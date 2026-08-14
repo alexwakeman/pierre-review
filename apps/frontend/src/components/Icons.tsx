@@ -126,6 +126,40 @@ export function ExternalLinkIcon({ size = 13, className, title }: IconProps): JS
   );
 }
 
+// Smiley — the "add a reaction" affordance, deliberately shaped like GitHub's own octicon so
+// the control reads as the same thing it is on github.com. Simplified to outline + two dots +
+// a curve rather than tracing the octicon path, which keeps it legible at 13px.
+//
+// It is a STROKE icon on `currentColor` on purpose: the emoji it replaces (🙂) painted its own
+// fixed colour, so it stayed a yellow face on both themes and could not be dimmed with the rest
+// of the button. Inheriting the colour is what makes the light/dark and hover states work at
+// all. The eyes are filled — an r≈1 circle stroked at width 2 is a blob.
+export function SmileyIcon({ size = 13, className, title }: IconProps): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden={title == null ? true : undefined}
+      role={title != null ? 'img' : undefined}
+    >
+      {title != null && <title>{title}</title>}
+      <circle cx="12" cy="12" r="9" />
+      {/* Quadratic, not an elliptical arc: the sweep-flag of `a4.5 4.5 0 0 0 8 0` is easy to
+          get backwards and yields a frown with no error anywhere. */}
+      <path d="M8 14 Q12 17.4 16 14" />
+      <circle cx="9" cy="9.8" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="9.8" r="1.15" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 // Refresh — two chasing arrows (Feather refresh-cw), the PR-detail header's "re-read this
 // PR from GitHub now" button. Spun via className while a refresh is in flight.
 export function RefreshIcon({ size = 14, className, title }: IconProps): JSX.Element {

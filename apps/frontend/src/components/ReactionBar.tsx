@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { ReactionContent, ReactionTargetKind } from '@pierre-review/shared';
 import { REACTION_CONTENTS, REACTION_EMOJI } from '@pierre-review/shared';
 import { useClickOutside } from '../hooks/useClickOutside.js';
+import { SmileyIcon } from './Icons.js';
 import {
   useReactionPending,
   useReactionState,
@@ -121,12 +122,12 @@ export function ReactionBar({
             e.stopPropagation();
             setOpen((v) => !v);
           }}
-          className={`inline-flex items-center rounded-full border border-dashed px-1.5 py-0.5 text-[11px] leading-none transition-opacity disabled:opacity-40 ${
+          className={`inline-flex items-center gap-0.5 rounded-full border border-dashed px-1.5 py-1 text-[11px] leading-none transition-opacity disabled:opacity-40 ${
             groups.length === 0 ? 'opacity-40 hover:opacity-100' : ''
-          } border-gray-300 text-gray-400 hover:text-gray-600 dark:border-gray-700 dark:hover:text-gray-200`}
+          } border-gray-300 text-gray-400 hover:text-gray-600 dark:border-gray-700 dark:text-gray-500 dark:hover:text-gray-200`}
         >
-          <span aria-hidden>🙂</span>
-          <span className="ml-0.5">+</span>
+          <SmileyIcon />
+          <span aria-hidden>+</span>
         </button>
       )}
 

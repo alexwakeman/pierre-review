@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import type { FileTreeNode } from '../../lib/diff.js';
 import { isLockFile } from '../../lib/diff.js';
 import { STATUS_META } from './status.js';
@@ -13,6 +14,22 @@ import { STATUS_META } from './status.js';
 
 const INDENT_PX = 10;
 const BASE_PAD_PX = 6;
+// Breathing room above/below the revealed row so it never lands flush against the rail's edge.
+const REVEAL_MARGIN_PX = 12;
+
+/**
+ * The nearest ancestor that actually scrolls. The rail is a `max-h-[70vh] overflow-y-auto`
+ * box declared in ChangesTab, so this walks up to find it rather than assuming
+ * `parentElement` — the tree renders a `note` above the rows and the wrapper is not ours.
+ */
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p != null; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight) return p;
+  }
+  return null;
+}
+
 
 function Counts({ additions, deletions }: { additions: number; deletions: number }): JSX.Element {
   return (
@@ -30,6 +47,7 @@ function TreeRow({
   onToggleDir,
   selectedPath,
   onSelectFile,
+  selectedRef,
 }: {
   node: FileTreeNode;
   depth: number;
@@ -37,6 +55,9 @@ function TreeRow({
   onToggleDir: (path: string) => void;
   selectedPath: string | null;
   onSelectFile: (path: string) => void;
+  // Attached to whichever file row is selected, so the rail can scroll it into view. Only one
+  // row ever claims it — a path is unique in the tree.
+  selectedRef: RefObject<HTMLButtonElement>;
 }): JSX.Element {
   const pad = { paddingLeft: BASE_PAD_PX + depth * INDENT_PX };
 
@@ -68,6 +89,7 @@ function TreeRow({
               onToggleDir={onToggleDir}
               selectedPath={selectedPath}
               onSelectFile={onSelectFile}
+              selectedRef={selectedRef}
             />
           ))}
       </>
@@ -84,6 +106,7 @@ function TreeRow({
   return (
     <button
       type="button"
+      ref={selected ? selectedRef : undefined}
       onClick={() => onSelectFile(node.path)}
       aria-pressed={selected}
       style={pad}
@@ -117,11 +140,24 @@ export function FileTree({
   selectedPath,
   onSelectFile,
   note,
+  revealNonce,
+  railHeight,
 }: {
   nodes: FileTreeNode[];
   // The file currently revealed in the diff panel (null = none).
   selectedPath: string | null;
   onSelectFile: (path: string) => void;
+  // Bumped by the caller every time a reveal is REQUESTED, including a repeat of the path
+  // already selected. Without it, re-clicking the same Claude Review finding after scrolling
+  // the rail away would leave the row off-screen: `selectedPath` did not change, so nothing
+  // would re-fire. Same reason `DiffFocusTarget` carries a nonce.
+  revealNonce?: number;
+  // The rail's measured max height. Included in the reveal's dependencies because the rail is
+  // sized by an effect in the caller that necessarily runs AFTER this component's first
+  // layout effect: the reveal would otherwise compute a scroll against the pre-measure
+  // geometry and be left pointing at the wrong row the instant the rail resizes. Observed
+  // exactly that — the row ended up 177px BELOW the resized box.
+  railHeight?: number | null;
   // Rendered at the top of the rail — used for the "Showing 100 of N" truncation
   // disclosure, which belongs INSIDE the tree: a tree implies a completeness a scrolling
   // list does not.
@@ -140,6 +176,54 @@ export function FileTree({
     });
   };
 
+  const selectedRef = useRef<HTMLButtonElement>(null);
+
+  // STEP 1 — a revealed file inside a directory the user collapsed has no row to scroll to at
+  // all. Re-open its ancestors first. Prefix matching rather than walking the tree: chain
+  // collapsing means a dir node's `path` may be `src/api/routes` in one row, so any collapsed
+  // entry that is a proper path prefix of the target is an ancestor of it.
+  useEffect(() => {
+    if (selectedPath == null) return;
+    setCollapsed((cur) => {
+      const stale = [...cur].filter((d) => selectedPath.startsWith(`${d}/`));
+      if (stale.length === 0) return cur; // identity preserved — no re-render
+      const next = new Set(cur);
+      for (const d of stale) next.delete(d);
+      return next;
+    });
+  }, [selectedPath, revealNonce]);
+
+  // STEP 2 — scroll the row into view inside the RAIL, and only the rail. `scrollIntoView`
+  // would also scroll every ancestor, including PrDetail's main scroll container, which
+  // FileDiffView is concurrently driving to the same file — the two fight and the diff pane
+  // lands in the wrong place. Adjusting `scrollTop` by hand touches nothing else.
+  // Runs after the expansion above has rendered, hence the dependency on `collapsed`.
+  useLayoutEffect(() => {
+    const row = selectedRef.current;
+    if (selectedPath == null || row == null) return;
+    const box = scrollParent(row);
+    if (box == null) return; // rail is short enough to show everything
+    const r = row.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    // The target is the rail ∩ WINDOW, not the rail's own box. The rail is `sticky top-0
+    // max-h-[70vh]` inside PrDetail's pane, which in a bottom-split layout is routinely
+    // shorter than 70vh — so the rail's lower half can sit below the fold. Scrolling a row to
+    // the middle of the BOX then leaves it perfectly "visible" by every measurement and still
+    // off-screen for the user. Measured: rail 810→1661 in a 1215px window.
+    const viewTop = Math.max(b.top, 0);
+    const viewBottom = Math.min(b.bottom, window.innerHeight);
+    const viewH = viewBottom - viewTop;
+    if (viewH <= 0) return; // rail scrolled out of the pane entirely
+    // Already on screen (the common case — the user clicked the row itself): leave the rail
+    // exactly where it is. Scrolling a row that is already visible is pure jitter.
+    if (r.top >= viewTop + REVEAL_MARGIN_PX && r.bottom <= viewBottom - REVEAL_MARGIN_PX) return;
+    // Out of view means we ARRIVED here from somewhere else — a Claude Review finding, most
+    // likely. Rest the row a third of the way down rather than nudging it just inside the
+    // edge: minimal scrolling leaves the thing you navigated to flush against the boundary
+    // with no surrounding context, which reads as "barely made it" rather than "here it is".
+    box.scrollTop += r.top - viewTop - viewH * 0.3;
+  }, [selectedPath, revealNonce, collapsed, railHeight]);
+
   return (
     <nav aria-label="Changed files" className="py-1">
       {note}
@@ -152,6 +236,7 @@ export function FileTree({
           onToggleDir={toggleDir}
           selectedPath={selectedPath}
           onSelectFile={onSelectFile}
+          selectedRef={selectedRef}
         />
       ))}
     </nav>

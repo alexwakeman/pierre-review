@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PrDetail, PrFileChange } from '@pierre-review/shared';
 import { usePrFiles } from '../hooks/usePr.js';
 import { useUsers } from '../hooks/useTimeline.js';
@@ -20,6 +20,9 @@ import { FileTree } from './diff/FileTree.js';
 // Below this many changed files the navigation rail is HIDDEN: a 3-file PR does not earn
 // 224px of width, and the bottom detail pane is only 384px tall by default.
 const TREE_MIN_FILES = 5;
+// Floor for the measured rail height, so dragging the detail split almost shut leaves the tree
+// scrollable rather than collapsing it to a sliver.
+const MIN_RAIL_PX = 160;
 
 // ---- fallback metadata row (when patches aren't available) ----
 
@@ -102,6 +105,39 @@ export function ChangesTab({
     if (externalFocus != null) setFocus(externalFocus);
   }, [externalFocus]);
 
+  // The rail is `sticky top-0` inside PrDetail's scrolling pane, so the height available to it
+  // is that pane's client height — NOT a fraction of the window. A fixed `70vh` overflows the
+  // pane whenever the PR detail is a bottom split (measured: an 851px rail in a 405px pane),
+  // and because the box's bottom then sits below the fold, its final ~446px of rows can never
+  // be scrolled into sight — the tail of the tree is simply unreachable. Measure instead.
+  const railRef = useRef<HTMLDivElement>(null);
+  const [railMaxH, setRailMaxH] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = railRef.current;
+    if (el == null) return;
+    let pane: HTMLElement | null = el.parentElement;
+    while (pane != null) {
+      const oy = getComputedStyle(pane).overflowY;
+      if (oy === 'auto' || oy === 'scroll') break;
+      pane = pane.parentElement;
+    }
+    const measure = (): void => {
+      // MIN_RAIL_PX keeps the rail usable if the user drags the split almost shut.
+      setRailMaxH(Math.max(MIN_RAIL_PX, pane != null ? pane.clientHeight : window.innerHeight));
+    };
+    measure();
+    // The pane is user-resizable (the split drag), so a one-shot measure goes stale.
+    const ro = new ResizeObserver(measure);
+    if (pane != null) ro.observe(pane);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+    // `data` is the dependency because the rail only exists once files have loaded — on the
+    // first run the ref is still null.
+  }, [data]);
+
   // Computed BEFORE the early returns below — hooks-order rule.
   const files = data?.files ?? [];
   const tree = useMemo(
@@ -150,6 +186,15 @@ export function ChangesTab({
   const focusMissing =
     focus != null &&
     !files.some((f) => f.path === focus.path || f.previousPath === focus.path);
+  // The rail is keyed on CURRENT paths, but a reveal request can name the old one — a Claude
+  // Review finding cites the path its run read, and `focusMissing` above already treats a
+  // `previousPath` hit as present. Without this the renamed file's row would never take the
+  // selected style and never scroll into view, while the diff pane below jumped correctly.
+  const selectedTreePath =
+    focus == null
+      ? null
+      : (files.find((f) => f.previousPath === focus.path && f.path !== focus.path)?.path ??
+        focus.path);
 
   // Fallback: no patches came back but the PR has changed files — show the lean
   // metadata list (per-file links) + a note, keeping the GitHub deep-links.
@@ -201,10 +246,18 @@ export function ChangesTab({
             per-file `sticky top-0` header sticks to), so a nested full-height scroller here
             would move that containing block. Hidden below `md` and below TREE_MIN_FILES. */}
         {showTree && (
-          <div className="sticky top-0 z-20 hidden max-h-[70vh] shrink-0 self-start overflow-y-auto overscroll-contain border-r border-gray-200 bg-white md:block md:w-56 dark:border-gray-800 dark:bg-gray-950">
+          <div
+            ref={railRef}
+            // `max-h-[70vh]` is the pre-measure fallback only; the inline value below is the
+            // real cap and wins. See the measuring effect for why a viewport fraction is wrong.
+            style={railMaxH != null ? { maxHeight: railMaxH } : undefined}
+            className="sticky top-0 z-20 hidden max-h-[70vh] shrink-0 self-start overflow-y-auto overscroll-contain border-r border-gray-200 bg-white md:block md:w-56 dark:border-gray-800 dark:bg-gray-950"
+          >
             <FileTree
               nodes={tree}
-              selectedPath={focus?.path ?? null}
+              selectedPath={selectedTreePath}
+              revealNonce={focus?.nonce}
+              railHeight={railMaxH}
               onSelectFile={(path) => setFocus({ path, nonce: Date.now() })}
               note={
                 data?.truncated ? (
