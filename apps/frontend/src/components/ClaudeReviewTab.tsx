@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type {
   ClaudeFinding,
   ClaudeFindingSeverity,
+  ClaudeFindingSide,
   ClaudeReview,
   ClaudeReviewModel,
   ClaudeReviewStatusResponse,
@@ -9,6 +11,7 @@ import type {
   PostReviewPreview,
   PostReviewResult,
   PrDetail,
+  PrFilesResponse,
   RequestedReviewMode,
   ReviewMode,
   User,
@@ -35,7 +38,17 @@ import {
 } from '../hooks/useClaudeReview.js';
 import { Markdown } from './Markdown.js';
 import { MentionTextarea } from './MentionTextarea.js';
+import { ExternalLinkIcon } from './Icons.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
+
+// "Show this finding in the Changes tab" — supplied by PrDetail, which owns the tab state.
+// Optional everywhere below so the tab still renders (link-only, as before) if it is ever
+// mounted somewhere that can't switch tabs.
+export type OpenInChanges = (
+  path: string,
+  line: number | null,
+  side: ClaudeFindingSide,
+) => void;
 
 // A label/body row matching ChecksTab's layout — a fixed-width uppercase caption
 // on the left, content on the right.
@@ -352,6 +365,8 @@ function FindingRow({
   headSha,
   posting,
   postError,
+  inChangeset,
+  onOpenInChanges,
   onToggle,
   onReword,
   onPostComment,
@@ -367,6 +382,11 @@ function FindingRow({
   headSha: string | null;
   posting: boolean;
   postError: string | null;
+  // This finding's file is part of the PR's changeset, so the Changes tab has something to
+  // show. false ⇒ nothing local to reveal, keep the GitHub link (a deep review reads files
+  // the PR never touched).
+  inChangeset: boolean;
+  onOpenInChanges?: OpenInChanges;
   onToggle: (included: boolean) => void;
   onReword: (editedBody: string) => Promise<unknown>;
   onPostComment: () => Promise<unknown>;
@@ -437,7 +457,13 @@ function FindingRow({
           .join('/')}#L${finding.line}`
       : null;
 
-  // Primary code-anchor link, in reliability + usefulness order:
+  // THE CODE ANCHOR IS AN IN-APP JUMP whenever the finding's file is in this PR's
+  // changeset: the path reveals the file (and, when it has one, the line) in the Changes
+  // tab, where the diff, the inline threads and the comment affordances already are.
+  // GitHub is still one click away — see `diffLineHref` below, kept as a small secondary
+  // link — but it is no longer the only way to look at the code a finding is about.
+  const canJumpInApp = inChangeset && onOpenInChanges != null;
+  // Fallback primary link, in reliability + usefulness order, unchanged from before:
   //   1. posted comment permalink (most reliable, already in PR context)
   //   2. the PR diff line anchor (in-review context — the useful default)
   const primaryHref = commentUrl ?? diffLineHref;
@@ -576,25 +602,62 @@ function FindingRow({
               ignored finding is collapsed; the action bar can re-expand it. */}
           {!detailsHidden && (
           <>
-          {/* Code anchor → opens this finding's line in the PR diff (review
-              context). A secondary "view file" links the blob at the reviewed
-              commit as an escape hatch for collapsed/outdated diffs. */}
+          {/* Code anchor → reveals this finding's file/line in the Changes tab when the
+              file is in the PR's changeset, else (as before) opens it on GitHub. The small
+              ↗ beside it always exits to the PR diff line on GitHub — today's behaviour,
+              kept as an explicit, visually secondary escape. A third "view file" link goes
+              to the blob at the reviewed commit for collapsed/outdated diffs. */}
           <div className="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-xs">
-            <a
-              href={primaryHref}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-blue-600 hover:underline dark:text-blue-400"
-              title={
-                commentUrl != null
-                  ? 'Open this posted comment on GitHub'
-                  : finding.line != null
-                    ? 'Open this line in the PR diff on GitHub'
-                    : 'Open this file in the PR diff on GitHub'
-              }
-            >
-              {anchorLabel}
-            </a>
+            {canJumpInApp ? (
+              <>
+                {/* A BUTTON, not an <a href="#…">: a hash navigation would write to the URL
+                    that useUrlState owns and serializes. */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    onOpenInChanges(finding.path, finding.line, finding.side)
+                  }
+                  className="text-left text-blue-600 hover:underline dark:text-blue-400"
+                  title={
+                    finding.line != null
+                      ? 'Show this line in the Changes tab'
+                      : 'Show this file in the Changes tab'
+                  }
+                >
+                  {anchorLabel}
+                </button>
+                <a
+                  href={diffLineHref}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  aria-label={
+                    finding.line != null
+                      ? `Open ${finding.path} line ${finding.line} in the PR diff on GitHub`
+                      : `Open ${finding.path} in the PR diff on GitHub`
+                  }
+                  title="Open this line in the PR diff on GitHub"
+                  className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                >
+                  <ExternalLinkIcon size={11} />
+                </a>
+              </>
+            ) : (
+              <a
+                href={primaryHref}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-blue-600 hover:underline dark:text-blue-400"
+                title={
+                  commentUrl != null
+                    ? 'Open this posted comment on GitHub'
+                    : finding.line != null
+                      ? 'Open this line in the PR diff on GitHub'
+                      : 'Open this file in the PR diff on GitHub'
+                }
+              >
+                {anchorLabel}
+              </a>
+            )}
             {secondaryBlobHref != null && (
               <a
                 href={secondaryBlobHref}
@@ -795,6 +858,8 @@ function ClaudesReview({
   postingFindingId,
   postErrorFindingId,
   postErrorMessage,
+  changedPaths,
+  onOpenInChanges,
   onToggleFinding,
   onRewordFinding,
   onPostFinding,
@@ -809,6 +874,10 @@ function ClaudesReview({
   postingFindingId: number | null;
   postErrorFindingId: number | null;
   postErrorMessage: string | null;
+  // Every path the PR touches, as far as we can tell WITHOUT spending a GitHub call.
+  // Empty ⇒ we know nothing, fall back to the finding's own `fileInDiff`.
+  changedPaths: ReadonlySet<string>;
+  onOpenInChanges?: OpenInChanges;
   onToggleFinding: (findingId: number, included: boolean) => void;
   onRewordFinding: (findingId: number, editedBody: string) => Promise<unknown>;
   onPostFinding: (findingId: number) => Promise<unknown>;
@@ -874,6 +943,13 @@ function ClaudesReview({
               postError={
                 postErrorFindingId === f.id ? postErrorMessage : null
               }
+              // The changed-file list is authoritative when we have one (it is also what
+              // the Changes tab renders); `fileInDiff` is the review-time answer and the
+              // only signal available when the list is empty or capped away.
+              inChangeset={
+                changedPaths.size > 0 ? changedPaths.has(f.path) : f.fileInDiff
+              }
+              onOpenInChanges={onOpenInChanges}
               onToggle={(included) => onToggleFinding(f.id, included)}
               onReword={(editedBody) => onRewordFinding(f.id, editedBody)}
               onPostComment={() => onPostFinding(f.id)}
@@ -1312,12 +1388,34 @@ export function ClaudeReviewTab({
   pr,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   usersById,
+  onOpenInChanges,
 }: {
   pr: PrDetail;
   usersById: Map<number, User>;
+  // Provided by PrDetail (which owns the tab state). Absent ⇒ every code anchor keeps its
+  // pre-existing GitHub link.
+  onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
   const { data, isLoading } = useClaudeReview(pr.id);
   const review = data?.review ?? null;
+
+  // WHICH FILES THIS PR TOUCHES — assembled WITHOUT issuing a request. `pr.files` is the
+  // lean metadata list already on the PrDetail payload, and `['pr-files', prId]` is the
+  // Changes tab's own query (staleTime: Infinity, IndexedDB-persisted), read
+  // opportunistically: populated whenever the user has opened Changes, absent otherwise.
+  // Deliberately NOT `usePrFiles(pr.id)` — that is a LIVE GitHub round trip, and firing it
+  // from a tab that renders no diffs would spend quota just to pick a link style.
+  const qc = useQueryClient();
+  const changedPaths = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of pr.files) set.add(f.path);
+    const cached = qc.getQueryData<PrFilesResponse>(['pr-files', pr.id]);
+    for (const f of cached?.files ?? []) {
+      set.add(f.path);
+      if (f.previousPath) set.add(f.previousPath);
+    }
+    return set;
+  }, [pr.files, pr.id, qc]);
 
   // Model picker (defaults to the last run's model, else the best-value default).
   const [model, setModel] = useState<ClaudeReviewModel>(
@@ -1702,6 +1800,8 @@ export function ClaudeReviewTab({
           postingFindingId={postingFindingId}
           postErrorFindingId={postErrorFindingId}
           postErrorMessage={postErrorMessage}
+          changedPaths={changedPaths}
+          onOpenInChanges={onOpenInChanges}
           onToggleFinding={(findingId, included) =>
             updateFinding.mutate({ findingId, included })
           }
