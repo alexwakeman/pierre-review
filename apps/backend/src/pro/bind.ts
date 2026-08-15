@@ -29,6 +29,7 @@ import {
 } from '../github/mutations.js';
 import { ghRestGetContentDir, ghRestGetContentRaw } from '../github/client.js';
 import { fetchCompareDiff } from '../github/compare.js';
+import { fetchReviewCommentHunks } from '../sync/hydrate-detail.js';
 import { fetchActionsJobLog } from '../github/actions-logs.js';
 import { applyAndPush, commitFilesAndOpenPr } from '../coding/git-ops.js';
 import { registerRetentionHandler } from '../db/retention.js';
@@ -85,7 +86,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   // ⚠ THE RUNTIME GATE. This literal is the twin of `ProPlugin['apiVersion']` in contract.ts —
   // bump them together. A half-bump here silently degrades a CORRECT plugin to OSS mode (the warn
   // below is the only trace; capabilities go dark and every /api/pro/* route 404s).
-  if (plugin?.apiVersion !== 16 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 17 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -218,6 +219,16 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       // Never throws; see github/compare.ts.
       fetchCompareDiff: async (accountId, a) =>
         fetchCompareDiff(await getAccessToken(accountId), { ...a, accountId }),
+      // Review-comment anchor hunks (apiVersion 17). Takes `accountId`, NOT a token, and
+      // deliberately does NOT `await getAccessToken(accountId)` in this arrow the way the
+      // compare above does: that call THROWS on a missing account or a missing stored token,
+      // which would make a "never throws" seam rejectable anyway. `fetchGhPrTextUncached`
+      // already resolves the token inside its own try, so routing through it makes the
+      // contract structurally true instead of a convention the caller has to defend against.
+      fetchReviewCommentHunks: (accountId, a) =>
+        fetchReviewCommentHunks(accountId, a.owner, a.name, a.prNumber, {
+          maxHunkChars: a.maxHunkChars,
+        }),
     },
     coding: {
       // Lazy-import the agent module (it pulls in the Claude Agent SDK) so the SDK

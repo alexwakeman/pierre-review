@@ -56,8 +56,9 @@ dual-dialect tables (`review_learnings`, `repo_digests`), migrations
 (`packages/pro/migrations{,-pg}/*.sql` run via `ctx.registerMigrations` → `src/pro/migrate.ts`,
 the one sanctioned raw-`$client` DDL site + `pro_migrations` bookkeeping), and isolation test.
 
-**`apiVersion` is 16** (bumped from 15 by the grounded addressed check — GithubSeam gains
-`fetchCompareDiff`, the two-sha compare seam; see § "Grounded `addressed`" below). 14 → 15 was the
+**`apiVersion` is 17** (bumped from 16 by lean-storage ANCHOR-HUNK hydration — GithubSeam gains
+`fetchReviewCommentHunks`; see § "Anchor-hunk hydration" below). 15 → 16 was the grounded addressed
+check (GithubSeam gained `fetchCompareDiff`, the two-sha compare seam). 14 → 15 was the
 Bot Tuning Advisor (GithubSeam gained `readRepoFile`/`listRepoDir`/`openIssue`, CodingSeam gained
 `commitFilesAndOpenPr`, ProHostQueries gained `getAdvisorFindings`/`getBotEffectPanel`,
 `CodingErrorCode` gained `BRANCH_EXISTS`, `llm.complete` gained `credential`, ProCapabilities
@@ -65,7 +66,7 @@ gained `botAdvisor`).
 ⚠ **FOUR literals must agree, not two**, and the one that actually enforces the handshake is the
 easiest to miss: `apps/backend/src/pro/contract.ts` (the host's declared `ProPlugin['apiVersion']`),
 `packages/pro/src/index.ts` (the plugin's exported value), `packages/pro/src/contract-types.ts` (the
-plugin's mirror), and **`apps/backend/src/pro/bind.ts`'s `plugin?.apiVersion !== 16` — THE RUNTIME
+plugin's mirror), and **`apps/backend/src/pro/bind.ts`'s `plugin?.apiVersion !== 17` — THE RUNTIME
 GATE**. A half-bump makes `bind.ts` log-and-degrade the ENTIRE plugin to OSS mode: capabilities dark,
 every `/api/pro/*` 404, nothing thrown. ⚠ **Nothing currently PINS the handshake** —
 `pro/contract.test.ts` asserts capability KEYS (it was updated for the `workspaceInsights` rename)
@@ -732,6 +733,95 @@ bulk "re-check the stale ones" any more — there is no PR-wide sweep to hang it
   `AnnotationRunResponse.noAuth?` says it outright; the counter arithmetic
   (`requested - cached - skipped > 0` with no `generated`/`failed`) is kept as a FALLBACK for older
   plugin builds and worded with "may", because it is an inference.
+
+### Anchor-hunk hydration + resolved-thread verification (apiVersion 17)
+
+Two independent reasons "Check review" kept returning a judgement with nothing useful in it. Both
+were measured on the live dev DB before anything was changed.
+
+**1. A RESOLVED thread was never asked.** `enumerateCombinedUnits` had
+`th.isResolved ? null : slotOf(addressedForThread(corpus, th))`, so a resolved thread got a
+`simplify` + `validity` panel and simply NOTHING where the addressed verdict belongs — visually
+identical to "the run failed", "you never pressed the button" and "the model declined". **6,066 of
+15,037 threads (40.3%)** are resolved. The old rationale ("nothing left to judge") had it exactly
+backwards: resolving is a human CLICK, and a thread whose only reply is "done" is the case most
+worth verifying.
+
+Resolving now FLIPS the question instead of cancelling it. `ADDRESSED_RULES` branches on the
+`human_marked_resolved` signal — you are verifying a claim, a reply of "done" is a CLAIM exactly
+like the resolve itself, and the model is told to say plainly when the diff does not back it up —
+and the UI retitles the panel **"Resolution check"** (`AnnotationPanel`'s `metaOverride`), because
+a panel still labelled "Addressed check" would misdescribe what the reader is looking at.
+
+⚠ **`isResolved` had to enter the hash** (`t2|` → **`t3|`**): the framing is an INPUT, so a thread
+resolved after its verdict was stored must not keep one computed under the other question. And
+⚠ **the legacy per-item `resolution-check/routes.ts` writes the SAME row**, so it learned
+`isResolved` in lockstep — a field in one writer's hash and not the other's makes each surface mark
+the other's row stale forever and re-bill work already paid for. (This file has taken that hit
+before; see the `validityPayloadHash` docstring.)
+
+**2. The judgements had no code at all.** `review_comments.diff_hunk` is NULL for **20,428 of
+20,970 rows (97.4%)** under lean storage, and the corpus read that column directly — so
+`Diff context` was an EMPTY STRING for nearly every prompt and the model correctly answered
+"unclear, I can't see the surrounding code", while the SPA rendered that exact hunk directly above
+the verdict from the host's hydration cache. The grounding compare (§ below) only ever attaches to
+the `addressed` slot, so a thread that got no addressed slot reached the model with no code from
+either channel — which is precisely the reported bug.
+
+**The seam.** `GithubSeam.fetchReviewCommentHunks(accountId, {owner, name, prNumber, maxHunkChars?})`
+→ `apps/backend/src/sync/hydrate-detail.ts` (**CORE**, like every GitHub primitive). It reuses the
+EXISTING `fetchGhPrText` cache — 60s TTL, in-flight coalesced, epoch-invalidated — so a "Check
+review" on a PR the SPA just opened is normally free. ⚠ **Not reliably free**: `refresh-pr.ts` busts
+that cache on every walk it performs, up to ~twice a minute while a PR pane is open, so budget it as
+one `PR_DETAIL_QUERY`. NEVER THROWS (`ok:false` + `reason`), and the token is resolved INSIDE
+`fetchGhPrTextUncached`'s own try — unlike the compare wrapper, whose `await getAccessToken()` in the
+bind arrow can reject even though `compare.ts` cannot.
+
+**Where it runs, and both halves are load-bearing:**
+- **Inside the batch loop** — past the payload-hash cache filter, the run gate, the auth pre-flight
+  and the credit check. Same rule as the compare: a fully-cached click reporting `generated: 0` must
+  cost zero GitHub quota. Putting it in `loadPrCorpus` would fire it on the FREE cached GET, i.e. on
+  every PR open — the single worst placement available.
+- **Once per RUN, not per batch** (`hunkHydrationDone`). One call covers the WHOLE PR, unlike the
+  compare which is genuinely per sha-window; a 50-target run chunks into 9 combined batches, so
+  without the guard that is 9 identical PR fetches.
+
+⚠⚠ **PROMPT CONTEXT ONLY — the hunk must NEVER enter a payload hash.** `validityPayloadHash` folds
+in the STORED column, and `currentHashFor` recomputes every stored row's hash on the free cached
+`GET /api/pro/prs/:id/annotations` fired on every PR open — a path that hydrates nothing. Put a
+hydrated value in that hash and the GET and the run compute different hashes for the same comment
+FOREVER: every judgement permanently `stale`, re-billed on the next click, or the free GET forced to
+call GitHub. So there is exactly ONE accessor, `hunkFor(corpus, comment)`, used at the three PROMPT
+sites (`validityForThreadRoot`, `addressedForThread`, `combinedItemBody`'s shared `Diff context`
+block), and `validityPayloadHash` still reads `root.diffHunk`. Pinned by
+`annotations-combined-targets.test.ts` — "hydrating a hunk changes the PROMPT but leaves every
+payload hash byte-identical", which also asserts the prompt really changed so it cannot go vacuous.
+
+⚠ **The re-bill bomb.** Because the hash keeps seeing NULL, nothing re-bills today. If
+`PERSIST_BODIES=true` ever becomes the default, or anything starts writing `diff_hunk` back, every
+stored validity row on every PR flips stale simultaneously. `writeBackNullBodies` leaves that column
+alone ON PURPOSE ("`diffHunk` stays untouched: it is lean-gated on purpose") — do not change it.
+
+**Hydration now feeds the rate budget.** `sync/hydrate-detail.ts` imported nothing from
+`github/rate-budget.ts` and discarded the `rateLimit { remaining resetAt cost }` block
+`PR_DETAIL_QUERY` already pays for — so the app's hottest GitHub spender was invisible to
+`gateBudget` and kept firing after `adaptive.ts` and `refresh-pr.ts` had both stood down. It now
+calls `noteBudget` on success and `noteLimited` on a classified rate-limit failure, and
+`fetchReviewCommentHunks` pre-empts via `isLimited` rather than deepening a known limit.
+
+**The deterministic explanation** (why a check couldn't be made). The stored `evidence` JSON gained
+an optional `anchor: {available, reason}` — a SEPARATE question from `outcome`, because the two
+fail independently: `outcome` is "what changed AFTERWARDS", `anchor` is "what the comment was
+POINTING AT". A verdict missing one deserves a stated caveat; missing both, it is reading a
+transcript. Reasons: `file_level` · `not_in_snapshot` (the host pages `reviewThreads(first: 50)`, so
+on a bot-flooded PR a thread past #50 is genuinely ABSENT rather than anchor-less) · `lean_storage` ·
+`rate_limited` · `saml_sso` · `unavailable`. `anchor` is OPTIONAL on read and absent ≠ false —
+every row written before this renders silence, not a claim. In the UI the collapsed Evidence row now
+states the grounding outcome instead of an unconditional sha range (which read as "grounded"
+whatever actually happened), and **an ungrounded verdict opens its own explanation** — the collapsed
+default is right for "here is the diff I judged" and wrong for "I had nothing to judge", which was
+literally the reported bug: a verdict saying it could not see the code, above a collapsed block
+explaining exactly why.
 
 ### Grounded `addressed` — the two-sha compare seam (apiVersion 16)
 

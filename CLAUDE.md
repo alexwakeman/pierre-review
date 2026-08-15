@@ -578,19 +578,49 @@ passthrough on `/api/me`, and inert seams. Details:
 [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) +
 [docs/PRO-PLATFORM.md](docs/PRO-PLATFORM.md). What bites:
 
-- **`apiVersion` is 16 and FOUR literals must agree**: host `contract.ts`, plugin
+- **`apiVersion` is 17 and FOUR literals must agree**: host `contract.ts`, plugin
   `index.ts`, plugin `contract-types.ts`, and `bind.ts`'s runtime gate
-  (`plugin?.apiVersion !== 16`) — the actual enforcer. A half-bump silently degrades the
+  (`plugin?.apiVersion !== 17`) — the actual enforcer. A half-bump silently degrades the
   ENTIRE plugin to OSS mode: capabilities dark, every `/api/pro/*` 404, nothing thrown.
   No test pins it; detection is `tsc` (TS2367 at the gate) + a boot check of `/api/me`.
-  (15 → 16 added ONE seam: `GithubSeam.fetchCompareDiff` — the two-sha compare
+  (16 → 17 added ONE seam: `GithubSeam.fetchReviewCommentHunks` — lean-storage ANCHOR-HUNK
+  hydration (`sync/hydrate-detail.ts`, off the existing 60s PR cache). Without it both the
+  `validity` and `addressed` judgements read `review_comments.diff_hunk`, which is NULL for
+  ~97% of rows, and correctly answered "unclear — I can't see the surrounding code" while
+  the SPA rendered that very hunk directly above the verdict.
+  15 → 16 added `GithubSeam.fetchCompareDiff` — the two-sha compare
   (`github/compare.ts`, CORE, NEVER THROWS → `{ok:false, reason}`) that grounds the
   `addressed` annotation in the REAL diff between the commit a thread was last discussed
   at and the PR head. 14 → 15 was the Bot Tuning Advisor: repo-file read seams +
   `openIssue` + `commitFilesAndOpenPr` + the two advisor host queries + `botAdvisor`.)
+- **A RESOLVED thread is now judged too, and that flips the question rather than cancelling
+  it.** `enumerateCombinedUnits` used to emit no `addressed` slot when `isResolved` — so 40%
+  of a real workspace's threads could never answer "was this actually addressed?", which is
+  precisely the population where someone has already CLAIMED it was. Resolving is a click,
+  not evidence. The prompt now branches on `human_marked_resolved` (verify the claim; say so
+  when the diff doesn't back it up), `isResolved` is in the hash (`t2|` → **`t3|`** — a
+  resolved-after-the-fact thread must not keep a verdict computed under the other framing),
+  and the UI retitles the panel "Resolution check". ⚠ The legacy per-item
+  `resolution-check/routes.ts` writes the SAME row, so it had to learn `isResolved` in
+  lockstep — a field in one writer's hash and not the other's makes each mark the other's row
+  stale forever and re-bill paid work.
+- **The hydrated anchor hunk is PROMPT CONTEXT ONLY and must never enter a payload hash.**
+  `validityPayloadHash` folds in the STORED column and `currentHashFor` recomputes every
+  stored row's hash on the free cached annotations GET fired on every PR open — a path that
+  hydrates nothing. Put a hydrated value in the hash and the GET and the run disagree
+  forever: every judgement permanently `stale`, re-billed on every click (or the free GET has
+  to call GitHub). So the hunk reaches `combinedItemBody`/`validityForThreadRoot`/
+  `addressedForThread` through the ONE accessor `hunkFor`, and `validityPayloadHash` still
+  reads `root.diffHunk`. Hydration itself is once per RUN (`hunkHydrationDone`), inside the
+  batch loop, after the cache filter — one GraphQL call covers the whole PR, so a per-batch
+  fetch would be 9 identical calls on a 50-target run. Pinned by
+  `annotations-combined-targets.test.ts` ("changes the PROMPT but leaves every payload hash
+  byte-identical"). ⚠ If `PERSIST_BODIES=true` ever becomes the default, or anything starts
+  writing `diff_hunk` back, every stored validity row flips stale at once —
+  `writeBackNullBodies` leaves that column alone ON PURPOSE.
 - **The grounded `addressed` check has three cost landmines** (full contract in
   [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md)): the payload-hash
-  prefix moved `t1|` → `t2|` and now carries the `(baseSha, headSha)` PAIR — never the diff
+  prefix moved `t1|` → `t2|` → `t3|` and now carries the `(baseSha, headSha)` PAIR — never the diff
   TEXT, because `currentHashFor` recomputes every stored row's hash on the free cached
   annotations GET fired on every PR open (the two writers of that row no longer hand-copy
   the formula — both call the ONE exported `addressedThreadPayloadHash`); the fetch must

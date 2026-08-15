@@ -99,7 +99,32 @@ interface AddressedEvidence {
   patch: string | null;
   previousPath: string | null;
   note: string | null;
+  /**
+   * Whether the judgement could see the code the comment was ANCHORED TO — a different question
+   * from `outcome`, which is about what changed AFTERWARDS. Null on every row written before the
+   * plugin started recording it: absent is "no opinion", not "no anchor", and must render as
+   * silence rather than as a claim.
+   */
+  anchor: { available: boolean; reason: string | null } | null;
 }
+
+/**
+ * Why a judgement had no anchored code, in the reader's words. Deterministic — this never comes
+ * from the model, which is the point: an "unclear" verdict is only actionable if you can tell a
+ * thin judgement from a lazy one, and which of the two inputs was missing.
+ *
+ * Unknown reasons fall through to a generic line rather than rendering the raw enum: the string
+ * crosses the host seam, so a newer backend can send a value this bundle has never heard of.
+ */
+const ANCHOR_REASON: Record<string, string> = {
+  file_level: 'this comment has no code anchor (it is file-level or PR-level)',
+  not_in_snapshot:
+    'GitHub returned only the first 50 review threads for this PR and this one fell outside them',
+  lean_storage: 'the anchored code was not stored and could not be re-fetched',
+  rate_limited: 'GitHub’s rate limit was hit before the anchored code could be fetched',
+  saml_sso: 'this token is not SSO-authorized for the repository’s organisation',
+  unavailable: 'the anchored code could not be fetched',
+};
 
 /**
  * Defensive by design: the column is free text written by a plugin build that may be older or
@@ -117,6 +142,7 @@ function parseEvidence(raw: string | null | undefined): AddressedEvidence | null
     if (baseSha == null || headSha == null) return null;
     const outcome =
       o.outcome === 'changed' || o.outcome === 'untouched' ? o.outcome : 'unavailable';
+    const rawAnchor = o.anchor as Record<string, unknown> | undefined;
     return {
       baseSha,
       headSha,
@@ -125,6 +151,15 @@ function parseEvidence(raw: string | null | undefined): AddressedEvidence | null
       patch: str('patch'),
       previousPath: str('previousPath'),
       note: str('note'),
+      // Only trust a well-formed object — a half-written one is treated as "no opinion", the
+      // same way an absent key is, rather than defaulting `available` to a claim we can't back.
+      anchor:
+        rawAnchor != null && typeof rawAnchor.available === 'boolean'
+          ? {
+              available: rawAnchor.available,
+              reason: typeof rawAnchor.reason === 'string' ? rawAnchor.reason : null,
+            }
+          : null,
     };
   } catch {
     return null;
@@ -151,9 +186,26 @@ function diffLineClass(line: string): string {
  * thread, and an open diff on each would bury the conversation the thread is about.
  */
 function EvidenceBlock({ evidence }: { evidence: AddressedEvidence }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const range = `comparing ${short(evidence.baseSha)}..${short(evidence.headSha)}`;
+  const grounded = evidence.outcome === 'changed';
+  const anchorMissing = evidence.anchor != null && !evidence.anchor.available;
+  // AN UNGROUNDED VERDICT OPENS ITSELF. The collapsed default is right when the answer is "here
+  // is the diff I judged" — the reader opens it to disagree. It is wrong when the answer is "I
+  // had nothing to judge", because that caveat changes how much weight the verdict deserves and
+  // a reader who never clicks never learns it. That was the reported bug: a verdict saying it
+  // could not see the code, sitting above a collapsed block that explained exactly why.
+  const [open, setOpen] = useState(!grounded || anchorMissing);
   const lines = evidence.patch != null ? evidence.patch.split('\n') : [];
+
+  // The COLLAPSED row states the grounding outcome, not just the sha range. "comparing a1b2c3..
+  // d4e5f6" reads as "grounded" whatever actually happened, which is precisely backwards when
+  // the compare came back empty or failed.
+  const hasRange = evidence.baseSha !== '' && evidence.headSha !== '';
+  const range = hasRange ? `${short(evidence.baseSha)}..${short(evidence.headSha)}` : null;
+  const summary = grounded
+    ? `· diff of ${range ?? 'the change'}`
+    : evidence.outcome === 'untouched'
+      ? `· file unchanged in ${range ?? 'that range'}`
+      : '· no diff available';
 
   return (
     <div className="mt-2 border-t border-violet-200/60 pt-1.5 dark:border-violet-900/40">
@@ -169,7 +221,10 @@ function EvidenceBlock({ evidence }: { evidence: AddressedEvidence }): JSX.Eleme
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>
         Evidence
-        <span className="font-normal text-gray-400 dark:text-gray-500">· {range}</span>
+        <span className="font-normal text-gray-400 dark:text-gray-500">{summary}</span>
+        {anchorMissing && (
+          <span className="font-normal text-amber-600 dark:text-amber-400">· no anchored code</span>
+        )}
       </button>
       {open && (
         <div className="mt-1.5">
@@ -208,6 +263,18 @@ function EvidenceBlock({ evidence }: { evidence: AddressedEvidence }): JSX.Eleme
               {evidence.note}
             </div>
           )}
+          {/* THE SECOND INPUT, stated separately because it fails separately. The block above is
+              "what changed after the comment"; this is "the code the comment pointed at". A
+              verdict missing the first is thin; missing BOTH, it is reading a transcript. */}
+          {anchorMissing && (
+            <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">
+              The code this comment was written against wasn’t available to the check —{' '}
+              {(evidence.anchor?.reason != null
+                ? ANCHOR_REASON[evidence.anchor.reason]
+                : null) ?? 'it could not be fetched'}
+              . The verdict rests on the thread’s own wording and the signals above.
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -229,6 +296,7 @@ function AnnotationPanel({
   annotation,
   defaultOpen,
   sublabel,
+  metaOverride,
 }: {
   annotation: CommentAnnotation;
   defaultOpen: boolean;
@@ -239,9 +307,17 @@ function AnnotationPanel({
    * of text it rewrites — which is the whole point of keeping the original on screen.
    */
   sublabel?: string;
+  /**
+   * Re-title the panel when the QUESTION differs from the kind's default one. Today's only use:
+   * an `addressed` check on an already-resolved thread is a VERIFICATION ("a human said this was
+   * handled — does the code back that up?"), not the open question "was this dealt with". The
+   * plugin asks the model the flipped question, so a panel still advertising "Addressed check"
+   * would misdescribe what the reader is looking at.
+   */
+  metaOverride?: { label: string; title: string };
 }): JSX.Element {
   const [open, setOpen] = useState(defaultOpen);
-  const meta = KIND_META[annotation.kind];
+  const meta = metaOverride ?? KIND_META[annotation.kind];
   const chip = verdictChip(annotation);
   // Only `addressed` is grounded in a post-comment diff; the other kinds store null.
   const evidence =
@@ -408,7 +484,24 @@ export function ThreadCheckOutput({
       {validity != null && <AnnotationPanel annotation={validity} defaultOpen />}
       {/* The two-section "**Addressed:** / **Still open:**" summary — the thing you actually need
           before resolving the thread, and the reason it is inline rather than in a chip tooltip. */}
-      {addressed != null && <AnnotationPanel annotation={addressed} defaultOpen />}
+      {addressed != null && (
+        <AnnotationPanel
+          annotation={addressed}
+          defaultOpen
+          // A resolved thread is VERIFIED rather than judged — the plugin flips the question it
+          // asks the model, so the panel has to say which question was answered. Without this the
+          // reader sees "Addressed check" over prose arguing about a thread they already closed.
+          metaOverride={
+            thread.isResolved
+              ? {
+                  label: 'Resolution check',
+                  title:
+                    'This thread is resolved. Whether the code actually backs that up — and what, if anything, is still open.',
+                }
+              : undefined
+          }
+        />
+      )}
     </>
   );
 }

@@ -13,6 +13,7 @@ import type {
   PostReviewPreview,
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../github/compare.js';
+import type { PrReviewCommentHunks } from '../sync/hydrate-detail.js';
 import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
 import type { PrDetailEnricher } from '../pr/detail-enricher.js';
 import type { AiUsageRecord } from '../db/usage.js';
@@ -328,6 +329,23 @@ export interface GithubSeam {
       maxPatchChars?: number;
     },
   ): Promise<CompareDiffResult>;
+  // REVIEW-COMMENT ANCHOR HUNKS (apiVersion 17) — the `diffHunk` each review comment was
+  // written against. Under lean storage (`PERSIST_BODIES` unset, the DEFAULT in BOTH modes)
+  // `review_comments.diff_hunk` is NULL for ~97% of rows, so a judgement that reads the stored
+  // column sees NO CODE and can only answer "unclear, I can't see the surrounding code" — while
+  // the SPA renders that very hunk directly above the verdict, from this same cache.
+  //
+  // ONE GraphQL call covers the WHOLE PR: coalesce per PR, never per comment. Served off the
+  // 60s hydration cache, so a PR the SPA just opened is usually free — but NOT reliably, since
+  // `refresh-pr.ts` busts that cache on every walk. Budget it as one PR_DETAIL_QUERY.
+  //
+  // NEVER THROWS: failures come back `ok:false` + `reason` and the caller falls back to the
+  // stored column. ⚠ REPO-AUTHORED text — fence it before a model sees it, and it is PROMPT
+  // CONTEXT ONLY: it must NEVER enter a payload hash (see contract-types.ts for why).
+  fetchReviewCommentHunks(
+    accountId: number,
+    args: { owner: string; name: string; prNumber: number; maxHunkChars?: number },
+  ): Promise<PrReviewCommentHunks>;
 }
 
 export interface CommitFilesAndOpenPrArgs {
@@ -760,18 +778,23 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  // Contract handshake; host warns on mismatch. 15 → 16: GithubSeam gains `fetchCompareDiff`
+  // Contract handshake; host warns on mismatch. 16 → 17: GithubSeam gains
+  // `fetchReviewCommentHunks` — the lean-storage anchor-hunk hydration behind the `addressed`
+  // and `validity` judgements (see src/sync/hydrate-detail.ts). Without it both judgements read
+  // a `diff_hunk` column that is NULL for ~97% of rows and answer "I can't see the code".
+  //
+  // 15 → 16: GithubSeam gained `fetchCompareDiff`
   // (the two-sha compare primitive the `addressed` annotation is grounded on — see
   // src/github/compare.ts). 14 → 15 was the Bot Tuning Advisor — GithubSeam gained
   // readRepoFile/listRepoDir/openIssue, CodingSeam gained commitFilesAndOpenPr,
   // ProHostQueries gained getAdvisorFindings/getBotEffectPanel, CodingErrorCode gained
   // BRANCH_EXISTS, llm.complete gained `credential`, and ProCapabilities gained `botAdvisor`.
   //
-  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (the `plugin?.apiVersion !== 16` runtime gate) and two
+  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (the `plugin?.apiVersion !== 17` runtime gate) and two
   // more in the plugin (packages/pro/src/index.ts, packages/pro/src/contract-types.ts). Bump ALL
   // FOUR or the plugin log-and-degrades to OSS mode against a version that is actually correct:
   // capabilities go dark, every /api/pro/* route 404s, and nothing throws.
-  apiVersion: 16;
+  apiVersion: 17;
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 

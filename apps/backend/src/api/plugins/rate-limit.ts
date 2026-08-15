@@ -146,6 +146,16 @@ function tierFor(method: string, path: string): readonly Tier[] {
   }
 
   // ---- AI generation ----
+  // ⚠ RE-DECIDED, not inherited: `POST /api/pro/prs/:id/annotations/run` now spends GITHUB quota
+  // as well as model tokens — one PR_DETAIL_QUERY per uncached PR for the anchor hunks
+  // (sync/hydrate-detail.ts) on top of the two-sha compares. It stays on `ai` (20/min), which is
+  // TIGHTER than `prDetail`'s 60/min, so the GitHub exposure is already bounded more
+  // conservatively than a plain `GET /api/prs/:id`. Nothing to change — but the decision is
+  // recorded, because this file's failure mode is a tier nobody re-examined.
+  // The PAIRED `GET /api/pro/prs/:id/annotations` must STAY on `read`: it is a pure DB read fired
+  // on every PR open, and it must never grow a hydration leg (see the prDetail note above for
+  // what that cost the first time).
+  //
   // Two shapes: the Pro plugin's /api/pro/* generators, and the Claude Review
   // family, which for back-compat kept the pre-plugin paths (/api/prs/:id/
   // claude-review, /api/claude-reviews/*, /api/claude-findings/*) and so does NOT

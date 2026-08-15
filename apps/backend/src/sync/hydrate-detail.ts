@@ -34,9 +34,11 @@ import {
   getGraphqlClientFor,
   graphqlChecksHint,
   graphqlTolerant,
+  isRateLimitError,
   isSamlBlock,
   summarizeGraphqlErrors,
 } from '../github/client.js';
+import { isLimited, noteBudget, noteLimited } from '../github/rate-budget.js';
 import { PR_DETAIL_QUERY, type PrDetailResponse } from '../github/queries.js';
 import { checkRunsFrom } from './upsert.js';
 
@@ -230,11 +232,24 @@ async function fetchGhPrTextUncached(
       },
     );
   } catch (err) {
+    // A rate-limited hydration must TELL the budget, not just fail quietly. Hydration is one
+    // of the app's hottest GitHub spenders (every PR open, plus every annotation run), and it
+    // used to be completely invisible to `github/rate-budget.ts` — so the sync's `gateBudget`
+    // stood down while this kept firing. Same classification the compare seam uses.
+    const rl = isRateLimitError(err);
+    if (rl.limited) noteLimited(accountId, rl.resumeAt);
     console.error(
       `[hydrate] PR detail fetch failed for ${owner}/${name}#${number}; returning stored metadata. ${err instanceof Error ? err.message : String(err)}`,
     );
     return { data: null, samlBlocked: false };
   }
+  // The budget observation this query ALREADY paid for. PR_DETAIL_QUERY selects
+  // `rateLimit { remaining resetAt cost }` and hydration used to discard it outright.
+  // ⚠ `noteBudget` must not clear `limitedUntil` — see rate-budget.ts.
+  noteBudget(accountId, {
+    remaining: resp.rateLimit?.remaining ?? null,
+    resetAt: resp.rateLimit?.resetAt != null ? new Date(resp.rateLimit.resetAt) : null,
+  });
   const pr = resp.repository?.pullRequest;
   if (!pr) return { data: null, samlBlocked };
 
@@ -505,4 +520,93 @@ export async function hydrateThreadDetail(
     return gc ? { ...c, body: gc.body, diffHunk: gc.diffHunk } : c;
   });
   return { ...thread, comments };
+}
+
+// ---- anchor hunks for the annotation platform --------------------------------------------------
+
+/** What `fetchReviewCommentHunks` could not do, when it could not. Null on a normal answer. */
+export type HunkFetchReason =
+  /** PERSIST_BODIES=true — the stored column is authoritative and nothing was fetched. */
+  | 'persisted'
+  /** The account's token is in a known hard limit; nothing was asked of GitHub. */
+  | 'rate_limited'
+  /** GitHub's SAML-SSO org wall forbade the repository node. */
+  | 'saml_sso'
+  /** Deleted PR, lost access, or a network failure. */
+  | 'unavailable';
+
+export interface PrReviewCommentHunks {
+  ok: boolean;
+  /** GitHub review-comment node id → its anchor diff hunk. A missing key = not in the snapshot. */
+  hunkByNodeId: Map<string, string>;
+  /**
+   * How many review comments GitHub's snapshot carried. Load-bearing for the UI's deterministic
+   * explanation: PR_DETAIL_QUERY pages `reviewThreads(first: 50)`, so on a bot-flooded PR — this
+   * app's target workload — a thread past #50 is ABSENT rather than hunk-less, and "GitHub's
+   * snapshot didn't include this thread" is a different sentence from "there is no code context".
+   */
+  commentsSeen: number;
+  reason: HunkFetchReason | null;
+}
+
+/** Well above either annotation cap (validity 2000 / addressed 1600); the caller re-clamps. */
+const DEFAULT_MAX_HUNK_CHARS = 4000;
+
+/**
+ * The anchor `diffHunk` of every review comment on one PR, hydrated on demand.
+ *
+ * WHY THIS EXISTS. Under lean storage (`PERSIST_BODIES` unset — the DEFAULT in BOTH modes)
+ * `review_comments.diff_hunk` is NULL for ~97% of rows, so any judgement that reads the stored
+ * column sees no code at all and can only answer "unclear — I can't see the surrounding code",
+ * while the SPA renders the hunk directly above that verdict from this very cache.
+ *
+ * ONE GraphQL call covers the WHOLE PR, and it is the SAME cached + coalesced call the SPA
+ * already makes when the PR is opened (`fetchGhPrText`, 60s TTL) — so a "Check review" click on
+ * a PR the user is looking at is normally free. It is NOT guaranteed free: `refresh-pr.ts` busts
+ * the cache on every walk it performs, up to ~twice a minute while a PR pane is open. Budget it
+ * as one PR_DETAIL_QUERY, not as zero.
+ *
+ * NEVER THROWS — the token is resolved inside `fetchGhPrTextUncached`'s own try, so the
+ * "never throws" contract is structural rather than a convention the caller must trust.
+ * Every failure comes back `ok:false` with a `reason` the caller can state to the user.
+ *
+ * ⚠ REPO-AUTHORED, therefore ATTACKER-AUTHORED text. Fence it before a model sees it, and it is
+ * PROMPT CONTEXT ONLY: it must NEVER enter a payload hash. The hash must keep seeing the stored
+ * (null) column, or the free cached GET — which recomputes every row's hash on every PR open —
+ * would disagree with the run forever, marking every judgement stale and re-billing it.
+ */
+export async function fetchReviewCommentHunks(
+  accountId: number,
+  owner: string,
+  name: string,
+  number: number,
+  opts: { maxHunkChars?: number } = {},
+): Promise<PrReviewCommentHunks> {
+  const empty = (reason: HunkFetchReason | null, ok: boolean): PrReviewCommentHunks => ({
+    ok,
+    hunkByNodeId: new Map(),
+    commentsSeen: 0,
+    reason,
+  });
+  if (owner === '' || name === '' || !Number.isFinite(number)) return empty('unavailable', false);
+  // Nothing to hydrate: the stored column already holds the real hunk.
+  if (config.persistBodies) return empty('persisted', true);
+  // Pre-empt rather than spend: the caller degrades to the stored column either way, and a
+  // request issued into a known hard limit only deepens it.
+  if (isLimited(accountId)) return empty('rate_limited', false);
+
+  const { data, samlBlocked } = await fetchGhPrText(owner, name, number, accountId);
+  if (data == null) return empty(samlBlocked ? 'saml_sso' : 'unavailable', false);
+
+  const cap = opts.maxHunkChars ?? DEFAULT_MAX_HUNK_CHARS;
+  const hunkByNodeId = new Map<string, string>();
+  let commentsSeen = 0;
+  for (const [nodeId, c] of data.reviewCommentByNode) {
+    commentsSeen += 1;
+    // A null hunk is a real answer from GitHub (a file-level comment has none) — store only
+    // what exists, so a missing key means "no anchor", not "we failed".
+    if (c.diffHunk == null || c.diffHunk === '') continue;
+    hunkByNodeId.set(nodeId, c.diffHunk.length > cap ? c.diffHunk.slice(0, cap) : c.diffHunk);
+  }
+  return { ok: true, hunkByNodeId, commentsSeen, reason: null };
 }
