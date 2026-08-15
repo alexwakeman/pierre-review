@@ -21,6 +21,20 @@ import {
 // or bot activity only. Transient, URL-silent — like feedMyTurnOnly.
 export type FeedBotLens = 'all' | 'hide' | 'only';
 
+// The Activity "Feed" CI-failure lens. THREE states, cycled by one pill:
+//   'feed' (DEFAULT) — CI rows are interleaved into the stream by time, alongside human activity
+//   'only'           — the stream is narrowed to CI rows
+//   'off'            — no CI rows are fetched at all
+//
+// The default is 'feed', i.e. ON. It shipped OFF, and the reason it changed is worth keeping:
+// an include-only toggle produces NO VISIBLE CHANGE in a busy workspace. CI rows are placed
+// chronologically, so in a high-traffic workspace (bevy/three.js: ~23 non-CI events in the 11.5h
+// since the newest CI failure) the first CI card lands ~23 rows down while the pill's count
+// cheerfully reads 34 — indistinguishable from a broken toggle. In a quiet workspace the same
+// code puts it at index 0 and looks perfect. 'only' is what makes the pill's effect legible
+// regardless of traffic.
+export type FeedCiLens = 'feed' | 'only' | 'off';
+
 // The Activity repo-console sub-tab strip (Activity | Bots) and the Insights console's
 // sub-tab bar. Store-remembered (see repoConsoleTabs / insightsSubTab) so returning to a
 // rail entry restores its last-active sub-tab.
@@ -238,26 +252,26 @@ export interface FilterState {
   // also emits plain commit-push runs. Server-side (the client can't synthesize plain commits),
   // so it's threaded into the feed query key. Transient, URL-silent (like the other feed toggles).
   feedShowCommits: boolean;
-  // Activity "Feed" opt-in "Show CI failures" toggle. false (default) → no CI rows at all;
-  // true → the server also emits ONE item per failed check run, on PR heads AND on the default
-  // branch (`ci_failed` / `trunk_ci_failed`). Server-side (the client cannot synthesize them),
-  // so it is threaded into the feed query key AND the head-poll key.
+  // Activity "Feed" CI-failure lens (see FeedCiLens). 'feed' (default) interleaves ONE item per
+  // failed check run — on PR heads AND on the default branch (`ci_failed` / `trunk_ci_failed`);
+  // 'only' narrows the stream to them; 'off' fetches none. The fetch half is server-side (the
+  // client cannot synthesize these rows), so it is threaded into the feed query key AND the
+  // head-poll key; the 'only' half is a client-side narrowing, like the category pills.
   //
   // ⚠ Unlike the other feed toggles this one is PERSISTED, with the filter bar (it is in
   // FilterDefaults / freshFilterDefaults / pickFilterBarState). "Show me broken builds" is a
-  // standing preference, not a per-session lens — a user who turns it on should find it on
+  // standing preference, not a per-session lens — a user who narrows to CI should find that
   // tomorrow. It is consequently also reset by "Clear filters", which is the correct reading of
-  // that control for a filter-shaped toggle. NO storage-version bump was needed — a pre-existing
-  // v3 blob simply lacks the key, sanitizePersistedFilters skips it by whitelist, and the store
-  // keeps this default.
+  // that control for a filter-shaped setting.
   //
-  // ⚠ AND IT IS URL-SERIALIZED (`ci=1`), which is not optional for a FilterDefaults key.
-  // useUrlState's serializer is hand-written per param, so a new key is silently omitted unless
-  // someone adds it — and being omitted does NOT merely make it unshareable: `writeToUrl` emits
-  // `?workspace=<id>` as soon as the scope resolves, so the address bar is non-bare within a
-  // second of every load, and the localStorage restore path runs ONLY on a bare URL. A
-  // URL-silent FilterDefaults key therefore round-trips into storage and is read back never.
-  feedShowCiFailures: boolean;
+  // ⚠ AND IT IS URL-SERIALIZED (`ci=only` / `ci=0`; the 'feed' default is omitted), which is not
+  // optional for a FilterDefaults key. useUrlState's serializer is hand-written per param, so a
+  // new key is silently omitted unless someone adds it — and being omitted does NOT merely make
+  // it unshareable: `writeToUrl` emits `?workspace=<id>` as soon as the scope resolves, so the
+  // address bar is non-bare within a second of every load, and the localStorage restore path
+  // runs ONLY on a bare URL. A URL-silent FilterDefaults key therefore round-trips into storage
+  // and is read back never.
+  feedCiLens: FeedCiLens;
   // Activity "Feed" single-PR isolation: null (default) → every PR in scope; a pr id →
   // the consolidated Feed shows ONLY that PR's items. Driven by the Feed "open PRs" panel.
   // Transient, URL-silent (like the other feed toggles); cleared on rail / scope changes.
@@ -526,9 +540,10 @@ export interface FilterState {
   toggleFeedNeedsReview: () => void;
   // Feed "show individual commits" toggle (see feedShowCommits).
   toggleFeedShowCommits: () => void;
-  // Feed "Show CI failures" toggle (see feedShowCiFailures). Persisted with the filter bar and
-  // URL-serialized as `ci=1`.
-  toggleFeedShowCiFailures: () => void;
+  // Feed CI-failure lens (see feedCiLens): cycles feed → only → off → feed. Persisted with the
+  // filter bar and URL-serialized (`ci=only` / `ci=0`).
+  cycleFeedCiLens: () => void;
+  setFeedCiLens: (v: FeedCiLens) => void;
   // Isolate the Feed to a single PR (or clear with null) — the Feed "open PRs" panel.
   setFeedIsolatedPrId: (id: number | null) => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
@@ -730,7 +745,7 @@ type FilterDefaults = Pick<
   // ⚠ A KEY IN THIS LIST MUST ALSO BE URL-SERIALIZED in hooks/useUrlState (both directions).
   // Persistence alone does not survive a reload: writeToUrl makes the address bar non-bare the
   // moment the workspace resolves, and the persisted blob is only read on a BARE url.
-  | 'feedShowCiFailures'
+  | 'feedCiLens'
 >;
 
 // Single source of truth for the filter defaults; array defaults are rebuilt per
@@ -762,9 +777,11 @@ function freshFilterDefaults(): FilterDefaults {
     prStatuses: [...DEFAULT_PR_STATUSES],
     reviewStates: [...DEFAULT_REVIEW_STATES],
     derivedStates: [],
-    // CI-failure feed rows are OFF on a fresh load: they are a second, machine-generated stream
-    // on top of human activity, and the Feed's job is situational awareness, not a build board.
-    feedShowCiFailures: false,
+    // CI-failure rows are IN the feed on a fresh load. A red build is situational awareness in
+    // the same sense a stalled review is, and the cost of the old 'off' default was that the
+    // feature was invisible until someone found the pill — and then, in a busy workspace,
+    // stayed invisible because the rows landed below the fold (see FeedCiLens).
+    feedCiLens: 'feed',
   };
 }
 
@@ -787,7 +804,7 @@ export function pickFilterBarState(s: FilterState): FilterDefaults {
     prStatuses: s.prStatuses,
     reviewStates: s.reviewStates,
     derivedStates: s.derivedStates,
-    feedShowCiFailures: s.feedShowCiFailures,
+    feedCiLens: s.feedCiLens,
   };
 }
 
@@ -814,6 +831,22 @@ export function sanitizePersistedFilters(
     if (key in raw && raw[key] !== undefined) {
       (out as Record<string, unknown>)[key] = raw[key];
     }
+  }
+  // `feedCiLens` is the one whitelisted key that is a string UNION rather than a boolean/array,
+  // so the whitelist alone would let a tampered or future blob seat a value the type says cannot
+  // exist. Drop anything that isn't a member and let the default apply.
+  //
+  // Note what is deliberately NOT here: a migration from the legacy boolean `feedShowCiFailures`.
+  // It is not in the whitelist, so it is ignored — which is the intended outcome. Mapping the old
+  // `false` (its default, i.e. what nearly every stored blob holds) onto 'off' would preserve the
+  // very invisibility this change exists to fix, for exactly the users who never found the pill.
+  if (
+    out.feedCiLens !== undefined &&
+    out.feedCiLens !== 'feed' &&
+    out.feedCiLens !== 'only' &&
+    out.feedCiLens !== 'off'
+  ) {
+    delete out.feedCiLens;
   }
   return out;
 }
@@ -975,8 +1008,11 @@ export const useFilters = create<FilterState>((set, get) => ({
   toggleFeedCatPrEvents: () => set((s) => ({ feedCatPrEvents: !s.feedCatPrEvents })),
   toggleFeedNeedsReview: () => set((s) => ({ feedNeedsReview: !s.feedNeedsReview })),
   toggleFeedShowCommits: () => set((s) => ({ feedShowCommits: !s.feedShowCommits })),
-  toggleFeedShowCiFailures: () =>
-    set((s) => ({ feedShowCiFailures: !s.feedShowCiFailures })),
+  cycleFeedCiLens: () =>
+    set((s) => ({
+      feedCiLens: s.feedCiLens === 'feed' ? 'only' : s.feedCiLens === 'only' ? 'off' : 'feed',
+    })),
+  setFeedCiLens: (v) => set({ feedCiLens: v }),
   setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setBotsInnerTab: (v) => set({ botsInnerTab: v }),

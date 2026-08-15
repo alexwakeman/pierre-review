@@ -498,14 +498,24 @@ Landmines that cost real bugs — read the doc before touching any of these:
   is `undefined` (unknown ≠ "no reactions"), the toggle carries a per-target MUTATION key so
   two mounts of one comment share in-flight state, and these queries stay OUT of
   `shouldDehydrateQuery` (a week-old persisted copy of other people's reactions is a lie).
-- **The Feed's "CI failures" toggle is OFF by default and is a FETCH toggle**, not a client
-  filter: `feedShowCiFailures` rides the feed query key AND the head-poll key (a head that
-  includes rows the loaded page doesn't false-fires "New activity"). It is the ONE feed
-  toggle that PERSISTS with the filter bar (in `FilterDefaults`/`pickFilterBarState`, hence
-  also cleared by "Clear filters"), URL-silent, and needs no storage-version bump — restore
-  whitelists against `freshFilterDefaults()`. Rows are actor-less: the server drops them
-  under `botsOnly` or any member filter, and they are withheld from `enrichMyTurn` (a null
-  actor is trivially "not you", which would make every red build an uncapped My-Turn card).
+- **The Feed's "CI failures" control is a THREE-state lens, defaulting to ON.** `feedCiLens`
+  = `'feed'` (default — rows interleaved chronologically) → `'only'` (stream narrowed to CI
+  rows) → `'off'` (none fetched). The `'off'` boundary is a FETCH toggle riding the feed
+  query key AND the head-poll key (a head including rows the loaded page lacks false-fires
+  "New activity"); `'only'` is a client-side narrowing that SKIPS the category pills, since
+  CI rows are in neither category and the combination could only ever be empty.
+  ⚠ **It shipped as an include-only boolean and that was the bug**: rows are placed by time,
+  so in a busy workspace the newest CI card lands ~23 rows below the fold while the pill's
+  count reads 34 — indistinguishable from a dead control, while the same code looks perfect
+  in a quiet workspace (index 0). Never ship an include-only toggle whose only feedback is a
+  count. It is the ONE feed control that PERSISTS with the filter bar (in
+  `FilterDefaults`/`pickFilterBarState`, hence also cleared by "Clear filters") and is
+  URL-serialized (`ci=only` / `ci=0`; legacy `ci=1` reads as `'feed'`); the legacy boolean
+  key is DROPPED from stored blobs rather than migrated, because its `false` default would
+  otherwise re-hide the feature for everyone who never found the pill. Rows are actor-less:
+  the server drops them under `botsOnly` or any member filter, and they are withheld from
+  `enrichMyTurn` (a null actor is trivially "not you", which would make every red build an
+  uncapped My-Turn card).
 
 ---
 

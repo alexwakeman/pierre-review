@@ -211,7 +211,7 @@ attention count, no badge, no My Turn.
 
 > **ONE EXPLICIT EXCEPTION, added with `trunk_ci_status_events` (migration `0052` / pg `0039`):
 > a trunk CI FAILURE can appear as a row in the Activity Feed** — but only behind the Feed's
-> opt-in "CI failures" pill, which is **OFF by default**. The sentence above still holds in the
+> "CI failures" pill, whose default lens (`'feed'`) DOES show them. The sentence above still holds in the
 > sense that matters: a trunk failure produces **no attention count, no badge, and no My Turn
 > row**. It is emitted with `prId: null` (so `enrichMyTurn` structurally declines it) AND is
 > withheld from the my-turn enrichment outright (`db/queries.ts` `isCiFeedKind`), because a CI
@@ -300,16 +300,38 @@ attention count, no badge, no My Turn.
 
 ### Trunk CI failures in the Activity Feed (`trunk_ci_status_events`)
 
-The Feed's opt-in **"CI failures"** pill (OFF by default; `feedShowCiFailures` →
-`includeCiFailures=true` on `GET /api/activity/feed`) emits **one item per failed check RUN**,
-keyed `(PR-or-branch, head sha, check name)`, from two transition logs:
+The Feed's **"CI failures"** pill emits **one item per failed check RUN**, keyed
+`(PR-or-branch, head sha, check name)`, from two transition logs. It is a THREE-state lens
+(`feedCiLens`), not a toggle:
 
-> ⚠ The toggle is a **standing preference**: it is the one feed toggle in `FilterDefaults`, so it
-> persists with the filter bar **and is URL-serialized as `ci=1`** (`hooks/useUrlState`). BOTH are
-> required, and the URL half is the one that actually restores it: the persisted blob is read only
-> on a BARE url, while `writeToUrl` puts `?workspace=<id>` on the address bar as soon as the scope
-> resolves. A `FilterDefaults` key that is not serialized is therefore written to localStorage on
-> every change and read back never — it survives nothing.
+| state | stream | wire |
+|---|---|---|
+| `'feed'` (**default**) | CI rows interleaved chronologically with human activity | `includeCiFailures=true` |
+| `'only'` | narrowed to CI rows (client-side, like the category pills) | `includeCiFailures=true` |
+| `'off'` | no CI rows fetched at all | param omitted |
+
+> ⚠ **Why three states.** It shipped as an include-only boolean, OFF by default, and that
+> combination hid the feature twice over. Rows are placed by TIME, so in a high-traffic workspace
+> (bevy/three.js: ~23 non-CI events in the 11.5h since the newest CI failure) the first red card
+> lands ~23 rows down while the pill's count reads 34 — a control that looks dead. The identical
+> code puts it at index 0 in a quiet workspace and looks perfect, which is why it was reported as
+> "works under one workspace, broken under another". `'only'` is the state that makes the effect
+> legible at any traffic level.
+>
+> ⚠ `'only'` **skips the Comments / PR-events category pills.** CI rows belong to neither category
+> (deliberately — see `catMatch`), so composing them could only ever produce an empty feed.
+>
+> ⚠ The lens is a **standing preference**: it is the one feed control in `FilterDefaults`, so it
+> persists with the filter bar **and is URL-serialized** (`ci=only` / `ci=0`; the `'feed'` default
+> is omitted, and a legacy `ci=1` link reads back as `'feed'`). BOTH are required, and the URL half
+> is the one that actually restores it: the persisted blob is read only on a BARE url, while
+> `writeToUrl` puts `?workspace=<id>` on the address bar as soon as the scope resolves. A
+> `FilterDefaults` key that is not serialized is written to localStorage on every change and read
+> back never — it survives nothing.
+>
+> ⚠ The legacy boolean `feedShowCiFailures` in a stored blob is **dropped, not migrated**. Its
+> default was `false` — what nearly every stored blob holds — so mapping it onto `'off'` would
+> preserve the very invisibility this change fixes, for exactly the users who never found the pill.
 
 | kind | source | shape |
 |---|---|---|

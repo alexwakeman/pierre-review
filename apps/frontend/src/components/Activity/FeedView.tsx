@@ -229,8 +229,8 @@ export function FeedView({
   const toggleFeedNeedsReview = useFilters((s) => s.toggleFeedNeedsReview);
   const feedShowCommits = useFilters((s) => s.feedShowCommits);
   const toggleFeedShowCommits = useFilters((s) => s.toggleFeedShowCommits);
-  const feedShowCiFailures = useFilters((s) => s.feedShowCiFailures);
-  const toggleFeedShowCiFailures = useFilters((s) => s.toggleFeedShowCiFailures);
+  const feedCiLens = useFilters((s) => s.feedCiLens);
+  const cycleFeedCiLens = useFilters((s) => s.cycleFeedCiLens);
   const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
@@ -420,7 +420,7 @@ export function FeedView({
       // Opt-in "show CI failures" — one row per failed check run, on PR heads AND on the
       // default branch. Inert in botsMode (a red build is not review-bot activity, and the
       // server ignores it there anyway).
-      includeCiFailures: !botsMode && feedShowCiFailures,
+      includeCiFailures: !botsMode && feedCiLens !== 'off',
     });
 
   // "New activity" detector: poll the server head for this exact scope and compare to what's
@@ -438,7 +438,7 @@ export function FeedView({
     botsOnly: botsMode,
     botWindowDays,
     includeAllCommits: !botsMode && feedShowCommits,
-    includeCiFailures: !botsMode && feedShowCiFailures,
+    includeCiFailures: !botsMode && feedCiLens !== 'off',
     loadedLatestId: latestId,
     loadedTotal: total,
     // Placeholder pages belong to the PREVIOUS key (e.g. a bots-window flip): total/latestId
@@ -659,8 +659,15 @@ export function FeedView({
       ? items.filter((i) => i.isMyTurn)
       : feedClaudeOnly
         ? items.filter((i) => i.kind === 'claude_review')
-        : items;
-    const byCat = feedCatComments || feedCatPrEvents ? base.filter(catMatch) : base;
+        : feedCiLens === 'only'
+          ? items.filter((i) => isCiFailureKind(i.kind))
+          : items;
+    // The category pills are SKIPPED under the CI lens' 'only' state. CI rows belong to neither
+    // category (that exclusion is deliberate — see catMatch), so composing the two could only
+    // ever yield an empty feed, and an empty feed is exactly the "this pill is broken" reading
+    // this lens exists to remove.
+    const byCat =
+      (feedCatComments || feedCatPrEvents) && feedCiLens !== 'only' ? base.filter(catMatch) : base;
     // 'hide' is applied server-side too (excludeBots on the request); the client pass here
     // keeps placeholder pages from the previous key (which still hold bots) consistent while
     // the re-keyed fetch is in flight, and covers any client/server divergence.
@@ -677,7 +684,7 @@ export function FeedView({
         ? byLens.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState))
         : byLens;
     return feedNeedsReview ? byState.filter(matchesNeedsReview) : byState;
-  }, [botsMode, botStateFilter, botVendorFilter, items, feedMyTurnOnly, feedClaudeOnly, effectiveBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor, feedNeedsReview, matchesNeedsReview]);
+  }, [botsMode, botStateFilter, botVendorFilter, items, feedMyTurnOnly, feedClaudeOnly, feedCiLens, effectiveBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor, feedNeedsReview, matchesNeedsReview]);
 
   // Honest count line: loaded-of-TOTAL (the server's post-cap stream length), never
   // visible-of-loaded — the initial page must not read "50 of 50" when the stream holds
@@ -1197,23 +1204,40 @@ export function FeedView({
           <span aria-hidden="true">◆</span> Commits
           {commitsCount > 0 && <span className="tabular-nums opacity-70">{commitsCount}</span>}
         </button>
-        {/* CI failures — opt-in (off by default), and the one feed toggle that PERSISTS with the
-            filter bar. On: one card per failed check run, on PR heads AND on the default branch.
-            A fetch toggle like Commits (the server can't be asked for them after the fact), NOT
-            part of the category OR-filter above. */}
+        {/* CI failures — a THREE-state lens (feed → only → off), and the one feed control that
+            PERSISTS with the filter bar. One card per failed check run, on PR heads AND on the
+            default branch.
+
+            Why three states rather than the include-toggle this shipped as: CI rows are placed
+            chronologically, so in a high-traffic workspace the newest one can sit ~23 rows below
+            the fold while the pill's count reads 34 — visually identical to a dead control,
+            while the SAME code looks perfect in a quiet workspace (index 0). 'only' is the state
+            that makes the pill's effect legible regardless of how busy the scope is.
+
+            The fetch half ('off' vs the rest) is server-side and threaded into the query key;
+            'only' is a client-side narrowing, like the category pills. */}
         <button
           type="button"
-          onClick={toggleFeedShowCiFailures}
-          aria-pressed={feedShowCiFailures}
+          onClick={cycleFeedCiLens}
+          aria-pressed={feedCiLens !== 'feed'}
           className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-            feedShowCiFailures
-              ? 'border-red-400 bg-red-50 text-red-700 dark:border-red-500/60 dark:bg-red-950/30 dark:text-red-300'
-              : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+            feedCiLens === 'only'
+              ? 'border-red-500 bg-red-500 text-white dark:border-red-500 dark:bg-red-600 dark:text-white'
+              : feedCiLens === 'feed'
+                ? 'border-red-400 bg-red-50 text-red-700 dark:border-red-500/60 dark:bg-red-950/30 dark:text-red-300'
+                : 'border-gray-300 text-gray-400 line-through hover:border-gray-400 dark:border-gray-700 dark:text-gray-500'
           }`}
-          title="Show CI failures in the feed (off by default) — one card per failed check run, on pull-request heads and on the default branch. Times are when Limn DETECTED the failure, which can lag the build."
+          title={
+            feedCiLens === 'feed'
+              ? 'CI failures are shown in the feed — click to show ONLY CI failures. One card per failed check run, on pull-request heads and on the default branch. Times are when Limn DETECTED the failure, which can lag the build.'
+              : feedCiLens === 'only'
+                ? 'Showing ONLY CI failures — click to hide them from the feed'
+                : 'CI failures are hidden — click to show them in the feed'
+          }
         >
-          <span aria-hidden="true">⚠</span> CI failures
-          {ciFailuresCount > 0 && (
+          <span aria-hidden="true">⚠</span>
+          {feedCiLens === 'only' ? 'CI failures only' : 'CI failures'}
+          {ciFailuresCount > 0 && feedCiLens !== 'off' && (
             <span className="tabular-nums opacity-70">{ciFailuresCount}</span>
           )}
         </button>

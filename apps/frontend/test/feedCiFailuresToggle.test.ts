@@ -1,4 +1,5 @@
-// The "Show CI failures" feed toggle — the ONE feed toggle that persists with the filter bar.
+// The Feed's CI-failure LENS — three states (feed → only → off), and the one feed control that
+// persists with the filter bar.
 //
 // Every other feed*/bot* toggle is transient and URL-silent by deliberate design. This one is a
 // standing preference ("show me broken builds"), so it joins FilterDefaults — which is a list
@@ -7,20 +8,24 @@
 //
 //   • IT SURVIVES A RELOAD. This is the assertion that matters, and the one a round-trip test
 //     cannot make. `pickFilterBarState` → `sanitizePersistedFilters` round-trips perfectly while
-//     the toggle is still forgotten on every reload, because the persisted blob is read ONLY on a
+//     the lens is still forgotten on every reload, because the persisted blob is read ONLY on a
 //     BARE url and `writeToUrl` emits `?workspace=<id>` (plus `view=activity`) as soon as the
 //     scope resolves — i.e. within a second of every load. The restoration path that actually
 //     runs is therefore writeToUrl → readFromUrl, and that is what is asserted below, against the
 //     real serializer rather than a re-implementation of it.
 //   • IT IS PERSISTED. `pickFilterBarState` must still emit it — the bare-url path (a fresh tab
 //     opened straight at /app) is the one the URL cannot serve.
-//   • A RETURNING USER'S EXISTING BLOB STILL LOADS. The key is ADDITIVE, so NO
-//     FILTER_STORAGE_VERSION bump was needed — an older v3 blob simply lacks it and
-//     `sanitizePersistedFilters` skips it by whitelist. A bump WITHOUT a matching
-//     `migratePersistedFilters` entry would DISCARD the user's whole remembered filter bar
-//     (repos, range, statuses) just to introduce one boolean; this test is what pins that the
-//     cheap path really does work.
-//   • IT IS OFF BY DEFAULT, and stays off after "Clear filters".
+//   • A RETURNING USER'S EXISTING BLOB STILL LOADS, including one holding the LEGACY boolean
+//     `feedShowCiFailures`. The key is additive, so no FILTER_STORAGE_VERSION bump was needed;
+//     the legacy key is dropped by whitelist and the new default applies.
+//   • THE DEFAULT IS 'feed' — CI rows are in the stream on a fresh load — and "Clear filters"
+//     returns to it.
+//
+// WHY THREE STATES (the bug this replaced): an include-only toggle is invisible in a busy
+// workspace. CI rows are placed chronologically, so with ~23 non-CI events since the newest CI
+// failure the first red card lands 23 rows down while the pill's count reads 34 — identical in
+// appearance to a dead control. The same code puts it at index 0 in a quiet workspace, which is
+// why it looked fine under one scope and broken under another.
 //
 // Run from the workspace that HAS vitest:
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
@@ -55,55 +60,78 @@ function state(over: Partial<FilterState>): FilterState {
   return { ...useFilters.getState(), ...over };
 }
 
-describe('feedShowCiFailures', () => {
+describe('feedCiLens', () => {
   beforeEach(() => {
     useFilters.getState().resetAllFilters();
     location.pathname = '/app/';
     location.search = '';
   });
 
-  it('is OFF on a fresh store', () => {
-    expect(useFilters.getState().feedShowCiFailures).toBe(false);
+  it("defaults to 'feed' — CI rows are in the stream on a fresh load", () => {
+    expect(useFilters.getState().feedCiLens).toBe('feed');
   });
 
-  it('toggles', () => {
-    useFilters.getState().toggleFeedShowCiFailures();
-    expect(useFilters.getState().feedShowCiFailures).toBe(true);
-    useFilters.getState().toggleFeedShowCiFailures();
-    expect(useFilters.getState().feedShowCiFailures).toBe(false);
+  it('cycles feed → only → off → feed', () => {
+    const cycle = (): string => {
+      useFilters.getState().cycleFeedCiLens();
+      return useFilters.getState().feedCiLens;
+    };
+    expect(cycle()).toBe('only');
+    expect(cycle()).toBe('off');
+    expect(cycle()).toBe('feed');
   });
 
   it('is PERSISTED with the filter bar', () => {
-    expect(pickFilterBarState(state({ feedShowCiFailures: true })).feedShowCiFailures).toBe(true);
-    expect(pickFilterBarState(state({ feedShowCiFailures: false })).feedShowCiFailures).toBe(
-      false,
-    );
+    expect(pickFilterBarState(state({ feedCiLens: 'only' })).feedCiLens).toBe('only');
+    expect(pickFilterBarState(state({ feedCiLens: 'off' })).feedCiLens).toBe('off');
   });
 
   it('round-trips through the persisted blob', () => {
-    const blob = pickFilterBarState(state({ feedShowCiFailures: true }));
-    expect(sanitizePersistedFilters(blob).feedShowCiFailures).toBe(true);
+    const blob = pickFilterBarState(state({ feedCiLens: 'only' }));
+    expect(sanitizePersistedFilters(blob).feedCiLens).toBe('only');
   });
 
   // THE ADDITIVE-KEY GUARANTEE: an older blob (written before this key existed) restores its
   // real filters untouched and simply carries no opinion about CI failures, so the store's
-  // `false` default stands. No version bump, no blob discard.
+  // default stands. No version bump, no blob discard.
   it('an older blob without the key restores cleanly and asserts nothing about it', () => {
     const out = sanitizePersistedFilters({
       repoIds: [4, 9],
       preset: '30d',
     } as unknown as Partial<FilterState>);
     expect(out).toEqual({ repoIds: [4, 9], preset: '30d' });
-    expect('feedShowCiFailures' in out).toBe(false);
+    expect('feedCiLens' in out).toBe(false);
   });
 
-  // It IS in FilterDefaults, so "Clear filters" clears it — the correct reading for a
-  // filter-shaped toggle, and the reason it is documented as such rather than left implicit.
-  it('is cleared by resetAllFilters', () => {
-    useFilters.getState().toggleFeedShowCiFailures();
-    expect(useFilters.getState().feedShowCiFailures).toBe(true);
+  // The LEGACY boolean is dropped rather than migrated, and that is deliberate: its default was
+  // `false`, which is what nearly every stored blob holds, so mapping it onto 'off' would
+  // preserve the exact invisibility this change exists to fix — for precisely the users who
+  // never found the pill.
+  it('drops the legacy feedShowCiFailures boolean instead of migrating it', () => {
+    const out = sanitizePersistedFilters({
+      repoIds: [7],
+      feedShowCiFailures: false,
+    } as unknown as Partial<FilterState>);
+    expect(out).toEqual({ repoIds: [7] });
+    expect('feedCiLens' in out).toBe(false);
+  });
+
+  // The blob is untrusted (localStorage, hand-editable): a value outside the union must not be
+  // seated into a typed field.
+  it('rejects a value outside the union', () => {
+    const out = sanitizePersistedFilters({
+      feedCiLens: 'bogus',
+    } as unknown as Partial<FilterState>);
+    expect('feedCiLens' in out).toBe(false);
+  });
+
+  // It IS in FilterDefaults, so "Clear filters" returns it to the default — the correct reading
+  // for a filter-shaped control.
+  it('is returned to the default by resetAllFilters', () => {
+    useFilters.getState().cycleFeedCiLens();
+    expect(useFilters.getState().feedCiLens).toBe('only');
     useFilters.getState().resetAllFilters();
-    expect(useFilters.getState().feedShowCiFailures).toBe(false);
+    expect(useFilters.getState().feedCiLens).toBe('feed');
   });
 
   // The other feed toggles must NOT have been dragged along: they stay transient, so "Clear
@@ -117,53 +145,62 @@ describe('feedShowCiFailures', () => {
 });
 
 // ⚠ THE RELOAD PATH, against the real serializer. The store's own subscription runs writeToUrl on
-// every change, so this is exactly the URL a user's address bar holds a moment after they flip
-// the toggle; readFromUrl is exactly what a reload of that URL hydrates from.
-describe('feedShowCiFailures survives a reload (writeToUrl → readFromUrl)', () => {
+// every change, so this is exactly the URL a user's address bar holds a moment after they change
+// the lens; readFromUrl is exactly what a reload of that URL hydrates from.
+describe('feedCiLens survives a reload (writeToUrl → readFromUrl)', () => {
   beforeEach(() => {
     useFilters.getState().resetAllFilters();
     location.pathname = '/app/';
     location.search = '';
   });
 
-  it('emits ci=1 when on, and nothing when off (the default stays out of the URL)', () => {
-    writeToUrl(state({ workspaceId: 5, feedShowCiFailures: true }));
-    expect(location.search).toContain('ci=1');
-    writeToUrl(state({ workspaceId: 5, feedShowCiFailures: false }));
+  it('encodes only the non-default lenses', () => {
+    writeToUrl(state({ workspaceId: 5, feedCiLens: 'only' }));
+    expect(location.search).toContain('ci=only');
+    writeToUrl(state({ workspaceId: 5, feedCiLens: 'off' }));
+    expect(location.search).toContain('ci=0');
+    writeToUrl(state({ workspaceId: 5, feedCiLens: 'feed' }));
     expect(location.search).not.toContain('ci=');
   });
 
   // THE REGRESSION. A non-bare URL is the normal case, not the exception — `?workspace=<id>` is
   // emitted always-once-resolved and `view=activity` rides the landing tab — so localStorage is
-  // never consulted on a reload and a URL-silent toggle is restored precisely never.
+  // never consulted on a reload and a URL-silent lens is restored precisely never.
   it('restores through a URL that already carries the workspace (the non-bare reload)', () => {
-    writeToUrl(state({ workspaceId: 5, feedShowCiFailures: true }));
+    writeToUrl(state({ workspaceId: 5, feedCiLens: 'only' }));
     // Not a contrived URL: the scope param is what makes the address bar non-bare.
     expect(location.search).toContain('workspace=5');
     const restored = readFromUrl();
-    expect(restored.feedShowCiFailures).toBe(true);
+    expect(restored.feedCiLens).toBe('only');
     expect(restored.workspaceId).toBe(5);
   });
 
   it('a URL with no ci param leaves the store default alone', () => {
     location.search = '?workspace=5';
-    // Absent ⇒ no opinion: the key is not in the hydrate patch at all, so `false` stands rather
-    // than being re-asserted over a value some other path set.
-    expect('feedShowCiFailures' in readFromUrl()).toBe(false);
+    // Absent ⇒ no opinion: the key is not in the hydrate patch at all, so the default stands
+    // rather than being re-asserted over a value some other path set.
+    expect('feedCiLens' in readFromUrl()).toBe(false);
   });
 
-  it('honours an explicit ci=0 (symmetry with bots=/stale=)', () => {
+  it('reads back each explicit value', () => {
     location.search = '?workspace=5&ci=0';
-    expect(readFromUrl().feedShowCiFailures).toBe(false);
+    expect(readFromUrl().feedCiLens).toBe('off');
+    location.search = '?workspace=5&ci=only';
+    expect(readFromUrl().feedCiLens).toBe('only');
+  });
+
+  // Links minted while this was a boolean carry `ci=1`, which meant "show them". It maps to the
+  // state that still means that, so an old shared link keeps working.
+  it('reads a legacy ci=1 link as the in-feed lens', () => {
     location.search = '?workspace=5&ci=1';
-    expect(readFromUrl().feedShowCiFailures).toBe(true);
+    expect(readFromUrl().feedCiLens).toBe('feed');
   });
 
   // A SHARED LINK MEANS WHAT IT SAYS. The URL is the shareable source of truth: a link that does
-  // not name the toggle must not pick it up from the recipient's own localStorage — which is
+  // not name the lens must not pick it up from the recipient's own localStorage — which is
   // structurally guaranteed here, since the hydrate patch simply omits the key.
-  it('a shared link without ci= does not inherit the sharer’s toggle', () => {
-    writeToUrl(state({ workspaceId: 5, feedShowCiFailures: false }));
-    expect(readFromUrl().feedShowCiFailures).toBeUndefined();
+  it('a shared link without ci= does not inherit the sharer’s lens', () => {
+    writeToUrl(state({ workspaceId: 5, feedCiLens: 'feed' }));
+    expect(readFromUrl().feedCiLens).toBeUndefined();
   });
 });
