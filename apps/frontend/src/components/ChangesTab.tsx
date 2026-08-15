@@ -81,20 +81,29 @@ function Header({ pr, extra }: { pr: PrDetail; extra?: JSX.Element }): JSX.Eleme
 export function ChangesTab({
   pr,
   focus: externalFocus,
+  onOpenThread,
 }: {
   pr: PrDetail;
-  // An outside-in reveal request (today: a Claude Review finding's code anchor). The tree's
-  // own clicks feed the same state, so there is exactly ONE focus target at a time.
+  // An outside-in reveal request (today: a Claude Review finding's code anchor, and a thread
+  // card's "In Changes"). The tree's own clicks feed the same state, so there is exactly ONE
+  // focus target at a time.
   focus?: DiffFocusTarget | null;
+  /** The return leg: open one of these inline threads in the Threads tab. */
+  onOpenThread?: (threadId: number) => void;
 }): JSX.Element {
   const { data, isLoading, isError } = usePrFiles(pr.id);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
-  // Unresolved review threads render inline at their diff line.
+  // EVERY thread, resolved included. This used to be `.filter((t) => !t.isResolved)`, which made
+  // 40% of threads invisible here: a diff line carrying a settled discussion looked undiscussed,
+  // and the round trip from the Threads tab was one-way for exactly those threads. Resolved ones
+  // render COLLAPSED (see InlineThreadRow) so the diff isn't buried — the reason the filter
+  // existed in the first place was volume, not relevance.
   const threadCtx: DiffThreadContext = {
-    threads: pr.threads.filter((t) => !t.isResolved),
+    threads: pr.threads,
     usersById,
     prUrl: pr.githubUrl,
+    onOpenThread,
   };
 
   // The focus target is STICKY (never cleared once shown): it doubles as the rail's selected

@@ -63,6 +63,51 @@ export function parsePatch(patch: string | null | undefined): DiffRow[] {
   return rows;
 }
 
+/**
+ * The line a review thread's ANCHOR HUNK points at, reconstructed from the hunk itself.
+ *
+ * WHY THIS EXISTS. `review_threads` stores exactly one positional column, `line`, and that is
+ * GitHub's LIVE line — it goes NULL the moment the anchor drifts out of the current diff. There
+ * is no `original_line`, no `start_line` and no `diff_side` column, and the sync's GraphQL walk
+ * never asks for them, so for an outdated thread there is nothing stored to navigate to at all.
+ * Measured on a real workspace: 5,572 of 6,195 outdated threads (90%) have a NULL line, while a
+ * non-outdated thread ALWAYS has one.
+ *
+ * GitHub's `diffHunk` convention is that the hunk ENDS at the commented line, which is already
+ * how `CodeAnchor` renders it (`lines.at(-1)` is the anchor). So the last real row of the parsed
+ * hunk gives back the thread's original line AND its side. Spot-checked against 25 live
+ * non-outdated threads: 23 matched the stored `line` exactly and the 2 that did not were genuine
+ * moved anchors (177 vs 181, 475 vs 477) — i.e. the disagreement is the drift, not a parse bug.
+ *
+ * ⚠ APPROXIMATE, and the caller must say so. This is the line in the commit the comment was
+ * WRITTEN against, not in the PR's current head, so it can land a few lines off (or, if the
+ * region was rewritten, on unrelated code). It is the best available answer for a thread whose
+ * live line is gone; it is never better than a non-null `thread.line`, which the caller must
+ * prefer.
+ */
+export function anchorLineFromHunk(
+  hunk: string | null | undefined,
+): { line: number; side: 'LEFT' | 'RIGHT' } | null {
+  const rows = parsePatch(hunk);
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const r = rows[i];
+    if (r == null || r.kind === 'hunk') continue;
+    // A deletion only exists on the LEFT; an addition only on the RIGHT; a context row is on
+    // both, and RIGHT is the side GitHub pins an inline thread to.
+    // `> 0` and not just non-null: a body with no `@@` header (a truncated hunk, or text that is
+    // not a diff at all) leaves both counters at 0, and 0 is never a valid diff line. Returning it
+    // would hand the caller a confident-looking target that matches no row — better to return null
+    // and let it fall to the next rung, which reveals the file.
+    if (r.kind === 'del') {
+      if (r.oldLine != null && r.oldLine > 0) return { line: r.oldLine, side: 'LEFT' };
+      continue;
+    }
+    if (r.newLine != null && r.newLine > 0) return { line: r.newLine, side: 'RIGHT' };
+    if (r.oldLine != null && r.oldLine > 0) return { line: r.oldLine, side: 'LEFT' };
+  }
+  return null;
+}
+
 // Total number of patch lines (used by the collapse-by-default size heuristic).
 export function patchLineCount(patch: string | null | undefined): number {
   if (!patch) return 0;

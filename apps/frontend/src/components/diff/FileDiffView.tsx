@@ -49,6 +49,8 @@ export interface DiffThreadContext {
   prUrl: string;
   focusThreadId?: number | null;
   onThreadShown?: () => void;
+  /** The return leg — open a thread in the Threads tab. Absent outside PrDetail's Changes tab. */
+  onOpenThread?: (threadId: number) => void;
 }
 
 // THE outside-in "reveal this file/line" signal. There are exactly TWO focus grains in this
@@ -239,6 +241,14 @@ function InlineThreadRow({
 }): JSX.Element {
   const ref = useRef<HTMLTableRowElement>(null);
   const focused = ctx.focusThreadId != null && ctx.focusThreadId === thread.id;
+  // A RESOLVED thread starts as a one-line stub. Resolved threads used to be filtered out of the
+  // Changes tab entirely, which hid 40% of them and made a settled diff line look undiscussed;
+  // rendering them like the rest would swing the other way and bury the code under closed
+  // conversations. The stub is the middle: the line advertises that it was discussed, and the
+  // conversation is one click away. Focus always wins — a deep link to a resolved thread must
+  // land on the thread, not on a stub the reader then has to find and open.
+  const [open, setOpen] = useState(!thread.isResolved);
+  const expanded = open || focused;
   useEffect(() => {
     if (focused && ref.current) {
       ref.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -247,6 +257,12 @@ function InlineThreadRow({
     // Only re-run when this row becomes the focus target.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focused]);
+
+  const firstLine = (thread.comments[0]?.body ?? '')
+    .split('\n')
+    .find((l) => l.trim() !== '')
+    ?.slice(0, 120);
+
   return (
     <tr ref={ref}>
       <td colSpan={4} className="bg-gray-50 px-2 py-2 dark:bg-gray-900/40">
@@ -255,12 +271,36 @@ function InlineThreadRow({
             focused ? 'ring-2 ring-amber-400/70' : ''
           }`}
         >
-          <ThreadCard
-            thread={thread}
-            usersById={ctx.usersById}
-            prUrl={ctx.prUrl}
-            selected={focused}
-          />
+          {expanded ? (
+            <ThreadCard
+              thread={thread}
+              usersById={ctx.usersById}
+              prUrl={ctx.prUrl}
+              selected={focused}
+              onOpenInThreads={
+                ctx.onOpenThread != null ? () => ctx.onOpenThread?.(thread.id) : undefined
+              }
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="flex w-full items-center gap-2 rounded border border-gray-200 bg-white px-2 py-1 text-left text-[11px] text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400 dark:hover:bg-gray-800"
+              title="Show this resolved thread"
+            >
+              <span className="shrink-0 text-emerald-600 dark:text-emerald-400">✓</span>
+              <span className="shrink-0 font-medium">
+                Resolved thread
+                {thread.comments.length > 1 ? ` · ${thread.comments.length} comments` : ''}
+              </span>
+              {firstLine && (
+                <span className="min-w-0 flex-1 truncate text-gray-400 dark:text-gray-500">
+                  {firstLine}
+                </span>
+              )}
+              <span className="shrink-0 text-gray-400">⌄</span>
+            </button>
+          )}
         </div>
       </td>
     </tr>
@@ -476,13 +516,19 @@ function FileDiffBlock({
     return { byRow, unanchored };
   }, [rows, threads]);
 
+  const unresolvedCount = threads.filter((t) => !t.isResolved).length;
+  const resolvedCount = threads.length - unresolvedCount;
+
   const hasFocus =
     threadCtx?.focusThreadId != null && threads.some((t) => t.id === threadCtx.focusThreadId);
   // Files with threads (or the deep-link target) start expanded, mirroring GitHub —
   // EXCEPT lock files, which always start collapsed even with threads (the header's
   // thread-count badge still advertises them, and the deep-link effect below still opens).
   const [expanded, setExpanded] = useState(
-    () => !isLockFile(file.path) && (!startsCollapsed(file) || threads.length > 0),
+    // `unresolvedCount`, not `threads.length`: this heuristic meant "a file with live discussion
+    // opens itself", and resolved threads joining the array must not start expanding files whose
+    // conversations are all settled.
+    () => !isLockFile(file.path) && (!startsCollapsed(file) || unresolvedCount > 0),
   );
   useEffect(() => {
     if (hasFocus) setExpanded(true);
@@ -540,12 +586,24 @@ function FileDiffBlock({
           </span>
           <code className="min-w-0 flex-1 truncate font-mono">{path}</code>
         </button>
-        {threads.length > 0 && (
+        {/* The badge counts UNRESOLVED threads and always did — `threads` now also carries the
+            resolved ones (they render as collapsed stubs), so the count is derived rather than
+            taken from the array length, which would silently redefine what the amber "needs
+            attention" chip means. The resolved tail is stated separately and in grey. */}
+        {unresolvedCount > 0 && (
           <span
             className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
-            title={`${threads.length} unresolved thread${threads.length === 1 ? '' : 's'} on this file`}
+            title={`${unresolvedCount} unresolved thread${unresolvedCount === 1 ? '' : 's'} on this file`}
           >
-            {threads.length} 💬
+            {unresolvedCount} 💬
+          </span>
+        )}
+        {resolvedCount > 0 && (
+          <span
+            className="shrink-0 rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400"
+            title={`${resolvedCount} resolved thread${resolvedCount === 1 ? '' : 's'} on this file`}
+          >
+            ✓{resolvedCount}
           </span>
         )}
         <span className="shrink-0 font-mono tabular-nums">

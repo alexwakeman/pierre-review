@@ -445,6 +445,60 @@ Review finding deep-link. Do not add a third.
   `fileInDiff`. The jump is a `<button>`, never an `<a href="#…">` (a hash navigation would write
   to the URL `useUrlState` owns), with a small `↗` beside it keeping the GitHub diff-line escape.
 
+#### Thread ↔ Changes navigation (both directions)
+
+**Thread → Changes.** `PrDetail.openInChangesFor(thread)` resolves the jump and hands `ThreadCard`
+an `openInChanges` object; the control is a real `<button>` in the card header. Four rungs, in
+order:
+
+1. `thread.line` is live → jump to it on the RIGHT side. Always available for a non-outdated
+   thread (measured: 8,844/8,844 have one).
+2. the live line is gone → reconstruct it with **`anchorLineFromHunk`** (`lib/diff.ts`) and label
+   the jump **approximate** (`⤷ In Changes ~`). `review_threads` stores exactly ONE positional
+   column — no `original_line`, no `start_line`, no `diff_side`, and the sync never asks GitHub for
+   them — so for the 5,572 of 6,195 outdated threads with a NULL line this is the only line data
+   that exists. It works because GitHub's `diffHunk` convention ends at the commented line (which
+   is already how `CodeAnchor` renders it): the last real parsed row gives back the original line
+   AND its side. Spot-checked against 25 live threads — 23 exact, the 2 misses being genuine
+   moved anchors. ⚠ It is the line in the commit the comment was WRITTEN against, so the wording
+   must stay hedged; a non-null `thread.line` always wins.
+3. no line at all → `line: null`, which `DiffFocusTarget` already means "reveal the FILE".
+4. the file has left the diff → `openInChangesFor` returns **null** and no control renders. The
+   changed-file set is `pr.files` ∪ a `qc.getQueryData(['pr-files', id])` read — **never
+   `usePrFiles`**, same rule as the Claude Review side: `ThreadCard` is mounted in the Feed across
+   many PRs and a fetch per card is a request storm on the `prDetail` tier.
+
+⚠ The jump routes through the existing **`openInChanges`**, never a hand-rolled
+`goToTab('changes')` + `setChangesFocus` — `goToTab` CLEARS the focus, and `openInChanges` is the
+one deliberate exception that orders the two correctly.
+
+**Changes → Threads.** `ChangesTab` now passes **every** thread into `DiffThreadContext`, not
+`.filter((t) => !t.isResolved)`. That filter hid 40.3% of threads: a diff line carrying a settled
+discussion looked undiscussed, and the round trip was one-way for exactly those. Resolved threads
+render as a **collapsed one-line stub** (`✓ Resolved thread · N comments · <first line>`) so the
+diff isn't buried under closed conversations — the filter existed for volume, not relevance.
+`focused` always overrides the stub, so a deep link lands on the thread rather than on something
+the reader must then find and open.
+
+Two counters had to stop being `threads.length`, which silently changed meaning once resolved
+threads joined the array: the amber `N 💬` header badge still counts UNRESOLVED only (with a
+separate grey `✓N`), and the auto-expand heuristic still keys on unresolved, so a file whose
+conversations are all settled no longer forces itself open.
+
+The return leg is `ThreadCard.onOpenInThreads`, supplied only by the inline mount. ⚠ It calls
+`goToTab('threads')` **itself** rather than relying on the `selectedThreadId` effect: that effect
+keys on the VALUE, so re-selecting an already-selected thread — precisely what happens when the
+reader arrived in Changes FROM that thread — would not re-fire. It still calls `selectThread`,
+which also clears the state/severity pill presets that could otherwise filter the target out.
+
+⚠ Both new props are **optional**, because only ONE of `ThreadCard`'s eight mounts can honour
+each. `ChangesTab` has a single mount (PrDetail), so only the Threads-tab mount sits beside a
+Changes tab without BEING one; the two mounts inside `FileDiffView` are already in the diff, and
+the Feed / search / attention / themes mounts have no Changes tab at all (they use `onOpenInPr`).
+Both controls are real `<button>`s so `ThreadCard`'s header-click guard
+(`closest('a,button,…')`) swallows them — a `<span onClick>` would ALSO fire `onOpenInPr` and
+navigate away from the PR the reader is already in.
+
 #### Emoji reactions (`ReactionBar` + `hooks/useReactions.ts`)
 
 CORE/free, and **nothing is stored or synced** — no column, no migration, no sync step; state is

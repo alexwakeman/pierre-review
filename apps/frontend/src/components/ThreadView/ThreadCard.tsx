@@ -23,6 +23,8 @@ export function ThreadCard({
   viewedSince,
   highlightCommentId,
   onOpenInPr,
+  openInChanges,
+  onOpenInThreads,
 }: {
   thread: ThreadDetail;
   usersById: Map<number, User>;
@@ -39,6 +41,27 @@ export function ThreadCard({
   // header's own controls (Show-on-timeline / addressed / resolve, all <button>s) keep working
   // via a closest() guard. Inert (a plain header) when omitted.
   onOpenInPr?: () => void;
+  /**
+   * "Show this thread's code in the Changes tab." Optional because only ONE of ThreadCard's eight
+   * mounts can honour it: `ChangesTab` has a single mount (PrDetail), so only the Threads-tab
+   * mount sits beside a Changes tab without BEING one. The two mounts inside FileDiffView are
+   * already in the diff, and the Feed / search / attention / themes mounts have no Changes tab at
+   * all — they navigate INTO a PR instead (`onOpenInPr`).
+   *
+   * `approximate` drives the wording, and the honesty matters: for a thread whose live `line` is
+   * gone, the target is reconstructed from the anchor hunk and is the line in the commit the
+   * comment was WRITTEN against, so it can land a little off. `line: null` means the file was
+   * resolvable but no line was — the jump reveals the file. The caller supplies no handler at all
+   * when the file has left the changeset, so the control is absent rather than dead.
+   */
+  openInChanges?: { run: () => void; approximate: boolean; line: number | null } | null;
+  /**
+   * "Show this thread in the Threads tab" — the RETURN leg, supplied only by the inline mount
+   * inside the diff. Threads render inline in Changes already, so this is not about finding the
+   * conversation; it is about getting to the tab that has the filters, the resolve controls and
+   * the whole file's other threads.
+   */
+  onOpenInThreads?: () => void;
 }): JSX.Element {
   const anchorHunk = thread.comments[0]?.diffHunk ?? null;
   const lineLabel = thread.line != null ? `line ${thread.line}` : 'file-level';
@@ -127,6 +150,45 @@ export function ThreadCard({
           {lineLabel}
         </span>
         {thread.isOutdated && <span>· outdated</span>}
+        {/* THE JUMP INTO THE DIFF. A real <button> so ThreadCard's header-click guard
+            (`closest('a,button,…')`) swallows it — a <span onClick> here would ALSO fire
+            `onOpenInPr` and navigate away from the PR the reader is already in. */}
+        {openInChanges != null && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              openInChanges.run();
+            }}
+            className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium text-blue-500 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/40"
+            title={
+              openInChanges.line == null
+                ? 'Show this file in the Changes tab — this thread’s line is no longer in the diff'
+                : openInChanges.approximate
+                  ? `Show line ~${openInChanges.line} in the Changes tab (approximate: this thread’s anchor is outdated, so the line is reconstructed from the code it was written against)`
+                  : `Show line ${openInChanges.line} in the Changes tab`
+            }
+          >
+            {openInChanges.line == null
+              ? '⤷ File in Changes'
+              : openInChanges.approximate
+                ? '⤷ In Changes ~'
+                : '⤷ In Changes'}
+          </button>
+        )}
+        {onOpenInThreads != null && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenInThreads();
+            }}
+            className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium text-blue-500 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/40"
+            title="Open this thread in the Threads tab"
+          >
+            ⤷ In Threads
+          </button>
+        )}
         {/* Pro (prSummary): the ONE AI check, spent on this thread alone — rewrite its wall of bot
             text, sanity-check the point, and judge what is actually still open. Deliberately NOT
             gated on `!thread.isResolved`: the rewrite and the validity read are still worth having

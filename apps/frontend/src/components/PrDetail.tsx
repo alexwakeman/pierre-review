@@ -4,7 +4,9 @@ import type {
   DerivedState,
   EventType,
   PrDetail as PrDetailT,
+  PrFilesResponse,
   ReviewState,
+  ThreadDetail,
   User,
 } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
@@ -43,6 +45,7 @@ import { MlSeverityBadge } from './MlSeverityBadge.js';
 import { ReactionBar } from './ReactionBar.js';
 import { mlLabelKey, useMlLabelIndex, useMlSeverityEnabled } from '../hooks/useMlLabels.js';
 import { ChangesTab } from './ChangesTab.js';
+import { anchorLineFromHunk } from '../lib/diff.js';
 import type { DiffFocusTarget } from './diff/FileDiffView.js';
 import { PrCommentComposer } from './PrCommentComposer.js';
 import { SkeletonBlock, SkeletonLine } from './Skeleton.js';
@@ -665,6 +668,76 @@ export function PrDetail({
   };
   const [activitySince, setActivitySince] = useState<string | null>(null);
   const qc = useQueryClient();
+  /**
+   * THREAD → CHANGES, with the full fallback ladder. Resolved here because this is the only
+   * component holding both the changed-file set and the tab state.
+   *
+   * The ladder, in order:
+   *   1. `thread.line` is live      → jump to that line on the RIGHT side. Always available for a
+   *                                   non-outdated thread (measured: 8,844/8,844 have a line).
+   *   2. the live line is gone      → reconstruct it from the anchor hunk (`anchorLineFromHunk`)
+   *                                   and mark the jump APPROXIMATE — it is the line in the commit
+   *                                   the comment was written against. 90% of outdated threads
+   *                                   have no stored line, so this rung is the only one they have.
+   *   3. no line at all             → reveal the FILE (`line: null`, which DiffFocusTarget already
+   *                                   means; ChangesTab scrolls the block header).
+   *   4. the file left the diff     → return null, so no control renders at all.
+   *
+   * ⚠ `changedPaths` is read from the React Query CACHE, never fetched. `GET /api/prs/:id/files`
+   * hydrates patches from GitHub and sits on the `prDetail` tier; ThreadCard is mounted in the
+   * Feed across MANY PRs, so a fetch from a card would be a request storm. `pr.files` is always
+   * present on the detail payload and covers rung 4 on its own; the cached `pr-files` entry, when
+   * the Changes tab has been opened, additionally contributes `previousPath` for renames.
+   */
+  const changedPaths = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of pr?.files ?? []) set.add(f.path);
+    const cached = qc.getQueryData<PrFilesResponse>(['pr-files', pr?.id]);
+    for (const f of cached?.files ?? []) {
+      set.add(f.path);
+      if (f.previousPath) set.add(f.previousPath);
+    }
+    return set;
+  }, [pr?.files, pr?.id, qc]);
+
+  const openInChangesFor = useCallback(
+    (thread: ThreadDetail) => {
+      // Rung 4: nothing to navigate to. An empty set means we simply don't know yet (a PR detail
+      // that has not loaded), and offering the jump is the kinder failure — ChangesTab already
+      // renders an explicit "isn't in the diff shown here" banner if it turns out to be wrong.
+      if (changedPaths.size > 0 && !changedPaths.has(thread.path)) return null;
+      const derived =
+        thread.line == null ? anchorLineFromHunk(thread.comments[0]?.diffHunk) : null;
+      const line = thread.line ?? derived?.line ?? null;
+      const side = thread.line != null ? 'RIGHT' : (derived?.side ?? 'RIGHT');
+      return {
+        line,
+        approximate: thread.line == null && derived != null,
+        // Routed through `openInChanges` rather than setting the tab and focus by hand: `goToTab`
+        // CLEARS `changesFocus`, and that helper is the one deliberate exception which orders the
+        // two correctly. A second path here would land on the diff with no jump.
+        run: () => openInChanges(thread.path, line, side),
+      };
+    },
+    [changedPaths, openInChanges],
+  );
+
+  /**
+   * CHANGES → THREADS, the return leg. Deliberately calls `goToTab` ITSELF rather than relying on
+   * the `selectedThreadId` effect below: that effect keys on the VALUE, so re-selecting a thread
+   * that is already selected — exactly what happens when the reader arrived in Changes FROM that
+   * thread a moment ago — would not re-fire and the tab would not move. `selectThread` is still
+   * called, because it also clears the state/severity pill presets that could otherwise filter the
+   * target thread out of the list entirely.
+   */
+  const openThreadInThreads = useCallback(
+    (threadId: number) => {
+      if (pr == null) return;
+      useFilters.getState().selectThread(pr.id, threadId);
+      goToTab('threads');
+    },
+    [pr, goToTab],
+  );
   const openPrFocused = useFilters((s) => s.openPrFocused);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
@@ -1151,6 +1224,7 @@ export function PrDetail({
             botFilter={threadBotFilter}
             stateFilter={threadStateFilter}
             severityFilter={threadSeverityFilter}
+            openInChangesFor={openInChangesFor}
           />
         ) : tab === 'activity' ? (
           <ActivityList
@@ -1162,7 +1236,7 @@ export function PrDetail({
             onConsumed={consumeActivityFocus}
           />
         ) : tab === 'changes' ? (
-          <ChangesTab pr={pr} focus={changesFocus} />
+          <ChangesTab pr={pr} focus={changesFocus} onOpenThread={openThreadInThreads} />
         ) : tab === 'bot_activity' ? (
           <PrBotBehaviourTab pr={pr} />
         ) : tab === 'ai_fix' ? (

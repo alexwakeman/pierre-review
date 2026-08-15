@@ -17,6 +17,7 @@ export function FileGroup({
   selectedThreadId,
   viewedSince,
   registerRef,
+  openInChangesFor,
 }: {
   path: string;
   threads: ThreadDetail[];
@@ -26,6 +27,10 @@ export function FileGroup({
   selectedThreadId: number | null;
   viewedSince?: string | null;
   registerRef: (threadId: number, el: HTMLDivElement | null) => void;
+  /** Per-thread "show it in the Changes tab"; null when its file has left the diff. */
+  openInChangesFor?: (
+    thread: ThreadDetail,
+  ) => { run: () => void; approximate: boolean; line: number | null } | null;
 }): JSX.Element {
   const counts = rollupCounts(threads);
   const hasUnresolved = threads.some((t) => t.derivedState !== 'resolved');
@@ -73,6 +78,7 @@ export function FileGroup({
                 repoId={repoId}
                 selected={t.id === selectedThreadId}
                 viewedSince={viewedSince}
+                openInChanges={openInChangesFor?.(t) ?? null}
               />
             </div>
           ))}

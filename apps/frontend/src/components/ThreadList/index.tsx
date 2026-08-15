@@ -71,6 +71,7 @@ export function ThreadList({
   botFilter = null,
   stateFilter,
   severityFilter,
+  openInChangesFor,
 }: {
   threads: ThreadDetail[];
   usersById: Map<number, User>;
@@ -88,6 +89,15 @@ export function ThreadList({
   // the store here) for the same reason as `stateFilter`: it is a GLOBAL store field and only
   // PrDetail knows whether it belongs to the PR being rendered.
   severityFilter?: Set<MlSeverity>;
+  /**
+   * "Show this thread in the Changes tab", resolved per thread by PrDetail — which is the only
+   * place that has BOTH the changed-file set and the tab state. Returns null when the thread's
+   * file is not in the diff at all, so the control is absent rather than dead (the bottom rung of
+   * the fallback ladder). Undefined at every mount that has no Changes tab.
+   */
+  openInChangesFor?: (
+    thread: ThreadDetail,
+  ) => { run: () => void; approximate: boolean; line: number | null } | null;
 }): JSX.Element {
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
   const setThreadBotFilter = useFilters((s) => s.setThreadBotFilter);
@@ -515,6 +525,7 @@ export function ThreadList({
               if (el) rowRefs.current.set(id, el);
               else rowRefs.current.delete(id);
             }}
+            openInChangesFor={openInChangesFor}
           />
         ))
       )}
