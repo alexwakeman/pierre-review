@@ -78,7 +78,10 @@ function sortValue(
       return repoNameById.get(pr.repoId) ?? '';
     case 'author': {
       const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
-      return (u?.githubLogin ?? userLabel(u, pr.authorId)).toLowerCase();
+      // Sort by what the CELL SHOWS — userLabel's display-name-then-login answer. Sorting on
+      // the raw login while rendering the display name made the column look broken: "Alex
+      // Wakeman" sorts under 'a' by login, so an A→Z click left the visible names unordered.
+      return userLabel(u, pr.authorId).toLowerCase();
     }
     case 'age':
       return pr.openedAt;

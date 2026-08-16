@@ -52,7 +52,9 @@ const hAgo = (hours: number): Date => new Date(T0 - hours * 3_600_000);
 
 let accountId = 0;
 let repoId = 0;
+let otherRepoId = 0;
 let prId = 0;
+let landedPrId = 0;
 let workspaceId = 0;
 
 const isCi = (i: ConsolidatedFeedItem): boolean =>
@@ -61,7 +63,9 @@ const isCi = (i: ConsolidatedFeedItem): boolean =>
 async function feed(over: Record<string, unknown> = {}): Promise<ConsolidatedFeedResponse> {
   return getConsolidatedFeed(accountId, {
     workspaceId,
-    repoIds: [repoId],
+    // BOTH repos: acme/decoy exists only to collide on PR number 34 with acme/app, and it can
+    // only do that from inside the feed's scope.
+    repoIds: [repoId, otherRepoId],
     userIds: null,
     prId: null,
     limit: null,
@@ -92,8 +96,16 @@ beforeAll(async () => {
   ({ trunkCiTransitionChanged } = await import('../sync/branch-status.js'));
   await runMigrations();
 
-  const { accounts, repos, users, pullRequests, events, ciStatusEvents, trunkCiStatusEvents } =
-    schema;
+  const {
+    accounts,
+    repos,
+    users,
+    pullRequests,
+    events,
+    ciStatusEvents,
+    trunkCiStatusEvents,
+    branchCommits,
+  } = schema;
 
   // The migrations may or may not have seeded a local account, so resolve by login.
   const existing = await db.select().from(accounts).execute();
@@ -127,6 +139,18 @@ beforeAll(async () => {
     .returning()
     .execute();
   repoId = repo.id;
+
+  // A SECOND in-scope repo that exists only to be a decoy for the trunk sha→PR resolution: it
+  // owns a PR with the SAME NUMBER as the one that landed the broken trunk commit. Both lookups
+  // there are `inArray(repoIds) × inArray(shas|numbers)`, which deliberately over-matches, so a
+  // map keyed on the bare number would hand this repo's PR to acme/app's card. It carries no
+  // events and no CI rows, so it changes nothing else in this fixture.
+  const [otherRepo] = await db
+    .insert(repos)
+    .values({ accountId, owner: 'acme', name: 'decoy', githubNodeId: 'R_decoy' })
+    .returning()
+    .execute();
+  otherRepoId = otherRepo.id;
 
   // Authored by the VIEWER → participation is real, so a normal feed row on this PR is my-turn.
   const [pr] = await db
@@ -246,6 +270,74 @@ beforeAll(async () => {
     ])
     .execute();
 
+  // The PR that LANDED the broken trunk commit below, plus a same-numbered decoy in the other
+  // repo (see otherRepoId). Neither has events, so neither adds a feed row of its own.
+  const [landed] = await db
+    .insert(pullRequests)
+    .values({
+      githubNodeId: 'PR_34',
+      accountId,
+      repoId,
+      number: 34,
+      title: 'Speed up the pipeline',
+      authorId: other.id,
+      state: 'merged',
+      openedAt: hAgo(300),
+      updatedAt: hAgo(50),
+      mergedAt: hAgo(50),
+    })
+    .returning()
+    .execute();
+  landedPrId = landed.id;
+  await db
+    .insert(pullRequests)
+    .values({
+      githubNodeId: 'PR_decoy_34',
+      accountId,
+      repoId: otherRepoId,
+      number: 34,
+      title: 'DECOY — same number, different repo',
+      authorId: other.id,
+      state: 'open',
+      openedAt: hAgo(300),
+      updatedAt: hAgo(50),
+    })
+    .execute();
+
+  // The trunk-commit window the sha→PR resolution reads. `ddddddd4444` is present but carries
+  // NO pr_number (a direct push), which is what keeps the PR-less card path covered.
+  await db
+    .insert(branchCommits)
+    .values([
+      {
+        accountId,
+        repoId,
+        sha: 'fedcba90000',
+        messageHeadline: 'Speed up the pipeline (#34)',
+        committedAt: hAgo(50),
+        prNumber: 34,
+      },
+      {
+        accountId,
+        repoId,
+        sha: 'ddddddd4444',
+        messageHeadline: 'Direct push to main',
+        committedAt: hAgo(49),
+        prNumber: null,
+      },
+      // The decoy repo landed its OWN #34 at a different sha — present so the number space
+      // genuinely collides in both directions.
+      {
+        accountId,
+        repoId: otherRepoId,
+        sha: 'aaaa0000dec',
+        messageHeadline: 'Decoy landing',
+        committedAt: hAgo(50),
+        prNumber: 34,
+      },
+    ])
+    .execute();
+
   // ---- Trunk-side CI transition log -------------------------------------------------------
   await db
     .insert(trunkCiStatusEvents)
@@ -258,6 +350,29 @@ beforeAll(async () => {
         status: 'failure',
         failingChecks: [check('e2e')],
         observedAt: hAgo(48),
+      },
+      // A trunk failure on a commit that DOES resolve to the PR that landed it.
+      {
+        accountId,
+        repoId,
+        branchName: 'main',
+        headSha: 'fedcba90000',
+        status: 'failure',
+        failingChecks: [check('build')],
+        observedAt: hAgo(45),
+      },
+      // …and the decoy repo's trunk is red too. This row is what makes the cross-repo test
+      // BITE: the resolver's repo/number lists are built from the trunk rows it is resolving,
+      // so without a failure here acme/decoy never enters the query and its same-numbered PR
+      // could never have been mis-picked in the first place.
+      {
+        accountId,
+        repoId: otherRepoId,
+        branchName: 'main',
+        headSha: 'aaaa0000dec',
+        status: 'failure',
+        failingChecks: [check('lint')],
+        observedAt: hAgo(44),
       },
       // Re-observation of the same head + set → no second card.
       {
@@ -282,7 +397,7 @@ beforeAll(async () => {
     ])
     .execute();
 
-  const scope = await resolveWorkspaceScope(accountId, undefined, [repoId]);
+  const scope = await resolveWorkspaceScope(accountId, undefined, [repoId, otherRepoId]);
   workspaceId = scope.workspaceId;
 });
 
@@ -369,11 +484,11 @@ describe('CI-failure feed items', () => {
     expect(bare[0]?.changeSummary).toContain('CI failed');
   });
 
-  it('surfaces a trunk failure as a PR-LESS card linking the commit', async () => {
+  it('surfaces a trunk failure on a directly-pushed commit as a PR-LESS card', async () => {
     const on = await feed({ includeCiFailures: true });
-    const trunk = on.items.filter((i) => i.kind === 'trunk_ci_failed');
-    expect(trunk).toHaveLength(1);
-    const t = trunk[0]!;
+    const t = on.items.find((i) => i.ciHeadSha === 'ddddddd4444')!;
+    expect(t.kind).toBe('trunk_ci_failed');
+    // `branch_commits` has this sha but no pr_number — nothing to name, so nothing is guessed.
     expect(t.prId).toBeNull();
     expect(t.prNumber).toBeNull();
     expect(t.actorId).toBeNull();
@@ -383,6 +498,49 @@ describe('CI-failure feed items', () => {
     expect(t.occurredAt).toBe(hAgo(48).toISOString());
     // The branch name is in the summary, never faked into a PR reference.
     expect(t.changeSummary).toContain('main');
+  });
+
+  it('names the PR that LANDED the broken trunk commit, without stealing the commit link', async () => {
+    const on = await feed({ includeCiFailures: true });
+    const t = on.items.find((i) => i.ciHeadSha === 'fedcba90000')!;
+    expect(t.kind).toBe('trunk_ci_failed');
+    expect(t.prId).toBe(landedPrId);
+    expect(t.prNumber).toBe(34);
+    expect(t.prTitle).toBe('Speed up the pipeline');
+    // The state drives the card's "landed by" vs "from" wording.
+    expect(t.prState).toBe('merged');
+    // The failure is still a fact about TRUNK: the link stays the commit (where a trunk run's
+    // checks live) and the summary still names the branch, not the PR.
+    expect(t.githubUrl).toBe('https://github.com/acme/app/commit/fedcba90000');
+    expect(t.changeSummary).toContain('main');
+    expect(t.changeSummary).not.toContain('#34');
+  });
+
+  // ⚠ NOT VACUOUS: acme/decoy owns its own PR #34, and both hops resolve with
+  // `inArray(repoIds) × inArray(numbers)`, which returns it. Only the composite (repoId, number)
+  // key discards it — a map on the bare number hands the wrong repo's PR to this card.
+  it('resolves the landing PR within its OWN repo, never by bare number', async () => {
+    const on = await feed({ includeCiFailures: true });
+    // Both repos have a red trunk, and both landed a PR NUMBERED 34 — so one bare-number map
+    // would give both cards the same PR. Asserted in BOTH directions.
+    const app = on.items.find((i) => i.ciHeadSha === 'fedcba90000')!;
+    const decoy = on.items.find((i) => i.ciHeadSha === 'aaaa0000dec')!;
+    expect(app.repoFullName).toBe('acme/app');
+    expect(app.prTitle).toBe('Speed up the pipeline');
+    expect(decoy.repoFullName).toBe('acme/decoy');
+    expect(decoy.prTitle).toBe('DECOY — same number, different repo');
+    expect(app.prNumber).toBe(decoy.prNumber);
+    expect(app.prId).not.toBe(decoy.prId);
+  });
+
+  it('keeps a trunk card out of the My-Turn lane even once it carries a prId', async () => {
+    const on = await feed({ includeCiFailures: true });
+    const t = on.items.find((i) => i.ciHeadSha === 'fedcba90000')!;
+    // The kind-based isCiFeedKind guard is now the ONLY thing holding this — a CI row is
+    // actor-less, so enrichMyTurn would otherwise flag it the moment a prId appeared.
+    expect(t.prId).not.toBeNull();
+    expect(t.isMyTurn).toBe(false);
+    expect(t.myTurnReasons).toEqual([]);
   });
 
   it('never flags a CI card as My Turn — and the lane is demonstrably live', async () => {
@@ -400,8 +558,9 @@ describe('CI-failure feed items', () => {
   it('reports a ciFailures facet that reconciles with the stream', async () => {
     const on = await feed({ includeCiFailures: true });
     expect(on.counts?.ciFailures).toBe(on.items.filter(isCi).length);
-    // 2 (head aaaa) + 5 (capped head bbbb) + 1 (bare ccc) + 5 (capped head ffff) + 1 (trunk) = 14.
-    expect(on.counts?.ciFailures).toBe(14);
+    // 2 (head aaaa) + 5 (capped head bbbb) + 1 (bare ccc) + 5 (capped head ffff) + 3 (trunk:
+    // the direct push, the landed commit, and the decoy repo's own red trunk) = 16.
+    expect(on.counts?.ciFailures).toBe(16);
   });
 
   it('skips both halves when a member filter is active (the rows are actor-less)', async () => {

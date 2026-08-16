@@ -1204,9 +1204,14 @@ export function FeedView({
           <span aria-hidden="true">◆</span> Commits
           {commitsCount > 0 && <span className="tabular-nums opacity-70">{commitsCount}</span>}
         </button>
-        {/* CI failures — a THREE-state lens (feed → only → off), and the one feed control that
-            PERSISTS with the filter bar. One card per failed check run, on PR heads AND on the
-            default branch.
+        {/* CI failures — a THREE-state lens cycling off → feed → only → off, and the one feed
+            control that PERSISTS with the filter bar. One card per failed check run, on PR heads
+            AND on the default branch.
+
+            'off' IS THE DEFAULT (see FeedCiLens for the two flips this default has had): one
+            card per failed check per head is too noisy to be a new user's first impression. The
+            pill still renders unconditionally, so the feature is one visible click away — that
+            is what makes an off-by-default acceptable here, where an invisible one was not.
 
             Why three states rather than the include-toggle this shipped as: CI rows are placed
             chronologically, so in a high-traffic workspace the newest one can sit ~23 rows below
@@ -1219,20 +1224,22 @@ export function FeedView({
         <button
           type="button"
           onClick={cycleFeedCiLens}
-          aria-pressed={feedCiLens !== 'feed'}
+          aria-pressed={feedCiLens !== 'off'}
           className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
             feedCiLens === 'only'
               ? 'border-red-500 bg-red-500 text-white dark:border-red-500 dark:bg-red-600 dark:text-white'
               : feedCiLens === 'feed'
                 ? 'border-red-400 bg-red-50 text-red-700 dark:border-red-500/60 dark:bg-red-950/30 dark:text-red-300'
-                : 'border-gray-300 text-gray-400 line-through hover:border-gray-400 dark:border-gray-700 dark:text-gray-500'
+                : // The RESTING state now, not a negated one — so no line-through, which read as
+                  // "this control is disabled" rather than "click to switch it on".
+                  'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
           }`}
           title={
             feedCiLens === 'feed'
               ? 'CI failures are shown in the feed — click to show ONLY CI failures. One card per failed check run, on pull-request heads and on the default branch. Times are when Limn DETECTED the failure, which can lag the build.'
               : feedCiLens === 'only'
-                ? 'Showing ONLY CI failures — click to hide them from the feed'
-                : 'CI failures are hidden — click to show them in the feed'
+                ? 'Showing ONLY CI failures — click to hide them again'
+                : 'CI failures are hidden — click to show them in the feed, then again for CI failures only. One card per failed check run, on pull-request heads and on the default branch.'
           }
         >
           <span aria-hidden="true">⚠</span>
@@ -1782,12 +1789,15 @@ function FeedRowImpl({
   const isThreadCard = item.kind === 'review_comment' && item.threadId != null;
   const isPrCommentCard = item.kind === 'pr_comment' && item.prId != null;
   const isPrOpened = item.kind === 'pr_opened';
-  // A default-branch CI failure belongs to no PR, so `onOpen`/`onFocus` both decline it (they
-  // return at `prId == null`) and the magnifier doesn't render. Rather than ship a card that
-  // visibly does nothing when clicked, it stops LOOKING clickable and carries one explicit
-  // affordance: the commit on GitHub, via safeExternalUrl (the URL is data-derived).
+  // A default-branch CI failure is a fact about trunk, but the server names the PR that LANDED
+  // the broken commit whenever the sha resolves to one (branch_commits.pr_number) — so the card
+  // opens that PR like any other. When it doesn't resolve (a direct push, an unobserved
+  // association, an untracked PR) there is genuinely nothing to open: rather than ship a card
+  // that visibly does nothing when clicked, it stops LOOKING clickable. Either way it keeps the
+  // commit link — that is where a trunk run's checks live — via safeExternalUrl (data-derived).
   const isTrunkCi = item.kind === 'trunk_ci_failed';
   const trunkCommitUrl = isTrunkCi ? safeExternalUrl(item.githubUrl) : undefined;
+  const trunkHasNoPr = isTrunkCi && item.prId == null;
 
   // Item 8 — only show credit that's meaningful for THIS card's context: "Merged by" +
   // "Reviewed by" belong on a merge card (and never re-attribute the merge to its own
@@ -1822,8 +1832,8 @@ function FeedRowImpl({
   // (they call their own handlers).
   const onCardClick = (e: ReactMouseEvent<HTMLElement>): void => {
     if ((e.target as HTMLElement).closest('a,button')) return;
-    // No PR behind a trunk card — see isTrunkCi. Its link is the affordance.
-    if (isTrunkCi) return;
+    // No PR resolved behind this trunk card — see isTrunkCi. Its commit link is the affordance.
+    if (trunkHasNoPr) return;
     onOpen(item);
   };
 
@@ -1831,7 +1841,7 @@ function FeedRowImpl({
     <li ref={innerRef} className="pb-2">
       <article
         onClick={onCardClick}
-        className={`${isTrunkCi ? 'cursor-default' : 'cursor-pointer'} rounded-md border p-2.5 text-sm transition-colors ${
+        className={`${trunkHasNoPr ? 'cursor-default' : 'cursor-pointer'} rounded-md border p-2.5 text-sm transition-colors ${
           flash
             ? 'border-sky-400 ring-2 ring-sky-400/60 dark:border-sky-500'
             : isMyTurn
@@ -1939,6 +1949,15 @@ function FeedRowImpl({
         {/* PR ref line — the keyboard-accessible open affordance */}
         <div className="mt-1 flex items-baseline gap-1.5 text-xs">
           <span className="shrink-0 text-gray-400">{item.repoFullName}</span>
+          {/* On a trunk card the PR is not what failed — it is what PUT the broken commit on
+              trunk — so it is labelled. "landed by" only when the PR actually merged:
+              pickAssociatedPrNumber falls back to an OPEN associated PR when that is the only
+              candidate, and claiming that one landed anything would be a plain lie. */}
+          {isTrunkCi && prLabel !== '' && (
+            <span className="shrink-0 text-gray-400">
+              · {item.prState === 'merged' ? 'landed by' : 'from'}
+            </span>
+          )}
           {prLabel !== '' && (
             <button
               type="button"
@@ -1951,7 +1970,8 @@ function FeedRowImpl({
           {item.path != null && (
             <span className="shrink-0 text-gray-400">· {item.path.split('/').pop()}</span>
           )}
-          {/* The trunk card's ONE affordance (it has no PR to open). Data-derived href, so it
+          {/* Always on a trunk card — the commit page is where a trunk run's checks live, and
+              when no PR resolved it is the card's ONLY affordance. Data-derived href, so it
               goes through safeExternalUrl — React happily renders a `javascript:` URL. */}
           {trunkCommitUrl != null && (
             <a

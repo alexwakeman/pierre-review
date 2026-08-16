@@ -226,6 +226,11 @@ const {
   // prId on the PR one: it is repo-scoped, has no PR to anchor retention to, and stores the
   // BranchCheckRun[] render payload rather than bare names.
   trunkCiStatusEvents,
+  // Trunk commits (the default-branch snapshot's window). Read here for ONE thing: its
+  // `pr_number` column, which is how a trunk CI failure names the PR that landed the commit
+  // it failed on. NOT derivable from `commits` — that table is PR-scoped, so a squash-merged
+  // PR never appears there under the sha that landed on trunk.
+  branchCommits,
   mlCommentLabels,
   // THE ONE SCOPE (migrations 0044/0045). `workspaces` + `workspace_repos` replace the old
   // `teams`/`team_repos` many-to-many: a repo belongs to EXACTLY ONE workspace, as a database
@@ -3373,11 +3378,101 @@ async function getCiFailureFeedItems(
 }
 
 /**
+ * Resolve trunk commit shas → the PR that landed each one, keyed `${repoId}:${sha}`.
+ *
+ * The mapping is already stored: the default-branch snapshot writes `branch_commits.pr_number`
+ * from `associatedPullRequests` (see `pickAssociatedPrNumber`), so this only walks the two hops
+ * needed to turn it into a local PR id.
+ *
+ * ⚠ BOTH maps key on `(repoId, X)`, never on a bare sha or number. A PR number is unique only
+ * WITHIN a repo, and the `inArray × inArray` shape deliberately over-matches (it is the portable
+ * one) — the composite key is what discards the cross-repo pairs it returns. `db/branch-queries.ts`
+ * documents the same trap; there is a seeded test pinning it there.
+ *
+ * A MISS IS ORDINARY, NOT AN ERROR, and the caller degrades to a PR-less card rather than
+ * guessing: a direct push to trunk has no PR at all; `pr_number` is null until the snapshot
+ * observes the association; the two logs are trimmed on DIFFERENT schedules (`branch_commits` =
+ * newest-100 ∪ within-90d, `trunk_ci_status_events` = newest-200 ∪ within the 14-day feed window),
+ * so an old sha can outlive its commit row; and the landing PR may simply not be synced here.
+ */
+async function resolveTrunkCommitPrs(
+  accountId: number,
+  pairs: { repoId: number; sha: string }[],
+): Promise<Map<string, { id: number; number: number; title: string; state: PrState }>> {
+  const out = new Map<string, { id: number; number: number; title: string; state: PrState }>();
+  if (pairs.length === 0) return out;
+  const repoIds = [...new Set(pairs.map((p) => p.repoId))];
+  const shas = [...new Set(pairs.map((p) => p.sha))];
+  const wanted = new Set(pairs.map((p) => `${p.repoId}:${p.sha}`));
+
+  // Covered by the (accountId, repoId, sha) unique.
+  const commitRows = await db
+    .select({
+      repoId: branchCommits.repoId,
+      sha: branchCommits.sha,
+      prNumber: branchCommits.prNumber,
+    })
+    .from(branchCommits)
+    .where(
+      and(
+        eq(branchCommits.accountId, accountId),
+        inArray(branchCommits.repoId, repoIds),
+        inArray(branchCommits.sha, shas),
+      ),
+    )
+    .execute();
+
+  const landed = commitRows.filter(
+    (c): c is typeof c & { prNumber: number } =>
+      c.prNumber != null && wanted.has(`${c.repoId}:${c.sha}`),
+  );
+  if (landed.length === 0) return out;
+
+  const prRows = await db
+    .select({
+      id: pullRequests.id,
+      repoId: pullRequests.repoId,
+      number: pullRequests.number,
+      title: pullRequests.title,
+      state: pullRequests.state,
+    })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.repoId, repoIds),
+        inArray(pullRequests.number, [...new Set(landed.map((c) => c.prNumber))]),
+      ),
+    )
+    .execute();
+  const prByRepoNumber = new Map(prRows.map((p) => [`${p.repoId}:${p.number}`, p]));
+
+  for (const c of landed) {
+    const pr = prByRepoNumber.get(`${c.repoId}:${c.prNumber}`);
+    if (pr != null)
+      out.set(`${c.repoId}:${c.sha}`, {
+        id: pr.id,
+        number: pr.number,
+        title: pr.title,
+        state: pr.state as PrState,
+      });
+  }
+  return out;
+}
+
+/**
  * Default-branch CI failures, from the `trunk_ci_status_events` transition log.
  *
- * PR-LESS by construction (`prId: null`), which is what keeps them out of the My-Turn lane
- * (enrichMyTurn requires a prId) and out of the per-page PR enrichment. Skipped entirely on the
- * single-PR isolation path — trunk is not a PR's history.
+ * The failure is a fact about TRUNK, but the commit it broke on was usually put there by a PR —
+ * so each card carries the landing PR (`resolveTrunkCommitPrs`) when the sha resolves to one,
+ * giving the SPA something to open. `githubUrl` stays the COMMIT, not the PR: a trunk run's
+ * checks live on the commit page, and the card keeps that link either way.
+ *
+ * ⚠ A resolved `prId` no longer keeps these rows out of the My-Turn lane — the kind-based
+ * `isCiFeedKind` guard in getConsolidatedFeed is now the ONLY thing that does, and it must stay.
+ * A CI row is actor-less, so `enrichMyTurn` would flag every red trunk build on a PR you touched
+ * as an UNCAPPED yellow card. Still skipped entirely under single-PR isolation — trunk is not a
+ * PR's history, even when a PR landed the commit.
  */
 async function getTrunkCiFailureFeedItems(
   accountId: number,
@@ -3410,30 +3505,42 @@ async function getTrunkCiFailureFeedItems(
     .limit(CI_EVENT_SCAN_CAP)
     .execute();
 
+  // One lookup for the whole scan's shas, BEFORE the collapse — which emits up to 5 cards per
+  // head, so resolving inside the emit would repeat the same two queries per card.
+  const prByCommit = await resolveTrunkCommitPrs(
+    accountId,
+    rows.map((r) => ({ repoId: r.repoId, sha: r.headSha })),
+  );
+
   return collapseCiRows(
     rows,
     (r) => `${r.repoId} ${r.headSha}`,
     (r) => (r.failingChecks ?? []).map((c) => c.name),
-    (r, checkName, moreFailing) =>
-      ciFeedItem({
+    (r, checkName, moreFailing) => {
+      // The PR that landed this commit, when we can name it — often absent (a direct push, an
+      // association not observed yet, a PR not tracked here), and the card reads fine without it.
+      const pr = prByCommit.get(`${r.repoId}:${r.headSha}`);
+      return ciFeedItem({
         id: `feed:trunkci:${r.repoId}:${r.headSha}:${checkName ?? ''}`,
         kind: 'trunk_ci_failed',
         occurredAt: r.observedAt,
         repoId: r.repoId,
         repoFullName: `${r.owner}/${r.name}`,
-        prId: null,
-        prNumber: null,
-        prTitle: null,
-        prState: null,
+        prId: pr?.id ?? null,
+        prNumber: pr?.number ?? null,
+        prTitle: pr?.title ?? null,
+        prState: pr?.state ?? null,
         status: r.status as CiStatus,
         headSha: r.headSha,
         checkName,
         moreFailing,
-        // The commit, not a PR — a trunk failure often has no PR at all (a direct push), and
-        // the commit page is where its checks live. Rendered through safeExternalUrl client-side.
+        // The COMMIT, not the PR, even when one resolved: a trunk run's checks live on the
+        // commit page, and the failure is a fact about trunk. The landing PR is reachable from
+        // the card's own PR reference. Rendered through safeExternalUrl client-side.
         githubUrl: `https://github.com/${r.owner}/${r.name}/commit/${r.headSha}`,
         where: r.branchName ?? 'trunk',
-      }),
+      });
+    },
   );
 }
 

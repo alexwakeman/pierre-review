@@ -252,11 +252,21 @@ export interface FilterState {
   // also emits plain commit-push runs. Server-side (the client can't synthesize plain commits),
   // so it's threaded into the feed query key. Transient, URL-silent (like the other feed toggles).
   feedShowCommits: boolean;
-  // Activity "Feed" CI-failure lens (see FeedCiLens). 'feed' (default) interleaves ONE item per
-  // failed check run — on PR heads AND on the default branch (`ci_failed` / `trunk_ci_failed`);
-  // 'only' narrows the stream to them; 'off' fetches none. The fetch half is server-side (the
-  // client cannot synthesize these rows), so it is threaded into the feed query key AND the
-  // head-poll key; the 'only' half is a client-side narrowing, like the category pills.
+  // Activity "Feed" CI-failure lens (see FeedCiLens). 'off' (DEFAULT) fetches none; 'feed'
+  // interleaves ONE item per failed check run — on PR heads AND on the default branch
+  // (`ci_failed` / `trunk_ci_failed`); 'only' narrows the stream to them. The fetch half is
+  // server-side (the client cannot synthesize these rows), so it is threaded into the feed query
+  // key AND the head-poll key; the 'only' half is a client-side narrowing, like the category
+  // pills. The pill cycles off → feed → only → off, so one click from rest turns the feature on.
+  //
+  // ⚠ IT DEFAULTS OFF ON PURPOSE, and that is the SECOND flip of this default. It first shipped
+  // as an include-only boolean defaulting off (invisible), was flipped on to make the feature
+  // discoverable, and is now off again because "on" is too noisy to be a good first impression:
+  // a red matrix build writes a card per failed check per head, and on a busy workspace that is
+  // most of what a new user's first feed contains. Discoverability is now the PILL's job — it
+  // renders whenever the Feed does, so the feature is one visible click away rather than
+  // ambient. The two lessons from the first flip still stand: never ship an include-only toggle
+  // whose only feedback is a count, and never re-derive this default from a stored value.
   //
   // ⚠ Unlike the other feed toggles this one is PERSISTED, with the filter bar (it is in
   // FilterDefaults / freshFilterDefaults / pickFilterBarState). "Show me broken builds" is a
@@ -264,7 +274,7 @@ export interface FilterState {
   // tomorrow. It is consequently also reset by "Clear filters", which is the correct reading of
   // that control for a filter-shaped setting.
   //
-  // ⚠ AND IT IS URL-SERIALIZED (`ci=only` / `ci=0`; the 'feed' default is omitted), which is not
+  // ⚠ AND IT IS URL-SERIALIZED (`ci=only` / `ci=1`; the 'off' default is omitted), which is not
   // optional for a FilterDefaults key. useUrlState's serializer is hand-written per param, so a
   // new key is silently omitted unless someone adds it — and being omitted does NOT merely make
   // it unshareable: `writeToUrl` emits `?workspace=<id>` as soon as the scope resolves, so the
@@ -540,8 +550,9 @@ export interface FilterState {
   toggleFeedNeedsReview: () => void;
   // Feed "show individual commits" toggle (see feedShowCommits).
   toggleFeedShowCommits: () => void;
-  // Feed CI-failure lens (see feedCiLens): cycles feed → only → off → feed. Persisted with the
-  // filter bar and URL-serialized (`ci=only` / `ci=0`).
+  // Feed CI-failure lens (see feedCiLens): cycles off → feed → only → off, so ONE click from the
+  // default turns the feature on. Persisted with the filter bar and URL-serialized
+  // (`ci=only` / `ci=1`; the 'off' default is omitted).
   cycleFeedCiLens: () => void;
   setFeedCiLens: (v: FeedCiLens) => void;
   // Isolate the Feed to a single PR (or clear with null) — the Feed "open PRs" panel.
@@ -777,11 +788,11 @@ function freshFilterDefaults(): FilterDefaults {
     prStatuses: [...DEFAULT_PR_STATUSES],
     reviewStates: [...DEFAULT_REVIEW_STATES],
     derivedStates: [],
-    // CI-failure rows are IN the feed on a fresh load. A red build is situational awareness in
-    // the same sense a stalled review is, and the cost of the old 'off' default was that the
-    // feature was invisible until someone found the pill — and then, in a busy workspace,
-    // stayed invisible because the rows landed below the fold (see FeedCiLens).
-    feedCiLens: 'feed',
+    // CI-failure rows are OUT of the feed on a fresh load — they are too noisy to be a new
+    // user's first impression (one card per failed check per head, so a red matrix build can
+    // dominate the stream). The pill is always rendered, so the feature stays one click away;
+    // discoverability is its job, not the default's. See FeedCiLens for the full history.
+    feedCiLens: 'off',
   };
 }
 

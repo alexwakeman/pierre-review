@@ -1,5 +1,5 @@
-// The Feed's CI-failure LENS — three states (feed → only → off), and the one feed control that
-// persists with the filter bar.
+// The Feed's CI-failure LENS — three states cycling off → feed → only → off, and the one feed
+// control that persists with the filter bar.
 //
 // Every other feed*/bot* toggle is transient and URL-silent by deliberate design. This one is a
 // standing preference ("show me broken builds"), so it joins FilterDefaults — which is a list
@@ -16,10 +16,12 @@
 //   • IT IS PERSISTED. `pickFilterBarState` must still emit it — the bare-url path (a fresh tab
 //     opened straight at /app) is the one the URL cannot serve.
 //   • A RETURNING USER'S EXISTING BLOB STILL LOADS, including one holding the LEGACY boolean
-//     `feedShowCiFailures`. The key is additive, so no FILTER_STORAGE_VERSION bump was needed;
-//     the legacy key is dropped by whitelist and the new default applies.
-//   • THE DEFAULT IS 'feed' — CI rows are in the stream on a fresh load — and "Clear filters"
-//     returns to it.
+//     `feedShowCiFailures`, which is dropped by whitelist.
+//   • THE DEFAULT IS 'off' — no CI rows are fetched on a fresh load — and "Clear filters"
+//     returns to it. ⚠ This default has FLIPPED TWICE (off → feed → off), and the second flip
+//     needed a FILTER_STORAGE_VERSION bump (v3 → v4) that the first did not: `feedCiLens` is
+//     persisted UNCONDITIONALLY, so by then every stored blob held a literal 'feed' written by
+//     the old default rather than by a user. `filterStorageMigration.test.ts` pins that step.
 //
 // WHY THREE STATES (the bug this replaced): an include-only toggle is invisible in a busy
 // workspace. CI rows are placed chronologically, so with ~23 non-CI events since the newest CI
@@ -67,18 +69,20 @@ describe('feedCiLens', () => {
     location.search = '';
   });
 
-  it("defaults to 'feed' — CI rows are in the stream on a fresh load", () => {
-    expect(useFilters.getState().feedCiLens).toBe('feed');
+  it("defaults to 'off' — no CI rows are fetched on a fresh load", () => {
+    expect(useFilters.getState().feedCiLens).toBe('off');
   });
 
-  it('cycles feed → only → off → feed', () => {
+  // ONE CLICK FROM REST TURNS IT ON. The cycle is unchanged as a cycle — what moved is where it
+  // STARTS — so the first click from the default must reach 'feed', not skip straight to 'only'.
+  it('cycles off → feed → only → off', () => {
     const cycle = (): string => {
       useFilters.getState().cycleFeedCiLens();
       return useFilters.getState().feedCiLens;
     };
+    expect(cycle()).toBe('feed');
     expect(cycle()).toBe('only');
     expect(cycle()).toBe('off');
-    expect(cycle()).toBe('feed');
   });
 
   it('is PERSISTED with the filter bar', () => {
@@ -129,9 +133,9 @@ describe('feedCiLens', () => {
   // for a filter-shaped control.
   it('is returned to the default by resetAllFilters', () => {
     useFilters.getState().cycleFeedCiLens();
-    expect(useFilters.getState().feedCiLens).toBe('only');
-    useFilters.getState().resetAllFilters();
     expect(useFilters.getState().feedCiLens).toBe('feed');
+    useFilters.getState().resetAllFilters();
+    expect(useFilters.getState().feedCiLens).toBe('off');
   });
 
   // The other feed toggles must NOT have been dragged along: they stay transient, so "Clear
@@ -154,13 +158,22 @@ describe('feedCiLens survives a reload (writeToUrl → readFromUrl)', () => {
     location.search = '';
   });
 
-  it('encodes only the non-default lenses', () => {
+  // ⚠ THE OMITTED VALUE MUST TRACK THE DEFAULT. When the default flipped to 'off', leaving 'off'
+  // as the encoded value and 'feed' as the omitted one would have written the default onto every
+  // URL while the state that now NEEDS serializing silently vanished — restoring 'feed' never.
+  it('encodes only the non-default lenses, and omits the CURRENT default', () => {
     writeToUrl(state({ workspaceId: 5, feedCiLens: 'only' }));
     expect(location.search).toContain('ci=only');
-    writeToUrl(state({ workspaceId: 5, feedCiLens: 'off' }));
-    expect(location.search).toContain('ci=0');
     writeToUrl(state({ workspaceId: 5, feedCiLens: 'feed' }));
+    expect(location.search).toContain('ci=1');
+    writeToUrl(state({ workspaceId: 5, feedCiLens: 'off' }));
     expect(location.search).not.toContain('ci=');
+  });
+
+  // The round trip that the flip could have broken: 'feed' is now the state a reload must carry.
+  it('restores the in-feed lens across a reload', () => {
+    writeToUrl(state({ workspaceId: 5, feedCiLens: 'feed' }));
+    expect(readFromUrl().feedCiLens).toBe('feed');
   });
 
   // THE REGRESSION. A non-bare URL is the normal case, not the exception — `?workspace=<id>` is
@@ -189,8 +202,8 @@ describe('feedCiLens survives a reload (writeToUrl → readFromUrl)', () => {
     expect(readFromUrl().feedCiLens).toBe('only');
   });
 
-  // Links minted while this was a boolean carry `ci=1`, which meant "show them". It maps to the
-  // state that still means that, so an old shared link keeps working.
+  // `ci=1` meant "show them" when this was a boolean and still does — which is why it is also
+  // what the serializer now emits for 'feed'. Links from BOTH older shapes keep working.
   it('reads a legacy ci=1 link as the in-feed lens', () => {
     location.search = '?workspace=5&ci=1';
     expect(readFromUrl().feedCiLens).toBe('feed');
@@ -200,7 +213,7 @@ describe('feedCiLens survives a reload (writeToUrl → readFromUrl)', () => {
   // not name the lens must not pick it up from the recipient's own localStorage — which is
   // structurally guaranteed here, since the hydrate patch simply omits the key.
   it('a shared link without ci= does not inherit the sharer’s lens', () => {
-    writeToUrl(state({ workspaceId: 5, feedCiLens: 'feed' }));
+    writeToUrl(state({ workspaceId: 5, feedCiLens: 'off' }));
     expect(readFromUrl().feedCiLens).toBeUndefined();
   });
 });

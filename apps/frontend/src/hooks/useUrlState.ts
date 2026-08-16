@@ -100,10 +100,11 @@ export function readFromUrl(): Partial<FilterState> {
   const stale = p.get('stale');
   if (stale === '0') out.excludeStale = false;
   else if (stale === '1') out.excludeStale = true;
-  // The Feed's CI-failure lens — THREE states, defaulting to 'feed' (rows interleaved), so only
-  // the two non-default values appear: `ci=only` narrows to CI rows, `ci=0` suppresses them.
-  // `ci=1` is still read as 'feed' because links minted while this was a boolean carry it, and
-  // that was the value meaning "on". ⚠ THIS PARAM IS WHAT MAKES IT SURVIVE A RELOAD: it is
+  // The Feed's CI-failure lens — THREE states, defaulting to 'off' (no CI rows fetched), so only
+  // the two non-default values appear: `ci=1` interleaves them, `ci=only` narrows to them.
+  // `ci=1` has meant "on" since this was a boolean, so links minted under either older shape
+  // still read correctly, and an explicit `ci=0` is still honoured as 'off' — it is now merely
+  // redundant with the default. ⚠ THIS PARAM IS WHAT MAKES IT SURVIVE A RELOAD: it is
   // persisted with the filter bar, but the persisted blob is read ONLY on a BARE URL, and
   // writeToUrl puts `?workspace=<id>` (and `view=activity`) on the address bar within a second of
   // every load — so a FilterDefaults key that is not serialized here is restored precisely never.
@@ -111,6 +112,10 @@ export function readFromUrl(): Partial<FilterState> {
   if (ci === 'only') out.feedCiLens = 'only';
   else if (ci === '0') out.feedCiLens = 'off';
   else if (ci !== null) out.feedCiLens = 'feed';
+  // ⚠ An OLD link that meant 'feed' carried NO `ci` param (it was the default when the link was
+  // minted), so it now reads as the new 'off' default. That is deliberate and unavoidable — an
+  // absent param cannot be told apart from a bare URL — and it is the same direction as the
+  // stored-blob migration below.
   out.customFrom = p.get('from');
   out.customTo = p.get('to');
 
@@ -189,12 +194,15 @@ export function writeToUrl(s: FilterState): void {
   if (s.allowedBotIds.length) p.set('allowBots', s.allowedBotIds.join(','));
   // Hidden is the default; only encode the non-default "show stale" choice (stale=0).
   if (!s.excludeStale) p.set('stale', '0');
-  // 'feed' is the default; encode only the two non-default lenses. It is a FilterDefaults key,
+  // 'off' is the default; encode only the two non-default lenses. It is a FilterDefaults key,
   // so — like every other one — it has to round-trip through the URL to survive a reload: this
   // subscription makes the address bar non-bare immediately, and the localStorage restore path
-  // only runs on a BARE url.
+  // only runs on a BARE url. ⚠ The OMITTED value must always be the CURRENT default: when the
+  // default flipped, leaving `ci=0` as the emitted one would have written the default onto every
+  // URL while the newly non-default 'feed' vanished — i.e. the one state that now needs
+  // serializing would be the one state that never survived a reload.
   if (s.feedCiLens === 'only') p.set('ci', 'only');
-  else if (s.feedCiLens === 'off') p.set('ci', '0');
+  else if (s.feedCiLens === 'feed') p.set('ci', '1');
   if (s.preset === 'custom' && s.customFrom) p.set('from', s.customFrom);
   if (s.preset === 'custom' && s.customTo) p.set('to', s.customTo);
   // Serialize the category selection whenever it differs from the fresh-load
@@ -272,7 +280,13 @@ const FILTER_STORAGE_KEY = 'pierre:filterBarState';
 // v3 = bots hidden by default. The only change is the `excludeBots` default flipping, so a v2
 // blob is still perfectly meaningful — discarding a user's whole remembered filter bar (repos,
 // range, statuses) to re-assert one default would be theft. Hence the per-version migration.
-const FILTER_STORAGE_VERSION = 3;
+//
+// v4 = CI failures out of the feed by default (`feedCiLens` 'feed' → 'off'), and the bump is
+// REQUIRED rather than cosmetic: `pickFilterBarState` persists the key UNCONDITIONALLY, so every
+// blob written under the old default holds a literal 'feed' that no one chose. Without a
+// migration the new default would reach new installs only, and every existing user would keep
+// the noisy feed forever — the exact failure the v2→v3 note describes, in the other direction.
+const FILTER_STORAGE_VERSION = 4;
 
 // Per-version migrations for the persisted filter blob, applied in loadPersistedFilters before
 // the version check (so a migrated blob passes it). Exported for its unit test only.
@@ -282,12 +296,30 @@ const FILTER_STORAGE_VERSION = 3;
 // forever) and `allowedBotIds` (an allow-list picked when excluding was a deliberate opt-in
 // choice doesn't carry the same intent into a world where excluding is ambient). Everything
 // else carries forward untouched.
+//
+// v3 → v4: drop EXACTLY `feedCiLens`, for the same reason in the other direction — the key is
+// persisted unconditionally, so a stored 'feed' is overwhelmingly the OLD DEFAULT rather than a
+// choice, and keeping it would pin the noisy feed for every existing user. A deliberate 'only'
+// is lost with it; that is the accepted cost of a default flip on a key whose stored value
+// cannot be told apart from the default that produced it. (Note the pill's own state is what
+// makes this recoverable in one click.)
+//
+// ⚠ The steps CHAIN — a v2 blob must land at v4, so this walks them in order rather than
+// returning early on a single version. An `if (parsed.v !== N) return parsed` per step would
+// carry a v2 blob no further than v3, where the version check below then discards it WHOLE.
 export function migratePersistedFilters(
   parsed: Record<string, unknown>,
 ): Record<string, unknown> {
-  if (parsed.v !== 2) return parsed;
-  const { excludeBots: _excludeBots, allowedBotIds: _allowedBotIds, ...rest } = parsed;
-  return { ...rest, v: 3 };
+  let out = parsed;
+  if (out.v === 2) {
+    const { excludeBots: _excludeBots, allowedBotIds: _allowedBotIds, ...rest } = out;
+    out = { ...rest, v: 3 };
+  }
+  if (out.v === 3) {
+    const { feedCiLens: _feedCiLens, ...rest } = out;
+    out = { ...rest, v: 4 };
+  }
+  return out;
 }
 
 // The SCOPE slice, persisted separately (see filters.ts `pickScopeState`): the active workspace
