@@ -19,7 +19,8 @@
     "seed:demo": "DATABASE_URL=/tmp/pierre-demo.sqlite DISABLE_SCHEDULER=true tsx scripts/seed-demo.ts",
     "sync:once": "tsx scripts/sync-once.ts",
     "ml:enrich": "DISABLE_SCHEDULER=true tsx scripts/ml-enrich.ts",
-    "ml:backfill-bodies": "DISABLE_SCHEDULER=true tsx scripts/backfill-null-bodies.ts"
+    "ml:backfill-bodies": "DISABLE_SCHEDULER=true tsx scripts/backfill-null-bodies.ts",
+    "ml:reparse-badges": "DISABLE_SCHEDULER=true tsx scripts/reparse-vendor-badges.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.162",

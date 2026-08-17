@@ -10,6 +10,7 @@ import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { workspaceKey } from '../../hooks/useActivity.js';
 import { useFilters } from '../../store/filters.js';
+import { describeAnswerWindow, INSIGHTS_RANGE_LABEL } from '../../lib/insightsRange.js';
 import {
   useSprintChat,
   useSprintChatHistory,
@@ -162,6 +163,17 @@ function HistoryRow({
           {item.wantBots && <span aria-hidden="true">🤖 </span>}
           {item.question}
         </span>
+        {/* The range this row was answered over. Once the range is selectable, two rows with the
+            SAME question text can be answers about different periods — the transcript is ambiguous
+            without it. Rows stored before ranges shipped carry no window and show nothing. */}
+        {item.window && (
+          <span
+            className="shrink-0 rounded bg-gray-100 px-1 text-[10px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+            title={describeAnswerWindow(item.window) ?? undefined}
+          >
+            {INSIGHTS_RANGE_LABEL[item.window.kind]}
+          </span>
+        )}
         <span
           className="shrink-0 text-[10px] text-gray-400"
           title={new Date(item.createdAt).toLocaleString()}
@@ -311,6 +323,9 @@ export function AdHocChatPanel(): JSX.Element | null {
   // mutation-data flash.
   const result = storedResult;
   const answer = result?.answer ?? null;
+  // null for an answer that predates ranges (or a stale persisted one) — the caption is then simply
+  // absent rather than captioned with a window nobody chose.
+  const answerWindow = describeAnswerWindow(result?.window);
   const pins = pinned.data?.prompts ?? [];
   // Don't offer to pin a question that's already saved verbatim for this Workspace.
   const alreadyPinned = pins.some((p) => p.text === trimmed);
@@ -482,9 +497,14 @@ export function AdHocChatPanel(): JSX.Element | null {
               <AdHocChart spec={result.chart} />
             </div>
           )}
-          {result?.generatedAt && (
+          {/* The window this answer COVERED — not the chips' current position. The two diverge the
+              moment someone changes the range without re-asking, and the answer on screen is still
+              about its own period. */}
+          {(result?.generatedAt || answerWindow) && (
             <div className="mt-1.5 text-[10px] text-gray-400">
-              Generated {new Date(result.generatedAt).toLocaleString()}
+              {answerWindow}
+              {answerWindow && result?.generatedAt && ' · '}
+              {result?.generatedAt && `Generated ${new Date(result.generatedAt).toLocaleString()}`}
             </div>
           )}
         </div>

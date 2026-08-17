@@ -24,10 +24,15 @@ import type { AnyColumn } from 'drizzle-orm';
 import type {
   AutomatedReviewerKind,
   BotAnalyticsMlTotals,
+  BotFlaggingComment,
+  BotFlaggingCommentsResponse,
+  BotFlaggingRefine,
+  BotFlaggingSelector,
   BotSeverityResponse,
   BotVendorComment,
   BotVendorCommentsResponse,
   BotWindowKind,
+  DerivedState,
   MlBotSeverityRow,
   MlCategory,
   MlLabel,
@@ -35,6 +40,8 @@ import type {
   MlSeverity,
   MlSeverityCounts,
   MlVendorConfidence,
+  SeverityAgreementMatrix,
+  VendorSeverityAxis,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { botWindowMs } from './bot-window.js';
@@ -653,6 +660,46 @@ function vendorBrand(kind: AutomatedReviewerKind, login: string): string {
     .join(' ');
 }
 
+// ── THE ONE BUCKET FOLD — the tile↔list consistency mechanism ───────────────────────────────
+// The strip's tile numbers are NOT SQL counts and cannot be. `categories` is a JSON column in
+// both dialects, so "is this praise?" has no portable SQL predicate, and neither does "did this
+// row's severity coerce?". The only way a drill-down's `total` can BE a tile's number rather
+// than merely agree with it is for both to run the identical scan and then the identical fold,
+// so the fold lives here, once, and every caller goes through it. A new bucket rule goes in this
+// function or nowhere.
+//
+// THE ORDER IS LOAD-BEARING and must never be re-spelled: severity coercion FIRST — a row whose
+// severity is unreadable belongs to NO bucket, counting in `labelled` (the raw scan length) and
+// in nothing else, exactly as the `continue` at the top of every fold loop did — then `isSummary`,
+// then praise.
+// ⚠ isSummary BEFORE praise means a praise-flavoured walkthrough is a SUMMARY, which is the
+// OPPOSITE of the frontend's `pillOf` display helper. That is deliberate, and it is why no count
+// on these screens may be re-derived client-side: the numbers are the server's.
+export type MlFoldBucket = 'summary' | 'praise' | 'finding';
+
+export interface FoldedMlRow {
+  bucket: MlFoldBucket;
+  severity: MlSeverity;
+  categories: MlCategory[];
+}
+
+/** null = this row's severity could not be coerced, so it belongs to none of the three buckets. */
+export function foldMlLabelRow(row: {
+  severity: string | null;
+  isSummary: boolean;
+  categories: unknown;
+}): FoldedMlRow | null {
+  const severity = coerceSeverity(row.severity);
+  if (!severity) return null;
+  const categories = coerceCategories(row.categories);
+  if (row.isSummary) return { bucket: 'summary', severity, categories };
+  // v2 non-finding class: the bot acknowledging a fix / withdrawing a concern. Bucketed like
+  // summaries — visible as labelled work, excluded from every severity-weighted number, because
+  // it is not a finding.
+  if (categories.includes('praise')) return { bucket: 'praise', severity, categories };
+  return { bucket: 'finding', severity, categories };
+}
+
 // ── The WINDOWED per-bot label fold for getBotAnalytics ─────────────────────────────────────
 // The merged Bots table shows ROI columns and severity columns on ONE row over ONE window, so
 // this aggregates `ml_comment_labels` per author over the SAME [from, now] window the ROI math
@@ -741,8 +788,11 @@ export async function getMlWindowAggregates(
   let praise = 0;
 
   for (const row of labelRows) {
-    const severity = coerceSeverity(row.severity);
-    if (!severity) continue;
+    // ⚠ Through `foldMlLabelRow`, NEVER a local re-spelling of the three branches: the flagging
+    // drill-down slices this same scan with this same fold, and a second copy of the order here
+    // is exactly how the tile and the list it opens would drift apart.
+    const folded = foldMlLabelRow(row);
+    if (!folded) continue;
     if (row.backend) backends.add(row.backend);
     let acc = byBot.get(row.authorUserId);
     if (!acc) {
@@ -757,11 +807,10 @@ export async function getMlWindowAggregates(
       byBot.set(row.authorUserId, acc);
     }
     acc.labelled += 1;
-    const categories = coerceCategories(row.categories);
-    if (row.isSummary) {
+    if (folded.bucket === 'summary') {
       acc.summaries += 1;
       summaries += 1;
-    } else if (categories.includes('praise')) {
+    } else if (folded.bucket === 'praise') {
       acc.praise += 1;
       praise += 1;
     } else {
@@ -769,10 +818,10 @@ export async function getMlWindowAggregates(
       // a walkthrough's severity while every rate divides by `findings` lets a share top 100%.
       acc.findings += 1;
       findings += 1;
-      acc.bySeverity[severity] += 1;
-      totalsBySeverity[severity] += 1;
-      if (severity === 'major' || severity === 'critical') acc.high += 1;
-      for (const c of categories) {
+      acc.bySeverity[folded.severity] += 1;
+      totalsBySeverity[folded.severity] += 1;
+      if (folded.severity === 'major' || folded.severity === 'critical') acc.high += 1;
+      for (const c of folded.categories) {
         totalsByCategory.set(c, (totalsByCategory.get(c) ?? 0) + 1);
       }
     }
@@ -1435,4 +1484,592 @@ export async function getMlBacklogForAccount(accountId: number): Promise<MlBackl
     .execute();
 
   return { pending, unscorable, labelled: Number(labelledRows[0]?.n ?? 0) };
+}
+
+// ── "What the bots are flagging" — the drill-down behind the ML totals strip ─────────────────
+//
+// Every tile and chip on the Bots rail's ML strip opens this ONE getter with a different
+// selector, and the contract is that the list's `total` IS the tile's number — not a second,
+// independently-derived count that happens to agree today.
+//
+// That rules out the obvious implementation. A `count(*) … WHERE severity = 'nit'` can never
+// equal the "Nits" tile: it counts summaries and praise, it cannot express praise at all (a JSON
+// column in both dialects), it ignores `coerceSeverity` failures, and it ignores ROLLUP_SCAN_CAP's
+// newest-first truncation. So this getter re-runs the STRIP'S OWN scan — byte-identical WHERE /
+// ORDER BY / LIMIT, only the select list widens — re-folds it through the shared
+// `foldMlLabelRow`, and slices the result. Pagination is therefore an OFFSET INTO THE FOLDED
+// IN-MEMORY POPULATION, behind an opaque `o:<n>` cursor so a later keyset switch is not a wire
+// break; keyset pagination is the wrong tool here because it cannot reproduce a count only JS
+// can compute.
+//
+// Cost is bounded the same way the strip's is: one capped label scan, then hydration of the
+// PAGE ONLY (≤50 rows) — never of the population.
+const FLAGGING_PAGE_MAX = 50;
+
+// The matrix axes, worst-first, mirroring the shared `ML_SEVERITIES` order with `'none'` (the bot
+// declared nothing) appended to the vendor axis. Local copies because `@pierre-review/shared` is
+// a TYPES-ONLY dependency of the backend — the release build greps `release/dist` and fails on a
+// real import — the same local-copy rule `REASON_PRIORITY` follows in queries.ts.
+// ⚠ Two severity orders live in this codebase (`ML_SEVERITIES` worst-first, the Bots panel's
+// `SEVERITY_COLUMNS` ascending). Flipping one axis silently transposes every cell, so the order
+// is pinned here and the client looks cells up by (vendor, ours) rather than by position.
+const MATRIX_VENDOR_AXIS: VendorSeverityAxis[] = ['critical', 'major', 'minor', 'nit', 'none'];
+const MATRIX_OURS_AXIS: MlSeverity[] = ['critical', 'major', 'minor', 'nit'];
+
+/**
+ * OUR severity as a 0..3 ordinal — `SEVERITY_KEYS` is stored ascending, so its INDEX is the
+ * ordinal, the same 0..3 the shared `ML_SEVERITY_ORD` map spells out for the frontend. Re-derived
+ * here rather than imported for the types-only reason above.
+ *
+ * ⚠ Used ONLY to say which way a vendor's claim differs from ours. It never orders, seeds,
+ * corrects or falls back OUR severity — see MlLabel.vendorSeverity.
+ */
+function severityOrdinal(s: MlSeverity): number {
+  return SEVERITY_KEYS.indexOf(s);
+}
+
+function emptyAgreementMatrix(): SeverityAgreementMatrix {
+  return {
+    // Dense 5×4: a zero cell is PRESENT, not omitted — the grid renders every combination, and
+    // an absent cell would read as "no data here" rather than "they never disagreed this way".
+    cells: MATRIX_VENDOR_AXIS.flatMap((vendor) =>
+      MATRIX_OURS_AXIS.map((ours) => ({ vendor, ours, count: 0 })),
+    ),
+    declared: 0,
+    undeclared: 0,
+    agree: 0,
+    overCall: 0,
+    underCall: 0,
+    total: 0,
+  };
+}
+
+/**
+ * The ours-vs-vendor confusion matrix over a population.
+ *
+ * ⚠ A DISPLAY OF TWO CLAIMS, NEVER A RECONCILIATION. The vendor badge scores 0.474 exact against
+ * our 0.700 on the adjudicated gold-300, so it is here to show WHERE the two differ and nothing
+ * more: it does not enter a selector predicate, `total`, or the fold.
+ */
+function buildAgreementMatrix(
+  rows: Array<{ vendor: MlSeverity | null; ours: MlSeverity }>,
+): SeverityAgreementMatrix {
+  const counts = new Map<string, number>();
+  let declared = 0;
+  let agree = 0;
+  let overCall = 0;
+  let underCall = 0;
+  for (const r of rows) {
+    const axis: VendorSeverityAxis = r.vendor ?? 'none';
+    const key = `${axis}|${r.ours}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    // A null vendor claim is UNDECLARED — it lands in the 'none' column and in NEITHER agreement
+    // nor disagreement. Silence is not a conflict, and `agree + over + under === declared` is the
+    // property that keeps the caption honest.
+    if (r.vendor == null) continue;
+    declared += 1;
+    if (r.vendor === r.ours) agree += 1;
+    else if (severityOrdinal(r.vendor) > severityOrdinal(r.ours)) overCall += 1;
+    else underCall += 1;
+  }
+  return {
+    cells: MATRIX_VENDOR_AXIS.flatMap((vendor) =>
+      MATRIX_OURS_AXIS.map((ours) => ({
+        vendor,
+        ours,
+        count: counts.get(`${vendor}|${ours}`) ?? 0,
+      })),
+    ),
+    declared,
+    undeclared: rows.length - declared,
+    agree,
+    overCall,
+    underCall,
+    total: rows.length,
+  };
+}
+
+/**
+ * Does this folded row belong to the tile that was clicked?
+ *
+ * ⚠ `severity` and `category` gate on `bucket === 'finding'` because the strip increments
+ * `bySeverity`/`byCategory` ONLY inside its finding branch (a walkthrough's severity is never
+ * counted, and a walkthrough's categories are an artefact of the marker parser reading a summary
+ * table). Dropping either gate makes the list overshoot the tile it opened from.
+ *
+ * ⚠ NOTHING HERE READS `vendorSeverity`. The bot's own badge is display-only; a selector that
+ * consulted it would let the less accurate of the two labels decide which rows are "high
+ * severity", which is precisely what MlLabel.vendorSeverity forbids.
+ */
+function matchesFlaggingSelector(
+  selector: Exclude<BotFlaggingSelector, { kind: 'overlap' }>,
+  fold: FoldedMlRow,
+): boolean {
+  switch (selector.kind) {
+    case 'findings':
+      return fold.bucket === 'finding';
+    case 'summaries':
+      return fold.bucket === 'summary';
+    case 'severity':
+      return fold.bucket === 'finding' && selector.severities.includes(fold.severity);
+    case 'category':
+      // ⚠ PRAISE IS ITS OWN BUCKET, NOT A FINDING CATEGORY — the one arm where the obvious
+      // spelling is unsatisfiable. `foldMlLabelRow` tests `isSummary` then praise then finding,
+      // so a praise row NEVER carries `bucket === 'finding'`; asking for `category:'praise'`
+      // under the finding gate matches nothing, for every input, forever.
+      //
+      // It stayed invisible while the only source of category selectors was the strip's chips,
+      // which come from `byCategory` — incremented solely inside the FINDING branch, so praise
+      // can never appear there. The drill-down's severity picker offers Praise directly (it sits
+      // beside the four severities, the `SEVERITY_PILLS` precedent), which made the dead arm
+      // reachable: the option reads "Praise · 55" from the analytics fold while the list it opens
+      // is empty — a control that looks broken, which is the exact failure this codebase has
+      // already paid for once with the CI-failure lens.
+      return selector.category === 'praise'
+        ? fold.bucket === 'praise'
+        : fold.bucket === 'finding' && fold.categories.includes(selector.category);
+  }
+}
+
+/** The refinement the matrix / direction toggle applies AFTER the selector has fixed `total`. */
+function matchesFlaggingRefine(
+  refine: BotFlaggingRefine,
+  vendor: MlSeverity | null,
+  ours: MlSeverity,
+): boolean {
+  if (refine.cell) {
+    if ((vendor ?? 'none') !== refine.cell.vendor) return false;
+    if (ours !== refine.cell.ours) return false;
+  }
+  if (refine.disagree) {
+    // Undeclared is not a disagreement (see buildAgreementMatrix).
+    if (vendor == null || vendor === ours) return false;
+    if (refine.disagree === 'over' && severityOrdinal(vendor) <= severityOrdinal(ours)) return false;
+    if (refine.disagree === 'under' && severityOrdinal(vendor) >= severityOrdinal(ours)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// The scan columns the page assembly needs, beyond what the fold consumes. Declared rather than
+// inferred so the hydration helper below has a name to take.
+interface FlaggingScanRow {
+  targetKind: MlLabelTargetKind;
+  targetId: number;
+  authorUserId: number;
+  severityOrd: number;
+  severityProb: number;
+  vendorSeverity: string | null;
+  vendorSeverityConfidence: string | null;
+  isSummary: boolean;
+  backend: string;
+  modelVersion: string;
+  createdAt: Date;
+}
+
+type FlaggingPageRow = { row: FlaggingScanRow; fold: FoldedMlRow };
+
+// One hydrated parent row, normalised across the three id spaces so the assembly loop has one
+// shape to read. PR comments and review bodies carry no path/line/thread state at all.
+interface FlaggingParentRow {
+  prId: number;
+  prNumber: number;
+  prTitle: string;
+  prAuthorId: number | null;
+  repoId: number;
+  repoFullName: string;
+  path: string | null;
+  line: number | null;
+  threadId: number | null;
+  derivedState: DerivedState | null;
+  body: string | null;
+  createdAt: Date;
+}
+
+/**
+ * Hydrate ONE PAGE (≤50 rows) into wire cards: four small parent selects, one `users` select and
+ * the two identity maps. Never called with the population.
+ *
+ * ⚠ Every parent WHERE carries `eq(pullRequests.accountId, accountId)` and
+ * `inArray(pullRequests.repoId, scope.repoIds)` even though these ids came from an
+ * already-scoped scan. The tenancy predicate is not optional because the input was trusted —
+ * that is how an id list stops being an existence oracle in every code path, not just the ones
+ * whose caller remembered.
+ */
+async function hydrateFlaggingPage(
+  accountId: number,
+  scope: BotScope,
+  pageRows: FlaggingPageRow[],
+): Promise<BotFlaggingComment[]> {
+  if (pageRows.length === 0) return [];
+
+  const idsFor = (kind: MlLabelTargetKind) =>
+    pageRows.filter((p) => p.row.targetKind === kind).map((p) => p.row.targetId);
+  const rcIds = idsFor('review_comment');
+  const pcIds = idsFor('pr_comment');
+  const rvIds = idsFor('review');
+  const authorIds = [...new Set(pageRows.map((p) => p.row.authorUserId))];
+
+  const [rcRows, pcRows, rvRows, userRows, kindMap, classLabel] = await Promise.all([
+    rcIds.length > 0
+      ? db
+          .select({
+            targetId: reviewComments.id,
+            prId: reviewComments.prId,
+            prNumber: pullRequests.number,
+            prTitle: pullRequests.title,
+            prAuthorId: pullRequests.authorId,
+            repoId: pullRequests.repoId,
+            owner: repos.owner,
+            name: repos.name,
+            body: reviewComments.body,
+            createdAt: reviewComments.createdAt,
+            threadId: reviewComments.threadId,
+            path: reviewThreads.path,
+            line: reviewThreads.line,
+            derivedState: reviewThreads.derivedState,
+          })
+          .from(reviewComments)
+          .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+          .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+          // LEFT, as everywhere else: a comment whose thread row is missing still renders, just
+          // without a path/line/state.
+          .leftJoin(reviewThreads, eq(reviewThreads.id, reviewComments.threadId))
+          .where(
+            and(
+              eq(pullRequests.accountId, accountId),
+              inArray(pullRequests.repoId, scope.repoIds),
+              inArray(reviewComments.id, rcIds),
+            ),
+          )
+          .execute()
+      : [],
+    pcIds.length > 0
+      ? db
+          .select({
+            targetId: prComments.id,
+            prId: prComments.prId,
+            prNumber: pullRequests.number,
+            prTitle: pullRequests.title,
+            prAuthorId: pullRequests.authorId,
+            repoId: pullRequests.repoId,
+            owner: repos.owner,
+            name: repos.name,
+            body: prComments.body,
+            createdAt: prComments.createdAt,
+          })
+          .from(prComments)
+          .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+          .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+          .where(
+            and(
+              eq(pullRequests.accountId, accountId),
+              inArray(pullRequests.repoId, scope.repoIds),
+              inArray(prComments.id, pcIds),
+            ),
+          )
+          .execute()
+      : [],
+    rvIds.length > 0
+      ? db
+          .select({
+            targetId: reviews.id,
+            prId: reviews.prId,
+            prNumber: pullRequests.number,
+            prTitle: pullRequests.title,
+            prAuthorId: pullRequests.authorId,
+            repoId: pullRequests.repoId,
+            owner: repos.owner,
+            name: repos.name,
+            body: reviews.body,
+            createdAt: reviews.submittedAt,
+          })
+          .from(reviews)
+          .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+          .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+          .where(
+            and(
+              eq(pullRequests.accountId, accountId),
+              inArray(pullRequests.repoId, scope.repoIds),
+              inArray(reviews.id, rvIds),
+              // ⚠ NO TEXT PREDICATE HERE, and that is load-bearing rather than an omission.
+              // It is tempting to mirror the candidate query's `isNotNull(body) + hasText(body)`
+              // "so the two corpora are provably identical" — but they are NOT identical, because
+              // the two halves move independently: comment/review bodies are RE-UPSERTED on every
+              // sync walk, while a label is written once and never re-scored. A review whose body
+              // GitHub later returns empty therefore keeps a label that was computed from real
+              // text (its `body_hash` is not the hash of '').
+              //
+              // `total` comes from the label scan, which never joins a parent. So a text predicate
+              // here silently subtracts rows the tile counted — measured on this repo's own dev DB:
+              // workspace 8 / rolling_30 reported total 792 but could only ever hydrate 782, and
+              // the FIRST page rendered 19 cards under a caption reading 20. That is exactly the
+              // tile↔list drift `foldMlLabelRow` and the byte-identical scan exist to prevent,
+              // arriving through hydration instead of through the count.
+              //
+              // The row is kept and rendered with a null body (the card says the text is gone),
+              // which is honest and keeps the list able to reach its tile.
+            ),
+          )
+          .execute()
+      : [],
+    authorIds.length > 0
+      ? db
+          .select({ id: users.id, login: users.githubLogin, name: users.displayName })
+          .from(users)
+          .where(inArray(users.id, authorIds))
+          .execute()
+      : [],
+    classificationKindForUser(accountId, scope.workspaceId),
+    classificationLabelMap(accountId, scope.workspaceId),
+  ]);
+
+  const parents = new Map<string, FlaggingParentRow>();
+  for (const r of rcRows) {
+    parents.set(`review_comment:${r.targetId}`, {
+      prId: r.prId,
+      prNumber: r.prNumber,
+      prTitle: r.prTitle,
+      prAuthorId: r.prAuthorId ?? null,
+      repoId: r.repoId,
+      repoFullName: `${r.owner}/${r.name}`,
+      path: r.path ?? null,
+      line: r.line ?? null,
+      threadId: r.threadId ?? null,
+      derivedState: r.derivedState ?? null,
+      body: r.body,
+      createdAt: r.createdAt,
+    });
+  }
+  // PR comments and review bodies share one parent shape, so one loop serves both.
+  interface FlatParentRow {
+    targetId: number;
+    prId: number;
+    prNumber: number;
+    prTitle: string;
+    prAuthorId: number | null;
+    repoId: number;
+    owner: string;
+    name: string;
+    body: string | null;
+    createdAt: Date;
+  }
+  const pushFlat = (kind: MlLabelTargetKind, rows: FlatParentRow[]) => {
+    for (const r of rows) {
+      parents.set(`${kind}:${r.targetId}`, {
+        prId: r.prId,
+        prNumber: r.prNumber,
+        prTitle: r.prTitle,
+        prAuthorId: r.prAuthorId ?? null,
+        repoId: r.repoId,
+        repoFullName: `${r.owner}/${r.name}`,
+        path: null,
+        line: null,
+        threadId: null,
+        derivedState: null,
+        body: r.body,
+        createdAt: r.createdAt,
+      });
+    }
+  };
+  pushFlat('pr_comment', pcRows);
+  pushFlat('review', rvRows);
+
+  // Identity: the workspace's custom label → the vendor's pretty name → display name/login —
+  // getBotAnalytics' `reviewerLabel` precedence verbatim, so one bot reads with one name across
+  // the whole Bots interface.
+  const displayById = new Map<number, string>();
+  const loginById = new Map<number, string | null>();
+  for (const u of userRows) {
+    displayById.set(u.id, u.name?.trim() || u.login || `#${u.id}`);
+    loginById.set(u.id, u.login || null);
+  }
+  const reviewerLabel = (userId: number, kind: AutomatedReviewerKind): string => {
+    const custom = classLabel.get(userId);
+    if (custom) return custom;
+    if (kind !== 'in_house' && kind !== 'pierre' && kind !== 'vendor') return labelForKind(kind);
+    return displayById.get(userId) ?? labelForKind(kind);
+  };
+
+  const items: BotFlaggingComment[] = [];
+  for (const { row, fold } of pageRows) {
+    const parent = parents.get(`${row.targetKind}:${row.targetId}`);
+    // A label whose parent row is gone is DROPPED from the page but stays counted in
+    // `total`/`filteredTotal` — the same tolerance getBotVendorComments has, and the honest one:
+    // re-deriving the count from what hydrated would put the list back out of step with the tile
+    // it was opened from, which is the whole thing this getter exists to prevent.
+    if (!parent) continue;
+    const kind: AutomatedReviewerKind = kindMap.get(row.authorUserId) ?? 'in_house';
+    items.push({
+      targetKind: row.targetKind,
+      targetId: row.targetId,
+      prId: parent.prId,
+      prNumber: parent.prNumber,
+      prTitle: parent.prTitle,
+      prAuthorId: parent.prAuthorId,
+      repoId: parent.repoId,
+      repoFullName: parent.repoFullName,
+      path: parent.path,
+      threadId: parent.threadId,
+      derivedState: parent.derivedState,
+      // Whitespace-only collapses to null so the card can tell "GitHub no longer returns this
+      // text" apart from a body it simply hasn't been handed. Reachable because bodies are
+      // re-upserted every walk while labels are never re-scored — see the hydration note above.
+      body: parent.body && parent.body.trim() !== '' ? parent.body : null,
+      createdAt: parent.createdAt.toISOString(),
+      // Inline, never a per-card fetch: this list spans many PRs, so the per-PR
+      // ['ml-labels', prId] index could not serve it (the ThreadAssessment
+      // 60-requests-for-60-empty-boxes rule). Severity and categories come from the FOLD, so the
+      // badge and the bucket that admitted the row can never disagree.
+      mlLabel: {
+        targetKind: row.targetKind,
+        targetId: row.targetId,
+        severity: fold.severity,
+        severityOrd: row.severityOrd,
+        severityProb: row.severityProb,
+        vendorSeverity: coerceSeverity(row.vendorSeverity),
+        vendorSeverityConfidence: coerceVendorConfidence(row.vendorSeverityConfidence),
+        categories: fold.categories,
+        isSummary: row.isSummary,
+        backend: row.backend,
+        modelVersion: row.modelVersion,
+        createdAt: row.createdAt.toISOString(),
+      },
+      authorUserId: row.authorUserId,
+      authorLogin: loginById.get(row.authorUserId) ?? null,
+      authorLabel: reviewerLabel(row.authorUserId, kind),
+      authorKind: kind,
+      line: parent.line,
+      // The PR, deliberately not a per-comment permalink: `review_threads` has no `url` column
+      // and the numeric REST comment id is not stored, so a fabricated anchor would 404.
+      prUrl: `https://github.com/${parent.repoFullName}/pull/${parent.prNumber}`,
+    });
+  }
+  return items;
+}
+
+export async function getBotFlaggingComments(
+  accountId: number,
+  selector: Exclude<BotFlaggingSelector, { kind: 'overlap' }>,
+  refine: BotFlaggingRefine,
+  window: BotWindowKind,
+  // ⚠ The SAME BotScope the strip was computed at — this list reproduces one of that strip's
+  // tiles, so it takes the identical workspace + repo narrowing. `repoIds: []` is a real empty
+  // workspace, never "widen to the account".
+  scope: BotScope,
+  page: { offset: number; limit: number },
+): Promise<BotFlaggingCommentsResponse> {
+  const nowMs = Date.now();
+  const to = new Date(nowMs);
+  // The one shared window→duration mapping (db/bot-window.ts) — the same `from` getBotAnalytics
+  // hands getMlWindowAggregates, which is what makes the two scans the same scan.
+  const from = new Date(nowMs - botWindowMs(window));
+  const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
+  const generatedAt = to.toISOString();
+  const offset = Math.max(0, Math.trunc(page.offset));
+  const limit = Math.max(1, Math.min(Math.trunc(page.limit), FLAGGING_PAGE_MAX));
+
+  const empty: BotFlaggingCommentsResponse = {
+    kind: 'comments',
+    workspaceId: scope.workspaceId,
+    window: win,
+    selector,
+    refine,
+    total: 0,
+    filteredTotal: 0,
+    matrix: emptyAgreementMatrix(),
+    items: [],
+    nextCursor: null,
+    truncated: false,
+    generatedAt,
+  };
+  if (scope.repoIds.length === 0) return empty;
+  // `'all'`, not `'review'` — the strip counts quality checks too, and a drill-down that narrowed
+  // the bot set would list fewer rows than the tile it opened from.
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
+  if (automatedIds.length === 0) return empty;
+
+  // ── Phase 1: the population scan ─────────────────────────────────────────────────────────
+  // ⚠ WHERE / ORDER BY / LIMIT are byte-identical to getMlWindowAggregates' scan; ONLY the select
+  // list widens. That identity — same rows, same order, same cap — plus the shared fold below is
+  // the entire reason `total` equals the tile rather than approximating it.
+  const labelRows = await db
+    .select({
+      // What the fold consumes …
+      authorUserId: mlCommentLabels.authorUserId,
+      severity: mlCommentLabels.severity,
+      isSummary: mlCommentLabels.isSummary,
+      categories: mlCommentLabels.categories,
+      backend: mlCommentLabels.backend,
+      // … and what a CARD needs on top of it.
+      id: mlCommentLabels.id,
+      targetKind: mlCommentLabels.targetKind,
+      targetId: mlCommentLabels.targetId,
+      severityOrd: mlCommentLabels.severityOrd,
+      severityProb: mlCommentLabels.severityProb,
+      vendorSeverity: mlCommentLabels.vendorSeverity,
+      vendorSeverityConfidence: mlCommentLabels.vendorSeverityConfidence,
+      modelVersion: mlCommentLabels.modelVersion,
+      createdAt: mlCommentLabels.createdAt,
+    })
+    .from(mlCommentLabels)
+    .where(
+      and(
+        eq(mlCommentLabels.accountId, accountId),
+        inArray(mlCommentLabels.repoId, scope.repoIds),
+        inArray(mlCommentLabels.authorUserId, automatedIds),
+        gte(mlCommentLabels.targetCreatedAt, from),
+      ),
+    )
+    .orderBy(desc(mlCommentLabels.targetCreatedAt), desc(mlCommentLabels.id))
+    .limit(ROLLUP_SCAN_CAP)
+    .execute();
+
+  // ── Phase 2: the shared fold, then the selector predicate ────────────────────────────────
+  const selected: FlaggingPageRow[] = [];
+  for (const row of labelRows) {
+    const fold = foldMlLabelRow(row);
+    if (!fold) continue;
+    if (!matchesFlaggingSelector(selector, fold)) continue;
+    selected.push({ row, fold });
+  }
+
+  // ── Phase 3: the matrix, over the SELECTOR population and PRE-refine ─────────────────────
+  // Computed before the refinement so clicking a cell cannot zero out the cell that was clicked
+  // — the commentFacetCounts / ConsolidatedFeedResponse.counts rule.
+  const matrix = buildAgreementMatrix(
+    selected.map(({ row, fold }) => ({
+      vendor: coerceSeverity(row.vendorSeverity),
+      ours: fold.severity,
+    })),
+  );
+
+  // ── Phase 4: refine, then slice ──────────────────────────────────────────────────────────
+  const narrowed = selected.filter(({ row, fold }) =>
+    matchesFlaggingRefine(refine, coerceSeverity(row.vendorSeverity), fold.severity),
+  );
+  const pageRows = narrowed.slice(offset, offset + limit);
+  const consumed = offset + pageRows.length;
+
+  // ── Phase 5: hydrate the page only ───────────────────────────────────────────────────────
+  const items = await hydrateFlaggingPage(accountId, scope, pageRows);
+
+  return {
+    kind: 'comments',
+    workspaceId: scope.workspaceId,
+    window: win,
+    selector,
+    refine,
+    total: selected.length,
+    filteredTotal: narrowed.length,
+    matrix,
+    items,
+    // Opaque on the wire; `o:<n>` is today's encoding of "offset into the folded population".
+    nextCursor: consumed < narrowed.length ? `o:${consumed}` : null,
+    // The same honesty rule as ROLLUP_SCAN_CAP everywhere else: a capped scan says so rather than
+    // presenting a most-recent sample as a total.
+    truncated: labelRows.length >= ROLLUP_SCAN_CAP,
+    generatedAt,
+  };
 }

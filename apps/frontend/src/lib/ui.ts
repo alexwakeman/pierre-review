@@ -235,6 +235,11 @@ export const BOT_VENDOR_META: Record<
   deepsource: { label: 'DeepSource', color: '#0ea5e9' },
   github_code_quality: { label: 'GitHub Code Quality', color: '#4338ca' },
   github_advanced_security: { label: 'GitHub Advanced Security', color: '#b91c1c' },
+  // OpenAI Codex. The brand mark is essentially black, which is unusable here (it vanishes on
+  // the dark theme and collides with the three slate vendors above), so we take OpenAI's product
+  // green instead — close to Sourcery's teal, but the map already tolerates that (Copilot and
+  // Qodo are both purple) and a legible near-brand hue beats an illegible exact one.
+  codex: { label: 'Codex', color: '#10a37f' },
   in_house: { label: 'In-house AI', color: '#6b7280' },
   // Generic proprietary vendor (user-classified, brand unknown) — neutral tint; like
   // in_house it is NOT branded, so buildBotColorMap gives each one a distinct palette hue.

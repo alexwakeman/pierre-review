@@ -253,7 +253,16 @@ function PrSummary({ body }: { body: string }): JSX.Element {
           if (!img.complete) settled = false; // still loading — keep polling
           continue; // not yet measurable, or broken (complete with no dimensions)
         }
-        const renderW = width ? Math.min(img.naturalWidth, width) : img.naturalWidth;
+        // The DECLARED width caps the render too (`.md-body img` turns a tag's width/height
+        // into max-* bounds), so an image that declares one is drawn smaller than its asset.
+        // Measuring natural-only would over-estimate its height and could hide a badge as if
+        // it were a screenshot — this stays a natural-DIMENSION measurement, it just applies
+        // the same cap the CSS does. `img.width` is 0 before layout, so read the attribute.
+        const declaredW = Number(img.getAttribute('width'));
+        const capW = Number.isFinite(declaredW) && declaredW > 0
+          ? Math.min(img.naturalWidth, declaredW)
+          : img.naturalWidth;
+        const renderW = width ? Math.min(capW, width) : capW;
         const renderH = Math.min((img.naturalHeight * renderW) / img.naturalWidth, MAX_PX);
         const tall = width > 0 && renderH > TALL_PX;
         img.classList.toggle('pr-summary-tall-img', tall);

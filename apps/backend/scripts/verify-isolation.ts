@@ -1314,6 +1314,183 @@ check(
   vcCross.comments.length === 0,
 );
 
+// ── "What the bots are flagging" (getBotFlaggingComments / getBotOverlapClusters) ───────────
+// The ML strip's drill-down. Two more readers OUTSIDE db/queries.ts — the second one in its own
+// file (db/bot-overlap.ts) — so, like findPostedReviewComment above, this script cannot see them
+// unless they are imported by name. They are the widest read surface on the Bots rail: one
+// request re-runs the strip's whole windowed population scan and then hydrates a page of comment
+// BODIES, PR titles and repo names, so a missing predicate hands over another tenant's review
+// content, not just a count.
+//
+// ⚠ THE SCOPE OBJECTS BELOW ARE HAND-BUILT ON PURPOSE. `resolveWorkspaceScope` intersects the
+// requested narrowing with the caller's own membership, so the "B asks for A's repo" spelling it
+// produces comes back with `repoIds: []` and BOTH getters short-circuit before querying anything
+// — green whether or not the accountId predicate exists (the same vacuity trap spelled out for
+// getBotSeverityRollup above). Pairing B's own workspace id with A's repo id skips that
+// intersection, which is the only shape in which the getters' OWN predicates are load-bearing.
+// Both spellings are checked; only the second one is evidence.
+const { getBotFlaggingComments } = await import('../src/db/ml-labels.js');
+const { getBotOverlapClusters } = await import('../src/db/bot-overlap.js');
+// No refinement: the whole selector population, which is the widest thing either getter returns.
+const noRefine = { cell: null, disagree: null };
+const flagPage = { offset: 0, limit: 20 };
+
+// The binding fixture is the one the rollup and the vendor-comments drill-down already use: the
+// SAME global author labelled in BOTH tenants — `isoRc[0]` under A (severity `major`, the vendor
+// declaring `critical`) and `isoRcB[0]` under B (severity `nit`, the vendor declaring NOTHING).
+// Both fold to the `finding` bucket, so `{kind:'findings'}` is each side's whole population.
+const flagA = await getBotFlaggingComments(
+  1,
+  { kind: 'findings' },
+  noRefine,
+  'rolling_30',
+  mlScopeA,
+  flagPage,
+);
+check(
+  "getBotFlaggingComments(A) lists A's labelled comment and never B's",
+  flagA.total === 1 &&
+    flagA.items.length === 1 &&
+    flagA.items[0]!.targetId === isoRc[0]!.id &&
+    flagA.items[0]!.repoId === A.repoId &&
+    !flagA.items.some((c) => c.targetId === isoRcB[0]!.id || c.repoId === B.repoId),
+);
+const flagB = await getBotFlaggingComments(
+  2,
+  { kind: 'findings' },
+  noRefine,
+  'rolling_30',
+  mlScopeB,
+  flagPage,
+);
+check(
+  "getBotFlaggingComments(B) lists ONLY B's row, and its MATRIX describes only B's row",
+  flagB.total === 1 &&
+    flagB.items.length === 1 &&
+    flagB.items[0]!.targetId === isoRcB[0]!.id &&
+    flagB.items[0]!.mlLabel?.severity === 'nit' &&
+    // The matrix is folded from the same population, so it is a second, independent readout of
+    // the same leak: A's row is vendor-declared `critical` against our `major`, B's declares
+    // nothing at all. One leaked row shows up here as declared/overCall 1 even if the list were
+    // somehow filtered afterwards.
+    flagB.matrix.total === 1 &&
+    flagB.matrix.declared === 0 &&
+    flagB.matrix.undeclared === 1 &&
+    flagB.matrix.overCall === 0,
+);
+const flagCrossResolved = await getBotFlaggingComments(
+  2,
+  { kind: 'findings' },
+  noRefine,
+  'rolling_30',
+  await q.resolveWorkspaceScope(2, undefined, [A.repoId]),
+  flagPage,
+);
+check(
+  'getBotFlaggingComments(B, resolveWorkspaceScope(narrow=[A.repo])) bounds the scope to nothing',
+  flagCrossResolved.total === 0 && flagCrossResolved.items.length === 0,
+);
+// THE BINDING ONE. MEASURED: deleting `eq(mlCommentLabels.accountId, accountId)` from the
+// population scan makes this report `total: 1` (A's `major` row) and fail.
+const flagCross = await getBotFlaggingComments(
+  2,
+  { kind: 'findings' },
+  noRefine,
+  'rolling_30',
+  { workspaceId: mlScopeB.workspaceId, repoIds: [A.repoId] },
+  flagPage,
+);
+check(
+  'getBotFlaggingComments(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)',
+  flagCross.total === 0 && flagCross.items.length === 0 && flagCross.matrix.total === 0,
+);
+
+// ── Same-line overlap clusters ──────────────────────────────────────────────────────────────
+// A cluster is ≥2 DISTINCT bots on one file within ±3 lines, so each tenant needs a real SECOND
+// thread before there is anything to leak.
+//
+// ⚠ THE ACTORS ARE CHOSEN SO THE CROSS-TENANT PROBE IS FALSIFIABLE. A leaked thread set is
+// filtered through the CALLER's `kindMap`/`roleMap` before it can form a cluster, so if A's
+// cluster were built from an actor B's workspace does not call a bot (`greptileai` — not a vendor
+// login, automated only via its stored row under account 1) the transposed check would pass with
+// the accountId predicate deleted, for the wrong reason. `coderabbitai` is a vendor login
+// (automated in EVERY workspace) and `contributor` carries a stored automated row in both
+// tenants, so A's cluster survives B's classification and only `accountId` can exclude it.
+await db
+  .insert(schema.reviewThreads)
+  .values([
+    // A: joins RT_iso_A ('x.ts' line 1, coderabbitai) → one cluster, two distinct bots.
+    {
+      githubNodeId: 'RT_iso_ovl_A',
+      prId: A.prId,
+      path: 'x.ts',
+      line: 2,
+      isResolved: false,
+      isOutdated: false,
+      derivedState: 'untouched',
+      originalCommenterId: contributor!.id,
+      createdAt: now,
+    },
+    // B: joins RT_iso_B ('src/b.ts' line 1, contributor) → B's own single cluster.
+    {
+      githubNodeId: 'RT_iso_ovl_B',
+      prId: B.prId,
+      path: 'src/b.ts',
+      line: 2,
+      isResolved: false,
+      isOutdated: false,
+      derivedState: 'untouched',
+      originalCommenterId: botUser!.id,
+      createdAt: now,
+    },
+  ])
+  .execute();
+const ovlPage = { offset: 0, limit: 10 };
+const ovlA = await getBotOverlapClusters(1, noRefine, 'rolling_30', mlScopeA, ovlPage);
+check(
+  "getBotOverlapClusters(A) returns A's own cluster and references none of B's PRs",
+  ovlA.total === 1 &&
+    ovlA.items.length === 1 &&
+    ovlA.items[0]!.prId === A.prId &&
+    ovlA.items[0]!.repoId === A.repoId &&
+    ovlA.items[0]!.members.length === 2 &&
+    !ovlA.items.some((c) => c.prId === B.prId || c.repoId === B.repoId),
+);
+const ovlB = await getBotOverlapClusters(2, noRefine, 'rolling_30', mlScopeB, ovlPage);
+check(
+  "getBotOverlapClusters(B) returns ONLY B's cluster, never A's (IDOR blocked)",
+  ovlB.total === 1 &&
+    ovlB.items.length === 1 &&
+    ovlB.items[0]!.prId === B.prId &&
+    ovlB.items[0]!.repoId === B.repoId &&
+    !ovlB.items.some((c) => c.prId === A.prId || c.repoId === A.repoId),
+);
+const ovlCrossResolved = await getBotOverlapClusters(
+  2,
+  noRefine,
+  'rolling_30',
+  await q.resolveWorkspaceScope(2, undefined, [A.repoId]),
+  ovlPage,
+);
+check(
+  'getBotOverlapClusters(B, resolveWorkspaceScope(narrow=[A.repo])) bounds the scope to nothing',
+  ovlCrossResolved.total === 0 && ovlCrossResolved.items.length === 0,
+);
+// THE BINDING ONE. MEASURED: deleting `eq(pullRequests.accountId, accountId)` from the thread
+// scan makes this report `total: 1` — A's cluster, with A's repo full name and PR title — and
+// fail.
+const ovlCross = await getBotOverlapClusters(
+  2,
+  noRefine,
+  'rolling_30',
+  { workspaceId: mlScopeB.workspaceId, repoIds: [A.repoId] },
+  ovlPage,
+);
+check(
+  'getBotOverlapClusters(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)',
+  ovlCross.total === 0 && ovlCross.items.length === 0,
+);
+
 // getMlBacklogForAccount — the account-wide enrichment backlog behind GET /api/ml-status. It
 // takes NO scope argument (the worker walks every workspace, so a workspace-scoped count would
 // under-report the work actually running), which makes its ONE accountId predicate carry the

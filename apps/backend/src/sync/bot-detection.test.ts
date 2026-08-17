@@ -117,6 +117,16 @@ describe('bot-detection', () => {
       expect(reviewBotKind('copilot-pull-request-reviewer')).toBe('copilot');
       expect(reviewBotKind('copilot-swe-agent')).toBeNull();
     });
+
+    it('matches OpenAI Codex on its App slug ONLY, never on the brand word', () => {
+      expect(reviewBotKind('chatgpt-codex-connector')).toBe('codex');
+      expect(reviewBotKind('chatgpt-codex-connector[bot]')).toBe('codex');
+      // `codex` and `openai` are ordinary GitHub user accounts owned by other people — one of
+      // them is a HUMAN in this project's own dev database. Matching the brand word would badge
+      // a person as a vendor, which no manual override can undo before the damage is on screen.
+      expect(reviewBotKind('codex')).toBeNull();
+      expect(reviewBotKind('openai')).toBeNull();
+    });
   });
 
   describe('isReviewBot', () => {

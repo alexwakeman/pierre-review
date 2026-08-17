@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { User } from '@pierre-review/shared';
+import type { MentionCandidate } from '@pierre-review/shared';
 import { getScopeMentionCandidates, resolveWorkspaceScope } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
@@ -11,10 +11,11 @@ import { accountIdOf } from '../plugins/auth.js';
 // the account's DEFAULT workspace (never a 404 — every id yields the same response shape, so it is
 // not an existence oracle). `resolveWorkspaceScope` turns it into the workspace's repo ids
 // server-side, so a caller cannot widen it, and an empty workspace yields `[]` → no candidates,
-// rather than the account's whole roster. Self + bots excluded. Returns a bare User[] exactly like
-// the PR route so MentionTextarea can consume it directly.
+// rather than the account's whole roster. Self + bots excluded. Returns a bare MentionCandidate[]
+// exactly like the PR route so MentionTextarea can consume it directly — each row carrying
+// `isMaintainer` (has merged a PR in the SCOPE's repos), which the picker sorts and shields on.
 export async function mentionsRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/mention-candidates', async (req): Promise<User[]> => {
+  app.get('/api/mention-candidates', async (req): Promise<MentionCandidate[]> => {
     const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);

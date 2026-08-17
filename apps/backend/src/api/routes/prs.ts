@@ -408,8 +408,9 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Candidates for an @mention autocomplete, ranked by proximity to this PR
-  // (participants first, then repo people), self + bots excluded. Account-scoped:
-  // 404 when the PR isn't the caller's.
+  // (participants first, then repo people), self + bots excluded, each carrying
+  // `isMaintainer` (has merged a PR in THIS repo) for the picker's shield + sort.
+  // Account-scoped: 404 when the PR isn't the caller's.
   app.get('/api/prs/:id/mention-candidates', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
     const candidates = await getMentionCandidates(id, accountIdOf(req));

@@ -44,6 +44,9 @@ const REVIEW_BOTS: Record<string, ReviewBotKind> = {
   deepsourcebot: 'deepsource',
   'github-code-quality': 'github_code_quality',
   'github-advanced-security': 'github_advanced_security',
+  // OpenAI Codex — App slug `chatgpt-codex-connector` (verified 2026-08), NOT `codex`/`openai`,
+  // which are ordinary user accounts. See the shared map for the full note.
+  'chatgpt-codex-connector': 'codex',
 };
 
 // Known QUALITY-CHECK automations (static analysis / coverage / lint). The backend's LOCAL copy

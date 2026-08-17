@@ -2,19 +2,28 @@ import type { FastifyInstance } from 'fastify';
 import type {
   BotAnalyticsResponse,
   BotBehaviourResponse,
+  BotFlaggingRefine,
+  BotFlaggingResponse,
+  BotFlaggingSelector,
   BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
   BotVendorCommentsResponse,
   BotVendorPrsResponse,
   BotWindowKind,
   DetectedReviewersResponse,
+  MlCategory,
+  MlSeverity,
   ResolveBotThreadsResult,
   ReviewerCostBody,
   ScopeResolveBotThreadsBody,
+  SeverityAgreementCellRef,
+  VendorDisagreeDirection,
+  VendorSeverityAxis,
   WorkspaceReviewer,
   WorkspaceReviewerPatchBody,
 } from '@pierre-review/shared';
-import { getBotVendorComments } from '../../db/ml-labels.js';
+import { getBotFlaggingComments, getBotVendorComments } from '../../db/ml-labels.js';
+import { getBotOverlapClusters } from '../../db/bot-overlap.js';
 import {
   getBotAnalytics,
   getBotBehaviourAnalytics,
@@ -308,6 +317,77 @@ const vendorCommentsSchema = {
       },
       workspace: { type: 'string' },
       repoIds: { type: 'string' },
+    },
+  },
+};
+
+// The two ML enums, spelled out LOCALLY rather than imported from the shared package.
+//
+// ⚠ `@pierre-review/shared` is TYPES-ONLY and is not a published runtime dependency — the
+// release build greps `release/dist` and FAILS on a surviving value import — so this file cannot
+// write `enum: [...ML_CATEGORIES]`. `db/ml-labels.ts` carries exactly the same accommodation (its
+// own private `ML_CATEGORY_VALUES` / `SEVERITY_KEYS`). These lists must stay in step with the
+// `MlCategory` / `MlSeverity` unions; drift shows up as a 400 on a class the model really emits,
+// which is why the `MlCategory[]` / `MlSeverity[]` annotations are load-bearing — a value the
+// union dropped stops compiling here.
+const FLAGGING_CATEGORY_VALUES: MlCategory[] = [
+  'correctness_bug',
+  'security',
+  'performance',
+  'style_readability',
+  'maintainability_refactor',
+  'testing',
+  'documentation',
+  'nitpick',
+  'praise',
+];
+
+const FLAGGING_SEVERITY_VALUES: MlSeverity[] = ['nit', 'minor', 'major', 'critical'];
+
+// GET /api/bot-analytics/flagging?select=&…&window=&workspace=&repoIds=&limit=&cursor= — the
+// drill-down behind EVERY tile and chip on the Bots rail's ML strip. One route, one discriminated
+// `select`, because every arm names a population of the SAME windowed label scan the strip is
+// folded from; six routes could not have guaranteed that.
+//
+// ⚠ `workspace` and `repoIds` are STRING, never integer — the degrade-to-Default contract at the
+// top of this file: an ajv `integer` would 400 on a garbage `?workspace=`, and garbage must
+// render the Default workspace rather than error. `limit` IS an integer, and that asymmetry is
+// the point: a bad page size is a client bug, not a stale bookmark.
+//
+// ⚠ `additionalProperties:false` here STRIPS unknown keys rather than rejecting them (Fastify's
+// ajv runs `removeAdditional:true`), so it is tidiness, not a guarantee. What bounds this route is
+// that the handler builds its selector from the enumerated keys and hands the scope to exactly one
+// getter.
+const flaggingSchema = {
+  querystring: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['select'],
+    properties: {
+      select: {
+        type: 'string',
+        enum: ['findings', 'summaries', 'severity', 'category', 'overlap'],
+      },
+      // CSV for `select=severity` (the High-severity tile sends `major,critical`). ajv cannot
+      // validate a CSV against an enum, so the handler parses it and 400s on anything unknown.
+      severities: { type: 'string' },
+      category: { type: 'string', enum: [...FLAGGING_CATEGORY_VALUES] },
+      // The confusion-matrix cell filter — a PAIR. 'none' is the vendor axis for "the bot
+      // declared no severity at all", which is a real column, not a missing value.
+      cellVendor: { type: 'string', enum: ['nit', 'minor', 'major', 'critical', 'none'] },
+      cellOurs: { type: 'string', enum: ['nit', 'minor', 'major', 'critical'] },
+      disagree: { type: 'string', enum: ['any', 'over', 'under'] },
+      window: {
+        type: 'string',
+        enum: ['rolling_7', 'rolling_14', 'rolling_30', 'sprint'],
+        default: 'rolling_14',
+      },
+      workspace: { type: 'string' },
+      repoIds: { type: 'string' },
+      limit: { type: 'integer', default: 20, minimum: 1, maximum: 50 },
+      // OPAQUE server-minted state. Bounded so a hostile client cannot make the handler parse an
+      // arbitrarily long string; a malformed one degrades to the first page rather than 400ing.
+      cursor: { type: 'string', minLength: 1, maxLength: 64 },
     },
   },
 };
@@ -652,6 +732,121 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
       return resp;
     },
   );
+
+  // ── "WHAT THE BOTS ARE FLAGGING" ──────────────────────────────────────────────────────────
+  // The drill-down behind every tile and chip on the Bots rail's ML strip. `select` picks the
+  // population; the response is discriminated on `kind` — 'comments' for the four label
+  // selectors, 'clusters' for same-line overlap (deterministic line clusters, not ML rows).
+  //
+  // ⚠ `total` IS THE TILE'S NUMBER, BY CONSTRUCTION — not an independently-derived count that
+  // happens to agree. The strip's buckets are a JS fold (`foldMlLabelRow`) over a JSON
+  // `categories` column that no portable SQL predicate can express, so a `COUNT(*) WHERE
+  // severity IN (…)` could never match it: it would count summaries and praise, could not
+  // express praise at all, and would ignore both `coerceSeverity` failures and the scan cap's
+  // newest-first truncation. The getters therefore re-run the strip's identical scan and
+  // identical fold and then slice. Nothing on either side of this route re-derives a count —
+  // note in particular that the client's `pillOf` tests praise BEFORE isSummary, the opposite
+  // of the backend, so a client-side recount would disagree with the tile it drilled into.
+  //
+  // ⚠ Rate tier `search`, pinned in rate-limit.test.ts, and that predicate is anchored on this
+  // EXACT path — spelling this route with a sub-path or a path parameter would silently drop it
+  // back onto the 600/min blanket bucket with no error anywhere. Per request it re-runs the
+  // strip's whole 50k-row label scan (the page offset is a JS slice over the fold) or the
+  // window's whole thread scan plus ±3-line clustering, then hydrates a page of comment BODIES —
+  // and an IntersectionObserver fires it again on every scroll.
+  app.get('/api/bot-analytics/flagging', { schema: flaggingSchema }, async (req, reply) => {
+    const q = req.query as {
+      select: 'findings' | 'summaries' | 'severity' | 'category' | 'overlap';
+      severities?: string;
+      category?: MlCategory;
+      cellVendor?: VendorSeverityAxis;
+      cellOurs?: MlSeverity;
+      disagree?: VendorDisagreeDirection;
+      window: BotWindowKind;
+      workspace?: string;
+      repoIds?: string;
+      limit: number;
+      cursor?: string;
+    };
+
+    // The selector and the refinement are assembled BEFORE any DB work: every failure below is a
+    // client bug, and there is nothing to resolve a scope for in a request that cannot name a
+    // population.
+    let selector: BotFlaggingSelector;
+    if (q.select === 'severity') {
+      // ⚠ AN UNKNOWN OR EMPTY SEVERITY LIST 400s, unlike `?workspace=`. The difference is who
+      // minted the value: a workspace id can be a stale bookmark and must degrade to something
+      // renderable, whereas this list is written by the tile that opened the tab. Silently
+      // dropping an unrecognised class would name a DIFFERENT population than the tile did and
+      // the list would quietly disagree with the number the user clicked.
+      const raw = (q.severities ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s !== '');
+      const severities = raw.filter((s): s is MlSeverity =>
+        (FLAGGING_SEVERITY_VALUES as string[]).includes(s),
+      );
+      if (severities.length === 0 || severities.length !== raw.length) {
+        reply.status(400);
+        return {
+          error: 'BadRequest',
+          message: `\`severities\` must be a comma-separated subset of ${FLAGGING_SEVERITY_VALUES.join(', ')}`,
+        };
+      }
+      selector = { kind: 'severity', severities };
+    } else if (q.select === 'category') {
+      // ajv has already rejected an unknown category VALUE, so only absence can reach here.
+      if (!q.category) {
+        reply.status(400);
+        return { error: 'BadRequest', message: '`select=category` requires `category`' };
+      }
+      selector = { kind: 'category', category: q.category };
+    } else if (q.select === 'summaries') {
+      selector = { kind: 'summaries' };
+    } else if (q.select === 'overlap') {
+      selector = { kind: 'overlap' };
+    } else {
+      selector = { kind: 'findings' };
+    }
+
+    // A confusion-matrix cell is a PAIR; half of one names no cell. Rejected rather than
+    // silently ignored, because a filter that appears to be applied and is not is the worse
+    // failure mode — the user reads an unfiltered list as the filtered one.
+    let cell: SeverityAgreementCellRef | null = null;
+    if (q.cellVendor && q.cellOurs) {
+      cell = { vendor: q.cellVendor, ours: q.cellOurs };
+    } else if (q.cellVendor || q.cellOurs) {
+      reply.status(400);
+      return {
+        error: 'BadRequest',
+        message: '`cellVendor` and `cellOurs` must be sent together or not at all',
+      };
+    }
+    const refine: BotFlaggingRefine = { cell, disagree: q.disagree ?? null };
+
+    // ⚠ THE CURSOR DEGRADES, IT NEVER 400s — the opposite rule to `severities` above, and for the
+    // opposite reason: it is server-minted state a client only ever echoes back, and it is OPAQUE
+    // on the wire precisely so its encoding can change (a later keyset switch) without breaking
+    // in-flight clients. Today it carries an offset into the folded population. Anything that is
+    // not exactly that — a stale shape, a value past the end, an unsafe integer — starts again at
+    // the first page, which is always a renderable answer.
+    const m = /^o:(\d+)$/.exec(q.cursor ?? '');
+    const parsedOffset = m ? Number(m[1]) : 0;
+    const offset = Number.isSafeInteger(parsedOffset) ? parsedOffset : 0;
+
+    const accountId = accountIdOf(req);
+    // The SAME scope the strip was measured at — this list reproduces one of that strip's tiles,
+    // so it must take the identical workspace (who counts as a bot) and repo narrowing (which
+    // data is measured), bounded by the workspace's membership inside the resolver. A `BotScope`
+    // is only ever built here; `parseIntList`'s result is the `narrow` argument, never a scope.
+    const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
+    const page = { offset, limit: q.limit };
+    const resp: BotFlaggingResponse =
+      selector.kind === 'overlap'
+        ? await getBotOverlapClusters(accountId, refine, q.window, scope, page)
+        : await getBotFlaggingComments(accountId, selector, refine, q.window, scope, page);
+    return resp;
+  });
 
   // Cross-bot dedup clusters for one PR (≥2 automated reviewers on the same path/line window).
   // Ownership-scoped → 404 for a PR this account doesn't own. No `?workspace=`: the getter derives

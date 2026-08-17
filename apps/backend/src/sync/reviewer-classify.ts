@@ -102,6 +102,7 @@ const VENDOR_LABELS: Record<ReviewBotKind, string> = {
   deepsource: 'DeepSource',
   github_code_quality: 'GitHub Code Quality',
   github_advanced_security: 'GitHub Advanced Security',
+  codex: 'Codex',
 };
 
 // Exported so the query layer (db/queries.ts) labels analytics/dedup groupings from the

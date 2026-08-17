@@ -38,6 +38,7 @@ import type {
   WorkspaceMetricsDetail,
   SprintComparisonMode,
   MetricPr,
+  MentionCandidate,
   FeedEvent,
   FeedResponse,
   Label,
@@ -6793,10 +6794,13 @@ export async function getPrDetail(
 // other repo PR author(6). Repo-people (5/6) are a bounded proxy for "active in this
 // repo" (authors + those who've merged here) — cheap and never cross-tenant because a
 // repo row belongs to exactly one account.
+//
+// `isMaintainer` is membership of the merger set, NOT rank 5: a maintainer who is also
+// the PR's author ranks 0, and the picker still owes them a shield.
 export async function getMentionCandidates(
   prId: number,
   accountId: number,
-): Promise<User[] | null> {
+): Promise<MentionCandidate[] | null> {
   const prRows = await db
     .select({ repoId: pullRequests.repoId, authorId: pullRequests.authorId })
     .from(pullRequests)
@@ -6870,7 +6874,11 @@ export async function getMentionCandidates(
       .where(eq(pullRequests.repoId, repoId))
       .execute(),
   ]);
-  for (const r of mergerRows) bump(r.userId, 5);
+  const maintainerIds = new Set<number>();
+  for (const r of mergerRows) {
+    bump(r.userId, 5);
+    if (r.userId != null) maintainerIds.add(r.userId);
+  }
   for (const r of repoAuthorRows) bump(r.authorId, 6);
 
   // The viewer can't @ themselves.
@@ -6882,7 +6890,10 @@ export async function getMentionCandidates(
   const rows = await db.select().from(users).where(inArray(users.id, ids)).execute();
   return rows
     .filter((u) => !u.isBot)
-    .map((u) => ({ user: mapUser(u), rank: rank.get(u.id) ?? 99 }))
+    .map((u) => ({
+      user: { ...mapUser(u), isMaintainer: maintainerIds.has(u.id) },
+      rank: rank.get(u.id) ?? 99,
+    }))
     .sort((a, b) => a.rank - b.rank || a.user.githubLogin.localeCompare(b.user.githubLogin))
     .map((x) => x.user);
 }
@@ -6896,7 +6907,7 @@ export async function getMentionCandidates(
 export async function getScopeMentionCandidates(
   accountId: number,
   repoIds: number[] | null,
-): Promise<User[]> {
+): Promise<MentionCandidate[]> {
   // Resolve the scope to a bounded set of THIS account's repo ids (never trust caller ids raw).
   const ownRepoRows = await db
     .select({ id: repos.id })
@@ -6927,7 +6938,11 @@ export async function getScopeMentionCandidates(
       .where(inArray(pullRequests.repoId, scopeIds))
       .execute(),
   ]);
-  for (const r of mergerRows) bump(r.userId, 0);
+  const maintainerIds = new Set<number>();
+  for (const r of mergerRows) {
+    bump(r.userId, 0);
+    if (r.userId != null) maintainerIds.add(r.userId);
+  }
   for (const r of authorRows) bump(r.authorId, 1);
 
   const viewerUserId = await getAccountUserId(accountId);
@@ -6938,7 +6953,10 @@ export async function getScopeMentionCandidates(
   const rows = await db.select().from(users).where(inArray(users.id, ids)).execute();
   return rows
     .filter((u) => !u.isBot)
-    .map((u) => ({ user: mapUser(u), rank: rank.get(u.id) ?? 99 }))
+    .map((u) => ({
+      user: { ...mapUser(u), isMaintainer: maintainerIds.has(u.id) },
+      rank: rank.get(u.id) ?? 99,
+    }))
     .sort((a, b) => a.rank - b.rank || a.user.githubLogin.localeCompare(b.user.githubLogin))
     .map((x) => x.user);
 }
@@ -10274,7 +10292,14 @@ export async function getBotReviewComments(
 
 export async function getBotAnalytics(
   accountId: number,
-  window: BotWindowKind,
+  // Either a KIND (resolved here against the one shared duration mapping) or a kind carried
+  // ALONGSIDE explicit bounds. The second form exists for one reason: `'sprint'` resolves to a
+  // trailing 14 days in core, because the account's cadence + start live in the plugin-owned
+  // `pro_settings` and core cannot read them. A caller that HAS those bounds (the Pro Insights
+  // chat, whose range chips include "Sprint to date") passes them, and the response's window then
+  // states the real sprint dates instead of a 14-day stand-in that nothing labelled as one.
+  // Bounds are trusted as given — they are server-derived, never client-supplied.
+  window: BotWindowKind | { kind: BotWindowKind; fromMs: number; toMs: number },
   // ONE object carrying both halves: `workspaceId` decides who counts as a bot, `repoIds` narrows
   // which data is measured. Its predecessor conflated them into a single `number[] | null` and
   // then needed a SECOND `teamKey` parameter for the judgement, which a caller could forget to
@@ -10283,12 +10308,19 @@ export async function getBotAnalytics(
   scope: BotScope,
 ): Promise<BotAnalyticsResponse> {
   const nowMs = Date.now();
-  const to = new Date(nowMs);
-  // The one shared window→duration mapping (db/bot-window.ts; sprint = 14d there).
-  const from = new Date(nowMs - botWindowMs(window));
-  const trendFrom = new Date(nowMs - 12 * 7 * 86_400_000); // 84 days ⊇ every window
-  const generatedAt = to.toISOString();
-  const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
+  const windowKind = typeof window === 'string' ? window : window.kind;
+  // The one shared window→duration mapping (db/bot-window.ts; sprint = 14d there) unless the
+  // caller supplied real bounds.
+  const to = new Date(typeof window === 'string' ? nowMs : window.toMs);
+  const from = new Date(
+    typeof window === 'string' ? nowMs - botWindowMs(window) : window.fromMs,
+  );
+  // The 12-week trend series must COVER the measured window, or a 90-day range would chart only
+  // its most recent 84 days while the totals beside it counted all 90. Anchored on `from`, not on
+  // now, so an explicit (possibly future-ending) sprint window is covered too.
+  const trendFrom = new Date(Math.min(from.getTime(), nowMs - 12 * 7 * 86_400_000));
+  const generatedAt = new Date(nowMs).toISOString();
+  const win = { kind: windowKind, from: from.toISOString(), to: to.toISOString() };
 
   const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0, botOnlyPrs: 0, overdueGraceMs: OVERDUE_GRACE_MS, overlapClusters: 0 };
   // An empty workspace → nothing to analyze.

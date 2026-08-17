@@ -126,6 +126,19 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/bot-analytics/vendor/u12/prs')).toEqual(['read']);
   });
 
+  // The flagging drill-down re-runs the strip's whole 50k-row label scan (or the whole windowed
+  // thread scan + clustering) on EVERY page, because the population is a JS fold over a JSON
+  // column and the offset is a slice over it — and an IntersectionObserver fires it repeatedly
+  // while the user scrolls. Nothing above it in `tierFor` matches an `/api/bot-analytics/*` path,
+  // so without an explicit predicate it would fall through to the 600/min blanket bucket: this
+  // file's documented failure mode, now three times over.
+  it('puts the flagging drill-down on the expensive bucket, not the blanket read one', () => {
+    expect(tiers('GET', '/api/bot-analytics/flagging')).toEqual(['search', 'read']);
+    // ...and it must not sweep in the always-loaded panel it drills into, nor its other sibling.
+    expect(tiers('GET', '/api/bot-analytics')).toEqual(['read']);
+    expect(tiers('GET', '/api/bot-analytics/bot-only-prs')).toEqual(['read']);
+  });
+
   it('throttles sync triggers and repo-add (each starts a backfill)', () => {
     expect(tiers('POST', '/api/repos/5/sync')).toEqual(['sync']);
     expect(tiers('POST', '/api/repos')).toEqual(['sync']);

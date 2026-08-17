@@ -25,10 +25,11 @@ export interface MlLog {
   warn: (msg: string) => void;
 }
 import { createHash } from 'node:crypto';
-import { gte } from 'drizzle-orm';
-import type { MlCategory, MlSeverity } from '@pierre-review/shared';
+import { gte, inArray } from 'drizzle-orm';
+import type { MlCategory, MlSeverity, ReviewBotKind } from '@pierre-review/shared';
 import { config } from '../config.js';
 import { db, schema } from '../db/client.js';
+import { reviewBotKind, reviewBotLogins } from './bot-detection.js';
 import {
   listMlCandidates,
   upsertMlLabels,
@@ -49,7 +50,7 @@ import {
   type SeverityResult,
 } from '../ml/severity-client.js';
 
-const { accounts } = schema;
+const { accounts, users } = schema;
 
 export const ML_ENRICHMENT_CRON_FALLBACK = '*/2 * * * *';
 
@@ -139,11 +140,73 @@ function publishProgress(stats: TickStats): void {
   runFailures = stats.failures;
 }
 
-/** Only the 16 real vendor names are a useful hint to the service's marker parser. */
-function vendorHint(kind: string | null | undefined): string | null {
-  if (!kind) return null;
-  if (kind === 'in_house' || kind === 'pierre' || kind === 'vendor') return null;
-  return kind;
+// Every REAL vendor kind, derived from the login map rather than typed out, so a vendor added to
+// REVIEW_BOTS is hinted from that moment and nothing else ever is. This used to be a BLACKLIST of
+// the three non-vendor kinds, which returns anything unrecognised verbatim — so any future
+// `AutomatedReviewerKind` addition would have leaked a meaningless string to the parser.
+const VENDOR_KINDS: ReadonlySet<string> = new Set<string>(
+  reviewBotLogins()
+    .map((login) => reviewBotKind(login))
+    .filter((kind): kind is ReviewBotKind => kind != null),
+);
+
+/**
+ * The vendor name handed to the severity-api, or null for "no useful hint".
+ *
+ * The service's marker parser DISPATCHES on this string: `coderabbit` means look for a
+ * `**Severity: Major**` line, `codex` a shields.io P-badge, `deepsource` a
+ * `severity_indicator_*.svg` URL. Send null and the comment goes down the generic path and can
+ * never carry the vendor's own badge — and the ONLY symptom is a vendor that is silently never
+ * badged, which is indistinguishable from a vendor that genuinely declares no severity.
+ *
+ * ⚠ WHY THE LOGIN AND NOT JUST THE STORED KIND. `workspace_reviewers.kind` is written once,
+ * lazily, the first time someone reads the Bots tab, and the classifier only writes a row that is
+ * MISSING — it never re-derives one that already exists. So an actor first seen BEFORE its login
+ * joined REVIEW_BOTS keeps the kind it was given that day FOREVER, and nothing in the app ever
+ * surfaces that the row is stale. This repo's own dev DB carries two: `deepsource-io` and
+ * `chatgpt-codex-connector` both sit at `kind='in_house'`, `source='github_type'`, with thousands
+ * of comments behind them. `classificationKindForUser` happens to repair both on read (it seeds
+ * itself from the vendor-login map and lets that win over the column), but that is one fold in
+ * one query helper — this worker is the layer that actually needs the answer, so it asks the
+ * login directly and is correct by construction rather than by inheritance.
+ *
+ * A HUMAN'S JUDGEMENT IS NOT AT RISK HERE, even though the worker never sees `identitySource`.
+ * An actor a human marked as a PERSON (`source='manual'` + `automated=false`) is subtracted by
+ * `automatedReviewerUserIds`, which is exactly the id set `listMlCandidates` selects on — such an
+ * actor produces no candidates in this workspace and cannot reach this function at all.
+ *
+ * EXPORTED as the single source of truth for "which vendor string does this actor's text get
+ * scored under". Anything that RE-parses stored text (a markers-only vendor-severity backfill)
+ * must dispatch on the same string the original scoring used, or it re-parses under a different
+ * parser than the row it is updating was written by.
+ */
+export function vendorHint(
+  kind: string | null | undefined,
+  login: string | null | undefined,
+): string | null {
+  if (kind != null && VENDOR_KINDS.has(kind)) return kind;
+  // `in_house` / `vendor` / `pierre` / a missing row all carry NO vendor identity, so falling
+  // back to the login overrides nothing — there is nothing there to override.
+  return reviewBotKind(login);
+}
+
+/**
+ * GitHub logins for the pool's authors, for the stale-kind repair above.
+ *
+ * `users` is one of the two GLOBAL tables (no `accountId` column) — the ids come from candidates
+ * already scoped to this account's repos, so reading it by id widens nothing, and only the login
+ * is selected: no profile fields leave this function.
+ */
+async function loginsForUsers(userIds: number[]): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  if (userIds.length === 0) return out;
+  const rows = await db
+    .select({ id: users.id, login: users.githubLogin })
+    .from(users)
+    .where(inArray(users.id, userIds))
+    .execute();
+  for (const r of rows) out.set(r.id, r.login);
+  return out;
 }
 
 function hashBody(text: string): string {
@@ -420,7 +483,12 @@ async function enrichWorkspace(
   const pool = await listMlCandidates(accountId, scope, poolSize);
   if (pool.length === 0) return true;
 
-  const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
+  // Independent reads: the workspace's verdicts, and the logins those verdicts are ABOUT (a
+  // workspace has a handful of bots, so this is a tiny by-id lookup, not a table scan).
+  const [kindMap, loginMap] = await Promise.all([
+    classificationKindForUser(accountId, scope.workspaceId),
+    loginsForUsers([...new Set(pool.map((c) => c.authorUserId))]),
+  ]);
 
   // Cap what we send: the model truncates at 512 tokens (~2.5k chars), so anything past the cap
   // is discarded server-side regardless. Trimming bounds the request payload without changing
@@ -451,7 +519,7 @@ async function enrichWorkspace(
 
       const items: SeverityRequestItem[] = batch.map((c) => ({
         body: c.body,
-        vendor: vendorHint(kindMap.get(c.authorUserId)),
+        vendor: vendorHint(kindMap.get(c.authorUserId), loginMap.get(c.authorUserId)),
         // The v2 model reads `path [SEP] body [SEP] diff`; both are optional and the
         // service degrades gracefully without them. Hunks are capped like bodies — same
         // surrogate-safe cut, since a diff carries emoji as readily as a comment does.

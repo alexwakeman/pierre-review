@@ -1,14 +1,22 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
-import type { User } from '@pierre-review/shared';
+import type { MentionCandidate } from '@pierre-review/shared';
 import { useMentionCandidates } from '../hooks/usePr.js';
 import { Avatar } from './CommentCard.js';
+import { MaintainerShield } from './MaintainerShield.js';
 
 // A drop-in replacement for a plain <textarea> that adds a GitHub-style "@mention"
 // autocomplete. Candidates are fetched per-PR (proximity-ranked, self + bots
 // excluded — see useMentionCandidates); the picker fires when the caret sits inside
 // an "@handle" token. Selecting a candidate inserts "@login " as plain text —
 // GitHub resolves the mention on post, so there's no Markdown-render change.
+//
+// MAINTAINERS FIRST: whoever holds merge rights in the context's repo(s)
+// (`isMaintainer`, computed server-side by both mention routes) is hoisted above the
+// rest and badged with the same shield the timeline / UserName / member picker use.
+// The hoist happens BEFORE the MAX_SUGGESTIONS slice on purpose — sorting the visible
+// eight would let a low-proximity maintainer fall off the list entirely, which is the
+// one person the box exists to reach.
 //
 // Everything else behaves like the textarea it replaces: value/onChange are
 // controlled, and the usual textarea props (rows/placeholder/className/…) pass
@@ -39,13 +47,33 @@ function activeMention(text: string, caret: number): { query: string; start: num
   return null;
 }
 
-function matchesQuery(user: User, query: string): boolean {
+function matchesQuery(user: MentionCandidate, query: string): boolean {
   if (query === '') return true;
   const q = query.toLowerCase();
   return (
     user.githubLogin.toLowerCase().includes(q) ||
     (user.displayName?.toLowerCase().includes(q) ?? false)
   );
+}
+
+/**
+ * The picker's visible list: candidates matching the typed query, MAINTAINERS FIRST,
+ * then capped. A stable partition rather than a comparator sort, so within each half
+ * the server's proximity ranking survives untouched.
+ *
+ * The cap is applied AFTER the hoist and that order is the whole point: sorting only
+ * the visible eight leaves a maintainer who ranks ninth by proximity absent from a
+ * list whose job is to reach exactly them.
+ */
+export function orderMentionSuggestions(
+  candidates: MentionCandidate[],
+  query: string,
+  limit = MAX_SUGGESTIONS,
+): MentionCandidate[] {
+  const matched = candidates.filter((u) => matchesQuery(u, query));
+  const maintainers = matched.filter((u) => u.isMaintainer);
+  const others = matched.filter((u) => !u.isMaintainer);
+  return [...maintainers, ...others].slice(0, limit);
 }
 
 // Keys the picker owns while it's open (so they don't newline / submit / blur).
@@ -70,7 +98,7 @@ export function MentionTextarea({
   // `candidates` wins when both are given. Both optional so a scope-less consumer just gets no
   // suggestions.
   prId?: number;
-  candidates?: User[];
+  candidates?: MentionCandidate[];
   value: string;
   onChange: (value: string) => void;
   rows?: number;
@@ -106,7 +134,7 @@ export function MentionTextarea({
   const mention = open ? activeMention(value, caret) : null;
   const suggestions = useMemo(() => {
     if (mention == null || !candidates) return [];
-    return candidates.filter((u) => matchesQuery(u, mention.query)).slice(0, MAX_SUGGESTIONS);
+    return orderMentionSuggestions(candidates, mention.query);
   }, [mention, candidates]);
 
   // Keep the highlighted index in range as the filtered list changes.
@@ -121,7 +149,7 @@ export function MentionTextarea({
     if (el) setCaret(el.selectionStart ?? 0);
   };
 
-  const accept = (user: User): void => {
+  const accept = (user: MentionCandidate): void => {
     const m = activeMention(value, caret);
     if (!m) return;
     // Replace the WHOLE token, not just the part before the caret: if the caret
@@ -215,6 +243,9 @@ export function MentionTextarea({
                 <span className="font-medium text-gray-800 dark:text-gray-100">
                   @{u.githubLogin}
                 </span>
+                {u.isMaintainer && (
+                  <MaintainerShield title="Maintainer — has merged a PR here" />
+                )}
                 {u.displayName && <span className="truncate text-gray-400">{u.displayName}</span>}
               </button>
             </li>

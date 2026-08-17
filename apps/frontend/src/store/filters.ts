@@ -4,11 +4,13 @@ import {
   EVENT_CATEGORY_BY_TYPE,
   PR_STATUSES,
   REVIEW_FILTER_STATES,
+  type BotFlaggingSelector,
   type BotTheme,
   type BotWindowKind,
   type DerivedState,
   type EventCategory,
   type EventType,
+  type InsightsRangeKey,
   type MlSeverity,
   type PrStatus,
   type ReviewBotKind,
@@ -413,6 +415,13 @@ export interface FilterState {
   // transient: the query string the cross-repo search-results tab renders. Read-not-consumed
   // (survives the tab's lifetime), like the drill-down seeds above. null = never opened.
   searchSeed: string | null;
+  // transient: which tile/chip of the Bots rail's ML totals strip the flagging drill-down renders,
+  // plus the repo it was opened FROM (null = the whole active workspace, i.e. the cross-repo Bots
+  // rail). Read-not-consumed for the tab's lifetime and overwritten by the next open — the
+  // themeThreadsSeed discipline, because the tab is a singleton RE-SEEDED IN PLACE.
+  // ⚠ NOT in FilterDefaults, NOT URL-serialized, NOT persisted: it carries a selector union, and a
+  // stale one restored from storage would render a tile the strip may no longer show.
+  botFlaggingSeed: { selector: BotFlaggingSelector; repoId: number | null } | null;
 
 
   // Activity tab (the master-detail triage console). Which detail is shown:
@@ -446,6 +455,19 @@ export interface FilterState {
   // The Insights console's last-active sub-tab. null = never set this session (InsightsView
   // falls back to its initialSubTab ?? 'overview'). Transient, URL-silent, like repoConsoleTabs.
   insightsSubTab: InsightsSubTab | null;
+  // How far back the Insights chat's next question reaches — the FilterBar Range chips while the
+  // Insights pane is open. **null = "no override", i.e. the account's configured window** (Settings
+  // → Sprint), and that is the whole reason it is transient rather than a persisted filter key: the
+  // default is a SERVER value the user can change in Settings, so a stored choice with a static
+  // default would quietly outrank it forever. `FilterDefaults` holds constants; this doesn't have
+  // one. Sent verbatim as `SprintChatBody.range`, so null simply omits the field and the server
+  // resolves the same window every other Insights surface uses.
+  //
+  // ⚠ NOT the Timeline's `preset`. They look identical and sit in the same FilterBar slot, but the
+  // boards answer different questions ('sprint' means nothing to a timeline zoom, 'Now' means
+  // nothing to a date range) and sharing one value would make each board silently reposition the
+  // other.
+  insightsRange: InsightsRangeKey | null;
 
   // file groups + diff hunks (PR detail thread view)
   expandedFileGroups: string[]; // paths explicitly toggled by the user
@@ -664,6 +686,19 @@ export interface FilterState {
   openBotThreadsDetail: (repoId: number | null) => void;
   openThemeThreadsDetail: (theme: BotTheme, source: 'bot' | 'human') => void;
   openSearchDetail: (query: string) => void;
+  // Open (or re-seed) the ML-strip drill-down tab on one tile/chip selector. `repoId` scopes it to
+  // the repo the strip was measured at (the per-repo Bots tab); null = the whole active workspace.
+  // BotFlaggingDetail reads (never consumes) the seed.
+  openBotFlaggingDetail: (selector: BotFlaggingSelector, repoId: number | null) => void;
+  // Re-point the ALREADY-OPEN flagging drill-down at a different population — the severity and
+  // topic dropdowns on the page itself. Replaces the seed's selector in place (the repo scope is
+  // preserved), opens no tab and touches no other filter state; a null seed is a no-op.
+  //
+  // ⚠ THIS LIVES IN THE STORE, not in BotFlaggingDetail's local state, because the pinned tab's
+  // CHIP LABEL is derived from this very selector (PinnedTabsBar → selectorLabel(seed.selector)).
+  // A local override would leave the chip advertising the tile the user has since navigated away
+  // from — the tab would read "Nits" while the page showed Security, which is worse than no label.
+  setBotFlaggingSelector: (selector: BotFlaggingSelector) => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
   // dedup-appends the added repo id to syncModalRepoIds so the modal can scope to
@@ -687,6 +722,10 @@ export interface FilterState {
   setRepoConsoleTab: (repoId: number, tab: RepoConsoleTab) => void;
   // Remember the Insights console's sub-tab (see insightsSubTab).
   setInsightsSubTab: (tab: InsightsSubTab) => void;
+  // Pick the Insights chat's range for the next question. `null` restores "use the account's
+  // configured window" — the chips express that as the settings-derived default being active, so
+  // re-clicking the highlighted chip is a no-op rather than a clear.
+  setInsightsRange: (range: InsightsRangeKey | null) => void;
   toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
   // Reset every user-set FILTER (repos, members, range, categories, PR statuses,
@@ -937,6 +976,7 @@ function freshDefaults(): FilterData {
     botThreadsFocusRepoId: null,
     themeThreadsSeed: null,
     searchSeed: null,
+    botFlaggingSeed: null,
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
     // with no thread-state filter.
@@ -944,6 +984,7 @@ function freshDefaults(): FilterData {
     activityThreadFilter: null,
     repoConsoleTabs: {},
     insightsSubTab: null,
+    insightsRange: null,
     expandedFileGroups: [],
     collapsedFileGroups: [],
     expandedDiffHunks: [],
@@ -1197,6 +1238,26 @@ export const useFilters = create<FilterState>((set, get) => ({
     set({ themeThreadsSeed: { theme, source } });
     usePinnedTabs.getState().openThemeThreadsTab({ fromActivity: true });
   },
+  // Open (or re-seed) the ML-strip drill-down on one tile/chip. `repoId` is the scope the strip
+  // was MEASURED at, carried through verbatim so the drill-down's total is the number the user
+  // just clicked rather than the same tile recomputed at a wider scope.
+  openBotFlaggingDetail: (selector, repoId) => {
+    set({ botFlaggingSeed: { selector, repoId } });
+    usePinnedTabs.getState().openBotFlaggingTab({ fromActivity: true });
+  },
+  // The on-page dropdowns' writer — navigation WITHIN the open tab, so no openBotFlaggingTab call
+  // (the tab is already showing; re-opening it would re-arm the Back-to-Activity affordance from a
+  // control that never left Activity).
+  setBotFlaggingSelector: (selector) => {
+    const seed = get().botFlaggingSeed;
+    // No seed = the drill-down was never opened, so there is nothing to re-point. Synthesising one
+    // here would create a tab-less seed with no repo scope, silently measured at a scope the
+    // reader never chose.
+    if (!seed) return;
+    // repoId rides through UNCHANGED: it is the scope the strip was MEASURED at, and these
+    // dropdowns change which population is shown, never where it was counted.
+    set({ botFlaggingSeed: { selector, repoId: seed.repoId } });
+  },
   // Open (or re-seed) the cross-team search-results tab for `query`. No forced fromActivity — the
   // search box is global (openable from any view), so openTab infers the Back-to-Activity arming
   // from whether Activity is showing; re-searching from inside the tab just updates the seed.
@@ -1247,6 +1308,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   setRepoConsoleTab: (repoId, tab) =>
     set((s) => ({ repoConsoleTabs: { ...s.repoConsoleTabs, [repoId]: tab } })),
   setInsightsSubTab: (tab) => set({ insightsSubTab: tab }),
+  setInsightsRange: (range) => set({ insightsRange: range }),
   toggleFileGroup: (path, defaultExpanded) =>
     set((s) => {
       // Track explicit user intent against the default so re-renders are stable.

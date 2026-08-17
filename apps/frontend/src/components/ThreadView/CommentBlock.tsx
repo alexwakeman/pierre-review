@@ -1,4 +1,5 @@
 import type { CommentDetail, MlLabel, User } from '@pierre-review/shared';
+import { CopyButton } from '../CopyButton.js';
 import { MlSeverityBadge } from '../MlSeverityBadge.js';
 import { ReactionBar } from '../ReactionBar.js';
 import { Avatar } from '../CommentCard.js';
@@ -53,6 +54,10 @@ export function CommentBlock({
         <span className="text-gray-400">{relativeTime(comment.createdAt)}</span>
         {isNew && <NewTag />}
         <MlSeverityBadge label={mlLabel} />
+        {/* Right-aligned so it lands in the same place on every comment regardless of how many
+            badges precede it — a control that moves per row is one the eye has to hunt for.
+            `ml-auto` rather than a spacer keeps the header's existing gap rhythm intact. */}
+        <CopyButton text={comment.body} className="ml-auto" />
       </div>
       {anchor && <div className="mt-1.5">{anchor}</div>}
       {/* NO annotation surface here any more. The AI "Simplified" rewrite used to sit above each

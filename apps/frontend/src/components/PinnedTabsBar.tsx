@@ -11,6 +11,7 @@ import {
 import { usePinnedTabs, type Tab } from '../store/pinnedTabs.js';
 import { useFilters } from '../store/filters.js';
 import { useRepos } from '../hooks/useTimeline.js';
+import { selectorLabel } from '../lib/severityAgreement.js';
 import { MagnifierIcon } from './Icons.js';
 
 const MetricsIcon = (
@@ -56,7 +57,7 @@ interface ChipDragHandlers {
 }
 
 // The shared shell every dynamic chip renders: wrapper (drag + context-menu surface),
-// the activating role="tab" button, and the ✕ close button. The nine tab kinds differ
+// the activating role="tab" button, and the ✕ close button. The ten tab kinds differ
 // only in width, body content, title and close aria-label.
 function ChipShell({
   tabKey,
@@ -149,6 +150,7 @@ function TabChip({
   const botThreadsRepoId = useFilters((s) => s.botThreadsFocusRepoId);
   const themeThreadsSeed = useFilters((s) => s.themeThreadsSeed);
   const searchSeed = useFilters((s) => s.searchSeed);
+  const botFlaggingSeed = useFilters((s) => s.botFlaggingSeed);
   const openPrsScope = useFilters((s) => s.openPrsScope);
   const { data: repos } = useRepos();
   const repoName = (id: number | null): string | null =>
@@ -289,6 +291,33 @@ function TabChip({
             🧵
           </span>
           <span className={chipLabelClass(active, 'sky')}>{themeTitle}</span>
+        </>
+      ),
+    };
+  } else if (tab.kind === 'bot-flagging') {
+    // The ML-strip drill-down — labelled with the tile/chip it was opened on (the transient seed).
+    // ⚠ This branch is not cosmetic: without it the tab falls through to the PR ladder below and
+    // renders as a two-line `#undefined` chip with no title and no author.
+    // `selectorLabel` returns the BARE tile name ("High severity"); the "Flagged ·" prefix is this
+    // strip's, so the same string can head the drill-down's own <h2> unprefixed.
+    const seedTitle = botFlaggingSeed ? selectorLabel(botFlaggingSeed.selector).title : null;
+    // The repo scope rides in the tooltip rather than the visible label: unlike the other
+    // repo-scoped chips ("Bot-only PRs"), the label already carries two segments, and a third
+    // would truncate away the one thing that distinguishes two flagging opens.
+    const scopeName = repoName(botFlaggingSeed?.repoId ?? null);
+    cfg = {
+      title: `What the bots are flagging${seedTitle ? ` — ${seedTitle}` : ''}${
+        scopeName ? ` · ${scopeName}` : ''
+      }`,
+      closeAria: 'Close bot-flagging tab',
+      body: (
+        <>
+          <span aria-hidden="true" className="shrink-0">
+            🔎
+          </span>
+          <span className={chipLabelClass(active, 'sky')}>
+            Flagged{seedTitle ? ` · ${seedTitle}` : ''}
+          </span>
         </>
       ),
     };

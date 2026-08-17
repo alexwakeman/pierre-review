@@ -26,7 +26,8 @@
     "db:studio": "pnpm --filter @pierre-review/backend db:studio",
     "sync:once": "pnpm --filter @pierre-review/backend sync:once",
     "ml:enrich": "pnpm --filter @pierre-review/backend ml:enrich",
-    "ml:backfill-bodies": "pnpm --filter @pierre-review/backend ml:backfill-bodies"
+    "ml:backfill-bodies": "pnpm --filter @pierre-review/backend ml:backfill-bodies",
+    "ml:reparse-badges": "pnpm --filter @pierre-review/backend ml:reparse-badges"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",

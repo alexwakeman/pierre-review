@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import type {
+  MentionCandidate,
   PrDetail,
   PrFilesResponse,
   SuggestedReviewersResponse,
   ThreadDetail,
-  User,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 
@@ -49,7 +49,7 @@ export function useThread(id: number | null) {
 // Powers the MentionTextarea autocomplete; cached ~5 min per PR since the roster
 // changes slowly relative to a composing session.
 export function useMentionCandidates(prId: number | null) {
-  return useQuery<User[]>({
+  return useQuery<MentionCandidate[]>({
     queryKey: ['mention-candidates', prId],
     queryFn: () => api.mentionCandidates(prId as number),
     enabled: prId != null,

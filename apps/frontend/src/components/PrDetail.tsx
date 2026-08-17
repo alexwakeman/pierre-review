@@ -27,6 +27,7 @@ import {
   safeExternalUrl,
 } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
+import { CopyButton } from './CopyButton.js';
 import { UserName } from './UserName.js';
 import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
 import {
@@ -500,6 +501,14 @@ function PrCommentsList({
                 label={mlIndex?.get(
                   mlLabelKey(isComment ? 'pr_comment' : 'review', it.id),
                 )}
+              />
+              {/* Right-aligned, matching CommentBlock's, so the control sits in one predictable
+                  place across both comment surfaces. A review body copies too — it is where a
+                  bot's summary verdict lands, and it is the single most-copied text here. */}
+              <CopyButton
+                text={it.body}
+                what={isComment ? 'comment' : 'review'}
+                className="ml-auto"
               />
             </div>
             <div className="mt-1 text-sm">

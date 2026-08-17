@@ -63,6 +63,9 @@ import type {
   ResolvableThreadPrsResponse,
   BotVendorCommentsResponse,
   BotVendorPrsResponse,
+  BotFlaggingSelector,
+  BotFlaggingRefine,
+  BotFlaggingResponse,
   BotDedupResponse,
   PrBotBehaviourResponse,
   DetectedReviewersResponse,
@@ -70,6 +73,7 @@ import type {
   WorkspaceReviewerPatchBody,
   ReviewerCostBody,
   MeResponse,
+  MentionCandidate,
   MergersResponse,
   MergePrBody,
   MergePrResult,
@@ -416,16 +420,17 @@ export const api = {
   suggestedReviewers: (id: number) =>
     get<SuggestedReviewersResponse>(`/api/prs/${id}/suggested-reviewers`),
   thread: (id: number) => get<ThreadDetail>(`/api/threads/${id}`),
-  // @mention candidates for a PR, pre-ranked by proximity (self + bots excluded).
+  // @mention candidates for a PR, pre-ranked by proximity (self + bots excluded), each
+  // flagged `isMaintainer` for this PR's repo.
   mentionCandidates: (prId: number) =>
-    get<User[]>(`/api/prs/${prId}/mention-candidates`),
+    get<MentionCandidate[]>(`/api/prs/${prId}/mention-candidates`),
   // @mention candidates for a whole WORKSPACE, for the ad-hoc Insights box — the scope-wide sibling
   // of `mentionCandidates` above, which is one PR's. (The name keeps the word "scope" for that
   // contrast alone; a workspace IS the scope, and there is no other kind left.) The id resolves to
   // the workspace's repos server-side, so a caller cannot widen it and an empty workspace yields no
   // candidates rather than the account's whole roster.
   scopeMentionCandidates: (workspaceId: number) =>
-    get<User[]>(withQuery('/api/mention-candidates', workspaceParam(workspaceId))),
+    get<MentionCandidate[]>(withQuery('/api/mention-candidates', workspaceParam(workspaceId))),
   prFiles: (id: number) => get<PrFilesResponse>(`/api/prs/${id}/files`),
   // A WINDOW of a failed GitHub Actions check's logs (fetched live, never stored).
   //
@@ -1269,6 +1274,59 @@ export const api = {
         repoIdsParam(repoIds),
       ),
     ),
+  // "What the bots are flagging" — the drill-down behind every tile and chip of the Bots rail's
+  // ML totals strip. ONE route, one `select=` discriminator, paginated by an OPAQUE cursor.
+  //
+  // ⚠ IT MUST BE CALLED WITH THE SAME (window, workspaceId, repoIds) TRIPLE THE STRIP WAS
+  // MEASURED AT. The response's `total` is the tile's number by construction — the server re-runs
+  // the strip's own windowed label scan and the SAME JS fold, then slices — so a drill-down opened
+  // at a different scope would silently contradict the number the user just clicked.
+  //
+  // The cursor is opaque: feed `nextCursor` back verbatim and never parse it (today it encodes an
+  // offset into the folded population, because that population is a JS fold over a JSON column no
+  // portable SQL predicate can express; a later keyset switch must not be a wire break).
+  botFlagging: (p: {
+    selector: BotFlaggingSelector;
+    refine: BotFlaggingRefine;
+    window: BotWindowKind;
+    workspaceId: number;
+    repoIds?: number[] | null;
+    limit: number;
+    cursor?: string | null;
+  }) => {
+    // Selector-specific fragments. Only the two parameterised arms carry a payload; `findings`,
+    // `summaries` and `overlap` are fully described by `select=` alone.
+    const selectorParts: string[] =
+      p.selector.kind === 'severity'
+        ? [`severities=${encodeURIComponent(p.selector.severities.join(','))}`]
+        : p.selector.kind === 'category'
+          ? [`category=${encodeURIComponent(p.selector.category)}`]
+          : [];
+    // Refinement. The cell's two halves travel together or not at all (a half-specified cell is
+    // not a narrowing the server can honour), and 'none' is a real vendor-axis value meaning
+    // "the bot declared nothing" — not an absent parameter.
+    const refineParts: string[] = [
+      p.refine.cell
+        ? `cellVendor=${encodeURIComponent(p.refine.cell.vendor)}&cellOurs=${encodeURIComponent(
+            p.refine.cell.ours,
+          )}`
+        : '',
+      p.refine.disagree ? `disagree=${encodeURIComponent(p.refine.disagree)}` : '',
+    ];
+    return get<BotFlaggingResponse>(
+      withQuery(
+        '/api/bot-analytics/flagging',
+        `select=${encodeURIComponent(p.selector.kind)}`,
+        ...selectorParts,
+        ...refineParts,
+        `window=${encodeURIComponent(p.window)}`,
+        workspaceParam(p.workspaceId),
+        repoIdsParam(p.repoIds),
+        `limit=${p.limit}`,
+        p.cursor ? `cursor=${encodeURIComponent(p.cursor)}` : '',
+      ),
+    );
+  },
   // Cross-bot dedup + consensus/conflict clusters for a PR (≥2 automated reviewers of
   // distinct kinds on the same path/line window).
   prBotDedup: (prId: number) => get<BotDedupResponse>(`/api/prs/${prId}/bot-dedup`),

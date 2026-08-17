@@ -103,6 +103,17 @@ export interface User {
   isBot: boolean;
 }
 
+// One row of the "@mention" autocomplete (both mention routes return these).
+// `isMaintainer` is the SAME "has merged a PR here" proxy for merge rights that the
+// timeline row labels, UserName and the member picker shield — computed server-side
+// because only the route knows the context's repos (the PR's repo / the workspace's
+// repo set), and the picker's own hosts (a ThreadCard reply box eight mounts deep)
+// carry no repo id. The picker sorts these first, so maintainers can never be cut by
+// its suggestion cap, and badges them with the shield.
+export interface MentionCandidate extends User {
+  isMaintainer: boolean;
+}
+
 // ── Third-party AI review bots ────────────────────────────────────────────────
 // Pierre is "the calm layer above your review bot": it classifies which vendor an
 // AI reviewer belongs to so its firehose can be triaged, not just excluded as noise.
@@ -128,7 +139,8 @@ export type ReviewBotKind =
   | 'entelligence'
   | 'deepsource'
   | 'github_code_quality'
-  | 'github_advanced_security';
+  | 'github_advanced_security'
+  | 'codex';
 
 // Bare GitHub login (lowercased, `[bot]` suffix stripped) → vendor. Verified 2026-07
 // against each vendor's GitHub Marketplace listing / a live PR (App slugs, not mention
@@ -165,6 +177,11 @@ export const REVIEW_BOTS: Record<string, ReviewBotKind> = {
   'github-code-quality': 'github_code_quality',
   // GitHub Advanced Security — code-scanning / secret-scanning + AI security detections.
   'github-advanced-security': 'github_advanced_security',
+  // OpenAI Codex — GitHub App slug `chatgpt-codex-connector` (verified 2026-08 against live
+  // review comments in this account's corpus). NOT `codex` and NOT `openai`: both exist as
+  // ordinary GitHub user accounts owned by other people, and `codex` is present in this very
+  // database as a human, so matching on the brand word would misclassify a person as a vendor.
+  'chatgpt-codex-connector': 'codex',
 };
 
 // Classify a login as a known AI review bot's vendor, or null. Normalises case + the
@@ -594,7 +611,13 @@ export type ReviewProvenance = 'ai_verbatim' | 'human_curated';
 // Surfaced per-review on PR detail; see ReviewDetail additions below.
 
 // ── WS3 Bot ROI / utilisation analytics ─────────────────────────────
-export type BotWindowKind = 'rolling_7' | 'rolling_14' | 'rolling_30' | 'sprint';
+// ⚠ `'sprint'` here does NOT mean the account's configured sprint by itself. The bot getters live
+// in CORE, which cannot read the plugin-owned sprint cadence/start, so a bare `'sprint'` kind
+// resolves to the same trailing 14 days as `'rolling_14'` (db/bot-window.ts). A caller that DOES
+// know the real bounds — the Pro Insights chat, via `pro_settings` — passes them explicitly
+// alongside the kind (see `getBotAnalytics`'s window parameter), and then `window.from`/`to` on the
+// response are the true sprint dates rather than a silent 14-day stand-in.
+export type BotWindowKind = 'rolling_7' | 'rolling_14' | 'rolling_30' | 'rolling_90' | 'sprint';
 export type BotVerdict = 'keep' | 'tune' | 'noisy';
 export interface BotVendorTrendPoint { weekStart: string; threads: number; actedOnPct: number | null; untouched: number; }
 export interface BotVendorAnalytics {
@@ -1922,8 +1945,35 @@ export interface SprintChatChartSpec {
 
 // POST /api/pro/insights/ask body. `wantBots` appends Pierre's deterministic bot-performance data
 // (getBotAnalytics) to the prompt.
+// How far back an Insights chat answer reaches. A per-QUESTION override of the account's
+// configured comparison window (Settings → Sprint), picked from the FilterBar's Range chips while
+// the Insights pane is open — it never writes back to Settings.
+//
+// `'sprint'` is the CURRENT sprint so far (`currentSprintWindow`), offered only when a cadence AND
+// a start date are stored; the rest are trailing windows ending now, whose "previous" is the
+// preceding window of equal length. There is no `'custom'` and no `'now'` — the latter recentres
+// the timeline, which means nothing to a question about a date range.
+export type InsightsRangeKey = 'sprint' | '7d' | '14d' | '30d' | '90d';
+
+// The window an answer was ACTUALLY computed over. Echoed on the response and stored on every
+// history row, because a 7d answer and a 90d answer to the same question are different claims and
+// the prose alone doesn't say which one you're reading.
+//
+// `requested` is present ONLY when it differs from `kind` — i.e. `'sprint'` was asked for with no
+// sprint configured, so the window fell back to rolling 14 days. The UI says so rather than
+// captioning a rolling fortnight "Sprint to date".
+export interface InsightsAnswerWindow {
+  kind: InsightsRangeKey;
+  from: string; // ISO-8601
+  to: string; // ISO-8601 (in the FUTURE for 'sprint' — the sprint's end, not "now")
+  requested?: InsightsRangeKey;
+}
+
 export interface SprintChatBody {
   question: string;
+  // Absent = the account's configured window (Settings → Sprint `comparisonMode`). Present =
+  // this one question covers that range instead.
+  range?: InsightsRangeKey;
   // Which WORKSPACE to ground the answer in — the wire value is the workspace id (the same plain
   // integer `?workspace=` carries, as a string on this body). Absent = the account's Default.
   // The sentinel vocabulary it used to accept ('all' | 'none' | 'teams' | '<teamId>') is gone with
@@ -1944,6 +1994,9 @@ export interface SprintChatResponse {
   prRefs: DigestPrRef[];
   // Present (non-null) only when `wantChart` was set AND the second pass produced a valid spec.
   chart?: SprintChatChartSpec | null;
+  // The window the answer was grounded in. Optional on the wire so a stale persisted response
+  // still parses; absent means "unknown", which the UI states rather than guessing at 14d.
+  window?: InsightsAnswerWindow | null;
   model?: string;
   generatedAt?: string; // ISO-8601
   throttled?: boolean;
@@ -1965,6 +2018,10 @@ export interface SprintChatHistoryItem {
   // cleared) by plugin migration 0020; the `ws:` prefix is what makes a legacy value unmatchable
   // rather than a silent alias onto a workspace with a different repo set.
   scope: string;
+  // The window this answer covered. NULL on rows written before ranges were selectable (plugin
+  // migration 0023 adds the columns and backfills nothing — a historical answer's window is not
+  // recoverable, and inventing rolling-14 for it would be a fabricated caption).
+  window: InsightsAnswerWindow | null;
   model: string | null;
   createdAt: string; // ISO-8601
 }
@@ -5845,6 +5902,192 @@ export interface BotSeverityResponse {
   truncated: boolean;
   generatedAt: string;
 }
+
+// ── "What the bots are flagging" — the drill-down behind the ML totals strip ─────────────
+//
+// Every tile and chip on the Bots rail's ML strip opens the SAME route with a different
+// selector. The one hard requirement of this contract is that the drill-down's `total` IS the
+// tile's number — not an independently-derived count that happens to agree. That is why the
+// selector arms below name POPULATIONS of the strip's own windowed label scan rather than SQL
+// predicates: the strip's buckets are a JS fold over a JSON `categories` column that no
+// portable SQL predicate can express (see docs/ML-SEVERITY.md), so the only way the two agree
+// is to run the identical scan and the identical fold, then slice.
+
+// Severity ordinals, shared.
+// `MlLabel.severityOrd` carries OUR ordinal. `vendorSeverity` carries NO ordinal — it is a
+// bare enum — so any direction comparison (did the bot call it worse or milder than we did?)
+// needs this map. Exported once so the three places that would otherwise hand-roll
+// `{nit:0,minor:1,major:2,critical:3}` (backend fold, frontend matrix, tests) cannot drift.
+// ⚠ This is an ORDERING aid, not a licence: see MlLabel.vendorSeverity — nothing may correct,
+// seed or fall back OUR severity from the vendor's.
+export const ML_SEVERITY_ORD: Record<MlSeverity, number> = {
+  nit: 0,
+  minor: 1,
+  major: 2,
+  critical: 3,
+};
+
+// ── The ONE selector: which tile/chip is being drilled ───────────────────────────────────
+// A discriminated union, not six routes. Every arm names a POPULATION of the SAME windowed
+// label scan that `BotAnalyticsMlTotals` is folded from — which is what lets the drill-down's
+// `total` be the tile's number by construction rather than by coincidence.
+export type BotFlaggingSelector =
+  // "Findings" tile → the findings bucket: severity coerced, NOT isSummary, NOT praise.
+  | { kind: 'findings' }
+  // The "+ N walkthrough/summary" sub-line of the Findings tile → isSummary rows.
+  // ⚠ BACKEND ORDER: isSummary is tested BEFORE praise, so a praise-flavoured walkthrough is
+  // a SUMMARY here — the OPPOSITE of the client-side `pillOf` display helper, deliberately.
+  // Nothing may re-derive these counts on the client; the drill-down's numbers are the
+  // server's, and `pillOf` is for display pills only.
+  | { kind: 'summaries' }
+  // "High severity" tile → ['major','critical']; "Nits" tile → ['nit'].
+  // Always FINDINGS-ONLY (bySeverity is incremented only inside the findings branch).
+  | { kind: 'severity'; severities: MlSeverity[] }
+  // "Top topic" tile AND each of the five category chips — the SAME arm, because tile 4 IS
+  // `ml.byCategory[0]` and chip 1 is the same object. Findings-only, multi-label membership.
+  | { kind: 'category'; category: MlCategory }
+  // "Same-line overlap" tile → DETERMINISTIC line clusters, not ML rows. This arm returns a
+  // different item shape (see the discriminated response below).
+  | { kind: 'overlap' };
+
+// ── Refinement applied AFTER the selector (both are server-side, because paging is) ──────
+export type VendorSeverityAxis = MlSeverity | 'none'; // 'none' = the bot declared nothing
+
+// One cell of the ours-vs-vendor confusion matrix, used as a filter.
+export interface SeverityAgreementCellRef {
+  vendor: VendorSeverityAxis;
+  ours: MlSeverity;
+}
+
+// 'any' = ours ≠ theirs in either direction; 'over' = the BOT called it worse than we did
+// (vendorOrd > oursOrd); 'under' = the bot called it milder. Direction is defined by
+// ML_SEVERITY_ORD on both sides — never by "confidence", never by severityProb.
+export type VendorDisagreeDirection = 'any' | 'over' | 'under';
+
+export interface BotFlaggingRefine {
+  /** Narrow to one confusion-matrix cell. null = the whole selector population. */
+  cell: SeverityAgreementCellRef | null;
+  /** Disagreements only, optionally directional. null = no narrowing. */
+  disagree: VendorDisagreeDirection | null;
+}
+
+// ── The confusion matrix ─────────────────────────────────────────────────────────────────
+// ⚠ THIS IS A DISPLAY OF TWO CLAIMS, NEVER A RECONCILIATION. `vendorSeverity` scores 0.474
+// exact / 0.697 ordinal MAE on the adjudicated gold-300 against our 0.700 / 0.303, so the
+// matrix exists to show WHERE they differ; nothing here feeds `severity`, `botVerdict`, the
+// nit-ratio gate, or any tile. `vendorSeverity` appears ONLY in this matrix, in `refine`, and
+// in display — never in a selector predicate and never in `total`.
+//
+// ⚠ CATEGORY IS OURS-ONLY AND IS ABSENT FROM THIS SHAPE ON PURPOSE. Vendors declare no
+// machine-readable category, so there is no vendor category to disagree with and none may be
+// inferred. The UI must state this next to the matrix.
+export interface SeverityAgreementMatrix {
+  /** Dense 5×4 (vendor axis incl. 'none' × our four). Zero cells are PRESENT, not omitted. */
+  cells: Array<{ vendor: VendorSeverityAxis; ours: MlSeverity; count: number }>;
+  /** Rows carrying a vendor claim at all — the matrix's own honest denominator, the
+   *  `BotBehaviourMlBot.vendorDeclared` precedent. `undeclared` is the 'none' column's sum. */
+  declared: number;
+  undeclared: number;
+  agree: number; // vendorSeverity === severity
+  overCall: number; // the BOT called it worse than we did
+  underCall: number; // the bot called it milder
+  /** Every row in the selector population, declared or not. agree+over+under === declared. */
+  total: number;
+}
+
+// ── The card item ────────────────────────────────────────────────────────────────────────
+// EXTENDS BotVendorComment so `lib/botComments.ts` (pillOf / vendorDisagrees /
+// commentFacetCounts / selectComments, all typed on BotVendorComment) works on it unchanged.
+// The four added fields are exactly what a CROSS-BOT list needs and the single-bot list does
+// not: who said it, and where on the file.
+export interface BotFlaggingComment extends BotVendorComment {
+  authorUserId: number;
+  authorLogin: string | null;
+  /** Workspace custom label → vendor pretty name → display name/login (reviewerLabel rules). */
+  authorLabel: string;
+  authorKind: AutomatedReviewerKind;
+  /** review_thread line for inline comments; null for PR comments, review bodies, and
+   *  OUTDATED threads (GitHub nulls the line when a thread outdates). */
+  line: number | null;
+  /** `https://github.com/<owner>/<name>/pull/<n>`. ⚠ There is deliberately NO per-comment
+   *  permalink: `review_threads` has no `url` column and the numeric REST comment id is not
+   *  stored, so a fabricated anchor would 404. */
+  prUrl: string;
+}
+
+// ── The cluster item (Same-line overlap) ─────────────────────────────────────────────────
+export interface BotFlaggingClusterMember {
+  threadId: number; // the representative thread (this bot's first in the cluster)
+  threadIds: number[]; // every thread this bot contributed (the ×N pill)
+  line: number | null; // this member's own line (the cluster carries the anchor)
+  derivedState: DerivedState;
+  addressedConfidence: AddressedConfidence;
+  /** The thread's OPENING comment by its OWN bot (author-filtered, lower-id tiebreak), with
+   *  its body and inline ML label. null when the thread has no comment by its own author —
+   *  the member still renders, unbodied. */
+  comment: BotFlaggingComment | null;
+}
+
+export interface BotFlaggingCluster {
+  /** Stable across pages: `${prId}:${line ?? 'x'}:${path}`. Opaque; equality only. */
+  clusterId: string;
+  prId: number;
+  prNumber: number;
+  prTitle: string;
+  prAuthorId: number | null;
+  repoId: number;
+  repoFullName: string;
+  prUrl: string;
+  path: string;
+  /** The cluster ANCHOR (its lowest line) — `LineOverlapCluster.line`. */
+  lineStart: number;
+  /** max(member lines). The ±3 window means lineEnd - lineStart <= LINE_OVERLAP_WINDOW. */
+  lineEnd: number;
+  /** One member per BOT (collapsed, the getBotDedupClusters rule) — always >= 2. */
+  members: BotFlaggingClusterMember[];
+  threadCount: number; // Σ members[].threadIds.length
+}
+// NOTE: deliberately NO `consensus`/`conflict` here. The per-PR dedup derives those from
+// `inferSeverity()` — a coarse REGEX over an excerpt — and importing that vocabulary into a
+// screen whose whole point is the ML severity comparison would put a THIRD severity scale on
+// one card. The members' badges side by side ARE the comparison.
+
+// ── The paginated response (ONE route, discriminated on `kind`) ──────────────────────────
+interface BotFlaggingBase {
+  /** Echoed so a stale bookmark renders honestly (?workspace= degrades to Default, never 404). */
+  workspaceId: number;
+  window: { kind: BotWindowKind; from: string; to: string };
+  selector: BotFlaggingSelector;
+  refine: BotFlaggingRefine;
+  /** The SELECTOR population's size — this is the number that must equal the tile. */
+  total: number;
+  /** After `refine`. Equals `total` when refine is empty. What the list's caption reports. */
+  filteredTotal: number;
+  /** Ours-vs-vendor over the SELECTOR population, PRE-refine — the commentFacetCounts /
+   *  ConsolidatedFeedResponse.counts rule, so a cell never zeroes itself out once clicked. */
+  matrix: SeverityAgreementMatrix;
+  /** OPAQUE. Feed back verbatim as `?cursor=`. null = no further page.
+   *  Today it encodes the offset into the folded population (`o:<n>`) BECAUSE the population is
+   *  a JS fold over a JSON column that no portable SQL predicate can express. Opaque so a later
+   *  keyset switch is not a wire break. */
+  nextCursor: string | null;
+  /** The 50k label scan (or the cluster cap) was hit — the numbers are a most-recent sample.
+   *  Same honesty rule as ROLLUP_SCAN_CAP / BotSeverityResponse.truncated. */
+  truncated: boolean;
+  generatedAt: string;
+}
+
+export interface BotFlaggingCommentsResponse extends BotFlaggingBase {
+  kind: 'comments';
+  items: BotFlaggingComment[];
+}
+
+export interface BotFlaggingClustersResponse extends BotFlaggingBase {
+  kind: 'clusters';
+  items: BotFlaggingCluster[];
+}
+
+export type BotFlaggingResponse = BotFlaggingCommentsResponse | BotFlaggingClustersResponse;
 
 // ---------------------------------------------------------------------------------------
 // Emoji reactions on comments (CORE, free tier — no AI, no ML, no stored state)

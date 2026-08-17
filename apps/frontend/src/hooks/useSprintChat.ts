@@ -7,13 +7,14 @@ import {
 } from '@tanstack/react-query';
 import type {
   CreatePinnedPromptBody,
+  MentionCandidate,
   PinnedPromptsResponse,
   SprintChatBody,
   SprintChatHistoryResponse,
   SprintChatResponse,
-  User,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { useFilters } from '../store/filters.js';
 import { workspaceKey } from './useActivity.js';
 
 // Chat history page size (matches the server default). One shared const so the hook, the
@@ -25,18 +26,22 @@ export const CHAT_HISTORY_PAGE_SIZE = 10;
 // optional chart spec. A generation may spend credits → invalidate the AI-usage meter; every
 // answer is persisted server-side, so also refresh the chat history so the new Q&A appears.
 //
-// ⚠ THE HOOK STAMPS THE SCOPE, THE CALLER CANNOT. `SprintChatBody.scope` is an OPTIONAL string and
-// an absent one silently grounds the answer in the account's DEFAULT workspace — a wrong answer
-// that looks entirely plausible. Taking the workspace as a parameter and omitting `scope` from the
-// mutation variable makes forgetting it impossible. The wire value is the workspace id as a
-// string; the plugin parses it and persists `ws:<id>` as the cache `scope_key`.
+// ⚠ THE HOOK STAMPS THE SCOPE **AND THE RANGE**, THE CALLER CANNOT. Both are OPTIONAL fields whose
+// absence produces a confident, plausible, WRONG answer: no `scope` silently grounds it in the
+// account's DEFAULT workspace, and no `range` silently answers over the account's configured window
+// while the FilterBar chips say 90d. Omitting both from the mutation variable makes forgetting
+// either impossible. The scope wire value is the workspace id as a string (the plugin persists
+// `ws:<id>` as the cache `scope_key`); the range is read straight from the store, where `null`
+// legitimately means "no override" and is therefore omitted rather than sent.
 export function useSprintChat(workspaceId: number | null) {
   const qc = useQueryClient();
-  return useMutation<SprintChatResponse, Error, Omit<SprintChatBody, 'scope'>>({
+  const range = useFilters((s) => s.insightsRange);
+  return useMutation<SprintChatResponse, Error, Omit<SprintChatBody, 'scope' | 'range'>>({
     mutationFn: (body) =>
       api.sprintChat({
         ...body,
         ...(workspaceId != null ? { scope: String(workspaceId) } : {}),
+        ...(range != null ? { range } : {}),
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['ai-usage'] });
@@ -78,7 +83,7 @@ export function useSprintChatHistory(
 // capability is on (`enabled`). The server resolves the workspace to its repos, so a caller cannot
 // widen it and an empty workspace yields no candidates.
 export function useScopeMentionCandidates(workspaceId: number | null, enabled: boolean) {
-  return useQuery<User[]>({
+  return useQuery<MentionCandidate[]>({
     queryKey: ['scope-mention-candidates', workspaceKey(workspaceId)],
     queryFn: workspaceId == null ? skipToken : () => api.scopeMentionCandidates(workspaceId),
     enabled,

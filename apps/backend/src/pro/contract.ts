@@ -644,9 +644,15 @@ export interface ProHostQueries {
   // Deterministic review-bot ROI/behaviour rollup (CORE) — per-reviewer volume / acted-on% /
   // untouched / verdict, over `window`. Returns BotAnalyticsResponse; the plugin casts it.
   // Powers the ad-hoc Insights chat's optional bot-performance context.
+  //
+  // `window` (apiVersion 18) takes a bare kind OR a kind WITH explicit bounds. The second form is
+  // the plugin's: core resolves `'sprint'` to a trailing 14 days because the cadence + start live
+  // in the plugin-owned `pro_settings`, so only the plugin can say what the sprint actually is.
+  // Passing them makes the chat's "Sprint to date" range measure the real sprint rather than a
+  // 14-day stand-in nothing labelled as one.
   getBotAnalytics(
     accountId: number,
-    window: BotWindowKind,
+    window: BotWindowKind | { kind: BotWindowKind; fromMs: number; toMs: number },
     scope: BotScopeWire,
   ): Promise<unknown>;
   // The raw automated-reviewer comment CONTENT for a scope/window (Pro "Themes" AI summary — the
@@ -783,6 +789,13 @@ export interface ProPlugin {
   // and `validity` judgements (see src/sync/hydrate-detail.ts). Without it both judgements read
   // a `diff_hunk` column that is NULL for ~97% of rows and answer "I can't see the code".
   //
+  // 17 → 18: `ProHostQueries.getBotAnalytics`'s `window` widened from a bare `BotWindowKind` to
+  // `kind | {kind, fromMs, toMs}`, so the Insights chat's user-chosen range (which now includes
+  // "Sprint to date" and 90d) can hand core the REAL window. Core alone cannot: `'sprint'` there
+  // resolves to a trailing 14 days, since the cadence + start are plugin-owned. `BotWindowKind`
+  // also gained `'rolling_90'`.
+  //
+  // 16 → 17: GithubSeam gained `fetchReviewCommentHunks`.
   // 15 → 16: GithubSeam gained `fetchCompareDiff`
   // (the two-sha compare primitive the `addressed` annotation is grounded on — see
   // src/github/compare.ts). 14 → 15 was the Bot Tuning Advisor — GithubSeam gained
@@ -790,11 +803,11 @@ export interface ProPlugin {
   // ProHostQueries gained getAdvisorFindings/getBotEffectPanel, CodingErrorCode gained
   // BRANCH_EXISTS, llm.complete gained `credential`, and ProCapabilities gained `botAdvisor`.
   //
-  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (the `plugin?.apiVersion !== 17` runtime gate) and two
+  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (the `plugin?.apiVersion !== 18` runtime gate) and two
   // more in the plugin (packages/pro/src/index.ts, packages/pro/src/contract-types.ts). Bump ALL
   // FOUR or the plugin log-and-degrades to OSS mode against a version that is actually correct:
   // capabilities go dark, every /api/pro/* route 404s, and nothing throws.
-  apiVersion: 17;
+  apiVersion: 18;
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 

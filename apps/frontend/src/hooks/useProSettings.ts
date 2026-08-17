@@ -22,7 +22,10 @@ export function useHasProSettings(): boolean {
 }
 
 // Per-account Pro settings (sprint / Slack / AI-update policy / Jira-Linear). Fetched only when
-// `enabled` (the modal is open AND a Pro section exists).
+// `enabled`. TWO consumers now: the config modal (open AND a Pro section exists) and the
+// FilterBar's Insights Range chips, which need `sprint.comparisonMode` for the default chip and
+// `cadenceDays`/`startDate` to decide whether "Sprint to date" is even offerable. One shared key +
+// a 60s staleTime, so the bar adds no fetch of its own while the modal is open.
 export function useProSettings(enabled: boolean) {
   return useQuery<ProSettings>({
     queryKey: ['pro-settings'],

@@ -6,8 +6,12 @@
  */
 export function MaintainerShield({
   className,
+  // Hover text. Defaults to the per-repo wording; the @mention picker overrides it
+  // because its candidate list can span a whole Workspace's repos, not just one.
+  title = 'Has merge rights — has merged a PR in this repo',
 }: {
   className?: string;
+  title?: string;
 }): JSX.Element {
   return (
     <svg
@@ -17,7 +21,7 @@ export function MaintainerShield({
       aria-hidden="true"
       className={['inline-block shrink-0', className].filter(Boolean).join(' ')}
     >
-      <title>Has merge rights — has merged a PR in this repo</title>
+      <title>{title}</title>
       <path
         fill="#8957e5"
         d="M8 .8 2.2 2.9v4.2c0 3.3 2.5 6.4 5.8 7.3 3.3-.9 5.8-4 5.8-7.3V2.9L8 .8Z"

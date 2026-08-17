@@ -212,3 +212,48 @@ export function FeedIcon({ size = 15, className, title }: IconProps): JSX.Elemen
     </svg>
   );
 }
+
+// Two overlapping sheets — the universal "copy to clipboard" affordance.
+export function CopyIcon({ size = 13, className, title }: IconProps): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden={title == null ? true : undefined}
+      role={title != null ? 'img' : undefined}
+    >
+      {title != null && <title>{title}</title>}
+      <rect x="9" y="9" width="12" height="12" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+// A tick — the transient "copied" confirmation beside CopyIcon.
+export function CheckIcon({ size = 13, className, title }: IconProps): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden={title == null ? true : undefined}
+      role={title != null ? 'img' : undefined}
+    >
+      {title != null && <title>{title}</title>}
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}

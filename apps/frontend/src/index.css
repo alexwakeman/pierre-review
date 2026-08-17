@@ -235,7 +235,6 @@ body {
   padding: 0.3em 0.6em;
 }
 .md-body img {
-  max-width: 100%;
   /* Restore the HTML/GitHub default of inline images. Tailwind's preflight
      resets `img { display: block }`, which would drop every image onto its own
      line — breaking icon-then-text runs (e.g. SonarCloud's "<icon> 0 New
@@ -244,14 +243,28 @@ body {
      icon next to its text as authored. */
   display: inline-block;
   vertical-align: middle;
-  /* Keep a single tall screenshot from blowing out the layout (and, in the
+  /* THE AUTHOR'S DECLARED SIZE ARRIVES AS AN UPPER BOUND, NOT A PINNED SIZE.
+     `--md-img-w/h` are set per-image by the `img` override in Markdown.tsx from the
+     tag's own width/height attributes, and are UNSET for an image that declared none
+     (the fallbacks then collapse each `min()` to the plain cap).
+
+     Why bounds rather than `width: 115px`: BOTH used dimensions must stay `auto` or the
+     replaced-element algorithm cannot preserve the aspect ratio when a cap bites — an
+     attribute-pinned width under a clamped max-height squashes the image, which is the
+     bug this rule previously fixed by dropping the declared size entirely. That fix cost
+     the other half: with the size discarded, a badge renders at its INTRINSIC size, so
+     Cursor's "Fix in Cursor" button (declared 115×28, shipped as a 345×84 @3x asset)
+     painted 3× too large in every bot comment.
+
+     As bounds, both hold at once: the declared size scales the image down to exactly what
+     the author asked for (ratios match, so 345×84 → 115×28), while a large screenshot with
+     no declared size still fits the container and the 24rem clamp without distortion.
+     The one deliberate asymmetry is that a declared size LARGER than the asset no longer
+     upscales it — never inventing pixels is the better default. */
+  max-width: min(100%, var(--md-img-w, 100%));
+  /* 24rem keeps a single tall screenshot from blowing out the layout (and, in the
      clamped 3-line PR Summary preview, from dominating before Show more). */
-  max-height: 24rem;
-  /* BOTH must be auto: GitHub embeds carry explicit width/height attributes, and
-     if width stays attribute-pinned while max-height clamps the height, the image
-     squashes (used width can't shrink to keep the ratio). With both auto, the CSS
-     replaced-element constraint algorithm scales to fit max-width AND max-height
-     while preserving aspect ratio. */
+  max-height: min(24rem, var(--md-img-h, 24rem));
   width: auto;
   height: auto;
 }

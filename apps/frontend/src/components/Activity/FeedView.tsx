@@ -36,6 +36,7 @@ import {
   safeExternalUrl,
   userLabel,
 } from '../../lib/ui.js';
+import { nearestScrollParent } from '../../lib/scrollParent.js';
 import { Avatar } from '../CommentCard.js';
 import { CommentAnnotations, ReviewCheckButton } from '../CommentAnnotations.js';
 import { MagnifierIcon } from '../Icons.js';
@@ -167,21 +168,6 @@ function metaOf(item: ConsolidatedFeedItem, prId: number): TabMeta {
 // plus optional client-side "My Turn only" / "Claude Reviews" filters. Clicking any item opens
 // full PR detail tab (a Claude item lands on its Claude Review tab; a PR comment scrolls to
 // the comment).
-
-// The feed lives inside the Activity console's own `overflow-y-auto` pane (not the page
-// viewport), so infinite-scroll must observe the sentinel against THAT scroll container —
-// only then does the rootMargin prefetch fire before the true bottom (a viewport root is
-// clipped by the pane and would only fire once the sentinel is actually visible). Walk up
-// to the nearest scrollable ancestor; null falls back to the viewport for any other host.
-function nearestScrollParent(el: HTMLElement | null): HTMLElement | null {
-  for (let node = el?.parentElement ?? null; node; node = node.parentElement) {
-    const oy = getComputedStyle(node).overflowY;
-    if ((oy === 'auto' || oy === 'scroll' || oy === 'overlay') && node.scrollHeight > node.clientHeight) {
-      return node;
-    }
-  }
-  return null;
-}
 
 // Windowing overscan (px) rendered past each edge of the visible viewport so a fast scroll
 // (or an expand-in-place row growing) never blanks, and a just-interacted row stays mounted.

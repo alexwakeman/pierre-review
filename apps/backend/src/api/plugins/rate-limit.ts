@@ -213,6 +213,17 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && /^\/api\/bot-analytics\/vendor\/[^/]+\/comments$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }
+  // GET /api/bot-analytics/flagging — the "what the bots are flagging" drill-down. Per request it
+  // re-runs the strip's WHOLE 50k-row label scan (the page offset is a JS slice over a fold of a
+  // JSON column that no portable SQL predicate can express, so there is no cheaper page to fetch)
+  // or the window's whole thread scan plus the ±3-line clustering, and then hydrates a page of
+  // comment BODIES on top. Strictly more work than the vendor-comments route beside it, and an
+  // IntersectionObserver fires it repeatedly as the user scrolls — so `search`, never the 600/min
+  // blanket. Anchored at both ends like its neighbour: `/api/bot-analytics` itself and
+  // `/api/bot-analytics/bot-only-prs` are ordinary reads and must keep falling through.
+  if (!mutating && /^\/api\/bot-analytics\/flagging$/.test(path)) {
+    return [TIERS.search, TIERS.read];
+  }
   // GET /api/prs/<id>/ml-labels — the per-PR badge index. Two indexed reads over
   // ml_comment_labels, no model call, no GitHub. `read` is right, and it is RECORDED here rather
   // than inherited from the fall-through: it sits inside the /api/prs/<id>/ family whose other

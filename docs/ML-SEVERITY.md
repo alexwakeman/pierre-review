@@ -241,7 +241,7 @@ migrations `0047` / pg `0034`). One row per classified target.
 >    completion, so new comments get labels without waiting for the cron.
 
 | `is_summary` | PR walkthrough/summary rather than a specific finding |
-| `vendor_severity`, `vendor_severity_confidence` | **the bot's OWN badge**, read off its markup by the service's deterministic marker parser (`nit`…`critical`; `high`/`medium`/`low`). Both **nullable** — most comments carry no badge, and an older severity-api omits the fields entirely, so the client reads them defensively. Stored to be SHOWN BESIDE ours and for nothing else; see the landmine |
+| `vendor_severity`, `vendor_severity_confidence` | **the bot's OWN badge**, read off its markup by the service's deterministic marker parser (`nit`…`critical`; `high`/`medium`/`low`). Both **nullable** — most comments carry no badge, and an older severity-api omits the fields entirely, so the client reads them defensively. Stored to be SHOWN BESIDE ours and for nothing else; see the landmine. Recoverable for old rows without re-scoring anything — `pnpm ml:reparse-badges`, above |
 | `backend`, `model_version` | verbatim from the service — and a `model_version` is worth something only if it MOVES when the artifact does; see the landmine |
 | `body_hash` | sha256 of the text **actually sent** (trimmed + capped) |
 | `target_created_at` | the source comment's timestamp |
@@ -502,6 +502,62 @@ pnpm ml:enrich --reset    # DELETE every stored label first, then refill
 "Known gaps"), so re-labelling after a model upgrade means clearing and refilling. The script
 drives the same worker the scheduler runs; it needs `SEVERITY_API_URL` set and refuses to start
 without it.
+
+### Backfilling the vendor's own badge (no model, nothing else moves)
+
+```bash
+pnpm ml:reparse-badges            # fill in every missing vendor badge
+pnpm ml:reparse-badges --dry-run  # report what WOULD change, write nothing
+pnpm ml:reparse-badges --all      # also re-parse rows that already carry a badge
+```
+
+**The gap it closes.** `vendor_severity` arrived after ~23 k rows already existed, and three
+high-volume vendors got a marker parser later still — so a large share of the corpus reads
+"no badge" for comments that visibly carry one. Measured in this repo's dev DB before the
+sweep:
+
+| vendor | labelled | badged | what the body actually carries |
+|---|---|---|---|
+| `deepsource-io` | 4 655 | 0 | `severity_indicator_<name>.svg` in the header `<picture>` |
+| `chatgpt-codex-connector` | 518 | 0 | a shields.io `![P2 Badge]` (P0→critical … P3→nit) |
+| `cursor` | 329 | 0 | `**High Severity**` (High/Medium/Low → major/minor/nit) |
+
+**Why it is not `--reset`.** A reset re-scores everything against whatever artifact is served
+today, which moves *every* number on screen — severities, the category mix, the Bots table's
+verdicts, the agreement matrix — as a side effect of wanting one missing badge. This command
+calls `POST /markers/vendor-severity`, the service's marker-only endpoint: it takes no
+`Services` dependency, never loads the model, and its response carries **only** the two vendor
+fields, so a caller physically cannot write anything else. Host-side it writes exactly
+`vendor_severity` + `vendor_severity_confidence` — not even `updated_at`, which means "when
+this label was produced" and no label was produced. `sync/reparse-vendor-badges.test.ts`
+asserts every other column is byte-identical before and after.
+
+Four rules worth knowing before running it:
+
+- **The vendor is derived from the GitHub LOGIN, never `workspace_reviewers.kind`.** That column
+  is written once, lazily, and never re-derived — `deepsource-io` and `chatgpt-codex-connector`
+  both sit at `kind='in_house'` in this very database, which maps to no hint at all, so a sweep
+  reading the stored kind would recover nothing while looking like the parser is broken. It goes
+  through `vendorHint()` (exported from `sync/ml-enrichment.ts`) so it dispatches on the same
+  string the enrichment worker scores under.
+- **A null parse never clears an existing badge.** The endpoint answers null both for "this
+  vendor declared none" and for "I have no parser for this vendor" — indistinguishable from
+  here — so clearing on null would let a parser regression or a rolled-back service silently
+  erase the column. `--reset` remains the deliberate way to clear one.
+- **A null answer is a normal, final result.** `sonarqubecloud`, `greptile-apps`,
+  `github-code-quality` and Copilot's prose comments genuinely declare no severity, and so does
+  a badge vendor's un-badged comment (Cursor's `<!-- BUGBOT_REVIEW -->` roll-up). Nothing
+  synthesizes one — the stored value is rendered as *that vendor's own call* next to ours, so
+  inventing it would put words in a third party's mouth.
+- **Re-runnable rather than incremental.** There is no persisted "already re-parsed" marker,
+  because the only place to keep one is a column this command may not write. A completed sweep
+  re-run reports `updated: 0`, and the rows that legitimately declare nothing are simply
+  re-read; the default (NULL-only) selection keeps that cheap, and no model time is spent
+  either way. If this ever becomes a background worker rather than a one-off, that is when it
+  needs a `vendor_parse_version` column.
+
+It prints a per-vendor summary — scanned / gained / changed / unchanged / no claim — which is
+the coverage jump, and exits non-zero if any batch failed.
 
 ---
 
@@ -790,6 +846,17 @@ breaks a tie, never becomes a low-confidence fallback, and never reaches the mod
   only the GitHub boundary mocked: fills exactly the NULLs GitHub has text for, never overwrites
   a stored body, never writes a nulled selection, leaves `diffHunk` lean-gated, moves repaired
   rows `unscorable` → `pending`, and is idempotent.
+- `sync/reparse-vendor-badges.test.ts` runs the vendor-badge backfill on a throwaway SQLite DB
+  with the marker endpoint stubbed at `fetch`, seeded with the three vendors' REAL body shapes
+  across all three target kinds. The load-bearing assertion is not "the badge arrived" but that
+  **every other column on every row is byte-identical** before and after — mutation-tested by
+  adding one extra column to the UPDATE, which fails it. Also pinned: the vendor comes from the
+  login even though the fixture carries the real `kind='in_house'` staleness for `deepsource-io`
+  (mutation-tested by reading the stored kind instead — the request log then loses `deepsource`),
+  a null parse never clears a stored badge (mutation-tested by enqueueing a clearing write), a
+  second run writes nothing, `--dry-run` writes nothing, an in-house bot is never sent at all,
+  an unreachable service is reported rather than thrown, and an answer missing its id leaves the
+  row untouched.
 - `sync/ml-enrichment.test.ts` pins `packBatches`: the character budget, the item cap, that an
   over-budget item gets its own batch rather than being dropped, and that nothing is lost or
   duplicated — plus `severityApiAnswered`, so "the service rejected this batch" and "the service
@@ -818,10 +885,15 @@ breaks a tie, never becomes a low-confidence fallback, and never reaches the mod
   the candidate query is still "has no label row", so an upgrade leaves the whole corpus on the
   old model until someone runs `pnpm ml:enrich --reset`. The targeted fix — a sweep that deletes
   labels whose `model_version` ≠ the service's current one — is now actually possible.
-- **`vendor_severity` is only populated for rows written after the service started returning it.**
-  Same mechanism again (no re-scoring path, nullable column), so the same `--reset` is the only
-  backfill. A NULL there means "not scored recently enough", not "this bot posted no badge" — do
-  not read it as a rate.
+- **~~`vendor_severity` is only populated for rows written after the service started returning
+  it.~~ CLOSED** — `pnpm ml:reparse-badges` (above) re-reads the badge off stored bodies through
+  the marker-only endpoint and writes those two columns and nothing else, so a NULL after a sweep
+  really does mean "this bot posted no badge". Two caveats survive: the sweep is a MANUAL one-off
+  (nothing runs it on a schedule, so rows written before a new vendor's parser lands stay NULL
+  until someone runs it again), and an actor a human identified as a vendor whose *login* is not
+  in `REVIEW_BOTS` gets no hint and keeps its NULL — deliberate under-recovery, since the
+  alternative is guessing a parser and writing a wrong claim into a column shown as the vendor's
+  own.
 - **The "the model did not pick this" flag is computed, stored and ignored.** `severity_prob <
   0.25` is an exact statement that calibration overrode the argmax (Accuracy above), true of 15%
   of the CodeRabbit corpus. Nothing surfaces it, no rollup weights by it, and no evaluation

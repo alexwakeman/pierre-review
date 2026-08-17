@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import type {
   AutomatedReviewerKind,
   BotAnalyticsMlTotals,
+  BotFlaggingSelector,
   BotTuningSuggestion,
   BotVendorAnalytics,
   BotVendorTrendPoint,
@@ -288,6 +289,62 @@ function TuningSuggestions({
   );
 }
 
+// The totals-strip tile chrome, byte-identical to the plain card it replaces. Split out so the
+// five tiles can become drill-downs without any of them restating the class list.
+const TILE_CLASS = 'rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800';
+// The interactive affordance, and nothing else: a hover border + a focus ring. `text-left`
+// matters — a <button> centres its text, which would silently re-align every tile.
+const TILE_INTERACTIVE_CLASS =
+  'block w-full text-left transition hover:border-sky-300 focus:outline-none' +
+  ' focus-visible:ring-1 focus-visible:ring-sky-400 dark:hover:border-sky-700';
+
+// One tile: a plain <div> card, or a <button> when the parent supplied a handler — the
+// WorkspaceMetricsPanel `TileShell` rule (a tile becomes clickable only when someone is there to
+// route the click), so a mount with nowhere to navigate keeps exactly the markup it had.
+//
+// ⚠ `title` is the tile's EXISTING tooltip and is passed through verbatim: several of this
+// strip's tooltips carry the advisory/honesty disclaimers (what "same-line overlap" counts, what
+// is excluded), so a "click to open" hint must never overwrite one. `openLabel` says what opens,
+// and it becomes the tooltip only when the tile had none to preserve.
+//
+// ⚠ NO `aria-label` ON THE BUTTON, deliberately. It would WIN the accessible-name computation
+// over name-from-content, so the tile would announce "Show the major and critical findings behind
+// this share" and never "High severity, 5%, 107 major or critical" — the numbers this strip
+// exists to state, which stop being reachable the moment the markup becomes one <button> leaf.
+// It also breaks voice control ("click High severity" would match nothing) — WCAG 2.5.3. The
+// house precedent is WorkspaceMetricsPanel's `TileShell`, which carries `title` only for exactly
+// this reason, so `openLabel` reaches the user as a tooltip and the tile keeps its own numbers
+// as its name.
+function Tile({
+  title,
+  openLabel,
+  onClick,
+  children,
+}: {
+  title?: string;
+  openLabel: string;
+  onClick?: () => void;
+  children: ReactNode;
+}): JSX.Element {
+  if (!onClick) {
+    return (
+      <div className={TILE_CLASS} title={title}>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title ?? openLabel}
+      className={`${TILE_CLASS} ${TILE_INTERACTIVE_CLASS}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 // ── "What the bots are flagging" — the ML severity totals strip (CORE, free, no AI) ──────────
 // The survivor of the retired standalone BotSeverityPanel: its per-bot table merged into the
 // VendorTable below (the ML columns), and these totals + top-category chips rehomed here — now
@@ -299,6 +356,7 @@ function TuningSuggestions({
 function MlTotalsStrip({
   ml,
   overlapClusters,
+  onOpen,
 }: {
   ml: BotAnalyticsMlTotals;
   // DETERMINISTIC, not model output: it counts line areas from the threads' own line data (the
@@ -306,8 +364,25 @@ function MlTotalsStrip({
   // It renders HERE because this strip is where the window's "what did the bots flag" facts are
   // read, and "two bots flagged the same lines" is one of them.
   overlapClusters: number;
+  // Opens the drill-down listing the comments behind a tile/chip. null ⇒ every tile stays a
+  // plain card (the `TileShell` rule above).
+  //
+  // ⚠ THE HANDLER MUST CLOSE OVER THE SAME TRIPLE THIS STRIP WAS MEASURED AT — workspaceId, the
+  // selected window, and the repo narrowing. A drill-down that measures a different scope than
+  // the tile that opened it is exactly the "one row mixing two time grains" complaint this strip
+  // was rebuilt to fix, except harder to spot: the list would simply disagree with the number
+  // that was clicked, with nothing on screen saying why.
+  onOpen: ((s: BotFlaggingSelector) => void) | null;
 }): JSX.Element | null {
   if (ml.labelled === 0 && ml.pending === 0) return null;
+  // `undefined` (not a no-op handler) when there is no opener, so `Tile` renders the plain card.
+  const open = (s: BotFlaggingSelector): (() => void) | undefined =>
+    onOpen ? () => onOpen(s) : undefined;
+  // The Findings tile carries its own chrome rather than going through `Tile` — see the ⚠ note at
+  // its markup. `focus-within` stands in for the focus ring a single <button> would have had.
+  const findingsTileClass = onOpen
+    ? `${TILE_CLASS} transition hover:border-sky-300 focus-within:border-sky-300 dark:hover:border-sky-700`
+    : TILE_CLASS;
   const coverage =
     ml.labelled + ml.pending > 0 ? ml.labelled / (ml.labelled + ml.pending) : 0;
   const highFindings = ml.bySeverity.major + ml.bySeverity.critical;
@@ -367,16 +442,53 @@ function MlTotalsStrip({
       {/* Totals strip — every tile is a claim about the SELECTED WINDOW. The first four are
           model-scored findings; the last is deterministic (see the prop's note). */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
-        <div className="rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800">
-          <div className="text-[10px] uppercase tracking-wide text-gray-400">Findings</div>
-          <div className="text-lg font-semibold tabular-nums">
-            {ml.findings.toLocaleString()}
-          </div>
-          <div className="text-[10px] text-gray-400">
-            + {ml.summaries.toLocaleString()} walkthrough/summary
-          </div>
+        {/* ⚠ The Findings tile is the ONE tile that cannot be a single <button>: its sub-line
+            drills into a DIFFERENT population (walkthroughs/summaries — the server tests
+            isSummary before praise, so they are not findings at all), and a <button> inside a
+            <button> is invalid HTML that React warns about and browsers dispatch ambiguously.
+            So the chrome stays a <div> and carries two buttons; `focus-within` keeps the whole
+            tile reading as interactive. */}
+        <div className={findingsTileClass}>
+          {onOpen ? (
+            <button
+              type="button"
+              onClick={() => onOpen({ kind: 'findings' })}
+              // No aria-label — it would displace "Findings 2,147" as the accessible name. See Tile.
+              title="Show the findings behind this number"
+              className="block w-full text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
+            >
+              <div className="text-[10px] uppercase tracking-wide text-gray-400">Findings</div>
+              <div className="text-lg font-semibold tabular-nums">
+                {ml.findings.toLocaleString()}
+              </div>
+            </button>
+          ) : (
+            <>
+              <div className="text-[10px] uppercase tracking-wide text-gray-400">Findings</div>
+              <div className="text-lg font-semibold tabular-nums">
+                {ml.findings.toLocaleString()}
+              </div>
+            </>
+          )}
+          {onOpen ? (
+            <button
+              type="button"
+              onClick={() => onOpen({ kind: 'summaries' })}
+              title="Show the walkthroughs and summaries — a separate population, not counted as findings"
+              className="block w-full text-left text-[10px] text-gray-400 hover:text-gray-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400 dark:hover:text-gray-200"
+            >
+              + {ml.summaries.toLocaleString()} walkthrough/summary
+            </button>
+          ) : (
+            <div className="text-[10px] text-gray-400">
+              + {ml.summaries.toLocaleString()} walkthrough/summary
+            </div>
+          )}
         </div>
-        <div className="rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800">
+        <Tile
+          openLabel="Show the major and critical findings behind this share"
+          onClick={open({ kind: 'severity', severities: ['major', 'critical'] })}
+        >
           <div className="text-[10px] uppercase tracking-wide text-gray-400">High severity</div>
           <div
             className="text-lg font-semibold tabular-nums"
@@ -387,8 +499,11 @@ function MlTotalsStrip({
           <div className="text-[10px] text-gray-400">
             {highFindings.toLocaleString()} major or critical
           </div>
-        </div>
-        <div className="rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800">
+        </Tile>
+        <Tile
+          openLabel="Show the findings scored as nits"
+          onClick={open({ kind: 'severity', severities: ['nit'] })}
+        >
           <div className="text-[10px] uppercase tracking-wide text-gray-400">Nits</div>
           <div
             className="text-lg font-semibold tabular-nums"
@@ -399,8 +514,15 @@ function MlTotalsStrip({
           <div className="text-[10px] text-gray-400">
             {ml.bySeverity.nit.toLocaleString()} trivial or optional
           </div>
-        </div>
-        <div className="rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800">
+        </Tile>
+        {/* ⚠ Non-interactive when there is no top category — the tile reads "—", and a button
+            that opened an empty category drill-down would be a control with nothing behind it. */}
+        <Tile
+          openLabel="Show the findings in this topic"
+          onClick={
+            topCategory ? open({ kind: 'category', category: topCategory.category }) : undefined
+          }
+        >
           <div className="text-[10px] uppercase tracking-wide text-gray-400">Top topic</div>
           <div className="truncate text-lg font-semibold">
             {topCategory ? (ML_CATEGORY_LABEL[topCategory.category] ?? topCategory.category) : '—'}
@@ -410,10 +532,11 @@ function MlTotalsStrip({
               ? `${topCategory.count.toLocaleString()} findings`
               : 'no categorised findings yet'}
           </div>
-        </div>
-        <div
-          className="rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800"
+        </Tile>
+        <Tile
           title="Distinct line areas two or more review bots both flagged in this window. Threads within ±3 lines of each other in the same file count as one area (two bots reviewing different revisions of a diff rarely land on the exact same line). Quality checks and outdated/file-level threads are excluded. Measured from the threads' own line data — not model-scored."
+          openLabel="Show the line areas more than one bot flagged"
+          onClick={open({ kind: 'overlap' })}
         >
           <div className="text-[10px] uppercase tracking-wide text-gray-400">
             Same-line overlap
@@ -424,20 +547,35 @@ function MlTotalsStrip({
           <div className="text-[10px] text-gray-400">
             line area{overlapClusters === 1 ? '' : 's'} flagged by &gt;1 bot · window
           </div>
-        </div>
+        </Tile>
       </div>
 
       {/* Top-category chips (rehomed from the old per-bot table's column) + the severity legend,
           which doubles as the vocabulary key for the per-bot mix bars below. */}
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
-        {ml.byCategory.slice(0, 5).map((c) => (
-          <span
-            key={c.category}
-            className="rounded bg-gray-100 px-1 py-0.5 font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-          >
-            {ML_CATEGORY_LABEL[c.category] ?? c.category} {c.count}
-          </span>
-        ))}
+        {/* Chip 1 and the "Top topic" tile deliberately emit the IDENTICAL selector — they are
+            the same `ml.byCategory[0]` object, so they open the same tab. That is correct, not a
+            duplicate control: the tile names the topic, the chip sits in the ranked row. */}
+        {ml.byCategory.slice(0, 5).map((c) =>
+          onOpen ? (
+            <button
+              key={c.category}
+              type="button"
+              onClick={() => onOpen({ kind: 'category', category: c.category })}
+              title={`Show the findings categorised as ${ML_CATEGORY_LABEL[c.category] ?? c.category}`}
+              className="rounded bg-gray-100 px-1 py-0.5 font-medium text-gray-500 hover:bg-gray-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
+            >
+              {ML_CATEGORY_LABEL[c.category] ?? c.category} {c.count}
+            </button>
+          ) : (
+            <span
+              key={c.category}
+              className="rounded bg-gray-100 px-1 py-0.5 font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+            >
+              {ML_CATEGORY_LABEL[c.category] ?? c.category} {c.count}
+            </span>
+          ),
+        )}
         <span className="ml-auto inline-flex flex-wrap items-center gap-2">
           {ML_SEVERITIES.map((s) => (
             <span key={s} className="inline-flex items-center gap-1">
@@ -1024,6 +1162,8 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
   const openBotPrsDetail = useFilters((s) => s.openBotPrsDetail);
   const openBotOnlyDetail = useFilters((s) => s.openBotOnlyDetail);
+  // The "what the bots are flagging" tiles/chips → the flagging drill-down tab.
+  const openBotFlaggingDetail = useFilters((s) => s.openBotFlaggingDetail);
   // The Tune/Drop pills → the Advisor tab, focused on the clicked bot. Pro-gated
   // (`botAdvisor`), hidden-not-upsold, and cross-repo-rail only: the Advisor tab itself
   // doesn't render in the per-repo console (it is workspace-grain, like Themes), so a pill
@@ -1131,7 +1271,16 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             same window as the table below it. Self-hides when the window has nothing scored
             and nothing pending. */}
         {showMlStrip && ml && (
-          <MlTotalsStrip ml={ml} overlapClusters={t.overlapClusters ?? 0} />
+          <MlTotalsStrip
+            ml={ml}
+            overlapClusters={t.overlapClusters ?? 0}
+            // ⚠ The drill-down inherits the SAME triple this panel measured with: the workspace
+            // (`workspaceId`, read by the tab from the store), the window (`botAnalyticsWindow`,
+            // the shared transient field — which is why the tab must not keep a local one), and
+            // the repo narrowing. `repoId ?? null` is that third leg: on the per-repo Bots tab
+            // the tile counts ONE repo, so the list must too.
+            onOpen={(s) => openBotFlaggingDetail(s, repoId ?? null)}
+          />
         )}
         <div className="text-[11px] text-gray-500 dark:text-gray-400">
           <span className="font-semibold tabular-nums text-gray-700 dark:text-gray-200">
