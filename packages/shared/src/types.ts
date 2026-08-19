@@ -4124,9 +4124,83 @@ export type AiFixStatus =
   | 'failed'
   | 'cancelled';
 
-// What seeded the fix prompt: the stored CI analysis, the latest Claude review, or a
-// plain request (summary/description only).
-export type AiFixSeed = 'ci_analysis' | 'review' | 'plain';
+// What seeded the fix prompt: the stored CI analysis, the latest Claude review, a
+// user-picked set of the PR's own review comments, or a plain request (summary/description
+// only).
+export type AiFixSeed = 'ci_analysis' | 'review' | 'plain' | 'comments';
+
+// ---- comment-seeded fixes ("fix from comments") ----
+
+// Which of the PR's comment id spaces a target lives in. The three are DISTINCT id
+// spaces (review_comments / pr_comments / reviews), exactly as ml_comment_labels keys
+// them — so a bare id is ambiguous and every target carries its kind.
+export type AiFixCommentKind = 'review_comment' | 'pr_comment' | 'review';
+
+// One comment the user dragged into the fix scope. The client sends only (kind, id); the
+// server resolves the body, author, file anchor and code hunk itself — a client-supplied
+// body would be an unauthenticated way to put arbitrary text in an agent's prompt.
+export interface AiFixCommentTargetRef {
+  kind: AiFixCommentKind;
+  id: number;
+}
+
+// A resolved target as STORED on the run, so the report renders (and stays honest) long
+// after the PR detail moved on. `ref` is the stable prompt label ("C1", "C2", …) the agent
+// must cite; it is assigned server-side in list order and is what maps a verdict back to
+// its comment.
+export interface AiFixCommentTarget extends AiFixCommentTargetRef {
+  ref: string;
+  authorId: number | null;
+  authorLogin: string | null;
+  isBot: boolean;
+  // File anchor (review comments only; null for PR-level comments and review bodies).
+  path: string | null;
+  line: number | null;
+  // The thread this comment belongs to, when it has one — the reply target for a pushback.
+  threadId: number | null;
+  url: string | null;
+  // Short preview for the report card; the full body went to the agent, not the wire.
+  excerpt: string;
+}
+
+// What the agent concluded about ONE seeded comment. `verdict` is the disposition;
+// `pushback` is set only when the agent is DISAGREEING (invalid / out_of_scope / rejected)
+// and is the argued rebuttal, ready for the user to send as a reply — nothing posts it
+// automatically.
+export type AiFixCommentDisposition =
+  | 'fixed'
+  | 'partially_fixed'
+  | 'already_addressed'
+  | 'invalid'
+  | 'out_of_scope'
+  | 'needs_human';
+
+export interface AiFixCommentVerdict {
+  // The prompt label the agent cited; matched back to AiFixCommentTarget.ref.
+  ref: string;
+  // Null when the agent cited a ref that was not in the seed set (kept, not dropped —
+  // a fabricated ref is information about the run).
+  target: AiFixCommentTarget | null;
+  verdict: AiFixCommentDisposition;
+  // Whether the agent judged the comment technically correct, independent of whether it
+  // fixed anything (a valid comment can still be out of scope).
+  //
+  // ⚠ THREE-STATE, and `null` is load-bearing: it means NOT ASSESSED — the row was synthesized
+  // for a comment the agent never reported on, or one that never fit the prompt at all. A
+  // two-state field forced those rows to `false`, which rendered as a positive claim that a
+  // reviewer's comment was judged WRONG, sitting directly above prose saying nothing is known
+  // about it. On a bot-flooded PR that fired on every skipped comment.
+  valid: boolean | null;
+  // Why — grounded in the code it read.
+  reasoning: string;
+  // The argued rebuttal, for a comment the agent is pushing back on. Null otherwise.
+  pushback: string | null;
+  // A durable takeaway worth remembering about this reviewer/bot's comment, if any.
+  learning: string | null;
+  // Paths the agent says it edited for this comment. Advisory — the authoritative
+  // changeset is still the captured git diff, never the agent's self-report.
+  filesTouched: string[];
+}
 
 export type AiFixPhase =
   | 'fetching_diff'
@@ -4185,6 +4259,12 @@ export interface AiFix {
   resolved: AiFixResolved | null;
   // The Claude review this fix was seeded from, if any.
   sourceReviewId: number | null;
+  // seed === 'comments' only: the comments the run was given, in the order the prompt
+  // listed them, and what the agent concluded about each. Both null on every other seed —
+  // and `commentVerdicts` is null (not []) on a comments run whose agent reported nothing,
+  // which is a different fact from "it reported an empty list".
+  commentTargets: AiFixCommentTarget[] | null;
+  commentVerdicts: AiFixCommentVerdict[] | null;
   costUsd: number | null;
   numTurns: number | null;
   error: string | null;
@@ -4249,7 +4329,25 @@ export interface GenerateFixBody {
   seed?: AiFixSeed;
   // When seed === 'review', the review text to seed the prompt with.
   reviewText?: string;
+  // When seed === 'comments', the comments to work through — (kind, id) pairs only. The
+  // server resolves each one against THIS PR's rows and silently drops anything that
+  // doesn't belong to it, so a forged id is inert rather than an error. Capped
+  // (AI_FIX_MAX_COMMENT_TARGETS) because every target costs prompt budget.
+  commentTargets?: AiFixCommentTargetRef[];
 }
+
+// How many comments one comments-seeded run will accept. A 60-thread bot-flooded PR is this app's
+// normal workload, and the whole set would blow the prompt budget the reference diff also has to
+// fit in — so the UI surfaces this cap rather than letting the server truncate a bigger basket.
+//
+// ⚠ The GUARANTEE is narrower than "25 always fit", and saying otherwise was a real bug: the
+// server renders each comment with its body and anchor hunk under its own char budget, and a
+// basket of 25 unusually LONG comments still loses a tail (reported per comment as "did not fit
+// the prompt budget", never silently). The budgets are sized so that a realistically-sized 25 fits;
+// they live in `packages/pro/src/ai-fix/comment-seed.ts` (SEED_CHAR_BUDGET) and `prompts.ts`
+// (FIX_COMMENTS_DIFF_BUDGET) and are ONE decision with this number — change none of the three
+// without re-measuring the other two.
+export const AI_FIX_MAX_COMMENT_TARGETS = 25;
 
 // Push a completed fix. `target` is which branch to push onto; a 'new' branch also
 // opens a PR against the base branch.

@@ -589,12 +589,22 @@ passthrough on `/api/me`, and inert seams. Details:
 [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) +
 [docs/PRO-PLATFORM.md](docs/PRO-PLATFORM.md). What bites:
 
-- **`apiVersion` is 17 and FOUR literals must agree**: host `contract.ts`, plugin
+- **`apiVersion` is 19 and FOUR literals must agree**: host `contract.ts`, plugin
   `index.ts`, plugin `contract-types.ts`, and `bind.ts`'s runtime gate
-  (`plugin?.apiVersion !== 17`) — the actual enforcer. A half-bump silently degrades the
+  (`plugin?.apiVersion !== 19`) — the actual enforcer. A half-bump silently degrades the
   ENTIRE plugin to OSS mode: capabilities dark, every `/api/pro/*` 404, nothing thrown.
   No test pins it; detection is `tsc` (TS2367 at the gate) + a boot check of `/api/me`.
-  (16 → 17 added ONE seam: `GithubSeam.fetchReviewCommentHunks` — lean-storage ANCHOR-HUNK
+  ⚠ **The plugin half of a bump lives in a SUBMODULE, so "all four" spans two repos** — the
+  gitlink this repo commits must point at a plugin commit carrying the same number, or a
+  fresh `git submodule update --init` checks out a plugin the host then rejects.
+  (18 → 19 is "fix from comments": `CodingSeam.generateFix`'s result gains OPTIONAL
+  `commentVerdicts: FixItemVerdict[]`, the per-item dispositions the agent reports through
+  core's `submit_fix` tool. Core stays ignorant of what the items ARE — the plugin's prompt
+  assigns the `ref` labels and `ai-fix/comment-seed.ts` maps them back to comment rows.
+  17 → 18 widened `ProHostQueries.getBotAnalytics`'s `window` from a bare `BotWindowKind`
+  to `kind | {kind, fromMs, toMs}` so the Insights chat's chosen range reaches core as real
+  bounds, and added `'rolling_90'`.
+  16 → 17 added ONE seam: `GithubSeam.fetchReviewCommentHunks` — lean-storage ANCHOR-HUNK
   hydration (`sync/hydrate-detail.ts`, off the existing 60s PR cache). Without it both the
   `validity` and `addressed` judgements read `review_comments.diff_hunk`, which is NULL for
   ~97% of rows, and correctly answered "unclear — I can't see the surrounding code" while
@@ -651,6 +661,20 @@ passthrough on `/api/me`, and inert seams. Details:
 - Tiers: **core** (free — feed/timeline/My Turn/Bots, no AI) · **pro** (AI summaries +
   Insights, on whenever the plugin is active) · **pro+** (AI Analysis + AI Fix + Claude
   Review, all gated together by the ONE flag `PRO_ADVANCED_AI_ENABLED`).
+- **AI Fix has FOUR seeds** (`AiFixSeed`) and the newest one, **`'comments'` ("fix from
+  comments")**, is a picker + basket on the AI Fix tab: the chosen comments become a numbered
+  prompt list, the agent must **judge each comment's validity BEFORE fixing it**, and it reports
+  per comment — including an argued **pushback** the user can send as a reply with one click
+  (nothing posts itself). Same single run, same one commit, same push flow. Stored in two
+  nullable JSON columns on `ai_fixes` (plugin migration `0024`), joined by the `C<n>` ref label
+  the PLUGIN's prompt assigns — core's `submit_fix` carries the verdicts without knowing what
+  the items are. Landmines: `resolveSeedText` short-circuits on `input.seedText` before any
+  seed-kind branch; the seed text was the ONE uncapped input in the fix prompt; the prompt is
+  rendered and STORED at start time so bodies/hunks are frozen; this seed WIDENS the
+  attacker-authored channel to every comment dragged in, so the untrusted-input paragraph and
+  per-comment fencing are the whole mitigation; and it must never get its own queue/slot (the
+  worktree is keyed on the SHA alone). Full contract:
+  [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § "Fix from comments".
 - Generation is cost-gated everywhere: payload-hash caches (**the hash must zero
   `Date.now()`-derived fields** or a dormant repo re-bills hourly), per-account
   serialisation + intervals, credit metering (`AI_CREDITS_PER_USD` = 1250, inlined in
@@ -1018,8 +1042,12 @@ ANY migration. Operating rules:
 sprint refresh) now cover the Default workspace ONLY; PrDetail still classifies bots
 client-side by login; the legacy `?team=` URL rule is unit-tested nowhere;
 `SprintReportCard` has no importer yet the AI-policy sweep still spends;
-`packages/pro/test/` (135 tests) + `apps/frontend/test/` (135 tests) do not run in CI;
-auto-merge's retarget guard still lacks a stored `expected_base_ref`; ML labels are never
+`packages/pro/test/` (225 tests) + `apps/frontend/test/` (381 tests) do not run in CI, and
+neither directory is typechecked (both tsconfigs include only `src`) — run them by hand with
+`./apps/backend/node_modules/.bin/vitest run --root packages/pro | --root apps/frontend`;
+auto-merge's retarget guard still lacks a stored `expected_base_ref`; **AI Fix's conflict-resolver
+paths (`rebaseResolve` / `mergeResolveAndPush`) GATE on credits but never CHARGE them** — only
+`saveFixSuccess` calls `recordAiUsage`, so a fix that ends in a rebase-resolve under-bills; ML labels are never
 re-scored (neither an edited body nor a model-version bump invalidates one — `pnpm ml:enrich
 --reset` is the only refresh); a SINGLE comment the severity-api rejects still blocks its whole
 workspace's enrichment backlog forever (`hardFailure` abandons the workspace, and the candidate

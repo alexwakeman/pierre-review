@@ -105,9 +105,33 @@ export interface GenerateFixArgs {
   onProgress: (p: CodingProgress) => void;
 }
 
+// One item's disposition from a LIST-seeded fix run (the "fix from comments" seed). The
+// agent reports these through the core `submit_fix` tool; `ref` is the label the CALLER's
+// prompt assigned, so core never needs to know what the items are. Self-report only —
+// `filesTouched` is advisory and the changeset still comes from git.
+export interface FixItemVerdict {
+  ref: string;
+  verdict:
+    | 'fixed'
+    | 'partially_fixed'
+    | 'already_addressed'
+    | 'invalid'
+    | 'out_of_scope'
+    | 'needs_human';
+  valid: boolean;
+  reasoning: string;
+  pushback?: string;
+  learning?: string;
+  filesTouched?: string[];
+}
+
 export interface GenerateFixResult {
   summary: string;
   commitMessage: string;
+  // Per-item dispositions, when the caller's prompt asked for them (apiVersion 19).
+  // `undefined` for a plain/CI-seeded run — the agent had no list to report on, which is
+  // deliberately distinct from an empty array.
+  commentVerdicts?: FixItemVerdict[];
   // Unified-diff patch (git add -A + git diff --cached --binary — includes new files).
   patch: string;
   filesChanged: string[];
@@ -789,6 +813,12 @@ export interface ProPlugin {
   // and `validity` judgements (see src/sync/hydrate-detail.ts). Without it both judgements read
   // a `diff_hunk` column that is NULL for ~97% of rows and answer "I can't see the code".
   //
+  // 18 → 19: `CodingSeam.generateFix`'s result gains OPTIONAL `commentVerdicts`
+  // (`FixItemVerdict[]`) — the per-item dispositions behind "fix from comments", reported by
+  // the agent through core's `submit_fix` tool. Core stays ignorant of what the items ARE:
+  // the plugin's prompt assigns the `ref` labels and maps them back to comment rows. Additive
+  // and optional, so a plain / CI-seeded run is byte-identical to before.
+  //
   // 17 → 18: `ProHostQueries.getBotAnalytics`'s `window` widened from a bare `BotWindowKind` to
   // `kind | {kind, fromMs, toMs}`, so the Insights chat's user-chosen range (which now includes
   // "Sprint to date" and 90d) can hand core the REAL window. Core alone cannot: `'sprint'` there
@@ -803,11 +833,11 @@ export interface ProPlugin {
   // ProHostQueries gained getAdvisorFindings/getBotEffectPanel, CodingErrorCode gained
   // BRANCH_EXISTS, llm.complete gained `credential`, and ProCapabilities gained `botAdvisor`.
   //
-  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (the `plugin?.apiVersion !== 18` runtime gate) and two
+  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (the `plugin?.apiVersion !== 19` runtime gate) and two
   // more in the plugin (packages/pro/src/index.ts, packages/pro/src/contract-types.ts). Bump ALL
   // FOUR or the plugin log-and-degrades to OSS mode against a version that is actually correct:
   // capabilities go dark, every /api/pro/* route 404s, and nothing throws.
-  apiVersion: 18;
+  apiVersion: 19;
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 

@@ -41,7 +41,11 @@ const TONES = {
 } as const;
 
 function chipLabelClass(active: boolean, tone: keyof typeof TONES): string {
-  return `max-w-[12rem] truncate text-xs font-medium ${
+  // `min-w-0 flex-1` rather than a `max-w` cap: chips are now a FIXED width, so the label's job is
+  // to absorb whatever space the icon and the ✕ leave. A max-width instead lets a long label push
+  // the ✕ out of its column on some tabs and not others — the exact misalignment the fixed width
+  // exists to remove. `min-w-0` is what actually lets `truncate` engage inside a flex row.
+  return `min-w-0 flex-1 truncate text-xs font-medium ${
     active ? TONES[tone] : 'text-gray-600 dark:text-gray-300'
   }`;
 }
@@ -91,9 +95,16 @@ function ChipShell({
       data-tabkey={tabKey}
       onContextMenu={(e) => onOpenMenu(e, tabKey)}
       {...drag}
+      // ⚠ EVERY CLOSABLE TAB IS THE SAME WIDTH (`w-52`), not sized to its label. The ✕ is the last
+      // flex item on a fixed-width box, so it lands at the SAME offset from the tab's left edge on
+      // every tab — which is the whole point: a close button that moves with the label length is a
+      // moving target in a row of tabs, and a strip of ragged widths reads as broken alignment.
+      // Labels absorb the difference by truncating (`chipLabelClass`), which they already did.
+      // `width` remains a prop so a future kind can opt out deliberately; nothing does today.
+      //
       // touch-none + select-none: without them the strip's overflow-x scroll (and text
       // selection) swallow the pointer drag before it can reorder anything.
-      className={`group flex ${width ?? ''} shrink-0 touch-none select-none items-center gap-1 rounded-t-md border border-b-0 pl-2 pr-1 ${
+      className={`group flex ${width ?? 'w-52'} shrink-0 touch-none select-none items-center gap-1 rounded-t-md border border-b-0 pl-2 pr-1 ${
         isDragged ? 'cursor-grabbing opacity-50 ' : ''
       }${
         active
@@ -106,7 +117,10 @@ function ChipShell({
         role="tab"
         aria-selected={active}
         onClick={() => onActivate(tabKey)}
-        className={buttonClass ?? 'flex items-center gap-1.5 py-1.5 text-left'}
+        // `min-w-0 flex-1` by default too: the activating button must OWN the space left over
+        // after the ✕, or a single-line chip sizes to its content and leaves the ✕ floating in the
+        // middle of a fixed-width tab.
+        className={buttonClass ?? 'flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left'}
         title={title}
       >
         {body}
@@ -337,13 +351,13 @@ function TabChip({
       ),
     };
   } else {
-    // PR tabs (pr-detail / pr-focus): fixed width, two-line body — PR title + author; a
-    // focus tab is marked with a magnifier icon + "PR focus" subtitle.
+    // PR tabs (pr-detail / pr-focus): two-line body — PR title + author; a focus tab is marked
+    // with a magnifier icon + "PR focus" subtitle. The width is ChipShell's shared default now
+    // (every closable chip is `w-52`), so nothing is set here.
     const isFocus = tab.kind === 'pr-focus';
     const meta = tab.meta;
     const author = meta?.authorDisplayName ?? meta?.authorLogin ?? 'unknown';
     cfg = {
-      width: 'w-52',
       buttonClass: 'flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left',
       title: `${meta?.repoFullName ?? ''} #${meta?.number ?? ''} · ${meta?.title ?? ''}${
         isFocus ? ' (focus)' : ''
@@ -593,6 +607,11 @@ export function PinnedTabsBar(): JSX.Element {
     lastX: number;
     el: HTMLElement;
     dragging: boolean;
+    // Where inside the chip the pointer grabbed it, and where the strip's chips sit — both
+    // captured at threshold entry so the ghost keeps the grab point under the cursor instead
+    // of jumping its own centre there.
+    grabDx: number;
+    top: number;
   } | null>(null);
   // True from drag-mode entry until the next pointerdown — guards the chip's onClick so
   // the drop doesn't also switch tabs.
@@ -684,6 +703,40 @@ export function PinnedTabsBar(): JSX.Element {
     [moveTab, stopAutoScroll],
   );
 
+  // ── the drag ghost ───────────────────────────────────────────────────────────────────────────
+  // A LIFTED COPY of the chip that follows the pointer, so the gesture reads as "carrying this
+  // tab" rather than "the strip is reflowing for reasons". The chip left behind keeps its
+  // half-transparent placeholder styling, which now reads as the hole the tab came out of.
+  //
+  // It is a CLONE of the live chip node, not a re-render of the label: the per-kind chip bodies
+  // (PR avatar + two-line title, drill-down emoji + label, search magnifier + query) live in
+  // `TabChip`'s config ladder, and a hand-built ghost would be a second copy of all of it — drifting
+  // the moment a kind changes. Cloning also gets the avatar image and the active/inactive colours
+  // for free. React never touches the host's children (it renders it empty), so mutating it
+  // imperatively is safe.
+  const ghostRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const host = ghostRef.current;
+    if (host == null) return;
+    if (draggedKey == null) {
+      host.replaceChildren();
+      return;
+    }
+    const src = dragRef.current?.el;
+    if (src == null) return;
+    const clone = src.cloneNode(true) as HTMLElement;
+    // Strip everything that would make the copy act like a real chip: its identity (so the drop
+    // slot maths, which enumerates `[data-tabkey]`, can never count the ghost) and its ✕.
+    clone.removeAttribute('data-tabkey');
+    clone.querySelector('[data-tab-close]')?.remove();
+    clone.classList.remove('opacity-50');
+    host.replaceChildren(clone);
+    // Paint it at the grab point immediately: without this it renders once at the parked
+    // coordinates and visibly snaps on the next pointermove.
+    const d = dragRef.current;
+    if (d != null) host.style.transform = `translate3d(${d.lastX - d.grabDx}px, ${d.top}px, 0)`;
+  }, [draggedKey]);
+
   // Escape cancels an in-flight drag without committing. Capture-phase + stopPropagation
   // so the global `esc` (useKeyboard → showTimeline) doesn't also fire.
   useEffect(() => {
@@ -712,6 +765,13 @@ export function PinnedTabsBar(): JSX.Element {
         return;
       }
       d.lastX = e.clientX;
+      // The ghost tracks the pointer by a DIRECT STYLE WRITE — a setState per pointermove would
+      // reconcile the whole strip ~60×/s, which is the same reason the preview order lives in
+      // local state and commits once on drop.
+      const host = ghostRef.current;
+      if (host != null) {
+        host.style.transform = `translate3d(${e.clientX - d.grabDx}px, ${d.top}px, 0)`;
+      }
       updatePreview(e.clientX);
       const strip = stripRef.current;
       if (strip != null) {
@@ -755,6 +815,7 @@ export function PinnedTabsBar(): JSX.Element {
         const key = e.currentTarget.dataset.tabkey;
         if (key == null) return;
         draggedRef.current = false;
+        const r = e.currentTarget.getBoundingClientRect();
         dragRef.current = {
           key,
           pointerId: e.pointerId,
@@ -762,6 +823,8 @@ export function PinnedTabsBar(): JSX.Element {
           lastX: e.clientX,
           el: e.currentTarget,
           dragging: false,
+          grabDx: e.clientX - r.left,
+          top: r.top,
         };
       },
       // Threshold entry only — past 4px horizontal the drag starts and the window-level
@@ -826,6 +889,7 @@ export function PinnedTabsBar(): JSX.Element {
   }, [tabs, previewKeys]);
 
   return (
+    <>
     <div
       ref={stripRef}
       data-testid="pinned-tabs"
@@ -873,5 +937,20 @@ export function PinnedTabsBar(): JSX.Element {
         />
       )}
     </div>
+    {/* The ghost's HOST. A SIBLING of the strip, never a child: the strip is `overflow-x-auto`,
+        and while `position: fixed` escapes that clip today, one `transform` added to the strip
+        (a hover lift, an animation) would turn it into the containing block and silently clip the
+        ghost to the 42px bar. Kept mounted and empty so the clone can be attached synchronously
+        at drag start, and `pointer-events-none` so it can never become its own hit target — the
+        drop slot is derived from the real chips' rects. */}
+    <div
+      ref={ghostRef}
+      aria-hidden="true"
+      className={`pointer-events-none fixed left-0 top-0 z-[70] flex items-stretch rounded-t-md shadow-lg ring-1 ring-black/10 dark:ring-white/10 ${
+        draggedKey == null ? 'hidden' : ''
+      }`}
+      style={{ transform: 'translate3d(-9999px, -9999px, 0)' }}
+    />
+    </>
   );
 }

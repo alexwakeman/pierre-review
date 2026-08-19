@@ -158,8 +158,8 @@ nothing).
   SQLite-only, so nothing automated covers the dialect divergences it carries. (CORE's pg chain
   `0000`→`0035` — including `0031`/`0032` — WAS replayed by hand during `0035`; see that section.
   It is still a one-off by hand, not CI, so it will go stale again.) The same is true of
-  everything added since: **pg `0036`–`0037`, pg `0039` and the plugin `0021`/`0022` pg twins are
-  unverified against a real Postgres.**
+  everything added since: **pg `0036`–`0037`, pg `0039` and the plugin `0021`/`0022`/`0023`/`0024`
+  pg twins are unverified against a real Postgres.**
 - **`trunk_ci_status_events` (`0052` / pg `0039`) has NO BACKFILL.** The table is append-only and
   written only by `sync/branch-status.ts`, on a TRANSITION, at the end of a full repo walk — and
   the one-time CI-history backfill (`sync/backfill-ci-history.ts`) synthesizes only the PR-side
@@ -359,4 +359,33 @@ explicit NULL.
   while the rest of the plugin keeps serving. That is still the better trade than a raise, which
   takes the WHOLE plugin dark (OSS-mode degrade) with nothing anyone would connect to this file;
   the fix is to delete the row from `pro_migrations` and restart once the cause is cleared.
+- ⚠ The pg twin has not been replayed against a real Postgres.
+
+## Plugin `0024` — `ai_fixes.comment_targets` + `comment_verdicts`
+
+Two additive nullable `text` columns holding JSON on the plugin's `ai_fixes` table (sqlite + pg
+twins, filename-sorted, NO journal, no `--> statement-breakpoint`; the pg twin is
+`ADD COLUMN IF NOT EXISTS` inside the standard `DO $$ … EXCEPTION WHEN others THEN RAISE WARNING`
+wrapper). They are the record of a **comments-seeded** fix run — the "fix from comments" workflow:
+`comment_targets` is the `AiFixCommentTarget[]` the run was given (written at INSERT, in prompt
+order, each carrying its `C<n>` ref label), `comment_verdicts` the `AiFixCommentVerdict[]` the
+agent reported (written on SUCCESS). `ref` is the join key between the two; both are NULL on every
+other seed.
+
+- **`0023` is the Insights chat-answer-window pair**, so this one is `0024` in both folders.
+- **Nullable with no default, deliberately.** `packages/pro/test/isolation.test.ts` auto-applies
+  every file in `packages/pro/migrations` (`readdirSync` + sort) and inserts `ai_fixes` rows from a
+  FIXED value list — a `NOT NULL` column without a default would break that suite.
+- **Stored, not re-derived.** The targets are resolved once at launch (bodies, authors, file
+  anchors and hydrated anchor hunks), and the prompt is rendered and stored at the same moment, so
+  the run's inputs are frozen. Re-resolving them to render the report would give a different answer
+  once the PR moved on, and would put a GitHub call behind a plain GET.
+- **The verdicts are the agent's SELF-REPORT and are stored as commentary only.** The authoritative
+  changeset is still the captured git diff — `filesTouched` inside a verdict is labelled as the
+  agent's own account wherever the UI shows it.
+- ⚠ What the pg warning path costs here: the ai-fix GET SELECTs both columns, so a database that
+  took the warning 500s that route — the whole AI Fix tab breaks while the rest of the plugin keeps
+  serving. Still the better trade than a raise, which takes the WHOLE plugin dark (OSS-mode
+  degrade); the fix is to delete the row from `pro_migrations` and restart once the cause is
+  cleared.
 - ⚠ The pg twin has not been replayed against a real Postgres.

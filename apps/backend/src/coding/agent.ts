@@ -261,7 +261,7 @@ export async function runCodingAgent(
       token,
     ));
 
-    let captured: { summary: string; commitMessage: string } | null = null;
+    let captured: SubmitFixPayload | null = null;
     const server = createSdkMcpServer({
       name: 'fix',
       version: '1.0.0',
@@ -272,7 +272,13 @@ export async function runCodingAgent(
           submitFixShape,
           async (a) => {
             const p = a as unknown as SubmitFixPayload;
-            captured = { summary: p.summary, commitMessage: p.commitMessage };
+            captured = {
+              summary: p.summary,
+              commitMessage: p.commitMessage,
+              // Present only for a list-seeded run (see submitFixShape); passed through
+              // verbatim for the caller to map back to its own items.
+              commentVerdicts: p.commentVerdicts,
+            };
             return { content: [{ type: 'text', text: 'Fix recorded.' }] };
           },
         ),
@@ -322,7 +328,7 @@ export async function runCodingAgent(
     // A cast so the closure-assigned `captured` reads back as its declared union.
     // (TS flow-narrows it to `null` because its only assignment is inside the tool
     // callback, which it can't prove ran — a plain annotation wouldn't break that.)
-    const fix = captured as { summary: string; commitMessage: string } | null;
+    const fix = captured as SubmitFixPayload | null;
     return {
       summary:
         fix?.summary ??
@@ -330,6 +336,9 @@ export async function runCodingAgent(
           ? `Applied changes to ${filesChanged.length} file(s).`
           : 'The agent made no changes.'),
       commitMessage: fix?.commitMessage ?? 'AI fix',
+      // Absent (not []) when the agent reported no per-item dispositions — the caller
+      // distinguishes "this run had no list" from "it reported an empty list".
+      commentVerdicts: fix?.commentVerdicts,
       patch,
       filesChanged,
       baseSha,

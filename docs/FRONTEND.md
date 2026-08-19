@@ -142,7 +142,19 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   state, ONE `moveTab` store commit on drop so `persist()`/the URL subscription don't run
   per-frame; avatars get `draggable={false}`; `touch-action:none` or the strip's own
   horizontal scroll swallows touch drags; order persistence is only as durable as tab
-  persistence — pr tabs survive a reload, drill-down positions don't). **Right-click opens a
+  persistence — pr tabs survive a reload, drill-down positions don't). **A drag carries a
+  GHOST**: a `position: fixed` copy of the chip that follows the pointer while the original
+  stays half-transparent as the hole it came out of. It is a **`cloneNode` of the live chip**,
+  not a re-rendered label — the per-kind bodies (PR avatar + two lines, drill-down emoji,
+  search magnifier) live in `TabChip`'s config ladder and a hand-built ghost would be a second
+  copy of all of it. The clone is stripped of `data-tabkey` (the drop-slot maths enumerates
+  those, so a ghost carrying one would count itself) and of its ✕, and its host is a SIBLING of
+  the strip: the strip is `overflow-x-auto`, and one `transform` added to it later would make it
+  the containing block and clip a `fixed` child to the 42px bar. **Every closable chip is the
+  same width** (`w-52` in `ChipShell`, labels absorbing it via `min-w-0 flex-1 truncate`), so the
+  ✕ sits at the same offset on every tab — a close button that moves with the label length is a
+  moving target in a row of tabs. The fixed Activity/Timeline chips stay content-sized: they have
+  no ✕ and are not "tabs that open". **Right-click opens a
   context menu** (floating-ui in a `FloatingPortal` — the strip is `overflow-x-auto`, an
   in-flow menu would clip to the 42px bar — virtual reference at the click point): Close this
   tab / Close other tabs / Close all tabs (`closeOtherTabs`/`closeAllTabs` in the store; on
@@ -538,8 +550,65 @@ read-only variant — the write gate is GitHub's own `viewerCanReact`.
   Chips carry `stopPropagation` + a `data-noactivate` marker because they sit inside
   click-to-open cards.
 
+### The AI-Fix comment picker + validity report (`components/AiFix/`)
 
+The `'comments'` AI-Fix seed's two UI halves. Backend contract:
+[docs/PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § "Fix from comments".
 
+- **`CommentPicker`** — the PR's comments on the **left**, the **fix scope** basket on the right,
+  drag either way, plus "Move all" and a per-row `+`/`−`. Reading order matches the movement, and
+  the DOM order matches both, so a keyboard pass walks the list before the basket. The `+`/`−` is a
+  **full-height column down the card's right edge**, not a glyph in the header row: it is the
+  PRIMARY way into the scope (drag is the shortcut, not the reverse), it points the way the comment
+  travels, and an already-added card shows a tick rather than a greyed-out `+` — down a 60-row list
+  "done" and "broken" must not look alike. It renders inside `FixerSection`, so it is
+  gated on the `aiFix` capability exactly like the launch button (the tab itself is visible under
+  `aiAnalysis || aiFix`, so gating it on the tab would draw a basket with no way to launch).
+  `disabled` while a run is in flight rather than hidden — the basket is the record of what that
+  run was given.
+- **`lib/aiFixCommentModel.ts` holds every decision** (grouping, ordering, caps, root/reply) as pure
+  functions, and the component is chrome + drag plumbing. Not a style preference: the frontend
+  vitest config has no React plugin and no jsdom, so logic is only testable at all once it is out
+  of the component.
+- **Selection lives in `store/aiFixComments.ts`** — a standalone, non-persisted, non-URL store keyed
+  by prId. NOT a `FilterDefaults` key (persistence and "Clear filters" share that list, and a
+  URL-serialized basket would let a link seed someone else's paid run), but a store rather than
+  component state because AiFixTab is lazy and its body unmounts on a tab switch. The cap is
+  enforced in the store, not just the UI: the server truncates, and a silently dropped tail means
+  watching a paid run work through a scope missing the comments you cared about.
+- **Drag is POINTER EVENTS** (the tab strip / splitter / marker-popover precedent), for two reasons:
+  one drag model in one codebase, and HTML5 DnD does not work on touch at all. ⚠ Drag is never the
+  ONLY path — the per-row `+`/`−` buttons carry `aria-label`s and are what a keyboard reaches.
+- **Ordering is imposed here, not inherited.** `getPrDetail`'s thread select has no `orderBy`, so
+  wire order is heap order and flips after any UPDATE on Postgres. Bots sort worst-finding-first
+  with **unlabelled last**, humans newest-first, and both tiebreak on the key so the result never
+  depends on input order. `praise`/`isSummary` rows are NON-findings and SINK (a walkthrough scored
+  `major` would otherwise outrank every real finding), and when there is no label data at all the
+  model reports `botsSortedBySeverity: false` so the UI can stop claiming a severity ranking —
+  ML labels exist only for bot text and only when `SEVERITY_API_URL` is set.
+- **Honesty about what the list is not**: bodies may be a ~160-char excerpt (`body ?? excerpt ?? ''`
+  with no flag), the list is capped at GitHub's page size per kind (so "Move all" ≠ everything —
+  `capNotice`), and a review comment's line is NULL for most outdated threads, in which case the
+  anchor renders as `~<line>` reconstructed from the hunk and says so. Replies are hidden behind one
+  toggle and render subordinate to their root; the basket renders from `byKey` (all comments) so a
+  deliberately-dragged reply does not vanish when replies are collapsed.
+- ⚠ The bot listing is fetched for the **PR's OWN workspace** (`useRepos()` + `pr.repoId`),
+  unnarrowed — never `filters.workspaceId`. A PR tab can hold a PR from any workspace via `?pr=`, a
+  restored tab or a search hit, and the wrong workspace's judgements are the pinned dead-control
+  regression (`test/resolvableBotThreads.test.ts`).
+- **`CommentFixReport`** — the per-comment verdicts under the fix summary, mounted ABOVE the "no
+  changes" branch because a run that correctly judged every comment invalid produces no diff at all,
+  and that is the run whose report matters most. It has NO hooks in the exported component (`seed` /
+  `commentVerdicts` are row fields, so a re-run flips the early returns and a `useMemo` above them
+  would change the hook count mid-life), issues zero requests, and returns `null` when there is
+  nothing to report. `valid` renders as its own pill next to the disposition because the two
+  diverge. Disagreement is purple, never red — the agent arguing back is a legitimate outcome.
+- ⚠ **A pushback never posts itself**: it renders as text with an editable prefilled composer and an
+  explicit Send, through core's existing thread-reply / PR-comment routes. Because a double-post is
+  not undoable, the sent claim is keyed `${fixId}|${ref}` in module state (those write hooks declare
+  no `mutationKey`, so `useIsMutating` is not reachable), claimed on click, promoted on success and
+  RELEASED on failure, and settlement chains on the `mutateAsync` promise — React Query drops
+  per-call callbacks when the component unmounts, which is exactly the tab-switch-mid-request case.
 
 ---
 

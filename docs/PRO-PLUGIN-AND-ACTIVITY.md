@@ -66,9 +66,15 @@ gained `botAdvisor`).
 ⚠ **FOUR literals must agree, not two**, and the one that actually enforces the handshake is the
 easiest to miss: `apps/backend/src/pro/contract.ts` (the host's declared `ProPlugin['apiVersion']`),
 `packages/pro/src/index.ts` (the plugin's exported value), `packages/pro/src/contract-types.ts` (the
-plugin's mirror), and **`apps/backend/src/pro/bind.ts`'s `plugin?.apiVersion !== 17` — THE RUNTIME
-GATE**. A half-bump makes `bind.ts` log-and-degrade the ENTIRE plugin to OSS mode: capabilities dark,
-every `/api/pro/*` 404, nothing thrown. ⚠ **Nothing currently PINS the handshake** —
+plugin's mirror), and **`apps/backend/src/pro/bind.ts`'s `plugin?.apiVersion !==` comparison — THE
+RUNTIME GATE**. A half-bump makes `bind.ts` log-and-degrade the ENTIRE plugin to OSS mode:
+capabilities dark, every `/api/pro/*` 404, nothing thrown. ⚠ The gate's number is deliberately not
+restated here or in the plugin's own checklist: both sat at `17` through two bumps, so the lines
+written to prevent a half-bump were themselves sending the reader to grep for a literal that no
+longer existed. **The current number is whatever those four files say — read them; only the count
+(four) and which file enforces it are stable facts.** Note also that the plugin half lives in a
+SUBMODULE, so "all four" spans two repos and the committed gitlink must point at a plugin carrying
+the same number, or a fresh `git submodule update --init` checks out a plugin the host rejects. ⚠ **Nothing currently PINS the handshake** —
 `pro/contract.test.ts` asserts capability KEYS (it was updated for the `workspaceInsights` rename)
 and contains no `apiVersion` reference at all, so the only detection is `tsc` (TS2367 no-overlap at
 the `bind.ts` gate, assignability at `index.ts`) plus a boot check that `/api/me` reports
@@ -733,6 +739,98 @@ bulk "re-check the stale ones" any more — there is no PR-wide sweep to hang it
   `AnnotationRunResponse.noAuth?` says it outright; the counter arithmetic
   (`requested - cached - skipped > 0` with no `generated`/`failed`) is kept as a FALLBACK for older
   plugin builds and worded with "may", because it is an inference.
+
+### Fix from comments — the `'comments'` AI-Fix seed (apiVersion 19)
+
+The AI Fix tab gains a picker: the PR's comments and threads on the right, a **fix scope** basket on
+the left, drag either way. Launching runs the SAME agentic worktree fixer as every other seed — one
+run, one commit, the existing push/rebase flow untouched — but the prompt is a numbered list of the
+chosen comments and the agent is told to **judge each comment before fixing it** and to report per
+comment. The output is the usual diff + summary PLUS a per-comment verdict card, and where the agent
+disagrees it writes an argued **pushback** that the user can send as a reply with one click.
+
+**Why validity-first is the whole point.** A bot comment is not a work order. The seed's system
+prompt makes the order explicit — read the real code at the anchor, decide whether the comment is
+CORRECT, and only then fix — with `invalid` (wrong), `out_of_scope` (right but not this PR's job)
+and `needs_human` as first-class outcomes, not failures. `valid` is stored SEPARATELY from the
+disposition because the two genuinely diverge: a valid comment can be out of scope, and an invalid
+one can still have been "fixed" defensively. Collapsing them would misreport the run.
+
+**The seam** (`CodingSeam.generateFix` → optional `commentVerdicts: FixItemVerdict[]`) is the only
+contract change. Core's `submit_fix` tool gained an OPTIONAL per-item array and stays ignorant of
+what the items are: the PLUGIN's prompt assigns the `C1..Cn` ref labels, and
+`ai-fix/comment-seed.ts` maps them back to comment rows. A plain / CI-seeded run is byte-identical
+to before, which is why the field had to be optional rather than an empty array.
+
+**`ai-fix/comment-seed.ts` owns all three halves, and they share nothing but the refs**:
+
+- `resolveCommentTargets` — (kind, id) pairs → real rows. **Tenancy**: `review_comments` /
+  `pr_comments` / `reviews` carry no `account_id`, they reach their account via `pr_id`, so every
+  predicate is `prId = <the prId the route already ownership-checked>` and an id that doesn't
+  resolve is **silently DROPPED** (a forged id must be inert, not an error that confirms the row
+  exists somewhere else). Refs are assigned over the SURVIVORS in the client's order. Cost is
+  bounded: a handful of queries regardless of target count, plus **at most ONE** GitHub call for the
+  whole PR's anchor hunks — skipped entirely when no review comment is in the basket.
+- `buildCommentSeedText` — the prompt block. ⚠ **The seed text was the one uncapped input in the
+  whole fix prompt** (the PR body is capped at 4k and the diff at 48k, but `seed.text` was
+  interpolated raw), so a bot-flooded PR dumped in wholesale would have failed the run with an
+  opaque "prompt is too long" AFTER the clone. Per-comment body/hunk caps plus a whole-seed budget
+  now bound it, overflow drops from the END and NAMES what it dropped, and the comments seed takes a
+  smaller diff budget than the other seeds because the two now share one window.
+- `mapCommentVerdicts` — the agent's self-report → the stored rows. Ref matching is trimmed and
+  case-insensitive ("c3." is a ref), a fabricated ref is KEPT with `target: null` (information about
+  the run, not a comment), and **a target the agent never mentioned is synthesized as
+  `needs_human`** — a silently missing comment is exactly the failure the report exists to prevent.
+
+**Storage: two nullable JSON columns on `ai_fixes`** (plugin migration `0024` + its pg twin) —
+`comment_targets` written at INSERT, `comment_verdicts` on success, joined by `ref`. Both NULL on
+every other seed. The targets are stored rather than re-resolved because selection is in-session and
+gone by the time anyone reads the report, and because the stored list is what keeps the report
+honest: it is the set the PROMPT contained, which is not the set the user ticked. The verdicts are
+COMMENTARY — `filesTouched` inside one is the agent's own account, and the authoritative changeset
+is still the captured git diff.
+
+**Landmines this feature is built around:**
+
+- ⚠ **`resolveSeedText`'s first line is `if (input.seedText) return input.seedText`** — it
+  short-circuits before any seed-kind branch. A comments run that reached it carrying client text
+  would prompt the agent with whatever the client sent instead of the server-resolved, capped seed.
+  The comments branch is structurally unable to take that path and accepts no client seed text.
+- ⚠ **`claimed.add(prId)` is reserved synchronously before the awaits**, so every new bail path —
+  including "nothing resolved" — must release it. A leak wedges that PR's fixer forever on
+  `already_running` with no way out short of a restart.
+- ⚠ **The prompt is rendered and stored at START time**, and the run can happen later behind the
+  single global slot. Comment bodies and hunks are therefore FROZEN at launch; nothing in the run
+  path refreshes them, and it must stay that way.
+- ⚠ **NEVER give this mode its own queue or slot.** The worktree path is keyed on the SHA alone and
+  `addWorktree` deletes whatever is already there, so two runs at one head sha would remove each
+  other's live tree; `applyClaudeReviewAuth` also mutates `process.env` and is only safe because
+  AI-Fix concurrency is 1. Route through the existing `enqueue`/`claimed`.
+- ⚠ **Every comment body and hunk in the prompt is attacker-authored** — this seed WIDENS the
+  untrusted channel from title/description/diff to every comment anyone dragged in, and the fixer
+  has `Bash`. The untrusted-input paragraph is the whole mitigation: keep it verbatim, fence each
+  comment individually, and never interpolate comment text into a tool name, path or git argument.
+- ⚠ **Bot-ness on a stored target is core's global `users.isBot`, not the UI's union rule** (isBot ∪
+  the workspace's automated reviewers, manual "human" winning both directions). That set is
+  module-private in core's query layer and is not on `ProHostQueries`, so the plugin does not fork
+  it; on the target it is a prompt hint ("a bot's comment can be wrong"), never a gate, and the
+  PICKER does the authoritative grouping client-side against the PR's OWN workspace.
+- ⚠ **The picker's list is a CAPPED view.** The walk and `PR_DETAIL_QUERY` both page
+  `reviewThreads/comments/reviews (first: 50)`, so "all of a PR's comments" is the first 50 per
+  kind and "Move all" must not claim completeness.
+- ⚠ **Thread order on the wire is HEAP order** (`getPrDetail`'s thread select has no `orderBy`, and
+  it flips after any UPDATE on Postgres), so the picker imposes its own total order. `line` is NULL
+  for ~90% of outdated threads and a review comment has no path/line of its own — they live on
+  `review_threads`.
+- ⚠ **Selection is a standalone non-persisted store keyed by prId** (`store/aiFixComments.ts`), NOT
+  a `FilterDefaults` key: persistence and "Clear filters" share that one list, and a URL-serialized
+  basket would let a link seed someone else's paid run. It is a store rather than component state
+  because AiFixTab is lazy and its body unmounts on a tab switch.
+- ⚠ **Drag is pointer-events, never HTML5 DnD** (the SPA's standing decision), and drag is never the
+  only path — every card has a keyboard-reachable +/− and there is a "Move all".
+- ⚠ **A pushback never posts itself.** It renders as text with an editable prefilled composer and an
+  explicit Send, posting through core's existing thread-reply / PR-comment routes. A double-post is
+  not undoable, so a sent pushback is replaced by a sent state rather than re-offered.
 
 ### Anchor-hunk hydration + resolved-thread verification (apiVersion 17)
 

@@ -31,6 +31,12 @@ import {
   useStartRebase,
 } from '../hooks/useAiFix.js';
 import { CiAnalysisCard, errText } from './CiAnalysisCard.js';
+import { CommentPicker } from './AiFix/CommentPicker.js';
+import { CommentFixReport } from './AiFix/CommentFixReport.js';
+import {
+  useAiFixCommentActions,
+  useAiFixSelection,
+} from '../store/aiFixComments.js';
 import { Markdown } from './Markdown.js';
 import { FileDiffView, type DiffFile } from './diff/FileDiffView.js';
 import { parseGitPatch } from '../lib/diff.js';
@@ -221,16 +227,22 @@ function FixerSection({
     liveStatus?.status ?? dbStatus ?? 'idle';
   const isRunning = displayStatus === 'running' || displayStatus === 'queued';
 
-  const seed: AiFixSeed = seedReviewText
-    ? 'review'
-    : 'plain';
+  // The comments the user dragged into the fix scope (in-session, per PR). A non-empty
+  // basket WINS over a pending review seed: the basket is visible right above this control
+  // and the button names what it will do, whereas the review seed is a one-shot handoff
+  // from another tab that the user may well have forgotten about.
+  const selection = useAiFixSelection(pr.id);
+  const { clear: clearSelection } = useAiFixCommentActions();
+  const seed: AiFixSeed =
+    selection.length > 0 ? 'comments' : seedReviewText ? 'review' : 'plain';
 
   const start = (): void => {
     startFix.mutate(
       {
         model,
         seed,
-        reviewText: seedReviewText ?? undefined,
+        reviewText: seed === 'review' ? seedReviewText ?? undefined : undefined,
+        commentTargets: seed === 'comments' ? selection : undefined,
       },
       { onSuccess: () => onSeedConsumed() },
     );
@@ -253,9 +265,16 @@ function FixerSection({
           </p>
         ) : (
           <>
+            {/* Pick the comments to work through. Rendered above the launch control because
+                it is what the launch control's label is derived from. Disabled (not hidden)
+                while a run is in flight — the basket is the record of what that run was
+                given, so hiding it mid-run would remove the only context for the progress. */}
+            <CommentPicker pr={pr} disabled={isRunning} />
             {seedReviewText && !isRunning && (
               <div className="mb-2 rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300">
-                Ready to generate a fix from the selected review.
+                {seed === 'comments'
+                  ? 'A review is queued as a seed, but the comments in the fix scope take precedence — clear them to fix from the review instead.'
+                  : 'Ready to generate a fix from the selected review.'}
               </div>
             )}
             <div className="flex flex-wrap items-center gap-2">
@@ -285,10 +304,31 @@ function FixerSection({
                   className={BTN_PRIMARY}
                   disabled={startFix.isPending}
                   onClick={start}
+                  title={
+                    seed === 'comments'
+                      ? 'Work through each comment in the fix scope: assess whether it is valid, then fix it'
+                      : undefined
+                  }
                 >
-                  {fix ? 'Generate new fix' : 'Generate fix'}
+                  {seed === 'comments'
+                    ? `Fix ${selection.length} comment${selection.length === 1 ? '' : 's'}`
+                    : fix
+                      ? 'Generate new fix'
+                      : 'Generate fix'}
                 </button>
               )}
+              {seed === 'comments' && !isRunning && (
+                <button
+                  type="button"
+                  className={BTN_SECONDARY}
+                  onClick={() => clearSelection(pr.id)}
+                >
+                  Clear scope
+                </button>
+              )}
+              {/* No "scope is full" line here on purpose — CommentPicker's header already says it,
+                  next to the disabled + buttons it explains. Two copies of one sentence on one
+                  screen reads as two different limits. */}
               {startFix.isError && (
                 <span className="text-[11px] text-red-500">
                   {errText(startFix.error)}
@@ -377,8 +417,16 @@ function FixResult({
           <Markdown>{fix.summary}</Markdown>
         </div>
       )}
+      {/* The per-comment verdicts, for a comments-seeded run. Mounted ABOVE the "no changes"
+          branch on purpose: a run that correctly decided every comment was invalid produces
+          no diff at all, and that is exactly the run whose report matters most. */}
+      <CommentFixReport pr={pr} fix={fix} />
       {noChanges ? (
-        <p className="mt-2 text-xs text-gray-500">The agent made no changes.</p>
+        <p className="mt-2 text-xs text-gray-500">
+          {fix.seed === 'comments'
+            ? 'The agent changed no files — see the per-comment verdicts above for why.'
+            : 'The agent made no changes.'}
+        </p>
       ) : (
         <>
           <div className="mb-1 mt-2 text-[11px] text-gray-500">
