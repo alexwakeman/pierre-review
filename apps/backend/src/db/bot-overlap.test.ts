@@ -47,7 +47,7 @@ const HOUR = 60 * 60 * 1000;
 const now = Math.floor(Date.now() / 1000) * 1000;
 const LINE_OVERLAP_WINDOW = 3;
 
-const NO_REFINE = { cell: null, disagree: null };
+const NO_REFINE = { cell: null, disagree: null, authorUserIds: null };
 
 /** PR local ids by number, so every assertion keys on `prId` — never on a bare PR number. */
 const prIdByNumber = new Map<number, number>();
@@ -539,6 +539,35 @@ describe('paging and refinement', () => {
     // …and not the other way. An undeclared claim is silence, not a disagreement, so the three
     // unlabelled clusters never match a direction filter either.
     expect((await clusters({ refine: { cell: null, disagree: 'over' } })).filteredTotal).toBe(0);
+  });
+
+  // The bot narrowing on the CLUSTER arm. It is a LIST because the Behaviour tab's inflation card
+  // sums its "View all N →" over the bots THAT panel resolves (role `'review'`) while this getter
+  // resolves role `'all'` — both deliberate — so only the exact id set can keep the two in step.
+  it('the bot narrowing takes a SET, needs no label, and an EMPTY set means NO bots', async () => {
+    const unrefined = await clusters();
+    expect(unrefined.filteredTotal).toBe(4);
+
+    // Every cluster here is a coderabbit×greptile pair, so either bot alone keeps all four — and
+    // three of those four carry NO ml label at all, which is the point: on its own the bot
+    // narrowing must not acquire `labelMatchesRefine`'s "has a label" requirement.
+    const cr = await clusters({ refine: { ...NO_REFINE, authorUserIds: [crId] } });
+    expect(cr.filteredTotal).toBe(4);
+    expect(cr.matrix).toEqual(unrefined.matrix); // the grid stays the selector population's
+    const both = await clusters({ refine: { ...NO_REFINE, authorUserIds: [grId, crId] } });
+    expect(pathsOf(both)).toEqual(pathsOf(cr));
+
+    // An id no cluster contains narrows to nothing — never to a wider list, never to an error.
+    const foreign = await clusters({ refine: { ...NO_REFINE, authorUserIds: [999_999] } });
+    expect(foreign.filteredTotal).toBe(0);
+    expect(foreign.total).toBe(unrefined.total);
+
+    // ⚠ THE `repoIds` TRAP. `[]` is "no bots", not "every bot": a gate spelled `?.length` would
+    // hand back all four clusters under a caption promising a subset.
+    const none = await clusters({ refine: { ...NO_REFINE, authorUserIds: [] } });
+    expect(none.filteredTotal).toBe(0);
+    expect(none.items).toEqual([]);
+    expect(none.total).toBe(unrefined.total);
   });
 
   it('an empty workspace answers empty, never the whole account', async () => {

@@ -12,6 +12,7 @@ import type { BotBehaviourMlBot, MlSeverityCounts } from '@pierre-review/shared'
 import {
   categoriesPresent,
   categoryWeeklySeries,
+  inflationSummary,
   meanSeverityOrdinal,
   meanSeverityValues,
   mlWeekLabels,
@@ -43,6 +44,9 @@ function bot(
     bySeverity: counts(),
     byVendorSeverity: counts(),
     vendorDeclared: 0,
+    vendorAgree: 0,
+    vendorOverCall: 0,
+    vendorUnderCall: 0,
     byCategory,
     weekly: weekly.map((w) => ({
       weekStart: w.weekStart,
@@ -142,6 +146,89 @@ describe('categoryWeeklySeries', () => {
   it('drops a category nobody used', () => {
     const a = bot('u1', [{ weekStart: week(1), byCategory: [{ category: 'nitpick', count: 0 }] }]);
     expect(categoryWeeklySeries([a], [week(1)])).toEqual([]);
+  });
+});
+
+describe('inflationSummary — the severity inflation index', () => {
+  // A bar's input is the server's own three-way split; these fixtures set it directly rather than
+  // deriving it from a severity mix, because deriving it here is exactly the second opinion the
+  // whole feature is built to avoid.
+  const inflBot = (
+    userId: number,
+    label: string,
+    counts: { findings?: number; declared: number; over: number; under: number },
+  ): { key: string; userId: number; label: string; ml: BotBehaviourMlBot } => {
+    const ml = bot(`u${userId}`, []);
+    ml.findings = counts.findings ?? counts.declared;
+    ml.vendorDeclared = counts.declared;
+    ml.vendorOverCall = counts.over;
+    ml.vendorUnderCall = counts.under;
+    ml.vendorAgree = counts.declared - counts.over - counts.under;
+    return { key: `u${userId}`, userId, label, ml };
+  };
+
+  const rabbit = inflBot(11, 'CodeRabbit', { findings: 819, declared: 758, over: 243, under: 79 });
+  const deep = inflBot(12, 'DeepSource', { findings: 1404, declared: 1278, over: 218, under: 0 });
+  // Findings, not one badge — the bot the chart must NOT draw.
+  const sonar = inflBot(13, 'SonarQube', { findings: 838, declared: 0, over: 0, under: 0 });
+
+  it('reads the direction the caller asked for, verbatim', () => {
+    const over = inflationSummary([rabbit, deep], 'over');
+    expect(over.bars.map((b) => [b.label, b.count])).toEqual([
+      ['CodeRabbit', 243],
+      ['DeepSource', 218],
+    ]);
+    // The other direction is a different question with a different answer — a transposition here
+    // turns "the bot inflates" into "we do", and every number on screen stays plausible.
+    const under = inflationSummary([rabbit, deep], 'under');
+    expect(under.bars.map((b) => [b.label, b.count])).toEqual([
+      ['CodeRabbit', 79],
+      ['DeepSource', 0],
+    ]);
+  });
+
+  it('carries the users.id the drill-down narrows on, not a parsed key', () => {
+    const [first] = inflationSummary([rabbit], 'over').bars;
+    expect(first!.userId).toBe(11);
+    expect(first!.key).toBe('u11');
+  });
+
+  // ⚠ THE HONESTY RULE. A bot that badges nothing has no over-calls because it makes no calls;
+  // drawn as a 0 it reads "never inflates", which is the opposite of "we cannot tell".
+  it('EXCLUDES a bot with no badge at all, and names it', () => {
+    const s = inflationSummary([rabbit, sonar], 'over');
+    expect(s.bars.map((b) => b.label)).toEqual(['CodeRabbit']);
+    expect(s.unbadged).toEqual(['SonarQube']);
+  });
+
+  it('KEEPS a badged bot whose count is zero — that zero is a measurement', () => {
+    const s = inflationSummary([deep], 'under');
+    expect(s.bars.map((b) => [b.label, b.count, b.declared])).toEqual([['DeepSource', 0, 1278]]);
+    expect(s.unbadged).toEqual([]);
+  });
+
+  it('says nothing about a bot with no findings at all', () => {
+    // Silent in the window ≠ silent about severity: it is absent from this block's story, so it
+    // must not be listed as an exclusion the reader is asked to account for.
+    const idle = inflBot(14, 'Idle', { findings: 0, declared: 0, over: 0, under: 0 });
+    expect(inflationSummary([idle], 'over').unbadged).toEqual([]);
+  });
+
+  it('totals the direction and its denominator over the badged bots only', () => {
+    const s = inflationSummary([rabbit, deep, sonar], 'over');
+    expect(s.total).toBe(243 + 218); // what the card's "view all" opens
+    expect(s.declared).toBe(758 + 1278); // …out of this, never out of `findings`
+  });
+
+  it('is sorted most-inflated first, ties by label', () => {
+    const a = inflBot(21, 'Zed', { declared: 10, over: 5, under: 0 });
+    const b = inflBot(22, 'Alpha', { declared: 10, over: 5, under: 0 });
+    const c = inflBot(23, 'Middle', { declared: 99, over: 9, under: 0 });
+    expect(inflationSummary([a, b, c], 'over').bars.map((x) => x.label)).toEqual([
+      'Middle',
+      'Alpha',
+      'Zed',
+    ]);
   });
 });
 

@@ -341,7 +341,7 @@ ever called by the background worker, so no request can spend anything.
     The gate reads the RAW share, not the rounded `mlNitPct` the column shows, and never
     `vendorSeverity`. Matrix pinned by `bot-analytics-verdict.test.ts`; the fold, the split and
     the overlap count by `bot-analytics-ml.test.ts`.
-- **The Bots → Behaviour tab (`BotBehaviourPanel`, EXPERIMENTAL)** — five charts off ONE
+- **The Bots → Behaviour tab (`BotBehaviourPanel`, EXPERIMENTAL)** — seven charts off ONE
   additive `ml` block on `/api/bot-behaviour` (`BotBehaviourMl`; no new route, no new fetch).
   Two grains in one block, and they are not the same: the flat counts describe the panel's
   SELECTED WINDOW, `weekly` covers the 84-day trend span on the SAME week boundaries as
@@ -354,6 +354,46 @@ ever called by the background worker, so no request can spend anything.
     stacked bar twice, ours and theirs, side by side, because **the disagreement is the
     product**. The vendor half has its OWN denominator (`vendorDeclared`, usually far smaller
     than `findings`) and says so in its caveat line; nothing derives from it.
+  - **The severity INFLATION INDEX** — per bot, how often its own badge disagrees with ours and
+    which way: `vendorAgree` / `vendorOverCall` (the bot graded it WORSE than we did — inflation)
+    / `vendorUnderCall`, on the same `vendorDeclared` denominator, so
+    `agree + over + under === vendorDeclared` exactly as `SeverityAgreementMatrix` has it. An
+    unbadged finding is SILENCE and counts in none of the three; a praise row is not a finding
+    and reaches neither. Direction comes from the ONE exported `vendorAgreementOf`
+    (`db/ml-labels.ts`), shared with the confusion matrix and the flagging drill-down's
+    `disagree` refinement — a second hand-spelled ordinal comparison is how a bar and the list
+    behind it come to disagree by a row with nothing failing. A bar opens that list through
+    `GET /api/bot-analytics/flagging`'s per-bot refinement (`authorUserIds`, a SET of `users.id`s
+    on the wire as a CSV); note the panel's own bot set is role `'review'` while that drill-down
+    is role `'all'`, which is precisely why the narrowing exists — the review-role bots are a
+    SUBSET of the wider one, so a caller that names its exact ids agrees with the list it opens
+    while an unnarrowed one would not. ⚠ `[]` means "no bots" and never widens to all.
+    ⚠ Nothing here corrects, seeds or breaks a tie for our severity; the vendor badge is the
+    thing being MEASURED, never an input (0.474 vs 0.700 exact — see Accuracy).
+    The UI is TWO cards beside the mix pair, on by default (`InflationChart` ×
+    `over`/`under`): **"Severity inflated by the bot"** (`vendorOverCall`) and **"Severity raised
+    by Limn"** (`vendorUnderCall`), each one series of per-bot COUNTS — never a share, so the
+    number in the bar is the number the drill-down lists. The maths is
+    `lib/botMlSeries.ts`'s `inflationSummary` (`apps/frontend/test/botMlSeries.test.ts`), which
+    owns the honesty rule: **a bot with `vendorDeclared === 0` is EXCLUDED, not drawn as a zero**
+    — badge coverage is vendor-shaped (a bot that badges nothing has no over-calls because it
+    makes no calls, and a 0 bar reads "never inflates"), and the excluded bots are NAMED in the
+    caveat line beside the `declared`/`findings` ratio. A badged bot whose count is 0 stays: that
+    zero is a measurement. **Every bar is a click-through**: `BarChart`'s optional `onSelectBar`
+    (band-level hit targets, real `<button>`s — absent, the chart is unchanged for every other
+    consumer) opens `BotFlaggingDetail` on `{kind:'findings'}` + `disagree` + the bar's
+    `userId` as a ONE-MEMBER set, through `openBotFlaggingDetail(selector, repoId, refine)`.
+    ⚠ **The card's "View all N →" is narrowed TOO — to `summary.bars`' ids**, the exact set that
+    `summary.total` was summed over (never the legend's `shown` subset, and never "no narrowing"):
+    unnarrowed it asserted a role-`'review'` total and then opened a role-`'all'` list, so a
+    workspace whose quality-check bots badge anything would read "View all 359" and land on 612
+    with nothing on screen explaining the gap. ⚠ Both the bot set and the direction ride the
+    STORE SEED, not the tab's local state — the pinned chip's label is `selectorLabel(seed, bots)`
+    (the bot's name at size 1, "N bots" above that), and two bars open the same selector, so
+    without the bots in the name the two tabs are indistinguishable. `refineQueryKey` carries the
+    set — numerically SORTED, with `[]` in its own slot — for the same reason it carries the other
+    two: the narrowing is server-side, so a key without it serves one bot's list from another
+    bot's cache entry.
   - **"Severity over time"** — one line per bot of its weekly MEAN severity on a nit(1)…
     critical(4) axis (`LineChart`'s `yDomain`, added for exactly this: the default 0→niceMax
     scale ticks at 0 and 5, two values a severity cannot take). A week with no findings is a

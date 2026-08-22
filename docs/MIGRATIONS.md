@@ -142,13 +142,18 @@ recipe under Dependency posture, and mind the `DROP SCHEMA public CASCADE` gotch
 drizzle's own `drizzle` schema behind and the migrator then no-ops, reporting success having done
 nothing).
 **Known gaps on this branch:**
-- **The two ACCOUNT-WIDE Pro CRONS now cover the DEFAULT WORKSPACE ONLY** — the Slack digest
-  (`slack/report.ts`) and the AI-policy sprint refresh (`ai-policy/scheduler.ts` →
-  `refreshSprintReport`). They have no request and therefore no `?workspace=`, and their old
-  `scope = 'all'` default has no image under a single-id scope, so both resolve
-  `ctx.queries.defaultWorkspaceId(accountId)`. Previously they covered every repo in the account. This is a real behaviour reduction, taken deliberately over iterating all workspaces,
-  which would multiply a billed LLM call by workspace count on a `*/5` sweep. **State it in the
+- **The one remaining ACCOUNT-WIDE Pro CRON covers the DEFAULT WORKSPACE ONLY** — the Slack digest
+  (`slack/report.ts`). It has no request and therefore no `?workspace=`, and its old
+  `scope = 'all'` default has no image under a single-id scope, so it resolves
+  `ctx.queries.defaultWorkspaceId(accountId)`. Previously it covered every repo in the account. This is a real behaviour reduction, taken deliberately over iterating all workspaces,
+  which would multiply a billed LLM call by workspace count on a sweep. **State it in the
   Settings copy for the Slack digest.**
+  (This gap used to name TWO crons; the other — the AI-policy sprint refresh,
+  `ai-policy/scheduler.ts` → `refreshSprintReport` — was DELETED along with the "AI summary
+  updates" setting. ⚠ **"The AI summaries are now manual-only" is TRUE ONLY FOR AN ACCOUNT WITH NO
+  SLACK CADENCE.** `buildSlackReport` independently regenerates the per-repo digests AND the sprint
+  report on the Slack cadence, so a configured account still has an automated billed path — it is
+  just a delivery schedule the user chose rather than a background policy.)
 - **PrDetail still classifies bots CLIENT-SIDE by LOGIN** — `ChecksTab`'s "Bots" chips group
   threads by `botVendorMeta(user)` and `ThreadList`'s vendor filter by `threadBotKind`, both
   login→`ReviewBotKind` only. A stored workspace judgement and the `quality_check` role never reach
@@ -170,9 +175,12 @@ nothing).
 - **The legacy `?team=` URL rule is unit-tested nowhere.** It lives in
   `readWorkspaceFromUrl`/`readFromUrl` in `hooks/useUrlState.ts`, neither of which is exported, so a
   test would pin a copy rather than the code — flagged in `workspaceScope.test.ts`'s own header.
-- **`SprintReportCard` has no importer**, yet the plugin's AI-policy sweep (`*/5`) still calls
-  `refreshSprintReport` for every account not on `manual` — real spend for a card nothing renders.
-  (`PresetPromptPanel` is also importer-less, but its server side is deliberately kept.)
+- ~~**`SprintReportCard` has no importer**, yet the plugin's AI-policy sweep (`*/5`) still calls
+  `refreshSprintReport` for every account not on `manual`.~~ **CLOSED** — the AI-policy sweep is
+  gone, so nothing calls `refreshSprintReport` on a timer any more; the only automated caller left
+  is the Slack digest, which renders the report into a message rather than into that card. The card
+  is still importer-less; it just no longer costs anything. (`PresetPromptPanel` is also
+  importer-less, but its server side is deliberately kept.)
 - **`packages/pro/test/` and `apps/frontend/test/` still do not run in CI** (see Tests above) — and
   they now hold the workspace refactor's frontend evidence (`workspaceScope.test.ts`,
   `botReviewerQueryKey.test.ts`) plus the plugin's cross-account isolation suite.
@@ -269,8 +277,10 @@ backfill.
   renamed — but a later app-less comment never clears an observed slug; most of a bot's comments
   carry no attribution object).
 - Read by the Bot Tuning Advisor's discovery tier (App-authored vs Actions-authored split). The
-  probe itself still has no sync-loop caller — the `bots.deepDetect` wiring described in the
-  probe's header remains future work, so the column fills only when something invokes the probe.
+  probe itself still has no caller ANYWHERE — and the `bots.deepDetect` setting that was meant to
+  trigger it has since been DELETED (it lived in the plugin's `pro_settings`, which CORE's
+  `classifyReviewer` cannot read, so it was never wired to anything). The column fills only when
+  something invokes the probe; wiring it in now needs a CORE-side gate, never a plugin setting.
 
 ## Plugin `0021` — Bot Tuning Advisor tables
 
@@ -350,7 +360,10 @@ explicit NULL.
 - **Additive and nullable, so existing rows stay readable.** They simply have no evidence to show;
   the panel renders nothing for them and the next "Check review" fills it in — which they are due
   anyway, because the addressed payload-hash prefix moved `t1|` → `t2|` in the same change and
-  marks every existing addressed row stale exactly once.
+  marks every existing addressed row stale exactly once. (It has moved twice more since, for the
+  same one-off reason each time: `t3|` when `isResolved` entered the hash, `t4|` when the evidence
+  window re-anchored on the thread's ROOT comment. Current prefix: **`t4|`** — see
+  docs/PRO-PLUGIN-AND-ACTIVITY.md.)
 - **The sqlite file is a plain `ALTER TABLE … ADD COLUMN`** (SQLite has no `IF NOT EXISTS` there,
   and `pro_migrations` guarantees one application); the pg twin is `ADD COLUMN IF NOT EXISTS`
   inside the standard `DO $$ … EXCEPTION WHEN others THEN RAISE WARNING` wrapper. ⚠ Be honest

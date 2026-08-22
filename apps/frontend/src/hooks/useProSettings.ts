@@ -8,11 +8,15 @@ import { useProCapabilities } from './useTriage.js';
 // fetch (which 404s without the plugin) so the free tier never calls it. `botTriage` is true
 // whenever the plugin is loaded (even with the paid flags off), so the FREE "Review bots"
 // settings section keeps the modal reachable on a flag-less local run.
+//
+// ⚠ EVERY CAP LISTED HERE MUST STILL OWN A SECTION. `activityDigest` used to be listed for the
+// "AI summary updates" policy section; that section is gone (the AI summaries are manual-only
+// now), so the cap came out with it — otherwise an account with ONLY that cap would open an empty
+// modal.
 export function useHasProSettings(): boolean {
   const caps = useProCapabilities();
   return (
     caps.workspaceInsights ||
-    caps.activityDigest ||
     caps.slackDigest ||
     caps.issueLinks ||
     caps.claudeReview ||
@@ -21,7 +25,7 @@ export function useHasProSettings(): boolean {
   );
 }
 
-// Per-account Pro settings (sprint / Slack / AI-update policy / Jira-Linear). Fetched only when
+// Per-account Pro settings (sprint / Slack / Jira-Linear / bots). Fetched only when
 // `enabled`. TWO consumers now: the config modal (open AND a Pro section exists) and the
 // FilterBar's Insights Range chips, which need `sprint.comparisonMode` for the default chip and
 // `cadenceDays`/`startDate` to decide whether "Sprint to date" is even offerable. One shared key +

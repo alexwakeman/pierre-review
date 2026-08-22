@@ -4,7 +4,6 @@ import { useProSettings, useUpdateProSettings } from '../../hooks/useProSettings
 import type { ProSettingsUpdate } from '@pierre-review/shared';
 import { SprintSection } from './SprintSection.js';
 import { SlackSection } from './SlackSection.js';
-import { AiPolicySection } from './AiPolicySection.js';
 import { IssueLinksSection } from './IssueLinksSection.js';
 import { BotSection } from './BotSection.js';
 import { AnthropicKeySection } from './AnthropicKeySection.js';
@@ -95,23 +94,28 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
               {caps.workspaceInsights && (
                 <SprintSection settings={settings} save={save} saving={mutation.isPending} />
               )}
-              {/* Review bots (ACCOUNT-WIDE) — detection heuristics, Limn attribution and the Slack
-                  block. All pro_settings-backed, hence the caps.botTriage gate: botTriage is FREE
-                  (true whenever the plugin is loaded, even with the paid PRO_* flags off), but with
-                  no plugin there are no pro_settings to edit.
+              {/* Review bots (ACCOUNT-WIDE) — now just the Slack bot-digest toggle, which
+                  additionally self-gates on caps.slackDigest. pro_settings-backed, hence the
+                  caps.botTriage gate: botTriage is FREE (true whenever the plugin is loaded, even
+                  with the paid PRO_* flags off), but with no plugin there are no pro_settings to
+                  edit.
                   Configuring an INDIVIDUAL BOT — is it automated, is it reviewing or
                   quality-checking, who is it, what does it cost — is deliberately NOT here: it is a
                   per-WORKSPACE fact and lives on the CORE Bots rail tab, which needs no plugin.
                   That also closed a real gap: an `npx pierre-review` (OSS, plugin-absent) user could
-                  not classify a reviewer at all while this gate was the only way in. */}
+                  not classify a reviewer at all while this gate was the only way in.
+                  The two account-wide sections that used to sit here — "Detection" (in-house
+                  detection toggles + login allowlist) and "Limn attribution" (hidden marker +
+                  visible footer) — were REMOVED. Detection had zero production consumers (no
+                  `classifyReviewer` call site ever read the allowlist or the tie-break flag, and
+                  core structurally cannot read plugin tables), and the marker is now stamped
+                  unconditionally in `review/post-seam.ts` because the Bot-ROI "Limn · Claude" row
+                  depends on it — a toggle that silently disabled a whole analytics lane. */}
               {caps.botTriage && (
                 <BotSection settings={settings} save={save} saving={mutation.isPending} />
               )}
               {caps.slackDigest && (
                 <SlackSection settings={settings} save={save} saving={mutation.isPending} />
-              )}
-              {caps.activityDigest && (
-                <AiPolicySection settings={settings} save={save} saving={mutation.isPending} />
               )}
               {caps.issueLinks && (
                 <IssueLinksSection settings={settings} save={save} saving={mutation.isPending} />

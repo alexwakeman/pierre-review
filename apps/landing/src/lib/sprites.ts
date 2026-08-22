@@ -123,7 +123,13 @@ const SOURCE: Record<SpriteName, { label: string; rows: string[] }> = {
     label: 'Group chat',
     rows: [
       'xxxxxx.....',
-      'x.aa.x.....',
+      // The top bubble's interior is INK, not accent, and must stay that way.
+      // `group` doubles as the Limn logo, where exactly one of the two bubbles
+      // is lit so the vermilion reads as a selection rather than decoration —
+      // top bubble = the noise, lower bubble = the exchange that still needs a
+      // human. Re-accenting this row silently un-tells that story everywhere
+      // the sprite is drawn.
+      'x.xx.x.....',
       'xxxxxx.....',
       '.x.........',
       '...xxxxxxx.',

@@ -81,7 +81,9 @@ function verdictChip(a: CommentAnnotation): { label: string; color: string } | n
 // ---- the grounding-diff evidence block ---------------------------------------------------------
 //
 // An `addressed` verdict is now judged against the REAL diff of the thread's file between the
-// commit it was last discussed at and the PR head (the plugin's annotations/evidence.ts). That
+// commit its ROOT comment was raised against and the PR head (the plugin's annotations/
+// evidence.ts — the base deliberately does NOT anchor on the thread's last comment, or a reply
+// landing after the fix hides the fix). That
 // diff is stored ALONGSIDE the verdict and shown here, because a verdict you cannot check is a
 // verdict you have to take on faith — and the sha range is what makes a WRONG one debuggable
 // ("it compared the wrong two commits" is a completely different bug from "it misread the diff").

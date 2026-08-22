@@ -619,7 +619,7 @@ passthrough on `/api/me`, and inert seams. Details:
   of a real workspace's threads could never answer "was this actually addressed?", which is
   precisely the population where someone has already CLAIMED it was. Resolving is a click,
   not evidence. The prompt now branches on `human_marked_resolved` (verify the claim; say so
-  when the diff doesn't back it up), `isResolved` is in the hash (`t2|` → **`t3|`** — a
+  when the diff doesn't back it up), `isResolved` is in the hash (`t2|` → `t3|` — a
   resolved-after-the-fact thread must not keep a verdict computed under the other framing),
   and the UI retitles the panel "Resolution check". ⚠ The legacy per-item
   `resolution-check/routes.ts` writes the SAME row, so it had to learn `isResolved` in
@@ -639,12 +639,26 @@ passthrough on `/api/me`, and inert seams. Details:
   byte-identical"). ⚠ If `PERSIST_BODIES=true` ever becomes the default, or anything starts
   writing `diff_hunk` back, every stored validity row flips stale at once —
   `writeBackNullBodies` leaves that column alone ON PURPOSE.
+- **The evidence window's base anchors on the thread's ROOT comment, never its last.**
+  `addressedWindowFor` is the ONE copy of that rule (resolution-check imports it, exactly as
+  it imports the hash). Last-comment anchoring collapsed the window to `base === head`
+  precisely when the fix had WORKED — fix lands 12:23, someone replies "addressed" 12:28,
+  the compare short-circuits `identical`, the prompt reads "NONE — the file was not
+  modified" and `ADDRESSED_RULES` (correctly) calls that strong evidence of non-fixing:
+  `not_addressed` at 95% on a thread whose fix sat in its sibling thread's evidence patch.
+  Root anchoring makes an empty compare TRUE again ("nothing landed since the concern was
+  raised"), which is why the note/section wording says that and not "since the last
+  comment". `commits_after_last_comment` still counts from the LAST comment — different
+  question, separate hash field.
 - **The grounded `addressed` check has three cost landmines** (full contract in
   [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md)): the payload-hash
-  prefix moved `t1|` → `t2|` → `t3|` and now carries the `(baseSha, headSha)` PAIR — never the diff
+  prefix moved `t1|` → `t2|` → `t3|` → **`t4|`** (the last bump FORCED — `baseSha` is in the
+  formula, so the window re-anchor moves every stored row's hash regardless) and carries the
+  `(baseSha, headSha)` PAIR — never the diff
   TEXT, because `currentHashFor` recomputes every stored row's hash on the free cached
   annotations GET fired on every PR open (the two writers of that row no longer hand-copy
-  the formula — both call the ONE exported `addressedThreadPayloadHash`); the fetch must
+  the formula OR the window rule — both call the ONE exported `addressedThreadPayloadHash`
+  and the ONE exported `addressedWindowFor`); the fetch must
   stay INSIDE the batch loop, AFTER the hash-cache filter / run gate / credit check (the
   per-item route: after its cache-hit short-circuit, never in the shared loader the GET also
   calls), or a fully-cached click
@@ -760,6 +774,13 @@ consumer). Full detail: **[docs/ML-SEVERITY.md](docs/ML-SEVERITY.md)**. The inva
 - **The vendor's own severity badge is stored to be SHOWN, never to be BELIEVED** — on the
   adjudicated gold-300 it is the worst of the three raters (0.474 exact vs our 0.700) and tuning
   towards agreement with it measurably degrades us, so it must never be an input to the model.
+- **The severity INFLATION index** (Bots → Behaviour, two default-on charts over the server's
+  `vendorOverCall`/`vendorUnderCall`) counts only the BADGED findings, so a bot that badges
+  nothing is **OMITTED and NAMED**, never drawn as a zero — no badge is silence, not agreement.
+  Bars are counts, never shares, and a bar's number IS the drill-down's `filteredTotal` (verified
+  live: DeepSource 218/0, CodeRabbit 246/81, Sourcery 37/1). The bot + direction ride the STORE
+  SEED, because two bars open the same `findings` selector and the tab chip would otherwise read
+  "Flagged · Findings" twice; `refineQueryKey` therefore carries a `|bot:<id>|` slot.
 - Advisory: macro-F1 ≈ 0.66 (0.700 exact / 0.303 ordinal MAE on the gold-300, at the human
   ceiling) and CRITICAL is under-recalled, so the product buckets **major+critical as "high"**
   and nothing auto-acts on a label.
@@ -1038,11 +1059,10 @@ ANY migration. Operating rules:
   drizzle keeps its journal in a separate `drizzle` schema).
 
 **Known gaps on this branch** (full list + closed-gaps record in
-[docs/MIGRATIONS.md](docs/MIGRATIONS.md)): the two account-wide Pro crons (Slack digest,
-sprint refresh) now cover the Default workspace ONLY; PrDetail still classifies bots
+[docs/MIGRATIONS.md](docs/MIGRATIONS.md)): the ONE remaining account-wide Pro cron (the
+Slack digest) covers the Default workspace ONLY; PrDetail still classifies bots
 client-side by login; the legacy `?team=` URL rule is unit-tested nowhere;
-`SprintReportCard` has no importer yet the AI-policy sweep still spends;
-`packages/pro/test/` (225 tests) + `apps/frontend/test/` (381 tests) do not run in CI, and
+`packages/pro/test/` (230 tests) + `apps/frontend/test/` (440 tests) do not run in CI, and
 neither directory is typechecked (both tsconfigs include only `src`) — run them by hand with
 `./apps/backend/node_modules/.bin/vitest run --root packages/pro | --root apps/frontend`;
 auto-merge's retarget guard still lacks a stored `expected_base_ref`; **AI Fix's conflict-resolver

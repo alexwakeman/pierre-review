@@ -1111,6 +1111,20 @@ export interface BotBehaviourMlBot {
   // Nothing derives from these — see MlLabel.vendorSeverity on why (0.474 vs 0.700 exact).
   byVendorSeverity: MlSeverityCounts;
   vendorDeclared: number;
+  // ── The SEVERITY INFLATION INDEX — how often the two claims disagree, and which way. ──────
+  // Over `vendorDeclared` (the badged findings), so `vendorAgree + vendorOverCall +
+  // vendorUnderCall === vendorDeclared` — the same invariant SeverityAgreementMatrix keeps, and
+  // for the same reason: a bot that declared nothing is SILENT, not in conflict, so an
+  // unbadged finding counts in none of the three.
+  //
+  // ⚠ `vendorOverCall` is the interesting one — the bot called it WORSE than we did. That is
+  // inflation, and it is a fact about the VENDOR, never a correction of ours: nothing here
+  // seeds, breaks a tie for or falls back to `severity` (0.474 vs 0.700 exact on the
+  // adjudicated gold-300 — see MlLabel.vendorSeverity). Direction is ordinal on both sides,
+  // never confidence and never severityProb.
+  vendorAgree: number;
+  vendorOverCall: number; // the BOT graded it worse than we did (inflation)
+  vendorUnderCall: number; // WE graded it worse than the bot did
   byCategory: Array<{ category: MlCategory; count: number }>; // non-summary, desc by count
   // ── 84-day trend span, oldest→newest, one point per trend week (same length as `trend`) ──
   weekly: BotBehaviourMlWeekPoint[];
@@ -2678,7 +2692,6 @@ export interface MeResponse {
 
 // ---- Pro per-account settings (packages/pro `pro_settings`; via GET/PUT /api/pro/settings) ----
 export type SlackDigestCadence = 'off' | 'daily' | 'twice_daily';
-export type AiUpdateMode = 'manual' | 'interval' | 'on_change';
 export type IssueProvider = 'jira' | 'linear';
 
 // Read shape (GET /api/pro/settings). The Slack webhook URL is WRITE-ONLY — never returned;
@@ -2707,21 +2720,27 @@ export interface ProSettings {
     hour2: number; // second daily send, used only for 'twice_daily'
     timezone: string | null; // IANA tz; null = server tz
   };
-  aiUpdate: { mode: AiUpdateMode; intervalMinutes: number };
+  // (There is NO `aiUpdate` policy any more. The per-repo Haiku digests and the sprint report
+  // regenerate ONLY when a user clicks Refresh/Regenerate — the ticking cron that read a
+  // manual|interval|on_change mode from `pro_settings` was deleted. The one remaining automated
+  // caller is the SLACK DIGEST cron, which independently rebuilds both on the account's configured
+  // cadence; an account with no Slack cadence is genuinely manual-only.)
   // provider/baseUrl configure the deep-link target; projectKeys is an optional allowlist of
   // project prefixes (e.g. ['ENG','PROJ']) — when non-empty, ONLY keys with a listed prefix are
   // detected (near-zero false positives). Empty → heuristic detection.
   issue: { provider: IssueProvider | null; baseUrl: string | null; projectKeys: string[] };
-  // Bot-Triage Platform (WS8 control surface). Toggles + scalars for detection, Pierre
-  // tagging, Slack bot digest, standing auto-resolve, and per-vendor cost.
+  // Bot-Triage Platform (WS8 control surface), now down to the Slack bot digest + two vestigial
+  // fields.
+  //
+  // ⚠ THE DETECTION AND ATTRIBUTION FIELDS WERE REMOVED FROM THE WIRE. `inhouseDetect` /
+  // `autoTagHighConfidence` / `loginAllowlist` / `deepDetect` / `aiTiebreak` had no production
+  // consumer — CORE's `classifyReviewer` never received them (core cannot read the plugin's
+  // `pro_settings` table at all), so they were switches wired to nothing. `tagPierreReviews` /
+  // `pierreFooter` went too: the hidden marker is now stamped unconditionally, because it is the
+  // ONLY producer of the 'pierre' AutomatedReviewerKind and a user turning it off silently deleted
+  // the Bot-ROI "Limn · Claude" row. Their `pro_settings` COLUMNS stay dormant (like
+  // `bot_auto_resolve*` below) — no migration, no data loss, nothing reads them.
   bots: {
-    inhouseDetect: boolean;
-    autoTagHighConfidence: boolean;
-    loginAllowlist: string[];
-    deepDetect: boolean;        // WS1f app-attribution REST enrich
-    aiTiebreak: boolean;        // WS1.6 Haiku medium-band tie-break
-    tagPierreReviews: boolean;  // WS2a/b
-    pierreFooter: boolean;      // WS2c visible footer
     slackDigest: boolean;       // WS5
     autoResolve: boolean;       // WS6b master enable
     autoResolveDays: number;
@@ -2770,7 +2789,7 @@ export interface ProSettingsUpdate {
     hour2?: number;
     timezone?: string | null;
   };
-  aiUpdate?: { mode?: AiUpdateMode; intervalMinutes?: number };
+  // (No `aiUpdate` — the AI-summary update policy was removed; see the read shape above.)
   // projectKeys: an allowlist of project prefixes; [] / null clears it (→ heuristic detection).
   issue?: { provider?: IssueProvider | null; baseUrl?: string | null; projectKeys?: string[] | null };
   // Bot-Triage settings patch (WS8). Only present fields change.
@@ -2781,13 +2800,15 @@ export interface ProSettingsUpdate {
   // retired rather than mirrored.
   // The read (`ProSettings.bots.cost`) survives as a deprecated legacy fallback — see there.
   //
-  // Failure mode for a stale client that still sends `bots.cost`: the PUT body schema has
-  // `additionalProperties: false`, so the key is SILENTLY STRIPPED rather than 400'd. That is the
-  // right outcome (nothing changes, the request still succeeds) but it is silent, so it is
+  // The detection + Limn-attribution fields were removed too (see the read shape). Their columns
+  // stay dormant in `pro_settings`; nothing writes them any more.
+  //
+  // Failure mode for a stale client that still sends a removed key (`bots.cost`,
+  // `bots.aiTiebreak`, `aiUpdate`, …): the PUT body schema has `additionalProperties: false` and
+  // ajv runs with `removeAdditional`, so the key is SILENTLY STRIPPED rather than 400'd. That is
+  // the right outcome (nothing changes, the request still succeeds) but it is silent, so it is
   // written down here.
   bots?: {
-    inhouseDetect?: boolean; autoTagHighConfidence?: boolean; loginAllowlist?: string[];
-    deepDetect?: boolean; aiTiebreak?: boolean; tagPierreReviews?: boolean; pierreFooter?: boolean;
     slackDigest?: boolean; autoResolve?: boolean; autoResolveDays?: number;
   };
 }
@@ -6067,6 +6088,32 @@ export interface BotFlaggingRefine {
   cell: SeverityAgreementCellRef | null;
   /** Disagreements only, optionally directional. null = no narrowing. */
   disagree: VendorDisagreeDirection | null;
+  /**
+   * Narrow to a SET of bots — `users.id`s (`BotFlaggingComment.authorUserId`, i.e. the numbers
+   * behind `u<userId>` keys), never vendor key strings. null = every bot in the selector
+   * population.
+   *
+   * This is what lets the Behaviour tab's inflation index open the comments behind ITS OWN
+   * numbers: that panel's bots come from `automatedReviewerUserIds(role: 'review')` while this
+   * drill-down resolves role `'all'`, and BOTH role choices are deliberate — so the two sides can
+   * only agree if the caller states the exact bot set its number was summed over.
+   *
+   * ⚠ A LIST, NOT A SINGLE ID, PRECISELY BECAUSE OF THE CARD-LEVEL "View all N →". A per-BAR click
+   * was always consistent (it carries one author), but the card-level button asserted a total
+   * summed over the panel's role-`'review'` bots and then opened a list resolved over role
+   * `'all'` — so a workspace whose quality-check bots emit vendor badges would read "View all 359"
+   * and land on 612, with nothing on screen explaining the gap. Sending the ids makes the two
+   * consistent BY CONSTRUCTION rather than by the coincidence that no shipped quality-check bot
+   * badges anything today.
+   *
+   * ⚠ `[]` MEANS "NO BOTS" AND MUST NEVER WIDEN TO "ALL" — the `repoIds` rule (`if (ids)`, never
+   * `ids.length > 0`). An empty list yields an empty page; only `null` widens.
+   *
+   * Ids from another account simply match nothing — the scan this filters is already
+   * accountId-scoped, so an empty list is the answer for "not yours" and for "no such bot" alike,
+   * and neither is an existence oracle.
+   */
+  authorUserIds: number[] | null;
 }
 
 // ── The confusion matrix ─────────────────────────────────────────────────────────────────
@@ -6186,6 +6233,319 @@ export interface BotFlaggingClustersResponse extends BotFlaggingBase {
 }
 
 export type BotFlaggingResponse = BotFlaggingCommentsResponse | BotFlaggingClustersResponse;
+
+// ---------------------------------------------------------------------------------------
+// Bot comment VOLUME per PR (CORE, free tier — deterministic, no model, no new table)
+// ---------------------------------------------------------------------------------------
+//
+// Two surfaces, one getter family (backend db/bot-volume.ts):
+//   • the Bots ROI tab's "avg bot comments per PR" column + the PR drill-down behind it, and
+//   • the Behaviour tab's LOC-vs-bot-comment-volume chart.
+//
+// ⚠ THE POPULATION IS **MERGED** PRs, AND THE WINDOW APPLIES TO `mergedAt`. Not opened-in-window,
+// not updated-in-window. Two reasons, and both are load-bearing for how the numbers read:
+//   • a still-open PR has not finished collecting bot comments, so averaging over it drags every
+//     mean down by an amount that depends only on how recently the window started; and
+//   • it is the same anchor `BotVendorAnalytics.mergedPastPrs` already uses, so the ROI tab keeps
+//     ONE time grain across its columns.
+// Measured on the dev corpus at 180d: the same repos hold 997 PRs by `openedAt` and 686 by
+// `mergedAt` (erxes/erxes), so the choice moves every average materially and must be stated in
+// any caption the UI writes.
+//
+// ⚠ WHAT COUNTS AS ONE "BOT COMMENT" — all THREE text kinds an automated reviewer can emit, the
+// same three the ML label corpus is built from: a `review_comments` row (one inline remark), a
+// `pr_comments` row (one PR-level remark), and a submitted `reviews` row (the review body — the
+// "walkthrough"/summary post). A `reviews` row counts even when its body is EMPTY (a bare
+// approval), because that is what the corpus measurement these surfaces were specced against
+// counted; the measured cost of that choice is erxes/erxes 16.89 vs 15.98 avg and go-redis
+// 4.91 vs 4.32 — the zero-comment PR counts are IDENTICAL either way, so no product signal
+// turns on it. `state: 'pending'` reviews (drafts, invisible on GitHub) are excluded.
+//   ⚠ This is a WIDER definition than `BotAnalyticsResponse.totals.comments`, which counts only
+//   the first two kinds. The two numbers are not interchangeable and neither is derivable from
+//   the other — do not caption one with the other's total.
+//
+// ⚠ NOBODY RE-DERIVES A COUNT CLIENT-SIDE. The server's number is the number; the column, the
+// drill-down and the chart all fold the SAME per-(PR, bot) counts, which is why they cannot
+// disagree.
+//
+// Nothing here feeds `botVerdict` — it is display-only (bot-analytics-verdict.test.ts pins that
+// verdict's inputs).
+
+/** The five LOC buckets every baseline is conditioned on. Edges (additions+deletions):
+ *  xs `<50` · s `50–200` · m `200–600` · l `600–2k` · xl `2k+`. Half-open, low edge inclusive.
+ *  The numeric edges live in ONE runtime table (backend db/bot-volume.ts `SIZE_BUCKETS`) and
+ *  ride the wire as `BotVolumeSizeBucketStat.minLoc/maxLoc`, so no client re-spells them. */
+export type BotVolumeSizeBucket = 'xs' | 's' | 'm' | 'l' | 'xl';
+
+/** Which population `BotVolumePrRow.expected` was averaged over — an EXPLICIT discriminator, not
+ *  something to infer from nulls, because "we have no baseline" and "this PR is exactly average"
+ *  are different claims that must read differently on screen.
+ *   • `'bucket'` — the mean of this PR's own repo × size bucket (the honest comparison).
+ *   • `'repo'`   — the bucket held fewer than the small-sample floor, so the repo's own mean over
+ *                  every merged PR in the window stood in. NOT size-conditioned: say so.
+ *   • `'none'`   — no baseline at all (PR size never observed, or the repo itself is under the
+ *                  floor). `expected` and `ratio` are both null. */
+/**
+ * How a row's `expected` was derived — and, when it is `'low_expectation'`, why there is no
+ * ratio despite `expected` being present.
+ *
+ * `'bucket'`  this repo's mean for PRs of this size — the intended comparison.
+ * `'repo'`    the repo mean, NOT size-matched (the size bucket was too thin). Disclosed on screen.
+ * `'low_expectation'` plenty of comparable PRs, but they average under the floor, so a multiplier
+ *              would amplify Poisson noise into a finding. Measured on erxes/30d: the `<50` cell
+ *              held 43 PRs at a mean of 0.9, where one PR drawing 4 comments reads 4.4× — and
+ *              across 43 PRs you expect about one such row by chance alone. `expected` and
+ *              `baselinePrs` are still populated so the UI can show what was compared; `ratio` is
+ *              null on purpose.
+ * `'none'`     no comparable population at all (unsized PR, or a repo under the sample floor).
+ *
+ * ⚠ `'low_expectation'` and `'none'` BOTH yield a null ratio and are NOT the same fact. One means
+ * "we found plenty of comparable PRs and they are all near-silent", the other "we could not find
+ * comparable PRs". Collapsing them loses the only information that distinguishes a quiet repo
+ * from an unmeasurable one.
+ */
+export type BotVolumeBaselineKind = 'bucket' | 'repo' | 'none' | 'low_expectation';
+
+/** `'comments'` (DEFAULT) = raw bot-comment count, desc. `'ratio'` = bucket-relative, desc.
+ *  ⚠ The default is raw count by product decision, but raw count MOSTLY RANKS BY SIZE — measured
+ *  correlation of log10(LOC+1) against bot-comment count is 0.615 on go-redis and 0.539 on erxes,
+ *  and bot comments per 100 LOC FALL monotonically across the buckets (erxes 32.91 → 8.33 → 4.32
+ *  → 2.08 → 0.30), i.e. size is sublinear in comments. `'ratio'` is what surfaces the PR that was
+ *  actually torn apart, and the corpus proves it: erxes #7802 is 17 LOC across 1 file and drew 25
+ *  bot comments — 3.68× its bucket's expectation — yet ranks **123rd of 686** under `'comments'`
+ *  and **8th** under `'ratio'`. A screen that offers only the default has shipped a size ranking. */
+export type BotVolumePrSort = 'comments' | 'ratio';
+
+export interface BotVolumeRefine {
+  /**
+   * Narrow to a SET of bots — `users.id`s (the numbers behind `u<userId>` keys), never vendor key
+   * strings. Deliberately the SAME spelling and the same rules as `BotFlaggingRefine.authorUserIds`
+   * (one drill-down convention on this surface, not two).
+   *
+   * ⚠ `[]` MEANS "NO BOTS" AND MUST NEVER WIDEN TO "ALL" — the `repoIds` rule (`if (ids)`, never
+   * `ids.length > 0`). Only `null` widens.
+   *
+   * ⚠ IT ALSO MOVES THE BASELINE. `expected` is re-averaged over the SAME narrowed bot set, or a
+   * one-bot list would be compared against every bot's combined expectation and every ratio would
+   * read low. Ids this account does not own simply match nothing (the scan is already
+   * accountId-scoped), which is what stops it being an existence oracle.
+   */
+  authorUserIds: number[] | null;
+}
+
+export interface BotVolumeBot {
+  /** Stable row key, `u<userId>` — the `BotVendorAnalytics.key` spelling, so the ROI table can
+   *  join this row onto the one it already renders. */
+  key: string;
+  authorUserId: number;
+  /** Workspace custom label → vendor pretty name → display name/login (reviewerLabel rules). */
+  label: string;
+  login: string | null;
+  kind: AutomatedReviewerKind;
+  /** `'quality_check'` bots are INCLUDED here (the bot set is role `'all'`). Split them out the
+   *  way `BotAnalyticsResponse` splits `vendors` from `qualityChecks` — this response does not
+   *  pre-split, because the chart wants both. */
+  role: ReviewerRole;
+  /** Every counted bot comment by this bot, over the window's merged PRs in scope. */
+  comments: number;
+  /** DISTINCT merged-in-window PRs carrying ≥1 comment by this bot. */
+  prsCommentedOn: number;
+  /**
+   * ⚠ THE TWO AVERAGES DIFFER BY THE DENOMINATOR AND NOTHING ELSE, AND THE GAP IS ENORMOUS —
+   * this is why neither is called `avgCommentsPerPr`. On mrdoob/three.js, 656 of 796 merged PRs
+   * carry ZERO bot comments, so the same bot reads ~6× higher "per PR it commented on" than
+   * "per PR in scope". A reader cannot tell them apart from the number alone, so the FIELD NAME
+   * has to. Whichever one a column shows, its header must name the denominator.
+   *
+   * `avgCommentsPerCommentedPr` = comments / prsCommentedOn — "when this bot shows up, how much
+   * does it say". THE HEADLINE ROI COLUMN. null when prsCommentedOn is 0.
+   *
+   * `avgCommentsPerScopePr` = comments / `BotVolumeTotals.prs` — "what does this bot add to the
+   * average PR here", counting the PRs it ignored. null when the scope has no merged PRs.
+   */
+  avgCommentsPerCommentedPr: number | null;
+  avgCommentsPerScopePr: number | null;
+  /** The most this bot said on any ONE merged PR in the window — the "torn to pieces" ceiling. */
+  maxCommentsOnOnePr: number;
+}
+
+export interface BotVolumeTotals {
+  /** Merged-in-window PRs in scope — the denominator of `avgCommentsPerScopePr`, and the honest
+   *  denominator for any "N of M PRs" caption. */
+  prs: number;
+  /** The subset with an OBSERVED size (see `BotVolumePrRow.loc`) — the denominator every LOC
+   *  chart and every bucket baseline actually uses. `prs - sizedPrs` is a real population on a
+   *  lean-storage install (135 of three.js's 796 here), never zero-LOC PRs. */
+  sizedPrs: number;
+  comments: number;
+  prsWithBotComments: number;
+  /** `prs - prsWithBotComments`. Present as its own field because it is the number that makes the
+   *  two averages legible ("656 of 796 merged PRs drew nothing"). */
+  prsWithNoBotComments: number;
+  /** Same denominator contract as the per-bot pair above, over ALL bots. */
+  avgCommentsPerCommentedPr: number | null;
+  avgCommentsPerScopePr: number | null;
+  maxCommentsOnOnePr: number;
+}
+
+export interface BotVolumeResponse {
+  /** Echoed so a stale bookmark renders honestly (?workspace= degrades to Default, never 404). */
+  workspaceId: number;
+  window: { kind: BotWindowKind; from: string; to: string };
+  /** Most comments first. A bot with zero window comments is OMITTED (unlike the ROI table's
+   *  dormant rows — this response has no trend to keep such a row meaningful). */
+  bots: BotVolumeBot[];
+  totals: BotVolumeTotals;
+  /** The merged-PR scan cap was hit: every number is a most-recent sample, not a total. Same
+   *  honesty rule as `BotFlaggingBase.truncated`. */
+  truncated: boolean;
+  generatedAt: string;
+}
+
+export interface BotVolumePrBotShare {
+  key: string; // `u<userId>`
+  authorUserId: number;
+  label: string;
+  comments: number;
+}
+
+export interface BotVolumePrRow {
+  prId: number;
+  prNumber: number;
+  prTitle: string;
+  /** `https://github.com/<owner>/<name>/pull/<n>`. */
+  prUrl: string;
+  repoId: number;
+  repoFullName: string;
+  /** The PR's `openedAt`, ISO. */
+  createdAt: string;
+  /** ISO. Never null in this population (merged-only) — typed non-null on purpose. */
+  mergedAt: string;
+  additions: number;
+  deletions: number;
+  /**
+   * `additions + deletions`, or **null when the PR's size was never observed**. Under lean
+   * storage the three size columns default to 0 and a PR whose detail never hydrated is
+   * indistinguishable from a genuinely empty one, so `changedFiles === 0 && additions === 0 &&
+   * deletions === 0` is read as UNKNOWN: `loc`/`changedFiles` null, `sizeBucket` null,
+   * `baseline: 'none'`, `expected`/`ratio`/`commentsPer100Loc` all null. **Never 0** — a
+   * fabricated zero would put the PR in the `xs` bucket and manufacture a spectacular ratio.
+   */
+  loc: number | null;
+  changedFiles: number | null;
+  /** Bot comments on this PR from the refined bot set (every bot when `refine` is empty). */
+  botComments: number;
+  /** Who said what, most comments first. Sums to `botComments` by construction. */
+  byBot: BotVolumePrBotShare[];
+  sizeBucket: BotVolumeSizeBucket | null;
+  /**
+   * The mean bot-comment count of the baseline population (see `baseline`), 2dp. null ⇔
+   * `baseline === 'none'`.
+   *
+   * `ratio` = botComments / expected, 2dp — "3.7×" is `ratio: 3.7`. null when there is no
+   * baseline AND when `expected` is 0. An `expected` of 0 cannot hide a finding: this PR is
+   * itself a member of its own baseline population, so a mean of 0 forces `botComments` to 0 too.
+   *
+   * ⚠ RENDER `expected` AND `baselinePrs` BESIDE THE MULTIPLIER, never behind a tooltip. A
+   * near-zero expectation inflates the ratio without inflating the finding: measured on this
+   * corpus, bevyengine/bevy #24971 reads **42.86×** off 3 bot comments against an expectation of
+   * 0.07 (over 61 PRs), while erxes #7802's 3.68× is 25 comments against 6.80. Both numbers are
+   * correct; only one is a PR someone should look at, and only the surrounding numbers say which.
+   * The small-sample floor fixes thin SAMPLES — nothing fixes a small MEAN except showing it.
+   */
+  expected: number | null;
+  ratio: number | null;
+  baseline: BotVolumeBaselineKind;
+  /** How many PRs the baseline was averaged over — the small-sample disclosure. 0 when
+   *  `baseline === 'none'`. A ratio computed off 2 PRs is noise dressed as a finding, which is
+   *  why a bucket under the floor degrades to `'repo'` rather than answering. */
+  baselinePrs: number;
+  /**
+   * ⚠ RAW DENSITY, DELIBERATELY NOT THE SORT AND NOT A HEADLINE. It EXPLODES on small PRs —
+   * measured across erxes's buckets it runs 57.65 → 8.99 → 4.46 → 2.23 → 0.83 per 100 LOC, so
+   * ranking on it returns a list of one-line PRs every time. The bucket-relative `ratio` is the
+   * honest form. null when `loc` is null; `loc` of 0 divides by 1 (a rename-only PR).
+   */
+  commentsPer100Loc: number | null;
+}
+
+export interface BotVolumePrsResponse {
+  workspaceId: number;
+  window: { kind: BotWindowKind; from: string; to: string };
+  refine: BotVolumeRefine;
+  sort: BotVolumePrSort;
+  /** Merged-in-window PRs in scope — the population, including the ones no bot touched. */
+  total: number;
+  /** PRs carrying ≥1 comment from the refined bot set — what the list actually enumerates, and
+   *  what its caption must report ("140 of 796 merged PRs drew bot comments"). */
+  filteredTotal: number;
+  items: BotVolumePrRow[];
+  /** OPAQUE. Feed back verbatim as `?cursor=`. null = no further page. Today it encodes an offset
+   *  into the sorted fold (`o:<n>`), because the population is a JS fold over three grouped
+   *  counts and the sort keys are derived — opaque so a later keyset switch is not a wire break. */
+  nextCursor: string | null;
+  truncated: boolean;
+  generatedAt: string;
+}
+
+export interface BotVolumeScatterPoint {
+  prId: number;
+  repoId: number;
+  /** Always a real observed size — unsized PRs are DROPPED from the series (they have no x). */
+  loc: number;
+  changedFiles: number;
+  botComments: number;
+}
+
+export interface BotVolumeSizeBucketStat {
+  bucket: BotVolumeSizeBucket;
+  /** Display label ('<50', '50–200', …) — minted server-side so every surface spells the edges
+   *  the same way. */
+  label: string;
+  minLoc: number;
+  /** Exclusive upper edge; null on the open-ended `xl` bucket. */
+  maxLoc: number | null;
+  /** SIZED merged PRs in this bucket across the whole scope. */
+  prs: number;
+  comments: number;
+  /** comments / prs, 2dp. null when prs is 0 (an empty bucket renders as a gap, never a zero). */
+  avgComments: number | null;
+  /** Σcomments / Σmax(loc,1) × 100, 2dp — the SUBLINEARITY readout, and the one place a density
+   *  belongs: aggregated per bucket it is stable, whereas the same figure per PR explodes. */
+  commentsPer100Loc: number | null;
+}
+
+export interface BotVolumeScatterResponse {
+  workspaceId: number;
+  window: { kind: BotWindowKind; from: string; to: string };
+  /** One point per SIZED merged PR, newest-merged first, capped. */
+  points: BotVolumeScatterPoint[];
+  /** The five bucket means over every sized PR THE SCAN RETURNED — the expectation curve to draw
+   *  through the cloud. Dense: every bucket is present even at `prs: 0`.
+   *  ⚠ Not necessarily the whole window: the scan itself stops at 5000 merged PRs, and that bit is
+   *  not on this response (see `truncated`). */
+  buckets: BotVolumeSizeBucketStat[];
+  sizedPrs: number;
+  /** Merged PRs whose size was never observed. They are absent from `points` and from every
+   *  bucket, so the chart must disclose them rather than let the eye read a smaller corpus. */
+  unsizedPrs: number;
+  /** The POINT cap bit ONLY — "showing the most recent N points". The SCAN cap is reported
+   *  SEPARATELY by `scanTruncated`; the two are never folded together, because the chart's
+   *  cloud and its expectation curve are truncated by different limits and a reader told only
+   *  "truncated" cannot tell which claim is weakened. */
+  truncated: boolean;
+  /** TRUE when the underlying scan itself stopped at its cap, i.e. `buckets` (and therefore the
+   *  expectation curve, and every "×  expected" ratio derived from the same baseline) describe
+   *  the most-recent N merged PRs rather than the whole window.
+   *
+   *  ⚠ THIS IS THE HONESTY BIT, NOT A PERFORMANCE DETAIL. `truncated` above can read `false`
+   *  while this is `true` — the points shown are genuinely all of them, but the curve they are
+   *  judged against is a sample. Presenting a sampled baseline as the scope's baseline is the
+   *  exact failure the autopsy was removed for, so the chart MUST disclose this rather than
+   *  quietly draw a curve that looks authoritative. */
+  scanTruncated: boolean;
+  generatedAt: string;
+}
 
 // ---------------------------------------------------------------------------------------
 // Emoji reactions on comments (CORE, free tier — no AI, no ML, no stored state)

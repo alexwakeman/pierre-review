@@ -23,6 +23,7 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { describe, expect, it } from 'vitest';
 import type {
+  BotFlaggingRefine,
   BotFlaggingSelector,
   MlCategory,
   MlLabel,
@@ -34,6 +35,7 @@ import { ML_CATEGORIES, ML_SEVERITIES, ML_SEVERITY_ORD } from '@pierre-review/sh
 import {
   SEVERITY_PICKS,
   TOPIC_PICKS,
+  botNarrowLabel,
   disagreeDirection,
   isCategoryFamily,
   isSeverityFamily,
@@ -281,36 +283,88 @@ describe('selectorQueryKey — the cache slot a tile opens', () => {
 // ── refineQueryKey ──────────────────────────────────────────────────────────────────────────
 
 describe('refineQueryKey — the refinement is server-side, so it is part of the key', () => {
+  // The wire shape has three narrowings; a test that spelled two of them would go on passing the
+  // day the third stopped being in the key.
+  const refine = (over: Partial<BotFlaggingRefine> = {}): BotFlaggingRefine => ({
+    cell: null,
+    disagree: null,
+    authorUserIds: null,
+    ...over,
+  });
+
   // The empty refine is the mount case: it has to produce ONE fixed string or every fresh mount
   // misses the cache.
   it('an empty refine is one fixed string', () => {
-    expect(refineQueryKey({ cell: null, disagree: null })).toBe(
-      refineQueryKey({ cell: null, disagree: null }),
-    );
+    expect(refineQueryKey(refine())).toBe(refineQueryKey(refine()));
   });
 
-  it('each half moves the key independently', () => {
-    const empty = refineQueryKey({ cell: null, disagree: null });
-    const celled = refineQueryKey({ cell: { vendor: 'none', ours: 'nit' }, disagree: null });
-    const dis = refineQueryKey({ cell: null, disagree: 'over' });
-    const both = refineQueryKey({ cell: { vendor: 'none', ours: 'nit' }, disagree: 'over' });
-    expect(new Set([empty, celled, dis, both]).size).toBe(4);
+  it('each part moves the key independently', () => {
+    const empty = refineQueryKey(refine());
+    const celled = refineQueryKey(refine({ cell: { vendor: 'none', ours: 'nit' } }));
+    const dis = refineQueryKey(refine({ disagree: 'over' }));
+    const bot = refineQueryKey(refine({ authorUserIds: [7] }));
+    const all = refineQueryKey(
+      refine({ cell: { vendor: 'none', ours: 'nit' }, disagree: 'over', authorUserIds: [7] }),
+    );
+    expect(new Set([empty, celled, dis, bot, all]).size).toBe(5);
   });
 
   it('the three directions are three slots', () => {
     const keys = (['any', 'over', 'under'] as const).map((disagree) =>
-      refineQueryKey({ cell: null, disagree }),
+      refineQueryKey(refine({ disagree })),
     );
     expect(new Set(keys).size).toBe(3);
-    expect(keys).not.toContain(refineQueryKey({ cell: null, disagree: null }));
+    expect(keys).not.toContain(refineQueryKey(refine()));
+  });
+
+  // ⚠ THE ONE THE INFLATION BARS DEPEND ON. Two bars of the same chart differ ONLY in
+  // `authorUserIds`, and the narrowing is applied server-side — so a key that dropped it would
+  // serve CodeRabbit's comments under DeepSource's caption, on the second click, with nothing
+  // erroring.
+  it('two bots are two slots, and neither is the unnarrowed one', () => {
+    const a = refineQueryKey(refine({ authorUserIds: [11], disagree: 'over' }));
+    const b = refineQueryKey(refine({ authorUserIds: [12], disagree: 'over' }));
+    const all = refineQueryKey(refine({ disagree: 'over' }));
+    expect(new Set([a, b, all]).size).toBe(3);
+  });
+
+  // ⚠ THE SET RULES. The card-level "view all" sends a whole bot SET, so the slot has to
+  // distinguish DIFFERENT sets while collapsing EQUIVALENT ones — the `canonicalSeverities`
+  // problem again. Unsorted, `[11,12]` and `[12,11]` are two entries for one population: two
+  // `search`-tier requests and a "Load more" paging the copy that is not on screen.
+  it('a set is canonical by membership, and different sets are different slots', () => {
+    expect(refineQueryKey(refine({ authorUserIds: [12, 11] }))).toBe(
+      refineQueryKey(refine({ authorUserIds: [11, 12] })),
+    );
+    const pair = refineQueryKey(refine({ authorUserIds: [11, 12] }));
+    const one = refineQueryKey(refine({ authorUserIds: [11] }));
+    const other = refineQueryKey(refine({ authorUserIds: [11, 13] }));
+    expect(new Set([pair, one, other]).size).toBe(3);
+    // Sorting is NUMERIC, so a two-digit id cannot be ordered as a string ('11' < '9').
+    expect(refineQueryKey(refine({ authorUserIds: [9, 11] }))).toBe(
+      refineQueryKey(refine({ authorUserIds: [11, 9] })),
+    );
+  });
+
+  it('does not mutate the id list it was handed', () => {
+    const ids = [12, 11];
+    refineQueryKey(refine({ authorUserIds: ids }));
+    expect(ids).toEqual([12, 11]);
+  });
+
+  // ⚠ "NO BOTS" IS NOT "EVERY BOT" — the `repoIds` rule. `[]` is a real (if degenerate) narrowing
+  // the server answers with an empty page; sharing `null`'s slot would serve the whole workspace's
+  // cached list under it.
+  it('an empty set is its own slot, never the unnarrowed one', () => {
+    expect(refineQueryKey(refine({ authorUserIds: [] }))).not.toBe(refineQueryKey(refine()));
   });
 
   // The two axes carry the same four class names, so a key that joined them without a separator
   // would let {vendor:'major', ours:'nit'} and {vendor:'majorn', ours:'it'} — or, really, any
   // transposition — collide.
   it('a transposed cell is a different slot', () => {
-    expect(refineQueryKey({ cell: { vendor: 'nit', ours: 'critical' }, disagree: null })).not.toBe(
-      refineQueryKey({ cell: { vendor: 'critical', ours: 'nit' }, disagree: null }),
+    expect(refineQueryKey(refine({ cell: { vendor: 'nit', ours: 'critical' } }))).not.toBe(
+      refineQueryKey(refine({ cell: { vendor: 'critical', ours: 'nit' } })),
     );
   });
 });
@@ -357,6 +411,51 @@ describe('selectorLabel — the tab chip and the drill-down heading', () => {
       expect(title.length).toBeGreaterThan(0);
       expect(subtitle.length).toBeGreaterThan(0);
     }
+  });
+
+  // The per-bot narrowing arrives from an inflation bar, and the CHIP is `selectorLabel(...).title`
+  // — two bars of the same chart open the same selector (`findings`), so without the bot in the
+  // name both tabs read "Flagged · Findings" and the reader cannot tell which is which.
+  it('names the bot when the drill-down is narrowed to one', () => {
+    const bare = selectorLabel({ kind: 'findings' });
+    const named = selectorLabel({ kind: 'findings' }, { userIds: [11], label: 'CodeRabbit' });
+    expect(named.title).toContain('CodeRabbit');
+    expect(named.title).not.toBe(bare.title);
+    expect(named.subtitle).toContain('CodeRabbit');
+    // Two bots are two names — the whole point of putting it in the title.
+    expect(
+      selectorLabel({ kind: 'findings' }, { userIds: [12], label: 'DeepSource' }).title,
+    ).not.toBe(named.title);
+  });
+
+  // The card-level "View all N →" narrows to a SET with no single name. It still has to read as a
+  // narrowing — the chip and the heading must not claim the whole workspace — and it must not
+  // borrow a bot's name for a population that is several bots wide.
+  it('describes a multi-bot set by its size, not by a name it does not have', () => {
+    const bare = selectorLabel({ kind: 'findings' });
+    const set = selectorLabel({ kind: 'findings' }, { userIds: [11, 12, 13], label: null });
+    expect(set.title).toContain('3 bots');
+    expect(set.title).not.toBe(bare.title);
+    expect(set.subtitle).toContain('3 bots');
+    // A one-member set still reads as one bot, never "1 bots".
+    const single = selectorLabel({ kind: 'findings' }, { userIds: [11], label: null });
+    expect(single.title).toContain('1 bot');
+    expect(single.title).not.toContain('1 bots');
+    // And `botNarrowLabel` is the ONE spelling both the chip and the on-page pill go through.
+    expect(botNarrowLabel({ userIds: [11, 12, 13], label: null })).toBe('3 bots');
+    expect(botNarrowLabel({ userIds: [11], label: 'CodeRabbit' })).toBe('CodeRabbit');
+  });
+
+  // `undefined` (a tile) and an explicit `null` (a cleared narrowing) are the same population and
+  // must read identically, or clearing the pill would leave the chip naming a bot that is gone.
+  it('an absent or cleared bot leaves the label untouched', () => {
+    const bare = selectorLabel({ kind: 'severity', severities: ['nit'] });
+    expect(selectorLabel({ kind: 'severity', severities: ['nit'] }, null)).toEqual(bare);
+    expect(selectorLabel({ kind: 'severity', severities: ['nit'] }, undefined)).toEqual(bare);
+    // …and an EMPTY set is NOT the same thing: it is a real (degenerate) narrowing the server
+    // answers empty, so the copy must not read like the unnarrowed population.
+    expect(selectorLabel({ kind: 'severity', severities: ['nit'] }, { userIds: [], label: null })
+      .title).not.toBe(bare.title);
   });
 
   it('the five arms have five distinct titles', () => {

@@ -89,9 +89,10 @@ the `bind.ts` gate, assignability at `index.ts`) plus a boot check that `/api/me
   the two plugin call sites that hold only a repo id (`insights/routes.ts`'s
   `GET /api/pro/insights/repo/:repoId/metrics`, `activity-digest/metrics.ts`'s digest payload
   builder). Without it both are unimplementable.
-- **NEW `ctx.queries.defaultWorkspaceId(accountId)`** — for the two ACCOUNT-WIDE CRON paths that
-  have no request and therefore no `?workspace=` (the Slack digest and the AI-policy sprint
-  refresh). It is a signature change, not vocabulary: their old `scope = 'all'` default has no image.
+- **NEW `ctx.queries.defaultWorkspaceId(accountId)`** — for the ACCOUNT-WIDE CRON paths that have
+  no request and therefore no `?workspace=`. That was two (the Slack digest and the AI-policy sprint
+  refresh); the AI-policy sweep has since been DELETED, so today it is just the Slack digest. It is
+  a signature change, not vocabulary: their old `scope = 'all'` default has no image.
 - Capability **`teamInsights` → `workspaceInsights`**; the other nine fields (`botTriage` included)
   are untouched.
 - `ctx.schema` automatically exposes `workspaces`/`workspaceRepos`/`workspaceReviewers` and no
@@ -245,19 +246,33 @@ AI/credit surface for the deterministic core.** Detection is now an
 **account-scoped multi-signal classifier** (`sync/{review-fingerprint,reviewer-classify,reviewer-behavior,
 app-attribution}.ts`), resolution order: **manual override > known vendor login > `users.githubType`
 `'Bot'`/app-attribution > branded-marker fingerprint > behavioral score (medium confidence, never
-auto-badges) > opt-in Haiku tie-break** (settings-gated OFF — the only AI, for the medium band).
-`users.githubType` is captured from the GraphQL author `__typename`; `AUTOMATED_LOGIN_PATTERNS` + a
-per-account allowlist catch service-account PATs. Classifications live in the CORE account-scoped
+auto-badges)**. `users.githubType` is captured from the GraphQL author `__typename`;
+`AUTOMATED_LOGIN_PATTERNS` catches service-account PATs. ⚠ **Detection is now WHOLLY deterministic
+and takes NO configuration.** A sixth step used to follow the behavioural band — an opt-in Haiku
+tie-break, the only AI in the classifier — alongside a per-account login allowlist that widened
+`AUTOMATED_LOGIN_PATTERNS`. Both were REMOVED with the settings that fed them (`bots.aiTiebreak`,
+`bots.loginAllowlist`, plus `inhouseDetect`/`autoTagHighConfidence`/`deepDetect`), because those
+settings lived in the PLUGIN's `pro_settings` while `classifyReviewer` is CORE — core structurally
+cannot read a plugin table, and not one of the four call sites ever passed the flags. They were
+switches wired to nothing. `app-attribution.ts` survives with no caller as a documented future
+probe (`ReviewerEvidence.appAttributed` is still honoured); if a per-account allowlist ever returns
+it needs a CORE home. Classifications live in the CORE account-scoped
 `workspace_reviewers` (manual + auto rows, uniq `(accountId, workspaceId, authorUserId)`) — see
 **One bot object** below. New shared type
 **`AutomatedReviewerKind = ReviewBotKind | 'in_house' | 'pierre'`** (widens `BotSignalVendorStat.kind`).
 **Pierre's own review is tagged bot-derived PER-REVIEW** (not per-account): a compute-on-read join
 `claudeReviews.postedReviewId = reviews.databaseId` (both TEXT) sets `provenance` = `ai_verbatim`
 (`userBody===summary`) vs `human_curated` and `kind='pierre'` on the `ReviewDetail` ONLY — **the human
-who posted (their token) is NEVER reclassified**. An optional hidden marker `<!-- pierre:claude-review
-v=1 -->` + visible footer are stamped in `review/post-seam.ts`, gated by `pro_settings`
-`bots.tagPierreReviews`/`pierreFooter` (threaded via the back-compat OPTIONAL `PostReviewArgs.pierreMarker?`/
-`pierreFooter?`), and dogfooded through the same fingerprint detector. **Bot-ROI** (`getBotAnalytics(accountId,
+who posted (their token) is NEVER reclassified**. The hidden marker `<!-- pierre:claude-review v=1 -->`
+is stamped **UNCONDITIONALLY** in `review/post-seam.ts` and dogfooded through the same fingerprint
+detector. ⚠ **It used to be a setting (`pro_settings bots.tagPierreReviews`) and must never be one
+again**: that marker is the ONLY producer of the `'pierre'` `AutomatedReviewerKind`, so switching it
+off silently deleted the Bot-ROI "Limn · Claude" row, the verbatim-vs-curated provenance,
+`BotPrsDetail`'s `'pierre'` tab and the `bot_only_review` risk flag — a config toggle for turning an
+analytics lane dark. The paired **visible footer** (`bots.pierreFooter`, "🤖 Reviewed with Limn +
+Claude") appeared in NO detector and is DELETED. `PostReviewArgs.pierreMarker?`/`pierreFooter?` stay
+DECLARED on both contract files (removing an optional field would want an apiVersion bump for no
+gain) but nothing passes them — apiVersion stays **19**. **Bot-ROI** (`getBotAnalytics(accountId,
 window, scope)`, CORE) → per-kind volume/actedOn%/untouched/`overdueUntouched`/`medianAddressedMs`/oldest/humanFollowThrough/noiseRatio/`verdict`
 (keep|tune|**noisy**) + ≤12wk trend + deterministic tuning suggestions → `BotRoiPanel`; **cost is
 SERVER-resolved from the workspace row**, with the `pro_settings` `bots.cost` blob surviving only as
@@ -301,12 +316,17 @@ changed no behaviour, and the unattended cron was replaced by the confirm-gated 
 still creates an orphan table; `pro_settings.bot_auto_resolve*` columns are now vestigial.)_
 **"Only a bot reviewed this" risk flag:** a `bot_only_review` Insights card (`getBotOnlyReviewPrs`;
 Pierre-verbatim counts as bot-derived) + a `ChecksTab` caution. **Settings:** the account-wide
-"Review bots" section (`BotSection`) backed by `pro_settings`'s 11 `bot_*` columns — the per-reviewer
+"Review bots" section (`BotSection`) is down to ONE knob — the `caps.slackDigest`-gated "Slack bot
+digest" toggle (`bot_slack_digest`) — plus the explainer pointing at the Bots rail. Its "Detection"
+and "Limn attribution" sections were removed (above); their `pro_settings` columns are left DORMANT,
+like `bot_auto_resolve*`, with no migration. ⚠ **Keep the section shell and its
+`data-testid="bot-settings-section"`** even when the toggle is gated off —
+`scripts/capture-shots.mjs` targets it and `pnpm shots` breaks without it. The per-reviewer
 `DetectedReviewersTable` lives in the Bots **Settings** sub-tab (below), which shows in the per-repo
 Bots tab too, where it is the same WORKSPACE listing filtered client-side to that repo's footprints. Deterministic tuning suggestions on the ROI panel are **advisory only** (no mute action).
-**Tiers:** detection/analytics/dedup/resolve are **CORE (free)**; the analytics PANELS, Slack block,
-and Pierre tag/footer are **PRO** (gated on the existing `workspaceInsights`/`slackDigest` caps — no
-new cap). **Migrations:** core `0027` (`users.github_type`), `0028` (`bot_review_classification`), `0029`
+**Tiers:** detection/analytics/dedup/resolve are **CORE (free)**; the analytics PANELS and the Slack
+block are **PRO** (gated on the existing `workspaceInsights`/`slackDigest` caps — no new cap); the
+Pierre marker is now unconditional and therefore free. **Migrations:** core `0027` (`users.github_type`), `0028` (`bot_review_classification`), `0029`
 (`bot_mute_rules`, now orphaned), `0042` (pg `0029`: RE-KEY to `repo_reviewers`, per repo, and
 DROP `bot_review_classification`), `0043` (pg `0030`: NORMALISE the actor grain out into
 `account_reviewers`), **`0045` (pg `0032`: COLLAPSE both onto `workspace_reviewers`, and DROP
@@ -426,8 +446,9 @@ considered and overruled.
   A coexist with fresh auto verdicts in B and C: there is **no "manual override wins" early return**
   — the derivation always runs and `persist` declines only the halves a human owns.
 - **The division now:** *is this login a bot, who is it, and what does it cost* are all per
-  **WORKSPACE**; *how we detect bots and how we attribute Limn's own reviews* stays per **ACCOUNT**
-  (`BotSection` in the Settings modal). Price is edited INLINE on the reviewer card
+  **WORKSPACE**. There is no longer an account-wide *counterpart*: detection takes no configuration
+  and the Limn marker is unconditional, so `BotSection` in the Settings modal is left holding only
+  the Slack bot-digest toggle. Price is edited INLINE on the reviewer card
   (`DetectedReviewersTable`) and its label reads **"Price for this Workspace"** — not a bare "Price",
   which on an otherwise workspace-scoped card would read as a global setting and invite exactly the
   cross-workspace totalling that is forbidden. `BotSection`'s old "Per-bot cost (account-wide)"
@@ -832,6 +853,49 @@ is still the captured git diff.
   explicit Send, posting through core's existing thread-reply / PR-comment routes. A double-post is
   not undoable, so a sent pushback is replaced by a sent state rather than re-offered.
 
+### The evidence window anchors on the ROOT comment (`t3|` → `t4|`)
+
+The grounded `addressed` check reported **"Still open"** on a comment that had demonstrably been
+fixed, and the cause was the window, not the model.
+
+**What happened.** The base sha was taken from the thread's **LAST** comment. On DEFRA/bng-metric-
+frontend#221 the fix commit `c634b2e` landed at 12:23:28 and a human reply — *"both comments have
+been addressed"* — at 12:28:31. Base therefore resolved to `c634b2e`, which is also the head, so
+`github/compare.ts` short-circuited `reason:'identical'` **without a network call**, `evidence.ts`
+mapped that to `outcome:'untouched'`, `formatEvidenceForPrompt` rendered *"NONE — the file was not
+modified between those commits"*, and `ADDRESSED_RULES` says — correctly, for what it was told —
+to treat NONE as strong evidence the concern was not handled. Verdict: `not_addressed`, confidence
+95. The SIBLING thread on the same file had no reply, so it got base `165696b`, returned
+`addressed`, and **its stored evidence patch literally contains the fix for the thread marked
+not-addressed**.
+
+**The fix.** `addressedWindowFor` anchors the base on the thread's **ROOT** comment — the one that
+RAISED the concern. That covers the general shape, not just this instance: *fix → reply → any later
+unrelated commit* hid the fix just as thoroughly, which a "widen the window only when the compare
+comes back empty" patch would not have caught. Under root anchoring `base === head` means something
+TRUE again — nothing has landed on this file since the concern was raised — so the note text became
+`no commits landed after the comment was raised` and the prompt section is headed *"Changes to
+&lt;file&gt; since the comment was raised"* (`ADDRESSED_RULES` names that exact wording, so the two
+move together). No new `outcome` value: the SPA's `parseEvidence` coerces anything it doesn't know
+to `unavailable`, and `AddressedEvidence` is hand-duplicated across the seam with no shared type.
+
+**Two things had to move with it.**
+- ⚠ **The hash prefix, forced.** `baseSha` is already in `addressedThreadPayloadHash`, so
+  re-anchoring moves every stored row's hash whether or not the prefix changes; `t3|` → `t4|` makes
+  that a deliberate one-off re-bill instead of a silent one. `commits_after_last_comment` keeps
+  counting from the LAST comment on purpose — it answers a different question ("did work continue
+  after the conversation?") and is its own hash field.
+- ⚠ **The second writer.** `resolution-check/routes.ts` writes the SAME annotation row and had its
+  own copy of the window rule (`shaWindowFor(commits, headSha, lastAt)`). It now IMPORTS
+  `addressedWindowFor`, exactly as it already imports `addressedThreadPayloadHash` — a window rule
+  that drifts between the two surfaces puts a different `baseSha` in each one's hash, so each marks
+  the other's row stale forever and re-bills paid work. One exported function is the stronger form
+  of "keep these in lockstep".
+
+Pinned by `packages/pro/test/annotations-combined-targets.test.ts` § "addressedWindowForThread",
+which asserts the root-anchored window AND — so the assertion cannot go vacuous — that the old
+last-comment rule really would have collapsed to `base === head` on the same corpus.
+
 ### Anchor-hunk hydration + resolved-thread verification (apiVersion 17)
 
 Two independent reasons "Check review" kept returning a judgement with nothing useful in it. Both
@@ -851,7 +915,8 @@ like the resolve itself, and the model is told to say plainly when the diff does
 and the UI retitles the panel **"Resolution check"** (`AnnotationPanel`'s `metaOverride`), because
 a panel still labelled "Addressed check" would misdescribe what the reader is looking at.
 
-⚠ **`isResolved` had to enter the hash** (`t2|` → **`t3|`**): the framing is an INPUT, so a thread
+⚠ **`isResolved` had to enter the hash** (`t2|` → `t3|`; the prefix has since moved on to **`t4|`**
+for the window re-anchor — § below): the framing is an INPUT, so a thread
 resolved after its verdict was stored must not keep one computed under the other question. And
 ⚠ **the legacy per-item `resolution-check/routes.ts` writes the SAME row**, so it learned
 `isResolved` in lockstep — a field in one writer's hash and not the other's makes each surface mark
@@ -943,9 +1008,11 @@ proves nothing) and the omitted `patch` on binary/oversized files. `accountId` i
 `bind.ts` so the budget is charged to the right tenant. ⚠ Patches are repo-authored, i.e.
 **attacker-authored** — fenced before they reach a model, never executed.
 
-**The window is approximated LOCALLY** (`packages/pro/src/annotations/evidence.ts`): base = the
-newest PR commit at or before the thread's LAST comment (the same instant `commits_after_last_
-comment` counts from), head = the PR's head sha; ties on `committedAt` break on the sha, and the
+**The window is approximated LOCALLY** (the rule lives in
+`annotations/targets.ts#addressedWindowFor`, over `evidence.ts`'s `shaWindowFor` primitive): base =
+the newest PR commit at or before the thread's **ROOT** comment (⚠ **not its last** — see § "The
+evidence window anchors on the ROOT comment" below), head = the PR's head sha; ties on
+`committedAt` break on the sha, and the
 corpus commit list is sorted `(time, sha)`, because the pair enters the payload hash and a window
 that flipped per request would mark a fresh row stale for nothing. The exact answer is the
 comment's own `originalCommit { oid }`, which would drag this into the fat sync query + a new
@@ -954,8 +1021,8 @@ comment's own `originalCommit { oid }`, which would drag this into the fat sync 
 never in that branch — the compare then 404s and the judgement degrades to "no diff evidence
 available". Wrong-but-silent is not one of the outcomes.
 
-**`t1|` → `t2|` — the payload hash.** `addressedThreadPayloadHash` (exported from
-`annotations/targets.ts`) now hashes `t2|threadId|isOutdated|addressedReason|commitsSince|
+**`t1|` → `t2|` → `t3|` → `t4|` — the payload hash.** `addressedThreadPayloadHash` (exported from
+`annotations/targets.ts`) hashes `t4|threadId|isOutdated|isResolved|addressedReason|commitsSince|
 baseSha|headSha|<comments>`. Three things about it:
 - It is the **PAIR, never the diff TEXT**. `currentHashFor` recomputes every stored row's hash on
   the cached `GET /api/pro/prs/:id/annotations` — a free read fired on every PR open — so a hash

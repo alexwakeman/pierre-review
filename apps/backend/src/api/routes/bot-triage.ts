@@ -9,6 +9,11 @@ import type {
   ResolvableThreadPrsResponse,
   BotVendorCommentsResponse,
   BotVendorPrsResponse,
+  BotVolumePrSort,
+  BotVolumePrsResponse,
+  BotVolumeRefine,
+  BotVolumeResponse,
+  BotVolumeScatterResponse,
   BotWindowKind,
   DetectedReviewersResponse,
   MlCategory,
@@ -24,6 +29,7 @@ import type {
 } from '@pierre-review/shared';
 import { getBotFlaggingComments, getBotVendorComments } from '../../db/ml-labels.js';
 import { getBotOverlapClusters } from '../../db/bot-overlap.js';
+import { getBotVolume, getBotVolumeScatter, getPrBotVolume } from '../../db/bot-volume.js';
 import {
   getBotAnalytics,
   getBotBehaviourAnalytics,
@@ -377,6 +383,23 @@ const flaggingSchema = {
       cellVendor: { type: 'string', enum: ['nit', 'minor', 'major', 'critical', 'none'] },
       cellOurs: { type: 'string', enum: ['nit', 'minor', 'major', 'critical'] },
       disagree: { type: 'string', enum: ['any', 'over', 'under'] },
+      // The per-bot narrowing, opened by the Behaviour tab's inflation index: a CSV of `users.id`s
+      // (the numbers behind `u<userId>` keys), NOT vendor key strings.
+      //
+      // ⚠ A LIST, because the card-level "View all N →" sums over the PANEL's bots (role
+      // `'review'`) while this route resolves role `'all'` — both deliberate — so only the exact
+      // id set can make the button's number and the list it opens agree by construction.
+      //
+      // ⚠ STRING + `parseIntList`, the `repoIds` precedent, and NOT an ajv array: a CSV is what
+      // every other id list on this surface is spelled as, and ajv cannot validate its members
+      // anyway. Bounds and validation therefore live in `parseIntList` (positive integers only,
+      // anything else dropped) exactly as they do for `repoIds`.
+      //
+      // ⚠ And it MUST be declared here at all: `additionalProperties: false` under Fastify's
+      // `removeAdditional: true` STRIPS an undeclared key and answers 200, so a client sending
+      // `authorUserIds` against a schema that never heard of it would list the WHOLE workspace
+      // under a caption promising a subset.
+      authorUserIds: { type: 'string' },
       window: {
         type: 'string',
         enum: ['rolling_7', 'rolling_14', 'rolling_30', 'sprint'],
@@ -387,6 +410,61 @@ const flaggingSchema = {
       limit: { type: 'integer', default: 20, minimum: 1, maximum: 50 },
       // OPAQUE server-minted state. Bounded so a hostile client cannot make the handler parse an
       // arbitrarily long string; a malformed one degrades to the first page rather than 400ing.
+      cursor: { type: 'string', minLength: 1, maxLength: 64 },
+    },
+  },
+};
+
+// ── Bot comment VOLUME (CORE, free, deterministic — db/bot-volume.ts) ───────────────────────
+// Three routes over ONE base scan: the per-bot column, its PR drill-down, and the LOC chart.
+//
+// ⚠ `workspace`/`repoIds` are STRING here for the same reason they are everywhere else on this
+// surface — an ajv `integer` would 400 on a stale bookmark, and a stale bookmark must degrade to
+// the Default workspace. `limit` IS an integer (a bad page size is a client bug, not a bookmark).
+//
+// ⚠ EVERY PARAMETER THESE HANDLERS READ MUST BE DECLARED HERE. Fastify runs ajv with
+// `removeAdditional: true`, so an undeclared key is STRIPPED and the request answers 200 with the
+// filter silently not applied — a `sort=ratio` the schema never heard of would return the
+// comments-sorted list under a caption promising the other one.
+const volumeScopeSchema = {
+  querystring: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      window: {
+        type: 'string',
+        enum: ['rolling_7', 'rolling_14', 'rolling_30', 'rolling_90', 'sprint'],
+        default: 'rolling_30',
+      },
+      workspace: { type: 'string' },
+      repoIds: { type: 'string' },
+    },
+  },
+};
+
+const volumePrsSchema = {
+  querystring: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      window: {
+        type: 'string',
+        enum: ['rolling_7', 'rolling_14', 'rolling_30', 'rolling_90', 'sprint'],
+        default: 'rolling_30',
+      },
+      workspace: { type: 'string' },
+      repoIds: { type: 'string' },
+      // The per-bot narrowing. A CSV of `users.id`s, the `BotFlaggingRefine.authorUserIds`
+      // spelling verbatim — ONE convention on this surface, not two. Present-but-empty means NO
+      // bots (see the handler); only absence widens.
+      authorUserIds: { type: 'string' },
+      // ⚠ AN ENUM, so an unknown sort 400s rather than silently falling back to the default and
+      // presenting a comments-ranked list as a ratio-ranked one. The default is `'comments'` by
+      // product decision even though raw count mostly ranks by SIZE — see BotVolumePrSort.
+      sort: { type: 'string', enum: ['comments', 'ratio'], default: 'comments' },
+      limit: { type: 'integer', default: 20, minimum: 1, maximum: 50 },
+      // OPAQUE server-minted state, bounded so a hostile client cannot make the handler parse an
+      // arbitrarily long string. A malformed cursor degrades to the first page rather than 400ing.
       cursor: { type: 'string', minLength: 1, maxLength: 64 },
     },
   },
@@ -762,6 +840,7 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
       cellVendor?: VendorSeverityAxis;
       cellOurs?: MlSeverity;
       disagree?: VendorDisagreeDirection;
+      authorUserIds?: string;
       window: BotWindowKind;
       workspace?: string;
       repoIds?: string;
@@ -822,7 +901,24 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
         message: '`cellVendor` and `cellOurs` must be sent together or not at all',
       };
     }
-    const refine: BotFlaggingRefine = { cell, disagree: q.disagree ?? null };
+    // ⚠ NO OWNERSHIP CHECK ON `authorUserIds`, and that is not an oversight: `users` is a GLOBAL
+    // table, so "does this account own that user row" is not a question it can answer. The
+    // narrowing is applied as a predicate over an already accountId- and scope-filtered label
+    // scan, so a foreign or nonexistent id matches nothing — an empty list, identical in both
+    // cases, which is what stops it being an existence oracle.
+    //
+    // ⚠ PRESENT-BUT-EMPTY IS "NO BOTS", NEVER "EVERY BOT" — the `repoIds` rule (`if (ids)`, never
+    // `ids.length > 0`). `parseIntList` collapses absence AND an unusable list to null, which is
+    // right for a repo NARROW (null = don't narrow) and wrong here: a caller that computed an
+    // empty bot set and sent it would get the whole workspace back under a caption promising a
+    // subset — the very failure this parameter was widened to prevent. So the KEY's presence
+    // decides whether there is a narrowing at all, and `parseIntList` only parses its members.
+    const authorUserIds = q.authorUserIds == null ? null : (parseIntList(q.authorUserIds) ?? []);
+    const refine: BotFlaggingRefine = {
+      cell,
+      disagree: q.disagree ?? null,
+      authorUserIds,
+    };
 
     // ⚠ THE CURSOR DEGRADES, IT NEVER 400s — the opposite rule to `severities` above, and for the
     // opposite reason: it is server-minted state a client only ever echoes back, and it is OPAQUE
@@ -845,6 +941,79 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
       selector.kind === 'overlap'
         ? await getBotOverlapClusters(accountId, refine, q.window, scope, page)
         : await getBotFlaggingComments(accountId, selector, refine, q.window, scope, page);
+    return resp;
+  });
+
+  // ── Bot comment VOLUME — the three routes over db/bot-volume.ts's one base scan ───────────
+  //
+  // GET /api/bot-analytics/volume — the ROI tab's "avg bot comments per PR" column + workspace
+  // totals. The two averages differ ONLY by denominator (`avgCommentsPerCommentedPr` divides by
+  // the PRs that bot touched, `avgCommentsPerScopePr` by every merged PR in scope) and on a quiet
+  // repo they differ by ~6× — the field names carry that, and so must the column header.
+  //
+  // ⚠ Rate tier `search`, pinned in rate-limit.test.ts. Per request it walks every merged PR in
+  // the window (up to 5000) plus three grouped comment counts over them, then folds in JS. No
+  // GitHub, no model — this process's event loop, the `/api/bot-severity` shape of cost — so it
+  // borrows the same 60/min bucket rather than the 600/min blanket one.
+  app.get('/api/bot-analytics/volume', { schema: volumeScopeSchema }, async (req) => {
+    const q = req.query as { window: BotWindowKind; workspace?: string; repoIds?: string };
+    const accountId = accountIdOf(req);
+    const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
+    const resp: BotVolumeResponse = await getBotVolume(accountId, q.window, scope);
+    return resp;
+  });
+
+  // GET /api/bot-analytics/volume/prs — the paginated drill-down behind that column. Default sort
+  // is raw `botComments` DESC; `sort=ratio` ranks by the bucket-relative expectation, which is
+  // the only ordering that surfaces a small PR a bot tore apart (raw count mostly ranks by size).
+  app.get('/api/bot-analytics/volume/prs', { schema: volumePrsSchema }, async (req) => {
+    const q = req.query as {
+      window: BotWindowKind;
+      workspace?: string;
+      repoIds?: string;
+      authorUserIds?: string;
+      sort: BotVolumePrSort;
+      limit: number;
+      cursor?: string;
+    };
+    const accountId = accountIdOf(req);
+    // ⚠ PRESENT-BUT-EMPTY IS "NO BOTS", NEVER "EVERY BOT" — the `repoIds` rule (`if (ids)`, never
+    // `ids.length > 0`), identical to the flagging route above. `parseIntList` collapses absence
+    // AND an unusable list to null, which is right for a repo NARROW and wrong here: a caller
+    // that computed an empty bot set and sent it would get the whole workspace back under a
+    // caption promising a subset. So the KEY's presence decides whether there is a narrowing at
+    // all, and `parseIntList` only parses its members.
+    //
+    // ⚠ NO OWNERSHIP CHECK, and that is not an oversight: `users` is a GLOBAL table, so "does this
+    // account own that user row" is not a question it can answer. The narrowing is applied over an
+    // already accountId- and scope-filtered fold, so a foreign or nonexistent id matches nothing —
+    // an empty list, identical in both cases, which is what stops it being an existence oracle.
+    const authorUserIds = q.authorUserIds == null ? null : (parseIntList(q.authorUserIds) ?? []);
+    const refine: BotVolumeRefine = { authorUserIds };
+    // ⚠ THE CURSOR DEGRADES, IT NEVER 400s — server-minted state a client only ever echoes back,
+    // opaque precisely so its encoding can change without breaking in-flight clients. Anything
+    // that is not exactly `o:<n>` starts again at the first page, which is always renderable.
+    const m = /^o:(\d+)$/.exec(q.cursor ?? '');
+    const parsedOffset = m ? Number(m[1]) : 0;
+    const offset = Number.isSafeInteger(parsedOffset) ? parsedOffset : 0;
+    const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
+    const resp: BotVolumePrsResponse = await getPrBotVolume(accountId, q.window, scope, refine, {
+      offset,
+      limit: q.limit,
+      sort: q.sort,
+    });
+    return resp;
+  });
+
+  // GET /api/bot-analytics/volume/scatter — the Behaviour tab's LOC-vs-volume chart: one point per
+  // SIZED merged PR (capped at 2000, newest first) plus the five bucket means over the WHOLE
+  // scope. The buckets are what make the chart readable — size is sublinear in comments, so the
+  // expectation curve bends and the naive "comments per 100 LOC" reading is the one to avoid.
+  app.get('/api/bot-analytics/volume/scatter', { schema: volumeScopeSchema }, async (req) => {
+    const q = req.query as { window: BotWindowKind; workspace?: string; repoIds?: string };
+    const accountId = accountIdOf(req);
+    const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
+    const resp: BotVolumeScatterResponse = await getBotVolumeScatter(accountId, q.window, scope);
     return resp;
   });
 

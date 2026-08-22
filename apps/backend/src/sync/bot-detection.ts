@@ -142,28 +142,17 @@ export const AUTOMATED_LOGIN_PATTERNS: RegExp[] = [
   /-machine-user$/,
 ];
 
-// Turn a simple `*`-glob (the per-account allowlist entries, e.g. `*-agent`, `svc-*`)
-// into an anchored, case-insensitive RegExp. Only `*` is special; every other regex
-// metacharacter is escaped.
-function globToRegExp(glob: string): RegExp {
-  const escaped = glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
-  return new RegExp(`^${escaped}$`, 'i');
-}
-
-// True when a login matches a built-in service-account pattern OR one of the
-// per-account allowlist globs (from the account's Pro settings `bots.loginAllowlist`,
-// simple `*` wildcards). Global/stateless — the account scoping lives in the caller.
-export function matchesAutomatedLoginPattern(
-  login: string,
-  extraAllowlist: string[] = [],
-): boolean {
+// True when a login matches a built-in service-account pattern. Global/stateless — the account
+// scoping lives in the caller.
+//
+// It used to take a second `extraAllowlist` parameter of simple `*`-globs, fed from the plugin's
+// `pro_settings bots.loginAllowlist`, with a private `globToRegExp` beside it. Both are gone with
+// that setting: NEITHER call site ever supplied the list (core cannot read plugin tables at all),
+// so the glob branch was unreachable. If a per-account allowlist ever comes back it needs a CORE
+// home — this function has no way to reach a plugin table. (The unrelated exported `globToRegExp`
+// in `github/codeowners.ts` is a different, live function; don't confuse the two.)
+export function matchesAutomatedLoginPattern(login: string): boolean {
   if (!login) return false;
   const norm = normalizeLogin(login);
-  if (AUTOMATED_LOGIN_PATTERNS.some((re) => re.test(norm))) return true;
-  for (const raw of extraAllowlist) {
-    const glob = raw.trim().toLowerCase();
-    if (!glob) continue;
-    if (globToRegExp(glob).test(norm)) return true;
-  }
-  return false;
+  return AUTOMATED_LOGIN_PATTERNS.some((re) => re.test(norm));
 }

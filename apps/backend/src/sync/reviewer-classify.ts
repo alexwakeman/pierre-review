@@ -4,9 +4,17 @@
 //   1. Known vendor login (reviewBotKind)               → vendor kind.        HIGH
 //   2. githubType==='Bot' OR opt-in app attribution     → fingerprint tool ?? in_house. HIGH
 //   3. Branded/marked fingerprint                       → fingerprint tool ?? in_house. HIGH
-//   4. Behavioral score (+ allowlist login promotion)   → in_house.          MEDIUM (never auto-badges)
-//   5. Opt-in AI tie-break (only if enabled AND medium) → may raise MEDIUM→HIGH.        ai_tiebreak
+//   4. Behavioral score (+ service-account login promotion) → in_house.       MEDIUM (never auto-badges)
 //   otherwise                                           → human (automated:false).
+//
+// ⚠ THERE IS NO LLM LEG IN HERE ANY MORE. A fifth step used to sit under the MEDIUM band — one
+// `cheapComplete` call over 3 sample comments — behind the plugin setting `bots.aiTiebreak`. It
+// was UNREACHABLE: the setting lived in the plugin's `pro_settings`, which CORE cannot read, and
+// not one of the four `classifyReviewer` call sites ever passed the flag. It went with the setting,
+// along with the per-account login allowlist (same story), which is why this module no longer
+// imports `review/llm.js`. The `ClassificationSource` union still carries 'ai_tiebreak' for rows
+// stored by an older build. Re-adding an LLM leg here means re-tiering three `read`-bucket routes
+// (see api/plugins/rate-limit.ts) in the SAME change.
 //
 // ── IT DERIVES ONCE PER ACTOR AND WRITES THAT VERDICT TO EVERY ONE OF THE NAMED WORKSPACE ROWS ─
 // A bot is a PER-WORKSPACE object, but the SIGNALS are not: a vendor login, `users.githubType`,
@@ -36,7 +44,7 @@
 // pass — the exact bug the two-table split was built to kill, reintroduced inside one row.
 //
 // `import type` only from shared.
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type {
   AutomatedReviewerKind,
   ClassificationConfidence,
@@ -49,9 +57,8 @@ import { db, schema } from '../db/client.js';
 import { matchesAutomatedLoginPattern, qualityCheckBot, reviewBotKind } from './bot-detection.js';
 import type { ReviewFingerprint } from './review-fingerprint.js';
 import type { BehavioralSignals } from './reviewer-behavior.js';
-import { cheapComplete } from '../review/llm.js';
 
-const { workspaceReviewers, reviewComments, pullRequests } = schema;
+const { workspaceReviewers } = schema;
 
 // The evidence the caller has already gathered (all optional — the resolver degrades to
 // the hard login/type signals when a piece is missing).
@@ -73,15 +80,12 @@ export interface PersistOpts {
   only?: 'judgement' | 'identity';
 }
 
-// The classifier's own knobs. It EXTENDS PersistOpts so `classifyReviewer` takes a single options
-// bag: a caller that only wants to name a half passes `{ only: … }`, a caller with per-account
-// settings passes the allowlist / tie-break flags, and either is a legal `PersistOpts`.
-export interface ClassifyOpts extends PersistOpts {
-  // Per-account service-account login globs (Pro settings `bots.loginAllowlist`).
-  allowlist?: string[];
-  // Opt-in Haiku tie-break for the MEDIUM band (Pro settings `bots.aiTiebreak`).
-  enableAiTiebreak?: boolean;
-}
+// The classifier's own knobs. It is currently nothing but `PersistOpts` — it carried an
+// `allowlist` and an `enableAiTiebreak` flag sourced from the plugin's `pro_settings`, both
+// removed with those settings (no call site ever passed either, and core cannot read plugin
+// tables). Kept as its own named type so `classifyReviewer`'s signature does not have to change
+// if a real knob ever arrives.
+export type ClassifyOpts = PersistOpts;
 
 // Fallback display labels for the vendor kinds. The frontend's BOT_VENDOR_META is the
 // source of truth for rendering; this is what lands in the persisted `label` column.
@@ -368,47 +372,6 @@ export async function persistHumanJudgement(
     .execute();
 }
 
-// One cheap single-shot completion over up to 3 sample comments. Only invoked from the
-// MEDIUM band when `enableAiTiebreak` is set. Returns null (→ stay MEDIUM) when there
-// are no samples or Claude auth is unavailable.
-async function aiTiebreak(
-  accountId: number,
-  userId: number,
-): Promise<'automated' | 'human' | null> {
-  const rows = await db
-    .select({ body: reviewComments.body })
-    .from(reviewComments)
-    .innerJoin(pullRequests, eq(reviewComments.prId, pullRequests.id))
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        eq(reviewComments.authorId, userId),
-        isNotNull(reviewComments.body),
-      ),
-    )
-    .limit(3)
-    .execute();
-  const samples = rows
-    .map((r) => (r.body ?? '').trim())
-    .filter((s) => s.length > 0)
-    .slice(0, 3);
-  if (samples.length === 0) return null;
-  try {
-    const res = await cheapComplete({
-      system:
-        'You classify whether GitHub PR review comments were written by an automated code-review tool/bot or by a human. Answer with a single word: AUTOMATED or HUMAN.',
-      prompt: samples.map((s, i) => `Comment ${i + 1}:\n${s}`).join('\n\n---\n\n'),
-      maxTokens: 8,
-    });
-    const t = res.text.toLowerCase();
-    if (t.includes('automat') || t.includes('bot')) return 'automated';
-    if (t.includes('human')) return 'human';
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 // `workspaceIds` is the set of WORKSPACE ROWS this verdict should be written to. It is REQUIRED
 // and positional so no caller can "just classify" without saying where the answer lands: the row
 // IS the bot object, and a verdict with no row is a verdict nobody can see or correct.
@@ -500,49 +463,11 @@ export async function classifyReviewer(
     );
   }
 
-  // 4. Behavioral band (MEDIUM — never auto-badges; the UI asks "confirm?").
-  const allowlistMatch = matchesAutomatedLoginPattern(login, opts.allowlist ?? []);
+  // 4. Behavioral band (MEDIUM — never auto-badges; the UI asks "confirm?"). This is the LAST
+  //    step: the opt-in Haiku tie-break that used to follow it is gone (see the file header).
+  const allowlistMatch = matchesAutomatedLoginPattern(login);
   const beh = behavioralVerdict(evidence.behavioral, allowlistMatch);
   if (beh.medium) {
-    // 5. Opt-in AI tie-break — only from the medium band, only when enabled.
-    if (opts.enableAiTiebreak) {
-      const ai = await aiTiebreak(accountId, user.id);
-      if (ai === 'automated') {
-        return persist(
-          accountId,
-          workspaceIds,
-          {
-            userId: user.id,
-            login,
-            automated: true,
-            kind: 'in_house',
-            label: allowlistMatch ? login : 'In-house AI',
-            confidence: 'high',
-            source: 'ai_tiebreak',
-            reasons: [...beh.reasons, 'AI tie-break: comments read as machine-generated'],
-          },
-          opts,
-        );
-      }
-      if (ai === 'human') {
-        return persist(
-          accountId,
-          workspaceIds,
-          {
-            userId: user.id,
-            login,
-            automated: false,
-            kind: null,
-            label: login,
-            confidence: 'high',
-            source: 'ai_tiebreak',
-            reasons: [...beh.reasons, 'AI tie-break: comments read as human-written'],
-          },
-          opts,
-        );
-      }
-      // ai === null → unavailable/ambiguous → fall through to the medium result.
-    }
     return persist(
       accountId,
       workspaceIds,

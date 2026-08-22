@@ -33,6 +33,7 @@ let prId = 0;
 let rabbitId = 0;
 let greptileId = 0;
 let sourceryId = 0;
+let cursorId = 0;
 
 const DAY = 24 * 60 * 60 * 1000;
 // Second-aligned: sqlite stores mode:'timestamp' as epoch SECONDS, so a millisecond-bearing date
@@ -131,11 +132,16 @@ beforeAll(async () => {
   rabbitId = await mkBot('coderabbitai', 'U_ml_beh_rabbit');
   greptileId = await mkBot('greptile-apps', 'U_ml_beh_greptile');
   sourceryId = await mkBot('sourcery-ai', 'U_ml_beh_sourcery');
+  // A FOURTH bot exists purely so the inflation index has a bot that declares a badge in all
+  // three directions. Added as its own login rather than by badging the other fixtures, so every
+  // assertion above it (greptile's "no badge at all" zero denominator in particular) still
+  // describes the population it was written for.
+  cursorId = await mkBot('cursor', 'U_ml_beh_cursor');
 
   // Each bot needs a TOUCH to appear in `bots` at all — the ML block only emits rows for bots the
   // panel already draws, because the `key` is the join.
   let rv = 0;
-  for (const botId of [rabbitId, greptileId, sourceryId])
+  for (const botId of [rabbitId, greptileId, sourceryId, cursorId])
     await db
       .insert(reviews)
       .values({
@@ -167,6 +173,14 @@ beforeAll(async () => {
       mlRow(greptileId, 'nit', { categories: ['documentation'] }),
       // ── sourcery: ONLY a summary — nothing to draw, so no row at all ──
       mlRow(sourceryId, 'major', { isSummary: true, categories: ['maintainability_refactor'] }),
+      // ── cursor: one badged finding in EACH direction, plus the two rows that must not count ──
+      mlRow(cursorId, 'minor', { vendorSeverity: 'critical' }), // the bot inflated: OVER
+      mlRow(cursorId, 'major', { vendorSeverity: 'major' }), // the two agree
+      mlRow(cursorId, 'major', { vendorSeverity: 'nit' }), // WE raised it: UNDER
+      mlRow(cursorId, 'minor'), // badged by nobody — silence, in none of the three
+      // A badged PRAISE row: a finding-only counter must not see it, so the invariant
+      // `agree + over + under === vendorDeclared` is not satisfiable by counting everything.
+      mlRow(cursorId, 'critical', { vendorSeverity: 'critical', categories: ['praise'] }),
     ])
     .execute();
 
@@ -223,6 +237,30 @@ describe('getBotBehaviourAnalytics — ML severity/category block', () => {
     expect(greptile.byVendorSeverity).toEqual({ nit: 0, minor: 0, major: 0, critical: 0 });
   });
 
+  it('splits the badged findings three ways, and they PARTITION vendorDeclared', async () => {
+    const resp = await q.getBotBehaviourAnalytics(1, 'rolling_14', scope);
+    const cursor = rowFor(resp, `u${cursorId}`);
+    // One row each way. The unbadged finding is SILENCE — in `findings`, in none of the three —
+    // and the badged PRAISE row is not a finding at all, so it reaches neither counter.
+    expect(cursor.vendorOverCall).toBe(1); // vendor critical vs our minor — inflation
+    expect(cursor.vendorAgree).toBe(1);
+    expect(cursor.vendorUnderCall).toBe(1); // vendor nit vs our major — we raised it
+    expect(cursor.vendorDeclared).toBe(3);
+    expect(cursor.findings).toBe(4); // the three badged + the silent one; praise excluded
+
+    // THE INVARIANT, over every row in the block — the same one SeverityAgreementMatrix keeps.
+    // It is what lets a caption divide by `vendorDeclared` and be honest about the rest.
+    for (const b of resp.ml.perBot) {
+      expect(b.vendorAgree + b.vendorOverCall + b.vendorUnderCall).toBe(b.vendorDeclared);
+      expect(b.vendorDeclared).toBeLessThanOrEqual(b.findings);
+    }
+
+    // Direction is ORDINAL, and the disagreement is the product: nothing here corrected our
+    // severity towards the badge.
+    expect(cursor.bySeverity).toEqual({ nit: 0, minor: 2, major: 2, critical: 0 });
+    expect(cursor.byVendorSeverity).toEqual({ nit: 1, minor: 0, major: 1, critical: 1 });
+  });
+
   it('buckets `weekly` over the whole 84-day span, on the density chart’s own weeks', async () => {
     const resp = await q.getBotBehaviourAnalytics(1, 'rolling_14', scope);
     const rabbit = rowFor(resp, `u${rabbitId}`);
@@ -261,7 +299,8 @@ describe('getBotBehaviourAnalytics — ML severity/category block', () => {
     const resp = await q.getBotBehaviourAnalytics(1, 'rolling_14', scope);
     expect(resp.bots.some((b: { key: string }) => b.key === `u${sourceryId}`)).toBe(true);
     expect(rowFor(resp, `u${sourceryId}`)).toBeUndefined();
-    expect(resp.ml.perBot).toHaveLength(2);
+    // rabbit + greptile + cursor. Sourcery has a label and is still absent — that is the point.
+    expect(resp.ml.perBot).toHaveLength(3);
     expect(resp.ml.truncated).toBe(false);
   });
 

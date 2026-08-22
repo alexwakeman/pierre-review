@@ -267,10 +267,16 @@ fixture tests (see Conventions).
     64-bit integers accept it happily, so an unbounded field means the same request succeeds locally
     and 500s in cloud.
 
-  The plugin-owned `pro_settings` keeps its 11 `bot_*` columns (its
-  `bot_cost_json` now a deprecated READ-only legacy source — `ProSettingsUpdate.bots.cost` was
-  REMOVED, there is no write path left; Pierre tag/footer toggles, Slack digest — its
-  now-vestigial `bot_auto_resolve*` columns backed the removed mute feature). See
+  The plugin-owned `pro_settings` still HAS its 11 `bot_*` columns, but only ONE is live:
+  `bot_slack_digest`. `bot_cost_json` is a deprecated READ-only legacy source
+  (`ProSettingsUpdate.bots.cost` was REMOVED, there is no write path left), and the other NINE are
+  **DORMANT** — present in every database, dropped from the drizzle schema modules and from the
+  wire, never selected and never written, with **no migration**: `bot_auto_resolve*` backed the
+  removed mute feature; `bot_inhouse_detect` / `bot_auto_tag` / `bot_login_allowlist` /
+  `bot_deep_detect` / `bot_ai_tiebreak` backed the removed "Detection" settings (which had no
+  consumer — CORE's classifier cannot read a plugin table); `bot_tag_pierre` / `bot_pierre_footer`
+  backed the removed "Limn attribution" settings (the marker is now unconditional). The
+  policy columns `ai_update_mode` / `ai_interval_minutes` are dormant on the same terms. See
   **Bot-Triage Platform** below. (The old `botMuteRules` table / `/api/bot-mute-rules` mute +
   auto-triage-cron feature was **removed** — see the note below; migration `0029` still creates
   the now-orphaned `bot_mute_rules` table in existing DBs but no code binds it.)

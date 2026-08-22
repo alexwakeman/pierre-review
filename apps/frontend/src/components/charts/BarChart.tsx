@@ -20,6 +20,8 @@ export function BarChart({
   formatValue = formatY,
   height = 132,
   rotateLabels = false,
+  onSelectBar,
+  barAriaLabel,
 }: {
   labels: string[];
   series: Series[];
@@ -32,6 +34,22 @@ export function BarChart({
   // footprint (`height`) is UNCHANGED: a larger bottom band is reserved for the labels,
   // so the plot area shrinks slightly rather than the card growing.
   rotateLabels?: boolean;
+  // ── OPTIONAL interactivity ────────────────────────────────────────────────────────────────
+  // Absent (the default, and every pre-existing consumer): this chart is a picture. No pointer
+  // cursor, no hit targets, nothing in the tab order, no accessible name — adding any of those
+  // to a decorative chart puts N unlabelled stops in every keyboard user's path for nothing.
+  //
+  // Present: each x BAND becomes a real <button>. The band, not the bar: the hover highlight
+  // already IS the band, a stacked segment or a grouped sub-bar is routinely 2px wide (and a
+  // zero-valued bar has no area at all), and a target you cannot hit is not a target. So the
+  // callback answers "which band", and `seriesKey` is the series' key ONLY when the chart draws
+  // exactly one — a multi-series band has no single answer, and inventing one (the first series,
+  // the tallest) is how a click comes to mean something the reader did not point at.
+  onSelectBar?: (seriesKey: string | null, index: number) => void;
+  // The accessible name for band `i`'s button. Default: the x label plus every series' value —
+  // fine for a bin distribution, but a caller that knows what a click DOES ("open the 243
+  // comments behind this") should say so; it is the only text a screen reader gets.
+  barAriaLabel?: (index: number) => string;
 }): JSX.Element {
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
@@ -67,6 +85,13 @@ export function BarChart({
     return isDate ? fmtDate(l) : l;
   };
   const showEveryLabel = !isDate || n <= 8;
+
+  // Unambiguous only for a single-series chart — see `onSelectBar`.
+  const seriesKeyOf = (): string | null => (series.length === 1 ? (series[0]?.key ?? null) : null);
+  const ariaFor = (i: number): string =>
+    barAriaLabel
+      ? barAriaLabel(i)
+      : `${labelFor(i)}: ${series.map((s) => `${s.label} ${formatValue(s.values[i] ?? 0)}`).join(', ')}`;
 
   return (
     <div>
@@ -178,6 +203,39 @@ export function BarChart({
               onMouseLeave={() => setHover(null)}
             />
           </svg>
+        )}
+        {/* The hit targets, only when this chart was given a click handler. Real <button>s in the
+            DOM rather than SVG rects with role="button": they are keyboard-reachable, Enter and
+            Space activate them for free (a div/rect needs both spelled out, and Space then also
+            scrolls the page), and they carry a focus ring the browser draws. They sit ABOVE the
+            svg's mousemove overlay, which is why each one re-states the hover itself — and the
+            wrapper is pointer-events-none so only the bands intercept, never the whole card.
+            BEFORE the FloatingTip in source order, so the tip — rendered after, z-20 and
+            pointer-events-none — still paints over them and is never covered by a target. */}
+        {onSelectBar && w > 0 && (
+          <div className="pointer-events-none absolute inset-0">
+            {labels.map((_, i) => (
+              <button
+                key={`hit-${i}`}
+                type="button"
+                className="pointer-events-auto absolute cursor-pointer rounded-sm bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                style={{ left: PAD_L + i * bandW, top: PAD_T, width: bandW, height: innerH }}
+                onMouseEnter={() => setHover(i)}
+                // ⚠ EACH BAND MUST CLEAR ITS OWN HOVER. The svg's full-size transparent overlay
+                // owns `onMouseLeave` for the mouse-only path, but these buttons are a SEPARATE
+                // DOM subtree stacked on top of it: while the pointer is over a band the overlay
+                // is not the event target, so React never fires the overlay's mouseleave when the
+                // pointer jumps straight from a band to somewhere outside the card. Without this
+                // the highlight band and the FloatingTip stayed painted after the pointer left.
+                // Band → band is safe: React dispatches the leave before the next enter.
+                onMouseLeave={() => setHover(null)}
+                onFocus={() => setHover(i)}
+                onBlur={() => setHover(null)}
+                onClick={() => onSelectBar(seriesKeyOf(), i)}
+                aria-label={ariaFor(i)}
+              />
+            ))}
+          </div>
         )}
         {hover != null && w > 0 && (
           <FloatingTip x={PAD_L + hover * bandW + bandW / 2} y={PAD_T} width={w}>

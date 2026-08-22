@@ -10,6 +10,7 @@ import { OpenPrsDetail } from './components/Activity/OpenPrsDetail.js';
 import { BotOnlyPrsDetail } from './components/Activity/BotOnlyPrsDetail.js';
 import { BotThreadsDetail } from './components/Activity/BotThreadsDetail.js';
 import { BotFlaggingDetail } from './components/Activity/BotFlaggingDetail.js';
+import { BotVolumeDetail } from './components/Activity/BotVolumeDetail.js';
 import { UserActivityDetail } from './components/Activity/UserActivityDetail.js';
 import { ThemeThreadsDetail } from './components/Activity/ThemeThreadsDetail.js';
 import { SearchResultsTab } from './components/Search/SearchResultsTab.js';
@@ -121,6 +122,7 @@ export default function App(): JSX.Element {
   const botOnlyActive = activeTabObj?.kind === 'bot-only-prs';
   const botThreadsActive = activeTabObj?.kind === 'bot-threads';
   const botFlaggingActive = activeTabObj?.kind === 'bot-flagging';
+  const botVolumeActive = activeTabObj?.kind === 'bot-volume';
   const themeThreadsActive = activeTabObj?.kind === 'theme-threads';
   const searchActive = activeTabObj?.kind === 'search';
   const userActivityActive = activeTabObj?.kind === 'user-activity';
@@ -147,6 +149,7 @@ export default function App(): JSX.Element {
     botOnlyActive ||
     botThreadsActive ||
     botFlaggingActive ||
+    botVolumeActive ||
     themeThreadsActive ||
     searchActive ||
     userActivityActive;
@@ -463,6 +466,17 @@ export default function App(): JSX.Element {
             className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
           >
             <BotFlaggingDetail />
+          </div>
+        )}
+        {/* The merged PRs behind the ROI table's "bot comments per PR" column — a sibling
+            full-main overlay. `overflow-auto` is load-bearing here too: it is the scroll pane the
+            list's auto-load sentinel roots its IntersectionObserver on (lib/scrollParent.ts). */}
+        {botVolumeActive && (
+          <div
+            data-testid="bot-volume-overlay"
+            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
+          >
+            <BotVolumeDetail />
           </div>
         )}
         {themeThreadsActive && (

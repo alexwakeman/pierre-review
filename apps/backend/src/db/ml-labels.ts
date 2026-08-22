@@ -1528,6 +1528,34 @@ function severityOrdinal(s: MlSeverity): number {
   return SEVERITY_KEYS.indexOf(s);
 }
 
+/** Which way the bot's claim differs from ours. `'agree'` is not a disagreement direction. */
+export type VendorAgreementDirection = 'agree' | 'over' | 'under';
+
+/**
+ * THE ours-vs-vendor direction rule, in ONE place.
+ *
+ * `null` = the bot declared nothing, which is SILENCE, not conflict — it lands in the matrix's
+ * 'none' column and in neither `agree` nor either disagreement counter. That is what keeps
+ * `agree + overCall + underCall === declared` true, and it is the property every caption on
+ * these screens leans on.
+ *
+ * Exported because three surfaces now ask the same question — the confusion matrix, the
+ * flagging drill-down's `disagree` refinement, and the Behaviour tab's per-bot inflation index
+ * (`getBotBehaviourAnalytics`) — and a fourth hand-spelled `>` is exactly how two numbers that
+ * must agree come to differ by one row with nothing failing.
+ *
+ * ⚠ Used ONLY to say which way the two differ. The vendor's badge never orders, seeds, corrects
+ * or falls back OUR severity — see MlLabel.vendorSeverity (0.474 vs 0.700 exact).
+ */
+export function vendorAgreementOf(
+  vendor: MlSeverity | null,
+  ours: MlSeverity,
+): VendorAgreementDirection | null {
+  if (vendor == null) return null;
+  if (vendor === ours) return 'agree';
+  return severityOrdinal(vendor) > severityOrdinal(ours) ? 'over' : 'under';
+}
+
 function emptyAgreementMatrix(): SeverityAgreementMatrix {
   return {
     // Dense 5×4: a zero cell is PRESENT, not omitted — the grid renders every combination, and
@@ -1565,11 +1593,12 @@ function buildAgreementMatrix(
     counts.set(key, (counts.get(key) ?? 0) + 1);
     // A null vendor claim is UNDECLARED — it lands in the 'none' column and in NEITHER agreement
     // nor disagreement. Silence is not a conflict, and `agree + over + under === declared` is the
-    // property that keeps the caption honest.
-    if (r.vendor == null) continue;
+    // property that keeps the caption honest. (`vendorAgreementOf` is the one direction rule.)
+    const dir = vendorAgreementOf(r.vendor, r.ours);
+    if (dir == null) continue;
     declared += 1;
-    if (r.vendor === r.ours) agree += 1;
-    else if (severityOrdinal(r.vendor) > severityOrdinal(r.ours)) overCall += 1;
+    if (dir === 'agree') agree += 1;
+    else if (dir === 'over') overCall += 1;
     else underCall += 1;
   }
   return {
@@ -1631,23 +1660,38 @@ function matchesFlaggingSelector(
   }
 }
 
-/** The refinement the matrix / direction toggle applies AFTER the selector has fixed `total`. */
+/**
+ * The refinement the matrix / direction toggle / per-bot bar applies AFTER the selector has
+ * fixed `total`.
+ *
+ * ⚠ `authorUserIds` narrows the LIST, never the matrix — the matrix is built over the selector
+ * population pre-refine (phase 3 below) so a cell cannot zero out the cell that was clicked, and
+ * a bot narrowing is no different: drilling into one bot must not silently redraw the grid the
+ * click came from. `filteredTotal` is what describes the narrowed list.
+ *
+ * ⚠ `[]` MEANS "NO BOTS", NOT "EVERY BOT" — the `repoIds` rule. The gate is on the list being
+ * PRESENT (`!= null`), never on its length, so a caller that computed an empty bot set gets an
+ * empty page rather than the whole workspace under a caption promising a subset.
+ */
 function matchesFlaggingRefine(
   refine: BotFlaggingRefine,
   vendor: MlSeverity | null,
   ours: MlSeverity,
+  authorUserId: number,
 ): boolean {
+  // `includes` over an array of at most one entry per automated reviewer in the workspace — a
+  // per-call Set would allocate once per scanned row for a membership test of ~10 numbers.
+  if (refine.authorUserIds != null && !refine.authorUserIds.includes(authorUserId)) return false;
   if (refine.cell) {
     if ((vendor ?? 'none') !== refine.cell.vendor) return false;
     if (ours !== refine.cell.ours) return false;
   }
   if (refine.disagree) {
-    // Undeclared is not a disagreement (see buildAgreementMatrix).
-    if (vendor == null || vendor === ours) return false;
-    if (refine.disagree === 'over' && severityOrdinal(vendor) <= severityOrdinal(ours)) return false;
-    if (refine.disagree === 'under' && severityOrdinal(vendor) >= severityOrdinal(ours)) {
-      return false;
-    }
+    // Undeclared is not a disagreement (see buildAgreementMatrix); `'any'` takes either
+    // direction. One shared classifier, so this predicate and the matrix cannot drift.
+    const dir = vendorAgreementOf(vendor, ours);
+    if (dir == null || dir === 'agree') return false;
+    if (refine.disagree !== 'any' && dir !== refine.disagree) return false;
   }
   return true;
 }
@@ -2047,7 +2091,12 @@ export async function getBotFlaggingComments(
 
   // ── Phase 4: refine, then slice ──────────────────────────────────────────────────────────
   const narrowed = selected.filter(({ row, fold }) =>
-    matchesFlaggingRefine(refine, coerceSeverity(row.vendorSeverity), fold.severity),
+    matchesFlaggingRefine(
+      refine,
+      coerceSeverity(row.vendorSeverity),
+      fold.severity,
+      row.authorUserId,
+    ),
   );
   const pageRows = narrowed.slice(offset, offset + limit);
   const consumed = offset + pageRows.length;

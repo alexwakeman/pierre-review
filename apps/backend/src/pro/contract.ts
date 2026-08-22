@@ -526,6 +526,15 @@ export interface PostReviewArgs {
   dryRun: boolean;
   // Bot-Triage WS2c — stamp Pierre provenance onto the posted review body. Both ADDITIVE +
   // OPTIONAL (default false → byte-identical behavior when absent, so apiVersion stays 11):
+  //
+  // ⚠ NOTHING PASSES EITHER OF THESE ANY MORE, AND THEY ARE STILL DECLARED ON PURPOSE. The two
+  // account settings that fed them were removed: the hidden marker is now stamped
+  // UNCONDITIONALLY by `review/post-seam.ts` (it is the only producer of the 'pierre'
+  // AutomatedReviewerKind, so a switch for it was a switch for deleting an analytics lane) and the
+  // visible footer is gone. They stay in the interface because REMOVING an optional field is the
+  // kind of contract narrowing that would want an apiVersion bump for no gain — a plugin build
+  // that still sends them type-checks and is simply ignored. Do NOT re-gate the marker on
+  // `pierreMarker`.
   pierreMarker?: boolean; // append a hidden `<!-- pierre:claude-review v=1 -->` marker
   pierreFooter?: boolean; // append a visible "🤖 Reviewed with Pierre + Claude" footer
 }

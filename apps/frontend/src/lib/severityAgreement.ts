@@ -98,7 +98,63 @@ export function matrixCell(
  * is "Nits". Any other combination is reachable only from a URL or a future caller, so it falls
  * back to listing the classes rather than inventing a name for them.
  */
-export function selectorLabel(s: BotFlaggingSelector): { title: string; subtitle: string } {
+/**
+ * The bot narrowing a flagging drill-down was opened with: the EXACT `users.id` set the number
+ * that was clicked was summed over, plus the name to call it by.
+ *
+ * ⚠ A SET, not one id, and the label is nullable BECAUSE OF THAT. A per-bar click narrows to one
+ * bot and has its name; the card-level "View all N →" narrows to every bot the chart summed and
+ * has no single name — so it passes `label: null` and the display falls back to a count. The set
+ * is what makes the button's number and the list it opens agree by construction: the panel's bots
+ * are role `'review'` while the drill-down resolves role `'all'`, both deliberately.
+ */
+export interface BotFlaggingBotNarrowing {
+  userIds: number[];
+  /** The single bot's display name when the set has exactly one member; null for a set. */
+  label: string | null;
+}
+
+/**
+ * How a narrowing names itself: the bot, or how many there are.
+ *
+ * Never `label ?? String(n)` — an unnamed single bot must not read "1", and a set must not read
+ * as a bot's name. Both the chip and the on-page pill go through this one function, so the tab
+ * and the heading can never describe the same narrowing differently.
+ */
+export function botNarrowLabel(n: BotFlaggingBotNarrowing): string {
+  if (n.label) return n.label;
+  return n.userIds.length === 1 ? '1 bot' : `${n.userIds.length} bots`;
+}
+
+export function selectorLabel(
+  s: BotFlaggingSelector,
+  // The bot narrowing, when the drill-down was opened from the Behaviour tab's inflation index
+  // (one bot's bar, or the card-level "view all" over the bots the chart summed). It belongs IN
+  // the name rather than only in a pill: the pinned tab's chip is `selectorLabel(seed).title`, and
+  // two opens for two different bots would otherwise read "Flagged · Findings" both times — the
+  // chip's whole job is to tell them apart. Absent for every tile-opened drill-down, which is why
+  // it is optional rather than a widened parameter.
+  bots?: BotFlaggingBotNarrowing | null,
+): { title: string; subtitle: string } {
+  const base = baseSelectorLabel(s);
+  if (!bots) return base;
+  // Possessive by arity: one named bot owns its comments; a set has no name to possess, and
+  // "3 bots’s own comments" is how a single hard-coded sentence gives itself away.
+  const owned = bots.label
+    ? `${bots.label}’s own comments`
+    : bots.userIds.length === 1
+      ? 'this bot’s comments'
+      : `these ${bots.userIds.length} bots’ comments`;
+  return {
+    title: `${base.title} — ${botNarrowLabel(bots)}`,
+    // The narrowing goes in the SUBTITLE too, because that sentence is what the reader checks the
+    // list against. The grid above it is deliberately NOT narrowed (the matrix describes the
+    // selector population pre-refine), so the copy must not claim the whole screen is theirs.
+    subtitle: `${base.subtitle} Narrowed to ${owned} — the grid above still describes every bot.`,
+  };
+}
+
+function baseSelectorLabel(s: BotFlaggingSelector): { title: string; subtitle: string } {
   switch (s.kind) {
     case 'findings':
       return {
@@ -186,12 +242,26 @@ export function selectorQueryKey(s: BotFlaggingSelector): string {
  * to either half is a different response and must be a different entry — while an empty refine
  * has to produce one fixed string, or every mount would miss the cache.
  *
- * `'-'` is the no-narrowing marker in both halves; it cannot collide with a
- * `VendorDisagreeDirection` or with a `vendor>ours` cell.
+ * `'-'` is the no-narrowing marker in all three parts; it cannot collide with a
+ * `VendorDisagreeDirection`, a `vendor>ours` cell or a `users.id`.
+ *
+ * ⚠ ALL THREE PARTS, and the third is the one that bites. `authorUserIds` narrows the list
+ * SERVER-side exactly as the other two do, so a key that ignores it serves one bot's comments
+ * from another bot's cache entry — two inflation bars clicked in a row would show the same list
+ * under two different captions, with nothing on screen saying why.
+ *
+ * ⚠ THE BOT SLOT IS A SET, SO IT IS SORTED — the `canonicalSeverities` rule one function up.
+ * `[7,3]` and `[3,7]` name one population; unsorted they are two React Query entries, two
+ * `search`-tier requests and a "Load more" that pages the copy that is not on screen. And `[]`
+ * ("no bots") must never key the same as `null` ("every bot"), which is why the empty set spells
+ * itself `[]` rather than collapsing to the `'-'` marker.
  */
 export function refineQueryKey(r: BotFlaggingRefine): string {
   const cell = r.cell ? `${r.cell.vendor}>${r.cell.ours}` : '-';
-  return `cell:${cell}|dis:${r.disagree ?? '-'}`;
+  const bots = r.authorUserIds
+    ? `[${[...r.authorUserIds].sort((a, b) => a - b).join(',')}]`
+    : '-';
+  return `cell:${cell}|dis:${r.disagree ?? '-'}|bot:${bots}`;
 }
 
 // ── The on-page pickers ─────────────────────────────────────────────────────────────────────

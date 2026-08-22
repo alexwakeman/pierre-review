@@ -224,6 +224,17 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && /^\/api\/bot-analytics\/flagging$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }
+  // GET /api/bot-analytics/volume[/prs|/scatter] — the bot-comment-volume family. Per request each
+  // walks EVERY merged PR in the window (up to 5000) plus three grouped comment counts over that
+  // population, then folds the whole thing in JS; the `/prs` page offset is a slice over that
+  // fold, so a cursor walk re-runs the scan per page and an IntersectionObserver fires it again
+  // on every scroll. Same shape of cost as its two neighbours above — this process's event loop,
+  // not GitHub quota and not Anthropic — so the same 60/min bucket rather than the 600/min
+  // blanket one. Anchored at BOTH ends with the sub-paths spelled out, so `/api/bot-analytics`
+  // itself and `/api/bot-analytics/bot-only-prs` keep falling through to `read`.
+  if (!mutating && /^\/api\/bot-analytics\/volume(\/(prs|scatter))?$/.test(path)) {
+    return [TIERS.search, TIERS.read];
+  }
   // GET /api/prs/<id>/ml-labels — the per-PR badge index. Two indexed reads over
   // ml_comment_labels, no model call, no GitHub. `read` is right, and it is RECORDED here rather
   // than inherited from the fall-through: it sits inside the /api/prs/<id>/ family whose other
@@ -343,18 +354,20 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // `ON CONFLICT DO NOTHING` insert of at most the account's unassigned repos, which is cheaper
   // than the feed query it precedes and reaches nothing upstream.
   //
-  // ⚠ KNOWN, AND DELIBERATELY LEFT ON `read` — written down rather than left to be re-discovered,
-  // because this is the shape of the two mistakes above. `GET /api/bot-reviewers` (its lazy pass
-  // classifies any actor with a footprint in the workspace and no stored row) and the two
-  // `DELETE /api/bot-reviewers/:userId/{judgement,identity}` resets (each re-derives in the same
-  // request) all run `classifyReviewer`, whose last resort for the medium-confidence band is a
-  // Haiku tie-break — `sync/reviewer-classify.ts:508` → `review/llm.ts cheapComplete`. That is a
-  // real LLM leg on a `read`-tier route. It is left because the tie-break is settings-gated OFF
-  // by default (`pro_settings bots.aiTiebreak`), because it predates the workspace refactor
-  // rather than arriving with it, and because the listing is fetched on every Bots-tab open, so
-  // moving it to `ai` (20/min, shared with digests and chat turns) would 429 the settings page it
-  // is trying to protect. If that tie-break is ever defaulted ON, these three routes need a tier
-  // in the same change — do not let it ship as a default flip alone.
+  // `GET /api/bot-reviewers` (its lazy pass classifies any actor with a footprint in the workspace
+  // and no stored row) and the two `DELETE /api/bot-reviewers/:userId/{judgement,identity}` resets
+  // (each re-derives in the same request) all run `classifyReviewer`, and they stay on `read`.
+  //
+  // ⚠ THAT USED TO BE A KNOWN COMPROMISE AND IS NOW SIMPLY CORRECT — kept written down because the
+  // reasoning is what would have to be re-derived. `classifyReviewer`'s last resort for the
+  // medium-confidence band was an opt-in Haiku tie-break (`review/llm.ts cheapComplete`), i.e. a
+  // real LLM leg on a `read`-tier route; it was tolerated because the setting gating it defaulted
+  // OFF. That code PATH NO LONGER EXISTS — the setting and the tie-break were deleted together, and
+  // `sync/reviewer-classify.ts` no longer imports the LLM seam at all — so these three routes are
+  // now purely DB-bound and `read` is the right bucket rather than the acceptable one. The rule
+  // that produced the earlier caution still stands: FOLLOW THE TOKEN. If anything ever puts a
+  // model call or a GitHub fetch back inside `classifyReviewer`, these three need a tier in the
+  // SAME change — not as a follow-up.
   return [TIERS.read];
 }
 

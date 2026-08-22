@@ -503,9 +503,24 @@ export async function getBotOverlapClusters(
   // A cluster survives when ≥1 of its threads matches. (The wire member shape carries no
   // per-member "matched" flag, so a surviving cluster renders whole — the matching member is
   // recognisable from its own badge.)
+  //
+  // ⚠ `authorUserIds` (the per-bot narrowing) is a fact about the THREAD's author, not about a
+  // label, so it is checked on `t.userId` and — on its own — must NOT acquire the "has a label"
+  // requirement `labelMatchesRefine` imposes. A cluster whose members are unlabelled is still a
+  // cluster those bots are in. Narrowing a CLUSTER list by a bot set keeps every other member on
+  // the card on purpose: the card's whole subject is who else flagged the same lines.
+  //
+  // ⚠ `[]` MEANS "NO BOTS", NOT "EVERY BOT" — the `repoIds` rule. Both the member predicate and
+  // the "is there a narrowing at all" gate test PRESENCE (`!= null`), never length, so an empty
+  // set answers with an empty page instead of widening to the whole workspace.
+  const memberMatches = (t: OverlapThread): boolean => {
+    if (refine.authorUserIds != null && !refine.authorUserIds.includes(t.userId)) return false;
+    if (!refine.cell && !refine.disagree) return true;
+    return labelMatchesRefine(labelForThread(t.threadId), refine);
+  };
   const narrowed =
-    refine.cell || refine.disagree
-      ? capped.filter((c) => c.items.some((t) => labelMatchesRefine(labelForThread(t.threadId), refine)))
+    refine.cell || refine.disagree || refine.authorUserIds != null
+      ? capped.filter((c) => c.items.some(memberMatches))
       : capped;
   // Describes the LIST being paged, so it counts the capped population: with `truncated` set it
   // is deliberately below `total`, which stays the tile's honest, uncapped number.

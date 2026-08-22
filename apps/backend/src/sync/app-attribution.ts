@@ -1,10 +1,14 @@
 // WS1f — opt-in app-attribution enrich (CORE, deterministic, NO AI).
 //
-// INERT BY DEFAULT. This is NOT wired into the sync loop — it costs one extra REST call
-// per PR, and the app's one-GraphQL-query-per-PR sync is a core virtue. It is invoked
-// ONLY when an account explicitly turns on "deep in-house detection"
-// (Pro settings `bots.deepDetect`); the caller (a sync hook or the detected-reviewers
-// route) passes the flag through to the classifier.
+// INERT — AND NOW IT HAS NO CALLER AT ALL. `fetchAppAttribution` is never invoked tree-wide. It
+// costs one extra REST call per PR and the app's one-GraphQL-query-per-PR sync is a core virtue,
+// so it was always opt-in: the intended trigger was the account setting "deep in-house detection"
+// (`pro_settings bots.deepDetect`), which a caller would have passed through to the classifier.
+// That setting has been REMOVED — it never had a consumer either, and CORE cannot read a plugin
+// table in the first place — so the last reason to reach this file went with it. The file survives
+// as a documented FUTURE PROBE: `ReviewerEvidence.appAttributed` still exists and
+// `classifyReviewer` still honours it, so wiring this in is a matter of finding it a caller and a
+// CORE-side gate (never a plugin setting).
 //
 // `performed_via_github_app` is the deterministic "posted via a GitHub App" signal. It
 // is REST-only, lives on issue/conversation comments + timeline events (not on review

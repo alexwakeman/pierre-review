@@ -7,6 +7,8 @@ import type {
   BotVendorAnalytics,
   BotVendorTrendPoint,
   BotVerdict,
+  BotVolumeBot,
+  BotVolumeResponse,
   BotWindowKind,
   MlSeverity,
 } from '@pierre-review/shared';
@@ -31,6 +33,8 @@ import {
   relativeTime,
 } from '../../lib/ui.js';
 import { formatCostInput, resolveVendorCost } from '../../lib/botCost.js';
+import { formatAvg, volumeByKey } from '../../lib/botVolume.js';
+import { useBotVolume } from '../../hooks/useBotVolume.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { SeverityBar } from '../MlSeverityBadge.js';
 import { LineChart } from '../charts/LineChart.js';
@@ -682,12 +686,89 @@ function QualityCheckSection({
   );
 }
 
+// One "Comments/PR" cell — the ROI table's bot-comment VOLUME column.
+//
+// ⚠ THE FIGURE IS `avgCommentsPerCommentedPr`: comments ÷ the merged PRs THIS BOT COMMENTED ON.
+// The sibling `avgCommentsPerScopePr` divides by every merged PR in scope and, on a repo where
+// most PRs draw nothing, reads ~6× lower for the same bot. Neither is named `avgCommentsPerPr` on
+// the wire precisely because a reader cannot tell them apart from the number — so the header names
+// the denominator and this tooltip carries the other figure beside it.
+//
+// ⚠ THE LOADING STATE IS REAL. `volume` is its own query (a whole-window merged-PR scan on the
+// `search` rate tier), so it settles later than the analytics response that drew the row. A "0"
+// in the meantime is a claim this bot says nothing, which then silently becomes 12.
+//
+// ⚠ AND IT COVERS THE *STALE* CASE, NOT JUST THE FIRST LOAD — `loading` is
+// `isLoading || isPlaceholderData`, and the guard below is `if (loading)`, NOT `if (loading &&
+// !bot)`. `useBotVolume` keeps the previous response through a key change (`placeholderData`),
+// so on a window or repo-scope switch this query still holds the OLD scope's numbers while the
+// analytics query — which has no placeholder, so the panel skeletons and then repaints — has
+// already come back with the NEW ones. A `!bot` guard is satisfied by that stale row, so the
+// cell would quietly print the previous window's average beside the new window's thread columns:
+// the same failure as the 0-that-becomes-12, only far harder to spot because the wrong number is
+// plausible.
+function VolumeCell({
+  bot,
+  loading,
+  mergedPrs,
+  onOpen,
+}: {
+  bot: BotVolumeBot | undefined;
+  /** True while the figure on hand does not describe the CURRENT (workspace, window, repo)
+   *  triple — first load AND the placeholder-carried gap after a scope/window change. */
+  loading: boolean;
+  /** Merged-in-window PRs in scope — the OTHER denominator, quoted in the tooltip. */
+  mergedPrs: number;
+  onOpen: ((b: { userId: number; label: string }) => void) | null;
+}): JSX.Element {
+  if (loading) {
+    return (
+      <span
+        className="inline-block h-3 w-8 animate-pulse rounded bg-gray-100 align-middle dark:bg-gray-800"
+        title="Counting the bot comments on this window’s merged PRs…"
+      />
+    );
+  }
+  if (!bot) {
+    return (
+      <span
+        className="text-gray-300 dark:text-gray-600"
+        title="This bot commented on nothing that merged inside the window. (The thread columns can still be non-zero — they count threads OPENED in the window, on PRs that may not have merged yet.)"
+      >
+        —
+      </span>
+    );
+  }
+  const label = formatAvg(bot.avgCommentsPerCommentedPr);
+  const detail =
+    `${bot.comments.toLocaleString()} comment${bot.comments === 1 ? '' : 's'} across ` +
+    `${bot.prsCommentedOn.toLocaleString()} of the ${mergedPrs.toLocaleString()} PRs merged in this window ` +
+    `(most on one PR: ${bot.maxCommentsOnOnePr.toLocaleString()}). ` +
+    `Averaged over EVERY merged PR in scope instead — counting the ones it ignored — it is ` +
+    `${formatAvg(bot.avgCommentsPerScopePr)}.`;
+  if (!onOpen) return <span title={detail}>{label}</span>;
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen({ userId: bot.authorUserId, label: bot.label })}
+      // No aria-label — it would displace the number as the accessible name (the `Tile` rule).
+      title={`${detail} Click for the PRs behind it.`}
+      className="rounded px-1 underline decoration-dotted underline-offset-2 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+    >
+      {label}
+    </button>
+  );
+}
+
 function VendorTable({
   vendors,
   botColor,
   onOpenVendor,
   overdueGraceMs,
   showMl,
+  volume,
+  volumeLoading,
+  onOpenVolume,
   onTune,
   onDrop,
 }: {
@@ -695,6 +776,19 @@ function VendorTable({
   botColor: BotColor;
   onOpenVendor: (key: string) => void;
   overdueGraceMs: number;
+  // The bot-comment VOLUME response backing the "Comments/PR" column — a SEPARATE query from the
+  // analytics one, measured at the same (workspace, window, repoIds) triple.
+  //
+  // ⚠ IT IS A DIFFERENT POPULATION FROM EVERY OTHER COLUMN HERE, and the header says so: these
+  // are PRs **MERGED** in the window, whereas the thread columns count threads opened in it. The
+  // two are not derivable from each other and must never be captioned with each other's total.
+  volume: BotVolumeResponse | undefined;
+  // True while the volume query has nothing to show yet. The cell renders a placeholder, NEVER a
+  // zero — a "0" that becomes "12" a moment later is a worse answer than an obvious pending state.
+  volumeLoading: boolean;
+  // Opens the merged-PR drill-down narrowed to this bot. null ⇒ the cell stays plain text (the
+  // `TileShell` rule: a cell becomes clickable only when someone is there to route the click).
+  onOpenVolume: ((bot: { userId: number; label: string }) => void) | null;
   // The ML severity columns (mix bar / High / Nits / the four "not addressed by severity"
   // columns) — rendered ONLY when the deployment scores (MeResponse.mlSeverity) AND the window
   // has labels. False must render NO ml chrome at all.
@@ -712,24 +806,60 @@ function VendorTable({
   // here and it needs `rowSpan={headSpan}` too.
   const headSpan = showMl ? 2 : 1;
   const showActions = Boolean(onTune ?? onDrop);
+  // ⚠ A BOT WITH NO COMMENTS IN THE WINDOW IS ABSENT FROM THE VOLUME RESPONSE (it has no trend to
+  // keep such a row meaningful, unlike this table's dormant rows) — so a miss means "said nothing
+  // on anything merged here" and renders a DASH, never a 0.
+  const volumeByBot = useMemo(() => volumeByKey(volume?.bots), [volume?.bots]);
+  const mergedPrs = volume?.totals.prs ?? 0;
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
       <table
         className={`w-full border-collapse text-[11px] ${
           showActions
             ? showMl
-              ? 'min-w-[1450px]'
-              : 'min-w-[1090px]'
+              ? 'min-w-[1560px]'
+              : 'min-w-[1200px]'
             : showMl
-              ? 'min-w-[1330px]'
-              : 'min-w-[970px]'
+              ? 'min-w-[1440px]'
+              : 'min-w-[1080px]'
         }`}
       >
         <thead>
           <tr className={`text-left text-gray-500 dark:text-gray-400${showMl ? '' : ' border-b border-gray-200 dark:border-gray-800'}`}>
             <th rowSpan={headSpan} className="px-2 py-1.5 font-medium">Vendor</th>
             <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium">Threads</th>
-            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium">Comments</th>
+            {/* ⚠ THIS COLUMN AND THE ONE BESIDE IT ARE NOT A NUMERATOR AND A RATIO, and their
+                adjacency invites exactly that reading. They disagree on BOTH axes:
+                  • KIND — this counts `review_comments` ONLY; "Comments/PR" also counts PR
+                    comments and review bodies.
+                  • POPULATION — this counts comments by their OWN createdAt on PRs in ANY state;
+                    "Comments/PR" is over PRs MERGED inside the window.
+                So `Comments ÷ Threads` is not this bot's comments-per-PR, and `Comments/PR ×
+                anything` does not reconstruct this number. Both tooltips say which basis they
+                use, because the figures alone cannot. */}
+            <th
+              rowSpan={headSpan}
+              className="px-2 py-1.5 text-right font-medium"
+              title="Inline review comments this bot left in the window, counted by the comment's own date, across PRs in any state (open, merged or closed). Deliberately NOT the numerator of Comments/PR — that column also counts PR comments and review bodies, and only over PRs merged inside the window."
+            >
+              Comments
+            </th>
+            {/* ⚠ `rowSpan={headSpan}` LIKE EVERY OTHER NON-ML HEADER CELL. When `showMl` the header
+                is TWO rows (the four "not addressed by severity" columns sit under a group cell),
+                and a new column without the span shoves every ordinary column out of alignment
+                with its own data.
+                ⚠ THE TOOLTIP STATES THE DENOMINATOR IN WORDS, and that is not padding: the same
+                bot's "per PR it commented on" and "per merged PR in scope" differ by ~6× on a
+                quiet repo (measured: 656 of mrdoob/three.js's 796 merged PRs drew NO bot comment
+                at all), and the number alone cannot tell a reader which one it is. The cell's own
+                tooltip carries the other figure so the gap is visible rather than implied. */}
+            <th
+              rowSpan={headSpan}
+              className="px-2 py-1.5 text-right font-medium"
+              title="How much this bot says when it shows up: its comments averaged over the PRs IT COMMENTED ON — not over every PR. Counts inline review comments, PR comments and review bodies, on PRs MERGED inside the window (open PRs are excluded, unlike the thread columns to the left). Click a figure for the PRs behind it."
+            >
+              Comments/PR
+            </th>
             <th
               rowSpan={headSpan}
               className="px-2 py-1.5 text-right font-medium"
@@ -882,6 +1012,21 @@ function VendorTable({
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
                   {v.dormant ? dash : v.comments}
+                </td>
+                {/* Comments per merged PR. NOT dashed on `dormant`: dormancy is judged on the
+                    THREAD columns' window, while this one counts comments on PRs merged in it —
+                    a bot that opened no new threads can still have commented on what shipped.
+                    Three states, deliberately distinguishable:
+                      • loading  → a pulse, never a 0 that turns into 12 a moment later;
+                      • no row   → a dash ("said nothing on anything merged here");
+                      • a figure → a button into the PRs it was folded from. */}
+                <td className="px-2 py-1.5 text-right tabular-nums">
+                  <VolumeCell
+                    bot={volumeByBot.get(v.key)}
+                    loading={volumeLoading}
+                    mergedPrs={mergedPrs}
+                    onOpen={onOpenVolume}
+                  />
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums">
                   {v.dormant ? (
@@ -1177,6 +1322,26 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   const workspaceId = useFilters((s) => s.workspaceId);
   const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
   const { data, isLoading, isError } = useBotAnalytics(workspaceId, window, true, repoScope);
+  // ⚠ THE VOLUME QUERY TAKES THE SAME TRIPLE, AND SO DOES THE DRILL-DOWN IT OPENS — workspace,
+  // window, repo narrowing. The column reproduces the drill-down's own numbers (both fold ONE
+  // server-side scan), so measuring them at different scopes would leave the list quietly
+  // contradicting the cell that was clicked, with nothing on screen saying why. This is the same
+  // failure the MlTotalsStrip's `onOpen` note describes, and the reason the window lives in the
+  // shared store field rather than in either tab's local state.
+  //
+  // ⚠ `isPlaceholderData` IS PART OF "LOADING" HERE. This query carries its previous response
+  // across a key change (`placeholderData: prev => prev`) while `useBotAnalytics` does NOT — so
+  // after a window or repo-scope switch the analytics half skeletons, comes back new, and repaints
+  // the table while this half is still serving the OLD scope's numbers with `isLoading === false`.
+  // Without this term the column would print the previous window's average beside the new
+  // window's thread columns, silently.
+  const {
+    data: volume,
+    isLoading: volumeFetching,
+    isPlaceholderData: volumeStale,
+  } = useBotVolume(workspaceId, window, true, repoScope);
+  const volumeLoading = volumeFetching || volumeStale;
+  const openBotVolumeDetail = useFilters((s) => s.openBotVolumeDetail);
   const botColor = useBotColors(workspaceId);
   // The ML severity surface: hidden ENTIRELY (no columns, no strip, no empty chrome) when the
   // deployment has no scoring service — /api/me's mlSeverity is the gate, exactly as the old
@@ -1317,6 +1482,15 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           onOpenVendor={(key) => openBotPrsDetail(key, repoId ?? null)}
           overdueGraceMs={t.overdueGraceMs}
           showMl={showMlColumns}
+          volume={volume}
+          volumeLoading={volumeLoading}
+          // ⚠ THE SAME `repoId ?? null` THIRD LEG the flagging drill-down gets: on the per-repo
+          // Bots tab the cell counts ONE repo, so the list must too. The bot narrowing is the
+          // one-element SET shape shared with the flagging drill-down (`users.id`s, never vendor
+          // key strings) — one narrowing convention on this surface, not two.
+          onOpenVolume={(b) =>
+            openBotVolumeDetail(repoId ?? null, { userIds: [b.userId], label: b.label })
+          }
           onTune={advisorPillsOn ? (key) => focusAdvisor(key, 'tune') : null}
           onDrop={advisorPillsOn ? (key) => focusAdvisor(key, 'drop') : null}
         />

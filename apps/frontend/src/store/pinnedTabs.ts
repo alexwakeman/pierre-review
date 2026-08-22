@@ -26,6 +26,8 @@ export type PinnedPr = TabMeta;
 //  - bot-threads: the resolvable-bot-threads review & resolve (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-flagging: the ML-strip drill-down ("what the bots are flagging" — a singleton, non-PR,
 //    EPHEMERAL tab; which tile/chip it shows is the transient seed, not the key)
+//  - bot-volume: the merged-PR list behind the ROI table's "bot comments per PR" column (a
+//    singleton, non-PR, EPHEMERAL tab; which bot it is narrowed to is the transient seed)
 //  - user-activity: one contributor's activity feed (keyed PER USER, non-PR, EPHEMERAL)
 export type TabKind =
   | 'pr-detail'
@@ -36,6 +38,7 @@ export type TabKind =
   | 'bot-only-prs'
   | 'bot-threads'
   | 'bot-flagging'
+  | 'bot-volume'
   | 'theme-threads'
   | 'search'
   | 'user-activity';
@@ -90,6 +93,13 @@ export const BOT_THREADS_TAB_KEY = 'bot-threads';
 // EPHEMERAL: excluded from persistence (see `persist`) + not matched by parseTabKey, so a reload
 // drops it — which it must, since the seed it renders from lives only in memory.
 export const BOT_FLAGGING_TAB_KEY = 'bot-flagging';
+// The bot-comment-VOLUME drill-down — the merged PRs behind the ROI table's "bot comments per PR"
+// column. A SINGLETON, non-PR tab like the ones above: WHICH bot it is narrowed to (and the repo
+// the column was measured at) is the transient `botVolumeSeed` signal (store/filters.ts), not the
+// key, so clicking a second bot's cell RE-SEEDS this one tab in place. EPHEMERAL: excluded from
+// persistence (see `persist`) + not matched by parseTabKey, so a reload drops it — which it must,
+// since the seed it renders from lives only in memory.
+export const BOT_VOLUME_TAB_KEY = 'bot-volume';
 // The theme-threads drill-down is a SINGLETON, non-PR tab: it lists all the review threads / PR
 // comments a Bot/Human theme groups. The theme itself is the transient seed (store/filters.ts
 // `themeThreadsSeed`), not the key. EPHEMERAL like the others (dropped on reload).
@@ -153,6 +163,7 @@ interface TabsState {
   openBotOnlyPrsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-only-PRs drill-down + activate
   openBotThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-threads resolve tab + activate
   openBotFlaggingTab: (opts?: OpenOpts) => void; // ensure the singleton ML-strip drill-down + activate
+  openBotVolumeTab: (opts?: OpenOpts) => void; // ensure the singleton bot-volume PR drill-down + activate
   openThemeThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton theme-threads drill-down + activate
   openSearchTab: (opts?: OpenOpts) => void; // ensure the singleton search-results drill-down + activate
   // Ensure (and activate) one contributor's activity-feed tab. Keyed per user; `user` is the
@@ -338,6 +349,8 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       openTab({ key: BOT_THREADS_TAB_KEY, kind: 'bot-threads', prId: 0, meta: null }, opts),
     openBotFlaggingTab: (opts) =>
       openTab({ key: BOT_FLAGGING_TAB_KEY, kind: 'bot-flagging', prId: 0, meta: null }, opts),
+    openBotVolumeTab: (opts) =>
+      openTab({ key: BOT_VOLUME_TAB_KEY, kind: 'bot-volume', prId: 0, meta: null }, opts),
     openThemeThreadsTab: (opts) =>
       openTab({ key: THEME_THREADS_TAB_KEY, kind: 'theme-threads', prId: 0, meta: null }, opts),
     openSearchTab: (opts) =>

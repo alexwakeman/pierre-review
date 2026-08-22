@@ -193,7 +193,11 @@ import { fingerprintReview } from '../sync/review-fingerprint.js';
 // ⚠ A deliberate module CYCLE: ml-labels.ts imports the bot-set resolvers from this file. It is
 // benign under ESM because both sides export hoisted function declarations and only call each
 // other at request time — never during module evaluation. Do not add an eval-time use.
-import { getMlWindowAggregates, listMlLabelsForBehaviour } from './ml-labels.js';
+import {
+  getMlWindowAggregates,
+  listMlLabelsForBehaviour,
+  vendorAgreementOf,
+} from './ml-labels.js';
 import { clusterThreadsByLine } from './line-overlap.js';
 import { botWindowMs } from './bot-window.js';
 import { detectChangepoints } from './changepoint.js';
@@ -8480,6 +8484,10 @@ function pathBucket(path: string): string {
 // full 84-day span would be a second heavy pass for a sparkline). One predicate, shared by
 // getBotAnalytics and getAdvisorFindings, so the two surfaces can never disagree about what
 // "acted on" means.
+//
+// ⚠ Its counterpart is NOT `!isActedOnThreadState`: "not acted on" is `state === 'untouched'`
+// EXACTLY, because `replied_unresolved` is neither (someone answered and then nothing happened).
+// Every caller in this file already spells that literal for that reason.
 function isActedOnThreadState(state: DerivedState | string): boolean {
   return state === 'resolved' || state === 'likely_addressed';
 }
@@ -12619,6 +12627,11 @@ export async function getBotBehaviourAnalytics(
     bySeverity: MlSeverityCounts;
     byVendorSeverity: MlSeverityCounts;
     vendorDeclared: number;
+    // The inflation index — the same three counters SeverityAgreementMatrix carries, at this
+    // response's grain. They partition `vendorDeclared`, never `findings`.
+    vendorAgree: number;
+    vendorOverCall: number;
+    vendorUnderCall: number;
     byCategory: Map<MlCategory, number>;
     weekly: { bySeverity: MlSeverityCounts; byCategory: Map<MlCategory, number> }[];
   }
@@ -12634,6 +12647,9 @@ export async function getBotBehaviourAnalytics(
         bySeverity: emptyCounts(),
         byVendorSeverity: emptyCounts(),
         vendorDeclared: 0,
+        vendorAgree: 0,
+        vendorOverCall: 0,
+        vendorUnderCall: 0,
         byCategory: new Map(),
         weekly: Array.from({ length: SPAN_WEEKS }, () => ({
           bySeverity: emptyCounts(),
@@ -12660,9 +12676,20 @@ export async function getBotBehaviourAnalytics(
       acc.bySeverity[row.severity] += 1;
       // The vendor's own badge — a strictly smaller population (most findings carry none), so it
       // gets its own denominator and never shares one with ours.
+      //
+      // The three disagreement counters ride the SAME branch, which is what makes
+      // `agree + over + under === vendorDeclared` structural rather than a property someone has
+      // to remember: an unbadged finding never reaches here, and silence is not a conflict.
+      // Direction comes from `vendorAgreementOf` — the one rule the confusion matrix and the
+      // flagging drill-down's `disagree` refinement also use, so this bar chart and the list it
+      // opens cannot disagree about which way a row leans.
       if (row.vendorSeverity) {
         acc.vendorDeclared += 1;
         acc.byVendorSeverity[row.vendorSeverity] += 1;
+        const dir = vendorAgreementOf(row.vendorSeverity, row.severity);
+        if (dir === 'agree') acc.vendorAgree += 1;
+        else if (dir === 'over') acc.vendorOverCall += 1;
+        else if (dir === 'under') acc.vendorUnderCall += 1;
       }
     }
   }
@@ -12687,6 +12714,9 @@ export async function getBotBehaviourAnalytics(
         bySeverity: acc.bySeverity,
         byVendorSeverity: acc.byVendorSeverity,
         vendorDeclared: acc.vendorDeclared,
+        vendorAgree: acc.vendorAgree,
+        vendorOverCall: acc.vendorOverCall,
+        vendorUnderCall: acc.vendorUnderCall,
         byCategory: sortedCategories(acc.byCategory),
         weekly,
       };

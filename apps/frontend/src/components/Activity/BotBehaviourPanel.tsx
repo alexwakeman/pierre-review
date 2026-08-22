@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type {
   AnalyticsBin,
   BotBehaviourAnomaly,
@@ -11,6 +11,7 @@ import type {
   MlSeverityCounts,
 } from '@pierre-review/shared';
 import { useBotBehaviour } from '../../hooks/useBotTriage.js';
+import { useBotVolumeScatter } from '../../hooks/useBotVolume.js';
 import { useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { useFilters } from '../../store/filters.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
@@ -24,11 +25,21 @@ import {
   SEVERITY_STACK_ORDER,
   categoriesPresent,
   categoryWeeklySeries,
+  inflationSummary,
   meanSeverityValues,
   mlWeekLabels,
   severityBreakdownNote,
   severityTotal,
+  type InflationDirection,
 } from '../../lib/botMlSeries.js';
+import {
+  bucketPrCount,
+  formatBucketAvg,
+  formatBucketDensity,
+  sizeBucketSeries,
+  unsizedNote,
+} from '../../lib/botVolumeSize.js';
+import type { BotFlaggingBotNarrowing } from '../../lib/severityAgreement.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import { Heatmap } from '../charts/Heatmap.js';
@@ -469,6 +480,10 @@ function DensityTrendChart({
 // One bot's ML fold joined to its identity from the `bots` rows (the `key` is the join).
 interface MlBotView {
   key: string;
+  // `users.id`, taken from the joined `bots` row — the number the flagging drill-down's per-bot
+  // narrowing takes. Carried rather than parsed back out of `key`'s `u<id>` shape: a second
+  // spelling of that format is how a bar and the list behind it come to name different bots.
+  userId: number;
   label: string;
   login: string | null;
   kind: BotBehaviourBotStat['kind'];
@@ -691,30 +706,234 @@ function MlCategoryTrendChart({
   return <LineChart labels={labels} series={series} height={160} curved logY centerTip />;
 }
 
+// ── Charts 6 & 7 — THE SEVERITY INFLATION INDEX ────────────────────────────────────────────────
+// The two mix charts above show ours and theirs side by side; these two say how often the two
+// claims CONTRADICT each other, and which way. `vendorOverCall` is the bot grading a finding worse
+// than we did (inflation — the tuning question); `vendorUnderCall` is us grading it worse than the
+// bot did (the findings a nit-filter would silently drop).
+//
+// ⚠ THE DENOMINATOR IS `vendorDeclared`, NOT `findings`, and the caveat line says so. Badge
+// coverage is vendor-shaped and wildly uneven — some bots badge nearly every finding, several
+// badge none at all — so a bot with no badges is EXCLUDED rather than drawn as a zero bar: it has
+// no over-calls because it makes no calls, and a 0 would read "never inflates". `inflationSummary`
+// owns that rule and names who it left out.
+//
+// ⚠ AND NOTHING HERE IS RE-DERIVED. Every bar is the server's own count, folded from the same
+// windowed scan through the same `vendorAgreementOf` rule the drill-down's `disagree` refinement
+// uses — which is exactly why a bar can open the comments behind it and the two numbers agree.
+const INFLATION_COPY: Record<
+  InflationDirection,
+  { title: string; seriesLabel: string; color: string; lead: string }
+> = {
+  over: {
+    title: 'Severity inflated by the bot',
+    seriesLabel: 'Bot called it worse',
+    color: PALETTE.amber,
+    lead: 'How often each bot badged a finding MORE severe than our model rated it — inflation. A fact about the bot, never a correction of our label.',
+  },
+  under: {
+    title: 'Severity raised by Limn',
+    seriesLabel: 'We called it worse',
+    color: PALETTE.violet,
+    lead: 'How often our model rated a finding MORE severe than the bot’s own badge — the ones a nit-filter set to the bot’s own grades would silently drop.',
+  },
+};
+
+function InflationChart({
+  direction,
+  views,
+  subset,
+  botColor,
+  windowLabel,
+  findings,
+  onOpen,
+}: {
+  direction: InflationDirection;
+  // EVERY view, not the badged ones — `inflationSummary` does the filtering, so the exclusion and
+  // the list of who was excluded are computed in one place.
+  views: MlBotView[];
+  subset: BotSubset;
+  botColor: BotColorFn;
+  windowLabel: string;
+  // The whole ML block's finding count — the number the badged denominator is stated against.
+  findings: number;
+  // ⚠ THE CALLER STATES THE BOT SET, ALWAYS — a bar's one id, or every id the card summed. It is
+  // NOT `InflationBar | null` any more: `null` used to mean "the card's view all", which the
+  // drill-down then resolved for itself over role `'all'` while THIS panel's bots are role
+  // `'review'` (both deliberate). So "View all 359 →" could open a list reporting 612, with
+  // nothing on screen explaining the gap — invisible today only because no shipped
+  // quality-check bot emits a vendor badge. Sending the ids makes the two agree by construction.
+  onOpen: (direction: InflationDirection, bots: BotFlaggingBotNarrowing) => void;
+}): JSX.Element {
+  const copy = INFLATION_COPY[direction];
+  const summary = useMemo(() => inflationSummary(views, direction), [views, direction]);
+  // The legend narrows which BARS are drawn; the caveat and "view all" keep describing the whole
+  // badged population, because that is what the button opens.
+  const shown = useMemo(() => summary.bars.filter((b) => subset.isOn(b.key)), [summary, subset]);
+  const viewByKey = useMemo(() => new Map(views.map((v) => [v.key, v])), [views]);
+  const colorOf = (key: string): string => {
+    const v = viewByKey.get(key);
+    return v ? botColor({ login: v.login, kind: v.kind }) : copy.color;
+  };
+  // The legend lists the BADGED bots in bar order (a pill for a bot that can never draw a bar is
+  // an unexplained dead control), and carries the identity `botColor` resolves on.
+  const legendBots = useMemo(
+    () =>
+      summary.bars.flatMap((b) => {
+        const v = viewByKey.get(b.key);
+        return v ? [{ key: v.key, label: v.label, login: v.login, kind: v.kind }] : [];
+      }),
+    [summary, viewByKey],
+  );
+
+  // Bars tinted per BOT (`Series.colors`), unlike the stacked mixes above where colour encodes the
+  // severity inside the bar. Here the series is one metric across bots, so the bot IS the axis —
+  // and the subset legend beside it is a row of bot-coloured pills, which a single flat bar colour
+  // would leave unexplained.
+  const series: Series[] = [
+    {
+      key: direction,
+      label: copy.seriesLabel,
+      color: copy.color,
+      values: shown.map((b) => b.count),
+      colors: shown.map((b) => colorOf(b.key)),
+    },
+  ];
+
+  const unbadgedNote =
+    summary.unbadged.length === 0
+      ? null
+      : summary.unbadged.length <= 3
+        ? summary.unbadged.join(', ')
+        : `${summary.unbadged.length} bots`;
+
+  return (
+    <ChartCard title={copy.title} note={`badged findings only · ${windowLabel}`}>
+      <BotSubsetLegend bots={legendBots} subset={subset} botColor={botColor} />
+      {summary.bars.length === 0 ? (
+        <ChartEmpty label="No bot declared a severity in this window" />
+      ) : shown.length === 0 ? (
+        <ChartEmpty label="Select at least one bot" />
+      ) : (
+        <BarChart
+          labels={shown.map((b) => b.label)}
+          series={series}
+          height={160}
+          rotateLabels
+          onSelectBar={(_seriesKey, i) => {
+            const bar = shown[i];
+            // One bot, named: the list can be captioned with its label and its `filteredTotal`
+            // is this bar's own count.
+            if (bar) onOpen(direction, { userIds: [bar.userId], label: bar.label });
+          }}
+          // The only text a screen reader gets for the band, so it states the denominator the
+          // bar is out of AND what activating it does.
+          barAriaLabel={(i) => {
+            const bar = shown[i];
+            if (!bar) return '';
+            return `${bar.label}: ${bar.count} of ${bar.declared} badged findings — open these comments`;
+          }}
+        />
+      )}
+      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-[10px] text-gray-400">
+          {copy.lead} Only {fmtNum(summary.declared)} of {fmtNum(findings)} findings in this window
+          carry a bot badge at all, and coverage is vendor-shaped.
+          {unbadgedNote && (
+            <>
+              {' '}
+              {unbadgedNote} badged nothing here and {summary.unbadged.length === 1 ? 'is' : 'are'}{' '}
+              left out rather than drawn as a zero — no badge is silence, not agreement.
+            </>
+          )}{' '}
+          Click a bar for the comments behind it.
+        </span>
+        {summary.total > 0 && (
+          <button
+            type="button"
+            // ⚠ `summary.bars`, NOT the legend's `shown` and NOT "every bot": this button's number
+            // is Σ count over EVERY badged bar (the legend narrows which bars are DRAWN, not what
+            // the caveat and this total describe), so the id set handed over must be exactly the
+            // set that sum was taken over. Anything else re-opens the gap between the promised
+            // count and the list's `filteredTotal`.
+            onClick={() =>
+              onOpen(direction, { userIds: summary.bars.map((b) => b.userId), label: null })
+            }
+            className="shrink-0 rounded border border-gray-300 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-200"
+            title="Open every one of these comments, across the bots this chart counted — the same window and scope it was measured at."
+          >
+            View all {fmtNum(summary.total)} →
+          </button>
+        )}
+      </div>
+    </ChartCard>
+  );
+}
+
 function MlCharts({
   bots,
   ml,
   botColor,
   windowLabel,
+  repoId,
 }: {
   bots: BotBehaviourBotStat[];
   ml: BotBehaviourMl;
   botColor: BotColorFn;
   windowLabel: string;
+  // The repo narrowing this whole panel is measured at — carried into the drill-down verbatim so
+  // the list it opens counts what the bar counted. See the ⚠ on `openInflation` below.
+  repoId: number | null;
 }): JSX.Element | null {
   const views = useMemo<MlBotView[]>(() => {
     const byKey = new Map(bots.map((b) => [b.key, b]));
     return ml.perBot.flatMap((m) => {
       const b = byKey.get(m.key);
-      return b ? [{ key: m.key, label: b.label, login: b.login, kind: b.kind, ml: m }] : [];
+      return b
+        ? [{ key: m.key, userId: b.userId, label: b.label, login: b.login, kind: b.kind, ml: m }]
+        : [];
     });
   }, [bots, ml]);
   const allKeys = useMemo(() => views.map((v) => v.key), [views]);
   // ONE subset across the two trend charts, so isolating a bot on "Severity over time" carries
   // into the category trend below it and the two read as a single investigation.
   const subset = useBotSubset(allKeys);
+  // A SECOND subset for the two inflation charts, over the bots that actually badge something —
+  // the DensityTrendChart precedent (its own subset over `botsWithData`). Sharing the trend
+  // charts' subset would make "all shown" mean a different set on each pair, and its
+  // none-selected/all-selected rule counts against the wrong denominator.
+  const badgedKeys = useMemo(
+    () => views.filter((v) => v.ml.vendorDeclared > 0).map((v) => v.key),
+    [views],
+  );
+  const inflationSubset = useBotSubset(badgedKeys);
   const [showMore, setShowMore] = useState(false);
   const [mixMode, setMixMode] = useState<MixMode>('share');
+
+  // ⚠ THE DRILL-DOWN MUST CLOSE OVER THE SAME (workspace, window, repo) TRIPLE THIS CHART WAS
+  // MEASURED AT — the MlTotalsStrip rule, and the failure is the same one: a list that disagrees
+  // with the number that was clicked, with nothing on screen saying why. Two of the three are
+  // shared store fields the drill-down reads for itself (`workspaceId`, `botAnalyticsWindow` —
+  // which is why this panel must not keep a local window), and `repoId` is the third leg, handed
+  // over here.
+  //
+  // The selector is `findings` because that is the population these counts are folded from
+  // (walkthroughs and praise never reach the vendor-badge branch), and the direction rides the
+  // `disagree` refinement — the SAME classifier the bars came from, so the bar's number and the
+  // list's `filteredTotal` are the same fold, not two opinions about one window.
+  //
+  // ⚠ THE BOT SET IS THE FOURTH LEG, and it is not optional. This panel's bots come from
+  // `automatedReviewerUserIds(role: 'review')`; the drill-down resolves role `'all'` — both
+  // deliberate, neither to be "harmonised" — so the ONLY thing that keeps a card-level total and
+  // the list it opens in agreement is the caller naming the exact ids it summed. `InflationCard`
+  // builds it (one bar's id, or every badged bar's) and this handler only forwards it.
+  const openBotFlaggingDetail = useFilters((s) => s.openBotFlaggingDetail);
+  const openInflation = useCallback(
+    (direction: InflationDirection, bots: BotFlaggingBotNarrowing): void => {
+      openBotFlaggingDetail({ kind: 'findings' }, repoId, { bots, disagree: direction });
+    },
+    [openBotFlaggingDetail, repoId],
+  );
 
   const model = useMemo(() => {
     const mixRows = views
@@ -798,6 +1017,31 @@ function MlCharts({
             badge at all, so this mix is a sparser sample than the one on the left.
           </div>
         </ChartCard>
+      </div>
+
+      {/* The inflation index — the disagreement the pair above only implies, counted and made
+          clickable. Rendered unconditionally beside the mixes (not behind the "more charts" fold):
+          each card states its own denominator and self-empties when no bot in scope badges
+          anything, so there is nothing to hide. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <InflationChart
+          direction="over"
+          views={views}
+          subset={inflationSubset}
+          botColor={botColor}
+          windowLabel={windowLabel}
+          findings={findings}
+          onOpen={openInflation}
+        />
+        <InflationChart
+          direction="under"
+          views={views}
+          subset={inflationSubset}
+          botColor={botColor}
+          windowLabel={windowLabel}
+          findings={findings}
+          onOpen={openInflation}
+        />
       </div>
 
       <ChartCard
@@ -1249,6 +1493,185 @@ function BotRepoWorkChart({
   );
 }
 
+// ── PR SIZE vs BOT COMMENT VOLUME (CORE, free, deterministic) ─────────────────────────────────
+//
+// "Do the bots talk more on a big PR, and how much more?" — the five LOC-bucket means from
+// `/api/bot-analytics/volume/scatter`, drawn as the pair of readings that together tell the truth:
+// absolute volume per merged PR (which RISES with size) beside volume per 100 lines (which FALLS,
+// hard). Either one alone is a half-story — the first invites "bots scale with the diff", the
+// second invites "bots ignore big PRs" — and both are wrong.
+//
+// ⚠ THIS CARD IS **NOT** ML-GATED, which is why it is mounted OUTSIDE the `mlEnabled` block rather
+// than inside `MlCharts` next door. Every number here is counted from stored comment rows; no
+// severity-api, no model, no `mlSeverity` capability. On a deployment with the whole ML block dark
+// (which includes every `npx pierre-review` install — it ships no model) this card still renders,
+// and putting it behind that flag would have hidden a free CORE feature from most installs.
+//
+// ⚠ FORM: BUCKET BARS, NOT A SCATTER. The response carries one point per sized merged PR and this
+// card deliberately does not draw them. LOC spans four orders of magnitude with the mass piled at
+// the bottom (measured live: one workspace here has 268 of 283 sized merged PRs under 50 lines), so
+// a cloud of those points reads as a blob whose apparent shape is set by OVERPLOTTING rather than
+// by the relationship — and the claim being made is about central tendency by size, which is
+// exactly what the server already folded. Bars over the existing `BarChart` also keep the per-bucket
+// PR counts sayable, which a scatter has nowhere to put.
+//
+// ⚠ READ-ONLY ON PURPOSE. A bucket does NOT open the volume drill-down: `BotVolumeRefine` narrows
+// by `authorUserIds` and by nothing else, so there is no size-bucket refinement for the server to
+// honour. A client-side "PRs in this bucket" filter would be a list the server's own `total` and
+// `filteredTotal` then contradict — the exact failure the volume surfaces were specced against. So
+// `BarChart` is given NO `onSelectBar`, which leaves it byte-identical to every other consumer:
+// no pointer cursor, no hit targets, nothing added to the tab order.
+function BotVolumeSizeChart({
+  workspaceId,
+  window: windowKind,
+  repoScope,
+  windowLabel,
+}: {
+  workspaceId: number | null;
+  window: BotWindowKind;
+  repoScope: number[] | null;
+  windowLabel: string;
+}): JSX.Element | null {
+  // ⚠ `isPlaceholderData` COUNTS AS LOADING. `useBotVolumeScatter` carries its previous response
+  // across a key change (`placeholderData: prev => prev`), so on a window or repo-scope switch
+  // `isLoading` is FALSE while `data` still describes the OLD scope — and this card's own note
+  // names the window ("merged PRs only · 30d"), so the stale bars would be captioned with the new
+  // window. The panel around it has already repainted by then (`useBotBehaviour` has no
+  // placeholder), which is exactly what makes the mismatch invisible.
+  const { data, isLoading, isPlaceholderData, isError } = useBotVolumeScatter(
+    workspaceId,
+    windowKind,
+    true,
+    repoScope,
+  );
+  const pending = isLoading || isPlaceholderData;
+  const model = useMemo(() => sizeBucketSeries(data?.buckets ?? []), [data?.buckets]);
+
+  const avgSeries: Series[] = useMemo(
+    () => [
+      {
+        key: 'avg',
+        label: 'Bot comments per merged PR',
+        color: PALETTE.blue,
+        values: model.rows.map((r) => r.avg),
+      },
+    ],
+    [model.rows],
+  );
+  const densitySeries: Series[] = useMemo(
+    () => [
+      {
+        key: 'density',
+        label: 'Bot comments per 100 lines',
+        color: PALETTE.purple,
+        values: model.rows.map((r) => r.density),
+      },
+    ],
+    [model.rows],
+  );
+
+  // A failed fetch renders NOTHING rather than an error card: this is one supporting reading on a
+  // tab whose other charts are already up, and a red box for a chart nobody asked to reload is
+  // noise. The panel's own error state covers the case where the whole tab failed.
+  if (isError) return null;
+  // NOT `pending && !data` — a stale placeholder from the previous window satisfies `data` and
+  // would draw the wrong scope's bars under this window's caption. See the ⚠ at the query above.
+  if (pending) {
+    return (
+      <div className="h-40 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40" />
+    );
+  }
+  // No merged PR in scope had an observed size — there is no x-axis to draw and nothing honest to
+  // say, so the card stays away entirely rather than showing five empty bands.
+  if (model.rows.length === 0) return null;
+
+  const labels = model.rows.map((r) => r.label);
+  const unsized = unsizedNote(data?.sizedPrs ?? 0, data?.unsizedPrs ?? 0);
+  // ⚠ THE SCAN CAP IS A CLAIM-WEAKENING FACT, NOT A PERFORMANCE DETAIL, so it belongs in the
+  // note rather than in a tooltip. When it bites, these five bucket means describe the most
+  // recent slice of the window instead of the window — and this card's whole job is to be the
+  // baseline a PR's "× expected" is read against. A sampled baseline drawn as an authoritative
+  // curve is exactly what got the post-merge autopsy deleted; say so on screen instead.
+  const scanNote = data?.scanTruncated ? ' · newest PRs only (scan capped)' : '';
+
+  return (
+    <ChartCard
+      title="PR size vs bot comment volume"
+      note={`merged PRs only · ${windowLabel} · by lines changed (added + deleted)${scanNote}`}
+    >
+      {!model.hasComments ? (
+        <ChartEmpty label="No bot comments on the PRs that merged in this window" />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <div>
+            <div className="mb-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">
+              Per merged PR <span className="font-normal text-gray-400">— rises with size</span>
+            </div>
+            <BarChart
+              labels={labels}
+              series={avgSeries}
+              height={140}
+              formatY={densAxis}
+              formatValue={formatBucketAvg}
+            />
+          </div>
+          <div>
+            <div className="mb-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">
+              Per 100 lines{' '}
+              <span className="font-normal text-gray-400">— falls, usually by a lot</span>
+            </div>
+            <BarChart
+              labels={labels}
+              series={densitySeries}
+              height={140}
+              formatY={densAxis}
+              formatValue={formatBucketDensity}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* The support behind each bar. A mean over 3 PRs and a mean over 268 draw at identical
+          visual weight, so the counts have to be on screen next to them, not in a tooltip. */}
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+        <span className="text-gray-400">Merged PRs behind each bar:</span>
+        {model.rows.map((r) => (
+          // The interpunct is not decoration: without it "<50 268 PRs 50–200 12 PRs" runs two
+          // separate readings together, and the bucket edges are themselves numbers.
+          <span key={r.label}>
+            {r.label} · <span className="font-medium">{bucketPrCount(r.prs)}</span>
+          </span>
+        ))}
+      </div>
+
+      {/* A band that is absent from the axis because nothing of that size merged — named, so it
+          cannot be read as "PRs this big are not measured here". Distinct from a band that IS on
+          the axis with no bar, which is the real finding "PRs this size merged and drew nothing". */}
+      {model.emptyLabels.length > 0 && (
+        <div className="mt-1 text-[10px] text-gray-400">
+          No merged PR of this size in this window: {model.emptyLabels.join(', ')} — those bands are
+          left off the axis rather than drawn as a zero.
+        </div>
+      )}
+      {unsized && <div className="mt-1 text-[10px] text-gray-400">{unsized}</div>}
+
+      <div className="mt-1 text-[10px] text-gray-400">
+        <span className="font-medium text-amber-600 dark:text-amber-400">
+          ⚠ A correlation, not a rule — and it is repo-dependent.
+        </span>{' '}
+        Across the five repos we measured this on, log-LOC against bot-comment count ran 0.62 and
+        0.54 on two heavily-configured repos, then 0.15, 0.13 and 0.03 on three others: where a bot
+        is lightly configured it says roughly the same amount whatever the diff size, and size
+        predicts nothing at all. Read this as the shape of <em>this</em> scope in{' '}
+        <em>this</em> window — several repos and every bot in the workspace are pooled here, so a
+        workspace whose repos are configured differently blends them into one curve. Counts every
+        review comment, PR comment and review body an automated reviewer wrote (a wider definition
+        than the ROI table&rsquo;s “Comments”), on PRs that <em>merged</em> in the window.
+      </div>
+    </ChartCard>
+  );
+}
+
 export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Element {
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
@@ -1307,10 +1730,29 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
           >
             <DensityTrendChart bots={bots} botColor={botColor} />
           </ChartCard>
+          {/* PR size vs volume. Sits HERE — beside the density trend and ABOVE the ML block —
+              because it answers the same "how noisy is this" question the card above does, only
+              cut by diff size instead of by week. It is deliberately OUTSIDE the `mlEnabled` gate
+              below: it needs no severity-api, so it must render on a deployment where every ML
+              chart is dark. */}
+          <BotVolumeSizeChart
+            workspaceId={workspaceId}
+            window={window}
+            repoScope={repoScope}
+            windowLabel={windowLabel}
+          />
           {/* ML severity/category — dark entirely when this deployment has no severity-api (the
               `mlSeverity` capability), which is also when the server ships no `ml` block. */}
           {mlEnabled && data?.ml != null && (
-            <MlCharts bots={bots} ml={data.ml} botColor={botColor} windowLabel={windowLabel} />
+            <MlCharts
+              bots={bots}
+              ml={data.ml}
+              botColor={botColor}
+              windowLabel={windowLabel}
+              // The third leg of the drill-down's scope triple — the same `repoId` this panel's
+              // own query is narrowed by (`repoScope` above).
+              repoId={repoId ?? null}
+            />
           )}
           {data?.overlap != null && (
             <BotOverlapSection overlap={data.overlap} color={botColor({ login: null, kind: 'in_house' })} />

@@ -1332,7 +1332,7 @@ check(
 const { getBotFlaggingComments } = await import('../src/db/ml-labels.js');
 const { getBotOverlapClusters } = await import('../src/db/bot-overlap.js');
 // No refinement: the whole selector population, which is the widest thing either getter returns.
-const noRefine = { cell: null, disagree: null };
+const noRefine = { cell: null, disagree: null, authorUserIds: null };
 const flagPage = { offset: 0, limit: 20 };
 
 // The binding fixture is the one the rollup and the vendor-comments drill-down already use: the
@@ -1403,6 +1403,61 @@ const flagCross = await getBotFlaggingComments(
 check(
   'getBotFlaggingComments(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)',
   flagCross.total === 0 && flagCross.items.length === 0 && flagCross.matrix.total === 0,
+);
+// The bot refinement narrows the LIST — it must never become a second way to name a row. It is a
+// LIST (the card-level "view all" states the exact bot set its total was summed over), so both the
+// one-member and the multi-member spellings are checked here.
+//
+// Non-vacuous by construction: `contributor` is a GLOBAL user (the `users` table is shared) who
+// authored a labelled comment in BOTH tenants, so B asking for that exact id is the closest a
+// caller can get to naming A's row. It must still see exactly one — its own.
+const flagByBot = await getBotFlaggingComments(
+  2,
+  { kind: 'findings' },
+  { ...noRefine, authorUserIds: [contributor!.id] },
+  'rolling_30',
+  mlScopeB,
+  flagPage,
+);
+check(
+  'getBotFlaggingComments(B, refine.authorUserIds=[shared global user]) narrows to B’s row only',
+  flagByBot.total === 1 &&
+    flagByBot.filteredTotal === 1 &&
+    flagByBot.items.length === 1 &&
+    flagByBot.items[0]!.targetId === isoRcB[0]!.id &&
+    !flagByBot.items.some((c) => c.targetId === isoRc[0]!.id || c.repoId === A.repoId),
+);
+// A SET containing a foreign bot alongside its own adds nothing: the extra id is still just a
+// predicate over an already accountId-scoped scan, so widening the list cannot widen the tenancy.
+const flagByBotSet = await getBotFlaggingComments(
+  2,
+  { kind: 'findings' },
+  { ...noRefine, authorUserIds: [contributor!.id, botUser!.id, 999_999] },
+  'rolling_30',
+  mlScopeB,
+  flagPage,
+);
+check(
+  'getBotFlaggingComments(B, refine.authorUserIds=[own, foreign-only, unknown]) still lists only B’s row',
+  flagByBotSet.filteredTotal === 1 &&
+    flagByBotSet.items.length === 1 &&
+    flagByBotSet.items[0]!.targetId === isoRcB[0]!.id &&
+    !flagByBotSet.items.some((c) => c.targetId === isoRc[0]!.id || c.repoId === A.repoId),
+);
+// ⚠ AN EMPTY SET IS "NO BOTS", NEVER "EVERY BOT" — the `repoIds` rule on a different parameter.
+// A gate spelled `authorUserIds?.length` would hand back the whole selector population under a
+// caption promising a subset.
+const flagByNoBot = await getBotFlaggingComments(
+  2,
+  { kind: 'findings' },
+  { ...noRefine, authorUserIds: [] },
+  'rolling_30',
+  mlScopeB,
+  flagPage,
+);
+check(
+  'getBotFlaggingComments(B, refine.authorUserIds=[]) narrows to nothing, never to everything',
+  flagByNoBot.total === 1 && flagByNoBot.filteredTotal === 0 && flagByNoBot.items.length === 0,
 );
 
 // ── Same-line overlap clusters ──────────────────────────────────────────────────────────────
@@ -1490,6 +1545,50 @@ check(
   'getBotOverlapClusters(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)',
   ovlCross.total === 0 && ovlCross.items.length === 0,
 );
+// The same refinement on the cluster arm. `contributor` is a member of BOTH tenants' clusters,
+// so narrowing B to that shared global id keeps B's cluster and must not surface A's.
+const ovlByBot = await getBotOverlapClusters(
+  2,
+  { ...noRefine, authorUserIds: [contributor!.id] },
+  'rolling_30',
+  mlScopeB,
+  ovlPage,
+);
+check(
+  'getBotOverlapClusters(B, refine.authorUserIds=[shared global user]) keeps only B’s cluster',
+  ovlByBot.total === 1 &&
+    ovlByBot.filteredTotal === 1 &&
+    ovlByBot.items.length === 1 &&
+    ovlByBot.items[0]!.prId === B.prId &&
+    !ovlByBot.items.some((c) => c.prId === A.prId || c.repoId === A.repoId),
+);
+// The set spelling, again with an id that only names a member of A's cluster: a wider bot list
+// still cannot widen the tenancy, and an EMPTY one means NO bots rather than all of them.
+const ovlByBotSet = await getBotOverlapClusters(
+  2,
+  { ...noRefine, authorUserIds: [contributor!.id, 999_999] },
+  'rolling_30',
+  mlScopeB,
+  ovlPage,
+);
+check(
+  'getBotOverlapClusters(B, refine.authorUserIds=[own, unknown]) still keeps only B’s cluster',
+  ovlByBotSet.filteredTotal === 1 &&
+    ovlByBotSet.items.length === 1 &&
+    ovlByBotSet.items[0]!.prId === B.prId &&
+    !ovlByBotSet.items.some((c) => c.prId === A.prId || c.repoId === A.repoId),
+);
+const ovlByNoBot = await getBotOverlapClusters(
+  2,
+  { ...noRefine, authorUserIds: [] },
+  'rolling_30',
+  mlScopeB,
+  ovlPage,
+);
+check(
+  'getBotOverlapClusters(B, refine.authorUserIds=[]) narrows to nothing, never to everything',
+  ovlByNoBot.total === 1 && ovlByNoBot.filteredTotal === 0 && ovlByNoBot.items.length === 0,
+);
 
 // getMlBacklogForAccount — the account-wide enrichment backlog behind GET /api/ml-status. It
 // takes NO scope argument (the worker walks every workspace, so a workspace-scoped count would
@@ -1507,6 +1606,196 @@ check(
 check(
   'getMlBacklogForAccount(B) counts ONLY B’s labels (IDOR blocked)',
   backlogB.labelled === 1,
+);
+
+// ── getBotVolume / getPrBotVolume / getBotVolumeScatter (db/bot-volume.ts) ──────────────────
+// The bot-comment-volume family: one merged-PR scan plus three grouped comment counts, all
+// account-scoped through `pullRequests.accountId`. Three getters, one base loader, so the check
+// is per getter — a predicate dropped from the shared loader would fail all three at once, but a
+// predicate dropped from one of the three grouped counts would only show up in a comment total.
+//
+// ⚠ NON-VACUITY IS THE WHOLE RISK HERE, TWICE OVER. The population is PRs MERGED IN THE WINDOW,
+// and every PR this script seeded is `state: 'open'` with a null `mergedAt` — so without the two
+// merged rows below, every assertion would be comparing empty to empty and would pass with the
+// accountId predicate deleted. Each merged PR therefore carries ONE OF EACH of the three counted
+// text kinds (review comment, PR comment, review body), so a leak reads as 3 rather than as a
+// difference between two empty lists.
+const { getBotVolume, getBotVolumeScatter, getPrBotVolume } = await import(
+  '../src/db/bot-volume.js'
+);
+const volMerged = new Date(now.getTime() - 2 * 86_400_000);
+async function seedMergedVolumePr(
+  accountId: number,
+  repoId: number,
+  tag: string,
+): Promise<number> {
+  const [pr] = await db
+    .insert(pullRequests)
+    .values({
+      githubNodeId: `PR_vol_${tag}`,
+      accountId,
+      repoId,
+      number: 9100,
+      title: `volume fixture ${tag}`,
+      state: 'merged',
+      isDraft: false,
+      openedAt: new Date(now.getTime() - 5 * 86_400_000),
+      updatedAt: volMerged,
+      mergedAt: volMerged,
+      // A real observed size, so the PR lands in a bucket and the scatter has a point to leak.
+      additions: 30,
+      deletions: 10,
+      changedFiles: 3,
+    })
+    .returning()
+    .execute();
+  const [thread] = await db
+    .insert(schema.reviewThreads)
+    .values({
+      githubNodeId: `RT_vol_${tag}`,
+      prId: pr!.id,
+      path: 'src/vol.ts',
+      line: 1,
+      isResolved: false,
+      isOutdated: false,
+      derivedState: 'untouched',
+      originalCommenterId: botUser!.id,
+      createdAt: volMerged,
+    })
+    .returning()
+    .execute();
+  await db
+    .insert(schema.reviewComments)
+    .values({
+      githubNodeId: `RC_vol_${tag}`,
+      threadId: thread!.id,
+      prId: pr!.id,
+      authorId: botUser!.id,
+      body: 'inline',
+      createdAt: volMerged,
+    })
+    .execute();
+  await db
+    .insert(schema.prComments)
+    .values({
+      githubNodeId: `PC_vol_${tag}`,
+      prId: pr!.id,
+      authorId: botUser!.id,
+      body: 'pr-level',
+      createdAt: volMerged,
+    })
+    .execute();
+  await db
+    .insert(schema.reviews)
+    .values({
+      githubNodeId: `RV_vol_${tag}`,
+      prId: pr!.id,
+      authorId: botUser!.id,
+      state: 'commented',
+      body: 'review body',
+      submittedAt: volMerged,
+    })
+    .execute();
+  return pr!.id;
+}
+// `botUser` is `coderabbitai`, a KNOWN VENDOR LOGIN, so it is automated in BOTH accounts by the
+// login seed alone — no workspace_reviewers row is needed on B, and B's side is therefore a real
+// positive control rather than an empty one.
+const volPrA = await seedMergedVolumePr(1, A.repoId, 'A');
+const volPrB = await seedMergedVolumePr(2, B.repoId, 'B');
+// Resolved through the REPO, not "the account's Default": assertions above move repos between
+// workspaces, so Default is not reliably where the seeded repo lives by now — and an empty scope
+// would short-circuit every getter, making both sides pass for the wrong reason.
+const volScopeA = (await q.workspaceScopeForRepo(1, A.repoId))!;
+const volScopeB = (await q.workspaceScopeForRepo(2, B.repoId))!;
+
+const volA = await getBotVolume(1, 'rolling_30', volScopeA);
+const volB = await getBotVolume(2, 'rolling_30', volScopeB);
+check(
+  'getBotVolume(A) counts A’s merged PR and all three of its bot text kinds',
+  volA.totals.prs === 1 && volA.totals.comments === 3 && volA.bots.length === 1,
+);
+check(
+  'getBotVolume(B) counts ONLY B’s (positive control — same bot login, own data)',
+  volB.totals.prs === 1 && volB.totals.comments === 3,
+);
+// The transposed scope: B's own workspace narrowed to A's repo. Hand-built on purpose —
+// resolveWorkspaceScope would intersect it away, so this is the strictly stronger check that the
+// getter's own accountId predicate holds even when handed a repo id it does not own.
+const volCross = await getBotVolume(1, 'rolling_30', {
+  workspaceId: volScopeA.workspaceId,
+  repoIds: [B.repoId],
+});
+check(
+  'getBotVolume(A, repoIds=[B.repo]) leaks nothing (IDOR blocked)',
+  volCross.totals.prs === 0 && volCross.totals.comments === 0 && volCross.bots.length === 0,
+);
+const volCrossB = await getBotVolume(2, 'rolling_30', {
+  workspaceId: volScopeB.workspaceId,
+  repoIds: [A.repoId],
+});
+check(
+  'getBotVolume(B, repoIds=[A.repo]) leaks nothing (IDOR blocked, both directions)',
+  volCrossB.totals.prs === 0 && volCrossB.totals.comments === 0,
+);
+// ...and through the resolver, spelled the way a caller actually could: B asking for A's repo id.
+const volCrossResolved = await getBotVolume(
+  2,
+  'rolling_30',
+  await q.resolveWorkspaceScope(2, undefined, [A.repoId]),
+);
+check(
+  'getBotVolume(B, resolveWorkspaceScope(narrow=[A.repo])) yields an empty scope, not A’s data',
+  volCrossResolved.totals.prs === 0,
+);
+
+const volPrsA = await getPrBotVolume(1, 'rolling_30', volScopeA, { authorUserIds: null }, {
+  offset: 0,
+  limit: 10,
+  sort: 'comments',
+});
+check(
+  'getPrBotVolume(A) returns A’s merged PR and never B’s',
+  volPrsA.filteredTotal === 1 &&
+    volPrsA.items.length === 1 &&
+    volPrsA.items[0]!.prId === volPrA &&
+    !volPrsA.items.some((i) => i.prId === volPrB || i.repoId === B.repoId),
+);
+const volPrsCross = await getPrBotVolume(1, 'rolling_30', {
+  workspaceId: volScopeA.workspaceId,
+  repoIds: [B.repoId],
+}, { authorUserIds: null }, { offset: 0, limit: 10, sort: 'ratio' });
+check(
+  'getPrBotVolume(A, repoIds=[B.repo]) leaks nothing under EITHER sort (IDOR blocked)',
+  volPrsCross.total === 0 && volPrsCross.filteredTotal === 0 && volPrsCross.items.length === 0,
+);
+// A refinement naming a bot that only exists through the OTHER tenant's data still cannot widen
+// tenancy, and an EMPTY list means NO bots rather than all of them.
+const volPrsNoBot = await getPrBotVolume(1, 'rolling_30', volScopeA, { authorUserIds: [] }, {
+  offset: 0,
+  limit: 10,
+  sort: 'comments',
+});
+check(
+  'getPrBotVolume(A, refine.authorUserIds=[]) narrows to nothing, never to everything',
+  volPrsNoBot.total === 1 && volPrsNoBot.filteredTotal === 0 && volPrsNoBot.items.length === 0,
+);
+
+const volScA = await getBotVolumeScatter(1, 'rolling_30', volScopeA);
+check(
+  'getBotVolumeScatter(A) plots A’s merged PR only',
+  volScA.points.length === 1 &&
+    volScA.points[0]!.prId === volPrA &&
+    volScA.points[0]!.botComments === 3 &&
+    !volScA.points.some((p) => p.repoId === B.repoId),
+);
+const volScCross = await getBotVolumeScatter(1, 'rolling_30', {
+  workspaceId: volScopeA.workspaceId,
+  repoIds: [B.repoId],
+});
+check(
+  'getBotVolumeScatter(A, repoIds=[B.repo]) plots nothing (IDOR blocked)',
+  volScCross.points.length === 0 && volScCross.sizedPrs === 0,
 );
 
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);

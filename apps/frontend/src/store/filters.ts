@@ -1,5 +1,9 @@
 import { create } from 'zustand';
 import { usePinnedTabs, type TabMeta } from './pinnedTabs.js';
+// TYPE-ONLY, and from the pure drill-down layer that also renders it (`botNarrowLabel` /
+// `selectorLabel`): the seed and the label must describe the same shape, and a second inline
+// spelling here is how the chip and the page come to disagree about a narrowing.
+import type { BotFlaggingBotNarrowing } from '../lib/severityAgreement.js';
 import {
   EVENT_CATEGORY_BY_TYPE,
   PR_STATUSES,
@@ -15,6 +19,7 @@ import {
   type PrStatus,
   type ReviewBotKind,
   type ReviewState,
+  type VendorDisagreeDirection,
   type WorkspaceMetricKey,
   type SprintChatResponse,
 } from '@pierre-review/shared';
@@ -421,8 +426,39 @@ export interface FilterState {
   // themeThreadsSeed discipline, because the tab is a singleton RE-SEEDED IN PLACE.
   // ⚠ NOT in FilterDefaults, NOT URL-serialized, NOT persisted: it carries a selector union, and a
   // stale one restored from storage would render a tile the strip may no longer show.
-  botFlaggingSeed: { selector: BotFlaggingSelector; repoId: number | null } | null;
-
+  // The two OPENING refinements ride the seed rather than the tab's local state, for the same
+  // reason the selector does: the chip's label is derived from the seed, so a bot narrowing the
+  // chip cannot see would leave two opens for two different bots reading identically.
+  //   • `bots` — narrow to a SET of automated reviewers (`users.id`s + the name to call them by).
+  //     A SET, not one id, because the inflation card's "View all N →" sums over the BEHAVIOUR
+  //     panel's bots (role `'review'`) while the drill-down resolves role `'all'` — both
+  //     deliberate — so only carrying the exact ids makes the number and the list agree.
+  //   • `disagree` — the direction an inflation bar was clicked in. RE-APPLIED, not cleared, by
+  //     BotFlaggingDetail's reset effect: it is what the tab was opened AS, so a window change
+  //     must not silently widen "CodeRabbit called it worse" to "every finding". Null for every
+  //     tile-opened drill-down, which is why that behaviour is unchanged there.
+  botFlaggingSeed: {
+    selector: BotFlaggingSelector;
+    repoId: number | null;
+    bots: BotFlaggingBotNarrowing | null;
+    disagree: VendorDisagreeDirection | null;
+  } | null;
+  // transient: which bot's "bot comments per PR" cell the volume drill-down was opened on, plus
+  // the repo the COLUMN was measured at (null = the whole active workspace, i.e. the cross-repo
+  // Bots rail). Read-not-consumed for the tab's lifetime and overwritten by the next open — the
+  // botFlaggingSeed discipline, because this tab is a singleton RE-SEEDED IN PLACE too.
+  // ⚠ NOT in FilterDefaults, NOT URL-serialized, NOT persisted: a stale narrowing restored from
+  // storage would name a bot the current workspace may not even have.
+  //
+  // `bots` reuses `BotFlaggingBotNarrowing` deliberately — ONE bot-narrowing shape on this
+  // surface, not two, so the chip label (`botNarrowLabel`) and the wire spelling (`users.id`s,
+  // never vendor key strings) are shared with the flagging drill-down. It rides the SEED rather
+  // than the tab's local state because the CHIP names it: two opens for two different bots would
+  // otherwise render identical chips. null = every bot in scope (the column's totals reading).
+  botVolumeSeed: {
+    repoId: number | null;
+    bots: BotFlaggingBotNarrowing | null;
+  } | null;
 
   // Activity tab (the master-detail triage console). Which detail is shown:
   // 'feed' = the cross-repo consolidated Feed (the default landing detail), a number =
@@ -689,7 +725,27 @@ export interface FilterState {
   // Open (or re-seed) the ML-strip drill-down tab on one tile/chip selector. `repoId` scopes it to
   // the repo the strip was measured at (the per-repo Bots tab); null = the whole active workspace.
   // BotFlaggingDetail reads (never consumes) the seed.
-  openBotFlaggingDetail: (selector: BotFlaggingSelector, repoId: number | null) => void;
+  //
+  // `refine` is the OPENING narrowing — omitted by every tile on the strip, supplied by the
+  // Behaviour tab's inflation card (one bot × one direction from a bar, or the card's whole
+  // summed bot SET × one direction from "View all"). Optional so the tile callers are untouched,
+  // and defaulted to nulls so the seed always holds a complete shape.
+  openBotFlaggingDetail: (
+    selector: BotFlaggingSelector,
+    repoId: number | null,
+    refine?: {
+      bots?: BotFlaggingBotNarrowing | null;
+      disagree?: VendorDisagreeDirection | null;
+    },
+  ) => void;
+  // The bot pill's ✕ on the open drill-down (and nothing else): drop the bot narrowing while
+  // keeping the population, the scope and the direction. In the store rather than local state
+  // because the CHIP names it — see the seed's own note.
+  setBotFlaggingBots: (bots: BotFlaggingBotNarrowing | null) => void;
+  // The drill-down's "Clear" — every refinement the SEED carries, in one write. The tab's local
+  // `cell`/`disagree` are cleared by the caller in the same event; this is the half that must not
+  // come back when the reset effect re-applies the seed.
+  clearBotFlaggingRefine: () => void;
   // Re-point the ALREADY-OPEN flagging drill-down at a different population — the severity and
   // topic dropdowns on the page itself. Replaces the seed's selector in place (the repo scope is
   // preserved), opens no tab and touches no other filter state; a null seed is a no-op.
@@ -699,6 +755,19 @@ export interface FilterState {
   // A local override would leave the chip advertising the tile the user has since navigated away
   // from — the tab would read "Nits" while the page showed Security, which is worse than no label.
   setBotFlaggingSelector: (selector: BotFlaggingSelector) => void;
+  // Open (or re-seed) the bot-comment-VOLUME drill-down — the merged PRs behind the ROI table's
+  // "bot comments per PR" cell. `repoId` is the scope the COLUMN was measured at (the per-repo
+  // Bots tab); null = the whole active workspace. `bots` is the cell's own bot, or null for the
+  // whole-workspace reading.
+  //
+  // ⚠ The tab MUST inherit the same (workspace, window, repoIds) triple the cell was computed at —
+  // workspace and window come from the store (`workspaceId` / `botAnalyticsWindow`, which is why
+  // the tab keeps no local window), and this `repoId` is the third leg. A list measured at a
+  // different scope would silently contradict the number that was clicked.
+  openBotVolumeDetail: (repoId: number | null, bots?: BotFlaggingBotNarrowing | null) => void;
+  // The bot pill's ✕ on the open volume drill-down: widen to EVERY bot while keeping the scope.
+  // `null`, never an empty set — `[]` reads as "no bots" on the wire, the opposite of "clear".
+  setBotVolumeBots: (bots: BotFlaggingBotNarrowing | null) => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
   // dedup-appends the added repo id to syncModalRepoIds so the modal can scope to
@@ -977,6 +1046,7 @@ function freshDefaults(): FilterData {
     themeThreadsSeed: null,
     searchSeed: null,
     botFlaggingSeed: null,
+    botVolumeSeed: null,
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
     // with no thread-state filter.
@@ -1241,9 +1311,28 @@ export const useFilters = create<FilterState>((set, get) => ({
   // Open (or re-seed) the ML-strip drill-down on one tile/chip. `repoId` is the scope the strip
   // was MEASURED at, carried through verbatim so the drill-down's total is the number the user
   // just clicked rather than the same tile recomputed at a wider scope.
-  openBotFlaggingDetail: (selector, repoId) => {
-    set({ botFlaggingSeed: { selector, repoId } });
+  openBotFlaggingDetail: (selector, repoId, refine) => {
+    set({
+      botFlaggingSeed: {
+        selector,
+        repoId,
+        bots: refine?.bots ?? null,
+        disagree: refine?.disagree ?? null,
+      },
+    });
     usePinnedTabs.getState().openBotFlaggingTab({ fromActivity: true });
+  },
+  setBotFlaggingBots: (bots) => {
+    const seed = get().botFlaggingSeed;
+    if (!seed) return; // never opened — nothing to narrow (same rule as setBotFlaggingSelector)
+    set({ botFlaggingSeed: { ...seed, bots } });
+  },
+  clearBotFlaggingRefine: () => {
+    const seed = get().botFlaggingSeed;
+    if (!seed) return;
+    // `null`, never `{userIds: [], …}` — an empty SET means "no bots" on the wire, which is the
+    // opposite of what "Clear" promises.
+    set({ botFlaggingSeed: { ...seed, bots: null, disagree: null } });
   },
   // The on-page dropdowns' writer — navigation WITHIN the open tab, so no openBotFlaggingTab call
   // (the tab is already showing; re-opening it would re-arm the Back-to-Activity affordance from a
@@ -1255,8 +1344,22 @@ export const useFilters = create<FilterState>((set, get) => ({
     // reader never chose.
     if (!seed) return;
     // repoId rides through UNCHANGED: it is the scope the strip was MEASURED at, and these
-    // dropdowns change which population is shown, never where it was counted.
-    set({ botFlaggingSeed: { selector, repoId: seed.repoId } });
+    // dropdowns change which population is shown, never where it was counted. The bot narrowing
+    // and the opening direction ride through for the same reason — "CodeRabbit's over-calls,
+    // now among the nits" is a population the reader asked for one half of at a time.
+    set({ botFlaggingSeed: { ...seed, selector } });
+  },
+  // Open (or re-seed) the bot-comment-VOLUME drill-down on one bot's cell (or on the whole
+  // workspace, from the totals line). The repo scope is carried through verbatim so the list's
+  // population is the one the clicked number was folded from.
+  openBotVolumeDetail: (repoId, bots) => {
+    set({ botVolumeSeed: { repoId, bots: bots ?? null } });
+    usePinnedTabs.getState().openBotVolumeTab({ fromActivity: true });
+  },
+  setBotVolumeBots: (bots) => {
+    const seed = get().botVolumeSeed;
+    if (!seed) return; // never opened — nothing to narrow (the setBotFlaggingBots rule)
+    set({ botVolumeSeed: { ...seed, bots } });
   },
   // Open (or re-seed) the cross-team search-results tab for `query`. No forced fromActivity — the
   // search box is global (openable from any view), so openTab infers the Back-to-Activity arming

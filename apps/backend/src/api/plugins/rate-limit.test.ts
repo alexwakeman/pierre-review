@@ -139,6 +139,21 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/bot-analytics/bot-only-prs')).toEqual(['read']);
   });
 
+  // The volume family walks every merged PR in the window (up to 5000) plus three grouped comment
+  // counts over that population on EVERY request — the `/prs` offset is a slice over the fold, so
+  // paging re-runs the scan. All three sub-paths are spelled into one both-ends-anchored regex;
+  // without it they would land on the 600/min blanket bucket with no error anywhere, this file's
+  // documented failure mode.
+  it('puts the bot-comment-volume family on the expensive bucket', () => {
+    expect(tiers('GET', '/api/bot-analytics/volume')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/bot-analytics/volume/prs')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/bot-analytics/volume/scatter')).toEqual(['search', 'read']);
+    // ...and the anchoring must not sweep in a neighbour or a path that merely starts the same.
+    expect(tiers('GET', '/api/bot-analytics')).toEqual(['read']);
+    expect(tiers('GET', '/api/bot-analytics/volumes')).toEqual(['read']);
+    expect(tiers('GET', '/api/bot-analytics/volume/prs/extra')).toEqual(['read']);
+  });
+
   it('throttles sync triggers and repo-add (each starts a backfill)', () => {
     expect(tiers('POST', '/api/repos/5/sync')).toEqual(['sync']);
     expect(tiers('POST', '/api/repos')).toEqual(['sync']);

@@ -48,7 +48,7 @@ const HOUR = 60 * 60 * 1000;
 // Second-aligned: sqlite stores mode:'timestamp' as epoch SECONDS.
 const now = Math.floor(Date.now() / 1000) * 1000;
 
-const NO_REFINE = { cell: null, disagree: null };
+const NO_REFINE = { cell: null, disagree: null, authorUserIds: null };
 const SEVERITY_KEYS = ['nit', 'minor', 'major', 'critical'];
 
 // One fixture row = one real parent comment + its label. The parent is REAL (not an invented
@@ -552,6 +552,89 @@ describe('the vendor badge is displayed, never believed', () => {
       { refine: { cell: { vendor: 'nit', ours: 'nit' }, disagree: 'any' } },
     );
     expect(agreeAndDisagree.filteredTotal).toBe(0);
+  });
+
+  it('the per-bot narrowing lists one bot, composes, and leaves the facets alone', async () => {
+    const unrefined = await page({ kind: 'findings' });
+    const gr = await page({ kind: 'findings' }, { refine: { ...NO_REFINE, authorUserIds: [grId] } });
+    // The same rule the cell and the direction follow: the matrix describes the SELECTOR
+    // population, so drilling into one bot must not redraw the grid the click came from.
+    expect(gr.matrix).toEqual(unrefined.matrix);
+    expect(gr.total).toBe(unrefined.total);
+    expect(gr.filteredTotal).toBe(3);
+    expect(new Set(gr.items.map((c: any) => c.authorUserId))).toEqual(new Set([grId]));
+
+    // It COMPOSES with the direction rather than replacing it — "this bot's over-calls" is the
+    // number a bar on the Behaviour tab's inflation index carries, and the list behind the bar
+    // has to be that same population or the two screens disagree.
+    expect(
+      (await page({ kind: 'findings' }, { refine: { ...NO_REFINE, authorUserIds: [grId], disagree: 'over' } }))
+        .filteredTotal,
+    ).toBe(0); // greptile only ever UNDER-called here
+    const crOver = await page(
+      { kind: 'findings' },
+      { refine: { ...NO_REFINE, authorUserIds: [crId], disagree: 'over' } },
+    );
+    expect(crOver.items.map(keyOf)).toEqual([keyOf(idOf('nit_vendor_critical'))]);
+
+    // An id this account cannot see narrows to nothing — never to a wider list, and never to an
+    // error. The predicate rides an already accountId-scoped scan, so "not yours" and "no such
+    // bot" are the same empty answer and neither is an existence oracle.
+    const foreign = await page(
+      { kind: 'findings' },
+      { refine: { ...NO_REFINE, authorUserIds: [999_999] } },
+    );
+    expect(foreign.filteredTotal).toBe(0);
+    expect(foreign.total).toBe(unrefined.total);
+  });
+
+  // ⚠ THE WHOLE REASON THIS REFINEMENT IS A LIST. The Behaviour tab's inflation card sums its
+  // "View all N →" over the bots THAT PANEL resolves (role `'review'`), while this getter resolves
+  // role `'all'` — both deliberate. Only the caller stating its exact id set can make the button's
+  // number and the list's `filteredTotal` agree by construction rather than by the coincidence that
+  // no shipped quality-check bot emits a vendor badge.
+  it('a multi-bot set is the union of its members, and its ORDER is irrelevant', async () => {
+    const unrefined = await page({ kind: 'findings' });
+    const gr = await page({ kind: 'findings' }, { refine: { ...NO_REFINE, authorUserIds: [grId] } });
+    const cr = await page({ kind: 'findings' }, { refine: { ...NO_REFINE, authorUserIds: [crId] } });
+    const both = await page(
+      { kind: 'findings' },
+      { refine: { ...NO_REFINE, authorUserIds: [crId, grId] } },
+    );
+    expect(both.filteredTotal).toBe(gr.filteredTotal + cr.filteredTotal);
+    // Every bot in this fixture is in the set, so the union IS the whole selector population —
+    // which is what the card-level "view all" promises.
+    expect(both.filteredTotal).toBe(unrefined.filteredTotal);
+    expect(both.matrix).toEqual(unrefined.matrix);
+    const reversed = await page(
+      { kind: 'findings' },
+      { refine: { ...NO_REFINE, authorUserIds: [grId, crId] } },
+    );
+    expect(reversed.items.map(keyOf)).toEqual(both.items.map(keyOf));
+
+    // A set containing one real bot and one id this account cannot see is still just that bot —
+    // an unknown member contributes nothing and widens nothing.
+    const mixed = await page(
+      { kind: 'findings' },
+      { refine: { ...NO_REFINE, authorUserIds: [grId, 999_999] } },
+    );
+    expect(mixed.filteredTotal).toBe(gr.filteredTotal);
+    expect(new Set(mixed.items.map((c: any) => c.authorUserId))).toEqual(new Set([grId]));
+  });
+
+  // ⚠ THE `repoIds` TRAP, on a different parameter. An EMPTY list means "no bots" and must answer
+  // empty; only `null` widens. A gate spelled `authorUserIds?.length` (or a `.length > 0` guard on
+  // the client) reads perfectly and hands back the WHOLE workspace under a caption promising a
+  // subset — the exact failure the list shape was introduced to close.
+  it('an EMPTY bot set means NO bots, never all of them', async () => {
+    const unrefined = await page({ kind: 'findings' });
+    const none = await page({ kind: 'findings' }, { refine: { ...NO_REFINE, authorUserIds: [] } });
+    expect(none.filteredTotal).toBe(0);
+    expect(none.items).toEqual([]);
+    // …while `total` and the grid still describe the selector population, exactly as they do under
+    // every other refinement.
+    expect(none.total).toBe(unrefined.total);
+    expect(none.matrix).toEqual(unrefined.matrix);
   });
 });
 

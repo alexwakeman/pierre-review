@@ -11,7 +11,7 @@ import {
 import { usePinnedTabs, type Tab } from '../store/pinnedTabs.js';
 import { useFilters } from '../store/filters.js';
 import { useRepos } from '../hooks/useTimeline.js';
-import { selectorLabel } from '../lib/severityAgreement.js';
+import { botNarrowLabel, selectorLabel } from '../lib/severityAgreement.js';
 import { MagnifierIcon } from './Icons.js';
 
 const MetricsIcon = (
@@ -165,6 +165,7 @@ function TabChip({
   const themeThreadsSeed = useFilters((s) => s.themeThreadsSeed);
   const searchSeed = useFilters((s) => s.searchSeed);
   const botFlaggingSeed = useFilters((s) => s.botFlaggingSeed);
+  const botVolumeSeed = useFilters((s) => s.botVolumeSeed);
   const openPrsScope = useFilters((s) => s.openPrsScope);
   const { data: repos } = useRepos();
   const repoName = (id: number | null): string | null =>
@@ -314,7 +315,12 @@ function TabChip({
     // renders as a two-line `#undefined` chip with no title and no author.
     // `selectorLabel` returns the BARE tile name ("High severity"); the "Flagged ·" prefix is this
     // strip's, so the same string can head the drill-down's own <h2> unprefixed.
-    const seedTitle = botFlaggingSeed ? selectorLabel(botFlaggingSeed.selector).title : null;
+    // The bot narrowing is part of the NAME (see selectorLabel): two inflation bars opened in a
+    // row are the same tile — "Findings" — and only the bot (or, for the card-level "view all",
+    // the size of the bot SET) tells the two chips apart.
+    const seedTitle = botFlaggingSeed
+      ? selectorLabel(botFlaggingSeed.selector, botFlaggingSeed.bots).title
+      : null;
     // The repo scope rides in the tooltip rather than the visible label: unlike the other
     // repo-scoped chips ("Bot-only PRs"), the label already carries two segments, and a third
     // would truncate away the one thing that distinguishes two flagging opens.
@@ -331,6 +337,31 @@ function TabChip({
           </span>
           <span className={chipLabelClass(active, 'sky')}>
             Flagged{seedTitle ? ` · ${seedTitle}` : ''}
+          </span>
+        </>
+      ),
+    };
+  } else if (tab.kind === 'bot-volume') {
+    // The "bot comments per PR" drill-down — labelled with the bot whose cell was clicked (the
+    // transient seed), or nothing when it was opened on the workspace-wide total.
+    // ⚠ Not cosmetic: without this branch the tab falls through to the PR ladder below and renders
+    // as a two-line `#undefined` chip with no title and no author.
+    // `botNarrowLabel` is the SAME function the drill-down's own pill uses, so the chip and the
+    // page can never name one narrowing two ways.
+    const botLabel = botVolumeSeed?.bots ? botNarrowLabel(botVolumeSeed.bots) : null;
+    const scopeName = repoName(botVolumeSeed?.repoId ?? null);
+    cfg = {
+      title: `Bot comments per merged PR${botLabel ? ` — ${botLabel}` : ''}${
+        scopeName ? ` · ${scopeName}` : ''
+      }`,
+      closeAria: 'Close bot-volume tab',
+      body: (
+        <>
+          <span aria-hidden="true" className="shrink-0">
+            💬
+          </span>
+          <span className={chipLabelClass(active, 'sky')}>
+            Comments/PR{botLabel ? ` · ${botLabel}` : ''}
           </span>
         </>
       ),

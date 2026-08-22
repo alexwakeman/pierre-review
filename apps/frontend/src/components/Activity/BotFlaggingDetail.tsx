@@ -17,6 +17,7 @@ import { indexUsers } from '../../lib/ui.js';
 import {
   SEVERITY_PICKS,
   TOPIC_PICKS,
+  botNarrowLabel,
   isCategoryFamily,
   isSeverityFamily,
   selectorLabel,
@@ -257,12 +258,31 @@ export function BotFlaggingDetail(): JSX.Element {
   // makes it a no-op in the store, which is also the only state in which no picker renders.
   const setSelector = useFilters((s) => s.setBotFlaggingSelector);
 
-  // The two refinements. LOCAL to the tab (the seed, window and scope are shared), and both are
-  // applied SERVER-side, because paging is — they ride the query key rather than filtering the
-  // loaded rows, or "Load more" would page a population the caption doesn't describe.
+  // The bot narrowing — a SET (one bar's bot, or every bot the inflation card summed). SEED-BACKED,
+  // not local, because the tab chip names it (see the store's note on `botFlaggingSeed`) — the same
+  // rule the selector follows. Null for every drill-down opened from a tile on the strip.
+  const bots = seed?.bots ?? null;
+  const setBots = useFilters((s) => s.setBotFlaggingBots);
+  const clearSeedRefine = useFilters((s) => s.clearBotFlaggingRefine);
+  // The direction the tab was OPENED in (an inflation bar's `over`/`under`), or null from a tile.
+  const seedDisagree = seed?.disagree ?? null;
+
+  // The two local refinements. LOCAL to the tab (the seed, window and scope are shared), and both
+  // are applied SERVER-side, because paging is — they ride the query key rather than filtering
+  // the loaded rows, or "Load more" would page a population the caption doesn't describe.
+  //
+  // ⚠ `disagree` INITIALISES FROM THE SEED, in the initializer and not an effect: this tab mounts
+  // when its tab becomes active, so an effect would render once with the direction absent and
+  // fire a whole extra `search`-tier request for a population nobody asked for.
   const [cell, setCell] = useState<SeverityAgreementCellRef | null>(null);
-  const [disagree, setDisagree] = useState<VendorDisagreeDirection | null>(null);
-  const refine = useMemo(() => ({ cell, disagree }), [cell, disagree]);
+  const [disagree, setDisagree] = useState<VendorDisagreeDirection | null>(seedDisagree);
+  // `authorUserIds` is the wire's third refinement — `users.id`s, never vendor key strings.
+  // ⚠ `bots?.userIds ?? null`: the whole set rides through. Sending only its first id (or a count)
+  // would put the caption and the list back out of step, which is what this shape exists to stop.
+  const refine = useMemo(
+    () => ({ cell, disagree, authorUserIds: bots?.userIds ?? null }),
+    [cell, disagree, bots],
+  );
 
   // ⚠ THE RESET, and it is load-bearing. This tab is a SINGLETON re-seeded in place, so without
   // this effect clicking "Nits" while "Critical + disagreements only" is active would open a list
@@ -271,10 +291,16 @@ export function BotFlaggingDetail(): JSX.Element {
   //
   // It resets LOCAL state only — never the store seed. A corrective write to `botFlaggingSeed`
   // would forget which tile the tab is showing, and the chip's label with it.
+  //
+  // ⚠ IT RESTORES `seedDisagree` RATHER THAN NULL. For every tile-opened drill-down that IS null,
+  // so nothing about the old behaviour changes; for a tab opened on an inflation bar the direction
+  // is what the tab IS ("CodeRabbit called it worse"), named in the chip and the heading, and
+  // clearing it on a window change would silently widen the list out from under both. Clearing it
+  // for real goes through `clearRefine`, which wipes the seed's copy too.
   useEffect(() => {
     setCell(null);
-    setDisagree(null);
-  }, [seed, window, workspaceId, repoScope]);
+    setDisagree(seedDisagree);
+  }, [seed, seedDisagree, window, workspaceId, repoScope]);
 
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
@@ -318,11 +344,15 @@ export function BotFlaggingDetail(): JSX.Element {
   // unclearable filter.
   const canCompare = matrix != null && matrix.declared > 0;
   const showDisagree = canCompare || disagree != null;
-  const refined = cell != null || disagree != null;
+  const refined = cell != null || disagree != null || bots != null;
+  // Clears BOTH halves — the tab's local state and the seed's opening refinement. Without the
+  // second write the reset effect would immediately re-apply the seeded direction and "Clear"
+  // would leave a filter on.
   const clearRefine = useCallback((): void => {
     setCell(null);
     setDisagree(null);
-  }, []);
+    clearSeedRefine();
+  }, [clearSeedRefine]);
   const cycleDisagree = useCallback((): void => {
     setDisagree((cur) => DISAGREE_CYCLE[(DISAGREE_CYCLE.indexOf(cur) + 1) % DISAGREE_CYCLE.length] ?? null);
   }, []);
@@ -336,13 +366,17 @@ export function BotFlaggingDetail(): JSX.Element {
   // The effect still fires — `setBotFlaggingSelector` replaces the seed OBJECT, so its identity
   // changes — and that is wanted, not redundant: a matrix cell chosen under "critical" means
   // nothing under "nit". This handler only makes the reset happen one render EARLIER.
+  //
+  // ⚠ It pre-applies exactly what the effect will settle on — `seedDisagree`, not null. Writing
+  // null here and letting the effect restore the seeded direction is TWO different refines across
+  // two renders, which is the extra fetch this handler exists to avoid.
   const onPickSelector = useCallback(
     (s: BotFlaggingSelector): void => {
       setCell(null);
-      setDisagree(null);
+      setDisagree(seedDisagree);
       setSelector(s);
     },
-    [setSelector],
+    [setSelector, seedDisagree],
   );
 
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
@@ -392,7 +426,10 @@ export function BotFlaggingDetail(): JSX.Element {
     loadMore: fetchMore,
   });
 
-  const { title, subtitle } = selectorLabel(selector);
+  // Named WITH the bot narrowing, exactly as PinnedTabsBar names the chip — the two read the same
+  // string from the same function, so the tab and the heading can never disagree about which
+  // population is on screen.
+  const { title, subtitle } = selectorLabel(selector, bots);
   const isClusters = items.kind === 'clusters';
   const noun = isClusters ? 'line areas' : 'comments';
 
@@ -436,10 +473,12 @@ export function BotFlaggingDetail(): JSX.Element {
                 // reset effect below. The effect is post-commit, so on its own the render between
                 // the two would key the query on (new window × OLD refine) and fire a full extra
                 // request — on the `search` tier, for a response that is thrown away unrendered.
-                // Batched together, the window change costs exactly one fetch.
+                // Batched together, the window change costs exactly one fetch. `seedDisagree`
+                // rather than null for the same reason as `onPickSelector` — it is what the
+                // effect will settle on.
                 onClick={() => {
                   setCell(null);
-                  setDisagree(null);
+                  setDisagree(seedDisagree);
                   setWindow(wOpt.key);
                 }}
                 className={`px-2 py-0.5 text-[11px] font-medium ${
@@ -522,6 +561,26 @@ export function BotFlaggingDetail(): JSX.Element {
                   bot said {cell.vendor === 'none' ? 'nothing' : cell.vendor} · we scored{' '}
                   {cell.ours}
                 </span>
+              )}
+              {/* The bot narrowing. A BUTTON, not the read-only span the cell pill is: the
+                  cell has a visible control to clear it (the grid), this one arrived from another
+                  screen and would otherwise be an unclearable filter on a list whose numbers the
+                  reader is trying to reconcile. Clearing widens to EVERY bot (`null`) — never to
+                  an empty set, which the wire reads as "no bots" — and keeps the direction, so the
+                  card-level "view all" a bar was clicked from is one click away. */}
+              {bots && (
+                <button
+                  type="button"
+                  onClick={() => setBots(null)}
+                  title={`Only ${botNarrowLabel(bots)}${bots.label ? '’s' : '’'} comments — opened from the Behaviour tab’s inflation index. Click to widen back to every bot, keeping this window, scope and direction.`}
+                  className="flex items-center gap-1 rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700 hover:border-violet-500 dark:border-violet-500/60 dark:bg-violet-950/30 dark:text-violet-300"
+                >
+                  <span aria-hidden="true">🤖</span>
+                  {botNarrowLabel(bots)} only
+                  <span aria-hidden="true" className="text-violet-400">
+                    ✕
+                  </span>
+                </button>
               )}
               {refined && (
                 <button
