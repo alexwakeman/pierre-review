@@ -43,6 +43,10 @@ export interface ProCapabilities {
   botAdvisor: boolean; // Bot Tuning Advisor (paid, like workspaceInsights): findings → intents →
   // config-PR/brief/issue outputs + the effect panel. Gates the Bots "Advisor" inner tab and
   // the Tune/Drop row pills; the free amber TuningSuggestions box stays regardless.
+  periodReports: boolean; // Period-over-period reporting (paid, like workspaceInsights): the
+  // Insights "Reports" sub-tab — a stored, forwardable per-sprint artifact with a
+  // coverage-honest comparison, a refusable forecast and a narrated summary. The metric vector
+  // itself is CORE compute (db/period-metrics.ts), but it has no free surface.
 }
 
 // ---- AI Fix seams (github + coding) -------------------------------------------
@@ -725,6 +729,53 @@ export interface ProHostQueries {
     botUserId: number,
     anchorMs: number | null,
   ): Promise<unknown>;
+  // ---- Period-over-period reporting (apiVersion 20) ----
+  // The closed, ordered 12-metric vector for ONE window, plus the fingerprint the plugin stores
+  // to decide whether a saved report has gone `stale`. Returns PeriodMetricsResult (cast by the
+  // plugin). It writes its OWN window-pure SQL and reuses none of the getters above: their
+  // series are a fixed trailing 12 weeks, several of their figures are current-state snapshots,
+  // and getWorkspaceMetricsDetail ignores `window.toMs` entirely — all fine for "now", all
+  // wrong for a historical period that must stay reproducible.
+  // `scope.workspaceId` decides who counts as an automated reviewer (metrics 9-11);
+  // `scope.repoIds` narrows what is measured, and `[]` yields all-null metrics, not an error.
+  getPeriodMetrics(
+    accountId: number,
+    scope: BotScopeWire,
+    window: { fromMs: number; toMs: number },
+  ): Promise<unknown>;
+  // Which of `repoIds` were ALREADY TRACKED at `atMs` (`repos.createdAt <= atMs`). Returns
+  // { trackedRepoIds } (cast by the plugin). This is the rule that keeps the whole feature
+  // honest: naive retroactive history reads as explosive growth purely because repos were
+  // onboarded over time (measured on the dev DB: merged-PR counts 39 → 570 across 13 periods,
+  // over 4 → 18 CONTRIBUTING repos). The plugin compares over the intersection of two periods'
+  // tracked sets and forecasts only over periods whose coverage is complete for that subset.
+  getPeriodCoverage(accountId: number, repoIds: number[], atMs: number): Promise<unknown>;
+  // The forecast estimator (CORE, PURE — db/forecast.ts: Theil–Sen slope + a MAD band, no DB, no
+  // I/O). Returns ForecastResult | { refused } (cast by the plugin). Crossed as async purely to
+  // match this seam's style — it awaits nothing. The split is deliberate: the PLUGIN owns the
+  // stored period history so it holds the series, while CORE owns the estimator so the refusal
+  // rules ('insufficient_history' / 'too_volatile') live with the maths and are unit-tested there.
+  // `values` are oldest-first; nulls are SKIPPED, never imputed.
+  //
+  // `opts.max` is a DECLARED ceiling, clamped like the built-in 0 floor. The caller must declare
+  // it and core must never infer it: three of the twelve period metrics are 0–100 percentages
+  // that a rising series extrapolates straight past ("CI success next period ≈ 104%"), while
+  // inferring a ceiling from the observed data would silently truncate a real forecast for a
+  // count-like metric whose values happen to sit low.
+  computePeriodForecast(
+    values: (number | null)[],
+    opts?: { max?: number },
+  ): Promise<unknown>;
+  // The EFFORT-vs-AUTOMATION breakdown for one window (db/period-metrics.ts `getPeriodLanes`).
+  // Returns PeriodLanes. Separate from `getPeriodMetrics` because it answers a different question
+  // over a different comment channel: the vector counts INLINE review comments, this counts all
+  // three surfaces, which is the only way a quality gate that posts issue comments is visible at
+  // all (measured: 786 SonarQube comments reading as zero bot activity).
+  getPeriodLanes(
+    accountId: number,
+    scope: BotScopeWire,
+    window: { fromMs: number; toMs: number },
+  ): Promise<unknown>;
 }
 
 export interface ProContext {
@@ -817,10 +868,14 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  // Contract handshake; host warns on mismatch. 16 → 17: GithubSeam gains
-  // `fetchReviewCommentHunks` — the lean-storage anchor-hunk hydration behind the `addressed`
-  // and `validity` judgements (see src/sync/hydrate-detail.ts). Without it both judgements read
-  // a `diff_hunk` column that is NULL for ~97% of rows and answer "I can't see the code".
+  // Contract handshake; host warns on mismatch.
+  //
+  // 19 → 20: PERIOD-OVER-PERIOD REPORTING. `ProHostQueries` gains three members —
+  // `getPeriodMetrics` (the closed 12-metric window-pure vector + its data fingerprint),
+  // `getPeriodCoverage` (which repos were already tracked at a period start — the rule that stops
+  // repo onboarding from reading as team growth) and `computePeriodForecast` (the pure Theil–Sen
+  // estimator, crossed as async) — and `ProCapabilities` gains `periodReports`. The plugin owns
+  // the stored history, the narration and the routes; core owns the metrics and the maths.
   //
   // 18 → 19: `CodingSeam.generateFix`'s result gains OPTIONAL `commentVerdicts`
   // (`FixItemVerdict[]`) — the per-item dispositions behind "fix from comments", reported by
@@ -834,7 +889,10 @@ export interface ProPlugin {
   // resolves to a trailing 14 days, since the cadence + start are plugin-owned. `BotWindowKind`
   // also gained `'rolling_90'`.
   //
-  // 16 → 17: GithubSeam gained `fetchReviewCommentHunks`.
+  // 16 → 17: GithubSeam gained `fetchReviewCommentHunks` — the lean-storage anchor-hunk
+  // hydration behind the `addressed` and `validity` judgements (see src/sync/hydrate-detail.ts).
+  // Without it both read a `diff_hunk` column that is NULL for ~97% of rows and answer
+  // "I can't see the code".
   // 15 → 16: GithubSeam gained `fetchCompareDiff`
   // (the two-sha compare primitive the `addressed` annotation is grounded on — see
   // src/github/compare.ts). 14 → 15 was the Bot Tuning Advisor — GithubSeam gained
@@ -842,11 +900,13 @@ export interface ProPlugin {
   // ProHostQueries gained getAdvisorFindings/getBotEffectPanel, CodingErrorCode gained
   // BRANCH_EXISTS, llm.complete gained `credential`, and ProCapabilities gained `botAdvisor`.
   //
-  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (the `plugin?.apiVersion !== 19` runtime gate) and two
-  // more in the plugin (packages/pro/src/index.ts, packages/pro/src/contract-types.ts). Bump ALL
-  // FOUR or the plugin log-and-degrades to OSS mode against a version that is actually correct:
-  // capabilities go dark, every /api/pro/* route 404s, and nothing throws.
-  apiVersion: 19;
+  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (its `plugin?.apiVersion !==` runtime gate — THE only
+  // enforcer) and two more in the plugin (packages/pro/src/index.ts,
+  // packages/pro/src/contract-types.ts). Bump ALL FOUR or the plugin log-and-degrades to OSS mode
+  // against a version that is actually correct: capabilities go dark, every /api/pro/* route
+  // 404s, and nothing throws. ⚠ The plugin's half lives in a SUBMODULE, so "all four" spans TWO
+  // repos — the gitlink committed here must point at a plugin commit carrying the same number.
+  apiVersion: 20;
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
@@ -865,6 +925,7 @@ export const EMPTY_CAPABILITIES: ProCapabilities = {
   issueLinks: false,
   botTriage: false,
   botAdvisor: false,
+  periodReports: false,
 };
 let active: ProCapabilities = EMPTY_CAPABILITIES;
 export function setProCapabilities(c: ProCapabilities): void {

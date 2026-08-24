@@ -3,12 +3,16 @@ import { describe, expect, it } from 'vitest';
 // only the RELEASE build forbids a real shared import in dist). This is deliberate — it's
 // how we guarantee the backend's local review-bot copy never drifts from the shared map.
 import {
+  DEPENDENCY_BOTS,
   QUALITY_CHECK_BOTS,
   REVIEW_BOTS,
+  dependencyBot as sharedDependencyBot,
   qualityCheckBot as sharedQualityCheckBot,
   reviewBotKind as sharedReviewBotKind,
 } from '@pierre-review/shared';
 import {
+  dependencyBot,
+  dependencyBotLogins,
   isLikelyBot,
   isReviewBot,
   qualityCheckBot,
@@ -154,5 +158,48 @@ describe('bot-detection', () => {
       expect(isLikelyBot('morgan-diaz')).toBe(false);
       expect(isLikelyBot('octocat')).toBe(false);
     });
+  });
+});
+
+// The THIRD hand-synced list (the dependency-automation lane). Same contract, same failure mode:
+// drift means the backend and the SPA disagree about whether an actor AUTHORS or REVIEWS, which
+// decides whether its PRs land in the throughput metrics or its comments in the review ones.
+describe('dependency-bot classifier ⇄ shared parity (kept in lockstep BY HAND)', () => {
+  it('exposes exactly the same login set as @pierre-review/shared DEPENDENCY_BOTS', () => {
+    expect(dependencyBotLogins().sort()).toEqual([...DEPENDENCY_BOTS].sort());
+  });
+
+  it('agrees with shared on every login across all three lists', () => {
+    for (const login of [
+      ...DEPENDENCY_BOTS,
+      ...QUALITY_CHECK_BOTS,
+      ...Object.keys(REVIEW_BOTS),
+    ]) {
+      expect(dependencyBot(login)).toBe(sharedDependencyBot(login));
+    }
+  });
+
+  // ⚠ THE DUPLICATE-IDENTITY DEFENCE. Real accounts carry `dependabot` AND `dependabot[bot]` as
+  // separate user rows with CONFLICTING automated flags. Login normalisation is what stops one
+  // actor being split across two lanes and under-counting both.
+  it('matches whether the login arrived bare or `[bot]`-suffixed, in any case', () => {
+    expect(dependencyBot('dependabot')).toBe(true);
+    expect(dependencyBot('dependabot[bot]')).toBe(true);
+    expect(dependencyBot('Dependabot[bot]')).toBe(true);
+    expect(dependencyBot('renovate[bot]')).toBe(true);
+  });
+
+  // The three lanes must not overlap, or an actor's classification depends on predicate order.
+  it('does not claim a login that belongs to another lane', () => {
+    for (const login of Object.keys(REVIEW_BOTS)) expect(dependencyBot(login)).toBe(false);
+    for (const login of QUALITY_CHECK_BOTS) {
+      if (DEPENDENCY_BOTS.has(login)) continue;
+      expect(dependencyBot(login)).toBe(false);
+    }
+  });
+
+  it('does not flag a human login', () => {
+    expect(dependencyBot('alexwakeman')).toBe(false);
+    expect(dependencyBot(null)).toBe(false);
   });
 });

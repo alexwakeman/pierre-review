@@ -91,6 +91,54 @@ describe('tierFor — Bot Tuning Advisor', () => {
   });
 });
 
+// The period-report family sits ABOVE the /api/pro/ catch-all, which tiers on the VERB alone.
+//
+// ⚠ MUTATION-TESTED, AND MOST OF THIS BLOCK IS INTENT RATHER THAN GUARD — said out loud because
+// "a new isolation check can be VACUOUS" is a lesson this repo has already paid for. Disabling
+// the family block in tierFor fails EXACTLY ONE assertion below: `POST …/reports` (the list root),
+// which the catch-all would bill as generation. Every other answer here is one the catch-all
+// happens to give too. They are asserted anyway because the catch-all's agreement is a
+// COINCIDENCE of its suffix heuristic (`/cancel`, `/key`, `/budget`, `/settings`), not a decision
+// about this family: add `/generate` to that suffix list, or add a fifth route here, and the
+// coincidence breaks silently. These assertions are what turns that into a failing test.
+describe('tierFor — period reports', () => {
+  it('bills the two POSTs as generation (minute AND hour windows)', () => {
+    expect(tiers('POST', '/api/pro/insights/reports/sprint-2026-08-18/generate')).toEqual([
+      'ai',
+      'ai_hourly',
+    ]);
+    expect(tiers('POST', '/api/pro/insights/reports/sprint-2026-08-18/chat')).toEqual([
+      'ai',
+      'ai_hourly',
+    ]);
+  });
+
+  it('leaves the two free GETs on the read bucket', () => {
+    expect(tiers('GET', '/api/pro/insights/reports')).toEqual(['read']);
+    expect(tiers('GET', '/api/pro/insights/reports/sprint-2026-08-18')).toEqual(['read']);
+    // ...and they must not be swept onto the AI bucket by the family block above them.
+    expect(tiers('GET', '/api/pro/insights/reports')).not.toContain('ai');
+  });
+
+  // The catch-all below this block treats every non-cancel/key/budget/settings POST as generation,
+  // so a GET spelling of a generate path must stay cheap and a POST to the list root must not
+  // become free. Both directions pinned.
+  it('does not let the verb alone decide inside the family', () => {
+    expect(tiers('GET', '/api/pro/insights/reports/sprint-2026-08-18/generate')).toEqual(['read']);
+    expect(tiers('POST', '/api/pro/insights/reports')).toEqual(['read']);
+  });
+
+  // The prefix is anchored on the exact family: a sibling under /api/pro/insights/ must keep
+  // falling through to the catch-all, which is what gives `/ask` its AI tier.
+  it('does not sweep in the neighbouring insights routes', () => {
+    expect(tiers('POST', '/api/pro/insights/ask')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/pro/insights/chat-history')).toEqual(['read']);
+    expect(tiers('GET', '/api/pro/insights')).toEqual(['read']);
+    // A path that merely STARTS the same must not be captured by the family prefix.
+    expect(tiers('POST', '/api/pro/insights/reports-export/generate')).toEqual(['ai', 'ai_hourly']);
+  });
+});
+
 describe('tierFor — GitHub quota spenders', () => {
   it('throttles live repo search separately', () => {
     expect(tiers('GET', '/api/repos/search')).toEqual(['search', 'read']);

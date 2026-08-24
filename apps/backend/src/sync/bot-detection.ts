@@ -75,8 +75,42 @@ const QUALITY_CHECK_BOTS = new Set([
   'codacy-bot',
 ]);
 
+// Known DEPENDENCY automations — the bots that AUTHOR pull requests rather than respond to them.
+// The backend's LOCAL copy of `DEPENDENCY_BOTS` in `@pierre-review/shared`; same hand-sync
+// contract as the two lists above, and `bot-detection.test.ts` fails on drift.
+//
+// This is a THIRD axis, not a subtraction from either: these logins are already in KNOWN_BOTS
+// (so they are correctly bots) and absent from REVIEW_BOTS (so they carry no vendor brand). What
+// they lacked was any signal that they never review — they defaulted to `role: 'review'`, which
+// put dependency bumps in the review-bot metrics and their tiny fast PRs in the throughput ones.
+const DEPENDENCY_BOTS = new Set([
+  'dependabot',
+  'dependabot-preview',
+  'renovate',
+  'renovate-bot',
+  'snyk-bot',
+  'pyup-bot',
+  'greenkeeper',
+  'depfu',
+]);
+
 function normalizeLogin(login: string): string {
   return login.toLowerCase().replace(/\[bot\]$/, '');
+}
+
+// True when a login is a known dependency automation. Mirror of `dependencyBot` in
+// `@pierre-review/shared`. The `[bot]`-suffix normalisation is load-bearing here: `dependabot` and
+// `dependabot[bot]` exist as SEPARATE user rows on real accounts, with conflicting automated
+// flags, and normalising is what stops one actor being split across two lanes.
+export function dependencyBot(login: string | null | undefined): boolean {
+  if (!login) return false;
+  return DEPENDENCY_BOTS.has(normalizeLogin(login));
+}
+
+// The bare dependency-automation login slugs, for the query layer's `IN (…)` predicate — the same
+// shape `qualityCheckBotLogins` serves for the role seed.
+export function dependencyBotLogins(): string[] {
+  return [...DEPENDENCY_BOTS];
 }
 
 // True when a login is a known quality-check automation. Mirror of `qualityCheckBot` in

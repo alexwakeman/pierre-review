@@ -162,10 +162,31 @@ export function readFromUrl(): Partial<FilterState> {
     // rail GATES it on the account having 2+ workspaces and falls back to 'feed' for the render
     // without writing a correction back (a corrective set() permanently forgets the choice).
     else if (activityRepo === 'compare') out.activityRepoId = 'compare';
+    // 'insights' USED to be write-only-by-omission: a landing default that stayed out of the URL
+    // and was not parsed here either. That made the period report unforwardable — `?report=` names
+    // a period on a console the link could not select, so the recipient landed on the Feed and saw
+    // no report at all. It is parsed and emitted now; the one-shot landing default in
+    // Activity/index.tsx only fires from a pristine 'feed', so a deep link still wins.
+    else if (activityRepo === 'insights') out.activityRepoId = 'insights';
     else {
       const n = Number.parseInt(activityRepo, 10);
       if (Number.isFinite(n)) out.activityRepoId = n;
     }
+  }
+
+  // Insights → Reports deep link: `?report=<periodKey>` names the period being read. Paired with
+  // `?activityRepo=insights` above — either alone is a half-link, which is why they landed together.
+  //
+  // It also selects the Reports SUB-TAB, which is the third half of the same link: Insights seeds
+  // its sub-tab from the store and falls back to 'overview', so a link carrying the console and the
+  // period still opened on the ad-hoc chat and showed no report at all. `?report=` can only ever
+  // mean the Reports pane, so this is a URL→store mapping, not a corrective write-back — the
+  // "derive the visible tab, never write it back" rule is about CORRECTING a user's stored choice,
+  // and InsightsView still derives 'overview' harmlessly if the periodReports capability is off.
+  const report = p.get('report');
+  if (report) {
+    out.insightsReportKey = report;
+    out.insightsSubTab = 'reports';
   }
 
   return out;
@@ -227,10 +248,12 @@ export function writeToUrl(s: FilterState): void {
   // is emitted only for a single-repo console (the 'all' feed is the default).
   if (usePinnedTabs.getState().activeTab === 'activity') {
     p.set('view', 'activity');
-    // A single-repo console, the CORE Bots console, the CORE "Needs attention" console and the
-    // CORE cross-workspace "Compare" console are deep-linkable; the 'feed' / 'insights'
-    // pseudo-rows are landing defaults and deliberately stay out of the URL (they are not
-    // parsed on the read side either, so emitting them would be write-only).
+    // A single-repo console and the CORE Bots / "Needs attention" / cross-workspace "Compare"
+    // consoles are deep-linkable, and so is 'insights' — it is a landing default AND a real
+    // destination, and omitting it made the period report's `?report=` link land on the Feed.
+    // Only 'feed' stays out of the URL now, because it is the bare state a link means when it
+    // says nothing. Emitting a value the read side does not parse would be write-only, so the
+    // two halves must always be changed together.
     // (The 'retro' pseudo-row is gone with the Retro panel; it was never parsed on the read side
     // either, so no legacy `?activityRepo=retro` link ever selected it.)
     if (typeof s.activityRepoId === 'number') {
@@ -241,6 +264,11 @@ export function writeToUrl(s: FilterState): void {
       p.set('activityRepo', 'attention');
     } else if (s.activityRepoId === 'compare') {
       p.set('activityRepo', 'compare');
+    } else if (s.activityRepoId === 'insights') {
+      p.set('activityRepo', 'insights');
+      // The period being read, emitted ONLY alongside the console that renders it — a bare
+      // `?report=` on the Feed would be inert noise in every link the app produces.
+      if (s.insightsReportKey) p.set('report', s.insightsReportKey);
     }
   }
 

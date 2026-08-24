@@ -124,6 +124,10 @@ import type {
   SprintChatBody,
   SprintChatResponse,
   SprintChatHistoryResponse,
+  PeriodChatResponse,
+  PeriodReportGenerateResponse,
+  PeriodReportResponse,
+  PeriodReportsListResponse,
   PinnedPromptsResponse,
   CreatePinnedPromptBody,
   ProSettings,
@@ -709,6 +713,61 @@ export const api = {
     ),
   deletePinnedPrompt: (id: number) =>
     fetch(`/api/pro/insights/pinned/${id}`, jsonBody('DELETE')).then((r) => handle<void>(r)),
+
+  // ---- Period-over-period reports (Pro `periodReports`; /api/pro/insights/reports/*) ----
+  // A stored, forwardable artifact for ONE completed sprint-cadence period: its window-pure
+  // metric vector, a coverage-stable comparison against the prior period, and a refusable
+  // forecast. The two GETs are FREE (plain DB reads of an immutable row — a stale row is
+  // FLAGGED, never silently regenerated); the two POSTs spend model budget.
+  //
+  // The period travels as a PATH SEGMENT (`sprint-2026-08-18`) — which is exactly why the key
+  // is punctuated with a hyphen rather than the colon the plan sketched. It is still
+  // `encodeURIComponent`-wrapped here: the key's shape is a server contract, not something the
+  // client gets to assume stays path-safe.
+  periodReports: (workspaceId: number) =>
+    get<PeriodReportsListResponse>(
+      withQuery('/api/pro/insights/reports', workspaceParam(workspaceId)),
+    ),
+  periodReport: (workspaceId: number, periodKey: string) =>
+    get<PeriodReportResponse>(
+      withQuery(
+        `/api/pro/insights/reports/${encodeURIComponent(periodKey)}`,
+        workspaceParam(workspaceId),
+      ),
+    ),
+  // The ONE billing path. `model` is the per-run override of the account default
+  // (`pro_settings.report_model`); omitted = whatever the account is configured for. The model is
+  // part of the stored row's unique key, so generating Sonnet does NOT destroy the Haiku row —
+  // asking for a model you already have back is a $0 cache hit (`generated: false`).
+  generatePeriodReport: (
+    workspaceId: number,
+    periodKey: string,
+    body: { model?: string } = {},
+  ) =>
+    fetch(
+      withQuery(
+        `/api/pro/insights/reports/${encodeURIComponent(periodKey)}/generate`,
+        workspaceParam(workspaceId),
+      ),
+      jsonBody('POST', body),
+    ).then((r) => handle<PeriodReportGenerateResponse>(r)),
+  // A drill-down turn, grounded in the stored report's STRUCTURED JSON (not its prose).
+  // `suggestedId` names a `PeriodSuggestedQuestion.id` from the report: the question's scope
+  // (`{metric, repoIds, fromMs, toMs}`) is already bound server-side, so a pill costs the model
+  // no re-derivation and cannot drift from the figures the reader is looking at. Free text sends
+  // `question` alone.
+  periodReportChat: (
+    workspaceId: number,
+    periodKey: string,
+    body: { question: string; suggestedId?: string },
+  ) =>
+    fetch(
+      withQuery(
+        `/api/pro/insights/reports/${encodeURIComponent(periodKey)}/chat`,
+        workspaceParam(workspaceId),
+      ),
+      jsonBody('POST', body),
+    ).then((r) => handle<PeriodChatResponse>(r)),
   // A single repo's digest (lazy per-repo so a slow Haiku call never blocks the grid).
   repoDigest: (repoId: number) =>
     get<RepoDigest>(`/api/pro/activity/digests/${repoId}`),

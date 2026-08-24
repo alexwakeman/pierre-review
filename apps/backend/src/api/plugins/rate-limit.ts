@@ -145,6 +145,30 @@ function tierFor(method: string, path: string): readonly Tier[] {
     return [TIERS.read];
   }
 
+  // ---- Period reports (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
+  // The Insights → Reports family is two free GETs and two spending POSTs under ONE path prefix,
+  // which is exactly the shape the catch-all below gets wrong in both directions: it tiers on the
+  // VERB, so `GET …/reports` (a list of stored rows — no model call, no GitHub) would inherit the
+  // 600/min blanket read bucket by accident rather than by decision, while a future GET that
+  // happened to be a POST would land on `ai` for free. Spelling the family out here also means
+  // the next reader sees the four routes and their costs together:
+  //   POST …/:periodKey/generate  an Anthropic completion (Haiku OR Sonnet — the one route in the
+  //                               app whose per-call price the USER picks) plus, on a first run,
+  //                               a bounded 8-period metrics backfill: ~20 indexed scans.
+  //   POST …/:periodKey/chat      one grounded Anthropic completion per turn.
+  //   GET  …/reports              stored rows + a bounded per-period coverage read. DB only.
+  //   GET  …/reports/:periodKey   one stored row + ONE metric-vector recompute for the staleness
+  //                               flag. DB only — it must NEVER grow a generation leg (the
+  //                               `GET /api/pro/prs/:id/annotations` precedent, which is on
+  //                               `read` for the same reason and for the same fragile reason).
+  // Anchored on the exact family prefix so no sibling `/api/pro/insights/*` route is swept in.
+  if (path === '/api/pro/insights/reports' || path.startsWith('/api/pro/insights/reports/')) {
+    if (mutating && (path.endsWith('/generate') || path.endsWith('/chat'))) {
+      return [TIERS.ai, TIERS.aiHourly];
+    }
+    return [TIERS.read];
+  }
+
   // ---- AI generation ----
   // ⚠ RE-DECIDED, not inherited: `POST /api/pro/prs/:id/annotations/run` now spends GITHUB quota
   // as well as model tokens — one PR_DETAIL_QUERY per uncached PR for the anchor hunks

@@ -230,6 +230,97 @@ export function qualityCheckBot(login: string | null | undefined): boolean {
   return QUALITY_CHECK_BOTS.has(login.toLowerCase().replace(/\[bot\]$/, ''));
 }
 
+// ── DEPENDENCY automations — the THIRD axis ──────────────────────────────────────────────────
+//
+// The bots that AUTHOR pull requests rather than respond to them. They are a distinct lane
+// because they distort a completely different set of metrics from the other two: a review bot
+// inflates review counts, a dependency bot inflates THROUGHPUT, lead time and PR size.
+//
+// Measured on a real workspace before this existed: Dependabot was 46 of 117 merged PRs in one
+// fortnight (39%), and because its PRs are tiny and merge fast it dragged the reported median PR
+// size to 68 lines — a blend of its own 14 and the humans' 142, describing no pull request anyone
+// had actually written, and understating real human PR size by 2.1×.
+//
+// Same hand-sync contract as REVIEW_BOTS and QUALITY_CHECK_BOTS: the backend keeps a local copy in
+// `sync/bot-detection.ts` (it cannot import shared at runtime) and `bot-detection.test.ts` fails
+// on drift.
+//
+// ⚠ These logins are ALREADY in the backend's KNOWN_BOTS, so they are correctly flagged as bots
+// today — what was missing is that they were classified `role: 'review'`, which is exactly
+// backwards for an actor that never reviews anything.
+export const DEPENDENCY_BOTS: ReadonlySet<string> = new Set([
+  'dependabot',
+  'dependabot-preview',
+  'renovate',
+  'renovate-bot',
+  'snyk-bot',
+  'pyup-bot',
+  'greenkeeper',
+  'depfu',
+]);
+
+// True when a login is a known dependency automation (see DEPENDENCY_BOTS). Normalises case + the
+// `[bot]` suffix — which is also what makes it immune to the duplicate-identity problem, where
+// `dependabot` and `dependabot[bot]` exist as two separate user rows with conflicting flags.
+export function dependencyBot(login: string | null | undefined): boolean {
+  if (!login) return false;
+  return DEPENDENCY_BOTS.has(login.toLowerCase().replace(/\[bot\]$/, ''));
+}
+
+// ── The four lanes ───────────────────────────────────────────────────────────────────────────
+//
+// Classified by WHAT AN ACTOR DOES, not by what it is, because that is what decides which metrics
+// it contaminates. Lumping all automation into one bucket cannot distinguish "your throughput is
+// inflated by dependency bumps" from "your approvals are automated" — different problems with
+// different fixes.
+export type ActorLane =
+  | 'human'
+  /** Substantive AI review — CodeRabbit, Copilot, Greptile, Cursor, Sourcery… (`REVIEW_BOTS`). */
+  | 'ai_review'
+  /** Quality gates, scanners and CI — SonarQube, Codecov, github-actions. Post status and
+   *  approvals rather than findings, so their VOLUME must never be read as review substance:
+   *  on the workspace above, all 786 of SonarQube's comments were "Quality Gate Passed/Failed". */
+  | 'quality_gate'
+  /** Dependency automation — authors PRs, never reviews. */
+  | 'dependency';
+
+export const ACTOR_LANES: ActorLane[] = ['human', 'ai_review', 'quality_gate', 'dependency'];
+
+// ── The effort-vs-automation breakdown on a period report ────────────────────────────────────
+//
+// ADDITIVE to the twelve-key metric vector, never part of it. The vector is the comparable
+// artifact — adding keys invalidates every stored period against the new ones — and "how much of
+// this was a person" is a NEW question rather than a correction to an old one, so it costs the
+// stored periods nothing.
+//
+// ⚠ `comments` SPANS ALL THREE CHANNELS (inline review comments, PR issue comments, review
+// bodies), unlike the vector's `bot_review_comments`, which counts inline only. That narrowness
+// is why a workspace with 786 SonarQube comments reported zero bot activity: quality gates post
+// issue comments, not inline ones. Do not "simplify" this back to one channel.
+export interface PeriodLaneStats {
+  lane: ActorLane;
+  mergedPrs: number;
+  openedPrs: number;
+  medianPrSizeLines: number | null;
+  medianLeadTimeHours: number | null;
+  comments: number;
+  approvals: number;
+}
+
+export interface PeriodLanes {
+  lanes: PeriodLaneStats[];
+  /** Share of merged PRs authored by automation, 0–100; null when nothing merged. */
+  automationMergeSharePct: number | null;
+  /** Median hours open → first review BY A PERSON. The vector's
+   *  `median_time_to_first_review_hours` attributes to whoever reviewed first, which on a
+   *  workspace with an auto-approving CI bot is the bot, at zero minutes — measured: 61 of 115
+   *  PRs, reported median 0h, real human medians ~21h and ~34h. Null when no human reviewed. */
+  medianTimeToFirstHumanReviewHours: number | null;
+  /** Automation classified into a lane that produced NOTHING this period — a configured AI
+   *  reviewer sitting silent is a finding, and it is invisible in every aggregate. */
+  silentAutomation: { userId: number; lane: ActorLane }[];
+}
+
 // ── Bot-Triage Platform (WS1–WS6) ──────────────────────────────────────────────
 // The neutral measurement + triage layer above ALL automated reviewers — the known
 // vendors (ReviewBotKind), an account's own in-house AI reviewer, and Pierre's own Claude
@@ -2640,6 +2731,11 @@ export interface ProCapabilities {
   // the per-row Tune/Drop pills, findings → config-PR/brief/issue outputs, the effect panel.
   // The free amber TuningSuggestions box renders regardless of this flag.
   botAdvisor: boolean;
+  // Period-over-period reporting (paid, gated like workspaceInsights): the Insights "Reports"
+  // sub-tab — a stored, forwardable artifact per sprint with a coverage-honest comparison, a
+  // refusable forecast and a narrated summary. Gates the sub-tab itself; the metrics behind it
+  // are CORE compute, but there is no free surface for them.
+  periodReports: boolean;
 }
 
 // Which GitHub sign-in methods this (cloud) deployment offers — GET /api/auth/providers.
@@ -5333,6 +5429,248 @@ export interface WorkspaceComparisonResponse {
   generatedAt: string; // ISO-8601
   sprint: { from: string; to: string };
   workspaces: WorkspaceComparisonRow[]; // one per workspace, in listWorkspaces order (name asc)
+}
+
+// ---- Period-over-period reporting (the Insights "Reports" sub-tab) ----
+// A stored, forwardable artifact for ONE completed period ("18 Aug – 1 Sep"), its comparison
+// against the prior one, and a refusable forecast. Metrics are CORE (db/period-metrics.ts);
+// the storage, the narration and the routes are plugin-owned.
+//
+// Two properties make the whole thing hold together, and neither is negotiable:
+//
+// 1. **Every metric is WINDOW-PURE** — a function of events timestamped in `[fromMs, toMs)` and
+//    nothing else. No "as of now" snapshot may enter the vector, because a stored historical
+//    period has to stay reproducible and a snapshot is not. That is why `openPrs`,
+//    `ciFailingNow`, open-PR age and current thread state are all ABSENT here even though the
+//    DORA header above carries them. (Trunk red share is absent for a different reason:
+//    `trunk_ci_status_events` has no backfill, so it is not computable for a past period at all.)
+// 2. **Retroactive history is systematically biased unless coverage is respected.** Merged-PR
+//    counts by 14-day period over the last 6 months read 570, 572, 557, … , 232, 177, 39, which
+//    looks like explosive growth; the number of repos CONTRIBUTING to those same periods is
+//    18, 19, 18, … , 9, 6, 4. The "trend" is repo onboarding, not team output. Hence
+//    `PeriodCoverage`, the stable-subset comparison, and a forecast that refuses rather than
+//    fits a line through an artifact.
+export const PERIOD_METRICS_SCHEMA_VERSION = 1;
+
+export type PeriodMetricKey =
+  | 'merged_prs' | 'opened_prs' | 'median_lead_time_hours'
+  | 'median_time_to_first_review_hours' | 'merge_ci_success_pct'
+  | 'median_pr_size_lines' | 'review_threads_opened'
+  | 'threads_replied_within_36h_pct' | 'bot_review_comments'
+  | 'human_review_comments' | 'bot_comments_per_merged_pr'
+  | 'reviewer_concentration_pct';
+
+// CLOSED + ORDERED at schema version 1. This order IS the render order and is part of the
+// contract; adding a metric bumps PERIOD_METRICS_SCHEMA_VERSION, and rows stored under an older
+// version simply lack the field — which must render "no prior", never 0.
+//
+// ⚠ `median_time_to_first_review_hours` attributes on `firstReviewAt`, NOT `openedAt` —
+// deliberately different from the `timeToFirstReviewHours` tile on WorkspaceMetrics. Bucketing by
+// open date right-censors a recent window (PRs opened in-window but not yet reviewed contribute
+// nothing, biasing the median DOWN); attributing on the review event keeps it window-pure and
+// uncensored. It is not a bug and must not be "fixed" into agreement with the tile.
+export const PERIOD_METRIC_KEYS: PeriodMetricKey[] = [
+  'merged_prs',
+  'opened_prs',
+  'median_lead_time_hours',
+  'median_time_to_first_review_hours',
+  'merge_ci_success_pct',
+  'median_pr_size_lines',
+  'review_threads_opened',
+  'threads_replied_within_36h_pct',
+  'bot_review_comments',
+  'human_review_comments',
+  'bot_comments_per_merged_pr',
+  'reviewer_concentration_pct',
+];
+
+export type PeriodMetricDirection = 'up_good' | 'down_good' | 'neutral';
+
+export interface PeriodMetricValue {
+  key: PeriodMetricKey;
+  value: number | null;      // null = no data. NEVER render as 0.
+  sampleSize: number;        // items behind the statistic (for a count, === value)
+  // `sampleSize` is below this metric's floor, so the FIGURE ITSELF is thin — distinct from a
+  // `PeriodMetricDelta` being insignificant, which is a statement about the CHANGE.
+  //
+  // It is computed in core and carried on the wire rather than derived in the SPA, because the
+  // floors live in ONE place (`PERIOD_METRIC_META` in db/period-metrics.ts) and a second copy in
+  // the frontend would drift the moment one of them was tuned — which is exactly the kind of
+  // duplication that has bitten this codebase before.
+  //
+  // Optional: rows stored before this existed simply carry no opinion, which renders as no marker
+  // rather than as a false "sample is fine".
+  lowSample?: boolean;
+}
+
+// A metric's this-vs-prior comparison. `prior` null means NO PRIOR PERIOD — the UI must
+// render that distinctly from "no change" (delta 0).
+export interface PeriodMetricDelta {
+  key: PeriodMetricKey;
+  value: number | null;
+  prior: number | null;
+  absoluteChange: number | null;   // value - prior; null when either side is null
+  percentChange: number | null;    // null when prior is null OR prior === 0
+  // True only when ALL of: both periods meet the metric's sample floor, the absolute change
+  // meets its absolute floor, and the two periods are coverage-comparable. Otherwise the delta
+  // is still CARRIED (the raw figures are real) but the UI must state it without a percentage —
+  // a percentage off a tiny base is noise wearing a suit, which this codebase has learned twice.
+  significant: boolean;
+  direction: PeriodMetricDirection;
+  // The CURRENT side's sample is below the metric's floor. Distinct from `significant`, which is
+  // about the CHANGE and also weighs the prior side and the absolute floor: a metric can be
+  // insignificant on a perfectly healthy sample (it barely moved), and can be thin while still
+  // clearing both floors. The row renders `value` from THIS object, so this is the sample that
+  // belongs beside it. Optional for rows stored before it existed.
+  lowSample?: boolean;
+}
+
+// Why a comparison or forecast could not be produced. A NAMED refusal, never a fabricated number.
+export type PeriodRefusalReason =
+  | 'no_prior_period'
+  | 'cadence_changed'
+  | 'partial_coverage'
+  | 'insufficient_history'
+  | 'too_volatile';
+
+export interface PeriodCoverage {
+  trackedRepos: number;     // repos in scope already tracked at period start
+  totalRepos: number;       // repos in scope now
+  complete: boolean;        // trackedRepos === totalRepos
+}
+
+export type PeriodForecast =
+  | { available: true; key: PeriodMetricKey; point: number; low: number; high: number;
+      basis: string; periodsUsed: number }
+  | { available: false; key: PeriodMetricKey; reason: PeriodRefusalReason };
+
+export interface PeriodMovement {
+  key: PeriodMetricKey;
+  absoluteChange: number;
+  percentChange: number | null;
+  rank: number;                 // 0 = biggest mover
+  favourable: boolean;          // change is in the metric's good direction
+}
+
+export interface PeriodSuggestedQuestion {
+  id: string;
+  text: string;
+  // The pre-bound scope, so selecting a pill needs no re-derivation by the model.
+  scope: { metric: PeriodMetricKey; repoIds: number[]; fromMs: number; toMs: number };
+}
+
+export interface PeriodReport {
+  // `'sprint-' + <period start as YYYY-MM-DD, UTC>`, e.g. 'sprint-2026-08-18'. Sortable,
+  // deterministic, and URL-path safe — it travels as a path segment, which is why it is not
+  // punctuated with a colon.
+  periodKey: string;
+  periodStart: string;          // ISO-8601
+  periodEnd: string;            // ISO-8601
+  grain: 'sprint';
+  // The configured sprint cadence, stored on EVERY row. A comparison between two rows with
+  // different cadences is REFUSED ('cadence_changed'), never silently subtracted.
+  cadenceDays: number;
+  coverage: PeriodCoverage;
+  // Headline values over the workspace's FULL current membership — that is what the reader
+  // means by "this period".
+  metrics: PeriodMetricValue[];
+  // The like-for-like comparison, recomputed over the COVERAGE-STABLE SUBSET (the intersection
+  // of the two periods' tracked repo sets) so the delta is not measuring repo onboarding.
+  // `refusal` set and `deltas` empty when no honest comparison is possible.
+  comparison: {
+    priorPeriodKey: string | null;
+    subsetRepoIds: number[];
+    subsetDisclosure: string;   // e.g. 'covers 17 of 19 repos tracked across both periods'
+    deltas: PeriodMetricDelta[];
+    refusal: PeriodRefusalReason | null;
+  };
+  forecasts: PeriodForecast[];
+  // Who did the work — effort vs automation (§ ActorLane). Optional: rows stored before the lane
+  // breakdown existed carry none, which renders as an absent panel rather than a false 0%.
+  lanes?: PeriodLanes;
+  // What the projection was fitted on, e.g. "fitted on the 6 of 8 repos tracked across all 5
+  // periods". The forecast series is measured over ONE stable repo subset (a workspace that
+  // onboarded a repo last week would otherwise never forecast at all), so the subset has to be
+  // stated — a projection over most of the workspace is useful, a projection the reader thinks
+  // covers all of it is misleading. Absent when the forecast was refused outright.
+  forecastDisclosure?: string;
+  movements: PeriodMovement[];
+  suggested: PeriodSuggestedQuestion[];
+  narrative: string | null;     // markdown; null on a backfilled (un-narrated) period
+  model: string | null;
+  metricsSchemaVersion: number;
+  generatedAt: string;          // ISO-8601
+  // The stored `data_fingerprint` no longer matches a recompute — the past moved underneath a
+  // report someone may already have forwarded. A stored report is IMMUTABLE once generated: the
+  // free GET only sets this flag and offers regeneration, it must NEVER silently regenerate.
+  stale: boolean;
+}
+
+export interface PeriodReportListItem {
+  periodKey: string; periodStart: string; periodEnd: string;
+  cadenceDays: number; hasNarrative: boolean; model: string | null;
+  coverageComplete: boolean;
+}
+
+export interface PeriodReportsListResponse {
+  enabled: boolean; workspaceId: number;
+  // No sprint cadence configured yet ⇒ the surface REFUSES to generate and shows a setup prompt
+  // pointing at the sprint setting. There is deliberately no silent fallback to a rolling
+  // 14 days: a period the user never chose is not an artifact they will forward.
+  cadenceConfigured: boolean;
+  periods: PeriodReportListItem[];
+  // Optional so a plugin build that predates it still satisfies the type; present on every
+  // response the current plugin serves. See PeriodReportModelInfo.
+  modelInfo?: PeriodReportModelInfo;
+}
+
+export interface PeriodReportResponse {
+  enabled: boolean; workspaceId: number; report: PeriodReport | null;
+  modelInfo?: PeriodReportModelInfo;
+}
+
+export interface PeriodReportGenerateResponse {
+  enabled: boolean; workspaceId: number;
+  report: PeriodReport | null;
+  generated: boolean;                  // false = served from cache, $0
+  creditsExhausted?: boolean;
+  cadenceMissing?: boolean;
+  // What the run ACTUALLY cost, from the server's own metering — the receipt that sits beside the
+  // pre-flight quote. Absent on a cached ($0) or credit-blocked generation, both of which spend
+  // nothing, so its absence is meaningful and must not render as a zero charge.
+  spend?: PeriodReportSpend;
+}
+
+export interface PeriodReportSpend {
+  model: string; credits: number; usd: number;
+  inputTokens: number; outputTokens: number;
+}
+
+export interface PeriodChatTurn { question: string; answer: string; createdAt: string; }
+export interface PeriodChatResponse {
+  enabled: boolean; answer: string; creditsExhausted?: boolean;
+}
+
+// Estimated spend BEFORE the user presses generate, shown next to the model selector — a model
+// switch that silently costs 5× is a support ticket. The ACTUAL spend is reported after the run.
+export interface PeriodReportCostEstimate {
+  model: string; estimatedCredits: number; estimatedUsd: number;
+}
+
+// The model selector's state, carried on BOTH free GETs.
+//
+// ⚠ THE QUOTE IS SERVED, NEVER RECOMPUTED CLIENT-SIDE. Both halves of it — the per-model token
+// prices and the typical prompt size — are the SERVER's, and the first cut of this feature had the
+// SPA hold its own copy of both: two price tables and two token envelopes (6000/900 against the
+// server's 4000/1100) quoting 13 and 39 credits for the very clicks the server priced at 12 and 36.
+// Neither number was wrong by much and neither could ever be checked against the other, which is
+// the failure mode: a duplicated constant that only manifests as a slightly-off promise about
+// money. The SPA renders `estimates` verbatim and adds a friendly label per id.
+export interface PeriodReportModelInfo {
+  // The account's effective default (pro_settings.report_model, else the deployment's default).
+  model: string;
+  // Selectable models, cheapest first, each with its pre-flight quote.
+  estimates: PeriodReportCostEstimate[];
 }
 
 // ---- Comment-validity assessment (Pro; reuses the prSummary capability) ----

@@ -58,7 +58,14 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // 'overview' rather than select a tab that no longer renders — that is what strands a user on a
 // blank pane. This field is transient (freshDefaults only, never persisted, never URL-parsed), so
 // a stale value can only live in memory for one session.
-export type InsightsSubTab = 'overview' | 'sprint';
+//
+// 'reports' is the period-over-period Reports pane (Pro `periodReports`). It is a REAL tab, but a
+// CONDITIONAL one — the capability decides whether it is in the rendered list, and InsightsView
+// normalizes a stored 'reports' back to 'overview' when the capability is off. That is the same
+// derive-don't-write-back rule the Feed/Bots inner tabs follow: the stored scalar may legitimately
+// name a tab the current context does not render, and a corrective set() would permanently forget
+// the user's choice the moment Pro flickers.
+export type InsightsSubTab = 'overview' | 'sprint' | 'reports';
 // The all-open-PRs drill-down's scope: one repo | 'feed' (every repo in the active Workspace —
 // the Flow metrics "Open PRs" tile) | a named repo GROUP (label + the exact repo set behind it —
 // see openPrsScope).
@@ -345,6 +352,13 @@ export interface FilterState {
   // selection
   selectedPrId: number | null;
   selectedThreadId: number | null;
+  // The Insights → Reports period the reader is looking at, as a `periodKey`
+  // ('sprint-2026-08-18'). It lives in the store rather than in the panel because it is
+  // URL-MIRRORED (`?report=`), and a forwardable link per period is the whole point of the
+  // period report — an artifact you cannot send to someone is not an artifact. Selection
+  // state, so it is NOT in FilterDefaults and "Clear filters" leaves it alone.
+  // null = show the newest completed period.
+  insightsReportKey: string | null;
   // PR-detail Threads-tab bot filter: when set, the Threads tab shows ONLY that review
   // vendor's threads (set by clicking a "CodeRabbit · 12 · 3 unresolved" chip in Overview).
   // null = no filter. Transient; cleared when the PR changes / selection clears.
@@ -791,6 +805,8 @@ export interface FilterState {
   setRepoConsoleTab: (repoId: number, tab: RepoConsoleTab) => void;
   // Remember the Insights console's sub-tab (see insightsSubTab).
   setInsightsSubTab: (tab: InsightsSubTab) => void;
+  // Select the Reports period (see insightsReportKey). `null` = the newest completed period.
+  setInsightsReportKey: (periodKey: string | null) => void;
   // Pick the Insights chat's range for the next question. `null` restores "use the account's
   // configured window" — the chips express that as the settings-derived default being active, so
   // re-clicking the highlighted chip is a no-op rather than a clear.
@@ -1029,6 +1045,7 @@ function freshDefaults(): FilterData {
     sprintChatResults: {},
     selectedPrId: null,
     selectedThreadId: null,
+    insightsReportKey: null,
     threadBotFilter: null,
     threadStateFilter: new Set<DerivedState>(),
     threadSeverityFilter: new Set<MlSeverity>(),
@@ -1411,6 +1428,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   setRepoConsoleTab: (repoId, tab) =>
     set((s) => ({ repoConsoleTabs: { ...s.repoConsoleTabs, [repoId]: tab } })),
   setInsightsSubTab: (tab) => set({ insightsSubTab: tab }),
+  setInsightsReportKey: (periodKey) => set({ insightsReportKey: periodKey }),
   setInsightsRange: (range) => set({ insightsRange: range }),
   toggleFileGroup: (path, defaultExpanded) =>
     set((s) => {

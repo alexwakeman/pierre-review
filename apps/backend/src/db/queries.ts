@@ -8444,6 +8444,21 @@ export async function classificationLabelMap(
 // 'review'). Used where a surface must SPLIT the two sets rather than filter to one —
 // getBotAnalytics computes every automated reviewer's row and then routes quality checks into
 // their own excluded section.
+// The actors a HUMAN has explicitly vouched for in this workspace (`source === 'manual' &&
+// !automated`). Exported because that judgement must beat every automated signal, and any caller
+// building its own union of automation signals has to be able to subtract it — otherwise a global
+// `users.isBot` or a bot-ish login silently overrules the person who said "this is a colleague".
+//
+// It reads `manualHuman` from `resolveWorkspaceReviewers` rather than re-deriving the predicate,
+// so there stays exactly ONE definition of what a manual human is.
+export async function manualHumanUserIds(
+  accountId: number,
+  workspaceId: number,
+): Promise<number[]> {
+  const resolved = await resolveWorkspaceReviewers(accountId, workspaceId);
+  return [...resolved].filter(([, r]) => r.manualHuman).map(([id]) => id);
+}
+
 export async function reviewerRoleForUser(
   accountId: number,
   workspaceId: number,

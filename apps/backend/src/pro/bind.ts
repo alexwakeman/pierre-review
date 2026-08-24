@@ -6,6 +6,11 @@ import { config } from '../config.js';
 import { accountIdOf } from '../api/plugins/auth.js';
 import { db, schema, runTransaction, isPg } from '../db/client.js';
 import * as hostQueries from '../db/queries.js';
+// Period-over-period reporting (apiVersion 20). The metric vector and the coverage rule live in
+// their own core module — window-pure SQL that deliberately shares nothing with queries.ts's
+// "as of now" getters — and the forecast estimator is pure maths with no db import at all.
+import { getPeriodMetrics, getPeriodCoverage, getPeriodLanes } from '../db/period-metrics.js';
+import { forecastNext } from '../db/forecast.js';
 import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
 import { aiCreditStatus } from '../db/credits.js';
 import { reviewEvents, registerLearningsProvider } from '../review/events.js';
@@ -86,7 +91,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   // ⚠ THE RUNTIME GATE. This literal is the twin of `ProPlugin['apiVersion']` in contract.ts —
   // bump them together. A half-bump here silently degrades a CORRECT plugin to OSS mode (the warn
   // below is the only trace; capabilities go dark and every /api/pro/* route 404s).
-  if (plugin?.apiVersion !== 19 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 20 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -155,6 +160,19 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         hostQueries.getAdvisorFindings(accountId, window, scope),
       getBotEffectPanel: (accountId, scope, botUserId, anchorMs) =>
         hostQueries.getBotEffectPanel(accountId, scope, botUserId, anchorMs),
+      // Period reporting (apiVersion 20). The scope passes straight through, exactly like the
+      // getters above: `workspaceId` decides who counts as an automated reviewer, `repoIds`
+      // narrows what is measured — and the plugin only ever holds a host-produced scope.
+      getPeriodMetrics: (accountId, scope, window) =>
+        getPeriodMetrics(accountId, scope, window),
+      getPeriodCoverage: (accountId, repoIds, atMs) =>
+        getPeriodCoverage(accountId, repoIds, atMs),
+      // PURE maths — no db, no I/O, nothing to await. It is crossed as async only to match the
+      // shape of every other member of this seam; do NOT read the `async` as a hint that this
+      // one touches the database.
+      computePeriodForecast: async (values, opts) => forecastNext(values, opts ?? {}),
+      getPeriodLanes: (accountId, scope, window) =>
+        getPeriodLanes(accountId, scope, window),
     },
     recordAiUsage: (row) => recordAiUsage(row),
     aiCredits: {

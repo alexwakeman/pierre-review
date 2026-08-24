@@ -20,6 +20,7 @@ const FULL: ProCapabilities = {
   issueLinks: true,
   botTriage: true,
   botAdvisor: true,
+  periodReports: true,
 };
 
 afterEach(() => {

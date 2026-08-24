@@ -138,6 +138,7 @@ export function useProCapabilities(): ProCapabilities {
       issueLinks: false,
       botTriage: false,
       botAdvisor: false,
+      periodReports: false,
     }
   );
 }
