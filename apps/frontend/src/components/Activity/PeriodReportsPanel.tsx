@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import type {
   ActorLane,
+  ActorLaneBand,
   PeriodForecast,
   PeriodLaneStats,
   PeriodLanes,
@@ -16,7 +17,12 @@ import type {
   PeriodReportModelInfo,
   PeriodSuggestedQuestion,
 } from '@pierre-review/shared';
-import { PERIOD_METRIC_KEYS, PERIOD_METRICS_SCHEMA_VERSION } from '@pierre-review/shared';
+import {
+  ACTOR_LANES,
+  ACTOR_LANE_BAND,
+  PERIOD_METRIC_KEYS,
+  PERIOD_METRICS_SCHEMA_VERSION,
+} from '@pierre-review/shared';
 import { useFilters } from '../../store/filters.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
@@ -82,6 +88,20 @@ interface MetricMeta {
   // name. Three of these are not cosmetic — they are the difference between a number the reader
   // trusts and one they think disagrees with another screen.
   note?: string;
+  // ⚠ THE LABEL FOR ANYWHERE OUTSIDE THE TABLE ROW.
+  //
+  // The two human-only twins are labelled `…by people`, which reads correctly ONLY directly under
+  // the blended figure they qualify. On a "biggest movers" pill that context is gone, and BOTH of
+  // them render as the same pill — a reader seeing "…by people ▼ −47 (−25%)" cannot tell whether
+  // their team merged 47 fewer PRs or wrote PRs 47 lines smaller, which are opposite kinds of
+  // news. Set this wherever `label` leans on its neighbour to make sense.
+  standaloneLabel?: string;
+}
+
+/** The label to use where the metric appears on its own — a pill, a tooltip, a chat prompt —
+ *  rather than in a table row directly beneath the figure it qualifies. */
+function standaloneLabelFor(meta: MetricMeta): string {
+  return meta.standaloneLabel ?? meta.label;
 }
 
 function changeFmtFor(meta: MetricMeta): Fmt {
@@ -89,21 +109,40 @@ function changeFmtFor(meta: MetricMeta): Fmt {
 }
 
 const METRIC_META: Record<PeriodMetricKey, MetricMeta> = {
-  merged_prs: { label: 'Merged PRs', format: countFmt },
+  merged_prs: { label: 'Merged PRs', format: countFmt, note: 'everything that landed' },
+  // ⚠ THE HUMAN-ONLY TWIN SITS DIRECTLY UNDER ITS BLENDED PARENT, in `PERIOD_METRIC_KEYS` order,
+  // and that adjacency is the feature. `117 / 71` read one under the other states the automation
+  // gap with no narration; the same two numbers on opposite sides of a table are two facts nobody
+  // joins up.
+  human_merged_prs: {
+    label: '…by people',
+    standaloneLabel: 'Merged PRs by people',
+    format: countFmt,
+    note: 'excludes bumps, agents, release bots',
+  },
   opened_prs: { label: 'Opened PRs', format: countFmt },
+  automation_merge_share_pct: {
+    label: 'Automation share of merges',
+    format: pctFmt,
+    changeFormat: pointsFmt,
+    note: 'no arrow — more automation is not self-evidently better or worse',
+  },
   median_lead_time_hours: {
     label: 'Lead time',
     format: fmtDuration,
     note: 'median open → merge',
   },
-  median_time_to_first_review_hours: {
-    label: 'Time to first review',
+  median_time_to_first_human_review_hours: {
+    label: 'Time to first review by a person',
     format: fmtDuration,
-    // Deliberately different from the Flow-metrics tile of nearly the same name, and the caption
-    // has to say so — otherwise the two screens look like they disagree. Bucketing by open date
-    // right-censors a recent window (PRs opened in-window but not yet reviewed contribute
-    // nothing, biasing the median DOWN); attributing on the review event keeps it window-pure.
-    note: 'median, counted on the review — not the open',
+    // TWO things this caption has to carry, both of which have burned a reader:
+    //  • "by a person" — this metric used to attribute to whoever reviewed FIRST, which on a
+    //    workspace where CI auto-approves on push is the bot, at zero minutes. It read 0h against
+    //    a real human median of 18.3h.
+    //  • "counted on the review" — deliberately different from the Flow-metrics tile of nearly
+    //    the same name. Bucketing by open date right-censors a recent window (PRs opened in-window
+    //    but not yet reviewed contribute nothing, biasing the median DOWN).
+    note: 'median, counted on the review — not the open. Bot approvals are excluded',
   },
   merge_ci_success_pct: {
     label: 'Merge CI success',
@@ -115,6 +154,14 @@ const METRIC_META: Record<PeriodMetricKey, MetricMeta> = {
     label: 'PR size',
     format: linesFmt,
     note: 'median lines added + deleted',
+  },
+  median_human_pr_size_lines: {
+    label: '…by people',
+    standaloneLabel: 'PR size, people only',
+    format: linesFmt,
+    // The measured case: Dependabot's 14-line bumps and the humans' 142 blended to a reported 68,
+    // a number no pull request in the workspace resembled.
+    note: 'the blended figure above understated this by 2.1× on the workspace this was built for',
   },
   review_threads_opened: { label: 'Review threads opened', format: countFmt },
   threads_replied_within_36h_pct: {
@@ -404,14 +451,57 @@ function ForecastCell({
 // fortnight were 71 human and 46 Dependabot, and the reported median PR size of 68 lines was a
 // blend of Dependabot's 14 and the humans' 142 — a number no pull request there resembled.
 //
-// FOUR lanes rather than bot-vs-human, because automation distorts DIFFERENT metrics depending on
-// what it does: a dependency bot inflates throughput, a quality gate inflates review counts and
+// LANES rather than bot-vs-human, because automation distorts DIFFERENT metrics depending on what
+// it does: a dependency bot inflates throughput, a quality gate inflates review counts and
 // approvals, and only an AI reviewer's volume says anything about review substance.
+//
+// The dependency/code-agent split is the one that most resists being collapsed back. Both author
+// pull requests, so any bot-vs-human view files them together — and yet a merged Dependabot bump
+// is overhead a team absorbed while a merged agent PR is work it shipped. "Automation authored
+// 40% of merges" is unreadable until you know which of those two it means.
+//
+// Colours are chosen so the two AUTHORING lanes read as a pair (teal/grey) and the RESPONDING
+// lanes as another (violet/blue/indigo), because the band is the first cut a reader makes.
 const LANE_META: Record<ActorLane, { label: string; note: string; hex: string }> = {
   human: { label: 'People', note: 'authored and reviewed by humans', hex: PALETTE.green },
+  code_agent: {
+    label: 'Code agents',
+    note: 'Devin, autofix, codegen, translation sync — writes real changes',
+    hex: PALETTE.teal,
+  },
+  dependency: {
+    label: 'Dependency bots',
+    note: 'Dependabot, Renovate — version bumps, never reviews',
+    hex: PALETTE.gray,
+  },
   ai_review: { label: 'AI review', note: 'CodeRabbit, Copilot, Greptile…', hex: PALETTE.violet },
-  quality_gate: { label: 'Quality gates & CI', note: 'SonarQube, scanners, Actions', hex: PALETTE.blue },
-  dependency: { label: 'Dependency bots', note: 'Dependabot, Renovate — authors, never reviews', hex: PALETTE.gray },
+  quality_gate: {
+    label: 'Quality gates & CI',
+    note: 'SonarQube, scanners, Actions — posts verdicts, not findings',
+    hex: PALETTE.blue,
+  },
+  release: {
+    label: 'Release automation',
+    note: 'merge queues, release trains, backports — moves code',
+    hex: PALETTE.indigo,
+  },
+  housekeeping: {
+    label: 'Housekeeping',
+    note: 'CLA, triage, labels, stale, size reports — noise in every review metric',
+    hex: PALETTE.slate,
+  },
+};
+
+// Which lanes AUTHOR the work and which merely RESPOND to it. MIRRORED from `ACTOR_LANE_BAND` in
+// shared — the frontend CAN import shared for real (only the backend's release build forbids it),
+// so this reads the shared map rather than re-listing it.
+//
+// The band is what makes seven lanes legible: a reader does not want seven numbers, they want
+// "how much of this was people, what wrote the rest, and what merely commented on it".
+const BAND_LABEL: Record<ActorLaneBand, string> = {
+  people: 'People',
+  authors: 'Automation that writes code',
+  responds: 'Automation that responds',
 };
 
 /** One stacked bar. Zero-total renders as a flat rule rather than an empty box, so the row still
@@ -443,7 +533,7 @@ function LaneBar({
 
 function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
   const byLane = new Map(lanes.lanes.map((l) => [l.lane, l]));
-  const order: ActorLane[] = ['human', 'ai_review', 'quality_gate', 'dependency'];
+  const order: ActorLane[] = ACTOR_LANES;
   const axes: { key: string; label: string; pick: (l: PeriodLaneStats) => number }[] = [
     { key: 'authored', label: 'PRs merged', pick: (l) => l.mergedPrs },
     { key: 'comments', label: 'Review comments', pick: (l) => l.comments },
@@ -454,6 +544,20 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
 
   const human = byLane.get('human');
   const ai = byLane.get('ai_review');
+
+  // ⚠ THE LEGEND LISTS ONLY LANES THAT DID SOMETHING. Seven chips under a bar with two colours in
+  // it reads as five missing measurements rather than five absent tools — and most workspaces run
+  // three or four of these. A lane that is genuinely zero is not a fact worth a chip.
+  const activeLanes = order.filter((lane) => {
+    const l = byLane.get(lane);
+    return l != null && axes.some((a) => a.pick(l) > 0);
+  });
+
+  // The band rollup, over MERGES. Three numbers is what a reader actually takes away — the
+  // per-lane bars are the detail behind it, not the summary.
+  const mergeTotal = lanes.lanes.reduce((n, l) => n + l.mergedPrs, 0);
+  const bandMerges = (band: ActorLaneBand): number =>
+    lanes.lanes.reduce((n, l) => (ACTOR_LANE_BAND[l.lane] === band ? n + l.mergedPrs : n), 0);
 
   return (
     <div className="space-y-2 rounded-md border border-gray-200 px-3 py-2.5 dark:border-gray-800">
@@ -483,9 +587,37 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
         );
       })}
 
+      {/* THE BAND ROLLUP — the one line most readers will take away. Three groups, because the
+          actionable question is not "which of seven" but "did people write this, did a machine
+          write it, or did a machine only comment on it". Rendered only when something merged;
+          a share of nothing is not 0%. */}
+      {mergeTotal > 0 && (
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 pt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+          {(['people', 'authors', 'responds'] as ActorLaneBand[]).map((band) => {
+            const n = bandMerges(band);
+            // `responds` is ~always 0 merges by construction (a reviewer does not author), so it
+            // would render as a permanent "0%" that looks like a broken measurement. Dropping a
+            // zero band is the same rule as dropping an inactive lane from the legend.
+            if (n === 0) return null;
+            return (
+              <span key={band}>
+                <span className="font-medium text-gray-600 dark:text-gray-300">
+                  {Math.round((n / mergeTotal) * 100)}%
+                </span>{' '}
+                {BAND_LABEL[band].toLowerCase()}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-x-3 gap-y-1 pt-0.5">
-        {order.map((lane) => (
-          <span key={lane} className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400">
+        {activeLanes.map((lane) => (
+          <span
+            key={lane}
+            title={LANE_META[lane].note}
+            className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400"
+          >
             <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: LANE_META[lane].hex }} />
             {LANE_META[lane].label}
           </span>
@@ -516,16 +648,20 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
         </div>
       )}
 
-      {/* ⚠ THE MOST DISTORTED FIGURE ON THE REPORT, stated plainly.
-          The table's "Time to first review" attributes to whoever reviewed FIRST — and where a CI
-          bot auto-approves, that is the bot at zero minutes. Measured: 61 of 115 PRs first
-          "reviewed" by github-actions, reported median 0h, humans ~21h. Shown only when the two
-          genuinely differ, so a workspace without an auto-approver sees no extra noise. */}
+      {/* ⚠ THIS CAPTION USED TO SAY THE TABLE ABOVE WAS CONTAMINATED, AND IT NO LONGER IS.
+          At metrics schema v1 the vector's "Time to first review" attributed to whoever reviewed
+          FIRST — a CI bot auto-approving at zero minutes — so this line existed to warn the reader
+          off the number directly above it. v2 renamed and redefined that metric to count only a
+          person, so the warning would now be actively false: it would tell a reader to distrust a
+          figure that IS the human one.
+          What is left is a reconciliation. Both figures come from the same fold in
+          `getPeriodLanes`, so they cannot disagree — and saying so is what stops the next reader
+          assuming one of the two screens is stale. */}
       {lanes.medianTimeToFirstHumanReviewHours != null && (
         <div className="text-[10px] text-gray-400">
           First review by a person: {fmtDuration(lanes.medianTimeToFirstHumanReviewHours)} at the
-          median. The row above counts whichever reviewer was first, including an auto-approving
-          bot.
+          median — the same measurement as the row above, which counts people only and excludes
+          bot approvals.
         </div>
       )}
     </div>
@@ -742,7 +878,7 @@ function Movements({
                   : 'Moved against this metric’s good direction'
             }
           >
-            {meta.label} {m.absoluteChange > 0 ? '▲' : '▼'}{' '}
+            {standaloneLabelFor(meta)} {m.absoluteChange > 0 ? '▲' : '▼'}{' '}
             {signed(m.absoluteChange, changeFmtFor(meta))}
             {m.percentChange != null && ` (${signed(m.percentChange, pctFmt)})`}
           </span>

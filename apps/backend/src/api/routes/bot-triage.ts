@@ -152,7 +152,12 @@ const patchSchema = {
     properties: {
       workspaceId: { type: 'integer', minimum: 1 },
       automated: { type: 'boolean' },
-      role: { type: 'string', enum: ['review', 'quality_check'] },
+      // Must stay in lockstep with `ReviewerRole` in shared — the schema is the only validation
+      // this field gets, and an unlisted role is rejected with a 400 rather than stored.
+      role: {
+        type: 'string',
+        enum: ['review', 'quality_check', 'dependency', 'code_agent', 'release', 'housekeeping'],
+      },
       kind: { type: ['string', 'null'] },
       label: { type: ['string', 'null'] },
     },

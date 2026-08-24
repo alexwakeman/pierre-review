@@ -1,4 +1,4 @@
-import type { ReviewBotKind } from '@pierre-review/shared';
+import type { AutomatedReviewerKind, ReviewBotKind, ReviewerRole } from '@pierre-review/shared';
 
 // Known bot logins (without the [bot] suffix). Anything weird gets a manual
 // override via PATCH /api/users/:id.
@@ -49,54 +49,102 @@ const REVIEW_BOTS: Record<string, ReviewBotKind> = {
   'chatgpt-codex-connector': 'codex',
 };
 
-// Known QUALITY-CHECK automations (static analysis / coverage / lint). The backend's LOCAL copy
-// of `QUALITY_CHECK_BOTS` in `@pierre-review/shared` — same hand-sync contract as REVIEW_BOTS
-// above (the backend cannot import shared at RUNTIME; a value import fails the release build),
-// and `bot-detection.test.ts` fails on any drift.
+// THE AUTOMATION VENDOR TABLE — the backend's LOCAL copy of `AUTOMATION_VENDORS` in
+// `@pierre-review/shared`. Same hand-sync contract as REVIEW_BOTS above (the backend cannot
+// import shared at RUNTIME — a value import fails the release build), and
+// `bot-detection.test.ts` fails on any drift, key by key AND value by value.
 //
-// This map SEEDS the default `ReviewerRole` for a login nobody has classified by hand. It is a
-// separate axis from REVIEW_BOTS, not a subtraction from it: a login may carry a vendor brand
-// (`kind`) AND the quality_check role at once, which is why `deepsource-io` /
-// `github-code-quality` / `github-advanced-security` are deliberately ABSENT here — they are
-// already named vendors with rows in existing dashboards, so seeding them would silently move
-// numbers on upgrade. They stay `review` and remain user-flippable.
-//
-// `sonarqubecloud` / `sonarcloud` are in KNOWN_BOTS but NOT in REVIEW_BOTS, so today they resolve
-// to `in_house` via the githubType step and get counted as review bots: the exact miscount the
-// role exists to fix. The list here MUST match migration 0042's backfill `IN (…)` list.
-const QUALITY_CHECK_BOTS = new Set([
-  'sonarqubecloud',
-  'sonarcloud',
-  'codecov',
-  'codeclimate',
-  'codefactor-io',
-  'houndci-bot',
-  'coveralls',
-  'codacy-bot',
-]);
-
-// Known DEPENDENCY automations — the bots that AUTHOR pull requests rather than respond to them.
-// The backend's LOCAL copy of `DEPENDENCY_BOTS` in `@pierre-review/shared`; same hand-sync
-// contract as the two lists above, and `bot-detection.test.ts` fails on drift.
-//
-// This is a THIRD axis, not a subtraction from either: these logins are already in KNOWN_BOTS
-// (so they are correctly bots) and absent from REVIEW_BOTS (so they carry no vendor brand). What
-// they lacked was any signal that they never review — they defaulted to `role: 'review'`, which
-// put dependency bumps in the review-bot metrics and their tiny fast PRs in the throughput ones.
-const DEPENDENCY_BOTS = new Set([
-  'dependabot',
-  'dependabot-preview',
-  'renovate',
-  'renovate-bot',
-  'snyk-bot',
-  'pyup-bot',
-  'greenkeeper',
-  'depfu',
-]);
+// ONE table rather than five login sets plus a parallel login→kind map: a login has exactly one
+// identity and one default role, and those are facts about the same key. See the shared copy for
+// the full reasoning, the measured numbers behind each family, and why the per-family sets below
+// are DERIVED from this rather than restated beside it.
+const AUTOMATION_VENDORS: Record<string, { kind: AutomatedReviewerKind; role: ReviewerRole }> = {
+  dependabot: { kind: 'dependabot', role: 'dependency' },
+  'dependabot-preview': { kind: 'dependabot', role: 'dependency' },
+  renovate: { kind: 'renovate', role: 'dependency' },
+  'renovate-bot': { kind: 'renovate', role: 'dependency' },
+  'snyk-bot': { kind: 'snyk', role: 'dependency' },
+  'pyup-bot': { kind: 'pyup', role: 'dependency' },
+  greenkeeper: { kind: 'greenkeeper', role: 'dependency' },
+  depfu: { kind: 'depfu', role: 'dependency' },
+  sonarqubecloud: { kind: 'sonarqube', role: 'quality_check' },
+  sonarcloud: { kind: 'sonarqube', role: 'quality_check' },
+  codecov: { kind: 'codecov', role: 'quality_check' },
+  codeclimate: { kind: 'codeclimate', role: 'quality_check' },
+  'codefactor-io': { kind: 'codefactor', role: 'quality_check' },
+  'houndci-bot': { kind: 'hound', role: 'quality_check' },
+  coveralls: { kind: 'coveralls', role: 'quality_check' },
+  'codacy-bot': { kind: 'codacy', role: 'quality_check' },
+  'github-actions': { kind: 'github_actions', role: 'quality_check' },
+  'jit-ci': { kind: 'jit', role: 'quality_check' },
+  'socket-security': { kind: 'socket', role: 'quality_check' },
+  gitguardian: { kind: 'gitguardian', role: 'quality_check' },
+  'semgrep-app': { kind: 'semgrep', role: 'quality_check' },
+  'trunk-io': { kind: 'trunk', role: 'quality_check' },
+  'devin-ai-integration': { kind: 'devin', role: 'code_agent' },
+  'sweep-ai': { kind: 'sweep', role: 'code_agent' },
+  'codegen-sh': { kind: 'codegen', role: 'code_agent' },
+  'deepsource-autofix': { kind: 'deepsource_autofix', role: 'code_agent' },
+  'pre-commit-ci': { kind: 'pre_commit_ci', role: 'code_agent' },
+  'restyled-io': { kind: 'restyled', role: 'code_agent' },
+  imgbot: { kind: 'imgbot', role: 'code_agent' },
+  imgbotapp: { kind: 'imgbot', role: 'code_agent' },
+  'transifex-integration': { kind: 'transifex', role: 'code_agent' },
+  'crowdin-bot': { kind: 'crowdin', role: 'code_agent' },
+  mintlify: { kind: 'mintlify', role: 'code_agent' },
+  allstar: { kind: 'allstar', role: 'code_agent' },
+  mergify: { kind: 'mergify', role: 'release' },
+  kodiak: { kind: 'kodiak', role: 'release' },
+  kodiakhq: { kind: 'kodiak', role: 'release' },
+  bulldozer: { kind: 'bulldozer', role: 'release' },
+  'release-please': { kind: 'release_please', role: 'release' },
+  releaser: { kind: 'release_please', role: 'release' },
+  'semantic-release': { kind: 'semantic_release', role: 'release' },
+  'semantic-release-bot': { kind: 'semantic_release', role: 'release' },
+  'release-drafter': { kind: 'release_drafter', role: 'release' },
+  'changeset-bot': { kind: 'changesets', role: 'release' },
+  changesets: { kind: 'changesets', role: 'release' },
+  autorelease: { kind: 'release_please', role: 'release' },
+  'lumberbot-app': { kind: 'backport', role: 'release' },
+  meeseeksdev: { kind: 'backport', role: 'release' },
+  backport: { kind: 'backport', role: 'release' },
+  'cla-bot': { kind: 'cla_assistant', role: 'housekeeping' },
+  'cla-assistant': { kind: 'cla_assistant', role: 'housekeeping' },
+  claassistant: { kind: 'cla_assistant', role: 'housekeeping' },
+  'google-cla': { kind: 'google_cla', role: 'housekeeping' },
+  googlebot: { kind: 'google_cla', role: 'housekeeping' },
+  'facebook-github-bot': { kind: 'meta_cla', role: 'housekeeping' },
+  dco: { kind: 'dco', role: 'housekeeping' },
+  stale: { kind: 'stale_bot', role: 'housekeeping' },
+  welcome: { kind: 'welcome_bot', role: 'housekeeping' },
+  lock: { kind: 'lock_bot', role: 'housekeeping' },
+  allcontributors: { kind: 'allcontributors', role: 'housekeeping' },
+  'semantic-pull-request': { kind: 'semantic_pr', role: 'housekeeping' },
+  sizebot: { kind: 'sizebot', role: 'housekeeping' },
+  'react-sizebot': { kind: 'sizebot', role: 'housekeeping' },
+  'diffray-bot': { kind: 'sizebot', role: 'housekeeping' },
+  'codesandbox-ci': { kind: 'codesandbox', role: 'housekeeping' },
+  netlify: { kind: 'netlify', role: 'housekeeping' },
+  vercel: { kind: 'vercel', role: 'housekeeping' },
+  'gitpod-io': { kind: 'gitpod', role: 'housekeeping' },
+};
 
 function normalizeLogin(login: string): string {
   return login.toLowerCase().replace(/\[bot\]$/, '');
 }
+
+const loginsWithRole = (role: ReviewerRole): Set<string> =>
+  new Set(Object.entries(AUTOMATION_VENDORS).filter(([, v]) => v.role === role).map(([k]) => k));
+
+// ⚠ DERIVED, which is what makes the families disjoint BY CONSTRUCTION. They used to be five
+// hand-written sets, so "no login appears in two of them" was a property a test had to check and
+// a contributor had to remember — and whenever it was violated, the order the predicates happened
+// to be tried in silently decided the answer. A login now appears exactly once.
+const QUALITY_CHECK_BOTS = loginsWithRole('quality_check');
+const DEPENDENCY_BOTS = loginsWithRole('dependency');
+const CODE_AGENT_BOTS = loginsWithRole('code_agent');
+const RELEASE_BOTS = loginsWithRole('release');
+const HOUSEKEEPING_BOTS = loginsWithRole('housekeeping');
 
 // True when a login is a known dependency automation. Mirror of `dependencyBot` in
 // `@pierre-review/shared`. The `[bot]`-suffix normalisation is load-bearing here: `dependabot` and
@@ -127,6 +175,51 @@ export function qualityCheckBot(login: string | null | undefined): boolean {
 // review bot in every metric, because the role seed only lands when the lazy classifier runs.
 export function qualityCheckBotLogins(): string[] {
   return [...QUALITY_CHECK_BOTS];
+}
+
+/** True when a login is a known code-authoring automation. Mirror of `codeAgentBot` in shared. */
+export function codeAgentBot(login: string | null | undefined): boolean {
+  if (!login) return false;
+  return CODE_AGENT_BOTS.has(normalizeLogin(login));
+}
+
+/** True when a login is a known release / merge automation. Mirror of `releaseBot` in shared. */
+export function releaseBot(login: string | null | undefined): boolean {
+  if (!login) return false;
+  return RELEASE_BOTS.has(normalizeLogin(login));
+}
+
+/** True when a login is a known housekeeping automation. Mirror of `housekeepingBot` in shared. */
+export function housekeepingBot(login: string | null | undefined): boolean {
+  if (!login) return false;
+  return HOUSEKEEPING_BOTS.has(normalizeLogin(login));
+}
+
+export function codeAgentBotLogins(): string[] {
+  return [...CODE_AGENT_BOTS];
+}
+
+export function releaseBotLogins(): string[] {
+  return [...RELEASE_BOTS];
+}
+
+export function housekeepingBotLogins(): string[] {
+  return [...HOUSEKEEPING_BOTS];
+}
+
+// THE ONE PLACE A LOGIN IS TURNED INTO A ROLE. Every caller that needs "what is this automation
+// for" goes through here rather than testing the five predicates in its own order — because the
+// ORDER only matters if the sets overlap, and `bot-detection.test.ts` asserts they are pairwise
+// disjoint, so there is exactly one answer and no precedence to get wrong.
+//
+// Returns null for a login in NO vocabulary. That is not "it reviews" — it is "we do not know",
+// and the two callers treat it differently on purpose: `defaultRoleFor` falls back to `'review'`
+// (the historical default, so an unknown vendor keeps its ROI row and stays user-flippable),
+// while `resolveActorLanes` falls back to the quality gate (it declines to CREDIT an unknown
+// automation as a reviewer). Both are deliberate and they are allowed to differ.
+export function roleForBotLogin(login: string | null | undefined): ReviewerRole | null {
+  if (!login) return null;
+  return AUTOMATION_VENDORS[normalizeLogin(login)]?.role ?? null;
 }
 
 // Every review bot is also a bot, so folding REVIEW_BOTS into the known set keeps a
@@ -189,4 +282,29 @@ export function matchesAutomatedLoginPattern(login: string): boolean {
   if (!login) return false;
   const norm = normalizeLogin(login);
   return AUTOMATED_LOGIN_PATTERNS.some((re) => re.test(norm));
+}
+
+/** The full vendor row for a known non-review automation login — identity AND default role in one
+ *  lookup, mirroring `AUTOMATION_VENDORS` in shared. Returns null for an AI reviewer (that is
+ *  `reviewBotKind`'s job) and for anything unknown. */
+export function automationVendorFor(
+  login: string | null | undefined,
+): { kind: AutomatedReviewerKind; role: ReviewerRole } | null {
+  if (!login) return null;
+  return AUTOMATION_VENDORS[normalizeLogin(login)] ?? null;
+}
+
+/** The vendor identity of a non-review automation, or null. Mirror of `automationVendorKind` in
+ *  shared. Deliberately SEPARATE from `reviewBotKind`, which answers the narrower "is this an AI
+ *  reviewer" and drives the review-bot badge and the cross-org benchmark — widening that one
+ *  would ship a linter's volume into a shared review-bot dataset. */
+export function automationVendorKind(
+  login: string | null | undefined,
+): AutomatedReviewerKind | null {
+  return automationVendorFor(login)?.kind ?? null;
+}
+
+/** Every login the vendor table covers — the drift guard's key set. */
+export function automationVendorLogins(): string[] {
+  return Object.keys(AUTOMATION_VENDORS);
 }

@@ -7,19 +7,24 @@
 //    an event at exactly `to` is OUT. This is THE bug the spec calls out: a one-sided `gte` is
 //    what makes three existing getters unusable here, and a two-sided predicate with an
 //    INCLUSIVE upper edge double-counts every event that lands on the boundary two adjacent
-//    periods share. Pinned below on `mergedAt`, `openedAt`, `firstReviewAt`, thread `createdAt`
-//    and review `submittedAt` — five columns, because getting it right on four proves nothing
-//    about the fifth.
-//  • AN EMPTY SCOPE IS AN EMPTY WORKSPACE, NOT AN ERROR AND NOT THE WHOLE ACCOUNT. All twelve
-//    metrics null, sampleSize 0.
+//    periods share. Pinned below on `mergedAt`, `openedAt`, the first human review, thread
+//    `createdAt` and review `submittedAt` — five columns, because getting it right on four
+//    proves nothing about the fifth.
+//  • AN EMPTY SCOPE IS AN EMPTY WORKSPACE, NOT AN ERROR AND NOT THE WHOLE ACCOUNT. Every metric
+//    null, sampleSize 0.
 //  • NULL IS NOT ZERO. A median over nothing, a percentage over nothing and a ratio with no
 //    denominator are `null`; a count of zero is `0`. The UI renders those differently and the
 //    difference has to originate here.
 //  • THE UNSIZED-PR RULE. Lean storage defaults the three size columns to 0, so an unhydrated
 //    PR is indistinguishable from an empty one — feeding a fabricated 0 into a MEDIAN drags it
 //    towards zero by however many rows never hydrated.
-//  • `median_time_to_first_review_hours` ATTRIBUTES ON `firstReviewAt`, NOT `openedAt`. A PR
-//    opened long before the period still contributes if that is when it was picked up.
+//  • `median_time_to_first_human_review_hours` ATTRIBUTES ON THE REVIEW, NOT `openedAt`. A PR
+//    opened long before the period still contributes if that is when it was picked up. It also
+//    does NOT read `pull_requests.first_review_at`, which records whoever reviewed first
+//    regardless of what they are — the column that made this metric report 0h on a workspace
+//    whose CI auto-approves on push, against a real human median of 18.3h.
+//  • THE VECTOR AND THE LANE PANEL AGREE. They render one above the other and the panel's caption
+//    says they are the same measurement, so they share one fold rather than two that match today.
 //  • THE FINGERPRINT IS STABLE ACROSS CALLS AND MOVES WHEN THE DATA DOES. A fingerprint that
 //    folded in anything `Date.now()`-derived would mark every stored report stale forever and
 //    invite a re-generation that changes nothing and costs money.
@@ -199,9 +204,9 @@ beforeAll(async () => {
     // ── Never merged ───────────────────────────────────────────────────────────────────────
     // Opened in-window: intake is intake whether or not it landed.
     { key: 'open_only', repo: repoA, openedMs: FROM + 2 * DAY, ci: 'pending', additions: 7 },
-    // ⚠ THE `firstReviewAt` ATTRIBUTION ROW. Opened ten days BEFORE the period and still open,
-    // but picked up on day 3 of it — so it contributes 312h to metric #4 and nothing else.
-    // Bucketing metric #4 by `openedAt` (the WorkspaceMetrics tile's rule) would drop it, and
+    // ⚠ THE ATTRIBUTION ROW. Opened ten days BEFORE the period and still open, but picked up by a
+    // person on day 3 of it — so it contributes 312h to the first-review metric and nothing else.
+    // Bucketing that metric by `openedAt` (the WorkspaceMetrics tile's rule) would drop it, and
     // dropping exactly the slow pickups is what biases that median down.
     {
       key: 'reviewed_late',
@@ -210,6 +215,57 @@ beforeAll(async () => {
       firstReviewMs: FROM + 3 * DAY,
       ci: 'pending',
       additions: 20,
+      changedFiles: 1,
+    },
+    // ── THE BOT-CONTAMINATION ROWS ─────────────────────────────────────────────────────────
+    // ⚠ `firstReviewMs` ON THESE IS DELIBERATELY THE **BOT'S** TIMESTAMP — which is what sync
+    // actually writes into `pull_requests.first_review_at`, because that column records whoever
+    // reviewed first regardless of what they are. Every one of these rows would produce a
+    // different (wrong) answer if the metric still read the column, so the column being present
+    // and misleading IS the assertion.
+    //
+    // `bot_first`: a bot reviews the instant it opens (the auto-approve-on-push shape that made
+    // the live workspace report 0h across 115 PRs), a person reviews 12h later. Both reviews are
+    // INSIDE the window, so the only thing that differs between right and wrong is the VALUE.
+    {
+      key: 'bot_first',
+      repo: repoA,
+      openedMs: FROM + 1 * DAY,
+      firstReviewMs: FROM + 1 * DAY, // the bot's review — must be ignored
+      ci: 'pending',
+      additions: 30,
+      changedFiles: 2,
+    },
+    // `human_before`: a person reviewed it a fortnight ago and again mid-window. Its first human
+    // review belongs to an EARLIER period, so it must contribute NOTHING here — the case that
+    // forces the all-time lookback rather than a window-only scan.
+    {
+      key: 'human_before',
+      repo: repoA,
+      openedMs: FROM - 12 * DAY,
+      firstReviewMs: FROM - 2 * DAY,
+      ci: 'pending',
+      additions: 15,
+      changedFiles: 1,
+    },
+    // Human review at EXACTLY `from` — the sixth column carrying the half-open rule. 6h.
+    {
+      key: 'hr_at_from',
+      repo: repoA,
+      openedMs: FROM - 6 * HOUR,
+      firstReviewMs: FROM,
+      ci: 'pending',
+      additions: 8,
+      changedFiles: 1,
+    },
+    // Human review at EXACTLY `to` — EXCLUDED. Opened in-window, so it still counts as intake.
+    {
+      key: 'hr_at_to',
+      repo: repoA,
+      openedMs: TO - 50 * HOUR,
+      firstReviewMs: TO,
+      ci: 'pending',
+      additions: 9,
       changedFiles: 1,
     },
     // ── ANOTHER ACCOUNT'S PR, in another account's repo, merged mid-window ──────────────────
@@ -356,14 +412,17 @@ beforeAll(async () => {
     }
   }
 
-  // ── Submitted reviews, for reviewer concentration ────────────────────────────────────────
-  const REVIEWS: { key: string; by: number; atMs: number; state?: string }[] = [
+  // ── Submitted reviews ────────────────────────────────────────────────────────────────────
+  // TWO metrics read this table and they read it differently, which is why `pr` had to become a
+  // field: reviewer concentration counts in-window reviews per AUTHOR and does not care which PR
+  // they are on, whereas the first-human-review metric folds per PR and looks OUTSIDE the window.
+  const REVIEWS: { key: string; by: number; atMs: number; state?: string; pr?: string }[] = [
     { key: 'a1', by: alice, atMs: FROM + 1 * DAY },
     { key: 'a2', by: alice, atMs: FROM + 2 * DAY },
     { key: 'a3', by: alice, atMs: FROM + 3 * DAY },
     { key: 'b1', by: bob, atMs: FROM + 4 * DAY },
-    // ⚠ FOUR BOT REVIEWS — more than any human. If automated reviewers were counted, the
-    // busiest reviewer would be CodeRabbit at 4 of 8 and the metric would read 50 instead of 75.
+    // ⚠ FIVE BOT REVIEWS — more than either human alone. If automated reviewers were counted,
+    // alice would be 7 of 13 and the metric would read 53.85 instead of 87.5.
     { key: 'c1', by: botCr, atMs: FROM + 1 * DAY },
     { key: 'c2', by: botCr, atMs: FROM + 2 * DAY },
     { key: 'c3', by: botCr, atMs: FROM + 3 * DAY },
@@ -374,13 +433,30 @@ beforeAll(async () => {
     { key: 'b_at_to', by: bob, atMs: TO },
     // Before the period.
     { key: 'a_before', by: alice, atMs: FROM - 1 * DAY },
+
+    // ── The first-HUMAN-review fixtures ────────────────────────────────────────────────────
+    // `bot_first`: the bot reviews at the instant the PR opens, the human 12h later. BOTH are
+    // in-window, so a metric reading `first_review_at` would report 0h and one reading the
+    // reviews table with a lane filter reports 12h. Nothing else distinguishes them.
+    { key: 'bf_bot', by: botCr, atMs: FROM + 1 * DAY, pr: 'bot_first' },
+    { key: 'bf_human', by: alice, atMs: FROM + 1 * DAY + 12 * HOUR, pr: 'bot_first' },
+    // `human_before`: reviewed by a person two days BEFORE the window and again on day 9. Its
+    // first human review is not in this period, so it contributes nothing — and the only way to
+    // know that is to look outside the window, which is what (4b) does.
+    { key: 'hb_old', by: alice, atMs: FROM - 2 * DAY, pr: 'human_before' },
+    { key: 'hb_new', by: alice, atMs: FROM + 9 * DAY, pr: 'human_before' },
+    // Exactly `from` (IN, 6h) and exactly `to` (OUT).
+    { key: 'hf_at_from', by: alice, atMs: FROM, pr: 'hr_at_from' },
+    { key: 'hf_at_to', by: alice, atMs: TO, pr: 'hr_at_to' },
+    // The slow pickup: opened ten days before the period, picked up by a person on day 3 → 312h.
+    { key: 'rl_human', by: alice, atMs: FROM + 3 * DAY, pr: 'reviewed_late' },
   ];
   for (const r of REVIEWS) {
     await db
       .insert(reviews)
       .values({
         githubNodeId: `RV_pm_${r.key}`,
-        prId: prIdOf.get('mid_1'),
+        prId: prIdOf.get(r.pr ?? 'mid_1'),
         authorId: r.by,
         state: r.state ?? 'commented',
         body: 'lgtm',
@@ -414,10 +490,23 @@ function metric(
 }
 
 describe('getPeriodMetrics — the vector shape', () => {
-  it('returns all twelve metrics, in the shared PERIOD_METRIC_KEYS order', async () => {
+  it('returns every metric, in the shared PERIOD_METRIC_KEYS order', async () => {
     const r = await vector();
-    expect(r.metrics).toHaveLength(12);
+    // Length is asserted against the SHARED list rather than a literal, so adding a metric to the
+    // contract does not need this line edited — the ORDER assertion below is what has teeth.
+    expect(r.metrics).toHaveLength(SHARED_KEYS.length);
     expect(r.metrics.map((m: any) => m.key)).toEqual(pm.PERIOD_METRIC_KEYS);
+  });
+
+  it('carries no metric whose name still claims the contaminated v1 meaning', async () => {
+    // v1's `median_time_to_first_review_hours` measured "time until ANYONE reviewed", which on a
+    // workspace with an auto-approving CI bot is the push time. It was RENAMED rather than
+    // redefined in place so that a stored v1 row and a v2 row can never be subtracted from one
+    // another under a shared key — the delta would be arithmetic across two definitions.
+    const r = await vector();
+    const keys = r.metrics.map((m: any) => m.key);
+    expect(keys).not.toContain('median_time_to_first_review_hours');
+    expect(keys).toContain('median_time_to_first_human_review_hours');
   });
 
   it('the backend key mirror has not drifted from the shared wire contract', async () => {
@@ -444,30 +533,61 @@ describe('getPeriodMetrics — THE WINDOW IS HALF-OPEN on every column', () => {
 
   it('applies the same rule to openedAt', async () => {
     const r = await vector();
-    // at_to, mid_1, mid_2, mid_unsized, open_only. `opened_at_to` opened at exactly TO and is
-    // out; `at_from` opened 10h before FROM and is out.
-    expect(metric(r, 'opened_prs').value).toBe(5);
+    // at_to, mid_1, mid_2, mid_unsized, open_only, bot_first, hr_at_to. `opened_at_to` opened at
+    // exactly TO and is out; `at_from` opened 10h before FROM and is out.
+    expect(metric(r, 'opened_prs').value).toBe(7);
   });
 
-  it('applies the same rule to firstReviewAt — AND attributes on it, not on openedAt', async () => {
+  it('applies the same rule to the first HUMAN review — and attributes on it, not on openedAt', async () => {
     const r = await vector();
-    // mid_1 (4h), mid_2 (8h) and `reviewed_late` (312h — opened ten days before the period and
-    // picked up on day 3). `at_from`'s review landed before FROM and `at_to`'s at exactly TO.
-    const m = metric(r, 'median_time_to_first_review_hours');
+    // hr_at_from (6h, reviewed at exactly FROM), bot_first (12h) and reviewed_late (312h —
+    // opened ten days before the period and picked up by a person on day 3).
+    // Excluded: hr_at_to (reviewed at exactly TO), human_before (first human review was two days
+    // BEFORE the window), and every PR no person reviewed at all.
+    const m = metric(r, 'median_time_to_first_human_review_hours');
     expect(m.sampleSize).toBe(3);
-    expect(m.value).toBe(8); // median of [4, 8, 312]
+    expect(m.value).toBe(12); // median of [6, 12, 312]
     // ⚠ THE ATTRIBUTION PROOF. Bucketing by `openedAt` would drop `reviewed_late` entirely (it
-    // opened before the period) and leave [4, 8] — a median of 6, i.e. the right-censoring bias
+    // opened before the period) and leave [6, 12] — a median of 9, i.e. the right-censoring bias
     // this metric was defined around.
+    expect(m.value).not.toBe(9);
+  });
+
+  // ── THE REGRESSION THIS WHOLE RENAME EXISTS FOR ──────────────────────────────────────────
+  it('ignores a bot that reviewed first, even though `first_review_at` records it', async () => {
+    const r = await vector();
+    const m = metric(r, 'median_time_to_first_human_review_hours');
+    // `bot_first` has BOTH reviews inside the window: CodeRabbit at the instant it opened and
+    // alice 12h later. Its `pull_requests.first_review_at` column holds the BOT's timestamp,
+    // which is what sync writes and what v1 read — so a metric still reading that column sees a
+    // 0h sample here and reports a median of 6 over [0, 6, 312] instead of 12 over [6, 12, 312].
+    //
+    // Measured live before the fix: `github-actions[bot]` auto-approved 61 of 115 PRs at zero
+    // minutes and the reported median was 0h against a human median of 18.3h.
     expect(m.value).not.toBe(6);
+    expect(m.value).toBe(12);
+    // And the 0h sample is not merely outvoted — it is not in the population at all.
+    expect(m.sampleSize).toBe(3);
+  });
+
+  it('excludes a PR whose first human review belongs to an EARLIER period', async () => {
+    const r = await vector();
+    // `human_before` was reviewed by alice two days before the window AND on day 9 of it. A
+    // window-only scan would see only the day-9 review, call it the first, and contribute
+    // (FROM+9d − (FROM−12d)) = 504h — inventing three weeks of latency on a PR a person had
+    // already looked at. Seeing the earlier review is the only way to rule it out, which is why
+    // query (4b) reads all of time rather than the window.
+    const m = metric(r, 'median_time_to_first_human_review_hours');
+    expect(m.sampleSize).toBe(3);
+    expect(m.value).not.toBe(312); // the median of [6, 12, 312, 504] would be 162; of [6,12,312] is 12
   });
 
   it('applies the same rule to thread createdAt and to review submittedAt', async () => {
     const r = await vector();
     // t_at_from (exactly FROM) is in; t_at_to (exactly TO) and t_before are out.
     expect(metric(r, 'review_threads_opened').value).toBe(5);
-    // bob's review at exactly TO is out, leaving alice 3 + bob 1.
-    expect(metric(r, 'reviewer_concentration_pct').sampleSize).toBe(4);
+    // bob's review at exactly TO is out (as is alice's `hf_at_to`), leaving alice 7 + bob 1.
+    expect(metric(r, 'reviewer_concentration_pct').sampleSize).toBe(8);
   });
 
   it('a window that ends before it starts matches nothing rather than throwing', async () => {
@@ -488,11 +608,11 @@ describe('getPeriodMetrics — the twelve figures', () => {
       // floors rather than re-derived in the SPA from a second copy of them.
       lowSample: true,
     });
-    // 5 opens against a floor of 5 — the floor is a FLOOR, so meeting it is not thin.
+    // 7 opens against a floor of 5 — the floor is a FLOOR, so clearing it is not thin.
     expect(metric(r, 'opened_prs')).toEqual({
       key: 'opened_prs',
-      value: 5,
-      sampleSize: 5,
+      value: 7,
+      sampleSize: 7,
       lowSample: false,
     });
     // Lead times 10, 20, 30, 40 hours ⇒ median 25. The unsized PR contributes a lead time even
@@ -580,24 +700,25 @@ describe('getPeriodMetrics — the twelve figures', () => {
   it('measures reviewer concentration over HUMAN reviewers only', async () => {
     const r = await vector();
     const m = metric(r, 'reviewer_concentration_pct');
-    // alice 3, bob 1 ⇒ the busiest holds 75%.
-    expect(m.sampleSize).toBe(4);
-    expect(m.value).toBe(75);
+    // alice 7 (a1–a3 plus the four first-review fixtures), bob 1 ⇒ the busiest holds 87.5%.
+    expect(m.sampleSize).toBe(8);
+    expect(m.value).toBe(87.5);
     // ⚠ THE BOT EXCLUSION, and it is a deliberate reading of "the busiest reviewer". CodeRabbit
-    // submitted FOUR reviews in this window — more than any human — so counting automated
-    // reviewers would answer 50 (4 of 8) here, and in a real bot-heavy workspace it would pin
-    // the metric near 100% forever and stop it moving at all. This is a bus-factor question and
-    // an always-on bot is not a bus factor; any caption must say "among human reviewers".
-    expect(m.value).not.toBe(50);
-    // The draft review is excluded too: counting it would give alice 4 of 5 ⇒ 80.
-    expect(m.value).not.toBe(80);
+    // submitted FIVE reviews in this window — more than either human alone — so counting
+    // automated reviewers would answer 53.85 (7 of 13) here, and in a real bot-heavy workspace
+    // it would pin the metric near 100% forever and stop it moving at all. This is a bus-factor
+    // question and an always-on bot is not a bus factor; any caption must say "among human
+    // reviewers".
+    expect(m.value).not.toBe(53.85);
+    // The draft review is excluded too: counting it would give alice 8 of 9 ⇒ 88.89.
+    expect(m.value).not.toBe(88.89);
   });
 });
 
 describe('getPeriodMetrics — scope', () => {
   it('an EMPTY repo list yields all-null metrics rather than throwing or widening', async () => {
     const r = await vector({ sc: { workspaceId: scope.workspaceId, repoIds: [] } });
-    expect(r.metrics).toHaveLength(12);
+    expect(r.metrics).toHaveLength(SHARED_KEYS.length);
     for (const m of r.metrics) {
       // ⚠ Null, not 0 — "this workspace has no repos" is not "this workspace merged nothing".
       expect(m.value).toBeNull();
@@ -701,5 +822,51 @@ describe('the data fingerprint', () => {
     const after = await vector();
     expect(metric(after, 'merged_prs').value).toBe(5);
     expect(after.fingerprint).not.toBe(before.fingerprint);
+  });
+});
+
+// ── The vector and the lane panel must agree about "time until a person reviewed it" ─────────
+//
+// They are rendered one directly above the other and the panel's caption asserts they are the
+// same measurement. On the live database they were NOT: 18.16h in the table against 18.27h in the
+// panel, because the lane fold read only reviews INSIDE the window and took each PR's earliest of
+// those — so a PR a person had reviewed in an earlier period counted as freshly reviewed.
+//
+// The fix was one shared fold (`loadFirstHumanReviewHours`) rather than a corrected copy, because
+// two folds that agree today are two folds that can drift tomorrow. This is what pins it.
+describe('getPeriodMetrics ⇄ getPeriodLanes agree on first human review', () => {
+  it('reports the same number in the vector and in the lane breakdown', async () => {
+    const [v, l] = await Promise.all([
+      pm.getPeriodMetrics(1, scope, { fromMs: FROM, toMs: TO }),
+      pm.getPeriodLanes(1, scope, { fromMs: FROM, toMs: TO }),
+    ]);
+    const fromVector = metric(v, 'median_time_to_first_human_review_hours').value;
+    expect(l.medianTimeToFirstHumanReviewHours).toBe(fromVector);
+    // Not vacuously equal via a shared null: the fixture has three qualifying PRs.
+    expect(fromVector).toBe(12);
+  });
+
+  it('excludes `human_before` from BOTH, not just from the vector', async () => {
+    // This is the row that made the two disagree. Its first human review is two days before the
+    // window and its second is on day 9, so a window-only fold contributes 504h to whichever
+    // surface uses it — which is what dragged the panel's median above the table's.
+    const l = await pm.getPeriodLanes(1, scope, { fromMs: FROM, toMs: TO });
+    expect(l.medianTimeToFirstHumanReviewHours).not.toBe(162); // median of [6, 12, 312, 504]
+    expect(l.medianTimeToFirstHumanReviewHours).toBe(12); // median of [6, 12, 312]
+  });
+
+  it('files the fixture bots into the lanes their logins imply', async () => {
+    const l = await pm.getPeriodLanes(1, scope, { fromMs: FROM, toMs: TO });
+    const byLane = new Map<string, any>(l.lanes.map((x: any) => [x.lane as string, x]));
+    // Every lane is present in the response even at zero — a missing lane and an empty lane are
+    // different facts, and only one of them is legal here.
+    for (const lane of ['human', 'code_agent', 'dependency', 'ai_review', 'quality_gate', 'release', 'housekeeping']) {
+      expect(byLane.has(lane), `lane '${lane}' missing from the response`).toBe(true);
+    }
+    // CodeRabbit and Greptile are known vendor logins, so they land in ai_review with no stored
+    // row involved — and their comments must NOT be counted as human review activity.
+    expect(byLane.get('ai_review')!.comments).toBeGreaterThan(0);
+    // Nothing in this fixture is authored by automation, so the share is a real 0, not null.
+    expect(l.automationMergeSharePct).toBe(0);
   });
 });

@@ -372,6 +372,20 @@
       "when": 1786300000000,
       "tag": "0052_trunk_ci_status_events",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1786400000000,
+      "tag": "0053_automation_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1786500000000,
+      "tag": "0054_automation_vendor_kinds",
+      "breakpoints": true
     }
   ]
 }

@@ -8286,13 +8286,19 @@ function narrowAutomatedIds(
     else if (r.manualHuman) set.delete(id);
   }
   if (role === 'all') return [...set];
-  // role === 'review': drop every reviewer whose stored role is quality_check. An explicit row is
-  // authoritative (a user may have flipped a linter back to 'review', or marked a vendor a quality
-  // check); otherwise the login seed decides.
+  // role === 'review': KEEP ONLY the reviewer cohort. An explicit row is authoritative (a user may
+  // have flipped a linter back to 'review', or marked a vendor a quality check); otherwise the
+  // login seed decides.
+  //
+  // ⚠ THE TEST IS `=== 'review'`, NOT `!== 'quality_check'`. It was the latter while those were
+  // the only two roles, which is the same answer — and became silently wrong the moment
+  // `dependency` / `code_agent` / `release` / `housekeeping` joined the union, because every one
+  // of them would have passed a "not a quality check" filter straight back into the ROI,
+  // behaviour, dedup and benchmark sets. See the ⚠ on `ReviewerRole` in shared.
   const qcDefault = new Set(qcIds);
   return [...set].filter((id) => {
     const r = resolved.get(id);
-    if (r) return r.role !== 'quality_check';
+    if (r) return r.role === 'review';
     return !qcDefault.has(id);
   });
 }
@@ -8470,6 +8476,32 @@ export async function reviewerRoleForUser(
   const out = new Map<number, ReviewerRole>();
   for (const id of qcIds) out.set(id, 'quality_check');
   for (const [id, r] of resolved) out.set(id, r.role);
+  return out;
+}
+
+// The actors whose ROLE a human set by hand in this workspace — `source === 'manual'`, which is
+// the provenance flag that owns the whole JUDGEMENT half (automated + role + confidence +
+// reasons), so a manual judgement necessarily means the role was chosen rather than derived.
+//
+// It exists because `resolveActorLanes` has to distinguish "this row says 'review' because a
+// person picked Review bot" from "this row says 'review' because that is the default a login we
+// have never heard of gets". Those are the same stored byte and opposite facts: the first must
+// beat every login vocabulary, the second must lose to all of them. Without this reader the
+// resolver would either ignore manual role choices (a user marks Copilot a code agent and the
+// report keeps filing it under AI review) or obey stale defaults over known logins.
+//
+// Automated rows ONLY. A manual `automated: false` is a manual HUMAN, which `manualHumanUserIds`
+// already owns and which wins earlier in the resolver — including it here would hand a person a
+// bot lane via whatever `role` their row happens to carry.
+export async function manualRoleUserIds(
+  accountId: number,
+  workspaceId: number,
+): Promise<Map<number, ReviewerRole>> {
+  const resolved = await resolveWorkspaceReviewers(accountId, workspaceId);
+  const out = new Map<number, ReviewerRole>();
+  for (const [id, r] of resolved) {
+    if (r.source === 'manual' && r.automated) out.set(id, r.role);
+  }
   return out;
 }
 
@@ -10901,7 +10933,14 @@ export async function getBotAnalytics(
     const overdueUntouched = overdueByUser.get(userId) ?? 0;
     // The ROLE decides which array this row lands in. Everything above is computed identically
     // for both — a quality check's numbers are real, they are just not REVIEW numbers.
-    const isQualityCheck = roleMap.get(userId) === 'quality_check';
+    //
+    // ⚠ `!== 'review'`, NEVER `=== 'quality_check'`. The wire field is still called
+    // `qualityChecks` for compatibility, but it now holds EVERY non-reviewer role — dependency,
+    // code_agent, release and housekeeping as well. Testing for the one old role would send all
+    // four newer ones into `vendors`, i.e. straight back into the AI-reviewer ROI table this
+    // split exists to keep clean. An absent entry means no stored row and no seeded login, which
+    // is the historical default 'review'.
+    const isQualityCheck = (roleMap.get(userId) ?? 'review') !== 'review';
     // `?? null` (never `||`): a stored 0 is a REAL price ("we pay nothing for this bot") and must
     // survive as 0, not collapse to "unknown". Nothing inherits, so there is no chain to walk.
     const storedCost = costMap.get(userId);
@@ -11562,7 +11601,10 @@ export async function getAdvisorFindings(
       kind,
       label: reviewerLabel(userId, kind),
       login: rawLoginById.get(userId) ?? null,
-      isQualityCheck: roleMap.get(userId) === 'quality_check',
+      // `!== 'review'` — the flag means "not a reviewer", and it has to keep meaning that now the
+      // role union carries dependency / code_agent / release / housekeeping. See the note beside
+      // the `qualityChecks` split in getBotAnalytics.
+      isQualityCheck: (roleMap.get(userId) ?? 'review') !== 'review',
       threads: agg.threads,
       actedOn: agg.actedOn,
       untouched: agg.untouched,
@@ -13051,6 +13093,19 @@ export async function getBenchmarkOptedInAccountIds(): Promise<number[]> {
   return rows.map((r) => r.id);
 }
 
+// MIRRORED from `REVIEW_BOT_KINDS` in @pierre-review/shared — the types-only package cannot be
+// imported for a runtime value (the release build greps `release/dist` and fails on a real
+// import), so the set is spelled twice and `bot-detection.test.ts` asserts they are identical.
+//
+// This is the list of kinds allowed to LEAVE THE TENANT for the cross-org benchmark. Adding a
+// member is a data-governance decision, not a formatting one: rows keyed on it are contributed to
+// a shared dataset and cannot be recalled.
+export const BENCHMARKABLE_VENDOR_KINDS = new Set<string>([
+  'coderabbit', 'greptile', 'copilot', 'qodo', 'sourcery', 'bito', 'ellipsis', 'korbit',
+  'baz', 'graphite', 'cursor', 'devin', 'entelligence', 'deepsource', 'github_code_quality',
+  'github_advanced_security', 'codex',
+]);
+
 // Weekly per-known-vendor benchmark aggregates for ONE account over [from, to).
 export async function getBenchmarkContributions(
   accountId: number,
@@ -13077,11 +13132,26 @@ export async function getBenchmarkContributions(
   const kindMap = await classificationKindForUserForAccount(accountId);
   const nowMs = Date.now();
 
-  // Only KNOWN vendors are comparable across orgs — skip in_house/pierre/generic-vendor/unclassified.
+  // Only KNOWN AI-REVIEW vendors are comparable across orgs.
+  //
+  // ⚠ AN ALLOW-LIST, AND IT MUST STAY ONE. This was a DENY-list — `!== 'in_house' && !== 'pierre'
+  // && !== 'vendor'` — which was correct only while `ReviewBotKind` was the entire branded
+  // universe: everything else was one of those three. The moment `AutomatedReviewerKind` grew
+  // vendor kinds for quality gates, dependency bots, code agents, release and housekeeping
+  // automation, every one of them would have passed that test and shipped a linter's volume into
+  // a shared cross-org REVIEW-BOT cohort — permanently, for every account, with no way to
+  // un-ship it. A deny-list fails open on exactly the change nobody thinks to audit here.
+  //
+  // The `role: 'review'` narrowing above is the other half of the defence and neither is
+  // redundant: role says "the user considers this a reviewer", this says "the brand is one we can
+  // compare across orgs". A user who marks SonarQube a review bot passes the first and must still
+  // fail the second — `sonarqube` is not a review-bot cohort anywhere else in the dataset.
+  //
+  // `REVIEW_BOT_KINDS` is MIRRORED from shared for the usual release-guard reason (types-only
+  // package, no runtime import); `bot-detection.test.ts` pins the two copies identical.
   const vendorKindOf = (userId: number): string | null => {
     const k = kindMap.get(userId);
-    if (!k || k === 'in_house' || k === 'pierre' || k === 'vendor') return null;
-    return k;
+    return k != null && BENCHMARKABLE_VENDOR_KINDS.has(k) ? k : null;
   };
 
   type Acc = {

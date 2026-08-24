@@ -46,7 +46,15 @@ import type { WorkspaceReviewer } from '@pierre-review/shared';
 export interface ReviewerBuckets {
   /** `automated && role === 'review'` — the reviewers every bot metric counts. */
   reviewBots: WorkspaceReviewer[];
-  /** `automated && role === 'quality_check'` — coverage/lint/static analysis, excluded from ROI. */
+  /**
+   * `automated && role !== 'review'` — EVERY non-reviewer automation, excluded from ROI.
+   *
+   * ⚠ THE NAME IS HISTORICAL AND NARROWER THAN THE CONTENTS. It held only `quality_check` when
+   * those were the only two roles; it now also holds dependency bots, code agents, release
+   * automation and housekeeping. Renaming it would mean renaming the wire field it mirrors
+   * (`BotAnalyticsResponse.qualityChecks`), so the name stayed and this note is the compensation.
+   * The UI groups the list by role rather than labelling the whole section "quality checks".
+   */
   qualityChecks: WorkspaceReviewer[];
   /**
    * The rows a human deliberately pinned as NOT automated in this workspace.
@@ -91,8 +99,15 @@ export function bucketReviewers(reviewers: readonly WorkspaceReviewer[]): Review
       if (r.isManualOverride || r.identitySource === 'manual') out.markedNotBots.push(r);
       continue;
     }
-    if (r.role === 'quality_check') out.qualityChecks.push(r);
-    else out.reviewBots.push(r);
+    // ⚠ THE COHORT TEST IS `=== 'review'`, NOT `!== 'quality_check'`.
+    //
+    // While those were the only two roles they were the same answer. They stopped being the same
+    // answer when `dependency` / `code_agent` / `release` / `housekeeping` joined the union, and
+    // the old spelling would have filed every one of them under `reviewBots` — the list whose
+    // whole purpose is "the reviewers every bot metric counts". Dependabot would have appeared as
+    // a review bot in the settings panel while the report correctly called it a dependency lane.
+    if (r.role === 'review') out.reviewBots.push(r);
+    else out.qualityChecks.push(r);
   }
   return out;
 }

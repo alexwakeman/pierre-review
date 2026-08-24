@@ -304,7 +304,12 @@ export async function getBotOverlapClusters(
     if (t.userId == null) continue;
     const kind = kindMap.get(t.userId);
     if (!kind) continue;
-    if (roleMap.get(t.userId) === 'quality_check') continue;
+    // ⚠ `!== 'review'`, never `=== 'quality_check'`: the role union now carries dependency /
+    // code_agent / release / housekeeping too, and every one of them would pass a "not a quality
+    // check" test back into an overlap number that is only meaningful between REVIEWERS.
+    // `roleMap` has no entry for an actor with no stored row and no seeded login, and that
+    // absence means the historical default 'review' — hence the `?? 'review'`.
+    if ((roleMap.get(t.userId) ?? 'review') !== 'review') continue;
     threads.push({
       prId: t.prId,
       path: t.path,

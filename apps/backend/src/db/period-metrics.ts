@@ -46,13 +46,22 @@ import type {
   PeriodMetricValue,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
-import { resolveActorLanes } from './actor-lanes.js';
-import { automatedReviewerUserIds, type BotScope } from './queries.js';
+import { resolveActorLanes, type ActorLanes } from './actor-lanes.js';
+import { type BotScope } from './queries.js';
 
 // MIRRORED from @pierre-review/shared `ACTOR_LANES`, for the same release-guard reason the metric
-// keys are (see below). Render order: people first, then the automation that is meant to help
-// them, then the automation that merely runs.
-const ACTOR_LANE_ORDER: ActorLane[] = ['human', 'ai_review', 'quality_gate', 'dependency'];
+// keys are (see below). Render order: people first, then the automation that AUTHORS code (the
+// lanes that distort throughput), then the automation that RESPONDS to it (the lanes that distort
+// review counts).
+const ACTOR_LANE_ORDER: ActorLane[] = [
+  'human',
+  'code_agent',
+  'dependency',
+  'ai_review',
+  'quality_gate',
+  'release',
+  'housekeeping',
+];
 
 const { prComments, pullRequests, repos, reviewComments, reviews, reviewThreads } = schema;
 
@@ -63,17 +72,21 @@ const { prComments, pullRequests, repos, reviewComments, reviews, reviewThreads 
 // in lockstep — and `period-metrics.test.ts` imports the shared originals (a test is not in
 // release/dist) and asserts the two arrays are identical, so the drift is caught in CI rather
 // than by a reader.
-export const PERIOD_METRICS_SCHEMA_VERSION = 1;
+export const PERIOD_METRICS_SCHEMA_VERSION = 2;
 
-/** CLOSED + ORDERED at schema version 1. This order IS the render order and is part of the
- *  contract. */
+/** CLOSED + ORDERED at schema version 2. This order IS the render order and is part of the
+ *  contract. Each human-only twin sits immediately after the blended figure it corrects — read
+ *  adjacently they state the automation gap without narration. */
 export const PERIOD_METRIC_KEYS: PeriodMetricKey[] = [
   'merged_prs',
+  'human_merged_prs',
   'opened_prs',
+  'automation_merge_share_pct',
   'median_lead_time_hours',
-  'median_time_to_first_review_hours',
+  'median_time_to_first_human_review_hours',
   'merge_ci_success_pct',
   'median_pr_size_lines',
+  'median_human_pr_size_lines',
   'review_threads_opened',
   'threads_replied_within_36h_pct',
   'bot_review_comments',
@@ -102,11 +115,22 @@ export interface PeriodMetricMeta {
 
 export const PERIOD_METRIC_META: Record<PeriodMetricKey, PeriodMetricMeta> = {
   merged_prs: { direction: 'up_good', sampleFloor: 5, absoluteFloor: 3 },
+  human_merged_prs: { direction: 'up_good', sampleFloor: 5, absoluteFloor: 3 },
   opened_prs: { direction: 'neutral', sampleFloor: 5, absoluteFloor: 3 },
+  // NEUTRAL, and that is a product decision rather than a hedge. More automation is not
+  // self-evidently good (a team drowning in bumps) or bad (a team shipping with agents) — the
+  // lane split below is what makes the number readable, and an arrow claiming a direction would
+  // assert a judgement the figure cannot support.
+  automation_merge_share_pct: { direction: 'neutral', sampleFloor: 5, absoluteFloor: 5 },
   median_lead_time_hours: { direction: 'down_good', sampleFloor: 5, absoluteFloor: 2 },
-  median_time_to_first_review_hours: { direction: 'down_good', sampleFloor: 5, absoluteFloor: 1 },
+  median_time_to_first_human_review_hours: {
+    direction: 'down_good',
+    sampleFloor: 5,
+    absoluteFloor: 1,
+  },
   merge_ci_success_pct: { direction: 'up_good', sampleFloor: 5, absoluteFloor: 5 },
   median_pr_size_lines: { direction: 'down_good', sampleFloor: 5, absoluteFloor: 20 },
+  median_human_pr_size_lines: { direction: 'down_good', sampleFloor: 5, absoluteFloor: 20 },
   review_threads_opened: { direction: 'neutral', sampleFloor: 10, absoluteFloor: 5 },
   threads_replied_within_36h_pct: { direction: 'up_good', sampleFloor: 10, absoluteFloor: 5 },
   bot_review_comments: { direction: 'neutral', sampleFloor: 10, absoluteFloor: 5 },
@@ -129,6 +153,15 @@ const REPLY_GRACE_MS = 36 * 60 * 60 * 1000;
 const PERIOD_PR_SCAN_CAP = 20_000;
 const PERIOD_THREAD_SCAN_CAP = 50_000;
 const PERIOD_COMMENT_SCAN_CAP = 200_000;
+
+// ⚠ A DIFFERENT KIND OF CAP FROM THE THREE ABOVE, and much smaller for a reason that is not
+// memory. The first-human-review fold has to look up every review on a candidate PR — including
+// ones OUTSIDE the window, since a PR first reviewed by a person in January must not be counted
+// as newly reviewed now — so the candidate ids travel as BIND PARAMETERS in an `IN (…)`. SQLite
+// caps those at 32,766 and Postgres at 65,535, so reusing `PERIOD_PR_SCAN_CAP` (20,000) would sit
+// one busy quarter away from a hard driver error rather than a truncated result. A period is a
+// sprint: 5,000 human-reviewed PRs in one is far beyond anything real.
+const PERIOD_FIRST_REVIEW_PR_CAP = 5_000;
 
 export interface PeriodWindow {
   fromMs: number;
@@ -176,13 +209,121 @@ interface MergedPr {
   /** Only the DETERMINATE outcomes — see the note on `merge_ci_success_pct`. */
   ciDeterminate: boolean;
   ciSuccess: boolean;
+  /** The AUTHOR's lane. `human` covers a null author (a deleted GitHub account is unattributable,
+   *  and calling it automation would be a claim we cannot support). */
+  lane: ActorLane;
+}
+
+// ── The ONE definition of "time until a person reviewed it" ──────────────────────────────────
+//
+// Extracted because it is read by TWO surfaces — the vector's
+// `median_time_to_first_human_review_hours` and the lane panel's
+// `medianTimeToFirstHumanReviewHours` — that sit one above the other on the same screen, and they
+// disagreed on the live database the first time this shipped: 18.16h in the table against 18.27h
+// in the panel below it.
+//
+// The cause was not rounding. The lane fold read only reviews INSIDE the window and took each
+// PR's earliest of those, so a PR a person had reviewed in a previous period counted as freshly
+// reviewed. The vector fold looked at all of time and required the first human review to fall in
+// the window, which is the correct question. Two folds, one screen, two answers — and the panel's
+// caption asserted they were the same measurement.
+//
+// So there is now one fold. Anything that wants this number calls this.
+async function loadFirstHumanReviewHours(
+  accountId: number,
+  scope: BotScope,
+  from: Date,
+  to: Date,
+  lanes: ActorLanes,
+): Promise<number[]> {
+  const inScope = and(
+    eq(pullRequests.accountId, accountId),
+    inArray(pullRequests.repoId, scope.repoIds),
+  );
+
+  // (1) CANDIDATES: every PR with a non-pending review submitted in the window. A superset of
+  // what we want — a PR whose first HUMAN review is in-window necessarily has a review in-window
+  // — narrowed by step (2). Newest-first so the dedupe keeps the most recent on hitting the cap.
+  const reviewedPrRows = await db
+    .select({ prId: reviews.prId })
+    .from(reviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+    .where(
+      and(
+        inScope,
+        gte(reviews.submittedAt, from),
+        lt(reviews.submittedAt, to),
+        ne(reviews.state, 'pending'),
+      ),
+    )
+    .orderBy(desc(reviews.submittedAt), desc(reviews.id))
+    .limit(PERIOD_COMMENT_SCAN_CAP)
+    .execute();
+
+  // Deduped in TS rather than with a `groupBy`, which keeps the query free of an aggregate:
+  // `min(submitted_at)` comes back as an epoch integer on SQLite and a Date on Postgres
+  // (drizzle's `mode: 'timestamp'` mapping applies to selected COLUMNS, not to `sql` fragments),
+  // and that is a dialect divergence this file has no reason to acquire for a trivial fold.
+  const candidatePrIds: number[] = [];
+  const seenPr = new Set<number>();
+  for (const r of reviewedPrRows) {
+    if (seenPr.has(r.prId)) continue;
+    seenPr.add(r.prId);
+    candidatePrIds.push(r.prId);
+    if (candidatePrIds.length >= PERIOD_FIRST_REVIEW_PR_CAP) break;
+  }
+  if (candidatePrIds.length === 0) return [];
+
+  // (2) EVERY non-pending review on a candidate PR, across ALL TIME — deliberately NOT restricted
+  // to the window.
+  //
+  // ⚠ THE UNBOUNDED TIME RANGE IS THE WHOLE POINT and must not be "optimised" back to
+  // `[from, to)`. That optimisation is precisely the bug described above. A PR a person reviewed
+  // in January and revisited today would answer "first reviewed today", reporting a months-old
+  // review as fresh latency. Seeing the earlier review is the only way to rule it out.
+  //
+  // ASCENDING so each PR's earliest review survives the cap; a newest-first cap would drop
+  // exactly the rows the fold is looking for.
+  const rows = await db
+    .select({
+      prId: reviews.prId,
+      authorId: reviews.authorId,
+      submittedAt: reviews.submittedAt,
+      openedAt: pullRequests.openedAt,
+    })
+    .from(reviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+    .where(and(inArray(reviews.prId, candidatePrIds), ne(reviews.state, 'pending')))
+    .orderBy(reviews.submittedAt, reviews.id)
+    .limit(PERIOD_COMMENT_SCAN_CAP)
+    .execute();
+
+  const firstHumanByPr = new Map<number, { at: number; openedAt: number }>();
+  for (const r of rows) {
+    if (firstHumanByPr.has(r.prId)) continue;
+    if (lanes.laneOf(r.authorId) !== 'human') continue;
+    firstHumanByPr.set(r.prId, { at: r.submittedAt.getTime(), openedAt: r.openedAt.getTime() });
+  }
+
+  const fromMs = from.getTime();
+  const toMs = to.getTime();
+  const out: number[] = [];
+  for (const { at, openedAt } of firstHumanByPr.values()) {
+    if (at < fromMs || at >= toMs) continue; // first human review was in some OTHER period
+    const hours = (at - openedAt) / 3_600_000;
+    // A review timestamped before its own PR opened is clock skew, not a negative latency.
+    // Excluding it is cheap and it is exactly the direction of error this metric exists to fix.
+    if (hours >= 0) out.push(hours);
+  }
+  return out;
 }
 
 interface PeriodBase {
   mergedPrs: MergedPr[];
   openedPrs: number;
-  /** openedAt → firstReviewAt deltas, for PRs whose FIRST REVIEW landed in the window. */
-  firstReviewMs: number[];
+  /** openedAt → first HUMAN review, in hours, for PRs whose first human review landed in the
+   *  window. See the fold in `loadPeriodBase` for why this is not the `first_review_at` column. */
+  humanFirstReviewHours: number[];
   threadsOpened: number;
   threadsRepliedWithin: number;
   botComments: number;
@@ -198,7 +339,7 @@ function emptyBase(): PeriodBase {
   return {
     mergedPrs: [],
     openedPrs: 0,
-    firstReviewMs: [],
+    humanFirstReviewHours: [],
     threadsOpened: 0,
     threadsRepliedWithin: 0,
     botComments: 0,
@@ -214,18 +355,30 @@ async function loadPeriodBase(
   to: Date,
 ): Promise<PeriodBase> {
   const repoIds = scope.repoIds;
-  // The workspace decides WHO IS A BOT (role 'all', the ROI/flagging convention — a quality
-  // check posts exactly the kind of text `bot_review_comments` counts, and splitting it out
-  // would make the bot/human halves fail to sum to the total).
-  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
+  // ⚠ THE AUTOMATION SET IS THE LANE RESOLVER'S UNION, NOT `automatedReviewerUserIds` ALONE.
+  //
+  // The workspace verdict still decides who counts as a bot, but on its own it MISSES the second
+  // row of a duplicated identity: `dependabot` and `dependabot[bot]` are separate `users` rows on
+  // real accounts and one of each pair sat at `automated = 0`, i.e. was counted as a person. That
+  // is what put bot text in `human_review_comments` and bot reviewers in the concentration
+  // figure. `resolveActorLanes` unions the verdict with `users.isBot` and the login vocabularies
+  // and subtracts anyone a human vouched for, which is the same set the lane panel renders — so
+  // the metric table and the lane breakdown under it can no longer disagree about who is a person.
+  //
+  // Role stays `'all'` inside that resolver by the ROI/flagging convention: a quality check posts
+  // exactly the kind of text `bot_review_comments` counts, and narrowing to reviewers would make
+  // the bot and human halves fail to sum to the total.
+  const lanes = await resolveActorLanes(accountId, scope);
+  const automatedIds = [...lanes.automatedIds];
   const inScope = and(eq(pullRequests.accountId, accountId), inArray(pullRequests.repoId, repoIds));
 
-  const [mergedRows, openedRow, reviewedRows, threadRows, commentRows, reviewRows, botCommentRow] =
+  const [mergedRows, openedRow, humanFirstReviewHours, threadRows, commentRows, reviewRows, botCommentRow] =
     await Promise.all([
       // (1) PRs MERGED in the window — the population behind metrics 1, 3, 5, 6 and the
       // denominator of 11. Newest-merged first so the cap keeps a recent sample.
       db
         .select({
+          authorId: pullRequests.authorId,
           openedAt: pullRequests.openedAt,
           mergedAt: pullRequests.mergedAt,
           additions: pullRequests.additions,
@@ -246,24 +399,10 @@ async function loadPeriodBase(
         .from(pullRequests)
         .where(and(inScope, gte(pullRequests.openedAt, from), lt(pullRequests.openedAt, to)))
         .execute(),
-      // (4) PRs whose FIRST REVIEW landed in the window.
-      //
-      // ⚠ ATTRIBUTED ON `firstReviewAt`, NOT `openedAt` — deliberately different from the
-      // `timeToFirstReviewHours` tile on WorkspaceMetrics, and it is not a bug. Bucketing by
-      // open date RIGHT-CENSORS a recent window: PRs opened in-window but not yet reviewed
-      // contribute nothing, so the median is computed only over the ones that were reviewed
-      // FAST, biasing it down by an amount that depends on how recently the window closed.
-      // Attributing on the review event makes the metric window-pure AND uncensored — a PR
-      // opened three weeks before the period still contributes if that is when it was picked up.
-      db
-        .select({ openedAt: pullRequests.openedAt, firstReviewAt: pullRequests.firstReviewAt })
-        .from(pullRequests)
-        .where(
-          and(inScope, gte(pullRequests.firstReviewAt, from), lt(pullRequests.firstReviewAt, to)),
-        )
-        .orderBy(desc(pullRequests.firstReviewAt), desc(pullRequests.id))
-        .limit(PERIOD_PR_SCAN_CAP)
-        .execute(),
+      // (4) Hours from open to the FIRST HUMAN REVIEW, for PRs whose first human review landed
+      // in this window. ONE shared fold — see `loadFirstHumanReviewHours` for why it is not
+      // inlined here and why it must look outside the window to answer correctly.
+      loadFirstHumanReviewHours(accountId, scope, from, to, lanes),
       // (7) Review threads whose ROOT COMMENT lands in the window. `reviewThreads.createdAt` IS
       // the root comment's timestamp (sync writes it from `comments.nodes[0].createdAt`), so no
       // second lookup is needed to bucket a thread.
@@ -348,9 +487,7 @@ async function loadPeriodBase(
     .select({ c: count() })
     .from(reviewComments)
     .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
-    .where(
-      and(inScope, gte(reviewComments.createdAt, from), lt(reviewComments.createdAt, to)),
-    )
+    .where(and(inScope, gte(reviewComments.createdAt, from), lt(reviewComments.createdAt, to)))
     .execute();
 
   const mergedPrs: MergedPr[] = [];
@@ -379,13 +516,8 @@ async function loadPeriodBase(
       loc: observed ? r.additions + r.deletions : null,
       ciDeterminate: ci === 'success' || ci === 'failure' || ci === 'error',
       ciSuccess: ci === 'success',
+      lane: lanes.laneOf(r.authorId),
     });
-  }
-
-  const firstReviewMs: number[] = [];
-  for (const r of reviewedRows) {
-    if (!r.firstReviewAt) continue; // same explicit narrowing as above
-    firstReviewMs.push(r.firstReviewAt.getTime() - r.openedAt.getTime());
   }
 
   // The reply fold. Per thread, the two earliest comment timestamps: `t[0]` is the root and
@@ -433,7 +565,7 @@ async function loadPeriodBase(
   return {
     mergedPrs,
     openedPrs: openedRow[0]?.c ?? 0,
-    firstReviewMs,
+    humanFirstReviewHours,
     threadsOpened: threadRows.length,
     threadsRepliedWithin,
     botComments,
@@ -501,8 +633,14 @@ export async function getPeriodMetrics(
   const busiestReviewer = humanReviews.reduce((m, c) => (c > m ? c : m), 0);
 
   const leadHours = base.mergedPrs.map((p) => p.leadMs / 3_600_000);
-  const reviewHours = base.firstReviewMs.map((ms) => ms / 3_600_000);
+  const reviewHours = base.humanFirstReviewHours;
   const sizes = sized.map((p) => p.loc!);
+  // The human-only twins. `human` here is the AUTHOR's lane, so a PR opened by a person and
+  // merged by a merge queue is still human work — "who merged it" is never a proxy for "who did
+  // the work", which is exactly why `release` is its own lane rather than folded into throughput.
+  const humanMerged = base.mergedPrs.filter((p) => p.lane === 'human');
+  const humanSizes = humanMerged.filter((p) => p.loc != null).map((p) => p.loc!);
+  const automationMerged = merged - humanMerged.length;
 
   const nullCell: MetricCell = { value: null, sampleSize: 0 };
   const pct = (numerator: number, denominator: number): MetricCell =>
@@ -525,11 +663,14 @@ export async function getPeriodMetrics(
   const cells: Record<PeriodMetricKey, MetricCell> = empty
     ? {
         merged_prs: nullCell,
+        human_merged_prs: nullCell,
         opened_prs: nullCell,
+        automation_merge_share_pct: nullCell,
         median_lead_time_hours: nullCell,
-        median_time_to_first_review_hours: nullCell,
+        median_time_to_first_human_review_hours: nullCell,
         merge_ci_success_pct: nullCell,
         median_pr_size_lines: nullCell,
+        median_human_pr_size_lines: nullCell,
         review_threads_opened: nullCell,
         threads_replied_within_36h_pct: nullCell,
         bot_review_comments: nullCell,
@@ -539,11 +680,17 @@ export async function getPeriodMetrics(
       }
     : {
         merged_prs: countCell(merged),
+        human_merged_prs: countCell(humanMerged.length),
         opened_prs: countCell(base.openedPrs),
+        // A SHARE OF NOTHING IS NOT ZERO. With no merges the question has no denominator, and a
+        // 0% here would read as "all of it was people" — the opposite failure to the one the
+        // metric exists to prevent.
+        automation_merge_share_pct: pct(automationMerged, merged),
         median_lead_time_hours: med(leadHours),
-        median_time_to_first_review_hours: med(reviewHours),
+        median_time_to_first_human_review_hours: med(reviewHours),
         merge_ci_success_pct: pct(ciGreen, ciKnown.length),
         median_pr_size_lines: med(sizes),
+        median_human_pr_size_lines: med(humanSizes),
         review_threads_opened: countCell(base.threadsOpened),
         threads_replied_within_36h_pct: pct(base.threadsRepliedWithin, base.threadsOpened),
         bot_review_comments: countCell(base.botComments),
@@ -715,10 +862,15 @@ export async function getPeriodLanes(
     inArray(pullRequests.repoId, scope.repoIds),
   );
 
-  // Every non-pending review in the window WITH its PR's open time, so the first HUMAN review per
-  // PR can be found in the fold. Reviews are far fewer than comments, and doing it here avoids a
-  // correlated subquery that neither dialect optimises well.
-  const [merged, opened, inlineRows, issueRows, reviewRows, humanReviewRows] = await Promise.all([
+  // ⚠ THE FIRST-HUMAN-REVIEW FIGURE COMES FROM THE SHARED FOLD, not from a per-review query here.
+  //
+  // It used to have its own, over reviews INSIDE the window only — which meant a PR a person had
+  // reviewed in a previous period counted as freshly reviewed. On the live database that reported
+  // 18.27h in this panel against the vector's 18.16h, one directly above the other, with a caption
+  // claiming they were the same measurement. They are the same measurement now because they are
+  // the same code.
+  const [merged, opened, inlineRows, issueRows, reviewRows, humanFirstReviewHours] =
+    await Promise.all([
     db
       .select({
         authorId: pullRequests.authorId,
@@ -769,26 +921,7 @@ export async function getPeriodLanes(
       )
       .groupBy(reviews.authorId, reviews.state, reviews.body)
       .execute(),
-    db
-      .select({
-        prId: reviews.prId,
-        authorId: reviews.authorId,
-        submittedAt: reviews.submittedAt,
-        openedAt: pullRequests.openedAt,
-      })
-      .from(reviews)
-      .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
-      .where(
-        and(
-          inScope,
-          gte(reviews.submittedAt, from),
-          lt(reviews.submittedAt, to),
-          ne(reviews.state, 'pending'),
-        ),
-      )
-      .orderBy(reviews.submittedAt, reviews.id)
-      .limit(PERIOD_COMMENT_SCAN_CAP)
-      .execute(),
+    loadFirstHumanReviewHours(accountId, scope, from, to, lanes),
   ]);
 
   const blank = () => ({ mergedPrs: 0, openedPrs: 0, sizes: [] as number[], leads: [] as number[], comments: 0, approvals: 0 });
@@ -842,20 +975,6 @@ export async function getPeriodLanes(
       approvals: a.approvals,
     };
   });
-
-  // First HUMAN review per PR. Ascending order above means the first row seen for a PR is the
-  // earliest, so a plain "keep the first" fold is correct and needs no comparison.
-  const firstHuman = new Map<number, number>();
-  for (const r of humanReviewRows) {
-    if (r.submittedAt == null || r.openedAt == null) continue;
-    if (lanes.laneOf(r.authorId) !== 'human') continue;
-    if (firstHuman.has(r.prId)) continue;
-    firstHuman.set(r.prId, (r.submittedAt.getTime() - r.openedAt.getTime()) / 3_600_000);
-  }
-  // Negative is impossible in practice but cheap to exclude: a clock-skewed review timestamped
-  // before its PR opened would otherwise pull the median down, which is the exact failure mode
-  // this figure exists to correct.
-  const humanFirstReviewHours = [...firstHuman.values()].filter((h) => h >= 0);
 
   const totalMerged = out.reduce((n, l) => n + l.mergedPrs, 0);
   const automatedMerged = out

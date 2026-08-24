@@ -193,81 +193,201 @@ export function reviewBotKind(login: string | null | undefined): ReviewBotKind |
   return REVIEW_BOTS[slug] ?? null;
 }
 
-// Bare GitHub login (lowercased, `[bot]` suffix stripped) → a QUALITY-CHECK automation:
-// static analysis, coverage, lint. These post review comments like a review bot, so every
-// layer of the classifier already flags them `automated` — but they are NOT reviewers, and
-// counting them as such is what makes the Bot-ROI panel read as noise. See `ReviewerRole`.
+// ── THE AUTOMATION VENDOR TABLE — one row per login, carrying BOTH facts ─────────────────────
 //
-// This map only SEEDS the default role for a login nobody has classified by hand. It is
-// deliberately NOT a parallel `AutomatedReviewerKind`: role and vendor identity are
-// orthogonal axes, and a login may hold a brand kind AND the quality_check role at once.
+// `REVIEW_BOTS` above owns the AI-reviewer family. This owns every other kind of automation that
+// touches a pull request, and it is ONE table rather than five login sets plus a parallel
+// login→kind map, because a login has exactly one identity and one default role and those are
+// facts about the same key. Two tables keyed by login is precisely the "a fact lives at ONE
+// grain" trap this codebase has paid for before: the second one drifts, and nothing detects it.
 //
-// Deliberately EXCLUDED even though they are arguably quality-check tools: `deepsource-io`,
-// `github-code-quality`, `github-advanced-security` — all three are already named
-// `ReviewBotKind` vendors with rows in existing dashboards, so seeding them quality_check
-// would silently move numbers on upgrade. They stay `review` and remain user-flippable.
+// ⚠ WHY THE `kind` COLUMN EXISTS AT ALL. Before this, every automation that was not an AI
+// reviewer resolved to `kind: 'in_house'` via the classifier's githubType fallback — the bucket
+// literally labelled "In-house AI". On the dev corpus that bucket held sonarqubecloud,
+// dependabot[bot], github-actions[bot], gitguardian, socket-security, google-cla and jit-ci: 25
+// of 37 such rows. Every one of them rendered as "In-house AI" with the same grey chip, so a user
+// could not tell their SonarQube from their CLA bot on the screen that exists to classify them.
 //
-// The backend keeps a hand-synced LOCAL copy in `sync/bot-detection.ts` (it cannot import
-// shared at runtime); `bot-detection.test.ts` fails on drift, exactly as for REVIEW_BOTS.
-export const QUALITY_CHECK_BOTS: ReadonlySet<string> = new Set([
-  // SonarQube Cloud (ex-SonarCloud) — current + legacy app slugs. Both are already in the
-  // backend's KNOWN_BOTS but absent from REVIEW_BOTS, so today they resolve to `in_house`
-  // via the githubType step: the exact miscount this role exists to fix.
-  'sonarqubecloud',
-  'sonarcloud',
-  'codecov',
-  'codeclimate',
-  'codefactor-io',
-  'houndci-bot',
-  'coveralls',
-  'codacy-bot',
-]);
+// `role` is the DEFAULT role for the login (see `ReviewerRole`); a human's choice always wins.
+// `kind` is the vendor identity — orthogonal to role, and a login may legitimately appear in
+// `REVIEW_BOTS` too when the same brand does both jobs. Where it does, the two tables MUST agree
+// on the kind; `bot-detection.test.ts` asserts that rather than leaving it to a reader.
+export const AUTOMATION_VENDORS: Record<
+  string,
+  { kind: AutomatedReviewerKind; role: ReviewerRole }
+> = {
+  // ── Dependency & version bumps ───────────────────────────────────────────────────────────
+  // Measured: Dependabot was 46 of 117 merged PRs in one fortnight (39%), and because its PRs are
+  // tiny and merge fast it dragged the reported median PR size to 68 lines — a blend of its own
+  // 14 and the humans' 142, describing no pull request anyone had written.
+  dependabot: { kind: 'dependabot', role: 'dependency' },
+  'dependabot-preview': { kind: 'dependabot', role: 'dependency' },
+  renovate: { kind: 'renovate', role: 'dependency' },
+  'renovate-bot': { kind: 'renovate', role: 'dependency' },
+  'snyk-bot': { kind: 'snyk', role: 'dependency' },
+  'pyup-bot': { kind: 'pyup', role: 'dependency' },
+  greenkeeper: { kind: 'greenkeeper', role: 'dependency' },
+  depfu: { kind: 'depfu', role: 'dependency' },
 
-// True when a login is a known quality-check automation (see QUALITY_CHECK_BOTS). Normalises
-// case + the `[bot]` suffix so it matches whether the login arrived via GraphQL or REST.
+  // ── Quality gates, scanners and CI ───────────────────────────────────────────────────────
+  // They post VERDICTS, not findings: all 786 of SonarQube's comments on the measured workspace
+  // were "Quality Gate Passed/Failed", so reading their volume as review substance reports
+  // hundreds of pieces of feedback where there were none.
+  sonarqubecloud: { kind: 'sonarqube', role: 'quality_check' },
+  sonarcloud: { kind: 'sonarqube', role: 'quality_check' },
+  codecov: { kind: 'codecov', role: 'quality_check' },
+  codeclimate: { kind: 'codeclimate', role: 'quality_check' },
+  'codefactor-io': { kind: 'codefactor', role: 'quality_check' },
+  'houndci-bot': { kind: 'hound', role: 'quality_check' },
+  coveralls: { kind: 'coveralls', role: 'quality_check' },
+  'codacy-bot': { kind: 'codacy', role: 'quality_check' },
+  // ⚠ `github-actions` held 385 submitted reviews and 3,116 comments across its two user rows
+  // while roled 'review' — the largest "AI reviewer" in the account's ROI table was a CI runner.
+  'github-actions': { kind: 'github_actions', role: 'quality_check' },
+  'jit-ci': { kind: 'jit', role: 'quality_check' },
+  'socket-security': { kind: 'socket', role: 'quality_check' },
+  gitguardian: { kind: 'gitguardian', role: 'quality_check' },
+  'semgrep-app': { kind: 'semgrep', role: 'quality_check' },
+  'trunk-io': { kind: 'trunk', role: 'quality_check' },
+
+  // ── Code agents — automation that WRITES CODE that is not a version bump ─────────────────
+  // The category that did not exist when the first lists were written and now matters most. A
+  // dependency bot and a coding agent both author PRs, so a bot-vs-human split files them
+  // together — and yet a merged bump is overhead a team absorbed while a merged agent PR is work
+  // it shipped. "Automation authored 40% of merges" is unreadable until you know which.
+  //
+  // Devin keeps its existing `devin` kind from REVIEW_BOTS (same brand, one identity) and gains
+  // the role that says what it actually does.
+  'devin-ai-integration': { kind: 'devin', role: 'code_agent' },
+  'sweep-ai': { kind: 'sweep', role: 'code_agent' },
+  'codegen-sh': { kind: 'codegen', role: 'code_agent' },
+  'deepsource-autofix': { kind: 'deepsource_autofix', role: 'code_agent' },
+  'pre-commit-ci': { kind: 'pre_commit_ci', role: 'code_agent' },
+  'restyled-io': { kind: 'restyled', role: 'code_agent' },
+  imgbot: { kind: 'imgbot', role: 'code_agent' },
+  imgbotapp: { kind: 'imgbot', role: 'code_agent' },
+  'transifex-integration': { kind: 'transifex', role: 'code_agent' },
+  'crowdin-bot': { kind: 'crowdin', role: 'code_agent' },
+  mintlify: { kind: 'mintlify', role: 'code_agent' },
+  allstar: { kind: 'allstar', role: 'code_agent' },
+
+  // ── Release & merge automation ───────────────────────────────────────────────────────────
+  // Neither inspects nor reports on the code: it ACTS on the repository once other conditions are
+  // met. A merge-queue bot can be the recorded merger of a large share of a repo's PRs, which is
+  // why "who merged this" is never a proxy for "who did the work".
+  mergify: { kind: 'mergify', role: 'release' },
+  kodiak: { kind: 'kodiak', role: 'release' },
+  kodiakhq: { kind: 'kodiak', role: 'release' },
+  bulldozer: { kind: 'bulldozer', role: 'release' },
+  'release-please': { kind: 'release_please', role: 'release' },
+  releaser: { kind: 'release_please', role: 'release' },
+  'semantic-release': { kind: 'semantic_release', role: 'release' },
+  'semantic-release-bot': { kind: 'semantic_release', role: 'release' },
+  'release-drafter': { kind: 'release_drafter', role: 'release' },
+  'changeset-bot': { kind: 'changesets', role: 'release' },
+  changesets: { kind: 'changesets', role: 'release' },
+  autorelease: { kind: 'release_please', role: 'release' },
+  'lumberbot-app': { kind: 'backport', role: 'release' },
+  meeseeksdev: { kind: 'backport', role: 'release' },
+  backport: { kind: 'backport', role: 'release' },
+
+  // ── Housekeeping — process, compliance and metadata, never the code ──────────────────────
+  // The long tail, defined by its volume being PURE NOISE in every review metric: a CLA bot's
+  // comment on every first-time contribution is indistinguishable, to a comment counter, from a
+  // reviewer finding a bug.
+  'cla-bot': { kind: 'cla_assistant', role: 'housekeeping' },
+  'cla-assistant': { kind: 'cla_assistant', role: 'housekeeping' },
+  claassistant: { kind: 'cla_assistant', role: 'housekeeping' },
+  'google-cla': { kind: 'google_cla', role: 'housekeeping' },
+  googlebot: { kind: 'google_cla', role: 'housekeeping' },
+  'facebook-github-bot': { kind: 'meta_cla', role: 'housekeeping' },
+  dco: { kind: 'dco', role: 'housekeeping' },
+  stale: { kind: 'stale_bot', role: 'housekeeping' },
+  welcome: { kind: 'welcome_bot', role: 'housekeeping' },
+  lock: { kind: 'lock_bot', role: 'housekeeping' },
+  allcontributors: { kind: 'allcontributors', role: 'housekeeping' },
+  'semantic-pull-request': { kind: 'semantic_pr', role: 'housekeeping' },
+  sizebot: { kind: 'sizebot', role: 'housekeeping' },
+  'react-sizebot': { kind: 'sizebot', role: 'housekeeping' },
+  'diffray-bot': { kind: 'sizebot', role: 'housekeeping' },
+  'codesandbox-ci': { kind: 'codesandbox', role: 'housekeeping' },
+  netlify: { kind: 'netlify', role: 'housekeeping' },
+  vercel: { kind: 'vercel', role: 'housekeeping' },
+  'gitpod-io': { kind: 'gitpod', role: 'housekeeping' },
+};
+
+/** Normalise a login the way every vocabulary here matches it: lowercased, `[bot]` suffix
+ *  stripped. The suffix stripping is load-bearing — `dependabot` and `dependabot[bot]` are
+ *  SEPARATE `users` rows with different GitHub node ids on real accounts, and a lookup that
+ *  covers one spelling and not the other splits one actor across two roles. */
+export function normalizeBotLogin(login: string): string {
+  return login.toLowerCase().replace(/\[bot\]$/, '');
+}
+
+/** The vendor identity of a non-review automation, or null. Orthogonal to `reviewBotKind`, which
+ *  answers the narrower "is this an AI reviewer" and must NOT be widened to cover these. */
+export function automationVendorKind(
+  login: string | null | undefined,
+): AutomatedReviewerKind | null {
+  if (!login) return null;
+  return AUTOMATION_VENDORS[normalizeBotLogin(login)]?.kind ?? null;
+}
+
+/** The DEFAULT role a login implies, or null when no vocabulary claims it. Null is not "it
+ *  reviews" — see `defaultRoleFor` and `resolveActorLanes`, which fall back differently on
+ *  purpose. */
+export function roleForAutomationLogin(login: string | null | undefined): ReviewerRole | null {
+  if (!login) return null;
+  return AUTOMATION_VENDORS[normalizeBotLogin(login)]?.role ?? null;
+}
+
+const loginsWithRole = (role: ReviewerRole): ReadonlySet<string> =>
+  new Set(Object.entries(AUTOMATION_VENDORS).filter(([, v]) => v.role === role).map(([k]) => k));
+
+// The per-family login sets, DERIVED from the table above rather than restated beside it.
+//
+// ⚠ Deriving them is what makes the families disjoint BY CONSTRUCTION. They used to be five
+// hand-written sets, which made "no login appears in two of them" a property a test had to check
+// and a contributor had to remember — and the order the predicates were tried in silently decided
+// the answer whenever it was violated. A login now appears exactly once, so there is nothing to
+// get wrong and no precedence to reason about.
+// Static analysis, coverage, scanners and CI. Deliberately EXCLUDED even though they are
+// arguably quality-check tools: `deepsource-io`, `github-code-quality`,
+// `github-advanced-security` — all three are already named `ReviewBotKind` vendors with rows in
+// existing dashboards, so re-roling them would silently move numbers on upgrade. They stay
+// `review` and remain user-flippable.
+export const QUALITY_CHECK_BOTS: ReadonlySet<string> = loginsWithRole('quality_check');
+export const DEPENDENCY_BOTS: ReadonlySet<string> = loginsWithRole('dependency');
+export const CODE_AGENT_BOTS: ReadonlySet<string> = loginsWithRole('code_agent');
+export const RELEASE_BOTS: ReadonlySet<string> = loginsWithRole('release');
+export const HOUSEKEEPING_BOTS: ReadonlySet<string> = loginsWithRole('housekeeping');
+
+/** True when a login is a known quality-check automation. */
 export function qualityCheckBot(login: string | null | undefined): boolean {
-  if (!login) return false;
-  return QUALITY_CHECK_BOTS.has(login.toLowerCase().replace(/\[bot\]$/, ''));
+  return roleForAutomationLogin(login) === 'quality_check';
 }
 
-// ── DEPENDENCY automations — the THIRD axis ──────────────────────────────────────────────────
-//
-// The bots that AUTHOR pull requests rather than respond to them. They are a distinct lane
-// because they distort a completely different set of metrics from the other two: a review bot
-// inflates review counts, a dependency bot inflates THROUGHPUT, lead time and PR size.
-//
-// Measured on a real workspace before this existed: Dependabot was 46 of 117 merged PRs in one
-// fortnight (39%), and because its PRs are tiny and merge fast it dragged the reported median PR
-// size to 68 lines — a blend of its own 14 and the humans' 142, describing no pull request anyone
-// had actually written, and understating real human PR size by 2.1×.
-//
-// Same hand-sync contract as REVIEW_BOTS and QUALITY_CHECK_BOTS: the backend keeps a local copy in
-// `sync/bot-detection.ts` (it cannot import shared at runtime) and `bot-detection.test.ts` fails
-// on drift.
-//
-// ⚠ These logins are ALREADY in the backend's KNOWN_BOTS, so they are correctly flagged as bots
-// today — what was missing is that they were classified `role: 'review'`, which is exactly
-// backwards for an actor that never reviews anything.
-export const DEPENDENCY_BOTS: ReadonlySet<string> = new Set([
-  'dependabot',
-  'dependabot-preview',
-  'renovate',
-  'renovate-bot',
-  'snyk-bot',
-  'pyup-bot',
-  'greenkeeper',
-  'depfu',
-]);
-
-// True when a login is a known dependency automation (see DEPENDENCY_BOTS). Normalises case + the
-// `[bot]` suffix — which is also what makes it immune to the duplicate-identity problem, where
-// `dependabot` and `dependabot[bot]` exist as two separate user rows with conflicting flags.
+/** True when a login is a known dependency automation. */
 export function dependencyBot(login: string | null | undefined): boolean {
-  if (!login) return false;
-  return DEPENDENCY_BOTS.has(login.toLowerCase().replace(/\[bot\]$/, ''));
+  return roleForAutomationLogin(login) === 'dependency';
 }
 
-// ── The four lanes ───────────────────────────────────────────────────────────────────────────
+/** True when a login is a known code-authoring automation. */
+export function codeAgentBot(login: string | null | undefined): boolean {
+  return roleForAutomationLogin(login) === 'code_agent';
+}
+
+/** True when a login is a known release / merge automation. */
+export function releaseBot(login: string | null | undefined): boolean {
+  return roleForAutomationLogin(login) === 'release';
+}
+
+/** True when a login is a known housekeeping automation. */
+export function housekeepingBot(login: string | null | undefined): boolean {
+  return roleForAutomationLogin(login) === 'housekeeping';
+}
+
+// ── The seven lanes ──────────────────────────────────────────────────────────────────────────
 //
 // Classified by WHAT AN ACTOR DOES, not by what it is, because that is what decides which metrics
 // it contaminates. Lumping all automation into one bucket cannot distinguish "your throughput is
@@ -281,10 +401,52 @@ export type ActorLane =
    *  approvals rather than findings, so their VOLUME must never be read as review substance:
    *  on the workspace above, all 786 of SonarQube's comments were "Quality Gate Passed/Failed". */
   | 'quality_gate'
-  /** Dependency automation — authors PRs, never reviews. */
-  | 'dependency';
+  /** Dependency automation — authors version bumps, never reviews (`DEPENDENCY_BOTS`). */
+  | 'dependency'
+  /** Automation that WRITES CODE — agents, autofix, generated-content sync (`CODE_AGENT_BOTS`).
+   *  Authors PRs like a dependency bot but means the opposite thing about a team, which is why
+   *  the two are never one bucket. */
+  | 'code_agent'
+  /** Merge queues, release trains, changelog + version bumpers, backporters (`RELEASE_BOTS`).
+   *  Moves code without writing or judging any. */
+  | 'release'
+  /** CLA/DCO, triage, labels, stale-closers, metadata, size + preview reporters
+   *  (`HOUSEKEEPING_BOTS`). Volume here is pure noise in every review metric. */
+  | 'housekeeping';
 
-export const ACTOR_LANES: ActorLane[] = ['human', 'ai_review', 'quality_gate', 'dependency'];
+/** Render order: people first, then the automation that AUTHORS code (the lanes that distort
+ *  throughput), then the automation that RESPONDS to it (the lanes that distort review counts). */
+export const ACTOR_LANES: ActorLane[] = [
+  'human',
+  'code_agent',
+  'dependency',
+  'ai_review',
+  'quality_gate',
+  'release',
+  'housekeeping',
+];
+
+// ── What a lane CONTAMINATES — the band a lane belongs to ────────────────────────────────────
+//
+// The lanes exist because different automation corrupts different metrics, so the band is not a
+// cosmetic grouping: it is the answer to "which figures above should I distrust because of this".
+//
+//   authors  — writes the pull requests: distorts throughput, PR size, lead time
+//   responds — comments/approves on them: distorts review volume, approvals, review latency
+//
+// `release` sits in `authors` because release trains and backporters open real pull requests; a
+// merge queue that only merges contributes nothing to either count and is harmless in that band.
+export type ActorLaneBand = 'people' | 'authors' | 'responds';
+
+export const ACTOR_LANE_BAND: Record<ActorLane, ActorLaneBand> = {
+  human: 'people',
+  code_agent: 'authors',
+  dependency: 'authors',
+  release: 'authors',
+  ai_review: 'responds',
+  quality_gate: 'responds',
+  housekeeping: 'responds',
+};
 
 // ── The effort-vs-automation breakdown on a period report ────────────────────────────────────
 //
@@ -311,10 +473,13 @@ export interface PeriodLanes {
   lanes: PeriodLaneStats[];
   /** Share of merged PRs authored by automation, 0–100; null when nothing merged. */
   automationMergeSharePct: number | null;
-  /** Median hours open → first review BY A PERSON. The vector's
-   *  `median_time_to_first_review_hours` attributes to whoever reviewed first, which on a
-   *  workspace with an auto-approving CI bot is the bot, at zero minutes — measured: 61 of 115
-   *  PRs, reported median 0h, real human medians ~21h and ~34h. Null when no human reviewed. */
+  /** Median hours open → first review BY A PERSON.
+   *
+   *  ⚠ SINCE v2 THIS IS THE SAME MEASUREMENT AS THE VECTOR'S
+   *  `median_time_to_first_human_review_hours`, and the duplication is deliberate: the vector is
+   *  the comparable/forecastable artifact, this is what the lane panel renders beside the human
+   *  row, and both read the one fold in `getPeriodLanes`. If they ever disagree, one of them has
+   *  stopped using the union automation set. */
   medianTimeToFirstHumanReviewHours: number | null;
   /** Automation classified into a lane that produced NOTHING this period — a configured AI
    *  reviewer sitting silent is a finding, and it is invisible in every aggregate. */
@@ -331,7 +496,69 @@ export interface PeriodLanes {
 // isn't a known brand — distinct from `in_house` (the account's OWN AI). It carries no brand
 // colour/label (rendered by login, like in_house) and is EXCLUDED from the cross-org
 // benchmark (brand-unknown, so not comparable to a named-vendor cohort).
-export type AutomatedReviewerKind = ReviewBotKind | 'in_house' | 'pierre' | 'vendor';
+// ── The non-review vendor families ──────────────────────────────────────────────────────────
+//
+// A vendor kind per automation family, so an integration stops collapsing into `in_house` — the
+// bucket literally labelled "In-house AI", which on the dev corpus held sonarqubecloud,
+// dependabot[bot], github-actions[bot], gitguardian, socket-security, google-cla and jit-ci.
+//
+// ⚠ THESE ARE NOT `ReviewBotKind` MEMBERS AND MUST NEVER BECOME ONE. That union is the AI-reviewer
+// cohort: `reviewBotKind()` decides who carries a review-bot badge, and the cross-org benchmark
+// contributes rows keyed on it. Widening it would ship SonarQube's volume into a shared
+// review-bot dataset that cannot be un-shipped. They join `AutomatedReviewerKind` (the identity
+// axis, which is orthogonal to the role) and nothing else.
+export type QualityCheckVendorKind =
+  | 'sonarqube' | 'codecov' | 'codeclimate' | 'codefactor' | 'hound' | 'coveralls' | 'codacy'
+  | 'github_actions' | 'jit' | 'socket' | 'gitguardian' | 'semgrep' | 'trunk';
+
+export type DependencyVendorKind =
+  | 'dependabot' | 'renovate' | 'snyk' | 'pyup' | 'greenkeeper' | 'depfu';
+
+export type CodeAgentVendorKind =
+  | 'sweep' | 'codegen' | 'deepsource_autofix' | 'pre_commit_ci' | 'restyled' | 'imgbot'
+  | 'transifex' | 'crowdin' | 'mintlify' | 'allstar';
+
+export type ReleaseVendorKind =
+  | 'mergify' | 'kodiak' | 'bulldozer' | 'release_please' | 'semantic_release'
+  | 'release_drafter' | 'changesets' | 'backport';
+
+export type HousekeepingVendorKind =
+  | 'cla_assistant' | 'google_cla' | 'meta_cla' | 'dco' | 'stale_bot' | 'welcome_bot'
+  | 'lock_bot' | 'allcontributors' | 'semantic_pr' | 'sizebot' | 'codesandbox' | 'netlify'
+  | 'vercel' | 'gitpod';
+
+/** The three UNBRANDED kinds, legal in EVERY role — the "we know what it does, not who made it"
+ *  answers. `in_house` = the account's own automation; `vendor` = a proprietary third party whose
+ *  brand we have no entry for; `pierre` = this product's own reviewer. All three render by login
+ *  rather than by brand, and all three are excluded from the cross-org benchmark. */
+export type GenericReviewerKind = 'in_house' | 'pierre' | 'vendor';
+
+export type AutomatedReviewerKind =
+  | ReviewBotKind
+  | QualityCheckVendorKind
+  | DependencyVendorKind
+  | CodeAgentVendorKind
+  | ReleaseVendorKind
+  | HousekeepingVendorKind
+  | GenericReviewerKind;
+
+/** ⚠ THE BENCHMARK ALLOW-LIST. `getBenchmarkContributions` used to decide "is this a comparable
+ *  named vendor" with a DENY-list (`!== in_house && !== pierre && !== vendor`), which was correct
+ *  only while `ReviewBotKind` was the entire branded universe. Every kind added above would have
+ *  passed it — shipping a linter's volume into a shared cross-org review-bot cohort, permanently,
+ *  for everyone, with no way to un-ship it. An allow-list cannot fail that way: a new kind is
+ *  excluded until someone deliberately adds it here. */
+export const REVIEW_BOT_KINDS: ReadonlySet<string> = new Set<ReviewBotKind>([
+  'coderabbit', 'greptile', 'copilot', 'qodo', 'sourcery', 'bito', 'ellipsis', 'korbit',
+  'baz', 'graphite', 'cursor', 'devin', 'entelligence', 'deepsource', 'github_code_quality',
+  'github_advanced_security', 'codex',
+]);
+
+/** True when a kind is a comparable, branded AI-REVIEW vendor — the only kinds that may leave the
+ *  tenant for the cross-org benchmark. */
+export function isBenchmarkableVendorKind(kind: string | null | undefined): boolean {
+  return kind != null && REVIEW_BOT_KINDS.has(kind);
+}
 export type ClassificationConfidence = 'high' | 'medium' | 'low';
 export type ClassificationSource =
   | 'manual' | 'vendor_login' | 'github_type' | 'app_attribution'
@@ -345,14 +572,24 @@ export type ClassificationSource =
 // sail straight through and ship linters to the cross-org benchmark as a named review-bot cohort.
 //
 //   'review'        — an AI code REVIEWER (CodeRabbit, Greptile, an in-house agent, Pierre).
-//   'quality_check' — static analysis / coverage / lint (SonarQube, Codecov, Hound). It posts
-//                     review comments and IS automated, but it is not reviewing: counting it as
-//                     a reviewer is what makes the ROI panel's volume and noise numbers lie.
+//   'quality_check' — static analysis / coverage / lint / CI (SonarQube, Codecov, Hound,
+//                     github-actions). It posts review comments and IS automated, but it is not
+//                     reviewing: counting it as a reviewer is what makes the ROI panel lie.
+//   'dependency'    — version bumps (Dependabot, Renovate). Authors PRs, never reviews.
+//   'code_agent'    — WRITES CODE that is not a bump: agents, autofix, generated-content sync.
+//   'release'       — merge queues, release trains, changelogs, backports. Moves code.
+//   'housekeeping'  — CLA/DCO, triage, labels, stale, metadata, size + preview reports.
 //
-// A quality_check reviewer stays `automated: true` — `excludeBots`, the feed bot lens and the
+// ⚠ EXACTLY ONE OF THESE IS THE REVIEWER COHORT, and it is `'review'`. Every consumer that used
+// to ask `role === 'quality_check'` to mean "not a reviewer" MUST ask `role !== 'review'` now —
+// the old spelling silently re-admits all four new roles into the ROI, behaviour, dedup and
+// benchmark sets, which is the precise miscount this axis exists to prevent. `isReviewerRole()`
+// below is the one predicate; prefer it to an inline comparison.
+//
+// Any automated role stays `automated: true` — `excludeBots`, the feed bot lens and the
 // per-row vendor tag all keep working unchanged. The role only splits the two DERIVED SETS:
 //   role 'review'                    → SCORING (ROI, behaviour, dedup, benchmark)
-//   all automated (review ∪ quality) → EXCLUSION, the feed, AND bot-only PRs
+//   all automated (every role)       → EXCLUSION, the feed, AND bot-only PRs
 // Confusing those two is the defect this feature is most likely to ship; see the CLAUDE.md note.
 //
 // BOT-ONLY PRs DELIBERATELY DO NOT NARROW, and the reason is worth stating because the symmetry
@@ -362,7 +599,119 @@ export type ClassificationSource =
 // one automated review" leg, and drop it from the list — hiding the risk instead of flagging it.
 // The scoring sets narrow because a linter's volume makes a REVIEWER's numbers lie; the risk set
 // does not, because a linter's approval is not a human's.
-export type ReviewerRole = 'review' | 'quality_check';
+export type ReviewerRole =
+  | 'review'
+  | 'quality_check'
+  | 'dependency'
+  | 'code_agent'
+  | 'release'
+  | 'housekeeping';
+
+/** Selection order for the role picker, and the order the Bots panel groups its sections in. */
+export const REVIEWER_ROLES: ReviewerRole[] = [
+  'review',
+  'quality_check',
+  'dependency',
+  'code_agent',
+  'release',
+  'housekeeping',
+];
+
+/** THE reviewer-cohort predicate. See the ⚠ above: `role !== 'review'` is the test, and spelling
+ *  it once means a seventh role cannot be forgotten at a call site. */
+export function isReviewerRole(role: ReviewerRole | null | undefined): boolean {
+  return (role ?? 'review') === 'review';
+}
+
+// ── WHICH VENDORS BELONG TO WHICH ROLE — what the settings picker filters on ────────────────
+//
+// The Bots card asks for the ROLE first and then offers only that family's vendors, because the
+// alternative is a flat list of ~60 brands in which a user looking for SonarQube scrolls past
+// CodeRabbit, Dependabot and a CLA bot. Role is also the field with consequences (it decides
+// which metrics count the actor), so it belongs above identity on the form rather than below it.
+//
+// DERIVED from `AUTOMATION_VENDORS` plus the two fixed families, so a vendor added to that table
+// appears in the right dropdown with no second edit — the parallel-table trap again.
+//
+// The three GENERIC kinds map to `null`, meaning "legal in every role". That is what gives each
+// family its own "In-house / custom" and "Other vendor" escape hatch: a user who runs an
+// unbranded quality gate can say so without being pushed into a brand that is not theirs.
+const KIND_ROLE_ENTRIES = new Map<AutomatedReviewerKind, ReviewerRole | null>([
+  ...Object.values(AUTOMATION_VENDORS).map(
+    (v) => [v.kind, v.role] as [AutomatedReviewerKind, ReviewerRole | null],
+  ),
+  // The AI reviewers. Listed from the REVIEW_BOTS map rather than restated, so a new vendor login
+  // is enough. `devin` is deliberately overwritten by AUTOMATION_VENDORS above — same brand, and
+  // what it DOES is author code.
+  ...Object.values(REVIEW_BOTS).map((k) => [k, 'review'] as [AutomatedReviewerKind, ReviewerRole]),
+  ['pierre', 'review'],
+  ['in_house', null],
+  ['vendor', null],
+]);
+
+/** The role a vendor kind belongs to, or `null` when it is legal in every role (the three generic
+ *  kinds). A kind with no entry is treated as `null` — permissive, because hiding a stored value
+ *  from its own picker is how a user's saved vendor silently changes on the next save. */
+export function roleForVendorKind(kind: AutomatedReviewerKind): ReviewerRole | null {
+  return KIND_ROLE_ENTRIES.get(kind) ?? null;
+}
+
+/**
+ * The vendor kinds offered for a role: that family, plus the generic escape hatches, plus
+ * `current` even when it does not belong.
+ *
+ * ⚠ THE `current` ARGUMENT IS NOT A CONVENIENCE. A `<select>` whose `value` is absent from its
+ * options renders the FIRST option instead, so the card would show a vendor the row does not
+ * hold — and the next save would write that wrong vendor. Role and identity are independently
+ * owned halves (`source` vs `identitySource`), so a row legitimately carries a vendor from
+ * another family: someone marks CodeRabbit a quality check without renaming it. The stored value
+ * has to stay selectable.
+ */
+export function vendorKindsForRole(
+  role: ReviewerRole,
+  current?: AutomatedReviewerKind | null,
+): AutomatedReviewerKind[] {
+  const out: AutomatedReviewerKind[] = [];
+  for (const [kind, kindRole] of KIND_ROLE_ENTRIES) {
+    if (kindRole === role || kindRole === null) out.push(kind);
+  }
+  if (current != null && !out.includes(current)) out.push(current);
+  return out;
+}
+
+/** A stored role maps 1:1 onto the lane it puts an actor in. Kept 1:1 ON PURPOSE — a user who
+ *  marks a bot "Release automation" and then finds it filed under "Quality gate" has been told
+ *  their choice did not take, so the two vocabularies do not get to drift into a lookup table
+ *  with surprises in it. `human` has no role because a human is not an automated reviewer. */
+export const REVIEWER_ROLE_LANE: Record<ReviewerRole, Exclude<ActorLane, 'human'>> = {
+  review: 'ai_review',
+  quality_check: 'quality_gate',
+  dependency: 'dependency',
+  code_agent: 'code_agent',
+  release: 'release',
+  housekeeping: 'housekeeping',
+};
+
+/** Short human labels — the role picker, the lane legend and the report table all read these, so
+ *  a rename lands everywhere at once. */
+export const REVIEWER_ROLE_LABEL: Record<ReviewerRole, string> = {
+  review: 'Review bot',
+  quality_check: 'Quality check',
+  dependency: 'Dependency updates',
+  code_agent: 'Code agent',
+  release: 'Release automation',
+  housekeeping: 'Housekeeping',
+};
+
+export const ACTOR_LANE_LABEL: Record<ActorLane, string> = {
+  human: 'People',
+  ai_review: 'AI review',
+  quality_gate: 'Quality gates & CI',
+  dependency: 'Dependency updates',
+  code_agent: 'Code agents',
+  release: 'Release automation',
+  housekeeping: 'Housekeeping',
+};
 
 // A BOT IS A PER-WORKSPACE OBJECT. Everything below keys on (account, WORKSPACE, actor): ONE row
 // per key, one grain, no inheritance chain, no merge and NO DEDUPLICATION anywhere.
@@ -5450,32 +5799,68 @@ export interface WorkspaceComparisonResponse {
 //    18, 19, 18, … , 9, 6, 4. The "trend" is repo onboarding, not team output. Hence
 //    `PeriodCoverage`, the stable-subset comparison, and a forecast that refuses rather than
 //    fits a line through an artifact.
-export const PERIOD_METRICS_SCHEMA_VERSION = 1;
+// ── VERSION 2: the vector stopped describing a blend of people and machines ──────────────────
+//
+// v1 measured "what happened in this workspace" without asking who did it, and on any workspace
+// with real automation that is a different question from the one a reader thinks they are asking.
+// Three v1 figures were not thin samples or edge cases — they were wrong about the team:
+//
+//   • `median_time_to_first_review_hours` read **0h**. It attributed to whoever reviewed FIRST,
+//     and `github-actions[bot]` auto-approved 61 of 115 PRs at zero minutes. The human median was
+//     **18.3h**. A lead reading 0h concludes review latency is solved.
+//   • `median_pr_size_lines` read **68**, a blend of Dependabot's 14 and the humans' 142 —
+//     a number no pull request in the workspace resembled, understating human PR size by 2.1×.
+//   • `human_review_comments` counted the second row of every duplicated bot identity as a human,
+//     because `dependabot` and `dependabot[bot]` are separate user rows and one of each pair sat
+//     at `automated = 0`.
+//
+// So v2 renames the review-latency metric to say whose latency it is, adds the human-only twins
+// of the two throughput figures, adds the automation share itself as a first-class trendable
+// metric, and moves every bot/human split onto the SAME union automation set the lanes use — so
+// the table and the lane panel below it can no longer disagree about who is a person.
+//
+// The cost was accepted deliberately: bumping the version invalidates every stored comparison,
+// because a v1 row's `median_time_to_first_review_hours` and a v2 row's
+// `median_time_to_first_human_review_hours` are not the same measurement and must never be
+// subtracted from one another. `payloadHashFor` folds this constant, so the bump alone makes
+// every stored row stale and the next read regenerates it.
+export const PERIOD_METRICS_SCHEMA_VERSION = 2;
 
 export type PeriodMetricKey =
-  | 'merged_prs' | 'opened_prs' | 'median_lead_time_hours'
-  | 'median_time_to_first_review_hours' | 'merge_ci_success_pct'
-  | 'median_pr_size_lines' | 'review_threads_opened'
+  | 'merged_prs' | 'human_merged_prs' | 'opened_prs'
+  | 'automation_merge_share_pct' | 'median_lead_time_hours'
+  | 'median_time_to_first_human_review_hours' | 'merge_ci_success_pct'
+  | 'median_pr_size_lines' | 'median_human_pr_size_lines' | 'review_threads_opened'
   | 'threads_replied_within_36h_pct' | 'bot_review_comments'
   | 'human_review_comments' | 'bot_comments_per_merged_pr'
   | 'reviewer_concentration_pct';
 
-// CLOSED + ORDERED at schema version 1. This order IS the render order and is part of the
+// CLOSED + ORDERED at schema version 2. This order IS the render order and is part of the
 // contract; adding a metric bumps PERIOD_METRICS_SCHEMA_VERSION, and rows stored under an older
 // version simply lack the field — which must render "no prior", never 0.
 //
-// ⚠ `median_time_to_first_review_hours` attributes on `firstReviewAt`, NOT `openedAt` —
-// deliberately different from the `timeToFirstReviewHours` tile on WorkspaceMetrics. Bucketing by
-// open date right-censors a recent window (PRs opened in-window but not yet reviewed contribute
-// nothing, biasing the median DOWN); attributing on the review event keeps it window-pure and
-// uncensored. It is not a bug and must not be "fixed" into agreement with the tile.
+// The human-only twin is placed IMMEDIATELY AFTER the blended figure on purpose. Read adjacently,
+// `merged_prs 117 / human_merged_prs 71` and `median_pr_size_lines 68 /
+// median_human_pr_size_lines 142` state the automation gap without a word of narration; split
+// across a table they are two facts nobody joins up.
+//
+// ⚠ `median_time_to_first_human_review_hours` attributes on the FIRST HUMAN REVIEW's timestamp,
+// NOT `openedAt` — deliberately different from the `timeToFirstReviewHours` tile on
+// WorkspaceMetrics. Bucketing by open date right-censors a recent window (PRs opened in-window but
+// not yet reviewed contribute nothing, biasing the median DOWN); attributing on the review event
+// keeps it window-pure and uncensored. It is not a bug and must not be "fixed" into agreement with
+// the tile. It also does NOT read `pull_requests.first_review_at`, which is stamped by whichever
+// actor reviewed first and is the contaminated column this metric was renamed to escape.
 export const PERIOD_METRIC_KEYS: PeriodMetricKey[] = [
   'merged_prs',
+  'human_merged_prs',
   'opened_prs',
+  'automation_merge_share_pct',
   'median_lead_time_hours',
-  'median_time_to_first_review_hours',
+  'median_time_to_first_human_review_hours',
   'merge_ci_success_pct',
   'median_pr_size_lines',
+  'median_human_pr_size_lines',
   'review_threads_opened',
   'threads_replied_within_36h_pct',
   'bot_review_comments',

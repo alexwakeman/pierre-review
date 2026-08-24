@@ -377,6 +377,48 @@ contracts are in [docs/DATA-MODEL.md](docs/DATA-MODEL.md). Cross-cutting facts:
   scope list — and the identity reset KEEPS the price. `deleteWorkspace` re-homes the
   workspace's repos AND its `workspace_reviewers` rows to Default inside its transaction
   BEFORE deleting (the cascade would destroy manual verdicts and typed prices).
+- **`ReviewerRole` has SIX members and EXACTLY ONE of them is the reviewer cohort.**
+  `'review' | 'quality_check' | 'dependency' | 'code_agent' | 'release' | 'housekeeping'` —
+  what an automation DOES, chosen per workspace from a picker, 1:1 onto an `ActorLane`.
+  ⚠ **Every cohort test is `=== 'review'`, never `!== 'quality_check'`.** Those were the
+  same answer while there were two roles and became silently wrong at six: the old spelling
+  re-admits dependency/code_agent/release/housekeeping into the ROI, behaviour, dedup and
+  benchmark sets. Fixed at four sites (`narrowAutomatedIds`, `getBotAnalytics`'s
+  `isQualityCheck`, `getBotOverlap`, `bucketReviewers`); `grep -n "quality_check'" ` before
+  adding a fifth. The wire field `BotAnalyticsResponse.qualityChecks` and the frontend
+  bucket of the same name now hold EVERY non-reviewer role — the names are historical.
+  ⚠ **The STORED role beats the login seed on read**, so widening a vocabulary in code does
+  nothing for an actor already classified — migration `0053` re-derives `role` for every row
+  whose `source <> 'manual'`, and a future vocabulary addition needs the same treatment.
+  The five per-family login sets are **DERIVED** from ONE table, `AUTOMATION_VENDORS`
+  (login → `{kind, role}`), so the families are disjoint by construction and there is no
+  predicate order to get wrong. Hand-mirrored in `sync/bot-detection.ts`; the drift test
+  compares it key-by-key AND value-by-value.
+- **`AutomatedReviewerKind` carries a brand for EVERY automation family**, not just AI
+  reviewers — quality gates, dependency bots, code agents, release and housekeeping
+  automation. Before this they all collapsed into `in_house`, the bucket labelled "In-house
+  AI" (25 of 37 such rows on the dev corpus were SonarQube, Dependabot, github-actions,
+  GitGuardian, Socket, Google CLA and Jit). Classifier step **1b** brands them; migration
+  `0054` re-derives `kind` for rows with `identity_source <> 'manual'` and `kind IN
+  ('in_house','vendor')`, nulling the cached `label` so the brand name shows.
+  ⚠ **`ReviewBotKind` must NEVER absorb them.** It is the AI-reviewer cohort: it drives the
+  review-bot badge and keys the rows the cross-org benchmark contributes.
+- ⚠ **`getBenchmarkContributions` filters kinds with an ALLOW-list** (`REVIEW_BOT_KINDS`,
+  mirrored into `queries.ts`), never a deny-list. Its rows LEAVE THE TENANT and cannot be
+  recalled. The old `!== in_house && !== pierre && !== vendor` test was correct only while
+  `ReviewBotKind` was the entire branded universe — every kind added above would have passed
+  it and shipped a linter into a shared review-bot cohort. Pinned by
+  `db/benchmark-vendor-kinds.test.ts`, which goes through the GETTER: a unit test pinning the
+  set's contents passed happily while the predicate was mutated back to the deny-list.
+- **The Bots card asks for the ROLE first, then offers only that family's vendors** plus
+  In-house/custom and Other vendor. ⚠ The role write sits behind an explicit **"Apply role"**
+  button, not the select's `change` event: that write stamps `source: 'manual'`, which stops
+  the classifier ever re-deriving the row, and a `change` event is not a deliberate act — a
+  scroll wheel, an arrow key or the browser restoring form state on reload all fire one (it
+  happened during development and silently re-roled a live row). ⚠ `vendorKindsForRole` takes
+  the STORED kind as `current` and always includes it: a `<select>` whose `value` is absent
+  from its options renders the FIRST option, so the card would show — and then save — a vendor
+  the row does not hold.
 - **`repos.createdAt` is LOAD-BEARING** — My Turn's per-repo "New PRs" cutoff (per REPO,
   not global; pinned by `db/my-turn-new-prs.test.ts`). There is NO second visibility axis:
   the "watched" columns were dropped in migration 0046.
@@ -589,15 +631,18 @@ passthrough on `/api/me`, and inert seams. Details:
 [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) +
 [docs/PRO-PLATFORM.md](docs/PRO-PLATFORM.md). What bites:
 
-- **`apiVersion` is 19 and FOUR literals must agree**: host `contract.ts`, plugin
+- **`apiVersion` is 20 and FOUR literals must agree**: host `contract.ts`, plugin
   `index.ts`, plugin `contract-types.ts`, and `bind.ts`'s runtime gate
-  (`plugin?.apiVersion !== 19`) — the actual enforcer. A half-bump silently degrades the
+  (`plugin?.apiVersion !== 20`) — the actual enforcer. A half-bump silently degrades the
   ENTIRE plugin to OSS mode: capabilities dark, every `/api/pro/*` 404, nothing thrown.
   No test pins it; detection is `tsc` (TS2367 at the gate) + a boot check of `/api/me`.
   ⚠ **The plugin half of a bump lives in a SUBMODULE, so "all four" spans two repos** — the
   gitlink this repo commits must point at a plugin commit carrying the same number, or a
   fresh `git submodule update --init` checks out a plugin the host then rejects.
-  (18 → 19 is "fix from comments": `CodingSeam.generateFix`'s result gains OPTIONAL
+  (19 → 20 is period-over-period reporting — the Insights **Reports** sub-tab: metrics are
+  CORE and window-pure (`db/period-metrics.ts`), the storage/narration/routes are
+  plugin-owned (pro migration `0025`, lanes `0026`).
+  18 → 19 is "fix from comments": `CodingSeam.generateFix`'s result gains OPTIONAL
   `commentVerdicts: FixItemVerdict[]`, the per-item dispositions the agent reports through
   core's `submit_fix` tool. Core stays ignorant of what the items ARE — the plugin's prompt
   assigns the `ref` labels and `ai-fix/comment-seed.ts` maps them back to comment rows.
@@ -725,6 +770,55 @@ passthrough on `/api/me`, and inert seams. Details:
   before/after effect panel — measurement stays independent of emission.
 
 ---
+
+## Period reporting + effort-vs-automation (Insights → Reports)
+
+A stored, forwardable artifact per completed period ("5 Aug – 19 Aug"), its comparison against
+the prior one, and a refusable forecast. **Metrics are CORE** (`db/period-metrics.ts`,
+`db/forecast.ts`, `db/actor-lanes.ts`); storage, narration and routes are plugin-owned
+(pro migrations `0025`/`0026`). The invariants:
+
+- **Every metric is WINDOW-PURE** — a function of events timestamped in `[fromMs, toMs)`, with
+  a TWO-SIDED predicate on every column. A stored historical period must stay reproducible, so
+  no "as of now" snapshot may enter the vector (hence no `openPrs`, no `ciFailingNow`).
+- **Retroactive history is COVERAGE-BIASED.** Merged PRs by fortnight read 39 → 570 over six
+  months while contributing repos read 4 → 18: the "trend" is repo onboarding. Hence
+  `getPeriodCoverage`, the stable-SUBSET comparison, and a forecast that REFUSES rather than
+  fitting a line through an artifact.
+- **ONE ROW MUST NEVER MIX THE HEADLINE AND SUBSET POPULATIONS.** The headline is the full
+  membership, the delta is the coverage-stable subset — `rowFigures()` is the one place that
+  decides, because rendering `117 | 146 | −33` where 117−146 = −29 is the defect this feature
+  shipped three times in one build.
+- **`PERIOD_METRICS_SCHEMA_VERSION` is 2 and is folded into `payloadHashFor`**, so a bump is
+  self-executing: every stored row goes `stale` and regenerates on the next read. Three
+  spellings (shared, core, plugin) kept in lockstep; a drift test pins the key list.
+  ⚠ **v1 → v2 was a CORRECTNESS fix, not a feature.** v1's `median_time_to_first_review_hours`
+  read `pull_requests.first_review_at`, which records whoever reviewed FIRST — so on a
+  workspace where `github-actions[bot]` auto-approves on push it reported **0h across 115 PRs
+  against a real human median of 18.3h**. It is renamed (never redefined in place, so a v1 and
+  a v2 row can't be subtracted under one key) to `median_time_to_first_human_review_hours` and
+  computed from the `reviews` table with a lane filter. Same release added the human-only twins
+  `human_merged_prs` / `median_human_pr_size_lines` (blended PR size read 68 — Dependabot's 14
+  mixed with the humans' 142, a number no PR resembled) and `automation_merge_share_pct`.
+- **A `_pct` metric MUST join `PCT_METRIC_KEYS`** in the plugin or its forecast projects an
+  impossible number. That is a silent defect, not a compile error.
+- **Seven `ActorLane`s, and the vector's human-only figures come from the same resolver the lane
+  panel does.** Automation contaminates different metrics depending on what it DOES — a
+  dependency bot inflates throughput, a quality gate inflates review counts, an AI reviewer's
+  volume is the only automation volume that means anything. The dependency/`code_agent` split
+  resists collapsing: both author PRs, but a merged bump is overhead and a merged agent PR is
+  delivered work.
+- ⚠ **"Time until a person reviewed it" has ONE fold** (`loadFirstHumanReviewHours`), read by
+  both the vector and the lane panel, which render one directly above the other. They had two,
+  and reported 18.16h and 18.27h on the same screen under a caption saying they were the same
+  measurement — because the lane fold looked only INSIDE the window, so a PR reviewed in an
+  earlier period counted as freshly reviewed. **The all-time lookback is load-bearing** and must
+  not be "optimised" back to the window; the candidate ids travel as BIND PARAMETERS, which is
+  why that scan has its own much smaller cap (`PERIOD_FIRST_REVIEW_PR_CAP`).
+- The automation set is the lane resolver's **UNION** (workspace verdict ∪ `users.isBot` ∪ the
+  login vocabularies, minus manual humans), not `automatedReviewerUserIds` alone — real accounts
+  carry `dependabot` and `dependabot[bot]` as two rows with one of each pair at `automated = 0`,
+  which is what put bot text in `human_review_comments`.
 
 ## ML severity/category on bot comments (CORE, free tier, no LLM)
 
@@ -1076,6 +1170,12 @@ nothing quarantines it; the one live instance of this is fixed at both ends, so 
 now latent rather than firing); **`trunk_ci_status_events` has NO backfill** — the writer only
 appends on a transition observed at the end of a full walk, so the trunk half of the CI feed
 stays blank for a repo until its next full walk (the PR half is populated by
-`backfill-ci-history.ts`, which does not touch the trunk table); and pg `0036`–`0037`, pg
-`0039` + the plugin `0021`/`0022` pg twins have not been replayed against a real Postgres
-(the chain through pg `0035` HAS been — see docs/MIGRATIONS.md).
+`backfill-ci-history.ts`, which does not touch the trunk table); **a manual role on ONE row of a
+duplicated identity re-splits that actor across two lanes** (a human classified
+`github-actions[bot]` and its twin `github-actions` kept the derived role, so one lands in
+`ai_review` and the other in `quality_gate` — a manual judgement is per user row by design, and
+nothing propagates it across the `[bot]`-normalised pair the vocabularies otherwise join); and pg
+`0036`–`0037`, pg `0039`–`0041` + the plugin `0021`/`0022` pg twins have not been replayed
+against a real Postgres (the chain through pg `0035` HAS been — see docs/MIGRATIONS.md). ⚠ pg
+`0040`/`0041` use `regexp_replace(…, '\[bot\]$', '')` where their sqlite twins use `replace()`,
+so they are the divergences worth replaying before a cloud deploy.

@@ -402,3 +402,67 @@ other seed.
   degrade); the fix is to delete the row from `pro_migrations` and restart once the cause is
   cleared.
 - ⚠ The pg twin has not been replayed against a real Postgres.
+
+## `0053` / pg `0040` — re-derive `workspace_reviewers.role` against five vocabularies
+
+Five `UPDATE`s, one per non-review role, over rows whose `source <> 'manual'`. No schema change —
+this is a pure data correction, and it exists because of a read-order property that makes a
+code-only fix insufficient.
+
+- **WHY A MIGRATION AT ALL.** `reviewerRoleForUser` applies the login seed FIRST and lets a stored
+  `workspace_reviewers` row overwrite it. That ordering is correct (an explicit row must beat a
+  default), but it means adding a login to `QUALITY_CHECK_BOTS` — or to any of the four
+  vocabularies introduced alongside `ReviewerRole`'s widening — has **no effect on an actor that
+  has already been classified**, and the lazy classifier stamps a row the first time anyone opens
+  the Bots tab. Any future vocabulary addition needs the same treatment or it only reaches installs
+  that have never used the product.
+- **What it corrected on the dev corpus.** `github-actions` + `github-actions[bot]` held 385
+  submitted reviews and 3,116 comments between them while roled `'review'` — the largest "AI
+  reviewer" in the account's ROI table was a CI runner. `dependabot[bot]` (738 authored PRs) was
+  roled `'review'` too, for an actor that has never reviewed anything.
+- **`source <> 'manual'` is the whole safety condition** — a role a person chose is never
+  re-derived, exactly as migration `0042`'s backfill had it. The judgement half is owned by
+  `source`. ⚠ The flip side is a real, accepted limitation: where a human classified ONE row of a
+  duplicated identity, the pair now splits across two lanes (see the known-gaps list in CLAUDE.md).
+- **It supersedes `0042`'s / pg `0029`'s narrower quality-check list** rather than repeating it.
+- ⚠ **THE ONE DIALECT DIVERGENCE:** sqlite strips the `[bot]` suffix with
+  `replace(lower(github_login), '[bot]', '')`, pg with
+  `regexp_replace(lower("github_login"), '\[bot\]$', '')`. Same operation, each in its dialect's
+  idiom — and the stripping itself is load-bearing, because the same actor exists as two `users`
+  rows with different GitHub node ids and a list covering one spelling splits it across two roles.
+  `replace()` is safe on sqlite because no GitHub login may contain `[` or `]`.
+- ⚠ The pg twin has not been replayed against a real Postgres.
+
+## `0054` / pg `0041` — brand the automations stored as `in_house`
+
+One `UPDATE` per vendor kind (68 of them), over rows whose identity was never set by a human. No
+schema change; a data correction with the same read-order justification as `0053`.
+
+- **WHY.** The classifier had no step between "known AI-reviewer login" and the `githubType`
+  fallback, so every OTHER automation — quality gates, dependency bots, code agents, release and
+  housekeeping bots — was stored as `kind: 'in_house'`, the bucket labelled **"In-house AI"**. On
+  the dev corpus that was 25 of 37 such rows, holding sonarqubecloud, dependabot[bot],
+  github-actions[bot], gitguardian, socket-security, google-cla and jit-ci. They rendered with the
+  same grey chip and the same wrong name on the one screen that exists to classify them. The
+  stored `kind` wins on read, so widening the vocabulary in code alone reaches only installs
+  nobody has opened the Bots tab on.
+- **It covers the AI-REVIEW vendors too**, which was not the original intent — found by checking
+  the result on a live database, where `deepsource-io`, `github-code-quality` and
+  `chatgpt-codex-connector` were also sitting at `in_house` because their rows predate those
+  logins joining `REVIEW_BOTS`. Identical staleness, identical fix.
+- **THE THREE CONDITIONS ARE EACH LOAD-BEARING:**
+  - `identity_source <> 'manual'` — a vendor a HUMAN named is never re-derived. Identity is owned
+    by `identity_source` and judgement by `source`, so this touches only the identity half and
+    leaves a manual "not a bot" verdict on the same row alone.
+  - `kind IN ('in_house','vendor')` — only the UNBRANDED kinds are upgraded. A row already
+    carrying a real brand got it from a stronger signal (a vendor-login or fingerprint hit), and
+    silently overwriting that is how a correction is lost.
+  - `label = NULL` — the label CACHES the kind's display name, and the old rows hold the literal
+    "In-house AI" or the bare login. Leaving it would print "In-house AI" beside a SonarQube chip.
+- ⚠ **The dialect divergence is the same as `0053`**: `replace(lower(…), '[bot]', '')` on sqlite,
+  `regexp_replace(lower(…), '\[bot\]$', '')` on Postgres.
+- **Verified on a live database.** After applying, the only rows left at `in_house` were the ones
+  that should be: four genuinely unknown logins (`cdp-github-action`, `erxes-dev-agent`,
+  `tjpeel-ee`, a user literally named `Copilot`) and nine rows a human had named
+  (`identity_source: 'manual'`), which the guard is there to protect.
+- ⚠ The pg twin has not been replayed against a real Postgres.

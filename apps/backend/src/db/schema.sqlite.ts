@@ -1149,14 +1149,17 @@ export const workspaceReviewers = sqliteTable(
       .references(() => users.id),
     // ── JUDGEMENT (owned by `source`) ──
     automated: integer('automated', { mode: 'boolean' }).notNull(),
-    // ReviewerRole — 'review' (an AI code reviewer) | 'quality_check' (static analysis / coverage
-    // / lint). Just a FLAG ON THIS OBJECT, orthogonal to `kind` (vendor identity): a login keeps
-    // its brand while being marked a linter. `automated` stays TRUE for a quality check, so
-    // exclusion + the feed are unaffected; only the SCORING sets (behaviour, dedup, benchmark,
-    // ROI) treat 'review' as the reviewer cohort. BOT-ONLY PRs DELIBERATELY DO NOT NARROW: that
+    // ReviewerRole — 'review' | 'quality_check' | 'dependency' | 'code_agent' | 'release' |
+    // 'housekeeping'. Just a FLAG ON THIS OBJECT, orthogonal to `kind` (vendor identity): a login
+    // keeps its brand while being marked a linter. `automated` stays TRUE for every automation
+    // role, so exclusion + the feed are unaffected; only the SCORING sets (behaviour, dedup,
+    // benchmark, ROI) narrow, and they narrow to EXACTLY 'review' — never "not quality_check",
+    // which would re-admit all four newer roles. BOT-ONLY PRs DELIBERATELY DO NOT NARROW: that
     // list answers "did a human look at this", and a PR reviewed only by SonarQube is exactly
     // what it exists to surface. NOT NULL DEFAULT 'review' so a row written by an older code path
-    // still means something.
+    // still means something. Migration 0053 re-derives it for every row whose `source` is not
+    // 'manual' — the stored value beats the login seed on read, so a widened vocabulary in code
+    // does nothing for an actor that has already been classified.
     role: text('role').notNull().default('review'),
     confidence: text('confidence').notNull(), // ClassificationConfidence — 'high'|'medium'|'low'
     source: text('source').notNull(), // ClassificationSource; 'manual' is never re-derived

@@ -49,12 +49,18 @@ import type {
   AutomatedReviewerKind,
   ClassificationConfidence,
   ClassificationSource,
+  GenericReviewerKind,
   ReviewBotKind,
   ReviewerClassification,
   ReviewerRole,
 } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
-import { matchesAutomatedLoginPattern, qualityCheckBot, reviewBotKind } from './bot-detection.js';
+import {
+  automationVendorFor,
+  matchesAutomatedLoginPattern,
+  reviewBotKind,
+  roleForBotLogin,
+} from './bot-detection.js';
 import type { ReviewFingerprint } from './review-fingerprint.js';
 import type { BehavioralSignals } from './reviewer-behavior.js';
 
@@ -89,7 +95,12 @@ export type ClassifyOpts = PersistOpts;
 
 // Fallback display labels for the vendor kinds. The frontend's BOT_VENDOR_META is the
 // source of truth for rendering; this is what lands in the persisted `label` column.
-const VENDOR_LABELS: Record<ReviewBotKind, string> = {
+//
+// ⚠ `Record<AutomatedReviewerKind, …>` minus the three generic kinds, so a vendor added to the
+// union without a label here is a COMPILE error rather than a card rendering the raw slug
+// (`deepsource_autofix`) at a user. `labelFor` handles the generics separately because they are
+// deliberately NOT branded — they render by login.
+const VENDOR_LABELS: Record<Exclude<AutomatedReviewerKind, GenericReviewerKind>, string> = {
   coderabbit: 'CodeRabbit',
   greptile: 'Greptile',
   copilot: 'Copilot',
@@ -107,13 +118,84 @@ const VENDOR_LABELS: Record<ReviewBotKind, string> = {
   github_code_quality: 'GitHub Code Quality',
   github_advanced_security: 'GitHub Advanced Security',
   codex: 'Codex',
+  // Quality gates, scanners and CI
+  sonarqube: 'SonarQube',
+  codecov: 'Codecov',
+  codeclimate: 'Code Climate',
+  codefactor: 'CodeFactor',
+  hound: 'Hound',
+  coveralls: 'Coveralls',
+  codacy: 'Codacy',
+  github_actions: 'GitHub Actions',
+  jit: 'Jit',
+  socket: 'Socket',
+  gitguardian: 'GitGuardian',
+  semgrep: 'Semgrep',
+  trunk: 'Trunk',
+  // Dependency & version bumps
+  dependabot: 'Dependabot',
+  renovate: 'Renovate',
+  snyk: 'Snyk',
+  pyup: 'PyUp',
+  greenkeeper: 'Greenkeeper',
+  depfu: 'Depfu',
+  // Code agents — automation that writes code
+  sweep: 'Sweep',
+  codegen: 'Codegen',
+  deepsource_autofix: 'DeepSource Autofix',
+  pre_commit_ci: 'pre-commit.ci',
+  restyled: 'Restyled',
+  imgbot: 'ImgBot',
+  transifex: 'Transifex',
+  crowdin: 'Crowdin',
+  mintlify: 'Mintlify',
+  allstar: 'Allstar',
+  // Release & merge automation
+  mergify: 'Mergify',
+  kodiak: 'Kodiak',
+  bulldozer: 'Bulldozer',
+  release_please: 'Release Please',
+  semantic_release: 'semantic-release',
+  release_drafter: 'Release Drafter',
+  changesets: 'Changesets',
+  backport: 'Backport bot',
+  // Housekeeping — process, compliance, metadata
+  cla_assistant: 'CLA Assistant',
+  google_cla: 'Google CLA',
+  meta_cla: 'Meta CLA',
+  dco: 'DCO',
+  stale_bot: 'Stale bot',
+  welcome_bot: 'Welcome bot',
+  lock_bot: 'Lock bot',
+  allcontributors: 'All Contributors',
+  semantic_pr: 'Semantic PR',
+  sizebot: 'Size bot',
+  codesandbox: 'CodeSandbox',
+  netlify: 'Netlify',
+  vercel: 'Vercel',
+  gitpod: 'Gitpod',
+};
+
+// What to call each role in a human-readable `reasons` line. "…is a known Dependabot dependency
+// bot" reads as a classification; the old "…is a known Dependabot review bot" read as a mistake,
+// because it was one.
+const ROLE_NOUN: Record<ReviewerRole, string> = {
+  review: 'review bot',
+  quality_check: 'quality check',
+  dependency: 'dependency bot',
+  code_agent: 'code agent',
+  release: 'release automation',
+  housekeeping: 'housekeeping bot',
 };
 
 // Exported so the query layer (db/queries.ts) labels analytics/dedup groupings from the
 // same source of truth as the persisted classification `label`.
 export function labelFor(kind: AutomatedReviewerKind): string {
   if (kind === 'pierre') return 'Limn · Claude';
-  if (kind === 'in_house') return 'In-house AI';
+  // ⚠ "In-house / custom", NOT "In-house AI". The kind is the fallback for EVERY role now, so an
+  // unbranded quality gate or CLA bot lands here — and calling those "In-house AI" is how the
+  // bucket got its reputation for being wrong. It is the role-neutral escape hatch.
+  if (kind === 'in_house') return 'In-house / custom';
   if (kind === 'vendor') return 'Vendor';
   return VENDOR_LABELS[kind] ?? kind;
 }
@@ -167,13 +249,20 @@ function behavioralVerdict(
 // caller that wants both facts reads both columns and states which flag governs the one it uses;
 // the query layer does exactly that.
 
-// The DEFAULT role for a login nobody has classified by hand: 'quality_check' for the known
-// static-analysis / coverage automations, else 'review'.
+// The DEFAULT role for a login nobody has classified by hand: whichever of the five automation
+// vocabularies claims it, else 'review'.
+//
+// ⚠ THE `'review'` FALLBACK IS NOT A CLAIM THAT AN UNKNOWN BOT REVIEWS — it is the historical
+// default, kept so an unrecognised vendor keeps its row in the ROI table where a user can see and
+// reclassify it. Defaulting an unknown automation to a non-review role would make it VANISH from
+// the one panel that exists to correct it. (`resolveActorLanes` makes the opposite choice for the
+// same input, and the asymmetry is deliberate: it declines to CREDIT an unknown as a reviewer,
+// which costs nothing, whereas hiding it here would cost the user the fix.)
 //
 // This is DERIVED, never carried in from the caller, and that is deliberate — see the landmine
 // on persist() below.
 export function defaultRoleFor(login: string): ReviewerRole {
-  return qualityCheckBot(login) ? 'quality_check' : 'review';
+  return roleForBotLogin(login) ?? 'review';
 }
 
 // The narrowed ON CONFLICT `set:` — every column optional EXCEPT `updatedAt`, which is what makes
@@ -397,7 +486,7 @@ export async function classifyReviewer(
   const login = user.githubLogin;
   const fp = evidence.fingerprint;
 
-  // 1. Known vendor login.
+  // 1. Known vendor login — an AI REVIEWER.
   const vendor = reviewBotKind(login);
   if (vendor) {
     return persist(
@@ -412,6 +501,40 @@ export async function classifyReviewer(
         confidence: 'high',
         source: 'vendor_login',
         reasons: [`login "${login}" is a known ${labelFor(vendor)} review bot`],
+      },
+      opts,
+    );
+  }
+
+  // 1b. Known vendor login — any OTHER automation family (quality gate, dependency bot, code
+  // agent, release or housekeeping automation).
+  //
+  // ⚠ THIS STEP MUST SIT ABOVE STEP 2, and its absence is why every non-reviewer integration used
+  // to render as "In-house AI". Step 2 fires on `githubType === 'Bot'`, which is true of all of
+  // these, and assigns `fp?.tool ?? 'in_house'` — so SonarQube, Dependabot, github-actions,
+  // GitGuardian, Socket, Google CLA and Jit all landed in the bucket literally labelled with
+  // another vendor's job description (25 of 37 such rows on the dev corpus). The user could not
+  // tell them apart on the one screen that exists to classify them.
+  //
+  // The `reasons` string says what the actor DOES rather than calling it a review bot — the
+  // difference between a classification a user trusts and one they immediately correct.
+  const automation = automationVendorFor(login);
+  if (automation) {
+    return persist(
+      accountId,
+      workspaceIds,
+      {
+        userId: user.id,
+        login,
+        automated: true,
+        kind: automation.kind,
+        label: labelFor(automation.kind),
+        confidence: 'high',
+        source: 'vendor_login',
+        reasons: [
+          `login "${login}" is a known ${labelFor(automation.kind)} ` +
+            `${ROLE_NOUN[automation.role]}`,
+        ],
       },
       opts,
     );
@@ -476,7 +599,7 @@ export async function classifyReviewer(
         login,
         automated: true,
         kind: 'in_house',
-        label: allowlistMatch ? login : 'In-house AI',
+        label: allowlistMatch ? login : 'In-house / custom',
         confidence: 'medium',
         source: 'behavioral',
         reasons: beh.reasons,

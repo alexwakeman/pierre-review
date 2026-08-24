@@ -6,7 +6,13 @@ import type {
   WorkspaceReviewer,
   WorkspaceReviewerPatchBody,
 } from '@pierre-review/shared';
-import { automatedReviewerMeta, BOT_VENDOR_META } from '../../lib/ui.js';
+import {
+  REVIEWER_ROLES,
+  REVIEWER_ROLE_LABEL,
+  roleForVendorKind,
+  vendorKindsForRole,
+} from '@pierre-review/shared';
+import { automatedReviewerMeta } from '../../lib/ui.js';
 import {
   costEditOutcome,
   costStateOf,
@@ -35,7 +41,6 @@ import { useBotColors } from '../../hooks/useBotColors.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { SectionShell, inputCls } from './ui.js';
 
-const ALL_KINDS = Object.keys(BOT_VENDOR_META) as AutomatedReviewerKind[];
 const MAX_SEARCH_MATCHES = 8;
 // How many repo chips a card prints before collapsing to "+N more". The full list stays in the
 // element's `title`, so the blast radius is never actually hidden — only wrapped.
@@ -46,6 +51,29 @@ const MAX_REPO_CHIPS = 8;
 // and the row read as a form, not a list. This is the same chrome with the width left off.
 const FIELD_CLS =
   'rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100';
+
+// What each role MEANS, in terms of the consequence the user is choosing. Every string names the
+// lane the actor lands in on the period report, because that consequence is otherwise two screens
+// away and is the reason most people open this picker at all.
+//
+// ⚠ ONLY `review` KEEPS THE ACTOR IN THE BOT-ROI / behaviour / dedup / benchmark metrics. The
+// other five all remove it, differing in how the period report ATTRIBUTES its work — which is a
+// real distinction (a merged agent PR is delivered work, a merged Dependabot bump is overhead)
+// and not five ways of saying "ignore this".
+const ROLE_HELP: Record<ReviewerRole, string> = {
+  review:
+    'A real AI code reviewer. The only role counted in the ROI, behaviour and dedup metrics; its comments read as review substance.',
+  quality_check:
+    'Static analysis, coverage, scanners, CI. Posts verdicts rather than findings — visible in the feed, excluded from the review-bot metrics.',
+  dependency:
+    'Version bumps (Dependabot, Renovate). Authors PRs and never reviews, so its merges are reported as overhead rather than as team throughput.',
+  code_agent:
+    'Writes code that is not a bump — agents, autofix, generated-content sync. Its merged PRs are reported as delivered work that no person typed.',
+  release:
+    'Merge queues, release trains, changelogs, backports. Moves code without writing or judging any; its approvals are governance, not review.',
+  housekeeping:
+    'CLA/DCO, triage, labels, stale-closers, size and preview reports. Its volume is noise in every review metric.',
+};
 
 /** Everything a card can write, minus the key the parent already holds. */
 type ReviewerPatch = Omit<WorkspaceReviewerPatchBody, 'workspaceId'>;
@@ -229,12 +257,14 @@ export function DetectedReviewersTable({
             onResetIdentity={(userId) => resetIdentity.mutate({ userId, workspaceId })}
           />
 
-          {/* Quality checks get their own list rather than being hidden: a mis-role must be
-              discoverable ("why did SonarQube vanish from the ROI table?") and re-rolable in
-              place. */}
+          {/* Non-reviewer automation gets its own list rather than being hidden: a mis-role must
+              be discoverable ("why did SonarQube vanish from the ROI table?") and re-rolable in
+              place. Each row states its own role, so the heading no longer claims they are all
+              quality checks — the list also holds dependency bots, code agents, release
+              automation and housekeeping. */}
           <ReviewerList
-            heading="Quality checks"
-            note="Static analysis / coverage / lint — still visible in the feed, excluded from the review-bot metrics."
+            heading="Other automation"
+            note="Quality gates, dependency bots, code agents, release and housekeeping automation — still visible in the feed, excluded from the review-bot metrics."
             reviewers={buckets.qualityChecks}
             workspaceSeatCount={workspaceSeatCount}
             repoName={repoName}
@@ -470,17 +500,22 @@ function ReviewerCard({
   // concluded its buttons were unwired. In a codebase navigated by grep, an ungreppable file is
   // a real hazard. U+001F is equally impossible in a vendor kind or a GitHub display name.
   const SEP = '\u001f';
-  const [seed, setSeed] = useState(`${serverKind}${SEP}${r.label}`);
-  const nextSeed = `${serverKind}${SEP}${r.label}`;
+  const [role, setRole] = useState<ReviewerRole>(r.role);
+  // The render-phase re-seed, extended to the role. Same rule as the vendor and label above: when
+  // the SERVER's value changes under us (a save landing, a refetch, another tab) the local draft
+  // is replaced — otherwise an applied role would keep showing the old draft and the "Apply role"
+  // button would stay lit forever.
+  const [seed, setSeed] = useState(`${serverKind}${SEP}${r.label}${SEP}${r.role}`);
+  const nextSeed = `${serverKind}${SEP}${r.label}${SEP}${r.role}`;
   if (seed !== nextSeed) {
     setSeed(nextSeed);
     setKind(serverKind);
     setLabel(r.label);
+    setRole(r.role);
   }
 
   const color = botColor({ login: r.login, kind: serverKind });
   const identityDirty = kind !== serverKind || label !== r.label;
-  const isQuality = r.role === 'quality_check';
   const f = r.footprint;
   const footprints = r.repoFootprints;
   const shownRepos = footprints.slice(0, MAX_REPO_CHIPS);
@@ -565,17 +600,137 @@ function ReviewerCard({
         </div>
       )}
 
+      {/* ── JUDGEMENT (provenance: source) ── */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {r.automated ? (
+          <>
+            {/* ⚠ A SELECT, NOT THE TWO-WAY TOGGLE THIS USED TO BE. The toggle read
+                `role: isQuality ? 'review' : 'quality_check'`, which can express exactly two of
+                the six roles — and, worse, would have silently RE-ROLED any of the four newer
+                ones to `quality_check` on a single click, because everything that was not
+                `quality_check` was assumed to be `review`.
+
+                The label under it names the lane this choice puts the actor in on the period
+                report, because that is the consequence a user is actually choosing and it is
+                otherwise two screens away. */}
+            <label className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+              <span className="sr-only">Role in this Workspace</span>
+              <select
+                disabled={busy}
+                value={role}
+                onChange={(e) => setRole(e.target.value as ReviewerRole)}
+                title={ROLE_HELP[role]}
+                className="rounded border border-gray-300 bg-transparent px-1.5 py-0.5 text-[11px] font-medium text-gray-600 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
+              >
+                {REVIEWER_ROLES.map((k) => (
+                  <option key={k} value={k}>
+                    {REVIEWER_ROLE_LABEL[k]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {/* ⚠ THE WRITE IS BEHIND AN EXPLICIT BUTTON, AND THIS IS NOT STYLE PEDANTRY.
+                The first cut wrote on the select's `change` event. That is a PERSISTENT,
+                provenance-stamping write — it stamps `source: 'manual'`, which means the
+                classifier will never re-derive the row again and only an explicit "Reset
+                classification" undoes it. A `change` event is not a deliberate act: a scroll
+                wheel over a focused select, an arrow key, or the browser restoring form state on
+                a reload all fire one. It happened during development — a live row went from
+                `review` to `housekeeping` with nobody choosing it — which is exactly the class of
+                accident a metric cohort should not be one stray event away from.
+                The identity half already works this way ("Save name"); so does this now. */}
+            {role !== r.role && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  onPatch(r.userId, {
+                    // `automated: true` rides along with the role so the row is stamped a human
+                    // judgement in one write. It is already true on this branch, so it changes
+                    // nothing but the provenance — which is the point of pressing a button.
+                    automated: true,
+                    role,
+                  })
+                }
+                title={ROLE_HELP[role]}
+                className="rounded bg-sky-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:opacity-40"
+              >
+                Apply role
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onPatch(r.userId, { automated: false })}
+              title="Stop treating this reviewer as automated in this Workspace — every repo in it. Its vendor name and price are kept, and your other Workspaces are unaffected."
+              className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Not a bot in this Workspace
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onPatch(r.userId, { automated: true })}
+            title="Treat this reviewer as automated again in this Workspace — every repo in it. Your other Workspaces are unaffected."
+            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            Treat as a review bot
+          </button>
+        )}
+        {/* THE WAY BACK for the judgement half, shown ONLY once a human has pinned it. Both buttons
+            above stamp `source: 'manual'`, which is what stops the next detection pass silently
+            reverting the edit — and also what makes it permanent without this. Pressing one of them
+            AGAIN undoes nothing: the row stays pinned, just on the new value. */}
+        {r.isManualOverride && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onResetJudgement(r.userId)}
+            title="Forget your bot / not-a-bot and review / quality-check judgement for this Workspace and let detection decide again. The vendor name and the price are untouched."
+            className="rounded border border-dashed border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+          >
+            Reset classification
+          </button>
+        )}
+      </div>
+      {/* On screen rather than only on hover: the reset is the half of the model that is not
+          guessable from the buttons. */}
+      {r.isManualOverride && (
+        <p className="text-[10px] text-gray-400">
+          Set by you — detection will not change it in this Workspace until you reset. Resetting
+          keeps the bot&apos;s{' '}
+          <span className="font-medium text-gray-500 dark:text-gray-300">name and price</span>.
+        </p>
+      )}
+
       {/* ── IDENTITY (provenance: identitySource) ── */}
       <div className="flex flex-wrap items-center gap-1.5">
+        {/* ⚠ SCOPED TO THE ROLE ABOVE, and the whole ~70-brand list is deliberately NOT offered.
+            A user who has just said "this is a quality check" is looking for SonarQube, not
+            scrolling past CodeRabbit, Dependabot and a CLA bot to reach it — and an ungrouped
+            list is also how a quality gate ends up tagged with a review vendor's brand.
+
+            ⚠ `kind` IS PASSED AS `current` FOR A CORRECTNESS REASON, not a cosmetic one. A
+            `<select>` whose `value` is absent from its options renders the FIRST option instead,
+            so the card would display a vendor the row does not hold — and "Save name" would then
+            write that wrong vendor. Role and identity are independently owned halves, so a row
+            legitimately carries a vendor from another family (someone marks CodeRabbit a quality
+            check without renaming it), and the stored value has to stay selectable. */}
         <select
           className={`${FIELD_CLS} w-auto py-0.5`}
           value={kind}
           onChange={(e) => setKind(e.target.value as AutomatedReviewerKind)}
           aria-label={`Vendor for ${r.login} in this Workspace`}
         >
-          {ALL_KINDS.map((k) => (
+          {vendorKindsForRole(role, kind).map((k) => (
             <option key={k} value={k}>
               {automatedReviewerMeta(k).label}
+              {/* Name the mismatch rather than hiding it — see `current` above. */}
+              {roleForVendorKind(k) != null && roleForVendorKind(k) !== role
+                ? ` (${REVIEWER_ROLE_LABEL[roleForVendorKind(k)!].toLowerCase()})`
+                : ''}
             </option>
           ))}
         </select>
@@ -623,78 +778,6 @@ function ReviewerCard({
           Reset hands the vendor and label back to detection for this Workspace —{' '}
           <span className="font-medium text-gray-500 dark:text-gray-300">the price is kept</span>,
           and the bot / not-a-bot verdict does not change.
-        </p>
-      )}
-
-      {/* ── JUDGEMENT (provenance: source) ── */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {r.automated ? (
-          <>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                onPatch(r.userId, {
-                  // `automated: true` rides along with the role so the row is stamped a human
-                  // judgement in one write. It is already true on this branch, so it changes
-                  // nothing but the provenance — which is the point of pressing a button.
-                  automated: true,
-                  role: (isQuality ? 'review' : 'quality_check') satisfies ReviewerRole,
-                })
-              }
-              title={
-                isQuality
-                  ? 'Treat it as a real AI code reviewer in this Workspace — it re-enters the ROI, behaviour and dedup metrics.'
-                  : 'Treat it as static analysis / coverage / lint in this Workspace. Stays visible in the feed, but is excluded from the review-bot metrics.'
-              }
-              className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
-              {isQuality ? 'Treat as a review bot' : 'Mark as a quality check'}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onPatch(r.userId, { automated: false })}
-              title="Stop treating this reviewer as automated in this Workspace — every repo in it. Its vendor name and price are kept, and your other Workspaces are unaffected."
-              className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
-              Not a bot in this Workspace
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onPatch(r.userId, { automated: true })}
-            title="Treat this reviewer as automated again in this Workspace — every repo in it. Your other Workspaces are unaffected."
-            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-          >
-            Treat as a review bot
-          </button>
-        )}
-        {/* THE WAY BACK for the judgement half, shown ONLY once a human has pinned it. Both buttons
-            above stamp `source: 'manual'`, which is what stops the next detection pass silently
-            reverting the edit — and also what makes it permanent without this. Pressing one of them
-            AGAIN undoes nothing: the row stays pinned, just on the new value. */}
-        {r.isManualOverride && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onResetJudgement(r.userId)}
-            title="Forget your bot / not-a-bot and review / quality-check judgement for this Workspace and let detection decide again. The vendor name and the price are untouched."
-            className="rounded border border-dashed border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
-          >
-            Reset classification
-          </button>
-        )}
-      </div>
-      {/* On screen rather than only on hover: the reset is the half of the model that is not
-          guessable from the buttons. */}
-      {r.isManualOverride && (
-        <p className="text-[10px] text-gray-400">
-          Set by you — detection will not change it in this Workspace until you reset. Resetting
-          keeps the bot&apos;s{' '}
-          <span className="font-medium text-gray-500 dark:text-gray-300">name and price</span>.
         </p>
       )}
 

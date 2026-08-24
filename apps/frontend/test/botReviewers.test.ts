@@ -75,6 +75,28 @@ describe('bucketReviewers — three lists, one row per actor', () => {
     expect(b.markedNotBots).toEqual([]);
   });
 
+  // ⚠ THE COHORT TEST IS `=== 'review'`, NOT `!== 'quality_check'`.
+  //
+  // Those were the same answer while `review` and `quality_check` were the only two roles, and
+  // they stopped being the same answer the moment the union widened. Written the old way, every
+  // one of the four newer roles falls into `reviewBots` — the list whose entire purpose is "the
+  // reviewers every bot metric counts" — so Dependabot would appear as a review bot on the
+  // settings screen while the period report correctly filed it as a dependency lane.
+  it('keeps EVERY non-review role out of the reviewer cohort, not just quality_check', () => {
+    const b = bucketReviewers([
+      reviewer({ userId: 1, role: 'review' }),
+      reviewer({ userId: 2, role: 'quality_check' }),
+      reviewer({ userId: 3, role: 'dependency' }),
+      reviewer({ userId: 4, role: 'code_agent' }),
+      reviewer({ userId: 5, role: 'release' }),
+      reviewer({ userId: 6, role: 'housekeeping' }),
+    ]);
+    expect(b.reviewBots.map((r) => r.userId)).toEqual([1]);
+    // The bucket's NAME is historical and narrower than its contents — it now holds every
+    // non-reviewer automation. See the note on `ReviewerBuckets.qualityChecks`.
+    expect(b.qualityChecks.map((r) => r.userId)).toEqual([2, 3, 4, 5, 6]);
+  });
+
   // ⚠ ONE ROW PER ACTOR IS THE WHOLE POINT OF THE COLLAPSE. A vendor running in six of the
   // workspace's repos is ONE card whose `repoFootprints` names all six — not six cards to group,
   // and not a list something has to dedupe.

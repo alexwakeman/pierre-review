@@ -489,7 +489,14 @@ describe('quality-check role', () => {
     // ONE row carries the judgement, the identity and the price. There is no second table to
     // upsert into any more, and no second conflict target to get wrong.
     expect(rows).toHaveLength(1);
-    expect(rows[0].kind).toBe('in_house');
+    // ⚠ `sonarqube`, not `in_house`. This assertion used to read `in_house` and was CORRECT then:
+    // the classifier had no step between the AI-reviewer login check and the githubType fallback,
+    // so every non-reviewer integration was stored in the bucket labelled "In-house AI" — 25 of
+    // 37 such rows on the dev corpus. Step 1b now brands them from the vendor table, which is the
+    // whole point of that step and is why this line moved.
+    expect(rows[0].kind).toBe('sonarqube');
+    // And the LABEL follows the brand rather than staying at the login or the old bucket name.
+    expect(rows[0].label).toBe('SonarQube');
   });
 
   it('seeds a known quality-check login with role=quality_check, still automated', async () => {

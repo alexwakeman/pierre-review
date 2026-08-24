@@ -94,6 +94,14 @@ beforeAll(async () => {
   await mkUser('unknownApp', 'some-ci-app', true);
   // A human a person explicitly vouched for, whose login LOOKS bot-ish.
   await mkUser('manualHuman', 'buildmaster', true);
+  // ── The lanes added alongside the wider ReviewerRole ─────────────────────────────────────
+  await mkUser('agent', 'devin-ai-integration[bot]', true);
+  await mkUser('mergeQueue', 'mergify[bot]', true);
+  await mkUser('cla', 'google-cla', true);
+  // Vocabulary says code_agent; a HUMAN said it reviews. The human must win.
+  await mkUser('reclassified', 'imgbot', true);
+  // No vocabulary knows this login; a human roled it by hand. Nothing else can place it.
+  await mkUser('manualAgent', 'acme-helper', true);
 
   // Stored verdicts, mirroring the live shapes:
   //  - the App half of each duplicate is `automated: 1`, the bare half is NOT classified at all
@@ -119,6 +127,16 @@ beforeAll(async () => {
       rv({ authorUserId: id.rabbit, kind: 'coderabbit' }),
       rv({ authorUserId: id.unknownApp, kind: 'in_house' }),
       rv({ authorUserId: id.manualHuman, automated: false, source: 'manual', kind: null }),
+      // ⚠ `role: 'review'` AND `source: 'github_type'` — a DERIVED default, not a judgement.
+      // This is the shape every already-classified actor carries on an install that predates the
+      // wider role union, and it is the reason migration 0053 exists. The login vocabulary must
+      // beat it, or a code agent stays filed under AI review forever.
+      rv({ authorUserId: id.agent, kind: 'in_house' }),
+      rv({ authorUserId: id.mergeQueue, kind: 'in_house' }),
+      rv({ authorUserId: id.cla, kind: 'in_house' }),
+      // A human overruling the vocabulary, and a human placing a login the vocabulary cannot.
+      rv({ authorUserId: id.reclassified, role: 'review', source: 'manual', kind: 'vendor' }),
+      rv({ authorUserId: id.manualAgent, role: 'code_agent', source: 'manual', kind: null }),
     ])
     .execute();
 });
@@ -158,11 +176,18 @@ describe('resolveActorLanes', () => {
   it('keeps the AI-review lane to actors that genuinely review', async () => {
     const r = await resolve();
     expect(r.laneOf(id.rabbit)).toBe('ai_review');
-    // …and nothing else leaked in.
+    // …and nothing leaked in that a person did not put there.
+    //
+    // `reclassified` (login `imgbot`, in CODE_AGENT_BOTS) is here ON PURPOSE: a human marked it a
+    // review bot in this workspace, and a manual judgement is the one signal that outranks the
+    // vocabularies. It is the ONLY member of this lane besides the genuine vendor, which is the
+    // real assertion — an actor reaches `ai_review` by being a known reviewer or by someone
+    // saying so, and never by falling through a default.
     const aiIds = [...r.lane.entries()]
       .filter(([, lane]: [number, string]) => lane === 'ai_review')
-      .map(([userId]: [number, string]) => userId);
-    expect(aiIds).toEqual([id.rabbit]);
+      .map(([userId]: [number, string]) => userId)
+      .sort((a: number, b: number) => a - b);
+    expect(aiIds).toEqual([id.rabbit!, id.reclassified!].sort((a, b) => a - b));
   });
 
   it('routes a quality gate by its stored role, not its brand', async () => {
@@ -184,6 +209,64 @@ describe('resolveActorLanes', () => {
     const r = await resolve();
     expect(r.laneOf(id.manualHuman)).toBe('human');
     expect(r.automatedIds.has(id.manualHuman)).toBe(false);
+  });
+
+
+  // ── The lanes and precedence rules added with the wider ReviewerRole ────────────────────
+  it('routes each new automation family to its own lane', async () => {
+    const r = await resolve();
+    expect(r.laneOf(id.agent)).toBe('code_agent');
+    expect(r.laneOf(id.mergeQueue)).toBe('release');
+    expect(r.laneOf(id.cla)).toBe('housekeeping');
+  });
+
+  // ⚠ THE RULE MIGRATION 0053 EXISTS TO SUPPORT, asserted from the other side.
+  it('lets a known login beat a DERIVED `review` role', async () => {
+    // `agent` carries `role: 'review'` with `source: 'github_type'` — the shape every actor
+    // classified before the role union widened still has in the database. That stored byte means
+    // "we had no other option", not "this reviews", so it must not out-rank a login we
+    // positively recognise. If it did, Devin would sit in the AI-review lane on every existing
+    // install no matter how many vocabularies were added to the code.
+    const r = await resolve();
+    expect(r.laneOf(id.agent)).not.toBe('ai_review');
+    expect(r.laneOf(id.agent)).toBe('code_agent');
+  });
+
+  // ...and the exact opposite when a PERSON typed it.
+  it('lets a MANUAL role beat the login vocabulary, in both directions', async () => {
+    const r = await resolve();
+    // `imgbot` is in CODE_AGENT_BOTS, but a human marked it a review bot in this workspace.
+    // Same stored column as the case above, opposite provenance, opposite answer — which is
+    // exactly why `manualRoleUserIds` reads `source` rather than the resolver trusting `role`.
+    expect(r.laneOf(id.reclassified)).toBe('ai_review');
+    // `acme-helper` is in no vocabulary at all; without the manual role it would fall through to
+    // the quality-gate default. The user's choice is the only thing that can place it.
+    expect(r.laneOf(id.manualAgent)).toBe('code_agent');
+    expect(r.laneOf(id.manualAgent)).not.toBe('quality_gate');
+  });
+
+  it('mirrors the shared REVIEWER_ROLE_LANE map exactly', async () => {
+    // The backend cannot value-import shared at runtime, so the role -> lane map is spelled in
+    // both packages. A test can import shared for real, which is what keeps them identical: a
+    // drift here would file a user's chosen role under a different lane than the picker promised.
+    const { REVIEWER_ROLE_LANE, REVIEWER_ROLES, ACTOR_LANES } = await import(
+      '@pierre-review/shared'
+    );
+    const al = await import('./actor-lanes.js');
+    // Every role maps to a real lane, and no role maps to `human` — a human is not a reviewer.
+    for (const role of REVIEWER_ROLES) {
+      expect(ACTOR_LANES).toContain(REVIEWER_ROLE_LANE[role]);
+      expect(REVIEWER_ROLE_LANE[role]).not.toBe('human');
+    }
+    // And every lane except `human` is reachable from some role, so no lane is undrawable.
+    const reachable = new Set(
+      REVIEWER_ROLES.map((role) => REVIEWER_ROLE_LANE[role] as string),
+    );
+    for (const lane of ACTOR_LANES) {
+      if (lane === 'human') continue;
+      expect(reachable.has(lane), `lane '${lane}' has no role that produces it`).toBe(true);
+    }
+    expect(typeof al.resolveActorLanes).toBe('function');
   });
 
   it('reports every automated id it classified, and no humans', async () => {

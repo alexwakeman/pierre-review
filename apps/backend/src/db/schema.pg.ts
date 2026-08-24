@@ -905,7 +905,9 @@ export const workspaceReviewers = pgTable(
       .references(() => users.id),
     // ── JUDGEMENT (owned by `source`) ──
     automated: boolean('automated').notNull(),
-    // ReviewerRole — 'review' | 'quality_check'. A flag on this object, orthogonal to `kind`.
+    // ReviewerRole — 'review' | 'quality_check' | 'dependency' | 'code_agent' | 'release' |
+    // 'housekeeping'. A flag on this object, orthogonal to `kind`. The scoring sets narrow to
+    // EXACTLY 'review'; see the sqlite twin for the full note and for migration 0053.
     role: text('role').notNull().default('review'),
     confidence: text('confidence').notNull(), // ClassificationConfidence — 'high'|'medium'|'low'
     source: text('source').notNull(), // ClassificationSource; 'manual' is never re-derived

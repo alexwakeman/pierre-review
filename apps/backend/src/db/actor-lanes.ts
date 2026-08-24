@@ -1,4 +1,4 @@
-// WHO DID THE WORK — the four lanes, resolved per user id for one workspace.
+// WHO DID THE WORK — the seven lanes, resolved per user id for one workspace.
 //
 // The period report's twelve metrics answer "what happened"; this answers "how much of it was a
 // person". Both are needed, because on a real workspace the blend is severe enough to make the
@@ -10,20 +10,28 @@
 //   That 68 is not a compromise between two numbers, it is a number no pull request in that
 //   workspace resembled, and it understated real human PR size by 2.1×.
 //
-// ── WHY FOUR LANES AND NOT "BOT vs HUMAN" ────────────────────────────────────────────────────
+// ── WHY LANES AND NOT "BOT vs HUMAN" ─────────────────────────────────────────────────────────
 //
 // Because automation contaminates DIFFERENT metrics depending on what it does, and one bucket
 // cannot tell those apart:
 //
-//   • a DEPENDENCY bot authors PRs   → distorts throughput, lead time, PR size
-//   • a QUALITY GATE responds/approves → distorts review counts and approvals
-//   • an AI REVIEWER writes findings   → the only automation whose review volume means anything
+//   • a DEPENDENCY bot authors bumps   → distorts throughput, lead time, PR size
+//   • a CODE AGENT authors real changes → distorts the same metrics and means the OPPOSITE
+//   • a QUALITY GATE responds/approves  → distorts review counts and approvals
+//   • an AI REVIEWER writes findings    → the only automation whose review volume means anything
+//   • RELEASE automation merges/tags    → its merges are governance events, not work
+//   • HOUSEKEEPING greets and labels    → pure noise in every one of the above
 //
 // "Your throughput is inflated by bumps" and "your approvals are automated" are different
 // problems with different fixes, and a single `isBot` flag can state neither. The same workspace
 // showed SonarQube posting 786 comments — every one of them a "Quality Gate Passed/Failed" badge
 // — so folding its volume in with an AI reviewer's findings would report 786 pieces of feedback
 // where there were none.
+//
+// The dependency/code-agent split is the one that most resists being collapsed back: both author
+// pull requests, so any "bot vs human" view puts them together, and yet a merged Dependabot bump
+// is overhead a team absorbed while a merged agent PR is work it shipped. A single "automation
+// authored 40% of merges" figure that mixes them tells the reader nothing they can act on.
 //
 // ── THE DUPLICATE-IDENTITY DEFENCE ───────────────────────────────────────────────────────────
 //
@@ -39,13 +47,14 @@
 // A genuine manual "this is a person" still wins (that rule is load-bearing elsewhere and is not
 // weakened here); what does not win is the mere ABSENCE of an automated verdict.
 import { inArray } from 'drizzle-orm';
-import type { ActorLane } from '@pierre-review/shared';
+import type { ActorLane, ReviewerRole } from '@pierre-review/shared';
 import { db, schema } from './client.js';
-import { dependencyBot, qualityCheckBot } from '../sync/bot-detection.js';
+import { roleForBotLogin } from '../sync/bot-detection.js';
 import {
   automatedReviewerUserIds,
   classificationKindForUser,
   manualHumanUserIds,
+  manualRoleUserIds,
   reviewerRoleForUser,
   type BotScope,
 } from './queries.js';
@@ -92,6 +101,20 @@ const AI_REVIEW_KINDS = new Set<string>([
 // choice stated in `resolveActorLanes`: under-claiming an AI reviewer costs nothing anyone acts
 // on, over-claiming one corrupts the single number a team would use to cancel a subscription.
 
+// MIRRORED from `REVIEWER_ROLE_LANE` in @pierre-review/shared — the backend cannot import shared
+// at RUNTIME (a value import fails the release build), so the map is spelled twice and
+// `actor-lanes.test.ts` asserts the two are identical. It is deliberately 1:1: a user who picks
+// "Release automation" and finds the actor filed under "Quality gate" has been told their choice
+// did not take.
+const ROLE_LANE: Record<ReviewerRole, Exclude<ActorLane, 'human'>> = {
+  review: 'ai_review',
+  quality_check: 'quality_gate',
+  dependency: 'dependency',
+  code_agent: 'code_agent',
+  release: 'release',
+  housekeeping: 'housekeeping',
+};
+
 export interface ActorLanes {
   /** Lane per user id, for every actor with a classification signal. Absent ⇒ `human`. */
   lane: Map<number, ActorLane>;
@@ -105,29 +128,41 @@ export interface ActorLanes {
  *
  * ORDER IS THE CONTRACT, because the categories genuinely overlap — `github-advanced-security` is
  * a scanner with a vendor brand, SonarQube is a quality check that some accounts have classified
- * by hand. Earlier rules win:
+ * by hand, and Copilot both reviews and (elsewhere) authors. Earlier rules win:
  *
- *   1. no automation signal at all            → human
- *   2. stored role `quality_check`            → quality_gate   (an explicit human judgement)
- *   3. known dependency login                 → dependency
- *   4. known quality-check login              → quality_gate
- *   5. vendor kind in AI_REVIEW_KINDS         → ai_review
- *   6. anything else automated                → quality_gate   (CI scripts, github-actions)
+ *   1. manual "this is a person"              → human          (nothing overrules it)
+ *   2. no automation signal at all            → human
+ *   3. MANUAL role                            → that role's lane
+ *   4. known login vocabulary                 → that role's lane
+ *   5. stored role other than 'review'        → that role's lane   (a seed we derived)
+ *   6. vendor kind in AI_REVIEW_KINDS         → ai_review
+ *   7. anything else automated                → quality_gate   (CI scripts, unknown apps)
  *
- * Rule 6 is deliberately NOT `ai_review`: an unrecognised automation is far more likely to be a
- * CI script than a reviewer, and the cost of the two mistakes is asymmetric. Miscounting a script
- * as a quality gate understates nothing anyone acts on; miscounting it as an AI reviewer inflates
- * the one number a team would use to judge whether their review tooling is earning its licence.
+ * ⚠ RULES 3 AND 5 ARE THE SAME COLUMN READ TWICE, AND SPLITTING THEM IS THE POINT. `role` defaults
+ * to `'review'`, so a stored `'review'` is ambiguous: it means "a person chose Review bot" on a
+ * manual row and "we have never heard of this login" on every other. Collapsing the two either
+ * ignores the user's choice (mark Copilot a code agent, watch the report keep calling it AI
+ * review) or lets a stale default beat a login we positively recognise. `manualRoleUserIds`
+ * carries the disambiguation, and it is automated-rows-only so a manual HUMAN cannot be handed a
+ * bot lane by whatever role their row happens to carry.
+ *
+ * Rule 7 is deliberately NOT `ai_review`, and it is also NOT `housekeeping`: an unrecognised
+ * automation is far more likely to be a CI script than a reviewer, and the cost of the mistakes is
+ * asymmetric. Miscounting a script as a quality gate understates nothing anyone acts on;
+ * miscounting it as an AI reviewer inflates the one number a team would use to judge whether their
+ * review tooling is earning its licence, and filing it under housekeeping would quietly drop it
+ * out of every count instead of merely declining to credit it.
  */
 export async function resolveActorLanes(
   accountId: number,
   scope: BotScope,
 ): Promise<ActorLanes> {
-  const [automatedFromWorkspace, kindMap, roleMap, vouchedHuman] = await Promise.all([
+  const [automatedFromWorkspace, kindMap, roleMap, vouchedHuman, manualRoles] = await Promise.all([
     automatedReviewerUserIds(accountId, scope.workspaceId, 'all'),
     classificationKindForUser(accountId, scope.workspaceId),
     reviewerRoleForUser(accountId, scope.workspaceId),
     manualHumanUserIds(accountId, scope.workspaceId),
+    manualRoleUserIds(accountId, scope.workspaceId),
   ]);
   // ⚠ THE ONE SIGNAL THAT BEATS THE UNION. Widening automation detection to `users.isBot` and the
   // login vocabularies is what fixes the duplicated identities — and it also re-admits an actor a
@@ -169,20 +204,23 @@ export async function resolveActorLanes(
   for (const id of candidateIds) {
     if (vouched.has(id)) continue; // a person said this is a person — nothing overrules that
     const login = loginById.get(id) ?? '';
-    const isDependency = dependencyBot(login);
-    const isQualityLogin = qualityCheckBot(login);
+    // ONE call, not five predicates in an order this file gets to choose: the vocabularies are
+    // asserted pairwise disjoint, so `roleForBotLogin` has exactly one answer per login.
+    const loginRole = roleForBotLogin(login);
     // THE UNION (see the header). A login vocabulary hit counts on its own, which is what covers
     // the duplicated-identity row whose stored verdict says `automated: 0`.
-    const automated =
-      workspaceAutomated.has(id) || flaggedBotIds.has(id) || isDependency || isQualityLogin;
+    const automated = workspaceAutomated.has(id) || flaggedBotIds.has(id) || loginRole != null;
     if (!automated) continue;
 
     automatedIds.add(id);
-    const role = roleMap.get(id);
+    const manualRole = manualRoles.get(id);
+    const storedRole = roleMap.get(id);
     const kind = kindMap.get(id);
-    if (role === 'quality_check') lane.set(id, 'quality_gate');
-    else if (isDependency) lane.set(id, 'dependency');
-    else if (isQualityLogin) lane.set(id, 'quality_gate');
+    if (manualRole != null) lane.set(id, ROLE_LANE[manualRole]);
+    else if (loginRole != null) lane.set(id, ROLE_LANE[loginRole]);
+    // A DERIVED `'review'` is the default an unknown login gets, so it is not evidence and does
+    // not short-circuit; every other derived role was positively concluded and does.
+    else if (storedRole != null && storedRole !== 'review') lane.set(id, ROLE_LANE[storedRole]);
     else if (kind != null && AI_REVIEW_KINDS.has(kind)) lane.set(id, 'ai_review');
     else lane.set(id, 'quality_gate');
   }
