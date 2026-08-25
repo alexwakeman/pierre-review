@@ -10,8 +10,11 @@ import {
 } from '@floating-ui/react';
 import { usePinnedTabs, type Tab } from '../store/pinnedTabs.js';
 import { useFilters } from '../store/filters.js';
+import { usePeriodReportsList } from '../hooks/usePeriodReports.js';
 import { useRepos } from '../hooks/useTimeline.js';
+import { useProCapabilities } from '../hooks/useTriage.js';
 import { botNarrowLabel, selectorLabel } from '../lib/severityAgreement.js';
+import { periodTitle } from './Activity/periodReportMarkdown.js';
 import { MagnifierIcon } from './Icons.js';
 
 const MetricsIcon = (
@@ -38,6 +41,7 @@ const TONES = {
   violet: 'text-violet-600 dark:text-violet-400',
   sky: 'text-sky-600 dark:text-sky-400',
   amber: 'text-amber-600 dark:text-amber-400',
+  ai: 'text-ai-signal',
 } as const;
 
 function chipLabelClass(active: boolean, tone: keyof typeof TONES): string {
@@ -167,6 +171,16 @@ function TabChip({
   const botFlaggingSeed = useFilters((s) => s.botFlaggingSeed);
   const botVolumeSeed = useFilters((s) => s.botVolumeSeed);
   const openPrsScope = useFilters((s) => s.openPrsScope);
+  const peopleReportSeed = useFilters((s) => s.peopleReportSeed);
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const { periodReports } = useProCapabilities();
+  // The people-report chip's period label resolves against the SAME cached list the picker
+  // gated Begin on (a shared cache read — warm whenever this tab can exist at all); every
+  // other tab kind holds the query disabled.
+  const reportsList = usePeriodReportsList(
+    periodReports && tab.kind === 'people-report' && peopleReportSeed != null,
+    workspaceId,
+  );
   const { data: repos } = useRepos();
   const repoName = (id: number | null): string | null =>
     id != null ? ((repos ?? []).find((r) => r.id === id)?.fullName ?? `repo ${id}`) : null;
@@ -204,7 +218,7 @@ function TabChip({
           <span aria-hidden="true" className="shrink-0">
             🤖
           </span>
-          <span className={chipLabelClass(active, 'violet')}>Bot Drill-Down</span>
+          <span className={chipLabelClass(active, 'ai')}>Bot Drill-Down</span>
         </>
       ),
     };
@@ -380,6 +394,34 @@ function TabChip({
           </span>
           <span className={chipLabelClass(active, 'sky')}>
             Comments/PR{botLabel ? ` · ${botLabel}` : ''}
+          </span>
+        </>
+      ),
+    };
+  } else if (tab.kind === 'people-report') {
+    // The People report — labelled with its period (resolved from the transient seed against
+    // the cached period list; the bare key stands in until the list is warm). `ai` tone: the
+    // tab hosts an AI narrative.
+    // ⚠ Not cosmetic: without this branch the tab falls through to the PR ladder below and
+    // renders as a two-line `#undefined` chip with no title and no author.
+    const period = peopleReportSeed
+      ? (reportsList.data?.periods ?? []).find(
+          (p) => p.periodKey === peopleReportSeed.periodKey,
+        ) ?? null
+      : null;
+    const periodLabel = period
+      ? periodTitle(period.periodStart, period.periodEnd)
+      : (peopleReportSeed?.periodKey ?? null);
+    cfg = {
+      title: `People report${periodLabel ? ` — ${periodLabel}` : ''} · one section per person or bot, alphabetical`,
+      closeAria: 'Close people-report tab',
+      body: (
+        <>
+          <span aria-hidden="true" className="shrink-0">
+            👥
+          </span>
+          <span className={chipLabelClass(active, 'ai')}>
+            People report{periodLabel ? ` · ${periodLabel}` : ''}
           </span>
         </>
       ),

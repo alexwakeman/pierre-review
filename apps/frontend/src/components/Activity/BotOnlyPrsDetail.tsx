@@ -295,7 +295,7 @@ export function BotOnlyPrsDetail(): JSX.Element {
             type="checkbox"
             checked={showMerged}
             onChange={(e) => setShowMerged(e.target.checked)}
-            className="h-3.5 w-3.5 cursor-pointer accent-violet-600"
+            className="h-3.5 w-3.5 cursor-pointer accent-ai-signal"
           />
           Show merged{mergedCount > 0 ? ` (${mergedCount})` : ''}
         </label>
@@ -308,7 +308,7 @@ export function BotOnlyPrsDetail(): JSX.Element {
               onClick={() => setWindow(wOpt.key)}
               className={`px-2 py-0.5 text-[11px] font-medium ${
                 window === wOpt.key
-                  ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                  ? 'bg-ai-signal/15 text-ai-signal'
                   : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
               }`}
             >

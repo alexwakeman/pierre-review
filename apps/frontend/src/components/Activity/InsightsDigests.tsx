@@ -73,8 +73,8 @@ export function InsightsDigests({
     <div className="space-y-2">
       {!embedded && (
         <div className="flex items-center gap-2 px-0.5">
-          <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
-            <span aria-hidden="true">✨</span> Repo summaries
+          <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-ai-ink">
+            <span aria-hidden="true" className="text-ai-signal">✨</span> Repo summaries
           </span>
         </div>
       )}
@@ -84,7 +84,7 @@ export function InsightsDigests({
           summary here.
         </p>
       ) : isLoading && digests.length === 0 ? (
-        <div className="h-12 animate-pulse rounded-md border border-violet-200 bg-violet-50/40 dark:border-violet-900/40 dark:bg-violet-950/10" />
+        <div className="h-12 animate-pulse rounded-md border border-ai-border bg-ai-surface" />
       ) : (
         <div className="space-y-2">
           {scopedRepos.map((repo) => {

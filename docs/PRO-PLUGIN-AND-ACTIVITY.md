@@ -199,7 +199,9 @@ tab exists only where it means something):
   per-bot depth is the `bot-detail` pinned drill-down, the workspace charts are a collapsed Pro
   section under ROI (`WorkspaceBotCharts`), and the bot-themes summary became the synthesis seam's
   "What they're flagging" card on Measure. The field is transient + URL-silent, so member removal
-  needed no migration.
+  needed no migration. ⚠ **`'themes'` did NOT return to `botsInnerTab` when the themes PANEL
+  did** — `BotThemesPanel` replaced that SynthesisCard mount on the main ROI view; the union is
+  still `'roi' | 'advisor' | 'settings'`.
 - **Insights** — the whole sub-tab apparatus is GONE (`InsightsSubTab`, `insightsSubTab`,
   `normalizeSubTab`, the guarded bar): the pane is Reports-FIRST — `PeriodReportsPanel` is its only
   body and the ad-hoc chat lives inside the report as "Ask about this period". Safe to delete
@@ -798,6 +800,18 @@ What 20 → 21 changed:
   plugin mirror moving in the same task — **because the plugin's payload hashes fold those very
   values**, and a cast-and-hope seam is exactly where a hash formula drifts.
 
+**apiVersion STAYED 21 for the People report** — and "additive" is a NARROW test, not a mood.
+What qualified: a TRAILING optional argument on an existing member (`getPersonPeriod(…, opts?:
+{evidence?: boolean})` — an older plugin calls with four args and type-checks; an older HOST
+simply never sets `person.evidence`, which the shared type declares optional for exactly that
+reason — the `registerAccountErasure` precedent); UNION widenings the old code never emits
+(`SynthesisScopeKind += 'person_report'`, `SynthesisItemKind += 'path_area'`); and optional
+result fields (`StoredSynthesis.sections?`, `PersonPeriod.evidence?`). ZERO core and ZERO plugin
+migrations. A SPA↔plugin **wire** type is not `ProContext` at all and never bumps — that is why
+`SprintChatBody.history`, `SprintChatResponse.followUps`/`trimmedTurns`, `BotThemesResult` and
+`BotTheme.commentCount` landed at 21 too. What would NOT qualify: changing an existing
+parameter's type, making an optional field required, or removing a union member.
+
 **The synthesis seam (`GET`/`POST /api/pro/synthesis` + `pro_synthesis`, plugin migration
 `0027`).** ONE endpoint pair and ONE cache table serving every "have the model summarise this
 set" grain — per-feature endpoints are exactly what the plan's D3 forbids. The standard
@@ -806,10 +820,15 @@ set" grain — per-feature endpoints are exactly what the plan's D3 forbids. The
 
 - **Seven `SynthesisScopeKind`s in two modes.** Four CLUSTERS grains — `'bot-flagging'`,
   `'bot-threads'` (windowless — a current-state backlog), `'bot-volume'`, `'workspace-bots'`
-  (the retired Bots-Themes question at workspace grain) — and three ORDERING grains —
-  `'brief'`, `'rollup'`, `'person'` (all windowless in the enum slot; `'person'` carries its
-  period as real `fromMs`/`toMs` bounds, sanity-capped at 200d so a client cannot mint cache
-  rows for arbitrary spans, and drops every bot-narrowing field).
+  (the workspace-grain bots question, still serving the three drill-down cards) — three ORDERING
+  grains — `'brief'`, `'rollup'`, `'person'` — and, at the same apiVersion, the SECTIONS grain
+  **`'person_report'`** (the People report's per-person narrative). All six non-cluster grains
+  are windowless in the enum slot; the two PERSON kinds carry their period as real
+  `fromMs`/`toMs` bounds, sanity-capped at `PERSON_WINDOW_MAX_MS` (200d) so a client cannot mint
+  cache rows for arbitrary spans, and drop every bot-narrowing field. ⚠ `'person_report'` shares
+  `PERSON_KINDS` (subject triple, required-triple 400, whole-workspace scope, `u:`/`pw:` tail)
+  but is deliberately NOT in `ORDERING_KINDS` — the `k:` slot is what keeps the 1:1 narration and
+  the report's sections in separate cache rows for one subject+period.
 - **Scope canonicalisation IS billing correctness** (`synthesis/scope.ts`): defaults filled,
   fields a kind does not consume DROPPED before keying — two spellings of one drill-down must
   not mint two cache rows and bill twice. Validation splits by who minted the value:
@@ -827,7 +846,10 @@ set" grain — per-feature endpoints are exactly what the plan's D3 forbids. The
   ref, any digit) is dropped and its strip line renders TEMPLATED; an entirely unparseable
   output is an empty list, STORED so the click doesn't loop-bill. `'person'` swaps only the
   system prompt (prep-not-scoring register) — brief/rollup prompts stay byte-identical, no
-  `SYNTHESIS_PROMPT_VERSION` churn.
+  `SYNTHESIS_PROMPT_VERSION` churn. **SECTIONS mode never 502s either** (see § "The People
+  report"): it keeps the mode-agnostic ORDERING user payload byte-for-byte and swaps only the
+  system prompt, and its staleness rides core's `PERSON_REPORT_VERSION` rather than the global
+  prompt version.
 - **The payload hash** (`synthesis/hash.ts`): sha256 over the SORTED input item ids + each
   item's stable created-at + the analyzed/total counts + `SYNTHESIS_SCHEMA_VERSION` +
   `SYNTHESIS_PROMPT_VERSION` + the scope key. Nothing `Date.now()`-derived, nothing hydrated —
@@ -860,9 +882,30 @@ set" grain — per-feature endpoints are exactly what the plan's D3 forbids. The
   `foldPrBotVolumePopulation`, `getBotReviewComments`, the brief fold), so the model summarises
   exactly the set the receipt list shows — a synthesis with its own SQL would drift silently.
   Rows come back capped with `analyzed`/`total` + `truncated`, never silently truncated.
-- **Bots Themes retired into this seam** (`registerBotThemesRoutes` gone; the workspace-grain
-  question is kind `'workspace-bots'`). The `bot_theme_reports` TABLE stays — retention ages it
-  out, erasure still covers it, no migration.
+- **Bots Themes was retired into this seam and then REVIVED beside it.** The seam's
+  `'workspace-bots'` kind is untouched and still serves the three drill-down SynthesisCards;
+  what came back is the merged **Bot Themes panel** (§ below), which replaces the SynthesisCard
+  mount on the MAIN Bots view only. `bot_theme_reports` was never dropped, so the revival needed
+  no migration.
+- **SECTIONS is the THIRD output mode** (`'person_report'`, the People report's per-person
+  narrative). CLUSTERS returns labelled id-clusters; ORDERING returns digit-free `{ref, phrase}`
+  lines; SECTIONS returns `{sections:[{id, prose, refs}]}` over a CLOSED four-id vocabulary
+  (`worked_on` / `nature_of_changes` / `collaboration` / `waiting_and_risk` —
+  `PersonReportSectionId`). `parsePersonReportOutput` drops an entry per defect (unknown or
+  ALREADY-ACCEPTED duplicate id, empty/over-`SECTION_PROSE_CAP` prose, any digit, zero surviving
+  refs after the `⊆ input` filter) and returns `[]` rather than throwing — the row is STORED
+  anyway so a click cannot loop-bill, and the deterministic vector + evidence cards stay primary
+  (§8.20). A rejected entry does NOT burn its section id, so a later well-formed duplicate can
+  still land (the `parseOrderingOutput` rule). It reuses `buildOrderingUserPrompt` VERBATIM —
+  the "BRIEF LINES JSON" heading must stay byte-identical, since renaming it is a
+  `SYNTHESIS_PROMPT_VERSION` event.
+- ⚠ **The D4 digit gate is `\p{Nd}\p{No}\p{Nl}`, not `[0-9]`.** Item bodies are attacker-authored
+  (PR titles, comment excerpts), and a prompt-injected "write the count in full-width digits"
+  walked straight through the ASCII spelling: `２３`/`٣` (Nd), `²` (No) and `Ⅻ` (Nl) all read as
+  numbers to a human while `[^0-9]` waved them through. The gate is now
+  `/^[^\p{Nd}\p{No}\p{Nl}]*$/u`, shared by ORDERING and SECTIONS and mirrored by the chat's
+  follow-up validator. Spelled-out counts ("twenty-three") stay regex-unverifiable and remain a
+  prompt-only rule by design.
 
 **The daily brief (`GET /api/daily-brief`, CORE/FREE — counts only).** `db/daily-brief.ts`
 computes on read behind a module-level 5-min TTL cache (zero core migrations, the plan's D5);
@@ -892,7 +935,92 @@ out — no batch/ranking spelling exists at any layer. The route degrades withou
 (unknown/foreign/bot id and off-grid period are all the same `person: null`;
 `cadenceConfigured: false` is the one distinct refusal), never generates, and sits EXPLICITLY on
 `[search, read]` in core's `tierFor` (not inherited from the `/api/pro/` catch-all). The
-narration rides synthesis kind `'person'`.
+narration rides synthesis kind `'person'` (and, for the People report, `'person_report'`).
+
+⚠ **"Prep, not scoring" was RESTATED for the People report, not relaxed.** The report renders
+several sections by LOOPING this route one person at a time, client-side — that is sanctioned.
+What is still refused at every layer is a cross-person SHAPE: no batch/list spelling of the
+route, core takes one id, and every consuming surface orders sections ALPHABETICALLY with no
+rank, no cross-person sort by any metric and no comparison table. The guardrail comments in
+`db/person-period.ts`, `insights/person-routes.ts` and `PeriodPeopleSection.tsx` were reworded
+in lockstep; if they ever disagree, the narrow reading (no cross-person shape) wins.
+
+### The People report — `?evidence=1`, `person_report`, and the bot half
+
+**Evidence is an option on the ONE fold, never a sibling.** `getPersonPeriod(…, {evidence:
+true})` (wire `?evidence=1`) widens each windowed scan from `count()` to a capped
+`ORDER BY … LIMIT` over the **identical predicate**, and the two medians hand back the exact PRs
+whose hours entered them through the folds' own `samplesOut` sinks (`ReviewSampleRef`) — so
+nothing anywhere re-derives "which PRs did this median cover". Every guardrail (scope resolve,
+lane admission, membership probe, the global-`users` rule) runs ONCE for both halves. Requesting
+evidence never moves a metric cell. `PERSON_EVIDENCE_CAP` = 8 per group, with the undisplayed
+remainder in `more` and "and N more" code-rendered; the shape is `PersonPeriodEvidence`
+(`prs` keyed by `PersonMetricKey` → `DigestPrRef` rows, `comments` as `BotVendorComment` rows
+with bodies + any stored ML label INLINE, `threads` as ONE list carrying today's `derivedState`
+as a chip — never a second population — and `pathAreas` bucketed to two path segments).
+
+- The thread cell and the thread CARDS come from ONE query (the extra columns ride the same
+  rows) — that is what guarantees the number and the list describe one population.
+- `commitFiles` is GLOBAL and is reached only through the tenant-scoped commit shas of the
+  already-capped authored PR set, which is also what bounds the scan. `verify:isolation` grew
+  166 → 169 for this arm (PR ids, comment bodies + thread excerpts, and path areas), seeded so
+  BOTH tenants hold a decoy of every family — a missing predicate leaks rather than finds
+  nothing — and the new checks were mutation-tested.
+- ⚠ **`personPeriodKey` carries an `ev:` slot.** Without it the report's evidence-bearing
+  response and the 1:1 tab's evidence-less one share a cache entry.
+
+**`PERSON_REPORT_VERSION` (core `db/synthesis-input.ts`, now 2) is KIND-SCOPED staleness.** It
+prefixes every evidence item id (`pe<v>:pr:` / `:rc:` / `:pc:` / `:th:` / `:area:`), so a bump
+moves only this kind's payload hashes: every stored `person_report` row flips `stale` on the
+free GET and regenerates, while no other kind is re-billed. **A `person_report` prompt edit
+bumps THIS literal, never `SYNTHESIS_PROMPT_VERSION`.** ⚠ A version literal only reaches the
+hash through an id that EXISTS, and two ordinary inputs carry zero evidence items — an
+awaiting-only admission (every count cell a non-null zero) and a reviewer-only period (the
+median sample PRs are deliberately not minted as items). A constant `pe<v>:none` sentinel line
+is minted for exactly that slice; without it those rows would read `stale: false` forever and
+serve the old prompt's sections at $0. The `pm…` vector items are byte-identical to the
+`'person'` grain's (two kinds must not describe two vectors) — only their `authorLabel` differs
+(`'brief'`, which is not hashed).
+
+- v1 → v2 was an ATTRIBUTION fix: figure lines are labelled `'brief'` (a dashboard line is not
+  something the subject wrote), and a thread root the subject authored themselves carries their
+  login instead of `'reviewer'` — it already travels as their own `pe:rc:` comment item, so the
+  old label handed the model the same text twice under contradictory attribution and had it
+  citing their own note as feedback received. `PersonEvidenceThreadRef.selfAuthoredRoot` is the
+  flag; it is optional/additive on the wire.
+- The scope key: `'person_report'` joins `WINDOWLESS_KINDS` and the new `PERSON_KINDS` set
+  (shared subject triple `userId`/`fromMs`/`toMs`, the required-triple 400, the whole-workspace
+  rule that drops any repo narrowing, and the `u:`/`pw:` conditional tail) but is deliberately
+  NOT in `ORDERING_KINDS` — it is the SECTIONS mode, and `routes.ts` branches on the kind. The
+  `k:` slot is what keeps a `person`row and a `person_report` row apart for one subject+period.
+
+**The bot sections are deterministic — NO AI.** They read the FREE core `/api/bot-analytics` row
+(ONE shared fetch per report, rows picked client-side by `u<userId>`) plus the per-bot comments
+drill-down, both narrowed to the real period by the routes' new `fromMs`/`toMs` pair. Paid depth
+stays a "Depth →" link. ⚠ **KNOWN LIMIT, disclosed in the UI:** authoring-family automation
+(Dependabot and friends) has no review output to chart, so its section says "PRs this automation
+authored are not charted here" rather than rendering an empty ROI row.
+
+**⚠ `getBotAnalytics` honoured an explicit `toMs` in only TWO of its folds** — the automated
+thread scan, `mergedPastRows`, `getMlWindowAggregates` and `countUnlabelledBotText` were
+`>= from` with no upper bound, so under a historical `toMs` ONE ROW mixed two window
+populations (the period-report lesson, at the bot grain). ⚠ **And the first fix was itself
+wrong:** it applied `lt(col, to)` UNCONDITIONALLY, and those columns are second-granular on
+sqlite, so under the ENUM window form (`to ≡ Date.now()`) rows written in the CURRENT SECOND
+were excluded — which flaked `verify:isolation` non-deterministically. The rule is:
+
+```ts
+const toBound = typeof window === 'string' ? null : to;   // explicit bounds ONLY
+…and(gte(col, from), ...(toBound != null ? [lt(col, toBound)] : []))
+```
+
+The enum form therefore carries NO upper predicate at all, which also keeps every enum-form scan
+byte-identical to the drill-downs reading the same rows — the identity behind "an Inflation
+count equals the flagging drill-down's `filteredTotal`". Explicit bounds are half-open `lt`,
+never `lte`: the routes advertise `[fromMs, toMs)` and `person-period.ts` already spells it that
+way, so a boundary-ms row lands in exactly one period. The same `toBound` rule governs
+`getBotVendorComments`, whose `window` parameter was widened to the same
+`BotWindowKind | {kind, fromMs, toMs}` form.
 
 **The grounded-figure check (`insights/grounded-figures.ts`) and the timestamp bypass it
 closed.** D4 at the report grain: every numeral token in the Sonnet period-report narrative must
@@ -908,6 +1036,114 @@ report-shaped input. Tolerance rules are enumerated exactly in the module header
 thousands separators stripped, the SPA formatters' roundings accepted, `fmtDuration` units for
 `*_hours` keys only, payload-string numerals and array lengths allowed) — do not widen them by
 guesswork; `test/grounded-figures.test.ts` pins them.
+
+### The Bot Themes panel — revived, merged with the deterministic layer
+
+`GET /api/pro/bot-themes` + `POST /api/pro/bot-themes/refresh` (`packages/pro/src/bot-themes/`)
+are back after the P2.3/C6 retirement, over the never-dropped `bot_theme_reports` table — **no
+migration**. `BotThemesPanel` replaces the `SynthesisCard` mount on the MAIN Bots view; the three
+drill-down SynthesisCards (`BotVolumeDetail`, `BotFlaggingDetail`, `BotThreadsDetail`) and the
+seam's `'workspace-bots'` kind are untouched and still serve slice-scoped Summarise.
+
+**⚠ The panel renders TWO CLASSES OF FIGURE and the caption must say which is which.** An early
+draft claimed the whole panel was exact.
+
+| Exact (code folds, D4) | Approximate (the model's read) |
+|---|---|
+| per-theme `commentCount` — Σ each cited cluster's code-computed `count` over the theme's **deduplicated** validated `memberIds` (an id outside the payload contributes 0) | `occurrences` — the model's own estimate, kept as the render fallback for legacy/pre-count stored rows and for the human sibling |
+| per-bot volume + acted-on % (`BotThemeBotRollup`, keyed `u<userId>` like the ROI row), the top-level-dir `byArea` split, `coverage` | `byCategory` / `bySeverity`, which are aggregated FROM the model's per-theme estimates |
+
+`ThemeThreadsDetail`'s per-theme metrics strip inherits the same split: its linked-member / PR /
+repo / thread-state chips are client-side folds over data the view already fetched (its queries
+are byte-identical to the groups' and badges' own, so React Query dedupes them and the strip
+issues nothing new), and the strip discloses `n of m PRs loaded` while partial — but the ML
+severity mix it shows is over that same loaded sample, not a population figure.
+
+**What the revival had to re-fix in the legacy code:**
+
+- **The payload hash dropped the day-quantised `windowKey`** and carries the version literal
+  `bt2` instead. The old formula re-billed every dormant scope daily — the exact "nothing
+  volatile in the sig" rule the synthesis seam already states. Consequence, stated on purpose:
+  with generation manual-only there is now NO time-based staleness at all — a Regenerate on an
+  unchanged corpus is free forever. The SET of cluster keys is content-derived, so membership
+  drift regenerates while pure volume drift is a $0 hit; counts stay excluded (they slide with
+  the clock). Rows hashed under the legacy formula simply miss once and regenerate.
+- **The refresh was rebuilt on the synthesis TOCTOU shape**: the per-account slot is claimed
+  SYNCHRONOUSLY (no `await` between `has()` and `add()` — the legacy code awaited the credit
+  check in exactly that gap, so two concurrent POSTs both passed, both missed the not-yet-written
+  hash cache, and both billed), the credit check runs INSIDE the `try/finally`, and the
+  min-interval is armed only when the model actually ran. The in-flight set is ACCOUNT-keyed: the
+  legacy `account:workspace:window` grain let one account fan out N parallel Haiku calls by
+  opening N scope/window combinations.
+- **`VALID_WINDOWS` gained `rolling_90`** (added at apiVersion 18, after the legacy set was
+  written). Silently degrading it to `rolling_14` cached the WRONG population under the RIGHT
+  client key.
+- **`repoIds` narrowing** now rides `resolveRequestScope` (membership ∩ narrow) exactly as
+  `behaviour-routes` does. `themesScopeKey` stays `ws:<id>` when unnarrowed — byte-identical to
+  the legacy vocabulary, so the isolation-test seeds and the migration-0014 commentary stay true
+  — and gains `|r:<sorted deduped csv>` ONLY when narrowed. It keys on the narrowing AS GIVEN,
+  not the intersection, so workspace-membership drift does not re-mint the row; correctness never
+  rests on the key alone, since the hash folds the actual cluster set.
+- ⚠ **`BotReviewCommentRow` is re-declared BY HAND in `build.ts`** (open-core boundary — the
+  plugin imports no host internals). It now has TWO consumers: this copy and core's
+  `db/synthesis-input.ts`, which imports the declaration directly. A change to
+  `queries.ts`'s `getBotReviewComments` return shape must be mirrored here.
+- Rate tiers (pinned in core's `rate-limit.test.ts`): the refresh POST lands on the `/api/pro/`
+  catch-all's `ai` pair; the GET stays on the plain `read` bucket. **DELIBERATE deviation from
+  the synthesis GET**, which sits on `search`: this GET has no `stale` probe, because probing
+  would re-run the whole `getBotReviewComments` fold on every Bots-tab open. Freshness here is
+  the manual Regenerate, free when the corpus is unchanged.
+- A gone-quiet scope answers with the STORED report, not `result: null`. Returning null had the
+  client `setQueryData` a "No summary yet" box over the report it was showing, which the next
+  GET refetch resurrected — a flicker whose CTA invited repeating the same no-op.
+
+### The Insights chat is multi-turn, and it runs on the REPORT model
+
+"Ask about this period" is a real conversation: the client sends prior turns as
+`SprintChatBody.history` (strings only — grounding is REBUILT fresh every turn, so what carries
+forward is the transcript, not stale data), and the answer may end in a `FOLLOWUPS:` tail.
+
+- **The depth cap is SERVER-side.** `SPRINT_CHAT_MAX_TURNS` = 10 **counting the live question**;
+  the plugin reads at most `CHAT_MAX_PRIOR_TURNS` = 9 prior pairs (an inlined mirror, since the
+  plugin only `import type`s from shared — the `AI_CREDITS_PER_USD` pattern; the test file, which
+  CAN value-import, compares the two). Verified live: 25 turns sent → `trimmedTurns: 16` → 9
+  kept. A client cap is a convenience, not the enforcement.
+- **The answering model is the account's resolved REPORT model**, not the hardcoded Haiku
+  `DIGEST_MODEL`: `pro_settings.report_model` → `readReportModel` → `DEFAULT_REPORT_MODEL`
+  (`PRO_REPORT_MODEL`, default `claude-sonnet-5`), through `makeReportClient`. There is
+  deliberately no per-request override — a follow-up is fresh work billed at the model the
+  account chose. The ledger row, the response's `model` and the stored history row all carry the
+  RESOLVED id, so `costUsd` (priced from that model's `REPORT_MODEL_PRICING` row) and the ledger
+  agree by construction. `CHAT_MAX_TOKENS_BY_MODEL` is a `Record<ReportModel, number>` (Haiku
+  900 / Sonnet 3000) so a model added to the pricing allowlist is a compile error until it gets a
+  row — the 750 sized for Haiku prose truncates a reasoning model mid-answer, because the model
+  draws its thinking from the same allowance. **The optional CHART pass stays on the injected
+  Haiku `llm`.**
+- ⚠ **The chart pass gets the grounding MINUS `conversation`.** `CHART_SYSTEM`'s provenance rule
+  ("use ONLY numbers present in the DATA json") makes everything in DATA a legal chart value, so
+  prior model-authored answers sitting there would launder hallucinated or stale figures into
+  rendered data (D4) — and re-bill the whole transcript as Haiku chart input on every charted
+  turn. The current `answer` rides OUTSIDE `data` for the same reason.
+- **`insights/chat-budget.ts` is a PURE module** (no ctx, no clock) because the trim rules are
+  the part most likely to be subtly wrong: `estimateTokens` is chars/4;
+  `chatInputBudgetTokens` = min(model context − reply allowance − `ESTIMATOR_SLACK_TOKENS`
+  20 000, `PRACTICAL_INPUT_CAP_TOKENS` 60 000) — a transcript must never grow toward a million
+  tokens just because Sonnet's window would hold it, since the whole thing is re-billed every
+  ask; `fitChatHistory` applies the protocol cap first, then drops WHOLE OLDEST pairs until it
+  fits. **The grounding is NEVER trimmed** — a payload that busts the budget alone still runs
+  with zero turns and every sent pair counted in `trimmedTurns` (= sent − kept, cap drops and
+  budget drops in one honest number, which the UI whispers per answer). Total, never throws,
+  never reorders.
+- **`splitFollowUps` is TOTAL**: only a `FOLLOWUPS:` line that is the LAST non-empty line is
+  treated as the tail, and it is stripped whether or not its JSON parses (machinery must never
+  render); a marker mid-answer is prose and stays. Survivors are ≤3, ≤120 chars, deduped, and
+  **digit-free under the same Unicode gate as the synthesis phrases** — each candidate dropped
+  individually. It runs BEFORE `resolveScopePrRefs` and BEFORE `persistChatHistory`, so PR refs
+  resolve from clean text and the stored row never carries the marker. Follow-ups are never
+  persisted.
+- History text is fenced inside the one JSON user message exactly like the `question` it
+  extends, so it adds no new trust surface; per-item it is re-capped (`MAX_QUESTION` for the
+  question, `CHAT_HISTORY_ANSWER_MAX` 4000 for the answer, both surrogate-safe).
 
 ### Fix from comments — the `'comments'` AI-Fix seed (apiVersion 19)
 

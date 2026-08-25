@@ -107,7 +107,13 @@ fixture tests (see Conventions).
 - **`reviewThreads`** + **`reviewComments`** — inline threads (stored `derivedState`) +
   comments; **`prComments`** — issue-level. Under lean storage the `body` is nullable (null
   when lean); `reviewComments.excerpt` always holds a short preview.
-- **`commits`** (`sha`+`prId`) + **`commitFiles`** (`sha` → changed paths, cached).
+- **`commits`** (`sha`+`prId`) + **`commitFiles`** (`sha` → changed paths, cached). ⚠ `commitFiles`
+  is **GLOBAL** (content-addressed by sha, no `accountId`), so every reader must reach it through
+  shas already proven to belong to the tenant — never by a bare path predicate. Two readers do
+  this today: the addressing-commit resolution in `queries.ts` and `db/person-period.ts`'s
+  person-evidence path-area fold (which joins through the tenant-scoped commit shas of an
+  already-capped authored-PR set, which is also what bounds its scan). `verify:isolation` seeds
+  both tenants with a decoy path bucket so a dropped join leaks rather than finding nothing.
 - **`events`** — the timeline feed; `accountId`, unique `(accountId, dedupeKey)`, typed
   (`pr_opened`/`pr_merged`/`pr_closed`/`review_submitted`/`review_comment`/`pr_comment`/
   `commit_pushed`). Only *substantive* reviews emit an event (an empty `commented` review is

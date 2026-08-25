@@ -63,11 +63,11 @@ function PresetAnswer({
   const result = query.data?.result ?? null;
 
   return (
-    <div className="mt-3 rounded-md border border-violet-200/70 bg-white/60 p-3 dark:border-violet-900/50 dark:bg-gray-900/40">
+    <div className="mt-3 rounded-md border border-ai-hairline bg-white/60 p-3 dark:bg-gray-900/40">
       {busy ? (
         <PresetSkeleton />
       ) : query.isLoading ? (
-        <div className="h-16 animate-pulse rounded bg-violet-500/5" />
+        <div className="h-16 animate-pulse rounded bg-ai-surface-2" />
       ) : result != null ? (
         <div key={result.generatedAt} className="digest-fade-in">
           <SummaryMarkdown
@@ -81,7 +81,7 @@ function PresetAnswer({
               type="button"
               onClick={() => onRegenerate(presetKey)}
               disabled={busy || outOfCredits}
-              className="ml-auto rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
+              className="ml-auto rounded border border-ai-border px-1.5 py-0.5 font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
               title={outOfCredits ? 'Out of AI credits — resets next month' : 'Regenerate just this answer'}
             >
               ↻ Regenerate
@@ -95,7 +95,7 @@ function PresetAnswer({
             type="button"
             onClick={() => onRegenerate(presetKey)}
             disabled={busy || outOfCredits}
-            className="rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
+            className="rounded border border-ai-border px-1.5 py-0.5 font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
             title="Generate this one"
           >
             Generate
@@ -158,21 +158,21 @@ export function PresetPromptPanel(): JSX.Element | null {
 
   return (
     <div
-      className="rounded-lg border border-violet-200 bg-violet-50/40 p-4 dark:border-violet-900/60 dark:bg-violet-950/20"
+      className="rounded-lg border border-ai-border bg-ai-surface p-4"
       data-testid="preset-prompt-panel"
     >
       <div className="flex items-center gap-2">
         <span className="text-base font-semibold text-gray-800 dark:text-gray-100">
           <span aria-hidden="true">✨</span> Sprint questions
         </span>
-        <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
+        <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
           Pro
         </span>
         <button
           type="button"
           onClick={generateAll}
           disabled={generatingAll || outOfCredits || workspaceId == null}
-          className="ml-auto rounded bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
+          className="ml-auto rounded bg-ai-signal px-3 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
           title={outOfCredits ? 'Out of AI credits — resets next month' : 'Generate answers to all six preset questions for this Workspace'}
         >
           {generatingAll ? 'Generating…' : 'Generate all'}
@@ -188,7 +188,7 @@ export function PresetPromptPanel(): JSX.Element | null {
         <button
           type="button"
           onClick={() => step(-1)}
-          className="rounded border border-violet-300 px-2 py-1 text-sm font-medium text-violet-600 hover:bg-violet-500/5 dark:border-violet-800 dark:text-violet-300"
+          className="rounded border border-ai-border px-2 py-1 text-sm font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
           aria-label="Previous question"
         >
           ◀
@@ -204,7 +204,7 @@ export function PresetPromptPanel(): JSX.Element | null {
         <button
           type="button"
           onClick={() => step(1)}
-          className="rounded border border-violet-300 px-2 py-1 text-sm font-medium text-violet-600 hover:bg-violet-500/5 dark:border-violet-800 dark:text-violet-300"
+          className="rounded border border-ai-border px-2 py-1 text-sm font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
           aria-label="Next question"
         >
           ▶

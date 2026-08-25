@@ -547,7 +547,7 @@ export function BotFlaggingDetail(): JSX.Element {
                 }}
                 className={`px-2 py-0.5 text-[11px] font-medium ${
                   window === wOpt.key
-                    ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                    ? 'bg-ai-signal/15 text-ai-signal'
                     : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
                 }`}
               >
@@ -643,11 +643,11 @@ export function BotFlaggingDetail(): JSX.Element {
                   type="button"
                   onClick={() => setBots(null)}
                   title={`Only ${botNarrowLabel(bots)}${bots.label ? '’s' : '’'} comments — opened from the Behaviour tab’s inflation index. Click to widen back to every bot, keeping this window, scope and direction.`}
-                  className="flex items-center gap-1 rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700 hover:border-violet-500 dark:border-violet-500/60 dark:bg-violet-950/30 dark:text-violet-300"
+                  className="flex items-center gap-1 rounded-full border border-ai-signal/50 bg-ai-signal/10 px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal"
                 >
                   <span aria-hidden="true">🤖</span>
                   {botNarrowLabel(bots)} only
-                  <span aria-hidden="true" className="text-violet-400">
+                  <span aria-hidden="true" className="text-ai-signal/70">
                     ✕
                   </span>
                 </button>

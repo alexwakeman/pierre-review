@@ -36,6 +36,11 @@
 //                      line, ids `pm<schema-version>:<key>:<value>` so the hash IS "the vector
 //                      values + PERSON_METRICS_SCHEMA_VERSION"; the WINDOW rides the scope key's
 //                      person slots (`u:`/`pw:`), so window+values+version are all in the hash.
+//   'person_report'  → person-period.ts `getPersonPeriod(…, {evidence:true})` — the People
+//                      report section's OWN fold. SECTIONS grain: the `pm…` vector items
+//                      byte-identical to 'person', plus the evidence rows the section's cards
+//                      render (`pe<PERSON_REPORT_VERSION>:` ids — same fold, same caps), so the
+//                      model summarises precisely the rows shown under it.
 //
 // ⚠ THE CAP IS DISCLOSED, NEVER SILENT (the themes-cap precedent): `items` is capped at
 // SYNTHESIS_INPUT_CAP in the population's own order, and `analyzedCount`/`totalCount` travel so
@@ -501,6 +506,159 @@ async function personInput(accountId: number, scope: SynthesisScope): Promise<Sy
   };
 }
 
+// ── The 'person_report' SECTIONS grain (the People report's per-person narrative) ────────────
+//
+// The seam's third output mode's input: the person vector's `pm…` items VERBATIM (byte-identical
+// to the 'person' grain — two kinds must not describe two vectors) plus the EVIDENCE rows the
+// report section's cards render, read through THE SAME fold with `evidence: true` — same
+// predicates, same caps, so the model summarises precisely the rows shown under it (§8.3 at the
+// person grain). The WINDOW rides the scope key's `u:`/`pw:` slots exactly like 'person'.
+//
+// `pe<PERSON_REPORT_VERSION>:` prefixes every evidence id: ONE kind-scoped literal covering the
+// evidence-item vocabulary AND the plugin's person_report section prompt — a bump changes every
+// `pe…` id, so every stored person_report row flips `stale` honestly on the free GET while NO
+// other kind is re-billed (the `pm<version>` trick; SYNTHESIS_PROMPT_VERSION stays untouched,
+// and future person_report prompt edits bump THIS literal instead of the global one).
+//
+// Hash discipline inherited: every id + createdAt is a plain DB read (pr/comment/thread rows
+// carry their real GitHub timestamps; the count-encoded area lines pin epoch zero), nothing is
+// `Date.now()`-derived, and bodies are NOT folded. A closed period's set is stable; a late
+// backfill that lands new rows flips `stale` honestly.
+// 1 → 2: the author vocabulary made honest — figure lines are labelled 'brief' (the legend's
+// own word for them, not the login: a dashboard line is not something the subject wrote),
+// thread roots the subject authored carry their login instead of 'reviewer' (a self-review
+// note is not feedback they received — and it already travels as their own `pe:rc:` item, so
+// the old label handed the model the same text twice under contradictory attribution), and a
+// zero-evidence input now mints the `:none` sentinel so this literal reaches its hash at all.
+export const PERSON_REPORT_VERSION = 2;
+
+async function personReportInput(
+  accountId: number,
+  scope: SynthesisScope,
+): Promise<SynthesisInput> {
+  // Same required-triple rule as 'person' (the plugin route 400s first; a miss here is loud).
+  if (scope.userId == null || scope.fromMs == null || scope.toMs == null) {
+    throw new Error(
+      "synthesis scope: kind 'person_report' requires `userId`, `fromMs` and `toMs`",
+    );
+  }
+  const person = await getPersonPeriod(
+    accountId,
+    scope.workspaceId,
+    scope.userId,
+    { fromMs: scope.fromMs, toMs: scope.toMs },
+    { evidence: true },
+  );
+  // No admissible person → EMPTY input → the POST answers `empty: true`, nothing billed.
+  if (person == null) {
+    return {
+      kind: 'person_report',
+      workspaceId: scope.workspaceId,
+      items: [],
+      totalCount: 0,
+      analyzedCount: 0,
+      truncated: false,
+    };
+  }
+  const ev = person.evidence;
+  const pe = `pe${PERSON_REPORT_VERSION}`;
+  // The vector lines, verbatim ids/bodies (figures are model INPUT, fenced as JSON by the
+  // prompt) — but re-labelled 'brief': the person_report legend defines author as
+  // login | 'reviewer' | 'brief', and a dashboard figure line is a brief line, not a quote from
+  // the subject. (The 1:1 'person' kind keeps the login — its own prompt defines author that
+  // way. authorLabel is not hashed, so the ids stay byte-identical across the two kinds.)
+  const items: SynthesisInputItem[] = personMetricItems(person).map((i) => ({
+    ...i,
+    authorLabel: 'brief',
+  }));
+  // Authored-PR titles: the merged ∪ opened evidence rows, deduped, cards' own order.
+  const seenPr = new Set<number>();
+  for (const r of [
+    ...(ev?.prs.merged_prs_authored?.rows ?? []),
+    ...(ev?.prs.opened_prs_authored?.rows ?? []),
+  ]) {
+    if (r.prId == null || seenPr.has(r.prId)) continue;
+    seenPr.add(r.prId);
+    items.push({
+      id: `${pe}:pr:${r.prId}`,
+      kind: 'pr',
+      authorLabel: person.login,
+      createdAt: r.openedAt ?? BRIEF_EPOCH,
+      body: capBody(r.title),
+    });
+  }
+  // Their own comment excerpts, split by target kind (two id spaces — the BotReviewCommentRow
+  // numeric-collision lesson).
+  for (const c of ev?.comments.rows ?? []) {
+    const rc = c.targetKind === 'review_comment';
+    items.push({
+      id: rc ? `${pe}:rc:${c.targetId}` : `${pe}:pc:${c.targetId}`,
+      kind: rc ? 'review_comment' : 'pr_comment',
+      authorLabel: person.login,
+      createdAt: c.createdAt,
+      body: capBody(c.body),
+      path: c.path,
+    });
+  }
+  // Thread roots on their PRs — usually feedback they RECEIVED ('reviewer', which the prompt
+  // legend defines as exactly that). A SELF-authored root (the "flagging this for reviewers"
+  // pattern) is the subject's own note and often also travels above as their `pe:rc:` comment
+  // item — so it carries their login, or the model reads the same text twice under
+  // contradictory attribution and honestly-cites their note as feedback received.
+  for (const t of ev?.threads.rows ?? []) {
+    items.push({
+      id: `${pe}:th:${t.threadId}`,
+      kind: 'thread',
+      authorLabel: t.selfAuthoredRoot ? person.login : 'reviewer',
+      createdAt: t.createdAt,
+      body: capBody(t.excerpt),
+      path: t.path,
+    });
+  }
+  // Path-area lines — count-encoded ids (the brief's content-hash trick: an area-mix change
+  // changes the id changes the hash), epoch-zero createdAt.
+  for (const area of ev?.pathAreas ?? []) {
+    items.push({
+      id: `${pe}:area:${area.bucket}:${area.files}`,
+      kind: 'path_area',
+      authorLabel: person.login,
+      createdAt: BRIEF_EPOCH,
+      body: `their commits touched ${area.files} files under ${area.bucket} (${area.commits} commits)`,
+    });
+  }
+  // The kind-version literal rides the hash ONLY via `pe…` ids, and two ordinary shapes carry
+  // ZERO evidence items: an awaiting-only admission (every count cell a non-null zero) and a
+  // reviewer-only period (the response-median sample PRs are deliberately not minted as items).
+  // Without a `pe…` id a PERSON_REPORT_VERSION bump would leave such stored rows `stale: false`
+  // forever, serving the old prompt's sections at $0. One CONSTANT sentinel line for exactly
+  // that slice (an evidence-carrying input already versions every id): epoch-zero createdAt,
+  // digit-free, and honestly citable — it states the absence rather than smuggling a marker.
+  if (!items.some((i) => i.id.startsWith(`${pe}:`))) {
+    items.push({
+      id: `${pe}:none`,
+      kind: 'brief_line',
+      authorLabel: 'brief',
+      createdAt: BRIEF_EPOCH,
+      body: 'no PR, comment or thread excerpts are available for this period',
+    });
+  }
+  // `truncated` discloses the evidence caps (each card group's own "and N more"); the item list
+  // itself is the analyzed set — ≈ ≤90 items, far under SYNTHESIS_INPUT_CAP by construction.
+  const truncated =
+    (ev?.prs.merged_prs_authored?.more ?? 0) > 0 ||
+    (ev?.prs.opened_prs_authored?.more ?? 0) > 0 ||
+    (ev?.comments.more ?? 0) > 0 ||
+    (ev?.threads.more ?? 0) > 0;
+  return {
+    kind: 'person_report',
+    workspaceId: scope.workspaceId,
+    items,
+    totalCount: items.length,
+    analyzedCount: items.length,
+    truncated,
+  };
+}
+
 /**
  * The ONE synthesis-input fold (ProHostQueries.getSynthesisInput's real body — bind.ts swaps its
  * declared-inert throw for this). `scope.workspaceId` decides who counts as a bot;
@@ -529,5 +687,7 @@ export async function getSynthesisInput(
       return rollupInput(accountId, scope);
     case 'person':
       return personInput(accountId, scope);
+    case 'person_report':
+      return personReportInput(accountId, scope);
   }
 }

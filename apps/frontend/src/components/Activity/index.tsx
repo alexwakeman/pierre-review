@@ -410,13 +410,13 @@ export function ActivityView(): JSX.Element {
               }`}
               title="Period-over-period reports for this workspace, with a grounded chat (Pro)"
             >
-              <span aria-hidden="true" className="shrink-0 text-violet-500">
+              <span aria-hidden="true" className="shrink-0 text-ai-signal">
                 ◈
               </span>
               <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
                 Reports
               </span>
-              <span className="shrink-0 rounded bg-violet-500/10 px-1 text-[9px] font-semibold uppercase text-violet-600 dark:text-violet-300">
+              <span className="shrink-0 rounded bg-ai-signal/10 px-1 text-[9px] font-semibold uppercase text-ai-signal">
                 Pro
               </span>
             </button>
@@ -571,7 +571,7 @@ export function ActivityView(): JSX.Element {
                       {t.label}
                       {/* Only Themes is Pro; the Feed itself is core. */}
                       {t.key === 'themes' && (
-                        <span className="rounded bg-violet-500/10 px-1 text-[9px] font-semibold uppercase text-violet-600 dark:text-violet-300">
+                        <span className="rounded bg-ai-signal/10 px-1 text-[9px] font-semibold uppercase text-ai-signal">
                           pro
                         </span>
                       )}

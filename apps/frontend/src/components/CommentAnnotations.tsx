@@ -37,7 +37,7 @@ import { Markdown } from './Markdown.js';
 // All of this reads ONE per-PR query (useAnnotationIndex) that every call site shares, so the
 // number of chips on screen doesn't change the number of requests. A target with no stored
 // judgements renders NOTHING and issues NO request of its own — load-bearing, because ThreadCard
-// is mounted in eight places (the Threads tab, the feed, search results, the diff view), so an
+// is mounted in seven places (the Threads tab, the feed, search results, the diff view), so an
 // unconditional placeholder box was ALSO an unconditional per-thread request storm.
 
 const VALIDITY_META: Record<string, { label: string; color: string }> = {
@@ -131,7 +131,7 @@ const ANCHOR_REASON: Record<string, string> = {
 /**
  * Defensive by design: the column is free text written by a plugin build that may be older or
  * newer than this bundle, so anything unparseable simply renders no block rather than throwing
- * inside a component mounted in eight places (there is no error boundary — a render-time throw
+ * inside a component mounted in seven places (there is no error boundary — a render-time throw
  * blanks the whole app).
  */
 function parseEvidence(raw: string | null | undefined): AddressedEvidence | null {
@@ -210,7 +210,7 @@ function EvidenceBlock({ evidence }: { evidence: AddressedEvidence }): JSX.Eleme
       : '· no diff available';
 
   return (
-    <div className="mt-2 border-t border-violet-200/60 pt-1.5 dark:border-violet-900/40">
+    <div className="mt-2 border-t border-ai-hairline pt-1.5">
       <button
         type="button"
         onClick={(e) => {
@@ -218,7 +218,7 @@ function EvidenceBlock({ evidence }: { evidence: AddressedEvidence }): JSX.Eleme
           setOpen((v) => !v);
         }}
         aria-expanded={open}
-        className="flex items-center gap-1 text-[10px] font-medium text-violet-600 hover:underline dark:text-violet-400"
+        className="flex items-center gap-1 text-[10px] font-medium text-ai-signal hover:underline"
         title="The exact change this verdict was judged against, and the two commits it was taken between."
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>
@@ -328,7 +328,7 @@ function AnnotationPanel({
       : null;
 
   return (
-    <div className="mt-2 rounded-md border border-violet-200/70 bg-violet-50/40 px-2.5 py-1.5 dark:border-violet-900/50 dark:bg-violet-950/20">
+    <div className="mt-2 rounded-md border border-ai-border bg-ai-surface px-2.5 py-1.5">
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -337,7 +337,7 @@ function AnnotationPanel({
             setOpen((v) => !v);
           }}
           aria-expanded={open}
-          className="flex items-center gap-1 text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
+          className="flex items-center gap-1 text-[11px] font-semibold text-ai-signal hover:underline"
           title={meta.title}
         >
           <span aria-hidden="true">{open ? '▾' : '▸'}</span>
@@ -354,7 +354,7 @@ function AnnotationPanel({
         )}
         {annotation.stale && <StaleChip />}
         {sublabel != null && (
-          <span className="text-[10px] text-violet-500/80 dark:text-violet-400/80">
+          <span className="text-[10px] text-ai-muted">
             {sublabel}
           </span>
         )}
@@ -554,7 +554,7 @@ export function ReviewCheckButton({
           run('review', { targets: [target] });
         }}
         disabled={state.running}
-        className="rounded px-1 py-0.5 text-[10px] font-medium text-violet-600 hover:bg-violet-100 disabled:opacity-50 dark:text-violet-300 dark:hover:bg-violet-900/30"
+        className="rounded px-1 py-0.5 text-[10px] font-medium text-ai-signal hover:bg-ai-signal/10 disabled:opacity-50"
         title={CHECK_REVIEW_TITLE}
       >
         {state.running ? 'Checking…' : '✨ Check review'}

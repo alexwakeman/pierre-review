@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import type { MutableRefObject } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type {
   AddReviewCommentResult,
@@ -9,23 +10,27 @@ import type {
 import { useAddReviewComment } from '../../hooks/usePrWrites.js';
 import { ApiError } from '../../api/client.js';
 import {
+  anchorRowFor,
+  commentTarget,
   isLockFile,
   lineRowIndex,
   parsePatch,
   patchLineCount,
   type DiffRow,
 } from '../../lib/diff.js';
-import { safeExternalUrl } from '../../lib/ui.js';
+import { DERIVED_STATE_META, relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
+import { ThreadCountChips, rollupCounts } from '../ThreadList/ThreadCountChips.js';
 import { STATUS_META } from './status.js';
 
 // The shared per-file diff renderer used by BOTH the Changes tab (with inline
 // commenting) and the AI Fix tab (read-only, pre-push). Per-file collapsible blocks
 // with a sticky header, line-number gutters, and the >400-line auto-collapse. Inline
 // commenting + the GitHub links are OPTIONAL: the AI-Fix changeset's files don't exist
-// on GitHub yet, so it passes neither. The Changes tab additionally threads unresolved
-// review threads (`threadCtx`) so they render inline at their diff line, like GitHub.
+// on GitHub yet, so it passes neither. The Changes tab additionally passes its review
+// threads (`threadCtx`, resolved included) so they render inline at their diff line as
+// collapsed pills, like GitHub.
 
 // One changed file with its unified-diff patch. A superset of the Changes tab's
 // PrFileDiff and the AI-Fix `parseGitPatch` output (githubUrl optional).
@@ -39,12 +44,15 @@ export interface DiffFile {
   githubUrl?: string | null;
 }
 
-// Unresolved review threads to render inline in the diff (Changes tab only). Threads
-// carry (path, line) but no side, so we anchor to the row whose new-side (else old-side)
-// line matches; a thread that matches no visible line renders as "outdated" atop its
-// file. `focusThreadId` scrolls to + highlights one thread (deep-link from a card).
+// Review threads to render inline in the diff (Changes tab only), pre-bucketed by RENDERED
+// file path — ChangesTab builds the one rename-aware fold (`indexThreadsByPath`), so a
+// thread written before a rename lands under the file's current path instead of silently
+// vanishing (the old per-view fold keyed on `t.path` while blocks looked up `f.path`).
+// Threads carry (path, line) but no side; `anchorRowFor` places each at its live row, at
+// the hunk-reconstructed row (approximate), or at file grain atop the file — never lost.
+// `focusThreadId` scrolls to + highlights one thread (the just-posted self-focus).
 export interface DiffThreadContext {
-  threads: ThreadDetail[];
+  threadsByPath: Map<string, ThreadDetail[]>;
   usersById: Map<number, User>;
   prUrl: string;
   focusThreadId?: number | null;
@@ -68,6 +76,13 @@ export interface DiffFocusTarget {
   line?: number | null;
   // Which side of the diff the line number belongs to. Defaults to RIGHT (the new file).
   side?: 'LEFT' | 'RIGHT';
+  // The review thread this reveal came FROM (a thread card's "In Changes"): the matching
+  // inline pill opens + flashes as part of the same reveal — every thread renders collapsed
+  // now, and a jump that lands beside a shut pill reads as a broken link. Consumed per
+  // `nonce`, never persistently: the focus target is STICKY in ChangesTab, and a sticky
+  // thread focus would yank the view back here after every posted-comment fade. Optional —
+  // file/line reveals (tree clicks, Claude Review findings) carry none.
+  threadId?: number | null;
   nonce: number;
 }
 
@@ -89,29 +104,6 @@ function startsCollapsed(file: DiffFile): boolean {
   if (patchLineCount(file.patch) > LARGE_PATCH_LINES) return true;
   if (file.additions + file.deletions > LARGE_CHANGED_LINES) return true;
   return false;
-}
-
-// Which side/line an inline comment on this row anchors to (Changes tab only).
-function commentTarget(row: DiffRow): { line: number; side: 'LEFT' | 'RIGHT' } | null {
-  if (row.kind === 'add' && row.newLine != null) return { line: row.newLine, side: 'RIGHT' };
-  if (row.kind === 'context' && row.newLine != null) return { line: row.newLine, side: 'RIGHT' };
-  if (row.kind === 'del' && row.oldLine != null) return { line: row.oldLine, side: 'LEFT' };
-  return null;
-}
-
-// A thread carries (path, line) but no side. Anchor it to the LAST row whose target line
-// matches, preferring the new (RIGHT) side — that's where GitHub pins an inline thread.
-function anchorIndexFor(rows: DiffRow[], line: number | null): number | null {
-  if (line == null) return null;
-  let right: number | null = null;
-  let left: number | null = null;
-  rows.forEach((row, i) => {
-    const t = commentTarget(row);
-    if (!t || t.line !== line) return;
-    if (t.side === 'RIGHT') right = i;
-    else left = i;
-  });
-  return right ?? left;
 }
 
 const ROW_BG: Record<DiffRow['kind'], string> = {
@@ -230,78 +222,196 @@ function DiffLine({
   );
 }
 
-// One inline review thread rendered inside the diff table (a full-width row). Scrolls
-// itself into view + shows a persistent highlight when it's the deep-link target.
-function InlineThreadRow({
+// One review thread rendered inline in the diff — EVERY thread starts as a one-line
+// collapsed pill (state dot + author + age + excerpt) that expands to the full ThreadCard in
+// place, the pill staying as the collapse header. One mechanism for all four states, resolved
+// merely quieter (no coloured border, dimmed, ✓ for the dot): the file-block auto-expand
+// already flags live discussion at file grain, the pill's state colour carries urgency at
+// line grain, and full cards at ~200–600px each are exactly the "eats the diff" failure this
+// replaces (a 47-unresolved-thread PR rendered ~47 cards interleaved in the hunks). Pills use
+// no hooks beyond local expand state — ThreadCard, with its shared per-PR annotation/ML
+// queries, mounts only on expand. Expansion is EPHEMERAL component state on purpose (no
+// store/URL field — the "derived, never written back" rule).
+function InlineThread({
   thread,
   ctx,
+  approximate = false,
+  fileChip = false,
+  focusNonce = null,
+  consumedFocus,
 }: {
   thread: ThreadDetail;
   ctx: DiffThreadContext;
+  /** Anchored via the hunk reconstruction (`anchorRowFor` rung 2) — hedged with `~`. */
+  approximate?: boolean;
+  /** Rendered at FILE grain (outdated / line not in this diff / binary), not at a row. */
+  fileChip?: boolean;
+  /** Non-null when this thread is the reveal's target (`DiffFocusTarget.threadId`). */
+  focusNonce?: number | null;
+  /**
+   * The block's record of the last DELIVERED reveal nonce. It must outlive this component:
+   * the focus target is STICKY in ChangesTab and collapsing the file unmounts the pill, so a
+   * re-expand remounts it against the old nonce — without this record the effect below would
+   * re-open a pill the user deliberately closed and teleport the view back to it. A ref (read
+   * at effect time), not a nulled prop: the mounted pill's props must stay stable mid-flash,
+   * or any re-render (the ~5s PR poll) would trip the reset branch and cut the ring short.
+   */
+  consumedFocus?: MutableRefObject<number | null>;
 }): JSX.Element {
-  const ref = useRef<HTMLTableRowElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   const focused = ctx.focusThreadId != null && ctx.focusThreadId === thread.id;
-  // A RESOLVED thread starts as a one-line stub. Resolved threads used to be filtered out of the
-  // Changes tab entirely, which hid 40% of them and made a settled diff line look undiscussed;
-  // rendering them like the rest would swing the other way and bury the code under closed
-  // conversations. The stub is the middle: the line advertises that it was discussed, and the
-  // conversation is one click away. Focus always wins — a deep link to a resolved thread must
-  // land on the thread, not on a stub the reader then has to find and open.
-  const [open, setOpen] = useState(!thread.isResolved);
-  const expanded = open || focused;
+  const [open, setOpen] = useState(false);
+  // The deep-link flash (thread card → "In Changes"): timed like the diff-row flash, never
+  // persistent — the focus target is sticky in ChangesTab, and a persistent thread focus
+  // would yank the view back here after every later posted-comment fade.
+  const [flash, setFlash] = useState(false);
+  // Focus LATCHES the pill open rather than gating `expanded = open || focused`: the
+  // just-posted self-focus clears on a 6s timer, and a card the reader is midway through
+  // must not snap shut when the highlight fades. Ring + scroll behaviour unchanged.
   useEffect(() => {
-    if (focused && ref.current) {
-      ref.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      ctx.onThreadShown?.();
-    }
-    // Only re-run when this row becomes the focus target.
+    if (!focused) return;
+    setOpen(true);
+    ref.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    ctx.onThreadShown?.();
+    // Only re-run when this thread becomes the focus target.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focused]);
+  useEffect(() => {
+    if (focusNonce == null) {
+      // Reset, not just return: the cleanup below cancels the fade timer, so a focus that
+      // moves elsewhere mid-flash would otherwise leave the ring stuck on (DiffLine's pattern).
+      setFlash(false);
+      return;
+    }
+    // Already delivered — this is a REMOUNT (the file was collapsed and re-expanded), not a
+    // new reveal. Do nothing: the pill starts closed and unringed, exactly as the user left it.
+    if (consumedFocus?.current === focusNonce) return;
+    if (consumedFocus != null) consumedFocus.current = focusNonce;
+    setOpen(true);
+    ref.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setFlash(true);
+    const t = setTimeout(() => setFlash(false), FOCUS_HIGHLIGHT_MS);
+    return () => clearTimeout(t);
+  }, [focusNonce, consumedFocus]);
 
-  const firstLine = (thread.comments[0]?.body ?? '')
+  const meta = DERIVED_STATE_META[thread.derivedState];
+  const resolved = thread.derivedState === 'resolved';
+  const root = thread.comments[0];
+  // TOTAL over stored data (no error boundary): a null/unsynced author, an empty comments
+  // array and an empty body all degrade to text, never throw.
+  const author = userLabel(
+    root?.authorId != null ? ctx.usersById.get(root.authorId) : undefined,
+    root?.authorId ?? null,
+  );
+  const replies = thread.comments.length - 1;
+  const excerpt = (root?.body ?? '')
     .split('\n')
     .find((l) => l.trim() !== '')
     ?.slice(0, 120);
+  const ringed = focused || flash;
 
   return (
-    <tr ref={ref}>
-      <td colSpan={4} className="bg-gray-50 px-2 py-2 dark:bg-gray-900/40">
-        <div
-          className={`rounded font-sans ${
-            focused ? 'ring-2 ring-amber-400/70' : ''
-          }`}
-        >
-          {expanded ? (
-            <ThreadCard
-              thread={thread}
-              usersById={ctx.usersById}
-              prUrl={ctx.prUrl}
-              selected={focused}
-              onOpenInThreads={
-                ctx.onOpenThread != null ? () => ctx.onOpenThread?.(thread.id) : undefined
-              }
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setOpen(true)}
-              className="flex w-full items-center gap-2 rounded border border-gray-200 bg-white px-2 py-1 text-left text-[11px] text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400 dark:hover:bg-gray-800"
-              title="Show this resolved thread"
-            >
-              <span className="shrink-0 text-emerald-600 dark:text-emerald-400">✓</span>
-              <span className="shrink-0 font-medium">
-                Resolved thread
-                {thread.comments.length > 1 ? ` · ${thread.comments.length} comments` : ''}
-              </span>
-              {firstLine && (
-                <span className="min-w-0 flex-1 truncate text-gray-400 dark:text-gray-500">
-                  {firstLine}
-                </span>
-              )}
-              <span className="shrink-0 text-gray-400">⌄</span>
-            </button>
-          )}
+    <div ref={ref} className={`rounded font-sans ${ringed ? 'ring-2 ring-amber-400/70' : ''}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        // A disclosure, like the tree's dir rows: the ⌄/⌃ glyph is visual-only, so without
+        // this a screen reader hears a state description on a button whose action is unstated.
+        aria-expanded={open}
+        title={`${meta.label} — ${meta.description}`}
+        // Inline colour, not a class pair: border-l colour classes lose to the shorthand
+        // border-colour class depending on utility order. Transparent (not absent) when
+        // resolved so the pills stay column-aligned.
+        style={{ borderLeftColor: resolved ? 'transparent' : meta.color }}
+        className={`flex w-full items-center gap-1.5 rounded border border-l-2 border-gray-200 bg-white px-2 py-1 text-left text-[11px] hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 ${
+          resolved
+            ? 'text-gray-400 opacity-70 dark:text-gray-500'
+            : 'text-gray-600 dark:text-gray-300'
+        }`}
+      >
+        {resolved ? (
+          <span className="shrink-0 text-emerald-600 dark:text-emerald-400">✓</span>
+        ) : (
+          <span
+            className="inline-block h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: meta.color }}
+          />
+        )}
+        {fileChip && (
+          <span className="shrink-0 text-gray-400 dark:text-gray-500">
+            {thread.isOutdated ? 'outdated' : 'line not in this diff'} ·
+          </span>
+        )}
+        <span className="shrink-0 font-medium">{author}</span>
+        <span className="shrink-0 text-gray-400 dark:text-gray-500">
+          · {relativeTime(thread.createdAt)}
+        </span>
+        {approximate && (
+          <span
+            className="shrink-0 text-gray-400 dark:text-gray-500"
+            title="Reconstructed from the code it was written against — may be a few lines off"
+          >
+            ~
+          </span>
+        )}
+        {replies > 0 && (
+          <span className="shrink-0 text-gray-400 dark:text-gray-500">
+            · {replies} repl{replies === 1 ? 'y' : 'ies'}
+          </span>
+        )}
+        {excerpt && (
+          // Plain text ONLY — bodies are untrusted, so markdown/images/links stay inert here.
+          <span className="min-w-0 flex-1 truncate text-gray-400 dark:text-gray-500">
+            · {excerpt}
+          </span>
+        )}
+        <span className="ml-auto shrink-0 text-gray-400">{open ? '⌃' : '⌄'}</span>
+      </button>
+      {open && (
+        <div className="mt-1">
+          <ThreadCard
+            thread={thread}
+            usersById={ctx.usersById}
+            prUrl={ctx.prUrl}
+            selected={ringed}
+            onOpenInThreads={
+              ctx.onOpenThread != null ? () => ctx.onOpenThread?.(thread.id) : undefined
+            }
+          />
         </div>
+      )}
+    </div>
+  );
+}
+
+// Table wrapper for InlineThread — a full-width row in the diff table. The binary/no-patch
+// branch renders the same pill unit in a plain <div> instead.
+function InlineThreadRow({
+  thread,
+  ctx,
+  approximate,
+  fileChip,
+  focusNonce,
+  consumedFocus,
+}: {
+  thread: ThreadDetail;
+  ctx: DiffThreadContext;
+  approximate?: boolean;
+  fileChip?: boolean;
+  focusNonce?: number | null;
+  consumedFocus?: MutableRefObject<number | null>;
+}): JSX.Element {
+  return (
+    <tr>
+      <td colSpan={4} className="bg-gray-50 px-2 py-1 dark:bg-gray-900/40">
+        <InlineThread
+          thread={thread}
+          ctx={ctx}
+          approximate={approximate}
+          fileChip={fileChip}
+          focusNonce={focusNonce}
+          consumedFocus={consumedFocus}
+        />
       </td>
     </tr>
   );
@@ -499,25 +609,25 @@ function FileDiffBlock({
   focus: DiffFocusTarget | null;
 }): JSX.Element {
   const rows = useMemo(() => parsePatch(file.patch), [file.patch]);
-  // Anchor each thread to a diff row; those with no matching visible line (outdated /
-  // line-less) render above the diff so they're never lost.
+  // Anchor each thread to a diff row via the shared ladder (`anchorRowFor`: live line, else
+  // the hunk reconstruction — marked approximate). Threads with no matching row render as
+  // FILE-level chips above the diff, so a thread never disappears.
   const { byRow, unanchored } = useMemo(() => {
-    const byRow = new Map<number, ThreadDetail[]>();
+    const byRow = new Map<number, { thread: ThreadDetail; approximate: boolean }[]>();
     const unanchored: ThreadDetail[] = [];
     for (const t of threads) {
-      const idx = anchorIndexFor(rows, t.line);
-      if (idx == null) unanchored.push(t);
+      const hit = anchorRowFor(rows, t);
+      if (hit == null) unanchored.push(t);
       else {
-        const a = byRow.get(idx) ?? [];
-        a.push(t);
-        byRow.set(idx, a);
+        const a = byRow.get(hit.index) ?? [];
+        a.push({ thread: t, approximate: hit.approximate });
+        byRow.set(hit.index, a);
       }
     }
     return { byRow, unanchored };
   }, [rows, threads]);
 
   const unresolvedCount = threads.filter((t) => !t.isResolved).length;
-  const resolvedCount = threads.length - unresolvedCount;
 
   const hasFocus =
     threadCtx?.focusThreadId != null && threads.some((t) => t.id === threadCtx.focusThreadId);
@@ -559,6 +669,12 @@ function FileDiffBlock({
   }, [focus]);
 
   const [openRow, setOpenRow] = useState<number | null>(null);
+
+  // The last thread-reveal nonce a pill in this block has DELIVERED. Lives here — not in the
+  // pill — because collapsing the file unmounts the table (and the pill's state with it) while
+  // this block survives; see `consumedFocus` on InlineThread for the failure it prevents.
+  const consumedThreadFocus = useRef<number | null>(null);
+
   const meta = STATUS_META[file.status];
   const path = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
   const githubUrl = file.githubUrl ?? null;
@@ -586,24 +702,13 @@ function FileDiffBlock({
           </span>
           <code className="min-w-0 flex-1 truncate font-mono">{path}</code>
         </button>
-        {/* The badge counts UNRESOLVED threads and always did — `threads` now also carries the
-            resolved ones (they render as collapsed stubs), so the count is derived rather than
-            taken from the array length, which would silently redefine what the amber "needs
-            attention" chip means. The resolved tail is stated separately and in grey. */}
-        {unresolvedCount > 0 && (
-          <span
-            className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
-            title={`${unresolvedCount} unresolved thread${unresolvedCount === 1 ? '' : 's'} on this file`}
-          >
-            {unresolvedCount} 💬
-          </span>
-        )}
-        {resolvedCount > 0 && (
-          <span
-            className="shrink-0 rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400"
-            title={`${resolvedCount} resolved thread${resolvedCount === 1 ? '' : 's'} on this file`}
-          >
-            ✓{resolvedCount}
+        {/* The full 4-state mix with counts — the old binary split (amber `N 💬` + grey `✓N`)
+            blended untouched, replied and likely-addressed into one number. Same footprint,
+            strictly more information; the `unresolvedCount > 0` auto-expand heuristic below
+            keeps its `isResolved`-based definition, so this is display-only. */}
+        {threads.length > 0 && (
+          <span className="shrink-0">
+            <ThreadCountChips counts={rollupCounts(threads)} />
           </span>
         )}
         <span className="shrink-0 font-mono tabular-nums">
@@ -642,18 +747,21 @@ function FileDiffBlock({
               ) : (
                 'Binary file — no textual diff.'
               )}
-              {/* Even without a textual diff, surface any threads so they aren't lost. */}
+              {/* Even without a textual diff, surface any threads so they aren't lost — the
+                  same collapsed pill as the table path, wrapped in a <div> instead of a row. */}
               {threadCtx && threads.length > 0 && (
-                <div className="mt-2 space-y-2 text-left">
+                <div className="mt-2 space-y-1 text-left">
                   {threads.map((t) => (
-                    <div key={t.id} className="font-sans">
-                      <ThreadCard
-                        thread={t}
-                        usersById={threadCtx.usersById}
-                        prUrl={threadCtx.prUrl}
-                        selected={threadCtx.focusThreadId === t.id}
-                      />
-                    </div>
+                    <InlineThread
+                      key={t.id}
+                      thread={t}
+                      ctx={threadCtx}
+                      fileChip
+                      focusNonce={
+                        focus != null && focus.threadId === t.id ? focus.nonce : null
+                      }
+                      consumedFocus={consumedThreadFocus}
+                    />
                   ))}
                 </div>
               )}
@@ -667,7 +775,16 @@ function FileDiffBlock({
               <tbody>
                 {threadCtx &&
                   unanchored.map((t) => (
-                    <InlineThreadRow key={`u-${t.id}`} thread={t} ctx={threadCtx} />
+                    <InlineThreadRow
+                      key={`u-${t.id}`}
+                      thread={t}
+                      ctx={threadCtx}
+                      fileChip
+                      focusNonce={
+                        focus != null && focus.threadId === t.id ? focus.nonce : null
+                      }
+                      consumedFocus={consumedThreadFocus}
+                    />
                   ))}
                 {rows.map((row, i) => (
                   <Fragment key={i}>
@@ -684,8 +801,19 @@ function FileDiffBlock({
                       focusNonce={focus?.nonce ?? null}
                     />
                     {threadCtx &&
-                      byRow.get(i)?.map((t) => (
-                        <InlineThreadRow key={t.id} thread={t} ctx={threadCtx} />
+                      byRow.get(i)?.map((a) => (
+                        <InlineThreadRow
+                          key={a.thread.id}
+                          thread={a.thread}
+                          ctx={threadCtx}
+                          approximate={a.approximate}
+                          focusNonce={
+                            focus != null && focus.threadId === a.thread.id
+                              ? focus.nonce
+                              : null
+                          }
+                          consumedFocus={consumedThreadFocus}
+                        />
                       ))}
                   </Fragment>
                 ))}
@@ -700,7 +828,7 @@ function FileDiffBlock({
 
 // Render a list of changed files. Pass `commenting:{prId}` to enable the Changes-tab
 // inline-comment affordances (omit it — AI Fix — for a read-only view), and `threadCtx`
-// to render unresolved review threads inline at their diff line.
+// to render review threads inline at their diff line as collapsed pills.
 export function FileDiffView({
   files,
   commenting,
@@ -713,16 +841,6 @@ export function FileDiffView({
   // Optional by contract: the AI Fix tab mounts this component twice with only `files`.
   focus?: DiffFocusTarget | null;
 }): JSX.Element {
-  const threadsByPath = useMemo(() => {
-    const m = new Map<string, ThreadDetail[]>();
-    for (const t of threadCtx?.threads ?? []) {
-      const a = m.get(t.path) ?? [];
-      a.push(t);
-      m.set(t.path, a);
-    }
-    return m;
-  }, [threadCtx?.threads]);
-
   // The thread a comment posted from this view just created. Held HERE rather than pushed
   // up to the caller so the focus works from any mount point without extra wiring: it
   // expands the file (FileDiffBlock's hasFocus effect), scrolls the row into view and rings
@@ -776,7 +894,7 @@ export function FileDiffView({
           file={f}
           commenting={commenting ?? null}
           onPosted={focusPostedThread}
-          threads={threadsByPath.get(f.path) ?? []}
+          threads={threadCtx?.threadsByPath.get(f.path) ?? []}
           threadCtx={effectiveCtx}
           focus={focus != null && f.path === focusedBlockPath ? focus : null}
         />

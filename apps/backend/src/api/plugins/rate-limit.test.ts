@@ -199,6 +199,19 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/pro/synthesis')).not.toContain('ai');
   });
 
+  // /api/pro/bot-themes — the revived Bots "What they're flagging" panel. Both tiers land via
+  // the /api/pro/ catch-all and are pinned here so the family's placement is explicit: the POST
+  // /refresh is a real model spend (Haiku behind a payload-hash $0 cache) → the `ai` pair; the
+  // GET is a PURE cache read of one indexed row, DELIBERATELY without a stale probe (a probe
+  // would re-run the whole getBotReviewComments corpus fold per Bots-tab open — the exact cost
+  // that puts its synthesis sibling's GET on `search`), so unlike that sibling it stays on the
+  // plain read bucket.
+  it('tiers the bot-themes pair per verb: refresh POST on the AI pair, the cached GET on read', () => {
+    expect(tiers('POST', '/api/pro/bot-themes/refresh')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/pro/bot-themes')).toEqual(['read']);
+    expect(tiers('GET', '/api/pro/bot-themes')).not.toContain('search');
+  });
+
   // /api/ml-status is POLLED every few seconds while a sync round is open (it is what lets the
   // progress UI represent the model pass rather than stopping at the GitHub walk). Its backlog
   // half is the rollup's unlabelled-count joins repeated PER WORKSPACE, so the 600/min blanket

@@ -42,9 +42,10 @@ export function ThreadCard({
   // via a closest() guard. Inert (a plain header) when omitted.
   onOpenInPr?: () => void;
   /**
-   * "Show this thread's code in the Changes tab." Optional because only ONE of ThreadCard's eight
+   * "Show this thread's code in the Changes tab." Optional because only ONE of ThreadCard's seven
    * mounts can honour it: `ChangesTab` has a single mount (PrDetail), so only the Threads-tab
-   * mount sits beside a Changes tab without BEING one. The two mounts inside FileDiffView are
+   * mount sits beside a Changes tab without BEING one. The single mount inside FileDiffView (the
+   * InlineThread pill's expansion — both the table and binary branches route through it) is
    * already in the diff, and the Feed / search / attention / themes mounts have no Changes tab at
    * all — they navigate INTO a PR instead (`onOpenInPr`).
    *
@@ -65,7 +66,7 @@ export function ThreadCard({
 }): JSX.Element {
   const anchorHunk = thread.comments[0]?.diffHunk ?? null;
   const lineLabel = thread.line != null ? `line ${thread.line}` : 'file-level';
-  // ONE shared per-PR query, whichever of the eight ThreadCard mount sites this is. React Query
+  // ONE shared per-PR query, whichever of the seven ThreadCard mount sites this is. React Query
   // dedupes it across every card on the same PR, and it is skipped entirely when the deployment
   // has no severity-api (npx), so an OSS install issues nothing.
   const mlEnabled = useMlSeverityEnabled();

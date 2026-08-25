@@ -215,6 +215,13 @@ interface MergedPr {
   lane: ActorLane;
 }
 
+/** One PR of a median's sample population — what the evidence sinks below carry: the PR id plus
+ *  the review timestamp that anchored it in the window (the newest-first evidence sort key). */
+export interface ReviewSampleRef {
+  prId: number;
+  atMs: number;
+}
+
 // ── The ONE definition of "time until a person reviewed it" ──────────────────────────────────
 //
 // Extracted because it is read by TWO surfaces — the vector's
@@ -243,6 +250,11 @@ export async function loadFirstHumanReviewHours(
   to: Date,
   lanes: ActorLanes,
   authorUserId?: number,
+  // Evidence sink (the People report's person-period evidence): when given, receives
+  // {prId, atMs} for EXACTLY the PRs whose hours entered the median — the sample population off
+  // this one fold, so no caller ever writes a sibling predicate to name it. Optional + append-
+  // only: both period-vector call sites pass nothing and are byte-identical to before.
+  samplesOut?: ReviewSampleRef[],
 ): Promise<number[]> {
   const inScope = and(
     eq(pullRequests.accountId, accountId),
@@ -317,12 +329,15 @@ export async function loadFirstHumanReviewHours(
   const fromMs = from.getTime();
   const toMs = to.getTime();
   const out: number[] = [];
-  for (const { at, openedAt } of firstHumanByPr.values()) {
+  for (const [prId, { at, openedAt }] of firstHumanByPr) {
     if (at < fromMs || at >= toMs) continue; // first human review was in some OTHER period
     const hours = (at - openedAt) / 3_600_000;
     // A review timestamped before its own PR opened is clock skew, not a negative latency.
     // Excluding it is cheap and it is exactly the direction of error this metric exists to fix.
-    if (hours >= 0) out.push(hours);
+    if (hours >= 0) {
+      out.push(hours);
+      samplesOut?.push({ prId, atMs: at });
+    }
   }
   return out;
 }

@@ -457,6 +457,66 @@ Review finding deep-link. Do not add a third.
   `fileInDiff`. The jump is a `<button>`, never an `<a href="#…">` (a hash navigation would write
   to the URL `useUrlState` owns), with a small `↗` beside it keeping the GitHub diff-line escape.
 
+#### Inline thread indicators in the diff + per-file state rollups
+
+Every review thread — **resolved included** — renders inside the diff as a one-line collapsed
+**pill** (`InlineThread` in `FileDiffView.tsx`): state dot, author, age, `~` when approximate,
+reply count, plain-text excerpt, chevron. Clicking expands the full `ThreadCard` IN PLACE with
+the pill as its collapse header. One mechanism for all four states — resolved is merely quieter
+(no coloured left border, dimmed, `✓` for the dot) — because the alternative failure modes are
+both real: filtering resolved out hid 40% of threads and made settled lines look undiscussed,
+while rendering every thread as a full card at ~200–600px each buried the diff (a 47-thread PR
+rendered ~47 cards interleaved in the hunks). Pills use **no hooks beyond local expand state**;
+`ThreadCard`, with its shared per-PR annotation/ML queries, mounts only on expand. Expansion is
+EPHEMERAL component state — no store field, no URL (the "derived, never written back" rule).
+
+- **ONE rename-aware fold, built once per PR.** `indexThreadsByPath` (`lib/diff.ts`, pinned by
+  `test/threadsByPath.test.ts`) buckets threads by the **RENDERED** file path and re-homes a
+  thread whose `path` matches only a file's `previousPath`. ⚠ Before this the per-view fold keyed
+  on `t.path` while the blocks looked up `f.path`, so a thread written before a rename was
+  INVISIBLE in Changes. An exact current-path match always beats a `previousPath` re-home (with a
+  COPY, both paths are in the diff and the thread belongs to the file that literally has it). It
+  is a memoized `Map`, never a per-row `.filter()`.
+- **Anchoring is a three-rung ladder** (`anchorRowFor`, shared with `PrDetail.openInChangesFor`
+  so the pill's position and the "In Changes ~" scroll target agree): a live `thread.line` → the
+  last matching row, RIGHT side preferred; else the anchor hunk reconstructed
+  (`anchorLineFromHunk` + `lineRowIndex`, matched honestly on its own side) and marked
+  **approximate**; else `null`, and the pill renders at FILE grain above the diff with an
+  "outdated" / "line not in this diff" prefix. **A thread never disappears.** Rung 1 never falls
+  through to the hunk: a live line absent from the visible patch means the hunks moved on, and a
+  reconstruction would contradict stored truth. Known asymmetry: the jump has no side and assumes
+  RIGHT, so a live line matching only a LEFT (del) row anchors the pill here while the jump falls
+  back to the file header (the pill still opens and rings; only the scroll target diverges).
+- ⚠ **`consumedFocus` lives on the BLOCK, not the pill.** `DiffFocusTarget` gained an optional
+  `threadId` so a thread-card jump opens and flashes the matching pill as part of the same
+  reveal, consumed per `nonce`. The focus target is STICKY in `ChangesTab` and collapsing a file
+  unmounts the table (and the pill's state with it), so a re-expand remounts the pill against the
+  old nonce — without the block-level record the effect would re-open a pill the user
+  deliberately closed and teleport the view back to it. It is a **ref read at effect time**, not
+  a nulled prop: the mounted pill's props must stay stable mid-flash or any re-render (the ~5s PR
+  poll) would trip the reset branch and cut the ring short. Focus also **LATCHES** the pill open
+  rather than gating `expanded = open || focused`, so the 6s self-focus timer expiring does not
+  snap shut a card the reader is midway through.
+- **Per-file and per-directory state rollups.** `ThreadCountChips` is now THE one renderer of the
+  `DERIVED_STATE_META` palette (the byte-identical `ThreadDots` in `StateBadge.tsx` was deleted —
+  rationale recorded at `ThreadCountChips.tsx`), and gained a `compact` dots-only mode for the
+  224px tree rail (4 × dot+number cannot compete with a file name; the file header two inches
+  right has the numbers, and resolved is dimmed at dot grain so a settled PR does not shout).
+  `FileTreeEntry.threadCounts` is optional (the AI-Fix changeset has no threads) and
+  `FileTreeNode.threadCounts` sums per directory exactly like `additions`/`deletions`, so a
+  collapsed `▸` row with a red dot says an untouched thread hides inside it. The file header
+  shows the full 4-state mix, replacing the old binary amber-`N 💬` + grey-`✓N` split which
+  blended untouched / replied / likely-addressed into one number; the `unresolvedCount > 0`
+  auto-expand heuristic keeps its `isResolved` definition, so that change is display-only.
+  ⚠ The **tab header** counts `pr.threads`, not the indexed map, so the PR-grain aggregate never
+  under-reports a thread whose file fell outside the 100-file diff cap.
+- Rail chrome: a sticky header with the file count and a **Collapse all / Expand all** toggle
+  over the same ephemeral `collapsed` set (default-all-open is right for small trees; a 60-file /
+  12-dir PR costs a scroll per directory without it). Directory `+/−` counts render MUTED so the
+  leaves — the click targets — stop competing with their own rollups, and the trailing
+  chips + counts are pinned as ONE `ml-auto` group so narrow widths are absorbed by name
+  truncation rather than column drift.
+
 #### Thread ↔ Changes navigation (both directions)
 
 **Thread → Changes.** `PrDetail.openInChangesFor(thread)` resolves the jump and hands `ThreadCard`
@@ -503,9 +563,10 @@ keys on the VALUE, so re-selecting an already-selected thread — precisely what
 reader arrived in Changes FROM that thread — would not re-fire. It still calls `selectThread`,
 which also clears the state/severity pill presets that could otherwise filter the target out.
 
-⚠ Both new props are **optional**, because only ONE of `ThreadCard`'s eight mounts can honour
+⚠ Both new props are **optional**, because only ONE of `ThreadCard`'s **seven** mounts can honour
 each. `ChangesTab` has a single mount (PrDetail), so only the Threads-tab mount sits beside a
-Changes tab without BEING one; the two mounts inside `FileDiffView` are already in the diff, and
+Changes tab without BEING one; the single mount inside `FileDiffView` (the `InlineThread` pill's
+expansion — both the table and binary branches route through it) is already in the diff, and
 the Feed / search / attention / themes mounts have no Changes tab at all (they use `onOpenInPr`).
 Both controls are real `<button>`s so `ThreadCard`'s header-click guard
 (`closest('a,button,…')`) swallows them — a `<span onClick>` would ALSO fire `onOpenInPr` and
@@ -514,9 +575,9 @@ navigate away from the PR the reader is already in.
 #### Emoji reactions (`ReactionBar` + `hooks/useReactions.ts`)
 
 CORE/free, and **nothing is stored or synced** — no column, no migration, no sync step; state is
-read live from GitHub. Exactly **two mounts**: `ThreadView/CommentBlock` (which reaches all eight
+read live from GitHub. Exactly **two mounts**: `ThreadView/CommentBlock` (which reaches all seven
 `ThreadCard` mount sites at once — Threads tab, Feed, search results, attention cards, the Pro
-themes drill-down, both diff views) and PrDetail's conversation list (PR comments + review bodies,
+themes drill-down, the diff's inline pill) and PrDetail's conversation list (PR comments + review bodies,
 the kind riding the same `isComment` discriminator as the ML badge). There is deliberately **no
 thread-level bar** (`PullRequestReviewThread` is not in GitHub's `Reactable` interface) and no
 read-only variant — the write gate is GitHub's own `viewerCanReact`.
@@ -692,10 +753,181 @@ but broken deep links).
   "View activity →" — same tab, named entry point; absent (never a nudge) when the capability is
   off.
 
-Deleted outright with this wave: `BotBehaviourPanel`, `BotThemesPanel` + `useBotThemes`,
+Deleted outright with this wave: `BotBehaviourPanel`,
 `WorkspaceComparisonPanel` + `useWorkspaceComparison` + the `'compare'` rail value (no longer
 URL-parsed — a legacy `?activityRepo=compare` link falls through to the `'feed'` default),
 `SprintReportCard` + `useSprintReport`, `lib/workspaceColors.ts`, and `InsightsSubTab`.
+(`BotThemesPanel` + `useBotThemes` were deleted here too and have since been RESTORED — see
+"The Bots Themes panel" below. `botsInnerTab` did NOT regain a `'themes'` member: the panel sits
+on the main ROI view.)
+
+### The Bots Themes panel (restored)
+
+`BotThemesPanel` replaces the `SynthesisCard` mount in `BotsView.tsx` **only**; the three
+drill-down `SynthesisCard` mounts (`BotVolumeDetail`, `BotFlaggingDetail`, `BotThreadsDetail`)
+are untouched and still serve slice-scoped Summarise. It copies `SynthesisCard`'s tier posture
+verbatim — OSS renders nothing, free cloud renders the one-line Pro nudge, paid renders the
+report — and its body is `max-h-[32rem] overflow-y-auto overscroll-contain` so a long report
+cannot push the deterministic Measure surface off screen.
+
+⚠ **The caption must distinguish the two figure classes**: per-theme comment counts, per-bot
+volume/acted-on and the area split are exact code folds; the themes themselves and the
+category/severity rollups are an AI read. The shipped copy says "Themes are an AI read
+(approximate); the volumes, per-theme comment counts and 'where' are exact" — do not simplify it
+to "exact". The same rule governs `ThemeThreadsDetail`'s new per-theme metrics strip: its chips
+are client-side folds over data the view had ALREADY fetched (queries byte-identical to the
+groups' and badges' own, so React Query dedupes them and the strip issues nothing new), it
+discloses `n of m PRs loaded` while partial, and its **ML severity mix is over that loaded
+sample, not a population**.
+
+`useBotThemes` keys on `['bot-themes', window, workspaceKey(workspaceId), repoKeySlot(repoIds)]`
+— the two-slot rule from `useBotTriage`, and the `ws:<id>` segment is the same string the plugin
+persists as `scope_key`. ⚠ `useRefreshBotThemes` shares its MUTATION key per scope
+(`useIsMutating`), because a board switch mid-run unmounts the panel and a per-mount `isPending`
+would reset the button to "Generate" while the Haiku run is still in flight — the
+`CiAnalysisCard` lesson. The `setQueryData` write must build the key the same way as the read
+(one `workspaceKey` + one `repoKeySlot` call each) or a Regenerate appears to do nothing until
+the next refetch.
+
+### The ad-hoc chat is a transcript (`AdHocChatPanel` + `adHocChatModel.ts`)
+
+Expanded by DEFAULT, completed turns rendered oldest→newest ABOVE the input, each turn keeping
+its OWN caption (window · generated time · answering model) so a transcript that legitimately
+spans two report periods stays honest. State is `sprintChatThreads: Record<string,
+SprintChatTurn[]>` in the filters store, keyed `workspaceScopeKey(workspaceId)` (`ws:<id>` — the
+same vocabulary the server persists; never a bare `String(id)`), transient and URL-silent. A
+turn holds the wire response VERBATIM rather than a projection, so a field added later flows
+through without a store change. Clearing a thread destroys no record: every turn was persisted
+server-side as its own history row at answer time.
+
+- ⚠ **The completed turn is appended in `useSprintChat`'s HOOK-level `onSuccess`, never a
+  `mutate()` callback.** Mutate-scoped callbacks die with the observer, and the panel fires
+  `chat.reset()` on a workspace switch / history pick / "New conversation" while clicking a PR
+  ref unmounts it mid-flight — either would `removeObserver` the pending mutation, so a billed,
+  server-persisted answer would silently miss the live transcript and the NEXT ask would send a
+  history missing that turn (so "why is that?" resolves against the wrong previous answer).
+  Hook-level callbacks run from `Mutation.execute` regardless of observers. The scope is captured
+  as **`onMutate` context**, because the options closure is not ask-stable — every re-render
+  while pending `setOptions`-swaps it, so by completion `workspaceId` can be another workspace's.
+- Only a response carrying a real `answer` becomes a turn; throttled / out-of-credits shapes
+  render as notices off the mutation's own data and must not occupy one of the ten slots. The
+  composer clears on send-success (guarded so text typed toward the NEXT question survives) and
+  is RETAINED on error/throttle on purpose — it aids retry.
+- **The cap UX**: at `SPRINT_CHAT_MAX_TURNS` pairs the input disables behind a "New
+  conversation" affordance. The server independently re-caps, so this is ergonomics, not
+  enforcement. `trimmedTurns > 0` on an answer is whispered under it — a reference the model
+  visibly missed otherwise reads as a model failure.
+- **Scrolling is STICKY, not unconditional**: `stickToBottomRef` is tracked continuously via
+  `onScroll` (it must be read as it stood BEFORE new content grew `scrollHeight`, so it cannot be
+  computed inside the effect), and a SEND always re-arms it while an arrival respects where the
+  reader scrolled to — Sonnet-length waits are long enough to re-read earlier turns.
+- **Suggestion pills are TWO LABELLED GROUPS** (`suggestionGroups` in the pure
+  `adHocChatModel.ts`): "From this report" — templated from the viewed report's own significant
+  deltas, so it renders only when a report is on screen — and "Quick questions", the built-ins.
+  They are different claims (client-computed figures vs generic asks) and one merged array also
+  carried a latent duplicate-`key` risk. Once a conversation exists the BUILT-INS collapse behind
+  their caption (derived from `thread.length` per render, never written back). Model-proposed
+  follow-up chips are FILLED pills inside the transcript, attached to the NEWEST answer only and
+  hidden while an ask is pending. ⚠ Every pill prompt must stay ≤500 chars — the server's
+  `MAX_QUESTION` truncates SILENTLY, so a mid-sentence cut would ship a live mispowered pill with
+  no error anywhere (pinned by `test/sprintChatThread.test.ts`).
+
+### The Reports People picker + the People report tab
+
+`PeriodPeopleSection` is now a PICKER: a text field that opens `UserSelectPanel`'s extracted
+`MemberSectionList` inline (same Maintainers / per-repo / Other grouping) plus a flat
+alphabetical BOTS section from `useDetectedReviewers` (the union truth — comment-only reviewers
+included), multi-select straight to removable chips, then "Begin report".
+
+- ⚠ **The section used to list the ACCOUNT's users across every workspace.** FilterBar's member
+  `useMemo` was extracted to the pure `hooks/useMemberSections.ts` (`buildMemberSections`) so the
+  picker reuses ONE fold with a different SCOPE and a different BOT VERDICT: `inScopeRepoIds` =
+  the WHOLE active workspace's membership (the repo picker is Timeline-only), the UNION bot
+  predicate (workspace `automated` ∪ `users.isBot`, a manual "human" winning both ways), and
+  **`includeRosterRemainder: false`** — that remainder was the cross-workspace bleed. FilterBar
+  passes exactly the inputs it always computed, so its output is byte-identical (fixture-pinned
+  by `test/memberSections.test.ts`).
+- ⚠ **MAJOR BUG CAUGHT IN REVIEW: the picker first used `useSearchTimeline`/`useSearchOpenPrs`,
+  which are TIMELINE-ONLY.** `buildTimelineSearch` emits `filters.repoIds` and windows by the
+  board's Range preset — neither control is mounted on the Reports pane, so a narrowing left on
+  the board silently dropped workspace members with no visible cause, and an older completed
+  period could not offer anyone quiet since. It now uses `rosterTimelineSearch` /
+  `useRosterTimeline` (workspace-wide, `excludeBots=false`, windowed by the PERIOD BEING
+  REPORTED so the string is STABLE per period rather than churning with the board's live `to`)
+  plus `useWorkspaceOpenPrs`. It deliberately does NOT share the board's cache entry — one extra
+  lean fetch, accepted for the same reason `useSearchTimeline` accepts its own. Pinned by
+  `test/peopleRosterScope.test.ts` in the `workspaceOpenPrsScope` idiom, including the
+  falsifiable half. The reported window is DERIVED from `insightsReportKey` (falling back to the
+  newest listed period), never written back.
+- **The report is an ephemeral SINGLETON pinned tab**: `TabKind 'people-report'` /
+  `PEOPLE_REPORT_TAB_KEY`, a full-main overlay in `App.tsx` at `max-w-[100rem]`, rendered from
+  the transient `peopleReportSeed { workspaceId, periodKey, selections[] }` (the
+  `themeThreadsSeed` discipline — read-not-consumed for the tab's lifetime, a second Begin
+  RE-SEEDS in place, excluded from `persist` and from `parseTabKey` so a reload drops it, which
+  it must since the seed lives only in memory). ⚠ **`workspaceId` IS PART OF THE SEED**: period
+  keys are cadence-grid strings, so another workspace sharing the grid would resolve the key and
+  render the OLD workspace's selections against the NEW workspace's data under the same heading.
+- **Sections render ALPHABETICALLY by label with humans and bots interleaved** (`orderSelections`
+  in the pure `lib/peopleReport.ts`, unit-tested) — the seed preserves click order and the render
+  ignores it. Never metric-sorted, never kind-grouped-then-ranked: PREP, NOT SCORING. Human
+  sections loop the one-person GET with `evidence=1`; the Pro `person_report` narrative is
+  generated SEQUENTIALLY through a narration queue so two sections never bill concurrently, with
+  a throttle backoff and a one-attempt-per-staleness-observation guard (a hard failure must stop
+  ASKING, or it holds the queue's single grant under a "queued…" label with nothing running).
+  Bot sections are deterministic, no AI. Every per-section query key carries `ws:` + `u:<userId>`
+  + `pw:<from>-<to>` fixed-arity slots, so two chips can never share a cache entry.
+
+## The AI-surface palette (`ai-*` tokens) — and the purple that STAYS
+
+The AI panels moved off violet/purple onto the landing's ink · vermilion · paper vocabulary.
+**Eight semantic tokens**, defined as theme-flipping CSS custom properties in
+`apps/frontend/src/index.css` (`:root` for light, `.dark` for dark — the SPA is
+`darkMode: 'class'`, so the vars inherit to every panel and must NOT be scoped to a component
+selector) and exposed to Tailwind in `apps/frontend/tailwind.config.ts` as
+`rgb(var(--x) / <alpha-value>)`:
+
+`--ai-surface` · `--ai-surface-2` · `--ai-border` · `--ai-hairline` · `--ai-ink` · `--ai-muted`
+· `--ai-signal` · `--ai-signal-fill`
+
+- ⚠ **The vars MUST stay space-separated RGB channel triplets** (`22 22 26`, the `--tl-tint`
+  precedent). Any other format makes `<alpha-value>` fail SILENTLY — `bg-ai-surface/10` simply
+  paints nothing.
+- Because the var flips, an `ai-*` class needs **no `dark:` twin**; the swap deleted the old
+  `dark:` halves rather than duplicating them.
+- `--ai-signal` is the TEXT-SAFE accent and the only vermilion allowed to carry or back text. It
+  is `#B53621` in light — deliberately DARKER than the landing's brand `#C13A20` — because every
+  text-on-wash recipe has to clear WCAG (`/15` over `--ai-surface` measures 4.55:1, `/10` over a
+  panel 4.92:1; the brand hex measured 4.14 / 4.46). The landing and `Wordmark` keep the brand
+  hex. `--ai-signal-fill` (`#E2492C`) is **NON-TEXT ONLY** — meters, strokes, rules. Dark mode
+  collapses both to one vermilion (`#F26B4E`).
+- Solid CTAs are `bg-ai-signal text-white dark:text-gray-950`.
+
+**⚠ The surviving `violet-`/`purple-`/`indigo-` hits are a deliberate KEEP-LIST, not leftovers.**
+`rg -n "violet-|purple-|indigo-" apps/frontend/src` should return only these; do not "finish the
+migration".
+
+| Kept | Why |
+|---|---|
+| the `#8957e5` maintainer shield (`MaintainerShield`, `Timeline/userRow.ts`, `UserSelectPanel`, `PeriodPeopleSection`) | maintainer identity, not AI |
+| `MergeControl` / `MergeWhenReadyControl` / PrDetail's "Auto-merge armed" chip | the merge family |
+| `lib/ui.ts` event-category colours + `.ev-*` dots, `ML_CATEGORY_COLOR`, `BOT_VENDOR_META` vendor accents, `charts/common.tsx` `PALETTE`/`SERIES_COLORS` | DATA ENCODING — hues must stay identical across every chart |
+| `PeriodReportsPanel`'s `LANE_META` (`ai_review` violet, `release` indigo) | the 7-lane palette needs 7 stable distinct hues; vermilion collides with the red already in charts |
+| `BotRoiPanel`'s inflation under-call violet | direction encoding — the drill-down matrix keys on the same hues |
+| FeedView's "PR events" / "Needs review" indigo pills | feed category-pill palette |
+| `ChecksTab` / `AttentionCards` "Assign" buttons | suggested reviewers are deterministic CORE (CODEOWNERS + inference) — no model, so not an AI marker |
+| `MetricsDetail` / `PinnedTabsBar`'s `violet` tone (Flow metrics) | core deterministic drill-down; a generic active accent |
+| `index.css` `.tl-repo-tint-1`, the cross-person chips | timeline layout encoding |
+| `AiFix/CommentFixReport`'s `DISAGREE_COLOR` (`#8957e5`) | its own comment pins "deliberately NOT red — red would read as the fix failed"; vermilion is red-adjacent and would recreate exactly that bug |
+
+The documented split is **controls join the family, data keeps the chart palette**: the Inflation
+column's under-call COUNTS stay violet while the chip the click opens is vermilion, and the
+`ai_review` LANE stays violet in lane charts.
+
+⚠ **A hex a component DERIVES a wash from cannot become a var.** `FeedView`'s `itemGlyph`
+returns `{color}` and the chip paints `background: glyph.color + '1a'`. The `claude_review` kind
+therefore returns a `className` (`bg-ai-signal/10 text-ai-signal`) with an empty `color`, and the
+chip skips the `style` attribute whenever a className is present. Adding a second theme-flipping
+glyph means extending that branch, not the hex table.
 
 ## ML severity badges + the Bots severity rollup
 

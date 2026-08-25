@@ -271,11 +271,39 @@ enforces FKs.
 |---|---|
 | `GET /api/prs/:id/ml-labels` | **THE per-PR index** → `PrMlLabelsResponse`. Every badge on the page reads this one query (React Query dedupes; `staleTime: Infinity`), so a 60-thread PR costs one request, not 60. A target with no label is simply absent. Ownership 404 via the getter. Carries the vendor's own badge (`vendorSeverity` / `vendorSeverityConfidence`, both nullable) alongside ours, purely so the client can render the disagreement. Rate tier `read` — recorded explicitly, not inherited, because it sits inside the `/api/prs/<id>/` family whose other members hydrate from GitHub |
 | ~~`GET /api/bot-severity`~~ | **DELETED** (the consolidation cut list). The Bots rail's severity surface lives entirely on `/api/bot-analytics` (the WINDOWED `ml` block + per-vendor `ml*` fields, computed by `getMlWindowAggregates`); a corpus-wide, unwindowed twin with no SPA consumer was one more predicate to hold in parity for zero renderers. `getBotSeverityRollup` STAYS in `db/ml-labels.ts` as the documented reference for the findings-only exclusion semantics the merged fold mirrors; `useBotSeverity`/`botSeverityKey` and the client method are gone with the route |
-| `GET /api/bot-analytics/vendor/:key/comments?window&workspace&repoIds` | The per-bot COMMENTS drill-down → `BotVendorCommentsResponse`: everything one automated reviewer said in the ROI window (inline review comments with path + thread state, PR comments, non-empty review bodies), each row's `MlLabel` shipped **INLINE** via a LEFT JOIN on `(account_id, target_kind, target_id)` — one request, never the per-PR index per row. Capped 3 000/source, newest-first, `truncated` flag. `key` = `u<userId>` \| `'pierre'` (the sentinel answers empty — verbatim reviews are human-posted); anything else 400s. Lives in `db/ml-labels.ts` (`getBotVendorComments`) — deliberately NOT a re-export of `getBotReviewComments`, whose row shape is lockstepped into `packages/pro` and which is role-`'review'` while this also serves quality-check rows. ⚠ **Rate tier `search`** (bodies + a three-way label join); its `/prs` sibling stays `read` (metadata only). Pinned in `rate-limit.test.ts` |
+| `GET /api/bot-analytics/vendor/:key/comments?window&workspace&repoIds[&fromMs&toMs]` | The per-bot COMMENTS drill-down → `BotVendorCommentsResponse`: everything one automated reviewer said in the ROI window (inline review comments with path + thread state, PR comments, non-empty review bodies), each row's `MlLabel` shipped **INLINE** via a LEFT JOIN on `(account_id, target_kind, target_id)` — one request, never the per-PR index per row. Capped 3 000/source, newest-first, `truncated` flag. `key` = `u<userId>` \| `'pierre'` (the sentinel answers empty — verbatim reviews are human-posted); anything else 400s. Lives in `db/ml-labels.ts` (`getBotVendorComments`) — deliberately NOT a re-export of `getBotReviewComments`, whose row shape is lockstepped into `packages/pro` and which is role-`'review'` while this also serves quality-check rows. Its `window` parameter was widened to the `getBotAnalytics` form (`BotWindowKind | {kind, fromMs, toMs}`) so the People report's per-bot evidence cards can cover a COMPLETED period; the optional `fromMs`/`toMs` query pair is route-validated (only-together, ordered, span ≤ 200d, else **400**) and applied under the `toBound` rule below. ⚠ **Rate tier `search`** (bodies + a three-way label join); its `/prs` sibling stays `read` (metadata only). Pinned in `rate-limit.test.ts` |
 | `GET /api/ml-status` | The worker's live state → `MlEnrichmentStatus` (incl. `unscorable`, the NULL-body legacy population — never part of `pending`), so the sync UI can show the scoring pass (above). **NO scope parameter** — the worker walks every workspace, so a workspace-scoped backlog would under-report the work actually running. Same `search` tier as the rollup, for the same reason (its backlog half is those unlabelled-count joins, once per workspace) — plus a ~3 s per-account cache on the scan, because this one is POLLED and a tier bounds request count, not per-request work |
 
 Both are **pure reads**. There is no generate endpoint and no mutating verb: the model is only
 ever called by the background worker, so no request can spend anything.
+
+### ⚠ The windowed fold's UPPER bound is conditional — `toBound`
+
+`getMlWindowAggregates` and `countBotText`/`countUnlabelledBotText` gained a `to: Date | null`
+parameter alongside `from`, threaded from `getBotAnalytics`. **It is a `Date` ONLY when the
+caller holds EXPLICIT bounds** (the People report's completed period), and is then applied
+half-open (`lt`, the routes' stated `[fromMs, toMs)` contract, matching `person-period.ts`'s
+spelling so a boundary-ms row lands in exactly one period). Under the ENUM window form it is
+`null` and the scan carries **no upper predicate at all**.
+
+Both halves of that rule are load-bearing, and each was learned the hard way:
+
+- **Without any upper bound**, a bot still labelling after a completed period leaked those rows
+  into that period's counts, weekly buckets and cap budget — the "one row must never mix two
+  populations" defect at the bot grain. The same one-sided predicate was in the automated thread
+  scan and `mergedPastRows` on the `getBotAnalytics` side.
+- **With an UNCONDITIONAL upper bound**, the enum form (whose `to` ≡ `Date.now()`) excluded rows
+  written in the CURRENT SECOND — these columns are second-granular on sqlite — which flaked
+  `verify:isolation` non-deterministically. It also broke byte-identity between this scan's
+  `WHERE` and `foldBotFlaggingPopulation`'s, and that identity is what makes "an Inflation count
+  IS the flagging drill-down's `filteredTotal`" true (the drill-down only ever serves enum
+  windows).
+
+Newest-first ordering still holds under either form, so the in-window rows remain a prefix of
+any widened (`trendFrom`) scan.
+
+`toWireLabel` is now EXPORTED from `db/ml-labels.ts` for the person-period evidence fold, which
+attaches stored labels to a handful of capped comment rows — same coercions, one spelling.
 
 ---
 

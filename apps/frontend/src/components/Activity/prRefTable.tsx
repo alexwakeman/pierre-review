@@ -213,7 +213,10 @@ export function parseBlocks(markdown: string, index: PrRefIndex): Block[] {
   return blocks;
 }
 
-function PrTable({
+// Exported for the People report's evidence groups, whose rows are DigestPrRefs already — one
+// group with an empty summary renders the same PR | CI | age | author | diff geometry as the
+// digests, so PRs present identically everywhere (the caller passes an empty index then).
+export function PrTable({
   groups,
   onOpenPr,
   usersById,
@@ -416,7 +419,7 @@ export function SummaryMarkdown({
           return (
             <div
               key={i}
-              className="border-l-2 border-violet-400 pl-2 text-[13px] font-semibold leading-relaxed text-gray-800 dark:border-violet-500 dark:text-gray-100"
+              className="border-l-2 border-ai-signal-fill pl-2 text-[13px] font-semibold leading-relaxed text-gray-800 dark:text-gray-100"
             >
               {render(renderInlineMarkdown(b.text ?? '', index, onOpenPr))}
             </div>

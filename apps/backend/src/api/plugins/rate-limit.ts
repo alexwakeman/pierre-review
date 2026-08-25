@@ -184,7 +184,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // plus ~10 person-scoped aggregates — the reports-GET shape of cost (this event loop and this
   // database, no GitHub, no Anthropic), so it borrows the same 60/min `search` bucket rather
   // than the 600/min blanket. Fired once per 1:1 section mount / period switch. The narration
-  // POST is NOT here — it rides the /api/pro/synthesis pair above (kind 'person').
+  // POST is NOT here — it rides the /api/pro/synthesis pair above (kind 'person'). The
+  // `?evidence=1` variant (the People report) is the same event-loop shape — ~8 additional
+  // capped `ORDER BY … LIMIT` selects on the same fold — so it sits on the same tier.
   if (!mutating && path.startsWith('/api/pro/insights/person/')) {
     return [TIERS.search, TIERS.read];
   }

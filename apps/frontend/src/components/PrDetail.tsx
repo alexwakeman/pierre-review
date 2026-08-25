@@ -669,12 +669,16 @@ export function PrDetail({
     path: string,
     line: number | null,
     side: 'LEFT' | 'RIGHT',
+    // Set only by the thread → Changes leg: the target thread's inline pill opens + flashes
+    // as part of the reveal (every thread renders collapsed there, and a jump landing beside
+    // a shut pill reads as a broken link). Claude Review anchors carry none.
+    threadId?: number,
   ): void => {
     // THE ONE DELIBERATE EXCEPTION to `goToTab`, and the ordering is the whole point: this path
     // exists to SET a focus, and `goToTab` clears it. Move the tab first, then arm the target, so
     // no clearing sits between the two.
     setTab('changes');
-    setChangesFocus({ path, line, side, nonce: Date.now() });
+    setChangesFocus({ path, line, side, threadId: threadId ?? null, nonce: Date.now() });
   };
   const [activitySince, setActivitySince] = useState<string | null>(null);
   const qc = useQueryClient();
@@ -726,7 +730,7 @@ export function PrDetail({
         // Routed through `openInChanges` rather than setting the tab and focus by hand: `goToTab`
         // CLEARS `changesFocus`, and that helper is the one deliberate exception which orders the
         // two correctly. A second path here would land on the diff with no jump.
-        run: () => openInChanges(thread.path, line, side),
+        run: () => openInChanges(thread.path, line, side, thread.id),
       };
     },
     [changedPaths, openInChanges],

@@ -23,7 +23,7 @@ export function InsightsView(): JSX.Element {
     <div className="space-y-3" data-testid="insights-view">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Reports</h2>
-        <span className="rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
+        <span className="rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
           Pro
         </span>
         <div className="ml-auto flex items-center gap-1.5">
@@ -32,7 +32,7 @@ export function InsightsView(): JSX.Element {
             onClick={() => setShowUsage((s) => !s)}
             className={`rounded border px-1.5 py-0.5 text-[11px] font-medium ${
               showUsage
-                ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/30 dark:text-violet-300'
+                ? 'border-ai-signal/50 bg-ai-signal/10 text-ai-signal'
                 : 'border-gray-300 hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500'
             }`}
             title="Show your month-to-date AI usage (in credits)"

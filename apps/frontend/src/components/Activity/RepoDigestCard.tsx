@@ -45,14 +45,14 @@ export function RepoDigestCard({
   outOfCredits?: boolean;
 }): JSX.Element {
   return (
-    <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-900/50 dark:bg-violet-950/20">
+    <div className="rounded-md border border-ai-border bg-ai-surface px-3 py-2">
       {/* The whole header row toggles collapse (so a collapsed card expands from
           anywhere on it, and the top collapses it again). The inner controls stop
           propagation: the title stays a focusable button for keyboard, Regenerate
           runs without also toggling. */}
       <div
         onClick={onToggle}
-        className="-mx-1 flex cursor-pointer select-none items-center gap-2 rounded px-1 hover:bg-violet-500/5"
+        className="-mx-1 flex cursor-pointer select-none items-center gap-2 rounded px-1 hover:bg-ai-signal/5"
       >
         <button
           type="button"
@@ -61,7 +61,7 @@ export function RepoDigestCard({
             onToggle();
           }}
           aria-expanded={!collapsed}
-          className="flex min-w-0 items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-violet-600 hover:text-violet-700 dark:text-violet-300 dark:hover:text-violet-200"
+          className="flex min-w-0 items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-ai-ink hover:text-ai-signal"
           title={collapsed ? 'Expand digest' : 'Collapse digest'}
         >
           <span aria-hidden="true" className="text-[9px]">
@@ -71,7 +71,7 @@ export function RepoDigestCard({
           <span className="truncate normal-case">{title}</span>
         </button>
         {showProBadge && (
-          <span className="shrink-0 rounded bg-violet-500/15 px-1 text-[10px] font-semibold text-violet-600 dark:text-violet-300">
+          <span className="shrink-0 rounded bg-ai-signal/15 px-1 text-[10px] font-semibold text-ai-signal">
             Pro
           </span>
         )}
@@ -95,7 +95,7 @@ export function RepoDigestCard({
                 onRegenerate?.();
               }}
               disabled={regenerating || outOfCredits}
-              className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
+              className="flex items-center gap-0.5 rounded border border-ai-border px-1.5 py-0.5 font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
               title={
                 outOfCredits
                   ? 'Out of AI credits — resets next month'
@@ -126,7 +126,7 @@ export function RepoDigestCard({
             // and `regenerating` flips false.
             <DigestSkeleton />
           ) : isLoading ? (
-            <div className="h-3 w-2/3 animate-pulse rounded bg-violet-200/60 dark:bg-violet-900/40" />
+            <div className="h-3 w-2/3 animate-pulse rounded bg-ai-surface-2" />
           ) : digest != null && digest.summary.trim() !== '' ? (
             // Keyed by generatedAt so `digest-fade-in` replays on each new summary.
             <div key={digest.generatedAt} className="digest-fade-in">

@@ -39,18 +39,38 @@ export function threadSeverities(
   return out;
 }
 
-// Rolled-up derived-state counts as coloured chips; zero counts hidden.
+// Rolled-up derived-state counts as coloured chips; zero counts hidden, and nothing at all
+// when every count is zero. `compact` drops the numbers (dots only, same per-state tooltips)
+// for the Changes tree rail, where 4 × dot+number can't compete with the file name for
+// 224px — presence + colour answers "which files still need attention"; the file header two
+// inches right has the numbers. THE one renderer of this palette (the near-duplicate
+// ThreadDots was deleted — two byte-identical renderers of one palette is drift waiting to
+// happen).
 export function ThreadCountChips({
   counts,
+  compact = false,
 }: {
   counts: Record<DerivedState, number>;
-}): JSX.Element {
+  compact?: boolean;
+}): JSX.Element | null {
   const shown = ORDER.filter((s) => counts[s] > 0);
+  if (shown.length === 0) return null;
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className={`inline-flex items-center ${compact ? 'gap-1' : 'gap-1.5'}`}>
       {shown.map((s) => {
         const meta = DERIVED_STATE_META[s];
-        return (
+        return compact ? (
+          <span
+            key={s}
+            // Resolved is dimmed at dot grain: the rail's question is "which files still need
+            // attention", and on a settled PR a full-saturation green on nearly every row
+            // shouts as loudly as untouched's red while carrying zero signal. Same quiet-not-
+            // hidden treatment as the inline pill; the tooltip keeps the count.
+            className={`inline-block h-2 w-2 rounded-full ${s === 'resolved' ? 'opacity-40' : ''}`}
+            style={{ backgroundColor: meta.color }}
+            title={`${meta.label}: ${counts[s]}`}
+          />
+        ) : (
           <span
             key={s}
             className="inline-flex items-center gap-0.5 text-[10px] font-semibold"

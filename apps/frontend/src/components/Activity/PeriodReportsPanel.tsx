@@ -222,7 +222,7 @@ function ForecastCell({
   }
   return (
     <span
-      className="text-[11px] text-violet-600 dark:text-violet-300"
+      className="text-[11px] text-ai-signal"
       title={`${forecast.basis} · ${forecast.periodsUsed} periods`}
     >
       ≈ {format(forecast.point)}
@@ -864,8 +864,10 @@ function Movements({
 // ── "Ask about this period" — the ad-hoc chat, grounded in THIS period (plan C5) ────────────
 //
 // The ad-hoc chat (pins, history, @-mentions, optional chart + bot-performance passes) moved
-// here from the deleted Insights Overview tab. It mounts COLLAPSED under the report — the report
-// is the artifact, the chat is the follow-up — and expands on demand. The `periodWindow` prop
+// here from the deleted Insights Overview tab. It mounts EXPANDED under the report — the
+// conversation is the report's follow-up surface, and a collapsed one-line toggle proved to be
+// where the feature went to die — with the toggle kept for readers who want the report alone
+// (the collapse is session-local, like the panel's other disclosure state). The `periodWindow` prop
 // carries the viewed period's exact [fromMs, toMs) (`periodStart`/`periodEnd` ARE those bounds,
 // ISO-serialised), which `useSprintChat` sends as `SprintChatBody.window`, so every answer is
 // grounded in the period on screen rather than a trailing window ending now.
@@ -884,7 +886,7 @@ function Movements({
 // existing defence, stating what it covered.
 function AskAboutPeriod({ report }: { report: PeriodReport }): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   if (!activityDigest) return null;
   const fromMs = Date.parse(report.periodStart);
   const toMs = Date.parse(report.periodEnd);
@@ -896,7 +898,7 @@ function AskAboutPeriod({ report }: { report: PeriodReport }): JSX.Element | nul
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-        title="Ask free-form questions grounded in this period's data (Pro, runs the Haiku model)"
+        title="Ask free-form questions grounded in this period's data (Pro, runs your configured report model)"
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>
         Ask about this period
@@ -1048,7 +1050,7 @@ function ReportBody({
       {/* The narration. A backfilled period has none by design (metrics-only, no LLM, no
           credits) — say that plainly rather than showing an empty box. */}
       {report.narrative ? (
-        <div className="rounded-md border border-violet-200/70 bg-white/60 p-3 dark:border-violet-900/50 dark:bg-gray-900/40">
+        <div className="rounded-md border border-ai-hairline bg-white/60 p-3 dark:bg-gray-900/40">
           <SummaryMarkdown markdown={report.narrative} prRefs={[]} onOpenPr={() => {}} />
         </div>
       ) : (
@@ -1145,7 +1147,7 @@ function GenerateControls({
           type="button"
           onClick={() => generate.mutate(model != null ? { model } : {})}
           disabled={blocked}
-          className="rounded border border-violet-300 px-2 py-0.5 text-[11px] font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
+          className="rounded border border-ai-border px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
           title={
             outOfCredits
               ? 'Out of AI credits — resets next month'
@@ -1350,7 +1352,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
                   aria-pressed={on}
                   className={`rounded border px-1.5 py-0.5 text-[11px] ${
                     on
-                      ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/30 dark:text-violet-300'
+                      ? 'border-ai-signal/50 bg-ai-signal/10 text-ai-signal'
                       : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
                   }`}
                   title={
@@ -1449,9 +1451,10 @@ export function PeriodReportsPanel(): JSX.Element | null {
             </div>
           )}
 
-          {/* People (plan P4.2): the workspace's humans, one click from a 1:1 — each opens the
-              user-activity tab, whose 1:1 header follows the period selected above (via
-              `insightsReportKey`). Alphabetical, metric-free, never a leaderboard. */}
+          {/* People (plan P4.2, now the People-report picker): pick people AND bots from the
+              WORKSPACE's own membership, then "Begin report" opens the people-report tab for
+              the period selected above (via `insightsReportKey`). Alphabetical, metric-free,
+              never a leaderboard. */}
           <PeriodPeopleSection />
         </>
       )}

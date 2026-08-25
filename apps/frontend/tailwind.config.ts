@@ -13,6 +13,17 @@ export default {
           likely: '#3b82f6', // blue-500
           resolved: '#22c55e', // green-500
         },
+        // AI-surface family (Limn landing palette; vars flip in .dark — see index.css).
+        ai: {
+          surface: 'rgb(var(--ai-surface) / <alpha-value>)',
+          'surface-2': 'rgb(var(--ai-surface-2) / <alpha-value>)',
+          border: 'rgb(var(--ai-border) / <alpha-value>)',
+          hairline: 'rgb(var(--ai-hairline) / <alpha-value>)',
+          ink: 'rgb(var(--ai-ink) / <alpha-value>)',
+          muted: 'rgb(var(--ai-muted) / <alpha-value>)',
+          signal: 'rgb(var(--ai-signal) / <alpha-value>)',
+          'signal-fill': 'rgb(var(--ai-signal-fill) / <alpha-value>)',
+        },
       },
     },
   },

@@ -55,6 +55,7 @@ import type {
   AiUsageResponse,
   BotWindowKind,
   BotAnalyticsResponse,
+  BotThemesResponse,
   HumanThemesResponse,
   BotBehaviourResponse,
   BotOnlyPrsResponse,
@@ -781,12 +782,15 @@ export const api = {
   // The 1:1-prep vector (Pro `periodReports`; plan P4.2): one person, one cadence period, FREE
   // deterministic read. `person: null` covers unknown/foreign/bot ids and off-grid periods in
   // one shape. The narration is NOT on this route — it rides the synthesis pair (kind 'person').
-  personPeriod: (workspaceId: number, userId: number, periodKey: string) =>
+  // `evidence` (the People report) asks the same fold for the receipt rows under the vector
+  // (`person.evidence`) — still free and deterministic; the 1:1 section keeps passing nothing.
+  personPeriod: (workspaceId: number, userId: number, periodKey: string, evidence?: boolean) =>
     get<PersonPeriodResponse>(
       withQuery(
         `/api/pro/insights/person/${userId}`,
         workspaceParam(workspaceId),
         `period=${encodeURIComponent(periodKey)}`,
+        evidence ? 'evidence=1' : undefined,
       ),
     ),
   // A single repo's digest (lazy per-repo so a slow Haiku call never blocks the grid).
@@ -1172,13 +1176,24 @@ export const api = {
   // server-side, so it can never reach outside the scope.
   //
   // ⚠ Never sum `costMonthlyUsd` across workspaces. Within this workspace's rows it is a plain sum.
-  botAnalytics: (window: BotWindowKind, workspaceId: number, repoIds?: number[] | null) =>
+  //
+  // `bounds` (the People report) refines the enum window to a REAL period (epoch ms, half-open)
+  // — server-validated: only-together, ordered, span-capped, else 400. It narrows what is
+  // MEASURED only; the workspace still decides who counts as a bot.
+  botAnalytics: (
+    window: BotWindowKind,
+    workspaceId: number,
+    repoIds?: number[] | null,
+    bounds?: { fromMs: number; toMs: number },
+  ) =>
     get<BotAnalyticsResponse>(
       withQuery(
         '/api/bot-analytics',
         `window=${encodeURIComponent(window)}`,
         workspaceParam(workspaceId),
         repoIdsParam(repoIds),
+        bounds ? `fromMs=${bounds.fromMs}` : undefined,
+        bounds ? `toMs=${bounds.toMs}` : undefined,
       ),
     ),
   // ── Bot Tuning Advisor (Pro; /api/pro/advisor/*) ─────────────────────────────────────────
@@ -1254,8 +1269,30 @@ export const api = {
     fetch('/api/pro/advisor/config-events', jsonBody('POST', body)).then((r) =>
       handle<{ ok: boolean }>(r),
     ),
-  // The Feed "Discussion themes" AI summary (Pro Haiku) — the HUMAN sibling of the retired
-  // bot-themes surface (the bot side folded into the synthesis seam, plan P2.3/C6): what
+  // The Bots "What they're flagging" AI summary (Pro Haiku) — the revived Themes report, merged
+  // with the deterministic Bots layer. GET is a pure cache read; the refresh POST is the only
+  // billing path. `repoIds` narrows the DATA to the per-repo Bots console tab (membership ∩
+  // narrow server-side) — sent whenever the array exists, INCLUDING empty (repoIdsParam).
+  botThemes: (window: BotWindowKind, workspaceId: number, repoIds?: number[] | null) =>
+    get<BotThemesResponse>(
+      withQuery(
+        '/api/pro/bot-themes',
+        `window=${encodeURIComponent(window)}`,
+        workspaceParam(workspaceId),
+        repoIdsParam(repoIds),
+      ),
+    ),
+  botThemesRefresh: (window: BotWindowKind, workspaceId: number, repoIds?: number[] | null) =>
+    fetch(
+      withQuery(
+        '/api/pro/bot-themes/refresh',
+        `window=${encodeURIComponent(window)}`,
+        workspaceParam(workspaceId),
+        repoIdsParam(repoIds),
+      ),
+      jsonBody('POST'),
+    ).then((r) => handle<BotThemesResponse>(r)),
+  // The Feed "Discussion themes" AI summary (Pro Haiku) — the HUMAN sibling of bot-themes: what
   // PEOPLE are raising in review, over the current WORKSPACE + window. GET is a pure cache read;
   // the refresh POST is the only billing path.
   humanThemes: (window: BotWindowKind, workspaceId: number) =>
@@ -1342,12 +1379,14 @@ export const api = {
   // The per-bot COMMENTS drill-down behind the same Bot-ROI row: everything the reviewer said
   // in the window (inline review comments, PR comments, review bodies), each row's ML label
   // shipped INLINE — one request, never the per-PR label index per row. Same scope wiring as
-  // botVendorPrs, for the same one-screen-one-answer reason.
+  // botVendorPrs, for the same one-screen-one-answer reason. `bounds` mirrors botAnalytics's
+  // (the People report's bot sections cover the real period; server-validated, 400 on garbage).
   botVendorComments: (
     key: string,
     window: BotWindowKind,
     workspaceId: number,
     repoIds?: number[] | null,
+    bounds?: { fromMs: number; toMs: number },
   ) =>
     get<BotVendorCommentsResponse>(
       withQuery(
@@ -1355,6 +1394,8 @@ export const api = {
         `window=${encodeURIComponent(window)}`,
         workspaceParam(workspaceId),
         repoIdsParam(repoIds),
+        bounds ? `fromMs=${bounds.fromMs}` : undefined,
+        bounds ? `toMs=${bounds.toMs}` : undefined,
       ),
     ),
   // "What the bots are flagging" — the drill-down behind every tile and chip of the Bots rail's

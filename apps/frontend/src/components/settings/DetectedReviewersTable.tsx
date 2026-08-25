@@ -327,7 +327,7 @@ export function DetectedReviewersTable({
           {!showCost ? (
             isCloud ? (
               <p className="text-[10px] text-gray-400">
-                <span className="mr-1 rounded bg-violet-500/15 px-1 text-[10px] font-semibold text-violet-600 dark:text-violet-300">
+                <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[10px] font-semibold text-ai-signal">
                   Pro
                 </span>
                 Per-bot monthly prices and the $/acted-on ROI column are part of Pro — upgrade to
@@ -844,7 +844,7 @@ function ReviewerCard({
 // box means something different in each: on a priced bot it CLEARS, on an unpriced one it does
 // nothing.
 const COST_INPUT_CLS: Record<CostState, string> = {
-  set: 'border-violet-400 text-gray-800 dark:border-violet-600 dark:text-gray-100',
+  set: 'border-ai-signal/60 text-gray-800 dark:text-gray-100',
   none: 'border-gray-300 text-gray-800 dark:border-gray-700 dark:text-gray-100',
 };
 

@@ -56,6 +56,17 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // the Flow metrics "Open PRs" tile) | a named repo GROUP (label + the exact repo set behind it —
 // see openPrsScope).
 export type OpenPrsScope = number | 'feed' | { label: string; repoIds: number[] };
+// One picked subject of the People report (see peopleReportSeed): a human or a bot, with the
+// label metadata the report tab needs captured at open time — `userId` is the `users.id` slot
+// every per-section query keys on; `label` is the display name (humans) / classification label
+// (bots) AT OPEN TIME, which is also the tab's alphabetical section order key.
+export interface PeopleReportSelection {
+  kind: 'human' | 'bot';
+  userId: number;
+  login: string | null;
+  label: string;
+  avatarUrl: string | null;
+}
 
 /**
  * The cache/result key for a workspace-scoped client-side memo — `ws:<id>`.
@@ -68,6 +79,16 @@ export type OpenPrsScope = number | 'feed' | { label: string; repoIds: number[] 
  */
 export function workspaceScopeKey(workspaceId: number): string {
   return `ws:${workspaceId}`;
+}
+
+// One completed turn of the LIVE ad-hoc chat conversation: what was asked + the wire response
+// VERBATIM (answer, prRefs, chart, window, model, followUps, trimmedTurns). The response is kept
+// whole rather than projected so the transcript renders each answer exactly as the single-answer
+// panel did — per-turn window caption included — and a wire field added later flows through
+// without a store change.
+export interface SprintChatTurn {
+  question: string;
+  response: SprintChatResponse;
 }
 
 export type RangePreset = '7d' | '14d' | '30d' | '90d' | 'custom';
@@ -329,14 +350,17 @@ export interface FilterState {
   // The ad-hoc "Ask about the sprint" chat's LIVE state, lifted here so it survives the Insights
   // panel unmounting (e.g. clicking a PR then returning) — the mutation result lives in
   // component state and would otherwise be lost. `draft` = the in-progress question + toggles.
-  // `results` = the last answer shown, keyed by `workspaceScopeKey(workspaceId)` (`ws:<id>`) so
-  // each workspace keeps its own answer and switching to one you haven't asked in shows nothing
-  // (never the previous workspace's output). The key MUST come from that helper, not from a
-  // plausible-looking `String(workspaceId)`: it is the same vocabulary the server persists in
-  // `scope_key`, and the `ws:` prefix is what stops a legacy '3' aliasing workspace 3.
-  // Transient, URL-silent; NOT the persisted history.
+  // `threads` = the live CONVERSATION per workspace — completed turns oldest→newest, keyed by
+  // `workspaceScopeKey(workspaceId)` (`ws:<id>`) so each workspace keeps its own transcript and
+  // switching to one you haven't asked in shows nothing (never the previous workspace's output).
+  // The key MUST come from that helper, not from a plausible-looking `String(workspaceId)`: it
+  // is the same vocabulary the server persists in `scope_key`, and the `ws:` prefix is what
+  // stops a legacy '3' aliasing workspace 3. Depth is capped at SPRINT_CHAT_MAX_TURNS by the
+  // panel (the server independently re-caps the prior pairs it reads). Transient, URL-silent;
+  // NOT the persisted history — every turn was stored server-side as its own history row at
+  // answer time, so clearing a thread destroys no record.
   sprintChatDraft: { question: string; wantChart: boolean; wantBots: boolean };
-  sprintChatResults: Record<string, SprintChatResponse | null>;
+  sprintChatThreads: Record<string, SprintChatTurn[]>;
 
   // selection
   selectedPrId: number | null;
@@ -461,6 +485,23 @@ export interface FilterState {
   botVolumeSeed: {
     repoId: number | null;
     bots: BotFlaggingBotNarrowing | null;
+  } | null;
+  // transient: what the people-report tab renders — the period + the picked people/bots
+  // (label metadata captured at Begin time, so a section headers itself without a roster
+  // lookup). themeThreadsSeed discipline verbatim: the tab is a SINGLETON RE-SEEDED IN PLACE
+  // by the next Begin; read-not-consumed for the tab's lifetime.
+  // ⚠ NOT in FilterDefaults, NOT URL-serialized, NOT persisted: a restored selection could
+  // name users this workspace no longer has, and the periodKey could be off the current
+  // cadence grid — the tab dies on reload by design.
+  // ⚠ `workspaceId` IS PART OF THE SEED. Period keys are cadence-grid strings, so a workspace
+  // sharing the grid still resolves the key — and the open report would then render the OLD
+  // workspace's selections against the NEW workspace's data under the same heading, with humans
+  // degrading to "no activity from them in this Workspace" and a bot silently showing different
+  // numbers. Pinning it lets the detail route that mismatch to its existing empty state.
+  peopleReportSeed: {
+    workspaceId: number;
+    periodKey: string;
+    selections: PeopleReportSelection[];
   } | null;
 
   // Activity tab (the master-detail triage console). Which detail is shown:
@@ -622,11 +663,16 @@ export interface FilterState {
   focusAdvisor: (botKey: string, intent: 'tune' | 'drop') => void;
   clearAdvisorFocus: () => void;
   setFeedInnerTab: (v: 'feed' | 'themes') => void;
-  // Persist the ad-hoc chat's live draft + last result across Insights remounts.
+  // Persist the ad-hoc chat's live draft + conversation across Insights remounts.
   setSprintChatDraft: (
     patch: Partial<{ question: string; wantChart: boolean; wantBots: boolean }>,
   ) => void;
-  setSprintChatResult: (scope: string, r: SprintChatResponse | null) => void;
+  // Append one completed turn to a workspace's live thread (the panel's ask() onSuccess — only
+  // responses carrying a real answer become turns; throttled/credit shapes stay notices).
+  appendSprintChatTurn: (scope: string, turn: SprintChatTurn) => void;
+  // Seed a thread wholesale (a history pick's fresh 1-turn transcript) or clear it with []
+  // (the "Start a new conversation" affordance).
+  setSprintChatThread: (scope: string, turns: SprintChatTurn[]) => void;
   // Set/clear the PR-detail Threads-tab bot filter (a ChecksTab bot chip → filter Threads to
   // that vendor). Re-selecting the same vendor toggles it off.
   setThreadBotFilter: (kind: ReviewBotKind | null) => void;
@@ -719,6 +765,17 @@ export interface FilterState {
   // backlog banner). repoId scopes it to one repo; null = the whole active workspace.
   openBotThreadsDetail: (repoId: number | null) => void;
   openThemeThreadsDetail: (theme: BotTheme, source: 'bot' | 'human') => void;
+  // Open (or re-seed) the People-report drill-down tab for one workspace + period + selection
+  // set (the Reports People picker's "Begin report"). The seed is read-not-consumed for the
+  // tab's lifetime; a second Begin RE-SEEDS the singleton tab in place. PeopleReportDetail
+  // renders sections ALPHABETICALLY from it — the seed preserves click order, the render
+  // ignores it — and refuses to render at all once the active workspace has moved off
+  // `workspaceId` (see the seed's own note).
+  openPeopleReport: (
+    workspaceId: number,
+    periodKey: string,
+    selections: PeopleReportSelection[],
+  ) => void;
   openSearchDetail: (query: string) => void;
   // Open (or re-seed) the ML-strip drill-down tab on one tile/chip selector. `repoId` scopes it to
   // the repo the strip was measured at (the per-repo Bots tab); null = the whole active workspace.
@@ -1022,7 +1079,7 @@ function freshDefaults(): FilterData {
     advisorFocus: null,
     feedInnerTab: 'feed',
     sprintChatDraft: { question: '', wantChart: false, wantBots: false },
-    sprintChatResults: {},
+    sprintChatThreads: {},
     selectedPrId: null,
     selectedThreadId: null,
     insightsReportKey: null,
@@ -1044,6 +1101,7 @@ function freshDefaults(): FilterData {
     searchSeed: null,
     botFlaggingSeed: null,
     botVolumeSeed: null,
+    peopleReportSeed: null,
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
     // with no thread-state filter.
@@ -1140,8 +1198,15 @@ export const useFilters = create<FilterState>((set, get) => ({
   setFeedInnerTab: (v) => set({ feedInnerTab: v }),
   setSprintChatDraft: (patch) =>
     set((s) => ({ sprintChatDraft: { ...s.sprintChatDraft, ...patch } })),
-  setSprintChatResult: (scope, r) =>
-    set((s) => ({ sprintChatResults: { ...s.sprintChatResults, [scope]: r } })),
+  appendSprintChatTurn: (scope, turn) =>
+    set((s) => ({
+      sprintChatThreads: {
+        ...s.sprintChatThreads,
+        [scope]: [...(s.sprintChatThreads[scope] ?? []), turn],
+      },
+    })),
+  setSprintChatThread: (scope, turns) =>
+    set((s) => ({ sprintChatThreads: { ...s.sprintChatThreads, [scope]: turns } })),
   setThreadBotFilter: (kind) =>
     set((s) => ({ threadBotFilter: s.threadBotFilter === kind ? null : kind })),
   toggleThreadStateFilter: (st) =>
@@ -1303,6 +1368,10 @@ export const useFilters = create<FilterState>((set, get) => ({
   openThemeThreadsDetail: (theme, source) => {
     set({ themeThreadsSeed: { theme, source } });
     usePinnedTabs.getState().openThemeThreadsTab({ fromActivity: true });
+  },
+  openPeopleReport: (workspaceId, periodKey, selections) => {
+    set({ peopleReportSeed: { workspaceId, periodKey, selections } });
+    usePinnedTabs.getState().openPeopleReportTab({ fromActivity: true });
   },
   // Open (or re-seed) the ML-strip drill-down on one tile/chip. `repoId` is the scope the strip
   // was MEASURED at, carried through verbatim so the drill-down's total is the number the user

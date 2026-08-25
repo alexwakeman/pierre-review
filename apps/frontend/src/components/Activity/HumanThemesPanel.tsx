@@ -41,7 +41,7 @@ function ParticipantRollup({ result }: { result: HumanThemesResult }): JSX.Eleme
 function HumanCoverageLine({ result }: { result: HumanThemesResult }): JSX.Element {
   const c = result.coverage;
   return (
-    <div className="mt-3 border-t border-violet-200/50 pt-2 text-[10px] text-gray-400 dark:border-violet-900/40">
+    <div className="mt-3 border-t border-ai-hairline pt-2 text-[10px] text-gray-400">
       Summarised the top {c.analyzed.toLocaleString()} of {c.totalComments.toLocaleString()} review
       comment{c.totalComments === 1 ? '' : 's'} (prioritised by PR-level comments, then active
       threads, then recency){c.truncated ? ' · older comments beyond the cap were excluded' : ''}.
@@ -69,14 +69,14 @@ export function HumanThemesPanel(): JSX.Element | null {
 
   return (
     <div
-      className="rounded-lg border border-violet-200 bg-violet-50/40 p-4 dark:border-violet-900/60 dark:bg-violet-950/20"
+      className="rounded-lg border border-ai-border bg-ai-surface p-4"
       data-testid="human-themes-panel"
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-base font-semibold text-gray-800 dark:text-gray-100">
           <span aria-hidden="true">💬</span> What people are discussing
         </span>
-        <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
+        <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
           Pro
         </span>
         <button
@@ -88,7 +88,7 @@ export function HumanThemesPanel(): JSX.Element | null {
             refresh.mutate();
           }}
           disabled={busy || outOfCredits || workspaceId == null}
-          className="ml-auto rounded bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
+          className="ml-auto rounded bg-ai-signal px-3 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
           title={outOfCredits ? 'Out of AI credits — resets next month' : 'Summarise what people are raising in review across this Workspace (runs the Haiku model)'}
         >
           {busy ? 'Summarising…' : result ? '↻ Regenerate' : 'Generate'}
@@ -115,7 +115,7 @@ export function HumanThemesPanel(): JSX.Element | null {
       {busy && !result ? (
         <ThemesSkeleton />
       ) : query.isLoading ? (
-        <div className="mt-3 h-24 animate-pulse rounded bg-violet-500/5" />
+        <div className="mt-3 h-24 animate-pulse rounded bg-ai-surface-2" />
       ) : result ? (
         <div key={result.generatedAt} className="digest-fade-in">
           <ThemesReportBody
@@ -132,7 +132,7 @@ export function HumanThemesPanel(): JSX.Element | null {
           />
         </div>
       ) : (
-        <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-dashed border-violet-300/60 p-3 text-[12px] text-gray-500 dark:border-violet-800/60 dark:text-gray-400">
+        <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-dashed border-ai-border p-3 text-[12px] text-gray-500 dark:text-gray-400">
           <span>No summary yet — generate one to see what people are discussing in review.</span>
         </div>
       )}

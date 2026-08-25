@@ -272,7 +272,7 @@ export function UserProfilePopover({
                   });
                   onDismiss();
                 }}
-                className="rounded px-1.5 py-1 text-xs font-medium text-violet-600 hover:bg-violet-50 dark:text-violet-400 dark:hover:bg-violet-950/40"
+                className="rounded px-1.5 py-1 text-xs font-medium text-ai-signal hover:bg-ai-signal/10"
                 title={`Prep for a 1:1 with ${label} — their period figures, not a scorecard`}
               >
                 1:1 prep →

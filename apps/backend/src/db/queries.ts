@@ -10166,9 +10166,10 @@ export async function getHumanReviewComments(
 // reads them. Account-scoped + WORKSPACE-scoped (`scope`, mirroring getBotAnalytics) + windowed;
 // only automated-reviewer authors; capped most-recent (a `truncated` flag) so a firehose repo can't
 // blow the payload. Returns both inline review-thread comments (with path + derivedState) and
-// issue-level PR comments (path/derivedState null). (The plugin's bot-themes/build.ts copy of this
-// row shape is gone with that surface — plan P2.3/C6; the surviving consumer is core
-// db/synthesis-input.ts's 'workspace-bots' fold, which imports this declaration directly.)
+// issue-level PR comments (path/derivedState null). ⚠ TWO consumers of this row shape: the
+// REVIVED plugin bot-themes/build.ts re-declares it BY HAND (open-core boundary — the plugin
+// imports no host internals), so any change here must be mirrored there; core
+// db/synthesis-input.ts's 'workspace-bots' fold imports the declaration directly.
 export interface BotReviewCommentRow {
   id: number; // source-row id (namespaced by `source` — not globally unique across sources)
   source: 'review' | 'issue';
@@ -10359,7 +10360,10 @@ export async function getBotAnalytics(
   // `pro_settings` and core cannot read them. A caller that HAS those bounds (the Pro Insights
   // chat, whose range chips include "Sprint to date") passes them, and the response's window then
   // states the real sprint dates instead of a 14-day stand-in that nothing labelled as one.
-  // Bounds are trusted as given — they are server-derived, never client-supplied.
+  // Bounds are trusted as given — they are server-derived or route-validated (the People
+  // report's `fromMs`/`toMs` query params, schema- and span-checked in bot-triage.ts): they only
+  // narrow WHAT IS MEASURED inside the account's own resolved scope — they carry no authority,
+  // exactly like the enum they refine.
   window: BotWindowKind | { kind: BotWindowKind; fromMs: number; toMs: number },
   // ONE object carrying both halves: `workspaceId` decides who counts as a bot, `repoIds` narrows
   // which data is measured. Its predecessor conflated them into a single `number[] | null` and
@@ -10385,6 +10389,14 @@ export async function getBotAnalytics(
   // its most recent 84 days while the totals beside it counted all 90. Anchored on `from`, not on
   // now, so an explicit (possibly future-ending) sprint window is covered too.
   const trendFrom = new Date(Math.min(from.getTime(), nowMs - 12 * 7 * 86_400_000));
+  // The window's UPPER predicate, applied ONLY under EXPLICIT bounds — the same rule
+  // `getMlWindowAggregates`' `to` parameter states, and for the same two reasons. Under the enum
+  // form the window ENDS AT NOW, so an upper bound can exclude nothing that exists except rows
+  // written in the CURRENT SECOND (these columns are second-granular on sqlite) — a live-data
+  // flake, not a window rule — and dropping it keeps every enum-form scan byte-identical to the
+  // drill-downs reading the same rows. A completed period, by contrast, MUST cap: a thread the
+  // bot opened after the period is a different population.
+  const toBound = typeof window === 'string' ? null : to;
   const generatedAt = new Date(nowMs).toISOString();
   const win = { kind: windowKind, from: from.toISOString(), to: to.toISOString() };
 
@@ -10433,6 +10445,9 @@ export async function getBotAnalytics(
     scope,
     automatedIds,
     from,
+    // Explicit bounds cap the label scan too; the enum form passes null (window ends at now —
+    // no upper predicate, keeping the scan byte-identical to the flagging drill-down's).
+    typeof window === 'string' ? null : to,
     opts?.inflationHistory ? { trendFrom } : undefined,
   );
 
@@ -10460,7 +10475,12 @@ export async function getBotAnalytics(
     return loginById.get(userId) ?? labelForKind(kind);
   };
 
-  // Automated-reviewer threads over the 12-week trend span (⊇ the selected window).
+  // Automated-reviewer threads over the 12-week trend span (⊇ the selected window), capped at
+  // `to` like every fold here — under explicit bounds (a completed period) a thread opened AFTER
+  // the period must reach neither the headline counts nor the trend/lastActive/dormancy math, or
+  // one row mixes two window populations. The half-open [from, to) spelling is the route's
+  // stated contract (bot-triage.ts); under the enum form there is no upper predicate at all
+  // (see `toBound`).
   // `line` feeds ONLY the same-line overlap pass below (reviewThreads is the one table carrying
   // line data — reviewComments has no line columns; overlap never computes from comments).
   const threadRows = await db
@@ -10481,6 +10501,7 @@ export async function getBotAnalytics(
         eq(pullRequests.accountId, accountId),
         inArray(reviewThreads.originalCommenterId, automatedIds),
         gte(reviewThreads.createdAt, trendFrom),
+        ...(toBound != null ? [lt(reviewThreads.createdAt, toBound)] : []),
         ...repoScopeFilter,
       ),
     )
@@ -10501,6 +10522,7 @@ export async function getBotAnalytics(
         inArray(reviewThreads.originalCommenterId, automatedIds),
         eq(reviewThreads.derivedState, 'untouched'),
         gte(pullRequests.mergedAt, from),
+        ...(toBound != null ? [lt(pullRequests.mergedAt, toBound)] : []),
         ...repoScopeFilter,
       ),
     )
@@ -10856,7 +10878,7 @@ export async function getBotAnalytics(
         eq(pullRequests.accountId, accountId),
         inArray(reviewComments.authorId, automatedIds),
         gte(reviewComments.createdAt, trendFrom),
-        lte(reviewComments.createdAt, to),
+        ...(toBound != null ? [lt(reviewComments.createdAt, toBound)] : []),
         ...repoScopeFilter,
       ),
     )
@@ -10890,7 +10912,7 @@ export async function getBotAnalytics(
         inArray(reviews.authorId, automatedIds),
         ne(reviews.state, 'pending'),
         gte(reviews.submittedAt, trendFrom),
-        lte(reviews.submittedAt, to),
+        ...(toBound != null ? [lt(reviews.submittedAt, toBound)] : []),
         ...repoScopeFilter,
       ),
     )

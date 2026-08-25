@@ -98,3 +98,46 @@ export function useSearchTimeline() {
     placeholderData: (prev) => prev,
   });
 }
+
+// Window activity for the Reports People picker's ROSTER — workspace-wide, bot-inclusive, and
+// windowed by the PERIOD BEING REPORTED.
+//
+// ⚠ NOT `useSearchTimeline`, and that is a correctness rule, not a preference:
+// `buildTimelineSearch` emits `filters.repoIds` and windows by `resolveRange(s)`, both of which
+// are TIMELINE BOARD state whose controls (the repo picker, the Range preset) are not mounted on
+// the Reports pane — the `useWorkspaceOpenPrs` lesson, applied to the timeline half. A repo
+// narrowing left on the board silently dropped workspace members from the picker, and an older
+// completed period could not offer anyone who has been quiet since (the picker's universe is
+// placed ∪ selected — `includeRosterRemainder: false`).
+//
+// The window is the period's own bounds, so the string is STABLE per period rather than churning
+// with the board's live `to`. It therefore does NOT share the board's cache entry — one extra
+// lean fetch on the Reports pane, accepted for the same reason useSearchTimeline accepts its own.
+export function rosterTimelineSearch(
+  workspaceId: number | null,
+  window: { fromMs: number; toMs: number } | null,
+): string {
+  const params = new URLSearchParams();
+  if (workspaceId != null) params.set('workspace', String(workspaceId));
+  if (window != null) {
+    params.set('from', new Date(window.fromMs).toISOString());
+    params.set('to', new Date(window.toMs).toISOString());
+  }
+  // The picker lists bots from its own detected-reviewers source, but the member fold reads the
+  // same rows — always fetch them, exactly like the search index does.
+  params.set('excludeBots', 'false');
+  return params.toString();
+}
+
+export function useRosterTimeline(window: { fromMs: number; toMs: number } | null) {
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const search = rosterTimelineSearch(workspaceId, window);
+  return useQuery<TimelineResponse>({
+    queryKey: ['timeline', workspaceKey(workspaceId), search],
+    queryFn: () => api.timeline(search),
+    // Null workspace = unresolved scope; null window = no period selected yet. Neither may be
+    // answered against the account's Default under another name.
+    enabled: workspaceId != null && window != null,
+    placeholderData: (prev) => prev,
+  });
+}

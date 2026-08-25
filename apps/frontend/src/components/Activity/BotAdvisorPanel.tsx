@@ -49,7 +49,7 @@ const STATUS_META: Record<string, { label: string; className: string }> = {
   dismissed: { label: 'Dismissed', className: 'bg-gray-500/10 text-gray-500 border border-gray-400/40' },
   pr_opened: { label: 'PR open', className: 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/30' },
   pr_merged: { label: 'PR merged', className: 'bg-green-500/10 text-green-700 dark:text-green-300 border border-green-500/30' },
-  issue_filed: { label: 'Issue filed', className: 'bg-violet-500/10 text-violet-700 dark:text-violet-300 border border-violet-500/30' },
+  issue_filed: { label: 'Issue filed', className: 'bg-ai-signal/10 text-ai-signal border border-ai-signal/30' },
   superseded: { label: 'Superseded', className: 'bg-gray-500/10 text-gray-500 border border-gray-400/40' },
 };
 
@@ -102,7 +102,7 @@ function IntentCard({
             href={rec.issueUrl}
             target="_blank"
             rel="noreferrer"
-            className="text-[11px] text-violet-600 hover:underline dark:text-violet-300"
+            className="text-[11px] text-ai-signal hover:underline"
           >
             issue
           </a>
@@ -470,7 +470,7 @@ function BotSection({
               const key = selectedKeys[0];
               if (key) fileIssue.mutate(key);
             }}
-            className="rounded border border-violet-400 px-2 py-0.5 text-[11px] font-medium text-violet-700 disabled:opacity-50 dark:border-violet-600/70 dark:text-violet-300"
+            className="rounded border border-ai-border px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
           >
             {fileIssue.isPending ? 'Filing…' : `File issue${ownerRepo ? ` → ${ownerRepo}` : ''}`}
           </button>
@@ -554,7 +554,7 @@ function BotSection({
         </div>
       )}
       {fileIssue.data && (
-        <div className="text-[11px] text-violet-700 dark:text-violet-300">
+        <div className="text-[11px] text-ai-signal">
           Filed{' '}
           <a href={fileIssue.data.issueUrl} target="_blank" rel="noreferrer" className="underline">
             {fileIssue.data.issueUrl}

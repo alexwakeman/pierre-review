@@ -286,7 +286,7 @@ function ActivityLog({ lines }: { lines: string[] }): JSX.Element | null {
 
 // Per-line colour for a rendered diff hunk.
 function hunkLineClass(line: string): string {
-  if (line.startsWith('@@')) return 'text-violet-500';
+  if (line.startsWith('@@')) return 'font-medium text-gray-600 dark:text-gray-300';
   if (line.startsWith('+')) return 'text-green-700 dark:text-green-400';
   if (line.startsWith('-')) return 'text-red-700 dark:text-red-400';
   return 'text-gray-500 dark:text-gray-400';
@@ -1107,7 +1107,7 @@ function ContextBlockDisclosure({ block }: { block: string }): JSX.Element {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="text-[10px] font-medium text-violet-600 hover:underline dark:text-violet-300"
+        className="text-[10px] font-medium text-ai-signal hover:underline"
         aria-expanded={open}
       >
         {open ? '▾ Hide' : '▸ Show'} the exact context sent to Claude
@@ -1136,7 +1136,7 @@ function ReviewActionRow({ action }: { action: ReviewAction }): JSX.Element {
   return (
     <li className="py-1 text-[11px]">
       <div className="flex flex-wrap items-center gap-1.5 text-gray-500">
-        <span className="rounded bg-violet-500/10 px-1 py-0.5 font-medium text-violet-600 dark:text-violet-300">
+        <span className="rounded bg-ai-signal/10 px-1 py-0.5 font-medium text-ai-signal">
           {label}
         </span>
         {action.glob != null && (
@@ -1244,7 +1244,7 @@ function LearningMatchRow({ match }: { match: LearningMatch }): JSX.Element {
               {match.kinds?.map((k) => (
                 <span
                   key={k.kind}
-                  className="rounded bg-violet-500/10 px-1 py-0.5 text-violet-600 dark:text-violet-300"
+                  className="rounded bg-ai-signal/10 px-1 py-0.5 text-ai-signal"
                 >
                   {LEARNING_KIND_LABELS[k.kind] ?? k.kind}
                   {k.count > 1 ? ` ×${k.count}` : ''}
@@ -1301,29 +1301,29 @@ function ReviewLearningsPanel({ prId }: { prId: number }): JSX.Element | null {
   const matches = data?.matches ?? [];
   if (!reviewMemory || matches.length === 0) return null;
   return (
-    <div className="mb-2 rounded border border-violet-200 bg-violet-50/50 dark:border-violet-900/50 dark:bg-violet-950/20">
+    <div className="mb-2 rounded border border-ai-border bg-ai-surface">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-violet-700 dark:text-violet-300"
+        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-ai-ink"
         aria-expanded={open}
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>
         From your past reviews in this repo ({matches.length} signal
         {matches.length === 1 ? '' : 's'})
-        <span className="ml-auto text-[10px] font-normal text-violet-500/70">
+        <span className="ml-auto text-[10px] font-normal text-ai-muted">
           {open ? 'hide' : 'show'}
         </span>
       </button>
       {open && (
-        <div className="border-t border-violet-200 px-1 pb-1 dark:border-violet-900/50">
+        <div className="border-t border-ai-hairline px-1 pb-1">
           <div className="px-2 py-1 text-[10px] text-gray-500 dark:text-gray-400">
             ⓘ These are given to Claude as context for this run.
           </div>
           {data?.contextBlock != null && data.contextBlock !== '' && (
             <ContextBlockDisclosure block={data.contextBlock} />
           )}
-          <ul className="divide-y divide-violet-100 dark:divide-violet-900/40">
+          <ul className="divide-y divide-ai-hairline">
             {matches.map((m, i) => (
               <LearningMatchRow key={i} match={m} />
             ))}
@@ -1375,7 +1375,7 @@ function GenerateFixFromReview({
       <button
         type="button"
         onClick={() => openAiFixFromReview(prId, buildReviewSeed(review))}
-        className="whitespace-nowrap rounded border border-violet-400 px-2.5 py-1 text-xs text-violet-700 hover:bg-violet-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
+        className="whitespace-nowrap rounded border border-ai-border px-2.5 py-1 text-xs text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
         title="Launch an agent to apply this review as a fix"
       >
         Generate fix from this review →

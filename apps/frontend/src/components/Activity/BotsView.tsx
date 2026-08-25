@@ -4,7 +4,7 @@ import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { BotRoiPanel, ResolveBacklogBanner } from './BotRoiPanel.js';
 import { WorkspaceBotCharts } from './WorkspaceBotCharts.js';
-import { SynthesisCard } from './SynthesisCard.js';
+import { BotThemesPanel } from './BotThemesPanel.js';
 import { BotAdvisorPanel } from './BotAdvisorPanel.js';
 import { BotSettingsPanel } from './BotSettingsPanel.js';
 import { FeedView } from './FeedView.js';
@@ -109,7 +109,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               {t.label}
               {/* Advisor is the paid advisor surface; the rest of the Bots view is core. */}
               {t.key === 'advisor' && (
-                <span className="rounded bg-violet-500/10 px-1 text-[9px] font-semibold uppercase text-violet-600 dark:text-violet-300">
+                <span className="rounded bg-ai-signal/10 px-1 text-[9px] font-semibold uppercase text-ai-signal">
                   pro
                 </span>
               )}
@@ -132,19 +132,17 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         <BotSettingsPanel repoId={repoId} />
       ) : (
         <>
-          {/* "What they're flagging" (plan P2.3/C6) — the workspace-grain synthesis verdict that
-              REPLACED the Themes tab: one cached Haiku pass over the exact bot-comment population
-              the old Themes fold read (`getBotReviewComments`, via the seam's 'workspace-bots'
-              kind), every count computed server-side from the validated grouping. The kind
-              supports repo narrowing (its fold takes the same BotScope the ROI panel does), so
-              the per-repo console Bots tab measures that repo alone — same `repoScope` the
-              analytics ride. Free/OSS renders nothing, free cloud the Pro nudge (SynthesisCard's
-              own posture); the deterministic Measure surface below never waits on it. */}
-          <SynthesisCard
-            workspaceId={workspaceId}
-            descriptor={{ kind: 'workspace-bots', window, repoIds: repoScope }}
-            title="What they’re flagging"
-          />
+          {/* "What they're flagging" — the workspace-grain synthesis verdict RE-EXPANDED into the
+              merged Themes panel: the same `getBotReviewComments` population, every deterministic
+              figure (per-bot volume + acted-on, area split, per-theme comment counts, coverage)
+              computed by the build fold, the themes + narrative the model's read (labelled
+              approximate). `repoScope` narrows the DATA (membership ∩ narrow server-side), so the
+              per-repo console Bots tab measures that repo alone — same repoScope the analytics
+              ride. Free/OSS renders nothing, free cloud the Pro nudge (SynthesisCard's posture,
+              carried over); the deterministic Measure surface below never waits on it. The three
+              drill-down SynthesisCards (BotVolume/BotFlagging/BotThreads) and the synthesis seam
+              are unaffected — this swap is this mount only. */}
+          <BotThemesPanel repoIds={repoScope} />
 
           {/* Governance caution: PRs whose only review came from an automated reviewer — no human
               ever looked. Sourced from the CORE analytics totals; "Show list" opens the

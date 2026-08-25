@@ -60,7 +60,7 @@ function ThemeCard({
   return (
     <li
       className={`rounded-md border border-gray-200 bg-white/70 p-3 dark:border-gray-800 dark:bg-gray-900/40 ${
-        hasThreads ? 'cursor-pointer transition-colors hover:border-violet-300 hover:bg-violet-50/40 dark:hover:border-violet-800/70 dark:hover:bg-violet-950/20' : ''
+        hasThreads ? 'cursor-pointer transition-colors hover:border-ai-signal/40 hover:bg-ai-surface-2' : ''
       }`}
       {...(hasThreads
         ? {
@@ -84,14 +84,26 @@ function ThemeCard({
             <span className="shrink-0 rounded bg-gray-100 px-1 text-[9px] font-medium uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
               {CATEGORY_LABEL[theme.category]}
             </span>
-            {theme.occurrences > 0 && (
+            {/* Exact when the server computed it (bot reports: Σ of the cited clusters'
+                code-computed counts — D4); the model's ≈estimate is the fallback for human
+                reports and stored pre-count rows. The exact count carries the unit and the
+                heavier weight (the SynthesisCard counts it replaced led their lines) — the
+                approximate fallback deliberately stays humbler. */}
+            {theme.commentCount != null ? (
+              <span
+                className="ml-auto shrink-0 text-[11px] font-semibold tabular-nums text-gray-600 dark:text-gray-300"
+                title="Comments across this theme's member clusters — computed from the clusters, not the model"
+              >
+                {theme.commentCount} comment{theme.commentCount === 1 ? '' : 's'}
+              </span>
+            ) : theme.occurrences > 0 ? (
               <span
                 className="ml-auto shrink-0 text-[10px] tabular-nums text-gray-400"
                 title="Approximate number of comments this theme covers"
               >
                 ≈{theme.occurrences}
               </span>
-            )}
+            ) : null}
           </div>
           {theme.summary && (
             <p className="mt-0.5 text-[12px] leading-relaxed text-gray-600 dark:text-gray-300">{theme.summary}</p>
@@ -125,7 +137,7 @@ function ThemeCard({
               </span>
             )}
             {hasThreads && (
-              <span className="ml-auto shrink-0 font-medium text-violet-500 dark:text-violet-400">
+              <span className="ml-auto shrink-0 font-medium text-ai-signal">
                 {theme.threads.length} thread{theme.threads.length === 1 ? '' : 's'} →
               </span>
             )}
@@ -136,12 +148,20 @@ function ThemeCard({
   );
 }
 
+// ⚠ These counts are the MODEL'S numbers — parseThemes sums each theme's model-reported
+// `occurrences` — so the chips carry the approximate disclaimer and the panel descriptions must
+// never fold them into an "exact" claim (the exact figures are the build fold's: volumes, "where",
+// the per-theme comment counts).
 function SeverityStrip({ bySeverity }: { bySeverity: BotThemeSeverityCount[] }): JSX.Element | null {
   if (bySeverity.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
       {bySeverity.map((s) => (
-        <span key={s.severity} className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${SEVERITY_META[s.severity].cls}`}>
+        <span
+          key={s.severity}
+          className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${SEVERITY_META[s.severity].cls}`}
+          title="Aggregated from the themes’ approximate occurrence estimates — the model’s read, not an exact count"
+        >
           {SEVERITY_META[s.severity].label} · {s.count}
         </span>
       ))}
@@ -214,7 +234,7 @@ export function ThemesReportBody({
   return (
     <div className="mt-3">
       {narrative && (
-        <div className="rounded-md border border-violet-200/70 bg-white/60 p-3 dark:border-violet-900/50 dark:bg-gray-900/40">
+        <div className="rounded-md border border-ai-hairline bg-white/60 p-3 dark:bg-gray-900/40">
           <SummaryMarkdown markdown={narrative} prRefs={[]} onOpenPr={() => {}} />
         </div>
       )}

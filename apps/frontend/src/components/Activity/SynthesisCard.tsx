@@ -60,7 +60,7 @@ function ClusterLines({ synthesis }: { synthesis: StoredSynthesis }): JSX.Elemen
 
 function CoverageLine({ synthesis }: { synthesis: StoredSynthesis }): JSX.Element {
   return (
-    <div className="mt-2 border-t border-violet-200/50 pt-1.5 text-[10px] text-gray-400 dark:border-violet-900/40">
+    <div className="mt-2 border-t border-ai-hairline pt-1.5 text-[10px] text-gray-400">
       Summarised {synthesis.analyzedCount.toLocaleString()} of{' '}
       {synthesis.totalCount.toLocaleString()} item{synthesis.totalCount === 1 ? '' : 's'}
       {synthesis.truncated ? ' (the newest — items beyond the cap were not analysed)' : ''}.
@@ -100,7 +100,7 @@ export function SynthesisCard({
     return (
       <>
         <p className="mb-2 text-[10px] text-gray-400">
-          <span className="mr-1 rounded bg-violet-500/15 px-1 text-[10px] font-semibold text-violet-600 dark:text-violet-300">
+          <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[10px] font-semibold text-ai-signal">
             Pro
           </span>
           Summaries of what this list adds up to are part of Pro — upgrade to get a clustered
@@ -130,12 +130,12 @@ export function SynthesisCard({
   return (
     <>
       <div
-        className={`rounded-lg border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900/60 dark:bg-violet-950/20 ${className ?? ''}`}
+        className={`rounded-lg border border-ai-border bg-ai-surface p-3 ${className ?? ''}`}
         data-testid="synthesis-card"
       >
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{title}</span>
-          <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
+          <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
             Pro
           </span>
           {synthesis && resp?.stale && (
@@ -150,7 +150,7 @@ export function SynthesisCard({
             type="button"
             onClick={() => generate.mutate()}
             disabled={busy || outOfCredits || workspaceId == null}
-            className="ml-auto rounded bg-violet-600 px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
+            className="ml-auto rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
             title={
               outOfCredits
                 ? 'Out of AI credits — resets next month'
@@ -181,7 +181,7 @@ export function SynthesisCard({
             <CoverageLine synthesis={synthesis} />
           </div>
         ) : busy ? (
-          <div className="mt-2 h-12 animate-pulse rounded bg-violet-500/5" />
+          <div className="mt-2 h-12 animate-pulse rounded bg-ai-surface-2" />
         ) : (
           <p className="mt-1 text-[11px] text-gray-400">
             No summary yet — Summarise groups this list into recurring clusters, with every count

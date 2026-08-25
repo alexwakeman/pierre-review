@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { type InsightsRangeKey, type User } from '@pierre-review/shared';
+import { buildMemberSections } from '../hooks/useMemberSections.js';
 import { useMergers, useRepos, useSearchTimeline, useUsers } from '../hooks/useTimeline.js';
 import { useSearchOpenPrs } from '../hooks/useTriage.js';
 import { useWorkspaces, workspaceRepoIds } from '../hooks/useWorkspaces.js';
@@ -14,7 +15,7 @@ import { StatusSelectPanel } from './StatusSelectPanel.js';
 import { WorkspaceSelector } from './WorkspaceSelector.js';
 import { GlobalSearch } from './Search/GlobalSearch.js';
 import { ThreadStateSelectPanel } from './ThreadStateSelectPanel.js';
-import { UserSelectPanel, type MemberSection } from './UserSelectPanel.js';
+import { UserSelectPanel } from './UserSelectPanel.js';
 
 const PRESETS: Exclude<RangePreset, 'custom'>[] = ['7d', '14d', '30d', '90d'];
 
@@ -222,6 +223,10 @@ export function FilterBar(): JSX.Element {
   // inactive members, so anyone stays pickable and selections stay visible.
   // maintainerIds (merge rights in the relevant repo(s)) drives both the per-row
   // shields and the panel's "Maintainers" quick-select — it is no longer a section.
+  //
+  // The FOLD lives in buildMemberSections (hooks/useMemberSections.ts) so the Reports People
+  // picker reuses it at workspace scope; this call site passes exactly the inputs the old
+  // inline fold read, so the output stays byte-identical (pinned by test/memberSections.test.ts).
   const {
     sections: memberSections,
     botSections,
@@ -231,131 +236,31 @@ export function FilterBar(): JSX.Element {
     // ⚠ IN-SCOPE IS NOW ALWAYS BOUNDED BY THE WORKSPACE, even with no per-repo narrowing.
     // `repoIds == null` used to mean "every repo in the account" and a null set here was
     // therefore correct; it now means "every repo in THIS WORKSPACE". Two of the three sources
-    // feeding `repoMembers` are already workspace-scoped server-side, but `useMergers()` is
-    // account-wide and unscoped — so a null set let maintainers of OTHER workspaces' repos in as
-    // members of a board that can never show them.
+    // feeding the builder's `repoMembers` are already workspace-scoped server-side, but
+    // `useMergers()` is account-wide and unscoped — so a null set let maintainers of OTHER
+    // workspaces' repos in as members of a board that can never show them.
     const workspaceRepoIdSet = new Set(workspaceRepos.map((r) => r.id));
     const explicit = f.repoIds;
     const inScopeRepoIds =
       explicit != null && explicit.length > 0
         ? new Set(explicit.filter((id) => workspaceRepoIdSet.has(id)))
         : workspaceRepoIdSet;
-
-    const byId = new Map((users ?? []).map((u) => [u.id, u] as const));
-    const usable = (id: number | null): User | null => {
-      if (id == null) return null;
-      const u = byId.get(id);
-      return u && !u.isBot ? u : null;
-    };
-    const botOf = (id: number | null): User | null => {
-      if (id == null) return null;
-      const u = byId.get(id);
-      return u && u.isBot ? u : null;
-    };
-
-    // Per-repo membership, derived from the member-agnostic window activity.
-    // Limited to in-scope repos (the selected repos, or all when no repo filter).
-    const repoMembers = new Map<number, Set<number>>();
-    const addMember = (repoId: number, userId: number | null): void => {
-      if (userId == null) return;
-      if (inScopeRepoIds && !inScopeRepoIds.has(repoId)) return;
-      let set = repoMembers.get(repoId);
-      if (!set) repoMembers.set(repoId, (set = new Set()));
-      set.add(userId);
-    };
-    for (const e of searchTimeline?.events ?? []) addMember(e.repoId, e.actorId);
-    for (const p of searchTimeline?.prs ?? []) addMember(p.repoId, p.authorId);
-    for (const p of searchOpenPrs?.prs ?? []) addMember(p.repoId, p.authorId);
-
-    // Maintainers (merge rights) in the relevant repo(s). They also count as
-    // members of their repo, so a maintainer surfaces under their repo section
-    // even without any activity in the window. Bots/unknowns are skipped so the
-    // "Maintainers" quick-select only stages real, selectable members.
-    const maintainers = new Set<number>();
-    for (const m of mergers ?? []) {
-      if (inScopeRepoIds && !inScopeRepoIds.has(m.repoId)) continue;
-      for (const uid of m.userIds) {
-        if (!usable(uid)) continue;
-        maintainers.add(uid);
-        addMember(m.repoId, uid);
-      }
-    }
-
-    const byName = (a: User, b: User): number =>
-      (a.displayName || a.githubLogin).localeCompare(b.displayName || b.githubLogin);
-    const maintainerFirst = (a: User, b: User): number => {
-      const rank = (maintainers.has(a.id) ? 0 : 1) - (maintainers.has(b.id) ? 0 : 1);
-      return rank !== 0 ? rank : byName(a, b);
-    };
-
-    const sections: MemberSection[] = [];
-    const placed = new Set<number>();
-
-    // One section per in-scope repo (kept in the repo-chip order). Maintainers are
-    // sorted first within each repo (and badged), but get no section of their own —
-    // the "Maintainers" quick-select in the panel covers them across all repos.
-    for (const r of repos ?? []) {
-      if (inScopeRepoIds && !inScopeRepoIds.has(r.id)) continue;
-      const ids = repoMembers.get(r.id);
-      if (!ids || ids.size === 0) continue;
-      const members = [...ids]
-        .map(usable)
-        .filter((u): u is User => u != null)
-        .sort(maintainerFirst);
-      if (!members.length) continue;
-      sections.push({ key: `repo:${r.id}`, label: r.name, members });
-      for (const u of members) placed.add(u.id);
-    }
-
-    // Selectable universe: the full non-bot roster when there's no repo filter,
-    // else the placed (active/maintainer) members plus any selected ones. Whatever
-    // isn't already in a section above falls into "Other".
-    const selectedIds = f.userIds ?? [];
-    const universe = repoScoped
-      ? new Set<number>([...placed, ...selectedIds])
-      : new Set<number>((users ?? []).filter((u) => !u.isBot).map((u) => u.id));
-    const other = [...universe]
-      .map(usable)
-      .filter((u): u is User => u != null)
-      .filter((u) => !placed.has(u.id))
-      .sort(byName);
-    if (other.length) {
-      sections.push({
-        key: 'other',
-        label: repoScoped ? 'Other' : 'No recent activity',
-        members: other,
-      });
-    }
-
-    // Per-repo Bots sections (item 3): the bot contributors active in each in-scope repo,
-    // so the user can allow-list the important ones. Derived from the same (bot-inclusive)
-    // window activity as members — repoMembers already holds bot ids (usable() filtered
-    // them out of the member sections). Any bot with no repo activity but already allow-
-    // listed still needs to be togglable, so it's floated into an "Other bots" section.
-    const botSections: MemberSection[] = [];
-    const placedBots = new Set<number>();
-    for (const r of repos ?? []) {
-      if (inScopeRepoIds && !inScopeRepoIds.has(r.id)) continue;
-      const ids = repoMembers.get(r.id);
-      if (!ids) continue;
-      const bots = [...ids]
-        .map(botOf)
-        .filter((u): u is User => u != null)
-        .sort(byName);
-      if (!bots.length) continue;
-      botSections.push({ key: `bot:${r.id}`, label: r.name, members: bots });
-      for (const u of bots) placedBots.add(u.id);
-    }
-    const allowedNotShown = (f.allowedBotIds ?? [])
-      .map(botOf)
-      .filter((u): u is User => u != null)
-      .filter((u) => !placedBots.has(u.id))
-      .sort(byName);
-    if (allowedNotShown.length) {
-      botSections.push({ key: 'bot:other', label: 'Other bots', members: allowedNotShown });
-    }
-
-    return { sections, botSections, maintainerIds: maintainers };
+    return buildMemberSections({
+      users,
+      repos,
+      searchTimeline,
+      searchOpenPrs,
+      mergers,
+      inScopeRepoIds,
+      repoScoped,
+      selectedIds: f.userIds ?? [],
+      allowedBotIds: f.allowedBotIds ?? [],
+      // The Timeline board's bot verdict is the global flag alone (the union verdict is the
+      // Feed/Reports rule — this dropdown's Bots half must keep listing exactly what the
+      // board's excludeBots hides).
+      isBot: (u: User) => u.isBot,
+      includeRosterRemainder: true,
+    });
   }, [
     users,
     searchTimeline,

@@ -72,6 +72,32 @@ describe('buildFileTree', () => {
     expect(tree[0]?.children[0]?.entry?.previousPath).toBe('src/old.ts');
   });
 
+  it('rolls up per-state thread counts onto directories; entries without counts read as zero', () => {
+    const counts = (untouched: number, resolved: number) => ({
+      untouched,
+      replied_unresolved: 0,
+      likely_addressed: 0,
+      resolved,
+    });
+    const tree = buildFileTree([
+      { ...entry('src/a.ts'), threadCounts: counts(2, 1) },
+      { ...entry('src/nested/b.ts'), threadCounts: counts(0, 3) },
+      // No threadCounts at all (the AI-Fix changeset / metadata fallback shape) — must
+      // contribute zeros, not poison the rollup.
+      entry('src/c.ts'),
+    ]);
+    const src = tree[0];
+    expect(src?.threadCounts).toEqual(counts(2, 4));
+    // The nested dir carries only its own subtree.
+    const nested = src?.children.find((c) => c.kind === 'dir');
+    expect(nested?.threadCounts).toEqual(counts(0, 3));
+    // File nodes carry their entry's counts; a count-less entry reads all-zero.
+    const a = src?.children.find((n) => n.path === 'src/a.ts');
+    expect(a?.threadCounts).toEqual(counts(2, 1));
+    const countless = src?.children.find((n) => n.path === 'src/c.ts');
+    expect(countless?.threadCounts).toEqual(counts(0, 0));
+  });
+
   it('is empty for an empty file list', () => {
     expect(buildFileTree([])).toEqual([]);
   });

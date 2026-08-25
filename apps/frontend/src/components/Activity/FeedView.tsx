@@ -55,9 +55,12 @@ function isCiFailureKind(kind: string): boolean {
 }
 
 // A coloured chip + label describing WHAT an item is (the event kind). The My-Turn reason is
-// a separate pill (see MY_TURN_REASON_META); Claude runs get their own violet chip.
-function itemGlyph(item: ConsolidatedFeedItem): { color: string; label: string } {
-  if (item.kind === 'claude_review') return { color: '#8957e5', label: 'Claude Review' };
+// a separate pill (see MY_TURN_REASON_META); Claude runs get their own AI-signal chip.
+function itemGlyph(item: ConsolidatedFeedItem): { color: string; label: string; className?: string } {
+  // The one glyph whose colour must flip per theme — a hex can't (the chip below
+  // derives its wash by appending '1a'), so this kind carries classes instead.
+  if (item.kind === 'claude_review')
+    return { color: '', label: 'Claude Review', className: 'bg-ai-signal/10 text-ai-signal' };
   // CI failures — one card per failed check run. "detected", not "failed at": both sources
   // timestamp OUR observation, which can lag the real failure by up to the sync floor.
   if (item.kind === 'ci_failed') return { color: '#ef4444', label: 'CI failed' };
@@ -1134,7 +1137,7 @@ export function FeedView({
             aria-pressed={feedClaudeOnly}
             className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
               feedClaudeOnly
-                ? 'border-violet-400 bg-violet-50 text-violet-700 dark:border-violet-500/60 dark:bg-violet-950/30 dark:text-violet-300'
+                ? 'border-ai-signal/50 bg-ai-signal/10 text-ai-signal hover:border-ai-signal'
                 : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
             }`}
             title="Show only Claude Reviews"
@@ -1833,7 +1836,7 @@ function FeedRowImpl({
             : isMyTurn
               ? 'border-yellow-400 bg-yellow-50/40 dark:border-yellow-500/50 dark:bg-yellow-950/15'
               : isClaude
-                ? 'border-violet-300 bg-violet-50/30 dark:border-violet-500/40 dark:bg-violet-950/10'
+                ? 'border-ai-border bg-ai-surface'
                 : 'border-gray-200 hover:border-sky-300 dark:border-gray-800 dark:hover:border-sky-700'
         }`}
       >
@@ -1904,8 +1907,8 @@ function FeedRowImpl({
             </span>
           )}
           <span
-            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
-            style={{ color: glyph.color, background: glyph.color + '1a' }}
+            className={`inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${glyph.className ?? ''}`}
+            style={glyph.className ? undefined : { color: glyph.color, background: glyph.color + '1a' }}
           >
             {glyph.label}
           </span>

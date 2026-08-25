@@ -210,9 +210,10 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       // db/person-period.ts, exactly the swap D2's single bump paid for — no contract change).
       // The fold resolves the workspace scope itself (resolveWorkspaceScope — a foreign id
       // degrades to Default), admits the subject only via the workspace activity probe, and
-      // returns null for bots and strangers alike.
-      getPersonPeriod: (accountId, workspaceId, userId, window) =>
-        getPersonPeriod(accountId, workspaceId, userId, window),
+      // returns null for bots and strangers alike. `opts.evidence` (the People report) rides
+      // through unchanged — an older plugin passes nothing and gets the vector alone.
+      getPersonPeriod: (accountId, workspaceId, userId, window, opts) =>
+        getPersonPeriod(accountId, workspaceId, userId, window, opts),
     },
     recordAiUsage: (row) => recordAiUsage(row),
     aiCredits: {

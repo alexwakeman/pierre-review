@@ -24,6 +24,35 @@
 
 :root {
   color-scheme: light dark;
+  /* ── AI-surface tokens (Limn landing palette, mapped two-theme) ─────────────
+     Space-separated RGB channels (the --tl-tint pattern) so Tailwind can apply
+     alpha at paint time via rgb(var(--x) / <alpha-value>). Light = the landing's
+     paper/ink/vermilion; dark = ink-deep surfaces + signal-on-dark. --ai-signal
+     is the TEXT-SAFE accent (also the only vermilion allowed to back/carry text);
+     --ai-signal-fill is NON-TEXT ONLY (meters, strokes, rules). */
+  --ai-surface: 250 250 248;      /* #FAFAF8 paper       */
+  --ai-surface-2: 244 244 239;    /* #F4F4EF paper-alt   */
+  --ai-border: 226 226 220;       /* #E2E2DC rule        */
+  --ai-hairline: 237 237 232;     /* #EDEDE8 rule-hair   */
+  --ai-ink: 22 22 26;             /* #16161A ink         */
+  --ai-muted: 90 90 94;           /* #5A5A5E muted       */
+  --ai-signal: 181 54 33;         /* #B53621 signal-text — darkened from the landing's #C13A20
+                                     so every text-on-wash recipe clears WCAG: /15 over
+                                     --ai-surface 4.55:1, /10 over a panel 4.92:1 (the brand hex
+                                     measured 4.14/4.46), and the chip ✕ at /70 clears the 3:1
+                                     non-text floor. Landing + Wordmark keep the brand hex. */
+  --ai-signal-fill: 226 73 44;    /* #E2492C signal-fill */
+}
+
+.dark {
+  --ai-surface: 22 22 26;         /* #16161A ink as panel ground        */
+  --ai-surface-2: 28 28 33;       /* #1C1C21 raised step (derived)      */
+  --ai-border: 58 58 62;          /* #3A3A3E ink-soft                   */
+  --ai-hairline: 42 42 46;        /* #2A2A2E ink-body                   */
+  --ai-ink: 220 220 214;          /* #DCDCD6 on-dark-body               */
+  --ai-muted: 154 154 148;        /* #9A9A94 on-dark-secondary          */
+  --ai-signal: 242 107 78;        /* #F26B4E signal-on-dark             */
+  --ai-signal-fill: 242 107 78;   /* same — one dark vermilion          */
 }
 
 html,
@@ -1157,7 +1186,7 @@ body {
   position: relative;
   overflow: hidden;
   border-radius: 4px;
-  background: rgba(139, 92, 246, 0.06); /* violet-500 @ 6% — barely there */
+  background: rgb(var(--ai-signal-fill) / 0.05); /* signal @ 5% — barely there */
 }
 .digest-skeleton-line::after {
   content: '';
@@ -1166,9 +1195,9 @@ body {
   transform: translateX(-100%);
   background: linear-gradient(
     90deg,
-    rgba(167, 139, 250, 0) 0%,
-    rgba(167, 139, 250, 0.16) 50%,
-    rgba(167, 139, 250, 0) 100%
+    rgb(var(--ai-signal-fill) / 0) 0%,
+    rgb(var(--ai-signal-fill) / 0.12) 50%,
+    rgb(var(--ai-signal-fill) / 0) 100%
   );
   animation: digest-shimmer 2.4s ease-in-out infinite;
 }

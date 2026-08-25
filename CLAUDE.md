@@ -181,25 +181,23 @@ pierre-review/
 │  │  │  ├─ github/             auth.ts (gh token), client.ts (per-account factories), queries.ts (the big query),
 │  │  │  │                      mutations.ts (REST writes + the GraphQL-only merge queue), branch-queries.ts (trunk, two-phase)
 │  │  │  ├─ merge/              auto-merge-runner.ts — the "merge when ready" watcher (own cron, safety gates)
-│  │  │  ├─ sync/               scheduler, sync-manager, sync-repo, upsert, derive-thread-state, commit-files, hydrate-detail,
-│  │  │  │                      sync-one-pr (targeted), branch-status (trunk snapshot), resync-after-write (post-write tail)
+│  │  │  ├─ sync/               scheduler, sync-manager, sync-repo, upsert, derive-thread-state, hydrate-detail,
+│  │  │  │                      sync-one-pr (targeted), branch-status (trunk), resync-after-write (post-write tail)
 │  │  │  │  └─ __fixtures__/threads/   JSON fixtures for the thread-state heuristic tests
-│  │  │  ├─ review/             Claude Review (local-only): agent, review-manager, routing, persist, post-review, clone-manager, prompt
-│  │  │  │                      + events.ts (inert review event-bus + learnings-provider registry), llm.ts (cheapComplete Haiku seam)
-│  │  │  ├─ pro/                open-core seam (no premium logic): contract.ts (ProContext/ProPlugin + capability singleton),
-│  │  │  │                      bind.ts (guarded runtime import of @pierre/pro), migrate.ts (plugin-owned dual-dialect migrator)
-│  │  │  └─ api/
-│  │  │     ├─ routes/          one file per resource (timeline, prs, repos, users, me, threads, activity, claude-review, auth[cloud], …)
-│  │  │     └─ plugins/         error-handler (notFoundHandler / SPA+landing router), auth (context + session + gate)
+│  │  │  ├─ review/             Claude Review (local-only): agent, review-manager, routing, persist, post-review, prompt
+│  │  │  │                      + events.ts (inert review event-bus + learnings registry), llm.ts (cheapComplete seam)
+│  │  │  ├─ pro/                open-core seam (no premium logic): contract.ts, bind.ts (guarded import), migrate.ts
+│  │  │  └─ api/                routes/ (one file per resource) + plugins/ (error-handler + SPA/landing router, auth)
 │  │  └─ data/                 the local SQLite DB (gitignored)
 │  ├─ frontend/                @pierre-review/frontend — the timeline SPA (base `/app/`)
 │  │  └─ src/
-│  │     ├─ App.tsx            useMe() 401 → SignInGate; FilterBar / PinnedTabsBar (Activity|Timeline + dynamic tabs) / Timeline / DetailPane / Activity+pinned overlays
-│  │     ├─ store/filters.ts   Zustand: all filter + selection + timeline-hint state (+ transient activityRepoId/activityThreadFilter)
-│  │     ├─ hooks/             useUrlState, useTimeline, usePr, useTriage, useMe (+ useProCapabilities), useActivity, useReviewLearnings,
-│  │     │                     useAutoMerge (arm/disarm + the polled list), useBranchStatus, useCheckLogs (paged log window), useAnnotations, …
+│  │     ├─ App.tsx            useMe() 401 → SignInGate; FilterBar / PinnedTabsBar / Timeline / DetailPane / overlays
+│  │     ├─ store/filters.ts   Zustand: all filter + selection + timeline-hint state (+ the transient seeds)
+│  │     ├─ hooks/             useUrlState, useTimeline, usePr, useTriage, useMe (+ useProCapabilities), useActivity,
+│  │     │                     useAutoMerge, useBranchStatus, useCheckLogs, useAnnotations, useMemberSections, …
 │  │     ├─ api/client.ts      typed fetch wrapper (credentialed; throws ApiError)
-│  │     ├─ components/        Timeline/, Activity/ (rail + FeedView + open-PR list + collapsible digest cards), PrDetail, ChecksTab, ThreadList/, ThreadView/, PinnedTabsBar, …
+│  │     ├─ components/        Timeline/, Activity/ (rail + FeedView + open-PR list + digest cards), PrDetail,
+│  │     │                     ChecksTab, ThreadList/, ThreadView/, diff/, PinnedTabsBar, …
 │  │     └─ lib/ui.ts          shared UI metadata (state colors/labels/shapes) + helpers
 │  └─ landing/                 @pierre-review/landing — public marketing page (cloud, served at `/`); no shared runtime code
 │                              PRERENDERED per route at build time (prerender.mjs + src/entry-server.tsx,
@@ -315,10 +313,10 @@ with **composite** conflict targets (`(accountId, githubNodeId)` / events
   `contexts(first:100)` must NOT be lowered.
 - **A completed FULL walk tail-runs the one-time CI-history backfill**
   (`sync/backfill-ci-history.ts`; `CI_HISTORY_BACKFILL=false` disables): trunk commits back
-  to the 90-day trend window (the `branch_commits` trim is HYBRID — newest-100 unconditional
-  ∪ within-90d, so the backfill survives the next tick) + `ci_status_events` synthesized from
-  GitHub's retained rollups so the CI charts aren't blank on a fresh repo. A PR's log is
-  touched ONLY when it is provably the first-observation snapshot — never real observed
+  to the 90-day trend window (the `branch_commits` trim is HYBRID — newest-100 ∪ within-90d,
+  so the backfill survives the next tick) + `ci_status_events` synthesized from GitHub's
+  retained rollups so the CI charts aren't blank on a fresh repo. A PR's log is touched ONLY
+  when it is provably the first-observation snapshot — never real observed
   history. Strictly non-fatal, capped, cancellation-aware; details in
   [docs/SYNC.md](docs/SYNC.md).
 
@@ -483,15 +481,16 @@ Landmines that cost real bugs — read the doc before touching any of these:
   default flip). Feed: lens `'hide'` is the transient default and rides the SERVER's
   `excludeBots` (excluded before the page cap); a bot contributor's own activity tab
   derives an effective lens (never written back). `useSearchTimeline` still always sends
-  `excludeBots=false` — the Members dropdown's bot listing depends on it.
+  `excludeBots=false` — the Members dropdown's bot listing depends on it, as does
+  `rosterTimelineSearch` (which sets it explicitly for the same reason).
 - **`workspaceId === null` means "not resolved yet"** — nothing may render
   workspace-scoped data while null. `?workspace=` is the ONE URL param emitted
   always-once-resolved and omitted while null (an unconditional `p.set` writes the literal
   `?workspace=null` on every bare load).
-- **`useWorkspaceSync` is three-branch** (null-or-dead / changed / **PRUNE ONLY**) — it
-  must NOT keep `repoIds` in lockstep with workspace membership (that kills per-repo
-  show/hide). Track the previous id in a ref; a write-only-if-different guard is not
-  sufficient (React Query result identity changes on every background refetch).
+- **`useWorkspaceSync` is three-branch** (null-or-dead / changed / **PRUNE ONLY**) — it must
+  NOT keep `repoIds` in lockstep with workspace membership (that kills per-repo show/hide).
+  Track the previous id in a ref; a write-only-if-different guard is not sufficient (React
+  Query result identity changes on every background refetch).
 - Legacy URLs: `?workspace` absent + `?team=<int>` present ⇒ that int IS the workspace id
   (migration 0044 preserved team ids); any other `?team=` form discards `?repos=` too, and
   `repoIds` is always pruned to the resolved workspace's membership before any query runs.
@@ -507,10 +506,10 @@ Landmines that cost real bugs — read the doc before touching any of these:
   `botsInnerTab` 'advisor'): a scalar may legitimately hold a key the current context
   doesn't render; compute an `effectiveTab` for the render only — a corrective `set…`
   permanently forgets the user's choice. (`botsInnerTab` is down to
-  `'roi' | 'advisor' | 'settings'` — 'behaviour' and 'themes' were removed with their tabs;
-  the field is transient + URL-silent, so member removal is safe. `InsightsSubTab` is GONE
-  entirely: the pane is Reports-first, the chat lives inside the report. The Compare rail
-  value `'compare'` is gone from `activityRepoId` and no longer URL-parsed.)
+  `'roi' | 'advisor' | 'settings'` — 'behaviour' and 'themes' were removed with their tabs and
+  did NOT come back when the Themes PANEL did (it sits on the main 'roi' view); the field is
+  transient + URL-silent, so member removal is safe. `InsightsSubTab` is GONE entirely: the pane
+  is Reports-first, the chat lives inside the report.)
 - **Timeline vertical scroll is GATED.** vis virtualizes rows; every programmatic scroll
   goes through `setVisScrollTop` and must claim the gate
   (`intentionalScrollRef` + `scrollLoopRef`) — never write `scrollTop` / call `focus()`
@@ -522,12 +521,47 @@ Landmines that cost real bugs — read the doc before touching any of these:
   called before PrDetail's early returns (hooks-order rule).
 - Data-derived URLs never go straight into `href`/`src` — `safeExternalUrl()` (React
   renders `javascript:` URLs).
+- **The AI surface has EIGHT semantic tokens, and the remaining purple is NOT leftovers.**
+  `--ai-surface/-2/-border/-hairline/-ink/-muted/-signal/-signal-fill` are theme-flipping vars
+  in `index.css` (`:root` + `.dark`, SPACE-SEPARATED channels — the `--tl-tint` precedent; any
+  other format breaks `<alpha-value>` silently) mapped in `tailwind.config.ts`, so an `ai-*`
+  class needs no `dark:` twin. `--ai-signal` is the only vermilion allowed to carry/back text
+  (darkened from the landing's brand hex to clear WCAG on wash); `--ai-signal-fill` is NON-TEXT
+  ONLY. ⚠ **Every surviving `violet-`/`purple-`/`indigo-` hit is a deliberate KEEP** — data
+  encoding (event/ML-category/lane/vendor/series palettes, feed category pills) and non-AI
+  controls (maintainer shield, merge/auto-merge, deterministic suggested reviewers, Flow
+  metrics, timeline tints), plus AI Fix's `DISAGREE_COLOR`, whose comment pins "deliberately NOT
+  red" — vermilion recreates exactly that bug. Do not "finish the migration"; the authoritative
+  keep-list is in [docs/FRONTEND.md](docs/FRONTEND.md). ⚠ A hex a component DERIVES a wash from
+  (`glyph.color + '1a'`) cannot become a var — FeedView's `claude_review` kind carries a
+  `className` and skips the style attr instead.
+- **The Insights chat is a multi-turn CONVERSATION and the cap is SERVER-side.** Turns live in
+  `sprintChatThreads[ws:<id>]`; `SPRINT_CHAT_MAX_TURNS` = 10 counting the live question, and the
+  plugin independently re-caps the prior pairs it reads (`CHAT_MAX_PRIOR_TURNS` = 9,
+  drift-tested) — a client that sends 25 gets `trimmedTurns` back, not 25 turns of billing.
+  ⚠ **The completed turn is appended in `useSprintChat`'s HOOK-level `onSuccess`, never a
+  `mutate()` callback**: observer teardown (`chat.reset()` on a workspace switch, or the panel
+  unmounting when a PR ref is clicked) kills mutate-scoped callbacks, so a billed,
+  server-persisted answer would silently miss the transcript and the NEXT ask would send a
+  history missing it. The ask-time workspace rides `onMutate` CONTEXT — the options closure is
+  re-swapped on every render while pending. The chart pass gets the grounding MINUS
+  `conversation` (CHART_SYSTEM makes everything in DATA a legal chart value, so prior model
+  prose would launder hallucinated figures into rendered data, and re-bill every charted turn).
+- **The Changes tab renders EVERY thread inline as a collapsed pill, and the path fold is
+  RENAME-AWARE.** `indexThreadsByPath` (built ONCE per PR, never a per-row filter) keys on the
+  RENDERED path and re-homes a pre-rename thread onto the file's current path — the old fold
+  keyed `t.path` while blocks looked up `f.path`, so those threads were invisible. A thread that
+  anchors to no row degrades to a FILE-level chip, never disappears, and the tab header counts
+  `pr.threads` so the aggregate can't be short by a file beyond the 100-file diff cap. ⚠ The
+  BLOCK owns the `consumedFocus` ref, not the pill: the focus target is STICKY and collapsing a
+  file unmounts the pill, so a remount would re-open a pill the user closed and teleport the
+  view back to it. `ThreadCountChips` is now THE one renderer of the state palette (the
+  near-identical `ThreadDots` was deleted); `ThreadCard` is down to **seven** mounts.
 - **Sync-round state is a transient store slice** (`syncRound` + `managerOpen`) with ONE
-  driver: `SyncStatus` (always mounted in the header; registers `{cancel, syncAll…}`
-  actions via a module-level registry). The progress UI embeds INSIDE the
-  WorkspaceManager panel (within `panelRef` or click-outside closes the manager); the
-  standalone `SyncProgressModal` survives ONLY for onboarding adds (`modal:true` iff the
-  manager isn't open), and the header button shows no dialog at all — it just spins.
+  driver: `SyncStatus` (always mounted in the header, registering its actions via a
+  module-level registry). The progress UI embeds INSIDE the WorkspaceManager panel (within
+  `panelRef` or click-outside closes the manager); `SyncProgressModal` survives ONLY for
+  onboarding adds (`modal:true` iff the manager isn't open).
   Landmines: the signal mailbox is an ARRAY (`syncModalRepoIds` — React 18 batches a
   multi-add loop into ONE effect run; a scalar drops all but the last id); an open
   round's EMPTY `scopeIds` is the all-repos sentinel — never append to it; merging into
@@ -538,20 +572,18 @@ Landmines that cost real bugs — read the doc before touching any of these:
 - **There is ONE bottom-right toast column** (App.tsx): ClaudeReviewBanner, AutoMergeBanner
   and the ambient `GlobalLoadingBar` render as plain cards inside it — never add a new
   independent `fixed bottom-4 right-4` element (three of them were painting over each
-  other at the same coordinate). The loading bar (yellow, non-dismissible, bottom-most
-  card) covers HEAVY work only: full-mode walks via `GET /api/sync-activity` (which
-  suppresses zero-progress retries of errored repos) + ML scoring strictly under
-  `isMlScoring`; its ETA treats unchanged poll values as no-observation (batch-grain
-  drains), and its monotonic percent clamp resets on stage/backfill-set changes and
-  per-repo percent regressions (phase 2 legitimately restarts percent from 1.0 → ~0.16).
+  other at the same coordinate). The loading bar covers HEAVY work only: full-mode walks via
+  `GET /api/sync-activity` + ML scoring strictly under `isMlScoring`; its ETA treats unchanged
+  poll values as no-observation, and its monotonic percent clamp resets on stage/backfill-set
+  changes and per-repo regressions (phase 2 legitimately restarts percent from 1.0 → ~0.16).
 - **Reactions are fetched ON DEMAND and NEVER STORED** — no column, no migration, no sync
-  step. `hooks/useReactions.ts` is a MICROTASK-BATCHED loader: each `ReactionBar` runs its
-  own `['reactions', kind, id]` query whose fn only enqueues, and one tick's registrations
-  become ONE `POST /api/reactions/lookup` (60/batch). Per-PR indexing (the `useMlLabelIndex`
-  shape) could NOT serve this — the Feed spans many PRs. The bar renders nothing while state
-  is `undefined` (unknown ≠ "no reactions"), the toggle carries a per-target MUTATION key so
-  two mounts of one comment share in-flight state, and these queries stay OUT of
-  `shouldDehydrateQuery` (a week-old persisted copy of other people's reactions is a lie).
+  step. `hooks/useReactions.ts` is a MICROTASK-BATCHED loader: each `ReactionBar`'s
+  `['reactions', kind, id]` query fn only enqueues, and one tick's registrations become ONE
+  `POST /api/reactions/lookup` (60/batch). Per-PR indexing (the `useMlLabelIndex` shape) could
+  NOT serve this — the Feed spans many PRs. The bar renders nothing while state is `undefined`
+  (unknown ≠ "no reactions"), the toggle carries a per-target MUTATION key, and these queries
+  stay OUT of `shouldDehydrateQuery` (a week-old persisted copy of other people's reactions is
+  a lie).
 - **The Feed's "CI failures" control is a THREE-state lens, defaulting to OFF.** `feedCiLens`
   cycles `'off'` (default — none fetched) → `'feed'` (rows interleaved chronologically) →
   `'only'` (stream narrowed to CI rows) → `'off'`, so ONE click from rest turns it on. The
@@ -559,15 +591,14 @@ Landmines that cost real bugs — read the doc before touching any of these:
   query key AND the head-poll key (a head including rows the loaded page lacks false-fires
   "New activity"); `'only'` is a client-side narrowing that SKIPS the category pills, since
   CI rows are in neither category and the combination could only ever be empty.
-  ⚠ **This default has flipped TWICE (off → feed → off) and each flip cost something.** It
-  shipped as an include-only boolean defaulting off, which hid the feature twice over: rows
-  are placed by time, so in a busy workspace the newest CI card lands ~23 rows below the fold
-  while the pill's count reads 34 — indistinguishable from a dead control, while the same
-  code looks perfect in a quiet workspace (index 0). **Never ship an include-only toggle whose
-  only feedback is a count** — that lesson is permanent and is why the third state exists. On
-  by default then proved too noisy for a first impression (one card per failed check per
-  head), so the default went back off with the always-rendered PILL carrying discoverability.
-  It is the ONE feed control that PERSISTS with the filter bar (in
+  ⚠ **This default has flipped TWICE (off → feed → off) and each flip cost something.** As an
+  include-only boolean defaulting off it hid the feature twice over: rows are placed by time,
+  so in a busy workspace the newest CI card landed ~23 rows below the fold while the pill's
+  count read 34 — indistinguishable from a dead control, while the same code looks perfect in
+  a quiet workspace (index 0). **Never ship an include-only toggle whose only feedback is a
+  count** — that is why the third state exists. On by default then proved too noisy for a
+  first impression, so the default went back off with the always-rendered PILL carrying
+  discoverability. It is the ONE feed control that PERSISTS with the filter bar (in
   `FilterDefaults`/`pickFilterBarState`, hence also cleared by "Clear filters") and is
   URL-serialized (`ci=only` / `ci=1`; the `'off'` default is omitted, and both `ci=1` and an
   explicit `ci=0` still read correctly from older links).
@@ -606,16 +637,14 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   arm: the `MergeWhenReadyControl` button in the Overview Actions row (eligible = verdict
   blocked/behind/unknown OR clean-but-`behindBy>0` — the widening is THIS button's only;
   never gate Merge on `behindBy`), which ALWAYS stores a real `updateStrategy` (never
-  `'none'` — a PR falling behind after arming must still freshen); while armed the Close
-  button is hidden and a header chip shows the intent (`usePrArmedIntent`: the armed list
-  carries 24h-resolved rows, so the predicate is `state==='armed'`, never row existence).
-  **Merge-queue repos arm the same way** ("Queue when ready"): the intent is stamped
-  `viaMergeQueue` and the watcher's terminal action becomes a head-pinned ENQUEUE gated on
-  `reviewDecision` (a queue repo rests at 'blocked'; checks don't gate entry) — freshen
-  happens once BEFORE the first enqueue, never while queued (an update kicks the entry out).
-  `enqueuedAt` is the attribution column: merged-while-set ⇒ 'merged' (toast), a human's
-  entry/dequeue ⇒ 'disarmed_blocked', and disarm with it set also dequeues (row deleted
-  first — cancel must win). Full contract in the doc.
+  `'none'`); while armed the Close button is hidden and a header chip shows the intent
+  (`usePrArmedIntent`: the armed list carries 24h-resolved rows, so the predicate is
+  `state==='armed'`, never row existence). **Merge-queue repos arm the same way** ("Queue when
+  ready"): the intent is stamped `viaMergeQueue` and the terminal action becomes a head-pinned
+  ENQUEUE gated on `reviewDecision` — freshen happens once BEFORE the first enqueue, never
+  while queued (an update kicks the entry out). `enqueuedAt` is the attribution column, and
+  disarm with it set also dequeues (row deleted first — cancel must win). Full contract in
+  the doc.
 - CI logs are live ranged reads of the signed Actions blob URL — server-side only, NEVER
   returned to a client (it is unauthenticated). Logs are offered for passing checks too.
 - Trunk status (`/api/branch-status` over `repos` head columns + `branchCommits`) is
@@ -651,59 +680,42 @@ passthrough on `/api/me`, and inert seams. Details:
   ⚠ **The plugin half of a bump lives in a SUBMODULE, so "all four" spans two repos** — the
   gitlink this repo commits must point at a plugin commit carrying the same number, or a
   fresh `git submodule update --init` checks out a plugin the host then rejects.
-  (20 → 21 is the TIER LINE — ONE bump carrying every seam of the calm-consolidation plan:
-  `ProCapabilities` gains **`botDepth`** (paid, non-AI depth, gated like
-  `workspaceInsights`) and `ProHostQueries` gains FIVE members — `getBotBehaviour` (the
-  core behaviour rollup behind the moved `/api/pro/bot-behaviour`, + an optional
-  one-bot narrowing for the bot-detail tab), `getPeriodMetricsForWorkspaces` (the Reports
-  "By workspace" axis; no cost fields ever), and three seams declared inert then
-  implemented with NO contract change: `getSynthesisInput` (the synthesis seam's input
-  assembly), `getDailyBriefCounts` (the free brief fold), `getPersonPeriod` (the 1:1
-  person vector, `PERSON_METRICS_SCHEMA_VERSION` 1).
-  19 → 20 is period-over-period reporting — the Insights **Reports** sub-tab: metrics are
-  CORE and window-pure (`db/period-metrics.ts`), the storage/narration/routes are
-  plugin-owned (pro migration `0025`, lanes `0026`).
-  18 → 19 is "fix from comments": `CodingSeam.generateFix`'s result gains OPTIONAL
-  `commentVerdicts: FixItemVerdict[]`, the per-item dispositions the agent reports through
-  core's `submit_fix` tool. Core stays ignorant of what the items ARE — the plugin's prompt
-  assigns the `ref` labels and `ai-fix/comment-seed.ts` maps them back to comment rows.
-  17 → 18 widened `ProHostQueries.getBotAnalytics`'s `window` from a bare `BotWindowKind`
-  to `kind | {kind, fromMs, toMs}` so the Insights chat's chosen range reaches core as real
-  bounds, and added `'rolling_90'`.
-  16 → 17 added `GithubSeam.fetchReviewCommentHunks` — lean-storage ANCHOR-HUNK hydration
-  (`sync/hydrate-detail.ts`); without it the `validity`/`addressed` judgements read
-  `review_comments.diff_hunk`, NULL for ~97% of rows, and answered "unclear" under the very
-  hunk the SPA was rendering.
-  15 → 16 added `GithubSeam.fetchCompareDiff` — the two-sha compare
-  (`github/compare.ts`, CORE, NEVER THROWS → `{ok:false, reason}`) that grounds the
-  `addressed` annotation in the REAL diff since the thread's last discussion.
-  14 → 15 was the Bot Tuning Advisor: repo-file read seams +
-  `openIssue` + `commitFilesAndOpenPr` + the two advisor host queries + `botAdvisor`.)
+  ⚠ **Not every contract change is a bump — but "additive" is a NARROW test.** The People
+  report widened `getPersonPeriod` with a TRAILING `opts?: {evidence?: boolean}`, added
+  `SynthesisScopeKind 'person_report'` + `SynthesisItemKind 'path_area'` + optional
+  `StoredSynthesis.sections` / `PersonPeriod.evidence`, and stayed at **21** with ZERO core
+  and ZERO plugin migrations — an older plugin calls with four args and type-checks, an older
+  host simply never sets the optional field (the `registerAccountErasure` precedent). A
+  SPA↔plugin WIRE type (`SprintChatBody.history`, `SprintChatResponse.followUps`/
+  `trimmedTurns`, `BotThemesResult`) is not `ProContext` at all and never bumps.
+  (20 → 21 is the TIER LINE — ONE bump for the whole calm-consolidation plan:
+  `ProCapabilities` gains **`botDepth`** (paid, non-AI depth, gated like `workspaceInsights`)
+  and `ProHostQueries` gains FIVE members — `getBotBehaviour`, `getPeriodMetricsForWorkspaces`
+  (the Reports "By workspace" axis; no cost fields ever) and three seams declared inert then
+  implemented with NO contract change: `getSynthesisInput`, `getDailyBriefCounts`,
+  `getPersonPeriod`. 19 → 20 was period-over-period reporting; 18 → 19 "fix from comments"
+  (`CodingSeam.generateFix` gains OPTIONAL `commentVerdicts`); 17 → 18 widened
+  `getBotAnalytics`'s `window` to `kind | {kind, fromMs, toMs}` and added `'rolling_90'`.
+  16 → 17, 15 → 16, 14 → 15 and the per-bump detail are in the topic doc's apiVersion history.)
 - **A RESOLVED thread is now judged too, and that flips the question rather than cancelling
-  it.** `enumerateCombinedUnits` used to emit no `addressed` slot when `isResolved` — so 40%
-  of a real workspace's threads could never answer "was this actually addressed?", which is
-  precisely the population where someone has already CLAIMED it was. Resolving is a click,
-  not evidence. The prompt now branches on `human_marked_resolved` (verify the claim; say so
-  when the diff doesn't back it up), `isResolved` is in the hash (`t2|` → `t3|` — a
-  resolved-after-the-fact thread must not keep a verdict computed under the other framing),
-  and the UI retitles the panel "Resolution check". ⚠ The legacy per-item
-  `resolution-check/routes.ts` writes the SAME row, so it had to learn `isResolved` in
-  lockstep — a field in one writer's hash and not the other's makes each mark the other's row
-  stale forever and re-bill paid work.
+  it.** `enumerateCombinedUnits` used to emit no `addressed` slot when `isResolved` — 40% of a
+  real workspace's threads, and precisely the population where someone has already CLAIMED it
+  was addressed. Resolving is a click, not evidence. The prompt branches on
+  `human_marked_resolved`, `isResolved` is in the hash (`t2|` → `t3|`), and the panel is
+  retitled "Resolution check". ⚠ The legacy per-item `resolution-check/routes.ts` writes the
+  SAME row, so it had to learn `isResolved` in lockstep — a field in one writer's hash and not
+  the other's makes each mark the other's row stale forever and re-bill paid work.
 - **The hydrated anchor hunk is PROMPT CONTEXT ONLY and must never enter a payload hash.**
-  `validityPayloadHash` folds in the STORED column and `currentHashFor` recomputes every
-  stored row's hash on the free cached annotations GET fired on every PR open — a path that
-  hydrates nothing. Put a hydrated value in the hash and the GET and the run disagree
-  forever: every judgement permanently `stale`, re-billed on every click (or the free GET has
-  to call GitHub). So the hunk reaches `combinedItemBody`/`validityForThreadRoot`/
-  `addressedForThread` through the ONE accessor `hunkFor`, and `validityPayloadHash` still
-  reads `root.diffHunk`. Hydration itself is once per RUN (`hunkHydrationDone`), inside the
-  batch loop, after the cache filter — one GraphQL call covers the whole PR, so a per-batch
-  fetch would be 9 identical calls on a 50-target run. Pinned by
-  `annotations-combined-targets.test.ts` ("changes the PROMPT but leaves every payload hash
-  byte-identical"). ⚠ If `PERSIST_BODIES=true` ever becomes the default, or anything starts
-  writing `diff_hunk` back, every stored validity row flips stale at once —
-  `writeBackNullBodies` leaves that column alone ON PURPOSE.
+  `currentHashFor` recomputes every stored row's hash on the free cached annotations GET fired
+  on every PR open — a path that hydrates nothing — so a hydrated value in the hash makes the
+  GET and the run disagree forever: every judgement permanently `stale`, re-billed on every
+  click. The hunk reaches the prompt through the ONE accessor `hunkFor`;
+  `validityPayloadHash` still reads the STORED `root.diffHunk`. Hydration is once per RUN
+  (`hunkHydrationDone`), inside the batch loop, after the cache filter (a per-batch fetch is 9
+  identical calls on a 50-target run). Pinned by `annotations-combined-targets.test.ts`.
+  ⚠ If `PERSIST_BODIES=true` ever becomes the default, or anything starts writing `diff_hunk`
+  back, every stored validity row flips stale at once — `writeBackNullBodies` leaves that
+  column alone ON PURPOSE.
 - **The evidence window's base anchors on the thread's ROOT comment, never its last.**
   `addressedWindowFor` is the ONE copy of that rule (resolution-check imports it, exactly as
   it imports the hash). Last-comment anchoring collapsed the window to `base === head`
@@ -716,21 +728,17 @@ passthrough on `/api/me`, and inert seams. Details:
   comment". `commits_after_last_comment` still counts from the LAST comment — different
   question, separate hash field.
 - **The grounded `addressed` check has three cost landmines** (full contract in
-  [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md)): the payload-hash
-  prefix moved `t1|` → `t2|` → `t3|` → **`t4|`** (the last bump FORCED — `baseSha` is in the
-  formula, so the window re-anchor moves every stored row's hash regardless) and carries the
-  `(baseSha, headSha)` PAIR — never the diff
-  TEXT, because `currentHashFor` recomputes every stored row's hash on the free cached
-  annotations GET fired on every PR open (the two writers of that row no longer hand-copy
-  the formula OR the window rule — both call the ONE exported `addressedThreadPayloadHash`
-  and the ONE exported `addressedWindowFor`); the fetch must
-  stay INSIDE the batch loop, AFTER the hash-cache filter / run gate / credit check (the
-  per-item route: after its cache-hit short-circuit, never in the shared loader the GET also
-  calls), or a fully-cached click
-  reporting `generated: 0` still spends GitHub quota; and the evidence must be spliced
-  INSIDE the `want.has('addressed')` branch of `combinedItemBody`, never into the shared
-  `Diff context` block above it (that block also feeds the *validity* and *simplify*
-  judgements, whose per-kind hashes would not change — the drift would be invisible).
+  [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md)): the payload-hash prefix
+  moved `t1|` → `t2|` → `t3|` → **`t4|`** (the last FORCED — `baseSha` is in the formula, so
+  the window re-anchor moved every row's hash anyway) and carries the `(baseSha, headSha)`
+  PAIR, never the diff TEXT — both writers call the ONE exported
+  `addressedThreadPayloadHash` + `addressedWindowFor` rather than hand-copying either;
+  the fetch must stay INSIDE the batch loop, AFTER the hash-cache filter / run gate / credit
+  check (per-item route: after its cache-hit short-circuit), or a fully-cached click reporting
+  `generated: 0` still spends GitHub quota; and the evidence must be spliced INSIDE the
+  `want.has('addressed')` branch of `combinedItemBody`, never into the shared `Diff context`
+  block above it (that block also feeds *validity*/*simplify*, whose per-kind hashes would not
+  change — the drift would be invisible).
 - **A stale `packages/pro/dist` shadows `src` in dev.** `bind.ts` prefers `src/index.ts`
   outside production and LOGS the entry it bound — the first thing to check when a Pro
   route unexpectedly 404s.
@@ -757,10 +765,28 @@ passthrough on `/api/me`, and inert seams. Details:
   the items are. Landmines: `resolveSeedText` short-circuits on `input.seedText` before any
   seed-kind branch; the seed text was the ONE uncapped input in the fix prompt; the prompt is
   rendered and STORED at start time so bodies/hunks are frozen; this seed WIDENS the
-  attacker-authored channel to every comment dragged in, so the untrusted-input paragraph and
-  per-comment fencing are the whole mitigation; and it must never get its own queue/slot (the
-  worktree is keyed on the SHA alone). Full contract:
+  attacker-authored channel to every comment dragged in (fencing is the whole mitigation); and
+  it must never get its own queue/slot (the worktree is keyed on the SHA alone). Full contract:
   [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § "Fix from comments".
+- **The Bots "Themes" panel is BACK, merged with the deterministic layer** (`bot-themes/
+  build.ts` + `routes.ts`, `GET`/`POST /api/pro/bot-themes[/refresh]`, still over the
+  never-dropped `bot_theme_reports` table — no migration). It replaces the `SynthesisCard`
+  mount on the MAIN Bots view **only**; the three drill-down SynthesisCards
+  (BotVolume/BotFlagging/BotThreads) and the seam's `'workspace-bots'` kind are untouched.
+  ⚠ **Its two figure classes are NOT both exact and the copy must say which is which.**
+  Per-theme `commentCount` is a code fold of code-derived counts (Σ each cited cluster's `count`
+  over the model's DEDUPLICATED validated memberIds), as are per-bot volume/acted-on and the
+  area split; the model's `occurrences` (the legacy `≈` fallback) and the category/severity
+  rollups built from it are ESTIMATES — an earlier draft captioned the whole panel "exact". The
+  revival also re-fixed three legacy defects: the payload hash DROPPED the day-quantised
+  `windowKey` (it re-billed every dormant scope daily) for a version literal `bt2`; the refresh
+  claims its per-account slot SYNCHRONOUSLY with the credit check INSIDE the try/finally (the
+  legacy `await` sat in that gap, so two POSTs both passed and both billed); and `VALID_WINDOWS`
+  had to learn `rolling_90` or a valid client window cached the wrong population.
+- ⚠ **The D4 digit gate rejects UNICODE numerals, not `[0-9]`.** The synthesis prompt's input is
+  attacker-authored, and "write the count in full-width digits" walked straight through the ASCII
+  spelling — `２３`/`٣` (Nd), `²` (No), `Ⅻ` (Nl) all read as numbers. It is now
+  `/^[^\p{Nd}\p{No}\p{Nl}]*$/u`. Spelled-out counts stay a prompt-only rule.
 - Generation is cost-gated everywhere: payload-hash caches (**the hash must zero
   `Date.now()`-derived fields** or a dormant repo re-bills hourly), per-account
   serialisation + intervals, credit metering (`AI_CREDITS_PER_USD` = 1250, inlined in
@@ -773,28 +799,25 @@ passthrough on `/api/me`, and inert seams. Details:
   CORE computes deterministic evidence CELLS (`getAdvisorFindings` — (bot × path-bucket) /
   (bot × category) / (bot × partner), floors + the path-coverage disclosure — plus the
   `getBotEffectPanel` verification math and `db/changepoint.ts`); the PLUGIN
-  (`packages/pro/src/advisor/`) derives intents, runs the emitter adapters (CodeRabbit
-  yaml-Document round-trip, Greptile JSON, Copilot/generic prose with a managed
-  `limn:advisor` marker block, confirmed-T3 manifests) and serves `/api/pro/advisor/*`.
-  Outputs: brief (default until a tuning PR merges) / config PR (via
-  `commitFilesAndOpenPr`: default-branch worktree → NEW branch, never force, workflow
-  paths refused, `visible:false` copy contract; `POST …/preview` is the dry-run — same
-  gate chain, returns the exact files, writes nothing) / GitHub issue to the bot's profile
-  `ownerRepo`. Non-negotiables: the recommendation text is TEMPLATED, never
-  model-generated — the ONE LLM touchpoint (`refine/`) rewords prose inside the marker
-  block behind a deterministic diff-guard, and the import-graph test
-  (`llm-isolation.test.ts`) pins that the deterministic modules cannot reach it; the
-  mandatory retro-check gate 422s any suppression it cannot simulate; **a cell with ANY
-  acted-on high-severity finding never earns a full suppress** (the veto — it downgrades
-  to the nit-scoped QUIET_PATH_NITS when the path is nit-dominated, else to silence), and
-  **a suppression needs ≥1 untouched thread on a PR that has since MERGED** (the
-  merged-past gate — open-PR silence is not final; the same signal is the ROI table's
-  "Merged past" column, `mergedPastPrs`, keyed on window `mergedAt`); path
-  cells are adaptive-depth (`a/b/**` when that prefix meets the floor, the coarse `a/**`
-  only when no child does — emitted globs never overlap); nothing the advisor
-  computes may feed `botVerdict`; suggestions arrive via the Bots table's Tune/Drop pills
-  or the Bots "Advisor" inner tab. Config events (`advisor_config_events`) anchor the
-  before/after effect panel — measurement stays independent of emission.
+  (`packages/pro/src/advisor/`) derives intents, runs the emitter adapters (CodeRabbit,
+  Greptile, Copilot/generic prose with a managed `limn:advisor` marker block) and serves
+  `/api/pro/advisor/*`. Outputs: brief (default until a tuning PR merges) / config PR (via
+  `commitFilesAndOpenPr`: default-branch worktree → NEW branch, never force, workflow paths
+  refused, `visible:false` copy contract; `POST …/preview` is the writes-nothing dry-run on the
+  same gate chain) / GitHub issue. Non-negotiables: the recommendation text is TEMPLATED, never
+  model-generated — the ONE LLM touchpoint (`refine/`) rewords prose inside the marker block
+  behind a deterministic diff-guard, and `llm-isolation.test.ts` pins that the deterministic
+  modules cannot reach it; the mandatory retro-check gate 422s any suppression it cannot
+  simulate; **a cell with ANY acted-on high-severity finding never earns a full suppress** (the
+  veto — it downgrades to the nit-scoped QUIET_PATH_NITS when the path is nit-dominated, else to
+  silence); **a suppression needs ≥1 untouched thread on a PR that has since MERGED** (the
+  merged-past gate — open-PR silence is not final; the same signal is the ROI table's "Merged
+  past" column, keyed on window `mergedAt`); path cells are adaptive-depth (`a/b/**` when that
+  prefix meets the floor, the coarse `a/**` only when no child does — emitted globs never
+  overlap); nothing the advisor computes may feed `botVerdict`. Config events
+  (`advisor_config_events`) anchor the before/after effect panel — measurement stays
+  independent of emission. Full detail:
+  [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md).
 
 ---
 
@@ -847,6 +870,46 @@ the prior one, and a refusable forecast. **Metrics are CORE** (`db/period-metric
   carry `dependabot` and `dependabot[bot]` as two rows with one of each pair at `automated = 0`,
   which is what put bot text in `human_review_comments`.
 
+**The People report** (Reports → People → "Begin report") — a multi-select picker of humans AND
+bots, one report with a SECTION per pick. Full contract:
+[docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § "The People report".
+
+- **PREP, NOT SCORING survives the widening.** The multi-select is sanctioned; a cross-person
+  SHAPE is not — sections ALPHABETICAL by label (humans/bots interleaved), no ranking, no
+  cross-person sort by any metric, no comparison table, and `getPersonPeriod` KEEPS its
+  one-person-per-request shape (the CLIENT loops; still no batch/list spelling anywhere). The
+  guardrail comments in `db/person-period.ts`, plugin `person-routes.ts` and
+  `PeriodPeopleSection.tsx` were REWORDED, not deleted.
+- ⚠ **The section used to list the ACCOUNT's users** — every workspace's humans under every
+  workspace's Reports pane. The roster is workspace-scoped through the ONE extracted builder
+  `hooks/useMemberSections.ts` (`inScopeRepoIds` = the whole workspace's membership,
+  `includeRosterRemainder: false` — that remainder WAS the bleed).
+- ⚠ **The picker must NOT read `useSearchTimeline`/`useSearchOpenPrs`** — both carry TIMELINE
+  BOARD state (`filters.repoIds`, plus the Range preset) whose controls aren't mounted on the
+  Reports pane, so a narrowing left on the board silently dropped workspace members with no
+  visible cause (the `RepoSelectPanel` rule at the timeline grain). It uses
+  `rosterTimelineSearch`/`useRosterTimeline` + `useWorkspaceOpenPrs`; pinned by
+  `apps/frontend/test/peopleRosterScope.test.ts` in the `workspaceOpenPrsScope` idiom.
+- Evidence is **ADDITIVE ON THE SAME FOLD**, never a sibling: `?evidence=1` widens each windowed
+  scan to a capped `ORDER BY … LIMIT` over the IDENTICAL predicate (the medians hand back their
+  sample PRs through the folds' own sinks), runs every guardrail once, never moves a cell.
+  `verify:isolation` 166 → 169 for this arm — including the GLOBAL `commitFiles` path-area reach,
+  tenant-safe only because it is joined through tenant-proven commit shas.
+- ⚠ **`PERSON_REPORT_VERSION` (now 2) is KIND-SCOPED staleness** — it prefixes every evidence id
+  `pe<v>:`, so a `person_report` prompt edit bumps IT, never `SYNTHESIS_PROMPT_VERSION`. And a
+  version literal only reaches the hash through an id that EXISTS: two ordinary inputs carry zero
+  evidence items, so a constant `pe<v>:none` sentinel is minted for that slice or those rows read
+  `stale: false` forever and serve the old prompt at $0.
+- ⚠ **`getBotAnalytics` honoured an explicit `toMs` in only TWO of its folds** — the thread scan,
+  `mergedPastRows`, `getMlWindowAggregates` and `countUnlabelledBotText` were `>= from` with no
+  upper bound, so ONE ROW mixed two window populations at the bot grain. ⚠ **The first fix was
+  itself wrong:** applying `lt(col, to)` UNCONDITIONALLY excluded rows written in the CURRENT
+  SECOND under the enum form (`to ≡ Date.now()`; these columns are second-granular on sqlite),
+  which flaked `verify:isolation`. The rule is
+  `const toBound = typeof window === 'string' ? null : to;` — upper predicate for EXPLICIT bounds
+  only, which also keeps every enum-form scan byte-identical to the drill-downs over the same
+  rows. Explicit bounds are half-open `lt`, never `lte`.
+
 ## ML severity/category on bot comments (CORE, free tier, no LLM)
 
 Every bot-authored review comment / PR comment / review body is labelled with a **severity**
@@ -889,9 +952,8 @@ other serving route). Full detail: **[docs/ML-SEVERITY.md](docs/ML-SEVERITY.md)*
   `GET /api/ml-status` (account-wide, NO scope — the worker's own grain) feeds the header
   spinner, the sync-menu line and the modal's scoring row. ⚠ **`pending > 0` is NOT "scoring in
   progress"** — go through `isMlScoring`. Backlog with nothing draining it is a real state
-  (service unreachable, worker backed off, or a comment the service keeps rejecting — one live
-  comment in this dev DB does exactly that, blocking its whole workspace), and spinning on it is
-  a worse lie than the premature "done" this replaced.
+  (service unreachable, worker backed off, a rejected comment blocking its workspace), and
+  spinning on it is a worse lie than the premature "done" this replaced.
 - **The vendor's own severity badge is stored to be SHOWN, never to be BELIEVED** — on the
   adjudicated gold-300 it is the worst of the three raters (0.474 exact vs our 0.700) and tuning
   towards agreement with it measurably degrades us, so it must never be an input to the model.
@@ -966,11 +1028,10 @@ Always-true rules:
 - **THE SCOPE IS ONE INTEGER. Do not reintroduce a scope vocabulary.** There is exactly one shape —
   a workspace id — with no sentinels, no wire strings, no canonicalisers and no parsers. Its
   predecessor `TeamScope` (`'all' | 'none' | 'teams' | number | number[]`) needed five client
-  canonicalisers and three server parsers, and shipped a real bug: `teamSetToScope` collapsed a FULL
-  selection to the `'teams'` sentinel and a ONE-team selection to a bare number, so `Array.isArray`
-  missed "every team ticked" and `=== 'teams'` missed an explicit 2-of-5 — which made the Compare
-  tab vanish and the rail un-group. Anything that would need a helper to answer "which repos is this
-  scope?" is a sign the union is coming back.
+  canonicalisers and three server parsers, and shipped a real bug: `teamSetToScope` collapsed a
+  FULL selection to the `'teams'` sentinel and a ONE-team selection to a bare number, so neither
+  `Array.isArray` nor `=== 'teams'` caught every case. Anything that would need a helper to
+  answer "which repos is this scope?" is a sign the union is coming back.
 - **`BotScope { workspaceId, repoIds }` — two named fields, because they answer different
   questions.** The WORKSPACE decides who counts as a bot; the REPO LIST narrows which data is
   measured. The old single `repoIds: number[] | null` conflated them and let a call site transpose a
@@ -1025,14 +1086,14 @@ Always-true rules:
   Pro themes drill-down, diff view). Every judgement now reads the ONE shared per-PR
   `useAnnotationIndex` query and returns `null` when the target has none.
 - **A feature can be fully built, correctly gated, and completely UNREACHABLE — grep for the
-  mount.** `CiAnalysisCard` was written to be mounted twice, its own comment said "the copy mounted
-  inline on the Overview tab", and its tier was correctly moved from the pro+ `aiFix` to the cheap
-  `prSummary` — but the only mount was inside the pro+ **AI Fix tab**, so no summary-tier user could
-  ever reach the CI diagnosis. Only the tier change had landed. When a change says a component "now
-  renders in X", the check is `grep '<Component'`, not the diff of the component.
-- **Two mounts of one paid-generation card must share the MUTATION key, not just the query key.**
-  `CiAnalysisCard`'s in-flight state reads `useIsMutating({mutationKey:['ai-fix-ci',prId]})`, because
-  per-mount `isPending` reset to "Analyze" on a tab switch mid-run — inviting a second BILLED POST.
+  mount.** `CiAnalysisCard`'s own comment said "the copy mounted inline on the Overview tab" and
+  its tier was correctly moved from the pro+ `aiFix` to the cheap `prSummary` — but the only
+  mount was inside the pro+ **AI Fix tab**, so no summary-tier user could ever reach the CI
+  diagnosis. Only the tier change had landed. When a change says a component "now renders in X",
+  the check is `grep '<Component'`, not the diff of the component.
+- **Two mounts of one paid-generation card must share the MUTATION key, not just the query key**
+  (`useIsMutating({mutationKey})` — `CiAnalysisCard`, `useRefreshBotThemes`): per-mount
+  `isPending` resets to "Generate" on a tab switch mid-run, inviting a second BILLED POST.
 - **Open-core boundary (`@pierre/pro`).** Premium code lives ONLY in the private submodule
   `packages/pro` (`alexwakeman/pierre-pro`) — never commit it into this public repo (only
   `.gitmodules` + the gitlink are public). The public repo holds just the contract, the
@@ -1071,21 +1132,16 @@ Always-true rules:
   invisible until a sync. Adding the tail costs that action a full extra GitHub round trip, so it
   is a per-route latency decision, not a blanket rule.
   - The tail is `invalidatePrHydration` → `syncOnePr(…, {waitForInFlight:true})` → a confirming
-    SELECT (`findPostedReviewComment`, matched on the numeric database id OR the node id, since
-    their equality is a convention and not a contract). `waitForInFlight` exists because the
-    in-flight targeted sync may have read GitHub BEFORE the write, so ITS success proves nothing
-    about the new row — the writer queues behind it (bounded, 3 attempts) and fetches itself.
-    Nothing in `resync-after-write.ts` throws: a failed resync must never turn a successful post
-    into an error.
+    SELECT (matched on the numeric db id OR the node id — their equality is a convention, not a
+    contract). `waitForInFlight` exists because the in-flight targeted sync may have read GitHub
+    BEFORE the write, so ITS success proves nothing. Nothing in `resync-after-write.ts` throws.
   - **The `visible`/`threadId` copy contract is a safety rule, not cosmetics.** `visible:false`
     with a NON-NULL `commentId` means the comment IS on GitHub and we merely couldn't confirm it
     locally — the copy must say "it'll show up here shortly", never "it failed", and must never
     offer a retry, because a retry DOUBLE-POSTS. `threadId` is null whenever `visible` is false.
-    Once GitHub has 201'd, the route may not fail: the handler's single `catch` (the 422 →
-    "couldn't place", everything else → 502) is only reachable from a failure BEFORE the post,
-    because `confirmPostedReviewComment` — the sole call after it — never throws.
-  - **Known limit:** the targeted sync pages `reviewThreads(first: 50)`, so on a PR with more
-    threads than that a brand-new one may fall outside the page — a real, expected `visible:false`.
+    Once GitHub has 201'd the route may not fail: the single `catch` is only reachable from a
+    failure BEFORE the post. Known limit: the targeted sync pages `reviewThreads(first: 50)`, so
+    a brand-new thread on a bigger PR is a real, expected `visible:false`.
 - **A column may be CLEARED only on a positive statement from GitHub.** `graphqlTolerant` hands
   back partial data with forbidden fields NULLED, so "GitHub said there is nothing" and "we never
   received that selection" look identical — and an unconditional write NULLs good detail on every
@@ -1187,9 +1243,13 @@ ANY migration. Operating rules:
 [docs/MIGRATIONS.md](docs/MIGRATIONS.md)): the ONE remaining account-wide Pro cron (the
 Slack digest) covers the Default workspace ONLY; PrDetail still classifies bots
 client-side by login; the legacy `?team=` URL rule is unit-tested nowhere;
-`packages/pro/test/` (230 tests) + `apps/frontend/test/` (440 tests) do not run in CI, and
+`packages/pro/test/` (351 tests / 23 files) + `apps/frontend/test/` (532 / 39) do not run in
+CI (`pnpm test` is recursive vitest and the frontend's `test` script is `echo "no tests"`), and
 neither directory is typechecked (both tsconfigs include only `src`) — run them by hand with
 `./apps/backend/node_modules/.bin/vitest run --root packages/pro | --root apps/frontend`;
+**the People report's BOT sections cannot chart authoring-family automation** — a Dependabot
+has no review output, so its section shows the honest "PRs this automation authored are not
+charted here" rather than an empty ROI row (the authored-PR half is simply not built yet);
 auto-merge's retarget guard still lacks a stored `expected_base_ref`; **AI Fix's conflict-resolver
 paths (`rebaseResolve` / `mergeResolveAndPush`) GATE on credits but never CHARGE them** — only
 `saveFixSuccess` calls `recordAiUsage`, so a fix that ends in a rebase-resolve under-bills; ML labels are never

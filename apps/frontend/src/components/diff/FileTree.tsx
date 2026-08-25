@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { FileTreeNode } from '../../lib/diff.js';
 import { isLockFile } from '../../lib/diff.js';
+import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
 import { STATUS_META } from './status.js';
 
 // The Changes tab's navigation rail: the PR's CHANGED FILES ONLY, arranged in their real
@@ -31,7 +32,25 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
 }
 
 
-function Counts({ additions, deletions }: { additions: number; deletions: number }): JSX.Element {
+// `muted` = directory rows: every row shouting saturated green/red made the leaves — the
+// click targets — compete with their own rollups. Grey keeps the subtree-size signal (kept
+// tabular-nums) while restoring hierarchy; file rows keep the colour.
+function Counts({
+  additions,
+  deletions,
+  muted = false,
+}: {
+  additions: number;
+  deletions: number;
+  muted?: boolean;
+}): JSX.Element {
+  if (muted) {
+    return (
+      <span className="shrink-0 font-mono text-[10px] tabular-nums text-gray-400 dark:text-gray-500">
+        +{additions} −{deletions}
+      </span>
+    );
+  }
   return (
     <span className="shrink-0 font-mono text-[10px] tabular-nums">
       <span className="text-green-600 dark:text-green-400">+{additions}</span>{' '}
@@ -77,7 +96,13 @@ function TreeRow({
           <span className="min-w-0 flex-1 truncate font-mono text-gray-500 dark:text-gray-400">
             {node.name}/
           </span>
-          <Counts additions={node.additions} deletions={node.deletions} />
+          {/* Trailing cluster pinned as ONE group: narrow widths are absorbed by name
+              truncation, never by column drift. Dots even on a collapsed dir — a `▸` row
+              with a red dot says an untouched thread hides inside it. */}
+          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+            <ThreadCountChips counts={node.threadCounts} compact />
+            <Counts additions={node.additions} deletions={node.deletions} muted />
+          </span>
         </button>
         {open &&
           node.children.map((child) => (
@@ -130,7 +155,10 @@ function TreeRow({
         {meta ? meta.icon : '·'}
       </span>
       <span className="min-w-0 flex-1 truncate font-mono">{node.name}</span>
-      <Counts additions={node.additions} deletions={node.deletions} />
+      <span className="ml-auto flex shrink-0 items-center gap-1.5">
+        <ThreadCountChips counts={node.threadCounts} compact />
+        <Counts additions={node.additions} deletions={node.deletions} />
+      </span>
     </button>
   );
 }
@@ -175,6 +203,27 @@ export function FileTree({
       return next;
     });
   };
+
+  // Every dir path in the tree (chain-collapsed rows carry the collapsed path), for the
+  // rail header's collapse-all. Default-all-open is right for small trees; on a 60-file /
+  // 12-dir PR orientation costs a scroll per dir without this. Same ephemeral `collapsed`
+  // set — and the ancestor-reopen reveal (STEP 1 below) already makes a fully-collapsed
+  // tree honour a deep link, so no new interaction with reveals.
+  const dirPaths = useMemo(() => {
+    const out: string[] = [];
+    const walk = (ns: FileTreeNode[]): void => {
+      for (const n of ns) {
+        if (n.kind === 'dir') {
+          out.push(n.path);
+          walk(n.children);
+        }
+      }
+    };
+    walk(nodes);
+    return out;
+  }, [nodes]);
+  const fileCount = useMemo(() => nodes.reduce((sum, n) => sum + n.fileCount, 0), [nodes]);
+  const anyExpanded = dirPaths.some((p) => !collapsed.has(p));
 
   const selectedRef = useRef<HTMLButtonElement>(null);
 
@@ -226,6 +275,25 @@ export function FileTree({
 
   return (
     <nav aria-label="Changed files" className="py-1">
+      {/* Sticky within the rail (the overflow-y-auto box in ChangesTab IS the scroll
+          container): Collapse-all exists for exactly the long trees whose rows would
+          otherwise scroll it out of reach. Opaque bg matches the rail's. */}
+      <div className="sticky top-0 z-10 flex items-center gap-2 bg-white px-2 pb-0.5 pt-1 text-[10px] text-gray-400 dark:bg-gray-950 dark:text-gray-500">
+        <span>
+          {fileCount} file{fileCount === 1 ? '' : 's'}
+        </span>
+        {dirPaths.length > 0 && (
+          <button
+            type="button"
+            onClick={() =>
+              setCollapsed(anyExpanded ? new Set(dirPaths) : new Set<string>())
+            }
+            className="ml-auto hover:text-gray-600 hover:underline dark:hover:text-gray-300"
+          >
+            {anyExpanded ? 'Collapse all' : 'Expand all'}
+          </button>
+        )}
+      </div>
       {note}
       {nodes.map((node) => (
         <TreeRow

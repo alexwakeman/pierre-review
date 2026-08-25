@@ -16,7 +16,10 @@ import { api } from '../api/client.js';
 // Evicting inactive detail after 45 min bounds the working set; cross-session
 // reuse still comes from the IndexedDB persist layer (lib/queryPersist.ts), which
 // re-hydrates a re-opened PR on demand.
-const DETAIL_GC_TIME = 1000 * 60 * 45;
+// Exported so ThemeThreadsDetail's metrics fold can register byte-identical ['pr', id] queries
+// (same key, same staleTime/gc) that DEDUPE against each group's own usePr instead of forking
+// the cache policy.
+export const DETAIL_GC_TIME = 1000 * 60 * 45;
 
 // PR / thread detail carries the bulky text that, in cloud mode, is hydrated on
 // demand from GitHub and persisted to IndexedDB (see lib/queryPersist.ts). We mark

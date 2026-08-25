@@ -37,7 +37,7 @@ const MUTED = 'text-gray-400';
 
 // Presentation only (labels + how a value prints) — the floors/basis stay core-side and arrive
 // on the wire. The ORDER comes from the response vector itself (PERSON_METRIC_KEYS order).
-const KEY_LABEL: Record<PersonMetricKey, string> = {
+export const KEY_LABEL: Record<PersonMetricKey, string> = {
   merged_prs_authored: 'PRs merged (authored)',
   opened_prs_authored: 'PRs opened',
   reviews_given: 'Reviews given',
@@ -50,7 +50,7 @@ const KEY_LABEL: Record<PersonMetricKey, string> = {
   open_prs_authored: 'Open PRs (WIP)',
 };
 
-const KEY_TITLE: Partial<Record<PersonMetricKey, string>> = {
+export const KEY_TITLE: Partial<Record<PersonMetricKey, string>> = {
   median_review_response_hours:
     'First review request on a PR → their first review of it, over PRs they first reviewed in this period (only PRs with a recorded request)',
   median_first_human_review_hours_their_prs:
@@ -59,7 +59,7 @@ const KEY_TITLE: Partial<Record<PersonMetricKey, string>> = {
     'Resolved or likely-addressed AS OF NOW — the threads are the period’s, the state is today’s',
 };
 
-function fmtValue(m: PersonMetricValue): string {
+export function fmtValue(m: PersonMetricValue): string {
   if (m.value == null) return '—';
   if (m.key === 'median_review_response_hours' || m.key === 'median_first_human_review_hours_their_prs') {
     return `${m.value}h`;
@@ -160,7 +160,7 @@ export function PersonPeriodSection({ userId }: { userId: number }): JSX.Element
       className="rounded-lg border border-gray-200 bg-white p-3 text-xs dark:border-gray-800 dark:bg-gray-950"
     >
       <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-ai-ink">
           1:1 prep
         </span>
         {/* The design rule, in the UI's own words — one quiet line, always rendered. */}

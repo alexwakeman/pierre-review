@@ -858,11 +858,18 @@ export interface ProHostQueries {
   // because the plugin's person-narration hash folds these very values (via the count-encoded
   // synthesis item ids core builds from this vector). `null` covers every degrade in one shape:
   // unknown/foreign user, a bot, no footprint in the workspace.
+  // `opts.evidence` (the People report) is an OPTIONAL trailing widening — apiVersion unchanged
+  // (the registerAccountErasure "purely additive" precedent): an older plugin calls with four
+  // args and type-checks; an older HOST simply never sets `person.evidence`, which the shared
+  // type declares optional for exactly that reason. When set, the same fold (same guardrails,
+  // run once) widens its windowed scans to capped row selects and returns the receipt rows —
+  // `PersonPeriod.evidence` — beside the untouched metric cells.
   getPersonPeriod(
     accountId: number,
     workspaceId: number,
     userId: number,
     window: { fromMs: number; toMs: number },
+    opts?: { evidence?: boolean },
   ): Promise<PersonPeriod | null>;
 }
 

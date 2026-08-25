@@ -1584,7 +1584,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             onClick={() => setWindow(wOpt.key)}
             className={`px-2 py-0.5 text-[11px] font-medium ${
               window === wOpt.key
-                ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                ? 'bg-ai-signal/15 text-ai-signal'
                 : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
             }`}
           >

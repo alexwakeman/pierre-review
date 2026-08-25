@@ -56,7 +56,7 @@ function SeamMeter({
         <>
           <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
             <div
-              className={`h-full rounded-full ${exhausted ? 'bg-amber-500' : 'bg-violet-500'}`}
+              className={`h-full rounded-full ${exhausted ? 'bg-amber-500' : 'bg-ai-signal-fill'}`}
               style={{ width: `${pct}%` }}
             />
           </div>

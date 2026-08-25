@@ -5,39 +5,73 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import type {
-  CreatePinnedPromptBody,
-  MentionCandidate,
-  PinnedPromptsResponse,
-  SprintChatBody,
-  SprintChatHistoryResponse,
-  SprintChatResponse,
+import {
+  SPRINT_CHAT_MAX_TURNS,
+  type CreatePinnedPromptBody,
+  type MentionCandidate,
+  type PinnedPromptsResponse,
+  type SprintChatBody,
+  type SprintChatHistoryResponse,
+  type SprintChatHistoryTurn,
+  type SprintChatResponse,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
-import { useFilters } from '../store/filters.js';
+import { useFilters, type SprintChatTurn } from '../store/filters.js';
 import { workspaceKey } from './useActivity.js';
 
 // Chat history page size (matches the server default). One shared const so the hook, the
 // pagination math, and the panel's "N per page" copy can't drift.
 export const CHAT_HISTORY_PAGE_SIZE = 10;
 
-// The ad-hoc "Ask about the workspace" chat (Pro Haiku). A free-text question is answered from the
-// current snapshot; the mutation returns the grounded Markdown answer + resolved PR refs + an
-// optional chart spec. A generation may spend credits → invalidate the AI-usage meter; every
-// answer is persisted server-side, so also refresh the chat history so the new Q&A appears.
+// Wire mapping for a continued conversation: the newest ≤ SPRINT_CHAT_MAX_TURNS − 1 completed
+// pairs, oldest→newest, strings only (grounding is rebuilt fresh every turn — the transcript is
+// what carries forward, never stale data). A turn whose response holds no answer is dropped
+// rather than sent as "" — the panel never appends one, but the mapping stays total. The client
+// cap here matches the server's own re-cap (`CHAT_MAX_PRIOR_TURNS`), so nothing sent is silently
+// discarded on depth alone; the token BUDGET can still trim, which the response discloses via
+// `trimmedTurns`.
+export function threadToWireHistory(turns: SprintChatTurn[]): SprintChatHistoryTurn[] {
+  return turns
+    .flatMap((t) =>
+      t.response.answer != null ? [{ question: t.question, answer: t.response.answer }] : [],
+    )
+    .slice(-(SPRINT_CHAT_MAX_TURNS - 1));
+}
+
+// The ad-hoc "Ask about the workspace" chat (Pro — answered by the account's configured report
+// model). A free-text question is answered from the current snapshot; the mutation returns the
+// grounded Markdown answer + resolved PR refs + an optional chart spec. A generation may spend
+// credits → invalidate the AI-usage meter; every answer is persisted server-side, so also refresh
+// the chat history so the new Q&A appears.
 //
-// ⚠ THE HOOK STAMPS THE SCOPE **AND THE WINDOW**, THE CALLER CANNOT. Both are OPTIONAL fields whose
-// absence produces a confident, plausible, WRONG answer: no `scope` silently grounds it in the
-// account's DEFAULT workspace, and no window silently answers over the account's configured window
-// while the surface says otherwise. Omitting them from the mutation variable makes forgetting
-// either impossible. The scope wire value is the workspace id as a string (the plugin persists
-// `ws:<id>` as the cache `scope_key`).
+// ⚠ THE HOOK STAMPS THE SCOPE, THE WINDOW **AND THE HISTORY**, THE CALLER CANNOT. All are OPTIONAL
+// fields whose absence produces a confident, plausible, WRONG answer: no `scope` silently grounds
+// it in the account's DEFAULT workspace, no window silently answers over the account's configured
+// window while the surface says otherwise, and no `history` silently answers a follow-up ("what
+// about the second one?") with no idea what came before. Omitting them from the mutation variable
+// makes forgetting any of them impossible. The scope wire value is the workspace id as a string
+// (the plugin persists `ws:<id>` as the cache `scope_key`).
 //
 // The window has two forms, resolved here in priority order:
 //  • `periodWindow` (explicit `[fromMs, toMs)` bounds — the Reports "Ask about this period"
 //    mount passes the VIEWED period's own bounds) is sent as `window` and WINS;
 //  • otherwise the store's `insightsRange` chip, where `null` legitimately means "no override"
 //    and is therefore omitted rather than sent.
+//
+// The history is read from the store AT CALL TIME (`getState()`, not a subscription) — the live
+// thread for the SAME workspace key the panel renders, so a turn appended between render and
+// click is still sent, and an empty thread omits the field entirely.
+//
+// ⚠ THE COMPLETED TURN IS APPENDED HERE, AT THE HOOK LEVEL — NEVER IN A mutate() CALLBACK.
+// Mutate-scoped callbacks die with the observer: `MutationObserver.reset()` (the panel fires it
+// on a workspace switch / history pick / New conversation) and the panel unmounting mid-flight
+// (clicking a PR ref) both `removeObserver` the pending mutation, after which the mutate-level
+// onSuccess never runs — the billed, server-persisted answer would silently miss the live
+// transcript, and the NEXT ask would send a history missing that turn, so a follow-up like "why
+// is that?" resolves against the wrong previous answer. Hook-level callbacks run from
+// Mutation.execute regardless of observers. The scope is captured as onMutate CONTEXT because
+// the options closure is NOT ask-stable: while the mutation is pending, every re-render
+// setOptions-swaps it, so by completion `workspaceId` here can already be another workspace's.
 export function useSprintChat(
   workspaceId: number | null,
   periodWindow?: { fromMs: number; toMs: number } | null,
@@ -47,19 +81,48 @@ export function useSprintChat(
   return useMutation<
     SprintChatResponse,
     Error,
-    Omit<SprintChatBody, 'scope' | 'range' | 'window'>
+    Omit<SprintChatBody, 'scope' | 'range' | 'window' | 'history'>,
+    { scopeKey: string }
   >({
-    mutationFn: (body) =>
-      api.sprintChat({
+    mutationFn: (body) => {
+      const thread =
+        useFilters.getState().sprintChatThreads[workspaceKey(workspaceId)] ?? [];
+      const history = threadToWireHistory(thread);
+      return api.sprintChat({
         ...body,
+        ...(history.length > 0 ? { history } : {}),
         ...(workspaceId != null ? { scope: String(workspaceId) } : {}),
         ...(periodWindow != null
           ? { window: { fromMs: periodWindow.fromMs, toMs: periodWindow.toMs } }
           : range != null
             ? { range }
             : {}),
-      }),
-    onSuccess: () => {
+      });
+    },
+    // Runs at ask time, before the options closure can be swapped — the context pins the
+    // workspace the question was grounded in.
+    onMutate: () => ({ scopeKey: workspaceKey(workspaceId) }),
+    onSuccess: (data, variables, context) => {
+      // Only a response carrying a real answer becomes a transcript turn — a throttled /
+      // out-of-credits shape renders its notice outside the transcript (off the mutation's own
+      // data) and must not occupy one of the SPRINT_CHAT_MAX_TURNS slots. Appended under the
+      // ask-time workspace key, so a workspace switch mid-flight lands the turn in the
+      // workspace it was asked in. The store outlives the panel, so an unmount mid-flight
+      // loses nothing.
+      if (data.answer != null && context != null) {
+        useFilters.getState().appendSprintChatTurn(context.scopeKey, {
+          question: variables.question,
+          response: data,
+        });
+        // Chat composers clear on send-success: the question is already rendered as the turn's
+        // own row, and a retained box reads as "not yet sent" — one stray Cmd+Enter away from
+        // re-billing the identical ask. Guarded so text typed toward the NEXT question during
+        // the wait survives; retained on error/throttle on purpose (it aids retry).
+        const draft = useFilters.getState().sprintChatDraft;
+        if (draft.question.trim() === variables.question) {
+          useFilters.getState().setSprintChatDraft({ question: '' });
+        }
+      }
       void qc.invalidateQueries({ queryKey: ['ai-usage'] });
       // A PREFIX: the history is keyed by workspace AND page, and a new answer shifts every page.
       void qc.invalidateQueries({ queryKey: ['sprint-chat-history'] });

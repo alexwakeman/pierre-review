@@ -4,8 +4,8 @@ import type { HumanThemesResponse, BotWindowKind } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 
-// The Feed "Discussion themes" AI summary (Pro Haiku) — the human sibling of the retired bot
-// Themes hook (that surface folded into the synthesis seam, plan P2.3/C6). Cached
+// The Feed "Discussion themes" AI summary (Pro Haiku) — the human sibling of the bot Themes hook
+// (useBotThemes; that surface was briefly folded into the synthesis seam, then REVIVED). Cached
 // per (window, WORKSPACE). Only fetched when the AI-summary capability is on (`enabled`); absent
 // the plugin the route 404s. The `ws:<id>` segment matches the plugin's persisted `scope_key`.
 export function useHumanThemes(

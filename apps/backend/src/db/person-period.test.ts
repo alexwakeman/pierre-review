@@ -14,11 +14,18 @@
 //    authored (the authorUserId narrowing of loadFirstHumanReviewHours), and ignores a bot's
 //    earlier review exactly as the period vector does.
 //  • LIVE KEYS ARE MARKED `basis: 'live'` and the windowed ones `'window'`.
+//  • EVIDENCE IS ADDITIVE (the People report): requesting it never changes a metric cell, each
+//    group is the counting predicate's own rows (window-pure where the metric is), caps at
+//    PERSON_EVIDENCE_CAP with the remainder in `more`, and the global `commitFiles` table is
+//    reached only through the subject's own evidence-set shas.
+//  • THE 'person_report' SYNTHESIS INPUT rides the SAME fold: `pm…` items byte-identical to the
+//    'person' grain, `pe2:`-prefixed evidence ids, every hash-relevant field a plain DB read.
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  PERSON_EVIDENCE_CAP as SHARED_EVIDENCE_CAP,
   PERSON_METRIC_KEYS as SHARED_KEYS,
   PERSON_METRICS_SCHEMA_VERSION as SHARED_VERSION,
 } from '@pierre-review/shared';
@@ -32,7 +39,9 @@ let db: any;
 let schema: any;
 let closeDb: (() => void) | undefined;
 let pp: any;
+let si: any; // synthesis-input (the 'person_report' grain reads the same fixture)
 let workspaceId = 0;
+let wsRepoIds: number[] = [];
 let repoA = 0;
 let repoMid = 0; // added DURING the window — the coverage disclosure
 let alice = 0; // the subject
@@ -46,6 +55,7 @@ const TO = Date.UTC(2026, 6, 15); // 2026-07-15T00:00:00Z
 const WIN = { fromMs: FROM, toMs: TO };
 
 const prIdOf = new Map<string, number>();
+const threadIdOf = new Map<string, number>();
 
 beforeAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
@@ -56,10 +66,21 @@ beforeAll(async () => {
   closeDb = client.closeDb;
   const q = await import('./queries.js');
   pp = await import('./person-period.js');
+  si = await import('./synthesis-input.js');
   await runMigrations();
 
-  const { repos, pullRequests, users, reviews, reviewThreads, reviewComments, reviewRequests } =
-    schema;
+  const {
+    repos,
+    pullRequests,
+    users,
+    reviews,
+    reviewThreads,
+    reviewComments,
+    reviewRequests,
+    prComments,
+    commits,
+    commitFiles,
+  } = schema;
 
   const mkRepo = async (name: string, node: string, createdAt: number) =>
     (
@@ -177,6 +198,7 @@ beforeAll(async () => {
       })
       .returning()
       .execute();
+    threadIdOf.set(key, t.id);
     await db
       .insert(reviewComments)
       .values({
@@ -185,6 +207,7 @@ beforeAll(async () => {
         prId: prIdOf.get(pr),
         authorId: bob,
         body: 'root',
+        excerpt: 'root',
         createdAt: new Date(rootMs),
       })
       .execute();
@@ -201,9 +224,68 @@ beforeAll(async () => {
     .execute();
   await db.insert(reviewRequests).values({ prId: prIdOf.get('b_merged'), userId: alice }).execute();
 
+  // ── Evidence fixtures (the People report) ──
+  // TEN inline review comments by Alice on t2 (her own PR's thread — bob's earlier root keeps
+  // the thread-root excerpt) → review_comments_written = 10, and with the two in-window PR
+  // comments below the comments evidence group overflows its cap (12 rows → 8 + more 4).
+  for (let i = 0; i < 10; i++) {
+    await db
+      .insert(reviewComments)
+      .values({
+        githubNodeId: `RC_pp_ac_${i}`,
+        threadId: threadIdOf.get('t2'),
+        prId: prIdOf.get('a_open'),
+        authorId: alice,
+        body: `alice reply ${i}`,
+        excerpt: `alice reply ${i}`,
+        createdAt: new Date(FROM + 6 * DAY + i * HOUR),
+      })
+      .execute();
+  }
+  // Issue-level PR comments: two in-window (they join the evidence card group but NOT the
+  // inline-only metric), one after `to` (window purity — in neither).
+  const mkPrComment = async (key: string, pr: string, by: number, atMs: number) =>
+    db
+      .insert(prComments)
+      .values({
+        githubNodeId: `PC_pp_${key}`,
+        prId: prIdOf.get(pr),
+        authorId: by,
+        body: `pc ${key}`,
+        createdAt: new Date(atMs),
+      })
+      .execute();
+  await mkPrComment('pc1', 'b_reviewed', alice, FROM + 7 * DAY);
+  await mkPrComment('pc2', 'b_reviewed', alice, FROM + 6 * DAY + 4 * HOUR + 30 * 60_000);
+  await mkPrComment('pc_out', 'b_reviewed', alice, TO + HOUR);
+
+  // Commits + changed files for the path areas: two commits on Alice's authored evidence PRs
+  // (a_mid, a_open) and one on BOB's PR that must NOT count. `commitFiles` is the GLOBAL
+  // sha→paths table — c3's row exists there and stays invisible to Alice's areas.
+  const mkCommit = async (sha: string, pr: string, atMs: number, paths: string[]) => {
+    await db
+      .insert(commits)
+      .values({
+        sha,
+        prId: prIdOf.get(pr),
+        authorId: alice,
+        committedAt: new Date(atMs),
+      })
+      .execute();
+    await db.insert(commitFiles).values({ sha, paths }).execute();
+  };
+  await mkCommit('c1_pp', 'a_mid', FROM + 2 * DAY + 12 * HOUR, [
+    'apps/backend/src/db/x.ts',
+    'apps/backend/src/db/y.ts',
+    'docs/README.md',
+  ]);
+  await mkCommit('c2_pp', 'a_open', FROM + 5 * DAY, ['apps/backend/src/api/z.ts']);
+  await mkCommit('c3_pp', 'b_merged', FROM + 5 * DAY, ['apps/backend/src/db/w.ts']);
+
   // The DEFAULT workspace + memberships, through the production resolver.
   const scope = await q.resolveWorkspaceScope(1, undefined, null);
   workspaceId = scope.workspaceId;
+  wsRepoIds = scope.repoIds;
 });
 
 afterAll(() => {
@@ -217,6 +299,7 @@ describe('the shared mirror', () => {
   it('matches the shared key list and schema version exactly', () => {
     expect(pp.PERSON_METRIC_KEYS).toEqual(SHARED_KEYS);
     expect(pp.PERSON_METRICS_SCHEMA_VERSION).toBe(SHARED_VERSION);
+    expect(pp.PERSON_EVIDENCE_CAP).toBe(SHARED_EVIDENCE_CAP);
   });
 
   it('has a meta row for every key, and the live/window split is the declared one', () => {
@@ -299,5 +382,174 @@ describe('getPersonPeriod', () => {
   it('returns null for a bot (lane rule) and for a stranger (global-users rule)', async () => {
     expect(await pp.getPersonPeriod(1, workspaceId, botCr, WIN)).toBeNull();
     expect(await pp.getPersonPeriod(1, workspaceId, 999_999, WIN)).toBeNull();
+  });
+});
+
+describe('getPersonPeriod evidence (the People report)', () => {
+  const withEv = () => pp.getPersonPeriod(1, workspaceId, alice, WIN, { evidence: true });
+
+  it('is absent unless requested, and requesting it changes NO metric cell', async () => {
+    const plain = await pp.getPersonPeriod(1, workspaceId, alice, WIN);
+    const rich = await withEv();
+    expect(plain.evidence).toBeUndefined();
+    expect(rich.evidence).toBeDefined();
+    expect(rich.metrics).toEqual(plain.metrics);
+    expect(rich.coverage).toEqual(plain.coverage);
+  });
+
+  it('lists each PR-backed metric population newest-first with the counting predicate', async () => {
+    const ev = (await withEv()).evidence;
+    // Merged: a_mid (merged +3d) before a_at_from (merged AT from); a_at_to's TO merge is out.
+    expect(ev.prs.merged_prs_authored.rows.map((r: any) => r.prId)).toEqual([
+      prIdOf.get('a_mid'),
+      prIdOf.get('a_at_from'),
+    ]);
+    expect(ev.prs.merged_prs_authored.more).toBe(0);
+    // Opened in-window, newest-first: a_at_to (+8d), a_open (+4d), a_mid (+2d).
+    expect(ev.prs.opened_prs_authored.rows.map((r: any) => r.prId)).toEqual([
+      prIdOf.get('a_at_to'),
+      prIdOf.get('a_open'),
+      prIdOf.get('a_mid'),
+    ]);
+    // The medians list their SAMPLE PRs (per-PR hours do not travel — DigestPrRef rows only).
+    expect(ev.prs.median_review_response_hours.rows.map((r: any) => r.prId)).toEqual([
+      prIdOf.get('b_reviewed'),
+    ]);
+    expect(ev.prs.median_first_human_review_hours_their_prs.rows.map((r: any) => r.prId)).toEqual(
+      [prIdOf.get('a_mid')],
+    );
+    // Live sets: awaiting (open PR with an outstanding request) + open authored.
+    expect(ev.prs.awaiting_their_review.rows.map((r: any) => r.prId)).toEqual([
+      prIdOf.get('b_norequest'),
+    ]);
+    expect(ev.prs.open_prs_authored.rows.map((r: any) => r.prId)).toEqual([prIdOf.get('a_open')]);
+    // DigestPrRef rows are served from persisted columns (title/author/repo resolved).
+    const merged = ev.prs.merged_prs_authored.rows[0];
+    expect(merged.title).toBe('fixture a_mid');
+    expect(merged.repoFullName).toBe('acme/alpha');
+    expect(merged.authorLogin).toBe('alice');
+  });
+
+  it('caps the comments group at PERSON_EVIDENCE_CAP across both channels and discloses `more`', async () => {
+    const p = await withEv();
+    const { rows, more } = p.evidence.comments;
+    // 10 inline + 2 in-window PR comments = 12 → 8 shown, 4 more; the out-of-window PR comment
+    // is in neither (window purity).
+    expect(rows.length).toBe(SHARED_EVIDENCE_CAP);
+    expect(more).toBe(4);
+    // ...while the METRIC stays inline-only (the evidence group is wider than the cell on
+    // purpose, and neither leaks into the other).
+    expect(metric(p, 'review_comments_written').value).toBe(10);
+    // Newest first, both channels interleaved; bodies inline.
+    expect(rows[0].targetKind).toBe('pr_comment');
+    expect(rows[0].body).toBe('pc pc1');
+    expect(rows.some((r: any) => r.targetKind === 'review_comment')).toBe(true);
+    for (const r of rows) {
+      const at = Date.parse(r.createdAt);
+      expect(at).toBeGreaterThanOrEqual(FROM);
+      expect(at).toBeLessThan(TO);
+      expect(r.mlLabel).toBeNull(); // nothing stored for a human — null, never invented
+    }
+  });
+
+  it('lists thread roots once (windowed population, live state chips) with excerpts', async () => {
+    const ev = (await withEv()).evidence;
+    // t2 (+5d) then t1 (+2d2h); the root at exactly `to` stays out.
+    expect(ev.threads.rows.map((t: any) => t.threadId)).toEqual([
+      threadIdOf.get('t2'),
+      threadIdOf.get('t1'),
+    ]);
+    expect(ev.threads.more).toBe(0);
+    const t2 = ev.threads.rows[0];
+    expect(t2.derivedState).toBe('untouched');
+    expect(t2.excerpt).toBe('root'); // bob's ROOT comment, not alice's later replies
+    expect(t2.prNumber).toBeGreaterThan(0);
+    expect(t2.repoFullName).toBe('acme/alpha');
+  });
+
+  it("buckets path areas over the subject's own evidence PRs only (global-table rule)", async () => {
+    const ev = (await withEv()).evidence;
+    // c1 (a_mid) + c2 (a_open) count; c3 sits on BOB's PR and its commitFiles row — present in
+    // the GLOBAL table — must stay invisible here.
+    expect(ev.pathAreas).toEqual([
+      { bucket: 'apps/backend/**', files: 3, commits: 2 },
+      { bucket: 'docs/README.md', files: 1, commits: 1 },
+    ]);
+  });
+
+  it('degrades exactly like the plain fold for bots and strangers', async () => {
+    expect(await pp.getPersonPeriod(1, workspaceId, botCr, WIN, { evidence: true })).toBeNull();
+    expect(await pp.getPersonPeriod(1, workspaceId, 999_999, WIN, { evidence: true })).toBeNull();
+  });
+});
+
+describe("getSynthesisInput kind 'person_report'", () => {
+  const repScope = () => ({
+    kind: 'person_report',
+    workspaceId,
+    repoIds: wsRepoIds,
+    window: 'rolling_14',
+    userId: alice,
+    fromMs: FROM,
+    toMs: TO,
+  });
+
+  it("carries the 'person' grain's pm items with only the AUTHOR LABEL re-spelled, plus pe2: evidence ids only", async () => {
+    const rep = await si.getSynthesisInput(1, repScope());
+    const per = await si.getSynthesisInput(1, { ...repScope(), kind: 'person' });
+    expect(rep.kind).toBe('person_report');
+    const pmItems = rep.items.filter((i: any) => i.id.startsWith('pm'));
+    // The HASHED half (id + createdAt) and the bodies stay byte-identical — two kinds must not
+    // describe two vectors — and `authorLabel` is not hashed.
+    const sansAuthor = (xs: any[]) => xs.map((i) => ({ ...i, authorLabel: null }));
+    expect(sansAuthor(pmItems)).toEqual(sansAuthor(per.items));
+    // …but a dashboard figure line is a BRIEF line here, which is the person_report legend's own
+    // word for it; the 1:1 'person' kind keeps the login ITS prompt defines author as.
+    expect(pmItems.every((i: any) => i.authorLabel === 'brief')).toBe(true);
+    expect(per.items.every((i: any) => i.authorLabel === 'alice')).toBe(true);
+    for (const i of rep.items) {
+      if (!i.id.startsWith('pm')) expect(i.id.startsWith('pe2:')).toBe(true);
+    }
+  });
+
+  it('items are the evidence rows: authored PRs, own comments (two id spaces), thread roots, areas', async () => {
+    const rep = await si.getSynthesisInput(1, repScope());
+    const byId = new Map(rep.items.map((i: any) => [i.id, i]));
+    // Authored-PR titles at their REAL openedAt (a hash-stable DB read).
+    const pr = byId.get(`pe2:pr:${prIdOf.get('a_mid')}`) as any;
+    expect(pr.kind).toBe('pr');
+    expect(pr.body).toBe('fixture a_mid');
+    expect(pr.createdAt).toBe(new Date(FROM + 2 * DAY).toISOString());
+    // Their own comments, rc:/pc: namespaced by target kind.
+    expect(rep.items.some((i: any) => i.id.startsWith('pe2:rc:') && i.kind === 'review_comment')).toBe(true);
+    expect(rep.items.some((i: any) => i.id.startsWith('pe2:pc:') && i.kind === 'pr_comment')).toBe(true);
+    // Thread roots — feedback RECEIVED, never labelled with the subject's login.
+    const th = byId.get(`pe2:th:${threadIdOf.get('t2')}`) as any;
+    expect(th.kind).toBe('thread');
+    expect(th.authorLabel).toBe('reviewer');
+    expect(th.body).toBe('root');
+    // Path areas: count-encoded id, epoch-zero createdAt (content hash, never a date hash).
+    const area = byId.get('pe2:area:apps/backend/**:3') as any;
+    expect(area.kind).toBe('path_area');
+    expect(area.createdAt).toBe(new Date(0).toISOString());
+    // The capped comments group discloses through `truncated`.
+    expect(rep.truncated).toBe(true);
+  });
+
+  it('is deterministic across calls (the free GET recomputes the hash from these ids)', async () => {
+    const a = await si.getSynthesisInput(1, repScope());
+    const b = await si.getSynthesisInput(1, repScope());
+    expect(a.items.map((i: any) => `${i.id}@${i.createdAt}`)).toEqual(
+      b.items.map((i: any) => `${i.id}@${i.createdAt}`),
+    );
+  });
+
+  it('answers EMPTY for a stranger and throws on a missing required triple', async () => {
+    const empty = await si.getSynthesisInput(1, { ...repScope(), userId: 999_999 });
+    expect(empty.items).toEqual([]);
+    expect(empty.totalCount).toBe(0);
+    await expect(
+      si.getSynthesisInput(1, { ...repScope(), userId: undefined }),
+    ).rejects.toThrow(/person_report/);
   });
 });

@@ -1275,13 +1275,15 @@ export interface BotAnalyticsMlTotals {
   truncated: boolean;
 }
 
-// ── THEMES shapes (Pro, AI) — the Feed "Discussion themes" report + the plugin theme parse ───
-// Originally the Bots "Themes" tab's wire shapes. That BOT surface retired in plan P2.3/C6 (its
-// question folded into the synthesis seam's 'workspace-bots' kind), and these shapes survive as
-// the shared vocabulary of the HUMAN sibling — the Feed "Discussion themes" summary
-// (HumanThemesResult reuses BotTheme + the category/severity/area/coverage shapes below) — and of
-// the plugin's tolerant theme parse (parseThemes), which both prompts share. The `Bot…` names are
-// historical.
+// ── THEMES shapes (Pro, AI) — the Bots "What they're flagging" panel, the Feed "Discussion
+// themes" report + the plugin theme parse ────────────────────────────────────────────────────
+// Originally the Bots "Themes" tab's wire shapes, briefly retired into the synthesis seam's
+// 'workspace-bots' kind and REVIVED merged with the deterministic Bots layer: BotThemesResult is
+// the wire result of GET/POST /api/pro/bot-themes (the panel that replaced the SynthesisCard
+// mount on the main Bots view — the three drill-down synthesis cards are unaffected). The same
+// vocabulary also serves the HUMAN sibling — the Feed "Discussion themes" summary
+// (HumanThemesResult reuses BotTheme + the category/severity/area/coverage shapes below) — and
+// the plugin's tolerant theme parse (parseThemes), which both prompts share.
 export type BotThemeCategory =
   | 'correctness'
   | 'security'
@@ -1332,6 +1334,23 @@ export interface BotTheme {
   areas: string[];
   prs: ThemePrRef[]; // distinct PRs the theme touches (resolved), most-relevant-first
   threads: ThemeThreadRef[]; // concrete member threads/comments (capped) for the drill-down
+  // DETERMINISTIC comment count (bot reports only): Σ of each cited cluster's code-computed
+  // `count` over the theme's deduplicated memberIds — a code fold of code-derived numbers (D4),
+  // unlike `occurrences` (the model's own estimate, kept as the render fallback). Optional
+  // because human reports never set it and stored pre-count bot rows lack it.
+  commentCount?: number;
+}
+
+// Per-automated-reviewer rollup (DETERMINISTIC — from the raw rows, not the model). `key` mirrors
+// the ROI row identity (`u<userId>`); `actedOnPct` is the derived-state acted-on share of the
+// bot's threads in the analyzed set.
+export interface BotThemeBotRollup {
+  key: string;
+  label: string;
+  login: string | null;
+  kind: AutomatedReviewerKind;
+  comments: number;
+  actedOnPct: number | null;
 }
 
 export interface BotThemeCategoryCount { category: BotThemeCategory; count: number; }
@@ -1347,8 +1366,28 @@ export interface BotThemeCoverage {
   truncated: boolean;    // the host row fetch hit its cap (older comments beyond it excluded)
 }
 
+export interface BotThemesResult {
+  narrative: string;                    // markdown — the 2–3 sentence overview
+  themes: BotTheme[];                   // most-critical-first
+  bots: BotThemeBotRollup[];            // per-reviewer volume + acted-on (deterministic)
+  byCategory: BotThemeCategoryCount[];  // aggregated from themes (approximate)
+  bySeverity: BotThemeSeverityCount[];  // aggregated from themes (approximate)
+  byArea: BotThemeAreaCount[];          // top-level-dir distribution (deterministic)
+  coverage: BotThemeCoverage;
+  generatedAt: string;                  // ISO
+  model: string;
+}
+
+export interface BotThemesResponse {
+  enabled: boolean;             // the Pro AI-summary tier is on (else the panel shouldn't render)
+  result: BotThemesResult | null; // the last generated report for this (scope, window); null = none yet
+  throttled?: boolean;          // a generation was already in flight (or inside the min interval)
+  creditsExhausted?: boolean;   // out of the monthly AI-credit allowance
+  empty?: boolean;              // no bot comments in scope/window → nothing to summarize
+}
+
 // ── Human "Discussion" THEMES (Pro, AI) — GET/POST /api/pro/human-themes ─────────────────────
-// The HUMAN sibling of the retired Bot "Themes" summary: the same themed AI read, but over PEOPLE'S
+// The HUMAN sibling of the (revived) Bot "Themes" summary: the same themed AI read, but over PEOPLE'S
 // review comments (non-bot authors, INCLUDING human replies inside bot threads) rather than the bots'. It
 // answers "what are people actually discussing / raising in review?" — recurring concerns, debates,
 // decisions, questions. STRICTLY Pro (activityDigest tier), workspace-scoped, surfaced as a Feed
@@ -2422,6 +2461,20 @@ export interface InsightsAnswerWindow {
   requested?: InsightsRangeKey;
 }
 
+// One prior completed turn of the conversation being continued, oldest→newest on the wire.
+// Strings only — no window/chart/refs travel back: grounding is REBUILT fresh every turn, so what
+// carries forward is the transcript, not stale data.
+export interface SprintChatHistoryTurn {
+  question: string; // what was asked (the server re-caps at its question limit)
+  answer: string; // the grounded markdown the model previously produced
+}
+
+// The conversation depth cap, COUNTING the live question. The server reads at most
+// `SPRINT_CHAT_MAX_TURNS − 1` prior pairs per ask (its own inlined `CHAT_MAX_PRIOR_TURNS = 9` —
+// the plugin only `import type`s from this package, the AI_CREDITS_PER_USD mirror pattern); the
+// frontend value-imports this the way PRESET_PROMPTS already is, to lock the input at depth 10.
+export const SPRINT_CHAT_MAX_TURNS = 10;
+
 export interface SprintChatBody {
   question: string;
   // Absent = the account's configured window (Settings → Sprint `comparisonMode`). Present =
@@ -2442,6 +2495,11 @@ export interface SprintChatBody {
   scope?: string;
   wantChart?: boolean;
   wantBots?: boolean;
+  // Prior turns of THIS conversation, oldest→newest. The server reads AT MOST the newest 9 pairs
+  // (`CHAT_MAX_PRIOR_TURNS`) — with the live question that is conversation depth
+  // SPRINT_CHAT_MAX_TURNS. Anything older, plus anything the token budget cannot fit, is dropped
+  // OLDEST-FIRST and counted in the response's `trimmedTurns`.
+  history?: SprintChatHistoryTurn[];
 }
 
 export interface SprintChatResponse {
@@ -2457,10 +2515,20 @@ export interface SprintChatResponse {
   // The window the answer was grounded in. Optional on the wire so a stale persisted response
   // still parses; absent means "unknown", which the UI states rather than guessing at 14d.
   window?: InsightsAnswerWindow | null;
+  // The model that actually answered — the account's resolved report model (settings →
+  // config default), the same id the usage ledger and the stored history row carry.
   model?: string;
   generatedAt?: string; // ISO-8601
   throttled?: boolean;
   creditsExhausted?: boolean;
+  // Model-proposed follow-up questions for the next turn (≤3, each ≤120 chars). Every entry is
+  // DIGIT-FREE — the server drops any candidate containing a digit (D4: the model never authors
+  // a number the UI presents as data; mirrors the synthesis ordering-mode gate). Absent when none
+  // were proposed / the tail failed to parse; never persisted to history.
+  followUps?: string[];
+  // How many Q&A pairs of the SENT history the model did not see (depth cap + token budget
+  // combined). Absent/0 = the model saw the whole transcript. The UI whispers it.
+  trimmedTurns?: number;
 }
 
 // One stored past ad-hoc chat (Pro; server-persisted per account, every workspace). Carries the
@@ -7429,8 +7497,11 @@ export type ReactionWriteResponse = ReactionState;
 
 /** The P2.1 drill-down grains plus the ORDERING grains: 'brief' (the daily-brief narration,
  *  N1), 'rollup' (the cross-workspace "Elsewhere" line, N5) and 'person' (the 1:1-prep
- *  narration, N4 — one digit-free phrase per person-vector line). Every widening here was
- *  additive — no version change (exactly the growth path the P2.1 comment promised). */
+ *  narration, N4 — one digit-free phrase per person-vector line), plus the SECTIONS grain
+ *  'person_report' (the People report's per-person narrative — digit-free prose per fixed
+ *  section id over the person vector + its evidence rows; see SynthesisSectionItem). Every
+ *  widening here was additive — no version change (exactly the growth path the P2.1 comment
+ *  promised). */
 export type SynthesisScopeKind =
   | 'bot-flagging'
   | 'bot-threads'
@@ -7438,7 +7509,8 @@ export type SynthesisScopeKind =
   | 'workspace-bots'
   | 'brief'
   | 'rollup'
-  | 'person';
+  | 'person'
+  | 'person_report';
 
 /**
  * The flagging drill-down's population selector, as the synthesis descriptor spells it.
@@ -7462,12 +7534,13 @@ export type SynthesisFlaggingSelect = 'findings' | 'summaries' | 'severity' | 'c
  * `window` is ignored — and canonicalised out of the cache key — for 'bot-threads': the resolve
  * backlog is a CURRENT-STATE set, not a windowed one (its drill-down takes no window either).
  *
- * The 'person' ORDERING grain (N4) carries its OWN three fields and nothing else: `userId` is
- * the 1:1 SUBJECT (a person, resolved through the lane resolver core-side — never `botUserId`,
- * which is a bot-population narrowing) and `fromMs`/`toMs` are the REAL period bounds off the
- * cadence grid (the enum `window` slot is canonicalised out for it, exactly like the other
- * ordering grains — an arbitrary-bounds period has no BotWindowKind spelling). All three name a
- * POPULATION: garbage 400s, it never degrades to a different person or period.
+ * The PERSON grains — 'person' (ORDERING, N4) and 'person_report' (SECTIONS, the People
+ * report) — carry their OWN three fields and nothing else: `userId` is the SUBJECT (a person,
+ * resolved through the lane resolver core-side — never `botUserId`, which is a bot-population
+ * narrowing) and `fromMs`/`toMs` are the REAL period bounds off the cadence grid (the enum
+ * `window` slot is canonicalised out for them, exactly like the other ordering grains — an
+ * arbitrary-bounds period has no BotWindowKind spelling). All three name a POPULATION: garbage
+ * 400s, it never degrades to a different person or period.
  */
 export interface SynthesisScope {
   kind: SynthesisScopeKind;
@@ -7479,9 +7552,10 @@ export interface SynthesisScope {
   select?: SynthesisFlaggingSelect;
   severities?: MlSeverity[];
   category?: MlCategory;
-  /** 'person' only: the 1:1 subject's user id. */
+  /** 'person' / 'person_report' only: the subject's user id. */
   userId?: number;
-  /** 'person' only: the period's real bounds (epoch ms, half-open `[fromMs, toMs)`). */
+  /** 'person' / 'person_report' only: the period's real bounds (epoch ms, half-open
+   *  `[fromMs, toMs)`). */
   fromMs?: number;
   toMs?: number;
 }
@@ -7491,7 +7565,9 @@ export interface SynthesisScope {
  *  workspace of the roll-up), whose id ENCODES its computed counts (see the daily-brief section
  *  below). `person_metric` is the 'person' grain's family: one non-null line of the 1:1 person
  *  vector, its id encoding the metric key + computed value + PERSON_METRICS_SCHEMA_VERSION for
- *  the same content-hash reason. */
+ *  the same content-hash reason. `path_area` is the 'person_report' grain's path-area family:
+ *  one top directory bucket of the subject's windowed commits, its id encoding
+ *  bucket + file count (content hash — an area-mix change changes the id changes the hash). */
 export type SynthesisItemKind =
   | 'review_comment'
   | 'pr_comment'
@@ -7499,7 +7575,8 @@ export type SynthesisItemKind =
   | 'thread'
   | 'pr'
   | 'brief_line'
-  | 'person_metric';
+  | 'person_metric'
+  | 'path_area';
 
 /**
  * One row of the model's input — the EXACT row the drill-down lists, reduced to what a grouping
@@ -7556,6 +7633,26 @@ export interface SynthesisOrderingItem {
   phrase: string;
 }
 
+/** The 'person_report' SECTIONS mode's fixed vocabulary — the only section ids the server
+ *  accepts (an unknown or duplicate id drops the item, plugin-side). Deliberately a CLOSED set:
+ *  the model picks which of these to write, never invents its own headings. */
+export type PersonReportSectionId =
+  | 'worked_on'            // what they worked on (from PR titles + path areas)
+  | 'nature_of_changes'    // the semantic read: what kind of changes these were
+  | 'collaboration'        // review flow: giving/receiving, thread back-and-forth
+  | 'waiting_and_risk';    // what's waiting on them / on their PRs, loose ends
+
+/** A Phase-3 SECTIONS-mode item ('person_report'): at most one per PersonReportSectionId, a
+ *  DIGIT-FREE paragraph (regex-validated + length-capped server-side) grounded in the input
+ *  items it cites via `refs` (⊆ the input set; strays dropped; a section left with zero valid
+ *  refs is dropped — evidence-based or absent). Every figure near this prose is code-rendered
+ *  from the vector/evidence wire fields, never model-authored (D4). */
+export interface SynthesisSectionItem {
+  id: PersonReportSectionId;
+  prose: string;           // DIGIT-FREE, server-validated, length-capped
+  refs: string[];          // ⊆ input ids — the citations the UI renders as chips
+}
+
 /** The stored, validated synthesis — what the GET serves and the card renders. */
 export interface StoredSynthesis {
   kind: SynthesisScopeKind;
@@ -7567,6 +7664,11 @@ export interface StoredSynthesis {
    *  Every ref ∈ the input set, every phrase digit-free (server-validated; a rejected item is
    *  simply absent — the caller renders its templated line). Empty/absent for cluster kinds. */
   ordering?: SynthesisOrderingItem[];
+  /** SECTIONS mode only ('person_report'): the validated section list, fixed-vocabulary ids,
+   *  digit-free prose, refs ⊆ the input set (zero-ref sections dropped server-side). Absent for
+   *  every other kind; `[]` is a stored-but-unparseable generation (the deterministic vector +
+   *  evidence cards stay primary, and storing the row stops a click from loop-billing). */
+  sections?: SynthesisSectionItem[];
   /** Input items the model left unclustered — recomputed server-side as input − clustered. */
   remainderIds: string[];
   remainderCount: number;
@@ -7716,6 +7818,51 @@ export interface PersonMetricValue {
   lowSample: boolean;
 }
 
+// ---- Person-period EVIDENCE (the People report; ADDITIVE, computed on read) ----
+//
+// The receipt rows under the vector: for each metric with a showable population, the capped
+// newest-first rows it was computed over — the SAME fold, the SAME predicates, one extra
+// `ORDER BY … LIMIT` variant per metric (never a sibling fold that can drift; the
+// tile-number-vs-hydration lesson). Absent unless the caller asked (`?evidence=1` /
+// `opts.evidence`); requesting it never changes a metric cell. Every group caps at
+// PERSON_EVIDENCE_CAP with the undisplayed remainder in `more` ("and N more" is code-rendered).
+
+/** Per-group evidence cap. Core inlines a copy (shared is types-only and not shipped); the
+ *  person-period test asserts the two spellings agree. */
+export const PERSON_EVIDENCE_CAP = 8; // per group; "and N more" from `more`
+
+/** One review-thread root on the subject's PRs — the `review_threads_on_their_prs` population,
+ *  with TODAY'S state chip riding the same row (`their_pr_threads_addressed` renders as a
+ *  highlight on this list, never a second population). */
+export interface PersonEvidenceThreadRef {
+  prId: number; prNumber: number; repoFullName: string;
+  threadId: number; path: string | null;
+  excerpt: string;                  // root-comment excerpt, whitespace-collapsed + capped
+  /** The ROOT comment was written by the subject themself (a self-review note) — the synthesis
+   *  input then labels it with their login rather than 'reviewer'. Optional (additive). */
+  selfAuthoredRoot?: boolean;
+  derivedState: DerivedState;       // TODAY'S state (live, like the metric it evidences)
+  createdAt: string;                // ISO — the thread root's window anchor
+}
+
+/** One top directory area of the subject's windowed authored work: paths off their PRs' commits
+ *  bucketed to the first two segments (`apps/backend/**` style). Counts are code-rendered. */
+export interface PersonPathArea { bucket: string; files: number; commits: number }
+
+export interface PersonPeriodEvidence {
+  /** PR-backed metrics → capped DigestPrRef rows, newest-first, + the undisplayed rest. The
+   *  median keys list the SAMPLE PRs the median was computed over (per-PR hours do NOT travel —
+   *  the figure stays the vector's); the live keys list today's sets. */
+  prs: Partial<Record<PersonMetricKey, { rows: DigestPrRef[]; more: number }>>;
+  /** review_comments_written → their own inline/issue comments, bodies INLINE (BotVendorComment
+   *  shape reuse; `mlLabel` is whatever is stored — normally null for humans). */
+  comments: { rows: BotVendorComment[]; more: number };
+  /** review_threads_on_their_prs / their_pr_threads_addressed → thread excerpts (ONE list). */
+  threads: { rows: PersonEvidenceThreadRef[]; more: number };
+  /** Top directory areas over commits on PRs they authored in-window. */
+  pathAreas: PersonPathArea[];
+}
+
 export interface PersonPeriod {
   userId: number;
   login: string;
@@ -7734,6 +7881,9 @@ export interface PersonPeriod {
    *  mid-window joiner's figures under-count their period exactly like an onboarding repo's. */
   firstObservedMidWindow: boolean;
   metricsSchemaVersion: number;
+  /** The receipt rows under the vector (see PersonPeriodEvidence) — ABSENT unless requested
+   *  (`?evidence=1`); an older host answering an evidence-asking plugin simply omits it. */
+  evidence?: PersonPeriodEvidence;
 }
 
 /** GET /api/pro/insights/person/:userId — Pro `periodReports`. `person: null` covers every

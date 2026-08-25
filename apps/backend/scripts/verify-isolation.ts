@@ -1876,6 +1876,113 @@ check(
     'getPersonPeriod(A) refuses an automation-lane actor outright (prep, not scoring — and never a bot)',
     (await getPersonPeriod(1, defaultA, bot!.id, winPP)) === null,
   );
+
+  // ── The EVIDENCE arm (`{ evidence: true }`) ─────────────────────────────────────────────
+  // The vector checks above never reach it, and it is a second, ROW-LEVEL read surface: PR ids,
+  // comment bodies, thread excerpts and commit path areas. Two of its tables are GLOBAL
+  // (`commitFiles`, `users`), reached only through tenant-proven rows — exactly the shape that
+  // looks fine until someone drops a join. Seeded so BOTH tenants hold a decoy row of every
+  // family, so a missing predicate leaks something rather than finding nothing.
+  const mkEvidence = async (prNodeId: string, tag: string) => {
+    const [pr] = await db
+      .select({ id: pullRequests.id })
+      .from(pullRequests)
+      .where(eq(pullRequests.githubNodeId, prNodeId))
+      .limit(1)
+      .execute();
+    const [thread] = await db
+      .insert(schema.reviewThreads)
+      .values({
+        githubNodeId: `RT_pp_${tag}`,
+        prId: pr!.id,
+        path: `${tag}-side/file.ts`,
+        line: 1,
+        isResolved: false,
+        isOutdated: false,
+        derivedState: 'untouched',
+        originalCommenterId: human!.id,
+        createdAt: new Date(now.getTime() - 86_400_000),
+      })
+      .returning()
+      .execute();
+    await db
+      .insert(schema.reviewComments)
+      .values({
+        githubNodeId: `RC_pp_${tag}`,
+        threadId: thread!.id,
+        prId: pr!.id,
+        authorId: human!.id,
+        body: `person-evidence-${tag}`,
+        createdAt: new Date(now.getTime() - 86_400_000),
+      })
+      .execute();
+    // A commit + its GLOBAL content-addressed file list, under a tenant-distinct path bucket.
+    await db
+      .insert(schema.commits)
+      .values({
+        sha: `sha_pp_${tag}`,
+        prId: pr!.id,
+        authorId: human!.id,
+        committedAt: new Date(now.getTime() - 2 * 86_400_000),
+      })
+      .execute();
+    await db
+      .insert(schema.commitFiles)
+      .values({ sha: `sha_pp_${tag}`, paths: [`${tag}-side/file.ts`] })
+      .execute();
+  };
+  await mkEvidence('PR_pp_isoA', 'a');
+  await mkEvidence('PR_pp_isoB', 'b');
+
+  const evA = (await getPersonPeriod(1, defaultA, human!.id, winPP, { evidence: true }))?.evidence;
+  const evB = (await getPersonPeriod(2, wsB.id, human!.id, winPP, { evidence: true }))?.evidence;
+  const prIdsOf = (e: typeof evA): number[] => [
+    ...new Set(
+      Object.values(e?.prs ?? {})
+        .flatMap((g) => (g?.rows ?? []).map((r) => r.prId))
+        .filter((id): id is number => id != null),
+    ),
+  ];
+  const [prA] = await db
+    .select({ id: pullRequests.id })
+    .from(pullRequests)
+    .where(eq(pullRequests.githubNodeId, 'PR_pp_isoA'))
+    .limit(1)
+    .execute();
+  const [prB] = await db
+    .select({ id: pullRequests.id })
+    .from(pullRequests)
+    .where(eq(pullRequests.githubNodeId, 'PR_pp_isoB'))
+    .limit(1)
+    .execute();
+  check(
+    "getPersonPeriod(A, evidence) names only A's PRs — B's authored PR is not a receipt row",
+    evA != null &&
+      evB != null &&
+      prIdsOf(evA).includes(prA!.id) &&
+      !prIdsOf(evA).includes(prB!.id) &&
+      prIdsOf(evB).includes(prB!.id) &&
+      !prIdsOf(evB).includes(prA!.id),
+  );
+  check(
+    "getPersonPeriod(A, evidence) returns only A's comment bodies + thread excerpts",
+    evA != null &&
+      evB != null &&
+      evA.comments.rows.some((c) => c.body === 'person-evidence-a') &&
+      !evA.comments.rows.some((c) => c.body === 'person-evidence-b') &&
+      !evA.threads.rows.some((t) => t.excerpt.includes('person-evidence-b')) &&
+      evB.comments.rows.some((c) => c.body === 'person-evidence-b') &&
+      !evB.comments.rows.some((c) => c.body === 'person-evidence-a'),
+  );
+  check(
+    'getPersonPeriod(A, evidence) folds path areas from A-side commits only (commitFiles is GLOBAL)',
+    evA != null &&
+      evB != null &&
+      evA.pathAreas.some((p) => p.bucket.startsWith('a-side')) &&
+      !evA.pathAreas.some((p) => p.bucket.startsWith('b-side')) &&
+      evB.pathAreas.some((p) => p.bucket.startsWith('b-side')) &&
+      !evB.pathAreas.some((p) => p.bucket.startsWith('a-side')),
+  );
 }
 
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);

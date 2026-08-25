@@ -141,6 +141,13 @@ const MODEL_LABELS: Record<string, { label: string; hint: string }> = {
   'claude-sonnet-5': { label: 'Sonnet', hint: 'more considered prose' },
 };
 
+// Presentation-only label for a model id (the chat transcript's per-turn caption names the model
+// that actually answered). Raw id fallback for the same reason as the picker: a model added
+// server-side names itself without a frontend release.
+export function reportModelLabel(model: string): string {
+  return MODEL_LABELS[model]?.label ?? model;
+}
+
 export interface PeriodReportModelChoice {
   id: string;
   label: string;

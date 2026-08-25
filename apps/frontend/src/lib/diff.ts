@@ -1,4 +1,4 @@
-import type { PrFileDiffStatus } from '@pierre-review/shared';
+import type { PrFileDiffStatus, ThreadStateCounts } from '@pierre-review/shared';
 
 // A tiny pure parser for a single file's unified-diff `patch` string (as GitHub
 // returns it on the REST `files` endpoint): header-less, starting at the first
@@ -116,8 +116,8 @@ export function patchLineCount(patch: string | null | undefined): number {
 
 // Find the row a (line, side) pair addresses — the "reveal this line" primitive behind
 // FileDiffView's `focus` prop (the Changes-tab file tree and the Claude-Review finding
-// deep-link both drive it). Deliberately NOT `commentTarget`/`anchorIndexFor` from
-// FileDiffView: those map a CONTEXT row to the RIGHT side only, because that is where an
+// deep-link both drive it). Deliberately NOT `commentTarget`/`anchorIndexFor` below:
+// those map a CONTEXT row to the RIGHT side only, because that is where an
 // inline comment must be anchored — which silently loses every LEFT-side target sitting on
 // an unchanged line. Here the side is known, so match it honestly on both sides. Prefer the
 // LAST match (line numbers are unique per side within one file's patch, so this only matters
@@ -140,6 +140,96 @@ export function lineRowIndex(
   return match;
 }
 
+// Which side/line an inline comment on this row anchors to: RIGHT for context rows on
+// purpose — the new-file side is where a NEW inline comment must be anchored (GitHub's
+// rule). Lives here (not FileDiffView) so `anchorRowFor` below can share it.
+export function commentTarget(row: DiffRow): { line: number; side: 'LEFT' | 'RIGHT' } | null {
+  if (row.kind === 'add' && row.newLine != null) return { line: row.newLine, side: 'RIGHT' };
+  if (row.kind === 'context' && row.newLine != null) return { line: row.newLine, side: 'RIGHT' };
+  if (row.kind === 'del' && row.oldLine != null) return { line: row.oldLine, side: 'LEFT' };
+  return null;
+}
+
+// A thread carries (path, line) but no side. Anchor it to the LAST row whose target line
+// matches, preferring the new (RIGHT) side — that's where GitHub pins an inline thread.
+function anchorIndexFor(rows: DiffRow[], line: number | null): number | null {
+  if (line == null) return null;
+  let right: number | null = null;
+  let left: number | null = null;
+  rows.forEach((row, i) => {
+    const t = commentTarget(row);
+    if (!t || t.line !== line) return;
+    if (t.side === 'RIGHT') right = i;
+    else left = i;
+  });
+  return right ?? left;
+}
+
+/**
+ * Where a review thread anchors inside a file's parsed diff — the SAME ladder PrDetail's
+ * `openInChangesFor` jump uses, so the inline pill's rendered position and the "In Changes ~"
+ * scroll target agree instead of the jump landing on a bare line while the thread sits
+ * elsewhere. One known asymmetry on rung 1: the jump has no side and no parsed rows, so it
+ * assumes RIGHT for any live line — a live line matching only a LEFT (del) row anchors the
+ * pill at that row here while the jump's line lookup misses and falls back to the file
+ * header (the pill still opens + rings; only the scroll target diverges):
+ *   1. a live `thread.line` → last matching row, RIGHT side preferred (GitHub pins inline
+ *      threads to the new side). Never approximate — and never falls through to the hunk:
+ *      a live line absent from the visible patch means the hunks moved on, and a hunk
+ *      reconstruction would contradict the stored truth.
+ *   2. `line == null` → reconstruct from the anchor hunk (`anchorLineFromHunk`) and match it
+ *      honestly on its own side (`lineRowIndex`). APPROXIMATE — the line in the commit the
+ *      comment was written against — and the caller must hedge it (the `~` glyph).
+ *   3. no hit → null; the caller renders the thread at FILE grain. A thread never disappears.
+ */
+export function anchorRowFor(
+  rows: DiffRow[],
+  thread: { line: number | null; comments: readonly { diffHunk: string | null }[] },
+): { index: number; approximate: boolean } | null {
+  if (thread.line != null) {
+    const idx = anchorIndexFor(rows, thread.line);
+    return idx == null ? null : { index: idx, approximate: false };
+  }
+  const derived = anchorLineFromHunk(thread.comments[0]?.diffHunk);
+  if (derived == null) return null;
+  const idx = lineRowIndex(rows, derived.line, derived.side);
+  return idx == null ? null : { index: idx, approximate: true };
+}
+
+/**
+ * Fold a PR's review threads into per-RENDERED-file buckets — keyed on the CURRENT path,
+ * the identity FileDiffView keys its blocks on and the tree keys its rows on. A thread
+ * whose path matches no current file but does match a file's `previousPath` was written
+ * before a rename and is re-homed under the current path (previously it was invisible in
+ * Changes: the fold keyed on `t.path` while blocks looked up `f.path`). A thread matching
+ * neither stays out of the map — a file beyond the diff's 100-file cap renders only in the
+ * Threads tab, and the tab-header count reads `pr.threads` so the aggregate never lies.
+ */
+export function indexThreadsByPath<T extends { path: string }>(
+  threads: readonly T[],
+  files: readonly { path: string; previousPath?: string | null }[],
+): Map<string, T[]> {
+  const current = new Set<string>();
+  const renamedFrom = new Map<string, string>(); // previousPath → current path
+  for (const f of files) {
+    current.add(f.path);
+    if (f.previousPath != null && f.previousPath !== '' && !renamedFrom.has(f.previousPath)) {
+      renamedFrom.set(f.previousPath, f.path);
+    }
+  }
+  const out = new Map<string, T[]>();
+  for (const t of threads) {
+    // An exact current-path match always wins over a previousPath re-home: with a COPY
+    // (old path still in the diff), the thread belongs to the file that literally has it.
+    const key = current.has(t.path) ? t.path : renamedFrom.get(t.path);
+    if (key == null) continue;
+    const bucket = out.get(key) ?? [];
+    bucket.push(t);
+    out.set(key, bucket);
+  }
+  return out;
+}
+
 // ---- changed-file tree (the Changes tab's navigation rail) ----
 
 // The minimum a file needs to appear in the tree. Deliberately structural, not the wire
@@ -151,6 +241,9 @@ export interface FileTreeEntry {
   deletions: number;
   status?: PrFileDiffStatus;
   previousPath?: string | null;
+  // Per-state review-thread rollup for this file (`rollupCounts` over its indexed threads).
+  // Optional: the AI-Fix changeset and the metadata fallback have no threads to count.
+  threadCounts?: ThreadStateCounts;
 }
 
 export interface FileTreeNode {
@@ -166,8 +259,22 @@ export interface FileTreeNode {
   fileCount: number;
   additions: number;
   deletions: number;
+  // Subtree thread-state rollup, summed per directory exactly like additions/deletions
+  // (all-zero when the entries carry no counts, e.g. the AI-Fix changeset).
+  threadCounts: ThreadStateCounts;
   // Files only.
   entry: FileTreeEntry | null;
+}
+
+function zeroThreadCounts(): ThreadStateCounts {
+  return { untouched: 0, replied_unresolved: 0, likely_addressed: 0, resolved: 0 };
+}
+
+function addThreadCounts(into: ThreadStateCounts, from: ThreadStateCounts): void {
+  into.untouched += from.untouched;
+  into.replied_unresolved += from.replied_unresolved;
+  into.likely_addressed += from.likely_addressed;
+  into.resolved += from.resolved;
 }
 
 interface MutableDir {
@@ -203,6 +310,7 @@ function dirToNodes(dir: MutableDir, prefix: string): FileTreeNode[] {
       fileCount: 1,
       additions: entry.additions,
       deletions: entry.deletions,
+      threadCounts: entry.threadCounts ?? zeroThreadCounts(),
       entry,
     });
   }
@@ -229,12 +337,24 @@ function dirToNode(name: string, dir: MutableDir, prefix: string): FileTreeNode 
   let fileCount = 0;
   let additions = 0;
   let deletions = 0;
+  const threadCounts = zeroThreadCounts();
   for (const c of children) {
     fileCount += c.fileCount;
     additions += c.additions;
     deletions += c.deletions;
+    addThreadCounts(threadCounts, c.threadCounts);
   }
-  return { kind: 'dir', name: label, path, children, fileCount, additions, deletions, entry: null };
+  return {
+    kind: 'dir',
+    name: label,
+    path,
+    children,
+    fileCount,
+    additions,
+    deletions,
+    threadCounts,
+    entry: null,
+  };
 }
 
 // Fold a flat changed-file list into its real project directory hierarchy. Pure (no React)

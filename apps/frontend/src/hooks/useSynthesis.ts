@@ -41,9 +41,10 @@ export interface SynthesisDescriptor {
   select?: SynthesisFlaggingSelect | null;
   severities?: MlSeverity[] | null;
   category?: MlCategory | null;
-  /** 'person' grain only (plan P4.2): the 1:1 subject + the period's REAL epoch-ms bounds —
-   *  never `botUserId` (a bot-population narrowing) and never the enum `window` (canonicalised
-   *  out for the ordering grains). */
+  /** The person grains only — 'person' (the 1:1 narration, plan P4.2) and 'person_report' (the
+   *  People report's sections): the subject + the period's REAL epoch-ms bounds — never
+   *  `botUserId` (a bot-population narrowing) and never the enum `window` (canonicalised out
+   *  for the ordering/sections grains). */
   userId?: number | null;
   fromMs?: number | null;
   toMs?: number | null;
@@ -57,12 +58,17 @@ export function synthesisKeySlots(
   d: SynthesisDescriptor,
 ): (string | number)[] {
   const flagging = d.kind === 'bot-flagging';
-  const person = d.kind === 'person';
+  // BOTH person grains — 'person' (the 1:1 ordering narration) and 'person_report' (the People
+  // report's SECTIONS narrative) — share the subject + period tail below; the `d.kind` slot at
+  // the head is what keeps their cache rows (and shared mutation keys) apart, mirroring the
+  // server key's `k:` slot.
+  const person = d.kind === 'person' || d.kind === 'person_report';
   const select = flagging ? (d.select ?? 'findings') : null;
   // The windowless kinds mirror the server's canonicalisation: 'bot-threads' (current-state
-  // backlog) and the ordering grains 'brief'/'rollup'/'person' — the first two are "now" folds
-  // (plan P3.1/P3.3) and 'person' carries REAL bounds in its own slot below (P4.2); all three
-  // take the whole workspace (no repo narrowing slot variation).
+  // backlog) and the ordering/sections grains 'brief'/'rollup'/'person'/'person_report' — the
+  // first two are "now" folds (plan P3.1/P3.3) and the person grains carry REAL bounds in their
+  // own slot below (P4.2); all of them take the whole workspace (no repo narrowing slot
+  // variation).
   const windowless =
     d.kind === 'bot-threads' || d.kind === 'brief' || d.kind === 'rollup' || person;
   const ordering = d.kind === 'brief' || d.kind === 'rollup' || person;

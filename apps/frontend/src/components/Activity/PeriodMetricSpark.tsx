@@ -1,5 +1,4 @@
 import type { JSX } from 'react';
-import { PALETTE } from '../charts/common.js';
 
 // A three-stop sparkline with a forecast band: PRIOR → THIS PERIOD → NEXT (predicted).
 //
@@ -7,9 +6,10 @@ import { PALETTE } from '../charts/common.js';
 // full-width, ResizeObserver-measured panels (LineChart/BarChart/StackedArea…) and every one of
 // them draws a SERIES. This draws at most three stops inside a table cell at a fixed size, and it
 // is the only consumer. It follows the toolkit's conventions to the letter — explicit PALETTE
-// hexes for the data marks (they read on light and dark alike), `currentColor` + Tailwind
-// `text-*` for anything chrome-ish — so it can move next door verbatim the day a second surface
-// wants it.
+// hexes for the observed data marks (they read on light and dark alike; the forecast accent is
+// the theme-flipping `ai-signal-fill` token, so it takes fill/stroke CLASSES — SVG presentation
+// attributes can't hold a var()), `currentColor` + Tailwind `text-*` for anything chrome-ish —
+// so it can move next door verbatim the day a second surface wants it.
 //
 // The band is the honest half of this picture: a Theil–Sen point estimate with a ±2-MAD band is
 // a claim about uncertainty, and drawing the point without the band would turn a hedge into a
@@ -108,7 +108,7 @@ export function PeriodMetricSpark({
               zero (we know where we are) and opens out to ±2 MAD one period ahead. */}
           <path
             d={`M ${lastObserved.x} ${y(lastObserved.v!)} L ${fx} ${bandTop} L ${fx} ${bandBottom} Z`}
-            fill={PALETTE.violet}
+            className="fill-ai-signal-fill"
             fillOpacity={0.18}
           />
           <line
@@ -116,11 +116,11 @@ export function PeriodMetricSpark({
             y1={y(lastObserved.v!)}
             x2={fx}
             y2={y(forecast.point)}
-            stroke={PALETTE.violet}
+            className="stroke-ai-signal-fill"
             strokeWidth={1.5}
             strokeDasharray="3 2"
           />
-          <circle cx={fx} cy={y(forecast.point)} r={2.5} fill={PALETTE.violet} />
+          <circle cx={fx} cy={y(forecast.point)} r={2.5} className="fill-ai-signal-fill" />
         </>
       )}
 

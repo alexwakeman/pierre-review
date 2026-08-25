@@ -19,7 +19,7 @@
 // candidate only once it has been classified. That is fine BECAUSE this is a pull-based
 // worker: it re-derives the bot set every tick, so a newly-classified or newly-marked bot's
 // whole backlog is picked up on the next pass with no backfill trigger of its own.
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql } from 'drizzle-orm';
 import type { AnyColumn } from 'drizzle-orm';
 import type {
   AutomatedReviewerKind,
@@ -405,7 +405,9 @@ export async function upsertMlLabels(rows: MlLabelWrite[]): Promise<number> {
 
 // ── 3. Reads ─────────────────────────────────────────────────────────────────────────────
 
-function toWireLabel(row: typeof mlCommentLabels.$inferSelect): MlLabel | null {
+// EXPORTED for the person-period evidence fold (db/person-period.ts), which attaches stored
+// labels to a handful of capped comment rows — same coercions, one spelling.
+export function toWireLabel(row: typeof mlCommentLabels.$inferSelect): MlLabel | null {
   const severity = coerceSeverity(row.severity);
   if (!severity) return null;
   return {
@@ -702,7 +704,7 @@ export function foldMlLabelRow(row: {
 
 // ── The WINDOWED per-bot label fold for getBotAnalytics ─────────────────────────────────────
 // The merged Bots table shows ROI columns and severity columns on ONE row over ONE window, so
-// this aggregates `ml_comment_labels` per author over the SAME [from, now] window the ROI math
+// this aggregates `ml_comment_labels` per author over the SAME [from, to) window the ROI math
 // uses — `target_created_at` was stored precisely so this read needs no union back to the three
 // polymorphic parents (and the (account, repo, author) index carries the scan). Exclusion
 // semantics are getBotSeverityRollup's, VERBATIM: summaries and praise are labelled work but not
@@ -743,6 +745,14 @@ export async function getMlWindowAggregates(
   scope: BotScope,
   automatedIds: number[],
   from: Date,
+  // The window's upper bound — a Date ONLY when the caller holds EXPLICIT bounds (the People
+  // report's completed period), applied half-open (`lt`, the route's stated [fromMs, toMs)
+  // contract). `null` = the enum form, whose window ends at now: the scan then carries NO upper
+  // predicate, which keeps its WHERE byte-identical to `foldBotFlaggingPopulation`'s — the
+  // identity behind "an Inflation count equals the drill-down's filteredTotal" (the drill-down
+  // only ever serves enum windows). A bot still labelling after a completed period must not leak
+  // those rows into the period's counts, weekly buckets, or cap budget.
+  to: Date | null,
   // Pro (`botDepth`) only: widen the scan back to `trendFrom` and fold the per-bot WEEKLY
   // inflation series over it (`inflationWeekly`, 12 buckets of 7 days from `trendFrom` — the
   // same anchoring as getBotAnalytics' own trend buckets, so the sparkline and the ROI trend
@@ -799,12 +809,15 @@ export async function getMlWindowAggregates(
           inArray(mlCommentLabels.repoId, scope.repoIds),
           inArray(mlCommentLabels.authorUserId, automatedIds),
           gte(mlCommentLabels.targetCreatedAt, scanFrom),
+          // Explicit bounds only (see the `to` parameter note) — newest-first still holds, so
+          // the in-window rows remain a prefix of any widened scan.
+          ...(to != null ? [lt(mlCommentLabels.targetCreatedAt, to)] : []),
         ),
       )
       .orderBy(desc(mlCommentLabels.targetCreatedAt), desc(mlCommentLabels.id))
       .limit(ROLLUP_SCAN_CAP)
       .execute(),
-    countUnlabelledBotText(accountId, scope, automatedIds, from),
+    countUnlabelledBotText(accountId, scope, automatedIds, from, to),
     // NOT window-bounded on purpose: the NULL-body population is legacy by nature (the
     // 2026-06 lean-storage window) and mostly sits OUTSIDE every rolling window — a windowed
     // count would read 0 while badges are visibly missing from the very lists this strip
@@ -1072,17 +1085,32 @@ function inlineLabel(
 export async function getBotVendorComments(
   accountId: number,
   target: { userId: number } | { kind: 'pierre' },
-  window: BotWindowKind,
+  // Either a KIND (resolved here against the one shared duration mapping) or a kind carried
+  // ALONGSIDE explicit bounds — the getBotAnalytics window form, widened here for the same
+  // reason: the People report's bot sections must list a completed period's comments, and an
+  // arbitrary-bounds period has no enum spelling. Bounds only narrow WHAT IS MEASURED inside
+  // the caller's resolved scope (route-validated where they arrive over the wire).
+  window: BotWindowKind | { kind: BotWindowKind; fromMs: number; toMs: number },
   // The SAME BotScope the ROI row was computed at — this list reproduces one of that panel's
   // rows, so it takes the identical workspace + repo narrowing.
   scope: BotScope,
 ): Promise<BotVendorCommentsResponse> {
   const nowMs = Date.now();
-  const to = new Date(nowMs);
-  // The one shared window→duration mapping (db/bot-window.ts) — same window as the ROI row.
-  const from = new Date(nowMs - botWindowMs(window));
-  const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
-  const generatedAt = to.toISOString();
+  const windowKind = typeof window === 'string' ? window : window.kind;
+  const to = new Date(typeof window === 'string' ? nowMs : window.toMs);
+  // The one shared window→duration mapping (db/bot-window.ts) — same window as the ROI row —
+  // unless the caller supplied real bounds.
+  const from = new Date(
+    typeof window === 'string' ? nowMs - botWindowMs(window) : window.fromMs,
+  );
+  const win = { kind: windowKind, from: from.toISOString(), to: to.toISOString() };
+  // The upper predicate, applied ONLY under EXPLICIT bounds — `getMlWindowAggregates`' `to`
+  // rule, and the ROI row this list reproduces uses the same `toBound`. Under the enum form the
+  // window ends at NOW, where an upper bound can only exclude rows written in the CURRENT SECOND
+  // (second-granular timestamps on sqlite) and would break byte-identity with the other
+  // enum-form scans over the same rows.
+  const toBound = typeof window === 'string' ? null : to;
+  const generatedAt = new Date(nowMs).toISOString();
 
   if ('kind' in target) {
     return {
@@ -1188,7 +1216,9 @@ export async function getBotVendorComments(
         inArray(pullRequests.repoId, scope.repoIds),
         eq(reviewComments.authorId, userId),
         gte(reviewComments.createdAt, from),
-        lte(reviewComments.createdAt, to),
+        // Half-open [from, to) — the route's stated bounds contract, and the person-period
+        // evidence fold's spelling, so a boundary-ms comment lands in exactly one period.
+        ...(toBound != null ? [lt(reviewComments.createdAt, toBound)] : []),
       ),
     )
     .orderBy(desc(reviewComments.createdAt))
@@ -1227,7 +1257,7 @@ export async function getBotVendorComments(
         inArray(pullRequests.repoId, scope.repoIds),
         eq(prComments.authorId, userId),
         gte(prComments.createdAt, from),
-        lte(prComments.createdAt, to),
+        ...(toBound != null ? [lt(prComments.createdAt, toBound)] : []),
       ),
     )
     .orderBy(desc(prComments.createdAt))
@@ -1270,7 +1300,7 @@ export async function getBotVendorComments(
         isNotNull(reviews.body),
         hasText(reviews.body),
         gte(reviews.submittedAt, from),
-        lte(reviews.submittedAt, to),
+        ...(toBound != null ? [lt(reviews.submittedAt, toBound)] : []),
       ),
     )
     .orderBy(desc(reviews.submittedAt))
@@ -1374,16 +1404,22 @@ async function countBotText(
   scope: BotScope,
   automatedIds: number[],
   mode: UnlabelledBodyMode,
-  // Optional window floor on the SOURCE row's own timestamp (createdAt / submittedAt) — the
-  // windowed ROI fold's coverage statement must be about the window it sits over. Absent =
-  // the whole corpus, exactly as before.
+  // Optional window on the SOURCE row's own timestamp (createdAt / submittedAt) — the windowed
+  // ROI fold's coverage statement must be about the window it sits over. Absent `from` = the
+  // whole corpus, exactly as before; `to` follows getMlWindowAggregates' contract (a Date only
+  // under explicit bounds, applied half-open; null = the now-ending enum window, no upper
+  // predicate).
   from?: Date,
+  to?: Date | null,
 ): Promise<number> {
   if (scope.repoIds.length === 0 || automatedIds.length === 0) return 0;
   const n = sql<number>`count(*)`;
   const bodyPredicate = (col: AnyColumn) =>
     mode === 'unlabelled' ? and(isNotNull(col), hasText(col)) : isNull(col);
-  const windowed = (col: AnyColumn) => (from ? [gte(col, from)] : []);
+  const windowed = (col: AnyColumn) => [
+    ...(from ? [gte(col, from)] : []),
+    ...(to != null ? [lt(col, to)] : []),
+  ];
 
   const [rc, pc, rv] = await Promise.all([
     db
@@ -1473,8 +1509,9 @@ async function countUnlabelledBotText(
   scope: BotScope,
   automatedIds: number[],
   from?: Date,
+  to?: Date | null,
 ): Promise<number> {
-  return countBotText(accountId, scope, automatedIds, 'unlabelled', from);
+  return countBotText(accountId, scope, automatedIds, 'unlabelled', from, to);
 }
 
 /** How much bot text in scope can NEVER be labelled as stored — see `UnlabelledBodyMode`. */

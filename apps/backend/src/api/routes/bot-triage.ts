@@ -66,6 +66,38 @@ function parseIntList(raw?: string): number[] | null {
   return ids.length > 0 ? ids : null;
 }
 
+// The explicit-bounds span cap — mirrors the synthesis person grain's PERSON_WINDOW_MAX_MS
+// (packages/pro/src/synthesis/scope.ts; a plugin constant core cannot import): far past any real
+// reporting period, tight enough that one request can never name a decade of rows.
+const WINDOW_BOUNDS_MAX_SPAN_MS = 200 * 86_400_000;
+
+// Resolve the optional `?fromMs=&toMs=` pair into `getBotAnalytics`' widened window form
+// (`{kind, fromMs, toMs}` — apiVersion 18; the enum alone when no bounds were sent). The pair
+// names a POPULATION, so garbage 400s rather than degrading (`{error}` here → 400 in the
+// handler): both-or-neither, `fromMs < toMs`, span ≤ the 200-day cap. The digits-only shape is
+// already ajv-enforced by the route schemas; bounds only narrow WHAT IS MEASURED inside the
+// account's own resolved scope — they carry no authority, exactly like the enum they refine.
+function parseWindowBounds(
+  window: BotWindowKind,
+  fromMs?: string,
+  toMs?: string,
+): { window: BotWindowKind | { kind: BotWindowKind; fromMs: number; toMs: number } } | { error: string } {
+  if (fromMs == null && toMs == null) return { window };
+  if (fromMs == null || toMs == null) {
+    return { error: '`fromMs` and `toMs` are only valid together' };
+  }
+  const from = Number(fromMs);
+  const to = Number(toMs);
+  if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to)) {
+    return { error: '`fromMs`/`toMs` must be epoch-ms integers' };
+  }
+  if (from >= to) return { error: '`fromMs` must be earlier than `toMs`' };
+  if (to - from > WINDOW_BOUNDS_MAX_SPAN_MS) {
+    return { error: '`fromMs`/`toMs` span too large (max 200 days)' };
+  }
+  return { window: { kind: window, fromMs: from, toMs: to } };
+}
+
 // ── THE SCOPE PARAMETER ─────────────────────────────────────────────────────────────────────
 // Every read route here takes `?workspace=<integer>` (absent / unknown / unparseable / another
 // tenant's id ⇒ the account's Default workspace — NOT a 404: every id yields the same response
@@ -261,8 +293,10 @@ const listReviewersSchema = {
   },
 };
 
-// GET /api/bot-analytics?window=&workspace=&repoIds= — the window is a closed 4-value set, safe to
-// enum + default.
+// GET /api/bot-analytics?window=&workspace=&repoIds=[&fromMs=&toMs=] — the window is a closed
+// 4-value set, safe to enum + default; the optional bounds pair refines it to a REAL period (the
+// People report's bot sections) and is validated by `parseWindowBounds` (only-together, ordered,
+// span-capped ⇒ 400 — a bad bound is a client bug, not a stale bookmark).
 const analyticsSchema = {
   querystring: {
     type: 'object',
@@ -278,6 +312,10 @@ const analyticsSchema = {
       // Optional DATA narrowing (comma-separated repo ids) — the per-repo Bots tab. It is
       // intersected with the workspace's membership; it does NOT change who counts as a bot.
       repoIds: { type: 'string' },
+      // Optional explicit bounds (epoch-ms integer strings, half-open [fromMs, toMs)) — they
+      // only narrow WHAT IS MEASURED inside the resolved scope, never who counts as a bot.
+      fromMs: { type: 'string', pattern: '^[0-9]+$' },
+      toMs: { type: 'string', pattern: '^[0-9]+$' },
     },
   },
 };
@@ -307,9 +345,11 @@ const vendorPrsSchema = {
   },
 };
 
-// GET /api/bot-analytics/vendor/:key/comments?window= — the per-REVIEWER COMMENTS drill-down.
-// Same shape as vendorPrsSchema, spelled out rather than aliased so the two can diverge without
-// a shared-object surprise (the reset-schema precedent above).
+// GET /api/bot-analytics/vendor/:key/comments?window=[&fromMs=&toMs=] — the per-REVIEWER
+// COMMENTS drill-down. Same shape as vendorPrsSchema, spelled out rather than aliased so the two
+// can diverge without a shared-object surprise (the reset-schema precedent above) — and it HAS
+// diverged: this one also takes the optional explicit-bounds pair (the People report's per-bot
+// evidence cards cover the real period), validated exactly like /api/bot-analytics's.
 const vendorCommentsSchema = {
   params: {
     type: 'object',
@@ -327,6 +367,8 @@ const vendorCommentsSchema = {
       },
       workspace: { type: 'string' },
       repoIds: { type: 'string' },
+      fromMs: { type: 'string', pattern: '^[0-9]+$' },
+      toMs: { type: 'string', pattern: '^[0-9]+$' },
     },
   },
 };
@@ -708,12 +750,21 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // the workspace row — a null here is FINAL.
   //
   // ⚠ Never sum the price across workspaces. Within this one workspace's rows it is a plain sum.
-  app.get('/api/bot-analytics', { schema: analyticsSchema }, async (req) => {
-    const { window, workspace, repoIds } = req.query as {
+  app.get('/api/bot-analytics', { schema: analyticsSchema }, async (req, reply) => {
+    const { window, workspace, repoIds, fromMs, toMs } = req.query as {
       window: BotWindowKind;
       workspace?: string;
       repoIds?: string;
+      fromMs?: string;
+      toMs?: string;
     };
+    // Optional REAL bounds (the People report) refine the enum via the fold's widened
+    // apiVersion-18 window form; a malformed pair 400s (it names a population, never degrades).
+    const bounds = parseWindowBounds(window, fromMs, toMs);
+    if ('error' in bounds) {
+      reply.status(400);
+      return { error: 'BadRequest', message: bounds.error };
+    }
     const accountId = accountIdOf(req);
     // ONE object drives both halves: `workspaceId` decides who counts as a bot, `repoIds` narrows
     // which data is measured — and the narrowing is already bounded by the workspace's membership,
@@ -727,7 +778,7 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     const inflationHistory = Boolean(
       req.account && entitledProCapabilities(req.account).botDepth,
     );
-    const resp: BotAnalyticsResponse = await getBotAnalytics(accountId, window, scope, {
+    const resp: BotAnalyticsResponse = await getBotAnalytics(accountId, bounds.window, scope, {
       inflationHistory,
     });
     return resp;
@@ -797,10 +848,12 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     { schema: vendorCommentsSchema },
     async (req, reply) => {
       const { key } = req.params as { key: string };
-      const { window, workspace, repoIds } = req.query as {
+      const { window, workspace, repoIds, fromMs, toMs } = req.query as {
         window: BotWindowKind;
         workspace?: string;
         repoIds?: string;
+        fromMs?: string;
+        toMs?: string;
       };
       const m = /^u(\d+)$/.exec(key);
       const target = m
@@ -812,12 +865,19 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
         reply.status(400);
         return { error: 'BadRequest', message: `Invalid vendor key: ${key}` };
       }
+      // Same optional real-bounds refinement as /api/bot-analytics (the People report's per-bot
+      // evidence cards) — a malformed pair 400s.
+      const bounds = parseWindowBounds(window, fromMs, toMs);
+      if ('error' in bounds) {
+        reply.status(400);
+        return { error: 'BadRequest', message: bounds.error };
+      }
       const accountId = accountIdOf(req);
       const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
       const resp: BotVendorCommentsResponse = await getBotVendorComments(
         accountId,
         target,
-        window,
+        bounds.window,
         scope,
       );
       return resp;

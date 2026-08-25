@@ -205,7 +205,7 @@ export function SyncProgressPanel({
           <div className="h-2 w-full overflow-hidden rounded bg-gray-200 dark:bg-gray-800">
             <div
               className={`h-2 rounded transition-all duration-500 ${
-                scoring ? 'bg-violet-500' : 'bg-green-500'
+                scoring ? 'bg-ai-signal-fill' : 'bg-green-500'
               }`}
               style={{ width: `${scorePercent}%` }}
             />

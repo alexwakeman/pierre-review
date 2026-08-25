@@ -56,7 +56,7 @@ export function RegenProgressBar({
   return (
     <div className="flex items-center gap-2 px-0.5" aria-live="polite">
       <div
-        className="h-1 flex-1 overflow-hidden rounded-full bg-violet-100 dark:bg-violet-950/40"
+        className="h-1 flex-1 overflow-hidden rounded-full bg-ai-signal-fill/15"
         role="progressbar"
         aria-valuenow={rounded}
         aria-valuemin={0}
@@ -64,11 +64,11 @@ export function RegenProgressBar({
         aria-label={label}
       >
         <div
-          className="h-full rounded-full bg-violet-500 transition-[width] duration-200 ease-out dark:bg-violet-400"
+          className="h-full rounded-full bg-ai-signal-fill transition-[width] duration-200 ease-out"
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="shrink-0 whitespace-nowrap text-right text-[10px] tabular-nums text-violet-500 dark:text-violet-300">
+      <span className="shrink-0 whitespace-nowrap text-right text-[10px] tabular-nums text-ai-signal">
         {sub ?? `${rounded}%`}
       </span>
     </div>

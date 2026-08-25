@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  PRESET_PROMPTS,
+  SPRINT_CHAT_MAX_TURNS,
   type DigestPrRef,
   type PinnedPrompt,
   type SprintChatHistoryItem,
@@ -9,7 +9,7 @@ import {
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { workspaceKey } from '../../hooks/useActivity.js';
-import { useFilters } from '../../store/filters.js';
+import { useFilters, type SprintChatTurn } from '../../store/filters.js';
 import { describeAnswerWindow, INSIGHTS_RANGE_LABEL } from '../../lib/insightsRange.js';
 import {
   useSprintChat,
@@ -20,62 +20,34 @@ import {
   useDeletePinnedPrompt,
   CHAT_HISTORY_PAGE_SIZE,
 } from '../../hooks/useSprintChat.js';
+import { reportModelLabel } from '../../hooks/usePeriodReports.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { SummaryMarkdown } from './prRefTable.js';
 import { AdHocChart } from './AdHocChart.js';
+import { suggestionGroups } from './adHocChatModel.js';
 
-// The ad-hoc "Ask about the sprint" box (Pro Haiku). A free-text question — with @-mentions of
-// people in the active Workspace — answered from the SAME data behind the Sprint summary. Two opt-in
-// toggles: add a chart (a second, best-effort Haiku pass) and include bot-performance data. The
-// current prompt can be pinned (server-stored per Workspace) and re-run later. Every answer is also
-// persisted to the account's chat HISTORY (collapsible, paginated below) so past questions re-open
-// for free. The live question + answer are held in the STORE (not component state) so they survive
-// the Insights panel unmounting (e.g. clicking a PR then returning). Gated on the activityDigest
-// capability exactly like the Sprint / preset surfaces — absent → nothing.
+// The ad-hoc "Ask about the sprint" box (Pro — answered by the account's configured report
+// model; the optional chart is still a second Haiku pass). A free-text question — with
+// @-mentions of people in the active Workspace — answered from the SAME data behind the Sprint
+// summary, as a real CONVERSATION: completed turns render oldest→newest in a transcript above
+// the input, each follow-up ask sends the prior turns as `history` so "the second one" resolves,
+// and the model may propose ≤3 digit-free follow-up chips per answer (server-validated — D4).
+// Depth is capped at SPRINT_CHAT_MAX_TURNS Q&A pairs; at the cap the input locks behind a
+// "Start a new conversation" affordance (the server-side history rows persist — the thread is
+// the live view, not the record). The current prompt can be pinned (server-stored per Workspace)
+// and re-run later. Every answer is also persisted to the account's chat HISTORY (collapsible,
+// paginated below) so past questions re-open for free; picking one seeds a fresh 1-turn
+// transcript that the next ask continues from. The live draft + per-workspace threads are held
+// in the STORE (not component state) so they survive the Insights panel unmounting (e.g.
+// clicking a PR then returning) — including a turn still IN FLIGHT when that happens: the
+// append (and the composer clear) run in useSprintChat's hook-level onSuccess, which outlives
+// both this component and chat.reset(). Gated on the activityDigest capability exactly like the
+// Sprint / preset surfaces — absent → nothing.
 
-// Quick-question pills — the former "Sprint questions" presets plus two catch-alls (sprint report,
-// retro), folded into this one panel. So the four old surfaces (Sprint report card, preset carousel,
-// the Retro sub-tab, chat) collapse to one, and every answer comes from the single grounded chat
-// endpoint. `label` is the pill caption, `question` the text loaded into the box.
-const SPRINT_REPORT_PROMPT =
-  'Give me a sprint status report: overall flow health, what needs attention now, the biggest changes shipped this sprint, and any blockers.';
-// The retrospective catch-all — this REPLACES the deleted Insights "Retro" sub-tab, its route and
-// its own `retro_reports` cache. Paired with the sprint report as the two catch-alls: that one is
-// forward-looking ("what needs attention now"), this one backward-looking ("what just happened").
-//
-// It asks for a short narrative followed by ONE GFM pipe table of the retro items — the renderer
-// (SummaryMarkdown/parseBlocks) parses pipe tables into a real table in PrTable's visual shell,
-// with owner/name#N refs in cells still linkifying. The Category vocabulary is pinned in the
-// prompt (shipped / went well / dragged / CI) so rows stay scannable across runs.
-//
-// It deliberately asks ONLY for what the chat's grounding payload actually holds — merged PRs,
-// flow metrics, CI failure reasons, attention items. NOT themes or sentiment: those needed the
-// retro's own 50-item corpus of raw comment/review bodies, which buildChatPayload has no
-// equivalent of, so asking would just trip CHAT_SYSTEM's "the JSON doesn't hold the answer"
-// decline and burn a third of a ~200-word answer. Discussion themes live in the Feed's Pro
-// "Themes" tab instead.
-//
-// Frontend-LOCAL const, exactly like SPRINT_REPORT_PROMPT and for the same reason — NOT an entry
-// in shared's PRESET_PROMPTS. A new PresetPromptKey is consumed by the plugin as two EXHAUSTIVE
-// Record<PresetPromptKey, string> maps (PRESET_QUESTIONS + a bespoke per-key system prompt), so
-// it would be an immediate compile error in packages/pro plus a new cache-row kind and a new
-// independent throttle/billing path — for a pill that only needs to prefill the chat box.
-// ⚠ Every pill prompt must stay ≤500 chars — the server's MAX_QUESTION truncates SILENTLY, and a
-// mid-sentence cut would ship a live mispowered pill with no error anywhere.
-const RETRO_PROMPT =
-  'Give me a retrospective of this sprint: start with a short narrative summary (2-3 sentences), then ONE GitHub-flavoured markdown pipe table of the retro items with columns Item | Category | PRs | Note. Category is one of: shipped, went well, dragged, CI. Put PR references in the PRs column as plain owner/name#N.';
-// The workspace-orientation catch-all: what is this set of repos FOR, and what is it busy with
-// right now. Grounded in the payload's `repos` map (each repo's GitHub "About" description — the
-// only real purpose text the payload carries) plus the merged/open PR activity.
-const WORKSPACE_ABOUT_PROMPT =
-  'What does this workspace do, and what are its latest priorities? Using the repo descriptions and recent PR activity in the JSON, give one line per repository on its purpose, then a short list of the current priorities and themes across the workspace.';
-const QUICK_QUESTIONS: { label: string; question: string }[] = [
-  { label: 'Sprint report', question: SPRINT_REPORT_PROMPT },
-  { label: 'Retro', question: RETRO_PROMPT },
-  { label: 'About this Workspace', question: WORKSPACE_ABOUT_PROMPT },
-  ...PRESET_PROMPTS.map((p) => ({ label: p.label, question: p.question })),
-];
+// Stable empty thread so the store selector returns an identical reference for workspaces with
+// no conversation (a fresh [] per render would defeat zustand's equality check).
+const EMPTY_THREAD: SprintChatTurn[] = [];
 
 function refMeta(ref: DigestPrRef): PinnedPr {
   return {
@@ -120,16 +92,76 @@ function Toggle({
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-3.5 w-3.5 rounded border-gray-300 text-violet-600 focus:ring-violet-400 dark:border-gray-600"
+        className="h-3.5 w-3.5 rounded border-gray-300 text-ai-signal focus:ring-ai-signal dark:border-gray-600"
       />
       {label}
     </label>
   );
 }
 
-// One past question in the history. Clicking the row loads its STORED answer (+ chart) into the
-// main answer panel at the TOP of this component (free — no re-run), and the row is marked as the
-// current selection. A secondary "↻ Reuse" reloads the question into the box for editing / re-asking.
+// The user's side of one transcript turn: a compact right-aligned row. Truncated — the full
+// question is in the title — because the ANSWER is the content; the question is orientation.
+function QuestionRow({ text }: { text: string }): JSX.Element {
+  return (
+    <div className="flex justify-end">
+      <div
+        className="max-w-[85%] truncate rounded-md bg-ai-surface-2 px-2.5 py-1 text-xs text-ai-ink"
+        title={text}
+      >
+        {text}
+      </div>
+    </div>
+  );
+}
+
+// One completed turn: the question row + the answer card (markdown, chart, caption). The caption
+// is PER TURN — window, generated time, answering model — so a transcript legitimately spanning
+// two report periods (the reader switched reports mid-conversation) stays honest: every answer
+// names what IT covered, not what the chips say now.
+function TranscriptTurn({
+  turn,
+  onOpenPr,
+}: {
+  turn: SprintChatTurn;
+  onOpenPr: (r: DigestPrRef) => void;
+}): JSX.Element {
+  const r = turn.response;
+  const answerWindow = describeAnswerWindow(r.window);
+  const caption = [
+    answerWindow,
+    r.generatedAt ? `Generated ${new Date(r.generatedAt).toLocaleString()}` : null,
+    r.model != null ? reportModelLabel(r.model) : null,
+  ]
+    .filter((p): p is string => p != null)
+    .join(' · ');
+  const trimmed = r.trimmedTurns ?? 0;
+  return (
+    <div>
+      <QuestionRow text={turn.question} />
+      <div className="digest-fade-in mt-1.5 rounded-md border border-ai-hairline bg-white/60 p-3 dark:bg-gray-900/40">
+        <SummaryMarkdown markdown={r.answer ?? ''} prRefs={r.prRefs ?? []} onOpenPr={onOpenPr} />
+        {r.chart && (
+          <div className="mt-3">
+            <AdHocChart spec={r.chart} />
+          </div>
+        )}
+        {caption !== '' && <div className="mt-1.5 text-[10px] text-gray-400">{caption}</div>}
+        {/* The server dropped prior turns (depth cap and/or token budget) for THIS answer — say
+            so, or a reference the model visibly missed reads as a model failure. */}
+        {trimmed > 0 && (
+          <div className="mt-0.5 text-[10px] italic text-gray-400">
+            The model couldn&apos;t see the {trimmed} earliest turn{trimmed === 1 ? '' : 's'} for
+            this answer.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// One past question in the history. Clicking the row seeds a FRESH 1-turn transcript from its
+// STORED answer (+ chart) — free, no re-run — and the row is marked as the current selection.
+// A secondary "↻ Reuse" reloads the question into the box for editing / re-asking.
 function HistoryRow({
   item,
   selected,
@@ -187,7 +219,7 @@ function HistoryRow({
           e.stopPropagation();
           onReuse();
         }}
-        className="shrink-0 border-l border-gray-200 px-2 text-[10px] font-medium text-violet-600 hover:bg-violet-50 hover:underline dark:border-gray-800 dark:text-violet-300 dark:hover:bg-violet-950/30"
+        className="shrink-0 border-l border-gray-200 px-2 text-[10px] font-medium text-ai-signal hover:bg-ai-signal/10 hover:underline dark:border-gray-800"
         title="Load this question back into the box to edit or re-ask"
       >
         ↻ Reuse
@@ -205,7 +237,7 @@ function HistoryRow({
 //    which period it answers about.
 //  • `suggestedQuestions` — extra pills the caller derives (client-side templated from the
 //    report's own significant deltas; the numbers in them are computed, never model-authored).
-//    Rendered ahead of the built-in quick questions.
+//    Rendered as their own labelled "From this report" group ahead of the built-ins.
 // All optional: with none of them the panel behaves exactly as the old standalone chat did.
 export function AdHocChatPanel({
   periodWindow,
@@ -218,7 +250,7 @@ export function AdHocChatPanel({
 } = {}): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   // The ACTIVE WORKSPACE is the whole scope — a plain id, no sentinel, nothing to canonicalise.
-  // `scopeKey` (`ws:<id>`) is only ever a CLIENT-SIDE Record key (the per-workspace answer stashed
+  // `scopeKey` (`ws:<id>`) is only ever a CLIENT-SIDE Record key (the per-workspace thread stashed
   // in the store); the wire scope is stamped by the hooks below, which take the id itself. It MUST
   // come from `workspaceKey`, not a hand-rolled `String(workspaceId)` — that is the same
   // vocabulary the plugin persists in `scope_key`, so a legacy '3' can never alias workspace 3.
@@ -229,17 +261,28 @@ export function AdHocChatPanel({
   // Live chat state lives in the STORE so it survives this panel unmounting/remounting.
   const draft = useFilters((s) => s.sprintChatDraft);
   const setDraft = useFilters((s) => s.setSprintChatDraft);
-  const storedResult = useFilters((s) => s.sprintChatResults[scopeKey] ?? null);
-  const setStoredResult = useFilters((s) => s.setSprintChatResult);
+  const thread = useFilters((s) => s.sprintChatThreads[scopeKey]) ?? EMPTY_THREAD;
+  // Turn APPENDS happen in useSprintChat's hook-level onSuccess (they must survive this panel
+  // unmounting and chat.reset()); the panel only seeds/clears whole threads.
+  const setThread = useFilters((s) => s.setSprintChatThread);
   const { question, wantChart, wantBots } = draft;
 
   // History panel (transient, session-local UI state — resets to collapsed on remount).
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Whether the built-in "Quick questions" group is expanded MID-CONVERSATION (it always renders
+  // expanded while the thread is empty — the pills ARE the first-run invitation). Transient
+  // local state, and the collapsed default is DERIVED per render from thread.length, never
+  // written back.
+  const [builtinsOpen, setBuiltinsOpen] = useState(false);
   const [historyPage, setHistoryPage] = useState(0);
-  // Which past question is currently loaded into the TOP answer panel (marks the row). Null = the
-  // top panel is showing a live/last Ask, not a picked history item.
+  // Which past question seeded the current transcript (marks the row). Null = the transcript is
+  // a live conversation, not a picked history item.
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
-  const answerRef = useRef<HTMLDivElement | null>(null);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  // Whether the reader is at (or near) the transcript's bottom, tracked CONTINUOUSLY via
+  // onScroll — it must be read as it stood BEFORE new content grew scrollHeight, so it cannot
+  // be computed inside the effect below.
+  const stickToBottomRef = useRef(true);
 
   // Every hook here takes the WORKSPACE ID and stamps the wire scope itself — the panel cannot
   // forget it, and an unscoped generation (which the server would answer for the account's Default)
@@ -254,8 +297,10 @@ export function AdHocChatPanel({
   // Everything in this panel is keyed to the active Workspace. When it changes: reset the history
   // page (so you don't land on an out-of-range page of the previous context), and clear the
   // transient mutation UI (a stale error / in-flight state) + the history-row selection — the
-  // answer itself is already per-workspace (sprintChatResults[scopeKey]), so a switch shows THIS
-  // Workspace's answer or nothing, never the previous one's.
+  // transcript itself is already per-workspace (sprintChatThreads[scopeKey]), so a switch shows
+  // THIS Workspace's conversation or nothing, never the previous one's. reset() only detaches
+  // the OBSERVER: an in-flight answer still completes into its ask-time workspace's thread via
+  // the hook-level onSuccess, so switching mid-ask discards no billed turn.
   useEffect(() => {
     setHistoryPage(0);
     chat.reset();
@@ -267,12 +312,23 @@ export function AdHocChatPanel({
   const outOfCredits =
     usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
 
-  // When a past question is picked, scroll the (now-replaced) top answer panel into view so the
-  // user sees the content that replaced whatever was there. Keyed on the selection id so it fires
-  // once per pick, after the store update has committed the answer DOM.
+  // Keep the newest turn (or the pending skeleton) in view: plain-DOM scroll of the transcript's
+  // own container — the timeline scroll gate does not apply here. STICKY, not unconditional: it
+  // pins only when the reader was already near the bottom, so scrolling up to re-read earlier
+  // turns during a long (Sonnet-length) wait isn't yanked away when the answer lands. The ask
+  // itself still scrolls — the container mounts pinned, and the programmatic scroll re-arms the
+  // ref via its own scroll event.
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, [thread.length, chat.isPending]);
+
+  // When a past question is picked, bring the (now-reseeded) transcript into view so the user
+  // sees the content that replaced whatever was there. Keyed on the selection id so it fires
+  // once per pick, after the store update has committed the transcript DOM.
   useEffect(() => {
     if (selectedHistoryId != null) {
-      answerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      transcriptRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [selectedHistoryId]);
 
@@ -280,43 +336,61 @@ export function AdHocChatPanel({
   if (!activityDigest) return null;
 
   const trimmed = question.trim();
+  const atCap = thread.length >= SPRINT_CHAT_MAX_TURNS;
   // `workspaceId != null` is part of the gate, not a nicety: this is the BILLING path, and an
   // unscoped Ask would be grounded in the account's Default workspace and then stashed under the
   // `ws:pending` key — a plausible-looking answer about repos the user isn't looking at.
-  const canAsk = trimmed !== '' && workspaceId != null && !chat.isPending && !outOfCredits;
+  const canAsk =
+    trimmed !== '' && workspaceId != null && !chat.isPending && !outOfCredits && !atCap;
 
   const ask = (q: string, chart: boolean, bots: boolean): void => {
     const text = q.trim();
-    if (text === '' || workspaceId == null || outOfCredits) return;
-    // A fresh Ask supersedes any picked history item, so the top panel shows the live answer.
+    if (text === '' || workspaceId == null || chat.isPending || outOfCredits || atCap) return;
+    // A fresh Ask continues the LIVE conversation; any picked-history marking is superseded
+    // (the seeded turn stays — the ask continues FROM it).
     setSelectedHistoryId(null);
-    // Persist the answer into the store on success so it survives a remount; the mutation's own
-    // data is component-local and would be lost when the panel unmounts.
-    chat.mutate(
-      // No `scope` here on purpose — `useSprintChat` stamps it from the workspace id it was given,
-      // and the mutation variable's type (`Omit<SprintChatBody,'scope'>`) makes that structural.
-      { question: text, wantChart: chart, wantBots: bots },
-      // Mirror the answer into the per-workspace store so it survives a remount AND is the single
-      // source the panel reads (keyed to the Workspace it was asked in).
-      { onSuccess: (data) => setStoredResult(scopeKey, data) },
-    );
+    // A SEND always scrolls (chat convention — show the question + skeleton); only arrivals
+    // respect where the reader has scrolled to.
+    stickToBottomRef.current = true;
+    // No `scope`/`history` here on purpose — `useSprintChat` stamps both (the scope from the
+    // workspace id it was given, the history from this workspace's live thread at call time),
+    // and the mutation variable's type makes that structural. NO mutate-level onSuccess either:
+    // the completed turn is appended (and the draft cleared) by the HOOK's own onSuccess under
+    // the ask-time workspace key — a mutate-scoped callback dies with the observer (chat.reset()
+    // on a workspace switch, or this panel unmounting mid-flight), which would silently drop a
+    // billed answer from the live transcript.
+    chat.mutate({ question: text, wantChart: chart, wantBots: bots });
   };
 
-  // Load a past question's STORED answer into the TOP answer panel (free — no re-run). Map the
-  // history item to the response shape and stash it under the current Workspace; reset() clears any
-  // stale error/in-flight banner from a prior Ask.
+  // Seed a FRESH 1-turn transcript from a past question's STORED answer (free — no re-run). It
+  // REPLACES any live transcript — the same destructive semantics the single-answer replace had,
+  // and every replaced turn is already individually in the server history. The next ask
+  // CONTINUES from the seeded turn. No follow-up chips (they are never persisted). An answer
+  // still in flight is NOT discarded: the hook-level onSuccess appends it when it lands (after
+  // the seed / into the emptied thread) — a billed turn always reaches the live view.
   const selectHistory = (item: SprintChatHistoryItem): void => {
     const mapped: SprintChatResponse = {
       enabled: true,
       answer: item.answer,
       prRefs: item.prRefs,
       chart: item.chart,
+      window: item.window,
       model: item.model ?? undefined,
       generatedAt: item.createdAt,
     };
     chat.reset();
-    setStoredResult(scopeKey, mapped);
+    setThread(scopeKey, [{ question: item.question, response: mapped }]);
     setSelectedHistoryId(item.id);
+  };
+
+  // Clear the live thread + draft question (toggles kept — they are preferences). The server's
+  // history rows are untouched: each turn was persisted at answer time, so the durable record
+  // survives; only the live view resets.
+  const newConversation = (): void => {
+    chat.reset();
+    setThread(scopeKey, []);
+    setDraft({ question: '' });
+    setSelectedHistoryId(null);
   };
 
   const runPinned = (p: PinnedPrompt): void => {
@@ -324,30 +398,30 @@ export function AdHocChatPanel({
     ask(p.text, p.wantChart, p.wantBots);
   };
 
-  // A quick-question pill: fill the box AND fire the Ask immediately (respecting the current
-  // chart/bots toggles), so clicking a preset submits without a separate Ask press.
+  // A suggestion / follow-up pill: fill the box AND fire the Ask immediately (respecting the
+  // current chart/bots toggles), so clicking one submits as the next turn without a separate
+  // Ask press.
   const runQuick = (qq: { question: string }): void => {
     setDraft({ question: qq.question });
     ask(qq.question, wantChart, wantBots);
   };
 
+  const latest = thread[thread.length - 1];
+  // The pinnable prompt: the box text — or, box empty (it clears when an answer lands), the
+  // newest turn's question, so the natural ask-then-pin flow needs no retyping.
+  const pinnable = trimmed !== '' ? trimmed : latest?.question.trim() ?? '';
   const pinCurrent = (): void => {
-    if (trimmed === '') return;
-    createPin.mutate({ text: trimmed, wantChart, wantBots });
+    if (pinnable === '') return;
+    createPin.mutate({ text: pinnable, wantChart, wantBots });
   };
 
-  // The visible answer for THIS Workspace. onSuccess mirrors each answer into
-  // sprintChatResults[scopeKey], so the per-workspace store entry is the single source — a switch
-  // shows that Workspace's answer (or nothing), never the previous one's, and there is no stale
-  // mutation-data flash.
-  const result = storedResult;
-  const answer = result?.answer ?? null;
-  // null for an answer that predates ranges (or a stale persisted one) — the caption is then simply
-  // absent rather than captioned with a window nobody chose.
-  const answerWindow = describeAnswerWindow(result?.window);
   const pins = pinned.data?.prompts ?? [];
   // Don't offer to pin a question that's already saved verbatim for this Workspace.
-  const alreadyPinned = pins.some((p) => p.text === trimmed);
+  const alreadyPinned = pinnable !== '' && pins.some((p) => p.text === pinnable);
+  // Follow-up chips belong to the NEWEST answer only — an older turn's suggestions were asks
+  // about a conversation state that no longer exists.
+  const followUps = latest?.response.followUps ?? [];
+  const pillsDisabled = chat.isPending || outOfCredits || atCap;
 
   const historyItems = history.data?.items ?? [];
   const historyTotal = history.data?.total ?? 0;
@@ -355,7 +429,7 @@ export function AdHocChatPanel({
 
   return (
     <div
-      className="rounded-lg border border-violet-200 bg-violet-50/40 p-4 dark:border-violet-900/60 dark:bg-violet-950/20"
+      className="rounded-lg border border-ai-border bg-ai-surface p-4"
       data-testid="adhoc-chat-panel"
     >
       <div className="flex items-center gap-2">
@@ -363,42 +437,184 @@ export function AdHocChatPanel({
           <span aria-hidden="true">💬</span>{' '}
           {periodLabel != null ? 'Ask about this period' : 'Ask about the sprint'}
         </span>
-        <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
+        <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
           Pro
         </span>
+        {thread.length > 0 && (
+          <button
+            type="button"
+            onClick={newConversation}
+            className="ml-auto shrink-0 text-[11px] font-medium text-gray-500 hover:text-gray-700 hover:underline dark:text-gray-400 dark:hover:text-gray-200"
+            title="Clear this conversation and start over (your questions stay in History)"
+          >
+            New conversation
+          </button>
+        )}
       </div>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
         {periodLabel != null ? (
           <>
             Pick a question below or type your own — answered from this Workspace&apos;s data over{' '}
-            <span className="font-medium">{periodLabel}</span>, the period shown above (runs the
-            Haiku model). Type <span className="font-mono">@</span> to mention someone.
+            <span className="font-medium">{periodLabel}</span>, the period shown above (runs your
+            configured report model). Follow-ups continue the conversation. Type{' '}
+            <span className="font-mono">@</span> to mention someone.
           </>
         ) : (
           <>
             Pick a question below or type your own — answered from this Workspace&apos;s sprint
-            data (runs the Haiku model). Type <span className="font-mono">@</span> to mention
-            someone.
+            data (runs your configured report model). Follow-ups continue the conversation. Type{' '}
+            <span className="font-mono">@</span> to mention someone.
           </>
         )}
       </p>
 
-      {/* Quick-question pills — clicking one fills the box AND fires the Ask immediately. These
-          replace the separate Sprint report card + "Sprint questions" carousel. Caller-supplied
-          suggestions (the report's significant-delta questions) lead; the built-ins follow. */}
-      <div className="mt-2 flex flex-wrap gap-1.5" data-testid="chat-quick-questions">
-        {[...(suggestedQuestions ?? []), ...QUICK_QUESTIONS].map((qq) => (
-          <button
-            key={qq.label}
-            type="button"
-            onClick={() => runQuick(qq)}
-            className="rounded-full border border-violet-300 bg-white/70 px-2.5 py-0.5 text-[11px] font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-gray-900/50 dark:text-violet-200 dark:hover:bg-violet-950/40"
-            title={qq.question}
+      {/* The transcript — completed turns oldest→newest, so the newest sits adjacent to the
+          input below. The pending ask renders as a provisional newest item. Scrolls in its own
+          container (auto-pinned to the bottom); the follow-up chips ride inside it, under the
+          last answer. */}
+      {(thread.length > 0 || chat.isPending) && (
+        <div
+          ref={transcriptRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          }}
+          className="mt-3 max-h-[28rem] space-y-3 overflow-y-auto pr-0.5"
+          data-testid="chat-transcript"
+        >
+          {thread.map((turn, i) => (
+            <TranscriptTurn
+              key={`${i}:${turn.response.generatedAt ?? ''}`}
+              turn={turn}
+              onOpenPr={(r) => openPrDetailTab(refMeta(r), { fromActivity: true })}
+            />
+          ))}
+          {chat.isPending && (
+            <div>
+              {chat.variables?.question != null && <QuestionRow text={chat.variables.question} />}
+              <div className="mt-1.5 rounded-md border border-ai-hairline bg-white/60 p-3 dark:bg-gray-900/40">
+                <ChatSkeleton />
+              </div>
+            </div>
+          )}
+          {/* Hidden while an ask is pending, for the same newest-answer-only reason: rendered
+              below the skeleton they would read as suggestions for the INCOMING answer, and
+              they are asks about a conversation state that is being superseded. */}
+          {!chat.isPending && followUps.length > 0 && (
+            <div data-testid="chat-follow-ups">
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                Follow up
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {/* Model-proposed, server-validated digit-free (D4) — filled pills so "continue
+                    the thread" reads differently from the outlined suggestion groups below. */}
+                {followUps.map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => runQuick({ question: f })}
+                    disabled={pillsDisabled}
+                    className="rounded-full bg-ai-signal px-2.5 py-0.5 text-left text-[11px] font-medium text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
+                    title={f}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Two labelled suggestion groups — the report's own delta pills (only when the caller
+          passed some, i.e. a report is on screen) visually distinct from the generic built-ins.
+          Clicking either fills the box AND fires the Ask as the next turn. Once a conversation
+          exists the BUILT-INS collapse behind their caption: ~3-4 wrapped pill rows between the
+          newest answer and the composer dilute the reply↔input adjacency, and mid-conversation
+          the conversation-relevant sets are the report pills and the follow-up chips. */}
+      {suggestionGroups(suggestedQuestions).map((g) => {
+        const collapsible = g.key === 'builtin' && thread.length > 0;
+        const open = !collapsible || builtinsOpen;
+        return (
+          <div
+            key={g.key}
+            className="mt-2"
+            data-testid={g.key === 'report' ? 'chat-report-questions' : 'chat-quick-questions'}
           >
-            {qq.label}
+            {collapsible ? (
+              <button
+                type="button"
+                onClick={() => setBuiltinsOpen((o) => !o)}
+                className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                aria-expanded={open}
+              >
+                <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+                {g.title}
+              </button>
+            ) : (
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                {g.title}
+              </div>
+            )}
+            {open && (
+              <div className="flex flex-wrap gap-1.5">
+                {g.pills.map((qq) => (
+                  <button
+                    key={qq.label}
+                    type="button"
+                    onClick={() => runQuick(qq)}
+                    disabled={pillsDisabled}
+                    className={
+                      g.key === 'report'
+                        ? 'rounded-full border border-sky-300 bg-sky-50/80 px-2.5 py-0.5 text-[11px] font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200 dark:hover:bg-sky-950/50'
+                        : 'rounded-full border border-ai-border bg-white/70 px-2.5 py-0.5 text-[11px] font-medium text-ai-signal hover:bg-ai-surface-2 disabled:opacity-50 dark:bg-gray-900/50'
+                    }
+                    title={qq.question}
+                  >
+                    {qq.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {chat.isError && (
+        <div className="mt-2 text-[11px] text-red-500">
+          {(chat.error as Error)?.message ?? 'Couldn’t answer that — try again.'}
+        </div>
+      )}
+      {/* Throttle / credit shapes never enter the transcript — they render as transient notices
+          off the mutation's own data (lost on remount, which is fine for a notice). */}
+      {chat.data?.throttled && (
+        <div className="mt-2 text-[11px] text-gray-400">
+          A question is already running — try again in a moment.
+        </div>
+      )}
+      {(chat.data?.creditsExhausted || outOfCredits) && (
+        <div className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
+          Out of AI credits this month — questions resume on the 1st.
+        </div>
+      )}
+
+      {/* The depth cap: the input locks rather than silently dropping oldest turns forever —
+          past SPRINT_CHAT_MAX_TURNS pairs the oldest context is gone from every answer anyway,
+          so a fresh start is the honest continuation. */}
+      {atCap && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50/60 px-2.5 py-1.5 text-[11px] text-amber-700 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
+          <span>
+            This conversation is at its {SPRINT_CHAT_MAX_TURNS}-question limit.
+          </span>
+          <button
+            type="button"
+            onClick={newConversation}
+            className="rounded border border-amber-400 px-2 py-0.5 font-semibold hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-950/40"
+          >
+            Start a new conversation
           </button>
-        ))}
-      </div>
+        </div>
+      )}
 
       <div className="mt-3">
         <MentionTextarea
@@ -406,9 +622,10 @@ export function AdHocChatPanel({
           value={question}
           onChange={(v) => setDraft({ question: v })}
           rows={3}
+          disabled={atCap}
           ariaLabel="Ask a question about the sprint"
           placeholder="e.g. What did @alex ship this sprint? Which reviews are stuck?"
-          className="w-full resize-y rounded-md border border-gray-300 bg-white px-2.5 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          className="w-full resize-y rounded-md border border-gray-300 bg-white px-2.5 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-ai-signal focus:outline-none focus:ring-1 focus:ring-ai-signal disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           onKeyDown={(e) => {
             // Cmd/Ctrl+Enter submits (the picker owns a bare Enter while open).
             if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && canAsk) {
@@ -436,9 +653,15 @@ export function AdHocChatPanel({
           <button
             type="button"
             onClick={pinCurrent}
-            disabled={trimmed === '' || createPin.isPending || alreadyPinned}
+            disabled={pinnable === '' || createPin.isPending || alreadyPinned}
             className="rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
-            title={alreadyPinned ? 'Already pinned' : 'Pin this prompt to re-run later'}
+            title={
+              alreadyPinned
+                ? 'Already pinned'
+                : trimmed === '' && pinnable !== ''
+                  ? 'Pin the last question to re-run later'
+                  : 'Pin this prompt to re-run later'
+            }
           >
             <span aria-hidden="true">📌</span> {alreadyPinned ? 'Pinned' : 'Pin'}
           </button>
@@ -446,8 +669,14 @@ export function AdHocChatPanel({
             type="button"
             onClick={() => ask(question, wantChart, wantBots)}
             disabled={!canAsk}
-            className="rounded bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
-            title={outOfCredits ? 'Out of AI credits — resets next month' : 'Ask (runs the Haiku model)'}
+            className="rounded bg-ai-signal px-3 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
+            title={
+              atCap
+                ? `This conversation is at its ${SPRINT_CHAT_MAX_TURNS}-question limit — start a new one`
+                : outOfCredits
+                  ? 'Out of AI credits — resets next month'
+                  : 'Ask (runs your configured report model)'
+            }
           >
             {chat.isPending ? 'Asking…' : 'Ask'}
           </button>
@@ -464,12 +693,12 @@ export function AdHocChatPanel({
             {pins.map((p) => (
               <span
                 key={p.id}
-                className="inline-flex max-w-full items-center gap-1 rounded-full border border-violet-300 bg-white/70 py-0.5 pl-2 pr-1 text-[11px] text-violet-700 dark:border-violet-800 dark:bg-gray-900/50 dark:text-violet-200"
+                className="inline-flex max-w-full items-center gap-1 rounded-full border border-ai-border bg-white/70 py-0.5 pl-2 pr-1 text-[11px] text-ai-ink dark:bg-gray-900/50"
               >
                 <button
                   type="button"
                   onClick={() => runPinned(p)}
-                  disabled={chat.isPending || outOfCredits}
+                  disabled={pillsDisabled}
                   className="max-w-[22rem] truncate text-left hover:underline disabled:opacity-50"
                   title={`Re-run: ${p.text}`}
                 >
@@ -492,58 +721,8 @@ export function AdHocChatPanel({
         </div>
       )}
 
-      {chat.isError && (
-        <div className="mt-2 text-[11px] text-red-500">
-          {(chat.error as Error)?.message ?? 'Couldn’t answer that — try again.'}
-        </div>
-      )}
-      {result?.throttled && (
-        <div className="mt-2 text-[11px] text-gray-400">
-          A question is already running — try again in a moment.
-        </div>
-      )}
-      {(result?.creditsExhausted || outOfCredits) && (
-        <div className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
-          Out of AI credits this month — questions resume on the 1st.
-        </div>
-      )}
-
-      {/* The answer. */}
-      {chat.isPending ? (
-        <div className="mt-3 rounded-md border border-violet-200/70 bg-white/60 p-3 dark:border-violet-900/50 dark:bg-gray-900/40">
-          <ChatSkeleton />
-        </div>
-      ) : answer != null ? (
-        <div
-          ref={answerRef}
-          key={result?.generatedAt}
-          className="digest-fade-in mt-3 rounded-md border border-violet-200/70 bg-white/60 p-3 dark:border-violet-900/50 dark:bg-gray-900/40"
-        >
-          <SummaryMarkdown
-            markdown={answer}
-            prRefs={result?.prRefs ?? []}
-            onOpenPr={(r) => openPrDetailTab(refMeta(r), { fromActivity: true })}
-          />
-          {result?.chart && (
-            <div className="mt-3">
-              <AdHocChart spec={result.chart} />
-            </div>
-          )}
-          {/* The window this answer COVERED — not the chips' current position. The two diverge the
-              moment someone changes the range without re-asking, and the answer on screen is still
-              about its own period. */}
-          {(result?.generatedAt || answerWindow) && (
-            <div className="mt-1.5 text-[10px] text-gray-400">
-              {answerWindow}
-              {answerWindow && result?.generatedAt && ' · '}
-              {result?.generatedAt && `Generated ${new Date(result.generatedAt).toLocaleString()}`}
-            </div>
-          )}
-        </div>
-      ) : null}
-
       {/* History — collapsible, paginated (10/page). Stored answers re-open for free (no AI). */}
-      <div className="mt-4 border-t border-violet-200/60 pt-3 dark:border-violet-900/40">
+      <div className="mt-4 border-t border-ai-hairline pt-3">
         <button
           type="button"
           onClick={() => setHistoryOpen((o) => !o)}

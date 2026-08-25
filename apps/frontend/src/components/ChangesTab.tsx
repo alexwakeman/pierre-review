@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PrDetail, PrFileChange } from '@pierre-review/shared';
 import { usePrFiles } from '../hooks/usePr.js';
 import { useUsers } from '../hooks/useTimeline.js';
-import { buildFileTree, type FileTreeEntry } from '../lib/diff.js';
+import { buildFileTree, indexThreadsByPath, type FileTreeEntry } from '../lib/diff.js';
 import { indexUsers } from '../lib/ui.js';
 import {
   FileDiffView,
@@ -10,6 +10,7 @@ import {
   type DiffThreadContext,
 } from './diff/FileDiffView.js';
 import { FileTree } from './diff/FileTree.js';
+import { ThreadCountChips, rollupCounts } from './ThreadList/ThreadCountChips.js';
 
 // The "Changes" tab: every file the PR touches with its inline diff hunks and per-line
 // review-comment affordances. The per-file rendering lives in the shared FileDiffView
@@ -94,13 +95,17 @@ export function ChangesTab({
   const { data, isLoading, isError } = usePrFiles(pr.id);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
-  // EVERY thread, resolved included. This used to be `.filter((t) => !t.isResolved)`, which made
-  // 40% of threads invisible here: a diff line carrying a settled discussion looked undiscussed,
-  // and the round trip from the Threads tab was one-way for exactly those threads. Resolved ones
-  // render COLLAPSED (see InlineThreadRow) so the diff isn't buried — the reason the filter
-  // existed in the first place was volume, not relevance.
+  // EVERY thread, resolved included (each renders as a collapsed pill — see InlineThread; the
+  // old `.filter((t) => !t.isResolved)` made 40% of threads invisible here). ONE rename-aware
+  // fold, built once and shared by the diff blocks, the tree rollups and the header mix: it
+  // keys threads on the RENDERED file path, so a thread written before a rename lands under
+  // the file's current path instead of silently vanishing from Changes.
+  const threadsByPath = useMemo(
+    () => indexThreadsByPath(pr.threads, data?.files ?? []),
+    [pr.threads, data?.files],
+  );
   const threadCtx: DiffThreadContext = {
-    threads: pr.threads,
+    threadsByPath,
     usersById,
     prUrl: pr.githubUrl,
     onOpenThread,
@@ -159,12 +164,13 @@ export function ChangesTab({
             deletions: f.deletions,
             status: f.status,
             previousPath: f.previousPath ?? null,
+            threadCounts: rollupCounts(threadsByPath.get(f.path) ?? []),
           }),
         ),
       ),
     // `files` is a fresh array each render; the query's data identity is the real input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data?.files],
+    [data?.files, threadsByPath],
   );
 
   // No changes at all on this PR — same empty state as before.
@@ -240,10 +246,15 @@ export function ChangesTab({
       <Header
         pr={pr}
         extra={
-          threadCtx.threads.length > 0 ? (
-            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
-              {threadCtx.threads.length} inline thread
-              {threadCtx.threads.length === 1 ? '' : 's'}
+          // The PR-grain version of the file-header read: count + the 4-state mix. Over
+          // `pr.threads` (not the indexed map), so the aggregate never under-reports a
+          // thread whose file fell outside the 100-file diff cap.
+          pr.threads.length > 0 ? (
+            <span className="flex items-center gap-2">
+              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 dark:text-gray-300">
+                {pr.threads.length} thread{pr.threads.length === 1 ? '' : 's'}
+              </span>
+              <ThreadCountChips counts={rollupCounts(pr.threads)} />
             </span>
           ) : undefined
         }
