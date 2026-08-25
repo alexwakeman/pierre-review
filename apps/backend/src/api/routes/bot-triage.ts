@@ -45,6 +45,7 @@ import {
   SCOPE_RESOLVE_THREAD_CAP,
 } from '../../db/queries.js';
 import { resolveThreadsOnGitHub } from '../../bot-triage/resolve.js';
+import { getAutomationOutput } from '../../db/automation-output.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { entitledProCapabilities } from '../../pro/contract.js';
 
@@ -297,6 +298,28 @@ const listReviewersSchema = {
 // 4-value set, safe to enum + default; the optional bounds pair refines it to a REAL period (the
 // People report's bot sections) and is validated by `parseWindowBounds` (only-together, ordered,
 // span-capped ⇒ 400 — a bad bound is a client bug, not a stale bookmark).
+// GET /api/bot-authoring — the AUTHORING half of "what did this automation do" (plan follow-up).
+// Bounds are REQUIRED here, unlike the two routes above: this endpoint exists to serve the People
+// report's bot sections, which always know their period, and a vector whose window silently
+// defaulted to a rolling enum would be captioned with the report's dates while measuring
+// something else. Same digits-only ajv shape and the same `parseWindowBounds` rules otherwise.
+const authoringSchema = {
+  querystring: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['userId', 'fromMs', 'toMs'],
+    properties: {
+      userId: { type: 'string', pattern: '^[0-9]+$' },
+      workspace: { type: 'string' },
+      repoIds: { type: 'string' },
+      fromMs: { type: 'string', pattern: '^[0-9]+$' },
+      toMs: { type: 'string', pattern: '^[0-9]+$' },
+      // `1` adds the receipt rows under the vector, mirroring the person route's `?evidence=1`.
+      evidence: { type: 'string' },
+    },
+  },
+} as const;
+
 const analyticsSchema = {
   querystring: {
     type: 'object',
@@ -750,6 +773,41 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // the workspace row — a null here is FINAL.
   //
   // ⚠ Never sum the price across workspaces. Within this one workspace's rows it is a plain sum.
+  // The authoring-automation vector: CORE, free, deterministic, no AI. `output: null` is the ONE
+  // degrade shape (unknown/foreign id, a HUMAN, or an automation that has never authored a PR in
+  // this workspace) so the route is not an existence oracle — the person route's posture.
+  app.get('/api/bot-authoring', { schema: authoringSchema }, async (req, reply) => {
+    const { userId, workspace, repoIds, fromMs, toMs, evidence } = req.query as {
+      userId: string;
+      workspace?: string;
+      repoIds?: string;
+      fromMs: string;
+      toMs: string;
+      evidence?: string;
+    };
+    // Reuse the shared validator so the bounds rules (ordered, span-capped) have ONE spelling
+    // across all three routes. The enum it refines is irrelevant here — the fold takes the pair.
+    const bounds = parseWindowBounds('rolling_14', fromMs, toMs);
+    if ('error' in bounds) {
+      reply.status(400);
+      return { error: 'BadRequest', message: bounds.error };
+    }
+    const accountId = accountIdOf(req);
+    const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
+    const output = await getAutomationOutput(
+      accountId,
+      scope,
+      Number(userId),
+      { fromMs: Number(fromMs), toMs: Number(toMs) },
+      { evidence: evidence === '1' },
+    );
+    return {
+      workspaceId: scope.workspaceId,
+      window: { fromMs: Number(fromMs), toMs: Number(toMs) },
+      output,
+    };
+  });
+
   app.get('/api/bot-analytics', { schema: analyticsSchema }, async (req, reply) => {
     const { window, workspace, repoIds, fromMs, toMs } = req.query as {
       window: BotWindowKind;

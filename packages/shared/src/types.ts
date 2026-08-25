@@ -7902,3 +7902,85 @@ export interface PersonPeriodResponse {
   periodEnd?: string; // ISO (exclusive, matching the half-open window)
   person: PersonPeriod | null;
 }
+
+// ── AUTHORING AUTOMATION: the output vector for a bot that writes PRs ────────────────────────
+//
+// The People report's bot sections answer "what did this automation produce?" from
+// `getBotAnalytics` — threads, comments, acted-on. That is REVIEW output, and it is the whole
+// story only for the `review` and `quality_check` roles. The picker also offers `dependency`,
+// `code_agent`, `release` and `housekeeping` automation, whose real output is PRs they AUTHORED:
+// for those, every review column is legitimately zero and a wall of zeros reads as "it did
+// nothing" when the truth is "it did a different thing". This vector is that different thing.
+//
+// ⚠ It is NOT a second spelling of the person vector. A person's numbers answer "how is this
+// teammate doing"; an automation's answer "what is this thing costing us" — hence
+// `prs_merged_without_human_review` (the cheap ones) and `human_review_comments_received` (the
+// expensive ones) rather than response times and review load. Do not add a metric here just
+// because PersonPeriod has it.
+export type AutomationMetricKey =
+  | 'prs_opened'
+  | 'prs_merged'
+  | 'prs_closed_unmerged'
+  | 'merge_rate_pct'
+  | 'median_hours_to_merge'
+  | 'median_pr_size_lines'
+  | 'prs_merged_without_human_review'
+  | 'human_review_comments_received'
+  | 'repos_touched';
+
+export const AUTOMATION_METRIC_KEYS: AutomationMetricKey[] = [
+  'prs_opened',
+  'prs_merged',
+  'prs_closed_unmerged',
+  'merge_rate_pct',
+  'median_hours_to_merge',
+  'median_pr_size_lines',
+  'prs_merged_without_human_review',
+  'human_review_comments_received',
+  'repos_touched',
+];
+
+/** `value: null` is "no sample", NEVER 0 — the period-metrics rule. `sampleSize` is the row
+ *  count the figure was folded over, so a median over two PRs can be captioned as such. */
+export interface AutomationMetricValue {
+  key: AutomationMetricKey;
+  value: number | null;
+  sampleSize: number;
+}
+
+/** Receipt rows under the vector — the PRs themselves, capped like the person evidence
+ *  (PERSON_EVIDENCE_CAP) with an honest `…More` remainder per group. */
+export interface AutomationOutputEvidence {
+  /** Merged inside the window, newest first. */
+  merged: DigestPrRef[];
+  mergedMore: number;
+  /** Closed inside the window WITHOUT merging — the automation's wasted churn. */
+  closedUnmerged: DigestPrRef[];
+  closedUnmergedMore: number;
+  /** Its PRs that pulled human review comments in the window — where it cost people time. */
+  humanReviewed: DigestPrRef[];
+  humanReviewedMore: number;
+}
+
+export interface AutomationOutput {
+  userId: number;
+  login: string | null;
+  displayName: string | null;
+  /** What the workspace says this automation DOES; null when unclassified. Drives the caption,
+   *  never the maths — the vector is identical whatever the role. */
+  role: ReviewerRole | null;
+  /** Repos it touched in the window, by PR count, descending. Capped for rendering. */
+  repos: Array<{ repoId: number; repoFullName: string; prs: number }>;
+  metrics: AutomationMetricValue[];
+  /** ABSENT unless requested (`?evidence=1`), matching the person route's shape. */
+  evidence?: AutomationOutputEvidence;
+}
+
+/** GET /api/bot-authoring — CORE, free, deterministic, no AI. `output: null` covers every
+ *  degrade in ONE shape (unknown/foreign user, a HUMAN, no authored PRs in this workspace) so
+ *  the route is not an existence oracle — the same posture as the person route. */
+export interface AutomationOutputResponse {
+  workspaceId: number;
+  window: { fromMs: number; toMs: number };
+  output: AutomationOutput | null;
+}

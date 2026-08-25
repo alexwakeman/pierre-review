@@ -3,7 +3,6 @@ import type {
   AwaitingReviewItem,
   ConsolidatedFeedItem,
   ConsolidatedFeedResponse,
-  FeedEvent,
   ActivityResponse,
   MeResponse,
   MyTurnPr,
@@ -259,51 +258,6 @@ const MY_TURN: MyTurnResponse = {
   users: USERS,
 };
 
-// Feed entries; the first references a non-inbox board PR, so clicking it is clearly a
-// full-board navigation (never an inbox/focus open) regardless of inbox membership.
-const FEED: { events: FeedEvent[]; users: User[] } = {
-  events: [
-    ...[105, 104].map((id, i): FeedEvent => {
-      const p = PRS.find((x) => x.id === id)!;
-      return {
-        id: 7000 + i,
-        type: 'pr_opened',
-        occurredAt: p.openedAt,
-        repoId: REPO.id,
-        repoFullName: REPO.fullName,
-        prId: p.id,
-        prNumber: p.number,
-        prTitle: p.title,
-        prState: p.state,
-        actorId: p.authorId,
-        refId: p.id,
-        reviewState: null,
-        excerpt: null,
-      };
-    }),
-    // The two MARKER feed items (mirror MARKER_EVENTS by id). A feed click on these opens
-    // the popover; the cross-person one (8001) also enters PR Focus.
-    ...MARKER_EVENTS.map((e): FeedEvent => {
-      const p = PRS.find((x) => x.id === e.prId)!;
-      return {
-        id: e.id,
-        type: e.type,
-        occurredAt: e.occurredAt,
-        repoId: REPO.id,
-        repoFullName: REPO.fullName,
-        prId: p.id,
-        prNumber: p.number,
-        prTitle: p.title,
-        prState: p.state,
-        actorId: e.actorId,
-        refId: e.refId,
-        reviewState: e.reviewState,
-        excerpt: e.type === 'pr_comment' ? 'a standalone PR comment' : null,
-      };
-    }),
-  ],
-  users: USERS,
-};
 
 // The Inbox aggregate (the rail) — one watched repo with the 5 open PRs.
 const ACTIVITY: ActivityResponse = {
@@ -559,8 +513,6 @@ export async function installMockApi(page: Page): Promise<void> {
       // and `.repoIds` off it.
       if (path.endsWith('/api/bot-reviewers')) return json(route, DETECTED_REVIEWERS);
       if (path.endsWith('/api/my-turn')) return json(route, MY_TURN);
-      // The consolidated Feed (new) — MUST precede the generic `/api/feed` check below,
-      // since `/api/activity/feed` also contains the substring `/api/feed`.
       if (path.endsWith('/api/activity/feed')) return json(route, CONSOLIDATED_FEED);
       if (path.endsWith('/api/activity')) return json(route, ACTIVITY);
       if (path.includes('/api/timeline')) return json(route, TIMELINE);
@@ -572,7 +524,6 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.includes('/api/pro/')) {
         return json(route, { enabled: false, model: 'claude-haiku-4-5', digests: [], digest: null, generatedAt: iso(0) });
       }
-      if (path.includes('/api/feed')) return json(route, FEED);
       if (prDetailMatch) return json(route, prDetailFor(Number(prDetailMatch[1])));
       // mark-viewed, my-turn-done, insights, and anything else: a harmless empty 200.
       if (path.includes('/api/my-turn-done') || path.includes('/dismiss-history')) {
@@ -588,7 +539,6 @@ export const fixtures = {
   INBOX_IDS,
   REPO,
   USERS,
-  FEED,
   CONSOLIDATED_FEED,
   ACTIVITY,
   WORKSPACE,

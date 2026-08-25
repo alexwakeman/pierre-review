@@ -442,6 +442,9 @@ that hold everywhere:
 - Client side: send `repoIds` whenever the array exists — **including when empty**
   (`if (ids)`, never `ids.length > 0`; an empty workspace must not widen to the whole
   account) — and every scoped React Query key carries a `ws:<id>` segment.
+- ⚠ **`GET /api/feed` is DELETED** — the caller-less, account-wide mirror of
+  `GET /api/activity/feed` and the last unscoped content route. `getFeed` STAYS (the consolidated
+  feed calls it internally, where the scoping happens).
 - Reads are accountId-scoped; id-addressed routes verify ownership → 404. Cloud gate:
   every `/api/*` 401s unauthenticated except `/api/health` + `/api/auth/*`. Claude-review
   routes are only REGISTERED when enabled (local-only).
@@ -874,6 +877,16 @@ the prior one, and a refusable forecast. **Metrics are CORE** (`db/period-metric
 bots, one report with a SECTION per pick. Full contract:
 [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § "The People report".
 
+- **A bot section renders TWO vectors and the DATA decides which appear**, never the stored role:
+  the review half (`/api/bot-analytics`) and the AUTHORING half (`GET /api/bot-authoring` over
+  `db/automation-output.ts` — CORE, free, deterministic). Both are fetched for every bot; each
+  fold's null hides its own half, and both null is the only true "it did nothing here". Gating on
+  role would be the login heuristic at one remove — a code agent writes AND reviews.
+  ⚠ `prs_closed_unmerged` keys on `mergedAt IS NULL` (a merge stamps `closedAt` too, so the bare
+  predicate calls every merge churn); `merge_rate_pct` divides by the RESOLVED population, not by
+  `prs_opened`; `prs_merged_without_human_review` probes reviews ALL-TIME on purpose (a review
+  predates its merge, so windowing it calls a March-reviewed, April-merged PR unreviewed).
+
 - **PREP, NOT SCORING survives the widening.** The multi-select is sanctioned; a cross-person
   SHAPE is not — sections ALPHABETICAL by label (humans/bots interleaved), no ranking, no
   cross-person sort by any metric, no comparison table, and `getPersonPeriod` KEEPS its
@@ -1247,9 +1260,6 @@ client-side by login; the legacy `?team=` URL rule is unit-tested nowhere;
 CI (`pnpm test` is recursive vitest and the frontend's `test` script is `echo "no tests"`), and
 neither directory is typechecked (both tsconfigs include only `src`) — run them by hand with
 `./apps/backend/node_modules/.bin/vitest run --root packages/pro | --root apps/frontend`;
-**the People report's BOT sections cannot chart authoring-family automation** — a Dependabot
-has no review output, so its section shows the honest "PRs this automation authored are not
-charted here" rather than an empty ROI row (the authored-PR half is simply not built yet);
 auto-merge's retarget guard still lacks a stored `expected_base_ref`; **AI Fix's conflict-resolver
 paths (`rebaseResolve` / `mergeResolveAndPush`) GATE on credits but never CHARGE them** — only
 `saveFixSuccess` calls `recordAiUsage`, so a fix that ends in a rebase-resolve under-bills; ML labels are never

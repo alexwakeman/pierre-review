@@ -191,6 +191,15 @@ function tierFor(method: string, path: string): readonly Tier[] {
     return [TIERS.search, TIERS.read];
   }
 
+  // GET /api/bot-authoring — the authoring-automation vector, the bot-shaped twin of the person
+  // route above and DECIDED for the identical reason: it runs the lane resolver, a capped
+  // merged-PR walk (AUTOMATION_MERGED_PR_CAP) whose ids then travel as bind parameters into two
+  // more scans, plus ~6 windowed aggregates. It is CORE and free, so it never reaches the
+  // /api/pro/ AI catch-all — without this line it would silently inherit the 600/min blanket
+  // `read` bucket, which is the wrong answer for a fold this size (the "follow the token" rule:
+  // 'DB-only' is not the same as 'cheap').
+  if (!mutating && path === '/api/bot-authoring') return [TIERS.search, TIERS.read];
+
   // ---- Bot behaviour depth (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
   // GET /api/pro/bot-behaviour — the workspace behaviour rollup, MOVED from core's
   // /api/bot-behaviour behind the `botDepth` entitlement (plan P0.2). DECIDED, not inherited from

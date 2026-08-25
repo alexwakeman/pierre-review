@@ -997,9 +997,40 @@ serve the old prompt's sections at $0. The `pm…` vector items are byte-identic
 **The bot sections are deterministic — NO AI.** They read the FREE core `/api/bot-analytics` row
 (ONE shared fetch per report, rows picked client-side by `u<userId>`) plus the per-bot comments
 drill-down, both narrowed to the real period by the routes' new `fromMs`/`toMs` pair. Paid depth
-stays a "Depth →" link. ⚠ **KNOWN LIMIT, disclosed in the UI:** authoring-family automation
-(Dependabot and friends) has no review output to chart, so its section says "PRs this automation
-authored are not charted here" rather than rendering an empty ROI row.
+stays a "Depth →" link.
+
+**A bot section now renders TWO vectors, and which ones appear is decided by the DATA, not by the
+role.** The review half above answers "what did it flag"; the AUTHORING half — `GET
+/api/bot-authoring` over `db/automation-output.ts` (CORE, free, deterministic) — answers "what did
+it write", and the section fetches both for every selection. Either fold returning null hides its
+own half; both null is the only real "it did nothing here" state.
+- ⚠ **This closed a gap that was previously disclosed in prose.** Authoring-family automation
+  (`dependency` / `code_agent` / `release` / `housekeeping`) has no review output at all, so the
+  section used to say "PRs this automation authored are not charted here" — honest, but it meant
+  the picker offered actors the report could not describe. It is deliberately NOT gated on the
+  stored role: a code agent both writes and reviews, and choosing a half by role would be the
+  login-heuristic mistake at one remove. The role only captions.
+- ⚠ **It is NOT a second spelling of the person vector.** A person's numbers answer "how is this
+  teammate doing"; an automation's answer "what is this thing costing us" — hence
+  `prs_merged_without_human_review` (the ones nobody had to look at) and
+  `human_review_comments_received` (the ones people paid for) instead of response times. Do not
+  add a metric there just because `PersonPeriod` has it.
+- ⚠ **`prs_closed_unmerged` keys on `mergedAt IS NULL`, never on a bare `closedAt` window** —
+  GitHub stamps `closedAt` on a merge too, so the naive predicate reports every successful merge
+  as abandoned churn as well. Pinned in `automation-output.test.ts`, whose fixture stamps both
+  columns exactly the way GitHub does.
+- ⚠ **`merge_rate_pct` is over the RESOLVED population** (merged + closed-unmerged, both
+  windowed), never over `prs_opened`: a PR opened on the last day of the window has not had its
+  chance yet, and dividing by it makes a busy final week look like a failing bot.
+- ⚠ **`prs_merged_without_human_review` probes reviews over ALL TIME on purpose.** The population
+  is PRs merged INSIDE the window and a review necessarily predates the merge, so the answer is
+  fixed once the PR lands — window it and a March-reviewed, April-merged PR reads as unreviewed.
+  The human test runs through `db/actor-lanes.ts`, so one bot reviewing another never counts as
+  human attention.
+- The evidence groups (merged / closed-unmerged / drew-human-review) are capped at
+  `PERSON_EVIDENCE_CAP` like the person receipts. The first two remainders are population
+  figures; the third is over what the capped comment scan SAW, which is why its caption says
+  "at least".
 
 **⚠ `getBotAnalytics` honoured an explicit `toMs` in only TWO of its folds** — the automated
 thread scan, `mergedPastRows`, `getMlWindowAggregates` and `countUnlabelledBotText` were

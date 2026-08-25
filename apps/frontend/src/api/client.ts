@@ -54,6 +54,7 @@ import type {
   WorkspaceMetricsResponse,
   AiUsageResponse,
   BotWindowKind,
+  AutomationOutputResponse,
   BotAnalyticsResponse,
   BotThemesResponse,
   HumanThemesResponse,
@@ -1194,6 +1195,26 @@ export const api = {
         repoIdsParam(repoIds),
         bounds ? `fromMs=${bounds.fromMs}` : undefined,
         bounds ? `toMs=${bounds.toMs}` : undefined,
+      ),
+    ),
+  // The AUTHORING half of "what did this automation do" (CORE, free). Bounds are REQUIRED by the
+  // route — the caller always knows its period — so there is no rolling-enum overload here.
+  botAuthoring: (
+    workspaceId: number,
+    userId: number,
+    bounds: { fromMs: number; toMs: number },
+    evidence: boolean,
+    repoIds?: number[] | null,
+  ) =>
+    get<AutomationOutputResponse>(
+      withQuery(
+        '/api/bot-authoring',
+        `userId=${userId}`,
+        `fromMs=${bounds.fromMs}`,
+        `toMs=${bounds.toMs}`,
+        workspaceParam(workspaceId),
+        repoIdsParam(repoIds),
+        evidence ? 'evidence=1' : undefined,
       ),
     ),
   // ── Bot Tuning Advisor (Pro; /api/pro/advisor/*) ─────────────────────────────────────────

@@ -1985,6 +1985,94 @@ check(
   );
 }
 
+// ── getAutomationOutput (db/automation-output.ts — the authoring-automation vector) ──────────
+// The bot-shaped twin of the person fold above, and it carries the SAME two leak shapes: `users`
+// is GLOBAL (so the same automation login exists in both tenants) and the evidence arm is a
+// second, row-level surface over PR titles. Seeded so every negative has a paired POSITIVE — the
+// vacuity lesson: a check that passes because the fold found nothing anywhere proves nothing.
+{
+  const { getAutomationOutput } = await import('../src/db/automation-output.js');
+  const { users } = schema;
+  const [dep] = await db
+    .insert(users)
+    .values({ githubLogin: 'dependabot[bot]', githubNodeId: 'U_iso_dep', isBot: true })
+    .returning()
+    .execute();
+  const winAO = { fromMs: now.getTime() - 30 * 86_400_000, toMs: now.getTime() + 86_400_000 };
+  // ⚠ This fold takes a BotScope, not a bare workspace id (the person fold's shape) — and a
+  // BotScope is only ever CONSTRUCTED by resolveWorkspaceScope, whose contract is that its
+  // repoIds are already a subset of that workspace's membership. Building one by hand here would
+  // test a scope the production path can never produce.
+  const scopeA = await q.resolveWorkspaceScope(1, String(defaultA), null);
+  const scopeB = await q.resolveWorkspaceScope(2, String(wsB.id), null);
+  const mkBotPr = async (accountId: number, repoId: number, tag: string, n: number) =>
+    db
+      .insert(pullRequests)
+      .values({
+        githubNodeId: `PR_ao_${tag}`,
+        accountId,
+        repoId,
+        number: n,
+        title: `bump ${tag}`,
+        state: 'merged',
+        isDraft: false,
+        authorId: dep!.id,
+        openedAt: new Date(now.getTime() - 3 * 86_400_000),
+        mergedAt: new Date(now.getTime() - 2 * 86_400_000),
+        updatedAt: now,
+        additions: 4,
+        deletions: 2,
+      })
+      .execute();
+
+  // Only B has seen this automation author → A must not admit it, while B does.
+  await mkBotPr(2, B.repoId, 'isoB', 960);
+  const aoForeign = await getAutomationOutput(1, scopeA, dep!.id, winAO);
+  const aoB = await getAutomationOutput(2, scopeB, dep!.id, winAO);
+  check(
+    'getAutomationOutput(A) refuses an automation that only ever authored in B — while B sees it',
+    aoForeign === null &&
+      aoB !== null &&
+      aoB.metrics.find((m) => m.key === 'prs_merged')?.value === 1,
+  );
+
+  // …and once it authors in A too, A counts ONLY A's rows.
+  await mkBotPr(1, A.repoId, 'isoA', 961);
+  const aoA = await getAutomationOutput(1, scopeA, dep!.id, winAO);
+  check(
+    "getAutomationOutput(A) counts A's rows only — the same automation's B-side merge never leaks in",
+    aoA !== null && aoA.metrics.find((m) => m.key === 'prs_merged')?.value === 1,
+  );
+
+  // The evidence arm: PR titles are the row-level surface. A's receipts must name A's PR and
+  // never B's, and vice versa — the paired positive on both sides.
+  const evAoA = (await getAutomationOutput(1, scopeA, dep!.id, winAO, { evidence: true }))
+    ?.evidence;
+  const evAoB = (await getAutomationOutput(2, scopeB, dep!.id, winAO, { evidence: true }))?.evidence;
+  check(
+    'getAutomationOutput(evidence) names each tenant\'s own authored PRs only',
+    evAoA != null &&
+      evAoB != null &&
+      evAoA.merged.some((r) => r.title === 'bump isoA') &&
+      !evAoA.merged.some((r) => r.title === 'bump isoB') &&
+      evAoB.merged.some((r) => r.title === 'bump isoB') &&
+      !evAoB.merged.some((r) => r.title === 'bump isoA'),
+  );
+
+  // The mirror-image lane rule, proven against a real human who HAS authored in A (so the null
+  // cannot be "no rows"): the person fold admits them, this one refuses them.
+  const [humanRow] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.githubLogin, 'iso-human'))
+    .limit(1)
+    .execute();
+  check(
+    'getAutomationOutput(A) refuses a HUMAN outright — the mirror image of the person fold',
+    humanRow != null && (await getAutomationOutput(1, scopeA, humanRow.id, winAO)) === null,
+  );
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

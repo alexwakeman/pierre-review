@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import type { JSX } from 'react';
 import { skipToken, useQuery } from '@tanstack/react-query';
 import type {
+  AutomationMetricKey,
+  AutomationMetricValue,
+  AutomationOutput,
+  AutomationOutputResponse,
   BotAnalyticsResponse,
   BotVendorAnalytics,
   BotVendorComment,
@@ -10,7 +14,9 @@ import type {
   DigestPrRef,
   PersonEvidenceThreadRef,
   PersonReportSectionId,
+  User,
 } from '@pierre-review/shared';
+import { AUTOMATION_METRIC_KEYS } from '@pierre-review/shared';
 import { api } from '../../api/client.js';
 import { useFilters, type PeopleReportSelection } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
@@ -127,6 +133,29 @@ function useReportBotComments(
       workspaceId == null || bounds == null
         ? skipToken
         : () => api.botVendorComments(`u${userId}`, 'sprint', workspaceId, undefined, bounds),
+    enabled: enabled && bounds != null,
+    staleTime: 60_000,
+    gcTime: ACTIVITY_GC_TIME,
+  });
+}
+
+// The AUTHORING half of a bot section (CORE, free). Fetched for EVERY bot, not only the ones the
+// review fold came back empty for: a code agent can both author PRs and review them, and deciding
+// client-side which half "counts" would be the login heuristic this codebase keeps deleting. The
+// server answers `output: null` for anything that has never authored here, and that null is what
+// hides the panel.
+function useReportBotAuthoring(
+  workspaceId: number | null,
+  userId: number,
+  bounds: PeriodBounds | null,
+  enabled: boolean,
+) {
+  return useQuery<AutomationOutputResponse>({
+    queryKey: ['bot-authoring', workspaceKey(workspaceId), `u${userId}`, boundsSlot(bounds)],
+    queryFn:
+      workspaceId == null || bounds == null
+        ? skipToken
+        : () => api.botAuthoring(workspaceId, userId, bounds, true),
     enabled: enabled && bounds != null,
     staleTime: 60_000,
     gcTime: ACTIVITY_GC_TIME,
@@ -836,6 +865,153 @@ function dur(ms: number | null): string {
   return `${days < 10 ? days.toFixed(1) : Math.round(days)}d`;
 }
 
+// ── The authoring vector's presentation ──────────────────────────────────────────────────────
+//
+// Labels live here rather than in the fold: the fold's job is the number. Every one of these is a
+// COUNT or a code-computed median — nothing on this panel is model-authored, which is why the
+// section keeps its "deterministic breakdown — no model narrative for bots" caption even now that
+// it renders two vectors.
+const AUTOMATION_LABEL: Record<AutomationMetricKey, string> = {
+  prs_opened: 'PRs opened',
+  prs_merged: 'PRs merged',
+  prs_closed_unmerged: 'Closed unmerged',
+  merge_rate_pct: 'Merge rate',
+  median_hours_to_merge: 'Median time to merge',
+  median_pr_size_lines: 'Median size',
+  prs_merged_without_human_review: 'Merged with no human review',
+  human_review_comments_received: 'Human review comments',
+  repos_touched: 'Repos touched',
+};
+
+const AUTOMATION_TITLE: Record<AutomationMetricKey, string> = {
+  prs_opened: 'PRs this automation opened inside the period',
+  prs_merged: 'PRs this automation authored that were merged inside the period',
+  prs_closed_unmerged:
+    'PRs it authored that were closed inside the period WITHOUT merging — the churn it cost for nothing',
+  merge_rate_pct:
+    'Merged ÷ (merged + closed-unmerged), over PRs RESOLVED in the period — not over PRs opened, since one opened on the last day has not had its chance yet',
+  median_hours_to_merge: 'Median open → merged, over the PRs merged inside the period',
+  median_pr_size_lines: 'Median added + deleted lines, over the PRs merged inside the period',
+  prs_merged_without_human_review:
+    'Of the PRs merged in the period, how many no human ever reviewed or commented on — the ones that cost nobody any time',
+  human_review_comments_received:
+    'Review comments people left on its PRs inside the period — where it did cost time',
+  repos_touched: 'Repos it opened or merged a PR in during the period',
+};
+
+function fmtAutomation(m: AutomationMetricValue): string {
+  if (m.value == null) return '—';
+  switch (m.key) {
+    case 'merge_rate_pct':
+      return `${Math.round(m.value)}%`;
+    case 'median_hours_to_merge':
+      return m.value < 24 ? `${Math.round(m.value)}h` : `${(m.value / 24).toFixed(1)}d`;
+    case 'median_pr_size_lines':
+      return `${Math.round(m.value).toLocaleString()} lines`;
+    default:
+      return Math.round(m.value).toLocaleString();
+  }
+}
+
+// The authored-PR vector + its receipts. Rendered UNDER the review block when both exist, so a
+// code agent that reviews and writes reads as one actor doing two things rather than two rows.
+function AuthoringPanel({
+  output,
+  usersById,
+  onOpenPr,
+}: {
+  output: AutomationOutput;
+  usersById: Map<number, User>;
+  onOpenPr: (ref: DigestPrRef) => void;
+}): JSX.Element {
+  // These rows carry no narrative, so there are no `pe<v>:` citations to resolve against — the
+  // empty index is the honest argument, not a placeholder.
+  const noIndex = useMemo(() => buildPrRefIndex([]), []);
+  const ev = output.evidence;
+  const byKey = new Map(output.metrics.map((m) => [m.key, m] as const));
+  const groups: { label: string; rows: DigestPrRef[]; more: number; title: string }[] = [];
+  if (ev != null) {
+    if (ev.merged.length > 0)
+      groups.push({ label: 'Merged', rows: ev.merged, more: ev.mergedMore, title: 'PRs merged inside the period' });
+    if (ev.closedUnmerged.length > 0)
+      groups.push({
+        label: 'Closed unmerged',
+        rows: ev.closedUnmerged,
+        more: ev.closedUnmergedMore,
+        title: 'Closed inside the period without merging',
+      });
+    if (ev.humanReviewed.length > 0)
+      groups.push({
+        label: 'Drew human review',
+        rows: ev.humanReviewed,
+        more: ev.humanReviewedMore,
+        title: 'Its PRs that a person commented on inside the period',
+      });
+  }
+
+  return (
+    <div className="space-y-3 border-t border-gray-200 pt-3 dark:border-gray-800">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          What it authored
+        </span>
+        <span className={`text-[11px] ${MUTED}`}>
+          PRs this automation wrote — the output its role is actually measured by
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-x-4 gap-y-2 sm:grid-cols-5">
+        {AUTOMATION_METRIC_KEYS.map((k) => {
+          const m = byKey.get(k);
+          if (m == null) return null;
+          return (
+            <Stat
+              key={k}
+              label={AUTOMATION_LABEL[k]}
+              value={fmtAutomation(m)}
+              title={AUTOMATION_TITLE[k]}
+            />
+          );
+        })}
+      </div>
+      {output.repos.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={`text-[10px] uppercase tracking-wide ${MUTED}`}>Where</span>
+          {output.repos.map((r) => (
+            <span
+              key={r.repoId}
+              className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600 dark:bg-gray-900 dark:text-gray-300"
+            >
+              {r.repoFullName.split('/')[1] ?? r.repoFullName} · {r.prs}
+            </span>
+          ))}
+        </div>
+      )}
+      {groups.map((g) => (
+        <div key={g.label}>
+          <div
+            className={`mb-1 text-[10px] font-semibold uppercase tracking-wide ${MUTED}`}
+            title={g.title}
+          >
+            {g.label}
+          </div>
+          <PrTable
+            groups={[{ prs: g.rows, summary: '' }]}
+            onOpenPr={onOpenPr}
+            usersById={usersById}
+            index={noIndex}
+          />
+          {/* The two closed/merged remainders ARE population figures; the human-review one is
+              over what the capped scan saw, so it says "at least". */}
+          <MoreLine
+            more={g.more}
+            unit={g.label === 'Drew human review' ? 'more PRs at least' : 'PRs'}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function BotSection({
   selection,
   workspaceId,
@@ -856,6 +1032,26 @@ function BotSection({
   const [showAllComments, setShowAllComments] = useState(false);
 
   const comments = useReportBotComments(workspaceId, selection.userId, bounds, true);
+  const authoring = useReportBotAuthoring(workspaceId, selection.userId, bounds, true);
+  const authored = authoring.data?.output ?? null;
+  const { data: usersForRefs } = useUsers();
+  const usersById = useMemo(() => indexUsers(usersForRefs), [usersForRefs]);
+  const openPrRef = useCallback(
+    (ref: DigestPrRef): void => {
+      if (ref.prId == null) return;
+      openPrDetailTab(
+        prRefToMeta({
+          prId: ref.prId,
+          prNumber: ref.prNumber,
+          repoFullName: ref.repoFullName,
+          title: ref.title,
+          authorLogin: ref.authorLogin,
+        }),
+        { fromActivity: true },
+      );
+    },
+    [openPrDetailTab],
+  );
   const rows = comments.data?.comments ?? [];
   const shown = showAllComments ? rows : rows.slice(0, BOT_COMMENT_SHOW_CAP);
   // The disclosed client-side sample — folded over the FETCHED rows, captioned with that exact
@@ -913,7 +1109,7 @@ function BotSection({
             release automation too, whose real output is PRs they AUTHORED; this section does
             not chart those, so it must not let a wall of zeros read as "it did nothing". */}
         <span className={`ml-auto text-[11px] ${MUTED}`}>
-          deterministic review-output breakdown — no model narrative for bots
+          deterministic breakdown — no model narrative for bots
         </span>
         {botDepth && (
           <button
@@ -937,11 +1133,19 @@ function BotSection({
 
       {analyticsLoading ? (
         <div className={`py-1 text-[11px] ${MUTED}`}>Loading period figures…</div>
-      ) : row == null ? (
+      ) : row == null && authored == null ? (
+        // BOTH folds are empty. This is now a real "it did nothing here" — it used to be the
+        // catch-all for authoring automation, which had output the section simply could not see.
         <div className={`text-[11px] ${MUTED}`}>
-          No review output in this period — threads and comments only; PRs this automation
-          authored are not charted here.
+          {authoring.isPending
+            ? 'Loading period figures…'
+            : 'No review output and no authored PRs in this period.'}
         </div>
+      ) : row == null ? (
+        // Authoring-only automation (dependency bots, most code agents, release bots). Its review
+        // columns are legitimately zero, so the section renders the authored vector ALONE rather
+        // than a wall of zeros above it.
+        <AuthoringPanel output={authored!} usersById={usersById} onOpenPr={openPrRef} />
       ) : (
         <div className="space-y-3">
           {/* The FREE ROI-row facts over the REAL period (the routes' fromMs/toMs bounds). */}

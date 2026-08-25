@@ -1540,7 +1540,7 @@ Static imports of every route module are at the top (lines 13–25), each a name
 - **L106–127** `@fastify/static` SPA + landing mounts (existence-gated).
 - **L131–136** `registerErrorHandler(app, {...})` — single not-found/error handler.
 - **L139** `if (config.isCloud) await app.register(authRoutes)` — OAuth.
-- **L141–151** the always-on data routes, registered unconditionally in order: `healthRoutes, repoRoutes, userRoutes, timelineRoutes, prRoutes, threadRoutes, meRoutes, openPrsRoutes, feedRoutes, mergersRoutes, insightsRoutes`.
+- **L141–151** the always-on data routes, registered unconditionally in order: `healthRoutes, repoRoutes, userRoutes, timelineRoutes, prRoutes, threadRoutes, meRoutes, openPrsRoutes, mergersRoutes, insightsRoutes` (`feedRoutes` is GONE — see below).
 
 **The exact conditional gate for premium routes (the precedent to mirror)** — L152–154:
 ```ts
@@ -1689,7 +1689,14 @@ All paths absolute. Line numbers are current.
 `getRepoAnalytics(accountId, repoId): Promise<RepoAnalytics | null>` (L1006)
 - Single-repo deep analytics (null → 404 if not owned). Returns weekly-bucketed series: `throughput {opened,merged,closed}`, `backlog {open,stalled}`, `reviewLatencyTrend`, `cycleBreakdown`, `reviewLatencyDist`, `threadMix {resolved,likely_addressed,replied_unresolved,untouched}` (L1217 — **per-week buckets, windowed by thread `createdAt`, NOT a current-state total**), `reviewVerdicts`, `reviewerLoad`, `sizeDist`, `sizeVsCycle`, `sizeCycleByBucket`, `activityHeatmap[168]`. Per-repo but trend-shaped, not a snapshot breakdown.
 
-`getFeed(accountId, daysBefore=14): Promise<FeedResponse>` (L589) — flat denormalized activity across WATCHED repos (`repos.inboxWatch=true`), newest-first, excludes commits. `FeedEvent` carries `repoId`, `repoFullName`, `prId/prNumber/prTitle/prState`, `actorId`, `reviewState`, `excerpt`. Repo data present but flat (not grouped).
+`getFeed(accountId, opts): Promise<FeedResponse>` — flat denormalized activity across the account's repos,
+newest-first, excludes commits. ⚠ It has NO route of its own any more: `GET /api/feed` and
+`api/routes/feed.ts` were DELETED as the superseded, caller-less mirror of `GET /api/activity/feed`
+(its own header had said "if this endpoint ever gains a caller, scope it through
+`resolveWorkspaceScope` … or delete it", and it never did — it predated workspaces, so it was also
+the last unscoped content route). The FUNCTION stays: `getConsolidatedFeed` calls it internally, which
+is where the workspace scoping and bot filtering are applied. The `repos.inboxWatch` narrowing this
+line used to describe is gone too — that column was dropped in migration 0046. `FeedEvent` carries `repoId`, `repoFullName`, `prId/prNumber/prTitle/prState`, `actorId`, `reviewState`, `excerpt`. Repo data present but flat (not grouped).
 
 `listRepos(accountId): Promise<Repo[]>` (L136) — each `Repo` carries `inboxWatch`, `lastFullSyncAt`, `lastIncrementalSyncAt`, `lastSyncStatus`. The watched-repo set comes from here.
 
@@ -1742,7 +1749,7 @@ Row types: `ClaudeReviewRow = typeof claudeReviews.$inferSelect`, `ClaudeFinding
 - Feature gating: whole feature behind `config.claudeReviewEnabled`; flows to FE via `/api/me` (me.ts referenced) + `ClaudeReviewResponse.enabled`.
 
 ### Repo-relevant read routes already exposed (reusable as-is, no AI, no new sync)
-`/api/timeline` (timeline.ts L81), `/api/open-prs` (open-prs.ts L16), `/api/insights` + `/api/insights/:repoId/analytics` (insights.ts L18/L28), `/api/my-turn` (me.ts L47), `/api/mergers` (mergers.ts L8), `/api/feed` (feed.ts L10), `/api/repos` (repos.ts L95), `/api/claude-reviews` + `/api/claude-reviews/:reviewId`, `/api/prs/:id/claude-review`. All scope via `accountIdOf(req)` (plugins/auth.ts).
+`/api/timeline` (timeline.ts L81), `/api/open-prs` (open-prs.ts L16), `/api/insights` + `/api/insights/:repoId/analytics` (insights.ts L18/L28), `/api/my-turn` (me.ts L47), `/api/mergers` (mergers.ts L8), `/api/repos` (repos.ts L95), `/api/claude-reviews` + `/api/claude-reviews/:reviewId`, `/api/prs/:id/claude-review`. All scope via `accountIdOf(req)` (plugins/auth.ts).
 
 ## E. Gap analysis — what's ALREADY queryable vs MISSING for the repo-oriented Inbox
 
