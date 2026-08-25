@@ -50,16 +50,16 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   },
   '/bots': {
     title: 'The receipt — independent grading of your AI review bots',
-    description: `Every bot comment on your repos, graded by ${SITE_NAME}’s own ML model — severity, category, cost and overlap. Is the review bot worth its seat? Now it’s a number, not a feeling. Free in the hosted service.`,
+    description: `Every bot comment on your repos, graded by ${SITE_NAME}’s own ML model — severity, category and a keep/tune/noisy verdict per bot. On adjudicated ground truth the model agrees 0.700 exactly; the vendor’s own badge manages 0.474. The verdict is free in the hosted service; per-bot depth, overlap and history are Pro.`,
   },
   '/pro': {
-    title: `${SITE_NAME} Pro & Pro+ — the intelligence layer, and the full loop`,
+    title: `${SITE_NAME} Pro & Pro+ — the measurement depth, and the full loop`,
     description:
-      'Pro reads the board for you: attention & risk digests, thread validity, addressed-confidence, themes and reports, chat with your repos, CI diagnosis. Pro+ closes the loop — Claude reviews that learn, and fixes you approve, pushed to GitHub.',
+      'Pro is the depth under the free verdicts: per-bot behaviour and inflation history, per-seat ROI, synthesised verdicts on every drill-down, period reports with 1:1 prep, narrated daily briefs, thread validity and CI diagnosis. Pro+ closes the loop — Claude reviews that learn, and fixes you approve, pushed to GitHub.',
   },
   '/pricing': {
     title: `Pricing — ${SITE_NAME} is open-core and free. Pro from $15 a seat`,
-    description: `The ${SITE_NAME} dashboard — including the bot receipt — is free forever. Pro is $15 a seat for the intelligence layer; Pro+ is $29 a seat for Claude reviews and fixes on your own key.`,
+    description: `The ${SITE_NAME} dashboard — including the bot receipt and its keep/tune/noisy verdicts — is free forever. Pro is $15 a seat for the history, depth and reports; Pro+ is $29 a seat for Claude reviews and fixes on your own key.`,
   },
   '/how-it-works': {
     title: 'How it works — sync, architecture & roadmap',

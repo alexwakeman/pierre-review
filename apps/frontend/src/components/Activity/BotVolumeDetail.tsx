@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BotVolumePrRow, BotVolumePrSort, BotWindowKind } from '@pierre-review/shared';
 import { useAutoLoadSentinel } from '../../hooks/useAutoLoadSentinel.js';
 import { useBotVolumePrs } from '../../hooks/useBotVolume.js';
@@ -15,6 +15,12 @@ import {
   ratioDetail,
   ratioTone,
 } from '../../lib/botVolume.js';
+import {
+  synthesisKeySlots,
+  useSynthesis,
+  type SynthesisDescriptor,
+} from '../../hooks/useSynthesis.js';
+import { SynthesisCard } from './SynthesisCard.js';
 
 // BOT COMMENTS PER MERGED PR — the drill-down behind the ROI table's "Comments/PR" column. Click a
 // bot's cell and this is the merged PRs that average was folded from, biggest first.
@@ -40,6 +46,11 @@ const WINDOWS: { key: BotWindowKind; label: string }[] = [
   { key: 'rolling_30', label: '30d' },
   { key: 'sprint', label: 'Sprint' },
 ];
+
+// Only ever read while the synthesis query is DISABLED (no expressible descriptor — see
+// `synthDescriptor` below). Hooks cannot be skipped, so useSynthesis needs some value; this one
+// is never sent.
+const NO_SYNTHESIS_DESCRIPTOR: SynthesisDescriptor = { kind: 'bot-volume', window: 'rolling_30' };
 
 function Skeleton(): JSX.Element {
   return (
@@ -171,6 +182,48 @@ export function BotVolumeDetail(): JSX.Element {
   // silently answer a different question.
   const [sort, setSort] = useState<BotVolumePrSort>('comments');
 
+  // ── P2.2: the synthesis verdict's SCOPE DESCRIPTOR ──────────────────────────────────────────
+  // The EXACT population this list shows, in the seam's vocabulary — the same fields
+  // `useBotVolumePrs`'s query key carries: the shared window, the seed's repo narrowing and the
+  // single-bot narrowing. The seam runs the drill-down's own fold (`foldPrBotVolumePopulation` —
+  // one predicate, three consumers), so its `totalCount` IS this page's `filteredTotal`. The
+  // SORT is deliberately absent: it re-orders the same row set, never changes it (the seam fixes
+  // 'comments', the route default), so every ordering of one population shares one verdict.
+  //
+  // A MULTI-bot narrowing has no seam grain (the descriptor carries ONE `botUserId`) — the
+  // descriptor goes null, the card unmounts, and the list renders exactly as today.
+  const synthDescriptor = useMemo<SynthesisDescriptor | null>(() => {
+    if (seed == null) return null;
+    if (bots != null && bots.userIds.length !== 1) return null;
+    return {
+      kind: 'bot-volume',
+      window,
+      repoIds: repoScope,
+      botUserId: bots?.userIds[0] ?? null,
+    };
+  }, [seed, bots, window, repoScope]);
+  // The card's OWN cached query — same key slots, one cache entry, no second fetch — read only
+  // to decide whether the receipts collapse. Free/OSS: useSynthesis gates itself on the
+  // capability, so this stays quiet and the list renders exactly as today.
+  const synthQuery = useSynthesis(
+    workspaceId,
+    synthDescriptor ?? NO_SYNTHESIS_DESCRIPTOR,
+    synthDescriptor != null,
+  );
+  const hasSynthesis =
+    synthDescriptor != null &&
+    synthQuery.data?.enabled === true &&
+    synthQuery.data.synthesis != null;
+  // Collapsed, NEVER hidden (P2.2). Reset per SCOPE — keyed on the canonical slots so an expand
+  // doesn't leak across re-seeds or window changes of this singleton tab.
+  const [showReceipts, setShowReceipts] = useState(false);
+  const synthKey =
+    synthDescriptor == null ? null : synthesisKeySlots(workspaceId, synthDescriptor).join('|');
+  useEffect(() => {
+    setShowReceipts(false);
+  }, [synthKey]);
+  const receiptsCollapsed = hasSynthesis && !showReceipts;
+
   const { data: repos } = useRepos();
   const repoName = useMemo(() => {
     if (seedRepoId == null) return null;
@@ -220,8 +273,10 @@ export function BotVolumeDetail(): JSX.Element {
 
   const sortMeta = VOLUME_SORTS.find((s) => s.key === sort) ?? VOLUME_SORTS[0];
 
-  return (
-    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
+  // The header row + subtitle, extracted so the return can slot the SynthesisCard between them
+  // and the receipts without touching either.
+  const header = (
+    <>
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
           Bot comments per merged PR
@@ -262,8 +317,14 @@ export function BotVolumeDetail(): JSX.Element {
         bot comment — inline review comments, PR comments and review bodies alike. Open PRs are not
         counted.
       </p>
+    </>
+  );
 
-      {seed == null ? (
+  // The deterministic receipt surface — the controls, the table and the totals. Extracted so the
+  // SynthesisCard can take it as its CHILDREN slot: it is ALWAYS rendered whatever the synthesis
+  // state (§8.20 — the card never gates it).
+  const receipts =
+    seed == null ? (
         // Unreachable in practice — the tab is ephemeral (never persisted, never parsed back from a
         // tab key), so it cannot exist without the seed that opened it. Said plainly rather than
         // rendered as an empty list, which would read as "no bot said anything".
@@ -370,6 +431,18 @@ export function BotVolumeDetail(): JSX.Element {
                 </>
               )}
             </div>
+          ) : receiptsCollapsed ? (
+            // P2.2: the synthesis leads and the receipts COLLAPSE (never hidden). The count is
+            // `filteredTotal` — the SAME server total the footer below renders — reused, never
+            // recounted from the loaded rows.
+            <button
+              type="button"
+              onClick={() => setShowReceipts(true)}
+              className="w-full rounded-lg border border-dashed border-gray-300 px-3 py-2 text-center text-[12px] font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-200"
+            >
+              Show the {filteredTotal.toLocaleString()} merged PR{filteredTotal === 1 ? '' : 's'}{' '}
+              this summary was computed from
+            </button>
           ) : (
             <>
               <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
@@ -447,6 +520,20 @@ export function BotVolumeDetail(): JSX.Element {
             </>
           )}
         </>
+      );
+
+  return (
+    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
+      {header}
+      {/* P2.2 — the synthesis VERDICT leads, carrying this drill-down's exact scope. With no
+          expressible descriptor (a multi-bot narrowing) the list renders exactly as today;
+          free/OSS posture is the card's own (nudge on cloud, absence on OSS). */}
+      {synthDescriptor != null ? (
+        <SynthesisCard workspaceId={workspaceId} descriptor={synthDescriptor}>
+          {receipts}
+        </SynthesisCard>
+      ) : (
+        receipts
       )}
     </div>
   );

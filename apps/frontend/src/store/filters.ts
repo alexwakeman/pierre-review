@@ -42,30 +42,16 @@ export type FeedBotLens = 'all' | 'hide' | 'only';
 // regardless of traffic.
 export type FeedCiLens = 'feed' | 'only' | 'off';
 
-// The Activity repo-console sub-tab strip (Activity | Bots) and the Insights console's
-// sub-tab bar. Store-remembered (see repoConsoleTabs / insightsSubTab) so returning to a
-// rail entry restores its last-active sub-tab.
-export type RepoConsoleTab = 'activity' | 'bots';
-// The Insights console's sub-tab keys. TWO members were REMOVED and must not come back here:
-//  • 'retro'   — the Pro "Retro" narrative panel was deleted (its content is now a quick-question
-//                pill in the ad-hoc chat).
-//  • 'compare' — cross-WORKSPACE comparison is its own Activity RAIL entry now
-//                (activityRepoId === 'compare'), gated on the account having 2+ workspaces. It
-//                lived here, then briefly on the Feed's sub-tab bar; neither is where it is now.
-// 'sprint' is likewise vestigial (that tab was folded into Overview long ago) and is deliberately
-// KEPT in the union: it is the one value that makes the "stale sub-tab → 'overview'" redirect in
-// InsightsView both reachable and type-checkable. A stale/deep-linked value MUST normalize to
-// 'overview' rather than select a tab that no longer renders — that is what strands a user on a
-// blank pane. This field is transient (freshDefaults only, never persisted, never URL-parsed), so
-// a stale value can only live in memory for one session.
+// The Activity repo-console sub-tab strip (Activity | Bots). Store-remembered (see
+// repoConsoleTabs) so returning to a rail entry restores its last-active sub-tab.
 //
-// 'reports' is the period-over-period Reports pane (Pro `periodReports`). It is a REAL tab, but a
-// CONDITIONAL one — the capability decides whether it is in the rendered list, and InsightsView
-// normalizes a stored 'reports' back to 'overview' when the capability is off. That is the same
-// derive-don't-write-back rule the Feed/Bots inner tabs follow: the stored scalar may legitimately
-// name a tab the current context does not render, and a corrective set() would permanently forget
-// the user's choice the moment Pro flickers.
-export type InsightsSubTab = 'overview' | 'sprint' | 'reports';
+// `InsightsSubTab` ('overview' | 'sprint' | 'reports') is GONE, with its whole apparatus
+// (`insightsSubTab`, `setInsightsSubTab`, InsightsView's tablist + normalization): the pane is
+// Reports-FIRST now (plan C5) — PeriodReportsPanel is its only body and the ad-hoc chat lives
+// inside the report as "Ask about this period". Safe to delete outright because the field was
+// transient (freshDefaults only, never persisted, never URL-emitted — `?report=` reads into
+// `insightsReportKey` alone), so no stored blob or link can carry a stale value anywhere.
+export type RepoConsoleTab = 'activity' | 'bots';
 // The all-open-PRs drill-down's scope: one repo | 'feed' (every repo in the active Workspace —
 // the Flow metrics "Open PRs" tile) | a named repo GROUP (label + the exact repo set behind it —
 // see openPrsScope).
@@ -303,17 +289,20 @@ export interface FilterState {
   // The rolling window the Bot-ROI panel (Insights) reports over. Transient, URL-silent
   // (like feedBotLens) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
-  // Which inner sub-tab the Bots view shows: 'roi' (the shipped ROI panel + bot feed),
-  // 'behaviour' (the EXPERIMENTAL behaviour analytics), 'themes' (the Pro Haiku summary),
+  // Which inner sub-tab the Bots view shows: 'roi' (the Measure surface — ROI panel + bot feed),
   // 'advisor' (the Pro Bot Tuning Advisor — findings → config-PR/brief/issue outputs), or
-  // 'settings' (the "who counts as a review bot in this workspace" classification tab). A single
-  // scalar (both the cross-repo rail Bots view and the per-repo console Bots tab share one
-  // BotsView) — so 'settings' can be selected while a PER-REPO Bots tab is showing, where it is
-  // the same list narrowed to one repo's footprint rather than a different judgement (the bot
-  // object is keyed per WORKSPACE now, and a repo belongs to exactly one). BotsView's
-  // effectiveTab fallback still owns any degradation ('advisor' is capability-gated like
-  // 'themes' — same derived-effective-tab rule). Transient, URL-silent.
-  botsInnerTab: 'roi' | 'behaviour' | 'themes' | 'advisor' | 'settings';
+  // 'settings' (the "who counts as a review bot in this workspace" classification tab).
+  // ('behaviour' was REMOVED in plan P1.1/C1 and 'themes' in plan P2.3/C6 — per-bot depth is the
+  // bot-detail drill-down tab, the workspace charts a collapsed section under ROI, and the bot
+  // themes summary folded into the synthesis seam's "What they're flagging" card on Measure. The
+  // field is transient and URL-silent, so dropping a member is safe: no persisted blob can hold
+  // it.) A single scalar (both the cross-repo rail Bots view and the per-repo console Bots tab
+  // share one BotsView) — so 'settings' can be selected while a PER-REPO Bots tab is showing,
+  // where it is the same list narrowed to one repo's footprint rather than a different judgement
+  // (the bot object is keyed per WORKSPACE now, and a repo belongs to exactly one). BotsView's
+  // effectiveTab fallback still owns any degradation ('advisor' is capability-gated — the
+  // derived-effective-tab rule). Transient, URL-silent.
+  botsInnerTab: 'roi' | 'advisor' | 'settings';
   // The Advisor tab's one-shot focus, set by the Tune/Drop pills on the Bots table: which
   // bot the advisor should open on, and with what intent ('tune' = its tuning findings,
   // 'drop' = the drop-shaped evidence: overlap + suppressions + cost). The PANEL treats it
@@ -326,8 +315,8 @@ export interface FilterState {
   // Which inner sub-tab the cross-repo Feed rail shows: 'feed' (the metrics header + consolidated
   // feed) or 'themes' (the Pro "Discussion themes" AI summary). Transient, URL-silent.
   //
-  // 'compare' is NOT a member: cross-workspace comparison is its own Activity RAIL entry
-  // (activityRepoId === 'compare'), gated on the account having 2+ workspaces.
+  // 'compare' is NOT a member: cross-workspace comparison is the Reports "By workspace" axis
+  // (inside PeriodReportsPanel), no longer a surface of its own anywhere.
   //
   // Landmine (still live for 'themes'): it is capability-gated, so this scalar can hold a key
   // whose tab isn't currently rendered. The consumer must DERIVE an effective tab from the
@@ -480,18 +469,16 @@ export interface FilterState {
   // side narrow, no refetch. (The old 'all' briefing-feed pseudo-row was removed — it was
   // redundant with the Feed + per-repo entries.) Transient (mirrors myTurnOnly/
   // insightsOpen): in freshDefaults() but NOT in pickFilterBarState /
-  // sanitizePersistedFilters. `?activityRepo=<id>` / `bots` / `attention` / `compare` are the
+  // sanitizePersistedFilters. `?activityRepo=<id>` / `bots` / `attention` are the
   // URL mirrors (see useUrlState); the active TAB lives in the pinnedTabs store. 'bots' = the
-  // CORE/free review-bot triage console (BotsView); 'compare' = the CORE/free cross-WORKSPACE
-  // comparison matrix, gated on the account having 2+ workspaces; 'insights' is the Pro
-  // Insights rail entry. (The 'retro' rail value was REMOVED with the Retro panel — it was
-  // already unreachable: nothing called setActivityRepo('retro') and useUrlState never parsed it.)
-  //
-  // Landmine (same discipline as feedInnerTab): 'compare' is GATED, so this scalar can name a
-  // rail entry that isn't currently rendered. The consumer DERIVES a fallback ('feed') for the
-  // render and leaves the store alone — a corrective set() would permanently forget the choice,
-  // so deleting and recreating a workspace would lose Compare instead of restoring it.
-  activityRepoId: number | 'feed' | 'attention' | 'insights' | 'bots' | 'compare' | null;
+  // CORE/free review-bot triage console (BotsView); 'insights' is the Pro Insights rail entry.
+  // (The 'retro' rail value was REMOVED with the Retro panel — it was already unreachable:
+  // nothing called setActivityRepo('retro') and useUrlState never parsed it. 'compare' was
+  // REMOVED with the "Compare workspaces" rail entry — cross-workspace comparison is Reports'
+  // "By workspace" axis now. This field is transient and 'compare' is no longer URL-parsed, so a
+  // stale value cannot enter the store; a legacy `?activityRepo=compare` link falls through the
+  // read side's parseInt branch and lands on the 'feed' default — normalization by construction.)
+  activityRepoId: number | 'feed' | 'attention' | 'insights' | 'bots' | null;
   // Soft thread-state filter inside an Activity repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
@@ -502,9 +489,6 @@ export interface FilterState {
   // (freshDefaults() only — not persisted, not URL-synced); deliberately NOT cleared by
   // setActivityRepo — surviving rail switches is the point.
   repoConsoleTabs: Record<number, RepoConsoleTab>;
-  // The Insights console's last-active sub-tab. null = never set this session (InsightsView
-  // falls back to its initialSubTab ?? 'overview'). Transient, URL-silent, like repoConsoleTabs.
-  insightsSubTab: InsightsSubTab | null;
   // How far back the Insights chat's next question reaches — the FilterBar Range chips while the
   // Insights pane is open. **null = "no override", i.e. the account's configured window** (Settings
   // → Sprint), and that is the whole reason it is transient rather than a persisted filter key: the
@@ -632,7 +616,7 @@ export interface FilterState {
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
   // Switch the Bots view's inner sub-tab (ROI / experimental Behaviour / Themes / Settings).
-  setBotsInnerTab: (v: 'roi' | 'behaviour' | 'themes' | 'advisor' | 'settings') => void;
+  setBotsInnerTab: (v: 'roi' | 'advisor' | 'settings') => void;
   // The Tune/Drop pills' entry point: focus the advisor on one bot AND switch the Bots view
   // to the Advisor tab in one action.
   focusAdvisor: (botKey: string, intent: 'tune' | 'drop') => void;
@@ -794,17 +778,13 @@ export interface FilterState {
   setManagerOpen: (open: boolean) => void;
   bumpClaudeReviewKickoff: () => void;
   // Select an Activity detail target (a repo id, or one of the pseudo-rows: 'feed' for the
-  // cross-repo consolidated Feed, 'bots', 'attention', 'compare', 'insights').
-  setActivityRepo: (
-    id: number | 'feed' | 'attention' | 'insights' | 'bots' | 'compare',
-  ) => void;
+  // cross-repo consolidated Feed, 'bots', 'attention', 'insights').
+  setActivityRepo: (id: number | 'feed' | 'attention' | 'insights' | 'bots') => void;
   // Set/clear the Activity repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
   setActivityThreadFilter: (s: DerivedState | null) => void;
   // Remember a repo console's Activity|Bots sub-tab (see repoConsoleTabs).
   setRepoConsoleTab: (repoId: number, tab: RepoConsoleTab) => void;
-  // Remember the Insights console's sub-tab (see insightsSubTab).
-  setInsightsSubTab: (tab: InsightsSubTab) => void;
   // Select the Reports period (see insightsReportKey). `null` = the newest completed period.
   setInsightsReportKey: (periodKey: string | null) => void;
   // Pick the Insights chat's range for the next question. `null` restores "use the account's
@@ -1070,7 +1050,6 @@ function freshDefaults(): FilterData {
     activityRepoId: 'feed',
     activityThreadFilter: null,
     repoConsoleTabs: {},
-    insightsSubTab: null,
     insightsRange: null,
     expandedFileGroups: [],
     collapsedFileGroups: [],
@@ -1427,7 +1406,6 @@ export const useFilters = create<FilterState>((set, get) => ({
     set((s) => ({ activityThreadFilter: s.activityThreadFilter === st ? null : st })),
   setRepoConsoleTab: (repoId, tab) =>
     set((s) => ({ repoConsoleTabs: { ...s.repoConsoleTabs, [repoId]: tab } })),
-  setInsightsSubTab: (tab) => set({ insightsSubTab: tab }),
   setInsightsReportKey: (periodKey) => set({ insightsReportKey: periodKey }),
   setInsightsRange: (range) => set({ insightsRange: range }),
   toggleFileGroup: (path, defaultExpanded) =>

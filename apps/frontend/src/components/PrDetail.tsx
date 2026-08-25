@@ -39,6 +39,7 @@ import {
   TimelineIcon,
 } from './Icons.js';
 import { ThreadList } from './ThreadList/index.js';
+import { BotTriageCard } from './BotTriageCard.js';
 import { ChecksTab } from './ChecksTab.js';
 import { CommentAnnotations, ReviewCheckButton } from './CommentAnnotations.js';
 import type { MlSeverity } from '@pierre-review/shared';
@@ -1194,6 +1195,14 @@ export function PrDetail({
         >
         {tab === 'overview' ? (
           <div>
+            {/* P3.2: the per-PR bot triage card, compact, in the Overview attention area —
+                renders nothing (and fetches nothing) below its bot-comment threshold. */}
+            <BotTriageCard
+              pr={pr}
+              usersById={usersById}
+              variant="compact"
+              onOpenThreads={() => goToTab('threads')}
+            />
             <ChecksTab
               pr={pr}
               usersById={usersById}
@@ -1222,7 +1231,11 @@ export function PrDetail({
             </div>
           </div>
         ) : tab === 'threads' ? (
-          <ThreadList
+          <>
+            {/* P3.2: full triage card — same folds as the list below it (rollupCounts /
+                threadSeverities / resolvableBotThreadIds), so the numbers always agree. */}
+            <BotTriageCard pr={pr} usersById={usersById} variant="full" />
+            <ThreadList
             threads={pr.threads}
             usersById={usersById}
             prUrl={pr.githubUrl}
@@ -1235,6 +1248,7 @@ export function PrDetail({
             severityFilter={threadSeverityFilter}
             openInChangesFor={openInChangesFor}
           />
+          </>
         ) : tab === 'activity' ? (
           <ActivityList
             pr={pr}

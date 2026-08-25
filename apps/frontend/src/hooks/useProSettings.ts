@@ -56,20 +56,18 @@ export function useUpdateProSettings() {
         void qc.invalidateQueries({ queryKey: ['thread'] });
       }
       // The sprint / comparison-window setting is resolved fresh on every /api/pro/insights read
-      // (getComparisonWindow → resolveComparisonWindow), so changing it re-frames the flow-metrics
-      // + sprint report — but those queries otherwise only refetch on the 5-min sync cadence. Push
+      // (getComparisonWindow → resolveComparisonWindow), so changing it re-frames the flow
+      // metrics — but those queries otherwise only refetch on the 5-min sync cadence. Push
       // the new window through immediately so the Insights UI reflects Save without waiting for a
-      // sync. The sprint report refetch is a cheap CACHED read (no regeneration/billing); when the
-      // window moved it comes back flagged `stale`, surfacing the Regenerate prompt.
-      // ⚠ These three are keys this file does NOT own (useWorkspaceInsights /
-      // useWorkspaceMetricsDetail / useSprintReport). They are bare literals, so a rename there is
+      // sync. (The `['sprint-report']` invalidation left with `SprintReportCard` — C7 cut list.)
+      // ⚠ These are keys this file does NOT own (useWorkspaceInsights /
+      // useWorkspaceMetricsDetail). They are bare literals, so a rename there is
       // silent here: the mutation succeeds, the invalidation targets a key nobody uses, and the UI
       // reads "the setting didn't take". They are PREFIXES, which is what makes them still sweep
       // every workspace's `['<name>', 'ws:<id>']` slot.
       if (patch.sprint) {
         void qc.invalidateQueries({ queryKey: ['workspace-insights'] });
         void qc.invalidateQueries({ queryKey: ['workspace-metrics-detail'] });
-        void qc.invalidateQueries({ queryKey: ['sprint-report'] });
       }
     },
   });

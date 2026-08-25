@@ -113,11 +113,18 @@ describe('tierFor — period reports', () => {
     ]);
   });
 
-  it('leaves the two free GETs on the read bucket', () => {
+  it('keeps the list GET on read and puts the one-report GET on the search bucket', () => {
     expect(tiers('GET', '/api/pro/insights/reports')).toEqual(['read']);
-    expect(tiers('GET', '/api/pro/insights/reports/sprint-2026-08-18')).toEqual(['read']);
-    // ...and they must not be swept onto the AI bucket by the family block above them.
+    // The one-report GET carries the "By workspace" axis (C4): 2 windows × N workspaces ×
+    // getPeriodMetrics — the same multiplies-by-workspace-count shape that put the deleted
+    // /api/workspace-metrics/compare on `search`. 60/min, never the 600/min blanket.
+    expect(tiers('GET', '/api/pro/insights/reports/sprint-2026-08-18')).toEqual([
+      'search',
+      'read',
+    ]);
+    // ...and neither free GET may be swept onto the AI bucket by the family block above them.
     expect(tiers('GET', '/api/pro/insights/reports')).not.toContain('ai');
+    expect(tiers('GET', '/api/pro/insights/reports/sprint-2026-08-18')).not.toContain('ai');
   });
 
   // The catch-all below this block treats every non-cancel/key/budget/settings POST as generation,
@@ -139,22 +146,57 @@ describe('tierFor — period reports', () => {
   });
 });
 
+// GET /api/pro/insights/person/:userId (plan P4.2 — the 1:1-prep vector). DECIDED onto `search`:
+// per request it runs the lane resolver + two capped review scans + ~10 person-scoped aggregates,
+// the one-report GET's shape of cost — never the 600/min blanket read the catch-all would hand a
+// GET. The narration spend is NOT this route: it rides POST /api/pro/synthesis (kind 'person'),
+// whose ai tier is pinned in the synthesis block above.
+describe('tierFor — 1:1 person period', () => {
+  it('puts the person GET on the search bucket, never the blanket read or ai', () => {
+    expect(tiers('GET', '/api/pro/insights/person/42')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/pro/insights/person/42')).not.toContain('ai');
+  });
+
+  it('leaves a (nonexistent) mutating spelling to the catch-all rather than blessing it', () => {
+    expect(tiers('POST', '/api/pro/insights/person/42')).toEqual(['ai', 'ai_hourly']);
+  });
+});
+
 describe('tierFor — GitHub quota spenders', () => {
   it('throttles live repo search separately', () => {
     expect(tiers('GET', '/api/repos/search')).toEqual(['search', 'read']);
     expect(tiers('GET', '/api/repos/suggested')).toEqual(['search', 'read']);
   });
 
-  // The ML severity surface spends NO GitHub quota and NO Anthropic credit — the model is
-  // called only by the background worker. What it does spend is this process: the rollup reads
-  // a workspace's whole label corpus (capped at 50k rows) plus three unlabelled-count joins, so
-  // it borrows the same 60/min bucket as `/compare`, while the per-PR badge index is two indexed
-  // reads and stays on `read`. Both are pinned here so the pair can't drift into each other.
-  it('separates the expensive ML rollup from the cheap per-PR label index', () => {
-    expect(tiers('GET', '/api/bot-severity')).toEqual(['search', 'read']);
+  // The ML label surface spends NO GitHub quota and NO Anthropic credit — the model is called
+  // only by the background worker, and the per-PR badge index is two indexed reads, so it stays
+  // on `read`. (GET /api/bot-severity — the expensive rollup this test used to separate it
+  // from — was REMOVED on the C7 cut list.)
+  it('keeps the cheap per-PR label index on read', () => {
     expect(tiers('GET', '/api/prs/42/ml-labels')).toEqual(['read']);
     // ...and the label index must NOT be swept into the GitHub-hydrating PR-detail bucket.
     expect(tiers('GET', '/api/prs/42/ml-labels')).not.toContain('pr_detail');
+  });
+
+  // GET /api/pro/bot-behaviour — the workspace behaviour rollup, MOVED from core's
+  // /api/bot-behaviour behind the botDepth entitlement (plan P0.2). Every-bot heatmaps + trends +
+  // anomalies + overlap + the ML fold per request — the same DB-heavy shape as the flagging/volume family —
+  // so it must sit on the 60/min `search` bucket, NOT inherit the /api/pro/ catch-all's GET→read
+  // branch (in core it sat on the blanket read fall-through; the move is where that got decided).
+  it('puts the moved pro bot-behaviour rollup on the expensive bucket, not the pro GET default', () => {
+    expect(tiers('GET', '/api/pro/bot-behaviour')).toEqual(['search', 'read']);
+  });
+
+  // /api/pro/synthesis (P2.1) — one endpoint, two verbs, two DECIDED tiers. The POST is a real
+  // model spend (Haiku behind a payload-hash $0 cache) → the `ai` pair, same as every generator.
+  // The free GET recomputes the payload hash via getSynthesisInput, i.e. it re-runs the
+  // drill-down's own population fold (the flagging label scan / the volume merged-PR walk) — the
+  // bot-behaviour shape of cost — so it must sit on `search`, not inherit the /api/pro/
+  // catch-all's 600/min GET→read branch.
+  it('tiers the synthesis endpoint per verb: POST on the AI pair, GET on the expensive read bucket', () => {
+    expect(tiers('POST', '/api/pro/synthesis')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/pro/synthesis')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/pro/synthesis')).not.toContain('ai');
   });
 
   // /api/ml-status is POLLED every few seconds while a sync round is open (it is what lets the
@@ -163,6 +205,14 @@ describe('tierFor — GitHub quota spenders', () => {
   // `read` bucket would be the wrong answer for a route a client hits on a timer.
   it('puts the polled enrichment-status route on the expensive bucket, not the blanket read one', () => {
     expect(tiers('GET', '/api/ml-status')).toEqual(['search', 'read']);
+  });
+
+  // GET /api/daily-brief (P3.1/P3.3) — free counts, but ONE call folds the consolidated feed +
+  // the insights cards + the resolve backlog, and `?rollup=1` multiplies by workspace count (the
+  // compare-route cost shape). A DELIBERATE `search` entry — the TTL cache bounds work per
+  // request, the tier bounds request count; neither substitutes for the other.
+  it('puts the daily-brief fold on the expensive bucket, not the blanket read one', () => {
+    expect(tiers('GET', '/api/daily-brief')).toEqual(['search', 'read']);
   });
 
   // The comments drill-down ships comment BODIES (up to 3000/source) plus a three-way label

@@ -68,19 +68,17 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
 
           <Section title="Activity console (the default)">
             The left rail is your state of play: <strong>Insights</strong>, a cross-repo{' '}
-            <strong>Feed</strong>, <strong>Bots</strong>,{' '}
-            <strong>Compare&nbsp;workspaces</strong>, <strong>Needs&nbsp;attention</strong>, then
-            the Workspace’s repos as a flat list. The Feed is one chronological stream of real
-            activity — opens, merges, reviews, comments, and pushes that addressed a thread —
+            <strong>Feed</strong>, <strong>Bots</strong>, <strong>Needs&nbsp;attention</strong>,
+            then the Workspace’s repos as a flat list. The Feed is one chronological stream of
+            real activity — opens, merges, reviews, comments, and pushes that addressed a thread —
             under the free flow-metric header (throughput, lead time, time-to-first-review, CI
             success &amp; recovery). Filter it with the pills: <strong>My Turn</strong> (things
             that concern you — you authored it, were asked to review, or already chimed in),{' '}
             <strong>Comments</strong> / <strong>PR events</strong> by category, and the
-            <strong> Bots</strong> lens (all → hide → only).{' '}
-            <strong>Compare&nbsp;workspaces</strong> appears once you’ve made a Workspace of your
-            own: a free side-by-side matrix of <em>every</em> Workspace over the same window,
-            whichever one is selected. Click any card to open that PR; <strong>Back</strong>{' '}
-            returns you to the exact card.
+            <strong> Bots</strong> lens (all → hide → only). Click any card to open that PR;{' '}
+            <strong>Back</strong> returns you to the exact card. To compare Workspaces, expand any
+            metric row in Insights → <strong>Reports</strong> — the “By workspace” breakdown shows
+            every Workspace side by side for that period.
           </Section>
 
           <Section title="Insights (Pro)">

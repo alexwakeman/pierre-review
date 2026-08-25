@@ -163,8 +163,11 @@ nothing).
   SQLite-only, so nothing automated covers the dialect divergences it carries. (CORE's pg chain
   `0000`→`0035` — including `0031`/`0032` — WAS replayed by hand during `0035`; see that section.
   It is still a one-off by hand, not CI, so it will go stale again.) The same is true of
-  everything added since: **pg `0036`–`0037`, pg `0039` and the plugin `0021`/`0022`/`0023`/`0024`
-  pg twins are unverified against a real Postgres.**
+  everything added since: **pg `0036`–`0037`, pg `0039`–`0041` and the plugin `0021`–`0027`
+  pg twins are unverified against a real Postgres** (⚠ pg `0040`/`0041` carry the
+  `regexp_replace(…, '\[bot\]$', '')`-vs-`replace()` divergence, and plugin `0027`'s pg twin is a
+  deliberately UNWRAPPED `CREATE TABLE` — see its section — so those are the ones worth replaying
+  before a cloud deploy).
 - **`trunk_ci_status_events` (`0052` / pg `0039`) has NO BACKFILL.** The table is append-only and
   written only by `sync/branch-status.ts`, on a TRANSITION, at the end of a full repo walk — and
   the one-time CI-history backfill (`sync/backfill-ci-history.ts`) synthesizes only the PR-side
@@ -178,9 +181,11 @@ nothing).
 - ~~**`SprintReportCard` has no importer**, yet the plugin's AI-policy sweep (`*/5`) still calls
   `refreshSprintReport` for every account not on `manual`.~~ **CLOSED** — the AI-policy sweep is
   gone, so nothing calls `refreshSprintReport` on a timer any more; the only automated caller left
-  is the Slack digest, which renders the report into a message rather than into that card. The card
-  is still importer-less; it just no longer costs anything. (`PresetPromptPanel` is also
-  importer-less, but its server side is deliberately kept.)
+  is the Slack digest, which renders the report into a message rather than into that card. The
+  importer-less card is now DELETED outright (`SprintReportCard.tsx` + `useSprintReport`, the
+  consolidation cut list); the plugin's `sprint-report.ts` routes and the Slack digest's use of
+  `refreshSprintReport` survive. (`PresetPromptPanel` is also importer-less, but its server side
+  is deliberately kept.)
 - **`packages/pro/test/` and `apps/frontend/test/` still do not run in CI** (see Tests above) — and
   they now hold the workspace refactor's frontend evidence (`workspaceScope.test.ts`,
   `botReviewerQueryKey.test.ts`) plus the plugin's cross-account isolation suite.
@@ -466,3 +471,35 @@ schema change; a data correction with the same read-order justification as `0053
   `tjpeel-ee`, a user literally named `Copilot`) and nine rows a human had named
   (`identity_source: 'manual'`), which the guard is there to protect.
 - ⚠ The pg twin has not been replayed against a real Postgres.
+
+## Plugin `0025`/`0026` — period reports · `0027` — `pro_synthesis`
+
+**`0025`** (`workspace_period_reports` + `sprint_cadence` settings surface) and **`0026`**
+(the lanes column) are the apiVersion-20 period-reporting storage — recorded in
+[PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md); the file-level rules here are the
+standard plugin ones (filename-sorted, NO journal, no `--> statement-breakpoint`).
+
+**`0027` creates `pro_synthesis`** — the ONE cache table behind `GET/POST /api/pro/synthesis`
+(drill-down verdict cards, the workspace "What they're flagging" synthesis, brief/roll-up/person
+narration; full contract in PRO-PLUGIN-AND-ACTIVITY.md § apiVersion 21). One row per
+`(account_id, scope_key)` with a unique index (`pro_synthesis_account_scope`) — every
+`onConflictDoUpdate` in `synthesis/routes.ts` targets exactly that pair (the 0042/0045 lesson is
+cited at the write site). Facts that live at the DDL grain:
+
+- **`output` is JSON as `text` in BOTH dialects** — never jsonb, never drizzle `mode:'json'` —
+  so the twins stay structurally identical and one serializer owns the blob (the
+  `workspace_period_reports` rule).
+- **`input_count`/`analyzed_count` are REAL COLUMNS**, not facts buried in the blob: the
+  "Summarised X of Y" coverage line is the disclosure that keeps a capped synthesis honest, and
+  it must survive any output-shape drift.
+- **No foreign keys, deliberately** — the workspace id is only ever resolver-produced (a foreign
+  id degrades to Default and never travels), and the row is a REGENERABLE scope-keyed cache (the
+  `bot_theme_reports` family), not a keyed history. It is in `retention.ts`'s
+  `eraseProByAccountId` and deliberately NOT in `pruneProByPrIds` (no pr_id grain — it ages by
+  STALENESS: the payload hash moves as the underlying items churn).
+- ⚠ **The pg twin's CREATE is BARE — no `DO $$ … EXCEPTION` wrapper — on purpose**, exactly like
+  `0021`'s and `0025`'s CREATEs. The warning-wrapper trade only makes sense when the feature can
+  degrade around the missing DDL; a missing TABLE cannot (every synthesis call would 500 forever
+  while `pro_migrations` records the file as applied, with no way back except editing that table
+  by hand). A raise is the honest outcome, and `IF NOT EXISTS` covers the one benign replay.
+- ⚠ The pg twin has not been replayed against a real Postgres (nor have `0025`/`0026`'s).

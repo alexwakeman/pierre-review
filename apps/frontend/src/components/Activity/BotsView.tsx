@@ -3,8 +3,8 @@ import { useBotAnalytics } from '../../hooks/useBotTriage.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { BotRoiPanel, ResolveBacklogBanner } from './BotRoiPanel.js';
-import { BotBehaviourPanel } from './BotBehaviourPanel.js';
-import { BotThemesPanel } from './BotThemesPanel.js';
+import { WorkspaceBotCharts } from './WorkspaceBotCharts.js';
+import { SynthesisCard } from './SynthesisCard.js';
 import { BotAdvisorPanel } from './BotAdvisorPanel.js';
 import { BotSettingsPanel } from './BotSettingsPanel.js';
 import { FeedView } from './FeedView.js';
@@ -45,20 +45,17 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // window/workspace/repoIds route → caption ≡ list); the caption just opens it.
   const openBotOnlyDetail = useFilters((s) => s.openBotOnlyDetail);
 
-  // Inner sub-tab: the shipped ROI surface vs the EXPERIMENTAL behaviour analytics. A single
-  // shared store field (both the cross-repo rail Bots view and the per-repo console Bots tab
-  // funnel through this one BotsView), so switching sticks across rail/tab round-trips.
+  // Inner sub-tab. A single shared store field (both the cross-repo rail Bots view and the
+  // per-repo console Bots tab funnel through this one BotsView), so switching sticks across
+  // rail/tab round-trips. The old 'behaviour' tab is GONE (plan P1.1/C1): per-bot depth is the
+  // "Depth →" drill-down tab off the ROI table, and the surviving workspace-grain charts are the
+  // collapsed "Workspace charts" section at the bottom of the ROI branch.
   const innerTab = useFilters((s) => s.botsInnerTab);
   const setInnerTab = useFilters((s) => s.setBotsInnerTab);
 
-  // The "Themes" AI summary is STRICTLY Pro (activityDigest tier) and WORKSPACE-scoped with no
-  // repo narrowing, so it only appears in the cross-repo Bots rail (repoId == null) — not the
-  // per-repo console Bots tab. When it's unavailable but the shared scalar still points at it,
-  // fall back to ROI.
-  const { activityDigest, botAdvisor } = useProCapabilities();
-  const showThemes = repoId == null && activityDigest;
-  // The Advisor is Pro (`botAdvisor`) and WORKSPACE-scoped with no repo narrowing (like
-  // Themes) — cross-repo rail only. Same derived-effective-tab rule.
+  // The Advisor is Pro (`botAdvisor`) and WORKSPACE-scoped with no repo narrowing —
+  // cross-repo rail only. Same derived-effective-tab rule.
+  const { botAdvisor } = useProCapabilities();
   const showAdvisor = repoId == null && botAdvisor;
   // "Settings" ("who counts as a review bot in this Workspace") shows in BOTH views. It used to be
   // cross-repo ONLY because the judgement was keyed per TEAM and a repo tab could not express a
@@ -68,14 +65,13 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // it has no capability gate, which also fixes an OSS gap: reviewer classification used to live
   // behind SettingsModal's caps.botTriage, so an `npx` user could not classify a reviewer at all.
   //
-  // DERIVE the visible tab; never write a correction back to the store. `themes` is still
-  // optional and shares one scalar with the per-repo console, so it can legitimately hold a key
-  // that isn't rendered here — writing a "fix" would permanently forget the user's choice for the
-  // view that DOES render it.
-  const effectiveTab =
-    (innerTab === 'themes' && !showThemes) || (innerTab === 'advisor' && !showAdvisor)
-      ? 'roi'
-      : innerTab;
+  // DERIVE the visible tab; never write a correction back to the store. `advisor` shares one
+  // scalar with the per-repo console, so it can legitimately hold a key that isn't rendered
+  // here — writing a "fix" would permanently forget the user's choice for the view that DOES
+  // render it. ('behaviour' and 'themes' left the union itself — the field is transient and
+  // URL-silent, so no stored value can resurrect them; a removed key needs no runtime mapping,
+  // only this derive-never-write-back rule for the capability-gated ones.)
+  const effectiveTab = innerTab === 'advisor' && !showAdvisor ? 'roi' : innerTab;
 
   return (
     <div className="space-y-3" data-testid="bots-view">
@@ -88,13 +84,11 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         </span>
       </div>
 
-      {/* Inner sub-tab bar — ROI (shipped) vs Behaviour (experimental). Shows in BOTH the
-          cross-repo rail Bots view and the per-repo console Bots tab (one BotsView body). */}
+      {/* Inner sub-tab bar. Shows in BOTH the cross-repo rail Bots view and the per-repo
+          console Bots tab (one BotsView body). */}
       <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
         {([
           { key: 'roi', label: 'ROI' },
-          { key: 'behaviour', label: 'Behaviour' },
-          ...(showThemes ? [{ key: 'themes', label: 'Themes' } as const] : []),
           ...(showAdvisor ? [{ key: 'advisor', label: 'Advisor' } as const] : []),
           { key: 'settings', label: 'Settings' },
         ] as const).map((t) => {
@@ -129,11 +123,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           only in-view way to un-isolate the bot feed — is always reachable. Self-hides otherwise. */}
       <FeedIsolationBanner />
 
-      {effectiveTab === 'behaviour' ? (
-        <BotBehaviourPanel repoId={repoId} />
-      ) : effectiveTab === 'themes' ? (
-        <BotThemesPanel />
-      ) : effectiveTab === 'advisor' ? (
+      {effectiveTab === 'advisor' ? (
         <BotAdvisorPanel />
       ) : effectiveTab === 'settings' ? (
         /* A per-repo Bots tab shows the SAME workspace listing, filtered client-side to the bots
@@ -142,6 +132,20 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         <BotSettingsPanel repoId={repoId} />
       ) : (
         <>
+          {/* "What they're flagging" (plan P2.3/C6) — the workspace-grain synthesis verdict that
+              REPLACED the Themes tab: one cached Haiku pass over the exact bot-comment population
+              the old Themes fold read (`getBotReviewComments`, via the seam's 'workspace-bots'
+              kind), every count computed server-side from the validated grouping. The kind
+              supports repo narrowing (its fold takes the same BotScope the ROI panel does), so
+              the per-repo console Bots tab measures that repo alone — same `repoScope` the
+              analytics ride. Free/OSS renders nothing, free cloud the Pro nudge (SynthesisCard's
+              own posture); the deterministic Measure surface below never waits on it. */}
+          <SynthesisCard
+            workspaceId={workspaceId}
+            descriptor={{ kind: 'workspace-bots', window, repoIds: repoScope }}
+            title="What they’re flagging"
+          />
+
           {/* Governance caution: PRs whose only review came from an automated reviewer — no human
               ever looked. Sourced from the CORE analytics totals; "Show list" opens the
               bot-only-PRs drill-down tab (same route/scope → count ≡ list). */}
@@ -181,6 +185,12 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               /api/bot-analytics response, so the screen carries one time grain. The standalone
               BotSeverityPanel (corpus-wide, its own /api/bot-severity fetch) is retired. */}
           <BotRoiPanel repoId={repoId} />
+
+          {/* The surviving workspace-grain behaviour charts (findings density, PR-size-vs-volume,
+              the ML block, cross-bot overlap, where-bots-work) — a collapsed-by-default section,
+              `botDepth`-gated (it renders NOTHING without the capability, and fetches nothing
+              until opened). The bottom of the Measure surface, above the bot feed. */}
+          <WorkspaceBotCharts repoId={repoId} />
 
           {/* The bot-only activity feed — the consolidated Feed filtered to automated-reviewer
               activity, with review-thread derived-state pills for triage. Same cards / inline

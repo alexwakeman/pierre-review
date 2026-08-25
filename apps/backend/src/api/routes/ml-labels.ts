@@ -1,30 +1,13 @@
 import type { FastifyInstance } from 'fastify';
-import type {
-  BotSeverityResponse,
-  MlEnrichmentStatus,
-  PrMlLabelsResponse,
-} from '@pierre-review/shared';
+import type { MlEnrichmentStatus, PrMlLabelsResponse } from '@pierre-review/shared';
 import {
-  getBotSeverityRollup,
   getMlBacklogForAccount,
   getPrMlLabels,
   type MlBacklog,
 } from '../../db/ml-labels.js';
-import { resolveWorkspaceScope } from '../../db/queries.js';
 import { isSeverityApiConfigured } from '../../ml/severity-client.js';
 import { getMlEnrichmentState } from '../../sync/ml-enrichment.js';
 import { accountIdOf } from '../plugins/auth.js';
-
-// `repoIds` → the `narrow` argument of `resolveWorkspaceScope`, never a scope in its own right.
-// Positive integers only (the stricter of the two parser variants in this directory).
-function parseIntList(raw: string | undefined): number[] | null {
-  if (!raw) return null;
-  const ids = raw
-    .split(',')
-    .map((s) => Number.parseInt(s.trim(), 10))
-    .filter((n) => Number.isInteger(n) && n > 0);
-  return ids.length > 0 ? ids : null;
-}
 
 // ML severity/category labels on BOT-authored text (CORE, FREE TIER — not a Pro capability, so
 // deliberately NOT under /api/pro/, which is 402'd for free cloud accounts and auto-tiered as
@@ -66,37 +49,10 @@ export async function mlLabelRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // The Bots-interface severity rollup for one workspace.
-  //
-  // `?workspace=` follows the read contract exactly: absent / unparseable / unknown / another
-  // tenant's id all resolve to this account's DEFAULT workspace rather than 404ing (a 404 there
-  // would be an existence oracle over another tenant's ids). Hence `{ type: 'string' }` in the
-  // schema — an ajv `integer` would 400 on garbage, contradicting that contract.
-  app.get(
-    '/api/bot-severity',
-    {
-      schema: {
-        querystring: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            workspace: { type: 'string' },
-            repoIds: { type: 'string' },
-          },
-        },
-      },
-    },
-    async (req): Promise<BotSeverityResponse> => {
-      const q = req.query as { workspace?: string; repoIds?: string };
-      const accountId = accountIdOf(req);
-      const scope = await resolveWorkspaceScope(
-        accountId,
-        q.workspace,
-        parseIntList(q.repoIds),
-      );
-      return getBotSeverityRollup(accountId, scope, isSeverityApiConfigured());
-    },
-  );
+  // (GET /api/bot-severity — the standalone Bots-interface severity rollup — was REMOVED on the
+  // C7 cut list: no SPA consumer since the merged Bots ROI table took its fold off
+  // `getBotAnalytics`. `getBotSeverityRollup` itself stays in db/ml-labels.ts — its exclusion
+  // semantics are the pinned reference the windowed twin declares itself VERBATIM-equal to.)
 
   // Live state of the background enrichment worker — what every sync surface polls so that
   // "sync complete" is not announced while the model is still scoring the text the walk just

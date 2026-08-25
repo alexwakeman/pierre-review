@@ -196,7 +196,26 @@ function HistoryRow({
   );
 }
 
-export function AdHocChatPanel(): JSX.Element | null {
+// C5: the panel's ONE mount is now inside PeriodReportsPanel's "Ask about this period" section
+// (the Insights Overview sub-tab is gone). The props exist for that mount:
+//  • `periodWindow` — the VIEWED report's exact `[fromMs, toMs)`. Threaded into `useSprintChat`,
+//    which sends it as `SprintChatBody.window`, so the grounding covers the period on screen
+//    instead of a trailing window ending now (the FilterBar Range chips are then bypassed).
+//  • `periodLabel` — the report's date-range title, used in the header copy so the panel says
+//    which period it answers about.
+//  • `suggestedQuestions` — extra pills the caller derives (client-side templated from the
+//    report's own significant deltas; the numbers in them are computed, never model-authored).
+//    Rendered ahead of the built-in quick questions.
+// All optional: with none of them the panel behaves exactly as the old standalone chat did.
+export function AdHocChatPanel({
+  periodWindow,
+  periodLabel,
+  suggestedQuestions,
+}: {
+  periodWindow?: { fromMs: number; toMs: number } | null;
+  periodLabel?: string | null;
+  suggestedQuestions?: { label: string; question: string }[];
+} = {}): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   // The ACTIVE WORKSPACE is the whole scope — a plain id, no sentinel, nothing to canonicalise.
   // `scopeKey` (`ws:<id>`) is only ever a CLIENT-SIDE Record key (the per-workspace answer stashed
@@ -225,7 +244,7 @@ export function AdHocChatPanel(): JSX.Element | null {
   // Every hook here takes the WORKSPACE ID and stamps the wire scope itself — the panel cannot
   // forget it, and an unscoped generation (which the server would answer for the account's Default)
   // is unrepresentable rather than merely discouraged.
-  const chat = useSprintChat(workspaceId);
+  const chat = useSprintChat(workspaceId, periodWindow);
   const { data: candidates } = useScopeMentionCandidates(workspaceId, activityDigest);
   const pinned = usePinnedPrompts(workspaceId, activityDigest);
   const createPin = useCreatePinnedPrompt(workspaceId);
@@ -341,21 +360,34 @@ export function AdHocChatPanel(): JSX.Element | null {
     >
       <div className="flex items-center gap-2">
         <span className="text-base font-semibold text-gray-800 dark:text-gray-100">
-          <span aria-hidden="true">💬</span> Ask about the sprint
+          <span aria-hidden="true">💬</span>{' '}
+          {periodLabel != null ? 'Ask about this period' : 'Ask about the sprint'}
         </span>
         <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
           Pro
         </span>
       </div>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        Pick a question below or type your own — answered from this Workspace&apos;s sprint data
-        (runs the Haiku model). Type <span className="font-mono">@</span> to mention someone.
+        {periodLabel != null ? (
+          <>
+            Pick a question below or type your own — answered from this Workspace&apos;s data over{' '}
+            <span className="font-medium">{periodLabel}</span>, the period shown above (runs the
+            Haiku model). Type <span className="font-mono">@</span> to mention someone.
+          </>
+        ) : (
+          <>
+            Pick a question below or type your own — answered from this Workspace&apos;s sprint
+            data (runs the Haiku model). Type <span className="font-mono">@</span> to mention
+            someone.
+          </>
+        )}
       </p>
 
       {/* Quick-question pills — clicking one fills the box AND fires the Ask immediately. These
-          replace the separate Sprint report card + "Sprint questions" carousel. */}
+          replace the separate Sprint report card + "Sprint questions" carousel. Caller-supplied
+          suggestions (the report's significant-delta questions) lead; the built-ins follow. */}
       <div className="mt-2 flex flex-wrap gap-1.5" data-testid="chat-quick-questions">
-        {QUICK_QUESTIONS.map((qq) => (
+        {[...(suggestedQuestions ?? []), ...QUICK_QUESTIONS].map((qq) => (
           <button
             key={qq.label}
             type="button"

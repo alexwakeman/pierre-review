@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type {
   BotAnalyticsResponse,
-  BotBehaviourResponse,
   BotFlaggingRefine,
   BotFlaggingResponse,
   BotFlaggingSelector,
@@ -32,7 +31,6 @@ import { getBotOverlapClusters } from '../../db/bot-overlap.js';
 import { getBotVolume, getBotVolumeScatter, getPrBotVolume } from '../../db/bot-volume.js';
 import {
   getBotAnalytics,
-  getBotBehaviourAnalytics,
   getBotOnlyPrs,
   getBotVendorPrs,
   getBotDedupClusters,
@@ -48,6 +46,7 @@ import {
 } from '../../db/queries.js';
 import { resolveThreadsOnGitHub } from '../../bot-triage/resolve.js';
 import { accountIdOf } from '../plugins/auth.js';
+import { entitledProCapabilities } from '../../pro/contract.js';
 
 // Parse a comma-separated id list into a positive-int array, or null when empty/absent (so
 // `resolveWorkspaceScope` treats it as "no narrowing — every repo in the workspace"). Mirrors the
@@ -674,6 +673,16 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   //
   // Same 404 rule as the resets: no row for that (workspace, actor) ⇒ no price to attach.
   app.put('/api/bot-reviewers/:userId/cost', { schema: costSchema }, async (req, reply) => {
+    // ── PAID (`botDepth`, plan P0.3) ── The cost overlay re-gated from "plugin loaded"
+    // (`botTriage`) to the paid depth tier. Same entitlement view /api/me serves and the
+    // /api/pro/* 402 gate mirrors: local accounts are fully entitled whenever the plugin is
+    // bound (so a flags-on local run keeps working), a free cloud account gets the same 402
+    // shape as the plugin routes. Everything else on this resource (classification, identity,
+    // role) stays free — this is the ONLY bot-reviewers route behind the check.
+    if (!req.account || !entitledProCapabilities(req.account).botDepth) {
+      reply.status(402);
+      return { error: 'pro required' };
+    }
     const { userId } = req.params as { userId: number };
     const { workspaceId, monthlyUsd, costModel } = req.body as ReviewerCostBody;
     const reviewer = await setReviewerCost(
@@ -710,25 +719,24 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     // which data is measured — and the narrowing is already bounded by the workspace's membership,
     // so the two cannot describe different sets of repos.
     const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
-    const resp: BotAnalyticsResponse = await getBotAnalytics(accountId, window, scope);
+    // The Inflation column's split tier (plan P1.2/C2, open-question Q2): the current-window
+    // counts are FREE (they ride the already-free ML fold — a verdict), while the WEEKLY history
+    // behind the sparkline ships only under the paid `botDepth` entitlement — the same view
+    // /api/me serves and the cost route above checks. Unentitled ⇒ the field is simply absent,
+    // never an error (hidden, not upsold — the P0.2/P0.3 posture).
+    const inflationHistory = Boolean(
+      req.account && entitledProCapabilities(req.account).botDepth,
+    );
+    const resp: BotAnalyticsResponse = await getBotAnalytics(accountId, window, scope, {
+      inflationHistory,
+    });
     return resp;
   });
 
-  // EXPERIMENTAL bot BEHAVIOUR analytics (CORE, deterministic — no AI). Per bot, over the same
-  // window/scope resolution as /api/bot-analytics: time-to-first-review, LoC-to-comments ratio,
-  // the week×hour activity heatmap (coverage / rate-limit inference), and post-first-review
-  // follow-up behaviour. Powers the Bots "Behaviour" sub-tab, kept separate from the ROI panel.
-  app.get('/api/bot-behaviour', { schema: analyticsSchema }, async (req) => {
-    const { window, workspace, repoIds } = req.query as {
-      window: BotWindowKind;
-      workspace?: string;
-      repoIds?: string;
-    };
-    const accountId = accountIdOf(req);
-    const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
-    const resp: BotBehaviourResponse = await getBotBehaviourAnalytics(accountId, window, scope);
-    return resp;
-  });
+  // The bot BEHAVIOUR analytics route MOVED to the plugin (`GET /api/pro/bot-behaviour`,
+  // packages/pro/src/bots/behaviour-routes.ts) behind the `botDepth` entitlement — the
+  // periodReports precedent: the compute stays CORE (db/queries.ts getBotBehaviourAnalytics,
+  // reached via the ProHostQueries.getBotBehaviour seam), but there is no free surface for it.
 
   // The exact PR list behind the analytics totals.botOnlyPrs count — "only a bot reviewed these".
   // Same window/scope resolution as /api/bot-analytics so the amber caption's number and this
@@ -958,7 +966,7 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   //
   // ⚠ Rate tier `search`, pinned in rate-limit.test.ts. Per request it walks every merged PR in
   // the window (up to 5000) plus three grouped comment counts over them, then folds in JS. No
-  // GitHub, no model — this process's event loop, the `/api/bot-severity` shape of cost — so it
+  // GitHub, no model — this process's event loop, the flagging-drill-down shape of cost — so it
   // borrows the same 60/min bucket rather than the 600/min blanket one.
   app.get('/api/bot-analytics/volume', { schema: volumeScopeSchema }, async (req) => {
     const q = req.query as { window: BotWindowKind; workspace?: string; repoIds?: string };

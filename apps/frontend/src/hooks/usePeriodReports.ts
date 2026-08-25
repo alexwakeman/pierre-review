@@ -10,7 +10,6 @@
 // wrong document.
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  PeriodChatResponse,
   PeriodReportCostEstimate,
   PeriodReportGenerateResponse,
   PeriodReportModelInfo,
@@ -97,12 +96,17 @@ export function useGeneratePeriodReport(workspaceId: number | null, periodKey: s
     },
     onSuccess: (data) => {
       // Write the fresh report straight into the shared GET slot so the panel updates in place
-      // (the response carries the same `PeriodReport` the GET serves).
-      qc.setQueryData<PeriodReportResponse>(periodReportKey(workspaceId, periodKey), {
+      // (the response carries the same `PeriodReport` the GET serves). PRESERVE the previous
+      // response's `byWorkspace` axis: the generate response does not carry it (it rides only the
+      // one-report GET), and dropping it here would blank every open "By workspace" expansion the
+      // moment a regenerate lands. The period is unchanged, so the axis is still true.
+      qc.setQueryData<PeriodReportResponse>(periodReportKey(workspaceId, periodKey), (old) => ({
         enabled: data.enabled,
         workspaceId: data.workspaceId,
         report: data.report,
-      });
+        ...(old?.byWorkspace != null ? { byWorkspace: old.byWorkspace } : {}),
+        ...(old?.modelInfo != null ? { modelInfo: old.modelInfo } : {}),
+      }));
       // A first generate BACKFILLS up to 8 prior periods (metrics-only, no LLM), so the list
       // gains rows the moment this returns — refetch it rather than assuming it is unchanged.
       void qc.invalidateQueries({ queryKey: periodReportsListKey(workspaceId) });
@@ -114,30 +118,10 @@ export function useGeneratePeriodReport(workspaceId: number | null, periodKey: s
   });
 }
 
-// The drill-down turn. Also mount-shared: the pills and the free-text box are two ways to spend
-// the same budget on the same report.
-export function periodReportChatMutationKey(
-  workspaceId: number | null,
-  periodKey: string | null,
-): [string, string, string] {
-  return ['period-report-chat', workspaceKey(workspaceId), periodKey ?? 'none'];
-}
-
-export function usePeriodReportChat(workspaceId: number | null, periodKey: string | null) {
-  const qc = useQueryClient();
-  return useMutation<PeriodChatResponse, Error, { question: string; suggestedId?: string }>({
-    mutationKey: periodReportChatMutationKey(workspaceId, periodKey),
-    mutationFn: (body) => {
-      if (workspaceId == null || periodKey == null) {
-        return Promise.reject(new Error('No period selected'));
-      }
-      return api.periodReportChat(workspaceId, periodKey, body);
-    },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['ai-usage'] });
-    },
-  });
-}
+// `usePeriodReportChat` (the per-report drill-down turn against `POST …/reports/:key/chat`) was
+// REMOVED with the panel's old `ReportChat`: the "Ask about this period" section is the ad-hoc
+// chat now (AdHocChatPanel + `useSprintChat` with explicit period bounds — see plan C5). The
+// server route and its stored `report.suggested` pills still exist and are simply unconsumed.
 
 // ── Model choice + the PRE-FLIGHT cost estimate ──────────────────────────────────────────────
 //

@@ -74,62 +74,8 @@ export const useInsightsDigestExpand = create<InsightsDigestExpandState>((set, g
   },
 }));
 
-// The Sprint report card's own collapse chrome — the top-level card body AND its nested
-// "Repo summaries" container. Both were ephemeral React state, so navigating away from the
-// Insights tab and back reset them (the container snapped shut every time, which also hid
-// the per-repo expand state from view). Persisted here so the reader's layout choices
-// survive a tab switch / reload. Defaults preserve the prior behaviour: card expanded, the
-// (length-heavy) repo-summaries section collapsed.
-const SPRINT_UI_KEY = 'pierre:sprintReportUi';
-
-interface SprintUiPersisted {
-  collapsed: boolean;
-  reposOpen: boolean;
-}
-
-function loadSprintUi(): SprintUiPersisted {
-  const fallback: SprintUiPersisted = { collapsed: false, reposOpen: false };
-  try {
-    const raw = localStorage.getItem(SPRINT_UI_KEY);
-    if (!raw) return fallback;
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed == null || typeof parsed !== 'object') return fallback;
-    const p = parsed as Record<string, unknown>;
-    return {
-      collapsed: typeof p.collapsed === 'boolean' ? p.collapsed : false,
-      reposOpen: typeof p.reposOpen === 'boolean' ? p.reposOpen : false,
-    };
-  } catch {
-    return fallback;
-  }
-}
-
-interface SprintReportUiState extends SprintUiPersisted {
-  setCollapsed: (v: boolean) => void;
-  setReposOpen: (v: boolean) => void;
-}
-
-export const useSprintReportUi = create<SprintReportUiState>((set, get) => {
-  const save = (): void => {
-    try {
-      const { collapsed, reposOpen } = get();
-      localStorage.setItem(SPRINT_UI_KEY, JSON.stringify({ collapsed, reposOpen }));
-    } catch {
-      /* quota / private mode — non-fatal */
-    }
-  };
-  return {
-    ...loadSprintUi(),
-    setCollapsed: (v) => {
-      set({ collapsed: v });
-      save();
-    },
-    setReposOpen: (v) => {
-      set({ reposOpen: v });
-      save();
-    },
-  };
-});
+// (`useSprintReportUi` — the Sprint report card's persisted collapse chrome, localStorage key
+// 'pierre:sprintReportUi' — was REMOVED with `SprintReportCard` on the C7 cut list.)
 
 // The Feed's "Open PRs" panel (the workspace's open PRs, grouped PER REPO, above the feed). COLLAPSED
 // BY DEFAULT — it's a filter affordance, not primary content — and its open/closed choice is

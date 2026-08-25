@@ -1228,3 +1228,66 @@ body {
 .dark .tab-scrollbar:hover::-webkit-scrollbar-thumb {
   background-color: rgb(100 116 139); /* slate-500 on hover */
 }
+
+/* ── Printing the Reports pane (plan P4.1 — the board-pack path) ────────────────────────────
+   Print-to-PDF is the vehicle; there is no server rendering. The printable subtree is the
+   period report marked `data-print-report` (PeriodReportsPanel): title, coverage sentence,
+   figures table, forecast lines and narrative. Everything else — rail, tab bars, header, chat,
+   buttons — is hidden. `visibility` (not display) keeps layout so the marked subtree can be
+   repositioned to the page origin; `overflow: visible` undoes the app shell's fixed-height
+   scroll containers so the report paginates instead of printing one clipped viewport.
+   DARK-MODE-SAFE BY FORCE: the app's dark theme is a class on <html> that print cannot remove,
+   and dark-variant text (gray-100 on gray-950) would print near-white on white paper — so
+   colors inside the print subtree are forced to a light palette wholesale. That deliberately
+   flattens the green/red delta tones; the arrows (▲/▼) and the wording carry the direction. */
+@media print {
+  @page {
+    margin: 1.6cm;
+  }
+  html,
+  body,
+  #root {
+    height: auto !important;
+    background: #fff !important;
+  }
+  #root * {
+    overflow: visible !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  [data-print-report],
+  [data-print-report] * {
+    visibility: visible;
+  }
+  [data-print-report] {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  [data-print-report] * {
+    color: #111 !important;
+    background: transparent !important;
+    border-color: #d1d5db !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+  /* Interactive chrome inside the report: expanders, copy, the earlier-periods select. The
+     `print:hidden` Tailwind classes on the picker/controls/chat sections handle the rest. */
+  [data-print-report] button,
+  [data-print-report] select {
+    display: none !important;
+  }
+  /* The figures table scrolls on screen (min-w + overflow-x-auto); on paper it must reflow to
+     the page width instead of clipping at the sheet edge. */
+  [data-print-report] table {
+    min-width: 0 !important;
+    width: 100% !important;
+    font-size: 10px;
+  }
+  [data-print-report] table th,
+  [data-print-report] table td {
+    page-break-inside: avoid;
+  }
+}

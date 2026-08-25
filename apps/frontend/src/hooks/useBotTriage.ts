@@ -14,6 +14,7 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { ACTIVITY_GC_TIME, workspaceKey } from './useActivity.js';
+import { useProCapabilities } from './useTriage.js';
 
 // Per-request cap on the workspace-wide resolve: the client chunks a larger reviewed selection into
 // sequential POSTs so a hundreds-of-threads resolve streams progress instead of one multi-minute
@@ -82,20 +83,38 @@ export function useBotAnalytics(
   });
 }
 
-// EXPERIMENTAL bot BEHAVIOUR analytics (TTFR / LoC-to-comments / 24h heatmap / follow-ups) over
-// the selected window. Same workspace/repoIds resolution and the same two-slot key rule as
-// useBotAnalytics. CORE / deterministic — the "Behaviour" sub-tab consumes it.
+// Bot BEHAVIOUR analytics (TTFR / LoC-to-comments / 24h heatmap / follow-ups) over the selected
+// window. Same workspace/repoIds resolution and the same two-slot key rule as useBotAnalytics.
+// Deterministic compute, but the SURFACE is Pro depth (plan P0.2): the route moved to
+// /api/pro/bot-behaviour behind the `botDepth` capability, so this hook gates the fetch on it —
+// with botDepth false (OSS: the route doesn't exist; free cloud: it would 402) NOTHING is
+// fetched and no error surfaces; consumers simply render nothing. Return shape is unchanged.
+// `botUserId` narrows the response to ONE bot (the per-bot depth drill-down tab, plan P1.1/C1) —
+// the server admits only ids in the workspace's review-role set, so a stale id yields the empty
+// response, never someone else's data. It gets its OWN key slot (`bot:<id>` — the refineQueryKey
+// precedent): without it two bots' depth tabs, or a tab and the workspace-wide charts, would
+// share one cache entry and silently show each other's data.
 export function useBotBehaviour(
   workspaceId: number | null,
   window: BotWindowKind,
   enabled = true,
   repoIds?: number[] | null,
+  botUserId?: number | null,
 ) {
+  const { botDepth } = useProCapabilities();
   return useQuery<BotBehaviourResponse>({
-    queryKey: ['bot-behaviour', window, workspaceKey(workspaceId), repoKeySlot(repoIds)],
+    queryKey: [
+      'bot-behaviour',
+      window,
+      workspaceKey(workspaceId),
+      repoKeySlot(repoIds),
+      botUserId != null ? `bot:${botUserId}` : 'bot:all',
+    ],
     queryFn:
-      workspaceId == null ? skipToken : () => api.botBehaviour(window, workspaceId, repoIds),
-    enabled,
+      workspaceId == null
+        ? skipToken
+        : () => api.botBehaviour(window, workspaceId, repoIds, botUserId),
+    enabled: enabled && botDepth,
     refetchInterval: 5 * 60_000,
     refetchIntervalInBackground: false,
     staleTime: 60_000,
@@ -186,11 +205,9 @@ const RECLASSIFY_INVALIDATE_KEYS = [
   // new one automated) changes every tile's number and every row of every selector's list.
   'bot-flagging',
   'bot-dedup',
-  // The ML severity rollup counts only the actors the workspace calls bots, so marking a login
-  // human (or a new one automated) changes it as surely as it changes the ROI numbers. The
-  // per-PR label index (['ml-labels', prId]) is deliberately NOT here: it holds stored labels
-  // for named targets, which a reclassification does not alter.
-  'bot-severity',
+  // The per-PR ML label index (['ml-labels', prId]) is deliberately NOT here: it holds stored
+  // labels for named targets, which a reclassification does not alter. (The 'bot-severity'
+  // rollup key left with GET /api/bot-severity — its fold now rides 'bot-analytics'.)
   'pr-bot-behaviour',
   'activity',
   'consolidated-feed',

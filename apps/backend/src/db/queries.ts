@@ -7312,6 +7312,10 @@ export interface ResolvableBotThreadRow {
   threadId: number;
   threadNodeId: string;
   path: string;
+  // The THREAD's own creation time (ISO) — GitHub-stable, unlike the PR's `updatedAt`. Added for
+  // the synthesis input (db/synthesis-input.ts), whose payload hash needs a per-item field that
+  // never moves under an unchanged backlog.
+  threadCreatedAt: string;
   prId: number;
   prNumber: number;
   prTitle: string;
@@ -7384,6 +7388,7 @@ export async function getResolvableBotThreadsForScope(
       threadId: reviewThreads.id,
       threadNodeId: reviewThreads.githubNodeId,
       path: reviewThreads.path,
+      threadCreatedAt: reviewThreads.createdAt,
       commenterId: reviewThreads.originalCommenterId,
       prId: pullRequests.id,
       prNumber: pullRequests.number,
@@ -7466,6 +7471,7 @@ export async function getResolvableBotThreadsForScope(
     threadId: r.threadId,
     threadNodeId: r.threadNodeId,
     path: r.path,
+    threadCreatedAt: r.threadCreatedAt.toISOString(),
     prId: r.prId,
     prNumber: r.prNumber,
     prTitle: r.prTitle,
@@ -10160,9 +10166,9 @@ export async function getHumanReviewComments(
 // reads them. Account-scoped + WORKSPACE-scoped (`scope`, mirroring getBotAnalytics) + windowed;
 // only automated-reviewer authors; capped most-recent (a `truncated` flag) so a firehose repo can't
 // blow the payload. Returns both inline review-thread comments (with path + derivedState) and
-// issue-level PR comments (path/derivedState null). The row shape is RE-DECLARED verbatim in
-// packages/pro/src/bot-themes/build.ts (open-core boundary — the plugin imports no host internals);
-// KEEP THE TWO IN LOCKSTEP.
+// issue-level PR comments (path/derivedState null). (The plugin's bot-themes/build.ts copy of this
+// row shape is gone with that surface — plan P2.3/C6; the surviving consumer is core
+// db/synthesis-input.ts's 'workspace-bots' fold, which imports this declaration directly.)
 export interface BotReviewCommentRow {
   id: number; // source-row id (namespaced by `source` — not globally unique across sources)
   source: 'review' | 'issue';
@@ -10361,6 +10367,11 @@ export async function getBotAnalytics(
   // thread through — so the metric and the drill-down behind it could evaluate different rules.
   // `repoIds: []` = an empty workspace → empty analytics.
   scope: BotScope,
+  // `inflationHistory` (plan P1.2/C2): fold the per-bot WEEKLY inflation series (the Pro
+  // sparkline behind the Inflation column) over the 12-week trend span. The route sets it from
+  // the `botDepth` entitlement — the current-window counts are FREE and computed regardless;
+  // only the history is paid, and an unentitled response simply ships no `weekly`.
+  opts?: { inflationHistory?: boolean },
 ): Promise<BotAnalyticsResponse> {
   const nowMs = Date.now();
   const windowKind = typeof window === 'string' ? window : window.kind;
@@ -10414,7 +10425,16 @@ export async function getBotAnalytics(
   // roles, like the rollup) and ALWAYS — the SPA's render gate is MeResponse.mlSeverity, and on
   // a deployment with no scoring service this is a cheap scan of an empty table plus three
   // indexed zero counts. The vendor's own declared severity is never read here.
-  const mlAgg = await getMlWindowAggregates(accountId, scope, automatedIds, from);
+  // Under `inflationHistory` the scan widens to `trendFrom` for the weekly series; the window
+  // counts are unchanged (in-window rows are a newest-first PREFIX of the widened scan — see the
+  // note on `getMlWindowAggregates`' `history` parameter).
+  const mlAgg = await getMlWindowAggregates(
+    accountId,
+    scope,
+    automatedIds,
+    from,
+    opts?.inflationHistory ? { trendFrom } : undefined,
+  );
 
   // Per-REVIEWER identity (so in-house bots — all kind 'in_house' — separate into their own rows
   // instead of collapsing). Label preference: the account's custom classification label →
@@ -10901,7 +10921,12 @@ export async function getBotAnalytics(
     const comments = commentsByUser.get(userId) ?? 0;
     // This bot's windowed ML label aggregate — undefined when it has no labels in the window,
     // and the row then OMITS the ml* fields entirely (blanks in the UI, never zeros).
-    const mlRow = mlAgg.byBot.get(userId);
+    //
+    // ⚠ `labelled > 0`, not bare presence: under `inflationHistory` the widened scan creates an
+    // accumulator for a bot whose only labels PREDATE the window, and shipping its zeros would
+    // change what a present `mlFindings: 0` means ("in-window labels exist, all summaries/praise").
+    const mlRowRaw = mlAgg.byBot.get(userId);
+    const mlRow = mlRowRaw != null && mlRowRaw.labelled > 0 ? mlRowRaw : undefined;
     // Window activity = threads/comments (the volume math) OR a body-only submitted review.
     // No window activity but ANY 12-week-trend footprint (threads, comments, or body-only
     // reviews) → the row survives as DORMANT (zeroed window counts + the trend) instead of
@@ -11010,6 +11035,20 @@ export async function getBotAnalytics(
             // the ignored threads are scored that way"; the UI blanks them like the other ML cells.
             notAddressedBySeverity:
               notAddressedBySeverityByUser.get(userId) ?? emptyMlSeverityCounts(),
+            // The Inflation column (plan P1.2/C2): counts partition `badged` (never `findings`),
+            // direction via the ONE shared `vendorAgreementOf` rule — so each count equals the
+            // flagging drill-down's `filteredTotal` for the same bot + direction. `weekly` ships
+            // only under the `botDepth` entitlement (the route's `inflationHistory` flag); a
+            // sparkline of all-zero weeks is dropped — nothing to draw.
+            mlInflation: {
+              badged: mlRow.vendorBadged,
+              overCall: mlRow.vendorOverCall,
+              underCall: mlRow.vendorUnderCall,
+              ...(mlRow.inflationWeekly != null &&
+              mlRow.inflationWeekly.some((w) => w.overCall > 0 || w.underCall > 0)
+                ? { weekly: mlRow.inflationWeekly }
+                : {}),
+            },
           }
         : {}),
       // The verdict uses OVERDUE untouched (aged past the norm), not raw untouched — so a bot
@@ -12057,6 +12096,12 @@ export async function getBotBehaviourAnalytics(
   // Exactly as getBotAnalytics: `workspaceId` decides who counts as a bot, `repoIds` narrows the
   // measured data. `repoIds: []` = an empty workspace.
   scope: BotScope,
+  // Optional ONE-BOT narrowing (apiVersion 21 — the per-bot drill-down tab's fetch). When set,
+  // the whole result covers only that bot: the automated-id set is sliced BEFORE any of the
+  // touch/thread/ML scans run, so opening one bot's tab never computes fifteen bots' heatmaps.
+  // A `botUserId` that is not one of the workspace's role-'review' automated reviewers yields
+  // the empty response, exactly like a workspace with no reviewers.
+  botUserId?: number,
 ): Promise<BotBehaviourResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
@@ -12122,7 +12167,14 @@ export async function getBotBehaviourAnalytics(
 
   // `role: 'review'` — TTFR, follow-up rate and the coverage heatmap are all claims about REVIEW
   // behaviour. A linter that fires on every push would flatten TTFR and dominate the heatmap.
-  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
+  //
+  // The one-bot narrowing slices HERE, before any scan runs: every downstream query
+  // (reviews/comments/threads/ML) filters on `automatedIds`, so one filter is the whole slice.
+  // Filtering (never trusting the raw id) also keeps the workspace-membership guarantee: a
+  // caller cannot smuggle a non-reviewer or another workspace's bot into the measured set.
+  const allAutomatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
+  const automatedIds =
+    botUserId != null ? allAutomatedIds.filter((id) => id === botUserId) : allAutomatedIds;
   if (automatedIds.length === 0) return empty(prsOpenedPerDay);
   const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
 

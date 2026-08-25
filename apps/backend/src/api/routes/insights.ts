@@ -3,7 +3,6 @@ import type {
   AttentionCardsResponse,
   InsightsResponse,
   RepoAnalytics,
-  WorkspaceComparisonResponse,
   WorkspaceMetricsDetailResponse,
   WorkspaceMetricsResponse,
 } from '@pierre-review/shared';
@@ -15,7 +14,6 @@ import {
   getWorkspaceMetricsForScope,
   resolveWorkspaceScope,
 } from '../../db/queries.js';
-import { getWorkspaceComparison } from '../../db/workspace-comparison.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 function parseIntList(raw: string | undefined): number[] | null {
@@ -65,25 +63,10 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
     return { enabled: true, detail };
   });
 
-  // Cross-workspace comparison — CORE/FREE, deliberately in the /api/workspace-metrics family
-  // because the panel shares the free DORA header's (trailing-14d) window.
-  //
-  // ⚠ IT TAKES NO PARAMETERS — not even `?workspace=`. It compares EVERY workspace the account
-  // owns, Default included, because its whole purpose is to place the selected workspace against
-  // the others; scoping it is what made its predecessor vanish the moment fewer than two teams were
-  // selected. The surface is hidden client-side on `workspaces.length < 2`, a count over the
-  // roster, never a test on a scope value.
-  //
-  // Isolation is by construction: getWorkspaceComparisonRows narrows `listWorkspaces(accountId)`,
-  // so there is no caller-supplied id to check and nothing to 404 on.
-  //
-  // Rate limit: the `search` tier (60/min), NOT the blanket 600/min `read` bucket its two siblings
-  // use — this is the one route in the family whose cost multiplies by workspace count
-  // (N × getWorkspaceMetrics, each a 12-week PR window). The SPA additionally fires it only while
-  // the Compare surface is open.
-  app.get('/api/workspace-metrics/compare', async (req): Promise<WorkspaceComparisonResponse> => {
-    return getWorkspaceComparison(accountIdOf(req));
-  });
+  // (GET /api/workspace-metrics/compare was DELETED with the "Compare workspaces" rail entry —
+  // cross-workspace comparison now lives inside Reports as the plugin-served "By workspace" axis,
+  // which rides the window-pure getPeriodMetricsForWorkspaces seam instead of the snapshot
+  // WorkspaceMetrics matrix.)
 
   // The attention cards (stalled reviews / untouched threads / reviewer load / needs-a-reviewer) —
   // CORE/free (the same cards Pro Insights computes in core getWorkspaceInsights), for the Feed

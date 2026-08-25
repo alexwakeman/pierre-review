@@ -10,18 +10,21 @@ import { ACTIVITY_QUERY_KEYS } from './useActivity.js';
 //  • ['repos'] — every repo row carries its `workspaceId`, so the account-wide repo list is stale
 //    the moment a move lands (and every client-side "is this repo in scope?" derives from it);
 //  • the whole Activity/Insights surface (ACTIVITY_QUERY_KEYS);
-//  • the three flow-metric keys owned by this hook's siblings. They are NOT redundant with the
-//    keys above and the reason is easy to miss: ['workspace-metrics', id] and
+//  • the flow-metric + Reports keys owned by this hook's siblings. They are NOT redundant with
+//    the keys above and the reason is easy to miss: ['workspace-metrics', id] and
 //    ['workspace-metrics-detail', id] carry the workspace id, but a MEMBERSHIP change moves repos
-//    in or out of the SAME id — the key does not change, so nothing would refetch on its own. And
-//    ['workspace-comparison'] carries no id at all (it lists every workspace with its repo count),
-//    so a create/delete/rename leaves the whole matrix stale until something invalidates it.
+//    in or out of the SAME id — the key does not change, so nothing would refetch on its own. The
+//    two Reports keys are in the same position AND their responses carry the cross-workspace
+//    "By workspace" axis, which a create/delete/rename of ANY workspace stales regardless of the
+//    id in the key. (They replaced ['workspace-comparison'] here when the Compare rail entry
+//    folded into Reports.)
 const WORKSPACE_INVALIDATE_KEYS = [
   'workspaces',
   'repos',
   'workspace-metrics',
   'workspace-metrics-detail',
-  'workspace-comparison',
+  'period-reports',
+  'period-report',
   // The board surfaces. Every one of these keys carries the workspace scope in its query
   // string (`ws:<id>` / `?workspace=`), but a MEMBERSHIP move changes what the SAME scope
   // means — the key does not change, so without an explicit invalidation the Timeline,

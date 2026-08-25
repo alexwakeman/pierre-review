@@ -258,7 +258,7 @@ function BranchTrends({
   );
 
   if (full) {
-    // The per-repo console: the ChartCard composition, exactly as BotBehaviourPanel's
+    // The per-repo console: the ChartCard composition, exactly as BotDetailPanel's
     // "Daily coverage" card.
     return (
       <div className="mb-2">

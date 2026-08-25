@@ -31,7 +31,7 @@ const NOTICE_MS = 5000;
 // Generate/regenerate a preset answer (the only billing path). Writes the fresh result into
 // the shared cache so the panel updates in place; surfaces a transient `notice` when the
 // server throttled the request or the account is out of credits — so a no-op click doesn't
-// read as a silent failure. Mirrors useRefreshSprintReport. The mutation takes the preset key
+// read as a silent failure. (Mirrored the removed useRefreshSprintReport.) The mutation takes the preset key
 // (which one the user clicked); the workspace is fixed per panel.
 export function useRefreshPresetPrompt(workspaceId: number | null) {
   const qc = useQueryClient();

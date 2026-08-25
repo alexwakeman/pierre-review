@@ -29,6 +29,8 @@ export type PinnedPr = TabMeta;
 //  - bot-volume: the merged-PR list behind the ROI table's "bot comments per PR" column (a
 //    singleton, non-PR, EPHEMERAL tab; which bot it is narrowed to is the transient seed)
 //  - user-activity: one contributor's activity feed (keyed PER USER, non-PR, EPHEMERAL)
+//  - bot-detail: one review bot's depth analytics (keyed PER BOT user id, non-PR, EPHEMERAL —
+//    the per-bot drill-down that replaced the Bots "Behaviour" inner tab, plan P1.1/C1)
 export type TabKind =
   | 'pr-detail'
   | 'pr-focus'
@@ -41,7 +43,8 @@ export type TabKind =
   | 'bot-volume'
   | 'theme-threads'
   | 'search'
-  | 'user-activity';
+  | 'user-activity'
+  | 'bot-detail';
 
 // The label metadata a user-activity tab carries, so its chip renders without a lookup
 // (and keeps rendering if the user drops out of the roster). Captured at open time.
@@ -52,12 +55,26 @@ export interface TabUserMeta {
   avatarUrl: string | null;
 }
 
+// The label metadata a bot-detail tab carries (the TabUserMeta pattern for bots): enough to
+// render the chip + header without a lookup, captured at open time from the ROI row the tab was
+// opened from. `repoId` is the repo narrowing that row was measured at (the per-repo Bots
+// console; null = whole workspace) — the tab's fetch inherits it so the depth describes the same
+// scope as the table the user clicked.
+export interface TabBotMeta {
+  id: number; // users.id — the same number the tab key carries
+  login: string | null;
+  label: string; // classification label → vendor name → login (the ROI row's display name)
+  kind: string; // AutomatedReviewerKind (kept as string here — the store stays type-light)
+  repoId: number | null;
+}
+
 export interface Tab {
-  key: string; // stable: 'pr-detail:123' | 'pr-focus:123' | 'user-activity:45'
+  key: string; // stable: 'pr-detail:123' | 'pr-focus:123' | 'user-activity:45' | 'bot-detail:45'
   kind: TabKind;
   prId: number; // PR id for pr-detail / pr-focus
   meta: TabMeta | null; // label meta for PR tabs
   userMeta?: TabUserMeta | null; // label meta for user-activity tabs
+  botMeta?: TabBotMeta | null; // label meta for bot-detail tabs
 }
 
 // Which "tab" the main area is showing: the standard timeline board, the Activity
@@ -117,6 +134,18 @@ export function parseUserActivityKey(key: string): number | null {
   const m = /^user-activity:(\d+)$/.exec(key);
   return m ? Number(m[1]) : null;
 }
+// One review bot's depth analytics, keyed PER BOT (the user-activity pattern): two bots' depth
+// tabs can sit side by side, and re-clicking the same bot's "Depth →" pill re-focuses its
+// existing tab. The NUMERIC slot is the bot's `users.id` — the same id the behaviour route's
+// `botUserId` narrowing takes, so the key and the fetch can never name different bots. Still
+// EPHEMERAL: `persist` whitelists only the two PR kinds and parseTabKey doesn't match this
+// prefix, so a reload drops it like every other drill-down.
+export const botDetailKey = (userId: number): string => `bot-detail:${userId}`;
+/** The bot's userId behind a bot-detail tab key (null for any other key). */
+export function parseBotDetailKey(key: string): number | null {
+  const m = /^bot-detail:(\d+)$/.exec(key);
+  return m ? Number(m[1]) : null;
+}
 
 /** Parse a Tab.key back into its kind + PR id (null for unknown). */
 export function parseTabKey(key: string): { kind: TabKind; prId: number } | null {
@@ -169,6 +198,9 @@ interface TabsState {
   // Ensure (and activate) one contributor's activity-feed tab. Keyed per user; `user` is the
   // chip's label metadata, captured at open time from whatever the caller already had.
   openUserActivityTab: (userId: number, user: TabUserMeta | null, opts?: OpenOpts) => void;
+  // Ensure (and activate) one review bot's depth drill-down tab. Keyed per bot (users.id);
+  // `bot` is the chip/header label metadata, captured at open time from the ROI row.
+  openBotDetailTab: (userId: number, bot: TabBotMeta | null, opts?: OpenOpts) => void;
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
   closeTab: (key: string) => void; // remove; fall back to 'timeline' if it was active
@@ -363,6 +395,17 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
           prId: 0,
           meta: null,
           userMeta: user,
+        },
+        opts,
+      ),
+    openBotDetailTab: (userId, bot, opts) =>
+      openTab(
+        {
+          key: botDetailKey(userId),
+          kind: 'bot-detail',
+          prId: 0,
+          meta: null,
+          botMeta: bot,
         },
         opts,
       ),

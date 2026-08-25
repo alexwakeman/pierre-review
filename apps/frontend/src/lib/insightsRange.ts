@@ -33,6 +33,9 @@ export const INSIGHTS_RANGE_LABEL: Record<InsightsRangeKey, string> = {
   '14d': '14d',
   '30d': '30d',
   '90d': '90d',
+  // Never a chip (FilterBar's key lists don't include it): 'period' only ever appears on answers
+  // the Reports "Ask about this period" mount grounded in an explicit reporting period.
+  period: 'Period',
 };
 
 // Sentence-case prose for a caption under an answer, where "7d" would read as a typo.
@@ -42,6 +45,8 @@ const PROSE: Record<InsightsRangeKey, string> = {
   '14d': 'Last 14 days',
   '30d': 'Last 30 days',
   '90d': 'Last 90 days',
+  // The caption's dates carry the specifics; this just names the KIND of window.
+  period: 'Report period',
 };
 
 // Caption one answer's window: what it covered and over which dates.

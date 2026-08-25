@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { JSX } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import type {
   ActorLane,
   ActorLaneBand,
+  PeriodByWorkspace,
   PeriodForecast,
   PeriodLaneStats,
   PeriodLanes,
@@ -15,7 +16,7 @@ import type {
   PeriodReport,
   PeriodReportListItem,
   PeriodReportModelInfo,
-  PeriodSuggestedQuestion,
+  PeriodWorkspaceRow,
 } from '@pierre-review/shared';
 import {
   ACTOR_LANES,
@@ -31,10 +32,31 @@ import {
   periodReportModelChoices,
   useGeneratePeriodReport,
   usePeriodReport,
-  usePeriodReportChat,
   usePeriodReportsList,
 } from '../../hooks/usePeriodReports.js';
+import { AdHocChatPanel } from './AdHocChatPanel.js';
+import { PeriodPeopleSection } from './PeriodPeopleSection.js';
+import { CopyButton } from '../CopyButton.js';
+import type { Fmt, MetricMeta } from './periodReportMarkdown.js';
+import {
+  METRIC_META,
+  REFUSAL_TEXT,
+  changeFmtFor,
+  figuresOnly,
+  metaFor,
+  pctFmt,
+  periodTitle,
+  renderPeriodReportMarkdown,
+  rowFigures,
+  signed,
+  standaloneLabelFor,
+} from './periodReportMarkdown.js';
 import { PALETTE, fmtDuration } from '../charts/common.js';
+
+// Re-exported for periodMetricRow.test.ts, which pins the one-population row rule through this
+// module's public surface (the definition moved to periodReportMarkdown.ts with the rest of the
+// presentation metadata).
+export { rowFigures } from './periodReportMarkdown.js';
 import { PeriodMetricSpark } from './PeriodMetricSpark.js';
 import { SummaryMarkdown } from './prRefTable.js';
 
@@ -62,191 +84,13 @@ import { SummaryMarkdown } from './prRefTable.js';
 
 // ── Metric presentation ──────────────────────────────────────────────────────────────────────
 //
-// LABELS AND FORMATTERS ONLY. `direction` is NOT duplicated here — it rides on every
-// `PeriodMetricDelta` from the server, which is what keeps this table from becoming a second copy
-// of spec §1's direction column that can silently disagree with the significance the server
-// computed. The sample/absolute floors are likewise absent on purpose: they are CORE's
-// (`db/period-metrics.ts`) and reach the SPA only as the pre-computed `significant` flag.
-type Fmt = (n: number) => string;
-
-const countFmt: Fmt = (n) => String(Math.round(n));
-const pctFmt: Fmt = (n) => `${Math.round(n)}%`;
-const linesFmt: Fmt = (n) => `${Math.round(n)}`;
-const ratioFmt: Fmt = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
-// The CHANGE in a percentage metric is measured in POINTS, not percent. Without this the CI
-// success row reads "▲ +5% (+8%)" — two different quantities wearing the same suffix, which is
-// exactly the ambiguity this surface exists to avoid.
-const pointsFmt: Fmt = (n) => `${Math.round(n)} pts`;
-
-interface MetricMeta {
-  label: string;
-  format: Fmt;
-  // How the ABSOLUTE CHANGE reads, when that differs from how the value reads (percentages →
-  // points). Defaults to `format`.
-  changeFormat?: Fmt;
-  // A short caption under the label, shown where the metric's definition is narrower than its
-  // name. Three of these are not cosmetic — they are the difference between a number the reader
-  // trusts and one they think disagrees with another screen.
-  note?: string;
-  // ⚠ THE LABEL FOR ANYWHERE OUTSIDE THE TABLE ROW.
-  //
-  // The two human-only twins are labelled `…by people`, which reads correctly ONLY directly under
-  // the blended figure they qualify. On a "biggest movers" pill that context is gone, and BOTH of
-  // them render as the same pill — a reader seeing "…by people ▼ −47 (−25%)" cannot tell whether
-  // their team merged 47 fewer PRs or wrote PRs 47 lines smaller, which are opposite kinds of
-  // news. Set this wherever `label` leans on its neighbour to make sense.
-  standaloneLabel?: string;
-}
-
-/** The label to use where the metric appears on its own — a pill, a tooltip, a chat prompt —
- *  rather than in a table row directly beneath the figure it qualifies. */
-function standaloneLabelFor(meta: MetricMeta): string {
-  return meta.standaloneLabel ?? meta.label;
-}
-
-function changeFmtFor(meta: MetricMeta): Fmt {
-  return meta.changeFormat ?? meta.format;
-}
-
-const METRIC_META: Record<PeriodMetricKey, MetricMeta> = {
-  merged_prs: { label: 'Merged PRs', format: countFmt, note: 'everything that landed' },
-  // ⚠ THE HUMAN-ONLY TWIN SITS DIRECTLY UNDER ITS BLENDED PARENT, in `PERIOD_METRIC_KEYS` order,
-  // and that adjacency is the feature. `117 / 71` read one under the other states the automation
-  // gap with no narration; the same two numbers on opposite sides of a table are two facts nobody
-  // joins up.
-  human_merged_prs: {
-    label: '…by people',
-    standaloneLabel: 'Merged PRs by people',
-    format: countFmt,
-    note: 'excludes bumps, agents, release bots',
-  },
-  opened_prs: { label: 'Opened PRs', format: countFmt },
-  automation_merge_share_pct: {
-    label: 'Automation share of merges',
-    format: pctFmt,
-    changeFormat: pointsFmt,
-    note: 'no arrow — more automation is not self-evidently better or worse',
-  },
-  median_lead_time_hours: {
-    label: 'Lead time',
-    format: fmtDuration,
-    note: 'median open → merge',
-  },
-  median_time_to_first_human_review_hours: {
-    label: 'Time to first review by a person',
-    format: fmtDuration,
-    // TWO things this caption has to carry, both of which have burned a reader:
-    //  • "by a person" — this metric used to attribute to whoever reviewed FIRST, which on a
-    //    workspace where CI auto-approves on push is the bot, at zero minutes. It read 0h against
-    //    a real human median of 18.3h.
-    //  • "counted on the review" — deliberately different from the Flow-metrics tile of nearly
-    //    the same name. Bucketing by open date right-censors a recent window (PRs opened in-window
-    //    but not yet reviewed contribute nothing, biasing the median DOWN).
-    note: 'median, counted on the review — not the open. Bot approvals are excluded',
-  },
-  merge_ci_success_pct: {
-    label: 'Merge CI success',
-    format: pctFmt,
-    changeFormat: pointsFmt,
-    note: '% green at merge',
-  },
-  median_pr_size_lines: {
-    label: 'PR size',
-    format: linesFmt,
-    note: 'median lines added + deleted',
-  },
-  median_human_pr_size_lines: {
-    label: '…by people',
-    standaloneLabel: 'PR size, people only',
-    format: linesFmt,
-    // The measured case: Dependabot's 14-line bumps and the humans' 142 blended to a reported 68,
-    // a number no pull request in the workspace resembled.
-    note: 'the blended figure above understated this by 2.1× on the workspace this was built for',
-  },
-  review_threads_opened: { label: 'Review threads opened', format: countFmt },
-  threads_replied_within_36h_pct: {
-    label: 'Threads replied within 36h',
-    format: pctFmt,
-    changeFormat: pointsFmt,
-    note: 'same 36h grace the bot verdict uses',
-  },
-  // Both comment counts are INLINE review comments only — not PR-level comments, not review
-  // bodies. The Bots tab's "bot comments" counts all three, so the same workspace legitimately
-  // shows a larger figure there; without this caption that reads as one of the two being broken.
-  bot_review_comments: {
-    label: 'Bot review comments',
-    format: countFmt,
-    // INLINE ONLY, and that is why the "Effort vs automation" panel above can legitimately show a
-    // much larger figure: quality gates post ISSUE comments, so a workspace with 786 SonarQube
-    // comments reads 0 here. The panel counts all three channels; this row is the frozen vector
-    // metric and stays comparable with every period stored before the panel existed.
-    note: 'inline only — see Effort vs automation',
-  },
-  human_review_comments: {
-    label: 'Human review comments',
-    format: countFmt,
-    note: 'inline only — see Effort vs automation',
-  },
-  bot_comments_per_merged_pr: { label: 'Bot comments per merged PR', format: ratioFmt },
-  reviewer_concentration_pct: {
-    label: 'Reviewer concentration',
-    format: pctFmt,
-    changeFormat: pointsFmt,
-    // Bots are excluded from this one — a bot that submits more reviews than anyone would
-    // otherwise define "the busiest reviewer" and the number would stop being about the team.
-    note: 'share taken by the busiest human reviewer',
-  },
-};
-
-// ── Refusals ─────────────────────────────────────────────────────────────────────────────────
-// A named reason, in the reader's words. Note what is NOT said: `insufficient_history` does not
-// quote the minimum number of periods, because that constant (`MIN_FORECAST_POINTS`) lives in
-// CORE and a hard-coded "4" here would drift silently the day it moves.
-const REFUSAL_TEXT: Record<PeriodRefusalReason, string> = {
-  no_prior_period: 'No earlier period is stored, so there is nothing to compare against.',
-  cadence_changed:
-    'The sprint cadence changed between these two periods. Periods of different lengths are not comparable, so the difference is not shown rather than being quietly subtracted.',
-  partial_coverage:
-    'No repo in this workspace was being tracked across both periods, so there is no like-for-like subset to compare.',
-  insufficient_history:
-    'Not enough complete periods yet — a trend needs several periods where every repo in the subset was already being tracked.',
-  too_volatile:
-    'Too volatile to forecast: the uncertainty band came out wider than the estimate itself.',
-};
-
-// ── Dates ────────────────────────────────────────────────────────────────────────────────────
-//
-// Rendered in UTC, matching the period key (`sprint-2026-08-18` is a UTC date). Local formatting
-// would show "17 Aug" to a reader west of Greenwich for a period whose own key says the 18th.
-//
-// `periodEnd` is the window's EXCLUSIVE bound and is printed as-is: a 14-day period starting
-// 18 Aug is titled "18 Aug – 1 Sep", which is how the cadence is spoken about. Do not
-// "fix" it by subtracting a day.
-const DAY_MONTH: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', timeZone: 'UTC' };
-
-function periodTitle(startIso: string, endIso: string): string {
-  const s = new Date(startIso);
-  const e = new Date(endIso);
-  const sameYear = s.getUTCFullYear() === e.getUTCFullYear();
-  const thisYear = new Date().getUTCFullYear();
-  const withYear: Intl.DateTimeFormatOptions = { ...DAY_MONTH, year: 'numeric' };
-  if (!sameYear) {
-    return `${s.toLocaleDateString(undefined, withYear)} – ${e.toLocaleDateString(undefined, withYear)}`;
-  }
-  const tail =
-    s.getUTCFullYear() === thisYear
-      ? e.toLocaleDateString(undefined, DAY_MONTH)
-      : e.toLocaleDateString(undefined, withYear);
-  return `${s.toLocaleDateString(undefined, DAY_MONTH)} – ${tail}`;
-}
+// The labels, formatters, refusal copy and the one-population row rule moved to
+// `periodReportMarkdown.ts` — ONE definition serving both this panel and the "Copy as Markdown"
+// export, so the copied artifact can never disagree with the screen it was copied from.
+// `rowFigures` is re-exported below for its unit test (periodMetricRow.test.ts).
 
 function shortPeriodLabel(p: PeriodReportListItem): string {
   return periodTitle(p.periodStart, p.periodEnd);
-}
-
-// Signed change, in the metric's own units — never a bare number, so "+2h" doesn't read as "+2".
-function signed(n: number, format: Fmt): string {
-  return `${n > 0 ? '+' : n < 0 ? '−' : ''}${format(Math.abs(n))}`;
 }
 
 const GOOD = 'text-green-600 dark:text-green-400';
@@ -267,60 +111,6 @@ function toneClass(fav: boolean | null): string {
 
 function toneHex(fav: boolean | null): string {
   return fav == null ? PALETTE.gray : fav ? PALETTE.green : PALETTE.red;
-}
-
-// "There is no earlier period" vs "there is one, but it had no figure for this metric" — two
-// different absences, and only the report as a whole knows which. Both render distinctly from
-// "no change" and neither renders as 0.
-/**
- * The three figures of one metric row, resolved to ONE population.
- *
- * Exported for its unit test: there is no jsdom in this workspace, so the row cannot be rendered,
- * and the invariant that matters here is arithmetic rather than visual — `value − prior` must
- * equal the change the row prints. That is precisely what broke before (see the block comment in
- * `MetricTable`), so it is pinned as a pure function rather than left to a component test that
- * this repo has no way to run.
- *
- * `headline` is the full-membership figure, and is non-null ONLY when it is a genuinely different
- * number from the one being subtracted — it is disclosure, never an input to the arithmetic.
- */
-export function rowFigures(
-  mv: PeriodMetricValue | undefined,
-  delta: PeriodMetricDelta | undefined,
-  populationsDiffer: boolean,
-): {
-  value: number | null;
-  prior: number | null;
-  headline: number | null;
-  /** The displayed figure rests on fewer items than the metric's floor. Taken from whichever
-   *  object supplied `value`, so the marker always describes the population on screen. */
-  lowSample: boolean;
-} {
-  // NOT `delta?.value ?? mv?.value`: that silently substitutes the headline whenever the subset
-  // legitimately has no figure, which reintroduces the two-population mix in the one case that is
-  // hardest to spot.
-  const value = delta ? delta.value : (mv?.value ?? null);
-  return {
-    value,
-    prior: delta?.prior ?? null,
-    headline: populationsDiffer && delta ? (mv?.value ?? null) : null,
-    // From the SAME object as `value`, for the same reason `value` is: the two populations have
-    // different sample sizes, and marking the row's figure with the other one's thinness is the
-    // same mixing bug in miniature.
-    lowSample: (delta ? delta.lowSample : mv?.lowSample) ?? false,
-  };
-}
-
-/** A backfilled, metrics-only period: no comparison was ATTEMPTED (hence no refusal) and no
- *  forecast was computed. Distinct from a refused comparison and from a genuine first period,
- *  both of which carry a reason — all three rendered identically before this existed. */
-function figuresOnly(report: PeriodReport): boolean {
-  return (
-    report.comparison.deltas.length === 0 &&
-    report.comparison.refusal == null &&
-    report.comparison.priorPeriodKey == null &&
-    report.forecasts.length === 0
-  );
 }
 
 function NoPrior({
@@ -668,8 +458,165 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
   );
 }
 
+// ── The "By workspace" axis (C4 — Compare workspaces folded into Reports) ────────────────────
+//
+// One metric, every workspace: the expansion under a metric row showing that metric's value per
+// workspace for the viewed period and the one before it. This replaced the standalone "Compare
+// workspaces" matrix, and it inherits Reports' honesty rules wholesale:
+//
+//  • ⚠ ONE POPULATION PER ROW. A workspace's current and prior figures are BOTH its full
+//    membership (the server computes no coverage-stable subset at this grain), so the subtraction
+//    is legitimate — and the onboarded-mid-window honesty travels as the row's own coverage
+//    annotation (◔), the same disclosure the headline report carries. The headline table's
+//    subset figures must never leak into these rows, nor these into it.
+//  • ⚠ The ◔ reads BOTH windows' coverage, not just the current row's. Coverage is measured at
+//    each window's own START, and tracking is monotone (`repos.createdAt <= atMs`), so the
+//    COMMON biased case is prior-partial-with-current-complete — repos onboarded between the
+//    two window starts make the prior figure under-count and the raw change over-state growth,
+//    with nothing visibly wrong on the current side. That is the 39→570 onboarding artifact at
+//    workspace grain; annotating only `row.coverage` missed it entirely.
+//  • The change is the RAW difference, muted and un-arrowed: no significance test runs at
+//    workspace grain, and a percentage off an untested base is noise wearing a suit.
+//  • `null` renders "—", never 0. "No prior period" renders as such, never as a zero column.
+//  • ⚠ NO MONEY. The vector carries no cost key and this axis must never grow one — a bot's
+//    price is per workspace and cross-workspace surfaces cannot even total it honestly.
+function WorkspaceAxis({
+  axis,
+  metricKey,
+  meta,
+}: {
+  axis: PeriodByWorkspace;
+  metricKey: PeriodMetricKey;
+  meta: MetricMeta;
+}): JSX.Element {
+  const priorBy =
+    axis.prior == null ? null : new Map(axis.prior.map((r) => [r.workspaceId, r]));
+  const cellFor = (row: PeriodWorkspaceRow | undefined): PeriodMetricValue | undefined =>
+    row?.metrics.find((m) => m.key === metricKey);
+  const changeFmt = changeFmtFor(meta);
+  return (
+    <div className="space-y-0.5">
+      <div className="grid grid-cols-[minmax(8rem,16rem)_5.5rem_5.5rem_1fr] items-baseline gap-2 text-[9px] uppercase tracking-wide text-gray-400">
+        <span>Workspace</span>
+        <span className="text-right">This period</span>
+        <span className="text-right">Prior</span>
+        <span>Change</span>
+      </div>
+      {axis.current.map((row) => {
+        const cur = cellFor(row);
+        const priorRow = priorBy?.get(row.workspaceId);
+        const prior = priorBy == null ? undefined : cellFor(priorRow);
+        const value = cur?.value ?? null;
+        const priorValue = prior?.value ?? null;
+        const delta = value != null && priorValue != null ? value - priorValue : null;
+        // Coverage honesty must consider BOTH windows. Since tracking is monotone, a partial
+        // current side implies a partial prior side (when a prior row exists) — so the three
+        // reachable annotated states are: prior-only partial (repos onboarded between the two
+        // window starts — the change over-states growth), both partial (both under-count), and
+        // current partial with no prior period at all.
+        const curPartial = !row.coverage.complete;
+        const priorCov = priorRow?.coverage;
+        const priorPartial = priorCov != null && !priorCov.complete;
+        const coveragePartial = curPartial || priorPartial;
+        const coverageTitle =
+          curPartial && priorPartial
+            ? `Partial coverage in both windows: ${row.coverage.trackedRepos} of ${row.coverage.totalRepos} repos in this workspace were tracked when this period started, and ${priorCov.trackedRepos} when the prior one did — both figures under-count, and the change mixes two different memberships.`
+            : priorPartial
+              ? `Partial prior coverage: the prior period started before ${priorCov.totalRepos - priorCov.trackedRepos} of ${priorCov.totalRepos} repos in this workspace were tracked, so the prior figure under-counts and the change over-states growth.`
+              : `Partial coverage: ${row.coverage.trackedRepos} of ${row.coverage.totalRepos} repos in this workspace were being tracked when this period started, so its figures under-count the period.`;
+        return (
+          <div
+            key={row.workspaceId}
+            className="grid grid-cols-[minmax(8rem,16rem)_5.5rem_5.5rem_1fr] items-baseline gap-2 text-[11px]"
+          >
+            <span className="flex min-w-0 items-baseline gap-1">
+              <span className="truncate text-gray-600 dark:text-gray-300">{row.name}</span>
+              {row.isDefault && <span className="shrink-0 text-[9px] text-gray-400">default</span>}
+              {/* Per-workspace coverage honesty — the same disclosure the headline report makes,
+                  where THIS workspace's repos onboarded mid-window. Without it a freshly-onboarded
+                  workspace's small figures read as a quiet team rather than a short observation.
+                  Renders when EITHER window's coverage is partial — the title names which window
+                  under-counts, because a complete current window over a partial prior one is a
+                  change biased UPWARD, not a clean row. */}
+              {coveragePartial && (
+                <span
+                  className="shrink-0 text-amber-600 dark:text-amber-400"
+                  title={coverageTitle}
+                >
+                  ◔
+                </span>
+              )}
+            </span>
+            <span className="text-right tabular-nums text-gray-700 dark:text-gray-200">
+              {value == null ? '—' : meta.format(value)}
+              {cur?.lowSample && value != null && (
+                <span
+                  className="ml-0.5 align-super text-[9px] text-amber-600 dark:text-amber-400"
+                  title={`Thin sample — ${cur.sampleSize} item${cur.sampleSize === 1 ? '' : 's'} behind this figure.`}
+                  aria-label="thin sample"
+                >
+                  ▵
+                </span>
+              )}
+            </span>
+            <span className="text-right tabular-nums text-gray-400">
+              {priorValue == null ? '—' : meta.format(priorValue)}
+            </span>
+            {axis.prior == null ? (
+              <span className={`text-[10px] ${MUTED}`} title="Nothing exists for the period before this one on the cadence grid">
+                no prior period
+              </span>
+            ) : priorValue == null || value == null ? (
+              <span
+                className={`text-[10px] ${MUTED}`}
+                title="One side has no figure for this metric in this workspace, so there is nothing to subtract"
+              >
+                {value == null && priorValue == null ? '—' : 'no prior figure'}
+              </span>
+            ) : delta === 0 ? (
+              <span className={`text-[10px] ${MUTED}`}>no change</span>
+            ) : (
+              <span
+                className={`text-[10px] ${MUTED}`}
+                title={
+                  coveragePartial
+                    ? 'Raw change — coverage-biased: one window was only partially tracked (see ◔), so this difference mixes memberships. No significance test is run at workspace grain, so no percentage and no verdict colour.'
+                    : "Raw change over this workspace's full membership — no significance test is run at workspace grain, so no percentage and no verdict colour"
+                }
+              >
+                {signed(delta!, changeFmt)}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── The metric table ─────────────────────────────────────────────────────────────────────────
-function MetricTable({ report }: { report: PeriodReport }): JSX.Element {
+function MetricTable({
+  report,
+  byWorkspace,
+}: {
+  report: PeriodReport;
+  // The optional per-workspace axis off the RESPONSE (not the stored report): null on older
+  // plugins, single-workspace accounts and stored-report-only renders — all of which must render
+  // the table exactly as before, expander-less. Absence, never an error.
+  byWorkspace: PeriodByWorkspace | null;
+}): JSX.Element {
+  // Which metric rows are expanded to their per-workspace breakdown (the C4 axis). Local and
+  // transient on purpose: an expansion is a reading gesture, not a filter worth a URL or the
+  // store. Hook sits above every early-return-free map (hooks-order rule).
+  const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<PeriodMetricKey>>(new Set());
+  const toggleExpanded = (key: PeriodMetricKey): void => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
   // Keyed lookups, so a metric the server did not send (an older schema version, or a key added
   // in a later version) simply renders "—" / "no prior" rather than throwing or landing on the
   // wrong row. PERIOD_METRIC_KEYS is the render order and is part of the contract.
@@ -738,11 +685,27 @@ function MetricTable({ report }: { report: PeriodReport }): JSX.Element {
             // An insignificant change must not colour the spark either — the picture and the
             // number have to tell the same story.
             const sparkTone = delta?.significant ? toneHex(fav) : PALETTE.gray;
+            const wsOpen = byWorkspace != null && expandedKeys.has(key);
             return (
-              <tr key={key} className="border-b border-gray-100 last:border-0 dark:border-gray-900">
+              <Fragment key={key}>
+              <tr className="border-b border-gray-100 last:border-0 dark:border-gray-900">
                 <td className="py-1.5 pr-3 align-top">
                   <div className="font-medium text-gray-700 dark:text-gray-200">{meta.label}</div>
                   {meta.note && <div className="text-[10px] text-gray-400">{meta.note}</div>}
+                  {/* The C4 expander. Only rendered when the response carries the axis — the
+                      server already omits it for single-workspace accounts, older plugins send
+                      nothing, and in both cases this row is byte-identical to the pre-axis one. */}
+                  {byWorkspace != null && (
+                    <button
+                      type="button"
+                      onClick={() => toggleExpanded(key)}
+                      aria-expanded={wsOpen}
+                      className="mt-0.5 text-[10px] text-sky-600 hover:underline dark:text-sky-400"
+                      title="This metric, per workspace, for this period and the prior one"
+                    >
+                      {wsOpen ? '▾' : '▸'} By workspace
+                    </button>
+                  )}
                 </td>
                 <td className="py-1.5 pr-3 text-right align-top">
                   {/* null is "—", never 0. The `sampleSize` title is only shown when this cell IS
@@ -824,6 +787,14 @@ function MetricTable({ report }: { report: PeriodReport }): JSX.Element {
                   />
                 </td>
               </tr>
+              {wsOpen && byWorkspace != null && (
+                <tr className="border-b border-gray-100 last:border-0 dark:border-gray-900">
+                  <td colSpan={6} className="bg-gray-50/60 py-1.5 pl-4 pr-3 dark:bg-gray-900/30">
+                    <WorkspaceAxis axis={byWorkspace} metricKey={key} meta={meta} />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             );
           })}
         </tbody>
@@ -862,7 +833,9 @@ function Movements({
         Biggest movers
       </span>
       {top.map((m) => {
-        const meta = METRIC_META[m.key];
+        // metaFor, not a direct index: movements ride the report array, and a stale row stored
+        // under an older schema version can carry keys the current vocabulary renamed away.
+        const meta = metaFor(m.key);
         const neutral = (directionOf.get(m.key) ?? 'neutral') === 'neutral';
         return (
           <span
@@ -888,135 +861,91 @@ function Movements({
   );
 }
 
-// ── The drill-down chat ──────────────────────────────────────────────────────────────────────
-// Grounded in the stored report's structured JSON. The pills carry a pre-bound scope server-side,
-// so selecting one costs the model no re-derivation and cannot ask about data the report does not
-// contain. The transcript is local to the mount: `PeriodChatResponse` has no history route, and
-// inventing a client-side persistence layer for it would be a second source of truth.
-function ReportChat({
-  workspaceId,
-  periodKey,
-  suggested,
-  disabled,
-  disabledReason,
-}: {
-  workspaceId: number | null;
-  periodKey: string;
-  suggested: PeriodSuggestedQuestion[];
-  disabled: boolean;
-  disabledReason: string | null;
-}): JSX.Element {
-  const [question, setQuestion] = useState('');
-  const [turns, setTurns] = useState<{ question: string; answer: string }[]>([]);
-  const chat = usePeriodReportChat(workspaceId, periodKey);
-
-  // A different period is a different conversation: answers about 18 Aug – 1 Sep must not stay on
-  // screen under the 1 – 15 Sep heading (the same class of bug as a stale window's numbers under a
-  // new window's caption). The panel already remounts this subtree on a `key={periodKey}`, so this
-  // is the second line of defence — cheap, and it survives someone removing that key.
-  useEffect(() => {
-    setTurns([]);
-    setQuestion('');
-  }, [periodKey]);
-
-  const ask = (text: string, suggestedId?: string): void => {
-    const t = text.trim();
-    if (!t || disabled || chat.isPending) return;
-    chat.mutate(
-      { question: t, ...(suggestedId ? { suggestedId } : {}) },
-      {
-        onSuccess: (res) => {
-          if (res.answer) setTurns((prev) => [...prev, { question: t, answer: res.answer }]);
-        },
-      },
-    );
-    setQuestion('');
-  };
-
+// ── "Ask about this period" — the ad-hoc chat, grounded in THIS period (plan C5) ────────────
+//
+// The ad-hoc chat (pins, history, @-mentions, optional chart + bot-performance passes) moved
+// here from the deleted Insights Overview tab. It mounts COLLAPSED under the report — the report
+// is the artifact, the chat is the follow-up — and expands on demand. The `periodWindow` prop
+// carries the viewed period's exact [fromMs, toMs) (`periodStart`/`periodEnd` ARE those bounds,
+// ISO-serialised), which `useSprintChat` sends as `SprintChatBody.window`, so every answer is
+// grounded in the period on screen rather than a trailing window ending now.
+//
+// This REPLACED the old `ReportChat` (the pill-driven drill-down grounded in the stored report
+// JSON via `usePeriodReportChat`): two chats titled "Ask about this period" on one report was a
+// coherence bug waiting to ship, and this one is a strict superset of what a reader could do
+// there. Its suggested pills are templated CLIENT-SIDE from the report's own significant deltas —
+// the numbers in a pill are computed (the same `signed`/`changeFmtFor` the table renders), never
+// model-authored (D4).
+//
+// Gated on `activityDigest` exactly as the panel gates itself: absent → the section renders
+// nothing (free posture — absence, never an error). The transcript/draft live in the filters
+// store keyed by WORKSPACE, so an answer asked under one period can survive into another
+// period's view — the answer's own window caption ("Report period · 5 Aug – 19 Aug") is the
+// existing defence, stating what it covered.
+function AskAboutPeriod({ report }: { report: PeriodReport }): JSX.Element | null {
+  const { activityDigest } = useProCapabilities();
+  const [open, setOpen] = useState(false);
+  if (!activityDigest) return null;
+  const fromMs = Date.parse(report.periodStart);
+  const toMs = Date.parse(report.periodEnd);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return null;
   return (
-    <div className="space-y-2">
-      <h4 className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+    <div className="border-t border-gray-200 pt-2 dark:border-gray-800 print:hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        title="Ask free-form questions grounded in this period's data (Pro, runs the Haiku model)"
+      >
+        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
         Ask about this period
-      </h4>
-      {suggested.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {suggested.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              disabled={disabled || chat.isPending}
-              onClick={() => ask(s.text, s.id)}
-              className="rounded-full border border-violet-300 px-2 py-0.5 text-[11px] text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-950/30"
-              title="Answered from this report's own figures — the question's scope is already bound to them"
-            >
-              {s.text}
-            </button>
-          ))}
+      </button>
+      {open && (
+        <div className="mt-2">
+          <AdHocChatPanel
+            periodWindow={{ fromMs, toMs }}
+            periodLabel={periodTitle(report.periodStart, report.periodEnd)}
+            suggestedQuestions={suggestedDeltaQuestions(report)}
+          />
         </div>
       )}
-      <div className="flex gap-1.5">
-        <input
-          type="text"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') ask(question);
-          }}
-          disabled={disabled || chat.isPending}
-          placeholder="e.g. which repos drove the lead-time change?"
-          className="min-w-0 flex-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950"
-        />
-        <button
-          type="button"
-          onClick={() => ask(question)}
-          disabled={disabled || chat.isPending || question.trim().length === 0}
-          className="rounded border border-violet-300 px-2 py-1 text-[11px] font-medium text-violet-600 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300"
-        >
-          {chat.isPending ? 'Asking…' : 'Ask'}
-        </button>
-      </div>
-      {disabled && disabledReason && (
-        <div className="text-[11px] text-amber-600 dark:text-amber-400">{disabledReason}</div>
-      )}
-      {chat.isError && (
-        <div className="text-[11px] text-red-500">
-          {(chat.error as Error)?.message ?? 'Couldn’t answer that.'}
-        </div>
-      )}
-      {chat.data?.creditsExhausted && (
-        <div className="text-[11px] text-amber-600 dark:text-amber-400">
-          Out of AI credits this month — questions resume on the 1st.
-        </div>
-      )}
-      {turns.map((t, i) => (
-        <div
-          key={i}
-          className="rounded-md border border-violet-200/70 bg-white/60 p-2.5 dark:border-violet-900/50 dark:bg-gray-900/40"
-        >
-          <div className="mb-1 text-[11px] font-medium text-gray-500 dark:text-gray-400">
-            {t.question}
-          </div>
-          {/* prRefs is empty: PeriodChatResponse carries no resolved PR references, so nothing is
-              linkified. SummaryMarkdown still gives the answer the same markdown/table treatment
-              every other AI answer in the app gets. */}
-          <SummaryMarkdown markdown={t.answer} prRefs={[]} onOpenPr={() => {}} />
-        </div>
-      ))}
     </div>
   );
+}
+
+// The chat's suggested pills, derived from the viewed report's SIGNIFICANT deltas and templated
+// client-side: "Why did Merged PRs by people fall −33 (−22%)?". Allowed under D4 because every
+// number here is computed — the label, verb and figures come from the same METRIC_META
+// formatters the table rows use (`standaloneLabelFor`, because a pill has no neighbouring row to
+// lean on). Biggest absolute movers first, capped like the Movements strip.
+function suggestedDeltaQuestions(report: PeriodReport): { label: string; question: string }[] {
+  return report.comparison.deltas
+    .filter((d) => d.significant && d.absoluteChange != null && d.absoluteChange !== 0)
+    .sort((a, b) => Math.abs(b.absoluteChange!) - Math.abs(a.absoluteChange!))
+    .slice(0, 4)
+    .map((d) => {
+      const meta = metaFor(d.key); // report array — old-vocabulary keys possible on stale rows
+      const verb = d.absoluteChange! > 0 ? 'rise' : 'fall';
+      const change = signed(d.absoluteChange!, changeFmtFor(meta));
+      const pct = d.percentChange != null ? ` (${signed(d.percentChange, pctFmt)})` : '';
+      const name = standaloneLabelFor(meta);
+      return {
+        label: `Why did ${name} ${verb} ${change}?`,
+        question: `Why did ${name} ${verb} ${change}${pct} over this period? Point to the PRs, repos or people in the data that explain the movement.`,
+      };
+    });
 }
 
 // ── The report body ──────────────────────────────────────────────────────────────────────────
 function ReportBody({
   report,
-  workspaceId,
+  byWorkspace,
 }: {
   report: PeriodReport;
-  workspaceId: number | null;
+  // The C4 "By workspace" axis, off the RESPONSE (computed live, never stored on the report).
+  byWorkspace: PeriodByWorkspace | null;
 }): JSX.Element {
-  const usage = useAiUsage(true);
-  const outOfCredits =
-    usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
   const comparison = report.comparison;
   // A backfilled, metrics-only row: no comparison was ATTEMPTED (so no refusal either) and no
   // forecast was computed. Distinguishable from a generated report whose comparison was refused —
@@ -1114,7 +1043,7 @@ function ReportBody({
         )
       )}
 
-      <MetricTable report={report} />
+      <MetricTable report={report} byWorkspace={byWorkspace} />
 
       {/* The narration. A backfilled period has none by design (metrics-only, no LLM, no
           credits) — say that plainly rather than showing an empty box. */}
@@ -1129,15 +1058,7 @@ function ReportBody({
         </div>
       )}
 
-      <ReportChat
-        workspaceId={workspaceId}
-        periodKey={report.periodKey}
-        suggested={report.suggested}
-        disabled={outOfCredits || workspaceId == null}
-        disabledReason={
-          outOfCredits ? 'Out of AI credits this month — questions resume on the 1st.' : null
-        }
-      />
+      <AskAboutPeriod report={report} />
     </div>
   );
 }
@@ -1362,6 +1283,23 @@ export function PeriodReportsPanel(): JSX.Element | null {
 
   const report = usePeriodReport(periodReports, workspaceId, selectedKey);
 
+  // The "Copy as Markdown" text — the report rendered by the deterministic exporter, built from
+  // the SAME METRIC_META/REFUSAL_TEXT/rowFigures this panel renders (periodReportMarkdown.ts).
+  // Hook sits above the capability early-return (hooks-order rule); empty string ⇒ CopyButton
+  // renders nothing.
+  const reportMarkdown = useMemo(() => {
+    const r = report.data?.report;
+    // try/catch, not trust: this memo runs during render with no error boundary above it, so a
+    // renderer defect on one stored row (it happened — a stale v1 row's renamed metric key)
+    // must degrade to "no copy button" ('' ⇒ CopyButton renders nothing), never blank the pane.
+    try {
+      return r ? renderPeriodReportMarkdown(r, PERIOD_METRICS_SCHEMA_VERSION) : '';
+    } catch (err) {
+      console.error('period report markdown failed', err);
+      return '';
+    }
+  }, [report.data]);
+
   // The capability flag and the plugin's own answer must BOTH be on. They can disagree — a stale
   // /api/me, or the plugin's `DIGEST_ENABLED` self-gate flipping — and `enabled: false` from the
   // route means "this workspace has no reports surface", which must render nothing rather than
@@ -1381,7 +1319,10 @@ export function PeriodReportsPanel(): JSX.Element | null {
   const current = report.data?.report ?? null;
 
   return (
-    <div className="space-y-3" data-testid="period-reports">
+    // `data-print-report` scopes the @media print stylesheet (index.css): printing the Reports
+    // pane prints THIS subtree — title, coverage, figures table, forecast, narrative — with the
+    // rail/tabs/chat/buttons hidden and light colors forced. Print-to-PDF is the board-pack path.
+    <div className="space-y-3" data-testid="period-reports" data-print-report>
       {workspaceId == null || listLoading ? (
         <Skeleton />
       ) : list.data?.cadenceConfigured === false ? (
@@ -1395,7 +1336,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
         <>
           {/* Period picker. Newest first; the label IS the date range, which is also the title
               below — the reader never has to decode a key to know what they are looking at. */}
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 print:hidden">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
               Period
             </span>
@@ -1468,9 +1409,15 @@ export function PeriodReportsPanel(): JSX.Element | null {
                   stale
                 </span>
               )}
+              {/* Copy the whole report as markdown — the forwardable artifact (plan N3). The text
+                  is the deterministic export above; an empty string (no report yet) renders no
+                  button at all, per CopyButton's own contract. */}
+              <CopyButton text={reportMarkdown} what="report as Markdown" className="print:hidden" />
             </div>
           )}
 
+          {/* Generation is a screen affordance, not part of the printed artifact. */}
+          <div className="print:hidden">
           <GenerateControls
             workspaceId={workspaceId}
             periodKey={selectedKey}
@@ -1479,6 +1426,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
             reportLoading={reportLoading}
             modelInfo={list.data?.modelInfo}
           />
+          </div>
 
           {reportLoading ? (
             <Skeleton />
@@ -1488,9 +1436,10 @@ export function PeriodReportsPanel(): JSX.Element | null {
             </div>
           ) : current ? (
             // Keyed by the period so switching periods remounts the body — the chat transcript
-            // and every derived map belong to ONE period and must not carry over.
+            // and every derived map belong to ONE period and must not carry over (including the
+            // by-workspace expansions, which are per-period readings too).
             <div key={current.periodKey}>
-              <ReportBody report={current} workspaceId={workspaceId} />
+              <ReportBody report={current} byWorkspace={report.data?.byWorkspace ?? null} />
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-gray-300 p-4 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
@@ -1499,6 +1448,11 @@ export function PeriodReportsPanel(): JSX.Element | null {
               earlier periods with figures only, so the forecast has something to fit.
             </div>
           )}
+
+          {/* People (plan P4.2): the workspace's humans, one click from a 1:1 — each opens the
+              user-activity tab, whose 1:1 header follows the period selected above (via
+              `insightsReportKey`). Alphabetical, metric-free, never a leaderboard. */}
+          <PeriodPeopleSection />
         </>
       )}
     </div>

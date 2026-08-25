@@ -38,6 +38,7 @@ import {
   useSetWorkspaceReviewer,
 } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
+import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { SectionShell, inputCls } from './ui.js';
 
@@ -140,6 +141,15 @@ export function DetectedReviewersTable({
   // would paint these bots from some other Workspace's vendor names.
   const botColor = useBotColors(workspaceId);
 
+  // ── THE COST SURFACES ARE PAID (`botDepth`), THE REST OF THIS SCREEN IS FREE ──────────────
+  // Classification / identity / role editing stays exactly as gated before (i.e. not at all —
+  // the deliberate OSS fix). Only the price editor, the workspace cost total and the ROI's
+  // $/acted-on column re-gated from "plugin loaded" (`botTriage`) to the paid `botDepth`
+  // capability (plan P0.3). With `botDepth` false: absence in OSS, a small Pro nudge in cloud —
+  // never an error. The server enforces the same gate on PUT …/cost.
+  const { botDepth: showCost } = useProCapabilities();
+  const isCloud = useMe().data?.deploymentMode === 'cloud';
+
   const patch = useSetWorkspaceReviewer();
   const cost = useSetReviewerCost();
   const resetJudgement = useResetReviewerJudgement();
@@ -183,8 +193,10 @@ export function DetectedReviewersTable({
     patch.error ?? cost.error ?? resetJudgement.error ?? resetIdentity.error;
 
   const title = 'Review bots';
-  const desc =
-    'Who counts as an automated reviewer in this Workspace, who each bot is, and what it costs here. Every setting below applies to the whole Workspace.';
+  // The cost clause only when the cost surfaces actually render (`botDepth`).
+  const desc = showCost
+    ? 'Who counts as an automated reviewer in this Workspace, who each bot is, and what it costs here. Every setting below applies to the whole Workspace.'
+    : 'Who counts as an automated reviewer in this Workspace and who each bot is. Every setting below applies to the whole Workspace.';
 
   // `workspaceId` is null only while the store resolves its Default. The listing hook holds the
   // query idle in that state (skipToken), so `isLoading` is false and the empty-state branch would
@@ -246,6 +258,7 @@ export function DetectedReviewersTable({
             note="Counted in the ROI, behaviour and dedup metrics."
             reviewers={buckets.reviewBots}
             workspaceSeatCount={workspaceSeatCount}
+            showCost={showCost}
             repoName={repoName}
             botColor={botColor}
             busy={busy}
@@ -267,6 +280,7 @@ export function DetectedReviewersTable({
             note="Quality gates, dependency bots, code agents, release and housekeeping automation — still visible in the feed, excluded from the review-bot metrics."
             reviewers={buckets.qualityChecks}
             workspaceSeatCount={workspaceSeatCount}
+            showCost={showCost}
             repoName={repoName}
             botColor={botColor}
             busy={busy}
@@ -288,6 +302,7 @@ export function DetectedReviewersTable({
             note="Detection leaves these alone until you reset them."
             reviewers={buckets.markedNotBots}
             workspaceSeatCount={workspaceSeatCount}
+            showCost={showCost}
             repoName={repoName}
             botColor={botColor}
             busy={busy}
@@ -306,6 +321,20 @@ export function DetectedReviewersTable({
             </p>
           )}
 
+          {/* The workspace cost total — a cost surface, so paid (`botDepth`). With the
+              capability off: cloud shows the one Pro nudge for the whole pricing feature,
+              OSS shows nothing (absence, never an error). */}
+          {!showCost ? (
+            isCloud ? (
+              <p className="text-[10px] text-gray-400">
+                <span className="mr-1 rounded bg-violet-500/15 px-1 text-[10px] font-semibold text-violet-600 dark:text-violet-300">
+                  Pro
+                </span>
+                Per-bot monthly prices and the $/acted-on ROI column are part of Pro — upgrade to
+                put a cost against each bot in this Workspace.
+              </p>
+            ) : null
+          ) : (
           <p className="text-[10px] text-gray-400">
             {costTotal.totalUsd == null ? (
               <>
@@ -331,6 +360,7 @@ export function DetectedReviewersTable({
               </>
             )}
           </p>
+          )}
 
           {/* Search-to-promote: find a reviewer this Workspace currently treats as human and mark
               them automated. One button now — the judgement is Workspace-wide, so there is no repo
@@ -402,6 +432,7 @@ function ReviewerList({
   note,
   reviewers,
   workspaceSeatCount,
+  showCost,
   repoName,
   botColor,
   busy,
@@ -414,6 +445,8 @@ function ReviewerList({
   note: string;
   reviewers: WorkspaceReviewer[];
   workspaceSeatCount: number;
+  /** Paid `botDepth`: false hides every price control (absence, never an error). */
+  showCost: boolean;
   repoName: Map<number, string>;
   botColor: BotColorFn;
   busy: boolean;
@@ -437,6 +470,7 @@ function ReviewerList({
             key={r.userId}
             reviewer={r}
             workspaceSeatCount={workspaceSeatCount}
+            showCost={showCost}
             repoName={repoName}
             botColor={botColor}
             busy={busy}
@@ -466,6 +500,7 @@ function ReviewerList({
 function ReviewerCard({
   reviewer,
   workspaceSeatCount,
+  showCost,
   repoName,
   botColor,
   busy,
@@ -476,6 +511,8 @@ function ReviewerCard({
 }: {
   reviewer: WorkspaceReviewer;
   workspaceSeatCount: number;
+  /** Paid `botDepth`: false hides the price editor (absence, never an error). */
+  showCost: boolean;
   repoName: Map<number, string>;
   botColor: BotColorFn;
   busy: boolean;
@@ -781,7 +818,10 @@ function ReviewerCard({
         </p>
       )}
 
-      {/* ── PRICE (no provenance; one writer) ── */}
+      {/* ── PRICE (no provenance; one writer) ── Paid (`botDepth`, plan P0.3): with the
+          capability off the editor simply doesn't render — the single nudge lives on the
+          section footer, not on every card. */}
+      {showCost && (
       <CostEditor
         // Remount on a userId change so a half-typed number (or a flipped pricing mode) can never
         // survive onto another bot.
@@ -793,6 +833,7 @@ function ReviewerCard({
         busy={busy}
         onApply={(v, m) => onCost(r.userId, v, m)}
       />
+      )}
     </li>
   );
 }

@@ -175,7 +175,7 @@ function avg2(sum: number, n: number): number | null {
 
 // ── The shared base ─────────────────────────────────────────────────────────────────────────
 
-interface VolumePr {
+export interface VolumePr {
   id: number;
   repoId: number;
   number: number;
@@ -424,14 +424,14 @@ async function loadMergedPrs(
 
 // ── Bot identity (the reviewerLabel precedence, one bot = one name everywhere) ───────────────
 
-interface BotIdentity {
+export interface BotIdentity {
   label: string;
   login: string | null;
   kind: AutomatedReviewerKind;
   role: ReviewerRole;
 }
 
-async function loadBotIdentities(
+export async function loadBotIdentities(
   accountId: number,
   scope: BotScope,
   automatedIds: number[],
@@ -647,21 +647,45 @@ function ratioFor(
 
 // ── (2) The paginated PR drill-down ─────────────────────────────────────────────────────────
 
-export async function getPrBotVolume(
+/** One scored drill-down row, pre-hydration. Exported for the synthesis input (§8.3). */
+export interface VolumeScoredPr {
+  pr: VolumePr;
+  botComments: number;
+  expected: number | null;
+  ratio: number | null;
+  baseline: BotVolumeBaselineKind;
+  baselinePrs: number;
+}
+
+// The shared drill-down POPULATION fold (§8.3: one predicate, three consumers). The route's LIST
+// (`getPrBotVolume` below), its COUNTS (`total`/`filteredTotal`) and the SYNTHESIS INPUT
+// (`db/synthesis-input.ts`) all read THIS function — never a second predicate.
+export interface PrBotVolumePopulation {
+  win: { kind: BotWindowKind; from: string; to: string };
+  generatedAt: string;
+  /** Scored + SORTED — `filteredTotal` is its length; the page/cap is a slice over it. */
+  scored: VolumeScoredPr[];
+  /** The whole merged in-window population (`total`) — the caption's denominator. */
+  windowPrCount: number;
+  truncated: boolean;
+  repoFullName: Map<number, string>;
+  /** The refined bot set (null = every bot) — page assembly filters `byBot` through it. */
+  only: Set<number> | null;
+}
+
+export async function foldPrBotVolumePopulation(
   accountId: number,
   window: BotWindowKind | { kind: BotWindowKind; fromMs: number; toMs: number },
   scope: BotScope,
   refine: BotVolumeRefine,
-  page: { offset: number; limit: number; sort: BotVolumePrSort },
-): Promise<BotVolumePrsResponse> {
+  sort: BotVolumePrSort,
+): Promise<PrBotVolumePopulation> {
   const base = await loadVolumeBase(accountId, window, scope);
   const win = {
     kind: base.windowKind,
     from: base.from.toISOString(),
     to: base.to.toISOString(),
   };
-  const offset = Math.max(0, Math.trunc(page.offset));
-  const limit = Math.max(1, Math.min(Math.trunc(page.limit), VOLUME_PAGE_MAX));
 
   // ⚠ `[]` MEANS "NO BOTS", NEVER "EVERY BOT" — the `repoIds` rule (`if (ids)`, never
   // `ids.length > 0`), and the BotFlaggingRefine contract restated. Only `null` widens.
@@ -683,15 +707,7 @@ export async function getPrBotVolume(
   // Only PRs the refined bot set actually touched are enumerated. `total` stays the whole merged
   // population so the caption can say "140 of 796 merged PRs drew bot comments" — the zero rows
   // are the point of that sentence, not rows to page through (three.js: 656 of them).
-  interface Scored {
-    pr: VolumePr;
-    botComments: number;
-    expected: number | null;
-    ratio: number | null;
-    baseline: BotVolumeBaselineKind;
-    baselinePrs: number;
-  }
-  const scored: Scored[] = [];
+  const scored: VolumeScoredPr[] = [];
   for (const pr of windowPrs) {
     const botComments = countOf(pr);
     if (botComments === 0) continue;
@@ -714,7 +730,7 @@ export async function getPrBotVolume(
   // a below-average one, and burying the null rows is the only reading that keeps the top of the
   // list meaningful.
   scored.sort((a, b) => {
-    if (page.sort === 'ratio') {
+    if (sort === 'ratio') {
       const ar = a.ratio;
       const br = b.ratio;
       if (ar == null && br != null) return 1;
@@ -727,6 +743,31 @@ export async function getPrBotVolume(
     if (bt !== at) return bt - at;
     return a.pr.id - b.pr.id;
   });
+
+  return {
+    win,
+    generatedAt: base.generatedAt,
+    scored,
+    windowPrCount: windowPrs.length,
+    truncated: base.truncated,
+    repoFullName: base.repoFullName,
+    only,
+  };
+}
+
+export async function getPrBotVolume(
+  accountId: number,
+  window: BotWindowKind | { kind: BotWindowKind; fromMs: number; toMs: number },
+  scope: BotScope,
+  refine: BotVolumeRefine,
+  page: { offset: number; limit: number; sort: BotVolumePrSort },
+): Promise<BotVolumePrsResponse> {
+  const offset = Math.max(0, Math.trunc(page.offset));
+  const limit = Math.max(1, Math.min(Math.trunc(page.limit), VOLUME_PAGE_MAX));
+
+  // The ONE population fold (shared with the synthesis input — §8.3).
+  const pop = await foldPrBotVolumePopulation(accountId, window, scope, refine, page.sort);
+  const { scored, only } = pop;
 
   const pageRows = scored.slice(offset, offset + limit);
   const consumed = offset + pageRows.length;
@@ -751,7 +792,7 @@ export async function getPrBotVolume(
         comments,
       }))
       .sort((x, y) => y.comments - x.comments || x.label.localeCompare(y.label));
-    const repoFullName = base.repoFullName.get(s.pr.repoId) ?? `#${s.pr.repoId}`;
+    const repoFullName = pop.repoFullName.get(s.pr.repoId) ?? `#${s.pr.repoId}`;
     return {
       prId: s.pr.id,
       prNumber: s.pr.number,
@@ -783,16 +824,16 @@ export async function getPrBotVolume(
 
   return {
     workspaceId: scope.workspaceId,
-    window: win,
+    window: pop.win,
     refine,
     sort: page.sort,
-    total: windowPrs.length,
+    total: pop.windowPrCount,
     filteredTotal: scored.length,
     items,
     // Opaque on the wire; `o:<n>` is today's encoding of "offset into the sorted fold".
     nextCursor: consumed < scored.length ? `o:${consumed}` : null,
-    truncated: base.truncated,
-    generatedAt: base.generatedAt,
+    truncated: pop.truncated,
+    generatedAt: pop.generatedAt,
   };
 }
 

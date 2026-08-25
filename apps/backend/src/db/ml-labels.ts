@@ -719,6 +719,18 @@ export interface MlVendorWindowAgg {
   praise: number;
   high: number; // major + critical findings
   bySeverity: MlSeverityCounts; // findings-only
+  // ── The Inflation column's counts (plan P1.2/C2) — in-window, findings-only ─────────────
+  // `vendorBadged` = findings carrying a vendor badge at all; the two disagreement counters
+  // partition it (with agreement as the remainder), NEVER `findings` — silence is not a call.
+  // Direction comes from the ONE shared `vendorAgreementOf` rule the flagging drill-down's
+  // `disagree` refinement also applies over this same scan + fold, which is what makes a count
+  // here equal that drill-down's `filteredTotal` for the same bot + direction by construction.
+  vendorBadged: number;
+  vendorOverCall: number;
+  vendorUnderCall: number;
+  // The Pro sparkline series (≤12 weekly points, oldest→newest over the caller's trend span).
+  // Null when the caller did not ask for history — the free counts must not widen the scan.
+  inflationWeekly: Array<{ weekStartMs: number; overCall: number; underCall: number }> | null;
 }
 
 export interface MlWindowAggregates {
@@ -731,6 +743,17 @@ export async function getMlWindowAggregates(
   scope: BotScope,
   automatedIds: number[],
   from: Date,
+  // Pro (`botDepth`) only: widen the scan back to `trendFrom` and fold the per-bot WEEKLY
+  // inflation series over it (`inflationWeekly`, 12 buckets of 7 days from `trendFrom` — the
+  // same anchoring as getBotAnalytics' own trend buckets, so the sparkline and the ROI trend
+  // share an x-axis). Omitted ⇒ the scan stays window-only and `inflationWeekly` is null.
+  //
+  // ⚠ WINDOW COUNTS ARE UNCHANGED BY THE WIDENING. The scan orders newest-first with the same
+  // cap, so the in-window rows are a PREFIX of the widened scan — identical rows in identical
+  // order to the window-only scan (and to the flagging drill-down's) until the cap bites INSIDE
+  // the window, which truncated both scans identically before. Every non-weekly aggregate below
+  // gates on `inWindow`.
+  history?: { trendFrom: Date },
 ): Promise<MlWindowAggregates> {
   const emptyTotals: BotAnalyticsMlTotals = {
     labelled: 0,
@@ -748,6 +771,13 @@ export async function getMlWindowAggregates(
     return { byBot: new Map(), totals: emptyTotals };
   }
 
+  // The widened lower bound covers the window by construction in the caller (trendFrom =
+  // min(from, now − 84d)); min() here is a backstop so a mis-anchored history can never NARROW
+  // the window scan.
+  const scanFrom =
+    history != null && history.trendFrom.getTime() < from.getTime() ? history.trendFrom : from;
+  const fromMs = from.getTime();
+
   const [labelRows, pending, unscorable] = await Promise.all([
     db
       .select({
@@ -756,6 +786,11 @@ export async function getMlWindowAggregates(
         isSummary: mlCommentLabels.isSummary,
         categories: mlCommentLabels.categories,
         backend: mlCommentLabels.backend,
+        // The two extra columns the Inflation fold needs. `vendorSeverity` is compared, never
+        // believed (MlLabel.vendorSeverity); `targetCreatedAt` decides `inWindow` and the weekly
+        // bucket.
+        vendorSeverity: mlCommentLabels.vendorSeverity,
+        targetCreatedAt: mlCommentLabels.targetCreatedAt,
       })
       .from(mlCommentLabels)
       .where(
@@ -763,7 +798,7 @@ export async function getMlWindowAggregates(
           eq(mlCommentLabels.accountId, accountId),
           inArray(mlCommentLabels.repoId, scope.repoIds),
           inArray(mlCommentLabels.authorUserId, automatedIds),
-          gte(mlCommentLabels.targetCreatedAt, from),
+          gte(mlCommentLabels.targetCreatedAt, scanFrom),
         ),
       )
       .orderBy(desc(mlCommentLabels.targetCreatedAt), desc(mlCommentLabels.id))
@@ -779,6 +814,21 @@ export async function getMlWindowAggregates(
     countUnscorableBotText(accountId, scope, automatedIds),
   ]);
 
+  // The weekly buckets for the Pro sparkline: 12 × 7 days anchored on `trendFrom`, index clamped
+  // — byte-for-byte the bucketing getBotAnalytics uses for its own trend arrays, so the two
+  // series share an x-axis.
+  const WEEK_MS = 7 * 86_400_000;
+  const SPAN_WEEKS = 12;
+  const trendFromMs = history?.trendFrom.getTime() ?? 0;
+  const weekIndexOf = (ms: number): number =>
+    Math.min(SPAN_WEEKS - 1, Math.max(0, Math.floor((ms - trendFromMs) / WEEK_MS)));
+  const emptyWeekly = (): Array<{ weekStartMs: number; overCall: number; underCall: number }> =>
+    Array.from({ length: SPAN_WEEKS }, (_, i) => ({
+      weekStartMs: trendFromMs + i * WEEK_MS,
+      overCall: 0,
+      underCall: 0,
+    }));
+
   const byBot = new Map<number, MlVendorWindowAgg>();
   const totalsBySeverity = emptySeverityCounts();
   const totalsByCategory = new Map<MlCategory, number>();
@@ -786,14 +836,28 @@ export async function getMlWindowAggregates(
   let findings = 0;
   let summaries = 0;
   let praise = 0;
+  // The totals' `labelled` twin under a widened scan: rows whose targetCreatedAt is in-window,
+  // fold success or not — exactly what `labelRows.length` counted when the scan was window-only.
+  let windowLabelled = 0;
+  // Whether the cap bit INSIDE the window. Rows arrive newest-first, so if the scan hit the cap
+  // but its oldest row already predates `from`, every in-window row was captured and the WINDOW
+  // totals are complete — only the (Pro, advisory) weekly history is a newest-first sample.
+  const capHit = labelRows.length >= ROLLUP_SCAN_CAP;
+  const oldestScannedMs = capHit
+    ? (labelRows[labelRows.length - 1]?.targetCreatedAt.getTime() ?? fromMs)
+    : null;
+  const windowTruncated = capHit && oldestScannedMs != null && oldestScannedMs >= fromMs;
 
   for (const row of labelRows) {
+    const rowMs = row.targetCreatedAt.getTime();
+    const inWindow = rowMs >= fromMs;
+    if (inWindow) windowLabelled += 1;
     // ⚠ Through `foldMlLabelRow`, NEVER a local re-spelling of the three branches: the flagging
     // drill-down slices this same scan with this same fold, and a second copy of the order here
     // is exactly how the tile and the list it opens would drift apart.
     const folded = foldMlLabelRow(row);
     if (!folded) continue;
-    if (row.backend) backends.add(row.backend);
+    if (inWindow && row.backend) backends.add(row.backend);
     let acc = byBot.get(row.authorUserId);
     if (!acc) {
       acc = {
@@ -803,26 +867,54 @@ export async function getMlWindowAggregates(
         praise: 0,
         high: 0,
         bySeverity: emptySeverityCounts(),
+        vendorBadged: 0,
+        vendorOverCall: 0,
+        vendorUnderCall: 0,
+        inflationWeekly: history != null ? emptyWeekly() : null,
       };
       byBot.set(row.authorUserId, acc);
     }
-    acc.labelled += 1;
+    if (inWindow) acc.labelled += 1;
     if (folded.bucket === 'summary') {
-      acc.summaries += 1;
-      summaries += 1;
+      if (inWindow) {
+        acc.summaries += 1;
+        summaries += 1;
+      }
     } else if (folded.bucket === 'praise') {
-      acc.praise += 1;
-      praise += 1;
+      if (inWindow) {
+        acc.praise += 1;
+        praise += 1;
+      }
     } else {
       // ⚠ FINDINGS-ONLY, inside this branch — the same phantom-gap rule as the rollup: counting
       // a walkthrough's severity while every rate divides by `findings` lets a share top 100%.
-      acc.findings += 1;
-      findings += 1;
-      acc.bySeverity[folded.severity] += 1;
-      totalsBySeverity[folded.severity] += 1;
-      if (folded.severity === 'major' || folded.severity === 'critical') acc.high += 1;
-      for (const c of folded.categories) {
-        totalsByCategory.set(c, (totalsByCategory.get(c) ?? 0) + 1);
+      if (inWindow) {
+        acc.findings += 1;
+        findings += 1;
+        acc.bySeverity[folded.severity] += 1;
+        totalsBySeverity[folded.severity] += 1;
+        if (folded.severity === 'major' || folded.severity === 'critical') acc.high += 1;
+        for (const c of folded.categories) {
+          totalsByCategory.set(c, (totalsByCategory.get(c) ?? 0) + 1);
+        }
+      }
+      // ── Inflation — findings-only, badged-only, via the ONE direction rule ───────────────
+      // `vendorAgreementOf` is the same classifier the confusion matrix and the flagging
+      // drill-down's `disagree` refinement apply, over the same fold of the same scan — which is
+      // exactly why the ROI column's count equals that drill-down's `filteredTotal` for the same
+      // bot + direction. A null vendor claim is SILENCE, in neither counter.
+      const dir = vendorAgreementOf(coerceSeverity(row.vendorSeverity), folded.severity);
+      if (dir != null) {
+        if (inWindow) {
+          acc.vendorBadged += 1;
+          if (dir === 'over') acc.vendorOverCall += 1;
+          else if (dir === 'under') acc.vendorUnderCall += 1;
+        }
+        if (acc.inflationWeekly != null && dir !== 'agree') {
+          const wk = acc.inflationWeekly[weekIndexOf(rowMs)]!;
+          if (dir === 'over') wk.overCall += 1;
+          else wk.underCall += 1;
+        }
       }
     }
   }
@@ -830,7 +922,7 @@ export async function getMlWindowAggregates(
   return {
     byBot,
     totals: {
-      labelled: labelRows.length,
+      labelled: windowLabelled,
       findings,
       summaries,
       praise,
@@ -841,7 +933,10 @@ export async function getMlWindowAggregates(
         .map(([category, count]) => ({ category, count }))
         .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category)),
       backends: [...backends].sort(),
-      truncated: labelRows.length >= ROLLUP_SCAN_CAP,
+      // Says the WINDOW sample is capped — under a widened (Pro-history) scan a cap that bit
+      // only in the pre-window tail leaves every window total complete, and claiming otherwise
+      // would be the same dishonesty the flag exists to prevent, inverted.
+      truncated: windowTruncated,
     },
   };
 }
@@ -925,9 +1020,9 @@ export async function listMlLabelsForBehaviour(
 // ML label INLINE via a LEFT JOIN on (account_id, target_kind, target_id). One response serves
 // the whole list: a cross-PR list must never mount the per-PR label index per row.
 //
-// Deliberately a NEW query rather than a re-export of getBotReviewComments: that row shape is
-// re-declared verbatim in packages/pro/src/bot-themes/build.ts (open-core lockstep) and it is
-// role:'review' by design, while this drill-down must also serve quality_check-roled rows —
+// Deliberately a NEW query rather than a re-export of getBotReviewComments: that query is
+// role:'review' by design (it feeds the synthesis seam's 'workspace-bots' fold), while this
+// drill-down must also serve quality_check-roled rows —
 // mirroring getBotVendorPrs, whose quality-check section offers the same drill-down.
 //
 // The 'pierre' sentinel answers EMPTY: its verbatim reviews are posted with the human's token
@@ -1698,7 +1793,7 @@ function matchesFlaggingRefine(
 
 // The scan columns the page assembly needs, beyond what the fold consumes. Declared rather than
 // inferred so the hydration helper below has a name to take.
-interface FlaggingScanRow {
+export interface FlaggingScanRow {
   targetKind: MlLabelTargetKind;
   targetId: number;
   authorUserId: number;
@@ -1712,7 +1807,7 @@ interface FlaggingScanRow {
   createdAt: Date;
 }
 
-type FlaggingPageRow = { row: FlaggingScanRow; fold: FoldedMlRow };
+export type FlaggingPageRow = { row: FlaggingScanRow; fold: FoldedMlRow };
 
 // One hydrated parent row, normalised across the three id spaces so the assembly loop has one
 // shape to read. PR comments and review bodies carry no path/line/thread state at all.
@@ -1741,7 +1836,7 @@ interface FlaggingParentRow {
  * that is how an id list stops being an existence oracle in every code path, not just the ones
  * whose caller remembered.
  */
-async function hydrateFlaggingPage(
+export async function hydrateFlaggingPage(
   accountId: number,
   scope: BotScope,
   pageRows: FlaggingPageRow[],
@@ -1993,17 +2088,33 @@ async function hydrateFlaggingPage(
   return items;
 }
 
-export async function getBotFlaggingComments(
+// ── The shared flagging POPULATION fold (§8.3: one predicate, three consumers) ──────────────
+// The drill-down's LIST (`getBotFlaggingComments` below), its COUNTS (`total`/`filteredTotal`)
+// and the SYNTHESIS INPUT (`db/synthesis-input.ts`) all read THIS function — never a second
+// predicate. The tile-number-vs-hydration lesson generalised: two spellings of "the flagged
+// comments" is how a verdict card comes to summarise a different population than the receipt
+// list under it.
+export interface BotFlaggingPopulation {
+  win: { kind: BotWindowKind; from: string; to: string };
+  generatedAt: string;
+  /** Post-selector, PRE-refine — the tile's `total`, and the matrix's population. */
+  selected: FlaggingPageRow[];
+  /** Post-refine — `filteredTotal`; the listed / paged / synthesised population, newest-first. */
+  narrowed: FlaggingPageRow[];
+  /** The ROLLUP_SCAN_CAP honesty flag: a capped scan is a most-recent sample, never a total. */
+  truncated: boolean;
+}
+
+export async function foldBotFlaggingPopulation(
   accountId: number,
   selector: Exclude<BotFlaggingSelector, { kind: 'overlap' }>,
   refine: BotFlaggingRefine,
   window: BotWindowKind,
-  // ⚠ The SAME BotScope the strip was computed at — this list reproduces one of that strip's
-  // tiles, so it takes the identical workspace + repo narrowing. `repoIds: []` is a real empty
-  // workspace, never "widen to the account".
+  // ⚠ The SAME BotScope the strip was computed at — this population reproduces one of that
+  // strip's tiles, so it takes the identical workspace + repo narrowing. `repoIds: []` is a real
+  // empty workspace, never "widen to the account".
   scope: BotScope,
-  page: { offset: number; limit: number },
-): Promise<BotFlaggingCommentsResponse> {
+): Promise<BotFlaggingPopulation> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
   // The one shared window→duration mapping (db/bot-window.ts) — the same `from` getBotAnalytics
@@ -2011,22 +2122,13 @@ export async function getBotFlaggingComments(
   const from = new Date(nowMs - botWindowMs(window));
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
   const generatedAt = to.toISOString();
-  const offset = Math.max(0, Math.trunc(page.offset));
-  const limit = Math.max(1, Math.min(Math.trunc(page.limit), FLAGGING_PAGE_MAX));
 
-  const empty: BotFlaggingCommentsResponse = {
-    kind: 'comments',
-    workspaceId: scope.workspaceId,
-    window: win,
-    selector,
-    refine,
-    total: 0,
-    filteredTotal: 0,
-    matrix: emptyAgreementMatrix(),
-    items: [],
-    nextCursor: null,
-    truncated: false,
+  const empty: BotFlaggingPopulation = {
+    win,
     generatedAt,
+    selected: [],
+    narrowed: [],
+    truncated: false,
   };
   if (scope.repoIds.length === 0) return empty;
   // `'all'`, not `'review'` — the strip counts quality checks too, and a drill-down that narrowed
@@ -2079,17 +2181,7 @@ export async function getBotFlaggingComments(
     selected.push({ row, fold });
   }
 
-  // ── Phase 3: the matrix, over the SELECTOR population and PRE-refine ─────────────────────
-  // Computed before the refinement so clicking a cell cannot zero out the cell that was clicked
-  // — the commentFacetCounts / ConsolidatedFeedResponse.counts rule.
-  const matrix = buildAgreementMatrix(
-    selected.map(({ row, fold }) => ({
-      vendor: coerceSeverity(row.vendorSeverity),
-      ours: fold.severity,
-    })),
-  );
-
-  // ── Phase 4: refine, then slice ──────────────────────────────────────────────────────────
+  // ── Phase 4: refine (phase 3, the matrix, is response-only — the caller builds it) ───────
   const narrowed = selected.filter(({ row, fold }) =>
     matchesFlaggingRefine(
       refine,
@@ -2098,6 +2190,47 @@ export async function getBotFlaggingComments(
       row.authorUserId,
     ),
   );
+
+  return {
+    win,
+    generatedAt,
+    selected,
+    narrowed,
+    // The same honesty rule as ROLLUP_SCAN_CAP everywhere else: a capped scan says so rather than
+    // presenting a most-recent sample as a total.
+    truncated: labelRows.length >= ROLLUP_SCAN_CAP,
+  };
+}
+
+export async function getBotFlaggingComments(
+  accountId: number,
+  selector: Exclude<BotFlaggingSelector, { kind: 'overlap' }>,
+  refine: BotFlaggingRefine,
+  window: BotWindowKind,
+  // ⚠ The SAME BotScope the strip was computed at — see foldBotFlaggingPopulation.
+  scope: BotScope,
+  page: { offset: number; limit: number },
+): Promise<BotFlaggingCommentsResponse> {
+  const offset = Math.max(0, Math.trunc(page.offset));
+  const limit = Math.max(1, Math.min(Math.trunc(page.limit), FLAGGING_PAGE_MAX));
+
+  // ── Phases 1–2 + 4: the ONE population fold (shared with the synthesis input) ────────────
+  const pop = await foldBotFlaggingPopulation(accountId, selector, refine, window, scope);
+  const { selected, narrowed } = pop;
+
+  // ── Phase 3: the matrix, over the SELECTOR population and PRE-refine ─────────────────────
+  // Computed before the refinement so clicking a cell cannot zero out the cell that was clicked
+  // — the commentFacetCounts / ConsolidatedFeedResponse.counts rule.
+  const matrix =
+    selected.length === 0
+      ? emptyAgreementMatrix()
+      : buildAgreementMatrix(
+          selected.map(({ row, fold }) => ({
+            vendor: coerceSeverity(row.vendorSeverity),
+            ours: fold.severity,
+          })),
+        );
+
   const pageRows = narrowed.slice(offset, offset + limit);
   const consumed = offset + pageRows.length;
 
@@ -2107,7 +2240,7 @@ export async function getBotFlaggingComments(
   return {
     kind: 'comments',
     workspaceId: scope.workspaceId,
-    window: win,
+    window: pop.win,
     selector,
     refine,
     total: selected.length,
@@ -2116,9 +2249,7 @@ export async function getBotFlaggingComments(
     items,
     // Opaque on the wire; `o:<n>` is today's encoding of "offset into the folded population".
     nextCursor: consumed < narrowed.length ? `o:${consumed}` : null,
-    // The same honesty rule as ROLLUP_SCAN_CAP everywhere else: a capped scan says so rather than
-    // presenting a most-recent sample as a total.
-    truncated: labelRows.length >= ROLLUP_SCAN_CAP,
-    generatedAt,
+    truncated: pop.truncated,
+    generatedAt: pop.generatedAt,
   };
 }

@@ -278,6 +278,24 @@ function TabChip({
         </>
       ),
     };
+  } else if (tab.kind === 'bot-detail') {
+    // One review bot's depth analytics — labelled with that bot (from the metadata captured
+    // when it was opened, no lookup needed).
+    // ⚠ Not cosmetic: without this branch the tab falls through to the PR ladder below and
+    // renders as a two-line `#undefined` chip with no title and no author.
+    const who = tab.botMeta?.label ?? tab.botMeta?.login ?? 'bot';
+    cfg = {
+      title: `${who} — bot depth`,
+      closeAria: 'Close bot depth tab',
+      body: (
+        <>
+          <span aria-hidden="true" className="shrink-0">
+            🤖
+          </span>
+          <span className={chipLabelClass(active, 'sky')}>{who} · depth</span>
+        </>
+      ),
+    };
   } else if (tab.kind === 'bot-threads') {
     const scopeName = repoName(botThreadsRepoId);
     cfg = {

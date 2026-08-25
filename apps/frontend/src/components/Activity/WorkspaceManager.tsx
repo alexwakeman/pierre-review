@@ -153,11 +153,12 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
   );
 
   // Remove (delete) a repo entirely. Invalidates the same cache cascade as the old FilterBar path.
-  // ⚠ 'workspaces' (NOT the long-dead 'teams') plus the three flow-metric keys: deleting a repo
-  // changes a workspace's membership without changing its ID, so ['workspace-metrics', id] and
-  // ['workspace-metrics-detail', id] would not refetch on their own, and ['workspace-comparison']
-  // carries no id at all. Same set useWorkspaceMutations invalidates — spelled out here because
-  // that list is module-private to useWorkspaces.ts.
+  // ⚠ 'workspaces' (NOT the long-dead 'teams') plus the flow-metric + Reports keys: deleting a
+  // repo changes a workspace's membership without changing its ID, so ['workspace-metrics', id],
+  // ['workspace-metrics-detail', id] and the two period-report keys would not refetch on their
+  // own — and the report GET's "By workspace" axis spans every workspace besides. Same set
+  // useWorkspaceMutations invalidates — spelled out here because that list is module-private to
+  // useWorkspaces.ts.
   const removeRepo = useMutation({
     mutationFn: (id: number) => api.deleteRepo(id),
     onSettled: () => {
@@ -171,7 +172,8 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
         'workspaces',
         'workspace-metrics',
         'workspace-metrics-detail',
-        'workspace-comparison',
+        'period-reports',
+        'period-report',
         ...ACTIVITY_QUERY_KEYS,
       ]) {
         void qc.invalidateQueries({ queryKey: [key] });

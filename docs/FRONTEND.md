@@ -84,7 +84,7 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
     gone (migration `0046` / pg `0033`); every repo in a workspace is fully live. Its empty state is
     the ordinary *empty-workspace* state: "No repos in this workspace — move some in from Manage
     repos & workspaces."
-  - **⚠ Activity, the Feed, Bots and Compare ALWAYS cover every repo in the selected Workspace —
+  - **⚠ Activity, the Feed, Bots and Reports ALWAYS cover every repo in the selected Workspace —
     the picker must never silently scope a screen that cannot see it.** It briefly sat outside the
     `isTimeline` gate on the reasoning that the Activity console "reads `repoIds` hardest", which is
     exactly the trap: a control the user set on the Timeline then narrowed a console that renders no
@@ -203,7 +203,7 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   retrofitted, per-tab `sortByTab` state) share `Activity/sortableTable.tsx`
   (`SortHeader`/`compare`/`nextSort`; numeric columns MUST return a number from `sortValue`, or
   `compare` localeCompares lexicographically). The rail's per-repo console remembers its Activity|Bots sub-tab in
-  `filters.repoConsoleTabs` (and Insights its sub-tab in `insightsSubTab`) — surviving rail
+  `filters.repoConsoleTabs` (`insightsSubTab` is GONE — the Insights pane is Reports-first, no sub-tabs) — surviving rail
   switches and tab round-trips; cross-view jumps set it explicitly (e.g. Show-in-feed →
   `setRepoConsoleTab(repoId,'bots')` BEFORE `setActivityRepo`, isolation set AFTER — the
   setter clears `feedIsolatedPrId`).
@@ -611,6 +611,91 @@ The `'comments'` AI-Fix seed's two UI halves. Backend contract:
   per-call callbacks when the component unmounts, which is exactly the tab-switch-mid-request case.
 
 ---
+
+## The calm-consolidation surfaces (apiVersion 21 wave)
+
+**Default landing = the FEED, for every tier.** The one-shot "auto-select Insights when Pro is
+on" effect (`insightsDefaultApplied` + `suppressInsightsDefault()`, which the Welcome-back
+banner had to call defensively) is DELETED — the store's plain `'feed'` default IS the landing,
+and the daily surface is the Feed with **`BriefStrip`** on top. The Insights rail entry is
+relabelled **"Reports"** — ⚠ LABEL-ONLY: the store/URL token stays `activityRepoId ===
+'insights'` (it is wire/URL-visible across `useUrlState`, FilterBar; renaming it buys nothing
+but broken deep links).
+
+- **`BriefStrip`** (`Activity/BriefStrip.tsx`, rendered inline at the top of the Feed branch —
+  no new fixed element, the one-toast-column rule): one compact line per thing that needs the
+  viewer, each DEEP-LINKING to the surface that owns its number (the strip grows no drill-downs
+  of its own), plus an "Elsewhere" line of per-workspace counts (`?rollup=1`). FREE = templated
+  count lines from `GET /api/daily-brief`; PRO (`activityDigest`) = the synthesis seam's
+  ORDERING mode (`kind:'brief'`/`'rollup'`) — the model orders and phrases lines DIGIT-FREE, the
+  FIGURES always come from the counts response (D4). A missing/failed narration renders the
+  templated lines exactly; the strip never waits on AI. Generation is lazy-on-read: at most one
+  auto-POST per stale scope per mount; ⚠ it fires the brief + rollup POSTs in ONE render cycle,
+  which is why the server's in-flight guard is claimed synchronously. Self-hides at all-zero.
+- **`BotTriageCard`** (`components/BotTriageCard.tsx`, CORE/free): the per-PR verdict sentence —
+  "N bot comments: X real issues · Y likely addressed · Z nit-flagged — [Resolve]". The "real
+  issues" segment is the PRO fold (stored validity/addressed annotations behind `prSummary`;
+  the annotation-index query isn't even issued without it) — a free account renders
+  "X awaiting a look" from the derived-state rollup in that slot instead. Mounted
+  TWICE (full atop the Threads tab, compact in the Overview attention area); renders ONLY at
+  ≥5 union-bot review comments and issues NO extra query below the threshold (the
+  ThreadAssessment 60-empty-boxes lesson) — everything it reads is already shared (the
+  workspace-reviewer listing, the per-PR ML label index, the per-PR annotation index; a pure
+  cached GET — the card can never bill). ⚠ Bot membership is the CLIENT MIRROR of the server's
+  UNION set (workspace judgement wins both ways, `users.isBot` fallback) — deliberately NOT the
+  legacy login-string classification PrDetail's bot chips still use; and every figure comes from
+  the SAME folds the Threads tab uses (`rollupCounts`/`threadSeverities`/
+  `resolvableBotThreadIds`) restricted to the bot subset, so card and tab cannot disagree.
+- **Bots view is down to `ROI ('roi' = Measure) | Advisor | Settings`** (`botsInnerTab` lost
+  `'behaviour'`/`'themes'` — transient + URL-silent, so member removal is safe). Measure =
+  cautions + the ROI table (now carrying the **Inflation column**, free current-window counts;
+  the weekly sparkline renders only when the server sent `mlInflation.weekly`, i.e. `botDepth`)
+  + the "What they're flagging" block with its `SynthesisCard` verdict + the collapsed Pro
+  "**Workspace charts**" section (`WorkspaceBotCharts` — the old BotBehaviourPanel's
+  workspace-grain charts behind `useBotBehaviour`, gated on `botDepth`) + the bot feed.
+- **`bot-detail` is a new `TabKind`** (the per-bot depth drill-down that replaced the Behaviour
+  tab): keyed PER BOT on `users.id` (`bot-detail:<userId>` — the user-activity pattern; the key's
+  id and the fetch's `botUserId` narrowing can never name different bots), `TabBotMeta` chip
+  metadata captured at open time from the ROI row (label, kind, and the `repoId` the row was
+  measured at, inherited so depth describes the scope the user clicked), EPHEMERAL (not
+  persisted, not URL-parsed). Opened by the ROI table's "Depth →" pill
+  (`openBotDetailTab`); `BotDetailPanel` is a sibling full-`<main>` overlay in App.tsx (joins
+  `overlayActive`), keyed on the tab so switching bots remounts. It re-slices the SAME per-bot
+  data shapes the workspace charts read — nothing recomputes client-side.
+- **`SynthesisCard`** (+ `hooks/useSynthesis.ts`) — the verdict card the drill-down surfaces and
+  the Measure flagging block mount. Contract: `children` is the host's own receipt list and is
+  ALWAYS rendered whatever the synthesis state (a failed/absent synthesis adds NOTHING and the
+  deterministic list stays primary); every rendered number is SERVER-computed (`cluster.count`,
+  `remainderCount`, analyzed/total — the card never counts); staleness is PASSIVE (the GET's
+  `stale` flag → badge + Regenerate, nothing regenerates on its own); free-tier posture is the
+  cost-nudge precedent (cloud → Pro chip + one-line nudge, OSS/local → null; nothing fetched
+  either way — `useSynthesis` gates on `activityDigest`). Mutation keys share the canonical
+  scope-key segment so two mounts of one scope share in-flight state.
+- **Reports pane (`PeriodReportsPanel`)**: Reports-FIRST — `InsightsSubTab` and the whole
+  sub-tab apparatus are deleted; the ad-hoc chat lives INSIDE the report ("Ask about this
+  period", window-bound to the viewed period). New: the "**By workspace**" axis (the folded
+  Compare — a per-metric expansion showing every workspace's current + prior figures from the
+  window-pure per-workspace vectors; ⚠ one population per row, low-coverage annotated, NO money
+  ever), "**Copy as Markdown**" (`periodReportMarkdown.ts` — ONE deterministic exporter serving
+  both the panel's rendering rules and the clipboard, so the copy cannot drift from the screen)
+  and **Print** (`@media print` in `index.css` + `print:hidden` on picker/controls/chat;
+  print-to-PDF is the board-pack path). `?report=<periodKey>` pairs with
+  `?activityRepo=insights` as before — it no longer needs to seed a sub-tab.
+- **People / 1:1 prep** (Pro `periodReports`): `PeriodPeopleSection` in Reports lists the
+  workspace's humans (roster minus the UNION bot verdict) — ⚠ ALPHABETICAL, no metrics on the
+  row, deliberately un-rankable ("prep, not scoring"); each row opens the EXISTING
+  `user-activity` tab, whose header now mounts **`PersonPeriodSection`** (the person-period
+  vector in the period table's idiom: null renders "—" never 0, `lowSample` flagged, the three
+  `basis:'live'` keys labelled "now", coverage annotations; period selector defaults to the
+  report being read via `insightsReportKey`; Pro narration phrases via synthesis kind
+  `'person'`). `UserProfilePopover` gains a second, capability-gated "1:1 prep →" entry beside
+  "View activity →" — same tab, named entry point; absent (never a nudge) when the capability is
+  off.
+
+Deleted outright with this wave: `BotBehaviourPanel`, `BotThemesPanel` + `useBotThemes`,
+`WorkspaceComparisonPanel` + `useWorkspaceComparison` + the `'compare'` rail value (no longer
+URL-parsed — a legacy `?activityRepo=compare` link falls through to the `'feed'` default),
+`SprintReportCard` + `useSprintReport`, `lib/workspaceColors.ts`, and `InsightsSubTab`.
 
 ## ML severity badges + the Bots severity rollup
 

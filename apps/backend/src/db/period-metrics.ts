@@ -47,7 +47,7 @@ import type {
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { resolveActorLanes, type ActorLanes } from './actor-lanes.js';
-import { type BotScope } from './queries.js';
+import { listWorkspaces, type BotScope } from './queries.js';
 
 // MIRRORED from @pierre-review/shared `ACTOR_LANES`, for the same release-guard reason the metric
 // keys are (see below). Render order: people first, then the automation that AUTHORS code (the
@@ -177,7 +177,7 @@ export interface PeriodMetricsResult {
   fingerprint: string;
 }
 
-function median(xs: number[]): number | null {
+export function median(xs: number[]): number | null {
   if (xs.length === 0) return null;
   const s = [...xs].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
@@ -185,8 +185,9 @@ function median(xs: number[]): number | null {
 }
 
 /** 2dp — display figures. An unrounded 16.888888888888889 in a report cell is worse than
- *  useless, and an unrounded float also churns the fingerprint on re-computation. */
-function round2(n: number): number {
+ *  useless, and an unrounded float also churns the fingerprint on re-computation.
+ *  (Both exported for db/person-period.ts — the person vector rounds and medians identically.) */
+export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
@@ -229,16 +230,24 @@ interface MergedPr {
 // caption asserted they were the same measurement.
 //
 // So there is now one fold. Anything that wants this number calls this.
-async function loadFirstHumanReviewHours(
+//
+// EXPORTED (P4.2): the 1:1 person vector's "median hours THEIR PRs waited for a first human
+// review" is this same measurement narrowed to one author — `authorUserId` narrows the candidate
+// PR population (query 1; query 2 runs over those candidates, so one predicate covers both) and
+// changes nothing else. A second fold of this number is the named shipped bug this comment block
+// opens with; the narrowing parameter exists precisely so no one writes one.
+export async function loadFirstHumanReviewHours(
   accountId: number,
   scope: BotScope,
   from: Date,
   to: Date,
   lanes: ActorLanes,
+  authorUserId?: number,
 ): Promise<number[]> {
   const inScope = and(
     eq(pullRequests.accountId, accountId),
     inArray(pullRequests.repoId, scope.repoIds),
+    ...(authorUserId != null ? [eq(pullRequests.authorId, authorUserId)] : []),
   );
 
   // (1) CANDIDATES: every PR with a non-pending review submitted in the window. A superset of
@@ -989,4 +998,72 @@ export async function getPeriodLanes(
       .filter(([userId]) => !active.has(userId))
       .map(([userId, lane]) => ({ userId, lane })),
   };
+}
+
+// ── (4) The per-workspace axis (apiVersion 21 — the Reports "By workspace" axis) ─────────────
+//
+// One period vector PER WORKSPACE the account owns, over ONE shared window — pure composition
+// over two reads that already exist (`listWorkspaces` + `getPeriodMetrics`), the
+// db/workspace-comparison.ts shape. WINDOW-PURE by construction: every predicate is
+// getPeriodMetrics' own two-sided `[fromMs, toMs)` pair, so a historical period stays
+// reproducible per workspace exactly as it does for the headline.
+//
+// ⚠ NO COST FIELDS TRAVEL HERE, AND NONE MAY BE ADDED. `monthly_cents` is a per-workspace fact:
+// six workspaces each listing a $120 CodeRabbit is either six subscriptions or one seen six
+// ways, and the app must not assert which — the same rule the comparison matrix carries. This
+// row shape has no money in it on purpose.
+//
+// Isolation is by construction (the shape the deleted getWorkspaceComparisonRows had, checked in
+// verify-isolation.ts): the only input is `listWorkspaces(accountId)` (whose `repoIds` come from
+// workspace_repos filtered by accountId), and getPeriodMetrics additionally filters
+// `pullRequests.accountId`. There is no
+// workspace-id parameter, so no 404 oracle and nothing to leak. The per-workspace scope is the
+// workspace's FULL membership — trivially `⊆ membership`, the resolveWorkspaceScope guarantee.
+
+export interface WorkspacePeriodMetricsRow {
+  workspaceId: number;
+  name: string;
+  isDefault: boolean;
+  /** Repos tracked at the window's start vs the workspace's membership now — the same
+   *  coverage-honesty disclosure the headline report carries, per workspace. A workspace whose
+   *  repos onboarded mid-window must be ANNOTATED, never silently under-counted. (`totalRepos`
+   *  is a now-fact, exactly like PeriodReport.coverage — disclosure, not part of the vector.) */
+  coverage: { trackedRepos: number; totalRepos: number; complete: boolean };
+  /** The full 15-key vector in PERIOD_METRIC_KEYS order — an empty workspace yields the
+   *  all-null vector (not an error, not a row omission: the axis must still name it). */
+  metrics: PeriodMetricValue[];
+}
+
+/**
+ * COST: N × `getPeriodMetrics`, one per workspace — the same multiplication that put the
+ * comparison route on the `search` rate tier. The consuming route's tier must account for it.
+ * Rows come back in `listWorkspaces` order (Default first, then by name) so the axis columns
+ * are stable across reloads.
+ */
+export async function getPeriodMetricsForWorkspaces(
+  accountId: number,
+  window: PeriodWindow,
+): Promise<WorkspacePeriodMetricsRow[]> {
+  const all = await listWorkspaces(accountId);
+  if (all.length === 0) return [];
+  return Promise.all(
+    all.map(async (w) => {
+      const [{ metrics }, { trackedRepoIds }] = await Promise.all([
+        getPeriodMetrics(accountId, { workspaceId: w.id, repoIds: w.repoIds }, window),
+        // Coverage at the WINDOW's start — the same inclusive bound the headline coverage uses.
+        getPeriodCoverage(accountId, w.repoIds, window.fromMs),
+      ]);
+      return {
+        workspaceId: w.id,
+        name: w.name,
+        isDefault: w.isDefault,
+        coverage: {
+          trackedRepos: trackedRepoIds.length,
+          totalRepos: w.repoIds.length,
+          complete: trackedRepoIds.length === w.repoIds.length,
+        },
+        metrics,
+      };
+    }),
+  );
 }

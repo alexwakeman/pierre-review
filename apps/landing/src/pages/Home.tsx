@@ -24,9 +24,11 @@ import { GameBar } from '../components/feint/GameBar';
 // timestamp line that advances the same morning by one step — and the final
 // CTA closes it at 09:31. The beats are strictly chronological down the page.
 //
-// Section order is the discovery ladder, deliberately: problem → the receipt
-// (the differentiator, early) → the queue → acting in place → Pro → Pro+ →
-// local → price. The agentic Claude loop is the LATE reveal by design — the
+// Section order is the discovery ladder, deliberately: problem → Measure (the
+// receipt, the differentiator, early) → Triage (the queue) → acting in place →
+// Report (Pro) → Pro+ → local → price. The rails carry the positioning's three
+// beats by name — Measure → Triage → Report — and the "Why Limn" section spells
+// the arc out once. The agentic Claude loop is the LATE reveal by design — the
 // positioning research is emphatic that "AI reviews your PRs" must never lead.
 //
 // The hero H1 has two variants behind HERO_VARIANT in lib/site.ts ('calm'
@@ -51,9 +53,9 @@ const STATS: { n: string; d: string }[] = [
 ];
 
 const FOR_MANAGERS = [
-  'Which of the bots you pay for earns its keep — cost, noise mix and overlap, per workspace.',
+  'Which of the bots you pay for earns its keep — a keep / tune / noisy verdict per bot, receipt attached.',
   'A reliable state of play — stalled PRs, waiting reviews, quiet threads — without asking anyone.',
-  'Flow metrics you can drill into. Mirrors, not scorecards.',
+  'Period reports and 1:1 prep you can hand to a director. Mirrors, not scorecards.',
 ];
 
 const FOR_ENGINEERS = [
@@ -198,9 +200,15 @@ export default function Home(): JSX.Element {
             <p className="mb-6 max-w-answer font-serif text-pull-quote italic text-ink">
               The pace isn’t coming back down. So the tools have to come up.
             </p>
-            <p className="max-w-[62ch] text-pretty">
+            <p className="mb-6 max-w-[62ch] text-pretty">
               That’s the whole idea: complexity you can see is complexity you can manage.
               The churn stays out there — you get the calm layer above it.
+            </p>
+            <p className="max-w-[62ch] text-pretty font-mono text-mono-nav text-secondary">
+              The shape of the product is three beats:{' '}
+              <span className="text-ink">measure</span> the reviewers ·{' '}
+              <span className="text-ink">triage</span> what they say ·{' '}
+              <span className="text-ink">report</span> what changed.
             </p>
           </div>
         </RailGrid>
@@ -282,7 +290,7 @@ export default function Home(): JSX.Element {
 
       {/* ---------- 02 · the receipt — the differentiator, early ---------- */}
       <Section tone="alt">
-        <RailGrid rail={{ n: '02', word: 'The receipt' }}>
+        <RailGrid rail={{ n: '02', word: 'Measure' }}>
           <div>
             <Beat t="09:08">
               The receipt: 214 bot comments this month. 61% nits. Your two bots agreed 58%
@@ -296,14 +304,16 @@ export default function Home(): JSX.Element {
               {SITE_NAME}’s own ML model — trained on years of GitHub bot reviews, no LLM
               calls — labels every bot comment by severity and category,
               independently of the bot that wrote it. The noise question stops being a
-              feeling: what share is nitpick, what’s correctness, where two bots overlap,
-              and what each vendor costs per comment a human actually acted on.
+              feeling: what share is nitpick, what’s correctness, how often each bot
+              over-calls, and a working keep / tune / noisy verdict per bot, computed from
+              what your team actually did with its comments.
             </p>
             <p className="mb-6">
               Five vendors currently claim #1 on the same public benchmark.{' '}
               <span className="text-ink">{SITE_NAME}’s number is about your repos.</span>{' '}
-              And it’s in the free tier — a measurement you’d have to pay for is a
-              measurement you’d doubt.
+              And the verdict is in the free tier — a measurement you’d have to pay for is
+              a measurement you’d doubt. Pro adds the depth: history, overlap, and what
+              each vendor costs per comment a human acted on.
             </p>
             <MonoLink to="/bots">The receipt, in depth →</MonoLink>
           </div>
@@ -319,8 +329,8 @@ export default function Home(): JSX.Element {
             />
             <ShotFrame
               src="/shots/bot-dedup.png"
-              alt="Cross-bot overlap: where two review bots raised the same issue on the same code — paying twice to be told the same thing."
-              caption={`${SITE_NAME.toLowerCase()} · overlap`}
+              alt="Cross-bot overlap in Pro: where two review bots raised the same issue on the same code — paying twice to be told the same thing."
+              caption={`${SITE_NAME.toLowerCase()} · overlap · pro`}
               height={200}
               fit="contain"
               strong
@@ -332,7 +342,7 @@ export default function Home(): JSX.Element {
 
       {/* ---------- 03 · the queue ---------- */}
       <Section>
-        <RailGrid rail={{ n: '03', word: 'The queue' }}>
+        <RailGrid rail={{ n: '03', word: 'Triage' }}>
           <div>
             <Beat t="09:12">
               A thread nobody answered, on the PR that ships tomorrow. Untouched — three
@@ -404,15 +414,15 @@ export default function Home(): JSX.Element {
 
       {/* ---------- 05 · the intelligence layer (Pro) ---------- */}
       <Section tone="alt">
-        <RailGrid rail={{ n: '05', word: 'Pro' }}>
+        <RailGrid rail={{ n: '05', word: 'Report' }}>
           <div>
             <Beat t="09:20">
-              The digest reads itself: three security flags untouched, five threads need a
-              human.
+              The morning brief reads itself: three security flags untouched, five threads
+              need a human.
             </Beat>
 
             <h2 className="mb-6 font-display text-h2-sm font-semibold text-ink type:text-h2">
-              A digest with teeth.
+              A brief with teeth.
             </h2>
             {/* The proof-block — a pull-quote in INK, not in the signal colour.
                 It is the product proving the measurement, in its own words. */}
@@ -422,11 +432,13 @@ export default function Home(): JSX.Element {
               Five threads actually need a human.”
             </p>
             <p className="mb-6">
-              That’s Pro: attention-and-risk digests instead of activity recaps — plus
-              validity checks on threads while you review, “was this addressed?” with a
-              confidence gauge, themes and reports across human and bot reviews, chat with
-              your repos with charts you can pin, and CI failures summarised to root
-              cause.
+              That’s Pro — the reporting layer on the free measurement. The daily brief
+              narrated instead of counted; period reports that say what changed since last
+              period, by workspace, with an honest forecast; 1:1 prep for the meeting
+              after standup; a synthesised verdict on every drill-down. Every number is
+              computed, never model-authored. Plus validity checks on threads while you
+              review, “was this addressed?” with a confidence gauge, chat grounded in the
+              report you’re reading, and CI failures summarised to root cause.
             </p>
             <MonoLink to="/pro">The whole intelligence layer →</MonoLink>
           </div>
@@ -521,7 +533,7 @@ export default function Home(): JSX.Element {
                   <span className="font-mono text-mono-data text-ink">$0, forever</span>
                 </div>
                 <p className="text-body-sm">
-                  The dashboard, the timeline, My Turn — and the bot receipt.
+                  The verdicts — the receipt, the grades, My Turn, the brief’s counts.
                 </p>
               </div>
               <div>
@@ -532,7 +544,7 @@ export default function Home(): JSX.Element {
                   </span>
                 </div>
                 <p className="text-body-sm">
-                  The intelligence layer — digests with teeth, validity, themes, chat.
+                  The measurement depth — per-bot history, ROI, reports and 1:1 prep.
                 </p>
               </div>
               <div>

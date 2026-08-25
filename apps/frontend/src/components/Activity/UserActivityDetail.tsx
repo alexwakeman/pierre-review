@@ -3,6 +3,7 @@ import { usePinnedTabs, parseUserActivityKey } from '../../store/pinnedTabs.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { profileUrl, userLabel } from '../../lib/ui.js';
 import { FeedView } from './FeedView.js';
+import { PersonPeriodSection } from './PersonPeriodSection.js';
 
 // ONE contributor's activity — the same consolidated Feed, the same cards (PR events,
 // reviews, comments, thread replies, thread-addressing commit runs), filtered to that person
@@ -84,6 +85,12 @@ export function UserActivityDetail(): JSX.Element {
           </a>
         )}
       </div>
+
+      {/* 1:1 prep (Pro `periodReports`, plan P4.2): the person-period vector for one sprint
+          period, in the period table's idiom — mounted HERE because this tab IS the person
+          surface (no new tab kind). Renders nothing on free/OSS, and its own quiet null state
+          when the workspace has never seen this person act. */}
+      <PersonPeriodSection userId={userId} />
 
       {/* The feed itself — the shared FeedView, scoped to this one actor. It drops its
           cross-repo Open-PRs panel and the "seen" marker under a userIds scope. */}

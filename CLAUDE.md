@@ -174,8 +174,9 @@ pierre-review/
 │  │  │  │  ├─ queries.ts       read layer (async, accountId-scoped): getTimeline/getPrDetail/getOpenPrs/getMyTurn/getMergers
 │  │  │  │  ├─ triage.ts        computeTriage(): reasonTag, "my turn", new-since-viewed, approvals
 │  │  │  │  ├─ branch-queries.ts  getBranchStatus(): default-branch health + trunk commits (+ commit→PR resolution)
-│  │  │  │  ├─ workspace-comparison.ts getWorkspaceComparison(): CORE/free cross-WORKSPACE metric matrix
-│  │  │  │  │                    (listWorkspaces ∘ getWorkspaceMetrics; takes NO scope — it always compares ALL of them)
+│  │  │  │  ├─ daily-brief.ts / person-period.ts / synthesis-input.ts   the apiVersion-21 core folds:
+│  │  │  │  │                    free brief counts (5-min TTL, reuses each surface's own fold), the 1:1
+│  │  │  │  │                    person vector, the synthesis seam's input assembly (one predicate per kind)
 │  │  │  │  └─ migrations/ + migrations-pg/   sqlite (.sql + meta/) | Postgres baseline (`db:generate:pg`)
 │  │  │  ├─ github/             auth.ts (gh token), client.ts (per-account factories), queries.ts (the big query),
 │  │  │  │                      mutations.ts (REST writes + the GraphQL-only merge queue), branch-queries.ts (trunk, two-phase)
@@ -446,9 +447,13 @@ that hold everywhere:
 - Reads are accountId-scoped; id-addressed routes verify ownership → 404. Cloud gate:
   every `/api/*` 401s unauthenticated except `/api/health` + `/api/auth/*`. Claude-review
   routes are only REGISTERED when enabled (local-only).
-- `GET /api/workspace-metrics/compare` takes NO scope on purpose (it always compares ALL
-  the account's workspaces) and sits on the `search` rate tier — its cost multiplies by
-  workspace count.
+- `GET /api/workspace-metrics/compare` is DELETED (with the Compare rail entry, its panel
+  and `db/workspace-comparison.ts`) — cross-workspace comparison is now the Reports
+  "By workspace" axis on the one-report GET, riding the window-pure
+  `getPeriodMetricsForWorkspaces` seam; that GET moved to the `search` tier for the same
+  cost-multiplies-by-workspace-count reason. `GET /api/daily-brief` (`?rollup=1` adds one
+  count line per other workspace) is CORE/FREE, counts only — every figure reuses the
+  owning surface's own fold — and also sits on `search`.
 
 ---
 
@@ -462,8 +467,11 @@ from filters; PR/thread detail fetched on demand; IndexedDB-persisted with
 `staleTime: Infinity` for pr/thread), **filter/selection** in Zustand `store/filters.ts`
 (`workspaceId` is the scope), **tabs** in `store/pinnedTabs.ts` (Activity | Timeline +
 closable PR/drill-down tabs; exactly one board mounts at a time), **URL** mirrored by
-`useUrlState.ts` (serializer diffs against defaults). App lands on the Activity console;
-cloud renders `<SignInGate>` on a 401 from `useMe()`.
+`useUrlState.ts` (serializer diffs against defaults). **App lands on the Activity FEED for
+every tier** — the daily `BriefStrip` sits on top of it, and the old one-shot "default to
+Insights when Pro is on" effect is gone; the Insights rail entry is labelled **"Reports"**
+(LABEL-ONLY — the store/URL value stays `'insights'`). Cloud renders `<SignInGate>` on a
+401 from `useMe()`.
 
 Landmines that cost real bugs — read the doc before touching any of these:
 
@@ -491,14 +499,18 @@ Landmines that cost real bugs — read the doc before touching any of these:
   list, so "Clear filters" would teleport the user into Default. It has its own persisted
   slice; `resetAllFilters` preserves it explicitly.
 - **The repo picker (`RepoSelectPanel`) is Timeline-ONLY.** Activity, Feed, Bots and
-  Compare always cover every repo in the selected workspace — never let the picker scope a
+  Reports always cover every repo in the selected workspace — never let the picker scope a
   screen that doesn't render it (pinned by `workspaceOpenPrsScope.test.ts`: of the three
   open-PR search builders, only the Timeline one honours the picker, and the two Activity
   builders stay byte-identical to each other when unscoped so they share one cache entry).
-- **Visible sub-tabs are DERIVED, never written back** (`feedInnerTab`, `botsInnerTab`,
-  the Compare rail gate): a scalar may legitimately hold a key the current context doesn't
-  render; compute an `effectiveTab` for the render only — a corrective `set…` permanently
-  forgets the user's choice.
+- **Visible sub-tabs are DERIVED, never written back** (`feedInnerTab` 'themes',
+  `botsInnerTab` 'advisor'): a scalar may legitimately hold a key the current context
+  doesn't render; compute an `effectiveTab` for the render only — a corrective `set…`
+  permanently forgets the user's choice. (`botsInnerTab` is down to
+  `'roi' | 'advisor' | 'settings'` — 'behaviour' and 'themes' were removed with their tabs;
+  the field is transient + URL-silent, so member removal is safe. `InsightsSubTab` is GONE
+  entirely: the pane is Reports-first, the chat lives inside the report. The Compare rail
+  value `'compare'` is gone from `activityRepoId` and no longer URL-parsed.)
 - **Timeline vertical scroll is GATED.** vis virtualizes rows; every programmatic scroll
   goes through `setVisScrollTop` and must claim the gate
   (`intentionalScrollRef` + `scrollLoopRef`) — never write `scrollTop` / call `focus()`
@@ -631,15 +643,24 @@ passthrough on `/api/me`, and inert seams. Details:
 [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) +
 [docs/PRO-PLATFORM.md](docs/PRO-PLATFORM.md). What bites:
 
-- **`apiVersion` is 20 and FOUR literals must agree**: host `contract.ts`, plugin
+- **`apiVersion` is 21 and FOUR literals must agree**: host `contract.ts`, plugin
   `index.ts`, plugin `contract-types.ts`, and `bind.ts`'s runtime gate
-  (`plugin?.apiVersion !== 20`) — the actual enforcer. A half-bump silently degrades the
+  (`plugin?.apiVersion !== 21`) — the actual enforcer. A half-bump silently degrades the
   ENTIRE plugin to OSS mode: capabilities dark, every `/api/pro/*` 404, nothing thrown.
   No test pins it; detection is `tsc` (TS2367 at the gate) + a boot check of `/api/me`.
   ⚠ **The plugin half of a bump lives in a SUBMODULE, so "all four" spans two repos** — the
   gitlink this repo commits must point at a plugin commit carrying the same number, or a
   fresh `git submodule update --init` checks out a plugin the host then rejects.
-  (19 → 20 is period-over-period reporting — the Insights **Reports** sub-tab: metrics are
+  (20 → 21 is the TIER LINE — ONE bump carrying every seam of the calm-consolidation plan:
+  `ProCapabilities` gains **`botDepth`** (paid, non-AI depth, gated like
+  `workspaceInsights`) and `ProHostQueries` gains FIVE members — `getBotBehaviour` (the
+  core behaviour rollup behind the moved `/api/pro/bot-behaviour`, + an optional
+  one-bot narrowing for the bot-detail tab), `getPeriodMetricsForWorkspaces` (the Reports
+  "By workspace" axis; no cost fields ever), and three seams declared inert then
+  implemented with NO contract change: `getSynthesisInput` (the synthesis seam's input
+  assembly), `getDailyBriefCounts` (the free brief fold), `getPersonPeriod` (the 1:1
+  person vector, `PERSON_METRICS_SCHEMA_VERSION` 1).
+  19 → 20 is period-over-period reporting — the Insights **Reports** sub-tab: metrics are
   CORE and window-pure (`db/period-metrics.ts`), the storage/narration/routes are
   plugin-owned (pro migration `0025`, lanes `0026`).
   18 → 19 is "fix from comments": `CodingSeam.generateFix`'s result gains OPTIONAL
@@ -649,15 +670,14 @@ passthrough on `/api/me`, and inert seams. Details:
   17 → 18 widened `ProHostQueries.getBotAnalytics`'s `window` from a bare `BotWindowKind`
   to `kind | {kind, fromMs, toMs}` so the Insights chat's chosen range reaches core as real
   bounds, and added `'rolling_90'`.
-  16 → 17 added ONE seam: `GithubSeam.fetchReviewCommentHunks` — lean-storage ANCHOR-HUNK
-  hydration (`sync/hydrate-detail.ts`, off the existing 60s PR cache). Without it both the
-  `validity` and `addressed` judgements read `review_comments.diff_hunk`, which is NULL for
-  ~97% of rows, and correctly answered "unclear — I can't see the surrounding code" while
-  the SPA rendered that very hunk directly above the verdict.
+  16 → 17 added `GithubSeam.fetchReviewCommentHunks` — lean-storage ANCHOR-HUNK hydration
+  (`sync/hydrate-detail.ts`); without it the `validity`/`addressed` judgements read
+  `review_comments.diff_hunk`, NULL for ~97% of rows, and answered "unclear" under the very
+  hunk the SPA was rendering.
   15 → 16 added `GithubSeam.fetchCompareDiff` — the two-sha compare
   (`github/compare.ts`, CORE, NEVER THROWS → `{ok:false, reason}`) that grounds the
-  `addressed` annotation in the REAL diff between the commit a thread was last discussed
-  at and the PR head. 14 → 15 was the Bot Tuning Advisor: repo-file read seams +
+  `addressed` annotation in the REAL diff since the thread's last discussion.
+  14 → 15 was the Bot Tuning Advisor: repo-file read seams +
   `openIssue` + `commitFilesAndOpenPr` + the two advisor host queries + `botAdvisor`.)
 - **A RESOLVED thread is now judged too, and that flips the question rather than cancelling
   it.** `enumerateCombinedUnits` used to emit no `addressed` slot when `isResolved` — so 40%
@@ -717,9 +737,16 @@ passthrough on `/api/me`, and inert seams. Details:
 - `ctx.schema` is `Record<string, any>` — a leftover `ctx.schema.teams` type-checks,
   evaluates to `undefined`, and throws only when the query runs. Grep, don't trust the
   compiler.
-- Tiers: **core** (free — feed/timeline/My Turn/Bots, no AI) · **pro** (AI summaries +
-  Insights, on whenever the plugin is active) · **pro+** (AI Analysis + AI Fix + Claude
-  Review, all gated together by the ONE flag `PRO_ADVANCED_AI_ENABLED`).
+- Tiers — **free gets the verdict, paid gets history/depth/explanation**: **core** (free —
+  feed/timeline/My Turn, the Bots ROI table with keep/tune/noisy verdicts + ML severity
+  columns + the Inflation column's CURRENT-WINDOW counts, Settings classification, the
+  daily-brief COUNTS strip, the per-PR `BotTriageCard` deterministic grade — no AI) ·
+  **pro** — **`botDepth`** (paid, NON-AI: the per-bot depth tab, workspace charts, the
+  inflation weekly sparkline/history, the per-seat cost overlay — its `PUT …/cost` write
+  402s without it), `activityDigest` (synthesis verdicts + brief narration),
+  `periodReports` (Reports + 1:1 prep), all on the paid summary tier · **pro+** (AI
+  Analysis + AI Fix + Claude Review, all gated together by the ONE flag
+  `PRO_ADVANCED_AI_ENABLED`).
 - **AI Fix has FOUR seeds** (`AiFixSeed`) and the newest one, **`'comments'` ("fix from
   comments")**, is a picker + basket on the AI Fix tab: the chosen comments become a numbered
   prompt list, the agent must **judge each comment's validity BEFORE fixing it**, and it reports
@@ -827,8 +854,8 @@ Every bot-authored review comment / PR comment / review body is labelled with a 
 microservice from the **`packages/ml`** submodule (fine-tuned ModernBERT ONNX on CPU + a
 deterministic marker parser). Badges render on the comments; the Bots rail shows ONE merged
 table (ROI + severity columns over ONE shared window — the ML fold rides `getBotAnalytics`
-via `ml_comment_labels.targetCreatedAt`; `/api/bot-severity` still serves but has no SPA
-consumer). Full detail: **[docs/ML-SEVERITY.md](docs/ML-SEVERITY.md)**. The invariants:
+via `ml_comment_labels.targetCreatedAt`; `/api/bot-severity` is DELETED — the fold has no
+other serving route). Full detail: **[docs/ML-SEVERITY.md](docs/ML-SEVERITY.md)**. The invariants:
 
 - **`SEVERITY_API_URL` IS THE WHOLE GATE.** Unset ⇒ no worker, `/api/me` reports
   `mlSeverity:false`, the SPA issues zero ML queries. That is also what keeps the feature dark
@@ -868,13 +895,17 @@ consumer). Full detail: **[docs/ML-SEVERITY.md](docs/ML-SEVERITY.md)**. The inva
 - **The vendor's own severity badge is stored to be SHOWN, never to be BELIEVED** — on the
   adjudicated gold-300 it is the worst of the three raters (0.474 exact vs our 0.700) and tuning
   towards agreement with it measurably degrades us, so it must never be an input to the model.
-- **The severity INFLATION index** (Bots → Behaviour, two default-on charts over the server's
-  `vendorOverCall`/`vendorUnderCall`) counts only the BADGED findings, so a bot that badges
-  nothing is **OMITTED and NAMED**, never drawn as a zero — no badge is silence, not agreement.
-  Bars are counts, never shares, and a bar's number IS the drill-down's `filteredTotal` (verified
-  live: DeepSource 218/0, CodeRabbit 246/81, Sourcery 37/1). The bot + direction ride the STORE
-  SEED, because two bars open the same `findings` selector and the tab chip would otherwise read
-  "Flagged · Findings" twice; `refineQueryKey` therefore carries a `|bot:<id>|` slot.
+- **The severity INFLATION index** is now the ROI table's **Inflation column**
+  (`BotVendorAnalytics.mlInflation` — per-bot over/under-call counts, CURRENT-WINDOW =
+  FREE; the ≤12-week `weekly` sparkline/history ships only under the paid `botDepth`
+  entitlement, ABSENT — not empty — for free accounts). The old two Behaviour-tab charts
+  are gone with that tab, but their rules survive the move: it counts only the BADGED
+  findings, so a bot that badges nothing is **OMITTED and NAMED**, never drawn as a zero —
+  no badge is silence, not agreement. Numbers are counts, never shares, and a clicked
+  count IS the flagging drill-down's `filteredTotal`. The bot + direction ride the STORE
+  SEED, because two cells open the same `findings` selector and the tab chip would
+  otherwise read "Flagged · Findings" twice; `refineQueryKey` therefore carries a
+  `|bot:<id>|` slot.
 - Advisory: macro-F1 ≈ 0.66 (0.700 exact / 0.303 ordinal MAE on the gold-300, at the human
   ceiling) and CRITICAL is under-recalled, so the product buckets **major+critical as "high"**
   and nothing auto-acts on a label.
@@ -1175,7 +1206,7 @@ duplicated identity re-splits that actor across two lanes** (a human classified
 `github-actions[bot]` and its twin `github-actions` kept the derived role, so one lands in
 `ai_review` and the other in `quality_gate` — a manual judgement is per user row by design, and
 nothing propagates it across the `[bot]`-normalised pair the vocabularies otherwise join); and pg
-`0036`–`0037`, pg `0039`–`0041` + the plugin `0021`/`0022` pg twins have not been replayed
+`0036`–`0037`, pg `0039`–`0041` + the plugin `0021`–`0027` pg twins have not been replayed
 against a real Postgres (the chain through pg `0035` HAS been — see docs/MIGRATIONS.md). ⚠ pg
 `0040`/`0041` use `regexp_replace(…, '\[bot\]$', '')` where their sqlite twins use `replace()`,
 so they are the divergences worth replaying before a cloud deploy.

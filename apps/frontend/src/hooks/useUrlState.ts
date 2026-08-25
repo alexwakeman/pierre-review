@@ -158,10 +158,10 @@ export function readFromUrl(): Partial<FilterState> {
   if (activityRepo) {
     if (activityRepo === 'bots') out.activityRepoId = 'bots';
     else if (activityRepo === 'attention') out.activityRepoId = 'attention';
-    // The cross-WORKSPACE comparison rail entry. Deep-linkable like the other pseudo-rows; the
-    // rail GATES it on the account having 2+ workspaces and falls back to 'feed' for the render
-    // without writing a correction back (a corrective set() permanently forgets the choice).
-    else if (activityRepo === 'compare') out.activityRepoId = 'compare';
+    // ('compare' is deliberately NOT parsed: the "Compare workspaces" rail entry was folded into
+    // Reports' "By workspace" axis. A legacy `?activityRepo=compare` link falls through the
+    // parseInt branch below — NaN, nothing set — and lands on the 'feed' default, which is the
+    // normalization for a value that no longer exists.)
     // 'insights' USED to be write-only-by-omission: a landing default that stayed out of the URL
     // and was not parsed here either. That made the period report unforwardable — `?report=` names
     // a period on a console the link could not select, so the recipient landed on the Feed and saw
@@ -174,19 +174,13 @@ export function readFromUrl(): Partial<FilterState> {
     }
   }
 
-  // Insights → Reports deep link: `?report=<periodKey>` names the period being read. Paired with
+  // Reports deep link: `?report=<periodKey>` names the period being read. Paired with
   // `?activityRepo=insights` above — either alone is a half-link, which is why they landed together.
-  //
-  // It also selects the Reports SUB-TAB, which is the third half of the same link: Insights seeds
-  // its sub-tab from the store and falls back to 'overview', so a link carrying the console and the
-  // period still opened on the ad-hoc chat and showed no report at all. `?report=` can only ever
-  // mean the Reports pane, so this is a URL→store mapping, not a corrective write-back — the
-  // "derive the visible tab, never write it back" rule is about CORRECTING a user's stored choice,
-  // and InsightsView still derives 'overview' harmlessly if the periodReports capability is off.
+  // (This used to also seed the Insights SUB-TAB; that apparatus is gone — the pane is
+  // Reports-first now, so the console + the period key ARE the whole link.)
   const report = p.get('report');
   if (report) {
     out.insightsReportKey = report;
-    out.insightsSubTab = 'reports';
   }
 
   return out;
@@ -248,22 +242,21 @@ export function writeToUrl(s: FilterState): void {
   // is emitted only for a single-repo console (the 'all' feed is the default).
   if (usePinnedTabs.getState().activeTab === 'activity') {
     p.set('view', 'activity');
-    // A single-repo console and the CORE Bots / "Needs attention" / cross-workspace "Compare"
-    // consoles are deep-linkable, and so is 'insights' — it is a landing default AND a real
-    // destination, and omitting it made the period report's `?report=` link land on the Feed.
+    // A single-repo console and the CORE Bots / "Needs attention" consoles are deep-linkable,
+    // and so is 'insights' — it is a landing default AND a real destination, and omitting it
+    // made the period report's `?report=` link land on the Feed.
     // Only 'feed' stays out of the URL now, because it is the bare state a link means when it
     // says nothing. Emitting a value the read side does not parse would be write-only, so the
     // two halves must always be changed together.
-    // (The 'retro' pseudo-row is gone with the Retro panel; it was never parsed on the read side
-    // either, so no legacy `?activityRepo=retro` link ever selected it.)
+    // (The 'retro' pseudo-row is gone with the Retro panel; the 'compare' pseudo-row is gone
+    // with the Compare rail entry — its surface is Reports' "By workspace" axis, reachable via
+    // `?activityRepo=insights&report=…`.)
     if (typeof s.activityRepoId === 'number') {
       p.set('activityRepo', String(s.activityRepoId));
     } else if (s.activityRepoId === 'bots') {
       p.set('activityRepo', 'bots');
     } else if (s.activityRepoId === 'attention') {
       p.set('activityRepo', 'attention');
-    } else if (s.activityRepoId === 'compare') {
-      p.set('activityRepo', 'compare');
     } else if (s.activityRepoId === 'insights') {
       p.set('activityRepo', 'insights');
       // The period being read, emitted ONLY alongside the console that renders it — a bare

@@ -1060,6 +1060,19 @@ export type ReviewProvenance = 'ai_verbatim' | 'human_curated';
 export type BotWindowKind = 'rolling_7' | 'rolling_14' | 'rolling_30' | 'rolling_90' | 'sprint';
 export type BotVerdict = 'keep' | 'tune' | 'noisy';
 export interface BotVendorTrendPoint { weekStart: string; threads: number; actedOnPct: number | null; untouched: number; }
+// One week of a bot's ours-vs-badge disagreement counts (the Inflation column's Pro sparkline).
+export interface BotInflationWeekPoint { weekStartMs: number; overCall: number; underCall: number; }
+// The per-bot severity-inflation summary riding each ROI row — see BotVendorAnalytics.mlInflation.
+export interface BotVendorInflation {
+  /** In-window findings carrying a vendor badge at all — the denominator the counts partition. */
+  badged: number;
+  /** The bot badged a finding WORSE than our model rated it (inflation — the tuning question). */
+  overCall: number;
+  /** Our model rated it worse than the bot's badge (what a nit-filter on the bot's own grades would drop). */
+  underCall: number;
+  /** Pro (`botDepth`) only: ≤12 weekly points, oldest→newest. Absent for free accounts. */
+  weekly?: BotInflationWeekPoint[];
+}
 export interface BotVendorAnalytics {
   // Stable unique row key. Analytics are now per-REVIEWER (so in-house bots — all kind
   // 'in_house' — get their own rows), and `kind` repeats across them, so the UI keys on this.
@@ -1127,6 +1140,22 @@ export interface BotVendorAnalytics {
   // (no in-window labels for this bot ⇒ no ML claim at all); present-and-zero means labels
   // exist and none of the ignored threads scored that way.
   notAddressedBySeverity?: MlSeverityCounts;
+  // ── The severity INFLATION column (plan P1.2/C2) ────────────────────────────────────────
+  // How often this bot's OWN badge contradicted our label, over the SAME window as every other
+  // column here. Counts, never shares — and they partition `badged` (the findings carrying a
+  // vendor badge at all), never `mlFindings`: most findings carry no badge, and silence is not
+  // agreement. Direction comes from the ONE shared `vendorAgreementOf` rule the confusion
+  // matrix and the flagging drill-down's `disagree` refinement also use, so a count here equals
+  // the drill-down's `filteredTotal` for the same bot + direction by construction.
+  //
+  // Absent under the same rule as its ml* siblings (no in-window labels for this bot). Present
+  // with `badged: 0` means the bot badges nothing — the UI renders a DASH, never a zero ("never
+  // inflates" and "makes no calls" are different claims).
+  //
+  // `weekly` is the Pro half (`botDepth`): ≤12 weekly points oldest→newest over the same trend
+  // span as `trend`, ABSENT (not empty) for unentitled accounts — counts are the free verdict,
+  // the history is paid.
+  mlInflation?: BotVendorInflation;
   // keep | tune | noisy. Thread math first (volume, acted-on, OVERDUE-untouched), plus ONE ML
   // input: a bot past the nit gates (findings ≥ 20 AND nit share ≥ 0.7 — the same gates as the
   // nit `BotTuningSuggestion`, so chip and advisory always agree) is ESCALATED 'keep' → 'tune'.
@@ -1246,16 +1275,13 @@ export interface BotAnalyticsMlTotals {
   truncated: boolean;
 }
 
-// ── Bot THEMES (Pro, AI) — GET/POST /api/pro/bot-themes ─────────────────────────────────────
-// An AI (Haiku) QUALITATIVE summary layer over the Bots console — the one bot surface that reads
-// what the automated reviewers actually SAY (every other bot surface is deterministic volume /
-// timing / area). It funnels the in-window, WORKSPACE-SCOPED bot review + PR comments (dedup + strip),
-// then a single Haiku pass extracts the recurring THEMES (nature + criticality + where) plus a
-// short narrative. The deterministic aggregates (per-bot volume, area distribution, acted-on %)
-// are computed in-plugin from the raw rows; the themes + narrative are the model's read
-// (approximate — the UI says so). STRICTLY Pro (rides the activityDigest AI-summary tier); cached +
-// credit-metered like the preset prompts. Scoped to the current Workspace (`?workspace=<id>`),
-// windowed like ROI.
+// ── THEMES shapes (Pro, AI) — the Feed "Discussion themes" report + the plugin theme parse ───
+// Originally the Bots "Themes" tab's wire shapes. That BOT surface retired in plan P2.3/C6 (its
+// question folded into the synthesis seam's 'workspace-bots' kind), and these shapes survive as
+// the shared vocabulary of the HUMAN sibling — the Feed "Discussion themes" summary
+// (HumanThemesResult reuses BotTheme + the category/severity/area/coverage shapes below) — and of
+// the plugin's tolerant theme parse (parseThemes), which both prompts share. The `Bot…` names are
+// historical.
 export type BotThemeCategory =
   | 'correctness'
   | 'security'
@@ -1308,18 +1334,6 @@ export interface BotTheme {
   threads: ThemeThreadRef[]; // concrete member threads/comments (capped) for the drill-down
 }
 
-// Per-automated-reviewer rollup (DETERMINISTIC — from the raw rows, not the model). `key` mirrors
-// the ROI row identity (`u<userId>`); `actedOnPct` is the derived-state acted-on share of the
-// bot's threads in the analyzed set.
-export interface BotThemeBotRollup {
-  key: string;
-  label: string;
-  login: string | null;
-  kind: AutomatedReviewerKind;
-  comments: number;
-  actedOnPct: number | null;
-}
-
 export interface BotThemeCategoryCount { category: BotThemeCategory; count: number; }
 export interface BotThemeSeverityCount { severity: BotThemeSeverity; count: number; }
 export interface BotThemeAreaCount { area: string; count: number; }
@@ -1333,29 +1347,9 @@ export interface BotThemeCoverage {
   truncated: boolean;    // the host row fetch hit its cap (older comments beyond it excluded)
 }
 
-export interface BotThemesResult {
-  narrative: string;                    // markdown — the 2–3 sentence overview
-  themes: BotTheme[];                   // most-critical-first
-  bots: BotThemeBotRollup[];            // per-reviewer volume + acted-on (deterministic)
-  byCategory: BotThemeCategoryCount[];  // aggregated from themes (approximate)
-  bySeverity: BotThemeSeverityCount[];  // aggregated from themes (approximate)
-  byArea: BotThemeAreaCount[];          // top-level-dir distribution (deterministic)
-  coverage: BotThemeCoverage;
-  generatedAt: string;                  // ISO
-  model: string;
-}
-
-export interface BotThemesResponse {
-  enabled: boolean;             // the Pro AI-summary tier is on (else the tab shouldn't render)
-  result: BotThemesResult | null; // the last generated report for this (scope, window); null = none yet
-  throttled?: boolean;          // a generation was already in flight
-  creditsExhausted?: boolean;   // out of the monthly AI-credit allowance
-  empty?: boolean;              // no bot comments in scope/window → nothing to summarize
-}
-
 // ── Human "Discussion" THEMES (Pro, AI) — GET/POST /api/pro/human-themes ─────────────────────
-// The HUMAN sibling of the Bot "Themes" summary: the same themed AI read, but over PEOPLE'S review
-// comments (non-bot authors, INCLUDING human replies inside bot threads) rather than the bots'. It
+// The HUMAN sibling of the retired Bot "Themes" summary: the same themed AI read, but over PEOPLE'S
+// review comments (non-bot authors, INCLUDING human replies inside bot threads) rather than the bots'. It
 // answers "what are people actually discussing / raising in review?" — recurring concerns, debates,
 // decisions, questions. STRICTLY Pro (activityDigest tier), workspace-scoped, surfaced as a Feed
 // sub-tab.
@@ -1390,8 +1384,9 @@ export interface HumanThemesResponse {
   empty?: boolean;
 }
 
-// ── Bot BEHAVIOUR analytics (EXPERIMENTAL) — GET /api/bot-behaviour ────────────────────────
-// A SEPARATE, deterministic (no-AI) CORE surface from the Bot-ROI panel, developed in its own
+// ── Bot BEHAVIOUR analytics — GET /api/pro/bot-behaviour (plugin, `botDepth`; the compute
+// stays CORE in db/queries.ts, reached via the ProHostQueries.getBotBehaviour seam) ─────────
+// A SEPARATE, deterministic (no-AI) surface from the Bot-ROI panel, developed in its own
 // "Behaviour" sub-tab so it can mature without touching the shipped ROI response. Answers the
 // common review-bot gripes: how fast does a bot get to a PR (TTFR), how noisy is it per line of
 // code, WHEN across the day is it active (coverage / rate-limit inference), and does it keep
@@ -2407,7 +2402,11 @@ export interface SprintChatChartSpec {
 // a start date are stored; the rest are trailing windows ending now, whose "previous" is the
 // preceding window of equal length. There is no `'custom'` and no `'now'` — the latter recentres
 // the timeline, which means nothing to a question about a date range.
-export type InsightsRangeKey = 'sprint' | '7d' | '14d' | '30d' | '90d';
+// `'period'` is the one member that is NEVER a chip and never arrives alone: it names an answer
+// grounded in an explicitly-bounded reporting period (the Reports "Ask about this period" mount
+// sends `SprintChatBody.window`, and the resolved/echoed window's `kind` is then `'period'`). A
+// bare `range: 'period'` with no bounds is unanswerable and falls back to the configured window.
+export type InsightsRangeKey = 'sprint' | '7d' | '14d' | '30d' | '90d' | 'period';
 
 // The window an answer was ACTUALLY computed over. Echoed on the response and stored on every
 // history row, because a 7d answer and a 90d answer to the same question are different claims and
@@ -2428,6 +2427,13 @@ export interface SprintChatBody {
   // Absent = the account's configured window (Settings → Sprint `comparisonMode`). Present =
   // this one question covers that range instead.
   range?: InsightsRangeKey;
+  // Explicit bounds for THIS question — the Reports "Ask about this period" mount sends the
+  // viewed period's exact `[fromMs, toMs)` so the answer covers the period on screen, not a
+  // trailing window ending now. Present (and valid) ⇒ wins over `range`; the echoed and stored
+  // `InsightsAnswerWindow.kind` is then `'period'`. Epoch milliseconds. The bounds reach
+  // `getBotAnalytics` through the same explicit-bounds path the `'sprint'` chip uses
+  // (apiVersion 18's `{kind, fromMs, toMs}` widening).
+  window?: { fromMs: number; toMs: number };
   // Which WORKSPACE to ground the answer in — the wire value is the workspace id (the same plain
   // integer `?workspace=` carries, as a string on this body). Absent = the account's Default.
   // The sentinel vocabulary it used to accept ('all' | 'none' | 'teams' | '<teamId>') is gone with
@@ -2953,9 +2959,9 @@ export interface UpdateBranchResult {
 // team requests carry only a name).
 //
 // ⚠ `teamName` HERE IS GITHUB'S OWN TEAM (`@org/team`) — NOT this app's workspace. It is parsed
-// straight out of a GitHub payload and stored in `reviewRequests.teamName`. It is one `sed` away
-// from `WorkspaceComparisonRow.workspaceName`, which is the OPPOSITE category and WAS renamed;
-// renaming this one breaks GitHub-team review-request rendering. Do not touch it.
+// straight out of a GitHub payload and stored in `reviewRequests.teamName`. Workspace-side names
+// (`PeriodWorkspaceRow.name`, `Workspace.name`) are the OPPOSITE category and follow the app's
+// own vocabulary; renaming this one breaks GitHub-team review-request rendering. Do not touch it.
 export interface RequestedReviewer {
   userId: number | null;
   teamName: string | null;
@@ -3085,6 +3091,11 @@ export interface ProCapabilities {
   // refusable forecast and a narrated summary. Gates the sub-tab itself; the metrics behind it
   // are CORE compute, but there is no free surface for them.
   periodReports: boolean;
+  // Non-AI paid DEPTH tier (paid, gated like workspaceInsights — NOT like botTriage, which is
+  // true whenever the plugin is merely loaded): behaviour trends/anomalies, the per-bot
+  // drill-down, overlap, where-bots-work, the inflation sparkline/history, and the per-seat
+  // ROI cost overlay. The compute behind these surfaces is CORE; this flag gates the surfaces.
+  botDepth: boolean;
 }
 
 // Which GitHub sign-in methods this (cloud) deployment offers — GET /api/auth/providers.
@@ -5739,46 +5750,10 @@ export interface WorkspaceMetricsResponse {
   metrics: WorkspaceMetrics | null; // null = the workspace has no repos
 }
 
-// ---- Cross-workspace comparison (the "Compare workspaces" rail line) ----
-// One row per WORKSPACE: that workspace's full flow metrics (the same WorkspaceMetrics shape the
-// DORA header uses), so the SPA can render a compact metric×workspace comparison matrix with
-// per-workspace throughput sparklines. `metrics` null when the workspace has no repos/data.
-//
-// ⚠ IT COVERS EVERY WORKSPACE, ALWAYS — Default included — and takes NO scope parameter. The
-// selection cannot narrow a comparison whose entire purpose is to place the selected workspace
-// against the others; its predecessor was scoped, which is what made it disappear the moment fewer
-// than two teams were selected. The surface is simply hidden when the account owns fewer than two
-// workspaces (`workspaces.length >= 2`), a count over the roster — never a test on a scope value.
-//
-// ⚠ COST IS NOT TOTALLED HERE, and no other cross-workspace surface may total it either: prices are
-// per workspace (see WorkspaceReviewer.costMonthlyUsd), so six workspaces each listing a $120
-// CodeRabbit is either six subscriptions or one seen six ways, and this screen must not assert
-// which. Show the figures side by side.
-//
-// WINDOW: core cannot read the plugin-owned `pro_settings`, so this uses the same trailing-14d
-// default `/api/workspace-metrics` does — NOT the account's configured sprint window. That makes
-// Compare agree with the free header elsewhere in the app, at the cost of possibly differing from a
-// Pro user's custom-window Insights header. Deliberate, and a visible change for those users.
-export interface WorkspaceComparisonRow {
-  workspaceId: number;
-  // The workspace's display name. NOTE, because the two are one `sed` apart and are opposites:
-  // this is OUR name for a grouping of repos, whereas `RequestedReviewer.teamName` and
-  // `ReviewerSuggestion.teamName`/`teamSlug` are GITHUB's own teams (`@org/team`) and must never
-  // be renamed — they parse GitHub payloads and address GitHub's review-request API.
-  workspaceName: string;
-  isDefault: boolean;
-  repoCount: number;
-  metrics: WorkspaceMetrics | null;
-}
-
-export interface WorkspaceComparisonResponse {
-  // Always true from the core route — kept on the wire (rather than removed) because the client
-  // never read it and dropping a field buys nothing, while a future gate might want it back.
-  enabled: boolean;
-  generatedAt: string; // ISO-8601
-  sprint: { from: string; to: string };
-  workspaces: WorkspaceComparisonRow[]; // one per workspace, in listWorkspaces order (name asc)
-}
+// (The "Compare workspaces" surface — `WorkspaceComparisonRow`/`WorkspaceComparisonResponse` and
+// `GET /api/workspace-metrics/compare` — was DELETED with its rail entry. Cross-workspace
+// comparison now lives inside Reports as the "By workspace" axis: `PeriodByWorkspace` below,
+// window-pure period vectors rather than the snapshot WorkspaceMetrics matrix.)
 
 // ---- Period-over-period reporting (the Insights "Reports" sub-tab) ----
 // A stored, forwardable artifact for ONE completed period ("18 Aug – 1 Sep"), its comparison
@@ -6009,9 +5984,48 @@ export interface PeriodReportsListResponse {
   modelInfo?: PeriodReportModelInfo;
 }
 
+// ---- The Reports "By workspace" axis (C4 — Compare workspaces folded into Reports) ----
+// One row per WORKSPACE the account owns, carrying the SAME window-pure 15-key vector the headline
+// table renders (`getPeriodMetrics` over that workspace's full membership) — NOT the snapshot
+// WorkspaceMetrics matrix the deleted Compare rail entry used, which was not window-pure and would
+// have put an "as of now" number under a dated period heading.
+//
+// ⚠ NO MONEY TRAVELS HERE, AND NONE MAY BE ADDED. A bot's price is a per-workspace fact, so a
+// cross-workspace surface can never total it — the vector has no cost key and this row adds none.
+//
+// ⚠ ONE POPULATION PER ROW: `current` and `prior` for a given workspace are both computed over
+// that workspace's FULL membership (there is no coverage-stable subset here). The honesty about
+// repos that onboarded mid-window travels as `coverage` — disclosure beside the figures, never a
+// silent substitution of a different population into the subtraction.
+export interface PeriodWorkspaceRow {
+  workspaceId: number;
+  name: string;
+  isDefault: boolean;
+  // Repos tracked at the window's start vs the workspace's membership now — the same shape (and
+  // the same annotation duty) as PeriodReport.coverage, per workspace.
+  coverage: PeriodCoverage;
+  // The full vector in PERIOD_METRIC_KEYS order. An empty workspace yields the all-null vector —
+  // still a row (the axis must name it), and every null renders "—", never 0.
+  metrics: PeriodMetricValue[];
+}
+
+export interface PeriodByWorkspace {
+  // Rows for the viewed period, listWorkspaces order (Default first, then by name).
+  current: PeriodWorkspaceRow[];
+  // Rows for the period before it, same order. `null` = no prior period window exists on the
+  // cadence grid — which must render as "no prior", never as a column of zeros.
+  prior: PeriodWorkspaceRow[] | null;
+  priorPeriodKey: string | null;
+}
+
 export interface PeriodReportResponse {
   enabled: boolean; workspaceId: number; report: PeriodReport | null;
   modelInfo?: PeriodReportModelInfo;
+  // The "By workspace" axis, computed LIVE on this GET (never stored on the report row — a stored
+  // report predating the axis still renders, and the axis reflects today's workspace roster).
+  // OPTIONAL and additive: an older plugin omits it, an older client ignores it. Omitted when the
+  // account owns fewer than two workspaces (one row compares nothing) and when there is no report.
+  byWorkspace?: PeriodByWorkspace;
 }
 
 export interface PeriodReportGenerateResponse {
@@ -7399,3 +7413,342 @@ export interface ReactionWriteBody extends ReactionTargetRef {
  * is stored locally, so there is nothing to stamp: this response IS the new truth.
  */
 export type ReactionWriteResponse = ReactionState;
+
+// ---- Synthesis (P2.1): ONE cached, credit-metered Haiku pass over a drill-down's item set ----
+//
+// The D3 decision made wire-shaped: C3 (drill-down verdicts) and C6 (workspace bot themes) are the
+// SAME capability at different grains — a deterministic item set assembled server-side, one model
+// pass that GROUPS it, and a rendered card whose every number is computed from the validated
+// grouping (D4: the model authors no numbers). One plugin endpoint (`/api/pro/synthesis`), one
+// cache table (`pro_synthesis`), one output contract.
+//
+// ⚠ THE ONE-PREDICATE RULE (§8.3) is what these shapes exist to carry: for each `kind`, the item
+// set the model sees is produced by the SAME core query the drill-down's list and count read
+// (core `db/synthesis-input.ts` getSynthesisInput). A synthesis over a second predicate would
+// summarise a different population than the receipt list below it.
+
+/** The P2.1 drill-down grains plus the ORDERING grains: 'brief' (the daily-brief narration,
+ *  N1), 'rollup' (the cross-workspace "Elsewhere" line, N5) and 'person' (the 1:1-prep
+ *  narration, N4 — one digit-free phrase per person-vector line). Every widening here was
+ *  additive — no version change (exactly the growth path the P2.1 comment promised). */
+export type SynthesisScopeKind =
+  | 'bot-flagging'
+  | 'bot-threads'
+  | 'bot-volume'
+  | 'workspace-bots'
+  | 'brief'
+  | 'rollup'
+  | 'person';
+
+/**
+ * The flagging drill-down's population selector, as the synthesis descriptor spells it.
+ * `'overlap'` is deliberately absent: that arm lists deterministic same-line clusters, not
+ * comments — there is nothing left for a clustering model to add to it.
+ */
+export type SynthesisFlaggingSelect = 'findings' | 'summaries' | 'severity' | 'category';
+
+/**
+ * The scope descriptor — what `getSynthesisInput` folds and what `scope_key` serialises.
+ *
+ * `workspaceId` + `repoIds` are RESOLVER-PRODUCED (host `resolveWorkspaceScope` / the plugin's
+ * `resolveRequestScope` + membership intersection): `repoIds ⊆ the workspace's membership`, and
+ * `[]` is an ordinary empty workspace, never "widen to the account". The narrowing fields carry
+ * the drill-down's own seed verbatim:
+ *   - `botUserId`  — the one-bot narrowing ('bot-flagging' + 'bot-volume'; the store-seed rule).
+ *   - `direction`  — the inflation drill-down's over/under narrowing ('bot-flagging' only).
+ *   - `select`/`severities`/`category` — the flagging tile's population ('bot-flagging' only;
+ *     `select` defaults to 'findings'; `severities` requires select='severity', `category`
+ *     requires select='category').
+ * `window` is ignored — and canonicalised out of the cache key — for 'bot-threads': the resolve
+ * backlog is a CURRENT-STATE set, not a windowed one (its drill-down takes no window either).
+ *
+ * The 'person' ORDERING grain (N4) carries its OWN three fields and nothing else: `userId` is
+ * the 1:1 SUBJECT (a person, resolved through the lane resolver core-side — never `botUserId`,
+ * which is a bot-population narrowing) and `fromMs`/`toMs` are the REAL period bounds off the
+ * cadence grid (the enum `window` slot is canonicalised out for it, exactly like the other
+ * ordering grains — an arbitrary-bounds period has no BotWindowKind spelling). All three name a
+ * POPULATION: garbage 400s, it never degrades to a different person or period.
+ */
+export interface SynthesisScope {
+  kind: SynthesisScopeKind;
+  workspaceId: number;
+  repoIds: number[];
+  window: BotWindowKind;
+  botUserId?: number;
+  direction?: VendorDisagreeDirection;
+  select?: SynthesisFlaggingSelect;
+  severities?: MlSeverity[];
+  category?: MlCategory;
+  /** 'person' only: the 1:1 subject's user id. */
+  userId?: number;
+  /** 'person' only: the period's real bounds (epoch ms, half-open `[fromMs, toMs)`). */
+  fromMs?: number;
+  toMs?: number;
+}
+
+/** The item family a synthesis row belongs to — the prefix of its `id` ref. `brief_line` is the
+ *  brief/rollup ordering grains' family: one line of the deterministic daily brief (or one
+ *  workspace of the roll-up), whose id ENCODES its computed counts (see the daily-brief section
+ *  below). `person_metric` is the 'person' grain's family: one non-null line of the 1:1 person
+ *  vector, its id encoding the metric key + computed value + PERSON_METRICS_SCHEMA_VERSION for
+ *  the same content-hash reason. */
+export type SynthesisItemKind =
+  | 'review_comment'
+  | 'pr_comment'
+  | 'review'
+  | 'thread'
+  | 'pr'
+  | 'brief_line'
+  | 'person_metric';
+
+/**
+ * One row of the model's input — the EXACT row the drill-down lists, reduced to what a grouping
+ * pass needs. `id` is a NAMESPACED ref (`rc:<n>` / `pc:<n>` / `rv:<n>` / `th:<n>` / `pr:<n>`)
+ * because the source ids live in different tables' id spaces and can collide numerically
+ * (the BotReviewCommentRow lesson); it is also the token the model cites back, which the server
+ * validates against this set. `createdAt` is the per-item STABLE field the payload hash folds —
+ * GitHub creation time, never a re-upserted or hydrated value.
+ */
+export interface SynthesisInputItem {
+  id: string;
+  kind: SynthesisItemKind;
+  authorLabel: string;
+  createdAt: string; // ISO
+  /** Whitespace-collapsed + capped server-side. '' when the source text is gone. */
+  body: string;
+  path?: string | null;
+  severity?: MlSeverity | null;
+}
+
+/**
+ * `getSynthesisInput`'s return: the CAPPED item rows plus the truncation disclosure. `totalCount`
+ * is the drill-down's own filtered total (count ≡ list ≡ input, §8.3); `analyzedCount` is what
+ * survived the cap + hydration. Silent truncation is forbidden — the card renders
+ * "Summarised X of Y" from exactly these two numbers.
+ */
+export interface SynthesisInput {
+  kind: SynthesisScopeKind;
+  workspaceId: number;
+  items: SynthesisInputItem[];
+  totalCount: number;
+  analyzedCount: number;
+  truncated: boolean;
+}
+
+/**
+ * One validated cluster. `itemIds` ⊆ the input set (strays dropped + logged server-side), and
+ * `count` is |itemIds| COMPUTED SERVER-SIDE — the rendered "34 style nits on generated files"
+ * takes its 34 from here, never from model prose (D4).
+ */
+export interface SynthesisCluster {
+  label: string;
+  itemIds: string[];
+  count: number;
+  /** An Advisor-intent hint — links to the Advisor, never an action in itself. */
+  configFixable?: boolean;
+}
+
+/** A Phase-3 ordering-mode item ('brief'/'rollup'): a ref from the input set plus a DIGIT-FREE
+ *  phrase (regex-validated server-side; a digit or unknown ref rejects the item and the caller
+ *  falls back to its templated line). Numbers are appended by the CALLER from computed values. */
+export interface SynthesisOrderingItem {
+  ref: string;
+  phrase: string;
+}
+
+/** The stored, validated synthesis — what the GET serves and the card renders. */
+export interface StoredSynthesis {
+  kind: SynthesisScopeKind;
+  /** The canonical serialised descriptor — the cache row's identity (and the client's shared
+   *  mutation-key segment, so two mounts of one scope share in-flight state). */
+  scopeKey: string;
+  clusters: SynthesisCluster[];
+  /** ORDERING mode only ('brief'/'rollup'): the validated {ref, phrase} list, model order.
+   *  Every ref ∈ the input set, every phrase digit-free (server-validated; a rejected item is
+   *  simply absent — the caller renders its templated line). Empty/absent for cluster kinds. */
+  ordering?: SynthesisOrderingItem[];
+  /** Input items the model left unclustered — recomputed server-side as input − clustered. */
+  remainderIds: string[];
+  remainderCount: number;
+  /** Coverage at generation time: `analyzedCount` of `totalCount` items were summarised. */
+  analyzedCount: number;
+  totalCount: number;
+  truncated: boolean;
+  model: string;
+  generatedAt: string; // ISO
+}
+
+/**
+ * The wire envelope for GET + POST `/api/pro/synthesis`. `enabled:false` = the AI-summary tier is
+ * off (OSS / flag-less run) — the SPA renders nothing, never an error. `stale` rides the free GET:
+ * the input set's recomputed payload hash no longer matches the stored row (items aged out of the
+ * window, new comments landed, or a schema/prompt version bump) — the card shows a stale badge +
+ * Regenerate, it never regenerates on its own.
+ */
+export interface SynthesisResponse {
+  enabled: boolean;
+  synthesis: StoredSynthesis | null;
+  stale?: boolean;
+  /** POST only: a generation is already in flight, or inside the min-interval — cached row served,
+   *  nothing billed. */
+  throttled?: boolean;
+  /** POST only: metered plan out of credits — cached row served, nothing billed. */
+  creditsExhausted?: boolean;
+  /** POST only: the scope resolves to zero items — nothing to summarise, nothing stored. */
+  empty?: boolean;
+}
+
+// ---- The daily brief (plan P3.1 / N1) + the cross-workspace roll-up (P3.3 / N5) ----
+//
+// A deterministic, computed-on-read fold of "what needs me this morning" for ONE workspace —
+// COUNTS ONLY, free tier, no storage, no AI (the Pro narration rides the synthesis seam's
+// ordering mode above and never touches these shapes). Every line REUSES the fold of the surface
+// it deep-links to (the consolidated feed's my-turn facet, the /api/attention cards, the
+// resolvable-backlog listing, the repos head columns), so the strip's number and the surface it
+// opens cannot disagree. ⚠ NO cost/money fields anywhere here — the roll-up especially must
+// never invite summing cost across workspaces (§8.18).
+
+/** One anomalous review bot this week (a narrow volume-only self-baseline — see
+ *  db/daily-brief.ts). `login`/`kind` travel so the client can seed the bot-detail tab's meta
+ *  without a second lookup; label is the display name (classification label → login → #id). */
+export interface DailyBriefBotAnomaly {
+  userId: number;
+  label: string;
+  login: string | null;
+  kind: string | null; // AutomatedReviewerKind, type-light like TabBotMeta.kind
+}
+
+/** A repo whose DEFAULT branch currently reads red (head snapshot columns). `name` is the short
+ *  repo name (the fullName's tail); `repoId` is the deep-link target (the repo console). */
+export interface DailyBriefTrunkRepo {
+  repoId: number;
+  name: string;
+}
+
+export interface DailyBriefCounts {
+  /** The consolidated feed's my-turn facet under the DEFAULT feed view (bots hidden). */
+  myTurn: number;
+  /** stalled_review cards on /api/attention (one card = one PR). */
+  stalled: number;
+  /** untouched_thread cards on /api/attention (one card = one thread). */
+  untouchedThreads: number;
+  /** reviewer_routing ("needs a reviewer") cards on /api/attention. */
+  needsReviewer: number;
+  /** The resolvable bot-thread backlog (the review-&-resolve tab's own totalThreads). */
+  resolveBacklog: number;
+  botAnomalies: DailyBriefBotAnomaly[];
+  trunkRed: DailyBriefTrunkRepo[];
+}
+
+/** One workspace's line in the roll-up ("Elsewhere") — counts only, never cost. */
+export interface DailyBriefWorkspaceLine {
+  workspaceId: number;
+  name: string;
+  counts: DailyBriefCounts;
+}
+
+/** GET /api/daily-brief — free, counts only; echoes the resolved workspace like every scoped
+ *  route. `rollup` is present only when `?rollup=1` was asked AND the account has other
+ *  workspaces; it lists the OTHER workspaces (the viewed one is the main `counts`). */
+export interface DailyBriefResponse {
+  workspaceId: number;
+  counts: DailyBriefCounts;
+  generatedAt: string; // ISO — when this fold was computed (may be ≤5 min stale, TTL cache)
+  rollup?: DailyBriefWorkspaceLine[];
+}
+
+// ---- 1:1 prep — the person-period vector (plan P4.2 / N4) ----
+//
+// A small fixed vector describing ONE PERSON's fortnight in ONE workspace — what an EM walks into
+// a 1:1 already knowing. PREP, NOT SCORING: nothing here ranks people against each other, no
+// cross-person shape exists on this wire, and every consumer copies that posture (the People list
+// is alphabetical, never sort-by-metric).
+//
+// The period vector's honesty rules apply unchanged: `null` is "no data" and NEVER renders 0; a
+// thin sample is flagged server-side (`lowSample` — the floors live in core, not in a second SPA
+// copy); coverage travels beside the figures (repos onboarded mid-window AND a person first
+// observed mid-window both disclose). ⚠ `users` is a GLOBAL table, so this shape carries the
+// person's login + display name ONLY — no other profile fields ever travel here.
+
+// This spelling is CANONICAL; core (db/person-period.ts) inlines a copy for the same
+// release-guard reason the period keys are inlined (shared is types-only and not shipped), and a
+// core test asserts the two are identical.
+export const PERSON_METRICS_SCHEMA_VERSION = 1;
+
+export type PersonMetricKey =
+  // -- windowed (two-sided `[fromMs, toMs)` predicates; reproducible for a past period) --
+  | 'merged_prs_authored'
+  | 'opened_prs_authored'
+  | 'reviews_given'
+  | 'review_comments_written'
+  | 'median_review_response_hours'
+  | 'median_first_human_review_hours_their_prs'
+  | 'review_threads_on_their_prs'
+  // -- live-state (a "now" reading; re-asking about a past period may answer differently) --
+  | 'their_pr_threads_addressed'
+  | 'awaiting_their_review'
+  | 'open_prs_authored';
+
+/** CLOSED + ORDERED at schema version 1 — the render order, exactly like PERIOD_METRIC_KEYS. */
+export const PERSON_METRIC_KEYS: PersonMetricKey[] = [
+  'merged_prs_authored',
+  'opened_prs_authored',
+  'reviews_given',
+  'review_comments_written',
+  'median_review_response_hours',
+  'median_first_human_review_hours_their_prs',
+  'review_threads_on_their_prs',
+  'their_pr_threads_addressed',
+  'awaiting_their_review',
+  'open_prs_authored',
+];
+
+/** Whether the figure is window-pure or a live "now" reading. Computed in CORE and carried on
+ *  the wire (the `lowSample` precedent) so the SPA never re-derives it from a second copy. */
+export type PersonMetricBasis = 'window' | 'live';
+
+export interface PersonMetricValue {
+  key: PersonMetricKey;
+  value: number | null; // null = no data. NEVER render as 0.
+  sampleSize: number;
+  basis: PersonMetricBasis;
+  /** Below this metric's core-side sample floor — the figure is real but thin. */
+  lowSample: boolean;
+}
+
+export interface PersonPeriod {
+  userId: number;
+  login: string;
+  /** Display name when known; the ONLY other identity field that travels (global-table rule). */
+  name: string | null;
+  /** All keys in PERSON_METRIC_KEYS order, ALWAYS present — a missing key and a null value are
+   *  different facts and only one of them is legal here. */
+  metrics: PersonMetricValue[];
+  /** Repo-coverage honesty, same shape + duty as PeriodReport.coverage: repos that onboarded
+   *  mid-window under-count the person's period and must be ANNOTATED, never silently. */
+  coverage: PeriodCoverage;
+  /** The person's earliest observed activity in this workspace scope (ISO), null when the scope
+   *  has never seen them act (they may still be awaiting-review-only). */
+  firstSeenAt: string | null;
+  /** True when firstSeenAt falls AFTER the window opened — the person-grain coverage bias: a
+   *  mid-window joiner's figures under-count their period exactly like an onboarding repo's. */
+  firstObservedMidWindow: boolean;
+  metricsSchemaVersion: number;
+}
+
+/** GET /api/pro/insights/person/:userId — Pro `periodReports`. `person: null` covers every
+ *  degrade in ONE shape (unknown/foreign user, a bot, no activity in this workspace, a period
+ *  key off the grid) so the route is never an existence oracle. Narration is NOT here — it rides
+ *  the synthesis seam's own GET/POST (kind 'person'), one seam per datum. */
+export interface PersonPeriodResponse {
+  enabled: boolean;
+  workspaceId: number;
+  /** False = no sprint cadence configured — same refusal (and same setup prompt) as Reports. */
+  cadenceConfigured: boolean;
+  /** Echo of the resolved period, so the client can build the synthesis descriptor without
+   *  re-deriving grid maths. Absent when `person` is null. */
+  periodKey?: string;
+  periodStart?: string; // ISO
+  periodEnd?: string; // ISO (exclusive, matching the half-open window)
+  person: PersonPeriod | null;
+}

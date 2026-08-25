@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AddressedConfidence,
   AddressedConfidenceCounts,
@@ -17,6 +17,12 @@ import { CI_META, CONFIDENCE_META, indexUsers, relativeTime, userLabel } from '.
 import { Avatar } from '../CommentCard.js';
 import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
 import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
+import {
+  synthesisKeySlots,
+  useSynthesis,
+  type SynthesisDescriptor,
+} from '../../hooks/useSynthesis.js';
+import { SynthesisCard } from './SynthesisCard.js';
 
 // The resolvable-bot-threads DRILL-DOWN — a persistent, singleton tab opened by the Bot-ROI
 // backlog banner ("Review & resolve"). The WORKSPACE-WIDE review-and-resolve flow. Every PR with
@@ -35,6 +41,12 @@ import { SortHeader, type SortState, compare, nextSort } from './sortableTable.j
 // disagree with itself, which is why the POST body no longer carries repo ids at all.
 
 const PAGE_SIZE = 50;
+
+// Only ever read while the synthesis query is DISABLED (no expressible descriptor — see
+// `synthDescriptor` below). Hooks cannot be skipped, so useSynthesis needs some value; this one
+// is never sent. The backlog is WINDOWLESS server-side — the seam ignores `window` for
+// 'bot-threads' and its key canonicalises the slot out — so the literal here is inert.
+const NO_SYNTHESIS_DESCRIPTOR: SynthesisDescriptor = { kind: 'bot-threads', window: 'rolling_30' };
 
 type SortCol = 'pr' | 'repo' | 'author' | 'age' | 'updated' | 'ci' | 'resolvable' | 'confidence';
 
@@ -166,6 +178,42 @@ export function BotThreadsDetail(): JSX.Element {
     repoFilter !== 'all' && repoOptions.some(([id]) => id === repoFilter) ? repoFilter : 'all';
   const showRepoCol = isCrossRepo && effectiveRepoFilter === 'all';
 
+  // ── P2.2: the synthesis verdict's SCOPE DESCRIPTOR ──────────────────────────────────────────
+  // The EXACT population this tab fetches — `useResolvableBotThreads`'s own key: the workspace
+  // and the focus-repo narrowing. The backlog is WINDOWLESS (the seam ignores `window` for this
+  // kind), and the seam runs the drill-down's own fold (`getResolvableBotThreadPrs` — one
+  // predicate, three consumers), so its `totalCount` IS this tab's `totalThreads`.
+  //
+  // The two CLIENT-side narrowings have no seam grain: under the cross-repo repo filter or
+  // "High-confidence only" the visible rows are a subset the descriptor cannot express (and the
+  // tab renders no server total for them to reuse) — the descriptor goes null, the card
+  // unmounts, and the list renders exactly as today.
+  const synthDescriptor = useMemo<SynthesisDescriptor | null>(() => {
+    if (effectiveRepoFilter !== 'all' || highOnly) return null;
+    return { kind: 'bot-threads', window: 'rolling_30', repoIds: repoScope };
+  }, [effectiveRepoFilter, highOnly, repoScope]);
+  // The card's OWN cached query — same key slots, one cache entry, no second fetch — read only
+  // to decide whether the receipts collapse. Free/OSS: useSynthesis gates itself on the
+  // capability, so this stays quiet and the list renders exactly as today.
+  const synthQuery = useSynthesis(
+    workspaceId,
+    synthDescriptor ?? NO_SYNTHESIS_DESCRIPTOR,
+    synthDescriptor != null,
+  );
+  const hasSynthesis =
+    synthDescriptor != null &&
+    synthQuery.data?.enabled === true &&
+    synthQuery.data.synthesis != null;
+  // Collapsed, NEVER hidden (P2.2). Reset per SCOPE — keyed on the canonical slots so an expand
+  // doesn't leak across focus-repo re-seeds or workspace switches of this singleton tab.
+  const [showReceipts, setShowReceipts] = useState(false);
+  const synthKey =
+    synthDescriptor == null ? null : synthesisKeySlots(workspaceId, synthDescriptor).join('|');
+  useEffect(() => {
+    setShowReceipts(false);
+  }, [synthKey]);
+  const receiptsCollapsed = hasSynthesis && !showReceipts;
+
   const [sort, setSort] = useState<SortState<SortCol> | null>({ col: 'updated', dir: 'desc' });
   const onSort = (col: SortCol): void => setSort((cur) => nextSort(cur, col, DEFAULT_DIR));
   const [page, setPage] = useState(0);
@@ -264,9 +312,10 @@ export function BotThreadsDetail(): JSX.Element {
     );
   };
 
-  return (
-    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
-      <div className="flex flex-wrap items-baseline gap-2">
+  // The header row, extracted so the return can slot the SynthesisCard between it and the
+  // receipts without touching either.
+  const header = (
+    <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
           <span aria-hidden>🧹</span> Resolve bot threads
         </h2>
@@ -305,7 +354,13 @@ export function BotThreadsDetail(): JSX.Element {
           Refresh
         </button>
       </div>
+  );
 
+  // The deterministic receipt surface — the action bar, the table and the pager. Extracted so
+  // the SynthesisCard can take it as its CHILDREN slot: it is ALWAYS rendered whatever the
+  // synthesis state (§8.20 — the card never gates it).
+  const receipts = (
+    <>
       {isLoading ? (
         <div className="space-y-2">
           {[0, 1, 2, 3].map((i) => (
@@ -318,6 +373,19 @@ export function BotThreadsDetail(): JSX.Element {
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
           No likely-addressed bot threads to review. 🎉
         </div>
+      ) : receiptsCollapsed ? (
+        // P2.2: the synthesis leads and the receipts COLLAPSE (never hidden). Both counts are
+        // the tab's own already-rendered figures — the server's `totalThreads` and the fetched
+        // PR-group count — reused, never recounted.
+        <button
+          type="button"
+          onClick={() => setShowReceipts(true)}
+          className="w-full rounded-lg border border-dashed border-gray-300 px-3 py-2 text-center text-[12px] font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-200"
+        >
+          Show the {totalThreads.toLocaleString()} thread{totalThreads === 1 ? '' : 's'} across{' '}
+          {prs.length.toLocaleString()} PR{prs.length === 1 ? '' : 's'} this summary was computed
+          from
+        </button>
       ) : (
         <>
           {/* TOP action bar — the bulk resolve pinned above the list. */}
@@ -581,6 +649,23 @@ export function BotThreadsDetail(): JSX.Element {
             </div>
           )}
         </>
+      )}
+    </>
+  );
+
+  return (
+    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
+      {header}
+      {/* P2.2 — the synthesis VERDICT leads, carrying this tab's exact scope (the workspace-wide
+          windowless backlog, focus-repo narrowed). Under a client-side repo filter or the
+          high-confidence subset the list renders exactly as today; free/OSS posture is the
+          card's own (nudge on cloud, absence on OSS). */}
+      {synthDescriptor != null ? (
+        <SynthesisCard workspaceId={workspaceId} descriptor={synthDescriptor}>
+          {receipts}
+        </SynthesisCard>
+      ) : (
+        receipts
       )}
     </div>
   );

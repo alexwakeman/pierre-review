@@ -56,8 +56,14 @@ dual-dialect tables (`review_learnings`, `repo_digests`), migrations
 (`packages/pro/migrations{,-pg}/*.sql` run via `ctx.registerMigrations` → `src/pro/migrate.ts`,
 the one sanctioned raw-`$client` DDL site + `pro_migrations` bookkeeping), and isolation test.
 
-**`apiVersion` is 17** (bumped from 16 by lean-storage ANCHOR-HUNK hydration — GithubSeam gains
-`fetchReviewCommentHunks`; see § "Anchor-hunk hydration" below). 15 → 16 was the grounded addressed
+**`apiVersion` is 21** (bumped from 20 by the tier line — `ProCapabilities` gains `botDepth` and
+`ProHostQueries` gains five members in ONE bump; see § "apiVersion 21" below). 19 → 20 was
+period-over-period reporting (`getPeriodMetrics`/`getPeriodCoverage`/`getPeriodLanes` +
+`computePeriodForecast`, pro migrations `0025`/`0026`, capability `periodReports`). 18 → 19 was
+"fix from comments" (§ below — `CodingSeam.generateFix` gained optional `commentVerdicts`).
+17 → 18 widened `getBotAnalytics`'s `window` to `kind | {kind, fromMs, toMs}` and added
+`'rolling_90'`. 16 → 17 was lean-storage ANCHOR-HUNK hydration (GithubSeam gained
+`fetchReviewCommentHunks`; § "Anchor-hunk hydration"). 15 → 16 was the grounded addressed
 check (GithubSeam gained `fetchCompareDiff`, the two-sha compare seam). 14 → 15 was the
 Bot Tuning Advisor (GithubSeam gained `readRepoFile`/`listRepoDir`/`openIssue`, CodingSeam gained
 `commitFilesAndOpenPr`, ProHostQueries gained `getAdvisorFindings`/`getBotEffectPanel`,
@@ -125,43 +131,36 @@ Timeline on the **tab axis** (`ActiveTab = 'timeline' | 'activity' | <Tab.key>` 
 active workspace's repos**:
 
 ```
-◈ Insights (Pro)      gate: caps.workspaceInsights
-✦ Feed                always
+◈ Reports (Pro)       gate: caps.workspaceInsights  (label renamed from "Insights"; store value stays 'insights')
+✦ Feed                always — THE default landing, BriefStrip on top
 🤖 Bots               always (CORE/free)
-⚖ Compare workspaces  gate: (workspaces ?? []).length >= 2
 ⚠ Needs attention     always (CORE/free)
 ── repos ──           flat: no grouping headers, no colour dots, no "Other" bucket
 ```
 
-The daily surfaces lead; Compare and Needs attention are the occasional ones. **The rail is no
+The daily surfaces lead; Needs attention is the occasional one. (The "Compare workspaces" rail
+entry is GONE — cross-workspace comparison is Reports' "By workspace" axis; `'compare'` left the
+`activityRepoId` union and the URL parser, and `lib/workspaceColors.ts` went with
+`WorkspaceComparisonPanel`, its only importer.) **The rail is no
 longer GROUPED** — a repo belongs to exactly one workspace and exactly one workspace is ever in
 scope, so there is one list, `renderRailRow`'s key is the bare `String(repoId)` (never a
 `${teamId}:${repoId}` composite), and `buildTeamColorMap`/`teamGroups`/`leftoverRows`/the "Other"
-bucket are all deleted. (`lib/workspaceColors.ts` survives, imported ONLY by
-`WorkspaceComparisonPanel`.) Selecting a repo shows a **compact header** (stats + thread-state bar +
+bucket are all deleted. Selecting a repo shows a **compact header** (stats + thread-state bar +
 per-repo Pro digest) atop that repo's **open-PR list** (`RepoOpenPrList` — all its open PRs with
 at-a-glance CI / approval standing / thread counts) THEN that **repo's own feed** (`RepoFeedHeader`
 + `RepoOpenPrList` + `<FeedView repoId>`). The rail selection is `store/filters.ts` `activityRepoId`
-(`'feed'` default | `'bots'` | `'attention'` | `'insights'` | **`'compare'`** | a repoId; `'retro'`
-is gone with the Retro panel).
+(`'feed'` default | `'bots'` | `'attention'` | `'insights'` | a repoId; `'retro'`
+is gone with the Retro panel, `'compare'` with the Compare rail entry — no longer URL-parsed, so a
+legacy `?activityRepo=compare` link falls through the parseInt branch and lands on the `'feed'`
+default, normalization by construction).
 
-- **The Compare gate is `(workspaces ?? []).length >= 2`** — a count over the ACCOUNT-WIDE roster,
-  Default included, **never a test on the selection**. It answers "has the user created a workspace
-  of their own?", which is only true at 2+. The panel then compares ALL of them, so the entry's data
-  does not depend on which workspace is selected. ⚠ `undefined` (not loaded) must read as HIDDEN,
-  not "show optimistically" — and the CONVERSE, demoting a deep-linked `?activityRepo=compare` to
-  the Feed, must wait until the roster has actually LOADED (`workspaces != null && !canCompare`), or
-  that same pre-load window flashes the Feed before Compare.
-- **DERIVED, never written back**: when the gate is known-false the render falls back to `'feed'`
-  and the store keeps `'compare'`, so deleting and recreating a workspace RESTORES the entry instead
-  of having silently forgotten it.
 - ⚠ **Branch POSITION in the right-detail chain is load-bearing.** The chain is `noReposAtAll →
-  showingBots → showingAttention → showingCompare → showingInsights → noRepos → showingFeed`, where
+  showingBots → showingAttention → showingInsights → noRepos → showingFeed`, where
   `noRepos` means "the SELECTED workspace has no repos" (the account may have plenty, living in
   other workspaces — the empty state distinguishes the two, since the remedy differs: add a repo vs.
-  move one in). `showingCompare` must sit **BEFORE `noRepos`** — the natural reading of the rail's
-  top-to-bottom order would put it after, which makes Compare unreachable whenever the selected
-  workspace happens to be empty, i.e. exactly when someone is setting workspaces up.
+  move one in). The lesson the deleted `showingCompare` branch taught still applies to any new
+  account-wide pseudo-row: it must sit **BEFORE `noRepos`**, or it becomes unreachable whenever the
+  selected workspace happens to be empty — exactly when someone is setting workspaces up.
 
 Built **entirely on the read layer**: `getActivity` composes
 `getInsights`/`getOpenPrs`/`getMergers`; `listClaudeReviewsByRepo` is retrieval-only. **Scoped by
@@ -193,23 +192,25 @@ tab exists only where it means something):
   `freshDefaults()` but not in `FilterDefaults`/`pickFilterBarState`/`sanitizePersistedFilters`, and
   `useUrlState` never touches it, so a stale `'compare'` cannot survive a reload and needed no
   migration.)
-- **Bots** (`BotsView`) — `ROI` | `Behaviour` | `Themes` (Pro, cross-repo only) | **`Settings`**
-  (CORE/free — the classification tab, see below; it shows in the per-repo Bots tab too, where it is
-  the same WORKSPACE listing filtered CLIENT-SIDE to the actors with a footprint in that repo).
-- **Insights** — the bar **no longer renders**: `SUB_TABS` is down to `Overview` alone (Retro is
-  deleted, Compare moved to the Feed, Sprint folded into Overview long ago), and the bar is guarded
-  on `SUB_TABS.length > 1`. The apparatus is kept live and type-checked, with a `normalizeSubTab`
-  MEMBERSHIP test (not a chain of `=== 'sprint'` literals) so a stale/deep-linked key falls back to
-  `overview` instead of stranding the pane on a tab that renders nothing — which is why
-  `InsightsSubTab` stays `'overview' | 'sprint'`: the vestigial member is the one value that keeps
-  that redirect reachable AND type-checkable. `'retro'`/`'compare'` were REMOVED from the union.
+- **Bots** (`BotsView`) — `ROI` (the Measure surface) | `Advisor` (Pro `botAdvisor`) |
+  **`Settings`** (CORE/free — the classification tab, see below; it shows in the per-repo Bots tab
+  too, where it is the same WORKSPACE listing filtered CLIENT-SIDE to the actors with a footprint
+  in that repo). `'behaviour'` and `'themes'` were REMOVED from `botsInnerTab` with their tabs:
+  per-bot depth is the `bot-detail` pinned drill-down, the workspace charts are a collapsed Pro
+  section under ROI (`WorkspaceBotCharts`), and the bot-themes summary became the synthesis seam's
+  "What they're flagging" card on Measure. The field is transient + URL-silent, so member removal
+  needed no migration.
+- **Insights** — the whole sub-tab apparatus is GONE (`InsightsSubTab`, `insightsSubTab`,
+  `normalizeSubTab`, the guarded bar): the pane is Reports-FIRST — `PeriodReportsPanel` is its only
+  body and the ad-hoc chat lives inside the report as "Ask about this period". Safe to delete
+  outright because the field was transient and never URL-emitted (`?report=` reads into
+  `insightsReportKey` alone), so no blob or link can carry a stale value.
 
-**Landmine — the visible tab is DERIVED, never written back.** `feedInnerTab` / `botsInnerTab` (and
-`activityRepoId === 'compare'`) are single scalars that can legitimately hold a key the current
-context doesn't render (Themes without the capability, Compare with one workspace). Each consumer
-computes an `effectiveTab` fallback for the RENDER only; a corrective `set…` would permanently
-forget the user's choice, so deleting a workspace would LOSE Compare rather than restore it when a
-second workspace comes back.
+**Landmine — the visible tab is DERIVED, never written back.** `feedInnerTab` / `botsInnerTab` are
+single scalars that can legitimately hold a key the current context doesn't render (Themes /
+Advisor without the capability). Each consumer computes an `effectiveTab` fallback for the RENDER
+only; a corrective `set…` would permanently forget the user's choice the moment a capability
+flickers off.
 
 **Activity render-perf (client-side; the console + Bots sub-tab mount fresh on every tab switch).**
 Two low-risk levers keep opens fast: (1) **warm snapshots** — `useActivity`/`useConsolidatedFeed`
@@ -760,6 +761,153 @@ bulk "re-check the stale ones" any more — there is no PR-wide sweep to hang it
   `AnnotationRunResponse.noAuth?` says it outright; the counter arithmetic
   (`requested - cached - skipped > 0` with no `generated`/`failed`) is kept as a FALLBACK for older
   plugin builds and worded with "may", because it is an inference.
+
+### apiVersion 21 — the tier line: `botDepth`, five seams, the synthesis platform
+
+ONE bump carrying every seam the calm-consolidation plan needs (its D2: each bump is a
+four-literal, two-repo, gitlink-coordinated hazard, so it is paid once — later phases swap
+declared-inert seam bodies for real folds, which changes NO contract and needs no 21→22).
+What 20 → 21 changed:
+
+- **`ProCapabilities` gains `botDepth`** — the paid NON-AI depth tier: behaviour
+  trends/anomalies, the per-bot drill-down, overlap, where-bots-work, inflation history, the
+  per-seat ROI cost overlay. Gated exactly like `workspaceInsights` (`PRO_DIGEST_ENABLED` is the
+  "paid tier on" proxy — no new env var; `entitledProCapabilities` zeroes it for free cloud
+  plans). ⚠ **NOT gated like `botTriage`**, which is `true` whenever the plugin is merely loaded
+  — that distinction is the whole tier line. Two core routes read the same entitlement view
+  directly: `PUT /api/bot-reviewers/:userId/cost` **402s** without it (the ONLY bot-reviewers
+  route behind the check — classification/identity/role stay free), and
+  `GET /api/bot-analytics` withholds the inflation `weekly` series (field simply ABSENT — hidden,
+  not upsold, never an error).
+- **`ProHostQueries` gains FIVE members.** Two landed live: `getBotBehaviour(accountId, window,
+  scope, botUserId?)` — the existing CORE rollup (`getBotBehaviourAnalytics`) re-exposed so the
+  route could MOVE from core `/api/bot-behaviour` to plugin `GET /api/pro/bot-behaviour`
+  (the periodReports precedent: compute stays core, no free surface; a flag-less local run 404s
+  a direct hit — `BotBehaviourResponse` has no `enabled` envelope to degrade into). The optional
+  `botUserId` narrows to ONE bot for the bot-detail tab's fetch (must not compute fifteen bots'
+  heatmaps to render one); core admits only ids in the workspace's role-`'review'` reviewer set,
+  so a foreign/non-reviewer id yields the EMPTY response, never someone else's data. And
+  `getPeriodMetricsForWorkspaces(accountId, window)` — the Reports "By workspace" axis: the same
+  window-pure vector per workspace (listWorkspaces order), each with a per-workspace coverage
+  disclosure, and ⚠ **NO cost fields, ever** — cost is per workspace and a cross-workspace
+  surface cannot total it honestly, so it simply does not travel. Three landed DECLARED-inert
+  (`Promise<unknown>` sketches) and were later implemented behind the unchanged contract:
+  `getSynthesisInput` (→ `db/synthesis-input.ts`), `getDailyBriefCounts` (→ `db/daily-brief.ts`),
+  `getPersonPeriod` (→ `db/person-period.ts`). Each was then TYPED with the shared wire type
+  (`SynthesisInput`/`DailyBriefCounts`/`PersonPeriod`) — a permitted no-version refinement, the
+  plugin mirror moving in the same task — **because the plugin's payload hashes fold those very
+  values**, and a cast-and-hope seam is exactly where a hash formula drifts.
+
+**The synthesis seam (`GET`/`POST /api/pro/synthesis` + `pro_synthesis`, plugin migration
+`0027`).** ONE endpoint pair and ONE cache table serving every "have the model summarise this
+set" grain — per-feature endpoints are exactly what the plan's D3 forbids. The standard
+`/api/pro/*` stack (registration only when the plugin loads; `DIGEST_ENABLED` self-gate — the
+`activityDigest` capability; the host's automatic cloud 402). The contract:
+
+- **Seven `SynthesisScopeKind`s in two modes.** Four CLUSTERS grains — `'bot-flagging'`,
+  `'bot-threads'` (windowless — a current-state backlog), `'bot-volume'`, `'workspace-bots'`
+  (the retired Bots-Themes question at workspace grain) — and three ORDERING grains —
+  `'brief'`, `'rollup'`, `'person'` (all windowless in the enum slot; `'person'` carries its
+  period as real `fromMs`/`toMs` bounds, sanity-capped at 200d so a client cannot mint cache
+  rows for arbitrary spans, and drops every bot-narrowing field).
+- **Scope canonicalisation IS billing correctness** (`synthesis/scope.ts`): defaults filled,
+  fields a kind does not consume DROPPED before keying — two spellings of one drill-down must
+  not mint two cache rows and bill twice. Validation splits by who minted the value:
+  `workspace`/`repoIds` DEGRADE (Default / membership intersection — a stale bookmark), every
+  population-naming param (`kind`, `direction`, `select`, `severities`, `category`) REJECTS →
+  400, or the card would silently summarise a different set than the list beside it. The
+  canonical serialised `scope_key` (fixed slot order, absent slots `'-'`) is the row identity
+  AND the client's shared mutation-key segment.
+- **CLUSTERS mode = D4 enforced server-side**: the model returns
+  `{clusters: [{label, itemIds[]}], remainderIds[]}`; ids outside the input set are DROPPED and
+  logged, counts are `|validated itemIds|` computed server-side, the remainder is recomputed. A
+  completely unparseable output **502s** — the deterministic list stays primary and the spend is
+  already on the ledger. **ORDERING mode never 502s on a weak parse**: each item is an input ref
+  + a phrase that must be **DIGIT-FREE** (regex-validated); an invalid item (unknown/repeated
+  ref, any digit) is dropped and its strip line renders TEMPLATED; an entirely unparseable
+  output is an empty list, STORED so the click doesn't loop-bill. `'person'` swaps only the
+  system prompt (prep-not-scoring register) — brief/rollup prompts stay byte-identical, no
+  `SYNTHESIS_PROMPT_VERSION` churn.
+- **The payload hash** (`synthesis/hash.ts`): sha256 over the SORTED input item ids + each
+  item's stable created-at + the analyzed/total counts + `SYNTHESIS_SCHEMA_VERSION` +
+  `SYNTHESIS_PROMPT_VERSION` + the scope key. Nothing `Date.now()`-derived, nothing hydrated —
+  the free GET recomputes it from `getSynthesisInput` alone to report `stale`, and a
+  version-const bump is self-executing invalidation (the period-vector discipline).
+- **`pro_synthesis`** (migration `0027`, both dialects): one row per `(account_id, scope_key)`
+  (regenerate = overwrite via `onConflictDoUpdate` on exactly that declared unique — the
+  0042/0045 lesson is cited AT the write); `output` is validated JSON as **TEXT in both
+  dialects** (one serializer owns the blob); `input_count`/`analyzed_count` are REAL COLUMNS
+  because "Summarised X of Y" is the disclosure that keeps a capped synthesis honest and must
+  survive output-shape drift. Deliberately NO foreign keys (resolver-produced workspace ids
+  only; a regenerable scope-keyed cache, the `bot_theme_reports` family). Erasure: listed in
+  `retention.ts` `eraseProByAccountId`; deliberately NOT in `pruneProByPrIds` (no pr_id grain —
+  it ages by STALENESS, not deletion). ⚠ The pg twin's CREATE is BARE on purpose — no
+  `DO $$ … EXCEPTION` wrapper, exactly like 0021's/0025's CREATEs: a missing TABLE cannot
+  degrade (every synthesis call would 500 forever while `pro_migrations` records the file
+  applied), so a raise is the honest outcome and `IF NOT EXISTS` covers the benign replay.
+- **Cost discipline + the TOCTOU fix.** The digest/themes stack: per-account in-flight guard →
+  min-interval → credit gate → payload-hash $0 cache → `recordAiUsage` on real generation only.
+  ⚠ **The in-flight slot is claimed SYNCHRONOUSLY — no `await` may sit between the `has()` and
+  the `add()`.** `BriefStrip` fires the brief + rollup POSTs in one render cycle; with an await
+  in that gap both pass the check, both miss the not-yet-written hash cache, and both bill. The
+  credit check therefore runs INSIDE the `try/finally` (a blocked call holds the guard only for
+  that one lookup; the `finally` releases on every path). The min-interval is armed only when
+  money actually moved (a $0 cache hit never locks the account out), and `recordAiUsage` is
+  called the moment the model answered — BEFORE the parse can fail, because the spend happened
+  either way.
+- **§8.3 — one predicate, three consumers.** `db/synthesis-input.ts` routes every kind through
+  the drill-down's OWN fold (`foldBotFlaggingPopulation`, `getResolvableBotThreadPrs`,
+  `foldPrBotVolumePopulation`, `getBotReviewComments`, the brief fold), so the model summarises
+  exactly the set the receipt list shows — a synthesis with its own SQL would drift silently.
+  Rows come back capped with `analyzed`/`total` + `truncated`, never silently truncated.
+- **Bots Themes retired into this seam** (`registerBotThemesRoutes` gone; the workspace-grain
+  question is kind `'workspace-bots'`). The `bot_theme_reports` TABLE stays — retention ages it
+  out, erasure still covers it, no migration.
+
+**The daily brief (`GET /api/daily-brief`, CORE/FREE — counts only).** `db/daily-brief.ts`
+computes on read behind a module-level 5-min TTL cache (zero core migrations, the plan's D5);
+`?rollup=1` adds one count line per OTHER workspace (capped 12, each line riding the same TTL).
+⚠ Every line REUSES the fold of the surface it deep-links to — the consolidated feed's my-turn
+facet under the default 'hide' lens (inheriting its actor-less CI-row exclusion), the
+`/api/attention` card counts, `getResolvableBotThreadPrs().totalThreads`, the repos
+default-branch head columns, and a NARROW volume-only anomaly slice (deliberately not the full
+behaviour compute — that is priced for an explicit Pro tab open, not an every-morning free
+strip). Never a re-derivation that can disagree with the surface it links to. Rate tier
+`search`, pinned. The Pro narration is the synthesis seam's ordering kinds (`'brief'`/`'rollup'`)
+— this route never touches AI and never carries cost/money (§8.18: the rollup loops per
+workspace).
+
+**The person vector (`GET /api/pro/insights/person/:userId`, `db/person-period.ts`).** The 1:1
+prep read: a small fixed vector for one person in one workspace over one cadence period, with
+its own **`PERSON_METRICS_SCHEMA_VERSION` (= 1, in `@pierre-review/shared`)** and per-person
+coverage honesty (onboarded-mid-window repos AND a first-observed-mid-window person both
+disclose). Window-pure two-sided predicates on every windowed key; THREE keys are deliberately
+`basis: 'live'` (`their_pr_threads_addressed` / `awaiting_their_review` / `open_prs_authored`)
+— now-questions a stored period must not pretend to reproduce. ⚠ `users` is GLOBAL: the subject
+is admitted only via a workspace activity probe (the `listUsers` precedent), only login/name
+leave, and the ONE lane resolver rejects automation-lane actors (`null` — no 1:1 with
+Dependabot); the first-human-review figure reuses `loadFirstHumanReviewHours` via its
+authorUserId narrowing (the one-fold rule). **Prep, not scoring**: one userId in, one person
+out — no batch/ranking spelling exists at any layer. The route degrades without oracles
+(unknown/foreign/bot id and off-grid period are all the same `person: null`;
+`cadenceConfigured: false` is the one distinct refusal), never generates, and sits EXPLICITLY on
+`[search, read]` in core's `tierFor` (not inherited from the `/api/pro/` catch-all). The
+narration rides synthesis kind `'person'`.
+
+**The grounded-figure check (`insights/grounded-figures.ts`) and the timestamp bypass it
+closed.** D4 at the report grain: every numeral token in the Sonnet period-report narrative must
+match a figure in the **NARRATION PAYLOAD** — the projection the model was actually shown — or
+the narrative is rejected at generation time and the templated summary is stored instead. ⚠ The
+grounding base was originally the raw `PeriodReport`, which made the check BYPASSABLE two ways:
+`generatedAt` is generation wall-clock (an ISO timestamp donates its
+year/month/day/hour/minute/second tokens — "velocity up 37%" grounded whenever the report
+happened to generate at :37), and `comparison.subsetRepoIds` are internal DB ids (each admitting
+an arbitrary integer). The payload contains neither — the model cannot quote what it was never
+shown — and `UNQUOTABLE_KEYS` (`generatedAt`/`model`/`subsetRepoIds`) is the belt for any
+report-shaped input. Tolerance rules are enumerated exactly in the module header (sign ignored,
+thousands separators stripped, the SPA formatters' roundings accepted, `fmtDuration` units for
+`*_hours` keys only, payload-string numerals and array lengths allowed) — do not widen them by
+guesswork; `test/grounded-figures.test.ts` pins them.
 
 ### Fix from comments — the `'comments'` AI-Fix seed (apiVersion 19)
 

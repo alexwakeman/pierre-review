@@ -3,7 +3,6 @@ import type { ActivityRepo, RepoBranchStatus, ThreadStateCounts } from '@pierre-
 import { useActivity } from '../../hooks/useActivity.js';
 import { useBranchStatus } from '../../hooks/useBranchStatus.js';
 import { useRepos } from '../../hooks/useTimeline.js';
-import { useWorkspaces } from '../../hooks/useWorkspaces.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
@@ -14,29 +13,23 @@ import { BranchStatusPanel } from './BranchStatusPanel.js';
 import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { RepoInsightsPanel } from './RepoInsightsPanel.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
+import { BriefStrip } from './BriefStrip.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { FeedMetricsPanel } from './FeedMetricsPanel.js';
 import { HumanThemesPanel } from './HumanThemesPanel.js';
-import { WorkspaceComparisonPanel } from './WorkspaceComparisonPanel.js';
 import { InsightsView } from './InsightsView.js';
 import { AttentionView } from './AttentionView.js';
 import { BotsView } from './BotsView.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
 
-// One-shot per page load: when Pro Insights is available, it becomes the DEFAULT landing
-// rail entry (and it's rendered first). Module-scoped so it survives ActivityView
-// remounts (switching tabs) within a session — we only ever auto-select once, so a user's
-// later choice of Feed/a repo is never overridden; a full reload re-applies the default.
-let insightsDefaultApplied = false;
-
-// Called by explicit "open the Feed" navigations (the Welcome-back banner) that mount the
-// Activity console for the first time this session. It marks the one-shot Insights default
-// consumed so the effect below won't clobber the caller's chosen 'feed' back to 'insights'
-// on that first mount. Idempotent; no-op once the default has already been applied.
-export function suppressInsightsDefault(): void {
-  insightsDefaultApplied = true;
-}
+// DEFAULT LANDING = THE FEED, for every tier (plan P3.1). There used to be a one-shot
+// module-scoped effect here that auto-selected the Reports/Insights rail entry when Pro was on
+// (`insightsDefaultApplied` + `suppressInsightsDefault()`, which the Welcome-back banner had to
+// call to keep its own 'feed' navigation from being clobbered) — chosen when Insights was the
+// daily chat surface. Post-C5 that pane is a fortnightly ARTIFACT (Reports), and the daily
+// surface is the Feed with the BriefStrip on top, so the store's plain 'feed' default IS the
+// landing and the whole apparatus is gone. Reports stays one click away on the rail.
 
 // Rail sort: attention desc → unread → alphabetical. Computed once per data load so
 // the rail is stable (not jumpy) as the user interacts.
@@ -212,9 +205,9 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
 // nothing else. The FilterBar's per-repo show/hide (`repoIds`) is a TIMELINE-board filter and is
 // not even mounted while Activity is the active tab; narrowing here is the RAIL's job — clicking a
 // repo row switches to that repo's console (`activityRepoId`), which is a different mechanism with
-// a visible, obvious control. The one entry that steps outside the workspace is "Compare
-// workspaces", and it does so completely — it compares every workspace in the account and ignores
-// the selection entirely.
+// a visible, obvious control. (The old "Compare workspaces" rail entry — the one entry that
+// stepped outside the workspace — was folded into Reports as the "By workspace" axis; see
+// PeriodReportsPanel.)
 export function ActivityView(): JSX.Element {
   useStalenessTick();
   const workspaceId = useFilters((s) => s.workspaceId);
@@ -223,7 +216,7 @@ export function ActivityView(): JSX.Element {
   const { workspaceInsights, activityDigest } = useProCapabilities();
   // The cross-repo Feed's inner sub-tab: 'feed' (metrics + consolidated feed) vs the Pro
   // "Discussion themes" AI summary. The Themes tab only appears when the AI-summary tier is on.
-  // ('compare' is NOT a member any more — cross-workspace comparison is its own rail entry.)
+  // ('compare' is NOT a member — cross-workspace comparison is Reports' "By workspace" axis.)
   const feedInnerTab = useFilters((s) => s.feedInnerTab);
   const setFeedInnerTab = useFilters((s) => s.setFeedInnerTab);
   // Scope is the ACTIVE WORKSPACE — the whole of it. Both narrowing arguments are NULL on purpose,
@@ -246,21 +239,6 @@ export function ActivityView(): JSX.Element {
     [branchData],
   );
   const { data: allRepos } = useRepos();
-  // The account's workspaces — read ONLY to gate the "Compare workspaces" rail entry. The rail
-  // itself is no longer grouped: a repo belongs to exactly one workspace and only one workspace
-  // is ever in scope, so there is one flat list, no headers, no colour dots and no "Other".
-  const { data: workspaces } = useWorkspaces();
-  // THE COMPARE GATE — a count over the ACCOUNT-WIDE roster, Default included, never a test on
-  // the selection. It answers "has the user created a workspace of their own?", which is only
-  // true at 2+. The panel then compares ALL of them, so the entry's data does not depend on
-  // which workspace is selected.
-  //
-  // ⚠ `undefined` (not loaded) must read as HIDDEN, not as "show optimistically": `workspaces ??
-  // []` is what keeps the line from being painted and then yanked away a frame later. The
-  // converse — demoting a deep-linked `?activityRepo=compare` to the Feed — must wait until the
-  // roster has actually LOADED, or that same pre-load window flashes the Feed before Compare.
-  const canCompare = (workspaces ?? []).length >= 2;
-  const compareUnavailable = workspaces != null && !canCompare;
 
   const sorted = useMemo(() => sortRepos(data?.repos ?? []), [data?.repos]);
 
@@ -269,17 +247,11 @@ export function ActivityView(): JSX.Element {
     typeof activityRepoId === 'number'
       ? sorted.find((r) => r.repoId === activityRepoId) ?? null
       : null;
-  // The CORE/free cross-WORKSPACE comparison matrix — its own rail entry now (it was a Feed
-  // sub-tab). DERIVED, never written back: when the gate is known-false the render falls back to
-  // the Feed and the store keeps 'compare', so deleting and recreating a workspace RESTORES the
-  // entry instead of having silently forgotten it.
-  const showingCompare = activityRepoId === 'compare' && !compareUnavailable;
-  // The cross-repo consolidated Feed is the default detail (also when nothing's set, and when a
-  // stale/deep-linked 'compare' has nothing to compare).
-  const showingFeed =
-    activityRepoId === 'feed' ||
-    activityRepoId == null ||
-    (activityRepoId === 'compare' && compareUnavailable);
+  // The cross-repo consolidated Feed is the default detail (also when nothing's set).
+  // ('compare' left the activityRepoId union with the Compare rail entry — cross-workspace
+  // comparison is Reports' "By workspace" axis now, and a legacy `?activityRepo=compare` link
+  // already normalizes to the Feed in useUrlState.)
+  const showingFeed = activityRepoId === 'feed' || activityRepoId == null;
   // The CORE/free "Needs attention" cards console — always available, no Pro gate.
   const showingAttention = activityRepoId === 'attention';
   const showingInsights = activityRepoId === 'insights';
@@ -287,20 +259,12 @@ export function ActivityView(): JSX.Element {
   // routes), independent of the Pro Insights caps.
   const showingBots = activityRepoId === 'bots';
 
-  // Make Insights the default view when Pro is available — but only once per page load, and
-  // only from the pristine 'feed' default (never overriding a deep-linked repo or a choice
-  // the user has already made this session).
-  useEffect(() => {
-    if (!insightsDefaultApplied && workspaceInsights) {
-      insightsDefaultApplied = true;
-      if (useFilters.getState().activityRepoId === 'feed') setActivityRepo('insights');
-    }
-  }, [workspaceInsights, setActivityRepo]);
+  // (The one-shot "default to Insights when Pro is on" effect lived here — removed with P3.1:
+  // the Feed, brief on top, is the default landing for every tier. See the note at the top.)
 
   // The cross-repo Feed's sub-tab bar: Feed | Themes(Pro). Still built dynamically so a tab
   // exists only where it means something — Themes needs the Pro AI tier. ("Compare teams" left
-  // this bar for its own rail entry; it compares every workspace in the account, which is not a
-  // property of the Feed's scope and had no business being nested under it.)
+  // this bar long ago; cross-workspace comparison is Reports' "By workspace" axis now.)
   const feedTabs = useMemo(() => {
     const tabs: { key: 'feed' | 'themes'; label: string }[] = [{ key: 'feed', label: 'Feed' }];
     if (activityDigest) tabs.push({ key: 'themes', label: 'Themes' });
@@ -419,15 +383,21 @@ export function ActivityView(): JSX.Element {
             isFetching && data != null ? 'opacity-60 transition-opacity' : ''
           }`}
         >
-          {/* RAIL ORDER, top to bottom: Insights (Pro) · Feed · Bots · Compare workspaces ·
-              Needs attention — then the per-repo rows BENEATH the whole block. The daily surfaces
-              lead; Compare and Needs attention are the occasional ones and sit at the bottom of
-              the pseudo-row block. Two entries are gated (Insights on the Pro capability, Compare
-              on the account owning 2+ workspaces); the other three are always present. */}
+          {/* RAIL ORDER, top to bottom: Reports (Pro; store value still 'insights') · Feed ·
+              Bots · Needs attention — then the per-repo rows BENEATH the whole block. The daily
+              surfaces lead; Needs attention is the occasional one and sits at the bottom of the
+              pseudo-row block. One entry is gated (Reports on the Pro capability); the other
+              three are always present.
+              (The "Compare workspaces" entry was folded into Reports' "By workspace" axis.) */}
 
-          {/* INSIGHTS pseudo-row — review intelligence for this workspace (Pro;
-              workspaceInsights). When Pro is on it is the FIRST entry AND the default landing
-              view (see the effect above); hidden entirely in OSS / when Pro is off. */}
+          {/* REPORTS pseudo-row (formerly "Insights" — renamed with plan C5, once the pane became
+              Reports-first and the chat moved inside the report). LABEL-ONLY rename: the store
+              value stays `activityRepoId === 'insights'` on purpose — it is transient but
+              referenced across several files (useUrlState's `?activityRepo=insights`, FilterBar's
+              `isInsights`, this file's default-landing effect), and renaming a wire/URL-visible
+              token buys nothing but broken deep links. Pro; workspaceInsights. When Pro is on it
+              is the FIRST entry AND the default landing view (see the effect above); hidden
+              entirely in OSS / when Pro is off. */}
           {workspaceInsights && (
             <button
               type="button"
@@ -438,13 +408,13 @@ export function ActivityView(): JSX.Element {
                   ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
                   : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
               }`}
-              title="Review intelligence across this workspace's repos (Pro)"
+              title="Period-over-period reports for this workspace, with a grounded chat (Pro)"
             >
               <span aria-hidden="true" className="shrink-0 text-violet-500">
                 ◈
               </span>
               <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
-                Insights
+                Reports
               </span>
               <span className="shrink-0 rounded bg-violet-500/10 px-1 text-[9px] font-semibold uppercase text-violet-600 dark:text-violet-300">
                 Pro
@@ -497,33 +467,6 @@ export function ActivityView(): JSX.Element {
               Bots
             </span>
           </button>
-
-          {/* COMPARE-WORKSPACES pseudo-row — the cross-workspace flow-metric matrix. CORE/free.
-              It was a sub-tab of the Feed, gated on "2+ teams in scope"; it is a rail entry now
-              because it is NOT a view of the selected scope — it compares EVERY workspace in the
-              account, so nesting it under a scoped surface misrepresented what it shows.
-              Gate: 2+ workspaces exist (Default counts) — i.e. the user has made one of their
-              own. Hidden, never disabled, while the roster is still loading. */}
-          {canCompare && (
-            <button
-              type="button"
-              onClick={() => setActivityRepo('compare')}
-              aria-pressed={showingCompare}
-              className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
-                showingCompare
-                  ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
-                  : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
-              }`}
-              title="Flow metrics for every workspace in your account, side by side (free)"
-            >
-              <span aria-hidden="true" className="shrink-0 text-teal-500">
-                ⚖
-              </span>
-              <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
-                Compare workspaces
-              </span>
-            </button>
-          )}
 
           {/* NEEDS-ATTENTION pseudo-row — the attention cards (stalled reviews / untouched threads /
               reviewer load / needs-a-reviewer), moved out from under the Pro Insights AI panels.
@@ -595,16 +538,6 @@ export function ActivityView(): JSX.Element {
           // load / needs-a-reviewer) — moved out from under the Pro Insights AI panels. Renders on
           // every tier, before repo data loads (its own empty/loading states).
           <AttentionView />
-        ) : showingCompare ? (
-          // The CORE/free cross-workspace flow-metric matrix, full-width. It takes NO scope — it
-          // compares every workspace in the account, which is why it is not nested under the Feed
-          // any more.
-          //
-          // ⚠ BRANCH POSITION IS LOAD-BEARING: it sits with Bots/Attention, ABOVE `noRepos`. The
-          // rail's top-to-bottom reading would put it after, which makes Compare unreachable while
-          // the SELECTED workspace happens to be empty — precisely when someone is setting
-          // workspaces up and most wants to compare them.
-          <WorkspaceComparisonPanel />
         ) : showingInsights ? (
           <InsightsView />
         ) : noRepos ? (
@@ -651,6 +584,11 @@ export function ActivityView(): JSX.Element {
               <HumanThemesPanel />
             ) : (
               <>
+                {/* The daily brief (P3.1/P3.3) — the morning's "what needs me" in one strip,
+                    each line deep-linking to its owning surface. THE one mount (this branch
+                    renders exactly once — the numeric-fallback FeedView below deliberately
+                    doesn't carry it, and per-repo consoles never do). Self-hides at all-zero. */}
+                <BriefStrip />
                 {/* "Is trunk green?" across every repo in scope — above the flow metrics,
                     because a red default branch invalidates every open PR's CI at once and is
                     the first thing worth knowing. Read-only; self-hides until branch-synced. */}

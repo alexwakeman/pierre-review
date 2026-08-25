@@ -9,7 +9,22 @@ import * as hostQueries from '../db/queries.js';
 // Period-over-period reporting (apiVersion 20). The metric vector and the coverage rule live in
 // their own core module — window-pure SQL that deliberately shares nothing with queries.ts's
 // "as of now" getters — and the forecast estimator is pure maths with no db import at all.
-import { getPeriodMetrics, getPeriodCoverage, getPeriodLanes } from '../db/period-metrics.js';
+import {
+  getPeriodMetrics,
+  getPeriodCoverage,
+  getPeriodLanes,
+  getPeriodMetricsForWorkspaces,
+} from '../db/period-metrics.js';
+// The synthesis input assembly (P2.1) — its own module for the same reason period-metrics is:
+// §8.3's one-predicate rule is the whole feature, and the module header names which drill-down
+// query each kind reads.
+import { getSynthesisInput } from '../db/synthesis-input.js';
+// The daily-brief fold (P3.1) — its own module: the counts strip's five surface-fold reuses +
+// the narrow anomaly slice + the 5-min TTL cache live together, documented at the source.
+import { getDailyBriefCounts } from '../db/daily-brief.js';
+// The 1:1-prep person vector (P4.2) — its own module: the global-users admission probe, the
+// lane check and the one-fold first-review reuse live together, documented at the source.
+import { getPersonPeriod } from '../db/person-period.js';
 import { forecastNext } from '../db/forecast.js';
 import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
 import { aiCreditStatus } from '../db/credits.js';
@@ -91,7 +106,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   // ⚠ THE RUNTIME GATE. This literal is the twin of `ProPlugin['apiVersion']` in contract.ts —
   // bump them together. A half-bump here silently degrades a CORRECT plugin to OSS mode (the warn
   // below is the only trace; capabilities go dark and every /api/pro/* route 404s).
-  if (plugin?.apiVersion !== 20 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 21 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -173,6 +188,31 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       computePeriodForecast: async (values, opts) => forecastNext(values, opts ?? {}),
       getPeriodLanes: (accountId, scope, window) =>
         getPeriodLanes(accountId, scope, window),
+      // Phase-0 seams (apiVersion 21) — inert until their consuming phases. The behaviour
+      // rollup is the existing CORE compute; `botUserId` slices the result to one bot for the
+      // per-bot drill-down tab (the fetch must not compute 15 bots' heatmaps to render one).
+      getBotBehaviour: (accountId, window, scope, botUserId) =>
+        hostQueries.getBotBehaviourAnalytics(accountId, window, scope, botUserId),
+      // Per-workspace period vectors (the Reports "By workspace" axis). Window-pure — a loop
+      // of getPeriodMetrics over the account's workspaces; carries no cost fields.
+      getPeriodMetricsForWorkspaces: (accountId, window) =>
+        getPeriodMetricsForWorkspaces(accountId, window),
+      // The synthesis input assembly (P2.1 — LIVE as of the P2.1 train; the declared-inert throw
+      // is swapped for db/synthesis-input.ts, which routes every kind through the drill-down's
+      // own fold per §8.3). No contract change — exactly the swap D2's single bump paid for.
+      getSynthesisInput: (accountId, scope) => getSynthesisInput(accountId, scope),
+      // The daily-brief fold (P3.1 — LIVE: the declared-inert throw swapped for core
+      // db/daily-brief.ts, which reuses each strip line's OWN surface fold behind a 5-min TTL
+      // cache). No contract change — exactly the swap D2's single bump paid for.
+      getDailyBriefCounts: (accountId, workspaceId) =>
+        getDailyBriefCounts(accountId, workspaceId),
+      // The 1:1-prep person vector (P4.2 — LIVE: the declared-inert throw swapped for core
+      // db/person-period.ts, exactly the swap D2's single bump paid for — no contract change).
+      // The fold resolves the workspace scope itself (resolveWorkspaceScope — a foreign id
+      // degrades to Default), admits the subject only via the workspace activity probe, and
+      // returns null for bots and strangers alike.
+      getPersonPeriod: (accountId, workspaceId, userId, window) =>
+        getPersonPeriod(accountId, workspaceId, userId, window),
     },
     recordAiUsage: (row) => recordAiUsage(row),
     aiCredits: {

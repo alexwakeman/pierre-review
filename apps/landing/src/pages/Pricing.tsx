@@ -37,26 +37,26 @@ import { PixelIcon } from '../components/feint/PixelIcon';
 // ---------------------------------------------------------------------------
 
 const FREE_FEATURES = [
-  'Unlimited repos & contributors',
+  'The verdict on every bot — keep / tune / noisy, computed from what your team actually did with its comments',
+  'Every bot comment graded for severity & category by an independent ML model, with this window’s inflation count per bot (hosted today; coming to the local install)',
+  'A per-PR bot triage grade — “12 bot comments: 2 awaiting a look · 6 likely addressed · 4 nit-flagged” — with one-pass resolve',
+  'My Turn + the daily brief’s counts — what needs you, and what changed overnight, as checkable numbers',
   `Activity console + cross-repo feed — the view ${SITE_NAME} opens on`,
-  'The timeline board — repos down the side, time across the top',
-  'The bot receipt — severity, category, cost & overlap from an independent ML model (hosted today; coming to the local install)',
-  'Review-thread states — resolved / likely addressed / replied / untouched',
-  'PR detail with inline diffs, CI logs and suggested reviewers',
-  `Reply, resolve, approve, request reviewers, rebase & merge from ${SITE_NAME}`,
-  'Cross-repo search, workspaces & comparison metrics',
-  `Runs 100% local — ${INSTALL_COMMAND}, your data never leaves your machine`,
+  'The timeline board · review-thread states — resolved / likely addressed / replied / untouched',
+  `PR detail with inline diffs & CI logs · reply, resolve, approve, rebase & merge from ${SITE_NAME}`,
+  'Cross-repo search & workspaces · bot classification settings — your judgement wins',
+  `Unlimited repos & contributors · runs 100% local — ${INSTALL_COMMAND}, your data never leaves your machine`,
 ];
 
 const PRO_FEATURES = [
-  'Attention & risk digests — what the bots posted, what was acted on, which threads need a human',
-  'Thread validity checks, inline while you review',
-  '“Was this addressed?” — immediate, with a confidence gauge',
-  'Themes & reports across human and bot reviews, by severity',
-  'Chat with your repos + ad-hoc charts — pin the keepers, re-run past reports',
-  'CI failures summarised to root cause, inline',
-  'Reviewer suggestions from commit history — requested in one click',
-  'Flow metrics with drill-downs · Slack digests · Jira & Linear links',
+  'Per-bot depth — every bot’s own tab: trends, anomalies, overlap, where it works, what your team does with it',
+  'Inflation history — each bot’s over-calling as a weekly line, not just this window’s count',
+  'Per-seat bot ROI — type the price, read what every acted-on comment cost, per workspace',
+  'Synthesised verdicts on every drill-down — the receipt read for you; every count computed, never model-authored',
+  'Period reports — what changed since last period, by workspace, with an honest forecast and a narrative checked against the figures',
+  '1:1 prep — a per-person period summary for walking into the meeting informed. Prep, not scoring',
+  'Daily-brief narration + “Ask about this period” — chat grounded in the report you’re reading',
+  'AI as connective tissue — attention & risk digests, thread validity, “Was this addressed?”, CI root-cause · Slack digests · Jira & Linear links',
 ];
 
 const PROPLUS_FEATURES = [
@@ -72,11 +72,11 @@ const PROPLUS_FEATURES = [
 const FAQ: { q: string; a: string }[] = [
   {
     q: 'Is free really free?',
-    a: `Yes. ${SITE_NAME} is open-core: the free dashboard is the product, not a trial. The Activity feed, the timeline, PR detail with real GitHub write actions, the bot receipt — all of it stays free, with no repo or seat limits. The paid tiers add layers on top.`,
+    a: `Yes. ${SITE_NAME} is open-core: the free dashboard is the product, not a trial. The Activity feed, the timeline, PR detail with real GitHub write actions, the bot receipt with its keep/tune/noisy verdicts — all of it stays free, with no repo or seat limits. The line is simple: free gets the verdict; paid gets the history, the depth and the explanation.`,
   },
   {
     q: 'Why is the bot grading free?',
-    a: `Because a measurement you have to pay for is a measurement you'd doubt. The grading model is ${SITE_NAME}'s own and runs on plain CPU — no LLM meter — so it costs next to nothing to serve, and the paid tiers are the layers on top of the ruler, never the ruler itself. It runs in the hosted service today; grading in the local install is on the roadmap.`,
+    a: `Because a measurement you have to pay for is a measurement you'd doubt. The grading model is ${SITE_NAME}'s own and runs on plain CPU — no LLM meter — so it costs next to nothing to serve, and the paid tiers are the layers on top of the ruler, never the ruler itself: the verdict and this window's counts are free, the week-by-week history and per-bot depth are Pro. It runs in the hosted service today; grading in the local install is on the roadmap.`,
   },
   {
     q: 'What counts as a seat?',
@@ -84,11 +84,11 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: 'Do I need an Anthropic key?',
-    a: 'Only for Pro+ — Claude Review and AI Fix run on your own Anthropic API key, with usage metered transparently in-app. Everything in Pro (digests, validity, themes, chat, CI diagnosis) is included in the subscription, no key needed.',
+    a: 'Only for Pro+ — Claude Review and AI Fix run on your own Anthropic API key, with usage metered transparently in-app. Everything in Pro (per-bot depth, period reports, briefs, synthesised verdicts, CI diagnosis) is included in the subscription, no key needed.',
   },
   {
     q: 'Do you rank my engineers?',
-    a: 'No. Everything is team- and process-grain: bots get graded, people don’t. Mirrors, not scorecards — by design, not as a setting.',
+    a: 'No ranking, no leaderboards — bots get graded, people don’t. Pro’s 1:1 prep builds a per-person period summary so a manager walks into the meeting informed, and it deliberately has no cross-person comparison: prep, not scoring. Mirrors, not scorecards — by design, not as a setting.',
   },
   {
     q: 'What happens if my payment fails?',
@@ -147,9 +147,10 @@ export default function Pricing(): JSX.Element {
               <span className="text-signal-text">fifteen dollars</span> a seat.
             </h1>
             <p className="max-w-[58ch] text-lede">
-              The dashboard is free, local-first, and yours forever — and the bot receipt
-              is free with a hosted sign-in. Pro reads the board for you; Pro+ closes the
-              loop with Claude. Each costs less than the review-bot seat it audits.
+              The dashboard is free, local-first, and yours forever — and every verdict is
+              free with a hosted sign-in. Pro adds the history, the depth and the
+              explanation; Pro+ closes the loop with Claude. Each costs less than the
+              review-bot seat it audits.
             </p>
 
             {checkoutUnavailable && (
@@ -188,7 +189,7 @@ export default function Pricing(): JSX.Element {
                 </div>
                 <MonoLabel className="mb-6 text-secondary">forever</MonoLabel>
                 <p className="mb-6 text-body-sm">
-                  Everything you need to see your team — and your bots — clearly.
+                  Every verdict, free: the receipt, the grades, and what needs you today.
                 </p>
 
                 <ul className="mb-7 flex flex-col">
@@ -211,7 +212,7 @@ export default function Pricing(): JSX.Element {
                   <h2 className="font-display text-[30px] font-semibold tracking-[-0.02em] text-ink">
                     Pro
                   </h2>
-                  <MonoLabel className="text-signal-text">The intelligence layer</MonoLabel>
+                  <MonoLabel className="text-signal-text">The measurement depth</MonoLabel>
                 </div>
                 {/* 46px display type, so `signal-text` is not required for contrast —
                     but it carries meaning here, and the darker stop is the one that
@@ -223,7 +224,7 @@ export default function Pricing(): JSX.Element {
                   per seat / month · billed annually · $19 monthly
                 </MonoLabel>
                 <p className="mb-6 text-body-sm">
-                  Everything in Free, read for you: judgement on top of the receipt.
+                  Everything in Free, plus the history, the depth and the explanation.
                 </p>
 
                 <ul className="mb-7 flex flex-col">
@@ -357,8 +358,8 @@ export default function Pricing(): JSX.Element {
               Fifteen dollars a seat. Every repo. Nothing missed.
             </h2>
             <p className="max-w-[56ch]">
-              Start free and read this month’s receipt — upgrade when you want the board
-              read, and the loop closed, for you.
+              Start free and read this month’s verdicts — upgrade when you want the
+              history, the depth, and the loop closed for you.
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-3.5">

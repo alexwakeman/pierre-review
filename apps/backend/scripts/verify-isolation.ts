@@ -933,26 +933,28 @@ check(
   (await q.getBotDedupClusters(A.prId, 2)) === null,
 );
 
-// ── Cross-WORKSPACE comparison ──────────────────────────────────────────────────
-// getWorkspaceComparison takes NO scope at all — it compares the caller's whole roster — so the
-// ONLY isolation surface is `listWorkspaces(accountId)` plus the accountId inside each metric read.
+// ── Cross-WORKSPACE period axis (the Reports "By workspace" rows) ───────────────
+// getPeriodMetricsForWorkspaces takes NO scope at all — it computes one period vector per
+// workspace the caller owns (the deleted getWorkspaceComparisonRows' shape) — so the ONLY
+// isolation surface is `listWorkspaces(accountId)` plus the accountId inside getPeriodMetrics.
 // A leak would show as another tenant's workspace row, or as its PRs inside the caller's numbers.
 // Landmine: B must already own a workspace WITH a repo, or the negative check passes on an empty
 // account and is VACUOUS. wsB is seeded above — do not reorder.
-const { getWorkspaceComparisonRows } = await import('../src/db/workspace-comparison.js');
-const cmpA = await getWorkspaceComparisonRows(1);
-const cmpB = await getWorkspaceComparisonRows(2);
+const { getPeriodMetricsForWorkspaces } = await import('../src/db/period-metrics.js');
+const axisWindow = { fromMs: Date.now() - 14 * 86_400_000, toMs: Date.now() };
+const axisA = await getPeriodMetricsForWorkspaces(1, axisWindow);
+const axisB = await getPeriodMetricsForWorkspaces(2, axisWindow);
 check(
-  "getWorkspaceComparisonRows(A) returns A's own workspaces only",
-  cmpA.length > 0 && !cmpA.some((r) => r.workspaceId === wsB.id || r.workspaceId === defaultB),
+  "getPeriodMetricsForWorkspaces(A) returns A's own workspaces only",
+  axisA.length > 0 && !axisA.some((r) => r.workspaceId === wsB.id || r.workspaceId === defaultB),
 );
 check(
-  "getWorkspaceComparisonRows(B) returns B's own workspaces only (blocked both ways)",
-  cmpB.length > 0 && !cmpB.some((r) => r.workspaceId === defaultA),
+  "getPeriodMetricsForWorkspaces(B) returns B's own workspaces only (blocked both ways)",
+  axisB.length > 0 && !axisB.some((r) => r.workspaceId === defaultA),
 );
 check(
-  "getWorkspaceComparisonRows(B) counts only B's repos",
-  cmpB.reduce((n, r) => n + r.repoCount, 0) === 1,
+  "getPeriodMetricsForWorkspaces(B) counts only B's repos in its coverage",
+  axisB.reduce((n, r) => n + r.coverage.totalRepos, 0) === 1,
 );
 
 
@@ -1797,6 +1799,84 @@ check(
   'getBotVolumeScatter(A, repoIds=[B.repo]) plots nothing (IDOR blocked)',
   volScCross.points.length === 0 && volScCross.sizedPrs === 0,
 );
+
+// ── getPersonPeriod (db/person-period.ts — the 1:1-prep vector, P4.2) ───────────────────────
+// `users` is GLOBAL, so the leak shape here is subtler than a repo id: the SAME human exists in
+// both tenants, and the fold must admit them per workspace (activity probe) and count per scope.
+// Seeded so every negative has a paired POSITIVE in the same check — the vacuity lesson.
+{
+  const { getPersonPeriod } = await import('../src/db/person-period.js');
+  const { users } = schema;
+  const [human] = await db
+    .insert(users)
+    .values({ githubLogin: 'iso-human', githubNodeId: 'U_iso_human', isBot: false })
+    .returning()
+    .execute();
+  const mkAuthored = async (accountId: number, repoId: number, tag: string) =>
+    db
+      .insert(pullRequests)
+      .values({
+        githubNodeId: `PR_pp_${tag}`,
+        accountId,
+        repoId,
+        number: 900 + accountId,
+        title: `person ${tag}`,
+        state: 'merged',
+        isDraft: false,
+        authorId: human!.id,
+        openedAt: new Date(now.getTime() - 3 * 86_400_000),
+        mergedAt: new Date(now.getTime() - 2 * 86_400_000),
+        updatedAt: now,
+      })
+      .execute();
+  const winPP = { fromMs: now.getTime() - 30 * 86_400_000, toMs: now.getTime() + 86_400_000 };
+
+  // Only B has seen this human act → A's workspace must not admit them (no oracle, no leak)…
+  // (B.repoId lives in wsB by this point — the workspace-move checks above put it there — so
+  // the positive half reads through THAT workspace, not B's now-empty Default.)
+  await mkAuthored(2, B.repoId, 'isoB');
+  const ppForeign = await getPersonPeriod(1, defaultA, human!.id, winPP);
+  const ppB = await getPersonPeriod(2, wsB.id, human!.id, winPP);
+  check(
+    'getPersonPeriod(A) refuses a human who only ever acted in B — while B sees them',
+    ppForeign === null &&
+      ppB !== null &&
+      ppB.metrics.find((m) => m.key === 'merged_prs_authored')?.value === 1,
+  );
+  // …and once they act in A too, A counts ONLY A's rows (B's merge never crosses the tenant).
+  await mkAuthored(1, A.repoId, 'isoA');
+  const ppA = await getPersonPeriod(1, defaultA, human!.id, winPP);
+  check(
+    "getPersonPeriod(A) counts A's rows only — the same human's B-side merge never leaks in",
+    ppA !== null && ppA.metrics.find((m) => m.key === 'merged_prs_authored')?.value === 1,
+  );
+  // A bot is refused even where it acted (the lane rule): reuse B's known-vendor reviewer if
+  // present; a fresh vendor-login user is simpler and self-contained.
+  const [bot] = await db
+    .insert(users)
+    .values({ githubLogin: 'coderabbitai[bot]', githubNodeId: 'U_iso_bot_pp', isBot: true })
+    .returning()
+    .execute();
+  await db
+    .insert(pullRequests)
+    .values({
+      githubNodeId: 'PR_pp_bot',
+      accountId: 1,
+      repoId: A.repoId,
+      number: 950,
+      title: 'bot pr',
+      state: 'open',
+      isDraft: false,
+      authorId: bot!.id,
+      openedAt: now,
+      updatedAt: now,
+    })
+    .execute();
+  check(
+    'getPersonPeriod(A) refuses an automation-lane actor outright (prep, not scoring — and never a bot)',
+    (await getPersonPeriod(1, defaultA, bot!.id, winPP)) === null,
+  );
+}
 
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();

@@ -4,7 +4,8 @@ import type { HumanThemesResponse, BotWindowKind } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 
-// The Feed "Discussion themes" AI summary (Pro Haiku) — the human sibling of useBotThemes. Cached
+// The Feed "Discussion themes" AI summary (Pro Haiku) — the human sibling of the retired bot
+// Themes hook (that surface folded into the synthesis seam, plan P2.3/C6). Cached
 // per (window, WORKSPACE). Only fetched when the AI-summary capability is on (`enabled`); absent
 // the plugin the route 404s. The `ws:<id>` segment matches the plugin's persisted `scope_key`.
 export function useHumanThemes(
@@ -22,8 +23,8 @@ export function useHumanThemes(
 
 const NOTICE_MS = 5000;
 
-// Generate/regenerate the human-themes report (the only billing path). Mirrors useRefreshBotThemes,
-// including the rule that the `setQueryData` key is built exactly like the read's.
+// Generate/regenerate the human-themes report (the only billing path). The `setQueryData` key must
+// be built exactly like the read's.
 export function useRefreshHumanThemes(window: BotWindowKind, workspaceId: number | null) {
   const qc = useQueryClient();
   const [notice, setNotice] = useState<string | null>(null);
@@ -33,8 +34,9 @@ export function useRefreshHumanThemes(window: BotWindowKind, workspaceId: number
     return () => globalThis.clearTimeout(t);
   }, [notice]);
   const mutation = useMutation({
-    // Refuses on an unresolved workspace — see useRefreshBotThemes for why a mutation cannot
-    // simply be gated the way the read is.
+    // Refuses on an unresolved workspace — a mutation cannot be skipToken-gated the way the
+    // read is, and generating for an unresolved workspace would bill for the account's Default
+    // and cache under 'ws:pending'.
     mutationFn: () => {
       if (workspaceId == null) throw new Error('No workspace selected');
       return api.humanThemesRefresh(window, workspaceId);

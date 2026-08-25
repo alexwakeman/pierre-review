@@ -72,27 +72,19 @@ describe('the period report link', () => {
     const back = readFromUrl();
     expect(back.activityRepoId).toBe('insights');
     expect(back.insightsReportKey).toBe('sprint-2026-08-18');
-    // THE THIRD HALF. Insights seeds its sub-tab from the store and falls back to 'overview', so a
-    // link carrying the console and the period still opened on the ad-hoc chat with no report in
-    // sight. `?report=` can only mean the Reports pane.
-    expect(back.insightsSubTab).toBe('reports');
+    // (The link used to carry a THIRD half — seeding the Insights sub-tab to 'reports'. The
+    // sub-tab apparatus is gone: the pane is Reports-first, so the console + the period key ARE
+    // the whole link.)
   });
 
   // The recipient must land on the console that renders the report. Before this fix `?report=`
   // parsed fine and the reader still saw the Feed, which looks identical to the report being
   // broken.
-  it('a link naming a period selects the Insights console, not the Feed', () => {
+  it('a link naming a period selects the Reports console, not the Feed', () => {
     location.search = '?activityRepo=insights&report=sprint-2026-08-04';
     const back = readFromUrl();
     expect(back.activityRepoId).toBe('insights');
     expect(back.insightsReportKey).toBe('sprint-2026-08-04');
-    expect(back.insightsSubTab).toBe('reports');
-  });
-
-  // A link with no `?report=` must not force the pane — the reader's own remembered sub-tab wins.
-  it('does not touch the sub-tab when the link names no period', () => {
-    location.search = '?activityRepo=insights';
-    expect('insightsSubTab' in readFromUrl()).toBe(false);
   });
 
   // `report` rides WITH the console and never alone: a bare `?report=` on the Feed would be inert

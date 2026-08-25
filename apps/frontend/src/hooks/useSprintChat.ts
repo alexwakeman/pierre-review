@@ -26,22 +26,38 @@ export const CHAT_HISTORY_PAGE_SIZE = 10;
 // optional chart spec. A generation may spend credits → invalidate the AI-usage meter; every
 // answer is persisted server-side, so also refresh the chat history so the new Q&A appears.
 //
-// ⚠ THE HOOK STAMPS THE SCOPE **AND THE RANGE**, THE CALLER CANNOT. Both are OPTIONAL fields whose
+// ⚠ THE HOOK STAMPS THE SCOPE **AND THE WINDOW**, THE CALLER CANNOT. Both are OPTIONAL fields whose
 // absence produces a confident, plausible, WRONG answer: no `scope` silently grounds it in the
-// account's DEFAULT workspace, and no `range` silently answers over the account's configured window
-// while the FilterBar chips say 90d. Omitting both from the mutation variable makes forgetting
+// account's DEFAULT workspace, and no window silently answers over the account's configured window
+// while the surface says otherwise. Omitting them from the mutation variable makes forgetting
 // either impossible. The scope wire value is the workspace id as a string (the plugin persists
-// `ws:<id>` as the cache `scope_key`); the range is read straight from the store, where `null`
-// legitimately means "no override" and is therefore omitted rather than sent.
-export function useSprintChat(workspaceId: number | null) {
+// `ws:<id>` as the cache `scope_key`).
+//
+// The window has two forms, resolved here in priority order:
+//  • `periodWindow` (explicit `[fromMs, toMs)` bounds — the Reports "Ask about this period"
+//    mount passes the VIEWED period's own bounds) is sent as `window` and WINS;
+//  • otherwise the store's `insightsRange` chip, where `null` legitimately means "no override"
+//    and is therefore omitted rather than sent.
+export function useSprintChat(
+  workspaceId: number | null,
+  periodWindow?: { fromMs: number; toMs: number } | null,
+) {
   const qc = useQueryClient();
   const range = useFilters((s) => s.insightsRange);
-  return useMutation<SprintChatResponse, Error, Omit<SprintChatBody, 'scope' | 'range'>>({
+  return useMutation<
+    SprintChatResponse,
+    Error,
+    Omit<SprintChatBody, 'scope' | 'range' | 'window'>
+  >({
     mutationFn: (body) =>
       api.sprintChat({
         ...body,
         ...(workspaceId != null ? { scope: String(workspaceId) } : {}),
-        ...(range != null ? { range } : {}),
+        ...(periodWindow != null
+          ? { window: { fromMs: periodWindow.fromMs, toMs: periodWindow.toMs } }
+          : range != null
+            ? { range }
+            : {}),
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['ai-usage'] });

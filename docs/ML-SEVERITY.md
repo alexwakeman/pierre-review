@@ -270,7 +270,7 @@ enforces FKs.
 | Method & path | Purpose |
 |---|---|
 | `GET /api/prs/:id/ml-labels` | **THE per-PR index** → `PrMlLabelsResponse`. Every badge on the page reads this one query (React Query dedupes; `staleTime: Infinity`), so a 60-thread PR costs one request, not 60. A target with no label is simply absent. Ownership 404 via the getter. Carries the vendor's own badge (`vendorSeverity` / `vendorSeverityConfidence`, both nullable) alongside ours, purely so the client can render the disagreement. Rate tier `read` — recorded explicitly, not inherited, because it sits inside the `/api/prs/<id>/` family whose other members hydrate from GitHub |
-| `GET /api/bot-severity?workspace&repoIds` | Bots-interface rollup → `BotSeverityResponse` (per-severity + per-category totals, one row per bot, coverage as `labelled`/`pending`/`unscorable`, the distinct `backend` strings). UNWINDOWED — the whole labelled corpus. `?workspace=` follows the read contract — unknown/foreign/garbage degrades to Default, never 404. ⚠ **Rate-limit tier `search` (60/min), not `read`**: DB-only, but it scans a workspace's whole label corpus (capped 50 k rows) plus three unlabelled-count joins — the same shape of cost as `/api/workspace-metrics/compare`. ⚠ **The SPA no longer calls it**: the Bots rail's severity surface merged into `/api/bot-analytics` (the WINDOWED `ml` block + per-vendor `ml*` fields, computed by `getMlWindowAggregates`), so the standalone panel and its mixed-time-grain row are gone. The route stays for its stable shape (external consumers / back-compat) |
+| ~~`GET /api/bot-severity`~~ | **DELETED** (the consolidation cut list). The Bots rail's severity surface lives entirely on `/api/bot-analytics` (the WINDOWED `ml` block + per-vendor `ml*` fields, computed by `getMlWindowAggregates`); a corpus-wide, unwindowed twin with no SPA consumer was one more predicate to hold in parity for zero renderers. `getBotSeverityRollup` STAYS in `db/ml-labels.ts` as the documented reference for the findings-only exclusion semantics the merged fold mirrors; `useBotSeverity`/`botSeverityKey` and the client method are gone with the route |
 | `GET /api/bot-analytics/vendor/:key/comments?window&workspace&repoIds` | The per-bot COMMENTS drill-down → `BotVendorCommentsResponse`: everything one automated reviewer said in the ROI window (inline review comments with path + thread state, PR comments, non-empty review bodies), each row's `MlLabel` shipped **INLINE** via a LEFT JOIN on `(account_id, target_kind, target_id)` — one request, never the per-PR index per row. Capped 3 000/source, newest-first, `truncated` flag. `key` = `u<userId>` \| `'pierre'` (the sentinel answers empty — verbatim reviews are human-posted); anything else 400s. Lives in `db/ml-labels.ts` (`getBotVendorComments`) — deliberately NOT a re-export of `getBotReviewComments`, whose row shape is lockstepped into `packages/pro` and which is role-`'review'` while this also serves quality-check rows. ⚠ **Rate tier `search`** (bodies + a three-way label join); its `/prs` sibling stays `read` (metadata only). Pinned in `rate-limit.test.ts` |
 | `GET /api/ml-status` | The worker's live state → `MlEnrichmentStatus` (incl. `unscorable`, the NULL-body legacy population — never part of `pending`), so the sync UI can show the scoring pass (above). **NO scope parameter** — the worker walks every workspace, so a workspace-scoped backlog would under-report the work actually running. Same `search` tier as the rollup, for the same reason (its backlog half is those unlabelled-count joins, once per workspace) — plus a ~3 s per-account cache on the scan, because this one is POLLED and a tier bounds request count, not per-request work |
 
@@ -341,74 +341,47 @@ ever called by the background worker, so no request can spend anything.
     The gate reads the RAW share, not the rounded `mlNitPct` the column shows, and never
     `vendorSeverity`. Matrix pinned by `bot-analytics-verdict.test.ts`; the fold, the split and
     the overlap count by `bot-analytics-ml.test.ts`.
-- **The Bots → Behaviour tab (`BotBehaviourPanel`, EXPERIMENTAL)** — seven charts off ONE
-  additive `ml` block on `/api/bot-behaviour` (`BotBehaviourMl`; no new route, no new fetch).
-  Two grains in one block, and they are not the same: the flat counts describe the panel's
-  SELECTED WINDOW, `weekly` covers the 84-day trend span on the SAME week boundaries as
-  `trend[i].weekStart` (both read `weekStarts` in `getBotBehaviourAnalytics` — a second copy of
-  that arithmetic is how the severity chart and the density chart come to disagree by a week
-  with nothing failing). Bot set is the tab's own `automatedReviewerUserIds(…, 'review')`, so a
-  quality check's volume stays out of a chart about reviewers, and rows are emitted ONLY for
-  bots that already appear in `bots` (the `u<userId>` key is the join).
-  - **"Severity mix per bot (Limn)"** + **"Severity mix per bot (bot's own badge)"** — the same
-    stacked bar twice, ours and theirs, side by side, because **the disagreement is the
-    product**. The vendor half has its OWN denominator (`vendorDeclared`, usually far smaller
-    than `findings`) and says so in its caveat line; nothing derives from it.
-  - **The severity INFLATION INDEX** — per bot, how often its own badge disagrees with ours and
-    which way: `vendorAgree` / `vendorOverCall` (the bot graded it WORSE than we did — inflation)
-    / `vendorUnderCall`, on the same `vendorDeclared` denominator, so
-    `agree + over + under === vendorDeclared` exactly as `SeverityAgreementMatrix` has it. An
-    unbadged finding is SILENCE and counts in none of the three; a praise row is not a finding
-    and reaches neither. Direction comes from the ONE exported `vendorAgreementOf`
+- **The workspace ML charts moved to the PAID depth tier and the ROI table** (the
+  consolidation's C2/P1.2). `BotBehaviourPanel` and the Bots "Behaviour" tab are DELETED;
+  `/api/bot-behaviour` moved into the plugin as `GET /api/pro/bot-behaviour` (`botDepth`), still
+  carrying the additive `ml` block (`BotBehaviourMl`) with its two grains — flat counts describe
+  the SELECTED WINDOW, `weekly` covers the 84-day trend span on the SAME `weekStarts` boundaries
+  as `trend` (a second copy of that arithmetic is how two charts come to disagree by a week with
+  nothing failing) — and the same role-`'review'` bot set. Where the seven charts went:
+  - **The severity INFLATION INDEX is now the ROI table's Inflation column** (`mlInflation` on
+    the same `/api/bot-analytics` vendor row): the current-window `overCall`/`underCall` COUNTS
+    are FREE (the verdict — they ride the same free ML fold as the severity columns); the
+    ≤12-week `weekly` sparkline beside them is the HISTORY, present on the wire only under the
+    `botDepth` entitlement (`inflationHistory` in `getBotAnalytics` — absent, never an error).
+    The semantics travelled unchanged: `vendorAgree`/`vendorOverCall`/`vendorUnderCall` partition
+    the bot's BADGED findings on the `vendorDeclared` denominator (`agree + over + under ===
+    vendorDeclared`, exactly as `SeverityAgreementMatrix` has it); an unbadged finding is SILENCE
+    and counts in none; direction comes from the ONE exported `vendorAgreementOf`
     (`db/ml-labels.ts`), shared with the confusion matrix and the flagging drill-down's
-    `disagree` refinement — a second hand-spelled ordinal comparison is how a bar and the list
-    behind it come to disagree by a row with nothing failing. A bar opens that list through
-    `GET /api/bot-analytics/flagging`'s per-bot refinement (`authorUserIds`, a SET of `users.id`s
-    on the wire as a CSV); note the panel's own bot set is role `'review'` while that drill-down
-    is role `'all'`, which is precisely why the narrowing exists — the review-role bots are a
-    SUBSET of the wider one, so a caller that names its exact ids agrees with the list it opens
-    while an unnarrowed one would not. ⚠ `[]` means "no bots" and never widens to all.
-    ⚠ Nothing here corrects, seeds or breaks a tie for our severity; the vendor badge is the
-    thing being MEASURED, never an input (0.474 vs 0.700 exact — see Accuracy).
-    The UI is TWO cards beside the mix pair, on by default (`InflationChart` ×
-    `over`/`under`): **"Severity inflated by the bot"** (`vendorOverCall`) and **"Severity raised
-    by Limn"** (`vendorUnderCall`), each one series of per-bot COUNTS — never a share, so the
-    number in the bar is the number the drill-down lists. The maths is
-    `lib/botMlSeries.ts`'s `inflationSummary` (`apps/frontend/test/botMlSeries.test.ts`), which
-    owns the honesty rule: **a bot with `vendorDeclared === 0` is EXCLUDED, not drawn as a zero**
-    — badge coverage is vendor-shaped (a bot that badges nothing has no over-calls because it
-    makes no calls, and a 0 bar reads "never inflates"), and the excluded bots are NAMED in the
-    caveat line beside the `declared`/`findings` ratio. A badged bot whose count is 0 stays: that
-    zero is a measurement. **Every bar is a click-through**: `BarChart`'s optional `onSelectBar`
-    (band-level hit targets, real `<button>`s — absent, the chart is unchanged for every other
-    consumer) opens `BotFlaggingDetail` on `{kind:'findings'}` + `disagree` + the bar's
-    `userId` as a ONE-MEMBER set, through `openBotFlaggingDetail(selector, repoId, refine)`.
-    ⚠ **The card's "View all N →" is narrowed TOO — to `summary.bars`' ids**, the exact set that
-    `summary.total` was summed over (never the legend's `shown` subset, and never "no narrowing"):
-    unnarrowed it asserted a role-`'review'` total and then opened a role-`'all'` list, so a
-    workspace whose quality-check bots badge anything would read "View all 359" and land on 612
-    with nothing on screen explaining the gap. ⚠ Both the bot set and the direction ride the
-    STORE SEED, not the tab's local state — the pinned chip's label is `selectorLabel(seed, bots)`
-    (the bot's name at size 1, "N bots" above that), and two bars open the same selector, so
-    without the bots in the name the two tabs are indistinguishable. `refineQueryKey` carries the
-    set — numerically SORTED, with `[]` in its own slot — for the same reason it carries the other
-    two: the narrowing is server-side, so a key without it serves one bot's list from another
-    bot's cache entry.
-  - **"Severity over time"** — one line per bot of its weekly MEAN severity on a nit(1)…
-    critical(4) axis (`LineChart`'s `yDomain`, added for exactly this: the default 0→niceMax
-    scale ticks at 0 and 5, two values a severity cannot take). A week with no findings is a
-    GAP, never 0 — there is nothing below `nit`. The week's counts ride in the hover note in
-    the new `noteTone="muted"` styling, since a note on every point painted in the anomaly
-    colour would claim everything is an outlier.
-  - folded behind "▸ More charts — categories": **"Categories per vendor"** (stacked bar) and
-    **"Category activity over time"** (one line per category), the latter sharing the severity
-    trend's bot-subset selection so the two read as one investigation.
-  - ⚠ **THE TWO EXCLUSIONS DIFFER HERE, deliberately.** Severity is findings-only (summaries
-    and praise out, the phantom-gap rule); CATEGORIES cover every non-summary row, so `praise`
-    appears as a category in its own right — "what does this bot talk about" is a fair question
-    to ask of an acknowledgment, while a walkthrough's categories are a read of the vendor's
-    template. Pinned by `db/bot-behaviour-ml.test.ts`; the pure series maths (the mean, the
-    union-of-weeks axis, the category fold) is `lib/botMlSeries.ts` +
+    `disagree` refinement. ⚠ **COUNTS, never shares — and a bot that badges nothing renders a
+    DASH ("no badge is silence, not agreement"), NEVER a zero**: it has no over-calls because it
+    makes no calls, and a 0 would read "never inflates" (within a badged bot a 0 IS real). Each
+    count is a CLICK-THROUGH to `BotFlaggingDetail` on `{kind:'findings'}` + `disagree` + this
+    bot as a ONE-MEMBER set — the exact opener the removed charts used — so the number clicked IS
+    the list's `filteredTotal`. ⚠ The bot set and the direction still ride the STORE SEED (two
+    cells open the same selector; `refineQueryKey` carries the numerically-sorted set in its own
+    `|bot:<id>|` slot — the narrowing is server-side, so a key without it serves one bot's list
+    from another's cache entry). Nothing here corrects, seeds or breaks a tie for our severity;
+    the vendor badge is the thing being MEASURED, never an input (0.474 vs 0.700 exact — see
+    Accuracy).
+  - **The per-bot severity-over-time slice + category mix live on the per-bot DEPTH tab**
+    (`BotDetailPanel`, the `bot-detail` pinned drill-down, Pro `botDepth`): `MlSeverityTrendChart`
+    over a single-bot view — the nit(1)…critical(4) `yDomain` survives (the default 0→niceMax
+    scale ticks at 0 and 5, two values a severity cannot take), and **a week with no findings is
+    a GAP, never 0** — there is nothing below `nit`. `WorkspaceBotCharts` keeps exactly what that
+    tab imports (`MlBotView`, `MlSeverityTrendChart`, `useBotSubset`).
+  - **CUT with no successor**: both "Severity mix per bot" chart twins, the two standalone
+    inflation ChartCards (the `inflationSummary` fold in `lib/botMlSeries.ts` survives, with its
+    tests), "Categories per vendor" and "Category activity over time".
+  - ⚠ **The two exclusions still differ, deliberately**: severity counts are FINDINGS-ONLY
+    (summaries and praise out, the phantom-gap rule) while CATEGORY counts cover every
+    non-summary row, so `praise` is a category in its own right. Pinned by
+    `db/bot-behaviour-ml.test.ts`; the pure series maths is `lib/botMlSeries.ts` +
     `apps/frontend/test/botMlSeries.test.ts`.
 - **The Comments drill-down (`BotPrsDetail`)** — a PRs | Comments sub-view toggle on the bot
   drill-down tab (state local to the tab; window/scope shared with the panel; the visible view
@@ -844,9 +817,10 @@ breaks a tie, never becomes a low-confidence fallback, and never reaches the mod
   an unconditional panel is how a 60-thread PR once became 60 requests drawing 60 empty boxes.
   Everything reads the one `['ml-labels', prId]` index and returns `null` when it finds nothing.
 - **`threadSeverityFilter` is global** — `PrDetail` must guard on `selectedPrId === prId`.
-- **`bot-severity` is a workspace-scoped query key** and therefore carries `ws:<id>`; it is also
-  in `RECLASSIFY_INVALIDATE_KEYS`, because marking a login human changes who the rollup counts.
-  The per-PR index deliberately is **not** — reclassification does not alter a stored label.
+- **The `bot-severity` query key left with its route** (`useBotSeverity`/`botSeverityKey`
+  deleted; the fold rides the `bot-analytics` key, which is in `RECLASSIFY_INVALIDATE_KEYS` —
+  marking a login human changes who the fold counts). The per-PR index deliberately is **not**
+  invalidated on reclassify — reclassification does not alter a stored label.
 - **The rollup only counts actors the workspace currently calls bots.** A label whose author has
   since been marked human is stored but excluded — correct, and the reason a naive isolation
   fixture for it passes vacuously (see below).
@@ -938,11 +912,11 @@ breaks a tie, never becomes a low-confidence fallback, and never reaches the mod
   0.25` is an exact statement that calibration overrode the argmax (Accuracy above), true of 15%
   of the CodeRabbit corpus. Nothing surfaces it, no rollup weights by it, and no evaluation
   reports it as its own slice.
-- **The `/api/bot-severity` rollup is still unwindowed** — but nothing in the SPA renders it any
-  more: the Bots rail's severity surface moved onto `/api/bot-analytics`'s WINDOWED `ml` fold
-  (`getMlWindowAggregates`, exactly the read `target_created_at` was stored for), so the
-  mixed-time-grain complaint is closed. The rollup route keeps its stable corpus-wide shape for
-  any external consumer; if none materialises it is a candidate for removal.
+- ~~The `/api/bot-severity` rollup is still unwindowed~~ **CLOSED by deletion** — the candidate
+  for removal was removed (no external consumer materialised). The Bots severity surface is
+  `/api/bot-analytics`'s WINDOWED `ml` fold (`getMlWindowAggregates`, exactly the read
+  `target_created_at` was stored for); `getBotSeverityRollup` survives in `db/ml-labels.ts` as
+  the exclusion-semantics reference only.
 - **Feed card bodies and `CommentCard` carry no badge** — see UI above.
 - **pg `0034` has not been replayed against a real Postgres** (the unit suite is SQLite-only).
   Same status as pg `0031`–`0033`; the throwaway-container recipe is in

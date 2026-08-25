@@ -119,8 +119,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //
   // Written as an exact match plus a `/`-terminated prefix, NOT a bare
   // `startsWith('/api/workspaces')` and emphatically not `startsWith('/api/workspace')`:
-  // `/api/workspace-metrics/compare` sits on a DIFFERENT tier a few lines below, and a loose
-  // prefix over two sibling vocabularies is precisely how one silently swallows the other.
+  // the `/api/workspace-metrics` family is a SIBLING vocabulary, and a loose prefix over two
+  // sibling vocabularies is precisely how one silently swallows the other.
   if (path === '/api/workspaces' || path.startsWith('/api/workspaces/')) return [TIERS.read];
 
   // ---- Bot Tuning Advisor (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
@@ -158,15 +158,68 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //   POST …/:periodKey/chat      one grounded Anthropic completion per turn.
   //   GET  …/reports              stored rows + a bounded per-period coverage read. DB only.
   //   GET  …/reports/:periodKey   one stored row + ONE metric-vector recompute for the staleness
-  //                               flag. DB only — it must NEVER grow a generation leg (the
-  //                               `GET /api/pro/prs/:id/annotations` precedent, which is on
-  //                               `read` for the same reason and for the same fragile reason).
+  //                               flag, PLUS the "By workspace" axis (C4): 2 windows ×
+  //                               N workspaces × getPeriodMetrics — the one cost in the family
+  //                               that MULTIPLIES by workspace count, which is the exact shape
+  //                               that put the deleted /api/workspace-metrics/compare on the
+  //                               60/min `search` bucket. Same tier here, same reason. Still DB
+  //                               only — it must NEVER grow a generation leg (the
+  //                               `GET /api/pro/prs/:id/annotations` precedent).
   // Anchored on the exact family prefix so no sibling `/api/pro/insights/*` route is swept in.
   if (path === '/api/pro/insights/reports' || path.startsWith('/api/pro/insights/reports/')) {
     if (mutating && (path.endsWith('/generate') || path.endsWith('/chat'))) {
       return [TIERS.ai, TIERS.aiHourly];
     }
+    // The one-report GET carries the by-workspace axis (N × getPeriodMetrics per window) —
+    // `search`, not the 600/min blanket. Anchored at both ends so ONLY `…/reports/:periodKey`
+    // matches: the list root and a GET spelling of `…/generate` stay on the plain read bucket.
+    if (/^\/api\/pro\/insights\/reports\/[^/]+$/.test(path)) return [TIERS.search, TIERS.read];
     return [TIERS.read];
+  }
+
+  // ---- 1:1 prep (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
+  // GET /api/pro/insights/person/:userId — the person-period vector (plan P4.2). DECIDED, not
+  // inherited from the catch-all's GET→read branch: per request it runs the lane resolver, the
+  // one-fold first-human-review scan and the request→review scan (two capped candidate walks)
+  // plus ~10 person-scoped aggregates — the reports-GET shape of cost (this event loop and this
+  // database, no GitHub, no Anthropic), so it borrows the same 60/min `search` bucket rather
+  // than the 600/min blanket. Fired once per 1:1 section mount / period switch. The narration
+  // POST is NOT here — it rides the /api/pro/synthesis pair above (kind 'person').
+  if (!mutating && path.startsWith('/api/pro/insights/person/')) {
+    return [TIERS.search, TIERS.read];
+  }
+
+  // ---- Bot behaviour depth (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
+  // GET /api/pro/bot-behaviour — the workspace behaviour rollup, MOVED from core's
+  // /api/bot-behaviour behind the `botDepth` entitlement (plan P0.2). DECIDED, not inherited from
+  // the /api/pro/ catch-all's GET→read branch: per request it computes every bot's TTFR /
+  // follow-up / week×hour heatmap plus trends, anomalies, overlap and the ML label fold over the
+  // whole window — the same shape of cost as the flagging/volume family
+  // beside it (this process's event loop and this database, not GitHub quota and not Anthropic),
+  // so it borrows the same 60/min `search` bucket rather than the 600/min blanket one. (In core
+  // it sat on the blanket `read` fall-through — that was the inherited tier this file warns
+  // about, corrected in the move.) The SPA fires it once per Bots view on the 5-min sync cadence.
+  if (!mutating && path === '/api/pro/bot-behaviour') return [TIERS.search, TIERS.read];
+
+  // ---- Synthesis (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
+  // ONE endpoint, two verbs, two costs (plan P2.1):
+  //   POST /api/pro/synthesis  the generate path — one Haiku call behind a payload-hash $0 cache,
+  //                            plus the input fold below. The catch-all's `generates` branch
+  //                            would land it on `ai` anyway; spelled here so the family's two
+  //                            tiers are DECIDED together (this file's failure mode is a tier
+  //                            nobody re-examined).
+  //   GET  /api/pro/synthesis  the free cached read — but it recomputes the payload hash from
+  //                            `getSynthesisInput`, i.e. it re-runs the drill-down's own
+  //                            population fold (the flagging kind's ≤50k-row label scan, the
+  //                            volume kind's merged-PR walk). That is the flagging/volume/
+  //                            bot-behaviour shape of cost — this process's event loop and this
+  //                            database, not GitHub and not Anthropic — so it borrows the same
+  //                            60/min `search` bucket, NOT the catch-all's 600/min GET→read
+  //                            branch. It must NEVER grow a generation leg (the
+  //                            `GET /api/pro/prs/:id/annotations` precedent).
+  if (path === '/api/pro/synthesis') {
+    if (mutating) return [TIERS.ai, TIERS.aiHourly];
+    return [TIERS.search, TIERS.read];
   }
 
   // ---- AI generation ----
@@ -206,29 +259,14 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // ---- GitHub-quota spenders ----
   if (path.startsWith('/api/repos/search')) return [TIERS.search, TIERS.read];
   if (path === '/api/repos/suggested') return [TIERS.search, TIERS.read];
-  // GET /api/workspace-metrics/compare — the one route in the app whose cost multiplies by the
-  // number of workspaces. It runs N × getWorkspaceMetrics, each a twelve-week PR window over that
-  // workspace's repos, and it takes NO narrowing parameters at all: it always compares every
-  // workspace the account owns. The spend is not GitHub quota and not Anthropic — it is this
-  // process's event loop and this database — which is exactly why it would otherwise have landed
-  // on the 600/min blanket bucket by default and made a loop over it a self-inflicted DoS.
-  // `search` is borrowed as the nearest correctly-sized 60/min bucket rather than inventing a
-  // tier for a single route; the SPA only fires it while the Compare-workspaces rail line is
-  // open, so 60/min is orders of magnitude above any human use.
-  //
-  // Its two siblings `/api/workspace-metrics` and `/api/workspace-metrics/detail` are ordinary
-  // single-window reads over one workspace's repos and are deliberately left on `read` via the
-  // fall-through — they do not multiply by anything. Matched as a prefix rather than an exact
-  // string because no other route shares it, so over-matching costs nothing while under-matching
-  // costs the bucket.
-  if (path.startsWith('/api/workspace-metrics/compare')) return [TIERS.search, TIERS.read];
-  // GET /api/bot-severity — the Bots ML-severity rollup. DB-only (the model is called by the
-  // background worker, never on a request), but it reads a whole workspace's label corpus into
-  // memory to aggregate it, capped at 50k rows, plus three unlabelled-count joins. Same shape of
-  // cost as `/compare` above — this process's event loop, not GitHub quota and not Anthropic —
-  // so it borrows the same 60/min `search` bucket rather than sitting on the 600/min blanket one.
-  // The SPA fires it once per Bots-tab view.
-  if (path.startsWith('/api/bot-severity')) return [TIERS.search, TIERS.read];
+  // (GET /api/workspace-metrics/compare — the old N × getWorkspaceMetrics comparison whose cost
+  // multiplied by workspace count, which is what earned it the `search` tier — was DELETED with
+  // the Compare rail entry (C4). The multiplication survives in the Reports "By workspace" axis,
+  // which is why `GET /api/pro/insights/reports/:periodKey` sits on `search` in the family block
+  // above. Its two siblings `/api/workspace-metrics` and `/api/workspace-metrics/detail` remain
+  // ordinary single-window reads on the `read` fall-through — they do not multiply by anything.)
+  // (GET /api/bot-severity — the standalone ML-severity rollup — was REMOVED on the C7 cut list;
+  // its `search` tier entry left with it.)
   // GET /api/bot-analytics/vendor/<key>/comments — the per-bot comments drill-down: up to 3000
   // comment BODIES per source plus a three-way ml_comment_labels join, per request. Same shape
   // of cost as the rollup above (this process, not GitHub and not Anthropic), so the same
@@ -267,11 +305,18 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && /^\/api\/prs\/\d+\/ml-labels$/.test(path)) return [TIERS.read];
   // GET /api/ml-status — the enrichment worker's live state, POLLED every few seconds while a
   // sync round is open so the progress UI can represent the model pass. Its in-memory half is
-  // free, but its backlog half is `/api/bot-severity`'s unlabelled-count joins repeated PER
+  // free, but its backlog half is a bot-set resolve plus three unlabelled-count joins PER
   // WORKSPACE, so it belongs in the same 60/min `search` bucket, not the blanket read one. The
   // route caches the scan for a few seconds precisely because the tier bounds request COUNT and
   // not the work each request does — the two are complementary, neither is a substitute.
   if (path.startsWith('/api/ml-status')) return [TIERS.search, TIERS.read];
+  // GET /api/daily-brief — the free counts strip (plan P3.1/P3.3). No GitHub, no LLM, but one
+  // call folds the consolidated feed + the insights cards + the resolve backlog, and `?rollup=1`
+  // multiplies that by the account's workspace count — the compare-route cost shape, so the same
+  // DELIBERATE 60/min `search` bucket rather than the 600/min blanket. The route's 5-min TTL
+  // cache bounds the work per request; the tier bounds request COUNT — complementary, neither a
+  // substitute (the ml-status rationale verbatim).
+  if (!mutating && path.startsWith('/api/daily-brief')) return [TIERS.search, TIERS.read];
   // ---- Emoji reactions: BOTH routes reach GitHub, and NEITHER lives under /api/prs/<id>/ ----
   //
   // Spelled as two EXACT string matches, above the mutating block, for the reason this file has

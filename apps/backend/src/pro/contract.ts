@@ -10,7 +10,11 @@ import type {
   ClaudeFindingSide,
   ClaudeReviewModel,
   ClaudeReviewVerdict,
+  DailyBriefCounts,
+  PersonPeriod,
   PostReviewPreview,
+  SynthesisInput,
+  SynthesisScope,
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../github/compare.js';
 import type { PrReviewCommentHunks } from '../sync/hydrate-detail.js';
@@ -47,6 +51,10 @@ export interface ProCapabilities {
   // Insights "Reports" sub-tab — a stored, forwardable per-sprint artifact with a
   // coverage-honest comparison, a refusable forecast and a narrated summary. The metric vector
   // itself is CORE compute (db/period-metrics.ts), but it has no free surface.
+  botDepth: boolean; // Non-AI paid DEPTH tier (paid, like workspaceInsights — NOT like
+  // botTriage, which is true whenever the plugin is loaded): behaviour trends/anomalies,
+  // per-bot drill-down, overlap, where-bots-work, inflation history, per-seat ROI cost.
+  // The compute is CORE (db/queries.ts getBotBehaviourAnalytics etc.); this gates the surfaces.
 }
 
 // ---- AI Fix seams (github + coding) -------------------------------------------
@@ -776,6 +784,86 @@ export interface ProHostQueries {
     scope: BotScopeWire,
     window: { fromMs: number; toMs: number },
   ): Promise<unknown>;
+  // ---- Phase-0 seams (apiVersion 21) — land INERT; consumed by later phases ----
+  // The existing CORE bot-behaviour rollup (db/queries.ts getBotBehaviourAnalytics — trends,
+  // anomalies, heatmaps, overlap, where-bots-work, the ML fold), re-exposed through the seam so
+  // the route can move into the plugin behind the `botDepth` entitlement. Returns
+  // BotBehaviourResponse (cast by the plugin). `botUserId` narrows the result to ONE bot —
+  // the per-bot drill-down tab's fetch, which must not compute fifteen bots' heatmaps to
+  // render one. Unset = every bot in scope, exactly as before.
+  getBotBehaviour(
+    accountId: number,
+    window: BotWindowKind,
+    scope: BotScopeWire,
+    botUserId?: number,
+  ): Promise<unknown>;
+  // The per-workspace period vectors behind the Reports "By workspace" axis: for EACH of the
+  // account's workspaces (listWorkspaces order — Default first, then by name), the same
+  // window-pure vector `getPeriodMetrics` computes, over that workspace's full membership.
+  // Returns WorkspacePeriodMetricsRow[] (cast by the plugin):
+  // [{workspaceId, name, isDefault, coverage: {trackedRepos, totalRepos, complete}, metrics}] —
+  // `coverage` is the per-workspace onboarded-mid-window disclosure, measured at the window's
+  // start. WINDOW-PURE (the two-sided predicates ride on getPeriodMetrics), and it carries NO
+  // cost fields at all — cost is per-workspace and must never be summed across workspaces, so it
+  // simply does not travel here.
+  getPeriodMetricsForWorkspaces(
+    accountId: number,
+    window: { fromMs: number; toMs: number },
+  ): Promise<unknown>;
+  // The synthesis seam's input assembly (P2.1, now LIVE): the EXACT item rows a drill-down lists
+  // for a scope descriptor, so the model summarises precisely the set the receipt list shows.
+  // ⚠ One predicate, three consumers — a drill-down's list, its count and this input set read the
+  // SAME core query per kind (db/synthesis-input.ts documents which; the bots-flagging
+  // tile-number-vs-hydration lesson generalised). The descriptor and row shapes are the SHARED
+  // `SynthesisScope`/`SynthesisInput` types — typed here (replacing the declared-inert
+  // `Promise<unknown>` sketch, a permitted no-version refinement: the plugin mirror moved in the
+  // same commit) because the plugin's payload hash folds the per-item ids + created-at, and a
+  // `cast-and-hope` seam is exactly where a hash formula drifts. Notes that moved into the types:
+  // the P2.1 kinds are the FOUR drill-down grains (Phase 3 widens the union additively); `window`
+  // is a bare BotWindowKind (every consuming drill-down is enum-windowed — the widened
+  // {fromMs,toMs} form stays a Phase-3 concern) and is IGNORED for the windowless 'bot-threads'
+  // backlog; the old `direction`/`filters` sketch became typed fields
+  // (direction/select/severities/category). Returns capped rows + analyzed/total counts +
+  // `truncated` — silent truncation reads as "covered everything", so the card renders
+  // "Summarised X of Y" from exactly these numbers.
+  getSynthesisInput(accountId: number, scope: SynthesisScope): Promise<SynthesisInput>;
+  // The deterministic daily-brief fold (P3.1 — NOW LIVE: core db/daily-brief.ts, computed on
+  // read behind a module-level 5-min TTL cache, no storage): My Turn count, stalled/attention
+  // counts, resolve-backlog count, trunk red repos, and a NARROW volume-only bot-anomaly slice
+  // (weekly event counts through the same exported weeklyAnomalies fold the behaviour tab uses —
+  // deliberately NOT the full behaviour/heatmap compute). Each line carries what its strip line
+  // needs to deep-link to the surface that owns it. ⚠ Every count REUSES that surface's own fold
+  // (the consolidated feed's my-turn facet under the default 'hide' lens — inheriting its
+  // actor-less CI-row exclusion — the /api/attention cards, getResolvableBotThreadPrs'
+  // totalThreads, the repos head columns), never a re-derivation that can disagree with the
+  // surface it links to. Typed with the SHARED DailyBriefCounts (replacing the declared-inert
+  // `Promise<unknown>` sketch — the permitted no-version refinement; the plugin mirror moved in
+  // the same task) because the plugin's brief-narration payload hash folds these very counts.
+  // NO cost fields travel here, ever (§8.18 — the roll-up loops this per workspace).
+  getDailyBriefCounts(accountId: number, workspaceId: number): Promise<DailyBriefCounts>;
+  // The 1:1-prep person vector (P4.2 — NOW LIVE: core db/person-period.ts): a small fixed
+  // vector for one person in one workspace — merged/opened authored · reviews given · review
+  // comments · median request→their-review response · their PRs' first-human-review wait ·
+  // threads opened on their PRs vs addressed · waiting-on-them · WIP — seven window-pure keys
+  // with two-sided predicates plus three keys explicitly marked `basis:'live'`, with its own
+  // PERSON_METRICS_SCHEMA_VERSION and per-person coverage honesty (onboarded-mid-window repos
+  // AND a first-observed-mid-window person both disclose). ⚠ `users` is a GLOBAL table — the
+  // fold admits the subject only via a workspace activity probe (the listUsers precedent) and
+  // returns login/name only; humans resolve through the ONE lane resolver (an automation-lane
+  // actor yields null — no 1:1 with Dependabot), and the first-human-review figure reuses
+  // loadFirstHumanReviewHours via its authorUserId narrowing (the one-fold rule). Prep, not
+  // scoring: one userId in, one person out — no cross-person shape travels here.
+  // Typed with the SHARED `PersonPeriod` (replacing the declared-inert `Promise<unknown>`
+  // sketch — the permitted no-version refinement; the plugin mirror moved in the same task)
+  // because the plugin's person-narration hash folds these very values (via the count-encoded
+  // synthesis item ids core builds from this vector). `null` covers every degrade in one shape:
+  // unknown/foreign user, a bot, no footprint in the workspace.
+  getPersonPeriod(
+    accountId: number,
+    workspaceId: number,
+    userId: number,
+    window: { fromMs: number; toMs: number },
+  ): Promise<PersonPeriod | null>;
 }
 
 export interface ProContext {
@@ -870,6 +958,17 @@ export interface ProContext {
 export interface ProPlugin {
   // Contract handshake; host warns on mismatch.
   //
+  // 20 → 21: THE PHASE-0 TIER LINE (one bump carrying every seam the calm-consolidation plan
+  // needs — later phases consume seams that land inert). `ProCapabilities` gains `botDepth`
+  // (the non-AI paid depth tier, gated like workspaceInsights). `ProHostQueries` gains FIVE
+  // members: `getBotBehaviour` (the core behaviour rollup re-exposed through the seam, widened
+  // with an optional `botUserId` one-bot narrowing) and `getPeriodMetricsForWorkspaces` (the
+  // per-workspace period vectors behind the Reports "By workspace" axis) — both live — plus
+  // three DECLARED-inert seams whose core folds are their consuming phases' deliverables:
+  // `getSynthesisInput` (P2.1 input assembly), `getDailyBriefCounts` (P3.1 brief fold) and
+  // `getPersonPeriod` (P4.2 person vector). Declaring all five HERE is what D2's single bump
+  // buys: swapping the inert bodies for the real folds later changes no contract, so no 21→22.
+  //
   // 19 → 20: PERIOD-OVER-PERIOD REPORTING. `ProHostQueries` gains three members —
   // `getPeriodMetrics` (the closed 12-metric window-pure vector + its data fingerprint),
   // `getPeriodCoverage` (which repos were already tracked at a period start — the rule that stops
@@ -906,7 +1005,7 @@ export interface ProPlugin {
   // against a version that is actually correct: capabilities go dark, every /api/pro/* route
   // 404s, and nothing throws. ⚠ The plugin's half lives in a SUBMODULE, so "all four" spans TWO
   // repos — the gitlink committed here must point at a plugin commit carrying the same number.
-  apiVersion: 20;
+  apiVersion: 21;
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
@@ -926,6 +1025,7 @@ export const EMPTY_CAPABILITIES: ProCapabilities = {
   botTriage: false,
   botAdvisor: false,
   periodReports: false,
+  botDepth: false,
 };
 let active: ProCapabilities = EMPTY_CAPABILITIES;
 export function setProCapabilities(c: ProCapabilities): void {

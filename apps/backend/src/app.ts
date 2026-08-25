@@ -33,6 +33,7 @@ import { insightsRoutes } from './api/routes/insights.js';
 import { activityRoutes } from './api/routes/activity.js';
 import { mentionsRoutes } from './api/routes/mentions.js';
 import { searchRoutes } from './api/routes/search.js';
+import { dailyBriefRoutes } from './api/routes/daily-brief.js';
 import { billingRoutes } from './api/routes/billing.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
 import { mlLabelRoutes } from './api/routes/ml-labels.js';
@@ -223,6 +224,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(activityRoutes);
   await app.register(mentionsRoutes);
   await app.register(searchRoutes);
+  // The daily brief + cross-workspace roll-up (CORE, FREE, counts only — plan P3.1/P3.3). Pure
+  // DB reads over the owning surfaces' own folds, TTL-cached; the Pro narration is the plugin's
+  // synthesis seam, not this route.
+  await app.register(dailyBriefRoutes);
   // Bot-triage platform (CORE, always registered): detection/override, ROI analytics,
   // cross-bot dedup, confirm-gated bot-thread resolve. Account-scoped; no AI.
   await app.register(botTriageRoutes);

@@ -135,13 +135,22 @@ await db
   .insert(schema.repos)
   .values([
     // `createdAt` is My Turn's clock, not decoration: an open PR only enters the "New PRs"
-    // section when `openedAt >= createdAt`, so 40 days back puts every curated PR inside the
+    // section when `openedAt >= createdAt`, so backdating it keeps every curated PR inside the
     // window (the newest curated activity is ~14 days old) AND inside the Feed's 14-day one.
     // There is no second visibility axis to set — a repo in a workspace is fully live.
+    //
+    // ⚠ IT IS ALSO THE PERIOD-COVERAGE CLOCK (db/period-metrics.ts getPeriodCoverage:
+    // "tracked" = repos.createdAt <= the period's start). The old day(40) value silently
+    // disqualified every completed 14-day period except the two newest — the Reports forecast
+    // (which needs 4 coverage-complete periods) refused everywhere. 112 days is chosen to sit
+    // strictly between the start of completed period −7 (~110d ago) and period −8 (~123d ago)
+    // for ANY seed time-of-day: periods −1…−7 read "3 of 3 repos tracked" while −8 legitimately
+    // fails coverage — so the coverage-honesty rendering ("repos onboarded mid-window") also
+    // has something real to show.
     // viewerPermission=ADMIN so write-gated UI (approve, AI Fix push controls) renders.
-    { id: WEB, accountId: 1, owner: 'acme', name: 'web-app', githubNodeId: 'R_web', defaultBranch: 'main', createdAt: day(40), viewerPermission: 'ADMIN' },
-    { id: API, accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_api', defaultBranch: 'main', createdAt: day(40), viewerPermission: 'ADMIN' },
-    { id: INFRA, accountId: 1, owner: 'acme', name: 'infrastructure', githubNodeId: 'R_infra', defaultBranch: 'main', createdAt: day(40), viewerPermission: 'ADMIN' },
+    { id: WEB, accountId: 1, owner: 'acme', name: 'web-app', githubNodeId: 'R_web', defaultBranch: 'main', createdAt: day(112), viewerPermission: 'ADMIN' },
+    { id: API, accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_api', defaultBranch: 'main', createdAt: day(112), viewerPermission: 'ADMIN' },
+    { id: INFRA, accountId: 1, owner: 'acme', name: 'infrastructure', githubNodeId: 'R_infra', defaultBranch: 'main', createdAt: day(112), viewerPermission: 'ADMIN' },
   ])
   .execute();
 await db
@@ -903,8 +912,9 @@ await db
   .execute();
 
 // ===========================================================================
-// HISTORICAL ACTIVITY (weeks 3–12) — purely to populate the Insights/analytics
-// charts (getRepoAnalytics, window = 84 days / 12 weeks). NONE of this touches
+// HISTORICAL ACTIVITY (weeks 3–14) — populates the Insights/analytics charts
+// (getRepoAnalytics, window = 84 days / 12 weeks) AND the completed 14-day
+// periods behind Insights → Reports (see the COHORTS note). NONE of this touches
 // the curated board: every PR below is MERGED/CLOSED with both openedAt AND its
 // close instant strictly OLDER than 16 days ago, so the default 14-day timeline
 // and the hero screenshots are unaffected. All ids are in a high, non-colliding
@@ -1141,9 +1151,15 @@ const histPrs: HistPr[] = [];
 let histPrId = 200;
 const titleCursor: Record<number, number> = { [WEB]: 0, [API]: 0, [INFRA]: 0 };
 
-// 10 weekly cohorts ending at ~16d ago and reaching back to ~86d ago. A gentle
+// 12 weekly cohorts ending at ~16d ago and reaching back to ~100d ago. A gentle
 // upward trend (older weeks slightly quieter) reads well on the throughput chart.
-const COHORTS = 10;
+// Two cohorts more than the 84-day analytics window needs, ON PURPOSE: the Insights
+// "Reports" tab compares completed 14-day periods (ending 11d ago, cadence from the
+// seeded pro_settings), and its forecast wants a series of non-empty periods behind
+// the newest completed one. 100 days of opens populates periods −1…−6 solidly and
+// leaves −7 legitimately THIN (a couple of PRs → low-sample flags) — the honesty
+// rendering the feature ships is worth demoing, not seeding away.
+const COHORTS = 12;
 for (let w = 0; w < COHORTS; w++) {
   // w=0 is the OLDEST cohort (~week 12), w=COHORTS-1 the most recent (~week 3).
   const weekEndDaysAgo = 16 + w * 7; // newest cohort opens ~16–23d ago (>16d close, see below)
@@ -1520,6 +1536,445 @@ for (const c of [...RECENT_CYCLES, ...OLD_CYCLES]) {
 await db.insert(schema.ciStatusEvents).values(ciStatusEventRows).execute();
 
 // ===========================================================================
+// BOT REVIEW HISTORY + THE CODERABBIT SPIKE WEEK + ML SEVERITY LABELS
+//
+// Three Train A–C marquees need bot data with a SHAPE, not just a presence:
+//
+//   • The daily brief's `botAnomalies` line and the per-bot depth tab's anomaly
+//     rings run a median±MAD self-baseline over 12 rolling weekly buckets of
+//     bot events (db/daily-brief.ts briefBotAnomalies / weeklyAnomalies:
+//     z ≥ 3, minScale 2, TRAILING bucket only for the brief). So CodeRabbit
+//     gets a steady ~6–7-events/week baseline for weeks 1–5 and a ~26-event
+//     TRAILING week (the spike, on open PRs #105/#111): z ≈ (26−7)/2 ≈ 9.5 —
+//     unmistakably flagged. Copilot and Acme CI get flat baselines that keep
+//     their trailing weeks unremarkable (z < 1), so exactly ONE bot rings.
+//
+//   • The period vector's bot metrics (`bot_review_comments`,
+//     `bot_comments_per_merged_pr`) deliberately begin only ~6 weeks back —
+//     the bots read as onboarded mid-history, so completed periods −1/−2
+//     carry solid counts, −3 is partial and older periods are genuine zeros:
+//     the Reports forecast for the bot metrics stays honest-thin while the
+//     human metrics forecast cleanly.
+//
+//   • `ml_comment_labels` rows (the free ML severity columns + the Inflation
+//     verdict) are seeded for EVERY bot-authored comment, the way the
+//     enrichment worker would have. ⚠ `targetKind`/`targetId` span THREE id
+//     spaces (review_comment / pr_comment / review) — each label below is
+//     built beside its source row, never from a bare id. CodeRabbit's rows
+//     carry `vendorSeverity` with an over-call lean (its badge says major,
+//     ours says minor) plus one under-call, so the Inflation column reads a
+//     real nonzero split; Copilot and Acme CI badge NOTHING (vendor null
+//     everywhere) → they render '—' / "badges nothing", the omitted-and-named
+//     state.
+//
+// Deterministic (no PRNG): hand tables + fixed cycles, so re-running the
+// seeder is byte-identical. Id bands: threads 700+, review comments 700+,
+// pr_comments 4, events 4000+ — clear of curated (≤116/1–23/30–40/300+/400+)
+// and history (≥5000) ranges.
+// ===========================================================================
+type SeedSev = 'nit' | 'minor' | 'major' | 'critical';
+const SEV_ORD: Record<SeedSev, number> = { nit: 0, minor: 1, major: 2, critical: 3 };
+const sevAbove = (s: SeedSev): SeedSev =>
+  s === 'nit' ? 'minor' : s === 'minor' ? 'major' : 'critical';
+
+interface BotHistItem {
+  botId: number;
+  prId: number;
+  repoId: number;
+  daysAgo: number;
+  path: string;
+  line: number;
+  body: string;
+  derived: 'resolved' | 'likely_addressed' | 'untouched';
+  ours: SeedSev;
+  vendor: SeedSev | null;
+  cats: string[];
+}
+
+// Host-PR picker: any Platform (api/infrastructure) PR already open at the
+// instant, preferring one still open (or closed <2d before) so the comment sits
+// inside a plausible review window. Pool order is insertion order → deterministic.
+const platformHostPrs = [...prRows, ...histPrRows].filter(
+  (p) => p.repoId === API || p.repoId === INFRA,
+);
+const hostPrAt = (daysAgo: number, salt: number): { id: number; repoId: number } => {
+  const t = now.getTime() - daysAgo * DAY_MS;
+  const alive = platformHostPrs.filter(
+    (p) =>
+      p.openedAt.getTime() <= t &&
+      (p.closedAt == null || p.closedAt.getTime() + 2 * DAY_MS >= t),
+  );
+  const pool = alive.length > 0 ? alive : platformHostPrs.filter((p) => p.openedAt.getTime() <= t);
+  const pick = pool[salt % Math.max(1, pool.length)] ?? platformHostPrs[0]!;
+  return { id: pick.id, repoId: pick.repoId };
+};
+
+// Per-bot marker'd body pools (marker ↔ severity stays consistent, like the real bots).
+const BOT_VOICES: Record<number, { body: string; ours: SeedSev; cats: string[] }[]> = {
+  [CODERABBIT]: [
+    { body: '_⚠️ Potential issue_ — this query re-reads the whole table inside the loop; hoist it above the iteration.', ours: 'major', cats: ['performance'] },
+    { body: '_🛠️ Refactor suggestion_ — the repeated guard clause can move into a shared helper to avoid drift.', ours: 'minor', cats: ['maintainability_refactor'] },
+    { body: '_🧹 Nitpick_ — inconsistent naming: `repoID` here vs `repoId` elsewhere in the module.', ours: 'nit', cats: ['nitpick', 'style_readability'] },
+  ],
+  [COPILOT]: [
+    { body: '**Potential issue** — the early return here skips the cleanup path below it.', ours: 'major', cats: ['correctness_bug'] },
+    { body: '**Suggestion** — parse the bounds once above the query builder instead of twice.', ours: 'minor', cats: ['maintainability_refactor'] },
+    { body: '🧹 Nitpick — this cast is redundant; the value is already narrowed.', ours: 'nit', cats: ['nitpick'] },
+  ],
+  [ACME_CI]: [
+    { body: '⚠️ Potential issue — the retry loop has no upper bound; a persistent failure spins forever.', ours: 'major', cats: ['correctness_bug'] },
+    { body: '🛠️ Refactor — duplicate scaling bounds; extract them into one module-level constant.', ours: 'minor', cats: ['maintainability_refactor'] },
+    { body: '🧹 Nitpick — align these threshold constants for readability.', ours: 'nit', cats: ['nitpick', 'style_readability'] },
+  ],
+};
+const BOT_PATHS: Record<number, string[]> = {
+  [CODERABBIT]: ['src/db/queries.ts', 'src/sync/upsert.ts', 'src/api/routes/feed.ts', 'src/sync/sync-repo.ts'],
+  [COPILOT]: ['src/api/routes/timeline.ts', 'src/db/triage.ts', 'src/sync/scheduler.ts'],
+  [ACME_CI]: ['terraform/eks/node-groups.tf', 'modules/monitoring/alarms.tf', 'terraform/vpc/main.tf'],
+};
+const BH_STATES = ['resolved', 'likely_addressed', 'untouched'] as const;
+
+// ---- baseline weeks 1–5 (bands [7w, 7w+7) days ago) ------------------------
+// CodeRabbit 6/7/6/7/6 (+1 from curated thread 40 in week 3 → 6,7,7,7,6),
+// Copilot 4/5/4/5/4, Acme CI 2/3/2/3/2. Trailing curated events: CR 7, CP 5,
+// ACI 4 — so with the 19-event spike ONLY CodeRabbit's trailing bucket is
+// anomalous against its own median (7): z ≈ 9.5 vs CP 0.25 / ACI 0.75.
+const BASELINE_WEEKS: Record<number, number[]> = {
+  [CODERABBIT]: [6, 7, 6, 7, 6],
+  [COPILOT]: [4, 5, 4, 5, 4],
+  [ACME_CI]: [2, 3, 2, 3, 2],
+};
+const botHistItems: BotHistItem[] = [];
+let bhSalt = 0;
+for (const botId of [CODERABBIT, COPILOT, ACME_CI]) {
+  const weeks = BASELINE_WEEKS[botId]!;
+  for (let w = 0; w < weeks.length; w++) {
+    const count = weeks[w]!;
+    for (let i = 0; i < count; i++) {
+      const daysAgo = 7 * (w + 1) + ((i + 0.5) * 7) / count; // spread inside the band
+      const host = hostPrAt(daysAgo, bhSalt);
+      const voice = BOT_VOICES[botId]![(w + i) % 3]!;
+      // CodeRabbit badges ~2/3 of its findings, leaning OVER (vendor one step above ours)
+      // every third badge — this is what feeds the Pro inflation weekly history. The other
+      // two bots never badge (vendor null → the '—' state).
+      const vendor: SeedSev | null =
+        botId === CODERABBIT
+          ? bhSalt % 3 === 0
+            ? sevAbove(voice.ours)
+            : bhSalt % 3 === 1
+              ? voice.ours
+              : null
+          : null;
+      botHistItems.push({
+        botId,
+        prId: host.id,
+        repoId: host.repoId,
+        daysAgo,
+        path: BOT_PATHS[botId]![(w + i) % BOT_PATHS[botId]!.length]!,
+        line: 20 + ((bhSalt * 13) % 240),
+        body: voice.body,
+        derived: BH_STATES[(w + i) % BH_STATES.length]!,
+        ours: voice.ours,
+        vendor,
+        cats: voice.cats,
+      });
+      bhSalt++;
+    }
+  }
+}
+
+// ---- the spike week: CodeRabbit floods #105 and #111 ------------------------
+// 18 inline comments over the trailing 7 days, nit-heavy (a noisy week reads as
+// noise, not as a burst of real findings): mostly untouched, badge-happy, with
+// exactly one critical the badge UNDER-calls — so the Inflation drill-down has
+// both directions to show. Hand-written so the two curated PRs read coherently.
+interface SpikeSeed {
+  prId: number;
+  daysAgo: number;
+  path: string;
+  line: number;
+  body: string;
+  derived: 'resolved' | 'likely_addressed' | 'untouched';
+  ours: SeedSev;
+  vendor: SeedSev | null;
+  cats: string[];
+}
+const SPIKE: SpikeSeed[] = [
+  // #105 (api — webhook handler), 9 comments
+  { prId: 105, daysAgo: 6.6, path: 'src/api/routes/webhooks.ts', line: 34, body: '_⚠️ Potential issue_ — the signature check reads the raw body AFTER json parsing; verify against the exact bytes received.', derived: 'likely_addressed', ours: 'major', vendor: 'major', cats: ['security', 'correctness_bug'] },
+  { prId: 105, daysAgo: 6.1, path: 'src/api/routes/webhooks.ts', line: 61, body: '_⚠️ Potential issue_ — webhook secrets are interpolated into this log line; redact before logging.', derived: 'resolved', ours: 'critical', vendor: 'major', cats: ['security'] },
+  { prId: 105, daysAgo: 5.4, path: 'src/api/routes/webhooks.ts', line: 90, body: '_🧹 Nitpick_ — prefer early return over the nested `else` here.', derived: 'untouched', ours: 'nit', vendor: 'major', cats: ['nitpick', 'style_readability'] },
+  { prId: 105, daysAgo: 4.8, path: 'src/sync/sync-repo.ts', line: 122, body: '_🧹 Nitpick_ — `handlerFn` shadows the import of the same name.', derived: 'untouched', ours: 'nit', vendor: 'minor', cats: ['nitpick'] },
+  { prId: 105, daysAgo: 4.1, path: 'src/api/routes/webhooks.ts', line: 118, body: '_🛠️ Refactor suggestion_ — the delivery-id dedupe map grows unbounded; cap or TTL it.', derived: 'likely_addressed', ours: 'minor', vendor: 'major', cats: ['performance', 'maintainability_refactor'] },
+  { prId: 105, daysAgo: 3.3, path: 'src/api/routes/webhooks.ts', line: 141, body: '_🧹 Nitpick_ — this comment restates the code; drop it.', derived: 'untouched', ours: 'nit', vendor: 'minor', cats: ['nitpick'] },
+  { prId: 105, daysAgo: 2.6, path: 'src/sync/sync-repo.ts', line: 87, body: '_🛠️ Refactor suggestion_ — hoist the repeated `config.` reads into locals for readability.', derived: 'untouched', ours: 'nit', vendor: null, cats: ['nitpick', 'style_readability'] },
+  { prId: 105, daysAgo: 1.7, path: 'src/api/routes/webhooks.ts', line: 155, body: '_⚠️ Potential issue_ — a replayed delivery with the same id is accepted after restart; persist the dedupe set.', derived: 'untouched', ours: 'minor', vendor: 'major', cats: ['correctness_bug'] },
+  { prId: 105, daysAgo: 0.9, path: 'src/api/routes/webhooks.ts', line: 172, body: '_🧹 Nitpick_ — trailing whitespace in the template literal.', derived: 'untouched', ours: 'nit', vendor: 'nit', cats: ['nitpick'] },
+  // #111 (api — SSE progress), 9 comments
+  { prId: 111, daysAgo: 6.4, path: 'src/api/routes/sync-activity.ts', line: 48, body: '_🛠️ Refactor suggestion_ — the SSE serializer duplicates the one in claude-review routes; extract a shared writer.', derived: 'resolved', ours: 'minor', vendor: 'minor', cats: ['maintainability_refactor'] },
+  { prId: 111, daysAgo: 5.8, path: 'src/api/routes/sync-activity.ts', line: 75, body: '_🧹 Nitpick_ — `retry:` interval of 100ms is aggressive; consider 1000ms.', derived: 'untouched', ours: 'nit', vendor: 'major', cats: ['nitpick', 'performance'] },
+  { prId: 111, daysAgo: 5.0, path: 'src/sync/sync-manager.ts', line: 204, body: '_⚠️ Potential issue_ — the progress counter is read outside the lock; a concurrent tick can report a stale total.', derived: 'likely_addressed', ours: 'minor', vendor: 'minor', cats: ['correctness_bug'] },
+  { prId: 111, daysAgo: 4.4, path: 'src/api/routes/sync-activity.ts', line: 96, body: '_🧹 Nitpick_ — inline the single-use `formatLine` helper.', derived: 'untouched', ours: 'nit', vendor: 'minor', cats: ['nitpick'] },
+  { prId: 111, daysAgo: 3.7, path: 'src/sync/sync-manager.ts', line: 233, body: '_🧹 Nitpick_ — `progressPct` is computed twice in this branch.', derived: 'untouched', ours: 'nit', vendor: null, cats: ['nitpick', 'performance'] },
+  { prId: 111, daysAgo: 2.9, path: 'src/api/routes/sync-activity.ts', line: 120, body: '_🛠️ Refactor suggestion_ — close the stream in a `finally`; an early throw currently leaks the reply.', derived: 'likely_addressed', ours: 'major', vendor: 'major', cats: ['correctness_bug', 'maintainability_refactor'] },
+  { prId: 111, daysAgo: 2.1, path: 'src/api/routes/sync-activity.ts', line: 134, body: '_🧹 Nitpick_ — prefer `const` for `lastEventId`; it is never reassigned.', derived: 'untouched', ours: 'nit', vendor: 'minor', cats: ['nitpick', 'style_readability'] },
+  { prId: 111, daysAgo: 1.3, path: 'src/sync/sync-manager.ts', line: 260, body: '_🧹 Nitpick_ — this TODO references a ticket that is already closed.', derived: 'untouched', ours: 'nit', vendor: 'minor', cats: ['nitpick', 'documentation'] },
+  { prId: 111, daysAgo: 0.5, path: 'src/api/routes/sync-activity.ts', line: 150, body: '_🧹 Nitpick_ — the heartbeat comment says 15s but the constant is 30s.', derived: 'untouched', ours: 'nit', vendor: 'minor', cats: ['nitpick', 'documentation'] },
+];
+const repoOfPrId = (prId: number): number => repoOfPr.get(prId) ?? API;
+for (const s of SPIKE) {
+  botHistItems.push({
+    botId: CODERABBIT,
+    prId: s.prId,
+    repoId: repoOfPrId(s.prId),
+    daysAgo: s.daysAgo,
+    path: s.path,
+    line: s.line,
+    body: s.body,
+    derived: s.derived,
+    ours: s.ours,
+    vendor: s.vendor,
+    cats: s.cats,
+  });
+}
+
+// ---- rows: threads + comments + events for the bot history ------------------
+let bhThreadId = 700;
+let bhCommentId = 700;
+let bhEventId = 4000;
+const bhThreadRows = botHistItems.map((it) => ({
+  id: bhThreadId++,
+  githubNodeId: `RT_${bhThreadId - 1}`,
+  prId: it.prId,
+  path: it.path,
+  line: it.line,
+  isResolved: it.derived === 'resolved',
+  isOutdated: false,
+  derivedState: it.derived,
+  originalCommenterId: it.botId,
+  createdAt: day(it.daysAgo),
+}));
+const bhCommentRows = botHistItems.map((it, i) => ({
+  id: bhCommentId++,
+  githubNodeId: `RC_${bhCommentId - 1}`,
+  threadId: bhThreadRows[i]!.id,
+  prId: it.prId,
+  authorId: it.botId,
+  body: it.body,
+  excerpt: it.body.length > 160 ? `${it.body.slice(0, 159)}…` : it.body,
+  diffHunk: `@@ -${it.line},3 +${it.line},4 @@`,
+  databaseId: `${1_400_000 + bhCommentId - 1}`,
+  createdAt: day(it.daysAgo),
+}));
+await db.insert(schema.reviewThreads).values(bhThreadRows).execute();
+await db.insert(schema.reviewComments).values(bhCommentRows).execute();
+
+// One bot-authored PR (issue-level) comment — the THIRD ml-label id space, and a
+// feed row under the bot lens. CodeRabbit's usual config tip, trailing week.
+await db
+  .insert(schema.prComments)
+  .values([
+    { id: 4, githubNodeId: 'PC_4', prId: 113, authorId: CODERABBIT, body: '> [!TIP]\n> CodeRabbit can collapse resolved threads automatically — set `reviews.collapse_resolved: true` in `.coderabbit.yaml`.', databaseId: '3000004', createdAt: day(2.25) },
+  ])
+  .execute();
+
+interface BhEventRow {
+  id: number;
+  accountId: number;
+  repoId: number;
+  actorId: number;
+  prId: number;
+  type: 'review_comment' | 'pr_comment';
+  occurredAt: Date;
+  refTable: string;
+  refId: number;
+  dedupeKey: string;
+}
+const bhEventRows: BhEventRow[] = botHistItems.map((it, i) => ({
+  id: bhEventId++,
+  accountId: 1,
+  repoId: it.repoId,
+  actorId: it.botId,
+  prId: it.prId,
+  type: 'review_comment',
+  occurredAt: day(it.daysAgo),
+  refTable: 'review_threads',
+  refId: bhThreadRows[i]!.id,
+  dedupeKey: `review_comment:${it.prId}:bh${bhThreadRows[i]!.id}`,
+}));
+bhEventRows.push({
+  id: bhEventId++,
+  accountId: 1,
+  repoId: API,
+  actorId: CODERABBIT,
+  prId: 113,
+  type: 'pr_comment',
+  occurredAt: day(2.25),
+  refTable: 'pr_comments',
+  refId: 4,
+  dedupeKey: 'pr_comment:113:bh4',
+});
+await db.insert(schema.events).values(bhEventRows).execute();
+
+// ---- ml_comment_labels — every bot-authored comment gets the label the -----
+// ---- enrichment worker would have written ----------------------------------
+// ⚠ THREE id spaces: review_comment → reviewComments.id · pr_comment →
+// prComments.id · review → reviews.id. Every row below is built beside its
+// source row so kind and id can never cross.
+interface LabelSeed {
+  repoId: number;
+  prId: number;
+  targetKind: 'review_comment' | 'pr_comment' | 'review';
+  targetId: number;
+  authorUserId: number;
+  ours: SeedSev;
+  vendor: SeedSev | null;
+  cats: string[];
+  isSummary: boolean;
+  body: string;
+  createdAt: Date;
+}
+const labelSeeds: LabelSeed[] = [];
+
+// (a) the curated #113 bot threads — hand-matched to their bodies. CodeRabbit's
+// badges lean OVER (threads 7/8/9): its "potential issue"/"refactor" framing
+// outranks what the text supports. Copilot (threads 20–23) badges nothing.
+const CURATED_113: Record<number, { ours: SeedSev; vendor: SeedSev | null; cats: string[] }> = {
+  6: { ours: 'major', vendor: 'major', cats: ['performance'] },
+  7: { ours: 'minor', vendor: 'major', cats: ['maintainability_refactor'] },
+  8: { ours: 'nit', vendor: 'minor', cats: ['nitpick', 'performance'] },
+  9: { ours: 'minor', vendor: 'major', cats: ['correctness_bug'] },
+  10: { ours: 'minor', vendor: 'minor', cats: ['maintainability_refactor'] },
+  11: { ours: 'nit', vendor: 'nit', cats: ['nitpick', 'performance'] },
+  20: { ours: 'major', vendor: null, cats: ['performance'] },
+  21: { ours: 'nit', vendor: null, cats: ['nitpick'] },
+  22: { ours: 'minor', vendor: null, cats: ['style_readability'] },
+  23: { ours: 'minor', vendor: null, cats: ['maintainability_refactor'] },
+};
+for (const rc of reviewCommentRows) {
+  const spec = CURATED_113[rc.threadId];
+  if (!spec) continue;
+  if (rc.authorId !== CODERABBIT && rc.authorId !== COPILOT) continue; // human replies stay unlabelled
+  labelSeeds.push({
+    repoId: API,
+    prId: 113,
+    targetKind: 'review_comment',
+    targetId: rc.id,
+    authorUserId: rc.authorId,
+    ours: spec.ours,
+    vendor: spec.vendor,
+    cats: spec.cats,
+    isSummary: false,
+    body: rc.body,
+    createdAt: rc.createdAt,
+  });
+}
+// (b) the cross-PR bot threads (#116 Acme CI ×3, #141 CodeRabbit ×1).
+const CURATED_BOT: Record<number, { ours: SeedSev; vendor: SeedSev | null; cats: string[] }> = {
+  30: { ours: 'major', vendor: null, cats: ['correctness_bug'] },
+  31: { ours: 'minor', vendor: null, cats: ['maintainability_refactor'] },
+  32: { ours: 'nit', vendor: null, cats: ['nitpick', 'style_readability'] },
+  40: { ours: 'minor', vendor: 'minor', cats: ['maintainability_refactor'] },
+};
+for (const rc of botCommentRows) {
+  const spec = CURATED_BOT[rc.threadId];
+  if (!spec) continue;
+  if (rc.authorId !== ACME_CI && rc.authorId !== CODERABBIT) continue;
+  labelSeeds.push({
+    repoId: rc.repoId,
+    prId: rc.prId,
+    targetKind: 'review_comment',
+    targetId: rc.id,
+    authorUserId: rc.authorId,
+    ours: spec.ours,
+    vendor: spec.vendor,
+    cats: spec.cats,
+    isSummary: false,
+    body: rc.body,
+    createdAt: rc.createdAt,
+  });
+}
+// (c) the generated bot history + spike comments — the spec rode the item.
+for (const [i, it] of botHistItems.entries()) {
+  labelSeeds.push({
+    repoId: it.repoId,
+    prId: it.prId,
+    targetKind: 'review_comment',
+    targetId: bhCommentRows[i]!.id,
+    authorUserId: it.botId,
+    ours: it.ours,
+    vendor: it.vendor,
+    cats: it.cats,
+    isSummary: false,
+    body: it.body,
+    createdAt: bhCommentRows[i]!.createdAt,
+  });
+}
+// (d) the bot REVIEW BODIES (#113 CodeRabbit/Copilot, #116 Acme CI) — targetKind
+// 'review', isSummary TRUE (a walkthrough is not a finding; excluded from every
+// severity count but present so the badge row renders on the review header).
+for (const rv of [
+  { id: 23, prId: 113, repoId: API, author: CODERABBIT, daysAgo: 2.3, body: REVIEWS.find((r) => r.id === 23)!.body! },
+  { id: 24, prId: 113, repoId: API, author: COPILOT, daysAgo: 2.2, body: REVIEWS.find((r) => r.id === 24)!.body! },
+  { id: 25, prId: 116, repoId: INFRA, author: ACME_CI, daysAgo: 3.1, body: REVIEWS.find((r) => r.id === 25)!.body! },
+]) {
+  labelSeeds.push({
+    repoId: rv.repoId,
+    prId: rv.prId,
+    targetKind: 'review',
+    targetId: rv.id,
+    authorUserId: rv.author,
+    ours: 'nit',
+    vendor: null,
+    cats: ['documentation'],
+    isSummary: true,
+    body: rv.body,
+    createdAt: day(rv.daysAgo),
+  });
+}
+// (e) the bot PR comment (id 4) — targetKind 'pr_comment', a tip → summary-like.
+labelSeeds.push({
+  repoId: API,
+  prId: 113,
+  targetKind: 'pr_comment',
+  targetId: 4,
+  authorUserId: CODERABBIT,
+  ours: 'nit',
+  vendor: null,
+  cats: ['documentation'],
+  isSummary: true,
+  body: 'CodeRabbit config tip',
+  createdAt: day(2.25),
+});
+
+await db
+  .insert(schema.mlCommentLabels)
+  .values(
+    labelSeeds.map((l) => ({
+      accountId: 1,
+      repoId: l.repoId,
+      prId: l.prId,
+      targetKind: l.targetKind,
+      targetId: l.targetId,
+      authorUserId: l.authorUserId,
+      severity: l.ours,
+      severityOrd: SEV_ORD[l.ours],
+      // Deterministic per-target wobble so the badges don't all read one number.
+      severityProb: 0.62 + ((l.targetId * 7) % 30) / 100,
+      vendorSeverity: l.vendor,
+      vendorSeverityConfidence: l.vendor == null ? null : ('high' as const),
+      categories: l.cats,
+      categoryProbs: {},
+      isSummary: l.isSummary,
+      backend: 'modernbert-onnx',
+      modelVersion: 'sev-2026-08-01',
+      bodyHash: createHash('sha256').update(l.body).digest('hex'),
+      targetCreatedAt: l.createdAt,
+    })),
+  )
+  .execute();
+
+// ===========================================================================
 // PRO-TABLE SEEDING (only when the PRIVATE @pierre/pro submodule is checked out).
 // Applies the plugin's own migrations EXACTLY the way the backend boot does
 // (src/pro/migrate.ts, incl. the pro_migrations bookkeeping — so the boot-time
@@ -1850,7 +2305,12 @@ console.log(
 console.log(
   `  history: ${histPrs.length} PRs (ids ${histPrs[0]?.id}–${histPrs[histPrs.length - 1]?.id}),`,
   `${histReviewRows.length} reviews, ${histThreadRows.length} threads,`,
-  `${histCommitRows.length} commits, ${histEventRows.length} events (weeks 3–12)`,
+  `${histCommitRows.length} commits, ${histEventRows.length} events (weeks 3–14)`,
+);
+console.log(
+  `  bot history: ${botHistItems.length} bot review comments (threads 700+, weeks 1–6 baseline`,
+  `+ the ${SPIKE.length}-comment CodeRabbit spike on #105/#111) · ${labelSeeds.length} ml_comment_labels`,
+  `(review_comment/pr_comment/review; CodeRabbit badges w/ over-call lean, Copilot & Acme CI badge nothing)`,
 );
 
 await closeDb();

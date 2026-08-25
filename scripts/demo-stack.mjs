@@ -48,6 +48,12 @@ const baseEnv = {
   DATABASE_URL: DB,
   DISABLE_SCHEDULER: 'true',
   ANTHROPIC_API_KEY: 'dummy',
+  // The ML severity gate IS the URL (config.severityApiUrl): without it /api/me reports
+  // mlSeverity:false and the SPA issues zero ML queries — so the seeded ml_comment_labels
+  // (severity badges, the Bots ROI severity + Inflation columns) would never render in the
+  // shots. Reads are DB-only and the scheduler (which owns the enrichment worker) is
+  // disabled, so nothing ever actually calls this URL; it only needs to be non-empty.
+  SEVERITY_API_URL: 'http://127.0.0.1:8799',
 };
 const proEnv = { PRO_DIGEST_ENABLED: 'true', PRO_ADVANCED_AI_ENABLED: 'true' };
 const freeEnv = { PRO_DISABLED: 'true' };

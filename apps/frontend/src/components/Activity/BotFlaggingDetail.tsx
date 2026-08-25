@@ -32,6 +32,12 @@ import {
   type BotFlaggedPrRef,
 } from './BotCommentCard.js';
 import { SeverityAgreementMatrixView } from './SeverityAgreementMatrix.js';
+import {
+  synthesisKeySlots,
+  useSynthesis,
+  type SynthesisDescriptor,
+} from '../../hooks/useSynthesis.js';
+import { SynthesisCard } from './SynthesisCard.js';
 
 // WHAT THE BOTS ARE FLAGGING — the drill-down behind every tile and chip of the Bots rail's ML
 // strip. Click "High severity" and this is the comments that number was folded from; click
@@ -62,6 +68,11 @@ const WINDOWS: { key: BotWindowKind; label: string }[] = [
 // Only ever read while the query is DISABLED (no seed). The hook's `selector` is non-optional and
 // hooks cannot be skipped, so it needs some value; this one is never sent.
 const NO_SELECTOR: BotFlaggingSelector = { kind: 'findings' };
+
+// Only ever read while the synthesis query is DISABLED (no expressible descriptor — see
+// `synthDescriptor` below). Same rule as NO_SELECTOR: hooks cannot be skipped, so useSynthesis
+// needs some value; this one is never sent.
+const NO_SYNTHESIS_DESCRIPTOR: SynthesisDescriptor = { kind: 'bot-flagging', window: 'rolling_30' };
 
 // The disagreement filter's cycle: off → any → the two directions → off. Four positions, three of
 // them "on" — `any` answers "where do we and the bots differ at all?", and the two directions
@@ -284,6 +295,57 @@ export function BotFlaggingDetail(): JSX.Element {
     [cell, disagree, bots],
   );
 
+  // ── P2.2: the synthesis verdict's SCOPE DESCRIPTOR ──────────────────────────────────────────
+  // The EXACT population the list below shows, spelled in the seam's vocabulary — the same
+  // fields `useBotFlagging`'s query key carries: the tile (`select` + severities/category), the
+  // shared window, the seed's repo narrowing, the single-bot narrowing and the disagreement
+  // direction. The seam rebuilds the drill-down's own selector+refine from exactly these
+  // (`flaggingSelectorOf` + `foldBotFlaggingPopulation` — one predicate, three consumers), so
+  // its `totalCount` IS this page's `filteredTotal` by construction.
+  //
+  // Three current states have NO seam grain and go null (the card unmounts; the list renders
+  // exactly as today): the overlap tile (deterministic line clusters — the seam's arm is
+  // deliberately absent), a matrix-CELL refinement (no per-cell synthesis surface, and the seam
+  // pins `cell: null`), and a MULTI-bot narrowing (the descriptor carries ONE `botUserId`).
+  const synthDescriptor = useMemo<SynthesisDescriptor | null>(() => {
+    if (seed == null) return null;
+    if (selector.kind === 'overlap') return null;
+    if (cell != null) return null;
+    if (bots != null && bots.userIds.length !== 1) return null;
+    return {
+      kind: 'bot-flagging',
+      window,
+      repoIds: repoScope,
+      botUserId: bots?.userIds[0] ?? null,
+      direction: disagree,
+      select: selector.kind,
+      severities: selector.kind === 'severity' ? selector.severities : null,
+      category: selector.kind === 'category' ? selector.category : null,
+    };
+  }, [seed, selector, cell, bots, disagree, window, repoScope]);
+  // The host reads the card's OWN cached query — same key slots, one cache entry, no second
+  // fetch — only to decide whether the receipts collapse. Free/OSS: useSynthesis gates itself on
+  // the capability, so this stays quiet and the list renders exactly as today.
+  const synthQuery = useSynthesis(
+    workspaceId,
+    synthDescriptor ?? NO_SYNTHESIS_DESCRIPTOR,
+    synthDescriptor != null,
+  );
+  const hasSynthesis =
+    synthDescriptor != null &&
+    synthQuery.data?.enabled === true &&
+    synthQuery.data.synthesis != null;
+  // Collapsed, NEVER hidden (P2.2): with a synthesis present the list folds under "Show the N".
+  // Reset per SCOPE — keyed on the canonical slots so an expand doesn't leak across re-seeds,
+  // window changes or direction cycles of this singleton tab.
+  const [showReceipts, setShowReceipts] = useState(false);
+  const synthKey =
+    synthDescriptor == null ? null : synthesisKeySlots(workspaceId, synthDescriptor).join('|');
+  useEffect(() => {
+    setShowReceipts(false);
+  }, [synthKey]);
+  const receiptsCollapsed = hasSynthesis && !showReceipts;
+
   // ⚠ THE RESET, and it is load-bearing. This tab is a SINGLETON re-seeded in place, so without
   // this effect clicking "Nits" while "Critical + disagreements only" is active would open a list
   // filtered to nothing and read as a broken screen. The window picker, a header workspace switch
@@ -433,8 +495,10 @@ export function BotFlaggingDetail(): JSX.Element {
   const isClusters = items.kind === 'clusters';
   const noun = isClusters ? 'line areas' : 'comments';
 
-  return (
-    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
+  // The header row + subtitle, extracted so the return can slot the SynthesisCard between them
+  // and the receipts without touching either.
+  const header = (
+    <>
       <div className="flex flex-wrap items-baseline gap-2">
         {/* The BARE tile name — `selectorLabel` returns it unprefixed and PinnedTabsBar adds its
             own "Flagged ·", so the tab chip and this heading always name the same population. */}
@@ -494,8 +558,14 @@ export function BotFlaggingDetail(): JSX.Element {
         </div>
       </div>
       <p className="max-w-4xl text-[11px] text-gray-500 dark:text-gray-400">{subtitle}</p>
+    </>
+  );
 
-      {seed == null ? (
+  // The deterministic receipt surface — the matrix, the refinement pills and the paged list.
+  // Extracted so the SynthesisCard can take it as its CHILDREN slot: it is ALWAYS rendered
+  // whatever the synthesis state (§8.20 — the card never gates it).
+  const receipts =
+    seed == null ? (
         // Unreachable in practice — the tab is ephemeral (never persisted, never parsed back from a
         // tab key), so it cannot exist without the seed that opened it. Said plainly rather than
         // rendered as an empty list, which would read as "nothing was flagged".
@@ -631,6 +701,17 @@ export function BotFlaggingDetail(): JSX.Element {
                 </>
               )}
             </div>
+          ) : receiptsCollapsed ? (
+            // P2.2: the synthesis leads and the receipts COLLAPSE (never hidden). The count is
+            // `filteredTotal` — the SAME server total the footer below renders — reused, never
+            // recounted from the loaded rows.
+            <button
+              type="button"
+              onClick={() => setShowReceipts(true)}
+              className="w-full rounded-lg border border-dashed border-gray-300 px-3 py-2 text-center text-[12px] font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-200"
+            >
+              Show the {filteredTotal.toLocaleString()} {noun} this summary was computed from
+            </button>
           ) : (
             <>
               {items.kind === 'clusters' ? (
@@ -709,6 +790,20 @@ export function BotFlaggingDetail(): JSX.Element {
             </>
           )}
         </>
+      );
+
+  return (
+    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
+      {header}
+      {/* P2.2 — the synthesis VERDICT leads, carrying this drill-down's exact scope. With no
+          expressible descriptor (overlap tile / matrix cell / multi-bot set) the list renders
+          exactly as today; free/OSS posture is the card's own (nudge on cloud, absence on OSS). */}
+      {synthDescriptor != null ? (
+        <SynthesisCard workspaceId={workspaceId} descriptor={synthDescriptor}>
+          {receipts}
+        </SynthesisCard>
+      ) : (
+        receipts
       )}
     </div>
   );

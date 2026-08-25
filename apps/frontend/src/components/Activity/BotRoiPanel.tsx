@@ -3,6 +3,7 @@ import type {
   AutomatedReviewerKind,
   BotAnalyticsMlTotals,
   BotFlaggingSelector,
+  BotInflationWeekPoint,
   BotTuningSuggestion,
   BotVendorAnalytics,
   BotVendorTrendPoint,
@@ -12,6 +13,7 @@ import type {
   BotWindowKind,
   MlSeverity,
 } from '@pierre-review/shared';
+import type { BotFlaggingBotNarrowing } from '../../lib/severityAgreement.js';
 import { ML_SEVERITIES } from '@pierre-review/shared';
 
 // ASCENDING (nit → critical), deliberately NOT the shared `ML_SEVERITIES` (worst-first, which is
@@ -26,6 +28,7 @@ import { useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useProSettings, useHasProSettings } from '../../hooks/useProSettings.js';
 import { useFilters } from '../../store/filters.js';
+import { usePinnedTabs, type TabBotMeta } from '../../store/pinnedTabs.js';
 import {
   automatedReviewerMeta,
   ML_CATEGORY_LABEL,
@@ -760,15 +763,128 @@ function VolumeCell({
   );
 }
 
+// The ONE place a vendor row's `u<userId>` key is parsed back to its users.id (the "Depth →"
+// pill's target). `BotVendorAnalytics` carries no userId field; its `key` is `u<id>` for real
+// reviewer rows and 'pierre' for Limn's own attribution row — the latter (or any future
+// non-user key) yields null, and the pill simply doesn't render for it. Kept as a single
+// exported-nowhere helper so a second spelling of the format cannot creep in.
+function vendorKeyUserId(key: string): number | null {
+  const m = /^u(\d+)$/.exec(key);
+  return m ? Number(m[1]) : null;
+}
+
+// ── The Inflation column (plan P1.2/C2) ───────────────────────────────────────────────────────
+// The severity-inflation index, folded into the ROI table: how often this bot's OWN badge
+// contradicted our label, over the same window as every other cell. It replaced the two
+// workspace-grain inflation ChartCards — the counts are the verdict (FREE, they ride the same
+// free ML fold as the severity columns); the weekly sparkline beside them is the history
+// (`botDepth`).
+//
+// ⚠ COUNTS, NEVER SHARES — and the counts partition the bot's BADGED findings, never its scored
+// ones. A bot that badges nothing renders a DASH with the "no badge is silence, not agreement"
+// tooltip, NEVER a zero: it has no over-calls because it makes no calls, and a 0 would read
+// "never inflates". (Within a badged bot a 0 IS real — "made calls, never that way".)
+//
+// ⚠ Each count opens the flagging drill-down seeded with THIS bot + direction — the exact opener
+// the removed charts used (`openBotFlaggingDetail({kind:'findings'}, repoId, {bots, disagree})`,
+// the `|bot:<id>|` refineQueryKey slot) — so the number clicked IS the list's `filteredTotal`:
+// both are the same `vendorAgreementOf` fold of the same windowed scan, server-side.
+
+// The tiny Pro sparkline: the two weekly disagreement series in the two directions' fixed colours
+// (amber = the bot called it worse, violet = we did — the removed charts' palette). Decorative
+// trend context only, so it is aria-hidden; the counts beside it carry the numbers.
+function InflationSparkline({ weekly }: { weekly: BotInflationWeekPoint[] }): JSX.Element | null {
+  const W = 52;
+  const H = 14;
+  if (weekly.length < 2) return null;
+  const max = Math.max(1, ...weekly.map((w) => Math.max(w.overCall, w.underCall)));
+  const pts = (v: (w: BotInflationWeekPoint) => number): string =>
+    weekly
+      .map((w, i) => {
+        const x = (i / (weekly.length - 1)) * (W - 2) + 1;
+        const y = H - 1 - (v(w) / max) * (H - 3);
+        return `${Math.round(x * 10) / 10},${Math.round(y * 10) / 10}`;
+      })
+      .join(' ');
+  return (
+    <svg width={W} height={H} className="ml-1 inline-block align-middle" aria-hidden="true">
+      <polyline points={pts((w) => w.overCall)} fill="none" stroke={PALETTE.amber} strokeWidth={1.25} />
+      <polyline points={pts((w) => w.underCall)} fill="none" stroke={PALETTE.violet} strokeWidth={1.25} />
+    </svg>
+  );
+}
+
+function InflationCell({
+  vendor,
+  onOpen,
+}: {
+  vendor: CostedVendor;
+  // Opens the flagging drill-down on this bot + direction; null ⇒ the counts stay plain text
+  // (the `TileShell` rule: a cell becomes clickable only when someone is there to route the click).
+  onOpen: ((direction: 'over' | 'under', bots: BotFlaggingBotNarrowing) => void) | null;
+}): JSX.Element {
+  const inf = vendor.mlInflation;
+  const userId = vendorKeyUserId(vendor.key);
+  if (inf == null || inf.badged === 0) {
+    // Omitted-and-named, never a zero — no badge is silence, not agreement.
+    return (
+      <span
+        className="text-gray-300 dark:text-gray-600"
+        title="badges nothing — no badge is silence, not agreement"
+      >
+        —
+      </span>
+    );
+  }
+  const canOpen = onOpen != null && userId != null;
+  const count = (direction: 'over' | 'under'): JSX.Element => {
+    const n = direction === 'over' ? inf.overCall : inf.underCall;
+    const label = `${direction === 'over' ? '↑' : '↓'}${n}`;
+    const title =
+      direction === 'over'
+        ? `${n} of ${inf.badged} badged findings the bot graded WORSE than our model did (inflation).${canOpen ? ' Click for the comments behind it.' : ''}`
+        : `${n} of ${inf.badged} badged findings our model graded worse than the bot's own badge — what a nit-filter set to the bot's grades would drop.${canOpen ? ' Click for the comments behind it.' : ''}`;
+    const color = direction === 'over' ? PALETTE.amber : PALETTE.violet;
+    if (!canOpen) {
+      return (
+        <span title={title} style={n > 0 ? { color } : undefined} className={n > 0 ? '' : 'text-gray-400'}>
+          {label}
+        </span>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={() => onOpen(direction, { userIds: [userId], label: vendor.label })}
+        title={title}
+        style={n > 0 ? { color } : undefined}
+        className={`rounded px-0.5 underline decoration-dotted underline-offset-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${n > 0 ? '' : 'text-gray-400'}`}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <span className="inline-flex items-center gap-1 tabular-nums">
+      {count('over')}
+      {count('under')}
+      {inf.weekly != null && <InflationSparkline weekly={inf.weekly} />}
+    </span>
+  );
+}
+
 function VendorTable({
   vendors,
   botColor,
   onOpenVendor,
   overdueGraceMs,
   showMl,
+  showCost,
   volume,
   volumeLoading,
   onOpenVolume,
+  onOpenInflation,
+  onOpenDepth,
   onTune,
   onDrop,
 }: {
@@ -789,10 +905,25 @@ function VendorTable({
   // Opens the merged-PR drill-down narrowed to this bot. null ⇒ the cell stays plain text (the
   // `TileShell` rule: a cell becomes clickable only when someone is there to route the click).
   onOpenVolume: ((bot: { userId: number; label: string }) => void) | null;
+  // Opens the per-bot DEPTH drill-down tab (plan P1.1/C1) — its own small cell/pill, because the
+  // row's existing click targets keep their jobs (the vendor chip opens the comments/PRs
+  // drill-down; the Comments/PR cell opens the volume list). Paid (`botDepth`): null renders NO
+  // depth chrome at all — hidden, not upsold, like the cost column beside it.
+  onOpenDepth:
+    | ((bot: { userId: number; label: string; login: string | null; kind: AutomatedReviewerKind }) => void)
+    | null;
   // The ML severity columns (mix bar / High / Nits / the four "not addressed by severity"
-  // columns) — rendered ONLY when the deployment scores (MeResponse.mlSeverity) AND the window
-  // has labels. False must render NO ml chrome at all.
+  // columns, plus Inflation) — rendered ONLY when the deployment scores (MeResponse.mlSeverity)
+  // AND the window has labels. False must render NO ml chrome at all.
   showMl: boolean;
+  // The Inflation column's click-through: opens the flagging drill-down seeded with the clicked
+  // bot + direction (the exact opener the removed workspace inflation charts used). null ⇒ the
+  // counts render as plain text.
+  onOpenInflation: ((direction: 'over' | 'under', bots: BotFlaggingBotNarrowing) => void) | null;
+  // The $/acted-on cost column — paid (`botDepth`, plan P0.3; it was effectively plugin-loaded
+  // via `botTriage` before). False renders NO cost chrome at all: hidden, not upsold — the
+  // upgrade nudge lives on the price editor in Bots → Settings, not on this table.
+  showCost: boolean;
   // The Bot Tuning Advisor entry point (Pro `botAdvisor`): per-row Tune/Drop pills that open
   // the Advisor tab focused on this bot. BOTH null in free mode → the Actions column does not
   // render at all (hidden, not upsold).
@@ -817,10 +948,10 @@ function VendorTable({
         className={`w-full border-collapse text-[11px] ${
           showActions
             ? showMl
-              ? 'min-w-[1560px]'
+              ? 'min-w-[1680px]'
               : 'min-w-[1200px]'
             : showMl
-              ? 'min-w-[1440px]'
+              ? 'min-w-[1560px]'
               : 'min-w-[1080px]'
         }`}
       >
@@ -936,16 +1067,36 @@ function VendorTable({
                 >
                   Not addressed by severity
                 </th>
+                {/* The Inflation column (plan P1.2/C2) — the workspace inflation charts' verdict,
+                    folded into the row. `rowSpan={headSpan}` like every other non-group ML cell. */}
+                <th
+                  rowSpan={headSpan}
+                  className="border-l border-gray-200 px-2 py-1.5 text-right font-medium dark:border-gray-800"
+                  title="How often this bot's OWN severity badge contradicted our label, over its badged findings in the window: ↑ = the bot graded a finding worse than we did (inflation), ↓ = we graded it worse than the bot (what a nit-filter on its own grades would drop). Counts, never shares. A bot that badges nothing shows a dash — no badge is silence, not agreement. Click a count for the comments behind it."
+                >
+                  Inflation
+                </th>
               </>
             )}
-            <th
-              rowSpan={headSpan}
-              className="px-2 py-1.5 text-right font-medium"
-              title="Monthly cost ÷ acted-on threads. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Bots → Settings. Narrowed to a single repo this divides a whole month's price by part of that bot's work, so read it as a rate, not as spend, and never add it up across workspaces."
-            >
-              $/acted-on
-            </th>
+            {showCost && (
+              <th
+                rowSpan={headSpan}
+                className="px-2 py-1.5 text-right font-medium"
+                title="Monthly cost ÷ acted-on threads. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Bots → Settings. Narrowed to a single repo this divides a whole month's price by part of that bot's work, so read it as a rate, not as spend, and never add it up across workspaces."
+              >
+                $/acted-on
+              </th>
+            )}
             <th rowSpan={headSpan} className="px-2 py-1.5 text-center font-medium">Verdict</th>
+            {onOpenDepth != null && (
+              <th
+                rowSpan={headSpan}
+                className="px-2 py-1.5 text-center font-medium"
+                title="Open this bot's depth tab — its latency, cadence, coverage and consistency charts, plus its severity-over-time and category mix"
+              >
+                Depth
+              </th>
+            )}
             {showActions && (
               <th
                 rowSpan={headSpan}
@@ -1169,6 +1320,12 @@ function VendorTable({
                         </td>
                       );
                     })}
+                    {/* Inflation — counts + (Pro) sparkline. NOT dashed on dormant: like the ML
+                        cells above, its window population is labels, not threads, and the cell
+                        carries its own dash rule (badges nothing ⇒ dash, never zero). */}
+                    <td className="border-l border-gray-200 px-2 py-1.5 text-right dark:border-gray-800">
+                      <InflationCell vendor={v} onOpen={onOpenInflation} />
+                    </td>
                   </>
                 )}
                 {/* The $/acted-on figure. The price is a plain column on this bot's WORKSPACE row
@@ -1178,6 +1335,7 @@ function VendorTable({
                     inheriting one $120 tool reading as $360; there is no inheritance left to
                     label, only the rule that a figure from THIS workspace is not a figure about
                     another one. */}
+                {showCost && (
                 <td
                   className="px-2 py-1.5 text-right tabular-nums text-gray-500"
                   // Money is printed through the same formatter as the cost box in Bots →
@@ -1209,6 +1367,7 @@ function VendorTable({
                     </>
                   )}
                 </td>
+                )}
                 <td className="px-2 py-1.5 text-center">
                   {v.dormant ? (
                     dash
@@ -1221,6 +1380,34 @@ function VendorTable({
                     </span>
                   )}
                 </td>
+                {onOpenDepth != null && (
+                  <td className="px-2 py-1.5 text-center">
+                    {(() => {
+                      // The 'pierre' attribution row (and any future non-user key) has no
+                      // users.id to key a depth tab on — a dash, never a dead pill.
+                      const depthUserId = vendorKeyUserId(v.key);
+                      return depthUserId == null ? (
+                        dash
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onOpenDepth({
+                              userId: depthUserId,
+                              label: v.label,
+                              login: v.login,
+                              kind: v.kind,
+                            })
+                          }
+                          title="Open this bot's depth tab — latency, cadence, coverage and consistency, plus its severity-over-time and category mix"
+                          className="rounded border border-sky-400 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 hover:bg-sky-50 dark:border-sky-600/70 dark:text-sky-300 dark:hover:bg-sky-950/40"
+                        >
+                          Depth →
+                        </button>
+                      );
+                    })()}
+                  </td>
+                )}
                 {showActions && (
                   <td className="px-2 py-1.5 text-center">
                     <span className="inline-flex gap-1">
@@ -1314,7 +1501,10 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   // doesn't render in the per-repo console (it is workspace-grain, like Themes), so a pill
   // there would navigate nowhere.
   const focusAdvisor = useFilters((s) => s.focusAdvisor);
-  const { botAdvisor } = useProCapabilities();
+  // `botDepth` gates the COST overlay (the $/acted-on column) — paid, per plan P0.3. It used
+  // to ride `botTriage` (true whenever the plugin was loaded); `botTriage` itself is untouched
+  // and still gates the free classification/identity settings surfaces.
+  const { botAdvisor, botDepth } = useProCapabilities();
   const advisorPillsOn = botAdvisor && repoId == null;
   // The workspace decides the VERDICT; `repoIds` only narrows the measured data. Both occupy
   // their own query-key slot, so either change refetches and two workspaces can never share a
@@ -1342,6 +1532,9 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   } = useBotVolume(workspaceId, window, true, repoScope);
   const volumeLoading = volumeFetching || volumeStale;
   const openBotVolumeDetail = useFilters((s) => s.openBotVolumeDetail);
+  // The per-bot DEPTH drill-down tab (plan P1.1/C1) — keyed on the bot's users.id, with the
+  // label metadata (and this table's repo narrowing) captured at open time.
+  const openBotDetailTab = usePinnedTabs((s) => s.openBotDetailTab);
   const botColor = useBotColors(workspaceId);
   // The ML severity surface: hidden ENTIRELY (no columns, no strip, no empty chrome) when the
   // deployment has no scoring service — /api/me's mlSeverity is the gate, exactly as the old
@@ -1482,6 +1675,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           onOpenVendor={(key) => openBotPrsDetail(key, repoId ?? null)}
           overdueGraceMs={t.overdueGraceMs}
           showMl={showMlColumns}
+          showCost={botDepth}
           volume={volume}
           volumeLoading={volumeLoading}
           // ⚠ THE SAME `repoId ?? null` THIRD LEG the flagging drill-down gets: on the per-repo
@@ -1490,6 +1684,35 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           // key strings) — one narrowing convention on this surface, not two.
           onOpenVolume={(b) =>
             openBotVolumeDetail(repoId ?? null, { userIds: [b.userId], label: b.label })
+          }
+          // The Inflation column's click-through — the EXACT opener the removed workspace
+          // inflation charts used: the flagging drill-down over `findings`, seeded with the
+          // clicked bot's id + direction (the `|bot:<id>|` refineQueryKey slot), plus the same
+          // `repoId ?? null` third leg as every other drill-down on this table. The workspace and
+          // window ride the shared store fields the tab reads for itself, so the count clicked
+          // and the list's `filteredTotal` are the same server-side fold of the same scan.
+          onOpenInflation={(direction, bots) =>
+            openBotFlaggingDetail({ kind: 'findings' }, repoId ?? null, {
+              bots,
+              disagree: direction,
+            })
+          }
+          // "Depth →" — Pro depth only (`botDepth`, hidden-not-upsold like the cost column).
+          // The meta is the chip/header label + the repo narrowing THIS table was measured at,
+          // so the tab describes the same scope as the row that was clicked.
+          onOpenDepth={
+            botDepth
+              ? (b) => {
+                  const meta: TabBotMeta = {
+                    id: b.userId,
+                    login: b.login,
+                    label: b.label,
+                    kind: b.kind,
+                    repoId: repoId ?? null,
+                  };
+                  openBotDetailTab(b.userId, meta);
+                }
+              : null
           }
           onTune={advisorPillsOn ? (key) => focusAdvisor(key, 'tune') : null}
           onDrop={advisorPillsOn ? (key) => focusAdvisor(key, 'drop') : null}

@@ -15,6 +15,7 @@ import { useFilters } from '../store/filters.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { useUserStats } from '../hooks/useUserStats.js';
+import { useProCapabilities } from '../hooks/useTriage.js';
 
 // Where the popover hangs off. `element` is the ordinary case — a real anchor node (the
 // clicked handle) that floating-ui tracks directly. `selector` is the vis-timeline case: the
@@ -61,6 +62,7 @@ export function UserProfilePopover({
 }): JSX.Element {
   const activeWorkspaceId = useFilters((s) => s.workspaceId);
   const openUserActivityTab = usePinnedTabs((s) => s.openUserActivityTab);
+  const { periodReports } = useProCapabilities();
   const { data: repos } = useRepos();
 
   // The repo subset the counts cover + the caption that names it. A single in-context repo wins;
@@ -238,22 +240,45 @@ export function UserProfilePopover({
         )}
 
         <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
-          <button
-            type="button"
-            onClick={() => {
-              openUserActivityTab(userId, {
-                id: userId,
-                login: user?.githubLogin ?? null,
-                displayName: user?.displayName ?? null,
-                avatarUrl: user?.avatarUrl ?? null,
-              });
-              onDismiss();
-            }}
-            className="rounded px-1.5 py-1 text-xs font-medium text-sky-600 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-sky-950/40"
-            title={`Open ${label}'s recent activity in a tab`}
-          >
-            View activity →
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                openUserActivityTab(userId, {
+                  id: userId,
+                  login: user?.githubLogin ?? null,
+                  displayName: user?.displayName ?? null,
+                  avatarUrl: user?.avatarUrl ?? null,
+                });
+                onDismiss();
+              }}
+              className="rounded px-1.5 py-1 text-xs font-medium text-sky-600 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-sky-950/40"
+              title={`Open ${label}'s recent activity in a tab`}
+            >
+              View activity →
+            </button>
+            {/* 1:1 prep (Pro `periodReports`, plan P4.2): the SAME tab — its header carries the
+                person-period vector. A separate line so the EM's entry point is named; absent
+                (never a nudge, never an error) when the capability is off. */}
+            {periodReports && (
+              <button
+                type="button"
+                onClick={() => {
+                  openUserActivityTab(userId, {
+                    id: userId,
+                    login: user?.githubLogin ?? null,
+                    displayName: user?.displayName ?? null,
+                    avatarUrl: user?.avatarUrl ?? null,
+                  });
+                  onDismiss();
+                }}
+                className="rounded px-1.5 py-1 text-xs font-medium text-violet-600 hover:bg-violet-50 dark:text-violet-400 dark:hover:bg-violet-950/40"
+                title={`Prep for a 1:1 with ${label} — their period figures, not a scorecard`}
+              >
+                1:1 prep →
+              </button>
+            )}
+          </div>
           {login && (
             <a
               href={profileUrl(login)}

@@ -22,13 +22,9 @@ import {
   DERIVED_STATE_META,
   ML_SEVERITY_META,
 } from '../../lib/ui.js';
-import {
-  mlLabelKey,
-  useMlLabelIndex,
-  useMlSeverityEnabled,
-} from '../../hooks/useMlLabels.js';
+import { useMlLabelIndex, useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { FileGroup } from './FileGroup.js';
-import { rollupCounts } from './ThreadCountChips.js';
+import { rollupCounts, threadSeverities } from './ThreadCountChips.js';
 
 // Stable empty Set so an absent stateFilter prop doesn't churn the memo deps every render.
 const EMPTY_STATE_SET: Set<DerivedState> = new Set();
@@ -113,20 +109,13 @@ export function ThreadList({
   const mlEnabled = useMlSeverityEnabled();
   const mlIndex = useMlLabelIndex(prId ?? null, mlEnabled);
 
-  // Every non-summary severity present in a thread. A thread matches the pills when it holds a
-  // comment of a selected severity — not when its WORST equals it: filtering to "major" should
-  // surface the thread that has one major finding among five nits, which an equality test on
-  // the rollup would hide.
+  // Every non-summary severity present in a thread — the shared `threadSeverities` fold (also
+  // read by BotTriageCard, so the card's nit count and these pills can never disagree). A thread
+  // matches the pills when it holds a comment of a selected severity — not when its WORST equals
+  // it: filtering to "major" should surface the thread that has one major finding among five
+  // nits, which an equality test on the rollup would hide.
   const severitiesOf = useCallback(
-    (t: ThreadDetail): Set<MlSeverity> => {
-      const out = new Set<MlSeverity>();
-      if (!mlIndex) return out;
-      for (const c of t.comments) {
-        const l = mlIndex.get(mlLabelKey('review_comment', c.id));
-        if (l && !l.isSummary) out.add(l.severity);
-      }
-      return out;
-    },
+    (t: ThreadDetail): Set<MlSeverity> => threadSeverities(t, mlIndex),
     [mlIndex],
   );
   const resolveBotThreads = useResolveBotThreads();

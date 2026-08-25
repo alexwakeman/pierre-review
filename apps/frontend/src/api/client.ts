@@ -48,15 +48,13 @@ import type {
   ConsolidatedFeedResponse,
   WorkspaceInsightsResponse,
   AttentionCardsResponse,
+  DailyBriefResponse,
   RepoWorkspaceMetricsResponse,
   WorkspaceMetricsDetailResponse,
   WorkspaceMetricsResponse,
-  WorkspaceComparisonResponse,
   AiUsageResponse,
-  SprintReportResponse,
   BotWindowKind,
   BotAnalyticsResponse,
-  BotThemesResponse,
   HumanThemesResponse,
   BotBehaviourResponse,
   BotOnlyPrsResponse,
@@ -77,6 +75,12 @@ import type {
   WorkspaceReviewerPatchBody,
   ReviewerCostBody,
   MeResponse,
+  MlCategory,
+  MlSeverity,
+  SynthesisFlaggingSelect,
+  SynthesisResponse,
+  SynthesisScopeKind,
+  VendorDisagreeDirection,
   MentionCandidate,
   MergersResponse,
   MergePrBody,
@@ -93,7 +97,6 @@ import type {
   AnnotationRunResponse,
   PrAnnotationsResponse,
   PrMlLabelsResponse,
-  BotSeverityResponse,
   MlEnrichmentStatus,
   ClosePrResult,
   PrMergeOptions,
@@ -124,9 +127,9 @@ import type {
   SprintChatBody,
   SprintChatResponse,
   SprintChatHistoryResponse,
-  PeriodChatResponse,
   PeriodReportGenerateResponse,
   PeriodReportResponse,
+  PersonPeriodResponse,
   PeriodReportsListResponse,
   PinnedPromptsResponse,
   CreatePinnedPromptBody,
@@ -252,6 +255,44 @@ function repoIdsParam(repoIds?: number[] | null): string {
 function withQuery(base: string, ...parts: (string | undefined)[]): string {
   const qs = parts.filter((p): p is string => Boolean(p)).join('&');
   return qs ? `${base}?${qs}` : base;
+}
+
+// The synthesis scope on the wire (plan P2.1). One builder for the GET and the POST so the two
+// verbs can never address different cache rows; the server canonicalises (fills the 'findings'
+// default, drops kind-irrelevant fields) so omitted-vs-explicit spellings land on one row too.
+export interface SynthesisRequestParams {
+  kind: SynthesisScopeKind;
+  window: BotWindowKind;
+  workspaceId: number;
+  repoIds?: number[] | null;
+  botUserId?: number | null;
+  direction?: VendorDisagreeDirection | null;
+  select?: SynthesisFlaggingSelect | null;
+  severities?: MlSeverity[] | null;
+  category?: MlCategory | null;
+  /** 'person' grain only: the 1:1 subject + the period's real epoch-ms bounds. */
+  userId?: number | null;
+  fromMs?: number | null;
+  toMs?: number | null;
+}
+
+function synthesisQueryParts(p: SynthesisRequestParams): (string | undefined)[] {
+  return [
+    `kind=${encodeURIComponent(p.kind)}`,
+    `window=${encodeURIComponent(p.window)}`,
+    workspaceParam(p.workspaceId),
+    repoIdsParam(p.repoIds),
+    p.botUserId != null ? `botUserId=${p.botUserId}` : undefined,
+    p.direction ? `direction=${encodeURIComponent(p.direction)}` : undefined,
+    p.select ? `select=${encodeURIComponent(p.select)}` : undefined,
+    p.severities && p.severities.length > 0
+      ? `severities=${encodeURIComponent(p.severities.join(','))}`
+      : undefined,
+    p.category ? `category=${encodeURIComponent(p.category)}` : undefined,
+    p.userId != null ? `userId=${p.userId}` : undefined,
+    p.fromMs != null ? `fromMs=${p.fromMs}` : undefined,
+    p.toMs != null ? `toMs=${p.toMs}` : undefined,
+  ];
 }
 
 export const api = {
@@ -585,8 +626,8 @@ export const api = {
     ),
   // Workspace review-intelligence "Insights" (Pro; workspaceInsights capability) — the attention
   // CARDS (+ the sprint report). The flow-metric HEADER moved OUT to the free
-  // /api/workspace-metrics, the Retro panel was deleted, and Compare moved to the free
-  // /api/workspace-metrics/compare.
+  // /api/workspace-metrics, the Retro panel was deleted, and cross-workspace comparison is the
+  // Reports "By workspace" axis (carried on `periodReport`).
   workspaceInsights: (workspaceId: number) =>
     get<WorkspaceInsightsResponse>(withQuery('/api/pro/insights', workspaceParam(workspaceId))),
   // The workspace flow-metric header (DORA-ish tiles + trends) — CORE/free, rendered in the Feed.
@@ -595,6 +636,12 @@ export const api = {
   // The attention cards (CORE/free) for the Feed "Needs attention" tab.
   attentionCards: (workspaceId: number) =>
     get<AttentionCardsResponse>(withQuery('/api/attention', workspaceParam(workspaceId))),
+  // The daily brief (CORE/free, counts only — plan P3.1/P3.3). `rollup` adds the per-workspace
+  // "Elsewhere" count lines; the Pro narration is a SEPARATE synthesis fetch, never this route.
+  dailyBrief: (workspaceId: number, rollup: boolean) =>
+    get<DailyBriefResponse>(
+      withQuery('/api/daily-brief', workspaceParam(workspaceId), rollup ? 'rollup=1' : undefined),
+    ),
   // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click) — CORE/free
   // too, so a Feed tile opens the drill-down for everyone.
   workspaceMetricsDetail: (workspaceId: number) =>
@@ -606,37 +653,14 @@ export const api = {
   // that repo's OWN workspace server-side, so it takes no `?workspace=`.
   repoWorkspaceMetrics: (repoId: number) =>
     get<RepoWorkspaceMetricsResponse>(`/api/pro/insights/repo/${repoId}/metrics`),
-  // Cross-WORKSPACE comparison — one WorkspaceMetrics row per workspace the account owns, so the
-  // SPA renders a compact metric×workspace matrix. CORE/FREE and served beside the two routes above
-  // (it shares their trailing-14d window), NOT the old Pro `/api/pro/insights/team-comparison`,
-  // which is DELETED: the panel is now its own Activity rail line, where it must render on every
-  // tier.
-  //
-  // ⚠ IT TAKES NO PARAMETERS — not even a workspace id — and its query key must have no scope
-  // segment either. It compares EVERY workspace, Default included, because its whole purpose is to
-  // place the selected one against the others; scoping it is what made its predecessor vanish the
-  // moment fewer than two teams were selected, and a scoped KEY would fragment one answer across N
-  // cache slots. The surface is gated client-side on `workspaces.length >= 2`, a count over the
-  // roster, never a test on a scope value.
-  //
-  // Rate limit: the `search` tier (60/min), not the blanket `read` bucket — its cost multiplies by
-  // workspace count. Fire it only while the Compare surface is open.
-  workspaceComparison: () =>
-    get<WorkspaceComparisonResponse>('/api/workspace-metrics/compare'),
+  // (`workspaceComparison` / `GET /api/workspace-metrics/compare` were DELETED with the "Compare
+  // workspaces" rail entry — cross-workspace comparison is the Reports "By workspace" axis now,
+  // carried on `periodReport`'s response as the optional `byWorkspace` field.)
   // Month-to-date AI-usage rollup (credits, split by seam). Covers all account AI spend.
   aiUsage: () => get<AiUsageResponse>('/api/pro/ai-usage'),
-  // The Insights "Sprint report" (Pro Haiku summary; activityDigest capability), grounded in one
-  // workspace's repos.
-  sprintReport: (workspaceId: number) =>
-    get<SprintReportResponse>(
-      withQuery('/api/pro/sprint-report', workspaceParam(workspaceId)),
-    ),
-  refreshSprintReport: (workspaceId: number) =>
-    fetch(
-      withQuery('/api/pro/sprint-report/refresh', workspaceParam(workspaceId)),
-      jsonBody('POST'),
-    ).then((r) => handle<SprintReportResponse>(r)),
-  // (`retroReport` / `refreshRetroReport` were REMOVED with the Insights "Retro" panel and its
+  // (`sprintReport` / `refreshSprintReport` were REMOVED with `SprintReportCard` (the C7 cut
+  // list); the `/api/pro/sprint-report*` plugin routes still exist server-side but have no SPA
+  // consumer. `retroReport` / `refreshRetroReport` were REMOVED with the Insights "Retro" panel and its
   // `/api/pro/retro*` routes. The retrospective is now a quick-question pill in the ad-hoc chat,
   // which needs no route of its own.)
   // Repo-scoped Claude review history (all runs per PR, newest-first). Gated on
@@ -751,23 +775,20 @@ export const api = {
       ),
       jsonBody('POST', body),
     ).then((r) => handle<PeriodReportGenerateResponse>(r)),
-  // A drill-down turn, grounded in the stored report's STRUCTURED JSON (not its prose).
-  // `suggestedId` names a `PeriodSuggestedQuestion.id` from the report: the question's scope
-  // (`{metric, repoIds, fromMs, toMs}`) is already bound server-side, so a pill costs the model
-  // no re-derivation and cannot drift from the figures the reader is looking at. Free text sends
-  // `question` alone.
-  periodReportChat: (
-    workspaceId: number,
-    periodKey: string,
-    body: { question: string; suggestedId?: string },
-  ) =>
-    fetch(
+  // (`periodReportChat` — the per-report drill-down turn — was removed with the panel's old
+  // ReportChat: "Ask about this period" is the ad-hoc chat now, grounded via `sprintChat` with
+  // explicit period bounds. The `…/reports/:key/chat` route still serves; nothing here calls it.)
+  // The 1:1-prep vector (Pro `periodReports`; plan P4.2): one person, one cadence period, FREE
+  // deterministic read. `person: null` covers unknown/foreign/bot ids and off-grid periods in
+  // one shape. The narration is NOT on this route — it rides the synthesis pair (kind 'person').
+  personPeriod: (workspaceId: number, userId: number, periodKey: string) =>
+    get<PersonPeriodResponse>(
       withQuery(
-        `/api/pro/insights/reports/${encodeURIComponent(periodKey)}/chat`,
+        `/api/pro/insights/person/${userId}`,
         workspaceParam(workspaceId),
+        `period=${encodeURIComponent(periodKey)}`,
       ),
-      jsonBody('POST', body),
-    ).then((r) => handle<PeriodChatResponse>(r)),
+    ),
   // A single repo's digest (lazy per-repo so a slow Haiku call never blocks the grid).
   repoDigest: (repoId: number) =>
     get<RepoDigest>(`/api/pro/activity/digests/${repoId}`),
@@ -834,10 +855,8 @@ export const api = {
     fetch('/api/reactions', jsonBody('POST', body)).then((r) =>
       handle<ReactionWriteResponse>(r),
     ),
-  botSeverity: (workspaceId: number, repoIds?: number[] | null) =>
-    get<BotSeverityResponse>(
-      withQuery('/api/bot-severity', workspaceParam(workspaceId), repoIdsParam(repoIds)),
-    ),
+  // (`botSeverity` and its GET /api/bot-severity route were REMOVED — the merged Bots ROI table
+  // reads the severity fold off `getBotAnalytics` instead.)
   // Live state of the background scoring worker. NO workspace parameter on purpose — the worker
   // walks every workspace, so this is account-wide (see MlEnrichmentStatus). Polled by the sync
   // UI so "sync complete" is not claimed while the model is still scoring what the walk fetched.
@@ -1235,27 +1254,8 @@ export const api = {
     fetch('/api/pro/advisor/config-events', jsonBody('POST', body)).then((r) =>
       handle<{ ok: boolean }>(r),
     ),
-  // The Bots "Themes" AI summary (Pro Haiku) — the qualitative read of what the automated reviewers
-  // are flagging over the current WORKSPACE + window. GET is a pure cache read; the refresh POST is
-  // the only billing path. Workspace-scoped (the cross-repo Bots rail), so no repoIds.
-  botThemes: (window: BotWindowKind, workspaceId: number) =>
-    get<BotThemesResponse>(
-      withQuery(
-        '/api/pro/bot-themes',
-        `window=${encodeURIComponent(window)}`,
-        workspaceParam(workspaceId),
-      ),
-    ),
-  botThemesRefresh: (window: BotWindowKind, workspaceId: number) =>
-    fetch(
-      withQuery(
-        '/api/pro/bot-themes/refresh',
-        `window=${encodeURIComponent(window)}`,
-        workspaceParam(workspaceId),
-      ),
-      jsonBody('POST'),
-    ).then((r) => handle<BotThemesResponse>(r)),
-  // The Feed "Discussion themes" AI summary (Pro Haiku) — the HUMAN sibling of bot-themes: what
+  // The Feed "Discussion themes" AI summary (Pro Haiku) — the HUMAN sibling of the retired
+  // bot-themes surface (the bot side folded into the synthesis seam, plan P2.3/C6): what
   // PEOPLE are raising in review, over the current WORKSPACE + window. GET is a pure cache read;
   // the refresh POST is the only billing path.
   humanThemes: (window: BotWindowKind, workspaceId: number) =>
@@ -1275,16 +1275,36 @@ export const api = {
       ),
       jsonBody('POST'),
     ).then((r) => handle<HumanThemesResponse>(r)),
-  // EXPERIMENTAL bot behaviour analytics (TTFR / LoC-to-comments / week×hour heatmap / follow-ups).
-  // Same window/workspace/repoIds wiring as botAnalytics — both scope parameters are sent.
-  botBehaviour: (window: BotWindowKind, workspaceId: number, repoIds?: number[] | null) =>
+  // Bot behaviour analytics (TTFR / LoC-to-comments / week×hour heatmap / follow-ups). MOVED to
+  // the plugin behind the `botDepth` capability (plan P0.2) — callers gate on it via
+  // useProCapabilities, so with botDepth false this is never fetched (in OSS the route does not
+  // exist at all). Same window/workspace/repoIds wiring as botAnalytics — both scope parameters
+  // are sent. `botUserId` narrows the whole response to ONE bot (the per-bot depth drill-down
+  // tab, plan P1.1/C1) — the server admits only ids in the workspace's review-role set.
+  botBehaviour: (
+    window: BotWindowKind,
+    workspaceId: number,
+    repoIds?: number[] | null,
+    botUserId?: number | null,
+  ) =>
     get<BotBehaviourResponse>(
       withQuery(
-        '/api/bot-behaviour',
+        '/api/pro/bot-behaviour',
         `window=${encodeURIComponent(window)}`,
         workspaceParam(workspaceId),
         repoIdsParam(repoIds),
+        botUserId != null ? `botUserId=${botUserId}` : undefined,
       ),
+    ),
+  // The ONE synthesis endpoint (plan P2.1): GET = the free cached read + stale flag (never
+  // generates); POST = the only billing path. One params builder for both verbs so the row the
+  // POST writes and the row the GET reads can never be addressed differently. Callers gate on the
+  // `activityDigest` capability (useSynthesis) — in OSS the route does not exist at all.
+  synthesis: (p: SynthesisRequestParams) =>
+    get<SynthesisResponse>(withQuery('/api/pro/synthesis', ...synthesisQueryParts(p))),
+  synthesisGenerate: (p: SynthesisRequestParams) =>
+    fetch(withQuery('/api/pro/synthesis', ...synthesisQueryParts(p)), jsonBody('POST')).then(
+      (r) => handle<SynthesisResponse>(r),
     ),
   // The exact PR list behind the analytics `totals.botOnlyPrs` count — "only a bot reviewed these".
   // Same window/workspace/repoIds wiring as botAnalytics, so the caption's number and this list are

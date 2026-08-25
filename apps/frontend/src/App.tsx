@@ -12,6 +12,7 @@ import { BotThreadsDetail } from './components/Activity/BotThreadsDetail.js';
 import { BotFlaggingDetail } from './components/Activity/BotFlaggingDetail.js';
 import { BotVolumeDetail } from './components/Activity/BotVolumeDetail.js';
 import { UserActivityDetail } from './components/Activity/UserActivityDetail.js';
+import { BotDetailPanel } from './components/Activity/BotDetailPanel.js';
 import { ThemeThreadsDetail } from './components/Activity/ThemeThreadsDetail.js';
 import { SearchResultsTab } from './components/Search/SearchResultsTab.js';
 import { DetailPane } from './components/DetailPane.js';
@@ -126,6 +127,7 @@ export default function App(): JSX.Element {
   const themeThreadsActive = activeTabObj?.kind === 'theme-threads';
   const searchActive = activeTabObj?.kind === 'search';
   const userActivityActive = activeTabObj?.kind === 'user-activity';
+  const botDetailActive = activeTabObj?.kind === 'bot-detail';
   const boardMode: TimelineMode | null =
     activeTabObj?.kind === 'pr-focus'
       ? { kind: 'isolate', prId: activeTabObj.prId }
@@ -135,11 +137,10 @@ export default function App(): JSX.Element {
   // an overlay — it replaces the board slot, so it doesn't set this.
   //
   // Note the axis: these are TABS. The Activity console's own RAIL entries — Insights, Feed,
-  // Bots, Compare workspaces, Needs attention, and each repo — are not tabs and get no branch
-  // here; they are `filters.activityRepoId` values rendered inside <ActivityView/>, which is
-  // already covered by `inboxActive`. Compare workspaces in particular is a rail line
-  // (`activityRepoId === 'compare'`), NOT a drill-down tab: there is no 'compare' TabKind and
-  // nothing to add to this list for it.
+  // Bots, Needs attention, and each repo — are not tabs and get no branch here; they are
+  // `filters.activityRepoId` values rendered inside <ActivityView/>, which is already covered
+  // by `inboxActive`. (The "Compare workspaces" rail line is gone — cross-workspace comparison
+  // is Reports' "By workspace" axis, inside the Insights rail entry; still no TabKind for it.)
   const overlayActive =
     prDetailId != null ||
     inboxActive ||
@@ -152,7 +153,8 @@ export default function App(): JSX.Element {
     botVolumeActive ||
     themeThreadsActive ||
     searchActive ||
-    userActivityActive;
+    userActivityActive ||
+    botDetailActive;
   // The detail pane is shown at the bottom of any board-slot Timeline (shared or
   // pr-focus) once a PR is selected there.
   const paneVisible = selectedPrId != null && !overlayActive;
@@ -496,6 +498,17 @@ export default function App(): JSX.Element {
             className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
           >
             <UserActivityDetail />
+          </div>
+        )}
+        {/* One review bot's depth analytics — a sibling full-main overlay. Keyed on the tab so
+            switching between two bots' tabs remounts the panel rather than reusing state. */}
+        {botDetailActive && (
+          <div
+            key={activeTab}
+            data-testid="bot-detail-overlay"
+            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
+          >
+            <BotDetailPanel />
           </div>
         )}
         {/* Cross-repo search results (scoped to the active workspace) — a sibling full-main

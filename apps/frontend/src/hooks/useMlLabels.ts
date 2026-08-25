@@ -1,15 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { skipToken } from '@tanstack/react-query';
 import type {
-  BotSeverityResponse,
   MlEnrichmentStatus,
   MlLabel,
   MlLabelTargetKind,
   PrMlLabelsResponse,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
-import { workspaceKey } from './useActivity.js';
-import { repoKeySlot } from './useBotTriage.js';
 import { useMe } from './useTriage.js';
 
 // ML severity/category labels on bot comments (CORE, FREE TIER — a local ONNX classifier on the
@@ -64,34 +60,8 @@ export function useMlLabelIndex(
   }).data;
 }
 
-/**
- * The Bots-interface severity rollup for one workspace.
- *
- * WORKSPACE-scoped, so the key carries the `ws:<id>` segment: two workspaces with no repo
- * narrowing build the identical request URL otherwise, and React Query would serve one's
- * numbers under the other's name with no refetch and no error.
- */
-export function botSeverityKey(
-  workspaceId: number | null,
-  repoIds: number[] | null,
-): unknown[] {
-  return ['bot-severity', workspaceKey(workspaceId), repoKeySlot(repoIds)];
-}
-
-export function useBotSeverity(
-  workspaceId: number | null,
-  repoIds: number[] | null,
-  enabled: boolean,
-) {
-  return useQuery<BotSeverityResponse>({
-    queryKey: botSeverityKey(workspaceId, repoIds),
-    queryFn:
-      workspaceId != null && enabled
-        ? () => api.botSeverity(workspaceId, repoIds)
-        : skipToken,
-    staleTime: 60_000,
-  });
-}
+// (`useBotSeverity` / `botSeverityKey` were REMOVED with GET /api/bot-severity — the merged
+// Bots ROI table reads the severity fold off `getBotAnalytics` instead. C7 cut list.)
 
 // ---- The scoring phase of a sync ---------------------------------------------------------
 //

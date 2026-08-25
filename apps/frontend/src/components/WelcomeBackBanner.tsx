@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useMe } from '../hooks/useTriage.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { useFilters } from '../store/filters.js';
-import { suppressInsightsDefault } from './Activity/index.js';
 import { relativeTime } from '../lib/ui.js';
 
 // A dismissible "welcome back" banner shown when there are "My Turn" feed items you haven't
@@ -28,11 +27,10 @@ export function WelcomeBackBanner(): JSX.Element | null {
   const since = me.feedLastSeenAt;
 
   // Open the Activity console's Feed, filtered to My Turn (the yellow-bordered items that
-  // need you). Viewing it marks the feed seen server-side, resetting the count. Suppress the
-  // one-shot Pro "default to Insights" first-mount effect so it can't clobber our 'feed' back
-  // to 'insights' when the banner is what opens the console (My Turn is core / every tier).
+  // need you). Viewing it marks the feed seen server-side, resetting the count. (This used to
+  // also call suppressInsightsDefault() — that one-shot "default to Insights" effect is gone:
+  // the Feed IS the default landing for every tier now, brief strip on top.)
   const showFeed = (): void => {
-    suppressInsightsDefault();
     setActivityRepo('feed');
     setFeedMyTurnOnly(true);
     showActivity();
