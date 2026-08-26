@@ -7,6 +7,7 @@ import { getScheduledJobs } from './scheduled-jobs.js';
 import { runBenchmarkRollup } from './benchmark-rollup.js';
 import { AUTO_MERGE_CRON, runAutoMergeTick } from '../merge/auto-merge-runner.js';
 import { runMlEnrichmentTick } from './ml-enrichment.js';
+import { MENTION_SCAN_CRON, runMentionScanTick } from './mention-scan.js';
 import { isSeverityApiConfigured } from '../ml/severity-client.js';
 import type { Logger } from './sync-repo.js';
 
@@ -15,6 +16,7 @@ let retentionTask: ScheduledTask | null = null;
 let benchmarkTask: ScheduledTask | null = null;
 let autoMergeTask: ScheduledTask | null = null;
 let mlEnrichmentTask: ScheduledTask | null = null;
+let mentionScanTask: ScheduledTask | null = null;
 // node-cron handles for plugin-registered background jobs (Slack digest cron, AI update policy).
 let proJobTasks: ScheduledTask[] = [];
 
@@ -99,6 +101,19 @@ export function startScheduler(log: FastifyBaseLogger): void {
     }
   }
 
+  // "@you" mention derivation (CORE, free tier, no AI, no GitHub quota) — the mention arm of My
+  // Turn's personal-relevance flag. Its own tick for the same reason ML enrichment has one: it
+  // pulls its whole worklist from the DB rather than being fed by a sync hook, so a webhook
+  // comment and a 90-day backfill are the same kind of work to it. Unconditional (no service to
+  // depend on, unlike ML), wall-clock bounded and never throws — with no rows the personal flag
+  // simply degrades to the maintainer test it had before this existed.
+  if (cron.validate(MENTION_SCAN_CRON)) {
+    mentionScanTask = cron.schedule(MENTION_SCAN_CRON, () => {
+      void runMentionScanTick(log);
+    });
+    log.info(`mention scan started (cron "${MENTION_SCAN_CRON}")`);
+  }
+
   // Plugin-registered background jobs (the @pierre/pro Slack digest cron + AI update policy).
   // Registered during bindProPlugin (which runs BEFORE startScheduler), so the registry is
   // populated here. Each rides the same disableScheduler gate as sync/retention and is torn
@@ -130,6 +145,8 @@ export function stopScheduler(): void {
   autoMergeTask = null;
   mlEnrichmentTask?.stop();
   mlEnrichmentTask = null;
+  mentionScanTask?.stop();
+  mentionScanTask = null;
   for (const t of proJobTasks) t.stop();
   proJobTasks = [];
 }

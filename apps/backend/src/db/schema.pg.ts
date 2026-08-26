@@ -1134,3 +1134,32 @@ export const mlCommentLabels = pgTable(
     ),
   }),
 );
+
+// ── "@you" on a PR ── the pg twin of the sqlite prMentions table. See that file for the full
+// rationale (presence IS the fact, why it is a table and not a column on pull_requests, why
+// `login` is provenance rather than a denormalised copy of accounts.github_login). Written only
+// by sync/mention-scan.ts. Contract: docs/DATA-MODEL.md.
+export const prMentions = pgTable(
+  'pr_mentions',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    login: text('login').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountPrUx: uniqueIndex('prm_account_pr').on(t.accountId, t.prId),
+    accountRepoIdx: index('prm_account_repo_idx').on(t.accountId, t.repoId),
+    prIdx: index('prm_pr_idx').on(t.prId),
+  }),
+);

@@ -137,6 +137,7 @@ beforeEach(() => {
     repoIds: null,
     activityRepoId: 'feed',
     attentionIsolation: null,
+    attentionPersonalOnly: false,
     feedIsolatedPrId: null,
     feedInnerTab: 'feed',
     botsInnerTab: 'roi',
@@ -308,6 +309,74 @@ describe('Back from Needs attention (the reported bug)', () => {
     expect(useFilters.getState().workspaceId).toBe(5);
     expect(useFilters.getState().attentionIsolation).toBeNull();
     expect(useFilters.getState().activityRepoId).toBe('feed');
+  });
+});
+
+// ── The PERSONAL lens (`attnPersonal`) — the board's second narrowing ────────────────────────
+//
+// The notification surfaces count the personal subset of my_turn, so the board they open is
+// narrowed to match (otherwise a banner reading 4 opens a list of 50). That makes it a VIEW the
+// reader navigated to, on both counts: it must have its own entry, and a pop onto a URL that does
+// not name it must CLEAR it — the `readFromUrl`-is-partial trap, which bites every key added here.
+describe('the personal lens on Needs attention', () => {
+  it('rides the URL and PUSHES — it changes what the board shows', () => {
+    gesture(() => useFilters.getState().setActivityRepo('attention'));
+    gesture(() => useFilters.getState().setAttentionPersonalOnly(true));
+    expect(entries).toHaveLength(3);
+    expect(location.search).toContain('attnPersonal=1');
+  });
+
+  it('round-trips through Back and Forward', () => {
+    gesture(() => useFilters.getState().setActivityRepo('attention'));
+    gesture(() => useFilters.getState().setAttentionPersonalOnly(true));
+
+    back();
+    // ⚠ Gone, not merely off-screen: the popped URL says nothing about it, and a partial pop
+    // would leave the next visit to the board silently filtered.
+    expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+    expect(useFilters.getState().activityRepoId).toBe('attention');
+
+    forward();
+    expect(useFilters.getState().attentionPersonalOnly).toBe(true);
+  });
+
+  it('is emitted only ON the attention rail — a lens off-screen is not part of the view', () => {
+    gesture(() => {
+      useFilters.getState().setActivityRepo('attention');
+      useFilters.getState().setAttentionPersonalOnly(true);
+    });
+    expect(location.search).toContain('attnPersonal=1');
+    gesture(() => useFilters.getState().setActivityRepo('feed'));
+    expect(location.search).not.toContain('attnPersonal');
+  });
+
+  it('the banner gesture is still ONE entry, and carries BOTH narrowings', () => {
+    gesture(() => useFilters.getState().openMyTurnInWorkspace(9));
+    expect(entries).toHaveLength(2);
+    expect(location.search).toContain('attn=my_turn');
+    expect(location.search).toContain('attnPersonal=1');
+
+    back();
+    expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+    expect(useFilters.getState().attentionIsolation).toBeNull();
+
+    forward();
+    // One Forward restores the WHOLE view — a banner click is one gesture in both directions.
+    expect(useFilters.getState().workspaceId).toBe(9);
+    expect(useFilters.getState().attentionIsolation).toBe('my_turn');
+    expect(useFilters.getState().attentionPersonalOnly).toBe(true);
+  });
+
+  it('only the literal 1 seats it — a link carrying anything else means the broad board', () => {
+    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnPersonal=0');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnPersonal=yes');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnPersonal=1');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionPersonalOnly).toBe(true);
   });
 });
 

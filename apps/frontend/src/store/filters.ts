@@ -385,6 +385,25 @@ export interface FilterState {
   // complaint). URL-visible and PERSISTED are different questions — a link may name the narrowed
   // board; a fresh tab must not restore it from a stale blob. See hooks/useUrlState.
   attentionIsolation: InsightKind | null;
+  // Activity "Needs attention" PERSONAL lens: false (default) → the board paints every card;
+  // true → `my_turn` cards flagged `MyTurnCard.personal === false` are hidden.
+  //
+  // ⚠ IT IS A SIBLING OF `attentionIsolation`, NOT A MEMBER OF IT. That field is compared
+  // against `card.kind`, so a "personal" member would be a kind that matches no card — and the
+  // two predicates are orthogonal anyway (you can want personal-only cards of every kind).
+  //
+  // ⚠ IT EXISTS TO KEEP A NOTIFICATION AND ITS DESTINATION THE SAME POPULATION. The welcome-back
+  // banner, the Workspace-dropdown badges and the "Elsewhere" lines now count the PERSONAL subset
+  // (`DailyBriefCounts.myTurnPersonal`) — otherwise they nag you about a stranger's PR in a repo
+  // you have never touched. A banner reading 4 whose click opened a board of 50 would be the
+  // "the strip says 5, the board lists 3" defect in a new place, so the ONE gesture that opens
+  // the board from those counts (`openMyTurnInWorkspace`) seats this lens as its last step.
+  //
+  // Transient, exactly like `attentionIsolation`: NOT in FilterDefaults / freshFilterDefaults /
+  // pickFilterBarState (so no FILTER_STORAGE_VERSION bump is owed), cleared by any rail or scope
+  // change — but URL-SERIALIZED (`?attnPersonal=1`) and a NAVIGATION key, because it changes what
+  // the board shows and a reader must be able to Back out of it.
+  attentionPersonalOnly: boolean;
   // The cross-repo Feed's "New" markers — see FeedNewCohorts above. Transient, URL-silent,
   // and written ONLY by FeedView's auto-insert path (a batch landed) and its scroll handler
   // (the reader is at the top). Read as a flat id set; never recomputed defensively on render.
@@ -764,6 +783,16 @@ export interface FilterState {
   // bot-only-PRs "Show in Activity feed" buttons follow for `setFeedIsolatedPrId`.
   setAttentionIsolation: (kind: InsightKind | null) => void;
   /**
+   * Narrow the "Needs attention" board to the cards that personally involve the viewer (or clear
+   * with false) — the lens the notification counts navigate INTO.
+   *
+   * ⚠ SAME ORDERING TRAP AS `setAttentionIsolation`, and one more: `setActivityRepo` clears this
+   * too AND early-returns `{}` on an unchanged rail, so a caller that wants the BROAD board while
+   * already standing on it must clear this EXPLICITLY (the daily brief's lines do — their figures
+   * are the broad ones). Relying on the rail switch to clear it works only when the rail changes.
+   */
+  setAttentionPersonalOnly: (on: boolean) => void;
+  /**
    * THE ONE "show me my turn — over there" navigation, in ONE gesture.
    *
    * Used by the Welcome-back banner's per-workspace lines: the whole point of that banner is that
@@ -781,7 +810,12 @@ export interface FilterState {
    *  2. `setActivityRepo` also clears the isolation, AND early-returns an empty patch when the
    *     rail id is unchanged — the asymmetry that makes a wrong-ordered caller work on every
    *     second click. (Pinned by attentionIsolation.test.ts.)
-   *  3. Only then is the lens seated.
+   *  3. Only then are the two lenses seated.
+   *
+   * ⚠ IT SEATS `attentionPersonalOnly` TOO, and that is not decoration. Every caller of this
+   * action is a NOTIFICATION surface whose figure is the PERSONAL count (banner line, dropdown
+   * badge, the brief's "Elsewhere" rows). Landing them on the broad board would put back the
+   * defect 747c9c9 fixed — a line that says 4 opening a list of 50.
    *
    * ⚠ The workspace write is SKIPPED when we are already there. Re-writing the same id would
    * throw away a repo narrowing the user chose on the Timeline for no reason at all.
@@ -1229,6 +1263,9 @@ function freshDefaults(): FilterData {
     feedShowCommits: false,
     feedIsolatedPrId: null,
     attentionIsolation: null,
+    // The board is BROAD by default: every card, personal or not. The lens is only ever seated by
+    // arriving from a count that was itself narrow.
+    attentionPersonalOnly: false,
     // No batch has landed yet — a freshly-opened feed is all equally new, so nothing is marked.
     feedNewCohorts: { scopeKey: null, cohorts: [] },
     botAnalyticsWindow: 'rolling_14',
@@ -1312,6 +1349,7 @@ export type UrlOwnedState = Pick<
   | 'selectedPrId'
   | 'selectedThreadId'
   | 'attentionIsolation'
+  | 'attentionPersonalOnly'
   | 'feedIsolatedPrId'
   | 'prDetailTab'
   | 'feedInnerTab'
@@ -1327,6 +1365,7 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
     selectedPrId: d.selectedPrId,
     selectedThreadId: d.selectedThreadId,
     attentionIsolation: d.attentionIsolation,
+    attentionPersonalOnly: d.attentionPersonalOnly,
     feedIsolatedPrId: d.feedIsolatedPrId,
     prDetailTab: d.prDetailTab,
     feedInnerTab: d.feedInnerTab,
@@ -1343,7 +1382,16 @@ export const useFilters = create<FilterState>((set, get) => ({
   // kind isolation goes with it for the same reason — the new workspace may have none of that
   // kind, and an empty board with an unexplained filter on it is the worse outcome.
   setWorkspace: (workspaceId, repoIds) =>
-    set({ workspaceId, repoIds, feedIsolatedPrId: null, attentionIsolation: null }),
+    set({
+      workspaceId,
+      repoIds,
+      feedIsolatedPrId: null,
+      attentionIsolation: null,
+      // The personal lens goes with them: it was seated by a count taken in the workspace being
+      // LEFT, so carrying it into the next one would filter a board against a number nobody
+      // showed the reader.
+      attentionPersonalOnly: false,
+    }),
   toggleRepo: (id) =>
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),
   showRepo: (id) => {
@@ -1398,6 +1446,10 @@ export const useFilters = create<FilterState>((set, get) => ({
   // ⚠ Callers switching rail AND isolating must call setActivityRepo('attention') FIRST — see
   // the setter's declaration comment (setActivityRepo clears this, and no-ops when unchanged).
   setAttentionIsolation: (kind) => set({ attentionIsolation: kind }),
+  // ⚠ Independent of the kind isolation on purpose (see the field): a caller that wants the broad
+  // board must clear this itself, because setActivityRepo's clear does not fire on an unchanged
+  // rail.
+  setAttentionPersonalOnly: (on) => set({ attentionPersonalOnly: on }),
   // See the declaration above for the two ordering traps this sequence exists to encapsulate.
   // It deliberately calls the PUBLIC setters rather than one fused `set({...})`: a fused write
   // would be a second definition of what a workspace switch clears, free to drift from
@@ -1410,6 +1462,10 @@ export const useFilters = create<FilterState>((set, get) => ({
     usePinnedTabs.getState().showActivity();
     s.setActivityRepo('attention');
     s.setAttentionIsolation('my_turn');
+    // Last, and never conditionally: the figure the reader clicked was the PERSONAL one, so the
+    // list they land on has to be the same population. Seated AFTER both clears above it, exactly
+    // like the isolation.
+    s.setAttentionPersonalOnly(true);
   },
   pushFeedNewCohort: (scopeKey, ids, atTop) =>
     set((s) => {
@@ -1736,6 +1792,7 @@ export const useFilters = create<FilterState>((set, get) => ({
             activityThreadFilter: null,
             feedIsolatedPrId: null,
             attentionIsolation: null,
+            attentionPersonalOnly: false,
           },
     ),
   setActivityThreadFilter: (st) =>

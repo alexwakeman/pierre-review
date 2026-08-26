@@ -393,6 +393,13 @@
       "when": 1786600000000,
       "tag": "0055_auto_merge_phase",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1786700000000,
+      "tag": "0056_pr_mentions",
+      "breakpoints": true
     }
   ]
 }

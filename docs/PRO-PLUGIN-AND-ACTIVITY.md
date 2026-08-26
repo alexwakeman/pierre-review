@@ -923,6 +923,39 @@ strip). Never a re-derivation that can disagree with the surface it links to. Ra
 — this route never touches AI and never carries cost/money (§8.18: the rollup loops per
 workspace).
 
+**The my_turn NARROW pair (`myTurnPersonal` / `myTurnPersonalTotal`).** `DailyBriefCounts` and
+`WorkspaceInsightsResponse` carry a SECOND my_turn figure beside `myTurn`/`myTurnTotal`: the
+subset flagged **`MyTurnCard.personal`**. All four fields are trailing-optional additions, so
+**`apiVersion` stays 21** and an older plugin simply never reads them.
+
+- **The rule lives in `getMyTurn`, once.** Five of the six sections are personal by construction
+  (they exist only because the viewer is involved) and are stamped `true` in `toMyTurnPr`. The
+  sixth — "New PRs" — is a UNION OF TWO ARMS that answer different questions. The MAINTAINER arm
+  (`viewerMaintainedRepoIds`) asks *is this your patch of ground*: `repos.viewerPermission` ∈
+  WRITE/MAINTAIN/ADMIN **∪** the repos `getMergers` says the viewer has landed a PR on (default
+  branch only). The MENTION arm (`viewerMentionedPrIds` over `pr_mentions`) asks *did somebody
+  type your name*, and holds **even in a repo the viewer only READS** — which is precisely why it
+  is not folded into the first. A stranger's PR in a repo the viewer maintains IS personal; so is
+  a PR anywhere that @-mentions them. The insight-card block READS the flag off the row — the
+  `since` rule applied to the second question this fold would otherwise answer twice.
+- **The mention arm is DERIVED OFFLINE** (`sync/mention-scan.ts` → `pr_mentions`), never computed
+  in the request: the underlying question is a substring scan over every comment body in scope and
+  this fold runs on every Feed landing. ⚠ **Absence never widens** — no rows means the flag is
+  exactly the maintainer test it was before mentions existed, so a fresh deployment (or one whose
+  scanner is off) behaves identically. See [DATA-MODEL.md](DATA-MODEL.md) § `pr_mentions` and
+  [SYNC.md](SYNC.md) § "@mention derivation".
+- ⚠ **NOTHING IS NARROWED BY IT.** `GET /api/my-turn` keeps returning every row (the CLI status
+  board and the Done tab's restorability contract both need the full set) and the "Needs
+  attention" board keeps painting every card — a PR in a repo you only read does still need a
+  review. The flag exists for the surfaces that INTERRUPT (welcome-back banner, Workspace-dropdown
+  badges, browser notifications), which must not summon you for 425 strangers' PRs.
+- ⚠ **`myTurnPersonalTotal` is folded off the PRE-CAP ranked array**, next to `myTurnTotal`.
+  Counted after the 50-card slice it would be bounded by 50 and stop being a total.
+- ⚠ **THE PAIR MUST BE NARROW-WITH-NARROW.** `myTurnCapDisclosure` fires only when the displayed
+  figure EQUALS the count it qualifies, so a narrow line borrowing `myTurnTotal` as its
+  denominator would both mix two populations in one row and silently lose its "of N" on every
+  capped workspace. That is the entire reason `myTurnPersonalTotal` exists.
+
 **The person vector (`GET /api/pro/insights/person/:userId`, `db/person-period.ts`).** The 1:1
 prep read: a small fixed vector for one person in one workspace over one cadence period, with
 its own **`PERSON_METRICS_SCHEMA_VERSION` (= 1, in `@pierre-review/shared`)** and per-person

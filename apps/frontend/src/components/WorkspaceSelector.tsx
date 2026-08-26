@@ -8,6 +8,20 @@ import { useFilters } from '../store/filters.js';
 import { WorkspaceManagerModal } from './Activity/WorkspaceManager.js';
 
 /**
+ * The My-Turn count badge, shared by the collapsed trigger and every menu row so the two can
+ * never drift apart.
+ *
+ * OUTLINE, NOT FILL. A solid amber pill read as an alert blob next to the workspace name and
+ * fought the rail's quiet grey-on-dark for attention — this control is a SCOPE PICKER that also
+ * happens to carry a count, not a notification. A hairline ring with a transparent centre keeps
+ * the number legible and lets the amber mean "there is work here" without shouting it.
+ * `min-w` + `text-center` keep a 1-digit and a 3-digit badge the same optical shape so a column
+ * of rows does not ripple; `tabular-nums` stops the digits themselves jittering.
+ */
+const MY_TURN_BADGE_CLASS =
+  'shrink-0 rounded-full border border-amber-500/60 px-1 text-center text-[9px] font-medium leading-[15px] tabular-nums text-amber-600 dark:border-amber-400/50 dark:text-amber-400';
+
+/**
  * Keep `workspaceId` resolved and `repoIds` HONEST — and note what it deliberately does NOT do.
  *
  * This replaced `useTeamScopeSync`, which kept `repoIds` "in lockstep" with the scope's membership:
@@ -192,7 +206,12 @@ export function WorkspaceSelector(): JSX.Element {
   // Per-workspace "My Turn" counts (see the hook). The rows are the ONE place in the app that
   // lists every workspace at once, which makes them the right place to say where your work is —
   // the amber badge is "N things are on your plate in THAT workspace". Same fold, same number and
-  // same cap phrasing as the Welcome-back banner, the daily-brief strip and the attention board.
+  // same cap phrasing as the Welcome-back banner.
+  //
+  // ⚠ IT COUNTS THE PERSONAL SUBSET (`myTurnPersonal`), like every other surface that NOTIFIES —
+  // a badge that lit up because a stranger opened a PR in a repo you only read is a summons to
+  // nothing. The "Needs attention" BOARD and the daily-brief strip keep the broad count: that
+  // work is real, it is just not yours. (See useMyTurnByWorkspace.)
   //
   // ⚠ INFORMATIONAL ONLY, on purpose. A row's click means "switch scope" and nothing more: this
   // control is mounted on EVERY board, so making a badged row additionally hijack the rail would
@@ -251,7 +270,7 @@ export function WorkspaceSelector(): JSX.Element {
                     elsewhereCapped ? ' or more' : ''
                   } items need you in other Workspaces — open this menu to see where`
             }
-            className="shrink-0 rounded-full bg-amber-400 px-1 text-[9px] font-semibold leading-4 tabular-nums text-amber-950 dark:bg-amber-500"
+            className={`${MY_TURN_BADGE_CLASS} min-w-[1.1rem]`}
           >
             {elsewhereCount}
             {elsewhereCapped ? '+' : ''}
@@ -320,7 +339,7 @@ export function WorkspaceSelector(): JSX.Element {
                             ? `1 item needs you in ${w.name}`
                             : `${myTurn.count} items need you in ${w.name}`)
                         }
-                        className="rounded-full bg-amber-400 px-1 text-[9px] font-semibold leading-4 tabular-nums text-amber-950 dark:bg-amber-500"
+                        className={`${MY_TURN_BADGE_CLASS} min-w-[1.35rem]`}
                       >
                         {myTurn.count}
                         {myTurn.cap != null && (

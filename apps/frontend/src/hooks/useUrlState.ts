@@ -78,6 +78,7 @@ const NAV_KEYS = [
   'workspace',
   'activityRepo',
   'attn',
+  'attnPersonal',
   'feedPr',
   'feedTab',
   'botsTab',
@@ -317,6 +318,11 @@ export function readFromUrl(): Partial<FilterState> {
   if (attn && (INSIGHT_KINDS as readonly string[]).includes(attn)) {
     out.attentionIsolation = attn as InsightKind;
   }
+  // The board's PERSONAL lens — the other half of the same navigation. A banner/badge click sets
+  // both, and each is a view the reader can Back out of independently, so both are addressable.
+  // Only the literal '1' seats it: this is a flag, and a link carrying anything else means the
+  // broad board (the default), never "something truthy".
+  if (p.get('attnPersonal') === '1') out.attentionPersonalOnly = true;
   // The Feed's single-PR isolation — the attention board's twin, addressable for the same reason.
   const feedPr = p.get('feedPr');
   if (feedPr) {
@@ -510,6 +516,10 @@ export function writeToUrl(s: FilterState): void {
     if (s.activityRepoId === 'attention' && s.attentionIsolation) {
       p.set('attn', s.attentionIsolation);
     }
+    // Emitted independently of `attn` — the two lenses are orthogonal, and a personal-only board
+    // showing every kind is a real (if uncommon) view. Same rail gate as its twin: a lens that is
+    // not on screen is not part of the view.
+    if (s.activityRepoId === 'attention' && s.attentionPersonalOnly) p.set('attnPersonal', '1');
     if (
       s.feedIsolatedPrId != null &&
       (s.activityRepoId === 'feed' || typeof s.activityRepoId === 'number')

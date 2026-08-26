@@ -32,6 +32,7 @@ describe('attentionIsolation', () => {
       workspaceId: 3,
       activityRepoId: 'feed',
       attentionIsolation: null,
+      attentionPersonalOnly: false,
       feedIsolatedPrId: null,
     });
   });
@@ -168,14 +169,110 @@ describe('attentionIsolation', () => {
     });
   });
 
+  // ── the PERSONAL lens: the sibling field, and the divergence rule it enforces ─────────────
+  //
+  // The welcome-back banner, the Workspace badges and the brief's "Elsewhere" rows count the
+  // PERSONAL subset of my_turn (`myTurnPersonal`); the board holds every card. A banner reading 4
+  // whose click opened a board of 50 would be the "the strip says 5, the board lists 3" defect
+  // (747c9c9) in a new place — so the ONE gesture those surfaces navigate through seats the lens.
+  //
+  // ⚠ IT IS A SIBLING OF `attentionIsolation`, NOT A MEMBER OF IT: that field is compared against
+  // `card.kind`, and these two predicates are orthogonal.
+  describe('attentionPersonalOnly', () => {
+    beforeEach(() => {
+      useFilters.setState({ attentionPersonalOnly: false });
+      usePinnedTabs.setState({ activeTab: 'timeline' });
+    });
+
+    it('defaults to false — the board is BROAD, because those PRs do need a review', () => {
+      expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+    });
+
+    it('openMyTurnInWorkspace seats it — the count and the list are one population', () => {
+      useFilters.setState({ workspaceId: 3, activityRepoId: 'feed' });
+      useFilters.getState().openMyTurnInWorkspace(9);
+      const after = useFilters.getState();
+      expect(after.attentionPersonalOnly).toBe(true);
+      // …alongside, never instead of, the kind isolation.
+      expect(after.attentionIsolation).toBe('my_turn');
+    });
+
+    it('…and seats it even when the rail is ALREADY attention (the empty-patch asymmetry)', () => {
+      useFilters.setState({
+        workspaceId: 3,
+        activityRepoId: 'attention',
+        attentionPersonalOnly: false,
+      });
+      useFilters.getState().openMyTurnInWorkspace(3);
+      expect(useFilters.getState().attentionPersonalOnly).toBe(true);
+    });
+
+    it('a rail switch clears it', () => {
+      useFilters.setState({ activityRepoId: 'attention', attentionPersonalOnly: true });
+      useFilters.getState().setActivityRepo('feed');
+      expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+    });
+
+    it('a workspace switch clears it (the count that seated it was another workspace’s)', () => {
+      useFilters.setState({ attentionPersonalOnly: true });
+      useFilters.getState().setWorkspace(9, null);
+      expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+    });
+
+    it('is cleared alongside the kind isolation, never instead of it', () => {
+      useFilters.setState({
+        activityRepoId: 'attention',
+        attentionIsolation: 'my_turn',
+        attentionPersonalOnly: true,
+        feedIsolatedPrId: 42,
+      });
+      useFilters.getState().setActivityRepo('bots');
+      const after = useFilters.getState();
+      expect(after.attentionIsolation).toBeNull();
+      expect(after.attentionPersonalOnly).toBe(false);
+      expect(after.feedIsolatedPrId).toBeNull();
+    });
+
+    it('is NOT persisted with the filter bar (so no FILTER_STORAGE_VERSION bump is owed)', () => {
+      useFilters.setState({ attentionPersonalOnly: true });
+      const persisted = pickFilterBarState(useFilters.getState()) as Record<string, unknown>;
+      expect('attentionPersonalOnly' in persisted).toBe(false);
+    });
+
+    it('is dropped from a restored blob that somehow carries it', () => {
+      const restored = sanitizePersistedFilters({
+        attentionPersonalOnly: true,
+      } as unknown as Partial<FilterState>) as Record<string, unknown>;
+      expect('attentionPersonalOnly' in restored).toBe(false);
+    });
+
+    it('a BROAD entry point clears it explicitly — the brief strip’s rule', () => {
+      // The strip's own lines count the broad population, and `setActivityRepo` does NOT clear
+      // anything when the rail is already 'attention'. Rendered as the strip renders it.
+      useFilters.setState({ activityRepoId: 'attention', attentionPersonalOnly: true });
+      const s = useFilters.getState();
+      s.setActivityRepo('attention'); // empty patch — the trap
+      s.setAttentionIsolation('stalled_review');
+      s.setAttentionPersonalOnly(false);
+      const after = useFilters.getState();
+      expect(after.attentionPersonalOnly).toBe(false);
+      expect(after.attentionIsolation).toBe('stalled_review');
+    });
+  });
+
   it('survives "Clear filters", exactly like feedIsolatedPrId', () => {
     // Neither transient isolation is in freshFilterDefaults(), so resetAllFilters does not touch
     // them: they are cleared by rail/scope changes instead. Pinned so the two stay consistent —
     // a lens that one control clears and its twin doesn't is the kind of drift nothing reports.
-    useFilters.setState({ attentionIsolation: 'my_turn', feedIsolatedPrId: 42 });
+    useFilters.setState({
+      attentionIsolation: 'my_turn',
+      attentionPersonalOnly: true,
+      feedIsolatedPrId: 42,
+    });
     useFilters.getState().resetAllFilters();
     const after = useFilters.getState();
     expect(after.attentionIsolation).toBe('my_turn');
+    expect(after.attentionPersonalOnly).toBe(true);
     expect(after.feedIsolatedPrId).toBe(42);
   });
 });

@@ -1489,3 +1489,54 @@ export const mlCommentLabels = sqliteTable(
     ),
   }),
 );
+
+// ── "@you" on a PR — the MENTION arm of My Turn's personal-relevance rule (CORE, no AI) ────
+// PRESENCE IS THE WHOLE FACT: a row means "this account's viewer login is @mentioned somewhere
+// on this PR" (a PR comment, a review body, or an inline review comment). There is no
+// `mentioned` boolean and no row for "scanned, found nothing" — absence is the answer, which is
+// what lets every reader be a single indexed existence check.
+//
+// WHY A TABLE AND NOT A COLUMN ON pull_requests. The fact is DERIVED and re-derivable, it is
+// about a (tenant, PR) pair rather than about the PR, and it is sparse — 12 rows out of 8.5k PRs
+// on this repo's own dev account. Widening the hottest table in the schema by a column that is
+// false 99.9% of the time, and that every sync upsert would then have to carry, buys nothing.
+//
+// WRITTEN ONLY BY sync/mention-scan.ts, which re-derives the FULL set per account per tick and
+// diffs it against what is stored — so an edited-away mention, a deleted comment, a renamed
+// account and a 90-day backfill all converge within one tick with no write path needing a hook
+// (the sync/ml-enrichment.ts precedent). `login` is the provenance of the derivation, not a
+// second copy of `accounts.github_login`: it records which login this row was matched FOR, so a
+// reader can refuse rows derived under a login the account no longer has instead of trusting a
+// row the scan has not caught up with yet.
+export const prMentions = sqliteTable(
+  'pr_mentions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // Denormalised from the PR — a snapshot of an immutable parent fact (a PR never changes
+    // repo), and what makes `deleteRepo` one indexed predicate rather than a join.
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    // The viewer login this row was derived from, stored lowercased (matching is
+    // case-insensitive, so the stored form has to be canonical or a reader's equality test
+    // would depend on how GitHub happened to spell the login that day).
+    login: text('login').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    // THE conflict target — one row per (tenant, PR), which is exactly the presence semantics.
+    accountPrUx: uniqueIndex('prm_account_pr').on(t.accountId, t.prId),
+    // deleteRepo deletes by repo; the retention sweep and deletePrSubtree delete by PR id, which
+    // is NOT a prefix of the unique above.
+    accountRepoIdx: index('prm_account_repo_idx').on(t.accountId, t.repoId),
+    prIdx: index('prm_pr_idx').on(t.prId),
+  }),
+);

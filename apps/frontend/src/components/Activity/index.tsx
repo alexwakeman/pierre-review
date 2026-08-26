@@ -542,9 +542,11 @@ export function ActivityView(): JSX.Element {
           // / reviewer load / needs-a-reviewer) — moved out from under the Pro Insights AI panels.
           // Renders on every tier, before repo data loads (its own empty/loading states).
           //
-          // The banner above it is the single-KIND isolation set by the daily brief's lines — the
-          // attention-board twin of FeedIsolationBanner (which is mounted only on the per-repo
-          // console + the fallback branch, never here). It renders null when nothing is isolated.
+          // The banner above it carries the board's two narrowings — the single KIND set by the
+          // daily brief's lines, and the PERSONAL lens set by the notification surfaces — each
+          // with its own way out. It is the attention-board twin of FeedIsolationBanner (which is
+          // mounted only on the per-repo console + the fallback branch, never here), and renders
+          // null when neither is on.
           <div className="space-y-3">
             <AttentionIsolationBanner />
             <AttentionView />

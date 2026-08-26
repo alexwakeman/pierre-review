@@ -10,7 +10,12 @@ import { useAutoNarration, type SynthesisDescriptor } from '../../hooks/useSynth
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabBotMeta } from '../../store/pinnedTabs.js';
-import { myTurnCapDisclosure, type MyTurnCapDisclosure } from './AttentionView.js';
+import {
+  myTurnCapDisclosure,
+  myTurnPersonalCapDisclosure,
+  personalMyTurnCount,
+  type MyTurnCapDisclosure,
+} from './AttentionView.js';
 
 // The daily-brief strip (plan P3.1/N1 + P3.3/N5) — the first thing the Feed shows: one compact
 // line per thing that needs the viewer, each line DEEP-LINKING to the surface that owns its
@@ -98,6 +103,7 @@ export function BriefStrip(): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
   const setAttentionIsolation = useFilters((s) => s.setAttentionIsolation);
+  const setAttentionPersonalOnly = useFilters((s) => s.setAttentionPersonalOnly);
   // The cross-workspace "Elsewhere" lines navigate through this one action — see the button.
   const openMyTurnInWorkspace = useFilters((s) => s.openMyTurnInWorkspace);
   const openBotThreadsTab = usePinnedTabs((s) => s.openBotThreadsTab);
@@ -111,7 +117,37 @@ export function BriefStrip(): JSX.Element | null {
   const { data } = useDailyBrief(workspaceId);
   const counts = data?.counts ?? null;
   const rollup = data?.rollup ?? [];
-  const elsewhereLines = useMemo(() => rollup.filter((w) => hasAnything(w.counts)), [rollup]);
+  // The cross-workspace roll-up, pre-folded into the bits each row renders.
+  //
+  // ⚠ THE "need you" FIGURE HERE IS THE PERSONAL ONE, unlike the strip's own lines above. These
+  // rows are the daily-brief spelling of the Welcome-back banner: they describe work in a
+  // workspace the reader is NOT in, and they navigate through the same `openMyTurnInWorkspace`,
+  // which seats the board's personal lens. Keeping the broad figure here would put back exactly
+  // the divergence this phase exists to prevent — "52 need you" opening a board of 3.
+  // A row whose only content was a non-personal my-turn count therefore folds to NO bits, and is
+  // dropped rather than rendered as a bare workspace name.
+  const elsewhereLines = useMemo(
+    () =>
+      rollup
+        .filter((w) => hasAnything(w.counts))
+        .map((w) => {
+          const needYou = personalMyTurnCount(w.counts);
+          const cap = myTurnPersonalCapDisclosure(needYou, w.counts);
+          const bits: string[] = [];
+          // The cap gets the same "N+" treatment the other surfaces use — a capped figure is a
+          // floor, and the exact pair rides the row's title.
+          if (needYou > 0) bits.push(`${needYou}${cap != null ? '+' : ''} need you`);
+          if (w.counts.stalled > 0) bits.push(`${w.counts.stalled} stalled`);
+          if (w.counts.needsReviewer > 0) bits.push(`${w.counts.needsReviewer} need a reviewer`);
+          if (w.counts.untouchedThreads > 0) bits.push(`${w.counts.untouchedThreads} untouched`);
+          if (w.counts.resolveBacklog > 0) bits.push(`${w.counts.resolveBacklog} resolvable`);
+          if (w.counts.botAnomalies.length > 0) bits.push('bot anomaly');
+          if (w.counts.trunkRed.length > 0) bits.push('trunk red');
+          return { workspaceId: w.workspaceId, name: w.name, bits, cap };
+        })
+        .filter((w) => w.bits.length > 0),
+    [rollup],
+  );
 
   const briefDescriptor = useMemo<SynthesisDescriptor>(
     () => ({ kind: 'brief', window: 'rolling_14' }),
@@ -150,9 +186,16 @@ export function BriefStrip(): JSX.Element | null {
     // clears the isolation, AND early-returns an empty patch when the rail id is unchanged — so
     // isolating first would be wiped on the click that switches rail and survive on the clicks
     // that don't. The same rule PrDetail / BotOnlyPrsDetail document for `feedIsolatedPrId`.
+    //
+    // ⚠ AND IT CLEARS THE PERSONAL LENS EXPLICITLY. THIS STRIP'S OWN FIGURES ARE THE BROAD ONES
+    // (`counts.myTurn` — the board is on screen, and every card on it is real work), so a lens
+    // left over from an earlier welcome-back/badge click would open a SMALLER list than the
+    // number just clicked. Relying on `setActivityRepo`'s clear is not enough: it early-returns
+    // an empty patch when the rail is already 'attention', which is the common case here.
     const openAttention = (kind: InsightKind) => (): void => {
       setActivityRepo('attention');
       setAttentionIsolation(kind);
+      setAttentionPersonalOnly(false);
     };
     // ⚠ "items", not "events". This number IS the my_turn card count — one clickable card per
     // row of GET /api/my-turn. It used to be a tally of feed EVENTS in a rolling 14 days, and
@@ -239,6 +282,7 @@ export function BriefStrip(): JSX.Element | null {
     openBotThreadsTab,
     setActivityRepo,
     setAttentionIsolation,
+    setAttentionPersonalOnly,
   ]);
 
   // Self-hide: nothing to say here AND nothing elsewhere. (Also while the workspace/brief is
@@ -337,16 +381,7 @@ export function BriefStrip(): JSX.Element | null {
                 {/* Roll-up narration (Pro): one digit-free phrase per workspace, figures ours. */}
                 {elsewhereLines.map((w) => {
                   const phrase = rollupPhrases.get(`ws:${w.workspaceId}`)?.phrase ?? null;
-                  const bits: string[] = [];
-                  if (w.counts.myTurn > 0) bits.push(`${w.counts.myTurn} need you`);
-                  if (w.counts.stalled > 0) bits.push(`${w.counts.stalled} stalled`);
-                  if (w.counts.needsReviewer > 0)
-                    bits.push(`${w.counts.needsReviewer} need a reviewer`);
-                  if (w.counts.untouchedThreads > 0)
-                    bits.push(`${w.counts.untouchedThreads} untouched`);
-                  if (w.counts.resolveBacklog > 0) bits.push(`${w.counts.resolveBacklog} resolvable`);
-                  if (w.counts.botAnomalies.length > 0) bits.push('bot anomaly');
-                  if (w.counts.trunkRed.length > 0) bits.push('trunk red');
+                  const bits = w.bits;
                   return (
                     <li key={w.workspaceId} className="min-w-0">
                       <button
@@ -361,7 +396,9 @@ export function BriefStrip(): JSX.Element | null {
                         // ordering traps live in its declaration) — and it is one gesture, so one
                         // Back undoes it.
                         onClick={() => openMyTurnInWorkspace(w.workspaceId)}
-                        title={phrase ?? `Show what needs you in ${w.name}`}
+                        // The cap sentence wins the title when there is one: it is the only place
+                        // the exact pair behind the "+" is written down.
+                        title={w.cap?.title ?? phrase ?? `Show what needs you in ${w.name}`}
                         className="w-full truncate text-left text-gray-500 hover:text-gray-700 hover:underline dark:text-gray-400 dark:hover:text-gray-200"
                       >
                         <span className="font-medium">{w.name}</span>: {bits.join(' · ')}

@@ -23,7 +23,7 @@ fixture tests (see Conventions).
 
 ### Data model (`src/db/schema.sqlite.ts` + its `schema.pg.ts` twin are authoritative)
 
-28 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
+29 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
 `users` + `commitFiles` global). The core entities:
 
 - **`accounts`** — a tenant. Local mode has exactly one (`id 1`, `isLocal=true`,
@@ -331,6 +331,45 @@ contract: [ML-SEVERITY.md](ML-SEVERITY.md).
 
 
 
+## `pr_mentions` (CORE, free — "@you was mentioned on this PR")
+
+One row per `(account, PR)` where the account's viewer login is `@`-mentioned in a PR comment, a
+review body or an inline review comment. It is the **MENTION arm of My Turn's personal-relevance
+flag** (`MyTurnPr.personal`): the repo arm asks *"is this your patch of ground"*, this one asks
+*"did somebody type your name"* — and a mention makes a PR personal **even in a repo the viewer
+only READS**, which is exactly why it cannot be folded into the maintainer test. Written ONLY by
+`sync/mention-scan.ts`; read only through `db/pr-mentions.ts`.
+
+- **PRESENCE IS THE WHOLE FACT.** There is no `mentioned` boolean and no "scanned, found nothing"
+  row, so every reader is one indexed existence check (`prm_account_pr`). Absence is the answer,
+  and it is the SAFE answer: a deployment whose scanner has never run behaves exactly as it did
+  before mentions existed — the flag degrades to the maintainer test and nothing widens.
+- **WHY A TABLE, NOT A COLUMN ON `pull_requests`.** The fact is derived, re-derivable and about a
+  `(tenant, PR)` pair rather than about the PR; it is sparse (12 rows out of 8.5k PRs on this
+  repo's own dev account). Widening the hottest table in the schema — and every sync upsert that
+  writes it — for a column that is false 99.9% of the time buys nothing.
+- **`login` is PROVENANCE, not a denormalised copy of `accounts.github_login`** (stored
+  lowercased). It records which login the row was matched FOR, which is what lets the read refuse
+  rows derived under a login the account no longer has. See the invalidation rules in
+  [SYNC.md](SYNC.md) § "@mention derivation".
+- **The match is a WORD BOUNDARY, and the SQL is only a prefilter.** `lower(body) LIKE '%@login%'`
+  matches `@alexwakeman` when the login is `alex`, and `bob@alex.com` for anyone; `mentionsLogin`
+  (a regex with explicit leading/trailing classes) is the authority on every row the scan returns.
+  ⚠ Dropping that confirmation leaves a scanner that still finds every true mention and silently
+  invents a pile of false ones — pinned by the case table in `db/pr-mentions.test.ts`.
+- The FKs cascade from `accounts`/`repos`/`pull_requests`, and unlike `ml_comment_labels` the row
+  is ALSO deleted explicitly in **`deleteRepo`** (by `repo_id`), **`deletePrSubtree`** (by
+  `pr_id`) and **`eraseAccountData`**, and it is on the `accountScopedTables()` checklist. A
+  surviving row does not merely waste space: it goes on asserting that a deleted PR is personally
+  relevant.
+- **Deliberately NOT in the account export.** It is fully re-derivable from `prComments` /
+  `reviews` / `reviewComments`, which the export already carries verbatim — the same standing as
+  `ml_comment_labels` and `search_index`. (Recorded here because `branchCommits`' absence from
+  that export was an omission nobody wrote down; this one is a choice.)
+
+
+
+
 ## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
 
 Three vocabularies describe an automated actor, and they are **orthogonal axes, not one enum**:
@@ -484,6 +523,7 @@ check every hit against its table's declared unique.**
 | `auto_merge_requests` | `[accountId, prId]` — current state, not a log; re-arm OVERWRITES, disarm DELETEs | `armAutoMerge` (~14009) |
 | `benchmark_contributions` | `[accountId, vendorKind, weekStart]` | the benchmark rollup (~13444) |
 | `ml_comment_labels` | `(account_id, target_kind, target_id)` (`mcl_account_target`) | `db/ml-labels.ts` (the enrichment worker's ONLY writer) |
+| `pr_mentions` | `(account_id, pr_id)` (`prm_account_pr`), `onConflictDoNothing` | `db/pr-mentions.ts` `syncAccountMentions` (the mention scanner's ONLY writer) |
 | `accounts` | the account uniques | `auth/account.ts` (`ensureLocalAccount`, `upsertCloudAccount`) |
 | `repos` head/trunk columns | `[accountId, githubNodeId]` / `branch_commits` composite | `sync/branch-status.ts`, `sync/sync-repo.ts` |
 

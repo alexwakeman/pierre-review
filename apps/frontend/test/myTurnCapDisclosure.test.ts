@@ -22,9 +22,13 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { describe, expect, it } from 'vitest';
 import type { DailyBriefCounts } from '@pierre-review/shared';
+import type { InsightCard } from '@pierre-review/shared';
 import {
   myTurnCapDisclosure,
   myTurnCapPlacement,
+  myTurnPersonalCapDisclosure,
+  passesPersonalLens,
+  personalMyTurnCount,
 } from '../src/components/Activity/AttentionView.js';
 import { workspaceCapDisclosure } from '../src/hooks/useMyTurnByWorkspace.js';
 
@@ -159,6 +163,120 @@ describe('workspaceCapDisclosure (the per-workspace badge and banner lines)', ()
     const uncapped = counts({ myTurn: 9, myTurnTotal: 9 });
     expect(workspaceCapDisclosure(uncapped, false, 'Platform')).toBeNull();
     expect(workspaceCapDisclosure(uncapped, true, 'Default')).toBeNull();
+  });
+});
+
+// ── The NARROW twin: the notification surfaces' pair ─────────────────────────────────────────
+//
+// The welcome-back banner, the Workspace-dropdown badges and the brief's "Elsewhere" rows count
+// `myTurnPersonal` — the my_turn cards that personally involve the viewer — because a badge that
+// lit up for a stranger's PR in a repo you only read is a summons to nothing. The BOARD keeps the
+// broad population.
+//
+//   ⚠ PAIR NARROW WITH NARROW. The broad rule gates on `shown === counts.myTurn`. Hand it a
+//     personal figure and that equality fails on exactly the workspaces the narrowing exists for,
+//     so the capped line silently loses its "of N" — and had it passed, it would have printed a
+//     narrow numerator over a broad denominator: one row, two populations.
+describe('myTurnPersonalCapDisclosure', () => {
+  it('discloses the PERSONAL total, never the broad one', () => {
+    const cap = myTurnPersonalCapDisclosure(
+      12,
+      counts({ myTurn: 50, myTurnTotal: 148, myTurnPersonal: 12, myTurnPersonalTotal: 30 }),
+    );
+    expect(cap?.shown).toBe(12);
+    expect(cap?.total).toBe(30);
+    expect(cap?.title).toContain('30');
+    expect(cap?.title).not.toContain('148');
+  });
+
+  it('the broad rule would have said NOTHING about the same line — the bug this exists for', () => {
+    // 12 !== counts.myTurn (50), so the shared guard rejects it: the "+" disappears from every
+    // capped narrow line, silently.
+    const c = counts({ myTurn: 50, myTurnTotal: 148, myTurnPersonal: 12, myTurnPersonalTotal: 30 });
+    expect(myTurnCapDisclosure(12, c)).toBeNull();
+    expect(myTurnPersonalCapDisclosure(12, c)).not.toBeNull();
+  });
+
+  it('stays silent when the personal population is fully painted', () => {
+    expect(
+      myTurnPersonalCapDisclosure(
+        12,
+        counts({ myTurn: 50, myTurnTotal: 148, myTurnPersonal: 12, myTurnPersonalTotal: 12 }),
+      ),
+    ).toBeNull();
+  });
+
+  it('keeps the same-snapshot guard — a live board against a drained brief says nothing', () => {
+    expect(
+      myTurnPersonalCapDisclosure(
+        9,
+        counts({ myTurn: 50, myTurnTotal: 148, myTurnPersonal: 12, myTurnPersonalTotal: 30 }),
+      ),
+    ).toBeNull();
+  });
+
+  it('degrades to the BROAD pair when the server sent no personal count', () => {
+    // A response predating the narrowing: the surfaces display `myTurn`, so the denominator must
+    // be `myTurnTotal` — still one population per row, just the old one.
+    const c = counts({ myTurn: 50, myTurnTotal: 148 });
+    expect(myTurnPersonalCapDisclosure(50, c)?.total).toBe(148);
+    expect(personalMyTurnCount(c)).toBe(50);
+  });
+
+  it('does NOT borrow the broad total when only the personal TOTAL is missing', () => {
+    // Half a narrow pair is not a pair. Silence beats "12 of 148".
+    expect(
+      myTurnPersonalCapDisclosure(12, counts({ myTurn: 50, myTurnTotal: 148, myTurnPersonal: 12 })),
+    ).toBeNull();
+  });
+
+  it('says nothing while the brief is still loading', () => {
+    expect(myTurnPersonalCapDisclosure(12, undefined)).toBeNull();
+    expect(myTurnPersonalCapDisclosure(12, null)).toBeNull();
+  });
+
+  it('personalMyTurnCount prefers the narrow figure and falls back to the broad one', () => {
+    expect(personalMyTurnCount(counts({ myTurn: 50, myTurnPersonal: 3 }))).toBe(3);
+    // ZERO is a real answer, not "absent": a workspace can hold 50 cards, none of them yours.
+    expect(personalMyTurnCount(counts({ myTurn: 50, myTurnPersonal: 0 }))).toBe(0);
+    expect(personalMyTurnCount(counts({ myTurn: 50 }))).toBe(50);
+  });
+});
+
+describe('workspaceCapDisclosure reads the NARROW pair (badge + banner)', () => {
+  it('qualifies the personal figure with the personal total, on any row', () => {
+    const c = counts({
+      myTurn: 50,
+      myTurnTotal: 148,
+      myTurnPersonal: 12,
+      myTurnPersonalTotal: 30,
+    });
+    const active = workspaceCapDisclosure(c, true, 'Default');
+    expect(active?.shown).toBe(12);
+    expect(active?.total).toBe(30);
+    // …and the place-name substitution still bites, so the narrow sentence must keep the phrase.
+    const other = workspaceCapDisclosure(c, false, 'Platform');
+    expect(other?.title).toContain('in Platform');
+    expect(other?.title).not.toContain('in this Workspace');
+  });
+});
+
+describe('passesPersonalLens (the board lens)', () => {
+  const card = (over: Partial<InsightCard>): InsightCard =>
+    ({ kind: 'my_turn', personal: true, ...over }) as InsightCard;
+
+  it('keeps personal my_turn cards and drops the rest', () => {
+    expect(passesPersonalLens(card({ personal: true }))).toBe(true);
+    expect(passesPersonalLens(card({ personal: false }))).toBe(false);
+  });
+
+  it('keeps a my_turn card whose flag is ABSENT — advisory, and absence means personal', () => {
+    expect(passesPersonalLens(card({ personal: undefined }))).toBe(true);
+  });
+
+  it('never touches another kind — no other card carries the flag at all', () => {
+    expect(passesPersonalLens(card({ kind: 'stalled_review', personal: undefined }))).toBe(true);
+    expect(passesPersonalLens(card({ kind: 'untouched_thread', personal: undefined }))).toBe(true);
   });
 });
 

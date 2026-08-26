@@ -322,3 +322,50 @@ takes no hook from `syncRepo` / `syncOnePr` / `persistPr`, and pulls its worklis
 database instead ("bot-authored text with no label yet"). That is deliberate — the classifier's
 cost tracks total text and `persistPr` runs entirely inside `runTransaction`, which on SQLite is
 a manual `BEGIN`/`COMMIT` on the one shared connection. See [ML-SEVERITY.md](ML-SEVERITY.md).
+
+---
+
+## Not part of this pipeline either: `@mention` derivation
+
+`sync/mention-scan.ts` is the second pull-based worker in this directory (CORE, free, no LLM, **no
+GitHub quota** — comment and review bodies are always persisted, so nothing is fetched). It fills
+`pr_mentions`, the MENTION arm of My Turn's personal-relevance flag; the table's contract is in
+[DATA-MODEL.md](DATA-MODEL.md).
+
+**Why a worker and not a read.** The obvious implementation is a text predicate inside
+`getMyTurn` — and it is the wrong shape by an order of magnitude. `getMyTurn` runs inside
+`getWorkspaceInsights`, which runs on **every Feed landing**, and the predicate is a substring
+scan over every comment and review body in scope (65k rows / ~0.19s on this repo's own dev
+account). Paying that per request to answer a question whose answer changes a few times a week is
+a misplaced fold. The scan runs on a `*/5` cron (`MENTION_SCAN_CRON`, a module constant — there is
+no per-deployment decision to make), rotates accounts like the ML worker, and is wall-clock
+bounded at 60s per tick; the request path then does one indexed existence lookup.
+
+**Why a FULL re-derive per tick, and not a cursor.** A watermark over the three comment tables has
+to be right about four different ways the corpus changes, and every wrong answer is silent:
+
+| Change | What a cursor gets wrong |
+|---|---|
+| a 90-day **backfill** | inserts rows whose `created_at` predates any time-based watermark |
+| a body **edit** | changes neither the row's id nor its `created_at` |
+| a **deleted** comment | must REMOVE a mention; an insert-only writer never can |
+| Postgres **sequence gaps** | ids commit out of order, so an id watermark can skip a row forever |
+
+Re-deriving the whole set and diffing it against what is stored is correct under all four with no
+state to keep, and it is affordable because the expensive half is bounded by the MATCHES, not the
+corpus. ⚠ **The delete half is load-bearing**: without it `personal` becomes a ratchet that only
+ever widens.
+
+**Invalidation — how staleness is bounded, in each direction:**
+
+- a **new mention** becomes personal within one tick;
+- a **removed** mention stops being personal within one tick;
+- a **renamed account** narrows **immediately**, before any tick, because the read
+  (`viewerMentionedPrIds`) is login-scoped against `pr_mentions.login`; it re-widens only once the
+  scan has actually re-derived under the new login;
+- ⚠ an account whose `github_login` has not resolved yet (local mode before `gh api user`
+  answers) is **skipped**, never scanned as the empty string — deriving an empty set would delete
+  every stored row, i.e. a transient `gh` outage would un-personalise the whole inbox.
+
+Absence never widens: with no rows at all the flag degrades exactly to the phase-1 maintainer
+test, which is why the feature needs no enable flag.

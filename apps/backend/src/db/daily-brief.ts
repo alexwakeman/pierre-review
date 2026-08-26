@@ -249,12 +249,19 @@ async function computeBriefCounts(
   ]);
 
   let myTurn = 0;
+  // The `MyTurnCard.personal` subset of the same cards — the figure the NOTIFICATION surfaces
+  // display, where the board keeps displaying `myTurn`. Counted off the cards for exactly the
+  // reason `myTurn` is: it is the number of PERSONAL cards the board actually paints, so its
+  // total (`myTurnPersonalTotal`, the pre-cap fold) is the only thing that may qualify it.
+  let myTurnPersonal = 0;
   let stalled = 0;
   let untouchedThreads = 0;
   let needsReviewer = 0;
   for (const c of insights.cards) {
-    if (c.kind === 'my_turn') myTurn += 1;
-    else if (c.kind === 'stalled_review') stalled += 1;
+    if (c.kind === 'my_turn') {
+      myTurn += 1;
+      if (c.personal) myTurnPersonal += 1;
+    } else if (c.kind === 'stalled_review') stalled += 1;
     else if (c.kind === 'untouched_thread') untouchedThreads += 1;
     else if (c.kind === 'reviewer_routing') needsReviewer += 1;
   }
@@ -267,6 +274,12 @@ async function computeBriefCounts(
     // strip DISPLAYS: it is the number of cards the board will paint, and a strip that announced
     // 148 over a board of 50 is exactly the "number you can't open" this brief replaced.
     myTurnTotal: insights.myTurnTotal,
+    myTurnPersonal,
+    // ⚠ THE MATCHED DENOMINATOR, and it is not optional in practice. `myTurnPersonal` paired with
+    // `myTurnTotal` would put two populations in one row, AND the cap disclosure only fires when
+    // the displayed figure equals the count it qualifies — so a narrow line borrowing the broad
+    // total would silently lose its "of N" on every capped workspace.
+    myTurnPersonalTotal: insights.myTurnPersonalTotal,
     stalled,
     untouchedThreads,
     needsReviewer,

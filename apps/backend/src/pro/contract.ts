@@ -845,6 +845,11 @@ export interface ProHostQueries {
   // plugin simply never reads it. It is a DISCLOSURE, not a figure: `myTurn` remains the count
   // every surface displays and the only one a narration may be grounded in, so nothing here
   // should start phrasing lines from `myTurnTotal` (D4 keeps digits out of the phrasing anyway).
+  // ⚠ Same again for the NARROW my_turn pair, `myTurnPersonal` / `myTurnPersonalTotal` (the
+  // `MyTurnCard.personal` subset — see PRO-PLUGIN-AND-ACTIVITY.md): both OPTIONAL and TRAILING,
+  // both additive, apiVersion still 21. They exist for the surfaces that INTERRUPT the viewer,
+  // not for narration; `myTurn` remains this seam's grounded figure, and the two totals only
+  // ever qualify the count they were folded from — never each other's.
   getDailyBriefCounts(accountId: number, workspaceId: number): Promise<DailyBriefCounts>;
   // The 1:1-prep person vector (P4.2 — NOW LIVE: core db/person-period.ts): a small fixed
   // vector for one person in one workspace — merged/opened authored · reviews given · review

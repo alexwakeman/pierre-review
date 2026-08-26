@@ -3849,6 +3849,29 @@ export interface MyTurnPr {
   // Trailing-optional for wire tolerance only (the e2e mock, any response predating the field);
   // `getMyTurn` always sets it and `openedAt` is the consumer's fallback.
   since?: string;
+  // ADVISORY: is this row personally relevant to the viewer, or is it "someone opened a PR in a
+  // repo you happen to track"?
+  //
+  // ⚠ IT NARROWS NOTHING ON THIS WIRE. `GET /api/my-turn` keeps returning EVERY row — the CLI
+  // status board and the Done tab's restorability contract both need the full set — and the
+  // "Needs attention" board keeps painting every card. The flag exists for the NOTIFICATION
+  // surfaces (the welcome-back banner, the Workspace-dropdown badges, browser notifications),
+  // which must not tap you on the shoulder for a stranger's PR in a repo you have never touched.
+  //
+  // True for the five sections that already require your involvement (review requested of you,
+  // your own PRs, your approved PRs, threads awaiting your reply, your Claude runs). For the
+  // "New PRs" section it is a UNION of two independent arms:
+  //   • MAINTAINER — WRITE/MAINTAIN/ADMIN on the repo, or you have landed a PR on its default
+  //     branch. A stranger's PR in a repo you maintain IS personal.
+  //   • MENTIONED — somebody @-mentioned your login on the PR (a PR comment, a review body, an
+  //     inline comment). This one holds EVEN IN A REPO YOU ONLY READ, which is the whole reason
+  //     it is not folded into the maintainer test. Derived offline into `pr_mentions` by
+  //     sync/mention-scan.ts; with no rows the flag degrades to the maintainer test alone.
+  //
+  // Trailing-optional for wire tolerance only; `getMyTurn` always sets it. Absent ⇒ treat as
+  // true — that is the pre-narrowing behaviour, and erring towards notifying is the safe way
+  // round for a response we can't classify.
+  personal?: boolean;
 }
 
 export interface AwaitingReviewItem extends MyTurnPr {
@@ -3901,6 +3924,10 @@ export interface ThreadAwaitingItem {
   lastReplyAt: string;
   lastReplyAuthorId: number | null;
   githubUrl: string;
+  /** See `MyTurnPr.personal`. Always true here — you opened the thread, so a reply on it is
+   *  personally addressed to you by construction. Carried anyway so a notification surface can
+   *  read ONE field across every section instead of knowing which sections are exempt. */
+  personal?: boolean;
 }
 
 // A completed Claude review that hasn't been actioned yet — no GitHub review/
@@ -3916,6 +3943,8 @@ export interface ClaudeReviewToAction {
   finishedAt: string | null;
   headStale: boolean;
   githubUrl: string;
+  /** See `MyTurnPr.personal`. Always true here — you asked for the run. */
+  personal?: boolean;
 }
 
 export interface MyTurnResponse {
@@ -5615,6 +5644,16 @@ export interface MyTurnCard extends InsightCardBase, InsightPrRef {
   detail: string;
   /** ISO — when the thing that needs you happened */
   since: string;
+  /** ADVISORY relevance flag, READ off the same `getMyTurn` row the rest of this card is built
+   *  from (never re-derived here — the `since` rule, applied to the second thing every surface
+   *  would otherwise answer twice). See `MyTurnPr.personal` for the rule.
+   *
+   *  ⚠ THE BOARD IS NOT NARROWED BY IT. Every card still paints: a new PR in a repo you only
+   *  read does still need a review, and hiding it would delete work rather than route it. The
+   *  flag is for the NOTIFICATION surfaces, which reach for the user rather than waiting to be
+   *  opened, and it is computed BEFORE the 50-card cap so `myTurnPersonalTotal` describes the
+   *  whole population and not the slice that fitted. */
+  personal: boolean;
 }
 
 export interface StalledReviewCard extends InsightCardBase, InsightPrRef {
@@ -5812,6 +5851,15 @@ export interface WorkspaceInsightsResponse {
    *  purpose: those are SURVEYS of the workspace, where 15 is a digestible sample of a long tail.
    *  Only my_turn is a personal worklist the user works through, where a cap is a lie. */
   myTurnTotal?: number;
+  /** The uncapped `my_turn` population RESTRICTED TO `MyTurnCard.personal` rows — the same
+   *  pre-cap array as `myTurnTotal`, folded a second time. It exists so the notification
+   *  surfaces get a MATCHED PAIR: a narrow count whose denominator is also narrow.
+   *
+   *  ⚠ A narrow count paired with `myTurnTotal` would be one row mixing two populations — and
+   *  the cap disclosure ("50 of 148") gates on the shown figure EQUALLING the count it is
+   *  qualifying, so a narrow line without this field silently loses its "+" for ever. Absent
+   *  under exactly the same condition as `myTurnTotal` (the fold didn't run). */
+  myTurnPersonalTotal?: number;
 }
 
 // The attention cards (stalled reviews / untouched threads / reviewer load / needs-a-reviewer),
@@ -7832,6 +7880,23 @@ export interface DailyBriefCounts {
    *  ⚠ Reporting THIS as the strip's figure would recreate the bug this whole surface exists to
    *  fix: a number whose list you cannot open. The board paints 50. */
   myTurnTotal?: number;
+  /** `myTurn`, restricted to cards flagged `MyTurnCard.personal` — the figure a NOTIFICATION
+   *  surface displays (the welcome-back banner, the Workspace-dropdown badges, browser
+   *  notifications), where "someone opened a PR in a repo you only read" is noise rather than a
+   *  summons. The BOARD keeps displaying `myTurn`: those PRs do still need a review.
+   *
+   *  Absent on a response predating the narrowing; a consumer then falls back to `myTurn`
+   *  (the old, broad behaviour — notifying too much beats notifying about nothing). */
+  myTurnPersonal?: number;
+  /** The uncapped population behind `myTurnPersonal` — `WorkspaceInsightsResponse.
+   *  myTurnPersonalTotal`, passed straight through.
+   *
+   *  ⚠ THIS IS WHY THE FIELD EXISTS. The cap disclosure only fires when the figure being
+   *  qualified equals the count it came from, so pairing `myTurnPersonal` with `myTurnTotal`
+   *  would both mix two populations in one row AND silently drop the "of N" from every capped
+   *  narrow line. Pair narrow with narrow; consumers gate on
+   *  `myTurnPersonalTotal > myTurnPersonal`. */
+  myTurnPersonalTotal?: number;
   /** stalled_review cards on /api/attention (one card = one PR). */
   stalled: number;
   /** untouched_thread cards on /api/attention (one card = one thread). */

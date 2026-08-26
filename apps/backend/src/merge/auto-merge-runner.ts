@@ -49,6 +49,7 @@ import {
   listArmedMergeRequestsForRunner,
   markPrMergedLocally,
   updateAutoMergeState,
+  WRITE_PERMISSIONS,
   type ArmedMergeWork,
 } from '../db/queries.js';
 import {
@@ -111,8 +112,6 @@ function forgetIntent(id: number): void {
 // One tick at a time. A slow tick (a big backlog, a slow clone-based rebase) must not overlap
 // the next one and double-attempt the same merge.
 let running = false;
-
-const WRITE_PERMISSIONS = new Set(['WRITE', 'MAINTAIN', 'ADMIN']);
 
 // The synced CI states that mean "the checks haven't finished". Used for exactly one thing:
 // naming the phase behind GitHub's `mergeableState: 'blocked'`, which collapses "required

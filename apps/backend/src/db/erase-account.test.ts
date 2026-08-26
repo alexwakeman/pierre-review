@@ -73,6 +73,7 @@ const SEEDED_TABLES = [
   'autoMergeRequests',
   'branchCommits',
   'trunkCiStatusEvents',
+  'prMentions',
 ];
 
 /**
@@ -281,6 +282,13 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
       failingChecks: [{ name: `build-${accountId}`, conclusion: 'failure' }],
       observedAt: new Date(),
     })
+    .execute();
+  // An "@you was mentioned on this PR" row (migration 0056 / pg 0043). Seeded for the same
+  // non-vacuity reason: the row records that somebody typed THIS account's login on a specific
+  // PR, so leaving it behind would survive an erasure the user was told was complete.
+  await db
+    .insert(s.prMentions)
+    .values({ accountId, repoId: repo.id, prId: pr.id, login: `dev-${accountId}` })
     .execute();
 }
 

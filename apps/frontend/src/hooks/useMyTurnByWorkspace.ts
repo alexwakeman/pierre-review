@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import type { DailyBriefCounts } from '@pierre-review/shared';
 import {
-  myTurnCapDisclosure,
+  myTurnPersonalCapDisclosure,
+  personalMyTurnCount,
   type MyTurnCapDisclosure,
 } from '../components/Activity/AttentionView.js';
 import { useFilters } from '../store/filters.js';
@@ -12,6 +13,17 @@ import { useWorkspaces } from './useWorkspaces.js';
  * PER-WORKSPACE "MY TURN" COUNTS — the one source behind the Welcome-back banner's lines and the
  * Workspace dropdown's yellow badges.
  *
+ * ── THE POPULATION IS THE PERSONAL ONE ────────────────────────────────────────────────────────
+ * These two surfaces NOTIFY: they reach for the reader rather than waiting to be opened. So they
+ * count `DailyBriefCounts.myTurnPersonal` — the my_turn cards that personally involve the viewer
+ * (a review requested of them, their own PRs, threads awaiting their reply, plus new PRs in repos
+ * they MAINTAIN or were @-mentioned on) — not the broad `myTurn`. Before this, adding a repo you
+ * had never touched put every open PR in it on your welcome-back banner: 425 of 459 items were
+ * "someone opened a PR somewhere you happen to track".
+ *
+ * ⚠ THE BOARD ITSELF KEEPS THE BROAD POPULATION — those PRs do still need a review, and hiding
+ * them would delete work rather than route it. Which makes the divergence rule below load-bearing.
+ *
  * ── ONE POPULATION, EVERYWHERE ────────────────────────────────────────────────────────────────
  * The figure is the STANDING `my_turn` CARD COUNT — the things on your plate right now — and NOT
  * "new feed events since you last looked". That distinction is the whole point of this hook: the
@@ -20,8 +32,14 @@ import { useWorkspaces } from './useWorkspaces.js';
  * WORKSPACE-scoped. So the banner counted workspace B's events, you cleared them by reading
  * workspace A, and no click anywhere opened the list it named. Every number this hook returns is
  * `DailyBriefCounts.myTurn`, which is literally the number of `my_turn` cards
- * `GET /api/attention` paints for that workspace — the same list `openMyTurnInWorkspace` opens.
- * Banner line, dropdown badge and destination board are therefore one fold and one number.
+ * `GET /api/attention` paints for that workspace, narrowed by the same `personal` flag — and
+ * `openMyTurnInWorkspace` seats `attentionPersonalOnly`, so the board the click opens paints
+ * exactly those cards. Banner line, dropdown badge and destination board are therefore one fold
+ * and one number.
+ *
+ * ⚠ THAT LAST CLAUSE IS THE WHOLE CONTRACT. A line that says 4 opening a board of 50 is the
+ * "the strip says 5, the board lists 3" defect (747c9c9) in a new place — so a NARROW count may
+ * only ever navigate through the gesture that seats the narrow lens.
  *
  * ── FRESHNESS: THE ACTIVE WORKSPACE IS NEVER READ FROM A CACHE ────────────────────────────────
  * `GET /api/daily-brief?rollup=1` deliberately serves its two halves differently (see
@@ -65,12 +83,17 @@ import { useWorkspaces } from './useWorkspaces.js';
 // naming the wrong workspace.
 const ACTIVE_WORKSPACE_PHRASE = 'in this Workspace';
 
+// ⚠ AND IT IS THE **PERSONAL** RULE. The figure on these two surfaces is `myTurnPersonal`, so its
+// denominator has to be `myTurnPersonalTotal`: the broad rule gates on `shown === counts.myTurn`,
+// which a narrow figure fails on precisely the workspaces this narrowing exists for — the badge
+// would silently lose its "+" and, if it hadn't, would have printed a narrow count over a broad
+// total. Pair narrow with narrow.
 export function workspaceCapDisclosure(
   counts: DailyBriefCounts,
   isActive: boolean,
   name: string,
 ): MyTurnCapDisclosure | null {
-  const cap = myTurnCapDisclosure(counts.myTurn, counts);
+  const cap = myTurnPersonalCapDisclosure(personalMyTurnCount(counts), counts);
   if (cap == null || isActive) return cap;
   return { ...cap, title: cap.title.replace(ACTIVE_WORKSPACE_PHRASE, `in ${name}`) };
 }
@@ -80,7 +103,10 @@ export interface WorkspaceMyTurnLine {
   name: string;
   /** The workspace the user is currently scoped to (the one they CAN see from here). */
   isActive: boolean;
-  /** The my_turn CARD count — the list `openMyTurnInWorkspace(workspaceId)` opens. */
+  /** The PERSONAL my_turn CARD count — the list `openMyTurnInWorkspace(workspaceId)` opens, which
+   *  seats the matching lens on the board. Falls back to the broad count on a response that
+   *  predates the narrowing (and `openMyTurnInWorkspace`'s lens is then a no-op filter, so the
+   *  two still agree). */
   count: number;
   /** Set only when that fold is capped; rendered as a "+" plus the exact pair in a title. The
    *  title names THIS line's workspace (see `workspaceCapDisclosure`), because a caller renders
@@ -141,7 +167,7 @@ export function useMyTurnByWorkspace(): MyTurnByWorkspace {
         workspaceId: id,
         name,
         isActive,
-        count: counts.myTurn,
+        count: personalMyTurnCount(counts),
         // Named for THIS line's workspace, never "this Workspace" — see the note above.
         cap: workspaceCapDisclosure(counts, isActive, name),
         fresh,

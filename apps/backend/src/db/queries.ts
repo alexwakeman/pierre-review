@@ -176,7 +176,8 @@ import {
   computeTriage,
   type TriageResult,
 } from './triage.js';
-import { getAccountUserId } from '../auth/account.js';
+import { getAccountById, getAccountUserId } from '../auth/account.js';
+import { viewerMentionedPrIds } from './pr-mentions.js';
 import { enrichReviewerSuggestions } from '../github/reviewer-suggest.js';
 import { ensureRoutingPrFiles } from '../sync/routing-files.js';
 import {
@@ -256,6 +257,10 @@ const {
   workspaceReviewers,
   benchmarkContributions,
   autoMergeRequests,
+  // "@you was mentioned on this PR" (migration 0056 / pg 0043). Read here only through
+  // db/pr-mentions.ts; named in this destructure for the ONE thing that has to live in this
+  // file — `deleteRepo`'s hand-written cascade.
+  prMentions,
 } = schema;
 
 function iso(d: Date | null): string | null {
@@ -2433,6 +2438,16 @@ export async function getRepoAnalytics(
 
 // ---- merge-rights inference ----
 
+/**
+ * The synced `repos.viewerPermission` values that mean the viewer can PUSH to the repo.
+ *
+ * Lives here, exported, because two unrelated features now ask the same question and a second
+ * literal set is a second answer waiting to drift: the auto-merge runner's land-time re-check,
+ * and My Turn's personal-relevance gate (`viewerMaintainedRepoIds` below). GitHub's other values
+ * — READ, TRIAGE, NONE, and a null from a token that couldn't read the field — are all "no".
+ */
+export const WRITE_PERMISSIONS = new Set(['WRITE', 'MAINTAIN', 'ADMIN']);
+
 // Distinct users who have merged a PR INTO THE DEFAULT BRANCH per repo (across
 // ALL synced history, not the timeline window). We treat "has merged into the
 // repo's default branch" as a good-enough proxy for "is a maintainer" — merges
@@ -2471,6 +2486,49 @@ export async function getMergers(accountId: number): Promise<RepoMergers[]> {
     else byRepo.set(r.repoId, [r.userId]);
   }
   return [...byRepo.entries()].map(([repoId, userIds]) => ({ repoId, userIds }));
+}
+
+/**
+ * THE REPOS THIS VIEWER MAINTAINS — the repo half of My Turn's personal-relevance gate.
+ *
+ * "Maintains" is deliberately a UNION of two independent signals, because either one alone is
+ * wrong on a real account:
+ *   • `repos.viewerPermission` ∈ WRITE/MAINTAIN/ADMIN — GitHub's own answer, but it is null on
+ *     rows synced before the column existed and READ on a repo you nonetheless ship to via a
+ *     fork-and-merge arrangement.
+ *   • you have landed a PR on the repo's DEFAULT BRANCH (`getMergers`) — behavioural, works
+ *     without any permission grant, and the same proxy the reviewer suggester already trusts.
+ *
+ * WHY IT EXISTS: My Turn's "New PRs" section notifies about every non-draft human PR in every
+ * repo the account has added, which on a real account is hundreds of strangers' PRs in repos the
+ * viewer only reads. The NOTIFICATION surfaces narrow to this set; the board does not (see
+ * `MyTurnCard.personal`). A stranger's PR in a repo you maintain is still personal — that is the
+ * whole point of the maintainer half.
+ *
+ * ⚠ `getMergers` has NO `ORDER BY`, so its rows and each row's `userIds` arrive in heap order,
+ * which flips after any UPDATE on Postgres. Only set MEMBERSHIP is read here; nothing may index
+ * into `userIds` positionally.
+ */
+async function viewerMaintainedRepoIds(
+  accountId: number,
+  viewerUserId: number | null,
+): Promise<Set<number>> {
+  const out = new Set<number>();
+  const permRows = await db
+    .select({ id: repos.id, viewerPermission: repos.viewerPermission })
+    .from(repos)
+    .where(eq(repos.accountId, accountId))
+    .execute();
+  for (const r of permRows) {
+    if (WRITE_PERMISSIONS.has(r.viewerPermission ?? '')) out.add(r.id);
+  }
+  // A viewer we couldn't resolve to a users row has no merge history to consult; the permission
+  // half above still stands on its own.
+  if (viewerUserId == null) return out;
+  for (const m of await getMergers(accountId)) {
+    if (m.userIds.includes(viewerUserId)) out.add(m.repoId);
+  }
+  return out;
 }
 
 // ---- inbox (CORE, always-on, no AI) ----
@@ -4394,6 +4452,12 @@ export async function getWorkspaceInsights(
   // as "that's everything". Written once, inside the my_turn block below (so an empty workspace
   // leaves it undefined = nothing to disclose); the CARDS remain the figure every surface shows.
   let myTurnTotal: number | undefined;
+  // The same pre-cap array, folded a second time over `MyTurnCard.personal` — the denominator
+  // the NOTIFICATION surfaces need. ⚠ It has to be its own total: pairing a narrow count with
+  // `myTurnTotal` mixes two populations in one row, and the cap disclosure only fires when the
+  // displayed figure equals the count it qualifies, so a narrow line borrowing the broad total
+  // silently loses its "of N" for ever.
+  let myTurnPersonalTotal: number | undefined;
   const userIdSet = new Set<number>();
   const addUser = (id: number | null): void => {
     if (id != null) userIdSet.add(id);
@@ -4476,6 +4540,7 @@ export async function getWorkspaceInsights(
       // The cap disclosure (see the field's doc). `finish()` is also the empty-workspace early
       // return below, where the my_turn block never ran and this is correctly undefined.
       myTurnTotal,
+      myTurnPersonalTotal,
     };
   };
   if (repoIds.length === 0) return finish();
@@ -4510,6 +4575,8 @@ export async function getWorkspaceInsights(
       detail: string;
       since: Date | null;
       prId: number;
+      /** `MyTurnCard.personal` — read off the section row, never re-derived (see `personalOf`) */
+      personal: boolean;
       /** actors to resolve for the client beyond the PR author (prRef's authorId) */
       extraActorIds: (number | null)[];
     };
@@ -4524,6 +4591,14 @@ export async function getWorkspaceInsights(
     const sinceOf = (i: MyTurnPr): Date | null =>
       i.since != null ? new Date(Date.parse(i.since)) : null;
 
+    // THE RELEVANCE ANSWER, READ NOT RE-DERIVED — the `sinceOf` rule applied to the second thing
+    // this block would otherwise answer for a second time. `getMyTurn` owns the personal-
+    // relevance rule AND the maintainer set it needs (one repo/merger read per fold); re-running
+    // it here would cost a second pair of queries and could disagree with the wire the very same
+    // request serves. Absent ⇒ true: that is the pre-narrowing behaviour, and over-notifying is
+    // the safe direction for a row we can't classify.
+    const personalOf = (i: { personal?: boolean }): boolean => i.personal ?? true;
+
     for (const i of mt.awaitingReview) {
       seeds.push({
         reason: 'review_request',
@@ -4536,6 +4611,7 @@ export async function getWorkspaceInsights(
             : 'Review requested from you',
         since: sinceOf(i),
         prId: i.prId,
+        personal: personalOf(i),
         extraActorIds: [],
       });
     }
@@ -4549,6 +4625,7 @@ export async function getWorkspaceInsights(
         detail: `${handle(i.lastReplyAuthorId)} replied ${agoLabel(at.getTime(), now)}`,
         since: at,
         prId: i.prId,
+        personal: personalOf(i),
         extraActorIds: [i.lastReplyAuthorId],
       });
     }
@@ -4563,6 +4640,7 @@ export async function getWorkspaceInsights(
         detail: `Approved by ${i.approvals} reviewer${i.approvals === 1 ? '' : 's'} · ${agoLabel(at.getTime(), now)}${conflicts}`,
         since: at,
         prId: i.prId,
+        personal: personalOf(i),
         extraActorIds: [],
       });
     }
@@ -4577,6 +4655,7 @@ export async function getWorkspaceInsights(
         detail: i.summary,
         since: sinceOf(i),
         prId: i.prId,
+        personal: personalOf(i),
         extraActorIds: [],
       });
     }
@@ -4590,6 +4669,9 @@ export async function getWorkspaceInsights(
         detail: `New PR from ${handle(i.authorId)} · ${agoLabel(at.getTime(), now)}`,
         since: at,
         prId: i.prId,
+        // The ONE section where this is ever false: a stranger's PR in a repo the viewer
+        // neither has write access to nor has ever merged into.
+        personal: personalOf(i),
         extraActorIds: [i.authorId],
       });
     }
@@ -4603,6 +4685,7 @@ export async function getWorkspaceInsights(
         // finishedAt is nullable on the wire; null falls back to the PR row's openedAt.
         since: i.finishedAt != null ? new Date(Date.parse(i.finishedAt)) : null,
         prId: i.prId,
+        personal: personalOf(i),
         extraActorIds: [],
       });
     }
@@ -4661,6 +4744,10 @@ export async function getWorkspaceInsights(
       // reporting 148 where the list holds 50 — that is the "number with no list behind it" bug
       // this whole surface exists to end.
       myTurnTotal = ranked.length;
+      // ⚠ FOLDED OFF THE PRE-CAP ARRAY, for the same reason `myTurnTotal` is. Counted after the
+      // slice it would be bounded by 50 and would stop being a total; counted here it is the real
+      // "how many of these are actually about you" population the notification surfaces need.
+      myTurnPersonalTotal = ranked.filter((r) => r.s.personal).length;
       const built = ranked.slice(0, MY_TURN_CARD_CAP);
 
       for (const { s, p, since } of built) {
@@ -4678,6 +4765,7 @@ export async function getWorkspaceInsights(
           threadId: s.threadId,
           detail: s.detail,
           since: since.toISOString(),
+          personal: s.personal,
         };
         cards.push(card);
       }
@@ -6274,6 +6362,12 @@ export async function getMyTurn(
       openedAt: t.openedAt,
       githubUrl: `https://github.com/${owner}/${name}/pull/${m.number}`,
       since: since.toISOString(),
+      // The DEFAULT half of the personal-relevance rule (see `MyTurnPr.personal`): five of the
+      // six sections require your involvement to exist at all — a review was requested of YOU,
+      // it is YOUR PR, YOUR PR was approved, YOUR thread got a reply, YOU asked for the run —
+      // so membership IS the relevance test and there is nothing further to check. Only "New
+      // PRs" admits work nobody asked you about, and it overrides this below.
+      personal: true,
     };
   };
 
@@ -6364,35 +6458,72 @@ export async function getMyTurn(
     ...approvedPrs.map((i) => i.prId),
   ]);
   // The response field keeps its wire name (`MyTurnResponse.watchedRepoPrs`).
-  const watchedRepoPrs = open
-    .filter(
-      (t) =>
-        newRepoPrEligible.has(t.id) &&
-        !inOtherSections.has(t.id) &&
-        !newRepoPrDismissedIds.has(t.id),
-    )
+  const newRepoPrCandidates = open.filter(
+    (t) =>
+      newRepoPrEligible.has(t.id) &&
+      !inOtherSections.has(t.id) &&
+      !newRepoPrDismissedIds.has(t.id),
+  );
+  // ⚠ THE ONE SECTION THAT NEEDS A RELEVANCE TEST, and it is a FLAG, not a filter. Every
+  //   candidate above still ships (the "Needs attention" board paints them all, and the CLI
+  //   status board + the Done tab's restorability contract both read the full set); what the
+  //   maintainer test decides is whether the NOTIFICATION surfaces are allowed to interrupt the
+  //   viewer about it. Narrowing the section itself would delete work rather than route it.
+  //   Membership is what changes the answer, so the extra read is skipped when nothing is here.
+  //
+  //   THE RULE HAS TWO ARMS AND THEY ANSWER DIFFERENT QUESTIONS. The repo arm asks "is this your
+  //   patch of ground"; the mention arm asks "did somebody type your name". A mention makes a PR
+  //   personal EVEN IN A REPO YOU ONLY READ — which is the whole reason it is not folded into the
+  //   maintainer test. The mention set is DERIVED OFFLINE (sync/mention-scan.ts) precisely so this
+  //   line stays an indexed existence check: the underlying question is a substring scan over
+  //   every comment body in scope, and this function runs on every Feed landing.
+  const [maintainedRepoIds, mentionedPrIds] =
+    newRepoPrCandidates.length > 0
+      ? await Promise.all([
+          viewerMaintainedRepoIds(accountId, localUserId),
+          // Login-scoped, so a renamed account narrows immediately rather than trusting rows the
+          // scanner has not caught up with. No rows at all ⇒ an empty set ⇒ this arm contributes
+          // nothing and the flag is exactly the maintainer test it was before mentions existed.
+          getAccountById(accountId).then((a) =>
+            viewerMentionedPrIds(
+              accountId,
+              a?.githubLogin ?? null,
+              newRepoPrCandidates.map((t) => t.id),
+            ),
+          ),
+        ])
+      : [new Set<number>(), new Set<number>()];
+  const watchedRepoPrs = newRepoPrCandidates
     // The one section where OPENING is genuinely the event, so openedAt is the honest clock.
-    .map((t) => toMyTurnPr(t, meta(t.id).openedAt))
+    .map((t) => ({
+      ...toMyTurnPr(t, meta(t.id).openedAt),
+      personal: maintainedRepoIds.has(t.repoId) || mentionedPrIds.has(t.id),
+    }))
     .sort((a, b) => b.openedAt.localeCompare(a.openedAt));
 
   // 3. Threads awaiting your response: you opened the thread, someone replied
   //    after you, and it isn't resolved. A dismissal sticks until a newer reply.
   const threadsAwaiting = (
     await getThreadsAwaiting(localUserId, accountId, repoNameById, scopedRepoIds)
-  ).filter((ta) => {
-    const d = threadDismissedAt.get(ta.threadId);
-    return !d || Date.parse(ta.lastReplyAt) > d.getTime();
-  });
+  )
+    .filter((ta) => {
+      const d = threadDismissedAt.get(ta.threadId);
+      return !d || Date.parse(ta.lastReplyAt) > d.getTime();
+    })
+    // You opened the thread and someone replied to YOU — personal by construction. Stamped
+    // rather than left absent so every section answers the relevance question in the same field.
+    .map((ta) => ({ ...ta, personal: true }));
   for (const ta of threadsAwaiting) {
     if (ta.lastReplyAuthorId != null) referencedUsers.add(ta.lastReplyAuthorId);
   }
 
   // Completed-but-unactioned Claude reviews (local-only feature; empty otherwise).
   // A manual "Done" hides the run until a newer run finishes (see claudeDismissedIds).
-  const claudeReviewsToAction = getProCapabilities().claudeReview
-    ? (await getUnactionedClaudeReviews(accountId, scopedRepoIds)).filter(
-        (c) => !claudeDismissedIds.has(c.reviewId),
-      )
+  const claudeReviewsToAction: ClaudeReviewToAction[] = getProCapabilities().claudeReview
+    ? (await getUnactionedClaudeReviews(accountId, scopedRepoIds))
+        .filter((c) => !claudeDismissedIds.has(c.reviewId))
+        // You asked for the run — personal by construction, same as the thread section.
+        .map((c) => ({ ...c, personal: true }))
     : [];
 
   const users =
@@ -7315,6 +7446,12 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       .delete(trunkCiStatusEvents)
       .where(eq(trunkCiStatusEvents.repoId, id))
       .execute();
+    // "@you" mention rows (migration 0056 / pg 0043). Its FKs cascade from repos AND
+    // pull_requests, so this is belt-and-braces for the same stated reason as the two above —
+    // SQLite enforces FKs only under `foreign_keys=ON` — but it is NOT optional: a surviving row
+    // would keep claiming a deleted PR is personally relevant, and the row is keyed by repo, so
+    // this is one indexed predicate rather than a dependency on the prIds list being non-empty.
+    await tx.delete(prMentions).where(eq(prMentions.repoId, id)).execute();
     if (prIds.length > 0) {
       await tx.delete(reviewComments).where(inArray(reviewComments.prId, prIds)).execute();
       await tx.delete(reviewThreads).where(inArray(reviewThreads.prId, prIds)).execute();

@@ -33,6 +33,7 @@ const {
   claudeReviews,
   claudeReviewFindings,
   pullRequests,
+  prMentions,
 } = schema;
 
 // A plugin-owned retention hook: @pierre/pro registers one (via ctx.registerRetention →
@@ -70,6 +71,10 @@ async function deletePrSubtree(
   await tx.delete(commits).where(inArray(commits.prId, prIds)).execute();
   await tx.delete(reviewRequests).where(inArray(reviewRequests.prId, prIds)).execute();
   await tx.delete(prViews).where(inArray(prViews.prId, prIds)).execute();
+  // "@you" mention rows (migration 0056 / pg 0043). The pr_id FK cascades, but this sweep runs
+  // parent-last by hand on both dialects and a mention row outliving its PR would go on claiming
+  // a deleted PR is personally relevant.
+  await tx.delete(prMentions).where(inArray(prMentions.prId, prIds)).execute();
   // PR-keyed my-turn dismissals (review_request / watched_repo_pr) would be left as inert
   // orphans. refId is a GLOBAL id (no accountId needed here — a maintenance sweep across
   // all accounts), so scope by kind + refId only.

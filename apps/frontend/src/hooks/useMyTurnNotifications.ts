@@ -18,6 +18,17 @@ import { dateTime } from '../lib/ui.js';
 // "only tell me about the workspace whose tab happened to be selected" would be a silence bug.
 // What it owes instead is PROVENANCE — so the body/title now NAME the workspace the new items
 // came from, resolved through `repos.workspaceId` (the client's only repo→workspace mapping).
+//
+// ⚠ IT FIRES ONLY FOR PERSONALLY RELEVANT ROWS (`MyTurnPr.personal`) — an OS notification is the
+// most interrupting surface in the product, and "someone opened a PR in a repo you added and have
+// never touched" is not worth interrupting anyone for (it was 425 of 459 rows on the reporter's
+// account). The flag is ADVISORY and the wire keeps every row: the "Needs attention" board still
+// paints them all, because they do need a review. Absent ⇒ treated as personal, which is the
+// pre-narrowing behaviour and the safe way round for a row we cannot classify.
+//
+// ⚠ THE BASELINE STILL TRACKS EVERY ROW. Only the fired set is narrowed — dropping non-personal
+// ids from the baseline would re-diff them as "new" on every poll, and a row that later BECOMES
+// personal (you get @-mentioned on it) would then fire as if it had just appeared.
 export function useMyTurnNotifications(enabled: boolean): void {
   const { data } = useMyTurn();
   const { data: repos } = useRepos();
@@ -58,25 +69,37 @@ export function useMyTurnNotifications(enabled: boolean): void {
     // id → the row's repo, so the diff below can name the WORKSPACE an item arrived in. Built
     // alongside `at` rather than re-walked, so the two can never describe different id sets.
     const repoOf = new Map<string, string>();
+    // id → is this row worth interrupting the reader for? Built in the SAME walk as the other two
+    // for the same reason: three maps written apart can describe three different id sets.
+    // ⚠ `personal !== false`, never `=== true`: the field is trailing-optional on the wire, and an
+    // unclassifiable row must notify rather than vanish.
+    const isPersonal = new Map<string, boolean>();
     for (const r of data.awaitingReview) {
       at.set(`r:${r.prId}`, r.since ?? r.openedAt);
       repoOf.set(`r:${r.prId}`, r.repoFullName);
+      isPersonal.set(`r:${r.prId}`, r.personal !== false);
     }
     for (const p of data.yourPrs) {
       at.set(`p:${p.prId}`, p.since ?? p.openedAt);
       repoOf.set(`p:${p.prId}`, p.repoFullName);
+      isPersonal.set(`p:${p.prId}`, p.personal !== false);
     }
     for (const a of data.approvedPrs ?? []) {
       at.set(`a:${a.prId}`, a.since ?? a.openedAt);
       repoOf.set(`a:${a.prId}`, a.repoFullName);
+      isPersonal.set(`a:${a.prId}`, a.personal !== false);
     }
     for (const t of data.threadsAwaiting) {
       at.set(`t:${t.threadId}`, t.lastReplyAt);
       repoOf.set(`t:${t.threadId}`, t.repoFullName);
+      isPersonal.set(`t:${t.threadId}`, t.personal !== false);
     }
     for (const w of data.watchedRepoPrs) {
       at.set(`w:${w.prId}`, w.since ?? w.openedAt);
       repoOf.set(`w:${w.prId}`, w.repoFullName);
+      // The one section the flag actually narrows: a new PR in a repo you neither maintain nor
+      // were mentioned on.
+      isPersonal.set(`w:${w.prId}`, w.personal !== false);
     }
 
     const prev = prevRef.current;
@@ -86,7 +109,10 @@ export function useMyTurnNotifications(enabled: boolean): void {
     if (!enabled) return;
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
 
-    const added = [...at.keys()].filter((id) => !prev.has(id));
+    // ⚠ The narrowing is applied HERE, after the baseline advanced above over EVERY id — see the
+    // header. Everything below (the counts, the workspace names, the stamp) reads this list, so
+    // the notification can never name a workspace whose only new item was filtered out.
+    const added = [...at.keys()].filter((id) => !prev.has(id) && isPersonal.get(id) !== false);
     if (added.length === 0) return;
 
     const reviews = added.filter((id) => id.startsWith('r:')).length;

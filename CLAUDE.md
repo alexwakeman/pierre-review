@@ -246,7 +246,7 @@ communicating that uncertainty.
 
 ### Data model
 
-`db/schema.sqlite.ts` + `schema.pg.ts` are authoritative (28 tables). **Per-table contracts and
+`db/schema.sqlite.ts` + `schema.pg.ts` are authoritative (29 tables). **Per-table contracts and
 the automation vocabulary (`ReviewerRole` — SIX members, EXACTLY ONE of which, `'review'`, is
 the reviewer cohort · `AutomatedReviewerKind` · `AUTOMATION_VENDORS`, the ONE table every
 per-family login set is DERIVED from · `REVIEW_BOT_KINDS`) live in
@@ -335,6 +335,12 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
 - **The repo picker (`RepoSelectPanel`) is Timeline-ONLY.** Activity, Feed, Bots and Reports
   always cover every repo in the workspace — never let the picker scope a screen that doesn't
   render it.
+- **A surface that NOTIFIES counts `myTurnPersonal`; a surface you OPEN counts `myTurn`** (banner,
+  Workspace badges, "Elsewhere" rows, browser notification vs the "Needs attention" board and the
+  brief's own lines). ⚠ A narrow count may only navigate through the narrow lens — every such
+  click goes through `openMyTurnInWorkspace`, which seats `attentionPersonalOnly`; a broad entry
+  point must CLEAR that flag explicitly. ⚠ Pair narrow with narrow in the cap disclosure
+  (`myTurnPersonalCapDisclosure`), or the "+" silently vanishes.
 - **Visible sub-tabs are DERIVED, never written back** (`feedInnerTab`, `botsInnerTab`) —
   compute an `effectiveTab` for the render only; a corrective `set…` permanently forgets the
   choice.

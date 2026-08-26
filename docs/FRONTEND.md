@@ -1188,9 +1188,19 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
 `['daily-brief', ws:<id>]` key.
 
 - **ONE POPULATION EVERYWHERE — standing `my_turn` CARDS, not "new since you looked".** The
-  number is `DailyBriefCounts.myTurn`, i.e. literally how many `my_turn` cards
+  number is a `DailyBriefCounts` my-turn figure, i.e. literally how many `my_turn` cards
   `GET /api/attention` paints for that workspace. So the banner line, the dropdown badge, the
   daily-brief strip line and the board a click opens are the same list and the same figure.
+- ⚠ **A SURFACE THAT NOTIFIES COUNTS `myTurnPersonal`; A SURFACE YOU OPEN COUNTS `myTurn`.**
+  The welcome-back banner, the Workspace-dropdown badges, `BriefStrip`'s "Elsewhere" rows and the
+  browser notification reach FOR the reader, so they count only what personally involves them
+  (`MyTurnCard.personal` — reviews requested of you, your PRs, threads awaiting your reply, plus
+  new PRs in repos you MAINTAIN or were @-mentioned on). Adding a repo you have never touched used
+  to put every open PR in it on the banner — 425 of 459 items on the reporter's account. The
+  "Needs attention" BOARD and the strip's own lines keep the BROAD `myTurn`: that work is real,
+  it is just not yours, and hiding it would delete work rather than route it.
+  ⚠ Absent narrow fields (a response predating the narrowing) ⇒ fall back to `myTurn` /
+  `myTurnTotal`. Over-notifying is the safe direction.
   ⚠ The banner used to render `MeResponse.newFeedItems` and both halves of that were wrong at
   once: the count was ACCOUNT-WIDE while the banner sat inside one workspace, and the gesture
   that cleared it (viewing the Feed) was WORKSPACE-scoped — so reading workspace A zeroed a
@@ -1209,8 +1219,26 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   (it clears `repoIds` / `feedIsolatedPrId` / `attentionIsolation`, and the `null` also stops
   `useWorkspaceSync`'s case-2 branch writing a second `setWorkspace` that would wipe what comes
   next), then `showActivity()`, then `setActivityRepo('attention')`, then
-  `setAttentionIsolation('my_turn')`. The workspace write is **skipped when already there** so a
-  Timeline repo narrowing survives. Pinned in `apps/frontend/test/attentionIsolation.test.ts`.
+  `setAttentionIsolation('my_turn')`, then `setAttentionPersonalOnly(true)`. The workspace write is
+  **skipped when already there** so a Timeline repo narrowing survives. Pinned in
+  `apps/frontend/test/attentionIsolation.test.ts`.
+- ⚠ **THE DIVERGENCE RULE: A NARROW COUNT MAY ONLY NAVIGATE THROUGH THE NARROW LENS.** A banner
+  line reading 4 that opened a board of 50 is the "the strip says 5, the board lists 3" defect
+  (747c9c9) in a new place — which is why `openMyTurnInWorkspace` seats **`attentionPersonalOnly`**
+  as its last step and why `BriefStrip`'s own (broad) lines CLEAR it explicitly. Clearing it is
+  not optional there: `setActivityRepo` early-returns an empty patch when the rail is already
+  `attention`, so a lens left over from an earlier banner click would survive the click that was
+  supposed to widen the board.
+- **`attentionPersonalOnly` is a SIBLING of `attentionIsolation`, never a member of it.** That
+  field is compared against `card.kind` and could not carry a second, orthogonal predicate. Same
+  transience contract (`freshDefaults()` only, out of `FilterDefaults` ⇒ **no
+  `FILTER_STORAGE_VERSION` bump**, cleared by any rail/scope change) and the same URL contract: it
+  is a NAV key, `?attnPersonal=1`, emitted only on the attention rail, parsed only for the literal
+  `'1'`, and in `UrlOwnedState` so a pop onto a URL that omits it CLEARS it.
+- **The lens must be VISIBLE and REVERSIBLE.** `AttentionIsolationBanner` carries both narrowings,
+  names how many cards the personal lens is holding back, and offers "Show everyone's" beside
+  "Clear"; `AttentionView`'s filtered empty state does the same. A lens that hides real work and
+  says nothing reads as "my items disappeared".
 - **FRESHNESS IS ASYMMETRIC AND THAT IS THE POINT.** `GET /api/daily-brief?rollup=1` computes the
   ACTIVE workspace's counts FRESH per request and serves the other workspaces' lines from a 5-min
   TTL (`db/daily-brief.ts`). The hook preserves the split (`fresh` per line) rather than
@@ -1219,7 +1247,13 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   switching there re-derives it before any list renders.
 - **NO SILENT CAPS, BOTH KINDS.** The 50-card cap goes through the ONE `myTurnCapDisclosure`
   rule (`Activity/AttentionView.tsx`) — the figure stays the CARD count with a "+" and the exact
-  pair in a `title`, never the uncapped total. The ROLL-UP cap (`ROLLUP_WORKSPACE_CAP`, server
+  pair in a `title`, never the uncapped total. ⚠ **PAIR NARROW WITH NARROW**: that rule gates on
+  `shown === counts.myTurn`, so a PERSONAL figure must go through
+  `myTurnPersonalCapDisclosure` (`myTurnPersonal` / `myTurnPersonalTotal`). Handing the broad rule
+  a narrow count fails the equality on exactly the workspaces the narrowing exists for — the line
+  silently loses its "of N" — and had it passed it would have printed a narrow numerator over a
+  broad denominator. A `myTurnPersonal` with no `myTurnPersonalTotal` discloses NOTHING rather
+  than borrowing the broad total. Pinned in `apps/frontend/test/myTurnCapDisclosure.test.ts`. The ROLL-UP cap (`ROLLUP_WORKSPACE_CAP`, server
   side) surfaces as `uncounted`: those rows render a dim "—" rather than a zero, plus a footer
   line in the dropdown and a line in the banner. ⚠ **Absence is not zero** — do not "tidy" a
   missing line into a 0.
@@ -1237,6 +1271,10 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   ⚠ The lookup lives in a **ref, out of the diff effect's deps**: that effect advances the
   notification baseline on every run, so re-running it because a reference query landed would
   consume a real diff and swallow the notification.
+  ⚠ It fires **only for `personal !== false` rows** (an OS banner is the most interrupting surface
+  there is), but the **baseline still tracks EVERY id** — dropping the others would re-diff them
+  as new on every poll, and a row that later becomes personal (you get @-mentioned) would fire as
+  if it had just appeared.
 
 ## The sync round — a transient store slice with ONE driver (`syncRound` / `managerOpen`)
 

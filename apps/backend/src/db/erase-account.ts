@@ -48,6 +48,7 @@ const {
   branchCommits,
   trunkCiStatusEvents,
   mlCommentLabels,
+  prMentions,
 } = schema;
 
 /**
@@ -148,6 +149,11 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .delete(mlCommentLabels)
       .where(eq(mlCommentLabels.accountId, accountId))
       .execute();
+    // "@you" mention rows (migration 0056 / pg 0043). Same reasoning as the labels above — the
+    // repo loop and the cascading repo/PR FKs normally take them, and this makes the guarantee
+    // independent of both. Each row records that a named person typed THIS user's login on a
+    // specific PR, which is exactly the kind of trace an erasure promise covers.
+    await tx.delete(prMentions).where(eq(prMentions.accountId, accountId)).execute();
     // Standing auto-merge intents. Their FKs cascade from pull_requests, so deleteRepo above
     // has already taken most of them — but a row is only as safe as the repo loop that ran,
     // and an intent naming a PR id is a record of what this user was about to ship. Explicit.
@@ -228,6 +234,8 @@ export function accountScopedTables(): {
       table: trunkCiStatusEvents,
     },
     { name: 'mlCommentLabels', col: mlCommentLabels.accountId, table: mlCommentLabels },
+    // "@you was mentioned on this PR" (migration 0056 / pg 0043).
+    { name: 'prMentions', col: prMentions.accountId, table: prMentions },
   ];
   return rows.map(({ name, col, table }) => ({
     name,
