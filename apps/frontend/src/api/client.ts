@@ -897,6 +897,16 @@ export const api = {
     fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }),
   myTurn: () => get<MyTurnResponse>('/api/my-turn'),
   myTurnDone: () => get<DismissedMyTurnResponse>('/api/my-turn/done'),
+  // "Done" — mark one My Turn entry as handled. The dismissal is STICKY BUT NOT PERMANENT: the
+  // server honours it only until newer activity supersedes it (a fresh reply on a dismissed
+  // thread brings the item back), which is what makes this a "seen" marker rather than a mute.
+  // ⚠ `MyTurnDismissKind` has five members and `MyTurnCardReason` has six — 'your_pr' has NO
+  // dismissal kind (opening the PR is its dismissal, via the pr_views marker) and the route's
+  // schema rejects it, so a caller must never widen this parameter to the card reason.
+  dismissMyTurn: (kind: MyTurnDismissKind, refId: number) =>
+    fetch('/api/my-turn/dismiss', jsonBody('POST', { kind, refId })).then((r) =>
+      handle<{ status: string }>(r),
+    ),
   undismissMyTurn: (kind: MyTurnDismissKind, refId: number) =>
     fetch('/api/my-turn/undismiss', jsonBody('POST', { kind, refId })).then((r) =>
       handle<{ status: string }>(r),

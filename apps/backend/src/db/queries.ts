@@ -30,7 +30,10 @@ import type {
   EventType,
   InsightCard,
   InsightKind,
+  InsightPrRef,
   InsightSeverity,
+  MyTurnCard,
+  MyTurnCardReason,
   ReviewerSuggestion,
   WorkspaceInsightsResponse,
   WorkspaceMetrics,
@@ -3585,6 +3588,23 @@ const INSIGHT_ROUTING_MIN_AGE_HOURS = 4; // ignore brand-new PRs
 // max range — beyond it, a PR is off everyone's radar.
 const INSIGHT_MAX_STALE_DAYS = 90;
 const INSIGHT_CARD_CAP = 15; // per-kind cap so the board stays digestible
+// `my_turn` gets its OWN, much larger cap. Every other kind is a SURVEY of the workspace, where 15
+// is a digestible sample of a long tail; my_turn is the viewer's actual inbox, where a cap is a
+// LIE — the daily brief reports the number of cards emitted, so capping at 15 would silently
+// restate "you have 54 things" as "you have 15". 50 keeps the board bounded while sitting above
+// any realistic personal inbox; the tail beyond it is disclosed by /api/my-turn's own listing.
+const MY_TURN_CARD_CAP = 50;
+
+/** "just now" / "42m ago" / "6h ago" / "3d ago" — the my_turn card's one-line detail suffix. */
+function agoLabel(fromMs: number, nowMs: number): string {
+  const secs = Math.max(0, Math.floor((nowMs - fromMs) / 1000));
+  if (secs < 60) return 'just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
 
 function topLevelDir(path: string): string {
   const i = path.indexOf('/');
@@ -4379,6 +4399,10 @@ export async function getWorkspaceInsights(
   const sprintTo = new Date(window?.toMs ?? now);
   const sprint = { from: sprintFrom.toISOString(), to: sprintTo.toISOString() };
   const cards: InsightCard[] = [];
+  // The my_turn fold's PRE-CAP length — the disclosure that keeps MY_TURN_CARD_CAP from reading
+  // as "that's everything". Written once, inside the my_turn block below (so an empty workspace
+  // leaves it undefined = nothing to disclose); the CARDS remain the figure every surface shows.
+  let myTurnTotal: number | undefined;
   const userIdSet = new Set<number>();
   const addUser = (id: number | null): void => {
     if (id != null) userIdSet.add(id);
@@ -4394,14 +4418,53 @@ export async function getWorkspaceInsights(
           .execute();
   const repoName = new Map(scopedRepos.map((r) => [r.id, `${r.owner}/${r.name}`]));
   const repoIds = scopedRepos.map((r) => r.id);
+
+  const ghUrl = (repoId: number, number: number): string =>
+    `https://github.com/${repoName.get(repoId)}/pull/${number}`;
+
+  // THE ONE BUILDER OF AN `InsightPrRef`. Every PR-bearing card kind (stalled_review,
+  // untouched_thread, reviewer_routing, my_turn) fills its shared PR context through this, so a
+  // new kind cannot quietly invent a different shape — or a different null policy — for the same
+  // eleven fields. `openedAt`/`additions`/`deletions`/`changedFiles` are NOT NULL columns;
+  // `ciStatus` is the only genuinely nullable one (null = no checks) and stays null.
+  const prRef = (p: {
+    id: number;
+    repoId: number;
+    number: number;
+    title: string;
+    authorId: number | null;
+    openedAt: Date;
+    ciStatus: CiStatus | null;
+    changedFiles: number;
+    additions: number;
+    deletions: number;
+  }): InsightPrRef => ({
+    prId: p.id,
+    repoId: p.repoId,
+    repoFullName: repoName.get(p.repoId) ?? '',
+    prNumber: p.number,
+    prTitle: p.title,
+    authorId: p.authorId,
+    githubUrl: ghUrl(p.repoId, p.number),
+    ciStatus: p.ciStatus,
+    changedFiles: p.changedFiles,
+    additions: p.additions,
+    deletions: p.deletions,
+    openedAt: p.openedAt.toISOString(),
+  });
+
   const finish = async (): Promise<WorkspaceInsightsResponse> => {
     const kindRank: Record<InsightKind, number> = {
-      bot_signal: 0, // the flagship "layer above your review bot" summary, leads its severity tier
-      bot_only_review: 1, // the governance "only a bot reviewed this" risk, right after
-      stalled_review: 2,
-      untouched_thread: 3,
-      reviewer_load: 4,
-      reviewer_routing: 5,
+      // my_turn leads every severity tier: it is the ONLY kind that is about the VIEWER
+      // personally ("someone is waiting on you"), where every other kind is a survey of the
+      // workspace. A thing you must do outranks a thing you might look at.
+      my_turn: 0,
+      bot_signal: 1, // the flagship "layer above your review bot" summary, next in its severity tier
+      bot_only_review: 2, // the governance "only a bot reviewed this" risk, right after
+      stalled_review: 3,
+      untouched_thread: 4,
+      reviewer_load: 5,
+      reviewer_routing: 6,
     };
     const sevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
     cards.sort(
@@ -4419,9 +4482,221 @@ export async function getWorkspaceInsights(
       metrics,
       cards,
       users: userRows.map(mapUser),
+      // The cap disclosure (see the field's doc). `finish()` is also the empty-workspace early
+      // return below, where the my_turn block never ran and this is correctly undefined.
+      myTurnTotal,
     };
   };
   if (repoIds.length === 0) return finish();
+
+  // ── my_turn cards (CORE, deterministic, no AI) ─────────────────────────────
+  // The VIEWER'S OWN inbox, promoted from an uncountable Feed facet to first-class cards.
+  //
+  // ⚠ This is NOT a re-derivation. It calls the SAME `getMyTurn` fold that `GET /api/my-turn`
+  // serves — passing the workspace scope — and emits one card per row of its six sections. The
+  // daily brief then counts the cards emitted here, so the strip's number and the list the user
+  // lands on are the same object by construction. (The count used to come from the consolidated
+  // feed's `counts.myTurn`: a tally of EVENTS in a rolling 14 days, which corresponded to no
+  // clickable list at all — "54 items" the user could not open.)
+  //
+  // Computed HERE, before the open-PR guard below, for the same reason the two bot cards are: a
+  // thread awaiting your reply, or a finished Claude review, can sit on a PR that guard drops
+  // (drafts, ultra-stale) — and dropping it would understate the brief's number.
+  {
+    const mt = await getMyTurn(accountId, scope);
+    const loginById = new Map(mt.users.map((u) => [u.id, u.githubLogin]));
+    const handle = (id: number | null): string =>
+      id != null ? `@${loginById.get(id) ?? `user${id}`}` : 'someone';
+
+    // Everything a card needs that is NOT in the shared InsightPrRef. `since` stays a Date until
+    // the sort is done (the cards' wire field is ISO), and is NULL when the section row carries no
+    // usable timestamp of its own — `sinceFor` then dates the card off the PR row.
+    type Seed = {
+      reason: MyTurnCardReason;
+      dismissRefId: number | null;
+      threadId: number | null;
+      severity: InsightSeverity;
+      detail: string;
+      since: Date | null;
+      prId: number;
+      /** actors to resolve for the client beyond the PR author (prRef's authorId) */
+      extraActorIds: (number | null)[];
+    };
+    const seeds: Seed[] = [];
+
+    // The approval CLOCK. `ApprovedPrItem` carries the approval COUNT but not when the newest
+    // approval landed, so reuse the same fold getMyTurn used to decide the section — never a
+    // second implementation of "latest approval".
+    const approvalInfo = await computeApprovalInfoByPr(mt.approvedPrs.map((i) => i.prId));
+
+    for (const i of mt.awaitingReview) {
+      seeds.push({
+        reason: 'review_request',
+        dismissRefId: i.prId,
+        threadId: null,
+        severity: 'high',
+        detail:
+          i.alsoRequested > 0
+            ? `Review requested from you · ${i.alsoRequested} other reviewer${i.alsoRequested === 1 ? '' : 's'} also requested`
+            : 'Review requested from you',
+        // Dated from the PR row (firstReviewRequestedAt ?? openedAt) — see `sinceFor`.
+        since: null,
+        prId: i.prId,
+        extraActorIds: [],
+      });
+    }
+    for (const i of mt.threadsAwaiting) {
+      const at = new Date(Date.parse(i.lastReplyAt));
+      seeds.push({
+        reason: 'thread',
+        dismissRefId: i.threadId,
+        threadId: i.threadId,
+        severity: 'high',
+        detail: `${handle(i.lastReplyAuthorId)} replied ${agoLabel(at.getTime(), now)}`,
+        since: at,
+        prId: i.prId,
+        extraActorIds: [i.lastReplyAuthorId],
+      });
+    }
+    for (const i of mt.approvedPrs) {
+      const at = approvalInfo.get(i.prId)?.latestApprovalAt ?? new Date(Date.parse(i.openedAt));
+      const conflicts = i.mergeable === 'conflicting' ? ' · conflicts' : '';
+      seeds.push({
+        reason: 'pr_approved',
+        dismissRefId: i.prId,
+        threadId: null,
+        severity: 'warn',
+        detail: `Approved by ${i.approvals} reviewer${i.approvals === 1 ? '' : 's'} · ${agoLabel(at.getTime(), now)}${conflicts}`,
+        since: at,
+        prId: i.prId,
+        extraActorIds: [],
+      });
+    }
+    for (const i of mt.yourPrs) {
+      seeds.push({
+        reason: 'your_pr',
+        // 'your_pr' is the ONE section with no dismissal kind — opening the PR clears it
+        // (the pr_views marker), so there is no my_turn_dismissals row to reference.
+        dismissRefId: null,
+        threadId: null,
+        severity: 'warn',
+        detail: i.summary,
+        // Dated from the PR row (updatedAt) — see `sinceFor`.
+        since: null,
+        prId: i.prId,
+        extraActorIds: [],
+      });
+    }
+    for (const i of mt.watchedRepoPrs) {
+      const at = new Date(Date.parse(i.openedAt));
+      seeds.push({
+        reason: 'watched_repo_pr',
+        dismissRefId: i.prId,
+        threadId: null,
+        severity: 'info',
+        detail: `New PR from ${handle(i.authorId)} · ${agoLabel(at.getTime(), now)}`,
+        since: at,
+        prId: i.prId,
+        extraActorIds: [i.authorId],
+      });
+    }
+    for (const i of mt.claudeReviewsToAction) {
+      seeds.push({
+        reason: 'claude_review',
+        dismissRefId: i.reviewId,
+        threadId: null,
+        severity: 'warn',
+        detail: `Claude review ready${i.verdict ? ` · ${i.verdict}` : ''}${i.headStale ? ' · head moved since' : ''}`,
+        // finishedAt is nullable on the wire; null falls back to the PR row's openedAt.
+        since: i.finishedAt != null ? new Date(Date.parse(i.finishedAt)) : null,
+        prId: i.prId,
+        extraActorIds: [],
+      });
+    }
+
+    if (seeds.length > 0) {
+      // The PR context (repoId / CI / diff size) the sections don't carry. These PRs are already
+      // inside `scope.repoIds` — getMyTurn was passed the scope — so this select is the account
+      // guard, not the scope one.
+      const seedPrIds = [...new Set(seeds.map((s) => s.prId))];
+      const prRows = await db
+        .select({
+          id: pullRequests.id,
+          repoId: pullRequests.repoId,
+          number: pullRequests.number,
+          title: pullRequests.title,
+          authorId: pullRequests.authorId,
+          openedAt: pullRequests.openedAt,
+          updatedAt: pullRequests.updatedAt,
+          firstReviewRequestedAt: pullRequests.firstReviewRequestedAt,
+          ciStatus: pullRequests.ciStatus,
+          changedFiles: pullRequests.changedFiles,
+          additions: pullRequests.additions,
+          deletions: pullRequests.deletions,
+        })
+        .from(pullRequests)
+        .where(
+          and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, seedPrIds)),
+        )
+        .execute();
+      const prRowById = new Map(prRows.map((p) => [p.id, p]));
+
+      // Two reasons date off a PR COLUMN rather than their section row: "awaiting your review"
+      // starts when a review was requested (the app's own review-pickup clock), and "your PR has
+      // new activity" is dated by the PR's last update — neither timestamp travels on the
+      // MyTurnPr wire shape, and openedAt would be plainly wrong for both. Everything else keeps
+      // its own row's timestamp, with openedAt as the floor for a null one.
+      const sinceFor = (s: Seed, p: (typeof prRows)[number]): Date =>
+        s.reason === 'review_request'
+          ? p.firstReviewRequestedAt ?? p.openedAt
+          : s.reason === 'your_pr'
+            ? p.updatedAt
+            : s.since ?? p.openedAt;
+
+      const sevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
+      const ranked = seeds
+        .flatMap((s) => {
+          const p = prRowById.get(s.prId);
+          // A PR the account doesn't own can't reach here; a missing row means the PR was
+          // deleted between the two reads. Drop the card rather than render a hollow one.
+          return p ? [{ s, p, since: sinceFor(s, p) }] : [];
+        })
+        .sort(
+          (a, b) =>
+            sevRank[a.s.severity] - sevRank[b.s.severity] ||
+            b.since.getTime() - a.since.getTime(),
+        );
+      // ⚠ THE CAP IS DISCLOSED, NOT HIDDEN. `ranked.length` is the population this board would
+      // paint uncapped — on a real workspace 148 against a cap of 50 — and it travels as
+      // `myTurnTotal` so the header can say "50 of 148". It is deliberately measured AFTER the
+      // deleted-PR drop above: the disclosure must name what the user could actually open, not
+      // a seed count that includes rows we refused to render. Raising or removing the cap is NOT
+      // the fix (50 is already the edge of what this board should paint), and neither is
+      // reporting 148 where the list holds 50 — that is the "number with no list behind it" bug
+      // this whole surface exists to end.
+      myTurnTotal = ranked.length;
+      const built = ranked.slice(0, MY_TURN_CARD_CAP);
+
+      for (const { s, p, since } of built) {
+        addUser(p.authorId);
+        for (const id of s.extraActorIds) addUser(id);
+        const card: MyTurnCard = {
+          // `myturn:` keeps these distinct from the stalled:/thread:/load:/route: ids — in
+          // particular a 'thread' reason and an untouched_thread card can name the SAME thread id.
+          id: `myturn:${s.reason}:${s.dismissRefId ?? s.prId}`,
+          kind: 'my_turn',
+          severity: s.severity,
+          ...prRef(p),
+          reason: s.reason,
+          dismissRefId: s.dismissRefId,
+          threadId: s.threadId,
+          detail: s.detail,
+          since: since.toISOString(),
+        };
+        cards.push(card);
+      }
+    }
+  }
 
   // ── bot_signal card (deterministic, no AI) ──────────────────────────────────
   // The un-copyable cross-repo, cross-bot "signal-to-noise" view: over the sprint window,
@@ -4539,9 +4814,6 @@ export async function getWorkspaceInsights(
       cards.push(card);
     }
   }
-
-  const ghUrl = (repoId: number, number: number): string =>
-    `https://github.com/${repoName.get(repoId)}/pull/${number}`;
 
   // Open, non-draft PRs in the workspace's repos that are NOT ultra-stale — i.e. have a real ACTIVITY
   // EVENT (open/commit/comment/review) within the last INSIGHT_MAX_STALE_DAYS. We key off the
@@ -4674,18 +4946,7 @@ export async function getWorkspaceInsights(
       id: `stalled:${p.id}`,
       kind: 'stalled_review',
       severity: ageHours >= 72 ? 'high' : ageHours >= 48 ? 'warn' : 'info',
-      prId: p.id,
-      repoId: p.repoId,
-      repoFullName: repoName.get(p.repoId) ?? '',
-      prNumber: p.number,
-      prTitle: p.title,
-      authorId: p.authorId,
-      githubUrl: ghUrl(p.repoId, p.number),
-      ciStatus: p.ciStatus,
-      changedFiles: p.changedFiles,
-      additions: p.additions,
-      deletions: p.deletions,
-      openedAt: p.openedAt!.toISOString(),
+      ...prRef(p),
       ageHours,
       requestedReviewerIds: reviewers,
       requestedTeamNames: teamNamesByPr.get(p.id) ?? [],
@@ -4740,18 +5001,7 @@ export async function getWorkspaceInsights(
       id: `thread:${t.threadId}`,
       kind: 'untouched_thread',
       severity: ageHours >= 96 ? 'high' : ageHours >= 48 ? 'warn' : 'info',
-      prId: t.prId,
-      repoId: t.repoId,
-      repoFullName: repoName.get(t.repoId) ?? '',
-      prNumber: t.prNumber,
-      prTitle: t.prTitle,
-      authorId: t.authorId,
-      githubUrl: ghUrl(t.repoId, t.prNumber),
-      ciStatus: t.ciStatus,
-      changedFiles: t.changedFiles,
-      additions: t.additions,
-      deletions: t.deletions,
-      openedAt: t.openedAt.toISOString(),
+      ...prRef({ ...t, id: t.prId, number: t.prNumber, title: t.prTitle }),
       threadId: t.threadId,
       path: t.path,
       ageHours,
@@ -4868,18 +5118,7 @@ export async function getWorkspaceInsights(
         id: `route:${p.id}`,
         kind: 'reviewer_routing',
         severity: 'info',
-        prId: p.id,
-        repoId: p.repoId,
-        repoFullName: repoName.get(p.repoId) ?? '',
-        prNumber: p.number,
-        prTitle: p.title,
-        authorId: p.authorId,
-        githubUrl: ghUrl(p.repoId, p.number),
-        ciStatus: p.ciStatus,
-        changedFiles: p.changedFiles,
-        additions: p.additions,
-        deletions: p.deletions,
-        openedAt: p.openedAt!.toISOString(),
+        ...prRef(p),
         topPaths: paths.slice(0, 5),
         suggestedReviewers: suggestions,
       });
@@ -5950,7 +6189,20 @@ async function getActionableActivityIds(accountId: number): Promise<{
   return { reviewRequestPrIds, newRepoPrIds, approvedPrIds, threadIds, claudeReviewIds };
 }
 
-export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
+// THE "my turn" FOLD — the six sections of what is on the viewer's plate, PR/thread-grained.
+//
+// `scope` is OPTIONAL and the two shapes are deliberately different questions:
+//   • omitted  → the ACCOUNT-WIDE inbox. `GET /api/my-turn` and the CLI status board take this,
+//                and its behaviour must stay byte-identical to the pre-scope version.
+//   • passed   → the WORKSPACE inbox: every section's driving query is narrowed to
+//                `scope.repoIds`, and an EMPTY repo list is an ordinary, immediate empty answer
+//                (a freshly created workspace), never a widening to the whole account.
+// The scoped form is what mints the `my_turn` insight cards in getWorkspaceInsights — so the
+// board's list and the daily brief's number come out of THIS function, once.
+export async function getMyTurn(
+  accountId: number,
+  scope?: BotScope,
+): Promise<MyTurnResponse> {
   const localUserId = await getAccountUserId(accountId);
   const empty: MyTurnResponse = {
     awaitingReview: [],
@@ -5962,6 +6214,11 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
     users: [],
   };
   if (localUserId == null) return empty;
+  // An empty workspace has nothing on your plate — and returning here also dodges the
+  // `inArray(col, [])` pitfall every scoped query below would otherwise hit.
+  if (scope && scope.repoIds.length === 0) return empty;
+  // null (not []) is the "no narrowing" sentinel the scoped helpers below test for.
+  const scopedRepoIds = scope ? scope.repoIds : null;
 
   const referencedUsers = new Set<number>();
 
@@ -5972,6 +6229,9 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
     .where(
       and(
         eq(pullRequests.accountId, accountId),
+        scopedRepoIds == null
+          ? undefined
+          : inArray(pullRequests.repoId, scopedRepoIds),
         eq(pullRequests.state, 'open'),
       ),
     )
@@ -6089,6 +6349,10 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
   //     aren't shown twice. Eligibility (opened on/after the repo was ADDED, by a non-bot
   //     human other than you, non-draft) is the shared getAddedRepoActionablePrIds; here we
   //     layer the cross-section dedupe + sticky dismissals on top.
+  //     ⚠ This section is workspace-scoped BY CONSTRUCTION, not by a predicate of its own: it
+  //     only ever emits ids drawn from `open`/`openRows`, which the query above already narrowed
+  //     to `scope.repoIds`. (Its repos read is a repo → addedAt CUTOFF map, so narrowing it would
+  //     change nothing but the row count.)
   const newRepoPrEligible = await getAddedRepoActionablePrIds(
     accountId,
     localUserId,
@@ -6114,7 +6378,7 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
   // 3. Threads awaiting your response: you opened the thread, someone replied
   //    after you, and it isn't resolved. A dismissal sticks until a newer reply.
   const threadsAwaiting = (
-    await getThreadsAwaiting(localUserId, accountId, repoNameById)
+    await getThreadsAwaiting(localUserId, accountId, repoNameById, scopedRepoIds)
   ).filter((ta) => {
     const d = threadDismissedAt.get(ta.threadId);
     return !d || Date.parse(ta.lastReplyAt) > d.getTime();
@@ -6126,7 +6390,7 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
   // Completed-but-unactioned Claude reviews (local-only feature; empty otherwise).
   // A manual "Done" hides the run until a newer run finishes (see claudeDismissedIds).
   const claudeReviewsToAction = getProCapabilities().claudeReview
-    ? (await getUnactionedClaudeReviews(accountId)).filter(
+    ? (await getUnactionedClaudeReviews(accountId, scopedRepoIds)).filter(
         (c) => !claudeDismissedIds.has(c.reviewId),
       )
     : [];
@@ -6169,6 +6433,10 @@ async function getThreadsAwaiting(
   localUserId: number,
   accountId: number,
   repoNameById: Map<number, string>,
+  // The workspace's repo narrowing, or null/undefined for the account-wide (unscoped) read that
+  // GET /api/my-turn and the CLI status board take. An EMPTY array is a real, scoped answer
+  // ("this workspace has no repos") and the caller short-circuits before reaching here.
+  repoIds?: number[] | null,
 ): Promise<ThreadAwaitingItem[]> {
   // Scope to the account by joining the thread → its PR → repo.
   const threadJoinRows = await db
@@ -6185,6 +6453,7 @@ async function getThreadsAwaiting(
     .where(
       and(
         eq(repos.accountId, accountId),
+        repoIds == null ? undefined : inArray(pullRequests.repoId, repoIds),
         eq(reviewThreads.originalCommenterId, localUserId),
         sql`${reviewThreads.derivedState} != 'resolved'`,
       ),
@@ -7177,6 +7446,9 @@ export async function listClaudeReviewsByRepo(
 // reviews don't fall through the cracks.
 export async function getUnactionedClaudeReviews(
   accountId: number,
+  // Optional workspace repo narrowing (same contract as getThreadsAwaiting's): null/undefined =
+  // the account-wide read, an array = only these repos' PRs.
+  repoIds?: number[] | null,
 ): Promise<ClaudeReviewToAction[]> {
   const rows = await db
     .select({
@@ -7198,6 +7470,7 @@ export async function getUnactionedClaudeReviews(
     .where(
       and(
         eq(repos.accountId, accountId),
+        repoIds == null ? undefined : inArray(pullRequests.repoId, repoIds),
         eq(claudeReviews.status, 'succeeded'),
         eq(pullRequests.state, 'open'),
       ),

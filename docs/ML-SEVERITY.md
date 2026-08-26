@@ -967,3 +967,74 @@ breaks a tie, never becomes a low-confidence fallback, and never reaches the mod
   UI's stalled-detection only stops it LYING about the situation.
 - **Not exercised in CI.** The Docker image is not pushed anywhere and CI has no severity-api,
   so the enrichment path is only ever run locally or in cloud.
+
+---
+
+## `packages/ml` is a SUBMODULE and a PYTHON repo — not a pnpm workspace, not an import
+
+Worth stating flatly, because every other directory under `packages/` is a pnpm workspace and
+the assumption costs time:
+
+- **It is PYTHON.** No TypeScript, no build step in this repo's toolchain.
+- **It is NOT a pnpm workspace.** The root `pnpm-workspace.yaml` globs `apps/*` + `packages/*`,
+  but `packages/ml` **has no `package.json`**, so the glob simply skips it. `pnpm install`,
+  `pnpm build`, `pnpm typecheck` and `pnpm test` never see it. Do not add one.
+- **It is NEVER IMPORTED.** The backend talks to it **over HTTP only** (`SEVERITY_API_URL` →
+  `POST /score/*`). There is no code path from a `.ts` file into this directory; the only
+  in-repo references are the dev script's spawn (`scripts/dev-ml.mjs` → the sibling's own
+  `scripts/serve_local.sh`) and this documentation.
+- **It builds, versions and DEPLOYS INDEPENDENTLY.** The submodule is a **pinned pointer, not a
+  merge of the two codebases** — its own repo
+  ([`pierre-ml`](https://github.com/alexwakeman/pierre-ml)) owns its release cycle, and cloud runs
+  it as a separate Railway service. Bumping the gitlink here changes which commit you get
+  locally; it does not deploy anything.
+- **Absent ⇒ the labels are simply dark.** A clone without `--recurse-submodules` is a fully
+  working checkout; `git submodule update --init` fetches it.
+
+⚠ **`pnpm dev` handles the absence by EXITING 0, never by failing.** `scripts/dev.mjs` decides
+**ONCE** whether the service can be started (sibling present, `uv` installed, not disabled) and
+uses that one answer for **two** things: whether to launch it, **and** whether to point the
+backend at it. Those must not be able to disagree — a backend aimed at a severity-api that is not
+running would report `mlSeverity: true` and show a scoring backlog nothing is draining, which is
+worse than the feature being quietly off. **Every "can't run it" path prints one line and exits
+0**, so a clone without the submodule gets exactly the dev loop it always had.
+
+⚠ **`SEVERITY_API_DEFAULT_URL`, never `SEVERITY_API_URL`** — `dev.mjs` exports the *fallback*
+name, and `config.ts` reads it only as a fallback. **`process.loadEnvFile` does NOT overwrite an
+already-set variable**, so exporting `SEVERITY_API_URL` from the dev script would have **BEATEN
+whatever is in your `.env`** — the exact inverse of what a default should do. An explicit
+`SEVERITY_API_URL` (shell or `.env`) always wins; nothing but the dev script sets the fallback.
+A custom `SEVERITY_API_PORT` therefore needs an explicit `SEVERITY_API_URL` too, and `dev.mjs`
+prints the URL it chose so a mismatch is visible. (Full env table + the
+`SEVERITY_API_WORKERS`/`ML_CONCURRENCY` pairing: § Running it locally.)
+
+## The batch budget is CHARACTERS, not items — the `config.*` field names
+
+Full mechanics are in **§ Batching: the character budget is the real one**; this is the
+name-mapping an agent editing `sync/ml-enrichment.ts` needs, plus the one-line statement of the
+rule.
+
+**The rule: a batch pads to its LONGEST member**, so one 6 k-char walkthrough dropped into a
+batch of 128 short comments makes all 128 cost like the walkthrough. Inference cost tracks
+**total text**, not item count — which is why the item cap is a safety rail and the **character
+budget is the real budget**.
+
+| Env var | `config.ts` field | Default | Role |
+|---|---|---|---|
+| `ML_BATCH_MAX_CHARS` | **`config.mlBatchMaxChars`** | `24_000` | **THE budget.** Fills each batch |
+| `ML_BATCH_MAX_ITEMS` | `config.mlBatchMaxItems` | `128` | Item cap — **service hard cap is 256** (over it, a 422) |
+| `ML_BODY_MAX_CHARS` | `config.mlBodyMaxChars` | `6_000` | Per-body trim, via `truncateOnCodePoint` |
+| `ML_CONCURRENCY` | `config.mlConcurrency` | `2` | In-flight requests |
+| `ML_TICK_BUDGET_MS` | `config.mlTickBudgetMs` | `90_000` | Wall-clock ceiling per tick |
+| `ML_REQUEST_TIMEOUT_MS` | `config.mlRequestTimeoutMs` | `120_000` | Cold start loads a ~150 MB model |
+
+**Candidates are SORTED BY BODY LENGTH before packing**, so each batch is internally uniform and
+the padding waste collapses. Measured on the dev corpus: **482 labels in 71 s (≈6.8 items/s)**
+versus the **~3 items/s** an unsorted batcher gets on the same machine — a >2× throughput
+difference from a `sort`.
+
+⚠ **Results are zipped POSITIONALLY, and `scoreComments` THROWS on a length mismatch.** If the
+service returns a different number of results than items sent, a short array would attach one
+comment's severity to a **different comment** — a silently wrong label on the wrong text, which
+is worse than no label at all. The throw is the contract, not defensive noise: do not "handle" it
+by zipping what came back.

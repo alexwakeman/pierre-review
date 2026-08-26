@@ -193,8 +193,9 @@ fixture tests (see Conventions).
   each repo's next full walk (`sync/backfill-ci-history.ts` synthesizes only the PR-side rows).
 - **`workspaceReviewers`** — the **Bot-Triage** table (CORE, `accountId`-scoped). **THE BOT OBJECT:
   ONE row per `(accountId, workspaceId, authorUserId)`**, carrying three independent facts:
-  - **JUDGEMENT** (provenance: `source`) — `automated`, `role` (`ReviewerRole`
-    `'review'|'quality_check'`, NOT NULL default `'review'`), `confidence`, `source`, `reasonsJson`.
+  - **JUDGEMENT** (provenance: `source`) — `automated`, `role` (`ReviewerRole` — **SIX** members,
+    NOT NULL default `'review'`; see "The automation vocabulary" below), `confidence`, `source`,
+    `reasonsJson`.
   - **IDENTITY** (provenance: `identitySource`) — `kind`, `label`.
   - **PRICE** (no provenance; exactly one writer) — `monthlyCents` + `costModel`.
 
@@ -326,3 +327,217 @@ contract: [ML-SEVERITY.md](ML-SEVERITY.md).
   deleted explicitly in `eraseAccountData`.
 - The **rollup counts only actors the workspace CURRENTLY calls bots** — a label whose author
   has since been marked human is stored but excluded.
+
+
+
+
+## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
+
+Three vocabularies describe an automated actor, and they are **orthogonal axes, not one enum**:
+
+| Axis | Type | Question | Provenance column |
+|---|---|---|---|
+| Judgement | `automated: boolean` + `ReviewerRole` | is it automation, and **what does it DO** | `source` |
+| Identity | `AutomatedReviewerKind` (+ `label`) | **WHO** is it — the vendor brand | `identitySource` |
+| Price | `monthlyCents` + `costModel` | what does it cost | (no provenance; one writer) |
+
+All three live in ONE `workspace_reviewers` row — see **`workspaceReviewers`** above.
+
+### `ReviewerRole` has SIX members, and EXACTLY ONE is the reviewer cohort
+
+```
+'review' | 'quality_check' | 'dependency' | 'code_agent' | 'release' | 'housekeeping'
+```
+
+What an automation DOES, chosen per workspace from a picker, mapping **1:1** onto an
+`ActorLane` via `REVIEWER_ROLE_LANE` (see [PERIOD-REPORTING.md](PERIOD-REPORTING.md) § lanes).
+The column is NOT NULL, default `'review'`.
+
+⚠ **Every cohort test is `=== 'review'`, never `!== 'quality_check'`.** Those two spellings were
+the same answer while there were exactly two roles, and became **silently wrong** at six: the
+old spelling re-admits `dependency` / `code_agent` / `release` / `housekeeping` into the ROI,
+behaviour, dedup and benchmark sets. Fixed at four sites — `narrowAutomatedIds`,
+`getBotAnalytics`'s `isQualityCheck`, `getBotOverlap`, `bucketReviewers`. **`grep -n
+"quality_check'"` before adding a fifth.** The wire field
+`BotAnalyticsResponse.qualityChecks` and the frontend bucket of the same name now hold EVERY
+non-reviewer role — the names are historical.
+
+⚠ **The STORED role beats the login seed on read.** Widening a vocabulary in code therefore
+does NOTHING for an actor already classified. Migration **`0053`** re-derives `role` for every
+row whose `source <> 'manual'`, and a future vocabulary addition needs the same treatment.
+
+### `AUTOMATION_VENDORS` is the ONE table the five per-family login sets are DERIVED from
+
+`packages/shared/src/types.ts`:
+
+```ts
+export const AUTOMATION_VENDORS: Record<string, { kind: AutomatedReviewerKind; role: ReviewerRole }>
+```
+
+**One row per login, carrying BOTH facts.** `REVIEW_BOTS` owns the AI-reviewer family; this
+owns every other kind of automation that touches a PR. It is ONE table rather than five login
+sets plus a parallel login→kind map, because **a login has exactly one identity and one default
+role, and those are facts about the same key**. Two tables keyed by login is precisely the "a
+fact lives at ONE grain" trap this codebase has paid for before: the second one drifts and
+nothing detects it.
+
+Consequences worth stating:
+
+- **The five families are disjoint BY CONSTRUCTION** — there is no predicate order to get
+  wrong. `roleForBotLogin(login)` has exactly one answer per login (the vocabularies are
+  asserted pairwise disjoint), which is why `db/actor-lanes.ts` makes ONE call instead of five
+  ordered predicates.
+- `role` is the **DEFAULT** role for the login; a human's choice always wins.
+- `kind` is the vendor **identity**, orthogonal to role. A login may legitimately appear in
+  `REVIEW_BOTS` too when the same brand does both jobs — and where it does, **the two tables
+  MUST agree on the kind**; `bot-detection.test.ts` asserts that rather than leaving it to a
+  reader.
+- It is **hand-mirrored in `sync/bot-detection.ts`** (the backend cannot import shared at
+  runtime — see [PERIOD-REPORTING.md](PERIOD-REPORTING.md) § three spellings). The **drift test
+  compares it key-by-key AND value-by-value** — a key-only comparison would pass while a
+  vendor's role silently changed.
+
+⚠ **Why the `kind` column exists at all.** Before it, every automation that was not an AI
+reviewer resolved to `kind: 'in_house'` via the classifier's githubType fallback — the bucket
+literally labelled **"In-house AI"**. On the dev corpus that bucket held sonarqubecloud,
+dependabot[bot], github-actions[bot], gitguardian, socket-security, google-cla and jit-ci:
+**25 of 37 such rows**. Every one rendered as "In-house AI" with the same grey chip, so a user
+could not tell their SonarQube from their CLA bot on the screen that exists to classify them.
+
+Classifier step **1b** brands them. Migration **`0054`** re-derives `kind` for rows with
+`identity_source <> 'manual'` and `kind IN ('in_house','vendor')`, **nulling the cached `label`**
+so the brand name shows.
+
+⚠ **`ReviewBotKind` must NEVER absorb the other families.** It is the AI-reviewer cohort: it
+drives the review-bot badge and keys the rows the cross-org benchmark contributes.
+
+## `REVIEW_BOT_KINDS` is an ALLOW-list — `getBenchmarkContributions`
+
+```ts
+export const REVIEW_BOT_KINDS: ReadonlySet<string>   // shared/types.ts, MIRRORED into queries.ts
+export function isBenchmarkableVendorKind(kind): boolean
+```
+
+`getBenchmarkContributions` decides which vendor rows may be contributed to the cross-org
+benchmark. **Those rows LEAVE THE TENANT and cannot be recalled.**
+
+The old test was a **deny-list**: `kind !== 'in_house' && kind !== 'pierre' && kind !== 'vendor'`.
+That was correct **only while `ReviewBotKind` was the entire branded universe**. The moment
+`AutomatedReviewerKind` grew quality-gate / dependency / code-agent / release / housekeeping
+brands, **every one of them would have passed it** — shipping a linter's volume into a shared
+cross-org *review-bot* cohort, permanently, for everyone, with no way to un-ship it.
+
+An allow-list cannot fail that way: **a new kind is excluded until someone deliberately adds
+it here.**
+
+⚠ **Pinned by `db/benchmark-vendor-kinds.test.ts`, which goes THROUGH THE GETTER.** This matters
+more than it sounds: a unit test that merely pinned the SET's contents passed happily while the
+predicate was mutated back to the deny-list. The set is not the invariant — the *filter* is.
+
+## `vendorKindsForRole` always includes the STORED kind
+
+```ts
+vendorKindsForRole(role: ReviewerRole, current?: AutomatedReviewerKind | null): AutomatedReviewerKind[]
+```
+
+The Bots card asks for the **ROLE first**, then offers only that family's vendors plus the
+generic escape hatches (In-house/custom, Other vendor). `roleForVendorKind` returns `null` for a
+kind legal in every role, and **a kind with no entry is treated as `null` — permissive**,
+because hiding a stored value from its own picker is how a user's saved vendor silently changes
+on the next save.
+
+⚠ **The `current` argument is NOT a convenience.** A `<select>` whose `value` is absent from its
+options renders the **FIRST option** instead — so the card would *show* a vendor the row does
+not hold, and the next save would *write* that wrong vendor. Role and identity are independently
+owned halves (`source` vs `identitySource`), so a row legitimately carries a vendor from another
+family: someone marks CodeRabbit a quality check without renaming it. The stored value has to
+stay selectable.
+
+⚠ **The role write sits behind an explicit "Apply role" BUTTON, not the select's `change`
+event.** That write stamps `source: 'manual'`, which stops the classifier ever re-deriving the
+row — and a `change` event is not a deliberate act: a scroll wheel, an arrow key, or the browser
+restoring form state on reload all fire one. It happened during development and silently
+re-roled a live row.
+
+## `onConflictDoUpdate` inventory — the conflict target of every writer, per table
+
+⚠ **When a unique index CHANGES, every `onConflictDoUpdate` on that table must change with it.**
+A stale target **type-checks perfectly** and raises *"no unique or exclusion constraint matching
+the ON CONFLICT specification"* at **RUNTIME**, in **both dialects**, and **only when a row is
+actually written** — so an insert-only test never reaches the branch. The bot writers took this
+hit twice in a row (`0042` re-keyed to three columns, `0045` re-keyed the three columns again).
+
+**Before adding a writer: `grep -n onConflictDo` over BOTH trees (core + `packages/pro`) and
+check every hit against its table's declared unique.**
+
+| Table | Conflict target | Writers |
+|---|---|---|
+| `workspace_reviewers` | `[accountId, workspaceId, authorUserId]` (`workspace_reviewers_account_workspace_author`) | `sync/reviewer-classify.ts` `persist` + `persistHumanJudgement`; every `queries.ts` bot writer (manual classification ~9605); `deleteWorkspace`'s reviewer re-home (`onConflictDoNothing`, ~626) |
+| `workspace_repos` | `[accountId, repoId]` — **the unique that makes an assignment a MOVE** | `assignReposToWorkspace` (~716), `upsertRepo`'s in-transaction membership insert, `ensureRepoMemberships` (both `onConflictDoNothing`) |
+| `workspaces` | the `workspaces` uniques (incl. the **partial** one-`isDefault`-per-account index that lives in the `.sql` migrations — drizzle index predicates are inert metadata) | `ensureDefaultWorkspace` (`onConflictDoNothing`) |
+| `repos` | `[accountId, githubNodeId]` | `upsertRepo` |
+| `pull_requests` / `events` / children | `(accountId, githubNodeId)` · `(accountId, dedupeKey)` · child `(prId, githubNodeId)` | `sync/upsert.ts` (the whole PR subtree) |
+| `review_comments` / `pr_comments` / `reviews` | `[prId, githubNodeId]` | `sync/upsert.ts` + the post-write local stamps in `queries.ts` (~7897 / ~7931 / ~7979) |
+| `commit_files` | `sha` (immutable content — a single-column target) | `sync/commit-files.ts` |
+| `pr_views` | `prId` | `markPrViewed` (~5416), the bulk mark-all (~5447) |
+| `my_turn_dismissals` | `[kind, refId]` — **deliberately omits `accountId`** (`refId` is a global PK) | `dismissMyTurn` (~5512) |
+| `auto_merge_requests` | `[accountId, prId]` — current state, not a log; re-arm OVERWRITES, disarm DELETEs | `armAutoMerge` (~14009) |
+| `benchmark_contributions` | `[accountId, vendorKind, weekStart]` | the benchmark rollup (~13444) |
+| `ml_comment_labels` | `(account_id, target_kind, target_id)` (`mcl_account_target`) | `db/ml-labels.ts` (the enrichment worker's ONLY writer) |
+| `accounts` | the account uniques | `auth/account.ts` (`ensureLocalAccount`, `upsertCloudAccount`) |
+| `repos` head/trunk columns | `[accountId, githubNodeId]` / `branch_commits` composite | `sync/branch-status.ts`, `sync/sync-repo.ts` |
+
+⚠ **`persist()` must NOT share one values object between the insert and the `set:`.** It did,
+and that was correct while the table held one grain. With judgement + identity + price in one
+row, a shared object overwrites a human's vendor name on every auto pass — and if `monthlyCents`
+ever crept into it, every auto pass would silently wipe the price the user typed. It builds the
+`set:` per workspace from the two stored provenance flags and **emits no statement when neither
+half may be written**. It is a **READ-THEN-NARROW, not an `onConflictDoUpdate … WHERE`** —
+drizzle spells `setWhere` differently per dialect while `db` is pg-typed.
+
+## Reading the bot table — `resolveWorkspaceReviewers` and its helper roster
+
+**Every read of `workspace_reviewers` needs an EXPLICIT workspace predicate.** With one row per
+`(account, workspace, actor)` there is nothing to fold: the old `resolveJudgements` (per-repo,
+unioned) and `resolveIdentities` (per-account) merged into ONE function the moment both facts
+landed on the same key.
+
+```ts
+async function resolveWorkspaceReviewers(accountId, workspaceId): Promise<Map<number, ResolvedReviewer>>
+```
+
+ONE read of ONE row per actor in ONE workspace, served directly by
+`workspace_reviewers_account_workspace_idx`. `ResolvedReviewer` carries
+`{automated, role, manualHuman, confidence, source, reasons, kind, label, identitySource,
+monthlyCents, costModel}` — where **`manualHuman` (`source === 'manual' && !automated`) is its
+own field** because it is the one judgement that must beat a known vendor login.
+
+**The helper roster over it — ALL of these take a `workspaceId`,** since every one of those
+facts is per workspace:
+
+| Helper | Answers |
+|---|---|
+| `automatedReviewerUserIds(accountId, workspaceId, role)` | the automated id set, `'review'` \| `'all'` |
+| `classificationKindForUser(accountId, workspaceId)` | id → `AutomatedReviewerKind` |
+| `classificationLabelMap(accountId, workspaceId)` | id → display label |
+| `reviewerRoleForUser(accountId, workspaceId)` | id → `ReviewerRole` (stored) |
+| `manualRoleUserIds(accountId, workspaceId)` | ids whose role was chosen BY A PERSON (automated rows only) |
+| `manualHumanUserIds(accountId, workspaceId)` | ids a person vouched for as human |
+| `reviewerCostForUser(accountId, workspaceId)` | id → resolved monthly cost (per-seat multiplied on READ) |
+
+⚠ **The old failure is worth remembering when writing a NEW read.** Helpers that collapsed the
+multi-row table one-row-per-author (`new Map(rows.map(…))`, `limit(1)`, no `ORDER BY`) returned
+rows in **heap order, which flips after any UPDATE on Postgres** — so the same query answered
+differently on the two dialects, and differently on the same dialect after an edit. Go through
+`resolveWorkspaceReviewers`.
+
+**The ONLY account-wide sweep is the cross-org benchmark**, and it gets **two explicitly named
+functions rather than a null sentinel**, so no ordinary read can reach it by accident:
+
+- `automatedReviewerUserIdsForAccount(accountId, role)`
+- `classificationKindForUserForAccount(accountId)`
+
+Its union rule is the old multi-repo one, lifted: automated in ANY workspace ⇒ automated;
+`role: 'review'` in any workspace ⇒ `'review'` (a login that lints one workspace and reviews
+another belongs in the reviewer cohort); a manual "this is a human" only counts when **NO**
+workspace calls the actor automated.

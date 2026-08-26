@@ -14,6 +14,7 @@ import {
   type DerivedState,
   type EventCategory,
   type EventType,
+  type InsightKind,
   type InsightsRangeKey,
   type MlSeverity,
   type PrStatus,
@@ -307,6 +308,16 @@ export interface FilterState {
   // the consolidated Feed shows ONLY that PR's items. Driven by the Feed "open PRs" panel.
   // Transient, URL-silent (like the other feed toggles); cleared on rail / scope changes.
   feedIsolatedPrId: number | null;
+  // Activity "Needs attention" single-KIND isolation: null (default) → every attention card in
+  // scope; an InsightKind → the board shows ONLY that kind. Set by the daily brief's lines, each
+  // of which is ABOUT one kind ("3 PRs stalled awaiting review" → the stalled cards), so the
+  // number the user clicked and the list they land on are the same population. Transient,
+  // URL-silent (like feedIsolatedPrId); cleared on rail / scope changes.
+  //
+  // ⚠ It is NOT in FilterDefaults / freshFilterDefaults / pickFilterBarState — a lens set by one
+  // click of a brief line is not a standing preference, so it must not persist or need a
+  // FILTER_STORAGE_VERSION bump. It lives in freshDefaults() only.
+  attentionIsolation: InsightKind | null;
   // The rolling window the Bot-ROI panel (Insights) reports over. Transient, URL-silent
   // (like feedBotLens) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
@@ -654,6 +665,14 @@ export interface FilterState {
   setFeedCiLens: (v: FeedCiLens) => void;
   // Isolate the Feed to a single PR (or clear with null) — the Feed "open PRs" panel.
   setFeedIsolatedPrId: (id: number | null) => void;
+  // Isolate the "Needs attention" board to one card kind (or clear with null) — the daily
+  // brief's lines.
+  //
+  // ⚠ ORDERING: `setActivityRepo` CLEARS this (and early-returns `{}` when the rail id is
+  // unchanged), so a caller that wants to both switch to the board AND isolate it must call
+  // `setActivityRepo('attention')` FIRST and this SECOND. The same rule the PR-detail /
+  // bot-only-PRs "Show in Activity feed" buttons follow for `setFeedIsolatedPrId`.
+  setAttentionIsolation: (kind: InsightKind | null) => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
   // Switch the Bots view's inner sub-tab (ROI / experimental Behaviour / Themes / Settings).
@@ -1074,6 +1093,7 @@ function freshDefaults(): FilterData {
     feedNeedsReview: false,
     feedShowCommits: false,
     feedIsolatedPrId: null,
+    attentionIsolation: null,
     botAnalyticsWindow: 'rolling_14',
     botsInnerTab: 'roi',
     advisorFocus: null,
@@ -1136,9 +1156,11 @@ export const useFilters = create<FilterState>((set, get) => ({
 
   setRepoIds: (ids) => set({ repoIds: ids }),
   // Switching workspace re-scopes everything; an isolated PR almost certainly falls out of the
-  // new scope, so drop the isolation to avoid a confusing empty feed.
+  // new scope, so drop the isolation to avoid a confusing empty feed. The attention board's
+  // kind isolation goes with it for the same reason — the new workspace may have none of that
+  // kind, and an empty board with an unexplained filter on it is the worse outcome.
   setWorkspace: (workspaceId, repoIds) =>
-    set({ workspaceId, repoIds, feedIsolatedPrId: null }),
+    set({ workspaceId, repoIds, feedIsolatedPrId: null, attentionIsolation: null }),
   toggleRepo: (id) =>
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),
   showRepo: (id) => {
@@ -1190,6 +1212,9 @@ export const useFilters = create<FilterState>((set, get) => ({
     })),
   setFeedCiLens: (v) => set({ feedCiLens: v }),
   setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
+  // ⚠ Callers switching rail AND isolating must call setActivityRepo('attention') FIRST — see
+  // the setter's declaration comment (setActivityRepo clears this, and no-ops when unchanged).
+  setAttentionIsolation: (kind) => set({ attentionIsolation: kind }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setBotsInnerTab: (v) => set({ botsInnerTab: v }),
   focusAdvisor: (botKey, intent) =>
@@ -1463,13 +1488,24 @@ export const useFilters = create<FilterState>((set, get) => ({
   setManagerOpen: (open) => set({ managerOpen: open }),
   bumpClaudeReviewKickoff: () =>
     set((s) => ({ claudeReviewKickoff: s.claudeReviewKickoff + 1 })),
-  // Selecting a different repo console drops any lingering thread-state filter + the Feed's
-  // single-PR isolation so a narrow from one view doesn't carry over to the next.
+  // Selecting a different repo console drops any lingering thread-state filter, the Feed's
+  // single-PR isolation and the attention board's kind isolation so a narrow from one view
+  // doesn't carry over to the next.
+  //
+  // ⚠ THE EARLY `{}` IS AN ORDERING TRAP for every caller that pairs this with an isolation
+  // setter: re-selecting the CURRENT rail entry returns an empty patch, so a caller that
+  // isolated FIRST and switched SECOND would have its isolation silently survive on some paths
+  // and be wiped on others. Always switch first, isolate second.
   setActivityRepo: (id) =>
     set((s) =>
       s.activityRepoId === id
         ? {}
-        : { activityRepoId: id, activityThreadFilter: null, feedIsolatedPrId: null },
+        : {
+            activityRepoId: id,
+            activityThreadFilter: null,
+            feedIsolatedPrId: null,
+            attentionIsolation: null,
+          },
     ),
   setActivityThreadFilter: (st) =>
     set((s) => ({ activityThreadFilter: s.activityThreadFilter === st ? null : st })),

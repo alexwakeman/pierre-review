@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   flip,
   FloatingPortal,
@@ -1008,15 +1008,33 @@ export function PinnedTabsBar(): JSX.Element {
         label="Timeline"
         title="Timeline — the activity board"
       />
-      {displayTabs.map((t) => (
-        <TabChip
-          key={t.key}
-          tab={t}
-          isDragged={draggedKey === t.key}
-          drag={dragHandlers}
-          onActivate={activateTab}
-          onOpenMenu={openMenu}
-        />
+      {displayTabs.map((t, i) => (
+        <Fragment key={t.key}>
+          {/* A Chrome-style pipe between adjacent DYNAMIC tabs only — `i > 0`, since index 0 abuts
+              the fixed Timeline chip and the two fixed chips are never separated.
+              ⚠ It must carry NO `data-tabkey`: `updatePreview` derives the drag drop-slot from
+              `strip.querySelectorAll('[data-tabkey]')` midpoints and then maps those elements'
+              `dataset.tabkey` into the order committed by `moveTab` — a tagged separator would
+              splice `undefined` into the tab order. A bare `aria-hidden` span with no role also
+              keeps it out of the `role="tablist"` accessibility tree.
+              It HIDES next to the active tab (Chrome does the same): the active chip paints a
+              `border-gray-300 dark:border-gray-700` outline, which an abutting pipe double-strikes.
+              `w-px -mx-px` puts the pipe INSIDE the strip's existing 4px gap so net spacing is
+              unchanged; `self-center h-4` stops `items-stretch` growing it into a full-height rule. */}
+          {i > 0 && displayTabs[i - 1]?.key !== activeTab && t.key !== activeTab && (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none -mx-px h-4 w-px shrink-0 self-center bg-gray-300 dark:bg-gray-700"
+            />
+          )}
+          <TabChip
+            tab={t}
+            isDragged={draggedKey === t.key}
+            drag={dragHandlers}
+            onActivate={activateTab}
+            onOpenMenu={openMenu}
+          />
+        </Fragment>
       ))}
       {menu != null && (
         <TabContextMenu

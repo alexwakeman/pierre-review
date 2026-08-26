@@ -20,6 +20,7 @@ import { FeedMetricsPanel } from './FeedMetricsPanel.js';
 import { HumanThemesPanel } from './HumanThemesPanel.js';
 import { InsightsView } from './InsightsView.js';
 import { AttentionView } from './AttentionView.js';
+import { AttentionIsolationBanner } from './AttentionIsolationBanner.js';
 import { BotsView } from './BotsView.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
 
@@ -534,10 +535,17 @@ export function ActivityView(): JSX.Element {
           // repo data loads.
           <BotsView />
         ) : showingAttention ? (
-          // The CORE/free "Needs attention" cards (stalled reviews / untouched threads / reviewer
-          // load / needs-a-reviewer) — moved out from under the Pro Insights AI panels. Renders on
-          // every tier, before repo data loads (its own empty/loading states).
-          <AttentionView />
+          // The CORE/free "Needs attention" cards (your turn / stalled reviews / untouched threads
+          // / reviewer load / needs-a-reviewer) — moved out from under the Pro Insights AI panels.
+          // Renders on every tier, before repo data loads (its own empty/loading states).
+          //
+          // The banner above it is the single-KIND isolation set by the daily brief's lines — the
+          // attention-board twin of FeedIsolationBanner (which is mounted only on the per-repo
+          // console + the fallback branch, never here). It renders null when nothing is isolated.
+          <div className="space-y-3">
+            <AttentionIsolationBanner />
+            <AttentionView />
+          </div>
         ) : showingInsights ? (
           <InsightsView />
         ) : noRepos ? (

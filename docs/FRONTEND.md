@@ -937,3 +937,130 @@ per-PR query (`['ml-labels', prId]`, `staleTime: Infinity`) — the badge never 
 target with no label renders nothing. Gated on `MeResponse.mlSeverity` (a TOP-LEVEL field, not a
 `pro` capability). `threadSeverityFilter` is a global store field and carries the same
 `selectedPrId === prId` guard as `threadStateFilter`. Detail: [ML-SEVERITY.md](ML-SEVERITY.md).
+
+## The sync round — a transient store slice with ONE driver (`syncRound` / `managerOpen`)
+
+**One user-visible "sync round"** = the GitHub walk **plus** the ML scoring pass that follows it,
+shared between the header sync button and the WorkspaceManager's embedded progress panel.
+
+- **State** lives in `store/filters.ts` as `SyncRoundState`
+  `{open, modal, syncing, cancelling, scopeIds}` plus the sibling flag `managerOpen`. Both are
+  **transient** — not persisted, not URL-serialized.
+- **`SyncStatus` (`components/SyncStatus.tsx`) is the SINGLE DRIVER.** It is **always mounted in
+  the header**, so the round survives the manager opening and closing. It owns the
+  `['sync-status']` + `['ml-status']` polls, the completion effects and every invalidation, and
+  it is the **only writer** of the slice. Everything else consumes state and calls the actions
+  `SyncStatus` registers.
+- **The actions ride a MODULE-LEVEL registry** (`registerSyncRoundActions` /
+  `getSyncRoundActions` — `{cancel, syncAllShallow, syncAllDeep, syncOneDeep, dismiss}`),
+  deliberately **not store state**: they are per-render closures, and putting them in the store
+  would churn every subscriber on each `SyncStatus` render. `SyncStatus` re-registers after every
+  render so the closures see fresh data and unregisters on unmount; **null while unmounted means
+  callers no-op, never queue**.
+- **Routing.** The progress UI embeds **INSIDE the WorkspaceManager panel** (it must render
+  within `panelRef`, or click-outside closes the manager). `SyncProgressModal` survives ONLY for
+  the onboarding add path — `modal: true` **iff the manager isn't open**
+  (`modal: !useFilters.getState().managerOpen`). Header-initiated rounds keep `modal: false`: the
+  header never opens a dialog, the icon spin is the whole surface.
+
+### Landmines
+
+- ⚠ **The signal mailbox is an ARRAY (`syncModalRepoIds`), not a scalar.** A multi-add calls
+  `requestSyncModal` once per repo in a **synchronous loop**; React 18 batches those sets and the
+  effect runs **ONCE** for all of them. A last-writer-wins scalar read would scope the round to
+  only the final repo. The effect **drains the whole pending list** and clears it.
+- ⚠ **An open round's EMPTY `scopeIds` is the "all repos" SENTINEL — never append to it.**
+  Appending would *narrow* a round that already covers everything down to just the newcomers.
+  Merging only fills in `missing` ids when `scopeIds.length > 0`.
+- ⚠ **Merging into an open round must re-arm `syncing: true`.** Past the walk phase (i.e. during
+  the ML-scoring linger, where `syncing` is already false) the `['sync-status']` poll is
+  **disabled**, so a repo added then renders frozen at 0% forever.
+- ⚠ **Merging must NOT call `beginSyncRound()`.** That resets `seenRunning` and cancels the
+  auto-close, stomping completion tracking for repos already being watched. The completion effect
+  keys off `runningCount === 0` across the *now-larger* scope, so it naturally waits for all of
+  them.
+- ⚠ **The `foregroundComplete` handoff EXCLUDES `paused.reason === 'queued'` rows.** Queued rows
+  can't start their foreground pass until the repos ahead of them finish their *whole* backfill,
+  so counting them would block a multi-add round's handoff forever. The predicate is
+  `nonQueuedRunning.length > 0 && nonQueuedRunning.every(s => s.progress?.foregroundComplete)`.
+- **`seenRunning` is a latch, and it is load-bearing.** A just-triggered repo isn't reflected in
+  the status poll for a tick or two, so `runningCount === 0` alone cannot tell "not started yet"
+  apart from "finished" — without the latch the round declares done and refetches half-written
+  data.
+- **Auto-close is gated on BOTH halves** (`!syncing && !cancelling && !mlScoring && !mlUnknown`)
+  and lives in its own effect. The walk ending used to schedule the close directly, which is
+  exactly what made the model pass unrepresentable: the overlay closed on "✓ done" while scoring
+  was only just starting.
+- **Adding a repo from the manager AUTO-SWITCHES the active workspace to the destination** once
+  the move commits — the "synced fine but nothing loaded" fix; the scope used to stay behind.
+
+## There is ONE bottom-right toast column (App.tsx) + `GlobalLoadingBar`
+
+⚠ **Never add a new independent `fixed bottom-4 right-4` element.** Three of them were painting
+over each other at the same coordinate. `App.tsx` renders exactly one column —
+
+```jsx
+<div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+  <ClaudeReviewBanner /> <AutoMergeBanner /> <GlobalLoadingBar />
+</div>
+```
+
+— and `ClaudeReviewBanner`, `AutoMergeBanner` and the ambient `GlobalLoadingBar` render as
+**plain cards inside it**. `GlobalLoadingBar` is the BOTTOM-MOST card; the two toast stacks sit
+above it rather than over it. The column is `pointer-events-none`: the bar is an **INDICATOR, not
+a dialog** — no close button, no click target, and it must never steal a click from the board
+underneath.
+
+### What the loading bar covers, and why it exists
+
+**HEAVY work only**: any **full-mode** sync walk (first-sync backfill / deep re-sync /
+queued-for-full, via `GET /api/sync-activity`) **plus** the ML scoring pass that follows a walk,
+strictly under `isMlScoring` — never a raw `pending > 0`. It exists because a user added
+`redis/go-redis`: the walk finished fine and then ~733 bot comments (~735k chars) ground the
+CPU-bound ONNX classifier for minutes **with no ambient indicator anywhere**, so the board looked
+dead.
+
+⚠ The two hooks are **circular** — the ML hook only raises its cadence when a walk is `active`,
+while `useSyncActivity` needs `scoring` — so the walk flag rides a **ref one render behind**
+(`backfillsActiveRef`). Walk percents change on effectively every fast poll, so the lag is one
+poll at most.
+
+### ETA mechanics (all pure + exported from `GlobalLoadingBar.tsx`, so they read as tests)
+
+- **An UNCHANGED poll value is NO OBSERVATION AT ALL** (`observeDrain`). Work drains in **batch
+  grain** — an ML batch of long comments lands tens of seconds apart — so the anchor stays put and
+  the eventual drop is averaged over the whole gap. Sampling zero-drain polls instead would decay
+  the EWMA between batches and make the ETA **flap several-fold on a ~30s cycle**.
+- A **GROWN** value re-anchors **without** sampling (new work arriving is not negative drain);
+  samples are clamped at ≥ 0 for the same reason.
+- `STALL_CUTOFF_SEC` = 90: no drain for that long drops the learned rate (keeping the anchor) and
+  degrades to "estimating…", rather than letting a dead rate quote a live countdown.
+  `MIN_RATE_SAMPLES` = 3 gates the first stable estimate; `EWMA_ALPHA` = 0.3.
+- **A rate-limit pause is ANCHORED, not sampled** (`anchorDrain`) — the pause window must read as
+  neither a stall nor progress, or rate-limit minutes decay the rate into a nonsense post-resume
+  ETA. Samples key on `dataUpdatedAt`, not wall clock, so a render without fresh data re-anchors.
+- The stages run **CONCURRENTLY**, so `blendPercent` is a **remaining-time-weighted** average (the
+  stage with more time left dominates — the bar tracks the work that actually gates "done"), with
+  equal weights whenever any stage's ETA is unknown. `headlineEtaSeconds` is the **MAX** of the
+  known stage ETAs, for the same concurrency reason.
+
+### ⚠ The monotonic percent clamp and its three resets
+
+`shownPercentRef` clamps the bar monotonically **within one stage composition** — a re-estimate
+must never walk it backwards. It **RESETS** on:
+
+1. **a stage-set change** (`walk-only` → `walk+ML` → `ML-only`, keyed by the `'b'`/`'m'` string);
+2. **backfill-set churn** — a repo joining or leaving the list (`nextPercents.size <
+   prevPercents.size`);
+3. **a per-repo percent REGRESSION** (`p < old - 0.02`).
+
+Reset 3 is not defensive coding: **the two-phase first sync legitimately restarts the
+server-side percent from ~1.0 back to ~0.16 when phase 2 begins**, and pinning across that would
+hold a stale ~100% through minutes of real work. The churn check is idempotent across data-less
+re-renders (same map, no drops). A new burst can also begin **inside** the previous burst's 1s
+fade window, so all the trackers reset on the idle→active transition itself, not only in the
+fade-out.
+
+`backfillFinishing` (rows still listed but every walk at ~100%, `remaining <= 0.01`) suppresses
+the countdown: the post-walk tails (ML-label purge, CI-history backfill) leave no drain to
+estimate, and a "~5 sec left" would sit frozen for minutes.

@@ -4151,6 +4151,18 @@ export interface MyTurnDismissBody {
   refId: number;
 }
 
+// WHY an item is on your plate — the six sections of GET /api/my-turn, one value each, carried by
+// `MyTurnCard.reason`. Five of them ARE `MyTurnDismissKind` verbatim (the section is dismissable,
+// and the value is what POST /api/my-turn/dismiss takes). `'your_pr'` is the sixth — "your PRs
+// with new activity since you last looked" — and it deliberately has NO dismissal kind: opening
+// the PR is its dismissal (the pr_views marker), so there is no row to write and nothing to restore.
+//
+// ⚠ NOT `MyTurnReason`, which is a DIFFERENT, older union ('requested' | 'authored' | 'merged' |
+// 'reviewed' | 'commented'): that one says how you PARTICIPATE in a feed row, this one says which
+// My Turn SECTION an item came from. They are one `sed` away from each other and mean opposite
+// things — the `-Card-` infix is load-bearing.
+export type MyTurnCardReason = MyTurnDismissKind | 'your_pr';
+
 export interface UpdateUserBody {
   isBot: boolean;
 }
@@ -5476,6 +5488,7 @@ export interface ConsolidatedFeedResponse {
 // and reviewer-routing suggestions. Scoped to the workspace's repos. "Sprint" is
 // the trailing 2 weeks. Each card is a self-contained work item, ranked most-urgent first.
 export type InsightKind =
+  | 'my_turn' // an item on YOUR plate — the GET /api/my-turn population, as cards
   | 'stalled_review' // an open PR awaiting review too long
   | 'untouched_thread' // a review thread nobody has responded to
   | 'reviewer_load' // a reviewer's pending-queue depth (+ sprint load)
@@ -5541,6 +5554,32 @@ export interface ReviewerSuggestion {
 export interface SuggestedReviewersResponse {
   suggestedReviewers: ReviewerSuggestion[];
   users: User[];
+}
+
+// An item that is on YOUR plate, as a first-class card on the needs-attention board.
+//
+// ⚠ THIS IS THE SAME POPULATION AS `GET /api/my-turn`, WORKSPACE-SCOPED — the server builds these
+// cards by calling the very same fold (`getMyTurn(accountId, scope)`), one card per row of its six
+// sections, never a re-derivation. And the daily brief's "N need your review or reply" IS the
+// number of `my_turn` cards emitted here, so the strip's number and the list the user lands on
+// cannot disagree. (It used to be a count of feed EVENTS in a rolling 14 days, which corresponded
+// to no clickable list at all — that is the defect this card kind exists to close.)
+//
+// `dismissRefId` is the `my_turn_dismissals` refId to POST to /api/my-turn/dismiss with `reason`
+// as the kind — a PR id, a thread id or a Claude-review run id depending on the reason. It is null
+// for exactly one reason, `'your_pr'`: opening the PR is that section's dismissal (the pr_views
+// marker), so there is no dismissal kind and no row to write.
+export interface MyTurnCard extends InsightCardBase, InsightPrRef {
+  kind: 'my_turn';
+  reason: MyTurnCardReason;
+  /** the my_turn_dismissals refId; null for 'your_pr', which has no dismissal kind */
+  dismissRefId: number | null;
+  /** set only when reason === 'thread' */
+  threadId: number | null;
+  /** one-line "what happened", e.g. "3 new comments · 1 new commit" or "@alice replied 3d ago" */
+  detail: string;
+  /** ISO — when the thing that needs you happened */
+  since: string;
 }
 
 export interface StalledReviewCard extends InsightCardBase, InsightPrRef {
@@ -5617,6 +5656,7 @@ export interface BotOnlyReviewCard extends InsightCardBase {
 }
 
 export type InsightCard =
+  | MyTurnCard
   | StalledReviewCard
   | UntouchedThreadCard
   | ReviewerLoadCard
@@ -5721,6 +5761,22 @@ export interface WorkspaceInsightsResponse {
   metrics: WorkspaceMetrics | null; // workspace flow-metrics header (null = the workspace has no repos)
   cards: InsightCard[];
   users: User[]; // actors referenced by the cards (avatar/login lookup)
+  /** THE UNCAPPED `my_turn` POPULATION — a DISCLOSURE, never a figure to display on its own.
+   *
+   *  `my_turn` cards are emitted capped at MY_TURN_CARD_CAP (50); this is the pre-cap length, so
+   *  on a workspace with 148 things on your plate it reads 148 while `cards` carries 50. THE CARD
+   *  COUNT REMAINS THE FIGURE EVERY SURFACE DISPLAYS — the brief's `myTurn`, the board's header
+   *  and the isolation banner all count cards, and they agree with each other by construction.
+   *  This field exists ONLY so a surface can append "of N" and stop reading as "covered
+   *  everything" (the no-silent-caps rule); a surface that rendered THIS as the headline would
+   *  recreate the "the number goes nowhere" bug — 148 with no list of 148 behind it.
+   *
+   *  Absent when the my_turn fold didn't run (an empty workspace); `undefined` and "not capped"
+   *  are both non-disclosures, which is why every consumer gates on `myTurnTotal > shown`.
+   *  Every OTHER card kind is capped at INSIGHT_CARD_CAP (15) and stays silent about it on
+   *  purpose: those are SURVEYS of the workspace, where 15 is a digestible sample of a long tail.
+   *  Only my_turn is a personal worklist the user works through, where a cap is a lie. */
+  myTurnTotal?: number;
 }
 
 // The attention cards (stalled reviews / untouched threads / reviewer load / needs-a-reviewer),
@@ -7728,8 +7784,19 @@ export interface DailyBriefTrunkRepo {
 }
 
 export interface DailyBriefCounts {
-  /** The consolidated feed's my-turn facet under the DEFAULT feed view (bots hidden). */
+  /** my_turn cards on /api/attention (one card = one thing on your plate) — the SAME fold as
+   *  GET /api/my-turn, workspace-scoped, so the strip's number is the list it opens. */
   myTurn: number;
+  /** The UNCAPPED my_turn population (WorkspaceInsightsResponse.myTurnTotal, passed straight
+   *  through — same fold, same window, same scope). A DISCLOSURE ONLY: `myTurn` above stays the
+   *  figure the strip displays, because it is the number of cards the board will actually paint.
+   *  This exists so the line can add a compact "of 148" marker instead of silently restating
+   *  "148 things need you" as "50". Absent when nothing was capped-or-counted; consumers gate on
+   *  `myTurnTotal > myTurn`, never render it alone.
+   *
+   *  ⚠ Reporting THIS as the strip's figure would recreate the bug this whole surface exists to
+   *  fix: a number whose list you cannot open. The board paints 50. */
+  myTurnTotal?: number;
   /** stalled_review cards on /api/attention (one card = one PR). */
   stalled: number;
   /** untouched_thread cards on /api/attention (one card = one thread). */

@@ -4,6 +4,9 @@ import type {
   InsightCard,
   InsightPrRef,
   InsightSeverity,
+  MyTurnCard,
+  MyTurnCardReason,
+  MyTurnDismissKind,
   ReviewerRoutingCard,
   StalledReviewCard,
   UntouchedThreadCard,
@@ -12,9 +15,10 @@ import type {
 import { usePr, useThread } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useRequestReviewers } from '../../hooks/usePrWrites.js';
+import { useDismissMyTurn } from '../../hooks/useAttentionCards.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
-import { automatedReviewerMeta, CI_META, indexUsers } from '../../lib/ui.js';
+import { automatedReviewerMeta, CI_META, dateTime, indexUsers, relativeTime } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
@@ -36,13 +40,28 @@ const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
   info: { border: 'border-l-sky-400 dark:border-l-sky-500', dot: 'bg-sky-500' },
 };
 
-const KIND_LABEL: Record<InsightCard['kind'], string> = {
+// Exported because the isolation banner names the isolated kind with it — one spelling of "what
+// this kind is called", so the banner and the card header can never disagree.
+export const KIND_LABEL: Record<InsightCard['kind'], string> = {
+  my_turn: 'Your turn',
   bot_signal: 'Review-bot signal',
   bot_only_review: 'Only a bot reviewed',
   stalled_review: 'Stalled review',
   untouched_thread: 'Untouched thread',
   reviewer_load: 'Review load',
   reviewer_routing: 'Needs a reviewer',
+};
+
+// WHICH My Turn section put this card on your plate. ⚠ Keyed on `MyTurnCardReason` (the six
+// sections of GET /api/my-turn), NOT the older `MyTurnReason` participation union that
+// lib/ui.ts's MY_TURN_REASON_META covers — they are one `sed` apart and mean opposite things.
+const MY_TURN_REASON_LABEL: Record<MyTurnCardReason, string> = {
+  review_request: 'Review requested',
+  thread: 'Reply needed',
+  pr_approved: 'Approved',
+  your_pr: 'Your PR',
+  watched_repo_pr: 'New PR',
+  claude_review: 'Claude review',
 };
 
 function ageLabel(hours: number): string {
@@ -247,6 +266,69 @@ function RoutingReviewers({
   );
 }
 
+// "Done" — the mark-as-seen control on a my_turn card. POSTs /api/my-turn/dismiss; the mutation
+// hook drops the card from the cached board immediately (optimistic) and re-fetches on settle, so
+// the click is never inert. The dismissal is honoured only until NEWER activity supersedes it —
+// a fresh reply on a dismissed thread brings the item back — which is why the copy is "Done" and
+// the tooltip says "seen", not "mute" or "dismiss forever".
+function MyTurnDoneButton({
+  kind,
+  refId,
+  cardId,
+}: {
+  kind: MyTurnDismissKind;
+  refId: number;
+  cardId: string;
+}): JSX.Element {
+  const dismiss = useDismissMyTurn();
+  return (
+    <span className="inline-flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => dismiss.mutate({ kind, refId, cardId })}
+        disabled={dismiss.isPending}
+        className="rounded border border-emerald-300 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+        title="Mark this as seen. It comes back if there's newer activity."
+      >
+        {dismiss.isPending ? 'Marking…' : '✓ Done'}
+      </button>
+      {dismiss.isError && (
+        <span className="text-[11px] text-red-500">
+          {(dismiss.error as Error)?.message ?? 'Couldn’t mark it done.'}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// The actions row of a my_turn card. Exactly one section — 'your_pr' — has NO dismissal kind:
+// opening the PR stamps `pr_views`, which is what drops it from the fold (PrDetail fires
+// `markPrViewed` on mount, unconditionally). So that reason gets an honest hint instead of a
+// button that would have nothing to POST.
+//
+// The copy promises "as soon as you come back", not "on the next refresh", because
+// `markViewed.onSuccess` invalidates ['attention-cards'] + ['daily-brief'] at the prefix — the
+// board is already refetching while the user is still in the PR. If that invalidation is ever
+// dropped, this sentence becomes a lie with a 60s staleTime behind it.
+function MyTurnActions({ card }: { card: MyTurnCard }): JSX.Element | null {
+  if (card.reason === 'your_pr') {
+    return (
+      <div className="mt-2 text-[11px] italic text-gray-400">
+        Opening the PR marks it seen — this card clears as soon as you come back.
+      </div>
+    );
+  }
+  // Defensive: the other five reasons all carry a dismissRefId by contract (their `reason` IS
+  // the dismissal kind). If one ever arrives without, render no control — a Done button with
+  // nothing to POST is the inert card this whole surface exists to remove.
+  if (card.dismissRefId == null) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <MyTurnDoneButton kind={card.reason} refId={card.dismissRefId} cardId={card.id} />
+    </div>
+  );
+}
+
 function CardShell({
   card,
   right,
@@ -293,7 +375,7 @@ function PrLine({
   card,
   onOpen,
 }: {
-  card: StalledReviewCard | UntouchedThreadCard | ReviewerRoutingCard;
+  card: MyTurnCard | StalledReviewCard | UntouchedThreadCard | ReviewerRoutingCard;
   onOpen: () => void;
 }): JSX.Element {
   return (
@@ -365,13 +447,50 @@ export function AttentionCards({
   // tab, deep-linked to the thread.
   const open = (meta: PinnedPr, returnItemId?: string): void =>
     openPrDetailTab(meta, { fromActivity: true, returnItemId });
-  const openThread = (card: UntouchedThreadCard): void => {
+  // Thread-shaped navigation, shared by the untouched-thread card and a my_turn card whose
+  // reason is 'thread' (the thread id is on a different field on each, so it's a parameter).
+  const openThreadOn = (card: InsightPrRef & { id: string }, threadId: number): void => {
     openPrDetailTab(metaFor(card, usersById), { fromActivity: true, returnItemId: card.id });
-    selectThread(card.prId, card.threadId);
+    selectThread(card.prId, threadId);
   };
+  const openThread = (card: UntouchedThreadCard): void => openThreadOn(card, card.threadId);
 
   const renderCard = (card: InsightCard): JSX.Element | null => {
     switch (card.kind) {
+      // The VIEWER'S OWN inbox as cards — the same population GET /api/my-turn serves, and the
+      // list the daily brief's "N need your review or reply" line counts. Clicking opens the PR
+      // (or, for a thread, the thread on the PR's Threads tab); "Done" marks it seen.
+      //
+      // ⚠ Deliberately LEANER than the untouched-thread card: no embedded ThreadCard and no
+      // InsightPrSummary. This kind carries its own much larger cap (MY_TURN_CARD_CAP = 50 vs 15
+      // for the survey kinds), so a per-card thread fetch would be up to 50 requests to paint one
+      // board — the `ThreadAssessment` failure mode. A thread-reason card navigates to the thread
+      // instead.
+      case 'my_turn':
+        return (
+          <CardShell
+            key={card.id}
+            card={card}
+            innerRef={(el) => setCardRef(card.id, el)}
+            flash={flashId === card.id}
+            right={<span title={dateTime(card.since)}>{relativeTime(card.since)}</span>}
+            onActivate={() =>
+              card.reason === 'thread' && card.threadId != null
+                ? openThreadOn(card, card.threadId)
+                : open(metaFor(card, usersById), card.id)
+            }
+          >
+            <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
+            <PrMetaRow pr={card} />
+            <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
+                {MY_TURN_REASON_LABEL[card.reason]}
+              </span>
+              <span className="min-w-0">{card.detail}</span>
+            </div>
+            <MyTurnActions card={card} />
+          </CardShell>
+        );
       case 'stalled_review':
         return (
           <CardShell
@@ -512,6 +631,11 @@ export function AttentionCards({
             )}
           </CardShell>
         );
+      // ⚠ The two bot kinds are filtered out upstream (they live in the free Bots console), so
+      // this arm is unreachable for them. It is ALSO where a NEW InsightKind lands, and it
+      // renders NOTHING and throws NOTHING — a kind the server emits and this switch has no case
+      // for simply vanishes, while the brief line that counts it keeps its number. That is
+      // exactly how `my_turn` shipped invisible; add a case whenever the union grows.
       default:
         return null;
     }

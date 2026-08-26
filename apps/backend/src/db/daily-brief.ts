@@ -4,16 +4,23 @@
 // of the surface its strip line deep-links to, so a number and the view it opens cannot disagree
 // (the plan's ⚠: "never a re-derivation that can disagree with the surface it links to"):
 //
-//   myTurn           → getConsolidatedFeed(...).counts.myTurn — the feed's OWN my-turn facet,
-//                      under the default feed view (excludeBots: true — the SPA's 'hide' lens),
-//                      so the strip's number IS the My Turn pill's number on a fresh Feed open.
-//                      The actor-less CI-row exclusion is inherited from that fold (CI rows are
-//                      withheld from enrichMyTurn inside getConsolidatedFeed), not re-implemented.
+//   myTurn /
 //   stalled /
 //   untouchedThreads /
 //   needsReviewer    → getWorkspaceInsights card counts — the same cards GET /api/attention
-//                      serves (one stalled_review card = one PR; one untouched_thread card = one
-//                      thread; one reviewer_routing card = one PR needing a reviewer).
+//                      serves (one my_turn card = one thing on your plate; one stalled_review
+//                      card = one PR; one untouched_thread card = one thread; one
+//                      reviewer_routing card = one PR needing a reviewer).
+//                      ⚠ `myTurn` USED TO be getConsolidatedFeed(...).counts.myTurn — a count of
+//                      feed EVENTS in a rolling 14 days, which corresponded to no clickable list
+//                      ("54 items" the user could not open). It is now literally the number of
+//                      my_turn cards the board emitted, which are in turn one-per-row of the
+//                      `getMyTurn(accountId, scope)` fold GET /api/my-turn serves — so the strip's
+//                      number, the board's list and the My Turn view are one population.
+//                      ⚠ Those cards are CAPPED (MY_TURN_CARD_CAP = 50) and the cap is DISCLOSED,
+//                      not hidden: `myTurnTotal` carries the uncapped population so the line can
+//                      read "50 of 148". The displayed figure stays `myTurn` — the card count —
+//                      because that is the list the click opens. See the shared type's doc.
 //   resolveBacklog   → getResolvableBotThreadPrs(...).totalThreads — the review-&-resolve tab's
 //                      own number (same predicate the resolve route re-derives).
 //   trunkRed         → the repos DEFAULT-BRANCH head snapshot columns (branch-status's source of
@@ -49,7 +56,6 @@ import {
   automatedReviewerUserIds,
   classificationKindForUser,
   classificationLabelMap,
-  getConsolidatedFeed,
   getResolvableBotThreadPrs,
   getWorkspaceInsights,
   resolveWorkspaceScope,
@@ -179,16 +185,7 @@ async function computeBriefCounts(
   // exactly the scoped-route posture; the caller already resolved real requests).
   const scope = await resolveWorkspaceScope(accountId, workspaceId);
 
-  const [feed, insights, backlog, botAnomalies, trunkRed] = await Promise.all([
-    // limit: 1 — the facet counts cover the WHOLE post-cap stream regardless of the page, and
-    // only the page pays enrichment cost. excludeBots: true = the SPA's default 'hide' lens, so
-    // this IS the My Turn pill's number on a fresh Feed open.
-    getConsolidatedFeed(accountId, {
-      workspaceId: scope.workspaceId,
-      repoIds: scope.repoIds,
-      excludeBots: true,
-      limit: 1,
-    }),
+  const [insights, backlog, botAnomalies, trunkRed] = await Promise.all([
     // The /api/attention fold verbatim (getWorkspaceInsights with the default window); the two
     // bot cards it filters out are not counted here either.
     getWorkspaceInsights(accountId, undefined, scope),
@@ -197,17 +194,25 @@ async function computeBriefCounts(
     trunkRedRepos(accountId, scope),
   ]);
 
+  let myTurn = 0;
   let stalled = 0;
   let untouchedThreads = 0;
   let needsReviewer = 0;
   for (const c of insights.cards) {
-    if (c.kind === 'stalled_review') stalled += 1;
+    if (c.kind === 'my_turn') myTurn += 1;
+    else if (c.kind === 'stalled_review') stalled += 1;
     else if (c.kind === 'untouched_thread') untouchedThreads += 1;
     else if (c.kind === 'reviewer_routing') needsReviewer += 1;
   }
 
   return {
-    myTurn: feed.counts?.myTurn ?? 0,
+    myTurn,
+    // The cap DISCLOSURE, passed straight through from the same getWorkspaceInsights call above
+    // (same fold, same scope, same default window) — so the strip's "of N" and the board's "of N"
+    // are one number, not two derivations that can drift. ⚠ `myTurn` above stays the figure the
+    // strip DISPLAYS: it is the number of cards the board will paint, and a strip that announced
+    // 148 over a board of 50 is exactly the "number you can't open" this brief replaced.
+    myTurnTotal: insights.myTurnTotal,
     stalled,
     untouchedThreads,
     needsReviewer,

@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   DailyBriefCounts,
+  InsightKind,
   StoredSynthesis,
   SynthesisOrderingItem,
 } from '@pierre-review/shared';
@@ -9,11 +10,19 @@ import { useAutoNarration, type SynthesisDescriptor } from '../../hooks/useSynth
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabBotMeta } from '../../store/pinnedTabs.js';
+import { myTurnCapDisclosure, type MyTurnCapDisclosure } from './AttentionView.js';
 
 // The daily-brief strip (plan P3.1/N1 + P3.3/N5) — the first thing the Feed shows: one compact
 // line per thing that needs the viewer, each line DEEP-LINKING to the surface that owns its
-// number (so the strip never grows its own drill-downs), plus an "Elsewhere" line of
+// number (so the strip never grows its own drill-downs), plus a collapsed "Elsewhere" roll-up of
 // per-workspace counts when other workspaces have something to say.
+//
+// ⚠ A LINE'S CLICK MUST LAND ON THE LIST ITS NUMBER COUNTS. The four workspace lines open the
+// "Needs attention" board ISOLATED to their own card kind (`setAttentionIsolation`), because a
+// figure that drops the reader on an undifferentiated board is a figure with no list behind it.
+// The my-turn line used to be worse than that: it flipped a Feed pill sitting below three
+// panels, through a setter that no-ops when the rail is already 'feed' — a click with no
+// observable effect at all.
 //
 // FREE = the templated count lines (counts from GET /api/daily-brief — every figure is the
 // owning surface's own fold). PRO (`activityDigest`) = the synthesis seam's ORDERING mode
@@ -35,6 +44,13 @@ interface BriefLine {
   count: number | null; // null = the line carries no figure (anomaly/trunk lines)
   text: string; // templated wording (digit-free; the count renders separately)
   onOpen: () => void;
+  /** The my_turn CAP DISCLOSURE (the `my_turn` line only — see myTurnCapDisclosure). Renders as a
+   *  superscript "+" beside the figure, with the exact pair in the line's `title`. Deliberately
+   *  NOT rendered as "50 of 148" inline: this line's wording is a SENTENCE ("50 items need your
+   *  review or reply"), and "50 of 148 items need your review or reply" claims only 50 of them
+   *  do. "50⁺ items need your review or reply" is true as written, and the title carries the
+   *  rest. The figure itself stays the CARD count, which is the list the click opens. */
+  cap?: MyTurnCapDisclosure;
 }
 
 /** The ordering ref's count-free identity: scalar ids are `myTurn:3` (count-encoded server-side
@@ -78,11 +94,15 @@ const WEEKDAY = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
 export function BriefStrip(): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
-  const setFeedMyTurnOnly = useFilters((s) => s.setFeedMyTurnOnly);
+  const setAttentionIsolation = useFilters((s) => s.setAttentionIsolation);
   const setWorkspace = useFilters((s) => s.setWorkspace);
   const openBotThreadsTab = usePinnedTabs((s) => s.openBotThreadsTab);
   const openBotDetailTab = usePinnedTabs((s) => s.openBotDetailTab);
   const { botDepth } = useProCapabilities();
+  // The cross-workspace roll-up is COLLAPSED by default: it is the least urgent line in the
+  // strip and the only one that grows with the account. Local component state on purpose —
+  // transient, not persisted, not URL-synced, like every other control on this strip.
+  const [elsewhereOpen, setElsewhereOpen] = useState(false);
 
   const { data } = useDailyBrief(workspaceId);
   const counts = data?.counts ?? null;
@@ -109,21 +129,60 @@ export function BriefStrip(): JSX.Element | null {
   const lines = useMemo<BriefLine[]>(() => {
     if (counts == null) return [];
     const out: BriefLine[] = [];
-    const scalar = (key: ScalarKey, count: number, text: string, onOpen: () => void): void => {
-      if (count > 0) out.push({ refKey: key, count, text, onOpen });
+    const scalar = (
+      key: ScalarKey,
+      count: number,
+      text: string,
+      onOpen: () => void,
+      cap?: MyTurnCapDisclosure | null,
+    ): void => {
+      if (count > 0) out.push({ refKey: key, count, text, onOpen, ...(cap ? { cap } : {}) });
     };
-    scalar('myTurn', counts.myTurn, 'need your review or reply', () => {
-      setActivityRepo('feed');
-      setFeedMyTurnOnly(true);
-    });
-    scalar('stalled', counts.stalled, 'PRs stalled awaiting review', () =>
-      setActivityRepo('attention'),
+    // Every line below lands on the "Needs attention" board ISOLATED to the one card kind the
+    // line is about, so the number the user clicked and the list they land on are the same
+    // population. Four brief lines used to drop the reader on one undifferentiated board.
+    //
+    // ⚠ ORDERING: `setActivityRepo` FIRST, `setAttentionIsolation` SECOND. `setActivityRepo`
+    // clears the isolation, AND early-returns an empty patch when the rail id is unchanged — so
+    // isolating first would be wiped on the click that switches rail and survive on the clicks
+    // that don't. The same rule PrDetail / BotOnlyPrsDetail document for `feedIsolatedPrId`.
+    const openAttention = (kind: InsightKind) => (): void => {
+      setActivityRepo('attention');
+      setAttentionIsolation(kind);
+    };
+    // ⚠ "items", not "events". This number IS the my_turn card count — one clickable card per
+    // row of GET /api/my-turn. It used to be a tally of feed EVENTS in a rolling 14 days, and
+    // the line pointed at a Feed pill below three panels: a number with no list behind it.
+    //
+    // ⚠ And it is CAPPED (50 cards). The figure stays the card count — swapping in the uncapped
+    // total would put the old bug back, a number 98 items wider than anything the click opens —
+    // so the cap is DISCLOSED instead: `cap` adds a superscript "+" and the exact pair in the
+    // tooltip. `counts.myTurn` is passed as both sides of the same-snapshot guard because here it
+    // literally is one snapshot — this line's figure and its total come from one response.
+    scalar(
+      'myTurn',
+      counts.myTurn,
+      'items need your review or reply',
+      openAttention('my_turn'),
+      myTurnCapDisclosure(counts.myTurn, counts),
     );
-    scalar('untouched', counts.untouchedThreads, 'review threads untouched', () =>
-      setActivityRepo('attention'),
+    scalar(
+      'stalled',
+      counts.stalled,
+      'PRs stalled awaiting review',
+      openAttention('stalled_review'),
     );
-    scalar('needsReviewer', counts.needsReviewer, 'PRs still need a reviewer', () =>
-      setActivityRepo('attention'),
+    scalar(
+      'untouched',
+      counts.untouchedThreads,
+      'review threads untouched',
+      openAttention('untouched_thread'),
+    );
+    scalar(
+      'needsReviewer',
+      counts.needsReviewer,
+      'PRs still need a reviewer',
+      openAttention('reviewer_routing'),
     );
     for (const r of counts.trunkRed) {
       out.push({
@@ -175,7 +234,7 @@ export function BriefStrip(): JSX.Element | null {
     openBotDetailTab,
     openBotThreadsTab,
     setActivityRepo,
-    setFeedMyTurnOnly,
+    setAttentionIsolation,
   ]);
 
   // Self-hide: nothing to say here AND nothing elsewhere. (Also while the workspace/brief is
@@ -215,11 +274,27 @@ export function BriefStrip(): JSX.Element | null {
               <button
                 type="button"
                 onClick={l.onOpen}
+                // The cap sentence rides the WHOLE line's title, not the 6px superscript: a
+                // disclosure nobody can hover is the silent cap again with extra steps.
+                title={l.cap?.title}
                 className="group flex w-full items-baseline gap-2 rounded px-1.5 py-0.5 text-left hover:bg-gray-50 dark:hover:bg-gray-900/60"
               >
                 {l.count != null && (
                   <span className="w-6 shrink-0 text-right font-semibold tabular-nums text-gray-800 dark:text-gray-100">
                     {l.count}
+                    {/* "50⁺" — one column, one line, and true as written. The exact "50 of 148"
+                        lives in the title above; the sr-only twin spells it out, because a bare
+                        "+" is the silent cap again for anyone not looking at the glyph. (An
+                        aria-label on the <sup> would NOT do it — a role-less generic element is
+                        not guaranteed to have one announced.) */}
+                    {l.cap != null && (
+                      <>
+                        <sup className="ml-px text-[8px] font-normal text-gray-400" aria-hidden>
+                          +
+                        </sup>
+                        <span className="sr-only"> of {l.cap.total}</span>
+                      </>
+                    )}
                   </span>
                 )}
                 <span
@@ -235,36 +310,57 @@ export function BriefStrip(): JSX.Element | null {
           );
         })}
         {elsewhereLines.length > 0 && (
+          // The cross-workspace roll-up: COLLAPSED by default behind a summary that still carries
+          // the only number that matters closed — how many OTHER workspaces have something. Open,
+          // it is one bullet per workspace rather than a wrapped run of buttons, which ran the
+          // workspaces together into a single sentence.
           <li className="mt-1 border-t border-gray-100 pt-1 dark:border-gray-900">
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-1.5">
-              <span className="shrink-0 font-medium text-gray-400">Elsewhere</span>
-              {/* Roll-up narration (Pro): one digit-free phrase per workspace, figures ours. */}
-              {elsewhereLines.map((w) => {
-                const phrase = rollupPhrases.get(`ws:${w.workspaceId}`)?.phrase ?? null;
-                const bits: string[] = [];
-                if (w.counts.myTurn > 0) bits.push(`${w.counts.myTurn} need you`);
-                if (w.counts.stalled > 0) bits.push(`${w.counts.stalled} stalled`);
-                if (w.counts.needsReviewer > 0) bits.push(`${w.counts.needsReviewer} need a reviewer`);
-                if (w.counts.untouchedThreads > 0) bits.push(`${w.counts.untouchedThreads} untouched`);
-                if (w.counts.resolveBacklog > 0) bits.push(`${w.counts.resolveBacklog} resolvable`);
-                if (w.counts.botAnomalies.length > 0) bits.push('bot anomaly');
-                if (w.counts.trunkRed.length > 0) bits.push('trunk red');
-                return (
-                  <button
-                    key={w.workspaceId}
-                    type="button"
-                    // A workspace switch re-scopes everything (repoIds reset to the whole
-                    // workspace — the setWorkspace contract); the Feed then shows that
-                    // workspace's own brief.
-                    onClick={() => setWorkspace(w.workspaceId, null)}
-                    title={phrase ?? `Switch to ${w.name}`}
-                    className="text-gray-500 hover:text-gray-700 hover:underline dark:text-gray-400 dark:hover:text-gray-200"
-                  >
-                    <span className="font-medium">{w.name}</span>: {bits.join(' · ')}
-                  </button>
-                );
-              })}
-            </div>
+            <button
+              type="button"
+              onClick={() => setElsewhereOpen((o) => !o)}
+              aria-expanded={elsewhereOpen}
+              className="group flex w-full items-baseline gap-2 rounded px-1.5 py-0.5 text-left hover:bg-gray-50 dark:hover:bg-gray-900/60"
+            >
+              <span className="w-6 shrink-0 text-right text-gray-400" aria-hidden>
+                {elsewhereOpen ? '▾' : '▸'}
+              </span>
+              <span className="min-w-0 flex-1 truncate font-medium text-gray-400 group-hover:underline">
+                Elsewhere ({elsewhereLines.length})
+              </span>
+            </button>
+            {elsewhereOpen && (
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-12 marker:text-gray-300 dark:marker:text-gray-600">
+                {/* Roll-up narration (Pro): one digit-free phrase per workspace, figures ours. */}
+                {elsewhereLines.map((w) => {
+                  const phrase = rollupPhrases.get(`ws:${w.workspaceId}`)?.phrase ?? null;
+                  const bits: string[] = [];
+                  if (w.counts.myTurn > 0) bits.push(`${w.counts.myTurn} need you`);
+                  if (w.counts.stalled > 0) bits.push(`${w.counts.stalled} stalled`);
+                  if (w.counts.needsReviewer > 0)
+                    bits.push(`${w.counts.needsReviewer} need a reviewer`);
+                  if (w.counts.untouchedThreads > 0)
+                    bits.push(`${w.counts.untouchedThreads} untouched`);
+                  if (w.counts.resolveBacklog > 0) bits.push(`${w.counts.resolveBacklog} resolvable`);
+                  if (w.counts.botAnomalies.length > 0) bits.push('bot anomaly');
+                  if (w.counts.trunkRed.length > 0) bits.push('trunk red');
+                  return (
+                    <li key={w.workspaceId} className="min-w-0">
+                      <button
+                        type="button"
+                        // A workspace switch re-scopes everything (repoIds reset to the whole
+                        // workspace — the setWorkspace contract); the Feed then shows that
+                        // workspace's own brief.
+                        onClick={() => setWorkspace(w.workspaceId, null)}
+                        title={phrase ?? `Switch to ${w.name}`}
+                        className="w-full truncate text-left text-gray-500 hover:text-gray-700 hover:underline dark:text-gray-400 dark:hover:text-gray-200"
+                      >
+                        <span className="font-medium">{w.name}</span>: {bits.join(' · ')}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </li>
         )}
       </ul>

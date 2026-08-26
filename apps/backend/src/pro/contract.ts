@@ -840,6 +840,11 @@ export interface ProHostQueries {
   // `Promise<unknown>` sketch — the permitted no-version refinement; the plugin mirror moved in
   // the same task) because the plugin's brief-narration payload hash folds these very counts.
   // NO cost fields travel here, ever (§8.18 — the roll-up loops this per workspace).
+  // ⚠ `DailyBriefCounts` gained an OPTIONAL trailing `myTurnTotal` (the uncapped my_turn
+  // population behind MY_TURN_CARD_CAP = 50) — additive, so apiVersion stays 21 and an older
+  // plugin simply never reads it. It is a DISCLOSURE, not a figure: `myTurn` remains the count
+  // every surface displays and the only one a narration may be grounded in, so nothing here
+  // should start phrasing lines from `myTurnTotal` (D4 keeps digits out of the phrasing anyway).
   getDailyBriefCounts(accountId: number, workspaceId: number): Promise<DailyBriefCounts>;
   // The 1:1-prep person vector (P4.2 — NOW LIVE: core db/person-period.ts): a small fixed
   // vector for one person in one workspace — merged/opened authored · reviews given · review

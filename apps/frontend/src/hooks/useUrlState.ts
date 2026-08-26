@@ -62,6 +62,63 @@ function readWorkspaceFromUrl(p: URLSearchParams): number | null {
   return parseWorkspaceParam(p.get('team'));
 }
 
+/**
+ * Does a param hold something `readFromUrl` would actually seat as an id? Mirrors its parse
+ * exactly (truthy raw, then a finite parseInt) so `?pr=` and `?pr=nonsense` — which set nothing —
+ * cannot be read here as a destination the app then honours.
+ */
+function namesId(p: URLSearchParams, key: string): boolean {
+  const raw = p.get(key);
+  return !!raw && Number.isFinite(Number.parseInt(raw, 10));
+}
+
+/**
+ * WHICH BOARD does this URL land on? — the ONE tab decision, made on every load.
+ *
+ * The rule: **always Activity, unless the URL EXPLICITLY names a board destination.** Activity is
+ * the relevance-ranked state of play and the app's front door; the timeline is the secondary
+ * surface you navigate TO.
+ *
+ * ⚠ `?workspace=<id>` IS NOT A DEEP LINK, and structurally never can be: `writeToUrl` stamps it
+ * onto the address bar itself as soon as the scope resolves — within ~1s of every load — so its
+ * presence says only "this app has run", never "the user asked for the board". This is exactly
+ * the bug this function exists to fix. The decision used to ride `hasUrlParams`
+ * (`window.location.search.length > 1`), one boolean answering two unrelated questions; because
+ * the app makes its own URL non-bare, only the very first paint of a truly bare `/app` ever
+ * reached the Activity branch, and any refresh from a PR tab or a drill-down landed on Timeline.
+ * The same reasoning disqualifies every other self-stamped param (`repos`, `cats`, `status`, …).
+ *
+ * The board is named two ways, and they are checked IN THIS ORDER:
+ *
+ *  1. `view=` — the AFFIRMATIVE statement, written by `writeToUrl` from the live tab. When it
+ *     names a board the app knows, it wins outright. (The read and write halves must always
+ *     change together, or a deliberate switch to the board is undone on the next F5.)
+ *  2. `?pr=<id>` / `?thread=<id>`, and ONLY when `view=` said nothing — the board INFERRED from a
+ *     selection that only the board can render: the DetailPane mounts solely in the board slot
+ *     (`paneVisible = selectedPrId != null && !overlayActive`, App.tsx), so landing a
+ *     hand-written or pre-`view=` link like that on Activity would leave it inert, naming a PR
+ *     nothing on screen displays.
+ *
+ * ⚠ THAT ORDER IS LOAD-BEARING, not stylistic. `selectedPrId` is NOT cleared when a user returns
+ * to Activity from a PR they opened out of the feed — FeedView calls `openPrDetailTab` +
+ * `selectPr`/`selectThread` together, and the Activity tab chip only changes the tab — so
+ * `?view=activity&pr=123` is an ordinary, frequently-produced URL rather than a contrived one.
+ * Testing `pr` first would refresh exactly those users onto the board.
+ *
+ * Anything else in `view=` — a stale spelling, a hand-edited value — falls through to the
+ * inference and then to Activity, the right normalization for a destination that no longer exists.
+ *
+ * Exported for its unit test — see test/landingTab.test.ts.
+ */
+export function landingTabFromUrl(search: string): 'timeline' | 'activity' {
+  const p = new URLSearchParams(search);
+  const view = p.get('view');
+  if (view === 'timeline') return 'timeline';
+  if (view === 'activity') return 'activity';
+  if (namesId(p, 'pr') || namesId(p, 'thread')) return 'timeline';
+  return 'activity';
+}
+
 /** Exported for its unit test only — see test/feedCiFailuresToggle.test.ts. */
 export function readFromUrl(): Partial<FilterState> {
   const p = new URLSearchParams(window.location.search);
@@ -151,9 +208,10 @@ export function readFromUrl(): Partial<FilterState> {
   const thread = p.get('thread');
   if (thread) out.selectedThreadId = Number.parseInt(thread, 10);
 
-  // Activity deep link: `?activityRepo=<id>` selects that repo's console (the active TAB
-  // itself — `?view=activity` — lives in the pinnedTabs store and is applied separately
-  // in useUrlState). `activityThreadFilter` is intentionally URL-silent.
+  // Activity deep link: `?activityRepo=<id>` selects that repo's console. The active BOARD
+  // itself (`view=`) is NOT read here — it lives in the pinnedTabs store, not FilterState, and
+  // is decided once per load by `landingTabFromUrl` above. `activityThreadFilter` is
+  // intentionally URL-silent.
   const activityRepo = p.get('activityRepo');
   if (activityRepo) {
     if (activityRepo === 'bots') out.activityRepoId = 'bots';
@@ -236,11 +294,19 @@ export function writeToUrl(s: FilterState): void {
   if (s.selectedPrId) p.set('pr', String(s.selectedPrId));
   if (s.selectedThreadId) p.set('thread', String(s.selectedThreadId));
 
-  // Activity tab (the only overlay tab that's URL-deep-linkable; pinned-PR tabs stay
+  // The active BOARD (the only tabs that are URL-deep-linkable; pinned-PR tabs stay
   // localStorage-only). Read the active tab from the pinnedTabs store — a different
   // store than this subscriber's, so useUrlState also subscribes to it. `activityRepo`
   // is emitted only for a single-repo console (the 'all' feed is the default).
-  if (usePinnedTabs.getState().activeTab === 'activity') {
+  //
+  // ⚠ BOTH boards are emitted AFFIRMATIVELY, and the timeline half is not optional. Silence
+  // now MEANS Activity (`landingTabFromUrl`), so leaving the board implicit would bounce a
+  // user who deliberately switched to the timeline straight back to Activity on the next F5 —
+  // the write half and the read half of a URL rule always move together.
+  const activeTab = usePinnedTabs.getState().activeTab;
+  if (activeTab === 'timeline') {
+    p.set('view', 'timeline');
+  } else if (activeTab === 'activity') {
     p.set('view', 'activity');
     // A single-repo console and the CORE Bots / "Needs attention" consoles are deep-linkable,
     // and so is 'insights' — it is a landing default AND a real destination, and omitting it
@@ -264,6 +330,11 @@ export function writeToUrl(s: FilterState): void {
       if (s.insightsReportKey) p.set('report', s.insightsReportKey);
     }
   }
+  // Every other `activeTab` is a pinned or ephemeral TAB, not a board — a PR detail, a
+  // drill-down, a report — and none of them is URL-addressable (pinned PR tabs live in
+  // localStorage; the drill-downs are deliberately ephemeral). So `view` is simply omitted, and
+  // a refresh from one lands on Activity per the rule above. That is the intended reading: the
+  // tab itself is restored into the tab bar, it just isn't what the app opens onto.
 
   const qs = p.toString();
   const next = `${window.location.pathname}${qs ? `?${qs}` : ''}`;
@@ -430,11 +501,6 @@ export function useUrlState(): void {
       const hasUrlParams = window.location.search.length > 1;
       if (hasUrlParams) {
         useFilters.getState().hydrate(readFromUrl());
-        // The active tab lives in the pinnedTabs store, so apply `?view=activity` here
-        // (after the filter hydrate that carries `?activityRepo`).
-        if (new URLSearchParams(window.location.search).get('view') === 'activity') {
-          usePinnedTabs.getState().setActiveTab('activity');
-        }
       } else {
         const persisted = loadPersistedFilters();
         if (persisted) useFilters.getState().hydrate(persisted);
@@ -445,11 +511,23 @@ export function useUrlState(): void {
         // workspace, and prunes repoIds to the resolved membership before any query runs.
         const workspaceId = loadPersistedScope();
         if (workspaceId != null) useFilters.getState().hydrate({ workspaceId });
-        // Activity-first: a bare load (a fresh sign-in / "open the app") lands on the
-        // Activity — the relevance-ranked state of play — with the timeline secondary.
-        // (A URL WITH params is a deep link: it keeps timeline unless `?view=activity`.)
-        usePinnedTabs.getState().setActiveTab('activity');
       }
+      // ── The BOARD decision — ONE rule, evaluated on EVERY load ─────────────────────────────
+      // Deliberately OUTSIDE the branch above, and deliberately not sharing its boolean. That
+      // branch answers "where do the FILTERS and the scope come from?" — the URL or
+      // localStorage — for which `hasUrlParams` is exactly right, and its behaviour here is
+      // unchanged. It is the WRONG test for "which board?", and one boolean answering both
+      // questions was the bug: the app stamps `?workspace=<id>` onto its own address bar within
+      // ~1s of every load, so the URL is non-bare on effectively every refresh and the
+      // Activity branch was reachable only on the very first paint of a truly bare `/app`.
+      // Refreshing from a PR tab or a drill-down — neither of which emits `view=` — therefore
+      // fell through to the store's unpersisted `activeTab: 'timeline'` default.
+      //
+      // Placed BEFORE the two subscriptions below on purpose: this write must not itself
+      // re-enter the serializer. See `landingTabFromUrl` for the rule it applies. (Unconditional
+      // is safe — `activeTab` is never persisted, so a fresh load always starts at the store
+      // default and there is no user choice here to overwrite.)
+      usePinnedTabs.getState().setActiveTab(landingTabFromUrl(window.location.search));
       hydrated.current = true;
     }
     // Reflect every subsequent change back into the URL and localStorage.

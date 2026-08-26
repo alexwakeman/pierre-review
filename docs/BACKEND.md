@@ -107,4 +107,64 @@ PR/thread opens (`sync/hydrate-detail.ts` → `PR_DETAIL_QUERY`, matched by node
 Migration `0010` makes the two `body` columns nullable (they're now written non-null on
 every sync).
 
+---
+
+## ⚠ `req.raw.on('close')` is NOT a client-disconnect signal on a POST — watch the REPLY socket
+
+**The rule.** On a POST, a client-disconnect abort must be wired to **`reply.raw`** (or the
+hijacked `raw` after `reply.hijack()`), never to `req.raw`. Every billed-loop route in this
+codebase has the same shape — a long run whose `shouldStop`/`aborted` flag exists so a client
+that goes away stops costing money — and getting this wrong turns the whole route into a silent
+no-op.
+
+**Why.** A request's `'close'` event fires when the **REQUEST** is complete. For a POST that
+means *the moment Fastify finishes reading the JSON body* — before the handler has done anything
+at all, and while the client is still sitting there waiting for the response. So:
+
+```ts
+// ❌ permanently true before the first iteration
+let aborted = false;
+req.raw.on('close', () => { aborted = true; });
+await runAnnotations(…, { shouldStop: () => aborted });
+```
+
+The run breaks out of its very first iteration and every `send()` is suppressed.
+
+**The failure mode is SILENT, not loud.** Nothing throws, nothing logs, no status code changes:
+
+- the annotations run routes returned **`generated: 0` inside a normal `200`** — indistinguishable
+  from "everything was already cached";
+- the digest **Regenerate** SSE twin returned a 200 with an **empty body** and no progress at
+  all, even though the digests really were being generated behind it.
+
+A route that looks like a no-op with no error anywhere is exactly what this produces.
+
+### The verification
+
+Measured with a standalone Fastify probe (2026-07-30), both directions, on the same server:
+
+```
+POST:  reqClosed = true    replyClosed = false     <- client still waiting
+GET :  reqClosed = false   replyClosed = false
+```
+
+`reply.raw`'s `'close'` is the signal that was actually wanted: it stays false while the client
+is waiting for the response and fires when the client goes away. That is why the fix is a
+one-line swap rather than a redesign.
+
+### What was fixed, and what must NOT be "fixed"
+
+Fixed at four sites: the plugin's annotations run routes (**JSON and SSE**), the
+digest-regenerate SSE, and the per-item resolution-check route.
+
+⚠ **The `…/stream` endpoints that are GETs are unaffected and must not be changed.** Claude
+Review and AI Fix stream over a **GET with no body**, correctly using the hijacked `raw`; a
+GET's `req.raw` does not close early (see the probe above), so "harmonising" them would be a
+change with no upside and a real risk of reintroducing the asymmetry.
+
+**Any NEW POST that wants a client-disconnect abort needs this** — it is the shape every billed
+loop here uses. The in-code comments at `packages/pro/src/annotations/routes.ts` and
+`packages/pro/src/activity-digest/routes.ts` restate the reasoning at the call site so a reader
+of either does not have to find this doc first.
+
 
