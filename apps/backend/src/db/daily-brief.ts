@@ -40,15 +40,38 @@
 // flagged when its CURRENT trailing-7-day bucket is the anomalous one — the brief is about this
 // week, not history.
 //
-// ── The TTL cache ──
-// A module-level 5-minute per-(accountId, workspaceId) cache, coalescing concurrent computes by
-// storing the promise. Rationale: the brief renders at the top of the Feed on every console open
-// and the roll-up loops it across workspaces, while its inputs (a sync tick, a review landing)
-// change on minutes-not-seconds cadence — so a ≤5-min-stale count is honest and a per-open
-// recompute of the feed+insights folds is not. The staleness is DISCLOSED (`computedAt` travels
-// to the route's `generatedAt`). A rejected compute is evicted so an error never sticks for 5
-// minutes. This also keeps the Pro narration's free staleness probe cheap: the synthesis GET
-// recomputes the brief's payload hash through this same fold.
+// ── TWO caches, and the line between them (⚠ do not merge them back into one) ──
+// The brief USED to sit behind a single 5-minute per-(accountId, workspaceId) TTL covering every
+// slice. That made the strip's headline a snapshot of a fold whose LIST is live: `myTurn` is the
+// my_turn card count, the click opens GET /api/attention, and that route recomputes the very same
+// getWorkspaceInsights fold on every request with no cache at all. Dismiss two cards (or open two
+// of your PRs — `pr_views` moves the fold too) and the strip kept saying 5 over a board of 3 for
+// up to five more minutes. A count that a single click disproves is not "≤5 min stale", it is
+// wrong; disclosing the staleness would not have made it right.
+//
+// So the split is by WHETHER THE NUMBER SITS ABOVE A LIVE LIST:
+//
+//   COUNTS (the four card counts + resolveBacklog + trunkRed) — computed FRESH on every read of
+//     `getDailyBriefEntry`, the ACTIVE workspace's line. Each one is the same fold the surface it
+//     deep-links to serves on demand, so it must be evaluated at the same moment the user looks
+//     at it. This is affordable precisely BECAUSE the anomaly slice below is not in it.
+//   botAnomalies — keeps its OWN 5-min TTL (`anomalyCache`). It is an 84-day `events` scan, and
+//     it backs NO clickable list: its line reads "unusual volume this week" and opens a bot tab,
+//     so nothing a click renders can contradict a five-minute-old flag.
+//   The ROLL-UP + the Pro narration inputs — keep a whole-counts TTL (`countsCache`, reached
+//     through `getDailyBriefCounts`). The "Elsewhere" lines describe OTHER workspaces: clicking
+//     one switches workspace, which then fetches that workspace's own FRESH brief, so the number
+//     is re-derived before any list can disagree with it. Freshening the loop instead would
+//     multiply getWorkspaceInsights by workspace count on every Feed mount — the cost this route
+//     is on the `search` tier for.
+//
+// ⚠ THEREFORE `generatedAt` DESCRIBES TWO COMPUTATION TIMES, and the honest one is the tighter:
+// it stamps the COUNTS (now == the request), while `botAnomalies` inside the same object may be
+// up to ANOMALY_TTL_MS older. That asymmetry is the feature, not an oversight — collapsing it
+// back into one cache to make one timestamp true again reintroduces the bug above.
+//
+// Both caches coalesce concurrent computes by storing the promise, and evict a REJECTED one so an
+// error never sticks for the whole window.
 import { and, eq, gte, inArray } from 'drizzle-orm';
 import type { DailyBriefBotAnomaly, DailyBriefCounts, DailyBriefTrunkRepo } from '@pierre-review/shared';
 import { db, schema } from './client.js';
@@ -69,17 +92,41 @@ const SPAN_WEEKS = 12; // 84 days — the behaviour tab's own baseline span
 const ANOMALY_CAP = 5;
 const TRUNK_CAP = 8;
 
-const TTL_MS = 5 * 60_000;
+/** The 84-day anomaly scan's own window (see the header — it backs no clickable list). */
+const ANOMALY_TTL_MS = 5 * 60_000;
+/** The roll-up / narration window — OTHER workspaces' lines, never the active one's. */
+const COUNTS_TTL_MS = 5 * 60_000;
 
-interface CacheEntry {
+interface CacheEntry<T> {
   at: number;
-  promise: Promise<DailyBriefCounts>;
+  promise: Promise<T>;
 }
-const cache = new Map<string, CacheEntry>();
+const anomalyCache = new Map<string, CacheEntry<DailyBriefBotAnomaly[]>>();
+const countsCache = new Map<string, CacheEntry<DailyBriefCounts>>();
 
-/** Test seam: drop every cached brief (the module-level-cache convention). */
+/** The one TTL read both caches share, so their eviction rules cannot drift apart. */
+function cached<T>(
+  map: Map<string, CacheEntry<T>>,
+  key: string,
+  ttlMs: number,
+  compute: () => Promise<T>,
+): Promise<T> {
+  const now = Date.now();
+  const hit = map.get(key);
+  if (hit && now - hit.at < ttlMs) return hit.promise;
+  const promise = compute();
+  map.set(key, { at: now, promise });
+  // An errored compute must not stick for the whole window.
+  promise.catch(() => {
+    if (map.get(key)?.promise === promise) map.delete(key);
+  });
+  return promise;
+}
+
+/** Test seam: drop every cached brief slice (the module-level-cache convention). */
 export function clearDailyBriefCache(): void {
-  cache.clear();
+  anomalyCache.clear();
+  countsCache.clear();
 }
 
 // The narrow volume-only anomaly slice (see the module header for why it is NOT the behaviour
@@ -187,10 +234,17 @@ async function computeBriefCounts(
 
   const [insights, backlog, botAnomalies, trunkRed] = await Promise.all([
     // The /api/attention fold verbatim (getWorkspaceInsights with the default window); the two
-    // bot cards it filters out are not counted here either.
+    // bot cards it filters out are not counted here either. ⚠ UNCACHED, and that is the point:
+    // /api/attention re-runs this exact call on every request, so a cached copy here is a number
+    // the very next click disproves.
     getWorkspaceInsights(accountId, undefined, scope),
     getResolvableBotThreadPrs(accountId, scope),
-    briefBotAnomalies(accountId, scope),
+    // The ONE cached slice — the 84-day scan, keyed on the RESOLVED workspace (the raw argument
+    // may have degraded to Default). Membership changes reach it within ANOMALY_TTL_MS, which is
+    // fine here and only here: no list contradicts a bot-volume flag.
+    cached(anomalyCache, `${accountId}:${scope.workspaceId}`, ANOMALY_TTL_MS, () =>
+      briefBotAnomalies(accountId, scope),
+    ),
     trunkRedRepos(accountId, scope),
   ]);
 
@@ -222,34 +276,43 @@ async function computeBriefCounts(
   };
 }
 
-/** The brief fold + its computed-at timestamp (the route's `generatedAt` disclosure). */
+/**
+ * THE ACTIVE WORKSPACE'S BRIEF — the one whose numbers sit above lists the strip can open, so its
+ * counts are computed FRESH on every call and never served from a cache (only the anomaly slice
+ * inside them is TTL'd; see the header). `computedAt` therefore stamps THE COUNTS, not the object.
+ *
+ * ⚠ Do not "optimise" this into `getDailyBriefCounts` below. They differ in exactly one way and it
+ * is the whole fix: this one cannot lag GET /api/attention, that one may.
+ */
 export async function getDailyBriefEntry(
   accountId: number,
   workspaceId: number,
 ): Promise<{ counts: DailyBriefCounts; computedAt: Date }> {
-  const key = `${accountId}:${workspaceId}`;
-  const now = Date.now();
-  const hit = cache.get(key);
-  if (hit && now - hit.at < TTL_MS) {
-    return { counts: await hit.promise, computedAt: new Date(hit.at) };
-  }
-  const promise = computeBriefCounts(accountId, workspaceId);
-  cache.set(key, { at: now, promise });
-  // An errored compute must not stick for 5 minutes.
-  promise.catch(() => {
-    if (cache.get(key)?.promise === promise) cache.delete(key);
-  });
-  return { counts: await promise, computedAt: new Date(now) };
+  // Stamped before the fold, so `generatedAt` can never claim to be newer than the read it describes.
+  const computedAt = new Date();
+  return { counts: await computeBriefCounts(accountId, workspaceId), computedAt };
 }
 
 /**
- * The ONE daily-brief fold (ProHostQueries.getDailyBriefCounts's real body — bind.ts swaps its
- * declared-inert throw for this). Counts only, no cost fields, computed on read behind the
- * module-level 5-min TTL cache above.
+ * The CACHED daily-brief fold (ProHostQueries.getDailyBriefCounts's real body — bind.ts swaps its
+ * declared-inert throw for this). Counts only, no cost fields, behind the module-level 5-min TTL.
+ *
+ * ⚠ Callers are the ones for whom a ≤5-min-old count cannot be contradicted by a click: the
+ * roll-up's OTHER-workspace lines (switching workspace re-derives them fresh) and the Pro
+ * narration's input assembly (whose phrasing is digit-free — the figures the strip paints always
+ * come from the counts response). The workspace the user is LOOKING at goes through
+ * `getDailyBriefEntry` above instead.
+ *
+ * ⚠ And the fresh path must NOT seed this cache with what it just computed, obvious as that looks:
+ * the narration's payload hash is read from here, so a counts vector that tracked every read would
+ * bill a regeneration for a count that ticked down and back up inside one window. The TTL is a
+ * cost gate on this path, not a performance one.
  */
 export async function getDailyBriefCounts(
   accountId: number,
   workspaceId: number,
 ): Promise<DailyBriefCounts> {
-  return (await getDailyBriefEntry(accountId, workspaceId)).counts;
+  return cached(countsCache, `${accountId}:${workspaceId}`, COUNTS_TTL_MS, () =>
+    computeBriefCounts(accountId, workspaceId),
+  );
 }

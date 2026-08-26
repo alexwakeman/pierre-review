@@ -184,16 +184,6 @@ const ME_RESPONSE: MeResponse = {
     avatarUrl: null,
     displayName: null,
   },
-  counts: {
-    awaitingReview: AWAITING_IDS.length,
-    yourPrsActivity: 0,
-    approvedPrs: 0,
-    threadsAwaiting: 0,
-    watchedRepoPrs: WATCHED_IDS.length,
-    claudeReviewsToAction: 0,
-  },
-  feedLastSeenAt: null,
-  newFeedItems: 0,
   deploymentMode: 'local',
   // Pro tier for e2e: all AI features (digests, Claude Review, AI Fix) stay off so the console
   // renders without the AI panels/tabs. "My Turn" is CORE / free now (not a Pro capability), so

@@ -146,6 +146,7 @@ import type {
   BotOnlyReviewCard,
   UserContributionStats,
   ArmedMergeRequest,
+  ArmedMergePhase,
   ArmedMergeState,
   MergeMethod,
 } from '@pierre-review/shared';
@@ -3555,16 +3556,6 @@ async function getTrunkCiFailureFeedItems(
 // ---- Activity-Feed "seen" marker (server-side, per account) ----
 
 // The account's last feed-view timestamp (null until the first view).
-export async function getFeedLastSeenAt(accountId: number): Promise<Date | null> {
-  const rows = await db
-    .select({ at: accounts.feedLastSeenAt })
-    .from(accounts)
-    .where(eq(accounts.id, accountId))
-    .limit(1)
-    .execute();
-  return rows[0]?.at ?? null;
-}
-
 // Record that the account has now viewed the feed (bumps the "seen" marker to now).
 export async function markFeedSeen(accountId: number): Promise<Date> {
   const now = new Date();
@@ -4524,10 +4515,14 @@ export async function getWorkspaceInsights(
     };
     const seeds: Seed[] = [];
 
-    // The approval CLOCK. `ApprovedPrItem` carries the approval COUNT but not when the newest
-    // approval landed, so reuse the same fold getMyTurn used to decide the section — never a
-    // second implementation of "latest approval".
-    const approvalInfo = await computeApprovalInfoByPr(mt.approvedPrs.map((i) => i.prId));
+    // THE CLOCK, READ NOT RE-DERIVED. Every PR-shaped section dates itself on the wire
+    // (`MyTurnPr.since` — review requested / last update / newest approval / opened), resolved
+    // once inside `getMyTurn`. Reading it here is what keeps a card and the browser notification
+    // built off the same fold from disagreeing about when an item landed — and it is why this
+    // block no longer runs its own `computeApprovalInfoByPr` for the approval timestamp.
+    // `openedAt` remains the floor for a row that predates the field.
+    const sinceOf = (i: MyTurnPr): Date | null =>
+      i.since != null ? new Date(Date.parse(i.since)) : null;
 
     for (const i of mt.awaitingReview) {
       seeds.push({
@@ -4539,8 +4534,7 @@ export async function getWorkspaceInsights(
           i.alsoRequested > 0
             ? `Review requested from you · ${i.alsoRequested} other reviewer${i.alsoRequested === 1 ? '' : 's'} also requested`
             : 'Review requested from you',
-        // Dated from the PR row (firstReviewRequestedAt ?? openedAt) — see `sinceFor`.
-        since: null,
+        since: sinceOf(i),
         prId: i.prId,
         extraActorIds: [],
       });
@@ -4559,7 +4553,7 @@ export async function getWorkspaceInsights(
       });
     }
     for (const i of mt.approvedPrs) {
-      const at = approvalInfo.get(i.prId)?.latestApprovalAt ?? new Date(Date.parse(i.openedAt));
+      const at = sinceOf(i) ?? new Date(Date.parse(i.openedAt));
       const conflicts = i.mergeable === 'conflicting' ? ' · conflicts' : '';
       seeds.push({
         reason: 'pr_approved',
@@ -4581,14 +4575,13 @@ export async function getWorkspaceInsights(
         threadId: null,
         severity: 'warn',
         detail: i.summary,
-        // Dated from the PR row (updatedAt) — see `sinceFor`.
-        since: null,
+        since: sinceOf(i),
         prId: i.prId,
         extraActorIds: [],
       });
     }
     for (const i of mt.watchedRepoPrs) {
-      const at = new Date(Date.parse(i.openedAt));
+      const at = sinceOf(i) ?? new Date(Date.parse(i.openedAt));
       seeds.push({
         reason: 'watched_repo_pr',
         dismissRefId: i.prId,
@@ -4627,8 +4620,6 @@ export async function getWorkspaceInsights(
           title: pullRequests.title,
           authorId: pullRequests.authorId,
           openedAt: pullRequests.openedAt,
-          updatedAt: pullRequests.updatedAt,
-          firstReviewRequestedAt: pullRequests.firstReviewRequestedAt,
           ciStatus: pullRequests.ciStatus,
           changedFiles: pullRequests.changedFiles,
           additions: pullRequests.additions,
@@ -4641,17 +4632,12 @@ export async function getWorkspaceInsights(
         .execute();
       const prRowById = new Map(prRows.map((p) => [p.id, p]));
 
-      // Two reasons date off a PR COLUMN rather than their section row: "awaiting your review"
-      // starts when a review was requested (the app's own review-pickup clock), and "your PR has
-      // new activity" is dated by the PR's last update — neither timestamp travels on the
-      // MyTurnPr wire shape, and openedAt would be plainly wrong for both. Everything else keeps
-      // its own row's timestamp, with openedAt as the floor for a null one.
-      const sinceFor = (s: Seed, p: (typeof prRows)[number]): Date =>
-        s.reason === 'review_request'
-          ? p.firstReviewRequestedAt ?? p.openedAt
-          : s.reason === 'your_pr'
-            ? p.updatedAt
-            : s.since ?? p.openedAt;
+      // Every seed already carries its own clock (`sinceOf` above, or the thread/run timestamp);
+      // openedAt is only the floor for a row that carries none. The per-reason resolution that
+      // used to live HERE — review_request off `firstReviewRequestedAt`, your_pr off `updatedAt` —
+      // moved upstream into `getMyTurn`, so the wire, the card and the notification all read ONE
+      // derivation of "when did this happen".
+      const sinceFor = (s: Seed, p: (typeof prRows)[number]): Date => s.since ?? p.openedAt;
 
       const sevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
       const ranked = seeds
@@ -6269,7 +6255,11 @@ export async function getMyTurn(
   const meta = (prId: number) =>
     openRows.find((p) => p.id === prId)!;
 
-  const toMyTurnPr = (t: TimelinePr) => {
+  // `since` is THE CLOCK — when the thing that needs you happened — and it is a PARAMETER
+  // rather than something derived here because each section dates off a different column
+  // (see `MyTurnPr.since`). Making it required is the point: a new section cannot quietly
+  // fall back to `openedAt`, which is the wrong moment for three of the four.
+  const toMyTurnPr = (t: TimelinePr, since: Date) => {
     const m = meta(t.id);
     const repoFullName = repoNameById.get(t.repoId) ?? `repo ${t.repoId}`;
     const [owner, name] = repoFullName.split('/');
@@ -6283,6 +6273,7 @@ export async function getMyTurn(
       state: t.state,
       openedAt: t.openedAt,
       githubUrl: `https://github.com/${owner}/${name}/pull/${m.number}`,
+      since: since.toISOString(),
     };
   };
 
@@ -6298,7 +6289,13 @@ export async function getMyTurn(
       .map(async (t) => {
         // otherReviewersRequested is recomputed via triage map; re-derive count.
         const others = await countOtherReviewers(t.id, localUserId);
-        return { ...toMyTurnPr(t), alsoRequested: others };
+        const m = meta(t.id);
+        // The review-pickup clock: when a review was REQUESTED of you (the PR's open time only
+        // stands in for repos synced before that column existed).
+        return {
+          ...toMyTurnPr(t, m.firstReviewRequestedAt ?? m.openedAt),
+          alsoRequested: others,
+        };
       }),
   );
 
@@ -6320,7 +6317,8 @@ export async function getMyTurn(
       return latest > dismissedAt.getTime();
     })
     .map((t) => ({
-      ...toMyTurnPr(t),
+      // Dated by the NEWEST approval — the same fold the section's dismissal test uses above.
+      ...toMyTurnPr(t, approvalInfo.get(t.id)?.latestApprovalAt ?? meta(t.id).openedAt),
       approvals: approvalInfo.get(t.id)?.approvals ?? 0,
       mergeable: t.mergeable,
       mergeStateStatus: t.mergeStateStatus,
@@ -6340,7 +6338,8 @@ export async function getMyTurn(
           t.newSinceLastViewed.commits > 0),
     )
     .map((t) => ({
-      ...toMyTurnPr(t),
+      // Dated by the PR's last update — that update IS the "new activity" this section reports.
+      ...toMyTurnPr(t, meta(t.id).updatedAt),
       newSinceLastViewed: t.newSinceLastViewed!,
       summary: summariseNew(t.newSinceLastViewed!),
     }));
@@ -6372,7 +6371,8 @@ export async function getMyTurn(
         !inOtherSections.has(t.id) &&
         !newRepoPrDismissedIds.has(t.id),
     )
-    .map((t) => toMyTurnPr(t))
+    // The one section where OPENING is genuinely the event, so openedAt is the honest clock.
+    .map((t) => toMyTurnPr(t, meta(t.id).openedAt))
     .sort((a, b) => b.openedAt.localeCompare(a.openedAt));
 
   // 3. Threads awaiting your response: you opened the thread, someone replied
@@ -14179,11 +14179,58 @@ export async function getBotDedupClusters(
 // tenant's token and stay isolated.
 // ---------------------------------------------------------------------------------------
 
-type AutoMergeRow = typeof schema.autoMergeRequests.$inferSelect;
+// The wire shape of an intent, spelled ONCE so the three readers below can't drift. The
+// repo/PR identity rides every row because the cross-PR surface (the global armed-merge card)
+// gets nothing else to label a row with — and the join is NOT the tenancy guard: every reader
+// keeps its explicit `accountId` predicate on `auto_merge_requests`.
+// A FUNCTION, not a module-level object: the table handles are destructured off `schema` at
+// import time, and a suite that stubs the schema module leaves them undefined — reading a
+// column there would throw while merely IMPORTING queries.ts, taking unrelated suites with it.
+const armedMergeColumns = () => ({
+  prId: autoMergeRequests.prId,
+  mergeMethod: autoMergeRequests.mergeMethod,
+  updateStrategy: autoMergeRequests.updateStrategy,
+  viaMergeQueue: autoMergeRequests.viaMergeQueue,
+  enqueuedAt: autoMergeRequests.enqueuedAt,
+  armedAt: autoMergeRequests.armedAt,
+  expectedHeadOid: autoMergeRequests.expectedHeadOid,
+  state: autoMergeRequests.state,
+  phase: autoMergeRequests.phase,
+  lastCheckedAt: autoMergeRequests.lastCheckedAt,
+  lastReason: autoMergeRequests.lastReason,
+  expiresAt: autoMergeRequests.expiresAt,
+  repoOwner: repos.owner,
+  repoName: repos.name,
+  prNumber: pullRequests.number,
+  prTitle: pullRequests.title,
+});
+
+interface AutoMergeRow {
+  prId: number;
+  mergeMethod: string;
+  updateStrategy: 'rebase' | 'merge' | 'none';
+  viaMergeQueue: boolean;
+  enqueuedAt: Date | null;
+  armedAt: Date;
+  expectedHeadOid: string;
+  state: string;
+  phase: string | null;
+  lastCheckedAt: Date | null;
+  lastReason: string | null;
+  expiresAt: Date;
+  repoOwner: string;
+  repoName: string;
+  prNumber: number;
+  prTitle: string;
+}
 
 function toArmedMergeRequest(row: AutoMergeRow): ArmedMergeRequest {
   return {
     prId: row.prId,
+    repoOwner: row.repoOwner,
+    repoName: row.repoName,
+    prNumber: row.prNumber,
+    prTitle: row.prTitle,
     mergeMethod: row.mergeMethod as MergeMethod,
     updateStrategy: row.updateStrategy,
     viaMergeQueue: row.viaMergeQueue,
@@ -14193,6 +14240,7 @@ function toArmedMergeRequest(row: AutoMergeRow): ArmedMergeRequest {
     state: row.state as ArmedMergeState,
     lastCheckedAt: iso(row.lastCheckedAt),
     lastReason: row.lastReason,
+    phase: row.phase as ArmedMergePhase | null,
     expiresAt: row.expiresAt.toISOString(),
   };
 }
@@ -14234,6 +14282,9 @@ export async function armAutoMerge(
       expiresAt: opts.expiresAt,
       lastCheckedAt: null,
       lastReason: null,
+      // The watcher hasn't looked yet (up to one cron tick away), and saying so is more honest
+      // than a blank row — the SPA seeds its progress card from THIS payload, on the click.
+      phase: 'pending_first_check',
       updatedAt: now,
     })
     .onConflictDoUpdate({
@@ -14251,13 +14302,17 @@ export async function armAutoMerge(
         expiresAt: opts.expiresAt,
         lastCheckedAt: null,
         lastReason: null,
+        phase: 'pending_first_check',
         updatedAt: now,
       },
     })
-    .returning()
     .execute();
-  // The upsert always yields exactly one row; the non-null assert mirrors persistPr's.
-  return toArmedMergeRequest(rows[0]!);
+  // Read back through the ONE joined reader rather than `.returning()`: the arm response is
+  // what the SPA seeds its progress card from, so it must carry the same identity + phase
+  // fields the polled list does. The upsert always yields exactly one row, so the non-null
+  // assert mirrors persistPr's.
+  const armed = await getAutoMergeRequest(accountId, prId);
+  return armed!;
 }
 
 /**
@@ -14287,8 +14342,10 @@ export async function getAutoMergeRequest(
   prId: number,
 ): Promise<ArmedMergeRequest | null> {
   const rows = await db
-    .select()
+    .select(armedMergeColumns())
     .from(autoMergeRequests)
+    .innerJoin(pullRequests, eq(pullRequests.id, autoMergeRequests.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
     .where(
       and(eq(autoMergeRequests.accountId, accountId), eq(autoMergeRequests.prId, prId)),
     )
@@ -14327,14 +14384,21 @@ const RESOLVED_INTENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 /**
  * Every armed intent for the account, plus recently-resolved ones (the client diffs
  * armed→merged to raise its toast). Newest first, capped.
+ *
+ * Joined to the repo + PR so each row can LABEL itself: this list is what the cross-PR
+ * progress surface reads, and it has no PR context of its own to look a name up from. Still a
+ * pure DB read, which is the reason `GET /api/auto-merge` may sit on the default `read` rate
+ * tier — see the note in api/plugins/rate-limit.ts before adding anything live to it.
  */
 export async function listAutoMergeRequests(
   accountId: number,
 ): Promise<ArmedMergeRequest[]> {
   const cutoff = new Date(Date.now() - RESOLVED_INTENT_WINDOW_MS);
   const rows = await db
-    .select()
+    .select(armedMergeColumns())
     .from(autoMergeRequests)
+    .innerJoin(pullRequests, eq(pullRequests.id, autoMergeRequests.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
     .where(
       and(
         eq(autoMergeRequests.accountId, accountId),
@@ -14376,6 +14440,11 @@ export interface ArmedMergeWork {
   // The watcher compares it to the live base so a retarget (which leaves head.sha untouched,
   // so the head pin can't see it) doesn't land the PR in a branch nobody consented to.
   syncedBaseRef: string | null;
+  // The head commit's CI status as last SYNCED. Used for ONE thing: GitHub collapses "required
+  // checks still running" and "required reviews missing" into the same `mergeableState:
+  // 'blocked'`, and this is what lets the watcher name which of the two it is without a second
+  // live fetch per intent per tick. Advisory only — it never gates the merge.
+  syncedCiStatus: CiStatus | null;
 }
 
 /**
@@ -14415,6 +14484,7 @@ export async function listArmedMergeRequestsForRunner(
       expiresAt: autoMergeRequests.expiresAt,
       armedAt: autoMergeRequests.armedAt,
       syncedBaseRef: pullRequests.baseRefName,
+      syncedCiStatus: pullRequests.ciStatus,
     })
     .from(autoMergeRequests)
     .innerJoin(pullRequests, eq(pullRequests.id, autoMergeRequests.prId))
@@ -14431,6 +14501,7 @@ export async function listArmedMergeRequestsForRunner(
     ...r,
     prState: r.prState as PrState,
     mergeMethod: r.mergeMethod as MergeMethod,
+    syncedCiStatus: r.syncedCiStatus as CiStatus | null,
   }));
 }
 
@@ -14443,6 +14514,10 @@ export async function updateAutoMergeState(
   opts: {
     state?: ArmedMergeState;
     lastReason?: string | null;
+    // The machine-readable twin of `lastReason` — pass it in the SAME call that writes the
+    // prose, never in a follow-up, so the two can't disagree. Explicit null resolves a
+    // terminal row (the outcome is `state`) or an uncharacterisable wait.
+    phase?: ArmedMergePhase | null;
     checkedAt?: Date;
     // Re-pin the consent anchor. ONLY the watcher's own "update the branch from trunk" step
     // may do this: it moved the head itself, so leaving the old SHA in place would make the
@@ -14462,6 +14537,7 @@ export async function updateAutoMergeState(
       updatedAt: now,
       ...(opts.state !== undefined ? { state: opts.state } : {}),
       ...(opts.lastReason !== undefined ? { lastReason: opts.lastReason } : {}),
+      ...(opts.phase !== undefined ? { phase: opts.phase } : {}),
       ...(opts.expectedHeadOid !== undefined
         ? { expectedHeadOid: opts.expectedHeadOid }
         : {}),

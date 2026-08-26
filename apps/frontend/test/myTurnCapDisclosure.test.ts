@@ -26,6 +26,7 @@ import {
   myTurnCapDisclosure,
   myTurnCapPlacement,
 } from '../src/components/Activity/AttentionView.js';
+import { workspaceCapDisclosure } from '../src/hooks/useMyTurnByWorkspace.js';
 
 /** A brief fold with only the two fields this rule reads varied. */
 function counts(over: Partial<DailyBriefCounts> = {}): DailyBriefCounts {
@@ -123,6 +124,41 @@ describe('myTurnCapDisclosure', () => {
     expect(myTurnCapDisclosure(c.myTurn, c)?.total).toBe(148);
     const uncapped = counts({ myTurn: 9, myTurnTotal: 9 });
     expect(myTurnCapDisclosure(uncapped.myTurn, uncapped)).toBeNull();
+  });
+});
+
+describe('workspaceCapDisclosure (the per-workspace badge and banner lines)', () => {
+  // The shared sentence is written for the board you are STANDING ON. The Workspace dropdown and
+  // the Welcome-back banner render the same disclosure on rows for workspaces the user is NOT
+  // in — surfaces whose entire job is telling workspaces apart — so the place name has to move
+  // with the row. The RULE (whether a cap exists, and the shown/total pair) still has one owner.
+  const capped = counts({ myTurn: 50, myTurnTotal: 148 });
+
+  it('the shared sentence still says "in this Workspace" — the substitution depends on it', () => {
+    // ⚠ If this fails, the re-homing in useMyTurnByWorkspace has silently become a no-op and
+    // every OTHER workspace's badge is back to naming the workspace the user is looking at.
+    expect(myTurnCapDisclosure(50, capped)?.title).toContain('in this Workspace');
+  });
+
+  it('leaves the ACTIVE line on the shared sentence, word for word', () => {
+    expect(workspaceCapDisclosure(capped, true, 'Default')?.title).toBe(
+      myTurnCapDisclosure(50, capped)?.title,
+    );
+  });
+
+  it('names the line’s OWN workspace on every other line', () => {
+    const cap = workspaceCapDisclosure(capped, false, 'Platform');
+    expect(cap?.title).toContain('in Platform');
+    expect(cap?.title).not.toContain('in this Workspace');
+    // The pair is untouched — only the place name moved.
+    expect(cap?.shown).toBe(50);
+    expect(cap?.total).toBe(148);
+  });
+
+  it('stays silent when there is no cap, wherever the line points', () => {
+    const uncapped = counts({ myTurn: 9, myTurnTotal: 9 });
+    expect(workspaceCapDisclosure(uncapped, false, 'Platform')).toBeNull();
+    expect(workspaceCapDisclosure(uncapped, true, 'Default')).toBeNull();
   });
 });
 

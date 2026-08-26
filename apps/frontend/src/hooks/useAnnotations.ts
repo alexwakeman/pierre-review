@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AnnotationKind,
   AnnotationRunBody,
   AnnotationRunKind,
   AnnotationRunResponse,
+  AnnotationRunTarget,
   AnnotationTargetKind,
   CommentAnnotation,
   PrAnnotationsResponse,
@@ -54,6 +55,64 @@ export function useAnnotationIndex(
   }).data;
 }
 
+// ---- in-flight runs, keyed by the ANCHOR the user clicked --------------------------------------
+//
+// A run's state lives in the hook instance the BUTTON owns, but the panels that run rewrites are a
+// SIBLING component (ThreadCheckOutput / CommentAnnotations) with nothing between them to carry it
+// — and at two of the three mount sites the button and the output sit inside a `.map()` row, so
+// there is no shared parent to lift it into either. Hence a module-level claim, the same idiom the
+// AI-Fix reply guard uses (CommentFixReport.tsx): the runner claims the anchors it is about to
+// overwrite, and any panel can ask "is my result about to be replaced?".
+//
+// KEYED ON THE ANCHOR, never on the PR alone: a bot-flooded PR has dozens of these blocks, and a
+// prId-only key would blank all of them because ONE thread was re-checked.
+//
+// Not a React Query mutation: `useRunAnnotations` aborts on unmount ON PURPOSE (that abort is what
+// stops the server billing — see below), so a shared mutation key would be decorative.
+
+const RUNNING = new Map<string, number>();
+const RUN_LISTENERS = new Set<() => void>();
+
+function subscribeRuns(onChange: () => void): () => void {
+  RUN_LISTENERS.add(onChange);
+  return () => {
+    RUN_LISTENERS.delete(onChange);
+  };
+}
+
+/** The claim key for one anchor of one PR — what a run claims and what a panel reads. */
+export function annotationRunKey(prId: number, target: AnnotationRunTarget): string {
+  return `${prId}|${target.targetKind}|${target.targetId}`;
+}
+
+// COUNTED, not a boolean, because two claims on one anchor overlap in ordinary use: `run` aborts
+// an in-flight run and claims again SYNCHRONOUSLY, while the aborted one releases a microtask
+// later (and one anchor can have two mounts — ThreadCard renders in seven places). A flag would be
+// cleared by whichever settles first, un-blanking a panel whose own run is still going.
+function claimRuns(keys: readonly string[], delta: 1 | -1): void {
+  if (keys.length === 0) return;
+  for (const k of keys) {
+    const n = (RUNNING.get(k) ?? 0) + delta;
+    if (n > 0) RUNNING.set(k, n);
+    else RUNNING.delete(k);
+  }
+  for (const l of RUN_LISTENERS) l();
+}
+
+/**
+ * Whether a "Check review" is in flight against THIS anchor — i.e. whether everything stored under
+ * it is about to be overwritten, so what is on screen is the PREVIOUS result. Either argument null
+ * (no PR, no anchor) is simply false.
+ */
+export function useAnnotationRunBusy(
+  prId: number | null,
+  target: AnnotationRunTarget | null,
+): boolean {
+  const key = prId != null && target != null ? annotationRunKey(prId, target) : null;
+  // Returns a primitive, so a fresh getSnapshot closure per render is fine.
+  return useSyncExternalStore(subscribeRuns, () => key != null && RUNNING.has(key));
+}
+
 // ---- runs ------------------------------------------------------------------------------------
 
 export interface AnnotationRunState {
@@ -93,6 +152,13 @@ export function useRunAnnotations(prId: number): {
       abortRef.current = ac;
       setState({ ...IDLE, running: true });
 
+      // Claim the anchors this run will rewrite, so their panels drop the previous result for the
+      // placeholder sweep instead of presenting it as current for the whole run. A whole-PR run
+      // (no `targets` — no UI sends one any more, but the wire still allows it) claims NOTHING:
+      // blanking every panel on the PR is a blackout, not feedback.
+      const claimed = (opts?.targets ?? []).map((t) => annotationRunKey(prId, t));
+      claimRuns(claimed, 1);
+
       void (async () => {
         try {
           const result = await api.runPrAnnotations(
@@ -113,6 +179,12 @@ export function useRunAnnotations(prId: number): {
           // ONE refetch for the whole run: every open panel on the PR picks the new judgements up
           // at once off the shared per-PR query.
           void qc.invalidateQueries({ queryKey: prAnnotationsKey(prId) });
+          // RELEASED UNCONDITIONALLY, and deliberately NOT awaited on that refetch. A re-run can
+          // legitimately end with nothing rewritten (a payload-hash hit — "Already up to date."),
+          // and holding the placeholder until a refetch that is retrying, or has no observer left
+          // to run at all, would strand it forever. The cost is that a genuinely-new judgement
+          // shows its previous text for the length of one cached local read.
+          claimRuns(claimed, -1);
         }
       })();
     },

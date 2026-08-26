@@ -1,4 +1,12 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import type {
   AutomatedReviewerKind,
@@ -12,8 +20,9 @@ import type {
   WorkspaceReviewer,
 } from '@pierre-review/shared';
 import {
+  countHeadArrivals,
   useConsolidatedFeed,
-  useFeedHasNew,
+  useFeedAutoInsert,
   useMarkFeedSeen,
 } from '../../hooks/useConsolidatedFeed.js';
 import { useDetectedReviewers, useSetWorkspaceReviewer } from '../../hooks/useBotTriage.js';
@@ -177,6 +186,26 @@ function metaOf(item: ConsolidatedFeedItem, prId: number): TabMeta {
 const FEED_OVERSCAN = 800;
 // Height estimate for a not-yet-measured row before the running average kicks in.
 const FEED_EST_ROW = 160;
+// How close to the top of the feed still counts as "reading the top of it" — both for deciding
+// whether an arriving batch needs scroll compensation and for crediting cohorts as seen. Roughly
+// half a card: far enough to survive a stray wheel nudge, near enough that the newest rows are
+// unambiguously on screen.
+const FEED_AT_TOP_PX = 80;
+
+// The feed's scroll container is either its own overflow pane (the Activity console) or the
+// document, and only the pane exposes a writable `scrollTop`. Two helpers so the compensation
+// path can't quietly no-op on the document case.
+//
+// ⚠ THIS IS NOT THE TIMELINE'S GATED SCROLL. `setVisScrollTop` / `intentionalScrollRef` guard the
+// vis-timeline board's virtualized viewport; this is a plain DOM pane and must NOT be routed
+// through them.
+function feedScrollTop(el: HTMLElement): number {
+  return el === document.documentElement || el === document.body ? window.scrollY : el.scrollTop;
+}
+function feedScrollBy(el: HTMLElement, dy: number): void {
+  if (el === document.documentElement || el === document.body) window.scrollBy(0, dy);
+  else el.scrollTop += dy;
+}
 
 // The review-thread DERIVED-state pills (every feed view). Order mirrors the timeline
 // legend: needs-attention → in-progress → done.
@@ -221,6 +250,10 @@ export function FeedView({
   const feedCiLens = useFilters((s) => s.feedCiLens);
   const cycleFeedCiLens = useFilters((s) => s.cycleFeedCiLens);
   const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
+  // The cross-repo feed's transient "New" markers (see FeedNewCohorts in store/filters.ts).
+  const feedNewCohorts = useFilters((s) => s.feedNewCohorts);
+  const pushFeedNewCohort = useFilters((s) => s.pushFeedNewCohort);
+  const markFeedNewCohortsSeen = useFilters((s) => s.markFeedNewCohortsSeen);
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
   const showPrComment = useFilters((s) => s.showPrComment);
@@ -301,7 +334,8 @@ export function FeedView({
     },
     [judgementMutate, workspaceId],
   );
-  // The one-shot flash signal — set ONLY by a real browser Back (navigateBack), so an
+  // The one-shot flash signal — promoted from the pending return target by
+  // `applyUrlTab({ fromPop: true })`, i.e. ONLY by a popped URL that lands on Activity, so an
   // ordinary return to Activity (e.g. clicking the Activity tab chip) never flashes.
   const flashTarget = usePinnedTabs((s) => s.activityFlashItemId);
   const clearFlash = usePinnedTabs((s) => s.clearActivityFlashItem);
@@ -325,19 +359,40 @@ export function FeedView({
   // here; when isolated, this view also drops its own cross-repo Open-PRs panel (below).
   const isolatedPrId = feedIsolatedPrId;
 
+  // THE ONE PREDICATE that says "this mount is *the* feed". FeedView has five mounts sharing one
+  // FeedRow — the cross-repo feed, the unresolved-repo fallback, the per-repo console, the Bots
+  // pane's bot-only feed and a person's activity tab — and three behaviours are cross-repo-only:
+  // the server "seen" marker below, the auto-insert of newly-arrived items, and the "New" card
+  // marker that goes with it. The narrowed views are things someone opened on purpose; keeping
+  // them live (and telling them what's new) would be answering a question they didn't ask.
+  const isCrossRepoFeed = repoId == null && !botsMode && userIds == null;
+
   // Viewing the CROSS-REPO feed marks it seen server-side (once per mount), resetting the
-  // "new My Turn since you were last here" count that drives the Welcome-back banner. A
-  // per-repo feed (repoId set) doesn't touch the global marker.
+  // "new My Turn since you were last here" count `/api/me` computes. A per-repo feed (repoId
+  // set) doesn't touch the global marker.
+  //
+  // ⚠ THIS IS THE *SERVER* SEEN MARKER (accounts.feedLastSeenAt) AND IT IS NOT THE CARD MARKER.
+  // It is account-level; the per-card "New" chip is a transient client cohort
+  // (store/filters.ts). Removing the old "New activity — Refresh" button must not take this
+  // with it — nothing else bumps feedLastSeenAt.
+  //
+  // ⚠ …AND IT NOW HAS NO READER AT ALL. `WelcomeBackBanner` used to render the count this
+  // marker gated (`MeResponse.newFeedItems`); it counts standing `my_turn` CARDS per workspace
+  // instead (a population that doesn't reset when you glance at a feed), so `/api/me` no longer
+  // carries `feedLastSeenAt`/`newFeedItems` and the read path is gone. THE COLUMN IS NOW
+  // WRITE-ONLY, and this write is deliberately kept: a marker that stopped being written could
+  // not be given a reader again without a backfill, and "when did they last look at the feed"
+  // is not recoverable after the fact. Drop the write only together with the column.
   const markFeedSeen = useMarkFeedSeen();
   const markedSeenRef = useRef(false);
   useEffect(() => {
     // botsMode and a userIds scope are both narrowed views — neither may reset the cross-repo
     // My-Turn "seen" marker (you haven't caught up on the feed by reading one person's).
-    if (repoId == null && !botsMode && userIds == null && !markedSeenRef.current) {
+    if (isCrossRepoFeed && !markedSeenRef.current) {
       markedSeenRef.current = true;
       markFeedSeen.mutate();
     }
-  }, [repoId, botsMode, userIds, markFeedSeen]);
+  }, [isCrossRepoFeed, markFeedSeen]);
 
   // Bots pane: the feed window follows the analytics window selector (shared store field),
   // using the SAME window→days mapping as getBotAnalytics (rolling_7=7, rolling_30=30, else —
@@ -374,15 +429,15 @@ export function FeedView({
   // Activity-native: the feedBotLens pills — whose 'hide' now rides the server's excludeBots
   // param (union bot definition, excluded BEFORE the page cap so a bot-heavy window fills
   // with human rows) while 'only' stays a client-side view — and botsMode (server-side).
-  // useConsolidatedFeed and useFeedHasNew below MUST share identical scope inputs, or the
-  // "New activity" banner false-fires against a differently-scoped head.
+  // useConsolidatedFeed and useFeedAutoInsert below MUST share identical scope inputs — the
+  // auto-insert path SPLICES the head's rows into this query's cache entry, so a divergent
+  // scope would prepend rows this request would never have returned.
   const {
     items,
     users,
     total,
     uncappedTotal,
     counts,
-    latestId,
     isLoading,
     isPlaceholderData,
     hasMore,
@@ -412,33 +467,7 @@ export function FeedView({
       includeCiFailures: !botsMode && feedCiLens !== 'off',
     });
 
-  // "New activity" detector: poll the server head for this exact scope and compare to what's
-  // loaded, driving the manual refresh banner (below). Clicking it invalidates the feed → the
-  // fresh page's items[0]/total catch up → the banner clears.
   const rootRef = useRef<HTMLDivElement>(null);
-  const { hasNew, refresh: refreshFeed } = useFeedHasNew({
-    // MUST match the loaded feed's workspace exactly, or the head belongs to another scope and
-    // the banner false-fires on every poll.
-    workspaceId,
-    repoIds: effectiveRepoIds,
-    userIds,
-    prId: isolatedPrId,
-    excludeBots: !botsMode && effectiveBotLens === 'hide',
-    botsOnly: botsMode,
-    botWindowDays,
-    includeAllCommits: !botsMode && feedShowCommits,
-    includeCiFailures: !botsMode && feedCiLens !== 'off',
-    loadedLatestId: latestId,
-    loadedTotal: total,
-    // Placeholder pages belong to the PREVIOUS key (e.g. a bots-window flip): total/latestId
-    // are stale then, and the head poll — already on the NEW key — would false-fire the
-    // banner via serverTotal > loadedTotal until page 0 lands.
-    feedSettled: !isLoading && !isPlaceholderData,
-  });
-  const onRefreshClick = (): void => {
-    refreshFeed();
-    nearestScrollParent(rootRef.current)?.scrollTo({ top: 0, behavior: 'smooth' });
-  };
 
   const usersById = useMemo(() => indexUsers(users), [users]);
   // Bot lens: an actor is a "bot" for the lens if it's ANY bot under the UNION definition —
@@ -630,11 +659,17 @@ export function FeedView({
   // Turn is CORE / free, so it's always available). The category pills + the bot lens compose
   // ON TOP of them. In botsMode the stream is hard-filtered to bot activity + the derived-state
   // pills instead (the store lens/category/my-turn filters don't apply).
-  const visible = useMemo(() => {
+  //
+  // ⚠ FACTORED OUT OF THE `visible` MEMO ON PURPOSE, so the auto-insert path can ask the SAME
+  // question of a batch that is about to be prepended: how many of these rows actually reach the
+  // rendered list? Every step below is a pure per-item predicate, so narrowing an arriving PREFIX
+  // on its own gives the same answer as narrowing the whole list and taking its prefix — which is
+  // what lets the window shift be exact instead of an estimate (see countHeadArrivals).
+  const applyFeedPills = useCallback((list: ConsolidatedFeedItem[]): ConsolidatedFeedItem[] => {
     if (botsMode) {
       // Backend already restricted to automated reviewers; the vendor + state pills compose here
       // (vendor ∧ state — an empty set for a dimension means "all" for that dimension).
-      let base = items;
+      let base = list;
       if (botVendorFilter.size > 0)
         base = base.filter((i) => i.actorId != null && botVendorFilter.has(i.actorId));
       if (botStateFilter.size > 0)
@@ -645,12 +680,12 @@ export function FeedView({
       return base;
     }
     const base = feedMyTurnOnly
-      ? items.filter((i) => i.isMyTurn)
+      ? list.filter((i) => i.isMyTurn)
       : feedClaudeOnly
-        ? items.filter((i) => i.kind === 'claude_review')
+        ? list.filter((i) => i.kind === 'claude_review')
         : feedCiLens === 'only'
-          ? items.filter((i) => isCiFailureKind(i.kind))
-          : items;
+          ? list.filter((i) => isCiFailureKind(i.kind))
+          : list;
     // The category pills are SKIPPED under the CI lens' 'only' state. CI rows belong to neither
     // category (that exclusion is deliberate — see catMatch), so composing the two could only
     // ever yield an empty feed, and an empty feed is exactly the "this pill is broken" reading
@@ -673,7 +708,8 @@ export function FeedView({
         ? byLens.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState))
         : byLens;
     return feedNeedsReview ? byState.filter(matchesNeedsReview) : byState;
-  }, [botsMode, botStateFilter, botVendorFilter, items, feedMyTurnOnly, feedClaudeOnly, feedCiLens, effectiveBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor, feedNeedsReview, matchesNeedsReview]);
+  }, [botsMode, botStateFilter, botVendorFilter, feedMyTurnOnly, feedClaudeOnly, feedCiLens, effectiveBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor, feedNeedsReview, matchesNeedsReview]);
+  const visible = useMemo(() => applyFeedPills(items), [applyFeedPills, items]);
 
   // Honest count line: loaded-of-TOTAL (the server's post-cap stream length), never
   // visible-of-loaded — the initial page must not read "50 of 50" when the stream holds
@@ -715,12 +751,69 @@ export function FeedView({
   // it never needed, which is the dominant cost of opening the Activity feed / Bots feed. ~12
   // covers a console pane's visible rows; a taller pane fills in on the next frame.
   const [win, setWin] = useState({ start: 0, end: 12, top: 0, bottom: 0 });
+  // The live window, readable from the auto-insert callbacks below (which run outside render).
+  const winRef = useRef(win);
+  winRef.current = win;
+  // "The reader is at the top" → credit every live cohort as seen. Held in a ref because the
+  // scroll effect below is declared BEFORE the feed's scopeKey exists, and a dep array is
+  // evaluated during render (a direct reference would be a temporal-dead-zone throw, not a
+  // lint nag). Reassigned every render, so it always closes over the current scope.
+  const markSeenRef = useRef<() => void>(() => {});
+  // THE READING ANCHOR — the topmost MOUNTED row and where it sits in the viewport, refreshed
+  // every time layout settles (the rAF `recompute` below, which runs on scroll/resize/row-growth)
+  // and again immediately before the head poll writes. `null` means "do not compensate": either
+  // the reader is at the top of the feed (arriving in view is the whole point of dropping the
+  // Refresh button) or no row is mounted.
+  //
+  // ⚠ THIS REF IS WHAT MAKES ONE COMPENSATION MECHANISM COVER BOTH ARRIVAL PATHS. The head poll
+  // can hand us a synchronous pre-write moment (`onBeforeInsert`); `SyncStatus.invalidateData()`
+  // CANNOT — it sweeps the `['consolidated-feed']` prefix on every sync round and React Query
+  // refetches EVERY loaded page, replacing the list with no warning at all. Measuring
+  // continuously means the compensation below never has to know which writer ran.
+  const anchorRef = useRef<{ id: string; top: number; scrollHeight: number } | null>(null);
+  // Compensation OWED: the anchor as measured BEFORE a prepend committed, paid in the layout pass
+  // that follows the window shift (the shift moves the anchor again, so a delta read before it
+  // would compensate for a layout that is already gone).
+  const pendingScrollFixRef = useRef<{
+    // The anchor row and its viewport position before the insert — the exact measurement.
+    anchorId: string;
+    anchorTop: number;
+    // Fallback when the anchor unmounts (a batch bigger than the window shifts it out of the
+    // slice): the container's total height, whose growth is the height added above.
+    scrollHeight: number;
+  } | null>(null);
+  const captureAnchor = useCallback((): void => {
+    const scrollEl = scrollElRef.current;
+    if (!scrollEl || feedScrollTop(scrollEl) <= FEED_AT_TOP_PX) {
+      // At the head of the feed the new cards SHOULD arrive in view — that is the whole point of
+      // dropping the button. Compensation is deliberately skipped there.
+      anchorRef.current = null;
+      return;
+    }
+    const rows = visibleRef.current;
+    const w = winRef.current;
+    for (let i = Math.max(0, w.start); i < Math.min(w.end, rows.length); i++) {
+      const el = rowRefs.current.get(rows[i]!.id);
+      if (el) {
+        anchorRef.current = {
+          id: rows[i]!.id,
+          top: el.getBoundingClientRect().top,
+          scrollHeight: scrollEl.scrollHeight,
+        };
+        return;
+      }
+    }
+    anchorRef.current = null;
+  }, []);
 
   const recompute = useCallback((): void => {
     rafRef.current = null;
     const scrollEl = scrollElRef.current;
     const listEl = listRef.current;
     if (!scrollEl || !listEl) return;
+    // Layout has settled — refresh the anchor while it still describes the list on screen. This
+    // is the ONLY pre-commit measurement the sync-round refetch path ever gets.
+    captureAnchor();
     const rows = visibleRef.current;
     const n = rows.length;
     if (n === 0) {
@@ -789,7 +882,7 @@ export function FeedView({
         ? w
         : { start, end, top, bottom },
     );
-  }, []);
+  }, [captureAnchor]);
 
   const scheduleRecompute = useCallback((): void => {
     if (rafRef.current == null) rafRef.current = requestAnimationFrame(recompute);
@@ -838,7 +931,17 @@ export function FeedView({
       scrollEl === document.scrollingElement ||
       scrollEl === document.documentElement ||
       scrollEl === document.body;
-    const onScroll = (): void => scheduleRecompute();
+    // The scroll handler also owns the "seen" half of the New-marker contract: SEEN = COHORT +
+    // SCROLL POSITION. Sitting at the top of the feed is what credits the cohorts up there as
+    // read — there is no per-card observer, by design.
+    const onScroll = (): void => {
+      if (feedScrollTop(scrollEl) <= FEED_AT_TOP_PX) markSeenRef.current();
+      // Refresh the reading anchor HERE, not only in the rAF recompute: a refetch can commit in
+      // the same frame as a scroll event, and compensating against a pre-scroll anchor would undo
+      // the reader's own scroll. Two rect reads, no writes in between — no forced reflow.
+      captureAnchor();
+      scheduleRecompute();
+    };
     const scrollTarget: EventTarget = isDoc ? window : scrollEl;
     scrollTarget.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
@@ -850,12 +953,200 @@ export function FeedView({
       window.removeEventListener('resize', onScroll);
       ro.disconnect();
     };
-  }, [scheduleRecompute, hasItems]);
+  }, [scheduleRecompute, captureAnchor, hasItems]);
 
   // Recompute whenever the visible set changes (filter toggles / new pages).
   useEffect(() => {
     scheduleRecompute();
   }, [visible, scheduleRecompute]);
+
+  // ── Auto-insert + scroll anchoring ──────────────────────────────────────────────────────────
+  // New activity is SPLICED INTO the stream as it arrives (the old "↑ New activity — Refresh"
+  // banner is gone). The price of that is the one thing a manual button never had to solve:
+  //
+  //   ⚠ A PREPEND MUST NOT MOVE CONTENT UNDER THE READER'S EYES. `recompute` derives the
+  //     viewport position from live rects (`rel`), which a prepend does NOT change — so the same
+  //     pixel offset silently resolves to rows N further back, and everything on screen slides
+  //     down by the height of what landed.
+  //
+  // ⚠ AND THERE ARE TWO WRITERS, NOT ONE. The head poll splices (and can announce itself);
+  // `SyncStatus.invalidateData()` sweeps the `['consolidated-feed']` prefix on EVERY sync round,
+  // which refetches every loaded page of the active infinite query and replaces the list with no
+  // callback at all. So compensation is driven by the COMMITTED LIST, not by a writer's callback
+  // (the same reason the "New" cohorts are minted by diffing) — see the layout effect below.
+  const estRowHeight = useCallback((): number => {
+    const heights = heightsRef.current;
+    if (heights.size === 0) return FEED_EST_ROW;
+    let sum = 0;
+    for (const v of heights.values()) sum += v;
+    return sum / heights.size;
+  }, []);
+
+  // The head poll is about to splice rows into the loaded pages. All this owes is the FRESHEST
+  // possible anchor: a batch can land without an intervening scroll event, so the last rAF
+  // `recompute` may predate the reader's current position, and this is the final moment the DOM
+  // still shows the pre-insert list. The shift + the scroll fix happen in the layout effect.
+  const onBeforeInsert = useCallback((): void => {
+    captureAnchor();
+  }, [captureAnchor]);
+
+  const { scopeKey } = useFeedAutoInsert({
+    // MUST match the loaded feed's scope exactly — this writes into that query's cache entry.
+    workspaceId,
+    repoIds: effectiveRepoIds,
+    userIds,
+    prId: isolatedPrId,
+    excludeBots: !botsMode && effectiveBotLens === 'hide',
+    botsOnly: botsMode,
+    botWindowDays,
+    includeAllCommits: !botsMode && feedShowCommits,
+    includeCiFailures: !botsMode && feedCiLens !== 'off',
+    enabled: isCrossRepoFeed,
+    onBeforeInsert,
+  });
+  markSeenRef.current = (): void => {
+    if (isCrossRepoFeed) markFeedNewCohortsSeen(scopeKey);
+  };
+
+  // WHERE THE "NEW" COHORTS ARE MINTED — by diffing the item list, NOT inside the auto-insert.
+  //
+  // ⚠ AUTO-INSERT IS NOT THE ONLY WAY ROWS REACH THE FEED. `SyncStatus` is mounted in the header
+  // on every screen and its `invalidateData()` sweeps the `['consolidated-feed']` prefix on every
+  // sync round — which for an active infinite query refetches EVERY loaded page and replaces the
+  // list. Minting markers in `onInserted` would leave them missing for the arrivals a reader is
+  // most likely to receive, and which path won the race would decide whether a card said "New".
+  //
+  // ⚠ ONLY THE HEAD PREFIX COUNTS. "Load more" appends 50 OLDER rows the reader deliberately
+  // asked for; flagging those as new would light up the entire page they just pulled. So the
+  // cohort is the run of ids ABOVE the first already-known one — the same contiguity rule the
+  // merge uses — and everything else merely joins the known set.
+  //
+  // ⚠ A PLACEHOLDER LIST IS NOT THIS SCOPE'S LIST. `placeholderData: (prev) => prev` keeps the
+  // PREVIOUS query key's rows on screen while a re-keyed fetch is in flight, and `scopeKey` flips
+  // in that same render — so seeding the baseline from them makes the real response's extra head
+  // rows look like arrivals. Every WIDENING re-key (bot lens 'hide'→'only'/'all', Commits off→on,
+  // CI failures 'off'→'feed'/'only') would then mint a "New" cohort on rows that were merely
+  // hidden a moment ago. The baseline must be the first SETTLED list for the scope.
+  const knownItemIdsRef = useRef<{ scopeKey: string; ids: Set<string> } | null>(null);
+  useEffect(() => {
+    if (!isCrossRepoFeed || items.length === 0 || isPlaceholderData) return;
+    const known = knownItemIdsRef.current;
+    if (known == null || known.scopeKey !== scopeKey) {
+      // First settled list for this scope IS the baseline. A freshly-opened feed is all equally
+      // new, so marking any of it would just be decoration on the whole screen.
+      knownItemIdsRef.current = { scopeKey, ids: new Set(items.map((i) => i.id)) };
+      return;
+    }
+    // `cut < 0` (the two lists share NOTHING — a very long absence, or a server-side window
+    // roll) deliberately marks nothing: "every card is new" is not an answer worth a chip on
+    // every row, and we cannot tell which of them the reader had already read.
+    const cut = items.findIndex((i) => known.ids.has(i.id));
+    const fresh = cut > 0 ? items.slice(0, cut).map((i) => i.id) : [];
+    for (const i of items) known.ids.add(i.id);
+    if (fresh.length === 0) return;
+    const scrollEl = scrollElRef.current;
+    // ONE arrival = ONE cohort — including the big one collected while the tab was backgrounded
+    // (the head poll is visibility-gated, so a whole absence lands as a single refetch).
+    pushFeedNewCohort(
+      scopeKey,
+      fresh,
+      scrollEl == null || feedScrollTop(scrollEl) <= FEED_AT_TOP_PX,
+    );
+  }, [items, isCrossRepoFeed, scopeKey, pushFeedNewCohort, isPlaceholderData]);
+
+  // ── THE ONE SCROLL-COMPENSATION PATH, before paint ──────────────────────────────────────────
+  // Driven by the COMMITTED item list rather than by whoever wrote it, because only one of the
+  // two writers can announce itself (see the block above `onBeforeInsert`): the head poll splices
+  // and calls `onBeforeInsert`, while the sync round's `invalidateData()` refetch replaces the
+  // whole list with no hook to hang a measurement on. Diffing the list covers both.
+  //
+  // TWO PASSES, IN THIS ORDER, and both run before the browser paints (a `useLayoutEffect`
+  // setState is flushed synchronously):
+  //   1. items changed + the head grew → remember the PRE-insert anchor and shift `win`.
+  //   2. re-entered by that `win` change → re-measure the anchor and add the delta to scrollTop.
+  // The shift MOVES the anchor, so measuring before it would compensate for a layout that is
+  // already gone — hence the hand-off ref rather than one pass.
+  const prevFeedRef = useRef<{
+    scopeKey: string;
+    items: ConsolidatedFeedItem[];
+    placeholder: boolean;
+  } | null>(null);
+  useLayoutEffect(() => {
+    // Pass 2 — the window shift has committed; pay what was measured before it.
+    const owed = pendingScrollFixRef.current;
+    if (owed != null) {
+      pendingScrollFixRef.current = null;
+      const scrollEl = scrollElRef.current;
+      if (scrollEl) {
+        const anchorEl = rowRefs.current.get(owed.anchorId);
+        // The anchor is exact. If a batch larger than the mounted window shifted it out of the
+        // slice, fall back to the container's height growth — right whenever everything that
+        // landed is above the reader, which for a head prepend it is.
+        const delta = anchorEl
+          ? anchorEl.getBoundingClientRect().top - owed.anchorTop
+          : scrollEl.scrollHeight - owed.scrollHeight;
+        if (Math.abs(delta) > 0.5) feedScrollBy(scrollEl, delta);
+        scheduleRecompute();
+      }
+    }
+    // Pass 1 — did the head of the list grow under the reader?
+    const prev = prevFeedRef.current;
+    prevFeedRef.current = { scopeKey, items, placeholder: isPlaceholderData };
+    // Gated to the cross-repo feed with the rest of the feature: the narrowed mounts (per-repo
+    // console, the Bots pane, a person's activity tab) are views someone opened on purpose.
+    if (!isCrossRepoFeed || prev == null || prev.items === items) return;
+    // A re-key is not an arrival, and `placeholderData` shows the PREVIOUS key's rows while the
+    // new one loads — neither end of that swap describes the same stream, so nothing may be
+    // compensated across it.
+    if (prev.scopeKey !== scopeKey || prev.placeholder || isPlaceholderData) return;
+    // ⚠ SHIFT BY THE ROWS THAT ACTUALLY REACH `visible`, NOT THE RAW ARRIVAL COUNT. The window
+    // indexes `visible`, which the client-side pills (My Turn, Claude-only, CI lens 'only',
+    // category, bot lens 'only', thread state, needs-review) narrow. Shifting by the raw count
+    // slides the window PAST the anchor: the anchor unmounts, the carried-over `bottom` then
+    // double-reserves the rows the window slid past, and the `scrollHeight` fallback yanks the
+    // pane by the estimated height of rows that were never rendered — once per poll.
+    const added = countHeadArrivals(prev.items, items, applyFeedPills);
+    if (added === 0) return; // nothing the reader can see changed
+    const anchor = anchorRef.current;
+    // No anchor = the reader is at the top of the feed (or nothing is mounted): the new cards
+    // SHOULD arrive in view there, and shifting the window would scroll them straight back out.
+    if (anchor == null) return;
+    pendingScrollFixRef.current = {
+      anchorId: anchor.id,
+      anchorTop: anchor.top,
+      scrollHeight: anchor.scrollHeight,
+    };
+    // `bottom` is carried over deliberately: `end` moves by exactly the number of rows that
+    // entered `visible`, so the rows below the window — and the height reserved for them — are
+    // unchanged. Estimate error in `top` is harmless: the same estimate feeds the spacer and the
+    // anchor sits below it, so pass 2's measured delta is exact regardless.
+    const est = estRowHeight();
+    setWin((w) => ({
+      start: w.start + added,
+      end: w.end + added,
+      top: w.top + added * est,
+      bottom: w.bottom,
+    }));
+  }, [
+    items,
+    win,
+    scopeKey,
+    isCrossRepoFeed,
+    isPlaceholderData,
+    applyFeedPills,
+    estRowHeight,
+    scheduleRecompute,
+  ]);
+
+  // The ids currently wearing a "New" marker, flattened from the live cohorts. DERIVED for the
+  // render only — never written back (a defensive recompute-and-store would permanently forget a
+  // legitimate cohort). Null when there is nothing to mark, so rows get a constant `false`.
+  const newItemIds = useMemo((): ReadonlySet<string> | null => {
+    if (!isCrossRepoFeed || feedNewCohorts.scopeKey !== scopeKey) return null;
+    const out = new Set<string>();
+    for (const c of feedNewCohorts.cohorts) for (const id of c.ids) out.add(id);
+    return out.size > 0 ? out : null;
+  }, [isCrossRepoFeed, feedNewCohorts, scopeKey]);
 
   // A stable-per-id ref callback (memoised in a Map) so a memoised row's `innerRef` prop
   // never changes identity. Registers the <li> for flash targeting + row-height measurement.
@@ -904,10 +1195,11 @@ export function FeedView({
     });
   }, []);
 
-  // Back-from-a-click highlight: when a browser Back returns us to the feed (navigateBack
-  // set the one-shot flashTarget), pin the target into the window, scroll it into view, and
-  // flash it once, then consume the signal. Only fires on a real Back. A bounded rAF retry
-  // waits for the window to expand + mount the row before scrolling.
+  // Back-from-a-click highlight: when a browser Back returns us to the feed (the popstate
+  // handler's `applyUrlTab({ fromPop: true })` promoted the pending return target into the
+  // one-shot flashTarget), pin the target into the window, scroll it into view, and flash it
+  // once, then consume the signal. Only fires on a real Back. A bounded rAF retry waits for the
+  // window to expand + mount the row before scrolling.
   const [flashId, setFlashId] = useState<string | null>(null);
   useEffect(() => {
     if (flashTarget == null) return;
@@ -1046,22 +1338,11 @@ export function FeedView({
 
   return (
     <div className="space-y-3" data-testid="feed-view" ref={rootRef}>
-      {/* Feed-wide "new activity" refresh banner. Manual by design (never yanks content while
-          you're reading); clicking refreshes the feed + scrolls to the top. Sticky so it stays
-          reachable while scrolled. (The single-PR "Showing only #N" filter banner lives in the
-          surrounding panel, under its summary header — see FeedIsolationBanner.) */}
-      {hasNew && (
-        <div className="sticky top-0 z-20">
-          <button
-            type="button"
-            onClick={onRefreshClick}
-            data-testid="feed-new-activity"
-            className="flex w-full items-center justify-center gap-2 rounded-full border border-sky-400 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 shadow-sm transition-colors hover:bg-sky-100 dark:border-sky-500/60 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/60"
-          >
-            <span aria-hidden="true">↑</span> New activity — Refresh
-          </button>
-        </div>
-      )}
+      {/* THERE IS NO "New activity — Refresh" BANNER. Newly-arrived items are spliced into the
+          stream where they belong (useFeedAutoInsert) and wear a "New" chip until the reader has
+          seen them, so nothing is withheld behind a click and nothing sticky sits over the feed.
+          (The single-PR "Showing only #N" filter banner lives in the surrounding panel, under its
+          summary header — see FeedIsolationBanner.) */}
 
       {/* The AI repo-summary (digest) collection now lives in the Insights panel — one home
           for every AI summary, with a single unified Refresh. It's no longer atop the Feed. */}
@@ -1378,6 +1659,7 @@ export function FeedView({
               botColor={botColor}
               overridePendingUserId={overridePendingUserId}
               onNotBot={markNotBot}
+              isNew={newItemIds?.has(item.id) ?? false}
               flash={flashId === item.id}
               expanded={expandedIds.has(item.id)}
               onToggleExpanded={toggleExpanded}
@@ -1704,6 +1986,12 @@ type FeedRowProps = {
   // (userId, label) — the judgement is keyed to the active WORKSPACE, not to this card's repo, so
   // the row passes the vendor's display name for the confirm copy instead of a repo id.
   onNotBot: (userId: number, label: string) => void;
+  // This row arrived while the reader had the feed open, in a cohort they haven't seen yet.
+  // Cross-repo feed only — the four narrowed mounts never auto-insert, so it is always false
+  // there. ⚠ It renders as a CHIP beside the timestamp, never a border: the card's border is a
+  // strict flash → My Turn → Claude → default ladder, and a fifth branch would silently outrank
+  // (or be outranked by) a yellow My-Turn card depending on where it was inserted.
+  isNew: boolean;
   flash: boolean;
   expanded: boolean;
   onToggleExpanded: (id: string) => void;
@@ -1722,6 +2010,7 @@ function FeedRowImpl({
   botColor,
   overridePendingUserId,
   onNotBot,
+  isNew,
   flash,
   expanded,
   onToggleExpanded,
@@ -1856,6 +2145,16 @@ function FeedRowImpl({
             >
               <MagnifierIcon size={13} />
             </button>
+          )}
+          {/* Arrived while you had the feed open. Clears once you've been to the top of the
+              feed AND more activity has landed behind it — see FeedNewCohorts. */}
+          {isNew && (
+            <span
+              className="shrink-0 rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-300"
+              title="Arrived since you last looked at the top of the feed"
+            >
+              New
+            </span>
           )}
           <span
             className="shrink-0 text-[11px] text-gray-400"
@@ -2150,6 +2449,9 @@ const FeedRow = memo(
   FeedRowImpl,
   (a, b) =>
     a.item === b.item &&
+    // ⚠ THE COMPARATOR IS AN ALLOW-LIST. A prop missing from it does not re-render the row when
+    // it flips — `isNew` would appear or clear only when something unrelated happened to change.
+    a.isNew === b.isNew &&
     a.flash === b.flash &&
     a.expanded === b.expanded &&
     a.replyOpen === b.replyOpen &&

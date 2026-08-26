@@ -113,6 +113,32 @@ describe('landingTabFromUrl — the decision table', () => {
     expect(landingTabFromUrl('?view=insights')).toBe('activity');
   });
 
+  // ── `view=` NAMES TABS TOO, spelled as the Tab.key verbatim ───────────────────────────────
+  //
+  // The four SELF-DESCRIBING tab kinds are reconstructable from the key alone, so each gets its
+  // own URL — which is what lets a browser Back leave one, and a refresh return to one.
+  it('honours a self-describing tab key', () => {
+    expect(landingTabFromUrl('?view=pr-detail:4123')).toBe('pr-detail:4123');
+    expect(landingTabFromUrl('?view=pr-focus:4123')).toBe('pr-focus:4123');
+    expect(landingTabFromUrl('?view=user-activity:45')).toBe('user-activity:45');
+    expect(landingTabFromUrl('?view=bot-detail:45')).toBe('bot-detail:45');
+    // The percent-encoded form the serializer actually produces (URLSearchParams escapes `:`).
+    expect(landingTabFromUrl('?workspace=5&view=pr-detail%3A4123')).toBe('pr-detail:4123');
+  });
+
+  // ⚠ THE SEED-BACKED DRILL-DOWNS STAY EPHEMERAL. Their identity is an in-memory seed that is
+  // deliberately never persisted (a restored one could name a tile the strip no longer shows), so
+  // no URL ever names them — and a hand-written or stale one resolves to the launching console
+  // rather than to a broken drill-down.
+  it('does NOT honour a seed-backed drill-down key', () => {
+    expect(landingTabFromUrl('?view=bot-flagging')).toBe('activity');
+    expect(landingTabFromUrl('?view=people-report')).toBe('activity');
+    expect(landingTabFromUrl('?view=search')).toBe('activity');
+    // Nor a malformed one that merely looks like a tab key.
+    expect(landingTabFromUrl('?view=pr-detail:')).toBe('activity');
+    expect(landingTabFromUrl('?view=pr-detail:abc')).toBe('activity');
+  });
+
   // The predicate must mirror `readFromUrl`'s own parse (truthy raw, finite parseInt). A `?pr=`
   // that seats no selection is not a destination — honouring it would open an empty board.
   it('ignores a pr/thread param that names no id', () => {
@@ -145,11 +171,20 @@ describe('writeToUrl emits the board affirmatively (the round trip)', () => {
     expect(landingTabFromUrl(location.search)).toBe('activity');
   });
 
-  // A pinned PR tab / drill-down is not a board and is not URL-addressable, so `view` is omitted
-  // and the refresh lands on Activity. The tab itself is still restored into the tab bar — it
-  // just isn't what the app opens onto.
-  it('emits no view for a pinned tab, so a refresh from one lands on Activity', () => {
+  // A pinned PR tab IS a view now, and it round-trips: the key is the address. (This used to
+  // assert the opposite — `view` omitted, refresh lands on Activity — which is precisely why
+  // reading a PR full-screen had no history entry of its own and Back left the app.)
+  it('emits the tab key for a pinned PR tab, and that URL lands back on the tab', () => {
     usePinnedTabs.setState({ activeTab: prDetailKey(4123) });
+    writeToUrl(state({ workspaceId: 5 }));
+    expect(landingTabFromUrl(location.search)).toBe(prDetailKey(4123));
+  });
+
+  // The seed-backed drill-downs are the exception, and it is a deliberate one: no `view` at all,
+  // so a refresh (or a Forward onto that entry) resolves to Activity rather than to a drill-down
+  // whose seed died with the session.
+  it('emits no view for a seed-backed drill-down, so a refresh from one lands on Activity', () => {
+    usePinnedTabs.setState({ activeTab: 'bot-flagging' });
     writeToUrl(state({ workspaceId: 5 }));
     expect(location.search).not.toContain('view=');
     expect(landingTabFromUrl(location.search)).toBe('activity');

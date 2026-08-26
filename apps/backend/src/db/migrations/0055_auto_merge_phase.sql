@@ -1,0 +1,12 @@
+-- Auto-merge ("merge when ready") gets a MACHINE-READABLE phase. SQLite / local mode;
+-- Postgres twin: migrations-pg/0042_auto_merge_phase.sql. One additive nullable column, no
+-- index, no backfill — an in-flight intent picks its phase up on the watcher's very next tick,
+-- and a null phase is already the "we can't characterise this wait" value.
+--
+-- WHY a column rather than parsing `last_reason`: the reason is PROSE written for a human
+-- ('waiting: conflicts with main', 'rebased onto main — waiting for checks'), and the global
+-- progress card would otherwise have to string-match a log line — which also goes NULL exactly
+-- at success. `phase` is written by the same watcher call that writes the prose, so the two can
+-- never disagree, and it describes a LIVE intent only: every terminal outcome is already a
+-- `state` member, so the watcher nulls the phase on every resolve.
+ALTER TABLE `auto_merge_requests` ADD `phase` text;

@@ -416,9 +416,10 @@ export function AttentionCards({
   const selectThread = useFilters((s) => s.selectThread);
   const usersById = useMemo(() => indexUsers(users), [users]);
 
-  // Back-from-a-click flash — EXACT parity with the Feed (FeedView): a real browser Back
-  // (navigateBack) sets a one-shot activityFlashItemId (the returnItemId we stamped when opening
-  // the PR = the card's id); on return we scroll that card into view and flash it.
+  // Back-from-a-click flash — EXACT parity with the Feed (FeedView): a real browser Back pops a
+  // URL that lands on Activity, and `applyUrlTab({ fromPop: true })` promotes the pending return
+  // target into the one-shot activityFlashItemId (the returnItemId we stamped when opening the
+  // PR = the card's id); on return we scroll that card into view and flash it.
   const flashTarget = usePinnedTabs((s) => s.activityFlashItemId);
   const clearFlash = usePinnedTabs((s) => s.clearActivityFlashItem);
   const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map());

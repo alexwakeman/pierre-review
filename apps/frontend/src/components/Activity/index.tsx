@@ -359,8 +359,11 @@ export function ActivityView(): JSX.Element {
       {/* LEFT RAIL */}
       <div className="flex flex-col border-b border-gray-200 md:w-72 md:shrink-0 md:border-b-0 md:border-r dark:border-gray-800">
         {/* No manual Refresh: the console tracks the workspace's repo set live — add/move/sync all
-            invalidate the Activity/Insights queries (ACTIVITY_QUERY_KEYS), and the feed has its
-            own "new activity" banner — so there's nothing to refresh by hand. */}
+            invalidate the Activity/Insights queries (ACTIVITY_QUERY_KEYS), and newly-arrived feed
+            items are INSERTED as they land, each carrying a per-card "New" chip until the reader
+            has seen it (`feedNewCohorts`) — so there is nothing to refresh by hand. (That chip
+            replaced a feed-wide "New activity — Refresh" banner, which asked the reader to
+            perform the update the feed can do itself.) */}
         {/* The workspace selector + "Manage repos & workspaces" live in the header's
             WorkspaceSelector (shown on every view), so the rail carries no header of its own. */}
         {generatedAt != null && (

@@ -672,6 +672,28 @@ export const autoMergeRequests = sqliteTable(
     lastCheckedAt: integer('last_checked_at', { mode: 'timestamp' }),
     // Why it is in its current state ('required reviews missing', 'head moved abc→def').
     lastReason: text('last_reason'),
+    // shared ArmedMergePhase — the MACHINE-READABLE half of `lastReason`, written by the same
+    // watcher call that writes the prose so the two can never disagree. It describes a LIVE
+    // intent only: every terminal outcome is already a `state` member, and duplicating them
+    // here would give a finished card two sources of truth, so the watcher nulls the phase on
+    // every resolve. Null also means "we can't honestly characterise this wait" (an unknown
+    // merge state, an unconfirmable base) — the client falls back to `lastReason` there.
+    phase: text('phase', {
+      enum: [
+        'pending_first_check',
+        'waiting_conflicts',
+        'waiting_behind',
+        'updating_rebase',
+        'updating_merge',
+        'awaiting_checks',
+        'awaiting_review',
+        'blocked_protection',
+        'enqueuing',
+        'queued',
+        'merging',
+        'retrying',
+      ],
+    }),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

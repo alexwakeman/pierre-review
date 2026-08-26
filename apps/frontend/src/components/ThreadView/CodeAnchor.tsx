@@ -36,10 +36,11 @@ export function CodeAnchor({
   if (expanded) {
     return (
       <div className="space-y-1">
-        <DiffHunk hunk={diffHunk} />
+        <DiffHunk hunk={diffHunk} onCollapse={() => toggle(threadId)} />
         <button
           type="button"
           onClick={() => toggle(threadId)}
+          aria-expanded={true}
           className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
         >
           ⌃ Hide code context
@@ -60,12 +61,14 @@ export function CodeAnchor({
   }
 
   // Collapsed, multi-line: the whole anchor preview is clickable to expand (mirrors
-  // the Claude-review finding hunk) — only "Hide code context" collapses it again,
-  // so clicking the expanded code to read/select it never folds it away.
+  // the Claude-review finding hunk). Once open, only the @@ header line and "Hide
+  // code context" collapse it again — the code lines never do, so clicking the
+  // expanded code to read/select it can't fold it away.
   return (
     <button
       type="button"
       onClick={() => toggle(threadId)}
+      aria-expanded={false}
       title="Show the full code context"
       className={`flex w-full items-center gap-2 overflow-hidden rounded-r border-l-2 bg-gray-50 py-0.5 pl-2 pr-2 text-left font-mono text-[12px] leading-snug hover:bg-gray-100 dark:bg-gray-900/60 dark:hover:bg-gray-800/60 ${BORDER[kind]}`}
     >

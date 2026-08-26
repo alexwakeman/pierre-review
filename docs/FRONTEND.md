@@ -30,11 +30,21 @@ Three layers, deliberately separated:
    - ⚠ **`useWorkspaceSync` must NOT keep `repoIds` in lockstep with the workspace's membership** —
      that and per-repo show/hide are mutually exclusive and the membership would win. The contract
      is three-branch: `workspaceId` null-or-dead ⇒ set Default and re-derive `repoIds`;
-     `workspaceId` CHANGED ⇒ re-derive for the new workspace; **otherwise PRUNE ONLY** (drop ids no
-     longer in the workspace, leave a user-narrowed subset — and `null` — alone). Track the
-     previous id in a ref: a write-only-if-different guard is necessary but not sufficient, because
-     `repos`/`workspaces` are React Query results whose identity changes on every background
-     refetch.
+     `workspaceId` CHANGED **BY A SWITCH** ⇒ re-derive for the new workspace; **otherwise PRUNE
+     ONLY** (drop ids no longer in the workspace, leave a user-narrowed subset — and `null` —
+     alone). Track the previous id in a ref: a write-only-if-different guard is necessary but not
+     sufficient, because `repos`/`workspaces` are React Query results whose identity changes on
+     every background refetch.
+   - ⚠ **A CHANGE OF WORKSPACE IS NOT ALWAYS A SWITCH.** Back/Forward can move that id too, and a
+     popped URL that named a workspace AND carried its own `?repos=` is a RESTORE: branch (2) would
+     widen the board a tick after the pop narrowed it, which is exactly how `repoIds` used to be
+     the one key in the history bundle that did not survive a Back. `applyUrlToStores` arms
+     `restoredScopeWorkspaceId` synchronously as it hydrates; branch (2) reads it through
+     `consumeRestoredWorkspaceScope(id)` — **keyed on the id and ONE-SHOT**, so it can never
+     suppress a later genuine switch — and falls through to the PRUNE path instead, which still
+     drops ids that have since left the workspace. The effect body is the exported
+     `syncWorkspaceScope()` so the three branches can be exercised by a test with no React
+     renderer (`test/urlHistory.test.ts`).
 3. **Tab state** → `store/pinnedTabs.ts` (`usePinnedTabs`): `ActiveTab = 'timeline' | 'activity'
    | <Tab.key>`; a `Tab{key,kind:'pr-detail'|'pr-focus'}` list. `openPrDetailTab` /
    `openPrFocusTab` / `closeTab`. Exactly one board mounts at a time (App keys the board slot;
@@ -42,6 +52,73 @@ Three layers, deliberately separated:
    situational awareness is the Feed + its "My Turn only" toggle.)
 4. **URL** → `useUrlState.ts` mirrors the store to the query string both ways (shareable /
    reloadable); the serializer diffs against **defaults**, so the common case stays clean.
+   - **THE URL IS THE APP'S ONLY HISTORY AUTHORITY, and every view has one.** `view=` names the
+     two boards AND the four self-describing tab kinds, spelled as the `Tab.key` VERBATIM
+     (`pr-detail:123`, `pr-focus:123`, `user-activity:45`, `bot-detail:45` — one vocabulary, not a
+     URL dialect); the narrowings a reader navigates TO are keys of their own (`attn=<InsightKind>`
+     for the attention board, `feedPr=<id>` for the Feed, `feedTab`/`botsTab` for the two Activity
+     sub-tab strips, `prTab` for PrDetail's inner tab, which is a `{prId, tab}` PAIR in the store
+     so one PR's tab can't be read on another's screen).
+   - ⚠ **NAVIGATIONS PUSH, REFINEMENTS REPLACE — decided by DIFFING `NAV_KEYS`**, never by a
+     `push:true` argument threaded through call sites (the 15th caller forgets) and never per
+     store write (Safari throws past ~100 pushes/30s). `pr`/`thread` are deliberately NOT nav
+     keys: clicking through PR bars is a selection, and historying it makes Back a per-click undo
+     stack.
+   - ⚠ **EVERY CORRECTIVE WRITE IS MARKED AT ITS SOURCE — `writeToUrl` never infers one from the
+     URL's SHAPE.** A write that reconciles state the reader did not ask for must REPLACE, and the
+     only place that knows a write is corrective is the code making it. Four do:
+     `syncWorkspaceScope`'s **fallback branch** (`workspaceId` unresolved, or naming a workspace
+     this account no longer has), the **first serialization after hydrate**, `applyUrlToStores`'
+     **post-pop reconcile**, and PrDetail's deep-link `seedTab`. The workspace half used to be a
+     shape test in `writeToUrl` (`prev` names no `workspace`, `p` does) and it was wrong in both
+     directions: FALSE during the resolution window (a navigation made before `/api/workspaces`
+     lands emits no `workspace` either, so it already pushed correctly) and TRUE forever after for
+     any genuine navigation made FROM an entry minted before the scope resolved — the reader's next
+     Back left the SPA. ⚠ And the fallback branch is a **TRAP, not merely an extra entry**: pushed,
+     it lands ON TOP of the entry the reader just reached, whose URL still names the dead
+     workspace — so the next Back pops right back into the same branch and pushes again. Back
+     becomes a permanent no-op (reproduced from a mid-session workspace delete AND from a cold load
+     off a stale bookmark / cross-account link). Pinned in `test/urlHistory.test.ts`.
+   - ⚠ **The serializer is COALESCED into a microtask** (`scheduleUrlWrite`). One gesture is
+     routinely several store writes — the Welcome-back banner's line is four setters — and written
+     straight through, that click would stack four entries. An effect that fires in a LATER task
+     is a genuinely separate write; the ones that seat a tab as a view opens (PrDetail's deep-link
+     effects) call `markUrlCorrection()` to replace instead of push.
+   - ⚠ **`popstate` REHYDRATES BOTH STORES from the popped URL** (the one listener, in
+     `useUrlState`; `App.tsx`'s store-flag handler and pinnedTabs' `{pierreTab}` pushes /
+     `navigateBack` are GONE — two authorities reacting to one event is what made Forward change
+     the address bar without moving the screen). The pop is **TOTAL**: `readFromUrl` is partial by
+     design, so `applyUrlToStores` resets `freshFilterDefaults()` + `freshUrlOwnedDefaults()`
+     first, or Back off a narrowed board leaves the narrowing standing. Never `freshDefaults()` —
+     that wipes `sprintChatThreads`, `syncRound`, `repoConsoleTabs` and every drill-down seed,
+     which the URL never serialized and cannot restore. `workspaceId` is exempt: `null` means "not
+     resolved yet", so a URL naming none keeps the live one. The write subscriptions check
+     `applyingUrl` **synchronously**, or a pop re-serializes the entry it just landed on.
+   - ⚠ **…and the pop then RECONCILES THE ADDRESS BAR, marked as a correction** — the same eager
+     replace the cold load does, for the same reason: after `applyUrlToStores` the stores hold the
+     CANONICAL reading of the popped URL, which is not always the popped URL. A seed-backed
+     drill-down entry emits no `view` at all and drops `activityRepo` with it (both live inside
+     `writeToUrl`'s `activity` branch), and a legacy `?team=<int>` is read as `workspace`. Left
+     un-reconciled the store says `activity` while the URL says nothing, and the reader's next
+     PURE REFINEMENT is diffed as a `view` change and **PUSHES** — destroying the forward stack and
+     turning a filter click into a history entry. A replace can only ever rewrite the CURRENT
+     entry, so the forward stack survives; an already-agreeing URL costs nothing (`writeToUrl`
+     string-compares and returns).
+   - **Seed-backed drill-downs stay EPHEMERAL** (`bot-flagging`, `people-report`, `search`, …):
+     their identity is an in-memory seed a restored blob could point at a tile that no longer
+     exists, so no URL names them. They emit no `view` at all — itself a distinct URL — and a
+     refresh or a Forward onto one resolves to Activity.
+   - ⚠ **URL-visible ≠ persisted.** `attn`/`feedPr`/`feedTab`/`botsTab`/`prTab` are transient
+     store fields that are NOT in `FilterDefaults`, so they owe **no** `FILTER_STORAGE_VERSION`
+     bump — a link may name a narrowed board; a fresh tab must not restore one.
+   - ⚠ **`repoIds` survives a Back ACROSS A WORKSPACE SWITCH only because the pop ANNOUNCES
+     ITSELF.** Seating the popped URL's `?repos=` is half the job: `useWorkspaceSync` runs a tick
+     later, sees the workspace id differ from its ref and would re-derive — `setWorkspace(id,
+     null)` — widening the board straight back. So `applyUrlToStores` arms
+     `restoredScopeWorkspaceId` (workspace + `?repos=` both named) and the sync effect consumes it
+     to take the PRUNE path; see the `useWorkspaceSync` bullets in §2 for the exact contract. Every
+     other key in the bundle (`workspace`, `activityRepo`, `attn`, `feedPr`) needs no such signal —
+     nothing else re-derives them after the pop.
    - ⚠ **`?workspace=` is the ONE exception to the diff-against-defaults rule**: there is no static
      default (the Default workspace's id varies per account), so it is emitted **always once
      resolved** and **omitted entirely while `workspaceId` is null** — `writeToUrl` runs from the
@@ -75,7 +152,9 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
     **`WorkspaceManager`** modal ("Manage repos & workspaces"), where repo add/remove/assignment
     and the debounced GitHub search picker (`RepoSearch` → `/api/repos/search`) live (a successful
     add pops the sync-progress modal via `syncModalSignal`); `RepoSearch` also mounts standalone
-    inside `FirstRunOnboarding` (zero-repo first run).
+    inside `FirstRunOnboarding` (zero-repo first run). Each row also carries an **amber My-Turn
+    badge** and the collapsed trigger carries the OTHER workspaces' total — see *Per-workspace
+    "My Turn"* below.
   - **`RepoSelectPanel` is TIMELINE-ONLY, and `filters.repoIds` is therefore timeline-local in
     effect.** It lists **only the active workspace's repos**, never the account's; `repoIds = null`
     means "every repo IN THIS WORKSPACE"; it canonicalises to `null` at all-or-none and won't hide
@@ -124,9 +203,10 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   Timeline takes the full height (App fires a synthetic `resize` on the transition so vis
   refits). Shows **PrDetail** for the selected PR. **App lands on the Activity console by
   default** (Activity-first; a bare load → `?view=activity`, deep links keep timeline).
-- **`AutoMergeBanner`** — a bottom-right toast stack (same shape as `ClaudeReviewBanner`) fed by
-  DIFFING `GET /api/auto-merge`: the watcher runs server-side, so an `armed →` terminal
-  transition is the only signal the client gets. Transitions only, never current state.
+- **`AutoMergeBanner`** — the armed-merge PROGRESS STACK, a bottom-right card (same shape as
+  `ClaudeReviewBanner`) fed by `GET /api/auto-merge`. One row per armed PR from the click that
+  arms, through the watcher's `phase`, to the outcome — see "The armed-merge progress stack"
+  below and docs/MERGE-CI-TRUNK.md.
 - **Tabs / board slot** (`PinnedTabsBar` + `App.tsx`). `<main>` renders exactly ONE
   `<Timeline>` "board slot" whose `mode` derives from the active tab: absent = the shared
   board; `{kind:'isolate',prId}` = a **pr-focus** tab's own isolated Timeline. `activity` +
@@ -197,7 +277,8 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   Threads tab with the `likely_addressed` pill preset. **Repo-scoped chips show the repo name**
   (`PinnedTabsBar` `TabChip` reads the seed + `useRepos`). Each drill-down = a `TabKind` + key
   const + opener in `pinnedTabs.ts`, a transient read-not-consumed seed + `openXDetail()` action in
-  `store/filters.ts` (`{fromActivity:true}` arms Back-to-Activity), a full-`<main>` overlay
+  `store/filters.ts` (`{fromActivity:true}` stamps the feed card to flash on a Back — the entry
+  itself is the URL's, see the Back-button note below), a full-`<main>` overlay
   branch in `App.tsx` (MUST join `overlayActive`), and a compact chip in `PinnedTabsBar`. The
   drill-down TABLES (open-prs / bot-only-prs / bot-threads, **plus `MetricsDetail`** — now
   retrofitted, per-tab `sortByTab` state) share `Activity/sortableTable.tsx`
@@ -233,10 +314,15 @@ Key behaviors to know about:
   switching/closing the tab (unmount). The isolation is purely component-LOCAL (only one instance
   is ever mounted), so it does NOT drive shared store flags. **A feed card, by contrast, opens a
   pr-DETAIL tab** (`openPrDetailTab`, not pr-focus) — full PrDetail, whose Show/Focus links then
-  drive the timeline. **Back button:** opening a tab from the Activity console pushes ONE deduped
-  `{pierreTab}` history entry (the app's ONLY `pushState`); App's single `popstate` handler
-  (`consumeActivityReturn`) returns to the Activity console, and the feed scrolls + flashes the
-  exact item that was clicked (`activityReturnItemId`). **Landmine:** an isolate-tab
+  drive the timeline. **Back button:** a tab open is an ORDINARY URL NAVIGATION now — `activeTab`
+  serializes as `view=<Tab.key>`, and the nav-key diff pushes the entry — so Back works from
+  wherever the tab was opened, not only from Activity. (`{pierreTab}`, `activityReturnArmed`,
+  `boardReturnTabKey` and `navigateBack` are DELETED; `showBoardFromDetail` no longer pushes its
+  own back-step, because leaving `view=pr-detail:<id>` for `view=timeline` already is one.) The
+  feed's scroll-to + flash of the exact card that was clicked SURVIVED the move: openers still
+  stamp `activityReturnItemId`, and `applyUrlTab` promotes it into the one-shot
+  `activityFlashItemId` only on a POP that lands on Activity — never on a click of the Activity
+  chip. **Landmine:** an isolate-tab
   range-preset/window effect must be inert (`if (embeddedPrId != null) return`) or a date-preset
   click overrides the
   boot fit. **Known gap:** a PR merged >90d ago is outside the isolate fetch window → can't
@@ -432,7 +518,23 @@ Review finding deep-link. Do not add a third.
   tabs live in this one `PrDetail` instance, so unlike `threadStateFilter` there is no global
   field to leak across PRs and no `selectedPrId === prId` guard to remember. Picking a tab BY
   HAND clears the pending target, so opening Changes to browse doesn't re-jump to the last
-  finding.
+  finding. (The TAB itself is the opposite call: it moved INTO the store as `prDetailTab`, a
+  `{prId, tab}` PAIR, because it has to be URL-addressable — `?view=pr-detail:<id>&prTab=changes`.
+  The pair is that guard, made structural. Deep-link effects seat it through `seedTab`, which
+  marks the write a URL CORRECTION so the tab a view opens ON doesn't get a history entry of its
+  own between the reader and where they came from.)
+- ⚠ **A DATA-GATED tab is DERIVED for the render, never written back — and it must not fall back
+  while the data that decides its visibility is still LOADING.** `bot_activity` shows only when the
+  server confirms an automated REVIEWER, and the fallback used to be a corrective
+  `seedTab('overview')`. Now that `prDetailTab` is URL-owned that write DESTROYED the link it was
+  correcting: on a refresh or a shared deep link to `?view=pr-detail:<id>&prTab=bot_activity`, `pr`
+  is still loading on the first effect run → the `hasBots` fetch gate is false → `usePrBotBehaviour`
+  has not even STARTED → the tab "isn't visible" → `seedTab` REPLACES the entry and `?prTab=` is
+  gone, unrecoverable by Back. So `PrDetail` computes an `effectiveTab` and the fallback waits for
+  an ANSWER — a LOADED PR whose client gate found nothing (`hasBots` is a superset of the server's
+  set, and the fetch is deliberately never made) or a SETTLED `prBotBehaviour`; the strip also lists
+  the tab while that answer is in flight, so a reader who arrived on it never sees a strip with
+  nothing highlighted. Same rule as `feedInnerTab` / `botsInnerTab`, one layer down.
 - `FileDiffView` matches the target to **at most ONE block**, and a **renamed file is addressable
   under either name** (blocks are keyed on the NEW path; a caller may hold the old one).
 - Inside the block: **an explicit reveal always wins over the collapse heuristic** — including
@@ -834,11 +936,46 @@ server-side as its own history row at answer time.
 
 ### The Reports People picker + the People report tab
 
-`PeriodPeopleSection` is now a PICKER: a text field that opens `UserSelectPanel`'s extracted
-`MemberSectionList` inline (same Maintainers / per-repo / Other grouping) plus a flat
-alphabetical BOTS section from `useDetectedReviewers` (the union truth — comment-only reviewers
-included), multi-select straight to removable chips, then "Begin report".
+`PeriodPeopleSection` is a PICKER: a row of maintainer shortcut pills, then a text field with
+"Begin report" beside it, opening `UserSelectPanel`'s extracted `MemberSectionList` (same
+Maintainers / per-repo / Other grouping) plus a flat alphabetical BOTS section from
+`useDetectedReviewers` (the union truth — comment-only reviewers included), multi-select straight
+to removable chips.
 
+- **The panel opens UPWARD, as an OVERLAY** — `absolute bottom-full left-0 mb-1 w-full max-w-md
+  z-30` (the `ReactionBar` spelling) on a `relative` wrapper that stays INSIDE the click-outside
+  `<section>`, because `useClickOutside` needs one root over both the field and the panel. It used
+  to be a plain in-flow block: the picker is the LAST child of a long report inside
+  `Activity/index.tsx`'s scroll pane, so opening it pushed the field itself down and out from under
+  the cursor. Being out of flow, it now needs `shadow-lg` and an opaque background to read as a
+  panel. **"Begin report" lives in the FLEX ROW with the field** (`flex max-w-md items-center
+  gap-2`, input `flex-1`, button `shrink-0`) — never inside the panel, which unmounts on close.
+  Its `disabled`/`title`/`onClick` bindings are unchanged (`beginDisabledReason` and
+  `openPeopleReport` are unit-pinned).
+- ⚠ **The panel's scroller carries NO PADDING, and that is load-bearing.** Chromium clamps
+  `position: sticky; top: 0` to the scroll container's CONTENT box, so `p-1.5` on the same element
+  as `overflow-y-auto` pinned every repo header 6px below the panel's inner edge, with rows
+  passing visibly through the band. The padded SHELL and the bare `max-h-72 overflow-y-auto`
+  scroller are two elements — `UserSelectPanel`'s own dialog/scroller shape, which is exactly why
+  the toolbar Members dropdown never had the gap — and the "Maintainers · select all" quick-select
+  sits in the shell so it stops sliding under the pinned repo names. **Do NOT fix this with a
+  negative `top`/`-mt` on the header**: `MemberSectionList` is SHARED, and the toolbar dropdown
+  (whose scroller is already unpadded) would gain the 6px back as an overlap.
+- **The maintainer pills are a SHORTCUT, not a ranking.** Up to ten pill-shaped `<label>`
+  checkboxes above the field, one per maintainer of the workspace — `maintainerIds` straight off
+  the builder, so already workspace-narrowed and bot-free (humans only: nothing can earn a pill
+  without merge rights, so there is no bot half). DEFAULT-VISIBLE and DEFAULT-UNCHECKED: ⚠ each
+  checked chip is a separately BILLED narrative generation when Begin runs, so a pre-selected row
+  would spend credits on a page load. The cut to ten is made on repo BREADTH — how many of the
+  workspace's in-scope repos list the person in `mergers`, a fact about merge RIGHTS, not about
+  output — and that breadth **never reaches the screen**: after the cut the row re-sorts
+  ALPHABETICALLY (the `orderSelections` idiom, `userId` tiebreak) and renders no number, no count,
+  no figure. That is what keeps the row on the right side of PREP, NOT SCORING; a strip sorted
+  visibly by an N beside each name is the scoreboard the three guardrail comments forbid.
+  ⚠ **The sort must be TOTAL before the slice** — `maintainerIds` iterates in the `mergers`
+  payload's order, i.e. `getMergers`' `selectDistinct` with no `ORDER BY` = server HEAP order,
+  which flips after any UPDATE on Postgres, so a bare `.slice(0, 10)` hands local and cloud a
+  different ten.
 - ⚠ **The section used to list the ACCOUNT's users across every workspace.** FilterBar's member
   `useMemo` was extracted to the pure `hooks/useMemberSections.ts` (`buildMemberSections`) so the
   picker reuses ONE fold with a different SCOPE and a different BOT VERDICT: `inScopeRepoIds` =
@@ -938,6 +1075,169 @@ target with no label renders nothing. Gated on `MeResponse.mlSeverity` (a TOP-LE
 `pro` capability). `threadSeverityFilter` is a global store field and carries the same
 `selectedPrId === prId` guard as `threadStateFilter`. Detail: [ML-SEVERITY.md](ML-SEVERITY.md).
 
+## The Activity Feed auto-inserts, and marks what's new (`feedNewCohorts`)
+
+**There is NO "↑ New activity — Refresh" button any more.** Newly-arrived activity is spliced
+into the cross-repo Feed as it arrives and the inserted cards wear a **"New" chip** until the
+reader has seen them. Content is never withheld behind a click, and nothing sticky sits over the
+feed. (`FeedView.tsx` + `useFeedAutoInsert` in `hooks/useConsolidatedFeed.ts`.)
+
+- **CROSS-REPO FEED ONLY.** `FeedView` has FIVE mounts sharing one `FeedRow` — the cross-repo
+  feed, the unresolved-repo fallback, the per-repo console, the Bots pane's bot-only feed and a
+  person's activity tab. Auto-insert AND the marker are gated on the single predicate
+  `isCrossRepoFeed = repoId == null && !botsMode && userIds == null` — the same one the server
+  "seen" marker uses. The narrowed views are things someone opened on purpose; keeping them live
+  would answer a question they didn't ask.
+- **The head poll became the insert source.** `['feed-head', ws, search]` still polls every 60s,
+  visibility-gated (`refetchIntervalInBackground: false`), but at **`limit: FEED_PAGE_SIZE`, not
+  1**. That width is the CONTIGUITY GUARANTEE, not appetite: the server folds the whole stream
+  either way (`counts`/`uncappedTotal` are whole-stream facets), so the limit costs payload, not
+  query work — and a head as wide as page 0 is what lets `planFeedHeadMerge` PROVE the two lists
+  overlap. ⚠ Its scope inputs must stay byte-identical to `useConsolidatedFeed`'s; real rows are
+  spliced now, so a divergent `excludeBots`/`includeCiFailures`/`botWindowDays` injects rows the
+  loaded request would never have returned.
+- ⚠ **The merge must keep the loaded pages a contiguous PREFIX of the stream.** Paging is by
+  OFFSET, so `planFeedHeadMerge` (pure, tested) prepends only the head's prefix above the first
+  already-loaded id; an unloaded id BELOW that point is a mid-stream backfill and is ignored, and
+  **zero overlap is a `'gap'` verdict → full invalidate, never a splice**. React Query has no
+  per-page refetch (`refetch()` refetches EVERY page and replaces the list under the reader), so
+  the write is a `setQueryData` touching page 0 only. `pages[0].total` is re-adopted from the
+  same head fold that supplied the rows — `getNextPageParam` compares the loaded count against
+  it, so a prepend that doesn't raise it stops "Load more" N items early.
+- ⚠ **A PREPEND MUST NOT MOVE CONTENT UNDER THE READER'S EYES**, and the hand-rolled
+  variable-height windower makes that harder than usual: `recompute` derives the viewport
+  position from live rects (`rel`), which a prepend does NOT change, so the same pixel offset
+  silently resolves to rows N further back. **There is exactly ONE compensation path and it is
+  driven by the COMMITTED ITEM LIST, never by a writer's callback** — for the same reason the
+  markers are (below): the head poll can announce itself, the sync round's `invalidateData()`
+  refetch cannot, and it is the more frequent of the two. A **`useLayoutEffect`, before paint**,
+  runs in two passes: (1) the list changed and its head grew → shift `win` and stash the
+  pre-insert anchor; (2) re-entered by that `win` change → re-measure the anchor and add the delta
+  to `scrollTop`. The shift MOVES the anchor, so the measurement must be read after it. The
+  anchor itself (`anchorRef`, the topmost mounted row + the container's `scrollHeight`) is
+  refreshed on every scroll and every settled layout, and `onBeforeInsert` refreshes it once more
+  the instant before the splice writes — it does nothing else. The anchor delta is exact; the
+  `scrollHeight` delta is the fallback when a batch larger than the mounted window shifts the
+  anchor out of the slice. **The compensation is SKIPPED at the top of the feed** (a null anchor)
+  — arriving in view is the point — and skipped across a re-key or a `placeholderData` swap,
+  which are not arrivals.
+  ⚠ **The shift is by the rows that reach `visible`, NOT the raw arrival count** — that is what
+  `countHeadArrivals(prev, next, narrow)` (pure, tested) exists for. The window indexes the
+  NARROWED list (the My Turn / Claude / CI-lens / category / bot-lens / thread-state /
+  needs-review pills), which the arriving server rows know nothing about; shifting by the raw
+  count slides the window past the anchor, the anchor unmounts, the carried-over `bottom`
+  double-reserves the rows the window slid past, and the `scrollHeight` fallback then yanks the
+  pane by the estimated height of rows that were never rendered — once per poll. Its other guard:
+  **no overlap answers 0, never "everything is new"** (a gap refetch / re-key / window roll is a
+  replacement, and scrolling by a whole list's height is the worst possible answer).
+  ⚠ This is a plain DOM pane (`nearestScrollParent`), **not** the Timeline's gated vis viewport:
+  it must never be routed through `setVisScrollTop` / `intentionalScrollRef`.
+- ⚠ **THE MARKERS ARE MINTED BY DIFFING THE ITEM LIST, NOT INSIDE THE INSERT.** Auto-insert is
+  not the only way rows reach the feed: `SyncStatus` is mounted in the header on every screen and
+  its `invalidateData()` sweeps the `['consolidated-feed']` prefix on every sync round, which for
+  an active infinite query refetches EVERY page and replaces the list. Minting in an `onInserted`
+  callback would leave the chip missing for the arrivals a reader most often gets, and which path
+  won the race would decide whether a card said "New". So FeedView keeps a per-mount known-id set
+  and mints a cohort from the run of ids ABOVE the first already-known one. ⚠ **Only that head
+  prefix counts** — "Load more" appends 50 OLDER rows the reader deliberately asked for, and
+  flagging those would light up the whole page they just pulled. The first settled list for a
+  scope IS the baseline (a freshly-opened feed is all equally new), and zero overlap marks
+  nothing rather than every row.
+  ⚠ **SETTLED means `!isPlaceholderData`, and the guard is load-bearing.** `placeholderData:
+  (prev) => prev` keeps the PREVIOUS query key's rows on screen while a re-keyed fetch is in
+  flight, and `scopeKey` flips in that same render — so seeding the baseline from `items` there
+  reads the old key's list. Every WIDENING re-key (bot lens `hide`→`only`/`all`, Commits off→on,
+  CI failures `off`→`feed`/`only`) then mints a spurious cohort of "New" chips on rows that were
+  merely hidden a moment ago. Narrowing flips are harmless (`cut === 0`) and a workspace switch
+  shares nothing (`cut === -1`) — which is exactly why the bug survives casual testing.
+- **SEEN = COHORT + SCROLL POSITION.** `feedNewCohorts` in `store/filters.ts` holds
+  `{scopeKey, cohorts: {ids, seen}[]}` — one entry per inserted BATCH. There is deliberately **no
+  per-card IntersectionObserver** (the SPA's only IOs are bottom-of-list auto-load sentinels);
+  being at or near the top of the feed (`FEED_AT_TOP_PX`) is what credits the cohorts up there as
+  read. ⚠ The removal rule has TWO halves: a **seen** cohort clears WHOLESALE when more content
+  arrives; an **unseen** one SURVIVES it. Collapsing that to "clear everything on each batch"
+  passes every at-the-top test and hides exactly the content the marker exists to announce for a
+  reader who was scrolled down. Unseen cohorts are capped so a never-returning reader can't grow
+  the slice forever.
+- **The slice is TRANSIENT** — `freshDefaults()` only, NOT in `FilterDefaults` /
+  `freshFilterDefaults` / `pickFilterBarState` / `sanitizePersistedFilters`, never URL-serialized,
+  so **no `FILTER_STORAGE_VERSION` bump is owed** (the `attentionIsolation` precedent). ⚠ But it
+  must live in the STORE, not in `FeedView`: the Activity console UNMOUNTS on every tab switch
+  while its query data survives 45 minutes (`ACTIVITY_GC_TIME`), so component state would clear
+  the markers on every Timeline round-trip — telling a reader who opened a PR and came back that
+  nothing arrived while they were away.
+- ⚠ **`isNew` had to join `FeedRow`'s memo comparator**, which is a hand-written ALLOW-LIST: a
+  prop missing from it doesn't re-render the row when it flips, so the chip would appear or clear
+  only when something unrelated happened to change. And it renders as a **chip beside the
+  timestamp, never a border** — the card border is a strict `flash → isMyTurn → isClaude →
+  default` ladder, and a fifth branch would silently outrank (or be outranked by) a yellow
+  My-Turn card depending on where it was inserted.
+- **The SERVER "seen" marker is a different thing and still fires.** `POST /api/activity/feed/
+  mark-seen` bumps account-level `accounts.feedLastSeenAt` once per cross-repo mount. Deleting the
+  refresh button did not take it with it — nothing else writes that column. ⚠ **It no longer has a
+  reader.** `WelcomeBackBanner` used to render the count it gates (`MeResponse.newFeedItems`) and
+  now counts standing `my_turn` cards per workspace instead (below), so `newFeedItems` /
+  `feedLastSeenAt` are still computed on every `/api/me` and read by nothing in the SPA.
+- Rules pinned in `apps/frontend/test/feedNewCohorts.test.ts` (run by hand — that directory is
+  not in CI).
+
+## Per-workspace "My Turn" — the banner, the dropdown badge and the one deep-link
+
+You can have work on your plate in a workspace you are not currently in. Three surfaces say so,
+and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
+`['daily-brief', ws:<id>]` key.
+
+- **ONE POPULATION EVERYWHERE — standing `my_turn` CARDS, not "new since you looked".** The
+  number is `DailyBriefCounts.myTurn`, i.e. literally how many `my_turn` cards
+  `GET /api/attention` paints for that workspace. So the banner line, the dropdown badge, the
+  daily-brief strip line and the board a click opens are the same list and the same figure.
+  ⚠ The banner used to render `MeResponse.newFeedItems` and both halves of that were wrong at
+  once: the count was ACCOUNT-WIDE while the banner sat inside one workspace, and the gesture
+  that cleared it (viewing the Feed) was WORKSPACE-scoped — so reading workspace A zeroed a
+  number that was mostly workspace B's, and the figure opened no list. There is therefore **no
+  per-workspace `seen` state and no schema change**: a line disappears when the work is done.
+- **`WelcomeBackBanner` is one line per workspace with a non-zero count**, the ACTIVE one
+  visually distinguished (filled dot + "this Workspace") because the others are the ones the
+  reader cannot see from where they are. Dismissal is component-local and therefore lasts the
+  session — that is the only mute there is now, since standing work is never "marked seen".
+  Hidden on the Activity console, where `BriefStrip` says it better.
+- **`useFilters.openMyTurnInWorkspace(workspaceId)` is THE deep-link — used by BOTH
+  cross-workspace surfaces**: the `WelcomeBackBanner` lines and `BriefStrip`'s collapsed
+  "Elsewhere" roll-up. ⚠ A bare `setWorkspace` in either place HALF-navigates — it re-scopes and
+  then leaves the reader on that workspace's Feed, hunting for the cards the line just counted.
+  It exists as a store action because the sequence is order-sensitive twice over: `setWorkspace(id, null)` **first**
+  (it clears `repoIds` / `feedIsolatedPrId` / `attentionIsolation`, and the `null` also stops
+  `useWorkspaceSync`'s case-2 branch writing a second `setWorkspace` that would wipe what comes
+  next), then `showActivity()`, then `setActivityRepo('attention')`, then
+  `setAttentionIsolation('my_turn')`. The workspace write is **skipped when already there** so a
+  Timeline repo narrowing survives. Pinned in `apps/frontend/test/attentionIsolation.test.ts`.
+- **FRESHNESS IS ASYMMETRIC AND THAT IS THE POINT.** `GET /api/daily-brief?rollup=1` computes the
+  ACTIVE workspace's counts FRESH per request and serves the other workspaces' lines from a 5-min
+  TTL (`db/daily-brief.ts`). The hook preserves the split (`fresh` per line) rather than
+  flattening it: a stale badge on the workspace you are LOOKING AT would contradict the board on
+  screen, while a ≤5-min badge on a workspace you are not in cannot be contradicted by anything —
+  switching there re-derives it before any list renders.
+- **NO SILENT CAPS, BOTH KINDS.** The 50-card cap goes through the ONE `myTurnCapDisclosure`
+  rule (`Activity/AttentionView.tsx`) — the figure stays the CARD count with a "+" and the exact
+  pair in a `title`, never the uncapped total. The ROLL-UP cap (`ROLLUP_WORKSPACE_CAP`, server
+  side) surfaces as `uncounted`: those rows render a dim "—" rather than a zero, plus a footer
+  line in the dropdown and a line in the banner. ⚠ **Absence is not zero** — do not "tidy" a
+  missing line into a 0.
+- ⚠ **The dropdown badge is INFORMATIONAL.** A row's click still means "switch scope" and nothing
+  more: `WorkspaceSelector` is mounted on every board, so a badged row that also hijacked the rail
+  would teleport someone who only wanted to re-scope the Timeline.
+- ⚠ **COST.** The hook rides the EXISTING daily-brief key (shared with `BriefStrip` and the
+  attention board's cap disclosure), but mounting it in the always-visible FilterBar and banner
+  means the Timeline now pays one `search`-tier request per stale window where it paid none.
+  Never add a second query key for these numbers.
+- **`useMyTurnNotifications` stays ACCOUNT-WIDE** — an OS notification is read outside the app,
+  where "only the selected workspace" is a silence bug. What it owes is PROVENANCE, so the title
+  names the workspace (`… in Acme` / `… across 2 Workspaces`, resolved via `repos.workspaceId`,
+  the client's only repo→workspace mapping) and the absolute stamp keeps leading the body.
+  ⚠ The lookup lives in a **ref, out of the diff effect's deps**: that effect advances the
+  notification baseline on every run, so re-running it because a reference query landed would
+  consume a real diff and swallow the notification.
+
 ## The sync round — a transient store slice with ONE driver (`syncRound` / `managerOpen`)
 
 **One user-visible "sync round"** = the GitHub walk **plus** the ML scoring pass that follows it,
@@ -1009,7 +1309,33 @@ over each other at the same coordinate. `App.tsx` renders exactly one column —
 **plain cards inside it**. `GlobalLoadingBar` is the BOTTOM-MOST card; the two toast stacks sit
 above it rather than over it. The column is `pointer-events-none`: the bar is an **INDICATOR, not
 a dialog** — no close button, no click target, and it must never steal a click from the board
-underneath.
+underneath. The two toast stacks DO take clicks, and each re-enables `pointer-events-auto` on its
+own card rather than on the column.
+
+### The armed-merge progress stack (`AutoMergeBanner`)
+
+ONE CARD PER MERGE, for the whole lifecycle. It used to toast only on an `armed → terminal`
+transition, which meant arming produced nothing global and the outcome arrived as an unrelated
+second surface. Now a row appears on the CLICK that arms, tracks the watcher's `phase`, and is
+REPLACED IN PLACE by its outcome — ⚠ never re-add a separate terminal toast for a PR the stack is
+already showing.
+
+- **Immediate**: `useArmAutoMerge` SEEDS `ARMED_MERGES_KEY` with the POST's own response
+  (`setQueryData` beside the invalidate — the arm route returns the full row, identity and
+  `phase:'pending_first_check'` included). `useDisarmAutoMerge` symmetrically DROPS the row.
+- **Live rows are derived from the polled list; outcomes are local state** captured on the
+  transition. The list carries 24h-resolved rows, so the FIRST poll still seeds a silent baseline
+  (a page load must not replay yesterday's merges), and deriving — not copying — the live half is
+  what makes a cancel clear the card at once.
+- **Terminals render off `state`; `lastReason` is only ever the secondary line** (it is NULL at
+  success, so a card bodied on it goes blank exactly when it should read "Merged"). Phase copy
+  comes from `phase`, with a `lastReason`-only fallback when it is null.
+- **Adaptive poll, one query**: `useArmedMerges` is 8s while any row is `armed`, 45s otherwise,
+  `refetchIntervalInBackground:false`. ⚠ The stack must NEVER call `useMergeOptions` per armed PR
+  (~3 GitHub calls each) — the row carries its own repo/PR identity precisely so it doesn't.
+- **Indicator + Cancel only.** Arming is consent anchored to `expectedHeadOid` and exactly ONE UI
+  path (`MergeWhenReadyControl`) may arm; the stack must never grow a re-arm / "update now" /
+  freshen action. Rows are click-to-open (`openPrDetailTab`), capped at 4 with a "+N more" line.
 
 ### What the loading bar covers, and why it exists
 

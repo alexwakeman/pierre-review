@@ -11,15 +11,12 @@ import {
   EMPTY_CAPABILITIES,
   entitledProCapabilities,
 } from '../../pro/contract.js';
-import { countNewMyTurnFeedItems } from '../../feed/my-turn.js';
 import { getAuthNotices } from '../../sync/auth-notices.js';
 import { isSeverityApiConfigured } from '../../ml/severity-client.js';
 import {
   dismissMyTurn,
   getCompletedDismissals,
-  getFeedLastSeenAt,
   getMyTurn,
-  markFeedSeen,
   undismissMyTurn,
 } from '../../db/queries.js';
 
@@ -62,20 +59,11 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/me', async (req): Promise<MeResponse> => {
     const accountId = accountIdOf(req);
     const user = accountToLocalUser(req.account);
-    const myTurn = await getMyTurn(accountId);
-    // Feed "seen" marker + how many "My Turn" items are new since. Only counted once a
-    // baseline exists (feedLastSeenAt set by the first feed view) so a fresh account never
-    // sees a scary first-load number. "My Turn" is CORE / free now, so the count is computed
-    // directly (no capability gate) — every tier gets the Welcome-back banner.
-    // Per-account entitlement (below): local = full capabilities; cloud = full only when the
+    // Per-account entitlement: local = full capabilities; cloud = full only when the
     // account's plan isn't 'free' (Stripe billing seam) — used for the `pro` passthrough.
     const entitled = req.account
       ? entitledProCapabilities(req.account)
       : EMPTY_CAPABILITIES;
-    const feedLastSeen = await getFeedLastSeenAt(accountId);
-    const newFeedItems = feedLastSeen
-      ? await countNewMyTurnFeedItems(accountId, feedLastSeen)
-      : 0;
     // Month-to-date AI balances, computed CORE-side (the plan/allowance rules live in db/credits)
     // so the SPA has the spend baseline on the very first authenticated call — no separate Pro
     // fetch needed on login. Split by seam: summary is metered by TURN count, agent by CREDITS.
@@ -96,16 +84,12 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     }
     return {
       user,
-      counts: {
-        awaitingReview: myTurn.awaitingReview.length,
-        yourPrsActivity: myTurn.yourPrs.length,
-        approvedPrs: myTurn.approvedPrs.length,
-        threadsAwaiting: myTurn.threadsAwaiting.length,
-        watchedRepoPrs: myTurn.watchedRepoPrs.length,
-        claudeReviewsToAction: myTurn.claudeReviewsToAction.length,
-      },
-      feedLastSeenAt: feedLastSeen ? feedLastSeen.toISOString() : null,
-      newFeedItems,
+      // NOTE: this response deliberately carries NO My-Turn counts. It used to return a
+      // `counts` object (a whole `getMyTurn` fold) plus `feedLastSeenAt`/`newFeedItems` (a
+      // second fold over the feed) for the Welcome-back banner. The banner is now
+      // per-workspace and reads standing `my_turn` card counts off the daily brief, so all
+      // three had no reader left and were pure per-request work on the SPA's first call.
+      // If you need a count here again, prefer the brief's fold over re-adding one.
       // Claude Review is now the Pro `claudeReview` capability (in `pro` below).
       deploymentMode: config.deploymentMode,
       pro: entitled,

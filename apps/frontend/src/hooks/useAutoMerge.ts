@@ -10,26 +10,37 @@ import { api } from '../api/client.js';
 
 export const ARMED_MERGES_KEY = ['auto-merge'] as const;
 
-// How often the cross-PR list is re-read. The watcher ticks every ~2 minutes, so polling
-// faster than that only adds requests; 45s is a compromise that keeps the "it landed" toast
-// feeling prompt without a per-minute request from an idle tab.
-const ARMED_POLL_MS = 45_000;
+// How often the cross-PR list is re-read when NOTHING is armed — the query still has to exist
+// (it is what notices a fresh arm from another tab), but nothing is moving.
+const ARMED_IDLE_POLL_MS = 45_000;
+// …and while at least one intent is live. The watcher ticks every ~2 minutes, so this is not
+// about seeing every phase change the instant it happens; it is about a card that is drawing a
+// PHASE not lagging the DB by most of a minute. Faster than this would just add requests
+// between two watcher ticks.
+const ARMED_LIVE_POLL_MS = 8_000;
+
+/** The row shape the cache holds, so the optimistic writers below can be spelled once. */
+type ArmedList = ArmedMergeListResponse;
 
 /**
  * Every armed (and recently-resolved) intent for the account. A pure DB read server-side, so
- * polling it is cheap — it never touches GitHub. Drives both the PR-detail armed state and
- * the global AutoMergeBanner toast.
+ * polling it is cheap — it never touches GitHub. Drives the PR-detail armed state and the
+ * global AutoMergeBanner progress stack, which is why the cadence is adaptive: an idle account
+ * must not pay a per-8s request for a stack that renders nothing.
  */
 export function useArmedMerges(enabled = true) {
   return useQuery<ArmedMergeListResponse>({
     queryKey: ARMED_MERGES_KEY,
     queryFn: () => api.armedMerges(),
     enabled,
-    refetchInterval: ARMED_POLL_MS,
+    refetchInterval: (q) =>
+      q.state.data?.requests.some((r) => r.state === 'armed')
+        ? ARMED_LIVE_POLL_MS
+        : ARMED_IDLE_POLL_MS,
     // The list is only interesting when the user is looking; a background tab polling for a
-    // toast it can't show is pure waste (the toast appears on the next foreground poll).
+    // card it can't show is pure waste (the card catches up on the next foreground poll).
     refetchIntervalInBackground: false,
-    staleTime: 15_000,
+    staleTime: 5_000,
   });
 }
 
@@ -54,9 +65,19 @@ export function useArmAutoMerge(prId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: ArmMergeBody) => api.armAutoMerge(prId, body),
-    onSuccess: () => {
+    onSuccess: (armed) => {
       // merge-options carries `autoMerge.armed`, which is what the merge control renders.
       void qc.invalidateQueries({ queryKey: ['merge-options', prId] });
+      // SEED the list from the POST's own response — it is the full row, identity and
+      // `phase: 'pending_first_check'` included. Without this the progress card only appears
+      // on the next poll, i.e. the surface that exists to say "I heard you" would be up to a
+      // poll interval late on the one action it acknowledges. The invalidate still runs; this
+      // is a head start, not a substitute (the row is authoritative server-side).
+      qc.setQueryData<ArmedList>(ARMED_MERGES_KEY, (prev) =>
+        prev == null
+          ? { requests: [armed] }
+          : { requests: [armed, ...prev.requests.filter((r) => r.prId !== armed.prId)] },
+      );
       void qc.invalidateQueries({ queryKey: ARMED_MERGES_KEY });
     },
   });
@@ -69,6 +90,11 @@ export function useDisarmAutoMerge(prId: number) {
     mutationFn: () => api.disarmAutoMerge(prId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['merge-options', prId] });
+      // The DELETE removes the row outright (no terminal state to observe), so drop it here
+      // too: the progress card must go on the click, not linger until the refetch lands.
+      qc.setQueryData<ArmedList>(ARMED_MERGES_KEY, (prev) =>
+        prev == null ? prev : { requests: prev.requests.filter((r) => r.prId !== prId) },
+      );
       void qc.invalidateQueries({ queryKey: ARMED_MERGES_KEY });
     },
   });

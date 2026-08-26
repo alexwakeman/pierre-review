@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Workspace } from '@pierre-review/shared';
 import { useClickOutside } from '../hooks/useClickOutside.js';
+import { useMyTurnByWorkspace } from '../hooks/useMyTurnByWorkspace.js';
+import { consumeRestoredWorkspaceScope, markUrlCorrection } from '../hooks/useUrlState.js';
 import { useWorkspaces } from '../hooks/useWorkspaces.js';
 import { useFilters } from '../store/filters.js';
 import { WorkspaceManagerModal } from './Activity/WorkspaceManager.js';
@@ -20,7 +22,8 @@ import { WorkspaceManagerModal } from './Activity/WorkspaceManager.js';
  *  1. `workspaceId` is null (never resolved) or names no live workspace (deleted, or another
  *     account's id restored from localStorage / a stale link) ⇒ adopt the account's Default and
  *     show all of it.
- *  2. The workspace CHANGED (the user picked a different one) ⇒ show all of the new one.
+ *  2. The workspace CHANGED — and the change is a SWITCH, not a URL restore (below) ⇒ show all of
+ *     the new one.
  *  3. Otherwise ⇒ PRUNE ONLY. Drop stored ids that are no longer in the workspace (a repo was
  *     moved out from the manager) and leave a user-narrowed subset — and `null` — alone.
  *
@@ -33,6 +36,10 @@ import { WorkspaceManagerModal } from './Activity/WorkspaceManager.js';
  * live workspace takes the PRUNE path. A `?workspace=5&repos=7,9` deep link must keep its `repos`
  * narrowing (minus any id that is not in workspace 5) rather than being widened back to the whole
  * workspace on mount.
+ *
+ * ⚠ …and a Back is the SAME SHAPE OF EVENT as that deep link, arriving mid-session. See case (2)
+ * in the body: a workspace id the URL restored ALONGSIDE its own `?repos=` is a restore, not a
+ * switch, and takes the prune path too.
  */
 export function useWorkspaceSync(): void {
   const workspaceId = useFilters((s) => s.workspaceId);
@@ -44,54 +51,105 @@ export function useWorkspaceSync(): void {
   const prevWorkspaceRef = useRef<number | null>(null);
 
   useEffect(() => {
-    // The server ENSURES a Default before answering, so a loaded list is never empty; an empty one
-    // means something is wrong upstream and writing a scope from it would be a guess.
-    if (workspaces == null || workspaces.length === 0) return;
-
-    const live = workspaceId == null ? undefined : workspaces.find((w) => w.id === workspaceId);
-
-    // (1) Unresolved, or an id that names no live workspace → the account's Default, showing all
-    // of it. This is the only path that may replace the array without the user having asked.
-    if (live == null) {
-      const fallback = workspaces.find((w) => w.isDefault) ?? workspaces[0];
-      if (fallback == null) return;
-      prevWorkspaceRef.current = fallback.id;
-      setWorkspace(fallback.id, null);
-      return;
-    }
-
-    // (2) The user switched workspace → show every repo in the new one (`null`). A stored subset
-    // belongs to the workspace they left; carrying it across would hide repos they never hid.
-    if (prevWorkspaceRef.current != null && prevWorkspaceRef.current !== live.id) {
-      prevWorkspaceRef.current = live.id;
-      // The picker below already wrote `null` when it switched; re-writing it would only churn a
-      // render. Only write when there is actually a subset to clear.
-      if (useFilters.getState().repoIds != null) setWorkspace(live.id, null);
-      return;
-    }
-    prevWorkspaceRef.current = live.id;
-
-    // (3) Same workspace → PRUNE ONLY. `null` means "every repo in this workspace" and is always
-    // correct, so it is never touched.
-    const stored = useFilters.getState().repoIds;
-    if (stored == null) return;
-    // Sticky-[] repair: a persisted EMPTY narrowing can never recover on its own — the prune
-    // below early-returns on 0 === 0, so the empty→null fallback further down is unreachable
-    // and every query keeps sending `repoIds=` (an empty board) forever. An empty array that
-    // SURVIVED into a new session is a trap, not a choice; fall back to the whole workspace.
-    // Still the prune path only — a non-empty user subset is never touched.
-    if (stored.length === 0) {
-      setRepoIds(null);
-      return;
-    }
-    const member = new Set(live.repoIds);
-    const pruned = stored.filter((id) => member.has(id));
-    if (pruned.length === stored.length) return;
-    // Every stored id left the workspace: fall back to the whole workspace rather than to `[]`,
-    // which is the real narrowing "show nothing" and would strand the user on an empty board with
-    // no hint that a repo moved.
-    setRepoIds(pruned.length > 0 ? pruned : null);
+    syncWorkspaceScope({ workspaces, workspaceId, prevWorkspaceRef, setWorkspace, setRepoIds });
   }, [workspaceId, workspaces, setWorkspace, setRepoIds]);
+}
+
+/**
+ * The effect body above, as a plain function over an explicit ref — the three branches, unchanged.
+ *
+ * It is a function rather than an inline effect for ONE reason: it is testable that way. The whole
+ * contract lives in which of the three branches a given (ref, workspace, stored repoIds) lands in,
+ * and that decision has silently regressed before; the frontend's unit tests are plain `.ts`
+ * modules with no React renderer, so an inline body could only ever be re-implemented by a test,
+ * never exercised by one. See test/urlHistory.test.ts.
+ */
+export function syncWorkspaceScope(args: {
+  workspaces: Workspace[] | undefined;
+  workspaceId: number | null;
+  prevWorkspaceRef: { current: number | null };
+  setWorkspace: (workspaceId: number, repoIds: number[] | null) => void;
+  setRepoIds: (ids: number[] | null) => void;
+}): void {
+  const { workspaces, workspaceId, prevWorkspaceRef, setWorkspace, setRepoIds } = args;
+  // The server ENSURES a Default before answering, so a loaded list is never empty; an empty one
+  // means something is wrong upstream and writing a scope from it would be a guess.
+  if (workspaces == null || workspaces.length === 0) return;
+
+  const live = workspaceId == null ? undefined : workspaces.find((w) => w.id === workspaceId);
+
+  // (1) Unresolved, or an id that names no live workspace → the account's Default, showing all
+  // of it. This is the only path that may replace the array without the user having asked.
+  //
+  // ⚠ AND IT IS THE ONLY PATH THAT RESOLVES THE WORKSPACE AT ALL, so it owns the whole
+  // "the first resolution is not a navigation" rule — `writeToUrl` no longer tries to infer it
+  // from the URL's shape. `workspace` is a NAV key, so an unmarked write here PUSHES a new entry
+  // one tick after a load or a pop, for a change the user did not make. Both shapes bite:
+  //
+  //   • a cold load from a stale bookmark / a cross-account link naming a dead id (the mount's own
+  //     correction marker has already been consumed by the hydrate's write), and
+  //   • a Back onto any entry naming a workspace that has since been deleted — the popped entry
+  //     still names the dead id, so the push lands on top of the entry the reader just reached,
+  //     the next Back pops into this branch again, and Back is a PERMANENT no-op: the reader can
+  //     neither reach an earlier view nor leave the app.
+  //
+  // A corrective write that reconciles state the user did not ask for is always a REPLACE.
+  if (live == null) {
+    const fallback = workspaces.find((w) => w.isDefault) ?? workspaces[0];
+    if (fallback == null) return;
+    prevWorkspaceRef.current = fallback.id;
+    markUrlCorrection();
+    setWorkspace(fallback.id, null);
+    return;
+  }
+
+  const changed = prevWorkspaceRef.current != null && prevWorkspaceRef.current !== live.id;
+  prevWorkspaceRef.current = live.id;
+
+  // (2) The workspace CHANGED — but A CHANGE IS NOT ALWAYS A SWITCH, and the difference is the
+  // whole of this branch. Two things move this id:
+  //
+  //   • The user picked a different workspace ⇒ SWITCH. Show every repo in the new one (`null`):
+  //     a stored subset belongs to the workspace they left, and carrying it across would hide
+  //     repos they never hid.
+  //   • Back/Forward applied a URL that named a workspace AND carried its own `?repos=` ⇒ RESTORE.
+  //     The narrowing IS the view the reader is returning to. Re-deriving here would widen the
+  //     board a tick after the pop restored it — `repoIds` was the one key in the whole history
+  //     bundle that did not survive a Back across a workspace switch, and this is why.
+  //
+  // ⚠ `consumeRestoredWorkspaceScope` is that signal, and it is read SYNCHRONOUSLY here — it is
+  // armed inside `applyUrlToStores`'s own call, so by the time this effect runs the flag is the
+  // only surviving evidence of how the id arrived. It is keyed on the id and one-shot, so it can
+  // never suppress a later genuine switch to a different workspace (or a second switch back).
+  if (changed && !consumeRestoredWorkspaceScope(live.id)) {
+    // The picker below already wrote `null` when it switched; re-writing it would only churn a
+    // render. Only write when there is actually a subset to clear.
+    if (useFilters.getState().repoIds != null) setWorkspace(live.id, null);
+    return;
+  }
+
+  // (3) Same workspace — or a restored one — → PRUNE ONLY. `null` means "every repo in this
+  // workspace" and is always correct, so it is never touched. A restored narrowing goes through
+  // the same prune, so a `?repos=` naming repos that have since left the workspace is corrected
+  // rather than trusted.
+  const stored = useFilters.getState().repoIds;
+  if (stored == null) return;
+  // Sticky-[] repair: a persisted EMPTY narrowing can never recover on its own — the prune
+  // below early-returns on 0 === 0, so the empty→null fallback further down is unreachable
+  // and every query keeps sending `repoIds=` (an empty board) forever. An empty array that
+  // SURVIVED into a new session is a trap, not a choice; fall back to the whole workspace.
+  // Still the prune path only — a non-empty user subset is never touched.
+  if (stored.length === 0) {
+    setRepoIds(null);
+    return;
+  }
+  const member = new Set(live.repoIds);
+  const pruned = stored.filter((id) => member.has(id));
+  if (pruned.length === stored.length) return;
+  // Every stored id left the workspace: fall back to the whole workspace rather than to `[]`,
+  // which is the real narrowing "show nothing" and would strand the user on an empty board with
+  // no hint that a repo moved.
+  setRepoIds(pruned.length > 0 ? pruned : null);
 }
 
 /** Default first (it is where new repos land), then the rest by name. */
@@ -131,6 +189,22 @@ export function WorkspaceSelector(): JSX.Element {
   const rows = useMemo(() => orderWorkspaces(workspaces ?? []), [workspaces]);
   const active = workspaceId == null ? undefined : rows.find((w) => w.id === workspaceId);
 
+  // Per-workspace "My Turn" counts (see the hook). The rows are the ONE place in the app that
+  // lists every workspace at once, which makes them the right place to say where your work is —
+  // the amber badge is "N things are on your plate in THAT workspace". Same fold, same number and
+  // same cap phrasing as the Welcome-back banner, the daily-brief strip and the attention board.
+  //
+  // ⚠ INFORMATIONAL ONLY, on purpose. A row's click means "switch scope" and nothing more: this
+  // control is mounted on EVERY board, so making a badged row additionally hijack the rail would
+  // teleport someone who only wanted to re-scope the Timeline. Reaching the list from a count is
+  // the banner's job (`openMyTurnInWorkspace`).
+  //
+  // ⚠ ABSENCE IS NOT ZERO. The cross-workspace roll-up is capped server-side, so a workspace can
+  // have NO number rather than a zero one — those rows render a dim "—" and the footer names how
+  // many, because a badge that exists to say "you have unseen work" must not omit a workspace
+  // silently. Nothing renders at all until the brief lands (`workspaceId === null` ⇒ idle).
+  const { byWorkspace, elsewhereCount, elsewhereCapped, uncounted } = useMyTurnByWorkspace();
+
   // Switching workspace shows all of it — a subset the user picked in the workspace they are
   // leaving is not a narrowing of the one they are entering.
   const select = (id: number): void => {
@@ -164,6 +238,25 @@ export function WorkspaceSelector(): JSX.Element {
           ◈
         </span>
         <span className="truncate">{activeLabel}</span>
+        {/* The collapsed trigger carries the OTHER workspaces' total only — the active one's
+            count is already visible on the board behind this control, whereas this figure is
+            work the reader cannot see from where they are standing. Without it the yellow only
+            exists inside a menu nobody has a reason to open. */}
+        {elsewhereCount > 0 && (
+          <span
+            title={
+              elsewhereCount === 1 && !elsewhereCapped
+                ? '1 item needs you in another Workspace — open this menu to see where'
+                : `${elsewhereCount}${
+                    elsewhereCapped ? ' or more' : ''
+                  } items need you in other Workspaces — open this menu to see where`
+            }
+            className="shrink-0 rounded-full bg-amber-400 px-1 text-[9px] font-semibold leading-4 tabular-nums text-amber-950 dark:bg-amber-500"
+          >
+            {elsewhereCount}
+            {elsewhereCapped ? '+' : ''}
+          </span>
+        )}
         <span aria-hidden className="text-[9px]">
           ▾
         </span>
@@ -180,6 +273,7 @@ export function WorkspaceSelector(): JSX.Element {
           ) : (
             rows.map((w) => {
               const selected = w.id === workspaceId;
+              const myTurn = byWorkspace.get(w.id) ?? null;
               return (
                 <button
                   key={w.id}
@@ -210,12 +304,58 @@ export function WorkspaceSelector(): JSX.Element {
                       </span>
                     )}
                   </span>
-                  <span className="shrink-0 tabular-nums text-[10px] text-gray-400">
-                    {w.repoCount}
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {myTurn != null && myTurn.count > 0 && (
+                      // The figure is the CARD count — the list that opens — never the uncapped
+                      // total; the cap gets the ONE shared "+" phrasing and the exact pair in the
+                      // title. A `fresh: false` line came from the roll-up's ≤5-min server cache,
+                      // which is fine precisely because it describes a workspace you are NOT in:
+                      // switching there re-derives it before any list renders. The ACTIVE row is
+                      // always the fresh one, so this badge can never disagree with the board on
+                      // screen.
+                      <span
+                        title={
+                          myTurn.cap?.title ??
+                          (myTurn.count === 1
+                            ? `1 item needs you in ${w.name}`
+                            : `${myTurn.count} items need you in ${w.name}`)
+                        }
+                        className="rounded-full bg-amber-400 px-1 text-[9px] font-semibold leading-4 tabular-nums text-amber-950 dark:bg-amber-500"
+                      >
+                        {myTurn.count}
+                        {myTurn.cap != null && (
+                          <>
+                            <span aria-hidden>+</span>
+                            <span className="sr-only"> of {myTurn.cap.total}</span>
+                          </>
+                        )}
+                      </span>
+                    )}
+                    {myTurn == null && uncounted.length > 0 && (
+                      // Not counted, NOT zero — see the note above the hook call.
+                      <span
+                        title="Not counted here — the cross-workspace roll-up covers only the first few Workspaces. Switch to it to see its own count."
+                        className="text-[10px] text-gray-300 dark:text-gray-600"
+                      >
+                        —
+                      </span>
+                    )}
+                    <span
+                      title="Repos in this Workspace"
+                      className="tabular-nums text-[10px] text-gray-400"
+                    >
+                      {w.repoCount}
+                    </span>
                   </span>
                 </button>
               );
             })
+          )}
+          {uncounted.length > 0 && (
+            <div className="px-2 pb-0.5 pt-1 text-[10px] leading-tight text-gray-400">
+              {uncounted.length} Workspace{uncounted.length === 1 ? '' : 's'} beyond the
+              cross-workspace roll-up{uncounted.length === 1 ? ' is' : ' are'} not counted here.
+            </div>
           )}
           <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
           {/* Repo/workspace management — add or remove repos, create workspaces, move repos

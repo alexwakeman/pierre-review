@@ -301,20 +301,25 @@ const BTN_SECONDARY =
   'whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
 
 // The diff hunk a finding covers, COLLAPSED by default. Clicking the collapsed
-// preview expands it (a convenience); the expanded hunk only collapses via the
-// dedicated "Hide" control (so clicking the code to read/select it never folds it
-// away). State is local + transient — it never persists across reloads.
+// preview expands it (a convenience); the expanded hunk collapses via the dedicated
+// "Hide" control or its @@ header line — never via a code line, so clicking the code
+// to read/select it doesn't fold it away. State is local + transient — it never
+// persists across reloads.
 function FindingHunk({ hunk }: { hunk: string }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const lines = hunk.replace(/\n$/, '').split('\n');
   // Prefer the @@ header for the collapsed preview; else the anchor (last) line.
   const preview = lines.find((l) => l.startsWith('@@')) ?? lines.at(-1) ?? '';
+  // The header only doubles as a collapse target when it really IS the first line;
+  // a truncated hunk opens on real code, which stays plain, selectable text.
+  const headerCollapses = lines[0]?.startsWith('@@') === true;
 
   if (!expanded) {
     return (
       <button
         type="button"
         onClick={() => setExpanded(true)}
+        aria-expanded={false}
         title="Show the code hunk"
         className="mt-1 flex w-full items-center gap-2 overflow-hidden rounded bg-gray-50 px-2 py-1.5 text-left font-mono text-xs dark:bg-gray-900/60"
       >
@@ -334,15 +339,35 @@ function FindingHunk({ hunk }: { hunk: string }): JSX.Element {
   return (
     <div className="mt-1 rounded bg-gray-50 dark:bg-gray-900/60">
       <pre className="overflow-x-auto px-2 py-1.5 font-mono text-xs leading-snug">
-        {lines.map((l, i) => (
-          <div key={i} className={hunkLineClass(l)}>
-            {l === '' ? ' ' : l}
-          </div>
-        ))}
+        {lines.map((l, i) =>
+          i === 0 && headerCollapses ? (
+            <button
+              key={i}
+              type="button"
+              onClick={() => {
+                // A click that ENDED a drag-select is the reader copying the
+                // header, not asking to fold the hunk away.
+                if (window.getSelection()?.isCollapsed === false) return;
+                setExpanded(false);
+              }}
+              aria-expanded={true}
+              aria-label="Hide code"
+              title="Hide code"
+              className={`block w-full whitespace-pre text-left hover:bg-gray-200/70 dark:hover:bg-gray-800/70 ${hunkLineClass(l)}`}
+            >
+              {l === '' ? ' ' : l}
+            </button>
+          ) : (
+            <div key={i} className={hunkLineClass(l)}>
+              {l === '' ? ' ' : l}
+            </div>
+          ),
+        )}
       </pre>
       <button
         type="button"
         onClick={() => setExpanded(false)}
+        aria-expanded={true}
         className="px-2 pb-1.5 text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
       >
         ⌃ Hide code

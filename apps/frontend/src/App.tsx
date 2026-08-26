@@ -183,16 +183,9 @@ export default function App(): JSX.Element {
     }
   }, [overlayActive]);
 
-  // Item 4: the single browser-Back handler. Opening a tab from the Activity pushes one
-  // {pierreTab} history entry (see store/pinnedTabs.ts openTab). {pierreTab} is now the
-  // ONLY pushState in the app, so any popstate while armed means the browser popped that
-  // entry → return to the Activity. Mounted once; reads only our own store, so it survives
-  // every tab remount.
-  useEffect(() => {
-    const onPop = (): void => usePinnedTabs.getState().navigateBack();
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
-  }, []);
+  // (The browser-Back handler used to live here, reading store flags and never looking at the
+  // URL. It is now `useUrlState`'s single `popstate` listener, which re-applies the popped URL to
+  // both stores — one history authority instead of two fighting over one event.)
 
   // Item 7: when the detail pane mounts/unmounts (a PR is selected/cleared), the
   // board-slot Timeline's flex height changes — nudge vis to recompute it.

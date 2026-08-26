@@ -180,8 +180,11 @@ console, under the "Review bots" header in `BotsView` (bot-only "Show in feed" l
 the empty-workspace fallback branch — so it's present in every context isolation can reach (never
 sticky; scrolls with content). When isolated, that view also **hides the repo-wide charts +
 open-PR list**: RepoConsole drops `RepoInsightsPanel`/`RepoOpenPrList`, and `FeedView` drops its own
-cross-repo `FeedOpenPrsPanel`. `FeedView` still reads `feedIsolatedPrId` only to scope its query;
-the feed-wide "New activity — Refresh" banner remains sticky as its own element.
+cross-repo `FeedOpenPrsPanel`. `FeedView` still reads `feedIsolatedPrId` only to scope its query.
+The feed-wide **"New activity — Refresh" banner is GONE**: newly-arrived items are spliced into
+the list as they land, each marked with a per-card "New" chip until the reader has seen it
+(`feedNewCohorts` — the rules live in [FRONTEND](FRONTEND.md) § "The Activity Feed auto-inserts").
+Isolation does not interact with it.
 
 **The rail entries' inner sub-tab bars** (all transient + URL-silent, all built DYNAMICALLY so a
 tab exists only where it means something):

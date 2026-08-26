@@ -172,24 +172,21 @@ interface OpenOpts {
 
 interface TabsState {
   tabs: Tab[]; // ordered; persisted
-  activeTab: ActiveTab; // NOT persisted (fresh load 'timeline'; useUrlState → 'activity')
-  // True while an Activity-launched navigation session has ONE pushed {pierreTab} history
-  // entry outstanding, so a browser Back returns to the Activity console. Deduped: opening
-  // further tabs from Activity reuses the single entry rather than stacking orphans.
-  activityReturnArmed: boolean;
+  activeTab: ActiveTab; // NOT persisted (fresh load 'timeline'; useUrlState → the URL's view)
   // The feed item id a browser-Back should scroll-to + flash. Two fields so the flash fires
   // ONLY on a real Back, never on an ordinary return to Activity (e.g. clicking the Activity
   // tab chip): `activityReturnItemId` is the PENDING target (set on an Activity-launched
-  // open); `consumeActivityReturn` promotes it into the one-shot `activityFlashItemId` (the
-  // signal the feed view consumes) only when the {pierreTab} entry is actually popped.
+  // open); `applyUrlTab({fromPop:true})` promotes it into the one-shot `activityFlashItemId`
+  // (the signal the feed view consumes) only when a POPPED url actually lands on Activity.
+  //
+  // ⚠ THE HISTORY ENTRY IS NO LONGER OURS. This used to ride a `{pierreTab}` marker pushed by
+  // `openTab` — the app's only pushState — consumed by a `navigateBack()` that read store flags
+  // and never looked at the URL. There is ONE history authority now (the URL: `useUrlState`
+  // pushes on a navigation-key change and rehydrates both stores on popstate), so the flash
+  // hangs off the pop that lands on Activity rather than off a private marker. Two authorities
+  // reacting to one popstate is what made Forward corrupt the stack.
   activityReturnItemId: string | null;
   activityFlashItemId: string | null;
-  // Second history level (the "Show" back-step): when a board-"Show" is launched FROM an
-  // Activity-opened pr-detail tab, we push an extra {pierreTab} entry and remember the tab
-  // here, so a browser Back returns to that detail tab (NOT all the way to the feed). A
-  // second Back then pops the outer entry → the Activity console. null when no back-step is
-  // outstanding. Deduped: reused rather than restacked.
-  boardReturnTabKey: string | null;
 
   pin: (meta: TabMeta) => void; // ensure a pr-detail tab, do NOT activate
   openPrDetailTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-detail + activate
@@ -220,13 +217,25 @@ interface TabsState {
 
   setActiveTab: (tab: ActiveTab) => void;
   showTimeline: () => void; // idempotent → 'timeline'
-  // Navigate to the board for a "Show", pushing a back-step to the current detail tab when
-  // it was Activity-launched (so Back returns here, not to the feed). Otherwise ≡ showTimeline.
+  // Navigate to the board for a "Show" from a PR-detail tab. ≡ showTimeline: the back-step it
+  // used to push by hand is now the ordinary URL history entry
+  // (`view=pr-detail:<id>` → `view=timeline`),
+  // so Back returns to the detail tab for free. Kept as its own name because two call sites read
+  // as "leave this detail for the board", which is a different intent from a rail click.
   showBoardFromDetail: () => void;
   showActivity: () => void; // idempotent → 'activity'
-  // Handle a browser Back: first the "Show" back-step (→ the remembered detail tab), then the
-  // Activity-return level (→ the feed, flashing the launching item). A no-op if neither armed.
-  navigateBack: () => void;
+  /**
+   * Seat the tab a URL names (`useUrlState`'s `view=`), on load AND on every browser Back /
+   * Forward. `fromPop` distinguishes the two: only a real pop promotes the pending feed
+   * return-item into the one-shot flash, so returning to Activity by clicking its chip never
+   * flashes a card.
+   *
+   * ⚠ A `view=pr-detail:<id>` naming a tab THIS BROWSER HAS NEVER SEEN (a shared link, a cleared
+   * `pierre:tabs`) is CREATED here with a null meta rather than discarded — PrDetail loads the PR
+   * by id and `syncMeta` backfills the chip a moment later. Anything else unrecognised falls back
+   * to whatever `landingTabFromUrl` normalised it to; this action never invents a kind.
+   */
+  applyUrlTab: (tab: ActiveTab, opts?: { fromPop?: boolean }) => void;
   clearActivityFlashItem: () => void; // feed flashed the returned item → forget it
   clear: () => void; // sign-out reset
 }
@@ -321,10 +330,10 @@ function sameMeta(a: TabMeta, b: TabMeta): boolean {
 }
 
 export const usePinnedTabs = create<TabsState>((set, get) => {
-  // Ensure `tab` exists, activate it, and (if opened from Activity) push a single
-  // browser-history entry so Back returns to the Activity console. Deduped: if an
-  // Activity-return entry is already outstanding, reuse it instead of stacking a second
-  // (which would leave an orphan that makes a later Back an inert no-op).
+  // Ensure `tab` exists and activate it. The BROWSER HISTORY ENTRY IS NOT PUSHED HERE any more:
+  // `activeTab` is serialized as `view=` (useUrlState), whose navigation-key diff pushes the
+  // entry — so a tab open is historied wherever it was launched from, not only from Activity,
+  // and Back lands on the URL that produced it rather than on a store flag's idea of "back".
   const openTab = (tab: Tab, opts?: OpenOpts): void => {
     const s = get();
     const fromActivity = opts?.fromActivity ?? s.activeTab === 'activity';
@@ -332,38 +341,21 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     const tabs = exists
       ? s.tabs.map((t) => (t.key === tab.key && tab.meta != null ? { ...t, meta: tab.meta } : t))
       : [...s.tabs, tab];
-    if (fromActivity && !s.activityReturnArmed) {
-      try {
-        history.pushState({ pierreTab: 1 }, '');
-      } catch {
-        /* non-fatal */
-      }
-    }
     if (!exists || tab.meta != null) persist(tabs);
     set({
       tabs,
       activeTab: tab.key,
-      activityReturnArmed: fromActivity || s.activityReturnArmed,
       // Remember which feed row launched this (latest wins) so Back can flash it; a
       // non-feed Activity open (e.g. a digest #N ref) clears any stale target.
       activityReturnItemId: fromActivity ? (opts?.returnItemId ?? null) : s.activityReturnItemId,
-      // A fresh Activity-launched open starts a NEW navigation session, so drop any
-      // dangling "Show" back-step from a previous one (e.g. returning to Activity via the
-      // tab chip after a Show, then opening another feed card). Leaving it set would make a
-      // browser Back detour through that stale detail tab instead of returning to the feed.
-      // navigateBack then falls straight through to the armed Activity-return level; the old
-      // pushed entry becomes a benign orphan.
-      boardReturnTabKey: fromActivity ? null : s.boardReturnTabKey,
     });
   };
 
   return {
     tabs: loadTabs(),
     activeTab: 'timeline',
-    activityReturnArmed: false,
     activityReturnItemId: null,
     activityFlashItemId: null,
-    boardReturnTabKey: null,
 
     pin: (meta) =>
       set((s) => {
@@ -425,8 +417,12 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       set((s) => {
         let changed = false;
         const tabs = s.tabs.map((t) => {
-          if (t.prId !== meta.id || t.meta == null) return t;
-          if (sameMeta(t.meta, meta)) return t;
+          // ⚠ A NULL meta is FILLED, not skipped. `applyUrlTab` creates a tab from a `view=pr-detail:<id>`
+          // key with no label at all, and the old `t.meta == null → return t` guard left that tab
+          // reading "#undefined" forever. Non-PR tabs are excluded by the id compare (their
+          // `prId` is 0), which is what that clause was really protecting.
+          if (t.prId !== meta.id) return t;
+          if (t.meta != null && sameMeta(t.meta, meta)) return t;
           changed = true;
           return { ...t, meta };
         });
@@ -441,24 +437,21 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
         if (idx === -1) return s;
         const tabs = s.tabs.filter((t) => t.key !== key);
         persist(tabs);
-        // Forget a "Show" back-step that pointed at the tab just closed (navigateBack would
-        // otherwise fall back to the board — harmless, but clearer to drop it now).
-        const boardReturnTabKey = s.boardReturnTabKey === key ? null : s.boardReturnTabKey;
         // Closing a non-active tab leaves the active one alone. Closing the ACTIVE tab
         // moves to a logical neighbour rather than snapping back to the board: the tab
         // immediately to its LEFT (still present in `tabs` at idx-1), else the one to its
         // RIGHT (now the leftmost, tabs[0]), else — no dynamic tabs remain — the board.
-        if (s.activeTab !== key) return { tabs, boardReturnTabKey };
+        if (s.activeTab !== key) return { tabs };
         const nextActive: ActiveTab =
           idx - 1 >= 0
             ? (s.tabs[idx - 1] as Tab).key
             : tabs.length > 0
               ? (tabs[0] as Tab).key
               : 'timeline';
-        return { tabs, activeTab: nextActive, boardReturnTabKey };
+        return { tabs, activeTab: nextActive };
       }),
     // Drag-to-reorder: move a tab to `toIndex` (clamped) in the strip. Pure presentation —
-    // it deliberately never touches activeTab or the "Show" back-step.
+    // it deliberately never touches activeTab.
     moveTab: (key, toIndex) =>
       set((s) => {
         const from = s.tabs.findIndex((t) => t.key === key);
@@ -483,9 +476,7 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
           s.activeTab === 'timeline' || s.activeTab === 'activity' || s.activeTab === key
             ? s.activeTab
             : key;
-        // The "Show" back-step survives only when it points at the kept tab.
-        const boardReturnTabKey = s.boardReturnTabKey === key ? s.boardReturnTabKey : null;
-        return { tabs, activeTab, boardReturnTabKey };
+        return { tabs, activeTab };
       }),
     closeAllTabs: () =>
       set((s) => {
@@ -495,7 +486,7 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
         // of the dynamic tabs just destroyed (mirrors closeTab's fallback).
         const activeTab =
           s.activeTab === 'timeline' || s.activeTab === 'activity' ? s.activeTab : 'timeline';
-        return { tabs: [], activeTab, boardReturnTabKey: null };
+        return { tabs: [], activeTab };
       }),
     unpin: (id) => get().closeTab(prDetailKey(id)),
 
@@ -505,51 +496,47 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     showTimeline: () => {
       if (get().activeTab !== 'timeline') set({ activeTab: 'timeline' });
     },
+    // ≡ showTimeline. The "Show" back-step is the URL's own entry now: leaving `view=pr-detail:<id>`
+    // for `view=timeline` is a navigation-key change, so useUrlState pushes and a browser Back
+    // returns to the detail tab without this store remembering anything.
     showBoardFromDetail: () => {
-      const s = get();
-      const parsed = parseTabKey(s.activeTab);
-      const onActivityDetail =
-        parsed?.kind === 'pr-detail' && s.activityReturnArmed && s.boardReturnTabKey == null;
-      if (onActivityDetail) {
-        // Push the inner back-step so a browser Back returns to THIS detail tab; the outer
-        // {pierreTab} entry (pushed when the feed opened it) then returns to the feed.
-        try {
-          history.pushState({ pierreTab: 1 }, '');
-        } catch {
-          /* non-fatal */
-        }
-        set({ activeTab: 'timeline', boardReturnTabKey: s.activeTab });
-        return;
-      }
-      if (s.activeTab !== 'timeline') set({ activeTab: 'timeline' });
+      if (get().activeTab !== 'timeline') set({ activeTab: 'timeline' });
     },
     showActivity: () => {
       if (get().activeTab !== 'activity') set({ activeTab: 'activity' });
     },
-    // The browser popped the {pierreTab} entry we pushed on an Activity-launched open →
-    // return to the Activity console and disarm. A no-op if no entry was outstanding.
-    // PROMOTE the pending return-item into the one-shot flash signal (and clear the pending
-    // one) so the feed flashes it EXACTLY on this Back — never on an ordinary return to
-    // Activity (e.g. clicking the Activity tab chip, which doesn't call this).
-    navigateBack: () => {
-      const s = get();
-      // Inner level first: the "Show" back-step → the remembered detail tab (or the board
-      // if it was closed meanwhile). Consumes only this level; a further Back handles the
-      // Activity-return entry below.
-      if (s.boardReturnTabKey != null) {
-        const exists = s.tabs.some((t) => t.key === s.boardReturnTabKey);
-        set({ activeTab: exists ? s.boardReturnTabKey : 'timeline', boardReturnTabKey: null });
-        return;
-      }
-      // Outer level: the Activity-launched entry → the feed, flashing the launching item.
-      if (!s.activityReturnArmed) return;
-      set({
-        activeTab: 'activity',
-        activityReturnArmed: false,
-        activityFlashItemId: s.activityReturnItemId,
-        activityReturnItemId: null,
-      });
-    },
+    applyUrlTab: (tab, opts) =>
+      set((s) => {
+        // A tab this browser has no record of (shared link / cleared storage): re-create it from
+        // the key alone. The four self-describing kinds can be — the key IS the identity — and a
+        // null meta is only a LABEL, which the PR fetch backfills (syncMeta) and the user/bot
+        // panels derive from their own roster. Dropping the tab instead would silently redirect a
+        // link to the front door. Seed-backed drill-downs are never named by a URL at all.
+        const missing = !s.tabs.some((t) => t.key === tab);
+        const parsedPr = parseTabKey(tab);
+        const newTab: Tab | null =
+          !missing
+            ? null
+            : parsedPr != null
+              ? { key: tab, kind: parsedPr.kind, prId: parsedPr.prId, meta: null }
+              : parseUserActivityKey(tab) != null
+                ? { key: tab, kind: 'user-activity', prId: 0, meta: null, userMeta: null }
+                : parseBotDetailKey(tab) != null
+                  ? { key: tab, kind: 'bot-detail', prId: 0, meta: null, botMeta: null }
+                  : null;
+        const tabs = newTab != null ? [...s.tabs, newTab] : s.tabs;
+        if (tabs !== s.tabs) persist(tabs);
+        // The Back-flash: EXACTLY on a pop that lands on Activity with a launching item pending.
+        const flashing =
+          opts?.fromPop === true && tab === 'activity' && s.activityReturnItemId != null;
+        return {
+          tabs,
+          activeTab: tab,
+          ...(flashing
+            ? { activityFlashItemId: s.activityReturnItemId, activityReturnItemId: null }
+            : {}),
+        };
+      }),
     clearActivityFlashItem: () => {
       if (get().activityFlashItemId != null) set({ activityFlashItemId: null });
     },
@@ -564,10 +551,8 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       set({
         tabs: [],
         activeTab: 'timeline',
-        activityReturnArmed: false,
         activityReturnItemId: null,
         activityFlashItemId: null,
-        boardReturnTabKey: null,
       });
     },
   };

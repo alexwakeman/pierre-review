@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, ne } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { ConsolidatedFeedItem, MyTurnReason, ReasonTag } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { getAccountUserId } from '../auth/account.js';
@@ -155,34 +155,3 @@ export async function enrichMyTurn(
   }
 }
 
-// How many "My Turn" feed items are NEW since `since` — activity events (all feed types except
-// plain commit pushes) after `since`, on a PR the viewer participates in, by someone other than
-// the viewer. Drives the Welcome-back banner count (/api/me). Cheap because `since` is normally
-// recent. 0 when there's no viewer identity or no matching rows.
-export async function countNewMyTurnFeedItems(
-  accountId: number,
-  since: Date,
-): Promise<number> {
-  const localUserId = await getAccountUserId(accountId);
-  if (localUserId == null) return 0;
-  const { events } = schema;
-  const rows = await db
-    .select({ prId: events.prId, actorId: events.actorId })
-    .from(events)
-    .where(
-      and(
-        eq(events.accountId, accountId),
-        gt(events.occurredAt, since),
-        ne(events.type, 'commit_pushed'),
-      ),
-    )
-    .execute();
-  const prIds = [...new Set(rows.map((r) => r.prId).filter((x): x is number => x != null))];
-  if (prIds.length === 0) return 0;
-  const participation = await resolveParticipation(accountId, localUserId, prIds);
-  let n = 0;
-  for (const r of rows) {
-    if (r.prId != null && r.actorId !== localUserId && participation.all.has(r.prId)) n++;
-  }
-  return n;
-}

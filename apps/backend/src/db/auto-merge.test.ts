@@ -34,6 +34,10 @@ vi.mock('../auth/account.js', () => ({
   getAccessToken: vi.fn(async () => 'gho_test'),
   getAccountUserId: vi.fn(async () => null),
 }));
+// The clone-based rebase (local mode only), reached through a dynamic import inside the runner.
+vi.mock('../coding/merge.js', () => ({
+  updatePrBranchFromTrunk: vi.fn(async () => ({ headSha: 'rebased1' })),
+}));
 
 const DB_PATH = '/tmp/pierre-auto-merge-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
@@ -151,9 +155,21 @@ describe('auto-merge intents', () => {
     expect(armed.expectedHeadOid).toBe('aaaaaaa1');
     expect(armed.mergeMethod).toBe('squash');
     expect(armed.lastCheckedAt).toBeNull();
+    // The arm RESPONSE is what the SPA seeds its progress card from, so it must already be
+    // self-describing: an honest first phase (the watcher is up to a tick away) and the
+    // repo/PR identity a cross-PR surface has no other way to look up.
+    expect(armed.phase).toBe('pending_first_check');
+    expect(armed.repoOwner).toBe('orga');
+    expect(armed.repoName).toBe('repoa');
+    expect(armed.prNumber).toBe(1);
+    expect(armed.prTitle).toBe('PR a');
 
     const read = await q.getAutoMergeRequest(A, prA);
     expect(read?.prId).toBe(prA);
+    const [listed] = await q.listAutoMergeRequests(A);
+    expect(listed.repoOwner).toBe('orga');
+    expect(listed.prTitle).toBe('PR a');
+    expect(listed.phase).toBe('pending_first_check');
   });
 
   it('is account-scoped in both directions (IDOR blocked)', async () => {
@@ -358,7 +374,110 @@ describe('the auto-merge watcher', () => {
 
     expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
     expect(gh.mergePullRequest.mock.calls[0][4]).toMatchObject({ expectedHeadSha: 'aaa' });
+    const row = await rowFor(prC);
+    expect(row.state).toBe('merged');
+    // A terminal row is described by `state` alone: `lastReason` is nulled on success, and a
+    // leftover 'merging' phase would give the finished card a second, contradictory line.
+    expect(row.lastReason).toBeNull();
+    expect(row.phase).toBeNull();
+  });
+
+  it('says "merging" while the merge call is in flight (the row is never blank at success)', async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('mmm'), updateStrategy: 'none' });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'mmm' }));
+    // Observed from INSIDE the GitHub call — the whole point of the stamp is that the row is
+    // honest for however long the merge takes, not just after it returns.
+    let phaseDuringMerge: string | null = null;
+    gh.mergePullRequest.mockImplementation(async () => {
+      phaseDuringMerge = (await rowFor(prC)).phase;
+      return { ok: true, sha: 'landed_m' };
+    });
+
+    await runner.runAutoMergeTick(log);
+
+    expect(phaseDuringMerge).toBe('merging');
     expect((await rowFor(prC)).state).toBe('merged');
+  });
+
+  it('REBASES a behind branch, then WAITS FOR CHECKS — phase and prose say the same thing', async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('rrr'), updateStrategy: 'rebase' });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(
+      snapshot({ headSha: 'rrr', mergeableState: 'behind', behindBy: 2 }),
+    );
+
+    await runner.runAutoMergeTick(log);
+
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+    const row = await rowFor(prC);
+    expect(row.state).toBe('armed');
+    // The rebase is SYNCHRONOUS, so the pin moves to the sha it pushed (unlike the async
+    // native update below, which must not re-pin).
+    expect(row.expectedHeadOid).toBe('rebased1');
+    // ⚠ The rebase has ALREADY RETURNED by the time this row is written, so the phase must not
+    // still say 'updating_rebase' — that spins "Rebasing onto the base branch…" for the rest of
+    // the cron interval over a row whose own prose says it is waiting for checks. Phase and
+    // prose disagreeing is precisely what this column exists to prevent.
+    expect(row.phase).toBe('awaiting_checks');
+    expect(row.lastReason).toContain('rebased onto main');
+  });
+
+  it("says 'updating_rebase' only WHILE the clone-based rebase is in flight", async () => {
+    // The other half of the same rule: the phase is stamped before the call (like 'merging' and
+    // 'enqueuing'), because a clone/fetch/rebase/force-push runs for tens of seconds and the SPA
+    // re-reads this row every 8s. That window is the ONLY time "Rebasing…" is true.
+    const { updatePrBranchFromTrunk } = await import('../coding/merge.js');
+    let phaseDuringRebase: string | null = null;
+    (updatePrBranchFromTrunk as any).mockImplementationOnce(async () => {
+      phaseDuringRebase = (await rowFor(prC)).phase;
+      return { headSha: 'rebased1' };
+    });
+    await q.armAutoMerge(A, prC, { ...armArgs('rr2'), updateStrategy: 'rebase' });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(
+      snapshot({ headSha: 'rr2', mergeableState: 'behind', behindBy: 2 }),
+    );
+
+    await runner.runAutoMergeTick(log);
+
+    expect(phaseDuringRebase).toBe('updating_rebase');
+    // …and the prose is left alone until the outcome write, so nothing claims a rebase finished
+    // while it is still running.
+    expect((await rowFor(prC)).phase).toBe('awaiting_checks');
+  });
+
+  it("names WHICH half of 'blocked' is blocking, from the already-synced CI status", async () => {
+    // GitHub collapses "required checks running" and "required reviews missing" into one
+    // mergeableState. Guessing wrong here puts a false line in front of a user who is deciding
+    // whether to go chase a reviewer, so the phase only says 'awaiting_checks' when the synced
+    // status actually agrees the checks are still running.
+    const { eq } = await import('drizzle-orm');
+    const setCi = async (ciStatus: string | null): Promise<void> => {
+      await db
+        .update(schema.pullRequests)
+        .set({ ciStatus })
+        .where(eq(schema.pullRequests.id, prC))
+        .execute();
+    };
+
+    gh.fetchPrMergeSnapshot.mockResolvedValue(
+      snapshot({ headSha: 'bbb1', mergeableState: 'blocked' }),
+    );
+
+    await setCi('pending');
+    await q.armAutoMerge(A, prC, { ...armArgs('bbb1'), updateStrategy: 'none' });
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).phase).toBe('awaiting_checks');
+
+    // Checks are green (or unknown) → protection is blocking for some other reason; the
+    // generic phase is the honest one.
+    await setCi('success');
+    await q.armAutoMerge(A, prC, { ...armArgs('bbb1'), updateStrategy: 'none' });
+    await runner.runAutoMergeTick(log);
+    const row = await rowFor(prC);
+    expect(row.phase).toBe('blocked_protection');
+    expect(row.state).toBe('armed');
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+
+    await setCi(null);
   });
 
   it('refuses to merge a PR that was RETARGETED to another base', async () => {
@@ -389,6 +508,7 @@ describe('the auto-merge watcher', () => {
     // GitHub's 202 is ASYNC: the pin must stay put until the move is PROVEN to be ours.
     expect(afterUpdate.expectedHeadOid).toBe('ccc');
     expect(afterUpdate.state).toBe('armed');
+    expect(afterUpdate.phase).toBe('updating_merge');
 
     // A human pushed inside the update window: one parent, so not our merge commit.
     gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'human1' }));
@@ -396,7 +516,10 @@ describe('the auto-merge watcher', () => {
     await runner.runAutoMergeTick(log);
 
     expect(gh.mergePullRequest).not.toHaveBeenCalled();
-    expect((await rowFor(prC)).state).toBe('disarmed_head_moved');
+    const disarmed = await rowFor(prC);
+    expect(disarmed.state).toBe('disarmed_head_moved');
+    // Terminal ⇒ no live phase, even though the previous tick left 'updating_merge' behind.
+    expect(disarmed.phase).toBeNull();
   });
 
   it('re-pins only to the PROVEN base-into-head merge it asked for', async () => {
@@ -416,6 +539,7 @@ describe('the auto-merge watcher', () => {
     const row = await rowFor(prC);
     expect(row.state).toBe('armed');
     expect(row.expectedHeadOid).toBe('ourmerge1');
+    expect(row.phase).toBe('awaiting_checks');
     // The move is not merged on the same tick — the new head's checks haven't even queued.
     expect(gh.mergePullRequest).not.toHaveBeenCalled();
   });
@@ -526,6 +650,7 @@ describe('the auto-merge watcher on a merge-queue repo', () => {
     expect(row.state).toBe('armed');
     expect(row.enqueuedAt).not.toBeNull();
     expect(row.lastReason).toContain('position 2');
+    expect(row.phase).toBe('queued');
   });
 
   it('waits to enqueue while required reviews are missing — and says so by name', async () => {
@@ -540,6 +665,7 @@ describe('the auto-merge watcher on a merge-queue repo', () => {
     expect(row.state).toBe('armed');
     expect(row.enqueuedAt).toBeNull();
     expect(row.lastReason).toContain('required reviews');
+    expect(row.phase).toBe('awaiting_review');
   });
 
   it("resolves 'merged' when the queue lands OUR entry (the toast is truthful)", async () => {

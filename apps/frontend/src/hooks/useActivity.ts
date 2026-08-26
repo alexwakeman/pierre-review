@@ -23,6 +23,14 @@ export const ACTIVITY_QUERY_KEYS = [
   // The default-branch strip rides the same console, so a repo add / move / sync must re-scope
   // it alongside everything else.
   'branch-status',
+  // ⚠ THESE TWO MUST STAY TOGETHER AND MUST STAY IN THIS LIST. They are one fold read twice:
+  // 'daily-brief' carries the strip's "N items need your review or reply", 'attention-cards' is
+  // the board that line CLICKS INTO, and both are getWorkspaceInsights over the same scope. Sweep
+  // one without the other (or leave them out, as this list used to) and a sync that changes the
+  // fold moves the list while the headline keeps the old number — the exact "5 items" over a
+  // board of 3 the server-side cache split fixed. Invalidated here, they refetch IN PHASE.
+  'attention-cards',
+  'daily-brief',
 ] as const;
 
 /**

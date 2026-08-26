@@ -53,6 +53,28 @@ export type FeedCiLens = 'feed' | 'only' | 'off';
 // transient (freshDefaults only, never persisted, never URL-emitted — `?report=` reads into
 // `insightsReportKey` alone), so no stored blob or link can carry a stale value anywhere.
 export type RepoConsoleTab = 'activity' | 'bots';
+// PrDetail's inner tab strip. It lives HERE, not in PrDetail's local state, because it is
+// URL-ADDRESSABLE: `?view=pr:<id>&prTab=changes` names one screen, so browser Back/Forward can
+// move between "the PR's diff" and "the PR's threads" like every other view. Which member is
+// VISIBLE is still derived per PR (bot_activity / claude_review / ai_fix are capability- or
+// data-gated) — the store holds the CHOICE, never a computed effective tab.
+export type PrDetailTab =
+  | 'overview'
+  | 'threads'
+  | 'activity'
+  | 'changes'
+  | 'bot_activity'
+  | 'claude_review'
+  | 'ai_fix';
+export const PR_DETAIL_TABS: readonly PrDetailTab[] = [
+  'overview',
+  'threads',
+  'activity',
+  'changes',
+  'bot_activity',
+  'claude_review',
+  'ai_fix',
+];
 // The all-open-PRs drill-down's scope: one repo | 'feed' (every repo in the active Workspace —
 // the Flow metrics "Open PRs" tile) | a named repo GROUP (label + the exact repo set behind it —
 // see openPrsScope).
@@ -169,6 +191,41 @@ export interface SyncRoundState {
   // semantics the modal-scope set always had); adds merge their repo id in.
   scopeIds: number[];
 }
+
+// ── The Feed's "new since you looked away" cohorts ────────────────────────────────────────────
+//
+// The cross-repo Activity Feed INSERTS newly-arrived items as they arrive (there is no
+// "New activity — Refresh" button any more: content is never withheld behind a click) and marks
+// the inserted cards "New". This slice is that marker's whole memory.
+//
+// ⚠ IT LIVES IN THE STORE, NOT IN FeedView, BECAUSE THE ACTIVITY CONSOLE UNMOUNTS ON EVERY TAB
+// SWITCH (see ACTIVITY_GC_TIME in useActivity.ts) while its query data survives 45 minutes. Held
+// in component state, every markers-clearing Timeline round-trip would silently repaint the same
+// cards as un-new — the reader would open a PR from the feed, come back, and be told nothing
+// arrived while they were away.
+//
+// It is TRANSIENT: freshDefaults() only, NOT in FilterDefaults / freshFilterDefaults /
+// pickFilterBarState / sanitizePersistedFilters, and never URL-serialized (the attentionIsolation
+// precedent above). "New to you" is a fact about THIS session's reading, so it must not be
+// restorable from a stale blob — and consequently no FILTER_STORAGE_VERSION bump is owed for it.
+export interface FeedNewCohorts {
+  // The feed scope (`ws:<id>` + the feed's own query string) these cohorts were collected under.
+  // A scope change discards them wholesale: an item id from another workspace's — or another
+  // lens' — stream says nothing about what is new in this one.
+  scopeKey: string | null;
+  // One entry per auto-inserted BATCH, oldest first.
+  //
+  // ⚠ `seen` IS A COHORT-LEVEL FACT, NOT A PER-CARD ONE. There is deliberately no per-card
+  // visibility observer (the SPA's only IntersectionObservers are bottom-of-list auto-load
+  // sentinels, and a feed of markdown-heavy cards is the last place to add one per row): being
+  // at — or near — the TOP of the feed is what counts as having seen what is at the top of it.
+  cohorts: { ids: string[]; seen: boolean }[];
+}
+
+// How many unseen cohorts to remember. A reader who never returns to the top of the feed would
+// otherwise accumulate one entry per poll for as long as the tab lives; past this many batches
+// "what's new" has stopped being a useful answer anyway, so the oldest fall off.
+const FEED_NEW_COHORT_LIMIT = 8;
 
 /** The actions SyncStatus registers so other surfaces (the manager) can drive the round. */
 export interface SyncRoundActions {
@@ -306,18 +363,32 @@ export interface FilterState {
   feedCiLens: FeedCiLens;
   // Activity "Feed" single-PR isolation: null (default) → every PR in scope; a pr id →
   // the consolidated Feed shows ONLY that PR's items. Driven by the Feed "open PRs" panel.
-  // Transient, URL-silent (like the other feed toggles); cleared on rail / scope changes.
+  // Transient (never persisted); cleared on rail / scope changes.
+  //
+  // ⚠ URL-SERIALIZED (`?feedPr=<id>`) and a NAVIGATION key, for the same reason as
+  // `attentionIsolation`: it is a whole screen the user navigated TO, so Back must be able to
+  // leave it. URL-visible ≠ persisted — a fresh tab still opens the un-isolated feed.
   feedIsolatedPrId: number | null;
   // Activity "Needs attention" single-KIND isolation: null (default) → every attention card in
   // scope; an InsightKind → the board shows ONLY that kind. Set by the daily brief's lines, each
   // of which is ABOUT one kind ("3 PRs stalled awaiting review" → the stalled cards), so the
-  // number the user clicked and the list they land on are the same population. Transient,
-  // URL-silent (like feedIsolatedPrId); cleared on rail / scope changes.
+  // number the user clicked and the list they land on are the same population. Cleared on rail /
+  // scope changes.
   //
   // ⚠ It is NOT in FilterDefaults / freshFilterDefaults / pickFilterBarState — a lens set by one
   // click of a brief line is not a standing preference, so it must not persist or need a
   // FILTER_STORAGE_VERSION bump. It lives in freshDefaults() only.
+  //
+  // ⚠ IT IS, HOWEVER, URL-SERIALIZED (`?attn=<kind>`) and it is a NAVIGATION key: clicking a
+  // brief line is the one gesture that takes a reader from "the board" to "this narrowed board",
+  // and before it was addressable the browser's Back left the app entirely (the reader's actual
+  // complaint). URL-visible and PERSISTED are different questions — a link may name the narrowed
+  // board; a fresh tab must not restore it from a stale blob. See hooks/useUrlState.
   attentionIsolation: InsightKind | null;
+  // The cross-repo Feed's "New" markers — see FeedNewCohorts above. Transient, URL-silent,
+  // and written ONLY by FeedView's auto-insert path (a batch landed) and its scroll handler
+  // (the reader is at the top). Read as a flat id set; never recomputed defensively on render.
+  feedNewCohorts: FeedNewCohorts;
   // The rolling window the Bot-ROI panel (Insights) reports over. Transient, URL-silent
   // (like feedBotLens) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
@@ -334,6 +405,11 @@ export interface FilterState {
   // (the bot object is keyed per WORKSPACE now, and a repo belongs to exactly one). BotsView's
   // effectiveTab fallback still owns any degradation ('advisor' is capability-gated — the
   // derived-effective-tab rule). Transient, URL-silent.
+  //
+  // ⚠ URL-SERIALIZED (`?botsTab=advisor|settings`, the 'roi' default omitted) and a NAVIGATION
+  // key, but ONLY alongside `activityRepo=bots` — the cross-repo Bots rail, where the strip is on
+  // screen. The per-repo console's Bots tab shares this scalar and does NOT emit it; a sub-tab
+  // that is not visible is not a view. Still transient: URL-visible ≠ persisted.
   botsInnerTab: 'roi' | 'advisor' | 'settings';
   // The Advisor tab's one-shot focus, set by the Tune/Drop pills on the Bots table: which
   // bot the advisor should open on, and with what intent ('tune' = its tuning findings,
@@ -357,7 +433,21 @@ export interface FilterState {
   // Themes instead of restoring it when the capability returns. Being transient (freshDefaults
   // only, never persisted, never URL-parsed) a stale value cannot outlive the session, which is
   // why removing 'compare' from the union needs no migration.
+  //
+  // ⚠ URL-SERIALIZED (`?feedTab=themes`, the 'feed' default omitted) and a NAVIGATION key, but
+  // ONLY alongside the cross-repo Feed rail entry, where the strip is on screen. The READ seats
+  // this RAW value; the derived-effective-tab rule above is unchanged — a URL naming 'themes' on
+  // an account without the capability must not be written back as a correction.
   feedInnerTab: 'feed' | 'themes';
+  // Which inner tab the PR-detail overlay shows (see PrDetailTab), PAIRED WITH THE PR IT BELONGS
+  // TO. null = nothing chosen yet → 'overview'.
+  //
+  // ⚠ THE PAIR IS THE POINT. This is a GLOBAL field read by a component mounted per PR, i.e. the
+  // `threadStateFilter` trap: a bare scalar would carry the tab you left PR #1 on into PR #2, so
+  // "open a PR from the feed" could land on someone else's diff. PrDetail reads it only when
+  // `prDetailTab.prId === prId`, and `writeToUrl` emits `?prTab=` only when the pair names the
+  // ACTIVE pr-detail tab. Transient (freshDefaults only — never persisted), URL-serialized.
+  prDetailTab: { prId: number; tab: PrDetailTab } | null;
   // The ad-hoc "Ask about the sprint" chat's LIVE state, lifted here so it survives the Insights
   // panel unmounting (e.g. clicking a PR then returning) — the mutation result lives in
   // component state and would otherwise be lost. `draft` = the in-progress question + toggles.
@@ -673,6 +763,46 @@ export interface FilterState {
   // `setActivityRepo('attention')` FIRST and this SECOND. The same rule the PR-detail /
   // bot-only-PRs "Show in Activity feed" buttons follow for `setFeedIsolatedPrId`.
   setAttentionIsolation: (kind: InsightKind | null) => void;
+  /**
+   * THE ONE "show me my turn — over there" navigation, in ONE gesture.
+   *
+   * Used by the Welcome-back banner's per-workspace lines: the whole point of that banner is that
+   * it names work sitting in a workspace you are NOT currently in, so a click has to change scope
+   * AND land on the list it named. It exists as a store action rather than a closure in the
+   * banner because the sequence below is order-sensitive in two independent ways and every extra
+   * spelling of it is a chance to get one of them wrong.
+   *
+   * ⚠ SCOPE FIRST, RAIL SECOND, ISOLATION LAST:
+   *  1. `setWorkspace` clears `repoIds` / `feedIsolatedPrId` / `attentionIsolation` — so any
+   *     isolation set before it is wiped. `repoIds: null` is load-bearing twice over: it shows all
+   *     of the DESTINATION workspace (a subset belongs to the one being left), and it keeps
+   *     `useWorkspaceSync`'s case-2 branch from issuing a SECOND `setWorkspace` on the next effect
+   *     tick, which would wipe the isolation seated in step 3.
+   *  2. `setActivityRepo` also clears the isolation, AND early-returns an empty patch when the
+   *     rail id is unchanged — the asymmetry that makes a wrong-ordered caller work on every
+   *     second click. (Pinned by attentionIsolation.test.ts.)
+   *  3. Only then is the lens seated.
+   *
+   * ⚠ The workspace write is SKIPPED when we are already there. Re-writing the same id would
+   * throw away a repo narrowing the user chose on the Timeline for no reason at all.
+   */
+  openMyTurnInWorkspace: (workspaceId: number) => void;
+  /**
+   * Record ONE auto-inserted batch of feed items as a "new" cohort, under `scopeKey`.
+   *
+   * This is also the ONLY place markers are removed, and the removal rule is the product one:
+   * a cohort the reader has already SEEN clears WHOLESALE the moment more content arrives —
+   * "new" then means the batch that just landed. A cohort they never saw SURVIVES the next
+   * batch: it is still news to them, and silently dropping it would hide exactly the content
+   * the marker exists to point at.
+   *
+   * `atTop` is the reader's scroll position AT THE MOMENT THE BATCH LANDED. Landing at the top
+   * means the cards arrived in front of their eyes, so the cohort is born seen — it still shows
+   * its marker, it just clears on the NEXT batch like any other.
+   */
+  pushFeedNewCohort: (scopeKey: string, ids: string[], atTop: boolean) => void;
+  /** Credit every live cohort as seen — the reader is at (or near) the top of the feed. */
+  markFeedNewCohortsSeen: (scopeKey: string) => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
   // Switch the Bots view's inner sub-tab (ROI / experimental Behaviour / Themes / Settings).
@@ -682,6 +812,11 @@ export interface FilterState {
   focusAdvisor: (botKey: string, intent: 'tune' | 'drop') => void;
   clearAdvisorFocus: () => void;
   setFeedInnerTab: (v: 'feed' | 'themes') => void;
+  /**
+   * Seat PrDetail's inner tab FOR ONE PR (see prDetailTab). Always call it with the prId the
+   * component is rendering — the pair is what keeps one PR's tab out of another's.
+   */
+  setPrDetailTab: (prId: number, tab: PrDetailTab) => void;
   // Persist the ad-hoc chat's live draft + conversation across Insights remounts.
   setSprintChatDraft: (
     patch: Partial<{ question: string; wantChart: boolean; wantBots: boolean }>,
@@ -941,7 +1076,7 @@ type FilterDefaults = Pick<
 
 // Single source of truth for the filter defaults; array defaults are rebuilt per
 // call so callers never share a mutable reference.
-function freshFilterDefaults(): FilterDefaults {
+export function freshFilterDefaults(): FilterDefaults {
   return {
     // null = every repo in the ACTIVE WORKSPACE (see FilterState.repoIds). The URL serializer
     // diffs against this, so a fresh load stays clean (no repos= param).
@@ -1094,10 +1229,13 @@ function freshDefaults(): FilterData {
     feedShowCommits: false,
     feedIsolatedPrId: null,
     attentionIsolation: null,
+    // No batch has landed yet — a freshly-opened feed is all equally new, so nothing is marked.
+    feedNewCohorts: { scopeKey: null, cohorts: [] },
     botAnalyticsWindow: 'rolling_14',
     botsInnerTab: 'roi',
     advisorFocus: null,
     feedInnerTab: 'feed',
+    prDetailTab: null,
     sprintChatDraft: { question: '', wantChart: false, wantBots: false },
     sprintChatThreads: {},
     selectedPrId: null,
@@ -1148,6 +1286,51 @@ function freshDefaults(): FilterData {
     },
     managerOpen: false,
     claudeReviewKickoff: 0,
+  };
+}
+
+// ── The URL-OWNED slice: state the query string names that is NOT a persisted filter ─────────
+//
+// `FilterDefaults` answers "what does Clear filters reset / what is persisted"; this answers a
+// different question the URL layer alone needs: **which keys must a browser Back RESET when the
+// popped URL does not mention them?** `readFromUrl` is PARTIAL by design (an absent param sets
+// nothing), which is right on a cold load — the store starts at defaults — and WRONG on a pop,
+// where the previous view's value would otherwise stay seated (Back off a narrowed attention
+// board would keep the narrowing). So `applyUrlToStores` resets exactly these before applying the
+// patch (see hooks/useUrlState).
+//
+// ⚠ It is deliberately NOT `freshDefaults()`: that would also wipe `sprintChatThreads`,
+// `syncRound`, `repoConsoleTabs` and every drill-down seed — transient state the URL never
+// serialized and therefore cannot restore.
+// ⚠ `workspaceId` is NOT here either. Writing `null` means "not resolved yet", which stops every
+// workspace-scoped surface from rendering and re-triggers the workspace-sync effect; the pop
+// handler preserves the live id when the URL names none.
+export type UrlOwnedState = Pick<
+  FilterData,
+  | 'activityRepoId'
+  | 'insightsReportKey'
+  | 'selectedPrId'
+  | 'selectedThreadId'
+  | 'attentionIsolation'
+  | 'feedIsolatedPrId'
+  | 'prDetailTab'
+  | 'feedInnerTab'
+  | 'botsInnerTab'
+>;
+
+/** The fresh values of the URL-owned keys — read off freshDefaults() so the two cannot drift. */
+export function freshUrlOwnedDefaults(): UrlOwnedState {
+  const d = freshDefaults();
+  return {
+    activityRepoId: d.activityRepoId,
+    insightsReportKey: d.insightsReportKey,
+    selectedPrId: d.selectedPrId,
+    selectedThreadId: d.selectedThreadId,
+    attentionIsolation: d.attentionIsolation,
+    feedIsolatedPrId: d.feedIsolatedPrId,
+    prDetailTab: d.prDetailTab,
+    feedInnerTab: d.feedInnerTab,
+    botsInnerTab: d.botsInnerTab,
   };
 }
 
@@ -1215,12 +1398,60 @@ export const useFilters = create<FilterState>((set, get) => ({
   // ⚠ Callers switching rail AND isolating must call setActivityRepo('attention') FIRST — see
   // the setter's declaration comment (setActivityRepo clears this, and no-ops when unchanged).
   setAttentionIsolation: (kind) => set({ attentionIsolation: kind }),
+  // See the declaration above for the two ordering traps this sequence exists to encapsulate.
+  // It deliberately calls the PUBLIC setters rather than one fused `set({...})`: a fused write
+  // would be a second definition of what a workspace switch clears, free to drift from
+  // `setWorkspace`'s.
+  openMyTurnInWorkspace: (workspaceId) => {
+    const s = get();
+    if (s.workspaceId !== workspaceId) s.setWorkspace(workspaceId, null);
+    // The banner can be clicked from the Timeline, a drill-down tab, anywhere — so the console
+    // has to be brought forward before the rail inside it means anything.
+    usePinnedTabs.getState().showActivity();
+    s.setActivityRepo('attention');
+    s.setAttentionIsolation('my_turn');
+  },
+  pushFeedNewCohort: (scopeKey, ids, atTop) =>
+    set((s) => {
+      if (ids.length === 0) return {};
+      // A scope change (workspace, lens, "show commits", …) invalidates every remembered id.
+      const prev = s.feedNewCohorts.scopeKey === scopeKey ? s.feedNewCohorts.cohorts : [];
+      const next = [...prev.filter((c) => !c.seen), { ids, seen: atTop }];
+      return {
+        feedNewCohorts: {
+          scopeKey,
+          cohorts:
+            next.length > FEED_NEW_COHORT_LIMIT
+              ? next.slice(next.length - FEED_NEW_COHORT_LIMIT)
+              : next,
+        },
+      };
+    }),
+  markFeedNewCohortsSeen: (scopeKey) =>
+    set((s) => {
+      const st = s.feedNewCohorts;
+      // Called from a scroll handler, so the no-change case must be an EMPTY patch — a fresh
+      // object every scroll event would re-render every subscriber of this slice.
+      if (st.scopeKey !== scopeKey || st.cohorts.every((c) => c.seen)) return {};
+      return {
+        feedNewCohorts: {
+          scopeKey: st.scopeKey,
+          cohorts: st.cohorts.map((c) => (c.seen ? c : { ...c, seen: true })),
+        },
+      };
+    }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setBotsInnerTab: (v) => set({ botsInnerTab: v }),
   focusAdvisor: (botKey, intent) =>
     set({ advisorFocus: { botKey, intent }, botsInnerTab: 'advisor' }),
   clearAdvisorFocus: () => set({ advisorFocus: null }),
   setFeedInnerTab: (v) => set({ feedInnerTab: v }),
+  setPrDetailTab: (prId, tab) =>
+    set((s) =>
+      s.prDetailTab?.prId === prId && s.prDetailTab.tab === tab
+        ? {}
+        : { prDetailTab: { prId, tab } },
+    ),
   setSprintChatDraft: (patch) =>
     set((s) => ({ sprintChatDraft: { ...s.sprintChatDraft, ...patch } })),
   appendSprintChatTurn: (scope, turn) =>

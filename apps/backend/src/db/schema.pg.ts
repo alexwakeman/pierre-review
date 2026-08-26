@@ -574,6 +574,24 @@ export const autoMergeRequests = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
     lastCheckedAt: timestamp('last_checked_at', { withTimezone: true, mode: 'date' }),
     lastReason: text('last_reason'),
+    // shared ArmedMergePhase — the machine-readable half of `lastReason`. See the sqlite twin
+    // for why terminal outcomes stay on `state` and why null is a legitimate value.
+    phase: text('phase', {
+      enum: [
+        'pending_first_check',
+        'waiting_conflicts',
+        'waiting_behind',
+        'updating_rebase',
+        'updating_merge',
+        'awaiting_checks',
+        'awaiting_review',
+        'blocked_protection',
+        'enqueuing',
+        'queued',
+        'merging',
+        'retrying',
+      ],
+    }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),

@@ -22,7 +22,10 @@ import { myTurnCapDisclosure, type MyTurnCapDisclosure } from './AttentionView.j
 // figure that drops the reader on an undifferentiated board is a figure with no list behind it.
 // The my-turn line used to be worse than that: it flipped a Feed pill sitting below three
 // panels, through a setter that no-ops when the rail is already 'feed' — a click with no
-// observable effect at all.
+// observable effect at all. The "Elsewhere" lines obey the same rule ACROSS workspaces, through
+// `openMyTurnInWorkspace` — the one action the Welcome-back banner's lines use, so the app's two
+// cross-workspace surfaces behave identically. (A bare `setWorkspace` here half-navigated: it
+// changed scope and left the reader on that workspace's Feed, not on the cards it counted.)
 //
 // FREE = the templated count lines (counts from GET /api/daily-brief — every figure is the
 // owning surface's own fold). PRO (`activityDigest`) = the synthesis seam's ORDERING mode
@@ -95,7 +98,8 @@ export function BriefStrip(): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
   const setAttentionIsolation = useFilters((s) => s.setAttentionIsolation);
-  const setWorkspace = useFilters((s) => s.setWorkspace);
+  // The cross-workspace "Elsewhere" lines navigate through this one action — see the button.
+  const openMyTurnInWorkspace = useFilters((s) => s.openMyTurnInWorkspace);
   const openBotThreadsTab = usePinnedTabs((s) => s.openBotThreadsTab);
   const openBotDetailTab = usePinnedTabs((s) => s.openBotDetailTab);
   const { botDepth } = useProCapabilities();
@@ -347,11 +351,17 @@ export function BriefStrip(): JSX.Element | null {
                     <li key={w.workspaceId} className="min-w-0">
                       <button
                         type="button"
-                        // A workspace switch re-scopes everything (repoIds reset to the whole
-                        // workspace — the setWorkspace contract); the Feed then shows that
-                        // workspace's own brief.
-                        onClick={() => setWorkspace(w.workspaceId, null)}
-                        title={phrase ?? `Switch to ${w.name}`}
+                        // ⚠ THE SAME GESTURE AS THE WELCOME-BACK BANNER'S LINE, and therefore the
+                        // same store action. This line names work sitting in a workspace you are
+                        // not in, so a click has to change scope AND land on the list it named: a
+                        // bare `setWorkspace` re-scoped everything and then dropped the reader on
+                        // that workspace's FEED, leaving them to find the cards this line just
+                        // counted. `openMyTurnInWorkspace` does the whole ordered sequence —
+                        // scope, then console, then the `my_turn` isolation (two independent
+                        // ordering traps live in its declaration) — and it is one gesture, so one
+                        // Back undoes it.
+                        onClick={() => openMyTurnInWorkspace(w.workspaceId)}
+                        title={phrase ?? `Show what needs you in ${w.name}`}
                         className="w-full truncate text-left text-gray-500 hover:text-gray-700 hover:underline dark:text-gray-400 dark:hover:text-gray-200"
                       >
                         <span className="font-medium">{w.name}</span>: {bits.join(' · ')}

@@ -6,24 +6,83 @@ import {
   DEFAULT_CATEGORIES,
   DEFAULT_PR_STATUSES,
   DEFAULT_REVIEW_STATES,
+  PR_DETAIL_TABS,
+  freshFilterDefaults,
+  freshUrlOwnedDefaults,
   pickFilterBarState,
   pickScopeState,
   sanitizePersistedFilters,
   sanitizePersistedScope,
   useFilters,
   type FilterState,
+  type PrDetailTab,
   type RangePreset,
 } from '../store/filters.js';
 import {
   DERIVED_STATES,
   type DerivedState,
   type EventCategory,
+  type InsightKind,
   type PrStatus,
   type ReviewState,
 } from '@pierre-review/shared';
-import { usePinnedTabs } from '../store/pinnedTabs.js';
+import {
+  parseBotDetailKey,
+  parseTabKey,
+  parseUserActivityKey,
+  usePinnedTabs,
+  type ActiveTab,
+} from '../store/pinnedTabs.js';
 
 const PRESETS: RangePreset[] = ['7d', '14d', '30d', '90d', 'custom'];
+// The attention board's isolation kinds. A local list because `InsightKind` ships no runtime
+// array; the URL is hand-editable, so an unknown value must seat nothing rather than narrow the
+// board to a kind no card has.
+const INSIGHT_KINDS: readonly InsightKind[] = [
+  'my_turn',
+  'stalled_review',
+  'untouched_thread',
+  'reviewer_load',
+  'reviewer_routing',
+  'bot_signal',
+  'bot_only_review',
+];
+
+/**
+ * THE NAVIGATION KEYS — the whole push-vs-replace rule, in one list.
+ *
+ * A change to any of these is a NAVIGATION: the user is now looking at a different VIEW, so it
+ * gets its own history entry (`pushState`) and a browser Back returns to the previous one.
+ * Everything else the serializer emits — a filter, a range, a search, a PR/thread SELECTION — is
+ * a refinement OF the current view and REPLACES the entry, because a Back that walks backwards
+ * through every pill click is a per-keystroke undo stack, not navigation.
+ *
+ * ⚠ Decided by DIFFING the URL, never by a `push: true` argument threaded through call sites. The
+ * serializer runs from an un-debounced store subscription that fires on EVERY write (transient
+ * signal bumps included), so a per-write push would blow Safari's ~100-entries/30s limit; and a
+ * per-caller flag is exactly the kind of thing the 15th caller forgets. Adding a key here is one
+ * decision in one place.
+ *
+ * ⚠ `pr`/`thread` are deliberately ABSENT. Clicking through PR bars on the board is a selection —
+ * historying it would stack an entry per click, and the DetailPane is a pane on the board, not a
+ * view of its own. Opening a PR as a TAB is a different gesture and shows up here as `view`.
+ *
+ * ⚠ `report` is ABSENT TOO, and for a sharper reason: `PeriodReportsPanel` AUTO-SEATS the newest
+ * period whenever the selection is empty or names a period the list doesn't have. As a nav key
+ * that effect would fight the Back button — the pop lands on a URL with no `report`, the effect
+ * immediately re-seats one and PUSHES, and the reader is shoved forward onto the entry they just
+ * left. A key an effect owns is a refinement, not a navigation.
+ */
+const NAV_KEYS = [
+  'view',
+  'workspace',
+  'activityRepo',
+  'attn',
+  'feedPr',
+  'feedTab',
+  'botsTab',
+  'prTab',
+] as const;
 
 function sameSet(a: readonly string[], b: readonly string[]): boolean {
   if (a.length !== b.length) return false;
@@ -108,13 +167,31 @@ function namesId(p: URLSearchParams, key: string): boolean {
  * Anything else in `view=` — a stale spelling, a hand-edited value — falls through to the
  * inference and then to Activity, the right normalization for a destination that no longer exists.
  *
+ * `view=` NAMES TABS TOO, not just the two boards, and the spelling is the `Tab.key` VERBATIM
+ * (`pr-detail:123`, `pr-focus:123`, `user-activity:45`, `bot-detail:45`) — one vocabulary, not a
+ * URL dialect that has to be kept in sync with the store's. Those four kinds are SELF-DESCRIBING:
+ * the key alone reconstructs the tab, so a link to one works in a browser that has never seen it
+ * (`applyUrlTab` re-creates it). The seed-backed drill-downs (`bot-flagging`, `people-report`,
+ * `search`, …) are NOT named by any URL: their identity lives in transient in-memory seeds, and a
+ * restored seed could name a tile the strip no longer shows or people this workspace no longer
+ * has. They stay ephemeral, and a URL landing on one resolves to Activity — which is exactly what
+ * the unknown-value rule below already does.
+ *
  * Exported for its unit test — see test/landingTab.test.ts.
  */
-export function landingTabFromUrl(search: string): 'timeline' | 'activity' {
+export function landingTabFromUrl(search: string): ActiveTab {
   const p = new URLSearchParams(search);
   const view = p.get('view');
   if (view === 'timeline') return 'timeline';
   if (view === 'activity') return 'activity';
+  if (
+    view != null &&
+    (parseTabKey(view) != null ||
+      parseUserActivityKey(view) != null ||
+      parseBotDetailKey(view) != null)
+  ) {
+    return view;
+  }
   if (namesId(p, 'pr') || namesId(p, 'thread')) return 'timeline';
   return 'activity';
 }
@@ -232,6 +309,42 @@ export function readFromUrl(): Partial<FilterState> {
     }
   }
 
+  // The "Needs attention" board's single-KIND isolation — the daily brief's lines. THE reason
+  // this key exists: a reader clicks "3 PRs stalled awaiting review", lands on a narrowed board,
+  // and presses Back. Before the board AND its narrowing were both addressable, that Back left
+  // the app entirely, because the whole session had exactly one history entry.
+  const attn = p.get('attn');
+  if (attn && (INSIGHT_KINDS as readonly string[]).includes(attn)) {
+    out.attentionIsolation = attn as InsightKind;
+  }
+  // The Feed's single-PR isolation — the attention board's twin, addressable for the same reason.
+  const feedPr = p.get('feedPr');
+  if (feedPr) {
+    const n = Number.parseInt(feedPr, 10);
+    if (Number.isFinite(n)) out.feedIsolatedPrId = n;
+  }
+  // The two Activity sub-tab strips. ⚠ THE RAW CHOICE IS SEATED HERE, never a corrected one:
+  // both consumers DERIVE a visible tab from the capabilities they can see (BotsView's
+  // `effectiveTab`, ActivityView's `effectiveFeedTab`), and writing a correction back would
+  // permanently forget a choice the moment a capability blinked.
+  const feedTab = p.get('feedTab');
+  if (feedTab === 'themes' || feedTab === 'feed') out.feedInnerTab = feedTab;
+  const botsTab = p.get('botsTab');
+  if (botsTab === 'roi' || botsTab === 'advisor' || botsTab === 'settings') {
+    out.botsInnerTab = botsTab;
+  }
+  // PrDetail's inner tab, and it is only meaningful PAIRED with the PR tab `view=` names — the
+  // store field is a {prId, tab} pair precisely so one PR's tab cannot be read on another's
+  // screen. A `?prTab=` with no PR view (or on a `pr-focus`, which renders a timeline) seats
+  // nothing rather than arming a pair for a PR nobody is looking at.
+  const prTab = p.get('prTab');
+  if (prTab && (PR_DETAIL_TABS as readonly string[]).includes(prTab)) {
+    const viewed = parseTabKey(p.get('view') ?? '');
+    if (viewed?.kind === 'pr-detail') {
+      out.prDetailTab = { prId: viewed.prId, tab: prTab as PrDetailTab };
+    }
+  }
+
   // Reports deep link: `?report=<periodKey>` names the period being read. Paired with
   // `?activityRepo=insights` above — either alone is a half-link, which is why they landed together.
   // (This used to also seed the Insights SUB-TAB; that apparatus is gone — the pane is
@@ -242,6 +355,89 @@ export function readFromUrl(): Partial<FilterState> {
   }
 
   return out;
+}
+
+// ── Three module-level flags, deliberately NOT store fields: each describes how a write REACHED
+// the app (or how the next one should reach the browser), not anything the app renders.
+//
+// `replaceNextWrite` — armed by `markUrlCorrection()` (below) for a write that is a CORRECTION
+// rather than a navigation. `applyingUrl` — true while the URL is being applied TO the stores, so
+// the subscriptions do not turn a pop into a fresh history entry. `restoredScopeWorkspaceId` —
+// see `consumeRestoredWorkspaceScope`.
+let replaceNextWrite = false;
+let applyingUrl = false;
+let restoredScopeWorkspaceId: number | null = null;
+
+/**
+ * "This workspace id arrived FROM THE ADDRESS BAR, and it brought its own `?repos=` with it."
+ *
+ * ⚠ THE BUG THIS EXISTS FOR: a Back across a workspace switch used to lose `repoIds`, and only
+ * `repoIds`. The pop seats the popped URL's narrowing correctly, and then `useWorkspaceSync` sees
+ * the workspace id differ from its ref, reads that as "the user switched workspace" and re-derives
+ * — `setWorkspace(id, null)` — widening the board straight back to the whole workspace. Every other
+ * key in the bundle (`workspace`, `activityRepo`, `attn`, `feedPr`) round-tripped; the reader
+ * watched Back restore the view and then un-narrow it a tick later.
+ *
+ * A CHANGE OF WORKSPACE IS NOT ALWAYS A SWITCH, and the two need telling apart at the one place
+ * that acts on the difference. So `applyUrlToStores` arms this marker — SYNCHRONOUSLY, inside the
+ * same call that hydrates the stores — whenever the applied URL named BOTH a workspace and a repo
+ * narrowing, and `useWorkspaceSync` consumes it in its "changed" branch to take the PRUNE path
+ * instead of the REPLACE one.
+ *
+ * ⚠ It is KEYED ON THE WORKSPACE ID and ONE-SHOT, both to stop it leaking onto a later, genuine
+ * switch: a caller asking about a different workspace gets `false` and the marker stays put for the
+ * workspace it actually describes, and the first matching read clears it. Every subsequent
+ * `applyUrlToStores` re-arms it from scratch (to null when that URL carries no narrowing), so a
+ * marker no effect ever consumed dies at the next pop rather than lingering for the session.
+ *
+ * Exported for `useWorkspaceSync` (components/WorkspaceSelector.tsx) and its unit test.
+ */
+export function consumeRestoredWorkspaceScope(workspaceId: number): boolean {
+  if (restoredScopeWorkspaceId !== workspaceId) return false;
+  restoredScopeWorkspaceId = null;
+  return true;
+}
+
+/**
+ * "The next store write is a CORRECTION, not a navigation — REPLACE the history entry."
+ *
+ * For the one shape of write that changes a navigation key without the user having navigated:
+ * the deep-link effects that seat a tab as a view OPENS (PrDetail forcing Threads because the
+ * feed row that opened it named a thread). Those fire one tick after the open that already
+ * pushed, so without this the reader's first Back lands on the same PR at Overview — an entry
+ * nobody asked for, between them and the feed they came from.
+ *
+ * Consumed by the very next `writeToUrl`, whether or not it changes anything.
+ */
+export function markUrlCorrection(): void {
+  replaceNextWrite = true;
+}
+
+// ── ONE URL WRITE PER GESTURE ────────────────────────────────────────────────────────────────
+//
+// ⚠ THE SERIALIZER MUST NOT RUN PER STORE WRITE, now that a navigation-key change PUSHES. One
+// user gesture is routinely several store writes: the Welcome-back banner's line is
+// `setWorkspace` → `showActivity` → `setActivityRepo` → `setAttentionIsolation`, each of which
+// moves a different navigation key. Written straight through, that single click would stack FOUR
+// history entries and the reader would need four Backs to leave the board they just opened —
+// which is the same "Back doesn't work" complaint from the other direction.
+//
+// Coalescing into a MICROTASK fixes it structurally: every store write inside one handler lands
+// before the flush, so the URL is computed once, from the final state, and the diff sees the
+// whole gesture. (It also stops the un-debounced subscription from serializing on transient
+// signal bumps.) Effects that run in a LATER task are genuinely separate writes — that is what
+// `markUrlCorrection` is for.
+let writeScheduled = false;
+function scheduleUrlWrite(): void {
+  // ⚠ Checked HERE, synchronously, not inside the microtask: `applyingUrl` is already false by
+  // the time a queued callback runs, so a pop's own store notification would sail through and
+  // re-write (or re-push) the URL the user just went back to.
+  if (applyingUrl || writeScheduled) return;
+  writeScheduled = true;
+  queueMicrotask(() => {
+    writeScheduled = false;
+    writeToUrl(useFilters.getState());
+  });
 }
 
 /** Exported for its unit test only — see test/feedCiFailuresToggle.test.ts. */
@@ -308,6 +504,24 @@ export function writeToUrl(s: FilterState): void {
     p.set('view', 'timeline');
   } else if (activeTab === 'activity') {
     p.set('view', 'activity');
+    // The board's own narrowings, each emitted ONLY on the rail entry that renders it — a lens
+    // that is not on screen is not part of the view, and a `?feedTab=` riding along on the
+    // attention board would be inert noise in every link the app produces.
+    if (s.activityRepoId === 'attention' && s.attentionIsolation) {
+      p.set('attn', s.attentionIsolation);
+    }
+    if (
+      s.feedIsolatedPrId != null &&
+      (s.activityRepoId === 'feed' || typeof s.activityRepoId === 'number')
+    ) {
+      p.set('feedPr', String(s.feedIsolatedPrId));
+    }
+    if (s.activityRepoId === 'feed' && s.feedInnerTab !== 'feed') {
+      p.set('feedTab', s.feedInnerTab);
+    }
+    if (s.activityRepoId === 'bots' && s.botsInnerTab !== 'roi') {
+      p.set('botsTab', s.botsInnerTab);
+    }
     // A single-repo console and the CORE Bots / "Needs attention" consoles are deep-linkable,
     // and so is 'insights' — it is a landing default AND a real destination, and omitting it
     // made the period report's `?report=` link land on the Feed.
@@ -329,18 +543,70 @@ export function writeToUrl(s: FilterState): void {
       // `?report=` on the Feed would be inert noise in every link the app produces.
       if (s.insightsReportKey) p.set('report', s.insightsReportKey);
     }
+  } else if (
+    parseTabKey(activeTab) != null ||
+    parseUserActivityKey(activeTab) != null ||
+    parseBotDetailKey(activeTab) != null
+  ) {
+    // A SELF-DESCRIBING tab: the key IS the address (see landingTabFromUrl). Emitted verbatim so
+    // a PR read full-screen, a contributor's feed and a bot's depth each have their own URL —
+    // which is what makes Back out of them (and a refresh back INTO them) work at all.
+    p.set('view', activeTab);
+    const viewedPr = parseTabKey(activeTab);
+    // PrDetail's inner tab, only for the PR actually on screen and only when it is not the
+    // 'overview' default — the diff-against-defaults rule every other key follows.
+    if (
+      viewedPr?.kind === 'pr-detail' &&
+      s.prDetailTab != null &&
+      s.prDetailTab.prId === viewedPr.prId &&
+      s.prDetailTab.tab !== 'overview'
+    ) {
+      p.set('prTab', s.prDetailTab.tab);
+    }
   }
-  // Every other `activeTab` is a pinned or ephemeral TAB, not a board — a PR detail, a
-  // drill-down, a report — and none of them is URL-addressable (pinned PR tabs live in
-  // localStorage; the drill-downs are deliberately ephemeral). So `view` is simply omitted, and
-  // a refresh from one lands on Activity per the rule above. That is the intended reading: the
-  // tab itself is restored into the tab bar, it just isn't what the app opens onto.
+  // Every remaining `activeTab` is a SEED-BACKED drill-down — the ML-strip flagging list, the
+  // People report, a search — whose identity lives in an in-memory seed that is deliberately
+  // never persisted (a restored one could name a tile the strip no longer shows). So `view` is
+  // omitted, which is itself a distinct URL, and both a refresh and a Forward onto it resolve to
+  // Activity rather than to a broken drill-down. The tab is still in the tab bar; it just isn't
+  // what the app opens onto.
 
   const qs = p.toString();
   const next = `${window.location.pathname}${qs ? `?${qs}` : ''}`;
-  if (next !== window.location.pathname + window.location.search) {
-    window.history.replaceState(null, '', next);
+  // ⚠ CONSUMED FIRST, unconditionally — a marker left armed by a write that changed nothing would
+  // silently swallow the NEXT real navigation's history entry.
+  const correction = replaceNextWrite;
+  replaceNextWrite = false;
+  if (next === window.location.pathname + window.location.search) return;
+
+  const prev = new URLSearchParams(window.location.search);
+  const changedNav = NAV_KEYS.some((k) => prev.get(k) !== p.get(k));
+  // ⚠ THE FIRST WORKSPACE RESOLUTION IS NOT A NAVIGATION — `useWorkspaceSync` writes the account's
+  // Default within ~1s of every load, stamping BOTH `workspace` and `view` onto a bare URL, and
+  // pushing that would burn the user's first Back on an entry they never navigated to. But it is
+  // NOT DETECTABLE HERE, and it used to be spelled as one: `prev` names no `workspace` and `p`
+  // does. That tests the URL's SHAPE, not "this is the first resolution", and it is wrong in both
+  // directions. It is FALSE during the resolution window (a navigation made before
+  // `/api/workspaces` lands emits no `workspace` either, so that one already pushed correctly),
+  // and it stays TRUE forever afterwards for any entry minted before the scope resolved: a Back
+  // onto such an entry deliberately KEEPS the live `workspaceId` (see `applyUrlToStores`), so the
+  // reader's next genuine navigation stamps `workspace` onto a workspace-less `prev`, was swallowed
+  // as a "first resolve" — and their following Back left the SPA.
+  //
+  // So the escape hatch belongs to the WRITER, which is the only place that knows: the fallback
+  // branch of `syncWorkspaceScope` (components/WorkspaceSelector.tsx) is the sole path that
+  // resolves an unresolved-or-dead workspace, and it calls `markUrlCorrection()` itself — as does
+  // the mount reconcile in `useUrlState` below. One shape of write, marked at its source.
+  if (changedNav && !correction) {
+    try {
+      window.history.pushState(null, '', next);
+      return;
+    } catch {
+      /* Safari rate-limits pushState (~100/30s) and THROWS; the address bar still has to be
+         right, so fall through to a replace rather than losing the URL entirely. */
+    }
   }
+  window.history.replaceState(null, '', next);
 }
 
 // Persist the filter-bar state across tabs/reloads. The URL stays the SHAREABLE
@@ -378,6 +644,12 @@ const FILTER_STORAGE_KEY = 'pierre:filterBarState';
 // blob written under the old default holds a literal 'feed' that no one chose. Without a
 // migration the new default would reach new installs only, and every existing user would keep
 // the noisy feed forever — the exact failure the v2→v3 note describes, in the other direction.
+//
+// ⚠ NO BUMP IS OWED for the history work that made `attn` / `feedPr` / `feedTab` / `botsTab` /
+// `prTab` URL-visible: not one of them is PERSISTED. This blob's version tracks the meaning of
+// what is STORED, and those keys are transient view state that dies with the tab — the version
+// moves only when a stored key's meaning changes, or when a default flips on a key
+// `pickFilterBarState` writes unconditionally.
 const FILTER_STORAGE_VERSION = 4;
 
 // Per-version migrations for the persisted filter blob, applied in loadPersistedFilters before
@@ -488,6 +760,80 @@ function persistScope(s: FilterState): void {
   }
 }
 
+/**
+ * APPLY THE ADDRESS BAR TO THE STORES — the read half of Back/Forward.
+ *
+ * ⚠ TOTAL, not partial. `readFromUrl` is partial by design (an absent param sets nothing), which
+ * is right on a cold load — the store starts at defaults — and WRONG here: popping off a narrowed
+ * attention board onto a URL that says nothing about `attn` would leave the narrowing standing,
+ * and the reader would watch Back change the address bar without changing the screen. So every
+ * key the URL OWNS is reset to its default first, and the patch is laid over it.
+ *
+ * ⚠ …but only those keys. Never `freshDefaults()`: that would also wipe `sprintChatThreads`,
+ * `syncRound`, `repoConsoleTabs` and every drill-down seed — transient state the URL never
+ * serialized, so a "reset" of it is pure loss.
+ *
+ * ⚠ `workspaceId` survives a URL that names none. `null` does not mean "no workspace", it means
+ * "not resolved yet": it blanks every workspace-scoped surface and re-triggers `useWorkspaceSync`
+ * into resolving Default — a silent context switch on a Back.
+ *
+ * `fromPop` reaches `applyUrlTab`, which promotes the pending feed return-item into the one-shot
+ * flash ONLY on a real Back (never on the initial load, and never on an ordinary return to
+ * Activity via its tab chip).
+ *
+ * ⚠ THE SCOPE THE URL RESTORED IS ANNOUNCED, not just hydrated. Seating `?repos=` is only half of
+ * restoring it: `useWorkspaceSync` runs a tick later, sees a workspace id it did not expect and
+ * would widen the board back to the whole workspace. Arming `restoredScopeWorkspaceId` here — in
+ * the same synchronous call, from the SAME patch that was applied — is what lets that effect tell
+ * "the URL restored a workspace that came with its own repoIds" from "the user switched workspace".
+ * See `consumeRestoredWorkspaceScope`.
+ *
+ * Exported for its unit test — see test/urlHistory.test.ts.
+ */
+export function applyUrlToStores(opts?: { fromPop?: boolean }): void {
+  applyingUrl = true;
+  try {
+    const patch = readFromUrl();
+    const liveWorkspaceId = useFilters.getState().workspaceId;
+    // Re-armed from scratch on EVERY apply, null included: a marker is a statement about the URL
+    // just applied, so a URL naming no narrowing must clear one left by an earlier pop.
+    // (`readFromUrl` already discards `?repos=` when the URL resolved no workspace, so a narrowing
+    // present here always belongs to the workspace named alongside it.)
+    restoredScopeWorkspaceId =
+      patch.workspaceId != null && patch.repoIds != null ? patch.workspaceId : null;
+    useFilters.getState().hydrate({
+      ...freshFilterDefaults(),
+      ...freshUrlOwnedDefaults(),
+      ...(patch.workspaceId == null && liveWorkspaceId != null
+        ? { workspaceId: liveWorkspaceId }
+        : {}),
+      ...patch,
+    });
+    usePinnedTabs.getState().applyUrlTab(landingTabFromUrl(window.location.search), opts);
+    // ⚠ RECONCILE THE ADDRESS BAR NOW, exactly as the cold load does (see `useUrlState` below),
+    // and for the same reason: after this call the stores hold the CANONICAL reading of the popped
+    // URL, which is not always the popped URL itself. A seed-backed drill-down entry emits no
+    // `view=` at all (its identity lives in an in-memory seed), and it drops `activityRepo` with
+    // it — both are emitted only inside the `activeTab === 'activity'` branch of `writeToUrl` — so
+    // popping onto one leaves the store saying `activity` while the address bar says nothing. The
+    // next PURE REFINEMENT (a preset, a status pill) then diffs `view` absent → `view=activity`,
+    // is read as a NAVIGATION, and PUSHES: the reader's Forward stack is destroyed and a filter
+    // click becomes a history entry — the per-click undo stack NAV_KEYS exists to prevent. A
+    // legacy `?team=<int>` lands the same way (read as `workspace`, written back as one).
+    //
+    // Doing it here, eagerly and as a REPLACE, means every later diff is measured against what the
+    // app is actually showing. It can only ever rewrite the CURRENT entry, so the forward stack is
+    // untouched; a URL that already agrees with the stores costs nothing (`writeToUrl` string-
+    // compares and returns).
+    markUrlCorrection();
+    writeToUrl(useFilters.getState());
+  } finally {
+    // Both stores notify SYNCHRONOUSLY inside set(), so the flag is already back to false by the
+    // time anything else can run — no timer, no ref-in-effect.
+    applyingUrl = false;
+  }
+}
+
 /** Two-way sync between the filter store and the URL query string + localStorage. */
 export function useUrlState(): void {
   const hydrated = useRef(false);
@@ -527,24 +873,52 @@ export function useUrlState(): void {
       // re-enter the serializer. See `landingTabFromUrl` for the rule it applies. (Unconditional
       // is safe — `activeTab` is never persisted, so a fresh load always starts at the store
       // default and there is no user choice here to overwrite.)
-      usePinnedTabs.getState().setActiveTab(landingTabFromUrl(window.location.search));
+      // `applyUrlTab`, not `setActiveTab`: a `view=` naming a PR / contributor / bot tab this
+      // browser has never seen must RE-CREATE it (a shared link, a cleared `pierre:tabs`), or
+      // every such link silently redirects to the front door. No `fromPop` — the Back-flash is
+      // for a real Back, and a fresh load has nothing pending anyway.
+      usePinnedTabs.getState().applyUrlTab(landingTabFromUrl(window.location.search));
+      // ⚠ RECONCILE THE ADDRESS BAR NOW, and as a REPLACE. A URL carrying `?workspace=5` and no
+      // `view=` (a pre-`view` link, a refresh from a seed-backed drill-down) would otherwise gain
+      // `view=activity` on whatever store write happens FIRST — and if that write is the user's
+      // first navigation, the diff blames it for a key the load introduced and pushes an entry for
+      // a screen nobody navigated to. Doing it here, eagerly, means every later diff is measured
+      // against what the app is actually showing. (Marking it a correction is what makes this one
+      // a replace; the marker is consumed by this very call, so it can never leak onto a later
+      // write.)
+      markUrlCorrection();
+      writeToUrl(useFilters.getState());
       hydrated.current = true;
     }
     // Reflect every subsequent change back into the URL and localStorage.
+    //
+    // ⚠ The URL write is SKIPPED while a pop is being applied. Rehydrating the stores from the
+    // popped URL notifies these subscriptions synchronously, and re-serializing there would write
+    // the URL we just read — at best a duplicate entry, at worst (with the push rule) a new one
+    // on top of the entry the user just went back to, so Back would never get anywhere. The
+    // localStorage halves still run: the popped state is a real state, and remembering it is
+    // right. `writeToUrl`'s string compare is the second line of defence, not the first.
     const unsub = useFilters.subscribe((s) => {
-      writeToUrl(s);
+      scheduleUrlWrite();
       persistFilters(s);
       persistScope(s);
     });
-    // The active tab (timeline / inbox / pinned PR) lives in a separate store, so
+    // The active tab (timeline / activity / a pinned PR) lives in a separate store, so
     // mirror its changes into the URL too — switching to/from the Activity tab toggles
     // `?view=activity`. Reads the current filter state for the rest of the query string.
     const unsubTabs = usePinnedTabs.subscribe(() => {
-      writeToUrl(useFilters.getState());
+      scheduleUrlWrite();
     });
+    // THE ONE popstate handler in the app. It re-reads the address bar and applies it to both
+    // stores — the browser's entry is the source of truth, so Back and Forward are symmetric.
+    // (It replaced a handler that read only store flags and never looked at the URL, which is
+    // why Forward used to change the address bar while leaving the screen where it was.)
+    const onPop = (): void => applyUrlToStores({ fromPop: true });
+    window.addEventListener('popstate', onPop);
     return () => {
       unsub();
       unsubTabs();
+      window.removeEventListener('popstate', onPop);
     };
   }, []);
 }

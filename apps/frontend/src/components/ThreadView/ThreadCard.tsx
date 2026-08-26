@@ -248,7 +248,12 @@ export function ThreadCard({
           "Comment check" panel sat. The three judgements key on three different ids (a rewrite per
           comment, validity on the root comment, addressed on the thread), so they cannot be one
           <CommentAnnotations>; ThreadCheckOutput assembles them off the same shared per-PR query.
-          Renders NOTHING — and issues no request of its own — when the thread has none. */}
+          Renders NOTHING — and issues no request of its own — when the thread has none.
+
+          COUPLED TO THE BUTTON ABOVE by the anchor, not by a prop: while a check is in flight
+          against ('thread', thread.id) this block drops the previous result for a placeholder
+          sweep, so changing the button's target without changing that would silently leave the
+          stale judgements on screen for the whole re-run. */}
       <ThreadCheckOutput thread={thread} usersById={usersById} />
 
       <div className="mt-2 space-y-1.5 pl-2 text-[11px]">

@@ -16,7 +16,8 @@ import { useMe, useProCapabilities } from '../hooks/useTriage.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { api } from '../api/client.js';
-import { useFilters } from '../store/filters.js';
+import { useFilters, type PrDetailTab } from '../store/filters.js';
+import { markUrlCorrection } from '../hooks/useUrlState.js';
 import { parseTabKey, usePinnedTabs, type PinnedPr } from '../store/pinnedTabs.js';
 import {
   buildQuotedReply,
@@ -74,14 +75,11 @@ function newSummary(n: PrDetailT['newSinceLastViewed']): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
-type Tab =
-  | 'overview'
-  | 'threads'
-  | 'activity'
-  | 'changes'
-  | 'bot_activity'
-  | 'claude_review'
-  | 'ai_fix';
+// The inner tab strip's union now lives in store/filters.ts (`PrDetailTab`), because the CHOICE
+// is URL-addressable state — `?view=pr-detail:<id>&prTab=changes` names one screen, so browser
+// Back/Forward can move between a PR's diff and its threads like any other view. The local alias
+// keeps every use site below reading the way it did.
+type Tab = PrDetailTab;
 
 // The lightweight metadata a pinned tab renders from (see store/pinnedTabs.ts).
 function pinnedMetaOf(pr: PrDetailT, usersById: Map<number, User>): PinnedPr {
@@ -638,7 +636,13 @@ export function PrDetail({
   const { data: repos } = useRepos();
   const { aiAnalysis, aiFix, claudeReview: claudeReviewEnabled } = useProCapabilities();
   const aiFixTabEnabled = aiAnalysis || aiFix;
-  const [tab, setTab] = useState<Tab>('overview');
+  // The inner tab is STORE state, paired with the PR it belongs to (see `prDetailTab`), so the
+  // URL can name it. Read through the pair — a tab seated for ANOTHER PR is not ours, exactly
+  // like the `threadStateFilter` guard below; without that a tab left on Changes would follow the
+  // reader into the next PR they open from the feed.
+  const prDetailTab = useFilters((s) => s.prDetailTab);
+  const setPrDetailTab = useFilters((s) => s.setPrDetailTab);
+  const tab: Tab = prDetailTab?.prId === prId ? prDetailTab.tab : 'overview';
   // "Show this finding in the Changes tab" — the Claude Review tab's code anchors hand a
   // (path, line, side) here and we switch tabs; ChangesTab turns it into FileDiffView's
   // `focus`. LOCAL state on purpose: both tabs live in THIS PrDetail instance, so unlike
@@ -661,10 +665,29 @@ export function PrDetail({
    * live bug. Clearing on EVERY tab change makes the stale-target state unrepresentable instead
    * of making each new call site remember.
    */
-  const goToTab = useCallback((t: Tab): void => {
-    setChangesFocus(null);
-    setTab(t);
-  }, []);
+  const goToTab = useCallback(
+    (t: Tab): void => {
+      setChangesFocus(null);
+      setPrDetailTab(prId, t);
+    },
+    [prId, setPrDetailTab],
+  );
+  /**
+   * THE SAME MOVE, MADE BY THE APP RATHER THAN THE READER — used by every deep-link effect below
+   * (a feed row naming a thread forces Threads, a review banner forces Claude Review, …).
+   *
+   * Identical to `goToTab` except that it tells the URL layer this write is a CORRECTION, so the
+   * entry is REPLACED instead of pushed. Those effects fire one tick after the open that already
+   * pushed a history entry; without this the reader's first Back would land on the very PR they
+   * are looking at, at Overview, instead of returning to the feed they came from.
+   */
+  const seedTab = useCallback(
+    (t: Tab): void => {
+      markUrlCorrection();
+      goToTab(t);
+    },
+    [goToTab],
+  );
   const openInChanges = (
     path: string,
     line: number | null,
@@ -677,7 +700,7 @@ export function PrDetail({
     // THE ONE DELIBERATE EXCEPTION to `goToTab`, and the ordering is the whole point: this path
     // exists to SET a focus, and `goToTab` clears it. Move the tab first, then arm the target, so
     // no clearing sits between the two.
-    setTab('changes');
+    setPrDetailTab(prId, 'changes');
     setChangesFocus({ path, line, side, threadId: threadId ?? null, nonce: Date.now() });
   };
   const [activitySince, setActivitySince] = useState<string | null>(null);
@@ -794,15 +817,15 @@ export function PrDetail({
   // Selecting a thread (e.g. via a timeline marker) forces the Threads tab,
   // where the thread list lives and auto-scrolls to the selected thread.
   useEffect(() => {
-    if (selectedThreadId != null) goToTab('threads');
-  }, [selectedThreadId, goToTab]);
+    if (selectedThreadId != null) seedTab('threads');
+  }, [selectedThreadId, seedTab]);
 
   // Clicking a review-bot chip in Overview (ChecksTab) sets threadBotFilter → jump to the
   // Threads tab, which then shows only that vendor's threads.
   const threadBotFilter = useFilters((s) => s.threadBotFilter);
   useEffect(() => {
-    if (threadBotFilter != null) goToTab('threads');
-  }, [threadBotFilter, goToTab]);
+    if (threadBotFilter != null) seedTab('threads');
+  }, [threadBotFilter, seedTab]);
 
   // Arriving from the resolvable-bot-threads tab presets a derived-state pill (likely_addressed)
   // → force the Threads tab so the relevant threads are visible immediately. The preset belongs
@@ -819,43 +842,43 @@ export function PrDetail({
   const threadSeverityFilter =
     selectedPrId === prId ? rawThreadSeverityFilter : EMPTY_THREAD_SEVERITY_FILTER;
   useEffect(() => {
-    if (threadStateFilter.size > 0) goToTab('threads');
-  }, [threadStateFilter, goToTab]);
+    if (threadStateFilter.size > 0) seedTab('threads');
+  }, [threadStateFilter, seedTab]);
 
   // A timeline deep link to an Activity entry (e.g. the commit popover) forces the
   // Activity tab and clears the "since" filter so the target is visible; the list
   // then scrolls to + flashes it.
   useEffect(() => {
     if (activityFocusForPr) {
-      goToTab('activity');
+      seedTab('activity');
       setActivitySince(null);
     }
-  }, [activityFocusForPr, goToTab]);
+  }, [activityFocusForPr, seedTab]);
 
   // The global Claude-review banner deep-links here: open the Claude Review tab
   // for the matching PR, then consume the signal.
   useEffect(() => {
     if (claudeReviewEnabled && claudeTabFocus && pr && claudeTabFocus.prId === pr.id) {
-      goToTab('claude_review');
+      seedTab('claude_review');
       consumeClaudeTabFocus();
     }
-  }, [claudeTabFocus, pr, claudeReviewEnabled, consumeClaudeTabFocus, goToTab]);
+  }, [claudeTabFocus, pr, claudeReviewEnabled, consumeClaudeTabFocus, seedTab]);
 
   // "Generate fix from this review" (or any deep link) → open the AI Fix tab for the
   // matching PR. The signal is NOT consumed here — AiFixTab reads its `reviewText` to
   // seed the prompt, then consumes it.
   useEffect(() => {
     if (aiFixTabEnabled && aiFixTabFocus && pr && aiFixTabFocus.prId === pr.id) {
-      goToTab('ai_fix');
+      seedTab('ai_fix');
     }
-  }, [aiFixTabFocus, pr, aiFixTabEnabled, goToTab]);
+  }, [aiFixTabFocus, pr, aiFixTabEnabled, seedTab]);
 
   // A timeline deep link to a PR comment (the pr_comment popover's "Open in detail
   // pane") forces the Overview tab, where PrCommentsList then scrolls to + flashes
   // it. PrCommentsList consumes the signal (not here) once it has scrolled.
   useEffect(() => {
-    if (commentFocusForPr != null) goToTab('overview');
-  }, [commentFocusForPr, goToTab]);
+    if (commentFocusForPr != null) seedTab('overview');
+  }, [commentFocusForPr, seedTab]);
 
   // Capture the last-viewed instant before marking (so new comments highlight
   // on this visit), then mark the PR viewed and refresh the list views' badges.
@@ -912,11 +935,27 @@ export function PrDetail({
   // from the review-bot set) never shows a "Bot activity" tab that would render an empty state.
   const botTabVisible = (prBotBehaviour?.bots.length ?? 0) > 0;
   const botTtfrAnomalies = (prBotBehaviour?.bots ?? []).filter((b) => b.ttfrAnomaly != null).length;
-  // If the active tab is bot_activity but this PR has no bot reviewers (e.g. switched to a
-  // human-only PR while on the tab), fall back to Overview so the content can't strand.
-  useEffect(() => {
-    if (tab === 'bot_activity' && !botTabVisible) goToTab('overview');
-  }, [tab, botTabVisible, goToTab]);
+  /**
+   * ⚠ A VISIBLE SUB-TAB IS DERIVED, NEVER WRITTEN BACK — and `prDetailTab` is URL-owned now
+   * (`?prTab=`), which is what turned the old corrective effect here into a link destroyer.
+   *
+   * It used to be `if (tab === 'bot_activity' && !botTabVisible) seedTab('overview')`, so a
+   * refresh or a shared deep link onto `?view=pr-detail:<id>&prTab=bot_activity` lost the tab
+   * before the data that decides visibility could arrive: `pr` is still loading on the first run,
+   * so `hasBots` is false, so `usePrBotBehaviour` has not even STARTED, so `botTabVisible` is
+   * false — and `seedTab` REPLACES the history entry, so `?prTab=` was destroyed rather than
+   * corrected, unrecoverable by Back.
+   *
+   * So the fallback waits for an ANSWER instead of reading "not loaded yet" as "no bots". There
+   * are two answers: a LOADED PR whose cheap client gate found nothing (`hasBots` is a superset of
+   * the server's automated-reviewer set, so none here means none there — and the fetch is
+   * deliberately never made), and a SETTLED `prBotBehaviour`. Until one of them lands the tab
+   * stands, and the store keeps the reader's raw choice either way — the same rule
+   * `feedInnerTab` / `botsInnerTab` follow.
+   */
+  const botTabResolved = pr != null && (!hasBots || prBotBehaviour !== undefined);
+  const effectiveTab: Tab =
+    tab === 'bot_activity' && botTabResolved && !botTabVisible ? 'overview' : tab;
 
   // Keep a pinned tab's label fresh if the PR detail (re)loads with a new title /
   // author (e.g. a renamed PR). No-op when the PR isn't pinned or nothing changed.
@@ -1143,7 +1182,11 @@ export function PrDetail({
             'threads',
             'activity',
             'changes',
-            ...(botTabVisible ? (['bot_activity'] as Tab[]) : []),
+            // Also listed while the bot data is still in flight for a reader who ARRIVED on this
+            // tab (a deep link / a refresh), so the strip is never showing a screen with no
+            // highlighted tab. It disappears again if the answer comes back empty, and
+            // `effectiveTab` moves to Overview with it.
+            ...(botTabVisible || effectiveTab === 'bot_activity' ? (['bot_activity'] as Tab[]) : []),
             ...(claudeReviewEnabled ? (['claude_review'] as Tab[]) : []),
             ...(aiFixTabEnabled ? (['ai_fix'] as Tab[]) : []),
           ] as Tab[]
@@ -1160,7 +1203,7 @@ export function PrDetail({
               // is `goToTab`'s whole job, so this is no longer a special case.
               onClick={() => goToTab(t)}
               className={`-mb-px border-b-2 px-3 py-1.5 text-xs ${
-                tab === t
+                effectiveTab === t
                   ? 'border-blue-500 text-blue-500'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
@@ -1207,7 +1250,7 @@ export function PrDetail({
         <Suspense
           fallback={<div className="px-4 py-6 text-sm text-gray-400">Loading…</div>}
         >
-        {tab === 'overview' ? (
+        {effectiveTab === 'overview' ? (
           <div>
             {/* P3.2: the per-PR bot triage card, compact, in the Overview attention area —
                 renders nothing (and fetches nothing) below its bot-comment threshold. */}
@@ -1244,7 +1287,7 @@ export function PrDetail({
               <PrCommentComposer prId={pr.id} />
             </div>
           </div>
-        ) : tab === 'threads' ? (
+        ) : effectiveTab === 'threads' ? (
           <>
             {/* P3.2: full triage card — same folds as the list below it (rollupCounts /
                 threadSeverities / resolvableBotThreadIds), so the numbers always agree. */}
@@ -1263,7 +1306,7 @@ export function PrDetail({
             openInChangesFor={openInChangesFor}
           />
           </>
-        ) : tab === 'activity' ? (
+        ) : effectiveTab === 'activity' ? (
           <ActivityList
             pr={pr}
             usersById={usersById}
@@ -1272,11 +1315,11 @@ export function PrDetail({
             focusEvent={activityFocusForPr}
             onConsumed={consumeActivityFocus}
           />
-        ) : tab === 'changes' ? (
+        ) : effectiveTab === 'changes' ? (
           <ChangesTab pr={pr} focus={changesFocus} onOpenThread={openThreadInThreads} />
-        ) : tab === 'bot_activity' ? (
+        ) : effectiveTab === 'bot_activity' ? (
           <PrBotBehaviourTab pr={pr} />
-        ) : tab === 'ai_fix' ? (
+        ) : effectiveTab === 'ai_fix' ? (
           <AiFixTab pr={pr} />
         ) : (
           <ClaudeReviewTab

@@ -120,6 +120,45 @@ interactive route) and sets `merged`; a merge/close that happened outside Pierre
 `disarmed_blocked`, NOT `merged` — the latter means "the watcher did it" and would raise a false
 toast. `MAX_CONSECUTIVE_FAILURES` 3, counted in memory so a restart errs towards retrying.
 
+**`phase` — the machine-readable half of `lastReason`** (shared `ArmedMergePhase`, a nullable
+column on `auto_merge_requests`, sqlite `0055` / pg `0042`). `lastReason` is PROSE for a human
+and is **NULL at success**, so a cross-PR surface reading it alone would be string-matching a log
+line that goes blank exactly when it matters. Every watcher write therefore sets phase and prose
+in the SAME `updateAutoMergeState` call — they cannot disagree — and the rules are:
+
+- **It describes a LIVE intent only.** Every terminal outcome is already an `ArmedMergeState`
+  member, so `resolve()` (and both merged landings) CLEAR it; a finished card renders off
+  `state`. Duplicating terminals here would give one row two contradicting lines.
+- **Null is a legitimate value**, meaning "this wait can't be honestly characterised" — an
+  unknown `mergeableState`, an unconfirmable base. The client falls back to `lastReason`. Never
+  invent the nearest member for a row the user has to act on.
+- **`'blocked'` is disambiguated from the ALREADY-SYNCED CI status**, never a new fetch: GitHub
+  collapses "required checks running" and "required reviews missing" into one `mergeableState`
+  with nothing else on the payload to separate them, so `pullRequests.ciStatus` ∈
+  {`pending`,`expected`} ⇒ `awaiting_checks`, anything else ⇒ the generic `blocked_protection`.
+  Advisory only — it never gates a merge. Derive behind/blocked from `mergeableState`, never
+  `behindBy` (the landmine above).
+- **`'merging'` / `'enqueuing'` are stamped BEFORE the irreversible call**, so the row is honest
+  for however long GitHub takes and never blank at the moment of success.
+- **An IN-FLIGHT phase must not outlive the operation it names.** `'updating_rebase'` follows the
+  same before-the-call rule (the clone-based rebase runs for tens of seconds; the SPA re-reads the
+  row every 8s), but the write that lands AFTER it returns stamps `'awaiting_checks'` — the same
+  phase as the native update's re-pin, whose prose is its twin. Leaving `'updating_rebase'` on the
+  finished row span a "Rebasing onto the base branch…" spinner over a row whose own `lastReason`
+  said it was waiting for checks: phase and prose contradicting each other is the ONE thing this
+  column exists to prevent. (`'updating_merge'` is the exception that proves it — GitHub's
+  update-branch really IS still running when that row is written.)
+- `armAutoMerge` writes `'pending_first_check'` at arm AND re-arm (beside the `lastCheckedAt` /
+  `lastReason` reset), so a freshly armed row has a true first line instead of a blank one for
+  the up-to-two-minutes until the first tick.
+
+`ArmedMergeRequest` also carries **`repoOwner` / `repoName` / `prNumber` / `prTitle`**:
+`GET /api/auto-merge` is a cross-PR payload with no PR context to look a label up from, and the
+alternative (a per-armed-PR merge-options fetch, ~3 GitHub calls each) is exactly what that route
+must not do. `listAutoMergeRequests` gets them from the same `pullRequests`+`repos` joins the
+runner scan already had — the join is NOT the tenancy guard, the explicit `accountId` predicate
+on `auto_merge_requests` still is, and the route stays a pure DB read on the `read` rate tier.
+
 **Merge-queue repos** ("queue when ready"): the arm route probes the queue (best-effort, like
 merge-options') and stamps `viaMergeQueue` on the intent — the terminal action is then a
 head-pinned `enqueuePullRequest` instead of the direct merge GitHub would refuse; a PR already
@@ -175,10 +214,35 @@ an armed chip, and the Close
 button HIDES (opposite promises) — all via **`usePrArmedIntent`**, a selector over the polled
 armed list (zero new requests; predicate is `state === 'armed'`, NEVER row existence — the list
 carries 24h-resolved rows; cross-tab it can lag the 45s poll, own-tab arm/disarm is instant via
-the `ARMED_MERGES_KEY` invalidation). `useArmedMerges` polls `GET /api/auto-merge` (45s,
-foreground only) and `AutoMergeBanner` toasts only on an `armed → terminal` TRANSITION it
-observed itself — the first poll seeds a silent baseline, so a page load never replays
-yesterday's outcomes.
+the `ARMED_MERGES_KEY` invalidation). `useArmedMerges` polls `GET /api/auto-merge` foreground-only
+on an ADAPTIVE cadence — 8s while any row is `armed`, 45s otherwise, because an account with
+nothing armed must not pay a per-8s request for a card that renders nothing.
+
+**The armed-merge progress stack (`AutoMergeBanner`)** is the global lifecycle surface, a plain
+card in App.tsx's ONE bottom-right toast column (never a second fixed element — see
+docs/FRONTEND.md). ONE CARD PER MERGE: a row appears on the CLICK that arms, tracks `phase` while
+the watcher works, and is REPLACED IN PLACE by its outcome — there is no separate terminal toast
+for a PR the stack was already showing. Four rules hold it together:
+
+- **The arm mutation SEEDS `ARMED_MERGES_KEY` from its own response** (`setQueryData` beside the
+  existing invalidate). The POST returns the full row, so the card is immediate; without the seed
+  the surface whose job is to say "I heard you" would be a poll interval late.
+- **Live rows are derived straight from the polled list; outcomes are local state captured on the
+  `armed → terminal` transition.** The list keeps resolved rows for 24h, so a page load must not
+  open with a merged card from two hours ago — the first poll still seeds a SILENT baseline. The
+  derived-not-copied half is what makes a disarm (which DELETES the row) clear the card at once.
+  ⚠ **Each capture carries its OWN id (a per-page-load counter), never `${prId}:${state}`** — a PR
+  reaches the same terminal twice routinely (arm → the branch moves → re-arm → it moves again),
+  all inside the 24h window, and the pair-key gave those two captures one React key and one
+  dismissal key, so dismissing the first run permanently silenced the second. A newer capture, or
+  a re-arm, SUPERSEDES that PR's older outcome row: one PR never occupies two rows of the stack.
+- **Terminals render off `state`, phases off `phase`, and `lastReason` is only ever the secondary
+  line** — it is null at success, so a card bodied on it goes blank exactly when it should read
+  "Merged".
+- **Indicator + Cancel, nothing else.** Cancel is `useDisarmAutoMerge` (the DELETE that dequeues);
+  the stack must never grow a re-arm / "update now" / freshen control, and must never call
+  `useMergeOptions` per armed PR (~3 GitHub calls each — the reason the row carries its own
+  identity and phase).
 
 ### CI logs (`github/actions-logs.ts`)
 

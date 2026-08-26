@@ -871,6 +871,9 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         expectedHeadOid: info.headSha,
         expiresAt: new Date(Date.now() + AUTO_MERGE_TTL_MS),
       });
+      // The full row, identity and `phase: 'pending_first_check'` included — the SPA seeds its
+      // progress card from this response, so the surface appears on the click rather than on
+      // the next poll (and, before it, the watcher's next tick, up to two minutes away).
       return armed;
     } catch (err) {
       reply.status(502);
@@ -910,7 +913,11 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Every armed (and recently-resolved) intent for the account. A pure DB read — this is what
-  // the SPA polls to raise its "auto-merge landed" toast, so it must never touch GitHub.
+  // the SPA polls to raise its "auto-merge landed" toast and to draw the cross-PR progress
+  // stack, so it must never touch GitHub. Each row carries its own repo/PR identity and
+  // `phase` precisely so that stack needs no second request per armed PR (a per-PR
+  // merge-options fetch would be ~3 GitHub calls each); adding anything live here would also
+  // break the `read` rate tier this route sits on. See api/plugins/rate-limit.ts.
   //
   // Registered here rather than in its own route file because it is the cross-PR view of the
   // per-PR routes directly above; keeping the pair together is what stops the two drifting.

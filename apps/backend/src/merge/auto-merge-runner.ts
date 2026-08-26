@@ -114,18 +114,31 @@ let running = false;
 
 const WRITE_PERMISSIONS = new Set(['WRITE', 'MAINTAIN', 'ADMIN']);
 
+// The synced CI states that mean "the checks haven't finished". Used for exactly one thing:
+// naming the phase behind GitHub's `mergeableState: 'blocked'`, which collapses "required
+// checks still running" and "required reviews missing" into one word with nothing on the same
+// payload to separate them. Reading the ALREADY-SYNCED status keeps that free — this path runs
+// for every intent on every tick — and it never gates anything; GitHub is still the authority.
+const CHECKS_PENDING = new Set(['pending', 'expected']);
+
 function short(sha: string): string {
   return sha.slice(0, 7);
 }
 
-/** Terminal-state helper: resolve an intent and drop all of its process-local bookkeeping. */
+/**
+ * Terminal-state helper: resolve an intent and drop all of its process-local bookkeeping.
+ *
+ * `phase` is CLEARED here, always: it describes a live intent, and every terminal outcome is
+ * already a `state` member. Leaving the last live phase behind would give a finished card two
+ * sources of truth that disagree ('merging' under a 'disarmed_head_moved' row).
+ */
 async function resolve(
   id: number,
   state: 'merged' | 'disarmed_head_moved' | 'disarmed_blocked' | 'expired' | 'failed',
   reason: string | null,
 ): Promise<void> {
   forgetIntent(id);
-  await updateAutoMergeState(id, { state, lastReason: reason });
+  await updateAutoMergeState(id, { state, lastReason: reason, phase: null });
 }
 
 /**
@@ -191,7 +204,7 @@ async function settleQueuedIntent(
       // actor.
       const viewerUserId = await getAccountUserId(work.accountId);
       await markPrMergedLocally(work.prId, work.accountId, viewerUserId);
-      await updateAutoMergeState(work.id, { state: 'merged', lastReason: null });
+      await updateAutoMergeState(work.id, { state: 'merged', lastReason: null, phase: null });
       log.info(
         { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
         'auto-merge landed via the merge queue',
@@ -214,6 +227,7 @@ async function settleQueuedIntent(
           queue.position != null
             ? `in the merge queue (position ${queue.position})`
             : 'in the merge queue',
+        phase: 'queued',
       });
     } else {
       await resolve(
@@ -266,6 +280,7 @@ async function enqueueWhenReady(
         queue.reviewDecision === 'REVIEW_REQUIRED'
           ? 'waiting: required reviews aren’t in yet'
           : 'waiting: a reviewer requested changes',
+      phase: 'awaiting_review',
     });
     return;
   }
@@ -287,6 +302,11 @@ async function enqueueWhenReady(
     return;
   }
 
+  // Stamped BEFORE the mutation for the same reason the direct merge stamps 'merging': the
+  // enqueue can throw (or hang), and a row that reads 'awaiting_review' while we are in fact
+  // enqueueing is a lie the user acts on. `lastReason` is deliberately left alone — this is the
+  // machine field only, and the prose belongs to the outcome.
+  await updateAutoMergeState(work.id, { phase: 'enqueuing' });
   const entry = await enqueuePullRequestOnQueue(token, work.prNodeId, pinnedOid);
   await updateAutoMergeState(work.id, {
     enqueuedAt: new Date(),
@@ -294,6 +314,7 @@ async function enqueueWhenReady(
       entry.position != null
         ? `added to the merge queue (position ${entry.position})`
         : 'added to the merge queue',
+    phase: 'queued',
   });
   log.info(
     { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
@@ -372,6 +393,7 @@ async function processOne(
     await updateAutoMergeState(work.id, {
       expectedHeadOid: pinnedOid,
       lastReason: `merged ${m.baseRef} in — waiting for checks`,
+      phase: 'awaiting_checks',
     });
     return;
   }
@@ -385,6 +407,9 @@ async function processOne(
     await updateAutoMergeState(work.id, {
       lastReason:
         'waiting: can’t confirm which branch this PR targets — re-sync the repository, then re-arm',
+      // No phase member describes this, and inventing the nearest one would put a wrong label
+      // on a row the user has to act on. Null hands the card back to `lastReason`.
+      phase: null,
     });
     return;
   }
@@ -430,6 +455,7 @@ async function processOne(
     // finds out from the row, not from a surprise merge.
     await updateAutoMergeState(work.id, {
       lastReason: `waiting: conflicts with ${m.baseRef}`,
+      phase: 'waiting_conflicts',
     });
     return;
   }
@@ -438,6 +464,7 @@ async function processOne(
     if (work.updateStrategy === 'none') {
       await updateAutoMergeState(work.id, {
         lastReason: `waiting: ${m.behindBy || 'some'} commit(s) behind ${m.baseRef}`,
+        phase: 'waiting_behind',
       });
       return;
     }
@@ -446,6 +473,12 @@ async function processOne(
     // fall back to GitHub's native merge-in, which is the only clone-free option.
     if (work.updateStrategy === 'rebase' && !config.isCloud) {
       const { updatePrBranchFromTrunk } = await import('../coding/merge.js');
+      // Stamped BEFORE the call, for the same reason 'merging' and 'enqueuing' are: the
+      // clone-based rebase (clone, fetch, rebase, force-push) runs for tens of seconds while the
+      // SPA re-reads this row every 8s, and this is the ONLY window in which "Rebasing onto the
+      // base branch…" is true. `lastReason` is deliberately left alone — the machine field only.
+      // A throw lands on the strike counter, which stamps 'retrying', so the phase can't stick.
+      await updateAutoMergeState(work.id, { phase: 'updating_rebase' });
       const out = await updatePrBranchFromTrunk({
         accountId: work.accountId,
         owner: work.owner,
@@ -458,10 +491,17 @@ async function processOne(
       });
       // The rebase is SYNCHRONOUS and returns the sha it pushed, so re-pinning to that exact
       // value adopts nothing we didn't produce — unlike the native update below.
+      // ⚠ And because it has already RETURNED, the phase moves off 'updating_rebase' in the same
+      // write as the prose: nothing is in flight any more, only the new head's checks. Leaving
+      // 'updating_rebase' here spun "Rebasing onto the base branch…" (a WORKING_PHASE) for the
+      // rest of the cron interval over a row whose own `lastReason` said it was waiting for
+      // checks — phase and prose contradicting each other is the one thing this column exists to
+      // prevent. Same shape as the native update's re-pin above, whose prose is the twin of this.
       freshenedIntents.add(work.id);
       await updateAutoMergeState(work.id, {
         expectedHeadOid: out.headSha,
         lastReason: `rebased onto ${m.baseRef} — waiting for checks`,
+        phase: 'awaiting_checks',
       });
       return;
     }
@@ -475,6 +515,8 @@ async function processOne(
     if (!upd.ok) {
       await updateAutoMergeState(work.id, {
         lastReason: `waiting: couldn’t update from ${m.baseRef} (${upd.message})`,
+        // The update was refused, so the branch is still exactly where it was: behind.
+        phase: 'waiting_behind',
       });
       return;
     }
@@ -487,6 +529,7 @@ async function processOne(
     freshenedIntents.add(work.id);
     await updateAutoMergeState(work.id, {
       lastReason: `merging ${m.baseRef} in — waiting for GitHub to finish the update`,
+      phase: 'updating_merge',
     });
     return;
   }
@@ -504,6 +547,13 @@ async function processOne(
   if (m.mergeableState === 'blocked') {
     await updateAutoMergeState(work.id, {
       lastReason: 'waiting: branch protection not satisfied (required reviews or checks)',
+      // 'blocked' is GitHub's word for BOTH "the required checks are still running" and "the
+      // required reviews are missing", and nothing else on that payload separates them. The
+      // synced head CI status is the free tiebreak (no extra fetch on a per-intent-per-tick
+      // path); anything short of it actively saying "still running" stays the honest generic.
+      phase: CHECKS_PENDING.has(work.syncedCiStatus ?? '')
+        ? 'awaiting_checks'
+        : 'blocked_protection',
     });
     return;
   }
@@ -513,6 +563,9 @@ async function processOne(
   if (!['clean', 'has_hooks', 'unstable'].includes(m.mergeableState)) {
     await updateAutoMergeState(work.id, {
       lastReason: `waiting: merge state "${m.mergeableState}"`,
+      // Deliberately unlabelled: this branch exists precisely because we do NOT know what the
+      // state means. `lastReason` names it verbatim, which is all we can honestly say.
+      phase: null,
     });
     return;
   }
@@ -536,6 +589,12 @@ async function processOne(
     return;
   }
 
+  // Stamped immediately before the irreversible call. On success `lastReason` is set to NULL
+  // (the outcome is the state, not a blocker), so without this the row would say nothing at all
+  // at the exact moment the user is watching hardest — and a merge that hangs or throws would
+  // leave the last blocker on screen while we were in fact merging.
+  await updateAutoMergeState(work.id, { phase: 'merging' });
+
   const out = await mergePullRequest(token, work.owner, work.name, work.number, {
     method: work.mergeMethod,
     expectedHeadSha: pinnedOid,
@@ -548,7 +607,7 @@ async function processOne(
     // attribute it to them too on the next sync.
     const viewerUserId = await getAccountUserId(work.accountId);
     await markPrMergedLocally(work.prId, work.accountId, viewerUserId);
-    await updateAutoMergeState(work.id, { state: 'merged', lastReason: null });
+    await updateAutoMergeState(work.id, { state: 'merged', lastReason: null, phase: null });
     log.info(
       { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
       'auto-merge landed',
@@ -615,6 +674,7 @@ export async function runAutoMergeTick(log: FastifyBaseLogger): Promise<void> {
           } else {
             await updateAutoMergeState(intent.id, {
               lastReason: `retrying after an error: ${message}`,
+              phase: 'retrying',
             }).catch(() => {});
           }
         }

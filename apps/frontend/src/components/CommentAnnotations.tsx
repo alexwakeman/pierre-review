@@ -14,6 +14,7 @@ import { useProCapabilities } from '../hooks/useTriage.js';
 import {
   annotationKey,
   useAnnotationIndex,
+  useAnnotationRunBusy,
   useRunAnnotations,
 } from '../hooks/useAnnotations.js';
 import { Markdown } from './Markdown.js';
@@ -33,6 +34,12 @@ import { Markdown } from './Markdown.js';
 // would bill on every open of a bot-flooded PR. The re-check is the SAME per-item "Check review"
 // button that produced the row — there is no bulk "re-check the stale ones" control any more,
 // because there is no PR-wide sweep to hang it off.
+//
+// A RE-RUN HIDES WHAT IT IS REPLACING. While a check is in flight against an anchor, every panel
+// that run rewrites drops its body (and its verdict + stale chips) for a placeholder sweep, so the
+// reader is never shown a superseded verdict as if it were the answer to the click they just made.
+// RE-RUN ONLY: a target with nothing stored still renders nothing and requests nothing — a
+// first run's feedback is the button's own "Checking…", never a box conjured out of an empty state.
 //
 // All of this reads ONE per-PR query (useAnnotationIndex) that every call site shares, so the
 // number of chips on screen doesn't change the number of requests. A target with no stored
@@ -283,6 +290,22 @@ function EvidenceBlock({ evidence }: { evidence: AddressedEvidence }): JSX.Eleme
   );
 }
 
+/**
+ * What a panel's body shows while the judgement behind it is being RE-RUN: placeholder lines with
+ * the same slow "shine swipe" the digest card uses (`.digest-skeleton-line`, whose
+ * prefers-reduced-motion kill switch comes with it). Purely decorative — the panel around it
+ * carries `aria-busy`, so this is hidden from assistive tech rather than read out as three blanks.
+ */
+function CheckSkeleton(): JSX.Element {
+  return (
+    <div className="mt-1.5 space-y-1.5 py-0.5" aria-hidden="true">
+      {['88%', '72%', '54%'].map((w, i) => (
+        <div key={i} className="digest-skeleton-line h-2.5" style={{ width: w }} />
+      ))}
+    </div>
+  );
+}
+
 function StaleChip(): JSX.Element {
   return (
     <span
@@ -299,6 +322,7 @@ function AnnotationPanel({
   defaultOpen,
   sublabel,
   metaOverride,
+  busy = false,
 }: {
   annotation: CommentAnnotation;
   defaultOpen: boolean;
@@ -317,6 +341,15 @@ function AnnotationPanel({
    * would misdescribe what the reader is looking at.
    */
   metaOverride?: { label: string; title: string };
+  /**
+   * A "Check review" is in flight against the anchor that WROTE this row, so everything rendered
+   * from it is the previous result, about to be overwritten. Blank it: the body becomes the sweep
+   * placeholder and the verdict + "may be out of date" chips go with it, because a "Shaky" chip
+   * sitting above a placeholder is the same defect one row down. The title/disclosure row STAYS —
+   * without it the block collapses to an unlabelled bar and the reader loses which check is
+   * re-running.
+   */
+  busy?: boolean;
 }): JSX.Element {
   const [open, setOpen] = useState(defaultOpen);
   const meta = metaOverride ?? KIND_META[annotation.kind];
@@ -328,7 +361,10 @@ function AnnotationPanel({
       : null;
 
   return (
-    <div className="mt-2 rounded-md border border-ai-border bg-ai-surface px-2.5 py-1.5">
+    <div
+      className="mt-2 rounded-md border border-ai-border bg-ai-surface px-2.5 py-1.5"
+      aria-busy={busy}
+    >
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -344,7 +380,8 @@ function AnnotationPanel({
           <span aria-hidden="true">✨</span>
           {meta.label}
         </button>
-        {chip != null && (
+        {/* Both chips are THE PREVIOUS RESULT, so they go while the re-run is in flight. */}
+        {!busy && chip != null && (
           <span
             className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
             style={{ backgroundColor: `${chip.color}1a`, color: chip.color }}
@@ -352,25 +389,31 @@ function AnnotationPanel({
             {chip.label}
           </span>
         )}
-        {annotation.stale && <StaleChip />}
+        {!busy && annotation.stale && <StaleChip />}
         {sublabel != null && (
           <span className="text-[10px] text-ai-muted">
             {sublabel}
           </span>
         )}
       </div>
-      {open && (
-        <div className="prose-thread mt-1.5 text-[12px] text-gray-700 dark:text-gray-200">
-          <Markdown>{annotation.body}</Markdown>
-          {evidence != null && <EvidenceBlock evidence={evidence} />}
-          <div className="mt-1 text-[10px] text-gray-400">
-            {annotation.kind === 'simplify'
-              ? 'AI rewrite — the original comment is shown below, unchanged.'
-              : 'AI judgement — a critical read, your call.'}{' '}
-            {new Date(annotation.createdAt).toLocaleString()}
+      {/* A COLLAPSED panel stays collapsed while it re-runs — the user closed it, and expanding it
+          into a placeholder would undo that. There is nothing stale on screen to hide down here
+          either; the header chips above already went. */}
+      {open &&
+        (busy ? (
+          <CheckSkeleton />
+        ) : (
+          <div className="prose-thread mt-1.5 text-[12px] text-gray-700 dark:text-gray-200">
+            <Markdown>{annotation.body}</Markdown>
+            {evidence != null && <EvidenceBlock evidence={evidence} />}
+            <div className="mt-1 text-[10px] text-gray-400">
+              {annotation.kind === 'simplify'
+                ? 'AI rewrite — the original comment is shown below, unchanged.'
+                : 'AI judgement — a critical read, your call.'}{' '}
+              {new Date(annotation.createdAt).toLocaleString()}
+            </div>
           </div>
-        </div>
-      )}
+        ))}
     </div>
   );
 }
@@ -394,6 +437,12 @@ export function CommentAnnotations({
 }): JSX.Element | null {
   const enabled = useProCapabilities().prSummary;
   const index = useAnnotationIndex(prId, enabled);
+  // The run ANCHOR is this component's own target at both mount sites — the "Check review" button
+  // beside a PR comment posts exactly ('pr_comment', that id), so a re-run rewrites precisely the
+  // panels below and they can all sweep together. A future mount whose anchor differs (a review
+  // comment inside a thread, whose anchor is the THREAD) would have to be handed the anchor; it
+  // fails safe — no match, no sweep, today's behaviour.
+  const busy = useAnnotationRunBusy(prId, { targetKind, targetId });
   if (!enabled || index == null) return null;
 
   const want: readonly AnnotationKind[] = kinds ?? ['simplify', 'validity', 'addressed'];
@@ -408,6 +457,7 @@ export function CommentAnnotations({
         <AnnotationPanel
           key={a.kind}
           annotation={a}
+          busy={busy}
           // OPEN BY DEFAULT, every kind. A verdict chip with the reasoning behind a ▸ is the same
           // failure as putting it in a `title` tooltip: the reader has to already suspect there is
           // something worth reading. "Likely addressed" is not actionable — "the rename is covered,
@@ -449,6 +499,15 @@ export function ThreadCheckOutput({
 }): JSX.Element | null {
   const enabled = useProCapabilities().prSummary;
   const index = useAnnotationIndex(thread.prId, enabled);
+  // ONE busy read for the WHOLE block, off the THREAD anchor — what the card's "Check review"
+  // button posts. Not each panel's own target: the rows below are keyed on three different ids
+  // (a rewrite per comment, validity on the ROOT comment, addressed on the thread), so a per-panel
+  // lookup would miss on all but one and the block would show two stale results beside one
+  // placeholder. One re-run rewrites all three, so all three sweep.
+  const busy = useAnnotationRunBusy(thread.prId, {
+    targetKind: 'thread',
+    targetId: thread.id,
+  });
   if (!enabled || index == null) return null;
 
   const root = thread.comments[0];
@@ -481,15 +540,17 @@ export function ThreadCheckOutput({
           annotation={r.annotation}
           sublabel={r.sublabel}
           defaultOpen
+          busy={busy}
         />
       ))}
-      {validity != null && <AnnotationPanel annotation={validity} defaultOpen />}
+      {validity != null && <AnnotationPanel annotation={validity} defaultOpen busy={busy} />}
       {/* The two-section "**Addressed:** / **Still open:**" summary — the thing you actually need
           before resolving the thread, and the reason it is inline rather than in a chip tooltip. */}
       {addressed != null && (
         <AnnotationPanel
           annotation={addressed}
           defaultOpen
+          busy={busy}
           // A resolved thread is VERIFIED rather than judged — the plugin flips the question it
           // asks the model, so the panel has to say which question was answered. Without this the
           // reader sees "Addressed check" over prose arguing about a thread they already closed.

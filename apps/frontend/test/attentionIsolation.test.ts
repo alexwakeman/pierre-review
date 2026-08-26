@@ -24,6 +24,7 @@ import {
   useFilters,
   type FilterState,
 } from '../src/store/filters.js';
+import { usePinnedTabs } from '../src/store/pinnedTabs.js';
 
 describe('attentionIsolation', () => {
   beforeEach(() => {
@@ -109,6 +110,62 @@ describe('attentionIsolation', () => {
       attentionIsolation: 'my_turn',
     } as unknown as Partial<FilterState>) as Record<string, unknown>;
     expect('attentionIsolation' in restored).toBe(false);
+  });
+
+  // ── openMyTurnInWorkspace: the banner's one-gesture cross-workspace deep-link ────────────
+  //
+  // The Welcome-back banner names My Turn work sitting in workspaces the reader is NOT in, so a
+  // line's click has to change scope AND land on that workspace's my_turn cards. Every step of
+  // that sequence clears the step after it, which is why it is ONE store action and why the
+  // cases below pin the outcome rather than the calls.
+  describe('openMyTurnInWorkspace', () => {
+    beforeEach(() => {
+      usePinnedTabs.setState({ activeTab: 'timeline' });
+    });
+
+    it('switches workspace, opens the console, and isolates to my_turn — from a cold Timeline', () => {
+      useFilters.setState({ workspaceId: 3, activityRepoId: 'feed', repoIds: [7, 9] });
+      useFilters.getState().openMyTurnInWorkspace(9);
+      const after = useFilters.getState();
+      expect(after.workspaceId).toBe(9);
+      // A subset belongs to the workspace being LEFT — the destination shows all of itself.
+      expect(after.repoIds).toBeNull();
+      expect(usePinnedTabs.getState().activeTab).toBe('activity');
+      expect(after.activityRepoId).toBe('attention');
+      // The whole point: the isolation SURVIVES both clears above it.
+      expect(after.attentionIsolation).toBe('my_turn');
+    });
+
+    it('leaves a Timeline repo narrowing alone when the target IS the active workspace', () => {
+      // Re-writing the same id would run setWorkspace's clear for nothing, throwing away a
+      // per-repo selection the user made on the board they are standing on.
+      useFilters.setState({ workspaceId: 3, activityRepoId: 'feed', repoIds: [7] });
+      useFilters.getState().openMyTurnInWorkspace(3);
+      const after = useFilters.getState();
+      expect(after.workspaceId).toBe(3);
+      expect(after.repoIds).toEqual([7]);
+      expect(after.activityRepoId).toBe('attention');
+      expect(after.attentionIsolation).toBe('my_turn');
+    });
+
+    it('re-isolates when the rail is ALREADY attention (setActivityRepo returns an empty patch)', () => {
+      // The asymmetry that hides ordering bugs: this path never runs setActivityRepo's clear, so
+      // it must still end isolated — and it must not inherit the PREVIOUS kind.
+      useFilters.setState({
+        workspaceId: 3,
+        activityRepoId: 'attention',
+        attentionIsolation: 'stalled_review',
+      });
+      useFilters.getState().openMyTurnInWorkspace(3);
+      expect(useFilters.getState().attentionIsolation).toBe('my_turn');
+    });
+
+    it('clears an isolated feed PR on the way (a switch re-scopes everything)', () => {
+      useFilters.setState({ workspaceId: 3, activityRepoId: 'feed', feedIsolatedPrId: 42 });
+      useFilters.getState().openMyTurnInWorkspace(11);
+      expect(useFilters.getState().feedIsolatedPrId).toBeNull();
+      expect(useFilters.getState().attentionIsolation).toBe('my_turn');
+    });
   });
 
   it('survives "Clear filters", exactly like feedIsolatedPrId', () => {

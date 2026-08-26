@@ -5,6 +5,7 @@ import { useProCapabilities } from '../hooks/useTriage.js';
 import { useNotificationPref } from '../hooks/useNotificationPref.js';
 import { useFilters } from '../store/filters.js';
 import { playReviewComplete } from '../lib/sound.js';
+import { dateTime } from '../lib/ui.js';
 
 interface CompletedCoord {
   repoFullName: string;
@@ -33,8 +34,16 @@ function notifyReviewsComplete(done: CompletedCoord[]): void {
           .slice(0, 3)
           .map((d) => `${d.repoFullName} #${d.prNumber}`)
           .join(' · ');
+  // Completion is DETECTED here, not reported: `ActiveReview` carries no finish time, so the run
+  // is "done" the first poll it stops appearing (≤2.5s late — invisible at minute resolution).
+  // Absolute, never relative, for the same reason the My Turn stamp is: this text outlives its
+  // banner in the OS notification centre. It LEADS on its own line so truncation can't eat it.
+  const stamp = dateTime(new Date().toISOString());
   try {
-    const n = new Notification(title, { body, tag: 'pierre-claude-review' });
+    const n = new Notification(title, {
+      body: `${stamp}\n${body}`,
+      tag: 'pierre-claude-review',
+    });
     n.onclick = () => {
       window.focus();
       n.close();

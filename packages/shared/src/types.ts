@@ -2901,8 +2901,47 @@ export type ArmedMergeState =
   | 'expired'
   | 'failed';
 
+// The live sub-state of an ARMED intent — the machine-readable half of `lastReason`, written
+// by the same watcher call that writes the prose so the two can never disagree. Every TERMINAL
+// outcome is already an `ArmedMergeState` member and is deliberately NOT duplicated here: a
+// finished card renders off `state`, and `lastReason` is null at success anyway.
+//
+//   pending_first_check — armed; the watcher hasn't looked yet (up to one cron tick)
+//   waiting_conflicts   — conflicts with the base; waiting for the author
+//   waiting_behind      — behind the base and not being updated (updateStrategy 'none', or the
+//                         update call was refused)
+//   updating_rebase     — rebasing onto the base (local mode's clone-based update)
+//   updating_merge      — GitHub is merging the base in (its update-branch is async)
+//   awaiting_checks     — the required checks haven't finished
+//   awaiting_review     — required reviews aren't in (or changes were requested)
+//   blocked_protection  — branch protection unmet for a reason that isn't checks
+//   enqueuing           — adding the PR to the merge queue right now
+//   queued              — sitting in the merge queue
+//   merging             — the merge call is in flight
+//   retrying            — a GitHub error, being retried (a persistent one ends in 'failed')
+export type ArmedMergePhase =
+  | 'pending_first_check'
+  | 'waiting_conflicts'
+  | 'waiting_behind'
+  | 'updating_rebase'
+  | 'updating_merge'
+  | 'awaiting_checks'
+  | 'awaiting_review'
+  | 'blocked_protection'
+  | 'enqueuing'
+  | 'queued'
+  | 'merging'
+  | 'retrying';
+
 export interface ArmedMergeRequest {
   prId: number;
+  // Repo/PR identity, carried on the row itself: this payload is the ONLY thing a CROSS-PR
+  // surface (the global armed-merge card) receives, and it has no PR context to look a label
+  // up from.
+  repoOwner: string;
+  repoName: string;
+  prNumber: number;
+  prTitle: string;
   mergeMethod: MergeMethod;
   // Whether to bring the branch up to date first when it's merely behind, and how.
   // 'none' = never update; a behind PR just waits (or expires).
@@ -2923,6 +2962,10 @@ export interface ArmedMergeRequest {
   // Machine-ish reason for the current state ('required reviews missing', 'head moved
   // abc1234→def5678', 'github: base branch modified'). Null while cleanly armed.
   lastReason: string | null;
+  // Where a LIVE intent stands, as an enum the UI can switch on. Null on every terminal row
+  // (read `state` there), and null for a wait the watcher can't honestly characterise — the
+  // client falls back to `lastReason` in both cases.
+  phase: ArmedMergePhase | null;
   expiresAt: string; // ISO-8601 — the hard stop, so an intent can't linger for weeks
 }
 
@@ -3104,20 +3147,6 @@ export interface LocalUser {
   displayName: string | null;
 }
 
-export interface MyTurnCounts {
-  awaitingReview: number;
-  yourPrsActivity: number;
-  // Your authored, still-open PRs that have a standing approval (ready to merge).
-  approvedPrs: number;
-  threadsAwaiting: number;
-  // New open PRs by others in your repos (opened at or after the repo was added — see
-  // `Repo.createdAt`), not yet dismissed. 0 when the account has no repos.
-  watchedRepoPrs: number;
-  // Completed Claude reviews not yet actioned (no comments/review posted). Always 0
-  // when Claude Review is disabled (cloud / flag off).
-  claudeReviewsToAction: number;
-}
-
 // Premium (@pierre/pro) capability map, mirrored from a backend singleton the
 // plugin populates at boot. All-false in OSS mode (plugin absent). Flows to the
 // frontend through /api/me exactly like claudeReviewEnabled.
@@ -3181,12 +3210,6 @@ export interface AuthProvidersResponse {
 
 export interface MeResponse {
   user: LocalUser | null;
-  counts: MyTurnCounts;
-  // Server-side Activity-Feed "seen" marker: when the account last viewed the feed
-  // (ISO, null until the first view), and how many "My Turn" feed items are new
-  // since then. Drives the Welcome-back banner (server-truth, consistent across devices).
-  feedLastSeenAt: string | null;
-  newFeedItems: number;
   // (Claude Review is now the Pro `pro.claudeReview` capability — the old top-level
   // `claudeReviewEnabled` flag was removed; read it off `pro` instead.)
   // Deployment mode. 'cloud' tells the SPA to show a sign-out control and treat a
@@ -3814,6 +3837,18 @@ export interface MyTurnPr {
   state: PrState;
   openedAt: string;
   githubUrl: string;
+  // ISO — WHEN THE THING THAT NEEDS YOU HAPPENED, which is a DIFFERENT column per section:
+  // review requested (`firstReviewRequestedAt`), your PR's last update, the newest approval,
+  // or the open time for a new PR (where opening genuinely IS the event). `openedAt` is the
+  // wrong moment for the first three, so nothing may date one of those rows off it.
+  //
+  // ⚠ THIS IS THE SAME CLOCK AS `MyTurnCard.since`, RESOLVED ONCE — getWorkspaceInsights reads
+  // this field rather than re-deriving it, so a card and the browser notification built off the
+  // same fold can never disagree about when an item landed on your plate.
+  //
+  // Trailing-optional for wire tolerance only (the e2e mock, any response predating the field);
+  // `getMyTurn` always sets it and `openedAt` is the consumer's fallback.
+  since?: string;
 }
 
 export interface AwaitingReviewItem extends MyTurnPr {
