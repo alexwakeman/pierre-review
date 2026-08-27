@@ -923,21 +923,33 @@ strip). Never a re-derivation that can disagree with the surface it links to. Ra
 — this route never touches AI and never carries cost/money (§8.18: the rollup loops per
 workspace).
 
-**The my_turn NARROW pair (`myTurnPersonal` / `myTurnPersonalTotal`).** `DailyBriefCounts` and
-`WorkspaceInsightsResponse` carry a SECOND my_turn figure beside `myTurn`/`myTurnTotal`: the
-subset flagged **`MyTurnCard.personal`**. All four fields are trailing-optional additions, so
-**`apiVersion` stays 21** and an older plugin simply never reads them.
+**The my_turn RELEVANCE split and its count pairs.** `DailyBriefCounts` and
+`WorkspaceInsightsResponse` carry more my_turn figures beside `myTurn`/`myTurnTotal`:
+`myTurnPersonal`/`myTurnPersonalTotal` (unchanged in meaning), plus the three-way split
+`myTurnDirect` · `myTurnMaintained` · `myTurnOther`, **each with its own uncapped total**. Every
+one of these, and `MyTurnPr.relevance` / `MyTurnCard.relevance` themselves, is a trailing-optional
+addition, so **`apiVersion` stays 21** and an older plugin simply never reads them.
 
-- **The rule lives in `getMyTurn`, once.** Five of the six sections are personal by construction
-  (they exist only because the viewer is involved) and are stamped `true` in `toMyTurnPr`. The
-  sixth — "New PRs" — is a UNION OF TWO ARMS that answer different questions. The MAINTAINER arm
-  (`viewerMaintainedRepoIds`) asks *is this your patch of ground*: `repos.viewerPermission` ∈
-  WRITE/MAINTAIN/ADMIN **∪** the repos `getMergers` says the viewer has landed a PR on (default
-  branch only). The MENTION arm (`viewerMentionedPrIds` over `pr_mentions`) asks *did somebody
-  type your name*, and holds **even in a repo the viewer only READS** — which is precisely why it
-  is not folded into the first. A stranger's PR in a repo the viewer maintains IS personal; so is
-  a PR anywhere that @-mentions them. The insight-card block READS the flag off the row — the
-  `since` rule applied to the second question this fold would otherwise answer twice.
+- ⚠ **`personal` CONFLATED TWO RELATIONSHIPS; `relevance` is that union un-collapsed.**
+  `MyTurnRelevance` is `'direct'` | `'maintained'` | `'none'`: work tied to YOU (card copy "YOUR
+  TURN") · a new PR by somebody else in a repo you maintain — ORBIT, NOT OWNERSHIP ("IN YOUR
+  REPOS") · everything else ("REVIEW OR REPLY"). `personal` survives as a DERIVED
+  `relevance !== 'none'`, still written by the server on every row, still meaning exactly what it
+  always meant ("may a notification surface interrupt?"). Read `relevance` for anything that
+  LABELS a row; a card that writes "YOUR TURN" off `personal` claims ownership of a stranger's
+  work in a repo you happen to have write on — the defect the split exists to end.
+- **The rule lives in `getMyTurn`, once.** Five of the six sections are `'direct'` by construction
+  (they exist only because the viewer is involved) and are stamped in `toMyTurnPr`. The sixth —
+  "New PRs" — has TWO ARMS that answer different questions, and they now **stay two facts all the
+  way to the label**. The MAINTAINER arm (`viewerMaintainedRepoIds`) asks *is this your patch of
+  ground*: `repos.viewerPermission` ∈ WRITE/MAINTAIN/ADMIN **∪** the repos `getMergers` says the
+  viewer has landed a PR on (default branch only) — it yields **`'maintained'`**. The MENTION arm
+  (`viewerMentionedPrIds` over `pr_mentions`) asks *did somebody type your name*, holds **even in a
+  repo the viewer only READS**, and yields **`'direct'`** — which WINS over the maintainer arm.
+  Neither arm ⇒ `'none'`. The insight-card block READS `relevance` off the row and folds
+  `personal` from it — the `since` rule applied to the second question this fold would otherwise
+  answer twice, and one source of truth so the board's label and the notification's count cannot
+  disagree about the same card.
 - **The mention arm is DERIVED OFFLINE** (`sync/mention-scan.ts` → `pr_mentions`), never computed
   in the request: the underlying question is a substring scan over every comment body in scope and
   this fold runs on every Feed landing. ⚠ **Absence never widens** — no rows means the flag is
@@ -949,12 +961,68 @@ subset flagged **`MyTurnCard.personal`**. All four fields are trailing-optional 
   attention" board keeps painting every card — a PR in a repo you only read does still need a
   review. The flag exists for the surfaces that INTERRUPT (welcome-back banner, Workspace-dropdown
   badges, browser notifications), which must not summon you for 425 strangers' PRs.
-- ⚠ **`myTurnPersonalTotal` is folded off the PRE-CAP ranked array**, next to `myTurnTotal`.
-  Counted after the 50-card slice it would be bounded by 50 and stop being a total.
-- ⚠ **THE PAIR MUST BE NARROW-WITH-NARROW.** `myTurnCapDisclosure` fires only when the displayed
-  figure EQUALS the count it qualifies, so a narrow line borrowing `myTurnTotal` as its
-  denominator would both mix two populations in one row and silently lose its "of N" on every
-  capped workspace. That is the entire reason `myTurnPersonalTotal` exists.
+- ⚠ **EVERY total is folded off the PRE-CAP ranked array**, in one pass next to `myTurnTotal`.
+  Counted after the 50-card slice any of them would be bounded by 50 and stop being a total.
+- **The split is MUTUALLY EXCLUSIVE and EXHAUSTIVE**, at both grains:
+  `direct + maintained + other === myTurn(Total)` and `direct + maintained === myTurnPersonal
+  (Total)`. So the daily brief renders **TWO lines that never double-count** — "N need your
+  attention" (`myTurnPersonal`, the interrupting population) and "M need review or reply"
+  (`myTurnOther`) — and each opens a board filtered to ITS OWN number. Notifications keep counting
+  `myTurnPersonal`; the banner shows the split ("2 yours · 3 in your repos") off `myTurnDirect` and
+  `myTurnMaintained`.
+- ⚠ **THE PAIR MUST BE NARROW-WITH-NARROW, AND NO COUNT MAY BE A SUBTRACTION.**
+  `myTurnCapDisclosure` fires only when the displayed figure EQUALS the count it qualifies, so a
+  narrow line borrowing `myTurnTotal` as its denominator would both mix two populations in one row
+  and silently lose its "of N" on every capped workspace. **`myTurnOther` is therefore its own
+  fold, never `myTurn - myTurnPersonal`**: the subtraction is arithmetically correct and produces
+  no denominator at all, which is the same defect wearing a different hat. That is the entire
+  reason every one of these counts ships with a matching `…Total`.
+
+**The `ci_failing` card — red builds the VIEWER is on the hook for (CORE, deterministic, no AI).**
+A `ci_failing` InsightKind, computed in `getWorkspaceInsights` beside `my_turn`, counted by the
+brief as `ciFailing`/`ciFailingTotal`, and painted on the "Needs attention" board like any other
+card. **TWO ARMS, carried on one kind by `CiFailingCard.arm`:**
+
+- **`'your_pr'`** — an open, non-draft PR you AUTHORED whose head CI is red. No new query: it folds
+  the open-PR population `getWorkspaceInsights` already builds (`pull_requests.ci_status` is NOT
+  lean-gated — `sync/upsert.ts` writes it on every walk; only `check_runs` is), so it hydrates
+  nothing.
+- **`'trunk'`** — the default branch of a repo you MAINTAIN is red RIGHT NOW
+  (`repos.default_branch_ci_status`), naming the LANDING PR of the red head through
+  `resolveTrunkCommitPrs` (which now also selects `mergedById`) and setting `viewerMerged` when
+  that was you. The maintainer set is the SAME `viewerMaintainedRepoIds` My Turn's relevance gate
+  uses — "a repo you maintain" means one thing in this app.
+
+- ⚠ **RED IS ALWAYS THE PAIR `failure` | `error`**, never one of them (`error` is GitHub's
+  infra/permissions half — the one that most often needs a human). ONE spelling, `RED_CI_STATUSES`,
+  used by both the row test and the SQL `inArray`.
+- ⚠ **THE BLOCK RUNS ABOVE `getWorkspaceInsights`' `openPrIds.length === 0` EARLY RETURN**, and
+  that guard is WORKSPACE-WIDE. The trunk arm needs no open PR, so under the guard a quiet
+  workspace paints a green board over a red trunk. `ci-failing-cards.test.ts` pins it with a
+  SECOND workspace of quiet repos — with everything in one workspace the trap cannot be tested.
+- ⚠ **EVERY PR FIELD IS NULLABLE AND A NULL IS ORDINARY.** ~11% of red heads are DIRECT PUSHES to
+  trunk (a legitimate steady state, not a sync gap). The card still says trunk is red; it just
+  names no PR.
+- ⚠ **`viewerMerged` ATTRIBUTES LANDING, NEVER BREAKING** — trunk may have been red before that PR
+  merged, and the card says so on its face.
+- **TWO NEIGHBOURING QUESTIONS ARE DELIBERATELY NOT BUILT** (measured on real data, cut, and
+  recorded in the code where somebody would reach for them): *"PRs I MERGED whose CI is failing"* —
+  `pull_requests.ci_status` is FROZEN at the merge instant (a merged PR is never re-walked), so it
+  answers "did this land red", a retro metric, not an inbox item; and *"the commit that TURNED
+  trunk red"* — trunk CI is non-monotone, 21% of `branch_commits` rows are ciStatus `unknown`, and
+  chronically-red repos have no streak start, so honest transition attribution needs a NEW
+  append-only per-commit table plus a sync step.
+- ⚠ **`ciFailing` AND `trunkRed` ARE TWO LINES, NOT ONE.** `trunkRed` names EVERY red trunk in the
+  workspace and each of its lines opens that repo's console; `ciFailing` counts the subset that is
+  YOURS plus your own red PRs and opens the board isolated to `ci_failing`. Folding either into the
+  other gives one of them a list its number does not match.
+- **Cap:** it shares `INSIGHT_CARD_CAP` (15) with the survey kinds but, like `my_turn`, DISCLOSES
+  it (`ciFailingTotal` + `ciFailingCapDisclosure`) — a worklist the viewer clears may not be
+  silently capped. Everything is trailing-optional, so **`apiVersion` stays 21**.
+- **The plugin side:** `insightsHash` gets an explicit `ci:<arm>:<repoId>:<sha|prId>` case, and the
+  sprint-report payload loop an explicit `continue`. ⚠ That `continue` is load-bearing — falling
+  through would count the card into the repo's importance ranking (`cards × 3`) and add a PR ref
+  for an issue the report never lists.
 
 **The person vector (`GET /api/pro/insights/person/:userId`, `db/person-period.ts`).** The 1:1
 prep read: a small fixed vector for one person in one workspace over one cadence period, with

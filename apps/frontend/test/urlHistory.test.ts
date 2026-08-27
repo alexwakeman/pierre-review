@@ -137,7 +137,7 @@ beforeEach(() => {
     repoIds: null,
     activityRepoId: 'feed',
     attentionIsolation: null,
-    attentionPersonalOnly: false,
+    attentionRelevance: null,
     feedIsolatedPrId: null,
     feedInnerTab: 'feed',
     botsInnerTab: 'roi',
@@ -312,71 +312,144 @@ describe('Back from Needs attention (the reported bug)', () => {
   });
 });
 
-// ── The PERSONAL lens (`attnPersonal`) — the board's second narrowing ────────────────────────
+// ── The RELEVANCE lens (`attnRel`) — the board's second narrowing ─────────────────────────────
 //
-// The notification surfaces count the personal subset of my_turn, so the board they open is
-// narrowed to match (otherwise a banner reading 4 opens a list of 50). That makes it a VIEW the
-// reader navigated to, on both counts: it must have its own entry, and a pop onto a URL that does
-// not name it must CLEAR it — the `readFromUrl`-is-partial trap, which bites every key added here.
-describe('the personal lens on Needs attention', () => {
+// The notification surfaces count the personal subset of my_turn and the brief's second my-turn
+// line counts the rest, so the board each opens is narrowed to match (otherwise a line reading 4
+// opens a list of 50). That makes it a VIEW the reader navigated to, on both counts: it must have
+// its own entry, and a pop onto a URL that does not name it must CLEAR it — the
+// `readFromUrl`-is-partial trap, which bites every key added here.
+//
+// ⚠ AND THE RETIRED SPELLING STILL PARSES. `?attnPersonal=1` shipped, so it is in bookmarks and —
+// worse — in history entries a browser Back replays verbatim. It resolves to 'mine' and is never
+// emitted again.
+describe('the relevance lens on Needs attention', () => {
   it('rides the URL and PUSHES — it changes what the board shows', () => {
     gesture(() => useFilters.getState().setActivityRepo('attention'));
-    gesture(() => useFilters.getState().setAttentionPersonalOnly(true));
+    gesture(() => useFilters.getState().setAttentionRelevance('mine'));
     expect(entries).toHaveLength(3);
-    expect(location.search).toContain('attnPersonal=1');
+    expect(location.search).toContain('attnRel=mine');
+  });
+
+  it('the OTHER half is its own view, with its own entry', () => {
+    // The whole reason the boolean had to become three-valued: both halves must be addressable,
+    // or the brief's two mutually exclusive lines cannot each open their own list.
+    gesture(() => useFilters.getState().setActivityRepo('attention'));
+    gesture(() => useFilters.getState().setAttentionRelevance('others'));
+    expect(location.search).toContain('attnRel=others');
+    gesture(() => useFilters.getState().setAttentionRelevance('mine'));
+    expect(location.search).toContain('attnRel=mine');
+    expect(location.search).not.toContain('attnRel=others');
+    back();
+    expect(useFilters.getState().attentionRelevance).toBe('others');
   });
 
   it('round-trips through Back and Forward', () => {
     gesture(() => useFilters.getState().setActivityRepo('attention'));
-    gesture(() => useFilters.getState().setAttentionPersonalOnly(true));
+    gesture(() => useFilters.getState().setAttentionRelevance('mine'));
 
     back();
     // ⚠ Gone, not merely off-screen: the popped URL says nothing about it, and a partial pop
     // would leave the next visit to the board silently filtered.
-    expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+    expect(useFilters.getState().attentionRelevance).toBeNull();
     expect(useFilters.getState().activityRepoId).toBe('attention');
 
     forward();
-    expect(useFilters.getState().attentionPersonalOnly).toBe(true);
+    expect(useFilters.getState().attentionRelevance).toBe('mine');
   });
 
   it('is emitted only ON the attention rail — a lens off-screen is not part of the view', () => {
     gesture(() => {
       useFilters.getState().setActivityRepo('attention');
-      useFilters.getState().setAttentionPersonalOnly(true);
+      useFilters.getState().setAttentionRelevance('mine');
     });
-    expect(location.search).toContain('attnPersonal=1');
+    expect(location.search).toContain('attnRel=mine');
     gesture(() => useFilters.getState().setActivityRepo('feed'));
-    expect(location.search).not.toContain('attnPersonal');
+    expect(location.search).not.toContain('attnRel');
   });
 
   it('the banner gesture is still ONE entry, and carries BOTH narrowings', () => {
     gesture(() => useFilters.getState().openMyTurnInWorkspace(9));
     expect(entries).toHaveLength(2);
     expect(location.search).toContain('attn=my_turn');
-    expect(location.search).toContain('attnPersonal=1');
+    expect(location.search).toContain('attnRel=mine');
 
     back();
-    expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+    expect(useFilters.getState().attentionRelevance).toBeNull();
     expect(useFilters.getState().attentionIsolation).toBeNull();
 
     forward();
     // One Forward restores the WHOLE view — a banner click is one gesture in both directions.
     expect(useFilters.getState().workspaceId).toBe(9);
     expect(useFilters.getState().attentionIsolation).toBe('my_turn');
-    expect(useFilters.getState().attentionPersonalOnly).toBe(true);
+    expect(useFilters.getState().attentionRelevance).toBe('mine');
   });
 
-  it('only the literal 1 seats it — a link carrying anything else means the broad board', () => {
-    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnPersonal=0');
+  it('only the two literals seat it — a link carrying anything else means the broad board', () => {
+    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnRel=0');
     applyUrlToStores();
-    expect(useFilters.getState().attentionPersonalOnly).toBe(false);
-    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnPersonal=yes');
+    expect(useFilters.getState().attentionRelevance).toBeNull();
+    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnRel=yes');
     applyUrlToStores();
-    expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+    expect(useFilters.getState().attentionRelevance).toBeNull();
+    // ⚠ …including the field's own value spellings. A "personal" that no longer exists must not
+    // resolve to something merely because it is truthy.
+    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnRel=personal');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionRelevance).toBeNull();
+    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnRel=mine');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionRelevance).toBe('mine');
+    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnRel=others');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionRelevance).toBe('others');
+  });
+
+  // ── the retired `?attnPersonal` spelling ──────────────────────────────────────────────────
+  it('a SHIPPED ?attnPersonal=1 link still resolves — to the half it always meant', () => {
     seat('/app/?workspace=5&view=activity&activityRepo=attention&attnPersonal=1');
     applyUrlToStores();
-    expect(useFilters.getState().attentionPersonalOnly).toBe(true);
+    expect(useFilters.getState().attentionRelevance).toBe('mine');
+  });
+
+  it('…and its old rejection cases still reject (only the literal 1 ever seated it)', () => {
+    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnPersonal=0');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionRelevance).toBeNull();
+    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnPersonal=yes');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionRelevance).toBeNull();
+  });
+
+  it('the NEW key wins when a URL somehow carries both', () => {
+    // A hand-edited or half-rewritten link must not let the retired spelling override the live
+    // one — back-compat is a read path, never an authority.
+    seat('/app/?workspace=5&view=activity&activityRepo=attention&attnRel=others&attnPersonal=1');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionRelevance).toBe('others');
+  });
+
+  it('is never EMITTED again — one lens, one key', () => {
+    gesture(() => {
+      useFilters.getState().setActivityRepo('attention');
+      useFilters.getState().setAttentionRelevance('mine');
+    });
+    expect(location.search).not.toContain('attnPersonal');
+  });
+
+  it('leaving a legacy entry is still a NAVIGATION, so Back returns to it', () => {
+    // The entry the reader is standing on names the retired key; the URL we emit names the new
+    // one. Both are nav keys, so that swap has to push — otherwise the legacy view is overwritten
+    // in place and Back skips past it.
+    entries = ['/app/?workspace=5&view=activity&activityRepo=attention&attnPersonal=1'];
+    cursor = 0;
+    seat(entries[0] as string);
+    applyUrlToStores();
+    expect(useFilters.getState().attentionRelevance).toBe('mine');
+    gesture(() => useFilters.getState().setAttentionRelevance('others'));
+    expect(entries).toHaveLength(2);
+    back();
+    expect(useFilters.getState().attentionRelevance).toBe('mine');
   });
 });
 

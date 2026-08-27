@@ -38,8 +38,15 @@ const PRESETS: RangePreset[] = ['7d', '14d', '30d', '90d', 'custom'];
 // The attention board's isolation kinds. A local list because `InsightKind` ships no runtime
 // array; the URL is hand-editable, so an unknown value must seat nothing rather than narrow the
 // board to a kind no card has.
-const INSIGHT_KINDS: readonly InsightKind[] = [
+//
+// ⚠ HAND-WRITTEN, SO NOTHING COMPILES WHEN THE UNION GROWS. A kind missing here is silently
+// UN-SEATABLE: `?attn=<kind>` is discarded, which means the daily-brief line that counts it opens
+// an un-isolated board and a browser Back cannot return to the narrowed one. EXPORTED purely so
+// `test/ciFailingCard.test.ts` can compare it against `KIND_LABEL` — whose exhaustiveness the
+// compiler DOES enforce — turning that silent omission into a failing test.
+export const INSIGHT_KINDS: readonly InsightKind[] = [
   'my_turn',
+  'ci_failing',
   'stalled_review',
   'untouched_thread',
   'reviewer_load',
@@ -78,6 +85,11 @@ const NAV_KEYS = [
   'workspace',
   'activityRepo',
   'attn',
+  'attnRel',
+  // ⚠ RETIRED BUT STILL LISTED. `?attnPersonal=1` shipped, so history entries and bookmarks carry
+  // it; it is parsed (as `attnRel=mine`) and never emitted. It stays a NAV key because leaving one
+  // of those legacy entries — the emitted URL drops `attnPersonal` and gains `attnRel` — is a real
+  // navigation, and the diff has to see BOTH halves of that swap to say so.
   'attnPersonal',
   'feedPr',
   'feedTab',
@@ -318,11 +330,18 @@ export function readFromUrl(): Partial<FilterState> {
   if (attn && (INSIGHT_KINDS as readonly string[]).includes(attn)) {
     out.attentionIsolation = attn as InsightKind;
   }
-  // The board's PERSONAL lens — the other half of the same navigation. A banner/badge click sets
+  // The board's RELEVANCE lens — the other half of the same navigation. A banner/badge click sets
   // both, and each is a view the reader can Back out of independently, so both are addressable.
-  // Only the literal '1' seats it: this is a flag, and a link carrying anything else means the
-  // broad board (the default), never "something truthy".
-  if (p.get('attnPersonal') === '1') out.attentionPersonalOnly = true;
+  // Only the two literals seat it: a link carrying anything else means the broad board (the
+  // default), never "something truthy".
+  const attnRel = p.get('attnRel');
+  if (attnRel === 'mine' || attnRel === 'others') out.attentionRelevance = attnRel;
+  // ⚠ BACK-COMPAT, ONE DIRECTION ONLY. `?attnPersonal=1` is the retired boolean spelling and it is
+  // ALREADY IN THE WILD — shipped links, and every history entry minted before this change, which
+  // a browser Back replays verbatim. It still resolves, to the lens that means what it meant
+  // ('mine' = direct + maintained = the old `personal`); it is never emitted again. The new key
+  // WINS when both appear, so a legacy entry can never override a live one.
+  else if (p.get('attnPersonal') === '1') out.attentionRelevance = 'mine';
   // The Feed's single-PR isolation — the attention board's twin, addressable for the same reason.
   const feedPr = p.get('feedPr');
   if (feedPr) {
@@ -516,10 +535,14 @@ export function writeToUrl(s: FilterState): void {
     if (s.activityRepoId === 'attention' && s.attentionIsolation) {
       p.set('attn', s.attentionIsolation);
     }
-    // Emitted independently of `attn` — the two lenses are orthogonal, and a personal-only board
-    // showing every kind is a real (if uncommon) view. Same rail gate as its twin: a lens that is
-    // not on screen is not part of the view.
-    if (s.activityRepoId === 'attention' && s.attentionPersonalOnly) p.set('attnPersonal', '1');
+    // Emitted independently of `attn` — the two lenses are orthogonal, and a relevance-lensed
+    // board showing every kind is a real (if uncommon) view. Same rail gate as its twin: a lens
+    // that is not on screen is not part of the view.
+    // ⚠ ONLY `attnRel` IS EMITTED. The retired `?attnPersonal=1` is read-only back-compat (see
+    // readFromUrl) — writing both would double-encode one lens and leave two keys to keep in step.
+    if (s.activityRepoId === 'attention' && s.attentionRelevance != null) {
+      p.set('attnRel', s.attentionRelevance);
+    }
     if (
       s.feedIsolatedPrId != null &&
       (s.activityRepoId === 'feed' || typeof s.activityRepoId === 'number')

@@ -32,7 +32,7 @@ describe('attentionIsolation', () => {
       workspaceId: 3,
       activityRepoId: 'feed',
       attentionIsolation: null,
-      attentionPersonalOnly: false,
+      attentionRelevance: null,
       feedIsolatedPrId: null,
     });
   });
@@ -169,30 +169,49 @@ describe('attentionIsolation', () => {
     });
   });
 
-  // ── the PERSONAL lens: the sibling field, and the divergence rule it enforces ─────────────
+  // ── the RELEVANCE lens: the sibling field, and the divergence rule it enforces ─────────────
   //
   // The welcome-back banner, the Workspace badges and the brief's "Elsewhere" rows count the
-  // PERSONAL subset of my_turn (`myTurnPersonal`); the board holds every card. A banner reading 4
+  // PERSONAL subset of my_turn (`myTurnPersonal` = direct + maintained); the brief's second
+  // my-turn line counts the REST (`myTurnOther`); the board holds every card. A line reading 4
   // whose click opened a board of 50 would be the "the strip says 5, the board lists 3" defect
-  // (747c9c9) in a new place — so the ONE gesture those surfaces navigate through seats the lens.
+  // (747c9c9) in a new place — so every one of those surfaces navigates through a gesture that
+  // seats ITS OWN half.
+  //
+  // ⚠ THREE-VALUED, NOT A BOOLEAN. It shipped as `attentionPersonalOnly: boolean`, which can say
+  // "what involves me" but has no way to say "the rest" — so the two mutually exclusive brief
+  // lines could not both land on a board filtered to their own number. Two lines + the un-lensed
+  // board is three views; a boolean has two states.
   //
   // ⚠ IT IS A SIBLING OF `attentionIsolation`, NOT A MEMBER OF IT: that field is compared against
   // `card.kind`, and these two predicates are orthogonal.
-  describe('attentionPersonalOnly', () => {
+  describe('attentionRelevance', () => {
     beforeEach(() => {
-      useFilters.setState({ attentionPersonalOnly: false });
+      useFilters.setState({ attentionRelevance: null });
       usePinnedTabs.setState({ activeTab: 'timeline' });
     });
 
-    it('defaults to false — the board is BROAD, because those PRs do need a review', () => {
-      expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+    it('defaults to null — the board is BROAD, because those PRs do need a review', () => {
+      expect(useFilters.getState().attentionRelevance).toBeNull();
     });
 
-    it('openMyTurnInWorkspace seats it — the count and the list are one population', () => {
+    it('holds either half', () => {
+      useFilters.getState().setAttentionRelevance('mine');
+      expect(useFilters.getState().attentionRelevance).toBe('mine');
+      useFilters.getState().setAttentionRelevance('others');
+      expect(useFilters.getState().attentionRelevance).toBe('others');
+      useFilters.getState().setAttentionRelevance(null);
+      expect(useFilters.getState().attentionRelevance).toBeNull();
+    });
+
+    it('openMyTurnInWorkspace seats MINE — the count and the list are one population', () => {
+      // Every caller of that action is a NOTIFICATION surface counting `myTurnPersonal`, which is
+      // exactly direct + maintained. Landing them on 'others' — or on the broad board — would show
+      // a different list than the number they clicked.
       useFilters.setState({ workspaceId: 3, activityRepoId: 'feed' });
       useFilters.getState().openMyTurnInWorkspace(9);
       const after = useFilters.getState();
-      expect(after.attentionPersonalOnly).toBe(true);
+      expect(after.attentionRelevance).toBe('mine');
       // …alongside, never instead of, the kind isolation.
       expect(after.attentionIsolation).toBe('my_turn');
     });
@@ -201,61 +220,101 @@ describe('attentionIsolation', () => {
       useFilters.setState({
         workspaceId: 3,
         activityRepoId: 'attention',
-        attentionPersonalOnly: false,
+        attentionRelevance: null,
       });
       useFilters.getState().openMyTurnInWorkspace(3);
-      expect(useFilters.getState().attentionPersonalOnly).toBe(true);
+      expect(useFilters.getState().attentionRelevance).toBe('mine');
+    });
+
+    it('…and OVERWRITES the opposite half rather than leaving it seated', () => {
+      // The failure this guards: a reader on the "review or reply" board clicks a workspace badge
+      // (a personal count) and lands on a board still filtered to the backlog — a smaller, wholly
+      // different list than the number they clicked.
+      useFilters.setState({
+        workspaceId: 3,
+        activityRepoId: 'attention',
+        attentionRelevance: 'others',
+      });
+      useFilters.getState().openMyTurnInWorkspace(3);
+      expect(useFilters.getState().attentionRelevance).toBe('mine');
     });
 
     it('a rail switch clears it', () => {
-      useFilters.setState({ activityRepoId: 'attention', attentionPersonalOnly: true });
+      useFilters.setState({ activityRepoId: 'attention', attentionRelevance: 'mine' });
       useFilters.getState().setActivityRepo('feed');
-      expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+      expect(useFilters.getState().attentionRelevance).toBeNull();
     });
 
     it('a workspace switch clears it (the count that seated it was another workspace’s)', () => {
-      useFilters.setState({ attentionPersonalOnly: true });
+      useFilters.setState({ attentionRelevance: 'others' });
       useFilters.getState().setWorkspace(9, null);
-      expect(useFilters.getState().attentionPersonalOnly).toBe(false);
+      expect(useFilters.getState().attentionRelevance).toBeNull();
     });
 
     it('is cleared alongside the kind isolation, never instead of it', () => {
       useFilters.setState({
         activityRepoId: 'attention',
         attentionIsolation: 'my_turn',
-        attentionPersonalOnly: true,
+        attentionRelevance: 'mine',
         feedIsolatedPrId: 42,
       });
       useFilters.getState().setActivityRepo('bots');
       const after = useFilters.getState();
       expect(after.attentionIsolation).toBeNull();
-      expect(after.attentionPersonalOnly).toBe(false);
+      expect(after.attentionRelevance).toBeNull();
       expect(after.feedIsolatedPrId).toBeNull();
     });
 
     it('is NOT persisted with the filter bar (so no FILTER_STORAGE_VERSION bump is owed)', () => {
-      useFilters.setState({ attentionPersonalOnly: true });
+      useFilters.setState({ attentionRelevance: 'mine' });
       const persisted = pickFilterBarState(useFilters.getState()) as Record<string, unknown>;
-      expect('attentionPersonalOnly' in persisted).toBe(false);
+      expect('attentionRelevance' in persisted).toBe(false);
     });
 
     it('is dropped from a restored blob that somehow carries it', () => {
       const restored = sanitizePersistedFilters({
-        attentionPersonalOnly: true,
+        attentionRelevance: 'mine',
       } as unknown as Partial<FilterState>) as Record<string, unknown>;
-      expect('attentionPersonalOnly' in restored).toBe(false);
+      expect('attentionRelevance' in restored).toBe(false);
     });
 
-    it('a BROAD entry point clears it explicitly — the brief strip’s rule', () => {
-      // The strip's own lines count the broad population, and `setActivityRepo` does NOT clear
-      // anything when the rail is already 'attention'. Rendered as the strip renders it.
-      useFilters.setState({ activityRepoId: 'attention', attentionPersonalOnly: true });
+    // ── the brief strip's two mutually exclusive lines, rendered as the strip renders them ────
+    //
+    // Each line SEATS its own value — including `null` for the whole-kind lines — because
+    // `setActivityRepo` returns an empty patch when the rail is already 'attention', so a lens
+    // left over from an earlier click would survive and open a different list than the number.
+    it('the "need your attention" line seats MINE', () => {
+      useFilters.setState({ activityRepoId: 'attention', attentionRelevance: 'others' });
+      const s = useFilters.getState();
+      s.setActivityRepo('attention'); // empty patch — the trap
+      s.setAttentionIsolation('my_turn');
+      s.setAttentionRelevance('mine');
+      const after = useFilters.getState();
+      expect(after.attentionRelevance).toBe('mine');
+      expect(after.attentionIsolation).toBe('my_turn');
+    });
+
+    it('the "need review or reply" line seats OTHERS — the two lines are exclusive', () => {
+      useFilters.setState({ activityRepoId: 'attention', attentionRelevance: 'mine' });
+      const s = useFilters.getState();
+      s.setActivityRepo('attention');
+      s.setAttentionIsolation('my_turn');
+      s.setAttentionRelevance('others');
+      const after = useFilters.getState();
+      expect(after.attentionRelevance).toBe('others');
+      expect(after.attentionIsolation).toBe('my_turn');
+    });
+
+    it('a WHOLE-KIND entry point clears it explicitly — the brief strip’s other rule', () => {
+      // The strip's non-my-turn lines count a whole kind, so they must widen the board rather than
+      // inherit whichever half was last seated.
+      useFilters.setState({ activityRepoId: 'attention', attentionRelevance: 'mine' });
       const s = useFilters.getState();
       s.setActivityRepo('attention'); // empty patch — the trap
       s.setAttentionIsolation('stalled_review');
-      s.setAttentionPersonalOnly(false);
+      s.setAttentionRelevance(null);
       const after = useFilters.getState();
-      expect(after.attentionPersonalOnly).toBe(false);
+      expect(after.attentionRelevance).toBeNull();
       expect(after.attentionIsolation).toBe('stalled_review');
     });
   });
@@ -266,13 +325,13 @@ describe('attentionIsolation', () => {
     // a lens that one control clears and its twin doesn't is the kind of drift nothing reports.
     useFilters.setState({
       attentionIsolation: 'my_turn',
-      attentionPersonalOnly: true,
+      attentionRelevance: 'mine',
       feedIsolatedPrId: 42,
     });
     useFilters.getState().resetAllFilters();
     const after = useFilters.getState();
     expect(after.attentionIsolation).toBe('my_turn');
-    expect(after.attentionPersonalOnly).toBe(true);
+    expect(after.attentionRelevance).toBe('mine');
     expect(after.feedIsolatedPrId).toBe(42);
   });
 });

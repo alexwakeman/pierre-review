@@ -181,14 +181,20 @@ describe('the daily brief counts what the click opens', () => {
     const live = await liveCardCounts();
     const { counts } = await brief.getDailyBriefEntry(1, scope.workspaceId);
     // Zeros are meaningful here: a kind the brief counts but the board filters out (or vice
-    // versa) shows up as a mismatch on one of these four, whatever the fixture happens to hold.
+    // versa) shows up as a mismatch on one of these five, whatever the fixture happens to hold.
+    //
+    // ⚠ EVERY kind the brief counts belongs in this object. `ci_failing` was added to the union,
+    // the count loop and the render switch in one change; a future kind added to the loop and not
+    // here would leave the pair unpinned exactly where it matters.
     expect({
       my_turn: counts.myTurn,
+      ci_failing: counts.ciFailing,
       stalled_review: counts.stalled,
       untouched_thread: counts.untouchedThreads,
       reviewer_routing: counts.needsReviewer,
     }).toEqual({
       my_turn: live.my_turn ?? 0,
+      ci_failing: live.ci_failing ?? 0,
       stalled_review: live.stalled_review ?? 0,
       untouched_thread: live.untouched_thread ?? 0,
       reviewer_routing: live.reviewer_routing ?? 0,

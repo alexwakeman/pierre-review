@@ -22,6 +22,7 @@ import {
 import type {
   ApprovedPrItem,
   CheckRun,
+  CiFailingCard,
   CiStatus,
   CommitDetail,
   DerivedState,
@@ -94,6 +95,7 @@ import type {
   ConsolidatedFeedCounts,
   FeedAffectedThread,
   MyTurnPr,
+  MyTurnRelevance,
   BotSignalCard,
   BotSignalVendorStat,
   AutomatedReviewerKind,
@@ -3462,11 +3464,22 @@ async function getCiFailureFeedItems(
  * newest-100 ∪ within-90d, `trunk_ci_status_events` = newest-200 ∪ within the 14-day feed window),
  * so an old sha can outlive its commit row; and the landing PR may simply not be synced here.
  */
+interface TrunkLandingPr {
+  id: number;
+  number: number;
+  title: string;
+  state: PrState;
+  /** Who merged it. This is the WHOLE of the ci_failing trunk card's attribution, and it
+   *  attributes LANDING, never BREAKING — trunk may well have been red before this PR merged
+   *  (see the ci_failing block in getWorkspaceInsights for why we do not try to say more). */
+  mergedById: number | null;
+}
+
 async function resolveTrunkCommitPrs(
   accountId: number,
   pairs: { repoId: number; sha: string }[],
-): Promise<Map<string, { id: number; number: number; title: string; state: PrState }>> {
-  const out = new Map<string, { id: number; number: number; title: string; state: PrState }>();
+): Promise<Map<string, TrunkLandingPr>> {
+  const out = new Map<string, TrunkLandingPr>();
   if (pairs.length === 0) return out;
   const repoIds = [...new Set(pairs.map((p) => p.repoId))];
   const shas = [...new Set(pairs.map((p) => p.sha))];
@@ -3502,6 +3515,9 @@ async function resolveTrunkCommitPrs(
       number: pullRequests.number,
       title: pullRequests.title,
       state: pullRequests.state,
+      // Selected HERE rather than re-queried by a caller: this is already the one hop from a
+      // trunk sha to its PR row. The feed-item caller simply ignores the extra column.
+      mergedById: pullRequests.mergedById,
     })
     .from(pullRequests)
     .where(
@@ -3522,6 +3538,7 @@ async function resolveTrunkCommitPrs(
         number: pr.number,
         title: pr.title,
         state: pr.state as PrState,
+        mergedById: pr.mergedById,
       });
   }
   return out;
@@ -3643,6 +3660,20 @@ const INSIGHT_CARD_CAP = 15; // per-kind cap so the board stays digestible
 // restate "you have 54 things" as "you have 15". 50 keeps the board bounded while sitting above
 // any realistic personal inbox; the tail beyond it is disclosed by /api/my-turn's own listing.
 const MY_TURN_CARD_CAP = 50;
+
+/**
+ * IS THIS BUILD RED? — and RED IS ALWAYS THE PAIR `failure` | `error`, never one of them.
+ *
+ * GitHub reports an infrastructure/permissions problem as `error` and a genuine check failure as
+ * `failure`, and every layer of this app that asks "is it red" has to accept both: db/triage.ts's
+ * reason tags, getWorkspaceMetricsDetail's own local `isRed`, and the SPA's lib/ui.ts. A fold that
+ * tested only 'failure' would silently drop every errored build — which is the half that most
+ * often needs a human.
+ */
+const RED_CI_STATUSES = ['failure', 'error'] as const;
+function isRedCiStatus(ci: CiStatus | null): boolean {
+  return (RED_CI_STATUSES as readonly string[]).includes(ci ?? '');
+}
 
 /** "just now" / "42m ago" / "6h ago" / "3d ago" — the my_turn card's one-line detail suffix. */
 function agoLabel(fromMs: number, nowMs: number): string {
@@ -4458,6 +4489,21 @@ export async function getWorkspaceInsights(
   // displayed figure equals the count it qualifies, so a narrow line borrowing the broad total
   // silently loses its "of N" for ever.
   let myTurnPersonalTotal: number | undefined;
+  // The same pre-cap array, folded a third/fourth/fifth time — one total per `MyTurnRelevance`
+  // value, because the brief renders the split as SEPARATE lines and each of them opens its own
+  // board. ⚠ NONE of these may be a subtraction off the two totals above: `capFor` only prints
+  // "of N" when the displayed figure equals the count it is qualifying, so a line whose
+  // denominator came from another population loses its cap disclosure silently, on exactly the
+  // workspaces where it matters. Every displayed count folds its own total, from this one array.
+  let myTurnDirectTotal: number | undefined;
+  let myTurnMaintainedTotal: number | undefined;
+  let myTurnOtherTotal: number | undefined;
+  // The `ci_failing` fold's PRE-CAP length, on the same rule as `myTurnTotal`: that kind shares
+  // INSIGHT_CARD_CAP (15) with the SURVEY kinds, which stay silent about their cap because 15 is
+  // a fair sample of a long tail — but "N red builds are yours" is a worklist the viewer clears,
+  // where a silent cap is the same lie my_turn's was. Written inside the block below, so an empty
+  // workspace leaves it undefined = nothing to disclose.
+  let ciFailingTotal: number | undefined;
   const userIdSet = new Set<number>();
   const addUser = (id: number | null): void => {
     if (id != null) userIdSet.add(id);
@@ -4514,12 +4560,16 @@ export async function getWorkspaceInsights(
       // personally ("someone is waiting on you"), where every other kind is a survey of the
       // workspace. A thing you must do outranks a thing you might look at.
       my_turn: 0,
-      bot_signal: 1, // the flagship "layer above your review bot" summary, next in its severity tier
-      bot_only_review: 2, // the governance "only a bot reviewed this" risk, right after
-      stalled_review: 3,
-      untouched_thread: 4,
-      reviewer_load: 5,
-      reviewer_routing: 6,
+      // The OTHER kind that is about the VIEWER rather than the workspace — a red build you are on
+      // the hook for. It sits directly under my_turn for the same reason my_turn leads: a thing
+      // you must do outranks a thing you might look at.
+      ci_failing: 1,
+      bot_signal: 2, // the flagship "layer above your review bot" summary, next in its severity tier
+      bot_only_review: 3, // the governance "only a bot reviewed this" risk, right after
+      stalled_review: 4,
+      untouched_thread: 5,
+      reviewer_load: 6,
+      reviewer_routing: 7,
     };
     const sevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
     cards.sort(
@@ -4541,6 +4591,10 @@ export async function getWorkspaceInsights(
       // return below, where the my_turn block never ran and this is correctly undefined.
       myTurnTotal,
       myTurnPersonalTotal,
+      myTurnDirectTotal,
+      myTurnMaintainedTotal,
+      myTurnOtherTotal,
+      ciFailingTotal,
     };
   };
   if (repoIds.length === 0) return finish();
@@ -4575,8 +4629,9 @@ export async function getWorkspaceInsights(
       detail: string;
       since: Date | null;
       prId: number;
-      /** `MyTurnCard.personal` — read off the section row, never re-derived (see `personalOf`) */
-      personal: boolean;
+      /** `MyTurnCard.relevance` — read off the section row, never re-derived (see `relevanceOf`).
+       *  The card's `personal` is FOLDED from this one field, so the two cannot drift. */
+      relevance: MyTurnRelevance;
       /** actors to resolve for the client beyond the PR author (prRef's authorId) */
       extraActorIds: (number | null)[];
     };
@@ -4592,12 +4647,19 @@ export async function getWorkspaceInsights(
       i.since != null ? new Date(Date.parse(i.since)) : null;
 
     // THE RELEVANCE ANSWER, READ NOT RE-DERIVED — the `sinceOf` rule applied to the second thing
-    // this block would otherwise answer for a second time. `getMyTurn` owns the personal-
-    // relevance rule AND the maintainer set it needs (one repo/merger read per fold); re-running
-    // it here would cost a second pair of queries and could disagree with the wire the very same
-    // request serves. Absent ⇒ true: that is the pre-narrowing behaviour, and over-notifying is
-    // the safe direction for a row we can't classify.
-    const personalOf = (i: { personal?: boolean }): boolean => i.personal ?? true;
+    // this block would otherwise answer for a second time. `getMyTurn` owns the relevance rule
+    // AND the maintainer/mention sets it needs (one repo/merger/mention read per fold); re-running
+    // it here would cost a second batch of queries and could disagree with the wire the very same
+    // request serves.
+    //
+    // Absent ⇒ fall back to the older boolean: `true` ⇒ 'direct', `false` ⇒ 'none'. A row that
+    // carries no `relevance` cannot be told apart from 'maintained', and it never has to be —
+    // only "New PRs" is ever that value and that section always sets the field. Over-notifying
+    // remains the safe direction for a row we can't classify.
+    const relevanceOf = (i: {
+      relevance?: MyTurnRelevance;
+      personal?: boolean;
+    }): MyTurnRelevance => i.relevance ?? ((i.personal ?? true) ? 'direct' : 'none');
 
     for (const i of mt.awaitingReview) {
       seeds.push({
@@ -4611,7 +4673,7 @@ export async function getWorkspaceInsights(
             : 'Review requested from you',
         since: sinceOf(i),
         prId: i.prId,
-        personal: personalOf(i),
+        relevance: relevanceOf(i),
         extraActorIds: [],
       });
     }
@@ -4625,7 +4687,7 @@ export async function getWorkspaceInsights(
         detail: `${handle(i.lastReplyAuthorId)} replied ${agoLabel(at.getTime(), now)}`,
         since: at,
         prId: i.prId,
-        personal: personalOf(i),
+        relevance: relevanceOf(i),
         extraActorIds: [i.lastReplyAuthorId],
       });
     }
@@ -4640,7 +4702,7 @@ export async function getWorkspaceInsights(
         detail: `Approved by ${i.approvals} reviewer${i.approvals === 1 ? '' : 's'} · ${agoLabel(at.getTime(), now)}${conflicts}`,
         since: at,
         prId: i.prId,
-        personal: personalOf(i),
+        relevance: relevanceOf(i),
         extraActorIds: [],
       });
     }
@@ -4655,7 +4717,7 @@ export async function getWorkspaceInsights(
         detail: i.summary,
         since: sinceOf(i),
         prId: i.prId,
-        personal: personalOf(i),
+        relevance: relevanceOf(i),
         extraActorIds: [],
       });
     }
@@ -4669,9 +4731,10 @@ export async function getWorkspaceInsights(
         detail: `New PR from ${handle(i.authorId)} · ${agoLabel(at.getTime(), now)}`,
         since: at,
         prId: i.prId,
-        // The ONE section where this is ever false: a stranger's PR in a repo the viewer
-        // neither has write access to nor has ever merged into.
-        personal: personalOf(i),
+        // The ONE section that is ever anything but 'direct': 'maintained' when it is a repo the
+        // viewer has write on or has landed a PR into, 'none' for a stranger's PR in a repo they
+        // merely track. (A mention on it makes it 'direct' again, even in a read-only repo.)
+        relevance: relevanceOf(i),
         extraActorIds: [i.authorId],
       });
     }
@@ -4685,7 +4748,7 @@ export async function getWorkspaceInsights(
         // finishedAt is nullable on the wire; null falls back to the PR row's openedAt.
         since: i.finishedAt != null ? new Date(Date.parse(i.finishedAt)) : null,
         prId: i.prId,
-        personal: personalOf(i),
+        relevance: relevanceOf(i),
         extraActorIds: [],
       });
     }
@@ -4747,7 +4810,14 @@ export async function getWorkspaceInsights(
       // ⚠ FOLDED OFF THE PRE-CAP ARRAY, for the same reason `myTurnTotal` is. Counted after the
       // slice it would be bounded by 50 and would stop being a total; counted here it is the real
       // "how many of these are actually about you" population the notification surfaces need.
-      myTurnPersonalTotal = ranked.filter((r) => r.s.personal).length;
+      myTurnPersonalTotal = ranked.filter((r) => r.s.relevance !== 'none').length;
+      // The three-way split of the same array, in the same pass and under the same pre-cap rule.
+      // Mutually exclusive and exhaustive: direct + maintained + other === myTurnTotal, and
+      // direct + maintained === myTurnPersonalTotal. Spelled out rather than subtracted — see the
+      // declaration above for why a subtracted denominator is a silent defect, not a shortcut.
+      myTurnDirectTotal = ranked.filter((r) => r.s.relevance === 'direct').length;
+      myTurnMaintainedTotal = ranked.filter((r) => r.s.relevance === 'maintained').length;
+      myTurnOtherTotal = ranked.filter((r) => r.s.relevance === 'none').length;
       const built = ranked.slice(0, MY_TURN_CARD_CAP);
 
       for (const { s, p, since } of built) {
@@ -4765,7 +4835,10 @@ export async function getWorkspaceInsights(
           threadId: s.threadId,
           detail: s.detail,
           since: since.toISOString(),
-          personal: s.personal,
+          // ⚠ FOLDED FROM `relevance`, never carried alongside it. One source of truth means the
+          // board's label and the notification's count cannot disagree about the same card.
+          personal: s.relevance !== 'none',
+          relevance: s.relevance,
         };
         cards.push(card);
       }
@@ -4909,6 +4982,9 @@ export async function getWorkspaceInsights(
       additions: pullRequests.additions,
       deletions: pullRequests.deletions,
       files: pullRequests.files,
+      // The ci_failing 'your_pr' arm's clock — the head commit the CI verdict is ABOUT. It is not
+      // a "red since": there is no stored per-PR CI transition to read one from.
+      lastCommitAt: pullRequests.lastCommitAt,
     })
     .from(pullRequests)
     .where(
@@ -4934,6 +5010,173 @@ export async function getWorkspaceInsights(
     .execute();
   const openPrIds = openPrs.map((p) => p.id);
   const prById = new Map(openPrs.map((p) => [p.id, p]));
+
+  // ── ci_failing cards (CORE, deterministic, no AI) ─────────────────────────────────
+  // RED BUILDS THE VIEWER IS ON THE HOOK FOR. Two arms, and they are two different claims — the
+  // same distinction the my_turn board draws between work that is YOURS and work that is merely in
+  // YOUR REPOS:
+  //   • 'your_pr' — an open, non-draft PR YOU AUTHORED whose head CI is red. Your code, your fix.
+  //   • 'trunk'   — the default branch of a repo you MAINTAIN is red RIGHT NOW; the card names the
+  //                 PR that landed the red head when the sha resolves to one.
+  //
+  // ⚠ IT SITS ABOVE THE `openPrIds.length === 0` GUARD BELOW, and must stay there. The trunk arm
+  // needs no open PR at all, so under the guard a workspace whose repos are quiet (or newly added,
+  // with no in-window activity event) would paint a green board over a red trunk.
+  //
+  // ⚠ TWO NEIGHBOURING QUESTIONS SOMEBODY WILL REACH FOR HERE. BOTH WERE MEASURED AND CUT:
+  //   1. "PRs I MERGED whose CI is failing", off `pull_requests.ci_status` on merged rows. A merged
+  //      PR is never re-walked (the repo walk orders by UPDATED_AT with a cutoff), so that column
+  //      is FROZEN at the merge instant — all three such rows on the reporting account froze within
+  //      20s of merging, 3-5 months ago. It answers "did this land red": a retro metric, which is
+  //      exactly what the merge-CI tile is for, not an inbox item.
+  //   2. "the commit that TURNED trunk red". Real data defeats streak-start detection: trunk CI is
+  //      non-monotone, 21% of `branch_commits` rows carry ciStatus 'unknown', and a chronically-red
+  //      repo has no streak start at all. Honest transition attribution needs a NEW append-only
+  //      per-commit table plus a sync step to fill it, and it was judged not worth building (0 of
+  //      96 red heads on the reporting account were the viewer's). So the card names the LANDING PR
+  //      of the CURRENT head and claims nothing whatsoever about who broke the build.
+  {
+    const viewerId = await getAccountUserId(accountId);
+    // Sorted and capped together, so the two arms compete on urgency rather than one arm always
+    // winning the cap. `sortAt` is the card's own clock (see `observedAt`), 0 when it has none.
+    const ciSeeds: { card: CiFailingCard; sortAt: number }[] = [];
+
+    // ARM 1 — your own open PRs, red NOW. NO NEW QUERY: `openPrs` above already selects authorId
+    // and ciStatus, and `pull_requests.ci_status` is NOT lean-gated (sync/upsert.ts writes it on
+    // every walk; only `check_runs` is gated), so this is a fold over rows we already hold and it
+    // hydrates nothing. It inherits that query's population on purpose — non-draft (a draft's red
+    // CI is not yet a summons) and not ultra-stale (an abandoned PR is not an inbox item).
+    if (viewerId != null) {
+      for (const p of openPrs) {
+        if (p.authorId !== viewerId || !isRedCiStatus(p.ciStatus)) continue;
+        const at = p.lastCommitAt ?? p.openedAt;
+        ciSeeds.push({
+          sortAt: at.getTime(),
+          card: {
+            id: `cifail:pr:${p.id}`,
+            kind: 'ci_failing',
+            // Your own PR, red, open: the most actionable thing this board can hold.
+            severity: 'high',
+            arm: 'your_pr',
+            repoId: p.repoId,
+            repoFullName: repoName.get(p.repoId) ?? '',
+            ciStatus: p.ciStatus as CiStatus,
+            prId: p.id,
+            prNumber: p.number,
+            prTitle: p.title,
+            headSha: null,
+            mergedById: null,
+            viewerMerged: false,
+            detail: 'You opened this PR — its head commit is red',
+            observedAt: at.toISOString(),
+            githubUrl: ghUrl(p.repoId, p.number),
+          },
+        });
+      }
+    }
+
+    // ARM 2 — trunk red NOW in a repo the viewer MAINTAINS. `repos.defaultBranchCiStatus` is the
+    // live default-branch snapshot /api/branch-status reads; it is a CURRENT-STATE column, which is
+    // what makes this an inbox item rather than history.
+    const redTrunks =
+      repoIds.length === 0
+        ? []
+        : await db
+            .select({
+              id: repos.id,
+              branchName: repos.defaultBranchName,
+              headSha: repos.defaultBranchHeadSha,
+              ci: repos.defaultBranchCiStatus,
+              observedAt: repos.defaultBranchUpdatedAt,
+            })
+            .from(repos)
+            .where(
+              and(
+                eq(repos.accountId, accountId),
+                inArray(repos.id, repoIds),
+                // ⚠ THE SAME ONE SPELLING the row-level test uses, pushed into SQL rather than
+                // re-typed as a literal pair here: a second copy is a second answer waiting to
+                // drift, and the half that drifts is always 'error'. (A NULL status is not red —
+                // a freshly added repo has no snapshot yet, and "unknown" is the honest answer.)
+                inArray(repos.defaultBranchCiStatus, [...RED_CI_STATUSES]),
+              ),
+            )
+            .execute();
+    // The SAME maintainer set My Turn's relevance gate uses — "a repo you maintain" has to mean one
+    // thing in this app, and that resolver is the union of GitHub's viewerPermission and "you have
+    // landed a PR on its default branch". Skipped entirely when no trunk is red, because membership
+    // is the only thing that could change the answer.
+    const maintained =
+      redTrunks.length > 0
+        ? await viewerMaintainedRepoIds(accountId, viewerId)
+        : new Set<number>();
+    const myRedTrunks = redTrunks.filter((r) => maintained.has(r.id));
+    // ONE lookup for every red head, before the loop — resolving inside it would repeat the same
+    // two queries per repo.
+    const landingPrs = await resolveTrunkCommitPrs(
+      accountId,
+      myRedTrunks.flatMap((r) => (r.headSha != null ? [{ repoId: r.id, sha: r.headSha }] : [])),
+    );
+    for (const r of myRedTrunks) {
+      // ⚠ A MISS HERE IS ORDINARY, NOT A GAP. ~11% of red heads are DIRECT PUSHES to the default
+      // branch (a legitimate steady state), and others simply have no association observed yet or
+      // no synced PR. The card must still say trunk is red — it just does not name a PR.
+      const landed = r.headSha != null ? landingPrs.get(`${r.id}:${r.headSha}`) : undefined;
+      const viewerMerged = landed?.mergedById != null && landed.mergedById === viewerId;
+      addUser(landed?.mergedById ?? null);
+      const full = repoName.get(r.id) ?? '';
+      const branch = r.branchName ?? 'trunk';
+      const shortSha = r.headSha != null ? r.headSha.slice(0, 7) : null;
+      ciSeeds.push({
+        sortAt: r.observedAt?.getTime() ?? 0,
+        card: {
+          id: `cifail:trunk:${r.id}:${r.headSha ?? ''}`,
+          kind: 'ci_failing',
+          // You LANDED the commit that is sitting on a red trunk — still not proof you broke it
+          // (see the block header), but the strongest claim this data supports. Everything else in
+          // a repo you maintain is a 'warn': real, yours to care about, not necessarily yours to fix.
+          severity: viewerMerged ? 'high' : 'warn',
+          arm: 'trunk',
+          repoId: r.id,
+          repoFullName: full,
+          ciStatus: r.ci as CiStatus,
+          prId: landed?.id ?? null,
+          prNumber: landed?.number ?? null,
+          prTitle: landed?.title ?? null,
+          headSha: r.headSha,
+          mergedById: landed?.mergedById ?? null,
+          viewerMerged,
+          detail: `You maintain this repo — ${branch} is red${shortSha != null ? ` at ${shortSha}` : ''}${
+            viewerMerged ? '; you merged the PR that landed this commit' : ''
+          }`,
+          // OUR observation time (when the branch snapshot last refreshed), not the commit's — the
+          // wire type says so, because the two are different facts and only one is stored here.
+          observedAt: r.observedAt?.toISOString() ?? null,
+          // The COMMIT page, not the PR: a trunk run's checks live on the commit, the same rule the
+          // trunk_ci_failed feed item follows. Falls back to the repo when we hold no head sha.
+          githubUrl:
+            r.headSha != null
+              ? `https://github.com/${full}/commit/${r.headSha}`
+              : `https://github.com/${full}`,
+        },
+      });
+    }
+
+    const ciSevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
+    ciSeeds.sort(
+      (a, b) =>
+        ciSevRank[a.card.severity] - ciSevRank[b.card.severity] ||
+        b.sortAt - a.sortAt ||
+        a.card.repoFullName.localeCompare(b.card.repoFullName),
+    );
+    // ⚠ MEASURED BEFORE THE SLICE, exactly as `myTurnTotal` is — counted after it, the "total"
+    // would be bounded by the cap and would stop being one.
+    ciFailingTotal = ciSeeds.length;
+    // ⚠ AND THE SLICE IS OURS TO CALL. There is no central cap in this function: every builder
+    // slices itself, so a block that forgets ships an uncapped card kind.
+    for (const seed of ciSeeds.slice(0, INSIGHT_CARD_CAP)) cards.push(seed.card);
+  }
+
   if (openPrIds.length === 0) return finish();
 
   // Pending review requests (GitHub drops the request once a review lands → still-pending).
@@ -6362,11 +6605,16 @@ export async function getMyTurn(
       openedAt: t.openedAt,
       githubUrl: `https://github.com/${owner}/${name}/pull/${m.number}`,
       since: since.toISOString(),
-      // The DEFAULT half of the personal-relevance rule (see `MyTurnPr.personal`): five of the
-      // six sections require your involvement to exist at all — a review was requested of YOU,
-      // it is YOUR PR, YOUR PR was approved, YOUR thread got a reply, YOU asked for the run —
-      // so membership IS the relevance test and there is nothing further to check. Only "New
-      // PRs" admits work nobody asked you about, and it overrides this below.
+      // The DEFAULT of the relevance rule (see `MyTurnRelevance`): five of the six sections
+      // require your involvement to exist at all — a review was requested of YOU, it is YOUR PR,
+      // YOUR PR was approved, YOUR thread got a reply, YOU asked for the run — so membership IS
+      // the relevance test and there is nothing further to check. Only "New PRs" admits work
+      // nobody asked you about, and it overrides BOTH of these below.
+      //
+      // `personal` is DERIVED from `relevance` (`!== 'none'`) and written anyway: it is still the
+      // field every notification surface reads, and keeping the server the one place that folds
+      // the three values down to the boolean is what stops the two ever disagreeing.
+      relevance: 'direct' as const,
       personal: true,
     };
   };
@@ -6495,10 +6743,28 @@ export async function getMyTurn(
       : [new Set<number>(), new Set<number>()];
   const watchedRepoPrs = newRepoPrCandidates
     // The one section where OPENING is genuinely the event, so openedAt is the honest clock.
-    .map((t) => ({
-      ...toMyTurnPr(t, meta(t.id).openedAt),
-      personal: maintainedRepoIds.has(t.repoId) || mentionedPrIds.has(t.id),
-    }))
+    .map((t) => {
+      // ⚠ THE TWO ARMS STAY TWO FACTS. They used to be OR-ed into one boolean, and that union is
+      // precisely what made the board unreadable: "somebody typed your name on this PR" and "this
+      // PR is in a repo you happen to have write on" are not the same summons, and a card that
+      // said "YOUR TURN" for the second one was claiming ownership of a stranger's work. Keep
+      // them separate all the way to the label; collapse only at the very end, into `personal`.
+      //
+      // DIRECT WINS: a mention in a repo you also maintain is still about you.
+      const relevance: MyTurnRelevance = mentionedPrIds.has(t.id)
+        ? 'direct'
+        : maintainedRepoIds.has(t.repoId)
+          ? 'maintained'
+          : 'none';
+      return {
+        ...toMyTurnPr(t, meta(t.id).openedAt),
+        relevance,
+        // DERIVED, and written here rather than left to the consumer so `personal` keeps meaning
+        // exactly what it meant before this split existed: "may a notification surface interrupt
+        // the viewer about this row?" — direct ∪ maintained, unchanged.
+        personal: relevance !== 'none',
+      };
+    })
     .sort((a, b) => b.openedAt.localeCompare(a.openedAt));
 
   // 3. Threads awaiting your response: you opened the thread, someone replied
@@ -6510,9 +6776,9 @@ export async function getMyTurn(
       const d = threadDismissedAt.get(ta.threadId);
       return !d || Date.parse(ta.lastReplyAt) > d.getTime();
     })
-    // You opened the thread and someone replied to YOU — personal by construction. Stamped
-    // rather than left absent so every section answers the relevance question in the same field.
-    .map((ta) => ({ ...ta, personal: true }));
+    // You opened the thread and someone replied to YOU — DIRECT by construction. Stamped rather
+    // than left absent so every section answers the relevance question in the same two fields.
+    .map((ta) => ({ ...ta, relevance: 'direct' as const, personal: true }));
   for (const ta of threadsAwaiting) {
     if (ta.lastReplyAuthorId != null) referencedUsers.add(ta.lastReplyAuthorId);
   }
@@ -6522,8 +6788,8 @@ export async function getMyTurn(
   const claudeReviewsToAction: ClaudeReviewToAction[] = getProCapabilities().claudeReview
     ? (await getUnactionedClaudeReviews(accountId, scopedRepoIds))
         .filter((c) => !claudeDismissedIds.has(c.reviewId))
-        // You asked for the run — personal by construction, same as the thread section.
-        .map((c) => ({ ...c, personal: true }))
+        // You asked for the run — DIRECT by construction, same as the thread section.
+        .map((c) => ({ ...c, relevance: 'direct' as const, personal: true }))
     : [];
 
   const users =

@@ -36,9 +36,15 @@ import { useFilters } from '../store/filters.js';
 // Adding a repo you have never touched used to put every open PR in it here (425 of 459 items on
 // the reporter's account). The "Needs attention" BOARD still holds all of them — they do need a
 // review — which is why the click below goes through `openMyTurnInWorkspace`, the one gesture
-// that also seats the board's matching personal lens. A line that says 4 must not open a list
+// that also seats the board's matching 'mine' lens. A line that says 4 must not open a list
 // of 50. There is consequently NO per-workspace "seen" state
 // and no schema change: a line disappears when you deal with the work, not when you glance at it.
+//
+// ⚠ THE HEADLINE SPLITS THAT POPULATION IN TWO, the chips do not. "2 yours · 3 in your repos"
+// (`totalSplit`, off `MyTurnCard.relevance`) says which half is which without changing WHAT is
+// counted — the chips, the dropdown badges and the OS notification all still count the sum, and
+// the click still opens the whole 'mine' board. Splitting the chips as well would cost a second
+// number per workspace on a row whose one-line guarantee is the reason this component exists.
 //
 // ── THE CLICK ────────────────────────────────────────────────────────────────────────────────
 // Each line goes through `openMyTurnInWorkspace`, the ONE store action that switches scope and
@@ -61,7 +67,7 @@ export function WelcomeBackBanner(): JSX.Element | null {
   const { data: me } = useMe();
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const openMyTurnInWorkspace = useFilters((s) => s.openMyTurnInWorkspace);
-  const { lines, total, anyCapped, uncounted } = useMyTurnByWorkspace();
+  const { lines, total, totalSplit, anyCapped, uncounted } = useMyTurnByWorkspace();
   const [dismissed, setDismissed] = useState(false);
 
   if (dismissed || !me?.user) return null;
@@ -105,9 +111,26 @@ export function WelcomeBackBanner(): JSX.Element | null {
       <span className="shrink-0 text-amber-700/80 dark:text-amber-300/80">
         {/* The headline sums CAPPED card counts, so it says "N+" the moment any line is
             capped — the summed figure is a floor, and saying so is cheaper than a wrong
-            total. The per-chip tooltips carry the exact pairs. */}
-        · {total}
-        {anyCapped ? '+' : ''} item{singular ? '' : 's'} need{singular ? 's' : ''} you
+            total. The per-chip tooltips carry the exact pairs.
+
+            ⚠ AND IT SHOWS THE SPLIT WHEN IT HAS ONE. A bare "5 items need you" is the conflation
+            this batch exists to undo: two of those may be PRs you wrote and three may be other
+            people's PRs in repos you happen to maintain, which is orbit rather than ownership.
+            The POPULATION is unchanged — the chips, the badges and the OS notification still
+            count the sum — this only says which half is which. Absent split ⇒ the old single
+            figure, never a half rendered as if it were the whole. */}
+        {totalSplit != null ? (
+          <>
+            · {totalSplit.direct}
+            {anyCapped ? '+' : ''} yours · {totalSplit.maintained}
+            {anyCapped ? '+' : ''} in your repos
+          </>
+        ) : (
+          <>
+            · {total}
+            {anyCapped ? '+' : ''} item{singular ? '' : 's'} need{singular ? 's' : ''} you
+          </>
+        )}
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
         {shown.map((l) => (

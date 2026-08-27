@@ -28,7 +28,7 @@ export function RepoFeedHeader({ repo }: { repo: ActivityRepo }): JSX.Element {
         {repo.attentionCount > 0 && (
           <span
             className="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400"
-            title="PRs needing attention (your turn · stalled · untouched threads)"
+            title="PRs needing attention (review or reply · stalled · untouched threads)"
           >
             ⚠ {repo.attentionCount}
           </span>

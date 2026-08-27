@@ -68,9 +68,16 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
   // which rides the window-pure getPeriodMetricsForWorkspaces seam instead of the snapshot
   // WorkspaceMetrics matrix.)
 
-  // The attention cards (stalled reviews / untouched threads / reviewer load / needs-a-reviewer) —
-  // CORE/free (the same cards Pro Insights computes in core getWorkspaceInsights), for the Feed
-  // "Needs attention" tab. The bot cards are excluded (they live in the free Bots console).
+  // The attention cards (your turn / red builds that are yours / stalled reviews / untouched
+  // threads / reviewer load / needs-a-reviewer) — CORE/free (the same cards Pro Insights computes
+  // in core getWorkspaceInsights), for the Feed "Needs attention" tab. The bot cards are excluded
+  // (they live in the free Bots console).
+  //
+  // ⚠ THIS FILTER IS A DENY-LIST OF EXACTLY TWO KINDS, and it must stay one: a new InsightKind
+  // ships here by default, which is the behaviour every non-bot kind wants. It is also one of the
+  // two hand-maintained spellings of "which kinds count" — the other is computeBriefCounts' if/else
+  // chain — and `daily-brief.test.ts` compares them per kind so a kind added to one and not the
+  // other fails rather than reproducing "header 5, list 3".
   //
   // It passes the whole `BotScope`, not just the repo ids: getWorkspaceInsights needs the
   // workspaceId to know who counts as an automated reviewer for its bot cards. Those two cards are

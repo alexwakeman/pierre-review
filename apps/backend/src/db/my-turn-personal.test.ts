@@ -272,6 +272,56 @@ describe('My Turn personal-relevance flag', () => {
     ).toBe(REPOS.filter((r) => !r.maintained).length);
   });
 
+  it('splits that flag into a THREE-VALUED relevance', async () => {
+    // `personal` is the UNION of two arms and cannot say WHICH. The card copy needs the
+    // distinction — "YOUR TURN" over a stranger's PR you merely have write access to is the
+    // overclaim this split exists to end — so every row carries `relevance` alongside it.
+    //
+    // ⚠ There are no `pr_mentions` rows in this fixture, so the MAINTAINER arm is the only thing
+    // that can lift a row off 'none' here: a maintained repo must read 'maintained', never
+    // 'direct'. A 'direct' would mean the two arms had been folded back into one another.
+    const res = await q.getMyTurn(1);
+    const byPrId = new Map<number, string | undefined>(
+      res.watchedRepoPrs.map((p: { prId: number; relevance?: string }) => [
+        p.prId,
+        p.relevance,
+      ]),
+    );
+    for (const r of REPOS) {
+      const prId = newPrIdByRepo.get(r.key)!;
+      expect(byPrId.get(prId), `${r.key} (${r.why})`).toBe(
+        r.maintained ? 'maintained' : 'none',
+      );
+    }
+    // And the involved sections stay 'direct' — membership IS the relevance test there.
+    const requested = res.awaitingReview.find(
+      (p: { prId: number }) => p.prId === requestedPrId,
+    );
+    expect(requested, 'the review-requested control must reach awaitingReview').toBeTruthy();
+    expect(requested.relevance).toBe('direct');
+  });
+
+  it('keeps `personal` exactly `relevance !== "none"` on every row', async () => {
+    // The compatibility contract: `personal` is now DERIVED and every existing consumer (the
+    // welcome-back banner, the Workspace badges, the notification permission gate) keeps reading
+    // it. If the server ever stopped folding the three values down to this boolean the two would
+    // silently disagree, and the surfaces that INTERRUPT would be the ones to find out.
+    const res = await q.getMyTurn(1);
+    const rows = [
+      ...res.watchedRepoPrs,
+      ...res.awaitingReview,
+      ...res.yourPrs,
+      ...res.approvedPrs,
+      ...res.threadsAwaiting,
+      ...res.claudeReviewsToAction,
+    ];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows as { relevance?: string; personal?: boolean }[]) {
+      expect(row.relevance, 'every row is classified').toBeTruthy();
+      expect(row.personal).toBe(row.relevance !== 'none');
+    }
+  });
+
   it('flags an involved section personal even in a repo the viewer only reads', async () => {
     const res = await q.getMyTurn(1);
     const requested = res.awaitingReview.find(
@@ -317,5 +367,52 @@ describe('My Turn personal-relevance flag', () => {
     expect(counts.myTurnPersonal).toBeLessThan(counts.myTurn);
     expect(counts.myTurnPersonalTotal).toBeLessThan(counts.myTurnTotal);
     expect(counts.myTurnPersonalTotal).toBeGreaterThan(counts.myTurnPersonal);
+  });
+
+  it('folds a MATCHED pair for EVERY relevance value, off the same pre-cap array', async () => {
+    const insights = await q.getWorkspaceInsights(1, undefined, scope);
+    const maintainedRepos = REPOS.filter((r) => r.maintained).length;
+    const readOnlyRepos = REPOS.length - maintainedRepos;
+
+    // The three totals partition the population — exhaustive against `myTurnTotal`, and the two
+    // positive ones re-sum to the preserved `myTurnPersonalTotal` (whose meaning is UNCHANGED:
+    // direct ∪ maintained is exactly what `personal` always was).
+    expect(insights.myTurnDirectTotal).toBe(1); // the single review request
+    expect(insights.myTurnMaintainedTotal).toBe(MAINTAINED_PRS + maintainedRepos);
+    expect(insights.myTurnOtherTotal).toBe(readOnlyRepos);
+    expect(
+      insights.myTurnDirectTotal +
+        insights.myTurnMaintainedTotal +
+        insights.myTurnOtherTotal,
+    ).toBe(insights.myTurnTotal);
+    expect(insights.myTurnDirectTotal + insights.myTurnMaintainedTotal).toBe(
+      insights.myTurnPersonalTotal,
+    );
+
+    const { counts } = await brief.getDailyBriefEntry(1, scope.workspaceId);
+    // Each count is folded off the CARDS (what the board paints), like `myTurn` — the same
+    // partition one level down.
+    expect(counts.myTurnDirect + counts.myTurnMaintained + counts.myTurnOther).toBe(
+      counts.myTurn,
+    );
+    expect(counts.myTurnDirect + counts.myTurnMaintained).toBe(counts.myTurnPersonal);
+
+    // ⚠ EVERY LINE GETS ITS OWN TOTAL, AND THAT IS NOT A STYLE PREFERENCE. The brief's second
+    // line ("M need review or reply") displays `myTurnOther`, and `capFor` prints "of N" only
+    // when the displayed figure equals the count it qualifies — so a line that borrowed
+    // `myTurnTotal`, or derived itself as `myTurn - myTurnPersonal` with no total of its own,
+    // would lose its cap disclosure silently on exactly the capped workspaces it exists for.
+    // The subtraction agrees arithmetically here; what it cannot produce is a DENOMINATOR.
+    expect(typeof counts.myTurnDirectTotal).toBe('number');
+    expect(typeof counts.myTurnMaintainedTotal).toBe('number');
+    expect(typeof counts.myTurnOtherTotal).toBe('number');
+    expect(counts.myTurnDirectTotal).toBe(insights.myTurnDirectTotal);
+    expect(counts.myTurnMaintainedTotal).toBe(insights.myTurnMaintainedTotal);
+    expect(counts.myTurnOtherTotal).toBe(insights.myTurnOtherTotal);
+
+    // ⚠ THE PRE-CAP DISCRIMINATOR, on the split's own totals. The 'maintained' population spills
+    // past the 50-card cap (the non-personal rows are the newest, so they sit INSIDE it), so a
+    // post-cap fold would report the shown figure instead of the real one.
+    expect(counts.myTurnMaintainedTotal).toBeGreaterThan(counts.myTurnMaintained);
   });
 });

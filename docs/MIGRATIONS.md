@@ -5,6 +5,52 @@
 > cross-cutting landmines. Add new detail HERE, not to CLAUDE.md. References to other
 > sections of the old CLAUDE.md resolve via the doc map at the top of CLAUDE.md.
 
+## Replaying the pg chain (the only thing that verifies a pg migration)
+
+`pnpm test` is SQLite-only. **No automated check ever executes a `migrations-pg/` file**, so a pg
+twin can be malformed, unregistered, or subtly divergent and every suite stays green. The single
+source of confidence is replaying it by hand into a throwaway database. Last done 2026-08-27 on
+**PostgreSQL 16.9**: core 44/44 + all 27 plugin twins, full table parity with SQLite.
+
+There is a **standing local Postgres** on `:5432` (the `bng-metric-backend-postgres-1` container,
+user/password `dev`/`dev`). Use a SEPARATE database inside it — never the app database that
+container exists for.
+
+```bash
+# 1. throwaway database
+docker exec bng-metric-backend-postgres-1 psql -U dev -d postgres -c "DROP DATABASE IF EXISTS limn_migration_test;"
+docker exec bng-metric-backend-postgres-1 psql -U dev -d postgres -c "CREATE DATABASE limn_migration_test;"
+
+# 2. the CORE chain, through the real runner (so the journal is exercised, not bypassed)
+DEPLOYMENT_MODE=cloud \
+DATABASE_URL="postgres://dev:dev@127.0.0.1:5432/limn_migration_test" \
+ENCRYPTION_KEY=$(python3 -c "print('0'*64)") SESSION_SECRET=$(python3 -c "print('0'*64)") \
+APP_BASE_URL="http://localhost:4000" \
+pnpm --filter @pierre-review/backend db:migrate
+
+# 3. the PLUGIN twins — filename order, no journal, stop on first error
+for f in $(ls packages/pro/migrations-pg/*.sql | sort); do
+  docker exec -i bng-metric-backend-postgres-1 \
+    psql -U dev -d limn_migration_test -v ON_ERROR_STOP=1 -q < "$f" || echo "FAIL $f"
+done
+```
+
+**What to assert afterwards**, because "it ran" is not the same as "it is right":
+
+- the recorded migration count equals `migrations-pg/meta/_journal.json`'s `entries.length`
+  (a file present on disk but absent from the journal SILENTLY SKIPS — this is the failure mode
+  the journal discipline exists for, and it looks like a perfect boot);
+- the pg `public` table list matches SQLite's, modulo `pro_migrations` (created by the plugin's
+  runner, not by a `.sql` file);
+- any column a recent migration added is actually there, with the expected type.
+
+⚠ **An empty replay proves DDL, never DATA.** Both `0040`/`0041`-style backfills ran against zero
+rows here. To check a data-shaping divergence you must run BOTH dialects' expressions over the
+same real inputs and diff them order-independently — Postgres sorts by locale and SQLite by byte,
+so a naive `diff` is nothing but collation noise. That is how the `[bot]`-stripping divergence in
+`0053`/pg `0040` was cleared: identical across all 4,561 real logins, differing only on shapes
+(`foo[bot]bar`, a leading `[bot]`) that GitHub cannot produce.
+
 ## History & planning
 
 SQLite migrations (`0000`+) track the schema's evolution — `0008_multitenant_accounts`
@@ -159,15 +205,12 @@ nothing).
   login→`ReviewBotKind` only. A stored workspace judgement and the `quality_check` role never reach
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
-- **Plugin `0020`'s pg twin has not been replayed against a real Postgres.** The unit suite is
-  SQLite-only, so nothing automated covers the dialect divergences it carries. (CORE's pg chain
-  `0000`→`0035` — including `0031`/`0032` — WAS replayed by hand during `0035`; see that section.
-  It is still a one-off by hand, not CI, so it will go stale again.) The same is true of
-  everything added since: **pg `0036`–`0037`, pg `0039`–`0041` and the plugin `0021`–`0027`
-  pg twins are unverified against a real Postgres** (⚠ pg `0040`/`0041` carry the
-  `regexp_replace(…, '\[bot\]$', '')`-vs-`replace()` divergence, and plugin `0027`'s pg twin is a
-  deliberately UNWRAPPED `CREATE TABLE` — see its section — so those are the ones worth replaying
-  before a cloud deploy).
+- ✅ **The pg chain is currently REPLAYED AND GREEN — see § Replaying the pg chain below.** As of
+  2026-08-27, core `0000`→`0043` (44/44) and all 27 plugin pg twins — including plugin `0020`,
+  the `0021`–`0027` batch and `0027`'s deliberately UNWRAPPED `CREATE TABLE` — apply cleanly into
+  a throwaway database on PostgreSQL 16.9, reaching full table parity with SQLite.
+  ⚠ **This is a by-hand one-off, not CI, so it goes stale the moment anyone adds a migration.**
+  The suite is SQLite-only and will stay silent about it.
 - **`trunk_ci_status_events` (`0052` / pg `0039`) has NO BACKFILL.** The table is append-only and
   written only by `sync/branch-status.ts`, on a TRANSITION, at the end of a full repo walk — and
   the one-time CI-history backfill (`sync/backfill-ci-history.ts`) synthesizes only the PR-side

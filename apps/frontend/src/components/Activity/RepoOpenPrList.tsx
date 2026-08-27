@@ -73,7 +73,7 @@ export function OpenPrRow({
         {prNeedsAttention(pr) && (
           <span
             aria-hidden="true"
-            title="Needs attention (your turn · stalled · untouched threads · CI / conflicts)"
+            title="Needs attention (review or reply · stalled · untouched threads · CI / conflicts)"
             className="shrink-0 text-xs leading-none text-amber-500 dark:text-amber-400"
           >
             ⚠

@@ -2118,9 +2118,14 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
         .map((c) => {
           switch (c.kind) {
             case 'stalled_review':
-              return `stalled:${c.prId}:${[...c.requestedReviewerIds].sort((a, b) => a - b).join(',')}`;
+              // ⚠ The TEAM names are part of the plugin's spelling too — a team-only stalled card
+              // has an empty reviewer-id list, so dropping them here made two cards hash alike and
+              // the seeded report read permanently "stale". Mirror the plugin exactly.
+              return `stalled:${c.prId}:${[...c.requestedReviewerIds].sort((a, b) => a - b).join(',')}:${[...c.requestedTeamNames].sort().join(',')}`;
             case 'untouched_thread':
               return `thread:${c.threadId}`;
+            case 'ci_failing':
+              return `ci:${c.arm}:${c.repoId}:${c.headSha ?? c.prId ?? ''}`;
             case 'reviewer_load':
               return `load:${c.reviewerId}:${c.pendingCount}`;
             case 'reviewer_routing':

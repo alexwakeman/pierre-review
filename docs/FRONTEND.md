@@ -1219,26 +1219,44 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   (it clears `repoIds` / `feedIsolatedPrId` / `attentionIsolation`, and the `null` also stops
   `useWorkspaceSync`'s case-2 branch writing a second `setWorkspace` that would wipe what comes
   next), then `showActivity()`, then `setActivityRepo('attention')`, then
-  `setAttentionIsolation('my_turn')`, then `setAttentionPersonalOnly(true)`. The workspace write is
+  `setAttentionIsolation('my_turn')`, then `setAttentionRelevance('mine')`. The workspace write is
   **skipped when already there** so a Timeline repo narrowing survives. Pinned in
   `apps/frontend/test/attentionIsolation.test.ts`.
-- ⚠ **THE DIVERGENCE RULE: A NARROW COUNT MAY ONLY NAVIGATE THROUGH THE NARROW LENS.** A banner
+- ⚠ **THE DIVERGENCE RULE: A NARROW COUNT MAY ONLY NAVIGATE THROUGH ITS OWN LENS.** A banner
   line reading 4 that opened a board of 50 is the "the strip says 5, the board lists 3" defect
-  (747c9c9) in a new place — which is why `openMyTurnInWorkspace` seats **`attentionPersonalOnly`**
-  as its last step and why `BriefStrip`'s own (broad) lines CLEAR it explicitly. Clearing it is
-  not optional there: `setActivityRepo` early-returns an empty patch when the rail is already
-  `attention`, so a lens left over from an earlier banner click would survive the click that was
-  supposed to widen the board.
-- **`attentionPersonalOnly` is a SIBLING of `attentionIsolation`, never a member of it.** That
+  (747c9c9) in a new place — which is why `openMyTurnInWorkspace` seats
+  **`attentionRelevance: 'mine'`** as its last step, why the brief's "review or reply" line seats
+  `'others'`, and why every whole-kind line seats **`null`**. Seating is not optional and a
+  conditional seat is not enough: `setActivityRepo` early-returns an empty patch when the rail is
+  already `attention`, so a lens left over from an earlier click survives the click that was
+  supposed to change it.
+- **`attentionRelevance` is a SIBLING of `attentionIsolation`, never a member of it.** That
   field is compared against `card.kind` and could not carry a second, orthogonal predicate. Same
   transience contract (`freshDefaults()` only, out of `FilterDefaults` ⇒ **no
   `FILTER_STORAGE_VERSION` bump**, cleared by any rail/scope change) and the same URL contract: it
-  is a NAV key, `?attnPersonal=1`, emitted only on the attention rail, parsed only for the literal
-  `'1'`, and in `UrlOwnedState` so a pop onto a URL that omits it CLEARS it.
-- **The lens must be VISIBLE and REVERSIBLE.** `AttentionIsolationBanner` carries both narrowings,
-  names how many cards the personal lens is holding back, and offers "Show everyone's" beside
-  "Clear"; `AttentionView`'s filtered empty state does the same. A lens that hides real work and
-  says nothing reads as "my items disappeared".
+  is a NAV key, `?attnRel=mine|others`, emitted only on the attention rail, parsed only for those
+  two literals, and in `UrlOwnedState` so a pop onto a URL that omits it CLEARS it.
+  ⚠ **IT IS THREE-VALUED BECAUSE THE BRIEF HAS TWO MY-TURN LINES.** It shipped (8b8a2b1) as
+  `attentionPersonalOnly: boolean`, which can express "what involves me" but not "the rest" — two
+  mutually exclusive lines plus the un-lensed board is three views, and a boolean has two states.
+  ⚠ **`?attnPersonal=1` IS STILL PARSED**, as `'mine'`, and never emitted: it shipped, so it is in
+  bookmarks and — worse — in history entries a browser Back replays verbatim. The new key wins when
+  both appear. Both keys stay in `NAV_KEYS`, because leaving a legacy entry (dropping one, gaining
+  the other) is a real navigation and the diff must see both halves of that swap.
+- ⚠ **THE LENS NARROWS `my_turn` AND NOTHING ELSE, IN BOTH DIRECTIONS** (`passesRelevanceLens`).
+  Relevance is a property of the my-turn fold; no other kind carries the field, and `ci_failing` is
+  personal BY CONSTRUCTION — hiding it under `'others'` would hide work that IS yours from a reader
+  who asked only to see the backlog. ⚠ The two halves are **not exact complements over
+  unclassifiable rows**: `'mine'` reads `personal` (which the server writes on every row, so it
+  survives a pre-split response) and `'others'` reads `relevance === 'none'`, so an old response
+  paints an EMPTY `'others'` board rather than a mislabelled full one — and the brief does not
+  offer that line on such a response, so nobody lands there.
+- **The lens must be VISIBLE, NAMED and REVERSIBLE.** `AttentionIsolationBanner` carries both
+  narrowings, says WHICH lens is on (one shared `LENS_COPY` table, so the banner and
+  `AttentionView`'s filtered empty state cannot phrase the same narrowing two ways), names how many
+  cards it is holding back, and offers "Show everyone's" beside "Clear". ⚠ The empty state tests
+  `attentionRelevance != null` — **all three values reach it**; a lens that hides real work and
+  falls through to "Nothing needs attention 🎉" reads as "my items disappeared".
 - **FRESHNESS IS ASYMMETRIC AND THAT IS THE POINT.** `GET /api/daily-brief?rollup=1` computes the
   ACTIVE workspace's counts FRESH per request and serves the other workspaces' lines from a 5-min
   TTL (`db/daily-brief.ts`). The hook preserves the split (`fresh` per line) rather than
@@ -1253,7 +1271,14 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   a narrow count fails the equality on exactly the workspaces the narrowing exists for — the line
   silently loses its "of N" — and had it passed it would have printed a narrow numerator over a
   broad denominator. A `myTurnPersonal` with no `myTurnPersonalTotal` discloses NOTHING rather
-  than borrowing the broad total. Pinned in `apps/frontend/test/myTurnCapDisclosure.test.ts`. The ROLL-UP cap (`ROLLUP_WORKSPACE_CAP`, server
+  than borrowing the broad total. The "review or reply" half has its OWN rule too —
+  `myTurnOtherCapDisclosure` (`myTurnOther` / `myTurnOtherTotal`) — and ⚠ **it may never be spelled
+  `myTurn - myTurnPersonal`**: the arithmetic agrees, but a subtracted figure has no denominator of
+  its own, and `capFor` gates the "of N" on `shown === count`, so the line silently loses its cap.
+  ⚠ Unlike the personal twin it does **not** fall back to the broad pair — nothing displays an
+  "other" figure on a pre-split response, so there is nothing to qualify. All four rules share one
+  `capFor` body; extend it, never fork it.
+  Pinned in `apps/frontend/test/myTurnCapDisclosure.test.ts`. The ROLL-UP cap (`ROLLUP_WORKSPACE_CAP`, server
   side) surfaces as `uncounted`: those rows render a dim "—" rather than a zero, plus a footer
   line in the dropdown and a line in the banner. ⚠ **Absence is not zero** — do not "tidy" a
   missing line into a 0.
@@ -1275,6 +1300,78 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   there is), but the **baseline still tracks EVERY id** — dropping the others would re-diff them
   as new on every poll, and a row that later becomes personal (you get @-mentioned) would fire as
   if it had just appeared.
+
+## `MyTurnRelevance` — three labels, two brief lines, one split banner
+
+`MyTurnCard.personal` shipped as a boolean and **conflated two different relationships**: "this is
+tied to me" (I wrote it, it was requested of me, someone replied to my thread, I was @-mentioned)
+and "this happened in a repo I maintain". A new PR by someone else in your repo is **orbit, not
+ownership** — reporting the two as one figure is what made the banner read as a nag. `relevance` is
+that boolean un-collapsed: `'direct'` · `'maintained'` · `'none'`. Wire contract:
+[PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md). On the client:
+
+- **THREE CARD LABELS, from `cardKindLabel` (`AttentionCards.tsx`)** — `'direct'` → "Your turn",
+  `'maintained'` → "In your repos", `'none'` → the neutral `KIND_LABEL.my_turn` ("Review or
+  reply"). The KIND stays neutral; only the CARD claims you.
+  ⚠ **An ABSENT `relevance` renders the NEUTRAL label — even on a card with `personal: true`.**
+  That is the opposite of the wire's tolerance rule (absent ⇒ personal, because over-notifying is
+  the safe direction), deliberately: a missing field may never invent an ownership claim ON SCREEN.
+  The only way to see it is a server too old to send the field, where the neutral label is true.
+- **TWO MUTUALLY EXCLUSIVE BRIEF LINES** replace the single my-turn line (`BriefStrip`):
+  "N need your attention" (`myTurnPersonal` = direct + maintained, lens `'mine'`) and "M need
+  review or reply" (`myTurnOther`, lens `'others'`). ⚠ **Each line pairs with its OWN total and
+  seats its OWN lens** — that pairing is the whole point of splitting the line, and handing the
+  broad `counts` object to a narrow line both mixes populations and silently drops the "of N".
+  ⚠ **Both halves or neither**: a response missing either field degrades to the single broad line
+  (`counts.myTurn`, `myTurnCapDisclosure`, no lens) rather than rendering one half and implying
+  the other is zero. `'myTurnOther'` is its own `ScalarKey`, because the Pro ordering map keys on
+  that string and a shared key would let one phrase reword both lines.
+- **THE WELCOME-BACK BANNER HEADLINE SHOWS THE SPLIT** — "2 yours · 3 in your repos" instead of a
+  bare 5 (`useMyTurnByWorkspace.totalSplit`). ⚠ **The POPULATION is unchanged**: the chips, the
+  dropdown badges and `useMyTurnNotifications` all still count the sum, and the click still opens
+  the whole `'mine'` board. Only the headline says which half is which — splitting the chips would
+  cost a second number per workspace on a row whose one-line guarantee is why the component exists.
+  ⚠ `relevanceSplit` takes **both fields or neither** (never `count - direct`, which would absorb
+  a future third relevance into "in your repos"), and `sumRelevanceSplit` **refuses whenever ANY
+  contributing line lacks the split** — mixed responses are real (the active workspace is computed
+  fresh while the roll-up rides a 5-min cache), and summing halves over some lines and wholes over
+  others prints two numbers that do not add up to the total beside them.
+- The dropdown badge keeps the summed figure and carries the split in its **tooltip only**, where
+  it costs no layout.
+
+## `ci_failing` — the red-build card, and the three SILENT lists a new InsightKind must reach
+
+A `ci_failing` card is a red build the viewer is on the hook for: `arm: 'your_pr'` (an open PR they
+authored whose head CI is red) or `arm: 'trunk'` (the default branch of a repo they MAINTAIN is red
+now). Server contract + the two things it deliberately does NOT compute:
+[PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § "The `ci_failing` card". On the client:
+
+- **The KIND label stays neutral** (`KIND_LABEL.ci_failing = 'CI failing'` — the isolation banner
+  reads it); the OWNERSHIP claim is per card, from `arm`, in `cardKindLabel` — the same split
+  `my_turn`/`personal` draws one layer up.
+- **Every PR field is nullable and a null is ORDINARY** (a direct push to trunk has no PR), so the
+  card renders the REPO as its subject and the PR as an optional line — it does NOT reuse `PrLine`,
+  which requires all four PR fields. A card with no PR has no whole-card `onActivate` either: a
+  click that does nothing is the inert card this board exists to remove.
+- **The `viewerMerged` caveat is ON THE CARD** ("Trunk is red at this commit — not necessarily
+  because of it"). We store no per-commit CI transition history, so nothing here can name the
+  commit that broke trunk; saying so is cheaper than being asked.
+- **The cap is DISCLOSED** (`ciFailingCapDisclosure`, `AttentionView`), unlike the survey kinds
+  that share `INSIGHT_CARD_CAP`. Pair narrow with narrow: it reads `counts.ciFailing` /
+  `ciFailingTotal` and never borrows `myTurnTotal`.
+
+⚠ **THREE OF THE FOUR CLIENT TOUCH POINTS ARE SILENT — only `KIND_LABEL` is compiler-enforced:**
+
+1. `renderCard`'s `switch` in `AttentionCards.tsx`. Its `default: return null` means a kind the
+   brief COUNTS but the switch cannot RENDER simply vanishes — "header 5, list 3" with no server
+   involved. That is exactly how `my_turn` shipped invisible.
+2. `INSIGHT_KINDS` in `hooks/useUrlState.ts`, a hand-written runtime array. A kind missing there
+   makes `?attn=<kind>` a no-op, so the brief line that counts it opens an UN-isolated board and a
+   browser Back cannot return to the narrowed one. **`test/ciFailingCard.test.ts` now compares that
+   array against `KIND_LABEL`**, forwarding the compiler's exhaustiveness onto it.
+3. `BriefStrip`'s `hasAnything` — the strip self-hides when every figure is zero, so a kind left
+   out of it can hide a line the strip has something to say on (a red build on your own PR leaves
+   `trunkRed` empty).
 
 ## The sync round — a transient store slice with ONE driver (`syncRound` / `managerOpen`)
 

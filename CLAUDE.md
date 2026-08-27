@@ -336,11 +336,20 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   always cover every repo in the workspace — never let the picker scope a screen that doesn't
   render it.
 - **A surface that NOTIFIES counts `myTurnPersonal`; a surface you OPEN counts `myTurn`** (banner,
-  Workspace badges, "Elsewhere" rows, browser notification vs the "Needs attention" board and the
-  brief's own lines). ⚠ A narrow count may only navigate through the narrow lens — every such
-  click goes through `openMyTurnInWorkspace`, which seats `attentionPersonalOnly`; a broad entry
-  point must CLEAR that flag explicitly. ⚠ Pair narrow with narrow in the cap disclosure
-  (`myTurnPersonalCapDisclosure`), or the "+" silently vanishes.
+  Workspace badges, "Elsewhere" rows, browser notification vs the "Needs attention" board). ⚠ A
+  narrow count may only navigate through ITS OWN lens — `attentionRelevance` is THREE-VALUED
+  (`'mine'` = direct + maintained = the retired `personal`; `'others'` = `relevance === 'none'`;
+  `null` = everything), and every entry point SEATS its value, `null` included, because
+  `setActivityRepo` early-returns `{}` on an unchanged rail. ⚠ Pair narrow with narrow in the cap
+  disclosure (`myTurnPersonalCapDisclosure` / `myTurnOtherCapDisclosure`), or the "+" silently
+  vanishes — and **`myTurnOther` is never `myTurn - myTurnPersonal`** (a subtraction has no
+  denominator, so `capFor`'s `shown === count` guard drops the disclosure).
+- **`MyTurnCard.relevance` writes THREE card labels** — `'direct'` → "Your turn", `'maintained'` →
+  "In your repos" (orbit, not ownership), `'none'` → the neutral kind label. ⚠ An ABSENT
+  `relevance` renders the NEUTRAL label even when `personal === true`: a missing field may never
+  invent an ownership claim on screen. ⚠ `?attnPersonal=1` is retired but still PARSED (as
+  `'mine'`) — it shipped, so it is in bookmarks and in history entries Back replays; `?attnRel=` is
+  the only key emitted.
 - **Visible sub-tabs are DERIVED, never written back** (`feedInnerTab`, `botsInnerTab`) —
   compute an `effectiveTab` for the render only; a corrective `set…` permanently forgets the
   choice.
@@ -749,11 +758,19 @@ rules:
 **Known gaps** — full list in [docs/MIGRATIONS.md](docs/MIGRATIONS.md). The ones that change
 how you work:
 
-- **The unit suite runs on SQLite ONLY**, and the pg chain past `0035` has never been replayed
-  against a real Postgres (pg `0036`–`0037`, `0039`–`0041` + the plugin `0021`–`0027` pg twins;
-  throwaway-container recipe in docs/SECURITY.md § dependency posture). ⚠ pg `0040`/`0041` use
-  `regexp_replace(…, '\[bot\]$', '')` where their sqlite twins use `replace()` — the
-  divergences worth replaying before a cloud deploy.
+- **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ The whole
+  chain is currently green: core `0000`→`0043` (44/44) **and** all 27 plugin pg twins applied
+  into a throwaway database on **PostgreSQL 16.9**, 2026-08-27, yielding full table parity with
+  SQLite (the only absentee is `pro_migrations`, which the plugin's own runner creates rather
+  than a `.sql` file). Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying
+  the pg chain. **A new pg migration is unreplayed until someone repeats this** — the suite will
+  not tell you.
+  - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence
+    (pg `0040`/`0041` vs their sqlite twins `0053`/`0054`) is REAL but unreachable: the two
+    disagree on `foo[bot]bar` (`foo[bot]bar` vs `foobar`) and on a LEADING `[bot]`, and agree
+    everywhere else. Measured identical across all 4,561 real logins, and zero of them carry
+    `[bot]` anywhere but the end — which is the only place GitHub puts it. Do not "fix" one to
+    match the other; each is idiomatic for its dialect.
 - ⚠ **AI Fix's conflict-resolver paths (`rebaseResolve` / `mergeResolveAndPush`) GATE on credits
   but never CHARGE them** — only `saveFixSuccess` calls `recordAiUsage`, so a fix ending in a
   rebase-resolve under-bills. (Recorded only here; no topic doc carries it.)

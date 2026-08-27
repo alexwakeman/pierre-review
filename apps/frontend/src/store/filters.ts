@@ -192,6 +192,21 @@ export interface SyncRoundState {
   scopeIds: number[];
 }
 
+// ── The "Needs attention" RELEVANCE lens ─────────────────────────────────────────────────────
+//
+// Which half of the `my_turn` population the board is showing, or null for all of it:
+//
+//   'mine'   — `MyTurnCard.relevance` is 'direct' OR 'maintained' (== the retired `personal`
+//              flag): work tied to you by authorship, a request, a reply, a mention — plus new
+//              PRs in repos you maintain.
+//   'others' — `relevance === 'none'`: the review-or-reply backlog nobody named you for.
+//
+// ⚠ THE TWO VALUES PARTITION `my_turn`, so the daily brief's two lines are MUTUALLY EXCLUSIVE
+// and each opens a board filtered to ITS OWN number. That is the entire reason this is not a
+// boolean: "personal only" and "not personal only" are not expressible as one flag plus its
+// negation while `null` (show everything) also has to be a state.
+export type AttentionRelevanceLens = 'mine' | 'others';
+
 // ── The Feed's "new since you looked away" cohorts ────────────────────────────────────────────
 //
 // The cross-repo Activity Feed INSERTS newly-arrived items as they arrive (there is no
@@ -385,25 +400,37 @@ export interface FilterState {
   // complaint). URL-visible and PERSISTED are different questions — a link may name the narrowed
   // board; a fresh tab must not restore it from a stale blob. See hooks/useUrlState.
   attentionIsolation: InsightKind | null;
-  // Activity "Needs attention" PERSONAL lens: false (default) → the board paints every card;
-  // true → `my_turn` cards flagged `MyTurnCard.personal === false` are hidden.
+  // Activity "Needs attention" RELEVANCE lens: null (default) → the board paints every card;
+  // 'mine' → only `my_turn` cards whose `relevance` is direct-or-maintained; 'others' → only the
+  // ones whose `relevance` is 'none'.
+  //
+  // ⚠ THREE-VALUED, NOT A BOOLEAN, AND THAT IS THE PRODUCT DECISION. It shipped as
+  // `attentionPersonalOnly: boolean`, which could express "what involves me" but had no way to
+  // say "the rest" — so the daily brief's two my-turn lines could not both land on a board
+  // filtered to THEIR OWN number. Two mutually exclusive lines need two seatable lenses plus the
+  // un-lensed board; a boolean gives you two states for three views. (The CARD LABELS are a
+  // separate three-way split, off `MyTurnCard.relevance` — see AttentionCards.cardKindLabel.)
   //
   // ⚠ IT IS A SIBLING OF `attentionIsolation`, NOT A MEMBER OF IT. That field is compared
-  // against `card.kind`, so a "personal" member would be a kind that matches no card — and the
-  // two predicates are orthogonal anyway (you can want personal-only cards of every kind).
+  // against `card.kind`, so a relevance member would be a kind that matches no card — and the
+  // two predicates are orthogonal anyway (you can want a relevance-lensed board of every kind).
   //
   // ⚠ IT EXISTS TO KEEP A NOTIFICATION AND ITS DESTINATION THE SAME POPULATION. The welcome-back
-  // banner, the Workspace-dropdown badges and the "Elsewhere" lines now count the PERSONAL subset
-  // (`DailyBriefCounts.myTurnPersonal`) — otherwise they nag you about a stranger's PR in a repo
-  // you have never touched. A banner reading 4 whose click opened a board of 50 would be the
-  // "the strip says 5, the board lists 3" defect in a new place, so the ONE gesture that opens
-  // the board from those counts (`openMyTurnInWorkspace`) seats this lens as its last step.
+  // banner, the Workspace-dropdown badges and the "Elsewhere" lines count the PERSONAL subset
+  // (`DailyBriefCounts.myTurnPersonal` = direct + maintained) — otherwise they nag you about a
+  // stranger's PR in a repo you have never touched. A banner reading 4 whose click opened a board
+  // of 50 would be the "the strip says 5, the board lists 3" defect in a new place, so the ONE
+  // gesture that opens the board from those counts (`openMyTurnInWorkspace`) seats `'mine'` as
+  // its last step — and the brief's "M need review or reply" line seats `'others'` for exactly
+  // the same reason, in the opposite direction.
   //
   // Transient, exactly like `attentionIsolation`: NOT in FilterDefaults / freshFilterDefaults /
   // pickFilterBarState (so no FILTER_STORAGE_VERSION bump is owed), cleared by any rail or scope
-  // change — but URL-SERIALIZED (`?attnPersonal=1`) and a NAVIGATION key, because it changes what
-  // the board shows and a reader must be able to Back out of it.
-  attentionPersonalOnly: boolean;
+  // change — but URL-SERIALIZED (`?attnRel=mine|others`) and a NAVIGATION key, because it changes
+  // what the board shows and a reader must be able to Back out of it. The retired
+  // `?attnPersonal=1` is still PARSED as 'mine' (shipped links and history entries), never
+  // emitted — see hooks/useUrlState.
+  attentionRelevance: AttentionRelevanceLens | null;
   // The cross-repo Feed's "New" markers — see FeedNewCohorts above. Transient, URL-silent,
   // and written ONLY by FeedView's auto-insert path (a batch landed) and its scroll handler
   // (the reader is at the top). Read as a flat id set; never recomputed defensively on render.
@@ -783,15 +810,16 @@ export interface FilterState {
   // bot-only-PRs "Show in Activity feed" buttons follow for `setFeedIsolatedPrId`.
   setAttentionIsolation: (kind: InsightKind | null) => void;
   /**
-   * Narrow the "Needs attention" board to the cards that personally involve the viewer (or clear
-   * with false) — the lens the notification counts navigate INTO.
+   * Narrow the "Needs attention" board to one half of the `my_turn` population — 'mine' (work
+   * tied to you) or 'others' (the review-or-reply backlog) — or `null` for the whole board.
    *
    * ⚠ SAME ORDERING TRAP AS `setAttentionIsolation`, and one more: `setActivityRepo` clears this
-   * too AND early-returns `{}` on an unchanged rail, so a caller that wants the BROAD board while
-   * already standing on it must clear this EXPLICITLY (the daily brief's lines do — their figures
-   * are the broad ones). Relying on the rail switch to clear it works only when the rail changes.
+   * too AND early-returns `{}` on an unchanged rail, so a caller that wants a DIFFERENT lens (or
+   * none) while already standing on the board must set it EXPLICITLY. The daily brief's lines all
+   * do: each seats its own value, `null` included, because relying on the rail switch to clear
+   * works only when the rail actually changes.
    */
-  setAttentionPersonalOnly: (on: boolean) => void;
+  setAttentionRelevance: (lens: AttentionRelevanceLens | null) => void;
   /**
    * THE ONE "show me my turn — over there" navigation, in ONE gesture.
    *
@@ -812,10 +840,11 @@ export interface FilterState {
    *     second click. (Pinned by attentionIsolation.test.ts.)
    *  3. Only then are the two lenses seated.
    *
-   * ⚠ IT SEATS `attentionPersonalOnly` TOO, and that is not decoration. Every caller of this
+   * ⚠ IT SEATS `attentionRelevance: 'mine'` TOO, and that is not decoration. Every caller of this
    * action is a NOTIFICATION surface whose figure is the PERSONAL count (banner line, dropdown
-   * badge, the brief's "Elsewhere" rows). Landing them on the broad board would put back the
-   * defect 747c9c9 fixed — a line that says 4 opening a list of 50.
+   * badge, the brief's "Elsewhere" rows) — direct + maintained, which is exactly what 'mine'
+   * paints. Landing them on the broad board would put back the defect 747c9c9 fixed — a line that
+   * says 4 opening a list of 50.
    *
    * ⚠ The workspace write is SKIPPED when we are already there. Re-writing the same id would
    * throw away a repo narrowing the user chose on the Timeline for no reason at all.
@@ -1263,9 +1292,9 @@ function freshDefaults(): FilterData {
     feedShowCommits: false,
     feedIsolatedPrId: null,
     attentionIsolation: null,
-    // The board is BROAD by default: every card, personal or not. The lens is only ever seated by
-    // arriving from a count that was itself narrow.
-    attentionPersonalOnly: false,
+    // The board is BROAD by default: every card, whatever its relevance. A lens is only ever
+    // seated by arriving from a count that was itself one half of the split.
+    attentionRelevance: null,
     // No batch has landed yet — a freshly-opened feed is all equally new, so nothing is marked.
     feedNewCohorts: { scopeKey: null, cohorts: [] },
     botAnalyticsWindow: 'rolling_14',
@@ -1349,7 +1378,7 @@ export type UrlOwnedState = Pick<
   | 'selectedPrId'
   | 'selectedThreadId'
   | 'attentionIsolation'
-  | 'attentionPersonalOnly'
+  | 'attentionRelevance'
   | 'feedIsolatedPrId'
   | 'prDetailTab'
   | 'feedInnerTab'
@@ -1365,7 +1394,7 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
     selectedPrId: d.selectedPrId,
     selectedThreadId: d.selectedThreadId,
     attentionIsolation: d.attentionIsolation,
-    attentionPersonalOnly: d.attentionPersonalOnly,
+    attentionRelevance: d.attentionRelevance,
     feedIsolatedPrId: d.feedIsolatedPrId,
     prDetailTab: d.prDetailTab,
     feedInnerTab: d.feedInnerTab,
@@ -1387,10 +1416,10 @@ export const useFilters = create<FilterState>((set, get) => ({
       repoIds,
       feedIsolatedPrId: null,
       attentionIsolation: null,
-      // The personal lens goes with them: it was seated by a count taken in the workspace being
+      // The relevance lens goes with them: it was seated by a count taken in the workspace being
       // LEFT, so carrying it into the next one would filter a board against a number nobody
       // showed the reader.
-      attentionPersonalOnly: false,
+      attentionRelevance: null,
     }),
   toggleRepo: (id) =>
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),
@@ -1447,9 +1476,9 @@ export const useFilters = create<FilterState>((set, get) => ({
   // the setter's declaration comment (setActivityRepo clears this, and no-ops when unchanged).
   setAttentionIsolation: (kind) => set({ attentionIsolation: kind }),
   // ⚠ Independent of the kind isolation on purpose (see the field): a caller that wants the broad
-  // board must clear this itself, because setActivityRepo's clear does not fire on an unchanged
+  // board must pass `null` itself, because setActivityRepo's clear does not fire on an unchanged
   // rail.
-  setAttentionPersonalOnly: (on) => set({ attentionPersonalOnly: on }),
+  setAttentionRelevance: (lens) => set({ attentionRelevance: lens }),
   // See the declaration above for the two ordering traps this sequence exists to encapsulate.
   // It deliberately calls the PUBLIC setters rather than one fused `set({...})`: a fused write
   // would be a second definition of what a workspace switch clears, free to drift from
@@ -1462,10 +1491,10 @@ export const useFilters = create<FilterState>((set, get) => ({
     usePinnedTabs.getState().showActivity();
     s.setActivityRepo('attention');
     s.setAttentionIsolation('my_turn');
-    // Last, and never conditionally: the figure the reader clicked was the PERSONAL one, so the
-    // list they land on has to be the same population. Seated AFTER both clears above it, exactly
-    // like the isolation.
-    s.setAttentionPersonalOnly(true);
+    // Last, and never conditionally: the figure the reader clicked was the PERSONAL one
+    // (direct + maintained), so the list they land on has to be the same population — which is
+    // what 'mine' paints. Seated AFTER both clears above it, exactly like the isolation.
+    s.setAttentionRelevance('mine');
   },
   pushFeedNewCohort: (scopeKey, ids, atTop) =>
     set((s) => {
@@ -1792,7 +1821,7 @@ export const useFilters = create<FilterState>((set, get) => ({
             activityThreadFilter: null,
             feedIsolatedPrId: null,
             attentionIsolation: null,
-            attentionPersonalOnly: false,
+            attentionRelevance: null,
           },
     ),
   setActivityThreadFilter: (st) =>

@@ -850,6 +850,13 @@ export interface ProHostQueries {
   // both additive, apiVersion still 21. They exist for the surfaces that INTERRUPT the viewer,
   // not for narration; `myTurn` remains this seam's grounded figure, and the two totals only
   // ever qualify the count they were folded from — never each other's.
+  // ⚠ And again for the three-way `MyTurnCard.relevance` split — `myTurnDirect` /
+  // `myTurnMaintained` / `myTurnOther`, each with its OWN `…Total`. All six OPTIONAL and
+  // additive, apiVersion still 21. `myTurnPersonal` keeps its meaning exactly (direct ∪
+  // maintained), so nothing already reading it moves; the split exists because the brief now
+  // renders TWO mutually exclusive lines and each one opens a board filtered to its own number.
+  // Same rule as above, one level down: a count may only ever be qualified by the total folded
+  // from the same population, and none of them may be derived by subtracting another.
   getDailyBriefCounts(accountId: number, workspaceId: number): Promise<DailyBriefCounts>;
   // The 1:1-prep person vector (P4.2 — NOW LIVE: core db/person-period.ts): a small fixed
   // vector for one person in one workspace — merged/opened authored · reviews given · review

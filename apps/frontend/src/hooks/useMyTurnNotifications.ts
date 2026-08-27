@@ -29,6 +29,14 @@ import { dateTime } from '../lib/ui.js';
 // ⚠ THE BASELINE STILL TRACKS EVERY ROW. Only the fired set is narrowed — dropping non-personal
 // ids from the baseline would re-diff them as "new" on every poll, and a row that later BECOMES
 // personal (you get @-mentioned on it) would then fire as if it had just appeared.
+//
+// ⚠ AND IT KEEPS READING `personal`, NOT the three-valued `MyTurnRelevance` that now splits it.
+// The board LABELS those two halves apart ("Your turn" vs "In your repos") and the brief SPLITS
+// its lines, because both are read inside the app where the distinction is actionable. An OS
+// banner is one glyph and one sentence read outside it: the question there is only "may we
+// interrupt?", which is exactly what `personal` (== `relevance !== 'none'`) answers. Narrowing
+// this to 'direct' would silently stop notifying about new PRs in repos you maintain — a
+// population change dressed up as a labelling change.
 export function useMyTurnNotifications(enabled: boolean): void {
   const { data } = useMyTurn();
   const { data: repos } = useRepos();

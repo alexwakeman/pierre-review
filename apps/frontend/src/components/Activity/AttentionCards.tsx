@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AutomatedReviewerKind,
+  CiFailingCard,
   InsightCard,
   InsightPrRef,
   InsightSeverity,
@@ -18,7 +19,14 @@ import { useRequestReviewers } from '../../hooks/usePrWrites.js';
 import { useDismissMyTurn } from '../../hooks/useAttentionCards.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
-import { automatedReviewerMeta, CI_META, dateTime, indexUsers, relativeTime } from '../../lib/ui.js';
+import {
+  automatedReviewerMeta,
+  CI_META,
+  dateTime,
+  indexUsers,
+  relativeTime,
+  safeExternalUrl,
+} from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
@@ -42,8 +50,19 @@ const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
 
 // Exported because the isolation banner names the isolated kind with it — one spelling of "what
 // this kind is called", so the banner and the card header can never disagree.
+//
+// ⚠ `my_turn` IS NOT LABELLED "Your turn" HERE, and that is the whole semantic split. The KIND
+// means "this needs a review or reply" — of the 149 such cards on the reporting account, 5 were
+// actually theirs. Naming the kind after the narrow case made the board claim ownership of work
+// belonging to people who had never touched the repo ("50+ items awaiting YOUR review" in a
+// project they are not a contributor to). The kind stays neutral; the OWNERSHIP claim is made
+// per card, off `relevance`, by `cardKindLabel` below. See docs/FRONTEND.md § "Per-workspace
+// 'My Turn'".
 export const KIND_LABEL: Record<InsightCard['kind'], string> = {
-  my_turn: 'Your turn',
+  my_turn: 'Review or reply',
+  // Neutral at the KIND level, like my_turn: the ownership claim ("your PR" vs "trunk in a repo
+  // you maintain") is made per card by `cardKindLabel`, off the card's own `arm`.
+  ci_failing: 'CI failing',
   bot_signal: 'Review-bot signal',
   bot_only_review: 'Only a bot reviewed',
   stalled_review: 'Stalled review',
@@ -51,6 +70,43 @@ export const KIND_LABEL: Record<InsightCard['kind'], string> = {
   reviewer_load: 'Review load',
   reviewer_routing: 'Needs a reviewer',
 };
+
+/**
+ * What THIS card is called, as opposed to what its kind is called. THREE labels for `my_turn`,
+ * off `MyTurnCard.relevance`, because the boolean it replaced conflated two different
+ * relationships:
+ *
+ *   'direct'     → "Your turn"      — you authored it, you were asked for the review, your
+ *                                     thread got a reply, your Claude run finished, or you were
+ *                                     @-mentioned (even in a repo you only read).
+ *   'maintained' → "In your repos"  — somebody else opened a PR in a repo you maintain. That is
+ *                                     ORBIT, not ownership: nobody named you, and calling it
+ *                                     "Your turn" is precisely the over-claim the reporter
+ *                                     objected to ("work on repos" vs "work tied to me directly
+ *                                     through authorship, reply or merge").
+ *   'none'       → the neutral KIND label ("Review or reply") — work that needs *someone*.
+ *
+ * ⚠ AN ABSENT `relevance` RENDERS THE NEUTRAL LABEL, and so does an absent-but-`personal: true`
+ * card. That is the opposite of the wire's tolerance rule (absent ⇒ personal, because
+ * over-notifying is the safe direction) and it is deliberate: a missing field may never invent an
+ * ownership claim ON SCREEN. The only way to see it is a server too old to send the field — where
+ * the neutral label is still true, and the notification surfaces (which read `personal`) keep
+ * their safe direction independently.
+ */
+export function cardKindLabel(card: InsightCard): string {
+  if (card.kind === 'my_turn') {
+    if (card.relevance === 'direct') return 'Your turn';
+    if (card.relevance === 'maintained') return 'In your repos';
+    return KIND_LABEL.my_turn;
+  }
+  // The ci_failing arms are the same distinction one layer over: 'your_pr' is a claim of
+  // AUTHORSHIP, 'trunk' a claim about your patch of ground. The server only ever emits a card the
+  // viewer is on the hook for, so both labels are true — they just are not the same summons.
+  if (card.kind === 'ci_failing') {
+    return card.arm === 'your_pr' ? 'CI failing on your PR' : 'Trunk CI failing';
+  }
+  return KIND_LABEL[card.kind];
+}
 
 // WHICH My Turn section put this card on your plate. ⚠ Keyed on `MyTurnCardReason` (the six
 // sections of GET /api/my-turn), NOT the older `MyTurnReason` participation union that
@@ -362,7 +418,7 @@ function CardShell({
       <div className="mb-1.5 flex items-center gap-2 text-[11px]">
         <span className={`inline-block h-1.5 w-1.5 rounded-full ${sev.dot}`} aria-hidden />
         <span className="font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-          {KIND_LABEL[card.kind]}
+          {cardKindLabel(card)}
         </span>
         <span className="ml-auto text-gray-400">{right}</span>
       </div>
@@ -402,6 +458,104 @@ function PrLine({
         ↗
       </a>
     </div>
+  );
+}
+
+// The body of a `ci_failing` card. The REPO is the subject on both arms (it is the one thing that
+// is always there), the PR is an optional second line, and the external link goes wherever the
+// server pointed it — the PR page on 'your_pr', the COMMIT page on 'trunk', where a trunk run's
+// checks actually live.
+function CiFailingBody({
+  card,
+  usersById,
+  onOpenPr,
+}: {
+  card: CiFailingCard;
+  usersById: Map<number, User>;
+  onOpenPr: (meta: PinnedPr, returnItemId?: string) => void;
+}): JSX.Element {
+  const ci = CI_META[card.ciStatus] ?? null;
+  const href = safeExternalUrl(card.githubUrl);
+  const hasPr = card.prId != null && card.prNumber != null && card.prTitle != null;
+  return (
+    <>
+      <div className="flex min-w-0 items-baseline gap-1.5 text-sm">
+        <span className="min-w-0 truncate font-medium text-gray-800 dark:text-gray-100">
+          <span className="text-gray-400">{card.repoFullName}</span>{' '}
+          {card.arm === 'trunk' ? 'trunk is red' : 'your PR is red'}
+        </span>
+        {href != null && (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer noopener"
+            onClick={(e) => e.stopPropagation()}
+            className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            title={card.arm === 'trunk' ? 'Open the commit on GitHub' : 'Open the PR on GitHub'}
+          >
+            ↗
+          </a>
+        )}
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+        <span className="inline-flex items-center gap-1" title={ci?.label ?? card.ciStatus}>
+          <span
+            className="inline-block h-2 w-2 rounded-full"
+            style={ci ? { background: ci.color } : { boxShadow: 'inset 0 0 0 1px #9ca3af' }}
+            aria-hidden
+          />
+          {ci?.label ?? card.ciStatus}
+        </span>
+        {card.headSha != null && <span className="font-mono">{card.headSha.slice(0, 7)}</span>}
+      </div>
+      {hasPr && (
+        // ⚠ RENDERED ONLY WHEN THERE IS ONE. On the 'trunk' arm a missing PR is ORDINARY — ~11% of
+        // red heads are direct pushes to the default branch — so the card says trunk is red and
+        // simply names no PR, rather than showing an empty "landed by" row.
+        <div className="mt-1 flex min-w-0 flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+          <span>{card.arm === 'trunk' ? 'landed by' : 'PR'}</span>
+          {card.arm === 'trunk' && card.mergedById != null && (
+            <UserChip id={card.mergedById} usersById={usersById} />
+          )}
+          <button
+            type="button"
+            onClick={() =>
+              onOpenPr(
+                metaFor(
+                  {
+                    prId: card.prId as number,
+                    prNumber: card.prNumber as number,
+                    prTitle: card.prTitle as string,
+                    repoFullName: card.repoFullName,
+                  },
+                  usersById,
+                ),
+                card.id,
+              )
+            }
+            className="min-w-0 truncate text-left hover:underline"
+            title="Open this PR on its Overview tab"
+          >
+            <span className="text-gray-400">#{card.prNumber}</span> {card.prTitle}
+          </button>
+        </div>
+      )}
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+        <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
+          {card.arm === 'your_pr' ? 'Your PR' : 'Your repo'}
+        </span>
+        <span className="min-w-0">{card.detail}</span>
+      </div>
+      {card.arm === 'trunk' && (
+        // ⚠ THE HONEST CAVEAT, ON THE CARD ITSELF. `viewerMerged` says the viewer LANDED the commit
+        // trunk is currently red at — it is NOT a claim that they broke the build. Trunk CI is
+        // non-monotone and we store no per-commit transition history, so nothing here can name the
+        // commit that turned it red; saying so on the card is cheaper than being asked.
+        <div className="mt-1 text-[11px] italic text-gray-400">
+          Trunk is red at this commit — not necessarily because of it.
+        </div>
+      )}
+    </>
   );
 }
 
@@ -490,6 +644,46 @@ export function AttentionCards({
               <span className="min-w-0">{card.detail}</span>
             </div>
             <MyTurnActions card={card} />
+          </CardShell>
+        );
+      // A red build the viewer is on the hook for. TWO ARMS on one kind, and every PR field is
+      // NULLABLE because the 'trunk' arm often has no PR at all (a direct push to the default
+      // branch, an association not observed yet) — so this renders the REPO as the subject and the
+      // PR as an optional line under it, rather than reusing PrLine (which requires all four).
+      case 'ci_failing':
+        return (
+          <CardShell
+            key={card.id}
+            card={card}
+            innerRef={(el) => setCardRef(card.id, el)}
+            flash={flashId === card.id}
+            right={
+              card.observedAt != null ? (
+                <span title={dateTime(card.observedAt)}>{relativeTime(card.observedAt)}</span>
+              ) : undefined
+            }
+            // Only the 'your_pr' arm has a PR to open by construction; a 'trunk' card without a
+            // landing PR has nothing to activate, and a whole-card click that did nothing would be
+            // the inert card this board exists to remove.
+            onActivate={
+              card.prId != null && card.prNumber != null && card.prTitle != null
+                ? (): void =>
+                    open(
+                      metaFor(
+                        {
+                          prId: card.prId as number,
+                          prNumber: card.prNumber as number,
+                          prTitle: card.prTitle as string,
+                          repoFullName: card.repoFullName,
+                        },
+                        usersById,
+                      ),
+                      card.id,
+                    )
+                : undefined
+            }
+          >
+            <CiFailingBody card={card} usersById={usersById} onOpenPr={open} />
           </CardShell>
         );
       case 'stalled_review':

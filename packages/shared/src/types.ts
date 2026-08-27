@@ -3826,6 +3826,32 @@ export interface AuthNotice {
 
 // ---- my turn ----
 
+/**
+ * WHY THIS ROW IS ON YOUR PLATE — three values, because the boolean it replaces conflated two
+ * genuinely different relationships and the card copy has to tell them apart.
+ *
+ *   • `'direct'`     — the work is tied to YOU: a review was requested of you, it is your PR,
+ *                      your PR was approved, your thread got a reply, you asked for the Claude
+ *                      run — OR somebody @-mentioned your login on the PR. ⚠ The mention arm
+ *                      holds EVEN IN A REPO YOU ONLY READ; that is the whole reason it is not
+ *                      folded into the maintainer test below. (Derived offline into
+ *                      `pr_mentions` by sync/mention-scan.ts; with no rows this arm contributes
+ *                      nothing and nothing widens.) Card copy: "YOUR TURN".
+ *   • `'maintained'` — a NEW PR by somebody else in a repo you maintain (WRITE/MAINTAIN/ADMIN on
+ *                      the repo, or you have landed a PR on its default branch). Your patch of
+ *                      ground, not your work — ORBIT, not ownership. Card copy: "IN YOUR REPOS".
+ *   • `'none'`       — a stranger's PR in a repo you merely track. It still needs a review, so
+ *                      it still paints; it just may not interrupt you. Card copy: "REVIEW OR
+ *                      REPLY".
+ *
+ * `'direct'` WINS over `'maintained'` — a mention in a repo you also maintain is still about you.
+ *
+ * ⚠ THIS NARROWS NOTHING, ANYWHERE. Every row and every card still ships; relevance decides how a
+ * card is LABELLED and which count it lands in, never whether it exists. Narrowing the population
+ * by it would delete work rather than route it.
+ */
+export type MyTurnRelevance = 'direct' | 'maintained' | 'none';
+
 // A PR reference shared by the my-turn sections (enough to render a row and
 // navigate on click).
 export interface MyTurnPr {
@@ -3852,26 +3878,27 @@ export interface MyTurnPr {
   // ADVISORY: is this row personally relevant to the viewer, or is it "someone opened a PR in a
   // repo you happen to track"?
   //
+  // ⚠ NOW DERIVED — `relevance !== 'none'`. It is still written by the server on every row and
+  // still means exactly what it always meant (the union of the two positive relevances), so no
+  // consumer breaks; it simply no longer carries the DISTINCTION the card copy needs. Read
+  // `relevance` for anything that LABELS a row; read this only to answer "may we interrupt?".
+  //
   // ⚠ IT NARROWS NOTHING ON THIS WIRE. `GET /api/my-turn` keeps returning EVERY row — the CLI
   // status board and the Done tab's restorability contract both need the full set — and the
   // "Needs attention" board keeps painting every card. The flag exists for the NOTIFICATION
   // surfaces (the welcome-back banner, the Workspace-dropdown badges, browser notifications),
   // which must not tap you on the shoulder for a stranger's PR in a repo you have never touched.
   //
-  // True for the five sections that already require your involvement (review requested of you,
-  // your own PRs, your approved PRs, threads awaiting your reply, your Claude runs). For the
-  // "New PRs" section it is a UNION of two independent arms:
-  //   • MAINTAINER — WRITE/MAINTAIN/ADMIN on the repo, or you have landed a PR on its default
-  //     branch. A stranger's PR in a repo you maintain IS personal.
-  //   • MENTIONED — somebody @-mentioned your login on the PR (a PR comment, a review body, an
-  //     inline comment). This one holds EVEN IN A REPO YOU ONLY READ, which is the whole reason
-  //     it is not folded into the maintainer test. Derived offline into `pr_mentions` by
-  //     sync/mention-scan.ts; with no rows the flag degrades to the maintainer test alone.
-  //
   // Trailing-optional for wire tolerance only; `getMyTurn` always sets it. Absent ⇒ treat as
   // true — that is the pre-narrowing behaviour, and erring towards notifying is the safe way
   // round for a response we can't classify.
   personal?: boolean;
+  // THE THREE-VALUED RELEVANCE — what `personal` collapsed, un-collapsed. See `MyTurnRelevance`.
+  //
+  // Trailing-optional for wire tolerance only; `getMyTurn` always sets it. Absent ⇒ fall back to
+  // `personal` (`true` ⇒ 'direct', `false` ⇒ 'none'): a response predating this field cannot
+  // distinguish 'maintained', and only the "New PRs" section can ever be that value.
+  relevance?: MyTurnRelevance;
 }
 
 export interface AwaitingReviewItem extends MyTurnPr {
@@ -3928,6 +3955,8 @@ export interface ThreadAwaitingItem {
    *  personally addressed to you by construction. Carried anyway so a notification surface can
    *  read ONE field across every section instead of knowing which sections are exempt. */
   personal?: boolean;
+  /** See `MyTurnPr.relevance`. Always `'direct'` here, for the same by-construction reason. */
+  relevance?: MyTurnRelevance;
 }
 
 // A completed Claude review that hasn't been actioned yet — no GitHub review/
@@ -3945,6 +3974,8 @@ export interface ClaudeReviewToAction {
   githubUrl: string;
   /** See `MyTurnPr.personal`. Always true here — you asked for the run. */
   personal?: boolean;
+  /** See `MyTurnPr.relevance`. Always `'direct'` here — you asked for the run. */
+  relevance?: MyTurnRelevance;
 }
 
 export interface MyTurnResponse {
@@ -5553,6 +5584,7 @@ export interface ConsolidatedFeedResponse {
 // the trailing 2 weeks. Each card is a self-contained work item, ranked most-urgent first.
 export type InsightKind =
   | 'my_turn' // an item on YOUR plate — the GET /api/my-turn population, as cards
+  | 'ci_failing' // a RED BUILD you are on the hook for — your open PR, or your repo's trunk
   | 'stalled_review' // an open PR awaiting review too long
   | 'untouched_thread' // a review thread nobody has responded to
   | 'reviewer_load' // a reviewer's pending-queue depth (+ sprint load)
@@ -5652,8 +5684,74 @@ export interface MyTurnCard extends InsightCardBase, InsightPrRef {
    *  read does still need a review, and hiding it would delete work rather than route it. The
    *  flag is for the NOTIFICATION surfaces, which reach for the user rather than waiting to be
    *  opened, and it is computed BEFORE the 50-card cap so `myTurnPersonalTotal` describes the
-   *  whole population and not the slice that fitted. */
+   *  whole population and not the slice that fitted.
+   *
+   *  ⚠ DERIVED from `relevance` (`!== 'none'`) and kept required so no consumer breaks. It is the
+   *  right field for "may we interrupt?" and the WRONG one for card copy — a card that reads
+   *  "YOUR TURN" off this says it over a stranger's PR in a repo you happen to have write on. */
   personal: boolean;
+  /** THE THREE-VALUED RELEVANCE the card's label is written from — see `MyTurnRelevance`. READ
+   *  off the same `getMyTurn` row as `personal` and `since`, never re-derived here.
+   *
+   *  Trailing-optional for wire tolerance only (an e2e mock, a response predating the field);
+   *  `getWorkspaceInsights` always sets it. Absent ⇒ fall back to `personal`. */
+  relevance?: MyTurnRelevance;
+}
+
+// Which relationship puts a red build on the viewer's plate. TWO ARMS, and they are two different
+// claims — the card's copy says which, exactly as `MyTurnRelevance` does for the my_turn board.
+export type CiFailureArm =
+  | 'your_pr' // an OPEN PR you AUTHORED whose head CI is red — your code, your fix
+  | 'trunk'; // the DEFAULT BRANCH of a repo you MAINTAIN is red right now
+
+// A red build the viewer is on the hook for (CORE, deterministic, no AI).
+//
+// ⚠ THE POPULATION IS DELIBERATELY NARROW, and the two things it does NOT cover are the whole
+// design (both were built, measured against real data, and cut — see the comments in
+// `getWorkspaceInsights`' ci_failing block):
+//   • "PRs I MERGED whose CI is failing" is not here. `pull_requests.ci_status` is FROZEN at the
+//     merge instant (a merged PR is never re-walked), so it answers "did this land red" — a retro
+//     metric — not "is something broken now".
+//   • "the commit that TURNED trunk red" is not here either. Trunk CI is non-monotone, a fifth of
+//     `branch_commits` rows carry an unknown CI status, and a chronically-red repo has no streak
+//     start at all. The card names the LANDING PR of the CURRENT red head, which is a fact we
+//     store, and says nothing about who broke it.
+//
+// ⚠ EVERY PR FIELD IS NULLABLE, and a null is ORDINARY. On the `trunk` arm ~11% of red heads are
+// direct pushes to the default branch (a legitimate steady state, not a sync gap) and others
+// simply have no association observed yet — the card must still say trunk is red and just not
+// name a PR. On the `your_pr` arm they are always set.
+export interface CiFailingCard extends InsightCardBase {
+  kind: 'ci_failing';
+  arm: CiFailureArm;
+  repoId: number;
+  repoFullName: string;
+  // Always 'failure' | 'error' — RED IS ALWAYS THAT PAIR, never one of them (db/triage.ts,
+  // getWorkspaceMetricsDetail and lib/ui.ts all spell the same two).
+  ciStatus: CiStatus;
+  /** The PR: the viewer's own on 'your_pr'; the LANDING PR of the red trunk head on 'trunk',
+   *  null there whenever the sha resolves to none (see the ⚠ above). */
+  prId: number | null;
+  prNumber: number | null;
+  prTitle: string | null;
+  /** 'trunk' only — the default-branch head the failure is reported on. Null on 'your_pr'. */
+  headSha: string | null;
+  /** 'trunk' only — who merged the landing PR, when one resolved. Null otherwise. */
+  mergedById: number | null;
+  /** 'trunk' only — `mergedById` IS the viewer: they put this commit on trunk themselves. This is
+   *  an ATTRIBUTION OF LANDING, never of BREAKING: the build may have been red before it. */
+  viewerMerged: boolean;
+  /** one-line "what is red and why it is yours", built server-side like the my_turn card's */
+  detail: string;
+  /** ISO — THE HONEST CLOCK, and it means something different per arm, which is why it is not
+   *  called "redSince": there is no stored per-PR CI transition to read that from.
+   *  'your_pr' → the head commit's time (the code the verdict is about);
+   *  'trunk'   → when we last REFRESHED the branch snapshot (our observation, not the commit's).
+   *  Null when neither is known. */
+  observedAt: string | null;
+  /** The PR page on 'your_pr'; the COMMIT page on 'trunk' — a trunk run's checks live on the
+   *  commit, the same rule the trunk_ci_failed feed item follows. Render via safeExternalUrl. */
+  githubUrl: string;
 }
 
 export interface StalledReviewCard extends InsightCardBase, InsightPrRef {
@@ -5731,6 +5829,7 @@ export interface BotOnlyReviewCard extends InsightCardBase {
 
 export type InsightCard =
   | MyTurnCard
+  | CiFailingCard
   | StalledReviewCard
   | UntouchedThreadCard
   | ReviewerLoadCard
@@ -5860,6 +5959,30 @@ export interface WorkspaceInsightsResponse {
    *  qualifying, so a narrow line without this field silently loses its "+" for ever. Absent
    *  under exactly the same condition as `myTurnTotal` (the fold didn't run). */
   myTurnPersonalTotal?: number;
+  /** The uncapped population of `relevance === 'direct'` cards — work tied to YOU. Folded off the
+   *  SAME pre-cap array as the two totals above, in the same pass. */
+  myTurnDirectTotal?: number;
+  /** The uncapped population of `relevance === 'maintained'` cards — new PRs in repos you
+   *  maintain. `myTurnDirectTotal + myTurnMaintainedTotal === myTurnPersonalTotal` by
+   *  construction; it is spelled out rather than left to a subtraction so a surface that displays
+   *  "in your repos" on its own has a real denominator of its own. */
+  myTurnMaintainedTotal?: number;
+  /** The uncapped population of `relevance === 'none'` cards — the "review or reply" backlog.
+   *
+   *  ⚠ ITS OWN FOLD, NEVER `myTurnTotal - myTurnPersonalTotal`. The cap disclosure only fires
+   *  when the displayed figure equals the count it qualifies, so a line whose denominator was
+   *  subtracted from a different population silently loses its "of N" (and mixes two populations
+   *  in one row). Every displayed count gets its own total — that is the whole rule. */
+  myTurnOtherTotal?: number;
+  /** The uncapped `ci_failing` population — the same disclosure `myTurnTotal` is, for the OTHER
+   *  kind that is a personal worklist rather than a survey of the workspace.
+   *
+   *  ⚠ `ci_failing` shares INSIGHT_CARD_CAP (15) with the survey kinds, which stay silent about
+   *  their cap on purpose (15 is a digestible sample of a long tail). This one may not: "3 red
+   *  builds are yours" is a number the viewer works through, so a silent cap on it is a lie in
+   *  exactly the way my_turn's was. Absent when the fold didn't run (an empty workspace) —
+   *  `undefined` and "not capped" are both non-disclosures, so consumers gate on `total > shown`. */
+  ciFailingTotal?: number;
 }
 
 // The attention cards (stalled reviews / untouched threads / reviewer load / needs-a-reviewer),
@@ -7897,6 +8020,51 @@ export interface DailyBriefCounts {
    *  narrow line. Pair narrow with narrow; consumers gate on
    *  `myTurnPersonalTotal > myTurnPersonal`. */
   myTurnPersonalTotal?: number;
+  /** THE THREE-WAY SPLIT of the same `myTurn` cards, by `MyTurnCard.relevance`. Each is counted
+   *  off the CARDS the board paints (exactly like `myTurn` and `myTurnPersonal`), each is paired
+   *  with its OWN uncapped total, and the three are MUTUALLY EXCLUSIVE and EXHAUSTIVE:
+   *
+   *      myTurnDirect + myTurnMaintained + myTurnOther === myTurn
+   *      myTurnDirect + myTurnMaintained             === myTurnPersonal
+   *
+   *  The brief renders TWO lines off this — "N need your attention" (`myTurnPersonal`, the
+   *  interrupting population, unchanged) and "M need review or reply" (`myTurnOther`) — and each
+   *  must open a board filtered to ITS OWN number. `myTurnDirect`/`myTurnMaintained` are the
+   *  banner's split ("2 yours · 3 in your repos").
+   *
+   *  ⚠ NOT ONE OF THESE MAY BE A SUBTRACTION. `myTurn - myTurnPersonal` would be arithmetically
+   *  right and STILL wrong: it has no total of its own, and `capFor` gates the "of N" disclosure
+   *  on the displayed figure equalling the count it qualifies, so a borrowed denominator drops
+   *  the disclosure on exactly the capped workspaces it exists for. Pair narrow with narrow.
+   *
+   *  All six trailing-optional; a response predating them leaves every consumer on the
+   *  `myTurn`/`myTurnPersonal` pair it used before. */
+  myTurnDirect?: number;
+  /** The uncapped population behind `myTurnDirect` (`WorkspaceInsightsResponse.myTurnDirectTotal`,
+   *  passed straight through — folded off the pre-cap array). */
+  myTurnDirectTotal?: number;
+  /** `myTurn` cards with `relevance === 'maintained'` — new PRs in repos you maintain. */
+  myTurnMaintained?: number;
+  /** The uncapped population behind `myTurnMaintained`, passed straight through. */
+  myTurnMaintainedTotal?: number;
+  /** `myTurn` cards with `relevance === 'none'` — the "review or reply" line's own figure. */
+  myTurnOther?: number;
+  /** The uncapped population behind `myTurnOther`, passed straight through. ⚠ Its own fold, never
+   *  `myTurnTotal - myTurnPersonalTotal` (see the block above). */
+  myTurnOtherTotal?: number;
+  /** `ci_failing` cards on /api/attention — red builds the viewer is on the hook for (their own
+   *  open PR, or trunk in a repo they maintain). Counted off the CARDS, like every figure above.
+   *
+   *  ⚠ IT OVERLAPS `trunkRed` BELOW AND THEY ARE NOT THE SAME LINE. `trunkRed` names EVERY repo in
+   *  the workspace whose trunk is red, maintained or not, and each of its lines opens that repo's
+   *  console. This counts the subset that is YOURS — plus your own red PRs, which `trunkRed` knows
+   *  nothing about — and its line opens the attention board isolated to `ci_failing`. Two figures,
+   *  two populations, two destinations; folding either into the other would give one of them a
+   *  list it does not match. */
+  ciFailing?: number;
+  /** The uncapped population behind `ciFailing` (`WorkspaceInsightsResponse.ciFailingTotal`,
+   *  passed straight through). ⚠ The matched denominator — pair narrow with narrow. */
+  ciFailingTotal?: number;
   /** stalled_review cards on /api/attention (one card = one PR). */
   stalled: number;
   /** untouched_thread cards on /api/attention (one card = one thread). */

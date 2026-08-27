@@ -26,11 +26,19 @@ import type { InsightCard } from '@pierre-review/shared';
 import {
   myTurnCapDisclosure,
   myTurnCapPlacement,
+  myTurnOtherCapDisclosure,
   myTurnPersonalCapDisclosure,
+  passesOtherLens,
   passesPersonalLens,
+  passesRelevanceLens,
   personalMyTurnCount,
 } from '../src/components/Activity/AttentionView.js';
-import { workspaceCapDisclosure } from '../src/hooks/useMyTurnByWorkspace.js';
+import { cardKindLabel, KIND_LABEL } from '../src/components/Activity/AttentionCards.js';
+import {
+  relevanceSplit,
+  sumRelevanceSplit,
+  workspaceCapDisclosure,
+} from '../src/hooks/useMyTurnByWorkspace.js';
 
 /** A brief fold with only the two fields this rule reads varied. */
 function counts(over: Partial<DailyBriefCounts> = {}): DailyBriefCounts {
@@ -261,7 +269,151 @@ describe('workspaceCapDisclosure reads the NARROW pair (badge + banner)', () => 
   });
 });
 
-describe('passesPersonalLens (the board lens)', () => {
+// ── The "review or reply" twin: the OTHER half of the same split ─────────────────────────────
+//
+// The brief's second my-turn line counts `myTurnOther` and opens a board filtered to it, so it
+// needs its own pair for exactly the reasons the personal twin does — plus one of its own:
+//
+//   ⚠ IT MAY NEVER BE `myTurn - myTurnPersonal`. The arithmetic agrees; the disclosure does not.
+//     `capFor` gates the "of N" on `shown === count`, so a subtracted figure has no denominator of
+//     its own to compare against and the line silently loses its cap.
+describe('myTurnOtherCapDisclosure', () => {
+  const split = counts({
+    myTurn: 50,
+    myTurnTotal: 148,
+    myTurnPersonal: 12,
+    myTurnPersonalTotal: 30,
+    myTurnOther: 38,
+    myTurnOtherTotal: 118,
+  });
+
+  it('discloses the OTHER total, never the broad or the personal one', () => {
+    const cap = myTurnOtherCapDisclosure(38, split);
+    expect(cap?.shown).toBe(38);
+    expect(cap?.total).toBe(118);
+    expect(cap?.title).toContain('118');
+    expect(cap?.title).not.toContain('148');
+    expect(cap?.title).not.toContain('30');
+  });
+
+  it('the broad rule would have said NOTHING about the same line', () => {
+    // 38 !== counts.myTurn (50), so the shared guard rejects it — the "+" would vanish silently.
+    expect(myTurnCapDisclosure(38, split)).toBeNull();
+    expect(myTurnOtherCapDisclosure(38, split)).not.toBeNull();
+  });
+
+  it('the SUBTRACTED spelling would have disclosed nothing at all — the rule’s whole point', () => {
+    // `myTurn - myTurnPersonal` is 38 here too, and every existing rule refuses to qualify it:
+    // the broad pair fails the equality and the personal pair describes a different population.
+    // Only a fold with its OWN denominator can carry a cap.
+    const subtracted = split.myTurn - (split.myTurnPersonal as number);
+    expect(subtracted).toBe(38);
+    expect(myTurnCapDisclosure(subtracted, split)).toBeNull();
+    expect(myTurnPersonalCapDisclosure(subtracted, split)).toBeNull();
+  });
+
+  it('stays silent when the other population is fully painted', () => {
+    expect(
+      myTurnOtherCapDisclosure(38, counts({ myTurnOther: 38, myTurnOtherTotal: 38 })),
+    ).toBeNull();
+  });
+
+  it('keeps the same-snapshot guard', () => {
+    expect(myTurnOtherCapDisclosure(30, split)).toBeNull();
+  });
+
+  it('⚠ does NOT fall back to the broad pair, unlike its personal twin', () => {
+    // The personal fallback exists because a pre-split response made the notification surfaces
+    // DISPLAY the broad figure. Nothing displays an "other" figure on such a response — the brief
+    // renders its single broad line instead — so there is nothing to qualify.
+    const old = counts({ myTurn: 50, myTurnTotal: 148 });
+    expect(myTurnOtherCapDisclosure(50, old)).toBeNull();
+    expect(myTurnPersonalCapDisclosure(50, old)?.total).toBe(148);
+  });
+
+  it('does NOT borrow a total when only the OTHER count is missing its own', () => {
+    expect(myTurnOtherCapDisclosure(38, counts({ myTurn: 50, myTurnTotal: 148, myTurnOther: 38 })))
+      .toBeNull();
+  });
+
+  it('says nothing while the brief is still loading', () => {
+    expect(myTurnOtherCapDisclosure(38, undefined)).toBeNull();
+    expect(myTurnOtherCapDisclosure(38, null)).toBeNull();
+  });
+
+  // ── the invariant the two lines rest on ───────────────────────────────────────────────────
+  it('the two lines are DISJOINT and EXHAUSTIVE over the same cards', () => {
+    // Pinned server-side too; pinned here because the strip renders both figures side by side and
+    // a reader can add them. If these ever stop summing, one of the two lines is a lie.
+    expect((split.myTurnPersonal as number) + (split.myTurnOther as number)).toBe(split.myTurn);
+    expect((split.myTurnPersonalTotal as number) + (split.myTurnOtherTotal as number)).toBe(
+      split.myTurnTotal,
+    );
+  });
+});
+
+// ── The banner's headline split ("2 yours · 3 in your repos") ─────────────────────────────────
+//
+// The POPULATION is unchanged — the chips, the dropdown badges and the OS notification all still
+// count the sum. This only says which half is which, because a new PR in a repo you maintain is
+// orbit rather than ownership and reporting the two as one figure is what made the banner nag.
+describe('relevanceSplit (one workspace)', () => {
+  it('reads both halves when the server sent them', () => {
+    expect(relevanceSplit(counts({ myTurnDirect: 2, myTurnMaintained: 3 }))).toEqual({
+      direct: 2,
+      maintained: 3,
+    });
+  });
+
+  it('⚠ BOTH FIELDS OR NEITHER — half a split is not a split', () => {
+    // Rendering "2 yours" beside a total of 5 with nothing accounting for the other 3 is the
+    // one-row-two-populations defect, and `maintained = count - direct` would silently absorb any
+    // future third relevance into "in your repos".
+    expect(relevanceSplit(counts({ myTurnPersonal: 5, myTurnDirect: 2 }))).toBeNull();
+    expect(relevanceSplit(counts({ myTurnPersonal: 5, myTurnMaintained: 3 }))).toBeNull();
+    expect(relevanceSplit(counts({ myTurnPersonal: 5 }))).toBeNull();
+  });
+
+  it('a ZERO half is a real answer, not an absent one', () => {
+    expect(relevanceSplit(counts({ myTurnDirect: 0, myTurnMaintained: 4 }))).toEqual({
+      direct: 0,
+      maintained: 4,
+    });
+  });
+
+  it('the halves sum to the personal count the surfaces display', () => {
+    const c = counts({ myTurnPersonal: 5, myTurnDirect: 2, myTurnMaintained: 3 });
+    const s = relevanceSplit(c);
+    expect((s as { direct: number }).direct + (s as { maintained: number }).maintained).toBe(
+      personalMyTurnCount(c),
+    );
+  });
+});
+
+describe('sumRelevanceSplit (the banner headline)', () => {
+  const line = (direct: number, maintained: number): { split: { direct: number; maintained: number } | null } => ({
+    split: { direct, maintained },
+  });
+
+  it('sums across workspaces', () => {
+    expect(sumRelevanceSplit([line(2, 3), line(1, 0)])).toEqual({ direct: 3, maintained: 3 });
+  });
+
+  it('⚠ REFUSES when ANY contributing line lacks the split', () => {
+    // Mixed responses are real: the active workspace's counts are fresh per request while the
+    // roll-up lines ride a 5-min cache, so one can predate a deploy the other followed. Summing
+    // the halves over some lines and the whole over others prints two numbers that do not add up
+    // to the total beside them.
+    expect(sumRelevanceSplit([line(2, 3), { split: null }])).toBeNull();
+    expect(sumRelevanceSplit([{ split: null }])).toBeNull();
+  });
+
+  it('says nothing when there are no lines at all', () => {
+    expect(sumRelevanceSplit([])).toBeNull();
+  });
+});
+
+describe('passesPersonalLens (the "mine" half)', () => {
   const card = (over: Partial<InsightCard>): InsightCard =>
     ({ kind: 'my_turn', personal: true, ...over }) as InsightCard;
 
@@ -274,9 +426,112 @@ describe('passesPersonalLens (the board lens)', () => {
     expect(passesPersonalLens(card({ personal: undefined }))).toBe(true);
   });
 
+  it('reads `personal`, NOT `relevance` — it must survive a pre-split response', () => {
+    // `personal` IS `relevance !== 'none'` and the server writes it on every row. Deriving this
+    // predicate from `relevance` instead would hide EVERY card on a response that predates the
+    // three-way split.
+    expect(passesPersonalLens(card({ personal: true, relevance: undefined }))).toBe(true);
+    expect(passesPersonalLens(card({ personal: true, relevance: 'maintained' }))).toBe(true);
+  });
+
   it('never touches another kind — no other card carries the flag at all', () => {
     expect(passesPersonalLens(card({ kind: 'stalled_review', personal: undefined }))).toBe(true);
     expect(passesPersonalLens(card({ kind: 'untouched_thread', personal: undefined }))).toBe(true);
+  });
+});
+
+describe('passesOtherLens (the "review or reply" half)', () => {
+  const card = (over: Partial<InsightCard>): InsightCard =>
+    ({ kind: 'my_turn', ...over }) as InsightCard;
+
+  it('keeps ONLY relevance:none my_turn cards', () => {
+    expect(passesOtherLens(card({ relevance: 'none' }))).toBe(true);
+    expect(passesOtherLens(card({ relevance: 'direct' }))).toBe(false);
+    expect(passesOtherLens(card({ relevance: 'maintained' }))).toBe(false);
+  });
+
+  it('⚠ an ABSENT relevance is NOT in this half', () => {
+    // The two lenses are deliberately not exact complements over unclassifiable rows: 'mine'
+    // keeps an unknown card (over-showing beats hiding work) and 'others' simply never claims it.
+    // A pre-split response therefore paints an EMPTY 'others' board rather than a mislabelled
+    // full one — and the brief does not offer the line on such a response, so nobody lands there.
+    expect(passesOtherLens(card({ relevance: undefined, personal: false }))).toBe(false);
+  });
+
+  it('never touches another kind', () => {
+    expect(passesOtherLens(card({ kind: 'stalled_review' }))).toBe(true);
+    // ⚠ `ci_failing` is personal BY CONSTRUCTION (your own red PRs + trunk in repos you maintain),
+    // so hiding it under 'others' would hide work that IS yours from a reader who asked only to
+    // see the backlog. The lens narrows `my_turn` and nothing else, in BOTH directions.
+    expect(passesOtherLens(card({ kind: 'ci_failing' }))).toBe(true);
+  });
+});
+
+describe('passesRelevanceLens (the one predicate the board and the banner share)', () => {
+  const card = (over: Partial<InsightCard>): InsightCard =>
+    ({ kind: 'my_turn', ...over }) as InsightCard;
+
+  it('null keeps everything', () => {
+    expect(passesRelevanceLens(card({ relevance: 'none', personal: false }), null)).toBe(true);
+    expect(passesRelevanceLens(card({ relevance: 'direct', personal: true }), null)).toBe(true);
+  });
+
+  it('the two halves PARTITION the classified cards', () => {
+    for (const rel of ['direct', 'maintained', 'none'] as const) {
+      const c = card({ relevance: rel, personal: rel !== 'none' });
+      const mine = passesRelevanceLens(c, 'mine');
+      const others = passesRelevanceLens(c, 'others');
+      // Exactly one half claims each card — which is what makes the brief's two lines mutually
+      // exclusive on the board as well as in the strip.
+      expect(mine !== others).toBe(true);
+    }
+  });
+});
+
+// ── THE CARD LABELS: three, off `relevance` ──────────────────────────────────────────────────
+//
+// The `personal` boolean conflated two different relationships. "Somebody else opened a PR in a
+// repo you maintain" is ORBIT, not ownership — labelling it "Your turn" is the over-claim the
+// reporter objected to ("work on repos" vs "work tied to me directly through authorship, reply or
+// merge"). The KIND stays neutral; the claim is per card.
+describe('cardKindLabel (my_turn)', () => {
+  const card = (over: Partial<InsightCard>): InsightCard =>
+    ({ kind: 'my_turn', ...over }) as InsightCard;
+
+  it('direct claims you, maintained claims your ground, none claims nothing', () => {
+    expect(cardKindLabel(card({ relevance: 'direct' }))).toBe('Your turn');
+    expect(cardKindLabel(card({ relevance: 'maintained' }))).toBe('In your repos');
+    expect(cardKindLabel(card({ relevance: 'none' }))).toBe(KIND_LABEL.my_turn);
+  });
+
+  it('⚠ an ABSENT relevance renders the NEUTRAL label, even with personal:true', () => {
+    // The opposite of the wire's tolerance rule, deliberately: absence ⇒ personal is the safe
+    // direction for NOTIFYING, but a missing field may never invent an ownership claim ON SCREEN.
+    // The only way to see this is a server too old to send the field, where "Review or reply" is
+    // still true.
+    expect(cardKindLabel(card({ personal: true }))).toBe(KIND_LABEL.my_turn);
+    expect(cardKindLabel(card({ personal: false }))).toBe(KIND_LABEL.my_turn);
+  });
+
+  it('the three labels are DISTINCT — the split is invisible if two of them collide', () => {
+    const labels = (['direct', 'maintained', 'none'] as const).map((r) =>
+      cardKindLabel(card({ relevance: r })),
+    );
+    expect(new Set(labels).size).toBe(3);
+  });
+
+  it('the ci_failing arms keep their own two labels', () => {
+    expect(cardKindLabel({ kind: 'ci_failing', arm: 'your_pr' } as InsightCard)).toBe(
+      'CI failing on your PR',
+    );
+    expect(cardKindLabel({ kind: 'ci_failing', arm: 'trunk' } as InsightCard)).toBe(
+      'Trunk CI failing',
+    );
+  });
+
+  it('every other kind is called what its kind is called', () => {
+    expect(cardKindLabel({ kind: 'stalled_review' } as InsightCard)).toBe(KIND_LABEL.stalled_review);
+    expect(cardKindLabel({ kind: 'reviewer_load' } as InsightCard)).toBe(KIND_LABEL.reviewer_load);
   });
 });
 

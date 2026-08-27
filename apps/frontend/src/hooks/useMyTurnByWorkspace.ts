@@ -33,9 +33,9 @@ import { useWorkspaces } from './useWorkspaces.js';
  * workspace A, and no click anywhere opened the list it named. Every number this hook returns is
  * `DailyBriefCounts.myTurn`, which is literally the number of `my_turn` cards
  * `GET /api/attention` paints for that workspace, narrowed by the same `personal` flag — and
- * `openMyTurnInWorkspace` seats `attentionPersonalOnly`, so the board the click opens paints
- * exactly those cards. Banner line, dropdown badge and destination board are therefore one fold
- * and one number.
+ * `openMyTurnInWorkspace` seats `attentionRelevance: 'mine'` (direct + maintained, which is what
+ * `personal` always meant), so the board the click opens paints exactly those cards. Banner line,
+ * dropdown badge and destination board are therefore one fold and one number.
  *
  * ⚠ THAT LAST CLAUSE IS THE WHOLE CONTRACT. A line that says 4 opening a board of 50 is the
  * "the strip says 5, the board lists 3" defect (747c9c9) in a new place — so a NARROW count may
@@ -98,6 +98,46 @@ export function workspaceCapDisclosure(
   return { ...cap, title: cap.title.replace(ACTIVE_WORKSPACE_PHRASE, `in ${name}`) };
 }
 
+/**
+ * The direct/maintained halves of ONE workspace's personal count, or null when the server did not
+ * send them.
+ *
+ * ⚠ BOTH FIELDS OR NEITHER, and never derived from `count`. Half a split is not a split: rendering
+ * "2 yours" beside a total of 5 with nothing accounting for the other 3 is the one-row-two-
+ * populations defect, and `myTurnMaintained = count - myTurnDirect` would silently absorb any
+ * future third relevance into "in your repos".
+ */
+export function relevanceSplit(
+  counts: DailyBriefCounts,
+): { direct: number; maintained: number } | null {
+  const { myTurnDirect, myTurnMaintained } = counts;
+  if (myTurnDirect == null || myTurnMaintained == null) return null;
+  return { direct: myTurnDirect, maintained: myTurnMaintained };
+}
+
+/**
+ * Sum the per-line splits into the banner's headline pair — or refuse.
+ *
+ * ⚠ ALL-OR-NOTHING ACROSS THE CONTRIBUTING LINES. Summing the halves over SOME lines and the whole
+ * over others would print two numbers that do not add up to the total beside them: one row, two
+ * populations. Mixed responses are REAL — the active workspace's counts are computed fresh on every
+ * request while the roll-up lines ride a 5-minute cache, so one can predate a deploy the other
+ * followed — which is exactly why this refuses instead of doing its best.
+ */
+export function sumRelevanceSplit(
+  lines: readonly { split: { direct: number; maintained: number } | null }[],
+): { direct: number; maintained: number } | null {
+  if (lines.length === 0) return null;
+  let direct = 0;
+  let maintained = 0;
+  for (const l of lines) {
+    if (l.split == null) return null;
+    direct += l.split.direct;
+    maintained += l.split.maintained;
+  }
+  return { direct, maintained };
+}
+
 export interface WorkspaceMyTurnLine {
   workspaceId: number;
   name: string;
@@ -112,6 +152,16 @@ export interface WorkspaceMyTurnLine {
    *  title names THIS line's workspace (see `workspaceCapDisclosure`), because a caller renders
    *  it on a row for a workspace the user is not in. */
   cap: MyTurnCapDisclosure | null;
+  /** `count`, SPLIT by `MyTurnCard.relevance` — 'direct' (tied to you by authorship, a request, a
+   *  reply or a mention) vs 'maintained' (someone else's PR in a repo you maintain). Null on a
+   *  response that predates the split; NEVER a subtraction, and `direct + maintained === count`
+   *  whenever it is present.
+   *
+   *  ⚠ THE NOTIFICATION POPULATION IS UNCHANGED — `count` is still the sum, badges still badge it,
+   *  the OS notification still fires on it. This only lets a surface SAY which half is which
+   *  ("2 yours · 3 in your repos"), because a new PR in a repo you maintain is orbit, not
+   *  ownership, and reporting the two as one figure is what made the banner feel like a nag. */
+  split: { direct: number; maintained: number } | null;
   /** true = computed on this request; false = from the roll-up's ≤5-min server cache. */
   fresh: boolean;
 }
@@ -123,6 +173,15 @@ export interface MyTurnByWorkspace {
   lines: WorkspaceMyTurnLine[];
   /** Sum over `lines`. Capped card counts, so `anyCapped` qualifies it. */
   total: number;
+  /** `total`, split the same way `WorkspaceMyTurnLine.split` is — the banner's headline
+   *  ("2 yours · 3 in your repos") instead of a bare 5.
+   *
+   *  ⚠ ALL-OR-NOTHING ACROSS THE CONTRIBUTING LINES. If any line lacks the split, this is null and
+   *  callers fall back to the single figure: summing the halves over SOME lines and the whole over
+   *  others would print two numbers that do not add up to the total beside them — one row, two
+   *  populations. (Mixed responses are real: the active workspace is computed fresh while the
+   *  roll-up lines ride a 5-minute cache, so one can predate a deploy the other followed.) */
+  totalSplit: { direct: number; maintained: number } | null;
   /** Sum over the non-active lines — "work you cannot see from where you are". */
   elsewhereCount: number;
   /** True when ANY contributing line is capped, so a summed figure can say "N+". */
@@ -138,6 +197,7 @@ const EMPTY: MyTurnByWorkspace = {
   byWorkspace: new Map(),
   lines: [],
   total: 0,
+  totalSplit: null,
   elsewhereCount: 0,
   anyCapped: false,
   elsewhereCapped: false,
@@ -170,6 +230,7 @@ export function useMyTurnByWorkspace(): MyTurnByWorkspace {
         count: personalMyTurnCount(counts),
         // Named for THIS line's workspace, never "this Workspace" — see the note above.
         cap: workspaceCapDisclosure(counts, isActive, name),
+        split: relevanceSplit(counts),
         fresh,
       });
     };
@@ -194,6 +255,9 @@ export function useMyTurnByWorkspace(): MyTurnByWorkspace {
       elsewhereCount += l.count;
       if (l.cap != null) elsewhereCapped = true;
     }
+    // Over the SAME `lines` the total was summed from, so the pair and the figure beside it can
+    // never describe different line sets. All-or-nothing — see `sumRelevanceSplit`.
+    const totalSplit = sumRelevanceSplit(lines);
 
     // The roll-up's own cap, made visible. Only computable once the brief has landed — see the
     // unresolved-workspace rule in the header.
@@ -201,6 +265,15 @@ export function useMyTurnByWorkspace(): MyTurnByWorkspace {
       .filter((w) => !byWorkspace.has(w.id))
       .map((w) => ({ id: w.id, name: w.name }));
 
-    return { byWorkspace, lines, total, elsewhereCount, anyCapped, elsewhereCapped, uncounted };
+    return {
+      byWorkspace,
+      lines,
+      total,
+      totalSplit,
+      elsewhereCount,
+      anyCapped,
+      elsewhereCapped,
+      uncounted,
+    };
   }, [brief, workspaces]);
 }

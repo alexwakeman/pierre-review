@@ -1,7 +1,7 @@
 import type { DailyBriefCounts, InsightCard } from '@pierre-review/shared';
 import { useAttentionCards } from '../../hooks/useAttentionCards.js';
 import { useDailyBrief } from '../../hooks/useDailyBrief.js';
-import { useFilters } from '../../store/filters.js';
+import { useFilters, type AttentionRelevanceLens } from '../../store/filters.js';
 import { AttentionCards, KIND_LABEL } from './AttentionCards.js';
 
 // The "Needs attention" rail entry (CORE/free) — the attention cards (your turn / stalled reviews
@@ -86,6 +86,60 @@ export function myTurnPersonalCapDisclosure(
   );
 }
 
+/**
+ * THE OTHER NARROW TWIN — the "review or reply" half of the same split, for the brief's second
+ * my-turn line and the board under the `'others'` lens.
+ *
+ * ⚠ IT MUST NEVER BE SPELLED `myTurn - myTurnPersonal`. The arithmetic agrees; the DISCLOSURE does
+ * not. `capFor` gates the "of N" on `shown === count && total > count`, so a subtracted figure has
+ * no denominator of its own to compare against — the line would print a bare number and silently
+ * drop its cap, which is the whole defect this family of rules exists to prevent. The server folds
+ * `myTurnOther` / `myTurnOtherTotal` as their own populations for exactly this reason.
+ *
+ * ⚠ AND IT DOES NOT FALL BACK TO THE BROAD PAIR, unlike its personal twin. That fallback exists
+ * because a response predating the narrowing made the notification surfaces DISPLAY the broad
+ * figure, so the broad denominator was the honest one. Nothing displays an "other" figure on such
+ * a response — the brief renders its single broad line instead — so there is nothing to qualify.
+ */
+export function myTurnOtherCapDisclosure(
+  shown: number,
+  counts: DailyBriefCounts | null | undefined,
+): MyTurnCapDisclosure | null {
+  if (counts == null || counts.myTurnOther == null) return null;
+  return capFor(
+    shown,
+    counts.myTurnOther,
+    counts.myTurnOtherTotal,
+    (total, n) =>
+      // Keeps the literal "in this Workspace" for the same reason the personal twin does — see
+      // `workspaceCapDisclosure`'s place-name substitution.
+      `${total} items in this Workspace need a review or reply from someone, but nobody has named you on them. The board shows the most urgent ${n} — highest severity first, newest first within it — and backfills as you clear them.`,
+  );
+}
+
+/**
+ * THE `ci_failing` TWIN — the same rule for the other kind that is a personal worklist rather than
+ * a survey of the workspace.
+ *
+ * ⚠ `ci_failing` shares INSIGHT_CARD_CAP (15) with the survey kinds, which stay silent about their
+ * cap on purpose. This one may not: "3 red builds are yours" is a list the viewer works through, so
+ * a silent cap is the same lie my_turn's was — just at a much smaller number, which is exactly why
+ * nobody would notice it. Pair narrow with narrow, like every other rule here.
+ */
+export function ciFailingCapDisclosure(
+  shown: number,
+  counts: DailyBriefCounts | null | undefined,
+): MyTurnCapDisclosure | null {
+  if (counts == null || counts.ciFailing == null) return null;
+  return capFor(
+    shown,
+    counts.ciFailing,
+    counts.ciFailingTotal,
+    (total, n) =>
+      `${total} red builds in this Workspace are yours — your own open PRs, and trunk in repos you maintain. The board shows the most urgent ${n}.`,
+  );
+}
+
 /** The shared body of both rules: the same-snapshot guard, the actually-capped test, the pair. */
 function capFor(
   shown: number,
@@ -108,14 +162,83 @@ export function personalMyTurnCount(counts: DailyBriefCounts): number {
   return counts.myTurnPersonal ?? counts.myTurn;
 }
 
-/** Does this card survive the board's PERSONAL lens?
+/** Does this card survive the board's PERSONAL ('mine') lens?
  *
  *  ⚠ Only an EXPLICIT `false` hides a card. `personal` is advisory and every other kind lacks it
  *  entirely, so an unclassifiable card stays on the board — the same "absent ⇒ personal" rule the
- *  wire type states, and the safe direction for a lens that hides work. */
+ *  wire type states, and the safe direction for a lens that hides work.
+ *
+ *  ⚠ It reads `personal`, not `relevance`, on purpose: `personal` IS `relevance !== 'none'`, the
+ *  server writes it on every row, and it survives a response that predates the three-way split.
+ *  Deriving it from `relevance` here would hide every card on such a response. */
 export function passesPersonalLens(card: InsightCard): boolean {
   return !(card.kind === 'my_turn' && card.personal === false);
 }
+
+/** The 'others' half: the review-or-reply backlog nobody named the viewer on.
+ *
+ *  ⚠ `relevance === 'none'`, NOT `personal === false`. A card that carries neither field is NOT
+ *  in this half — the two lenses are deliberately not exact complements over unclassifiable rows,
+ *  because the safe direction differs: 'mine' keeps an unknown card (over-showing beats hiding
+ *  work), and so does 'others' by simply never claiming it. An old response therefore paints an
+ *  empty 'others' board rather than a mislabelled full one — and the brief does not offer the
+ *  line at all on such a response, so nothing routes a reader there. */
+export function passesOtherLens(card: InsightCard): boolean {
+  return !(card.kind === 'my_turn' && card.relevance !== 'none');
+}
+
+/**
+ * THE ONE LENS PREDICATE the board, the banner and their counts all go through.
+ *
+ * ⚠ IT NARROWS `my_turn` AND NOTHING ELSE, in BOTH directions. Relevance is a property of the
+ * my-turn fold — no other kind carries the field, and a stalled review or a red build is a survey
+ * of the workspace rather than a claim about who it belongs to. Filtering those by a field they do
+ * not have would empty the board the moment a lens was seated (`ci_failing` in particular is
+ * personal BY CONSTRUCTION — the server only emits your own red PRs and trunk in repos you
+ * maintain — so hiding it under 'others' would hide work that IS yours from a reader who only
+ * asked to see the backlog).
+ */
+export function passesRelevanceLens(card: InsightCard, lens: 'mine' | 'others' | null): boolean {
+  if (lens == null) return true;
+  return lens === 'mine' ? passesPersonalLens(card) : passesOtherLens(card);
+}
+
+/**
+ * HOW EACH LENS IS NAMED IN PROSE — one table, read by the board's filtered empty state AND by
+ * `AttentionIsolationBanner`, so the two surfaces that describe the same narrowing cannot phrase
+ * it two ways (the rule `myTurnCapDisclosure` enforces for the cap, applied to the lens).
+ *
+ * ⚠ 'others' IS NOT "not yours". It is "nobody has named you on it" — a PR in a repo you only
+ * read, or one in a repo you maintain that you have already been counted for elsewhere. The copy
+ * says "tied to you", the reporter's own words, because "not personal" reads as a judgement about
+ * the work rather than about the relationship.
+ */
+export const LENS_COPY: Record<
+  AttentionRelevanceLens,
+  {
+    /** Follows "No <kind> items …" in the filtered empty state. */
+    empty: string;
+    /** Names the OTHER half in "· N more <hidden>". */
+    hidden: string;
+    /** The banner's noun phrase when a KIND is named before it. */
+    withKind: string;
+    /** …and when it stands alone. */
+    bare: string;
+  }
+> = {
+  mine: {
+    empty: 'personally involve you',
+    hidden: 'in repos you don’t maintain',
+    withKind: 'that personally involves you',
+    bare: 'what personally involves you',
+  },
+  others: {
+    empty: 'are waiting on someone other than you',
+    hidden: 'tied to you directly',
+    withKind: 'that isn’t tied to you',
+    bare: 'what isn’t tied to you',
+  },
+};
 
 /**
  * WHERE the disclosure goes on the board, which depends on what the header count is counting.
@@ -145,12 +268,13 @@ export function AttentionView(): JSX.Element {
   // rail switch or workspace change (see the store).
   const attentionIsolation = useFilters((s) => s.attentionIsolation);
   const setAttentionIsolation = useFilters((s) => s.setAttentionIsolation);
-  // The PERSONAL lens, set by the notification surfaces (banner line, Workspace badge, the
-  // brief's "Elsewhere" rows) so the count they showed and the list this board paints are one
-  // population. Off by default — a stranger's PR in a repo you only read still needs a review,
-  // and this board is where that work is meant to be found.
-  const attentionPersonalOnly = useFilters((s) => s.attentionPersonalOnly);
-  const setAttentionPersonalOnly = useFilters((s) => s.setAttentionPersonalOnly);
+  // The RELEVANCE lens — 'mine' (direct + maintained), 'others' (the review-or-reply backlog) or
+  // null. Seated by whichever count the reader clicked (the notification surfaces seat 'mine'; the
+  // brief's two my-turn lines seat one each) so the number they saw and the list this board paints
+  // are one population. Null by default — a stranger's PR in a repo you only read still needs a
+  // review, and this board is where that work is meant to be found.
+  const attentionRelevance = useFilters((s) => s.attentionRelevance);
+  const setAttentionRelevance = useFilters((s) => s.setAttentionRelevance);
   const { data, isLoading, isError } = useAttentionCards(workspaceId);
   // The cap disclosure's only source on this screen: /api/attention carries the cards, the brief
   // carries the uncapped my_turn population. Same fold, same scope, same default window (the
@@ -158,23 +282,38 @@ export function AttentionView(): JSX.Element {
   // warmed — so this is a cache read, not a second board request.
   const { data: brief } = useDailyBrief(workspaceId);
   const all = (data?.cards ?? []).filter((c) => !BOT_CARD_KINDS.has(c.kind));
-  // The PERSONAL lens applies BEFORE the kind isolation and before every count below it: it is a
+  // The RELEVANCE lens applies BEFORE the kind isolation and before every count below it: it is a
   // property of the population this board is showing, not of the kind filter on top of it.
-  const visible = attentionPersonalOnly ? all.filter(passesPersonalLens) : all;
+  const visible =
+    attentionRelevance == null
+      ? all
+      : all.filter((c) => passesRelevanceLens(c, attentionRelevance));
   // ⚠ Everything below reads `cards`, the ISOLATED subset — including the item count. A header
   // that kept counting the full list would name a number the list underneath it doesn't contain.
   const cards =
     attentionIsolation == null ? visible : visible.filter((c) => c.kind === attentionIsolation);
   // Counted off `visible`, never `cards`: the brief's myTurn counts every my_turn card the board
   // holds, so the same-snapshot guard has to compare like with like whatever the board is filtered to.
-  // ⚠ And the RULE has to match the LENS — under the personal lens the numerator is the personal
-  // subset, so its denominator must be `myTurnPersonalTotal`; pairing it with the broad total both
-  // mixes populations and (because the guard is an equality) drops the disclosure entirely.
+  // ⚠ And the RULE has to match the LENS — under 'mine' the numerator is the personal subset, so
+  // its denominator must be `myTurnPersonalTotal`, and under 'others' it must be
+  // `myTurnOtherTotal`. Pairing either with the broad total both mixes populations and (because
+  // the guard is an equality) drops the disclosure entirely. Pair narrow with narrow, three ways.
   const myTurnShown = visible.filter((c) => c.kind === 'my_turn').length;
-  const cap = attentionPersonalOnly
-    ? myTurnPersonalCapDisclosure(myTurnShown, brief?.counts)
-    : myTurnCapDisclosure(myTurnShown, brief?.counts);
+  const cap =
+    attentionRelevance === 'mine'
+      ? myTurnPersonalCapDisclosure(myTurnShown, brief?.counts)
+      : attentionRelevance === 'others'
+        ? myTurnOtherCapDisclosure(myTurnShown, brief?.counts)
+        : myTurnCapDisclosure(myTurnShown, brief?.counts);
   const placement = myTurnCapPlacement(cap, attentionIsolation);
+  // The ci_failing cap, disclosed ONLY while the board is isolated to that kind — anywhere else the
+  // header count mixes kinds, and a ci-only denominator beside it would be one row, two populations
+  // (the same reason `myTurnCapPlacement` returns 'none' off-kind). Counted off `visible`, like the
+  // my_turn figure above, so the same-snapshot guard compares like with like.
+  const ciCap =
+    attentionIsolation === 'ci_failing'
+      ? ciFailingCapDisclosure(visible.filter((c) => c.kind === 'ci_failing').length, brief?.counts)
+      : null;
   // How many cards the lens is holding back — the number the empty state and the banner need to
   // say "they're filtered, not gone".
   const hiddenByLens = all.length - visible.length;
@@ -194,8 +333,18 @@ export function AttentionView(): JSX.Element {
           </span>
         )}
         {!isLoading && !isError && placement === 'aside' && cap != null && (
+          // ⚠ THE ASIDE NAMES THE POPULATION IT IS QUALIFYING. Under 'others' the my_turn cards on
+          // this board are precisely the ones NOT yours, so a hard-coded "your turn" would put the
+          // wrong label on the right number — a one-row, two-populations mislabel of the same
+          // family the cap rules exist to prevent.
           <span className="text-[11px] text-gray-400" title={cap.title}>
-            · your turn {cap.shown} of {cap.total}
+            · {attentionRelevance === 'others' ? 'review or reply' : 'your turn'} {cap.shown} of{' '}
+            {cap.total}
+          </span>
+        )}
+        {!isLoading && !isError && ciCap != null && (
+          <span className="text-[11px] text-gray-400" title={ciCap.title}>
+            · {ciCap.shown} of {ciCap.total} red builds
           </span>
         )}
       </div>
@@ -211,13 +360,14 @@ export function AttentionView(): JSX.Element {
         </div>
       ) : isError ? (
         <div className="text-sm text-red-500">Couldn’t load what needs attention.</div>
-      ) : cards.length === 0 && (attentionIsolation != null || attentionPersonalOnly) ? (
+      ) : cards.length === 0 && (attentionIsolation != null || attentionRelevance != null) ? (
         // A filter that matches nothing gets its OWN empty state, naming the filter(s) and
         // offering the way out of each. The generic "nothing needs attention 🎉" below would be a
         // lie here — the board is filtered, and there may be plenty of other cards behind it.
-        // ⚠ BOTH lenses reach this branch. A personal lens that emptied the board while 50 cards
-        // sit behind it is exactly the "where did my work go" moment, so it may never fall through
-        // to the celebration.
+        // ⚠ EVERY LENS VALUE REACHES THIS BRANCH — the test is `!= null`, never a truthiness check
+        // on a boolean that no longer exists. A lens that emptied the board while 50 cards sit
+        // behind it is exactly the "where did my work go" moment, so neither half of the split may
+        // fall through to the celebration.
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
           {/* The explicit {' '} pair is load-bearing: JSX drops a trailing space before a
               newline, so "No " on its own line would render as "NoYour turn items". */}
@@ -230,7 +380,8 @@ export function AttentionView(): JSX.Element {
                 </span>{' '}
               </>
             )}
-            items {attentionPersonalOnly ? 'personally involve you ' : ''}right now.
+            items {attentionRelevance != null ? `${LENS_COPY[attentionRelevance].empty} ` : ''}
+            right now.
           </div>
           <div className="mt-1 text-[11px]">
             {attentionIsolation != null &&
@@ -239,20 +390,20 @@ export function AttentionView(): JSX.Element {
                     visible.length === 1 ? ' is' : 's are'
                   } hidden. `
                 : 'The board is filtered to that one kind. ')}
-            {attentionPersonalOnly &&
+            {attentionRelevance != null &&
               (hiddenByLens > 0
-                ? `${hiddenByLens} item${
-                    hiddenByLens === 1 ? '' : 's'
-                  } in repos you don’t maintain ${hiddenByLens === 1 ? 'is' : 'are'} hidden — ${
+                ? `${hiddenByLens} item${hiddenByLens === 1 ? '' : 's'} ${
+                    LENS_COPY[attentionRelevance].hidden
+                  } ${hiddenByLens === 1 ? 'is' : 'are'} hidden — ${
                     hiddenByLens === 1 ? 'it does' : 'they do'
                   } still need a review.`
-                : 'The board is filtered to what personally involves you.')}
+                : `The board is filtered to ${LENS_COPY[attentionRelevance].bare}.`)}
           </div>
           <div className="mt-2 flex items-center justify-center gap-2">
-            {attentionPersonalOnly && (
+            {attentionRelevance != null && (
               <button
                 type="button"
-                onClick={() => setAttentionPersonalOnly(false)}
+                onClick={() => setAttentionRelevance(null)}
                 className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900/60"
               >
                 Show everyone’s

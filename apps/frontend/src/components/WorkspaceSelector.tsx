@@ -333,11 +333,20 @@ export function WorkspaceSelector(): JSX.Element {
                       // always the fresh one, so this badge can never disagree with the board on
                       // screen.
                       <span
+                        // ⚠ THE BADGE STILL SUMS BOTH HALVES — the notification population is
+                        // unchanged, and a badge is one glyph wide. The direct/maintained SPLIT
+                        // rides the tooltip only, where it costs no layout: "3 tied to you, 2 in
+                        // repos you maintain" is the difference between a summons and an FYI, and
+                        // a reader hovering a badge is asking exactly that. The cap sentence still
+                        // wins the title when there is one — it is the only place the exact
+                        // shown/total pair is written down.
                         title={
                           myTurn.cap?.title ??
-                          (myTurn.count === 1
-                            ? `1 item needs you in ${w.name}`
-                            : `${myTurn.count} items need you in ${w.name}`)
+                          (myTurn.split != null
+                            ? `${myTurn.split.direct} tied to you, ${myTurn.split.maintained} in repos you maintain — in ${w.name}`
+                            : myTurn.count === 1
+                              ? `1 item needs you in ${w.name}`
+                              : `${myTurn.count} items need you in ${w.name}`)
                         }
                         className={`${MY_TURN_BADGE_CLASS} min-w-[1.35rem]`}
                       >

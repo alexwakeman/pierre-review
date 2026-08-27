@@ -5,6 +5,7 @@
 // (the plan's ⚠: "never a re-derivation that can disagree with the surface it links to"):
 //
 //   myTurn /
+//   ciFailing /
 //   stalled /
 //   untouchedThreads /
 //   needsReviewer    → getWorkspaceInsights card counts — the same cards GET /api/attention
@@ -25,6 +26,10 @@
 //                      own number (same predicate the resolve route re-derives).
 //   trunkRed         → the repos DEFAULT-BRANCH head snapshot columns (branch-status's source of
 //                      truth) — red = 'failure' | 'error'; pending/unknown are not red.
+//                      ⚠ NOT the same population as `ciFailing` above, and neither replaces the
+//                      other: this names EVERY red trunk in the workspace and opens that repo's
+//                      console; `ciFailing` counts the ones you MAINTAIN plus your own red PRs and
+//                      opens the attention board. Two figures, two lists, two destinations.
 //   botAnomalies     → a NARROW volume-only self-baseline (below) — deliberately NOT the full
 //                      getBotBehaviourAnalytics compute (trends+heatmaps+overlap+ML fold over
 //                      every bot), which is priced for an explicit Pro tab open, not an
@@ -254,13 +259,41 @@ async function computeBriefCounts(
   // reason `myTurn` is: it is the number of PERSONAL cards the board actually paints, so its
   // total (`myTurnPersonalTotal`, the pre-cap fold) is the only thing that may qualify it.
   let myTurnPersonal = 0;
+  // The THREE-WAY split of those same cards, by `MyTurnCard.relevance`. The brief renders two
+  // MUTUALLY EXCLUSIVE lines off them — "N need your attention" (direct + maintained, i.e.
+  // `myTurnPersonal`, unchanged) and "M need review or reply" (`myTurnOther`) — and each line
+  // opens a board filtered to its own number, so each needs its own count AND its own total.
+  //
+  // ⚠ `myTurnOther` IS NOT `myTurn - myTurnPersonal`. The arithmetic agrees; the disclosure does
+  // not. `capFor` prints "of N" only when the displayed figure equals the count it qualifies, so
+  // a subtracted figure has no total it may legally borrow and the "of N" vanishes on every
+  // capped workspace — the pair-narrow-with-narrow rule, one level down.
+  let myTurnDirect = 0;
+  let myTurnMaintained = 0;
+  let myTurnOther = 0;
+  // Red builds the viewer is on the hook for — their own open PR, or trunk in a repo they
+  // maintain. Counted off the CARDS like every figure above, so the line and the board agree.
+  //
+  // ⚠ IT OVERLAPS `trunkRed` BELOW WITHOUT REPLACING IT, and the two lines are not interchangeable:
+  // `trunkRed` names EVERY red trunk in the workspace (maintained or not) and each of its lines
+  // opens that repo's console; this counts the subset that is YOURS plus your own red PRs, and its
+  // line opens the attention board isolated to `ci_failing`. Folding either into the other hands
+  // one of them a list its number does not match — the defect this whole strip exists to prevent.
+  let ciFailing = 0;
   let stalled = 0;
   let untouchedThreads = 0;
   let needsReviewer = 0;
   for (const c of insights.cards) {
-    if (c.kind === 'my_turn') {
+    if (c.kind === 'ci_failing') ciFailing += 1;
+    else if (c.kind === 'my_turn') {
       myTurn += 1;
       if (c.personal) myTurnPersonal += 1;
+      // Absent ⇒ fall back to the boolean, which cannot express 'maintained' (see
+      // `MyTurnRelevance`). getWorkspaceInsights above always sets it; this is wire tolerance.
+      const rel = c.relevance ?? (c.personal ? 'direct' : 'none');
+      if (rel === 'direct') myTurnDirect += 1;
+      else if (rel === 'maintained') myTurnMaintained += 1;
+      else myTurnOther += 1;
     } else if (c.kind === 'stalled_review') stalled += 1;
     else if (c.kind === 'untouched_thread') untouchedThreads += 1;
     else if (c.kind === 'reviewer_routing') needsReviewer += 1;
@@ -280,6 +313,18 @@ async function computeBriefCounts(
     // the displayed figure equals the count it qualifies — so a narrow line borrowing the broad
     // total would silently lose its "of N" on every capped workspace.
     myTurnPersonalTotal: insights.myTurnPersonalTotal,
+    // The split, each count paired with the total folded off the SAME pre-cap array it came from
+    // (passed straight through — same fold, same scope, same window as `myTurnTotal`).
+    myTurnDirect,
+    myTurnDirectTotal: insights.myTurnDirectTotal,
+    myTurnMaintained,
+    myTurnMaintainedTotal: insights.myTurnMaintainedTotal,
+    myTurnOther,
+    myTurnOtherTotal: insights.myTurnOtherTotal,
+    ciFailing,
+    // The matched denominator, passed straight through from the same getWorkspaceInsights call —
+    // pair narrow with narrow, or the "of N" disclosure silently never fires.
+    ciFailingTotal: insights.ciFailingTotal,
     stalled,
     untouchedThreads,
     needsReviewer,

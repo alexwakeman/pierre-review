@@ -222,6 +222,14 @@ async function personalByPr(): Promise<Map<number, boolean>> {
   );
 }
 
+/** The three-valued `relevance` of every "New PRs" row, keyed by PR id. */
+async function relevanceByPr(): Promise<Map<number, string | undefined>> {
+  const res = await q.getMyTurn(1);
+  return new Map<number, string | undefined>(
+    res.watchedRepoPrs.map((p: { prId: number; relevance?: string }) => [p.prId, p.relevance]),
+  );
+}
+
 describe('@mention detection', () => {
   it('matches a whole-word @login and nothing else', () => {
     // The PURE rule, independent of any SQL. The two directions the brief names explicitly:
@@ -270,6 +278,20 @@ describe('the mention scanner', () => {
     // ABSENCE NEVER WIDENS: a PR nobody mentioned the viewer on reads exactly as it did before
     // this feature existed.
     expect(personal.get(controlPrId)).toBe(false);
+  });
+
+  it('makes a mention DIRECT, not merely "maintained"', async () => {
+    // ⚠ THE ARM DISCRIMINATOR. `personal` above is the UNION of the two arms and would pass with
+    // them swapped; `relevance` is where they must stay apart. Every repo in this fixture is READ
+    // with no merge history, so the maintainer arm scores zero on all of them — a mention has to
+    // come out 'direct' ("YOUR TURN": somebody typed your name), never 'maintained' ("IN YOUR
+    // REPOS": your patch of ground, which none of these is).
+    const relevance = await relevanceByPr();
+    for (const c of CASES) {
+      const prId = prIdByKey.get(c.key)!;
+      expect(relevance.get(prId), `${c.key} (${c.body})`).toBe(c.mentioned ? 'direct' : 'none');
+    }
+    expect(relevance.get(controlPrId)).toBe('none');
   });
 
   it('keeps returning every row — the flag is still advisory, not a filter', async () => {

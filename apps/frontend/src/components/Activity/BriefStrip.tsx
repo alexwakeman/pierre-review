@@ -8,10 +8,12 @@ import type {
 import { useDailyBrief } from '../../hooks/useDailyBrief.js';
 import { useAutoNarration, type SynthesisDescriptor } from '../../hooks/useSynthesis.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
-import { useFilters } from '../../store/filters.js';
+import { useFilters, type AttentionRelevanceLens } from '../../store/filters.js';
 import { usePinnedTabs, type TabBotMeta } from '../../store/pinnedTabs.js';
 import {
+  ciFailingCapDisclosure,
   myTurnCapDisclosure,
+  myTurnOtherCapDisclosure,
   myTurnPersonalCapDisclosure,
   personalMyTurnCount,
   type MyTurnCapDisclosure,
@@ -44,7 +46,17 @@ import {
 // Self-hides when everything is zero. Renders INLINE at the top of the Feed branch — no new
 // fixed-position element (the one-toast-column rule).
 
-type ScalarKey = 'myTurn' | 'stalled' | 'untouched' | 'needsReviewer' | 'resolveBacklog';
+type ScalarKey =
+  | 'myTurn'
+  // The second half of the my-turn split — its own line, its own figure, its own lens. ⚠ It is a
+  // SIBLING of 'myTurn', not a variant of it: the two lines are mutually exclusive populations and
+  // the Pro ordering map keys on this string, so sharing a key would let one phrase reword both.
+  | 'myTurnOther'
+  | 'ciFailing'
+  | 'stalled'
+  | 'untouched'
+  | 'needsReviewer'
+  | 'resolveBacklog';
 
 interface BriefLine {
   /** The count-free ref key the ordering refs resolve to ('myTurn' / 'anomaly:u42' / 'trunk:r7'). */
@@ -52,6 +64,19 @@ interface BriefLine {
   count: number | null; // null = the line carries no figure (anomaly/trunk lines)
   text: string; // templated wording (digit-free; the count renders separately)
   onOpen: () => void;
+  /**
+   * Render `text` VERBATIM — never let the Pro narration reword this line.
+   *
+   * ⚠ Only the "need your attention" line sets this, and it must. That wording is a precise
+   * OWNERSHIP CLAIM about a specific population, and the ordering model cannot restate it: it
+   * sees a ref and a label, has no idea whose work is whose, and is explicitly FORBIDDEN from
+   * writing "you"/"your" (the ownership gate in the plugin's parseOrderingOutput — added because
+   * it kept labelling workspace-wide backlogs as the reader's). So a phrase here can only ever be
+   * LESS accurate than the template: it silently turned "4 need your attention" into "4 items
+   * awaiting review or reply", which is the generic line's sentence over the personal line's
+   * figure — exactly the conflation this split exists to undo.
+   */
+  verbatim?: true;
   /** The my_turn CAP DISCLOSURE (the `my_turn` line only — see myTurnCapDisclosure). Renders as a
    *  superscript "+" beside the figure, with the exact pair in the line's `title`. Deliberately
    *  NOT rendered as "50 of 148" inline: this line's wording is a SENTENCE ("50 items need your
@@ -84,6 +109,9 @@ function orderingByKey(s: StoredSynthesis | null | undefined): Map<string, Synth
 function hasAnything(c: DailyBriefCounts): boolean {
   return (
     c.myTurn > 0 ||
+    // ⚠ NOT covered by `trunkRed` below: a red build on your OWN open PR leaves trunk green, and
+    // without this the strip would hide itself over a line it has something to say on.
+    (c.ciFailing ?? 0) > 0 ||
     c.stalled > 0 ||
     c.untouchedThreads > 0 ||
     c.needsReviewer > 0 ||
@@ -103,7 +131,7 @@ export function BriefStrip(): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
   const setAttentionIsolation = useFilters((s) => s.setAttentionIsolation);
-  const setAttentionPersonalOnly = useFilters((s) => s.setAttentionPersonalOnly);
+  const setAttentionRelevance = useFilters((s) => s.setAttentionRelevance);
   // The cross-workspace "Elsewhere" lines navigate through this one action — see the button.
   const openMyTurnInWorkspace = useFilters((s) => s.openMyTurnInWorkspace);
   const openBotThreadsTab = usePinnedTabs((s) => s.openBotThreadsTab);
@@ -137,6 +165,9 @@ export function BriefStrip(): JSX.Element | null {
           // The cap gets the same "N+" treatment the other surfaces use — a capped figure is a
           // floor, and the exact pair rides the row's title.
           if (needYou > 0) bits.push(`${needYou}${cap != null ? '+' : ''} need you`);
+          // Personal by construction (your PR / your repo's trunk), so it belongs in the row that
+          // describes what needs YOU in a workspace you are not in.
+          if ((w.counts.ciFailing ?? 0) > 0) bits.push(`${w.counts.ciFailing} red`);
           if (w.counts.stalled > 0) bits.push(`${w.counts.stalled} stalled`);
           if (w.counts.needsReviewer > 0) bits.push(`${w.counts.needsReviewer} need a reviewer`);
           if (w.counts.untouchedThreads > 0) bits.push(`${w.counts.untouchedThreads} untouched`);
@@ -175,8 +206,18 @@ export function BriefStrip(): JSX.Element | null {
       text: string,
       onOpen: () => void,
       cap?: MyTurnCapDisclosure | null,
+      verbatim?: true,
     ): void => {
-      if (count > 0) out.push({ refKey: key, count, text, onOpen, ...(cap ? { cap } : {}) });
+      if (count > 0) {
+        out.push({
+          refKey: key,
+          count,
+          text,
+          onOpen,
+          ...(cap ? { cap } : {}),
+          ...(verbatim ? { verbatim } : {}),
+        });
+      }
     };
     // Every line below lands on the "Needs attention" board ISOLATED to the one card kind the
     // line is about, so the number the user clicked and the list they land on are the same
@@ -187,31 +228,94 @@ export function BriefStrip(): JSX.Element | null {
     // isolating first would be wiped on the click that switches rail and survive on the clicks
     // that don't. The same rule PrDetail / BotOnlyPrsDetail document for `feedIsolatedPrId`.
     //
-    // ⚠ AND IT CLEARS THE PERSONAL LENS EXPLICITLY. THIS STRIP'S OWN FIGURES ARE THE BROAD ONES
-    // (`counts.myTurn` — the board is on screen, and every card on it is real work), so a lens
-    // left over from an earlier welcome-back/badge click would open a SMALLER list than the
-    // number just clicked. Relying on `setActivityRepo`'s clear is not enough: it early-returns
-    // an empty patch when the rail is already 'attention', which is the common case here.
-    const openAttention = (kind: InsightKind) => (): void => {
-      setActivityRepo('attention');
-      setAttentionIsolation(kind);
-      setAttentionPersonalOnly(false);
-    };
-    // ⚠ "items", not "events". This number IS the my_turn card count — one clickable card per
+    // ⚠ AND IT SEATS THE RELEVANCE LENS EXPLICITLY — INCLUDING `null`. Every line here opens the
+    // list ITS OWN number counts, and for the two my-turn lines that list is one HALF of the
+    // my_turn population, so each passes the lens that paints its half; every other line counts a
+    // whole kind and passes `null`. Seating (rather than clearing) is what makes the two my-turn
+    // lines mutually exclusive on the board as well as in the strip.
+    // ⚠ AND IT IS NEVER CONDITIONAL. `setActivityRepo` early-returns an empty patch when the rail
+    // is already 'attention' — the common case here — so a lens left over from an earlier
+    // welcome-back/badge click would survive and open a different list than the number clicked.
+    const openAttention =
+      (kind: InsightKind, lens: AttentionRelevanceLens | null = null) =>
+      (): void => {
+        setActivityRepo('attention');
+        setAttentionIsolation(kind);
+        setAttentionRelevance(lens);
+      };
+    // ── THE MY-TURN SPLIT: TWO MUTUALLY EXCLUSIVE LINES ─────────────────────────────────────
+    //
+    // ⚠ "items", not "events". These numbers ARE my_turn card counts — one clickable card per
     // row of GET /api/my-turn. It used to be a tally of feed EVENTS in a rolling 14 days, and
     // the line pointed at a Feed pill below three panels: a number with no list behind it.
     //
-    // ⚠ And it is CAPPED (50 cards). The figure stays the card count — swapping in the uncapped
+    // ⚠ And they are CAPPED (50 cards). The figure stays the card count — swapping in the uncapped
     // total would put the old bug back, a number 98 items wider than anything the click opens —
     // so the cap is DISCLOSED instead: `cap` adds a superscript "+" and the exact pair in the
-    // tooltip. `counts.myTurn` is passed as both sides of the same-snapshot guard because here it
-    // literally is one snapshot — this line's figure and its total come from one response.
+    // tooltip.
+    //
+    // ⚠ ONE LINE BECAME TWO BECAUSE ONE NUMBER ANSWERED TWO QUESTIONS. "149 items need review or
+    // reply" is true and useless: 5 of them were the reader's. The split is by
+    // `MyTurnCard.relevance` — "N need your attention" is direct + maintained (the same
+    // population every notification surface counts), "M need review or reply" is the rest — and
+    // the two are DISJOINT and EXHAUSTIVE over the same cards, so a reader can read one, act on
+    // it, and ignore the other without wondering what overlaps.
+    //
+    // ⚠ EACH LINE PAIRS WITH ITS OWN TOTAL AND SEATS ITS OWN LENS. Handing the broad `counts`
+    // object to a narrow line would both mix populations and silently drop the "of N" (the
+    // disclosure gates on `shown === count`), and landing both lines on the same board would put
+    // back the "the strip says 5, the board lists 3" defect in the very feature built to fix it.
+    //
+    // ⚠ AND `myTurnOther` IS NEVER `myTurn - myTurnPersonal` — see myTurnOtherCapDisclosure.
+    const myTurnPersonal = counts.myTurnPersonal;
+    const myTurnOther = counts.myTurnOther;
+    if (myTurnPersonal != null && myTurnOther != null) {
+      scalar(
+        'myTurn',
+        myTurnPersonal,
+        // May say "your" because it means it: authored by you, requested of you, replying to you,
+        // mentioning you — plus new PRs in repos you maintain, which is orbit rather than
+        // ownership but is still a claim on your attention (the CARD says which; see
+        // cardKindLabel).
+        'need your attention',
+        openAttention('my_turn', 'mine'),
+        myTurnPersonalCapDisclosure(myTurnPersonal, counts),
+        // VERBATIM — see BriefLine.verbatim. The narration cannot say "your" and must not be
+        // allowed to relabel this line's figure with the generic sentence.
+        true,
+      );
+      scalar(
+        'myTurnOther',
+        myTurnOther,
+        // ⚠ NOT "your review or reply". Nobody has named the reader on any of these; they are
+        // work that needs *someone*, and this board is where it is meant to be found.
+        'need review or reply',
+        openAttention('my_turn', 'others'),
+        myTurnOtherCapDisclosure(myTurnOther, counts),
+      );
+    } else {
+      // A response predating the split (or one whose my_turn fold did not run) carries neither
+      // half. ⚠ DEGRADE TO THE SINGLE BROAD LINE — never render one half and imply the other is
+      // zero, and never subtract one from the other. Broad figure, broad total, no lens.
+      scalar(
+        'myTurn',
+        counts.myTurn,
+        'items need review or reply',
+        openAttention('my_turn'),
+        myTurnCapDisclosure(counts.myTurn, counts),
+      );
+    }
+    // ⚠ A DIFFERENT LINE FROM THE `trunk is red` ONES BELOW, and neither absorbs the other. Those
+    // name EVERY red trunk in the workspace and open that repo's console; this counts the red builds
+    // that are YOURS — your own open PRs, plus trunk in repos you maintain — and opens the board
+    // isolated to `ci_failing`. Same rule as everywhere on this strip: a figure's click lands on the
+    // list its number counts, so two populations get two lines.
     scalar(
-      'myTurn',
-      counts.myTurn,
-      'items need your review or reply',
-      openAttention('my_turn'),
-      myTurnCapDisclosure(counts.myTurn, counts),
+      'ciFailing',
+      counts.ciFailing ?? 0,
+      'red builds are yours to fix',
+      openAttention('ci_failing'),
+      ciFailingCapDisclosure(counts.ciFailing ?? 0, counts),
     );
     scalar(
       'stalled',
@@ -282,7 +386,7 @@ export function BriefStrip(): JSX.Element | null {
     openBotThreadsTab,
     setActivityRepo,
     setAttentionIsolation,
-    setAttentionPersonalOnly,
+    setAttentionRelevance,
   ]);
 
   // Self-hide: nothing to say here AND nothing elsewhere. (Also while the workspace/brief is
@@ -316,7 +420,8 @@ export function BriefStrip(): JSX.Element | null {
       </div>
       <ul className="flex flex-col gap-0.5">
         {lines.map((l) => {
-          const phrase = briefPhrases.get(l.refKey)?.phrase ?? null;
+          // A verbatim line never consults the narration — its wording is load-bearing.
+          const phrase = l.verbatim ? null : (briefPhrases.get(l.refKey)?.phrase ?? null);
           return (
             <li key={l.refKey}>
               <button
