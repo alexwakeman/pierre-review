@@ -34,7 +34,7 @@ import {
 import { escapeHtml, indexUsers, userLabel } from '../../lib/ui.js';
 import { SkeletonBlock, SkeletonLine } from '../Skeleton.js';
 import { renderPrBar, prClassName, prTooltip } from './prBar.js';
-import { renderUserLabel } from './userRow.js';
+import { CHEVRON_DOWN_SVG, CHEVRON_RIGHT_SVG, renderUserLabel } from './userRow.js';
 import { UserProfilePopover } from '../UserProfilePopover.js';
 import { buildMarkerItems } from './clustering.js';
 import { assignPrLanes, prGroupId } from './lanes.js';
@@ -2017,7 +2017,11 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       if (prFocusActiveRef.current || focusedGroupIdsRef.current) return;
       const willCollapse = !collapsedRowsByUserRef.current.has(gid);
       setRowCollapsed(gid, willCollapse);
-      btn.textContent = willCollapse ? '▸' : '▾';
+      // ⚠ innerHTML, not textContent: the caret is an inline <svg> (renderUserLabel's
+      // CHEVRON_* constants — the same drawing ChevronIcon renders in React), and a
+      // textContent write would delete the element and leave an empty button. Both
+      // constants are compile-time literals, so nothing untrusted reaches innerHTML.
+      btn.innerHTML = willCollapse ? CHEVRON_RIGHT_SVG : CHEVRON_DOWN_SVG;
       const title = willCollapse ? 'Expand row' : 'Collapse row';
       btn.setAttribute('title', title);
       btn.setAttribute('aria-label', title);

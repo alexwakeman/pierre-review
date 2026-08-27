@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useApprovePr } from '../hooks/usePrWrites.js';
 import { ApiError } from '../api/client.js';
 import { MentionTextarea } from './MentionTextarea.js';
+import { CheckIcon } from './Icons.js';
 
 // Approve control for the Overview tab, rendered ONLY when the viewer has the
 // right to approve (pr.viewerCanApprove — the server re-checks and 403s
@@ -38,7 +39,7 @@ export function ApproveControl({
         title="You've already approved this PR — your approval still stands"
         className="inline-flex cursor-default items-center gap-1 rounded border border-green-500/40 px-2 py-0.5 text-sm font-medium text-green-700/70 dark:border-green-700/50 dark:text-green-400/70"
       >
-        <span aria-hidden>✓</span> Approved
+        <CheckIcon /> Approved
       </button>
     );
   }
@@ -69,7 +70,7 @@ export function ApproveControl({
           onClick={() => setOpen(true)}
           className="inline-flex items-center gap-1 rounded border border-green-500 px-2 py-0.5 text-sm font-medium text-green-700 hover:bg-green-50 dark:border-green-600 dark:text-green-400 dark:hover:bg-green-900/30"
         >
-          <span aria-hidden>✓</span> Approve
+          <CheckIcon /> Approve
         </button>
         {error && <span className="text-xs text-red-500">{error}</span>}
       </div>

@@ -12,6 +12,7 @@ import { useWorkspaces, workspaceRepoIds } from '../../hooks/useWorkspaces.js';
 import { usePeriodReportsList } from '../../hooks/usePeriodReports.js';
 import { beginDisabledReason, orderSelections } from '../../lib/peopleReport.js';
 import { automatedReviewerMeta, userLabel } from '../../lib/ui.js';
+import { CloseIcon, PersonIcon } from '../Icons.js';
 import { MaintainerShield, MemberSectionList } from '../UserSelectPanel.js';
 
 // The Reports "People" section (plan P4.2, reworked for the People report): a PICKER — a text
@@ -380,7 +381,7 @@ export function PeriodPeopleSection(): JSX.Element | null {
                   className="h-3.5 w-3.5 shrink-0 rounded-full bg-gray-200 dark:bg-gray-800"
                 />
               ) : (
-                <span aria-hidden="true">👤</span>
+                <PersonIcon size={14} className="shrink-0" />
               )}
               <span className="max-w-[12rem] truncate" title={c.login ?? c.label}>
                 {c.label}
@@ -391,7 +392,7 @@ export function PeriodPeopleSection(): JSX.Element | null {
                 aria-label={`Remove ${c.label} from the report`}
                 className="rounded px-0.5 opacity-60 hover:opacity-100"
               >
-                ✕
+                <CloseIcon />
               </button>
             </span>
           ))}

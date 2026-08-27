@@ -1,7 +1,9 @@
+import type { ComponentType } from 'react';
 import type { SearchHit, SearchHitKind } from '@pierre-review/shared';
 import type { TabMeta } from '../../store/pinnedTabs.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
+import { CommentIcon, PullRequestIcon, ReviewIcon, ThreadsIcon } from '../Icons.js';
 
 // Shared open-a-hit behaviour for the search dropdown + results tab. A review-comment hit deep-links
 // straight to its review thread (the "link directly to the thread" requirement); every other kind
@@ -46,10 +48,16 @@ export const KIND_LABEL: Record<SearchHitKind, string> = {
   pr_comment: 'Comment',
 };
 
-// A compact glyph per hit kind (emoji — no new icon deps; matches the drill-down chip style).
-export const KIND_GLYPH: Record<SearchHitKind, string> = {
-  pr: '🔀',
-  review: '✅',
-  review_comment: '🧵',
-  pr_comment: '💬',
+// A compact mark per hit kind (matches the drill-down chip style). COMPONENTS, not glyph strings:
+// every consumer renders this straight into JSX, so the mark inherits the row's colour and size
+// instead of painting its own. Both consumers live in this directory (GlobalSearch's dropdown and
+// SearchResultsTab's HitHeader) — neither concatenates it into a string.
+export const KIND_ICON: Record<
+  SearchHitKind,
+  ComponentType<{ size?: number; className?: string }>
+> = {
+  pr: PullRequestIcon,
+  review: ReviewIcon,
+  review_comment: ThreadsIcon,
+  pr_comment: CommentIcon,
 };

@@ -7,6 +7,7 @@ import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { ML_CATEGORY_COLOR, ML_CATEGORY_LABEL, automatedReviewerMeta } from '../../lib/ui.js';
+import { BotIcon } from '../Icons.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import { Heatmap } from '../charts/Heatmap.js';
@@ -66,15 +67,16 @@ function anomalyNote(
   const latest = hits[0]!; // list is newest-first
   const obs = fmtMetricVal(metric, latest.observed);
   const typ = fmtMetricVal(metric, latest.typical);
-  const arrow = latest.direction === 'high' ? '↑' : '↓';
-  return `⚠ ${hits.length} exception${hits.length === 1 ? '' : 's'} · latest ${arrow} ${obs} vs ${typ} typical`;
+  // `note` is a plain STRING prop on ChartCard, so this stays worded rather than iconised.
+  const dir = latest.direction === 'high' ? 'higher' : 'lower';
+  return `${hits.length} exception${hits.length === 1 ? '' : 's'} · latest ${dir}: ${obs} vs ${typ} typical`;
 }
 
 // The coverage-gap note for the daily strip (silence runs).
 function silenceNote(bot: BotBehaviourBotStat): string | undefined {
   if (bot.silentRuns.length === 0) return undefined;
   const longest = Math.max(...bot.silentRuns.map((r) => r.days));
-  return `⚠ ${bot.silentRuns.length} gap${bot.silentRuns.length === 1 ? '' : 's'} · longest ${longest}d silent`;
+  return `${bot.silentRuns.length} gap${bot.silentRuns.length === 1 ? '' : 's'} · longest ${longest}d silent`;
 }
 
 // One per-bot weekly trend mini-chart with anomaly rings (a week the bot diverged from its own
@@ -384,7 +386,7 @@ export function BotDetailPanel(): JSX.Element {
     <div className="mx-auto max-w-[100rem] space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="inline-flex items-center gap-1.5 text-base font-semibold text-gray-800 dark:text-gray-100">
-          <span aria-hidden="true">🤖</span>
+          <BotIcon size={15} />
           {label}
           <span className="font-normal text-gray-400"> · depth</span>
         </h2>

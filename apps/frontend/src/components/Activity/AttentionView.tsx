@@ -2,6 +2,7 @@ import type { DailyBriefCounts, InsightCard } from '@pierre-review/shared';
 import { useAttentionCards } from '../../hooks/useAttentionCards.js';
 import { useDailyBrief } from '../../hooks/useDailyBrief.js';
 import { useFilters, type AttentionRelevanceLens } from '../../store/filters.js';
+import { CheckCircleIcon } from '../Icons.js';
 import { AttentionCards, KIND_LABEL } from './AttentionCards.js';
 
 // The "Needs attention" rail entry (CORE/free) — the attention cards (your turn / stalled reviews
@@ -422,7 +423,8 @@ export function AttentionView(): JSX.Element {
         </div>
       ) : cards.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          Nothing needs attention in this Workspace right now. 🎉
+          <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] text-gray-300 dark:text-gray-600" />
+          Nothing needs attention in this Workspace right now.
           <div className="mt-1 text-[11px]">
             Items on your plate, stalled reviews, untouched threads, reviewer load and un-assigned
             PRs will surface here.

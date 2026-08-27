@@ -16,6 +16,7 @@ import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { useUserStats } from '../hooks/useUserStats.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
+import { ExternalLinkIcon } from './Icons.js';
 
 // Where the popover hangs off. `element` is the ordinary case — a real anchor node (the
 // clicked handle) that floating-ui tracks directly. `selector` is the vis-timeline case: the
@@ -285,10 +286,11 @@ export function UserProfilePopover({
               target="_blank"
               rel="noreferrer noopener"
               onClick={(e) => e.stopPropagation()}
-              className="rounded px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+              className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
               title={`@${login} on GitHub`}
             >
-              GitHub ↗
+              GitHub
+              <ExternalLinkIcon size={11} />
             </a>
           )}
         </div>

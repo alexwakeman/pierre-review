@@ -15,7 +15,16 @@ import { useRepos } from '../hooks/useTimeline.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import { botNarrowLabel, selectorLabel } from '../lib/severityAgreement.js';
 import { periodTitle } from './Activity/periodReportMarkdown.js';
-import { MagnifierIcon } from './Icons.js';
+import {
+  BotIcon,
+  CloseIcon,
+  CommentIcon,
+  MagnifierIcon,
+  PeopleIcon,
+  PersonIcon,
+  ResolveIcon,
+  ThreadsIcon,
+} from './Icons.js';
 
 const MetricsIcon = (
   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -133,11 +142,11 @@ function ChipShell({
         type="button"
         data-tab-close
         onClick={() => closeTab(tabKey)}
-        className="shrink-0 self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+        className="flex shrink-0 items-center self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
         title="Close this tab"
         aria-label={closeAria}
       >
-        ✕
+        <CloseIcon />
       </button>
     </div>
   );
@@ -216,7 +225,7 @@ function TabChip({
       body: (
         <>
           <span aria-hidden="true" className="shrink-0">
-            🤖
+            <BotIcon />
           </span>
           <span className={chipLabelClass(active, 'ai')}>Bot Drill-Down</span>
         </>
@@ -255,7 +264,7 @@ function TabChip({
       body: (
         <>
           <span aria-hidden="true" className="shrink-0">
-            🤖
+            <BotIcon />
           </span>
           <span className={chipLabelClass(active, 'amber')}>
             Bot-only PRs{scopeName ? ` · ${scopeName}` : ''}
@@ -285,7 +294,7 @@ function TabChip({
             />
           ) : (
             <span aria-hidden="true" className="shrink-0">
-              👤
+              <PersonIcon />
             </span>
           )}
           <span className={chipLabelClass(active, 'sky')}>{who}</span>
@@ -304,7 +313,7 @@ function TabChip({
       body: (
         <>
           <span aria-hidden="true" className="shrink-0">
-            🤖
+            <BotIcon />
           </span>
           <span className={chipLabelClass(active, 'sky')}>{who} · depth</span>
         </>
@@ -318,7 +327,7 @@ function TabChip({
       body: (
         <>
           <span aria-hidden="true" className="shrink-0">
-            🧹
+            <ResolveIcon />
           </span>
           <span className={chipLabelClass(active, 'sky')}>
             Bot threads{scopeName ? ` · ${scopeName}` : ''}
@@ -335,7 +344,7 @@ function TabChip({
       body: (
         <>
           <span aria-hidden="true" className="shrink-0">
-            🧵
+            <ThreadsIcon />
           </span>
           <span className={chipLabelClass(active, 'sky')}>{themeTitle}</span>
         </>
@@ -365,7 +374,7 @@ function TabChip({
       body: (
         <>
           <span aria-hidden="true" className="shrink-0">
-            🔎
+            <MagnifierIcon size={13} />
           </span>
           <span className={chipLabelClass(active, 'sky')}>
             Flagged{seedTitle ? ` · ${seedTitle}` : ''}
@@ -390,7 +399,7 @@ function TabChip({
       body: (
         <>
           <span aria-hidden="true" className="shrink-0">
-            💬
+            <CommentIcon />
           </span>
           <span className={chipLabelClass(active, 'sky')}>
             Comments/PR{botLabel ? ` · ${botLabel}` : ''}
@@ -418,7 +427,7 @@ function TabChip({
       body: (
         <>
           <span aria-hidden="true" className="shrink-0">
-            👥
+            <PeopleIcon />
           </span>
           <span className={chipLabelClass(active, 'ai')}>
             People report{periodLabel ? ` · ${periodLabel}` : ''}

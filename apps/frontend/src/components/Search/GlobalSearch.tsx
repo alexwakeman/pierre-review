@@ -4,7 +4,7 @@ import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { useSearchDropdown } from '../../hooks/useSearch.js';
 import { useFilters } from '../../store/filters.js';
 import { MagnifierIcon } from '../Icons.js';
-import { KIND_GLYPH, KIND_LABEL, openSearchHit } from './searchNav.js';
+import { KIND_ICON, KIND_LABEL, openSearchHit } from './searchNav.js';
 import { highlightTerms } from './highlight.js';
 
 // The global cross-repo search box (in the FilterBar). Debounced; a query ≥ 2 chars pops a panel of
@@ -114,36 +114,39 @@ export function GlobalSearch(): JSX.Element {
                   ))}
                 </div>
               )}
-              {hits.map((h) => (
-                <button
-                  key={`${h.kind}:${h.refId}`}
-                  type="button"
-                  onClick={() => {
-                    openSearchHit(h);
-                    setOpen(false);
-                  }}
-                  className="flex w-full flex-col gap-0.5 px-3 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
-                >
-                  <span className="flex items-center gap-1 text-[10px] text-gray-400">
-                    <span aria-hidden>{KIND_GLYPH[h.kind]}</span>
-                    <span className="font-medium text-gray-500 dark:text-gray-400">
-                      {KIND_LABEL[h.kind]}
+              {hits.map((h) => {
+                const KindIcon = KIND_ICON[h.kind];
+                return (
+                  <button
+                    key={`${h.kind}:${h.refId}`}
+                    type="button"
+                    onClick={() => {
+                      openSearchHit(h);
+                      setOpen(false);
+                    }}
+                    className="flex w-full flex-col gap-0.5 px-3 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    <span className="flex items-center gap-1 text-[10px] text-gray-400">
+                      <KindIcon size={11} />
+                      <span className="font-medium text-gray-500 dark:text-gray-400">
+                        {KIND_LABEL[h.kind]}
+                      </span>
+                      <span aria-hidden>·</span>
+                      <span className="truncate">
+                        {h.repoFullName} #{h.prNumber}
+                      </span>
                     </span>
-                    <span aria-hidden>·</span>
-                    <span className="truncate">
-                      {h.repoFullName} #{h.prNumber}
+                    <span className="truncate text-xs font-medium">
+                      {highlightTerms(h.prTitle, debounced)}
                     </span>
-                  </span>
-                  <span className="truncate text-xs font-medium">
-                    {highlightTerms(h.prTitle, debounced)}
-                  </span>
-                  {h.snippet && h.kind !== 'pr' ? (
-                    <span className="line-clamp-1 text-[11px] text-gray-500 dark:text-gray-400">
-                      {highlightTerms(h.snippet, debounced)}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
+                    {h.snippet && h.kind !== 'pr' ? (
+                      <span className="line-clamp-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        {highlightTerms(h.snippet, debounced)}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
             </>
           )}
           <button

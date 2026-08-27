@@ -20,6 +20,7 @@ import {
   safeExternalUrl,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
+import { ArrowIcon, BotIcon, ExternalLinkIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { MlSeverityBadge } from '../MlSeverityBadge.js';
 
@@ -198,7 +199,7 @@ function VendorClaim({ label }: { label: MlLabel }): JSX.Element {
       style={{ color: vendorMeta.color }}
       title={`The bot badged this ${vendorMeta.label}; our model rated it ${ours.label}. The direction is the two severity ordinals — not anyone's confidence. Ours is the more accurate rating (70% agreement with human adjudication against the bot's 47%), so this is a disagreement to look at, not one to resolve.`}
     >
-      <span aria-hidden="true">{dir === 'over' ? '↑' : '↓'}</span>
+      <ArrowIcon dir={dir === 'over' ? 'up' : 'down'} size={10} />
       {dir === 'over' ? 'bot called it worse' : 'bot called it milder'}
     </span>
   );
@@ -281,7 +282,7 @@ function BotCommentCardImpl({
           style={{ color, background: `${color}1a` }}
           title={`${c.authorLabel} — an automated reviewer Limn triages`}
         >
-          <span aria-hidden="true">🤖</span>
+          <BotIcon size={10} />
           {c.authorLabel}
         </span>
         <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-400">
@@ -379,10 +380,11 @@ function BotCommentCardImpl({
             href={prHref}
             target="_blank"
             rel="noreferrer noopener"
-            className="font-medium text-sky-600 hover:underline dark:text-sky-400"
+            className="inline-flex items-center gap-0.5 font-medium text-sky-600 hover:underline dark:text-sky-400"
             title={`${c.repoFullName} #${c.prNumber} on GitHub. There is deliberately no per-comment permalink — the comment's REST id isn't stored, so an anchor would 404.`}
           >
-            ↗ PR
+            <ExternalLinkIcon size={11} />
+            PR
           </a>
         )}
       </div>
@@ -494,7 +496,7 @@ function BotClusterCardImpl({
   return (
     <section className="rounded-md border border-sky-200 bg-sky-50/60 p-2.5 text-sm dark:border-sky-800 dark:bg-sky-950/30">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-        <span aria-hidden="true">🤖</span>
+        <BotIcon size={12} />
         <span className="font-medium text-sky-800 dark:text-sky-200">
           {cluster.members.length} bots flagged the same lines
         </span>
@@ -526,9 +528,10 @@ function BotClusterCardImpl({
             href={prHref}
             target="_blank"
             rel="noreferrer noopener"
-            className="ml-auto shrink-0 font-medium text-sky-600 hover:underline dark:text-sky-400"
+            className="ml-auto inline-flex shrink-0 items-center gap-0.5 font-medium text-sky-600 hover:underline dark:text-sky-400"
           >
-            ↗ PR
+            <ExternalLinkIcon size={11} />
+            PR
           </a>
         )}
       </div>

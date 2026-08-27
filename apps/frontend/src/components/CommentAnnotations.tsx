@@ -18,6 +18,7 @@ import {
   useRunAnnotations,
 } from '../hooks/useAnnotations.js';
 import { Markdown } from './Markdown.js';
+import { ChevronIcon, SparkleIcon } from './Icons.js';
 
 // The comment-ANNOTATIONS surface (Pro; the prSummary capability). ONE component renders every
 // stored AI judgement about a comment or thread, whatever its kind:
@@ -228,7 +229,7 @@ function EvidenceBlock({ evidence }: { evidence: AddressedEvidence }): JSX.Eleme
         className="flex items-center gap-1 text-[10px] font-medium text-ai-signal hover:underline"
         title="The exact change this verdict was judged against, and the two commits it was taken between."
       >
-        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
         Evidence
         <span className="font-normal text-gray-400 dark:text-gray-500">{summary}</span>
         {anchorMissing && (
@@ -376,8 +377,8 @@ function AnnotationPanel({
           className="flex items-center gap-1 text-[11px] font-semibold text-ai-signal hover:underline"
           title={meta.title}
         >
-          <span aria-hidden="true">{open ? '▾' : '▸'}</span>
-          <span aria-hidden="true">✨</span>
+          <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
+          <SparkleIcon size={11} />
           {meta.label}
         </button>
         {/* Both chips are THE PREVIOUS RESULT, so they go while the re-run is in flight. */}
@@ -618,7 +619,13 @@ export function ReviewCheckButton({
         className="rounded px-1 py-0.5 text-[10px] font-medium text-ai-signal hover:bg-ai-signal/10 disabled:opacity-50"
         title={CHECK_REVIEW_TITLE}
       >
-        {state.running ? 'Checking…' : '✨ Check review'}
+        {state.running ? (
+          'Checking…'
+        ) : (
+          <>
+            <SparkleIcon size={10} className="inline-block align-[-0.1em]" /> Check review
+          </>
+        )}
       </button>
       {/* `disabled` only covers THIS button — every thread card and PR comment has its own hook,
           and the server allows one run per ACCOUNT at a time. So a second button pressed mid-run

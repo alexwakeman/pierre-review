@@ -17,6 +17,7 @@ import { relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
 import { markerVisual } from './markerTemplate.js';
 import { StateBadge } from '../StateBadge.js';
 import { Markdown } from '../Markdown.js';
+import { CloseIcon, ExternalLinkIcon } from '../Icons.js';
 
 export interface PopoverState {
   x: number;
@@ -264,7 +265,7 @@ function SingleEvent({
             rel="noreferrer noopener"
             className="text-blue-500 hover:underline"
           >
-            Open commit on GitHub ↗
+            Open commit on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
         )}
         {isPrComment && prComment && prDetail && (
@@ -274,7 +275,7 @@ function SingleEvent({
             rel="noreferrer noopener"
             className="text-blue-500 hover:underline"
           >
-            Open on GitHub ↗
+            Open on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
         )}
       </div>
@@ -499,7 +500,7 @@ export function MarkerPopover({
             aria-label="Close"
             title="Close"
           >
-            ✕
+            <CloseIcon />
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-2">

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { profileUrl } from '../lib/ui.js';
-import { ExternalLinkIcon } from './Icons.js';
+import { CaretIcon, ExternalLinkIcon } from './Icons.js';
 
 // The signed-in user chip at the far right of the header: a subtle button (avatar + name)
 // that opens a small dropdown menu — "Open Profile on GitHub" and (cloud only) "Sign Out".
@@ -77,9 +77,7 @@ export function UserMenu({
       >
         {avatar}
         <span className="max-w-[10rem] truncate">{label}</span>
-        <span aria-hidden="true" className="text-[9px] text-gray-400">
-          ▾
-        </span>
+        <CaretIcon dir="down" className="shrink-0 text-gray-400" />
       </button>
 
       {open && (

@@ -8,6 +8,7 @@ import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';
 import { CodeAnchor } from './CodeAnchor.js';
 import { safeExternalUrl } from '../../lib/ui.js';
+import { ArrowIcon, ExternalLinkIcon } from '../Icons.js';
 import { ResolveThread } from './ResolveThread.js';
 import { ReplyComposer } from './ReplyComposer.js';
 import { isNewComment } from './NewCommentHighlight.js';
@@ -170,11 +171,12 @@ export function ThreadCard({
                   : `Show line ${openInChanges.line} in the Changes tab`
             }
           >
+            <ArrowIcon size={10} className="mr-0.5 inline-block align-[-0.1em]" />
             {openInChanges.line == null
-              ? '⤷ File in Changes'
+              ? 'File in Changes'
               : openInChanges.approximate
-                ? '⤷ In Changes ~'
-                : '⤷ In Changes'}
+                ? 'In Changes ~'
+                : 'In Changes'}
           </button>
         )}
         {onOpenInThreads != null && (
@@ -187,7 +189,8 @@ export function ThreadCard({
             className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium text-blue-500 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/40"
             title="Open this thread in the Threads tab"
           >
-            ⤷ In Threads
+            <ArrowIcon size={10} className="mr-0.5 inline-block align-[-0.1em]" />
+            In Threads
           </button>
         )}
         {/* Pro (prSummary): the ONE AI check, spent on this thread alone — rewrite its wall of bot
@@ -265,7 +268,8 @@ export function ThreadCard({
             rel="noreferrer noopener"
             className="text-blue-500 hover:underline"
           >
-            ↗ {thread.url ? 'View thread on GitHub' : 'Reply on GitHub'}
+            <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />{' '}
+            {thread.url ? 'View thread on GitHub' : 'Reply on GitHub'}
           </a>
         </div>
       </div>

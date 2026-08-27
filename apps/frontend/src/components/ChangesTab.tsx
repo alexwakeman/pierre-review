@@ -11,6 +11,7 @@ import {
 } from './diff/FileDiffView.js';
 import { FileTree } from './diff/FileTree.js';
 import { ThreadCountChips, rollupCounts } from './ThreadList/ThreadCountChips.js';
+import { ExternalLinkIcon } from './Icons.js';
 
 // The "Changes" tab: every file the PR touches with its inline diff hunks and per-line
 // review-comment affordances. The per-file rendering lives in the shared FileDiffView
@@ -48,7 +49,7 @@ function MetaFileRow({ file }: { file: PrFileChange }): JSX.Element {
         <span className="text-red-500 dark:text-red-400">−{file.deletions}</span>
       </span>
       <span className="shrink-0 text-gray-300 group-hover:text-blue-500 dark:text-gray-600">
-        ↗
+        <ExternalLinkIcon size={12} />
       </span>
     </a>
   );
@@ -73,7 +74,7 @@ function Header({ pr, extra }: { pr: PrDetail; extra?: JSX.Element }): JSX.Eleme
         rel="noreferrer noopener"
         className="ml-auto text-blue-500 hover:underline"
       >
-        Files changed ↗
+        Files changed <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
       </a>
     </div>
   );
@@ -227,7 +228,7 @@ export function ChangesTab({
             rel="noreferrer noopener"
             className="text-blue-500 hover:underline"
           >
-            View on GitHub ↗
+            View on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
         </div>
         {pr.files.length > 0 && (
@@ -289,7 +290,8 @@ export function ChangesTab({
                       rel="noreferrer noopener"
                       className="text-blue-500 hover:underline"
                     >
-                      All on GitHub ↗
+                      All on GitHub{' '}
+                      <ExternalLinkIcon size={10} className="inline-block align-[-0.1em]" />
                     </a>
                   </div>
                 ) : null
@@ -310,7 +312,7 @@ export function ChangesTab({
                 rel="noreferrer noopener"
                 className="text-blue-500 hover:underline"
               >
-                View on GitHub ↗
+                View on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
               </a>
             </div>
           )}
@@ -331,7 +333,7 @@ export function ChangesTab({
             rel="noreferrer noopener"
             className="text-blue-500 hover:underline"
           >
-            View all on GitHub ↗
+            View all on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
         </div>
       )}

@@ -39,6 +39,7 @@ import { formatCostInput, resolveVendorCost } from '../../lib/botCost.js';
 import { formatAvg, volumeByKey } from '../../lib/botVolume.js';
 import { useBotVolume } from '../../hooks/useBotVolume.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
+import { ArrowIcon, BotIcon, ResolveIcon } from '../Icons.js';
 import { SeverityBar } from '../MlSeverityBadge.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
@@ -285,7 +286,8 @@ function TuningSuggestions({
                 className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium"
                 style={{ color: meta.color, background: `${meta.color}1a` }}
               >
-                🤖 {meta.label}
+                <BotIcon size={11} />
+                {meta.label}
               </span>
               <span className="text-gray-600 dark:text-gray-300">{s.rationale}</span>
             </li>
@@ -839,7 +841,16 @@ function InflationCell({
   const canOpen = onOpen != null && userId != null;
   const count = (direction: 'over' | 'under'): JSX.Element => {
     const n = direction === 'over' ? inf.overCall : inf.underCall;
-    const label = `${direction === 'over' ? '↑' : '↓'}${n}`;
+    const label = (
+      <>
+        <ArrowIcon
+          dir={direction === 'over' ? 'up' : 'down'}
+          size={10}
+          className="inline-block align-[-0.1em]"
+        />
+        {n}
+      </>
+    );
     const title =
       direction === 'over'
         ? `${n} of ${inf.badged} badged findings the bot graded WORSE than our model did (inflation).${canOpen ? ' Click for the comments behind it.' : ''}`
@@ -1072,7 +1083,7 @@ function VendorTable({
                 <th
                   rowSpan={headSpan}
                   className="border-l border-gray-200 px-2 py-1.5 text-right font-medium dark:border-gray-800"
-                  title="How often this bot's OWN severity badge contradicted our label, over its badged findings in the window: ↑ = the bot graded a finding worse than we did (inflation), ↓ = we graded it worse than the bot (what a nit-filter on its own grades would drop). Counts, never shares. A bot that badges nothing shows a dash — no badge is silence, not agreement. Click a count for the comments behind it."
+                  title="How often this bot's OWN severity badge contradicted our label, over its badged findings in the window: the up-arrow count = the bot graded a finding worse than we did (inflation), the down-arrow count = we graded it worse than the bot (what a nit-filter on its own grades would drop). Counts, never shares. A bot that badges nothing shows a dash — no badge is silence, not agreement. Click a count for the comments behind it."
                 >
                   Inflation
                 </th>
@@ -1143,7 +1154,8 @@ function VendorTable({
                     className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:underline"
                     style={{ color, background: `${color}1a` }}
                   >
-                    🤖 {v.label}
+                    <BotIcon size={11} />
+                    {v.label}
                   </button>
                   {v.reviewers > 1 && (
                     <span className="ml-1 text-gray-400">×{v.reviewers}</span>
@@ -1474,7 +1486,8 @@ export function ResolveBacklogBanner({
       className="flex w-full items-start gap-1.5 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-left text-[11px] text-sky-700 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-300 dark:hover:bg-sky-900/40"
     >
       <span className="flex-1">
-        🧹 <span className="font-semibold tabular-nums">{totalThreads}</span> likely-addressed bot
+        <ResolveIcon className="mr-1 inline-block align-[-0.1em]" />
+        <span className="font-semibold tabular-nums">{totalThreads}</span> likely-addressed bot
         thread{totalThreads === 1 ? '' : 's'} look resolved by later commits — review before
         resolving on GitHub.
       </span>

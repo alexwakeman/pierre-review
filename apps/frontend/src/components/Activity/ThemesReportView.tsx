@@ -8,6 +8,9 @@ import type {
 } from '@pierre-review/shared';
 import { SummaryMarkdown } from './prRefTable.js';
 
+/** A component reference, so a caller names WHICH mark without this module importing both. */
+type ActorIcon = (props: { size?: number; className?: string }) => JSX.Element;
+
 // Shared presentational core for the two "Themes" AI summaries (Bots → what bots flag; Feed → what
 // people discuss). Both reports have the identical body — narrative, severity strip, theme cards,
 // area distribution — and differ only in the header, the reviewer/participant rollup, and the
@@ -43,16 +46,18 @@ export function SeverityPill({ severity }: { severity: BotThemeSeverity }): JSX.
 }
 
 // One theme card. Clicking anywhere on the card (when it has member threads) opens the theme-threads
-// drill-down; clicking a PR chip opens THAT PR's own detail tab (stops the card click). `actorEmoji`
-// names the meta line's actor list ("🤖" for bots, "💬" for people).
+// drill-down; clicking a PR chip opens THAT PR's own detail tab (stops the card click). `ActorIcon`
+// marks the meta line's actor list — a bot mark for the Bots report, a comment mark for the People
+// one. It is passed in rather than derived here because this component is deliberately ignorant of
+// which of the two reports it is rendering.
 function ThemeCard({
   theme,
-  actorEmoji,
+  ActorIcon,
   onOpenPr,
   onOpenTheme,
 }: {
   theme: BotTheme;
-  actorEmoji: string;
+  ActorIcon: ActorIcon;
   onOpenPr: (pr: ThemePrRef) => void;
   onOpenTheme: (theme: BotTheme) => void;
 }): JSX.Element {
@@ -111,7 +116,7 @@ function ThemeCard({
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-400">
             {theme.bots.length > 0 && (
               <span>
-                <span className="text-gray-400">{actorEmoji} </span>
+                <ActorIcon size={11} className="mr-1 inline-block align-[-0.1em] text-gray-400" />
                 {theme.bots.join(', ')}
               </span>
             )}
@@ -213,7 +218,7 @@ export function ThemesReportBody({
   themes,
   bySeverity,
   byArea,
-  actorEmoji,
+  ActorIcon,
   emptyThemesLabel,
   reviewerSection,
   coverageLine,
@@ -224,7 +229,7 @@ export function ThemesReportBody({
   themes: BotTheme[];
   bySeverity: BotThemeSeverityCount[];
   byArea: BotThemeAreaCount[];
-  actorEmoji: string;
+  ActorIcon: ActorIcon;
   emptyThemesLabel: string;
   reviewerSection?: JSX.Element | null;
   coverageLine: JSX.Element;
@@ -244,7 +249,7 @@ export function ThemesReportBody({
       {themes.length > 0 ? (
         <ul className="mt-3 space-y-2">
           {themes.map((t, i) => (
-            <ThemeCard key={i} theme={t} actorEmoji={actorEmoji} onOpenPr={onOpenPr} onOpenTheme={onOpenTheme} />
+            <ThemeCard key={i} theme={t} ActorIcon={ActorIcon} onOpenPr={onOpenPr} onOpenTheme={onOpenTheme} />
           ))}
         </ul>
       ) : (

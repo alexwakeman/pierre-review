@@ -24,6 +24,7 @@ import {
   sizeBucketSeries,
   unsizedNote,
 } from '../../lib/botVolumeSize.js';
+import { ChevronIcon, WarningIcon } from '../Icons.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import {
@@ -900,7 +901,8 @@ function BotVolumeSizeChart({
 
       <div className="mt-1 text-[10px] text-gray-400">
         <span className="font-medium text-amber-600 dark:text-amber-400">
-          ⚠ A correlation, not a rule — and it is repo-dependent.
+          <WarningIcon size={10} className="mr-0.5 inline-block align-[-0.1em]" />A correlation, not
+          a rule — and it is repo-dependent.
         </span>{' '}
         Across the five repos we measured this on, log-LOC against bot-comment count ran 0.62 and
         0.54 on two heavily-configured repos, then 0.15, 0.13 and 0.03 on three others: where a bot
@@ -939,9 +941,10 @@ export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.El
         type="button"
         onClick={() => setOpen((s) => !s)}
         aria-expanded={open}
-        className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
       >
-        {open ? '▾' : '▸'} Workspace charts — cross-bot trends, overlap and coverage
+        <ChevronIcon dir={open ? 'down' : 'right'} size={11} />
+        Workspace charts — cross-bot trends, overlap and coverage
       </button>
       {open && (
         <>
@@ -969,7 +972,7 @@ export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.El
             <>
               <ChartCard
                 title="Findings density"
-                note="threads a bot opens per PR / KLoC · weekly · log scale · lower = cleaner · hover ⭘ for why"
+                note="threads a bot opens per PR / KLoC · weekly · log scale · lower = cleaner · hover a ring for why"
               >
                 <DensityTrendChart bots={bots} botColor={botColor} />
               </ChartCard>

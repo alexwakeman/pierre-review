@@ -1,6 +1,7 @@
 import { useRepoAnalytics } from '../../hooks/useTriage.js';
 import { PALETTE, ChartEmpty, type Series } from '../charts/common.js';
 import { LineChart } from '../charts/LineChart.js';
+import { ChartIcon } from '../Icons.js';
 
 // The Activity rail's per-repo Insights (item 12): the "PR merge rate over time" graph,
 // sitting under the AI digest (in RepoFeedHeader) and above the open-PR list. The "Charts"
@@ -33,7 +34,7 @@ export function RepoInsightsCard({
           className="shrink-0 rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
           title="Open the full analytics charts for this repo"
         >
-          📊 Charts
+          <ChartIcon size={11} className="inline-block align-[-0.1em]" /> Charts
         </button>
       </div>
       {isLoading && data == null ? (

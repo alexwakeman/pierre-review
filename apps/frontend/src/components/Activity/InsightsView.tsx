@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ChevronIcon } from '../Icons.js';
 import { PeriodReportsPanel } from './PeriodReportsPanel.js';
 import { TrackUsage } from './TrackUsage.js';
 
@@ -30,14 +31,16 @@ export function InsightsView(): JSX.Element {
           <button
             type="button"
             onClick={() => setShowUsage((s) => !s)}
-            className={`rounded border px-1.5 py-0.5 text-[11px] font-medium ${
+            aria-expanded={showUsage}
+            className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium ${
               showUsage
                 ? 'border-ai-signal/50 bg-ai-signal/10 text-ai-signal'
                 : 'border-gray-300 hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500'
             }`}
             title="Show your month-to-date AI usage (in credits)"
           >
-            {showUsage ? '▾' : '▸'} Track usage
+            <ChevronIcon dir={showUsage ? 'down' : 'right'} size={10} />
+            Track usage
           </button>
         </div>
       </div>

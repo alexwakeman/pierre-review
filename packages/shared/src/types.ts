@@ -3193,6 +3193,12 @@ export interface ProCapabilities {
   // drill-down, overlap, where-bots-work, the inflation sparkline/history, and the per-seat
   // ROI cost overlay. The compute behind these surfaces is CORE; this flag gates the surfaces.
   botDepth: boolean;
+  // The work plan (paid, gated like workspaceInsights/periodReports): the prioritised
+  // "what should I work on today" worklist under the Activity daily-brief strip, plus its
+  // optional Haiku narration. Gates the WHOLE panel, both halves — the deterministic worklist is
+  // CORE compute (db/work-plan.ts) but has no free surface, and the narration is the billed POST.
+  // The ranked rows render with or without a plan, so this flag is the panel's only gate.
+  workPlan: boolean;
 }
 
 // Which GitHub sign-in methods this (cloud) deployment offers — GET /api/auth/providers.
@@ -8318,4 +8324,172 @@ export interface AutomationOutputResponse {
   workspaceId: number;
   window: { fromMs: number; toMs: number };
   output: AutomationOutput | null;
+}
+
+// ---- The work plan (Pro): "what should I work on today" ----------------------------------
+//
+// A prioritised worklist for ONE workspace, plus an optional Haiku-written narration of it.
+// It sits directly under the daily-brief strip, and the relationship between the two is the
+// whole design constraint:
+//
+//   THE BRIEF SAYS HOW MUCH. THE PLAN SAYS IN WHAT ORDER. THEY ARE ONE POPULATION.
+//
+// `WorkPlanEvidence` is folded from the SAME `/api/attention` cards `computeBriefCounts` counts
+// (plus two signals the cards never carried — "can land now" and "behind trunk"), so a plan that
+// disagreed with the strip above it would be a bug in one fold, not two opinions. `counts` below
+// is carried on the wire precisely so that agreement is ASSERTABLE rather than assumed.
+//
+// ── THE DIVISION OF LABOUR, WHICH IS THE SAFETY PROPERTY ─────────────────────────────────────
+// EVERY FIGURE, ID, LINK AND RANK IS CODE-DERIVED. The model receives the already-ranked items
+// and may only (a) choose which of them to foreground, (b) order those, and (c) write one
+// sentence each about WHY NOW. It may not invent an item, restate a number, or drop work from
+// the board — anything it omits still renders, below, under its own heading.
+//
+// That is enforced three ways, not by prompt alone: ids the model names are intersected with the
+// evidence (unknown ⇒ dropped and COUNTED, see `droppedIds`); every string it produces passes the
+// digit gate, so a figure cannot reach the screen through prose; and the UI renders model text in
+// the `--ai-*` palette beneath code-derived chips, never mixed into the same line.
+export type WorkPlanKind =
+  /** Approved-or-clean and GitHub will take it: the shortest path to a merged PR. */
+  | 'merge'
+  /** `mergeStateStatus === 'behind'` — GitHub is REFUSING the merge until it is updated.
+   *  ⚠ Not "the base branch moved on", which is true of most healthy PRs. */
+  | 'update_branch'
+  /** The viewer's own open PR whose head-commit CI rollup is red. */
+  | 'unblock_ci'
+  /** A review was requested of the viewer. */
+  | 'review'
+  /** A thread is waiting on the viewer's reply. */
+  | 'reply'
+  /** An untouched review thread on someone's open PR — nobody has answered it. */
+  | 'thread'
+  /** A review has been requested of SOMEONE and nobody has moved. Ageing, unowned. */
+  | 'nudge';
+
+/** The code-derived evidence behind one row. Every field here is a fact a reader can check by
+ *  following the row's link — that is the bar for putting anything in this object. */
+export interface WorkPlanFacts {
+  /** Standing approvals on the PR. */
+  approvals?: number;
+  /** GitHub's protection-aware merge state, passed through verbatim. */
+  mergeStateStatus?: MergeStateStatus;
+  /** Head-commit CI rollup. Red is ALWAYS the pair `failure` | `error`, never one of them. */
+  ciStatus?: CiStatus | null;
+  /** Review threads with no reply and no follow-up commit touching the file. */
+  untouchedThreads?: number;
+  /** Reviewers still on the hook — users AND GitHub teams (a team request has no user id). */
+  pendingReviewers?: number;
+  /** Files the PR touches, for "is this a five-minute job or an afternoon". */
+  changedFiles?: number;
+  /** Hours since `clock`. ⚠ DERIVED FROM `now`, so it must never enter a payload hash. */
+  ageHours?: number;
+  /** WHICH clock `ageHours` measures. Never assume "since opened" — the four signals age
+   *  against four different instants, and saying so is the difference between a fact and a
+   *  plausible number. */
+  clock?: 'opened' | 'requested' | 'last_commit' | 'thread_created' | 'observed';
+}
+
+export interface WorkPlanItem {
+  /** Namespaced and stable across ticks: `wp:<kind>:<prId|repoId[:threadId]>`. It is the join
+   *  key between the evidence and the model's steps, so it may never encode a time. */
+  id: string;
+  kind: WorkPlanKind;
+  /**
+   * WHAT THIS ROW IS ABOUT — and it is NOT derivable from `prId` or from the id shape.
+   *
+   * ⚠ Two different questions were once answered by one predicate, and both halves shipped wrong.
+   * "Is this row the PR's ONE job?" (the per-PR dedup: two threads on a PR are two jobs, so a
+   * thread row answers NO) is a different question from "is this row about a pull request?" (a
+   * thread row answers YES — it is a conversation on one). Deriving the second from the first told
+   * the model that a review thread was "the repository default branch", and told the card to draw
+   * it as one.
+   *
+   * `'repo'` today means exactly one thing: the red-trunk arm of `unblock_ci`, which is about a
+   * default branch and whose `prId` — when it has one — is only the PR that landed the current
+   * head. Anything `'repo'` must never be described, drawn or narrated as a pull request.
+   */
+  subject: 'pr' | 'repo';
+  /** null only on a repo-grained row (a red trunk whose head sha resolves to no PR). */
+  prId: number | null;
+  repoId: number;
+  repoFullName: string;
+  prNumber: number | null;
+  prTitle: string | null;
+  threadId?: number | null;
+  /** Pre-built server-side. ⚠ Still render it through `safeExternalUrl()`. */
+  githubUrl: string;
+  /** The same three tiers the attention board and My Turn use: `direct` = it names you,
+   *  `maintained` = it is in a repo you maintain, `none` = shared work in scope. A row's copy
+   *  may never claim ownership the tier does not support. */
+  relevance: MyTurnRelevance;
+  facts: WorkPlanFacts;
+  /** 0..1 — how few steps from landing. A mergeable, approved PR is 1. */
+  proximity: number;
+  /** 0..1 — how likely this is to sit untouched, from its own clock. */
+  stallRisk: number;
+  /** The deterministic rank. Items arrive sorted by it, descending. */
+  score: number;
+  /** A CODE-WRITTEN one-liner naming the concrete blocker ("behind trunk", "2 approvals,
+   *  checks green"). ⚠ NEVER model output — this renders even when nothing was generated. */
+  reason: string;
+}
+
+export interface WorkPlanEvidence {
+  workspaceId: number;
+  /** ISO — when this fold ran. ⚠ NEVER folded into a payload hash: a dormant workspace must
+   *  stay a cache hit forever rather than re-billing on a timer. */
+  generatedAt: string;
+  /** Ranked, capped. */
+  items: WorkPlanItem[];
+  /** The UNCAPPED population per kind, so a capped list can disclose what it left out. */
+  totals: Partial<Record<WorkPlanKind, number>>;
+  /** ⚠ THE ALIGNMENT CONTRACT. These are folded from the same `/api/attention` cards the daily
+   *  brief counts, carried here so the panel can be asserted equal to the strip above it rather
+   *  than hoped equal. A divergence is a defect in ONE fold. */
+  counts: {
+    myTurn: number;
+    myTurnPersonal?: number;
+    ciFailing?: number;
+    stalled: number;
+    untouchedThreads: number;
+    needsReviewer: number;
+  };
+}
+
+/** One narrated step. `why` is model prose; the row it decorates is entirely code-derived. */
+export interface WorkPlanStep {
+  /** MUST be an id from the evidence. Anything else was dropped before storage. */
+  id: string;
+  /** One sentence, digit-free, ≤ the phrase cap. */
+  why: string;
+}
+
+export interface StoredWorkPlan {
+  /** One sentence framing the day. Digit-free. */
+  headline: string;
+  steps: WorkPlanStep[];
+  /** What can wait until tomorrow, in one sentence. null when the model offered none. */
+  parked: string | null;
+  model: string;
+  generatedAt: string;
+  /** How many ids the model named that the evidence did not contain. Rendered when non-zero:
+   *  a silent drop would let a hallucinated reference vanish without trace. */
+  droppedIds: number;
+}
+
+/** GET (cache read + staleness probe) and POST (billed generation) share this envelope, exactly
+ *  like the synthesis seam. `enabled: false` is the OSS/free answer and is never an error. */
+export interface WorkPlanResponse {
+  enabled: boolean;
+  /** Always present when enabled — the deterministic worklist renders with or without a plan. */
+  evidence: WorkPlanEvidence | null;
+  plan: StoredWorkPlan | null;
+  /** GET only: the stored plan was written against different evidence. */
+  stale?: boolean;
+  /** POST only: already generating, or inside the min-interval — cached row served, $0 spent. */
+  throttled?: boolean;
+  /** POST only: metered plan out of credits — cached row served, nothing billed. */
+  creditsExhausted?: boolean;
+  /** POST only: nothing needs doing in this workspace — nothing generated, nothing stored. */
+  empty?: boolean;
 }

@@ -9,6 +9,7 @@ import {
   ANOMALY_RING,
   type Series,
 } from './common.js';
+import { RingIcon } from '../Icons.js';
 
 // Multi-series line chart over a weekly x-axis (labels are ISO bucket-starts). The
 // first series may render a soft area fill (area). Null values break that series'
@@ -327,7 +328,9 @@ export function LineChart({
                       }`}
                       style={noteTone === 'muted' ? undefined : { color: ANOMALY_RING }}
                     >
-                      <span className="mt-px">{noteTone === 'muted' ? '·' : '⭘'}</span>
+                      <span className="mt-px flex shrink-0 items-center">
+                        {noteTone === 'muted' ? '·' : <RingIcon size={9} />}
+                      </span>
                       <span>{note}</span>
                     </div>
                   )}
@@ -366,7 +369,13 @@ export function LineChart({
                         (noteTone === 'muted' ? (
                           <span className="text-gray-500 dark:text-gray-400">· {note}</span>
                         ) : (
-                          <span style={{ color: ANOMALY_RING }}>⭘ {note}</span>
+                          <span
+                            className="inline-flex items-center gap-1"
+                            style={{ color: ANOMALY_RING }}
+                          >
+                            <RingIcon size={9} />
+                            {note}
+                          </span>
                         ))}
                     </span>
                   );

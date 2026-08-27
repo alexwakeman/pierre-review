@@ -25,6 +25,7 @@ import {
   severityPickToSelector,
   type SeverityPick,
 } from '../../lib/severityAgreement.js';
+import { BotIcon, CloseIcon, ScalesIcon } from '../Icons.js';
 import {
   BotClusterCard,
   BotCommentCard,
@@ -619,7 +620,7 @@ export function BotFlaggingDetail(): JSX.Element {
                       : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
                   }`}
                 >
-                  <span aria-hidden="true">⚖</span>
+                  <ScalesIcon size={11} />
                   {disagree ? DISAGREE_LABEL[disagree].label : 'Disagreements only'}
                 </button>
               )}
@@ -645,10 +646,10 @@ export function BotFlaggingDetail(): JSX.Element {
                   title={`Only ${botNarrowLabel(bots)}${bots.label ? '’s' : '’'} comments — opened from the Behaviour tab’s inflation index. Click to widen back to every bot, keeping this window, scope and direction.`}
                   className="flex items-center gap-1 rounded-full border border-ai-signal/50 bg-ai-signal/10 px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal"
                 >
-                  <span aria-hidden="true">🤖</span>
+                  <BotIcon size={11} />
                   {botNarrowLabel(bots)} only
-                  <span aria-hidden="true" className="text-ai-signal/70">
-                    ✕
+                  <span className="text-ai-signal/70">
+                    <CloseIcon size={10} />
                   </span>
                 </button>
               )}

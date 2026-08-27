@@ -28,6 +28,7 @@ import {
   safeExternalUrl,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
+import { BotIcon, CheckIcon, ChevronIcon, ExternalLinkIcon } from '../Icons.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
 import { AiSummary } from '../AiSummary.js';
@@ -168,7 +169,8 @@ function BotVendorPill({ kind }: { kind: AutomatedReviewerKind }): JSX.Element {
       style={{ color: meta.color, background: `${meta.color}1a` }}
       title="This thread was opened by an automated reviewer"
     >
-      🤖 {meta.label}
+      <BotIcon size={12} />
+      {meta.label}
     </span>
   );
 }
@@ -210,7 +212,12 @@ export function InsightPrSummary({ prId }: { prId: number }): JSX.Element {
         onClick={() => setOpen((o) => !o)}
         className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
       >
-        {open ? '▾' : '▸'} PR summary
+        <ChevronIcon
+          dir={open ? 'down' : 'right'}
+          size={10}
+          className="inline-block align-[-0.1em]"
+        />{' '}
+        PR summary
       </button>
       {open && <InsightPrSummaryBody prId={prId} />}
     </div>
@@ -288,11 +295,15 @@ function RoutingReviewers({
           className="rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
           title="Request these reviewers on GitHub"
         >
-          {done
-            ? '✓ Requested'
-            : request.isPending
-              ? 'Assigning…'
-              : `Assign${suggestions.length > 1 ? ' all' : ''}`}
+          {done ? (
+            <>
+              <CheckIcon size={11} className="inline-block align-[-0.1em]" /> Requested
+            </>
+          ) : request.isPending ? (
+            'Assigning…'
+          ) : (
+            `Assign${suggestions.length > 1 ? ' all' : ''}`
+          )}
         </button>
       </div>
       <ul className="space-y-1">
@@ -346,7 +357,13 @@ function MyTurnDoneButton({
         className="rounded border border-emerald-300 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
         title="Mark this as seen. It comes back if there's newer activity."
       >
-        {dismiss.isPending ? 'Marking…' : '✓ Done'}
+        {dismiss.isPending ? (
+          'Marking…'
+        ) : (
+          <>
+            <CheckIcon size={11} className="inline-block align-[-0.1em]" /> Done
+          </>
+        )}
       </button>
       {dismiss.isError && (
         <span className="text-[11px] text-red-500">
@@ -455,7 +472,7 @@ function PrLine({
         className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
         title="Open on GitHub"
       >
-        ↗
+        <ExternalLinkIcon />
       </a>
     </div>
   );
@@ -493,7 +510,7 @@ function CiFailingBody({
             className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
             title={card.arm === 'trunk' ? 'Open the commit on GitHub' : 'Open the PR on GitHub'}
           >
-            ↗
+            <ExternalLinkIcon />
           </a>
         )}
       </div>

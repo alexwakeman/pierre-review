@@ -6,6 +6,7 @@ import { useWorkspaces, workspaceRepoIds } from '../../hooks/useWorkspaces.js';
 import { useFilters } from '../../store/filters.js';
 import { useOpenPrTab } from '../../hooks/useOpenPrTab.js';
 import { useInsightsDigestExpand } from '../../store/digestCollapse.js';
+import { SparkleIcon } from '../Icons.js';
 import { RepoDigestCard } from './RepoDigestCard.js';
 
 // The per-repo AI "branch summaries" moved into the Insights panel (they used to live atop
@@ -74,7 +75,8 @@ export function InsightsDigests({
       {!embedded && (
         <div className="flex items-center gap-2 px-0.5">
           <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-ai-ink">
-            <span aria-hidden="true" className="text-ai-signal">✨</span> Repo summaries
+            <SparkleIcon className="text-ai-signal" />
+            Repo summaries
           </span>
         </div>
       )}

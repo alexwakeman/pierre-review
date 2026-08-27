@@ -17,6 +17,7 @@ import {
   userLabel,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
+import { ChevronIcon, WarningIcon } from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 
 // How many open-PR rows the inline lists show. Keeps a busy repo's list scannable — the sort
@@ -74,9 +75,9 @@ export function OpenPrRow({
           <span
             aria-hidden="true"
             title="Needs attention (review or reply · stalled · untouched threads · CI / conflicts)"
-            className="shrink-0 text-xs leading-none text-amber-500 dark:text-amber-400"
+            className="flex shrink-0 items-center text-amber-500 dark:text-amber-400"
           >
-            ⚠
+            <WarningIcon size={12} />
           </span>
         )}
         <span className="min-w-0 flex-1 truncate">
@@ -253,9 +254,10 @@ export function RepoOpenPrList({
         aria-expanded={!collapsed}
         className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/40"
       >
-        <span aria-hidden="true" className="text-gray-400">
-          {collapsed ? '▸' : '▾'}
-        </span>
+        <ChevronIcon
+          dir={collapsed ? 'right' : 'down'}
+          className="shrink-0 text-gray-400"
+        />
         Open PRs · {openCount}
         {draftCount > 0 && (
           <span className="font-normal normal-case text-gray-400">

@@ -5,6 +5,7 @@ import { useScopedOpenPrs } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { indexUsers } from '../../lib/ui.js';
+import { RefreshIcon } from '../Icons.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
 import { OpenPrsTable } from './OpenPrsTable.js';
 
@@ -113,9 +114,10 @@ export function OpenPrsDetail(): JSX.Element {
             disabled={isFetching}
             className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
           >
-            <span aria-hidden className={isFetching ? 'animate-spin' : ''}>
-              ↻
-            </span>{' '}
+            <RefreshIcon
+              size={11}
+              className={`inline-block align-[-0.1em] ${isFetching ? 'animate-spin' : ''}`}
+            />{' '}
             Refresh
           </button>
         </div>

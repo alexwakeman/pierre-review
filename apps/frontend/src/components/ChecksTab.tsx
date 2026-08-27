@@ -37,39 +37,44 @@ import { usePrArmedIntent } from '../hooks/useAutoMerge.js';
 import { useSuggestedReviewers } from '../hooks/usePr.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
+import { BotIcon, CheckIcon, CloseIcon, WarningIcon } from './Icons.js';
 
 // Per-state styling for the "Reviewers" row badges (everyone who submitted a
-// review, not just approvers): the badge hue + leading glyph hint at each
+// review, not just approvers): the badge hue + leading mark hint at each
 // reviewer's LATEST review state, so the row reads at a glance — green check for an
 // approval, red cross for changes-requested, neutral for a plain comment / dismissed
 // review. Mirrors the Approvers badge style (bg-…/10 + soft text) so the two rows
 // sit together visually.
+//
+// `icon` is an ELEMENT, not a character: the badge tints itself (text-green-700 /
+// text-red-700), and only an icon inheriting `currentColor` follows that tint. The
+// states with nothing to say carry null and render no mark at all.
 const REVIEWER_STATE_META: Record<
   ReviewState,
-  { icon: string; cls: string; title: string }
+  { icon: JSX.Element | null; cls: string; title: string }
 > = {
   approved: {
-    icon: '✓',
+    icon: <CheckIcon size={12} />,
     cls: 'bg-green-500/10 text-green-700 dark:text-green-400',
     title: 'Approved',
   },
   changes_requested: {
-    icon: '✗',
+    icon: <CloseIcon size={12} />,
     cls: 'bg-red-500/10 text-red-700 dark:text-red-400',
     title: 'Requested changes',
   },
   commented: {
-    icon: '',
+    icon: null,
     cls: 'bg-gray-500/10 text-gray-600 dark:text-gray-300',
     title: 'Reviewed (commented)',
   },
   dismissed: {
-    icon: '',
+    icon: null,
     cls: 'bg-gray-500/10 text-gray-400',
     title: 'Review dismissed',
   },
   pending: {
-    icon: '',
+    icon: null,
     cls: 'bg-gray-500/10 text-gray-400',
     title: 'Review pending',
   },
@@ -119,7 +124,7 @@ function AutomatedReviewerBadge({
       style={{ color: meta.color, background: `${meta.color}1a` }}
       title={`Automated reviewer — ${meta.label}${prov}`}
     >
-      <span aria-hidden>🤖</span>
+      <BotIcon size={10} />
       {meta.label}
       {prov}
     </span>
@@ -190,7 +195,15 @@ function SuggestedReviewersRow({
                   className="rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
                   title="Request this reviewer on GitHub"
                 >
-                  {done ? '✓ Requested' : pendingKey === k ? 'Assigning…' : 'Assign'}
+                  {done ? (
+                    <>
+                      <CheckIcon size={11} className="inline-block align-[-0.1em]" /> Requested
+                    </>
+                  ) : pendingKey === k ? (
+                    'Assigning…'
+                  ) : (
+                    'Assign'
+                  )}
                 </button>
               )}
             </div>
@@ -538,7 +551,7 @@ export function ChecksTab({
                   title={verdict.detail ?? undefined}
                 >
                   {(verdict.tone === 'bad' || verdict.tone === 'warn') && (
-                    <span aria-hidden>⚠ </span>
+                    <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
                   )}
                   {verdict.label}
                 </span>
@@ -565,7 +578,7 @@ export function ChecksTab({
                   className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 ${meta.cls}`}
                   title={meta.title}
                 >
-                  {meta.icon && <span aria-hidden>{meta.icon}</span>}
+                  {meta.icon}
                   <Avatar user={u} size={14} />
                   <UserName user={u} fallbackId={uid} repoId={pr.repoId} />
                   {auto && (
@@ -580,7 +593,7 @@ export function ChecksTab({
                 className="inline-flex items-center gap-1 rounded bg-amber-400/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-300"
                 title="Every review on this PR came from an automated reviewer — no human has reviewed it yet."
               >
-                <span aria-hidden>🤖</span>
+                <BotIcon size={12} />
                 only bots reviewed
               </span>
             )}
@@ -604,7 +617,7 @@ export function ChecksTab({
                   g.unresolved > 0 ? ` · ${g.unresolved} still need a look` : ' · all acted on'
                 } — click to filter the Threads tab`}
               >
-                <span aria-hidden>🤖</span>
+                <BotIcon size={12} />
                 {g.label}
                 <span className="tabular-nums opacity-70">· {g.threads}</span>
                 {g.unresolved > 0 && (
@@ -628,7 +641,7 @@ export function ChecksTab({
               .map((b) => `${b.label}: slower than its typical on this PR`)
               .join(' · ')}
           >
-            <span aria-hidden>⚠</span>
+            <WarningIcon size={12} />
             {slowBots.length === 1
               ? `${slowBots[0]!.label} slower than typical`
               : `${slowBots.length} bots slower than typical`}

@@ -7,6 +7,7 @@ import type {
 } from '@pierre-review/shared';
 import { useArmedMerges, useDisarmAutoMerge } from '../hooks/useAutoMerge.js';
 import { usePinnedTabs, type TabMeta } from '../store/pinnedTabs.js';
+import { CheckIcon, WarningIcon } from './Icons.js';
 
 // The global auto-merge progress stack, rendered as a plain card inside App.tsx's ONE shared
 // fixed bottom-right toast column (which owns position/width/z and pointer-events-none; the
@@ -296,7 +297,11 @@ function OutcomeRow({
       <div className="mt-0.5 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className={merged ? 'text-green-600 dark:text-green-400' : 'text-gray-500'}>
-            {merged ? '✓ ' : '⚠ '}
+            {merged ? (
+              <CheckIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+            ) : (
+              <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+            )}
             {TERMINAL_LABEL[outcome.state] ?? 'Auto-merge finished'}
           </div>
           {outcome.reason && (

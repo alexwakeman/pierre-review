@@ -32,6 +32,7 @@ import {
   useAdvisorPutProfile,
 } from '../../hooks/useAdvisor.js';
 import { automatedReviewerMeta } from '../../lib/ui.js';
+import { BotIcon } from '../Icons.js';
 
 const INTENT_LABEL: Record<string, string> = {
   SUPPRESS_PATH: 'Suppress path',
@@ -325,7 +326,8 @@ function BotSection({
           className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px] font-medium"
           style={{ color: meta.color, background: `${meta.color}1a` }}
         >
-          🤖 {bot.label}
+          <BotIcon size={11} />
+          {bot.label}
         </span>
         <span className="text-[11px] text-gray-500 dark:text-gray-400">
           {hasAdapter

@@ -1,4 +1,5 @@
 import { useAuthProviders } from '../../hooks/useAuthProviders.js';
+import { ExternalLinkIcon } from '../Icons.js';
 import { SectionShell } from './ui.js';
 
 // GitHub App INSTALL (cloud-only, CORE/free). Signing in via the App uses GitHub's
@@ -30,7 +31,8 @@ export function GithubAppInstallSection(): JSX.Element | null {
     >
       <div className="flex flex-wrap gap-2">
         <a className={linkCls} href={installUrl} target="_blank" rel="noreferrer">
-          Install on an account or org ↗
+          Install on an account or org
+          <ExternalLinkIcon size={11} />
         </a>
         <a
           className={linkCls}
@@ -38,7 +40,8 @@ export function GithubAppInstallSection(): JSX.Element | null {
           target="_blank"
           rel="noreferrer"
         >
-          Manage installations ↗
+          Manage installations
+          <ExternalLinkIcon size={11} />
         </a>
       </div>
 

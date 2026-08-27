@@ -4,6 +4,7 @@ import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useHumanThemes, useRefreshHumanThemes } from '../../hooks/useHumanThemes.js';
+import { CommentIcon, RefreshIcon } from '../Icons.js';
 import { ThemesReportBody, ThemesSkeleton } from './ThemesReportView.js';
 import { prRefToMeta } from './ThemeThreadsDetail.js';
 
@@ -74,7 +75,8 @@ export function HumanThemesPanel(): JSX.Element | null {
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-base font-semibold text-gray-800 dark:text-gray-100">
-          <span aria-hidden="true">💬</span> What people are discussing
+          <CommentIcon size={15} className="inline-block align-[-0.1em]" /> What people are
+          discussing
         </span>
         <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
           Pro
@@ -91,7 +93,16 @@ export function HumanThemesPanel(): JSX.Element | null {
           className="ml-auto rounded bg-ai-signal px-3 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
           title={outOfCredits ? 'Out of AI credits — resets next month' : 'Summarise what people are raising in review across this Workspace (runs the Haiku model)'}
         >
-          {busy ? 'Summarising…' : result ? '↻ Regenerate' : 'Generate'}
+          {busy ? (
+            'Summarising…'
+          ) : result ? (
+            <>
+              <RefreshIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+              Regenerate
+            </>
+          ) : (
+            'Generate'
+          )}
         </button>
       </div>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -123,7 +134,7 @@ export function HumanThemesPanel(): JSX.Element | null {
             themes={result.themes}
             bySeverity={result.bySeverity}
             byArea={result.byArea}
-            actorEmoji="💬"
+            ActorIcon={CommentIcon}
             emptyThemesLabel="No distinct discussion themes surfaced in this window."
             reviewerSection={<ParticipantRollup result={result} />}
             coverageLine={<HumanCoverageLine result={result} />}

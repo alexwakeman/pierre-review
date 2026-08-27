@@ -10,7 +10,7 @@
 `pnpm test` is SQLite-only. **No automated check ever executes a `migrations-pg/` file**, so a pg
 twin can be malformed, unregistered, or subtly divergent and every suite stays green. The single
 source of confidence is replaying it by hand into a throwaway database. Last done 2026-08-27 on
-**PostgreSQL 16.9**: core 44/44 + all 27 plugin twins, full table parity with SQLite.
+**PostgreSQL 16.9**: core 44/44 + all 28 plugin twins, full table parity with SQLite.
 
 There is a **standing local Postgres** on `:5432` (the `bng-metric-backend-postgres-1` container,
 user/password `dev`/`dev`). Use a SEPARATE database inside it — never the app database that
@@ -206,7 +206,8 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is currently REPLAYED AND GREEN — see § Replaying the pg chain below.** As of
-  2026-08-27, core `0000`→`0043` (44/44) and all 27 plugin pg twins — including plugin `0020`,
+  2026-08-27, core `0000`→`0043` (44/44) and all 28 plugin pg twins (`0028_work_plan` replayed
+  into a throwaway DB the day it was written, and idempotent on a second run) — including plugin `0020`,
   the `0021`–`0027` batch and `0027`'s deliberately UNWRAPPED `CREATE TABLE` — apply cleanly into
   a throwaway database on PostgreSQL 16.9, reaching full table parity with SQLite.
   ⚠ **This is a by-hand one-off, not CI, so it goes stale the moment anyone adds a migration.**

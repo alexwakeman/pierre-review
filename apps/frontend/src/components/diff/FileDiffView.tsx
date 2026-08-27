@@ -19,6 +19,7 @@ import {
   type DiffRow,
 } from '../../lib/diff.js';
 import { DERIVED_STATE_META, relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
+import { CheckIcon, ChevronIcon, ExternalLinkIcon } from '../Icons.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { ThreadCountChips, rollupCounts } from '../ThreadList/ThreadCountChips.js';
@@ -330,7 +331,10 @@ function InlineThread({
         }`}
       >
         {resolved ? (
-          <span className="shrink-0 text-emerald-600 dark:text-emerald-400">✓</span>
+          <CheckIcon
+            size={11}
+            className="shrink-0 text-emerald-600 dark:text-emerald-400"
+          />
         ) : (
           <span
             className="inline-block h-2 w-2 shrink-0 rounded-full"
@@ -365,7 +369,11 @@ function InlineThread({
             · {excerpt}
           </span>
         )}
-        <span className="ml-auto shrink-0 text-gray-400">{open ? '⌃' : '⌄'}</span>
+        <ChevronIcon
+          dir={open ? 'up' : 'down'}
+          size={11}
+          className="ml-auto shrink-0 text-gray-400"
+        />
       </button>
       {open && (
         <div className="mt-1">
@@ -582,7 +590,11 @@ function InlineCommentBox({
                 rel="noreferrer noopener"
                 className="text-blue-500 hover:underline"
               >
-                Open on GitHub ↗
+                Open on GitHub
+                <ExternalLinkIcon
+                  size={10}
+                  className="ml-0.5 inline-block align-[-0.1em]"
+                />
               </a>
             </>
           )}
@@ -691,8 +703,8 @@ function FileDiffBlock({
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
           title={expanded ? 'Collapse this file' : 'Expand this file'}
         >
-          <span className="w-3 shrink-0 select-none text-gray-400">
-            {expanded ? '▾' : '▸'}
+          <span className="flex w-3 shrink-0 select-none items-center text-gray-400">
+            <ChevronIcon dir={expanded ? 'down' : 'right'} />
           </span>
           <span
             className={`w-3 shrink-0 select-none text-center font-mono font-bold ${meta.cls}`}
@@ -720,10 +732,10 @@ function FileDiffBlock({
             href={githubUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="shrink-0 text-blue-500 hover:underline"
+            className="inline-flex shrink-0 items-center text-blue-500 hover:underline"
             title="View this file's diff on GitHub"
           >
-            ↗
+            <ExternalLinkIcon size={12} />
           </a>
         )}
       </div>
@@ -741,7 +753,11 @@ function FileDiffBlock({
                     rel="noreferrer noopener"
                     className="text-blue-500 hover:underline"
                   >
-                    view on GitHub ↗
+                    view on GitHub
+                    <ExternalLinkIcon
+                      size={10}
+                      className="ml-0.5 inline-block align-[-0.1em]"
+                    />
                   </a>
                 </>
               ) : (

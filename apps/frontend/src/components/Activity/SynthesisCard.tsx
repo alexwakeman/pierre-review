@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type { StoredSynthesis } from '@pierre-review/shared';
 import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
+import { RefreshIcon } from '../Icons.js';
 import {
   useGenerateSynthesis,
   useSynthesis,
@@ -157,7 +158,16 @@ export function SynthesisCard({
                 : 'Group this list into recurring clusters (runs the Haiku model; unchanged items cost nothing)'
             }
           >
-            {busy ? 'Summarising…' : synthesis ? '↻ Regenerate' : 'Summarise'}
+            {busy ? (
+              'Summarising…'
+            ) : synthesis ? (
+              <span className="inline-flex items-center gap-1">
+                <RefreshIcon size={11} />
+                Regenerate
+              </span>
+            ) : (
+              'Summarise'
+            )}
           </button>
         </div>
 

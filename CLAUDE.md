@@ -30,7 +30,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) | the agentic PR-review feature |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) | ML severity/category of bot comments (`packages/ml`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
-| [PRO-PLUGIN-AND-ACTIVITY](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity, Feed, the bot platform, annotations, digests |
+| [PRO-PLUGIN-AND-ACTIVITY](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity, Feed, the bot platform, annotations, digests, the work plan |
 | [PRO-PLATFORM](docs/PRO-PLATFORM.md) | the Pro platform's own deep-dive |
 | [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, rate limits, GDPR, dependency posture |
 | [PACKAGING](docs/PACKAGING.md) · [RELEASE](docs/RELEASE.md) | build-release, CLI, landing prerender · CI publishing |
@@ -360,6 +360,17 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   `selectedPrId === prId`, or a PR opened via tab inherits a stale preset.
 - `UserName`'s returned tree SHAPE must not depend on popover-open state — React remounts the
   anchor and the popover lands in the top-left corner.
+- **EVERY RENDERED ICON IS A COMPONENT IN `components/Icons.tsx`** — the SPA ships no icon library
+  and no icon emoji. An emoji paints its own colour (so it cannot be dimmed, hovered or themed), a
+  glyph's metrics are a font lookup, and neither can be sized. ⚠ **What stayed a character is a
+  DECISION, listed at the bottom of that file's header**: regex matchers against vendor comment
+  bodies (`sync/review-fingerprint.ts`, `bot-resolution-markers.ts`, the bot-theme classifiers —
+  changing one silently breaks bot classification), `Activity/periodReportMarkdown.ts` (a markdown
+  export with no DOM), the backend CLI, prose arrows, and anything inside a `title=`/`aria-label=`
+  string, which cannot hold an SVG and was REWORDED instead. ⚠ `▾` is TWO controls: `CaretIcon`
+  (solid) for a menu trigger, `ChevronIcon` for an expand/collapse — decide by what the click does.
+  `lib/ui.ts` is `.ts` and cannot hold JSX, so `CHECK_STATE_META.icon` is a component REFERENCE
+  rendered `<m.icon />`.
 - **The AI surface has EIGHT `--ai-*` semantic tokens**, whose channels must stay
   SPACE-SEPARATED (any other format silently breaks Tailwind's `<alpha-value>`);
   `--ai-signal-fill` is NON-TEXT ONLY. ⚠ **Every surviving `violet-`/`purple-`/`indigo-` hit
@@ -485,6 +496,16 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   touchpoint sits behind a diff-guard `llm-isolation.test.ts` pins unreachable); **a cell with
   ANY acted-on high-severity finding never earns a full suppress**; **a suppression needs ≥1
   untouched thread on a PR that has since MERGED**; nothing it computes may feed `botVerdict`.
+- **The work plan** (Pro, `workPlan`): "what should I work on today" for one Workspace, under the
+  daily-brief strip. CORE ranks (`db/work-plan.ts`), the PLUGIN narrates. Contract in
+  [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § The work plan. What bites:
+  **the brief says how much, the plan says in what order, and they are ONE population** (both fold
+  `getWorkspaceInsights`' cards; `counts` rides the wire so the agreement is ASSERTABLE); the CODE
+  ranks and the model may only foreground/order/annotate; ⚠ `ageHours`/`stallRisk`/`score` are
+  `now`-derived and must stay OUT of the payload hash; ⚠ **ONE PR IS ONE JOB** — the id dedup is
+  not enough, a second pass keys on `prId` and wins by time-free `proximity`; ⚠ a repo-grained row
+  (a red trunk) must not be described as a PR in the payload, its facts, or on screen; ⚠
+  `ProHostQueries.getWorkPlan` is OPTIONAL so `apiVersion` stays 21.
 
 ---
 
@@ -759,7 +780,7 @@ rules:
 how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ The whole
-  chain is currently green: core `0000`→`0043` (44/44) **and** all 27 plugin pg twins applied
+  chain is currently green: core `0000`→`0043` (44/44) **and** all 28 plugin pg twins applied
   into a throwaway database on **PostgreSQL 16.9**, 2026-08-27, yielding full table parity with
   SQLite (the only absentee is `pro_migrations`, which the plugin's own runner creates rather
   than a `.sql` file). Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying

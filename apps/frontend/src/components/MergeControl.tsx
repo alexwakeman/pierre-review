@@ -10,6 +10,7 @@ import {
 import { useDisarmAutoMerge } from '../hooks/useAutoMerge.js';
 import { dateTime, MERGE_TONE_CLASS, mergeVerdict, relativeTime, toMergeStateStatus } from '../lib/ui.js';
 import { ApiError } from '../api/client.js';
+import { CaretIcon, ExternalLinkIcon, MergeIcon, WarningIcon } from './Icons.js';
 
 // Merge control for the Overview tab (CORE / free tier), rendered next to Approve when the
 // viewer has push access and the PR is open + not a draft. Collapsed it's a single "Merge ▾"
@@ -79,7 +80,9 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
         onClick={() => setOpen(true)}
         className="inline-flex items-center gap-1 rounded border border-violet-500 px-2 py-0.5 text-sm font-medium text-violet-700 hover:bg-violet-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
       >
-        <span aria-hidden>⇱</span> Merge ▾
+        <MergeIcon />
+        Merge
+        <CaretIcon />
       </button>
     );
   }
@@ -134,7 +137,9 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
     <div className="w-full space-y-2">
       {/* The verdict, always first — "why can't I merge this?" answered in one line. */}
       <div className={`text-xs font-medium ${MERGE_TONE_CLASS[verdict.tone]}`}>
-        {(verdict.tone === 'bad' || verdict.tone === 'warn') && <span aria-hidden>⚠ </span>}
+        {(verdict.tone === 'bad' || verdict.tone === 'warn') && (
+          <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
+        )}
         {verdict.label}
         {verdict.detail && (
           <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">
@@ -146,7 +151,8 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
       {/* Conflicts — info only. Conflict resolution is a Pro feature; free tier links out. */}
       {options.conflicts && (
         <div className="rounded border border-amber-300 bg-amber-50/60 px-2 py-1.5 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200">
-          ⚠ This PR conflicts with <span className="font-mono">{options.baseRef}</span>. Resolve the
+          <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
+          This PR conflicts with <span className="font-mono">{options.baseRef}</span>. Resolve the
           conflicts on{' '}
           <a
             href={githubUrl}
@@ -154,7 +160,7 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
             rel="noreferrer noopener"
             className="font-medium underline"
           >
-            GitHub ↗
+            GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
           .
         </div>

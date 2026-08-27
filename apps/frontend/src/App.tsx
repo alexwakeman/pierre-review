@@ -41,6 +41,7 @@ import { ApiError, api } from './api/client.js';
 import { initAnalytics, trackPageView } from './lib/analytics.js';
 import { CookieBanner } from './components/CookieBanner.js';
 import { Wordmark } from './components/Wordmark';
+import { MoonIcon, SunIcon } from './components/Icons.js';
 
 function useDarkMode(): [boolean, () => void] {
   const [dark, setDark] = useState(
@@ -316,7 +317,11 @@ export default function App(): JSX.Element {
             className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
             title="Toggle dark mode"
           >
-            {dark ? '☀' : '☾'}
+            {dark ? (
+              <SunIcon className="inline-block align-[-0.15em]" />
+            ) : (
+              <MoonIcon className="inline-block align-[-0.15em]" />
+            )}
           </button>
           {/* Signed-in user — a subtle button at the far right opening an account menu
               (Open Profile on GitHub · Sign Out). Sign Out is cloud-only (local has no

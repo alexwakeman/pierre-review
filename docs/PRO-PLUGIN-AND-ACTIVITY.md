@@ -1770,3 +1770,128 @@ config PR is ever rejected by CodeRabbit's validator); the CodeRabbit assisted-b
 (`@coderabbitai configuration` comment → parse the synced reply) is not built; cloud per-account BYO
 Anthropic keys are a designed seam (`credential:'account-key'`), not built; Greptile's `.greptile/`
 directory layout is unverified against their docs (single `greptile.json` served first).
+
+---
+
+## The work plan — "what should I work on today"
+
+A Pro-only panel mounted **directly under the daily-brief strip** in the Activity feed
+(`Activity/index.tsx`, immediately after `<BriefStrip />`). It renders a deterministically ranked
+worklist for one Workspace, optionally narrated by Haiku.
+
+Capability `workPlan`, gated like `workspaceInsights` (`digestEnabled`). Free/OSS renders nothing
+and issues no request.
+
+### The division of labour, which is the safety property
+
+**Every figure, id, link and rank is CODE-derived.** The model receives the already-ranked items
+and may only (a) choose which to foreground, (b) order those, (c) write one sentence each about
+why now, plus a headline and an optional "what can wait". It may not invent an item, restate a
+number, or take work off the board — anything it omits still renders under "Also on the list".
+
+Enforced three ways, none of them the prompt alone:
+
+- ids the model names are intersected with the evidence; strays are dropped **and counted** into
+  `StoredWorkPlan.droppedIds`, which the panel shows when non-zero;
+- the **D4 digit gate** (`/^[^\p{Nd}\p{No}\p{Nl}]*$/u`, Unicode numerals — the input includes
+  attacker-authored PR titles) runs on the headline, every `why`, and `parked`. A string carrying a
+  digit is **dropped, never rewritten**;
+- the **second-person gate** fires on steps whose item `relevance === 'none'` and nowhere else —
+  second person is a *fact* for `direct`/`maintained` rows and a guess for shared work. This is a
+  deliberate narrowing of the synthesis rule; do not widen it "because the panel is personal", the
+  panel is personal but the ROW is not.
+
+### Alignment with the brief
+
+> THE BRIEF SAYS HOW MUCH. THE PLAN SAYS IN WHAT ORDER. THEY ARE ONE POPULATION.
+
+Six of the seven signals are folded off `getWorkspaceInsights`' `InsightCard[]` — the same fold
+`computeBriefCounts` counts — rather than re-derived, because a second predicate for "an untouched
+thread" is a second number for one population, inches away on screen. `WorkPlanEvidence.counts`
+travels on the wire **so the agreement is assertable**; `work-plan.test.ts` pins it field-by-field
+against `getDailyBriefEntry`, and that assertion is mutation-tested.
+
+Two signals the cards never carried come from one query over open non-draft PRs in scope:
+
+| kind | predicate |
+|---|---|
+| `merge` | `READY_MERGE_STATES` (**imported** from `db/triage.ts`, never re-spelled) and `mergeable !== 'conflicting'` |
+| `update_branch` | `mergeStateStatus === 'behind'`, and only that |
+
+⚠ `behindBy` is **not stored** (every read is a live GitHub `/compare`) and is the wrong signal
+anyway — `behindBy > 0` is true of most healthy PRs, while `'behind'` means GitHub is actually
+refusing the merge.
+
+### The rank
+
+`score = 0.50·proximity + 0.30·stallRisk + 0.20·relevanceWeight`, sorted descending with a **total**
+tie-break chain, so two ticks over unchanged data produce byte-identical order — a panel people read
+top-down may not reshuffle between polls.
+
+⚠ **`ageHours`, `stallRisk` and `score` are derived from `now`** and must never enter
+`workPlanPayloadHash`, or a dormant workspace re-bills on a timer *and* the free GET (which
+recomputes the hash from a fresh fold) disagrees with the POST forever: permanently `stale`,
+re-billed on every click.
+
+⚠ **The cap seats one row per non-empty kind before filling by score** (`capWithKindCoverage`). A
+plain `slice(0, CAP)` deletes a whole signal — the relevance weight means a dozen `direct` rows
+out-score every shared-work row — and the panel then tells the reader that nothing is behind trunk.
+The absence looks like a fact; it is an artifact of the cap.
+
+### ⚠ ONE PR IS ONE JOB
+
+Deduping on the item id is **not enough**. The my_turn fold and the merge fold reach the same PR
+under different ids, so an approved, mergeable PR of yours arrived twice — `wp:merge:<id>` saying
+"nothing is blocking this" and `wp:review:<id>` saying "your PR is approved and waiting on you".
+One instruction printed twice, burning two of the twelve slots. It was invisible to every unit
+test, because each fold is individually correct, and was found by looking at the running app.
+
+A second pass therefore keys on `prId`:
+
+- the survivor is the **highest-`proximity`** row (the action furthest along), tie-broken by the
+  time-free `tieRank`;
+- ⚠ **proximity, not score** — score folds `stallRisk`, so choosing by it would let the survivor,
+  and therefore its `reason` (a **hashed** field), change on a timer and re-bill;
+- ⚠ **PR-grained rows only.** Two untouched threads on one PR are two jobs, and a red trunk is
+  repo-grained. The grain is read back off the id (`wp:<kind>:<prId>` ⇒ PR-grained), so a new row
+  kind cannot get the two out of step.
+
+### ⚠ A repo-grained row is about the BRANCH, not a PR
+
+The trunk arm of `unblock_ci` resolves the current red head to the PR that **landed** it. That prId
+is a link target and nothing more — trunk CI is non-monotone, ~21% of commit rows carry `unknown`,
+and roughly one red head in nine is a direct push belonging to no PR. All three of these shipped
+wrong once:
+
+- **the model payload** gets `subject: 'the repository default branch — NOT a pull request'`
+  instead of `number`/`title`. Handed a PR number, the model wrote *"needs this merge to let all
+  pending work build"* and called another row *"the newest blocker"* — causal claims the card
+  refuses to make. The system prompt also forbids naming a cause outright;
+- **the facts** carry only `ciStatus` + `observed` age. Approvals and diff size belong to the
+  landing PR, and "one approval" beside "default branch" is a claim about the wrong object;
+- **the row** leads with "`owner/repo` **default branch**" and demotes the PR to "landed by #N",
+  matching the `ci_failing` card's existing wording on the attention board.
+
+### Routes, storage and cost
+
+`GET /api/pro/work-plan` (free: evidence + cached plan + a `stale` probe, tier `[search, read]`)
+and `POST` (billed, tier `[ai, ai_hourly]`). Both spelled explicitly in `tierFor` **above** the
+`/api/pro/` catch-all, because that catch-all tiers on the verb and this GET re-runs the fold.
+
+Storage is `pro_work_plans`, unique `(accountId, scopeKey)`, `output` TEXT in both dialects, in
+`eraseProByAccountId` and deliberately **not** in `pruneProByPrIds` (no `pr_id` grain).
+
+The cost gates copy the synthesis seam exactly: a synchronous in-flight claim (no `await` between
+`has()` and `add()`), the credit check **inside** the `try/finally`, a min-interval armed only on
+billed runs, `recordAiUsage` best-effort before the parse can fail, and a stored **empty sentinel**
+so an unparseable answer cannot loop-bill.
+
+⚠ **The POST folds the evidence BEFORE the throttle checks** — a deliberate divergence from
+synthesis. `WorkPlanResponse.evidence` is "always present when enabled" (the deterministic worklist
+renders whatever happens to the narration), so a throttled reply that dropped it would hand the
+panel nothing. The cost is bounded by this route's own `ai` bucket, which is tighter than the free
+GET's `search` bucket running the identical fold.
+
+⚠ `ctx.queries.getWorkPlan` is **optional** on `ProHostQueries` — called `?.()`, absent ⇒
+`{enabled: false}`. A required new member is the one case that forces an `apiVersion` bump; optional
+keeps it at 21 and degrades to this one feature going dark against an older host.

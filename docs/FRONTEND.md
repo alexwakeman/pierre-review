@@ -1525,3 +1525,50 @@ fade-out.
 `backfillFinishing` (rows still listed but every walk at ~100%, `remaining <= 0.01`) suppresses
 the countdown: the post-walk tails (ML-label purge, CI-history backfill) leave no drain to
 estimate, and a "~5 sec left" would sit frozen for minutes.
+
+---
+
+## Iconography — `components/Icons.tsx`
+
+The SPA ships **no icon library and no rendered emoji**. Every icon is a hand-written inline SVG
+component in one module. Read that file's header before adding one: it states the contract (24×24
+viewBox, `currentColor`, a `size` prop, `title` as the a11y switch — absent means decorative and
+`aria-hidden`, present makes it `role="img"`) and, at the bottom, exactly what stayed a character.
+
+### Why the migration happened
+
+~500 rendered glyphs were replaced. Three things were wrong with all of them:
+
+1. **An emoji paints its own colour.** 🙂 stayed a yellow face on both themes, could not be dimmed
+   with the button around it, and ignored every hover and disabled state. Same for 🤖 💬 ✨ 🎉.
+2. **A glyph is a font lookup**, so its advance width, baseline and weight are the platform's
+   choice. ✕ and ✓ sat on different baselines; ▾ and ▸ had visibly different optical sizes; ⚠ and
+   ✅ become full-colour emoji on several platforms via the variation-selector default.
+3. **It cannot be sized.** The AI-Fix picker's drag grip was a braille cell (⠿) whose "~11×12px"
+   box the 4px drag threshold was reasoned against — a guess the gesture depended on.
+
+### ⚠ What is deliberately NOT an icon
+
+Each of these is a decision, not an oversight, and "finishing the migration" would break something:
+
+- **Regex matchers and test fixtures.** `sync/review-fingerprint.ts`,
+  `sync/bot-resolution-markers.ts`, `packages/pro/src/bot-themes/build.ts` and `db/queries.ts`
+  (~9195, use `grep -a`) match ⚠️ 🛠️ 🧹 💡 ✅ **that review vendors write into their own comment
+  bodies**. Changing one silently breaks bot classification and no test fails loudly.
+- **`Activity/periodReportMarkdown.ts`** — a markdown export people paste elsewhere. It has no DOM,
+  so its ▲ ▼ ▵ stay characters.
+- **The backend CLI** (`apps/backend/src/status.ts`) — a terminal, not a browser.
+- **Glyphs inside `title=` / `aria-label=` strings.** An attribute value is text; those sites were
+  **reworded** (e.g. "the ✕ on the tab" → "the close button on the tab").
+- **Typographic arrows in prose and chart labels** ("open → 1st review", "Reports → People"),
+  maths/punctuation (· − ≥ ≈ ∪ ∩), and the landing arcade's ← → key legend.
+
+### Two rules that are easy to get wrong
+
+- ⚠ **`▾` was TWO controls.** `CaretIcon` (solid triangle) for a control that opens a **menu**;
+  `ChevronIcon` for an **expand/collapse** disclosure. Decide by what the click does. They were the
+  same character before, which is why the two roles were indistinguishable.
+- ⚠ **`lib/ui.ts` is `.ts` and cannot hold JSX**, so `CHECK_STATE_META.icon` is a component
+  **reference**, rendered `<m.icon size={11} />`. Its seven states each keep their own mark:
+  "it decided nothing", "it never ran" and "GitHub told us nothing" are three different facts, and
+  collapsing any into the failure mark would report a red nobody observed.

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Repo } from '@pierre-review/shared';
 import { useClickOutside } from '../hooks/useClickOutside.js';
+import { CaretIcon, CloseIcon, WarningIcon } from './Icons.js';
 
 // Show/hide dropdown for the ACTIVE WORKSPACE's repos — the only narrowing left inside a
 // workspace, and the reason this panel is mounted rather than merely defined. Each repo is a
@@ -81,9 +82,7 @@ export function RepoSelectPanel({
         >
           Repos
           {total > 0 ? ` (${filtered ? `${shownCount}/${total}` : total})` : ''}
-          <span aria-hidden className="text-[9px]">
-            ▾
-          </span>
+          <CaretIcon dir="down" />
         </button>
         {filtered && (
           <button
@@ -91,9 +90,9 @@ export function RepoSelectPanel({
             onClick={() => onShowAll()}
             title="Show every repo in this workspace"
             aria-label="Show every repo in this workspace"
-            className="py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
+            className="flex items-center self-stretch py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
           >
-            ✕
+            <CloseIcon size={11} />
           </button>
         )}
       </span>
@@ -157,11 +156,12 @@ export function RepoSelectPanel({
                       </span>
                       {r.lastSyncStatus === 'error' && (
                         <span
-                          className="shrink-0 text-red-500"
+                          role="img"
+                          className="flex shrink-0 items-center text-red-500"
                           title={r.lastSyncError ?? 'Last sync failed'}
                           aria-label="Last sync failed"
                         >
-                          ⚠
+                          <WarningIcon size={12} />
                         </span>
                       )}
                     </label>

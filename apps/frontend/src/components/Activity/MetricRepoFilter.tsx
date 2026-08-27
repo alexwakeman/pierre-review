@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
+import { CaretIcon, CloseIcon } from '../Icons.js';
 
 // Repo filter for a drill-down list (the Flow-metric sub-tabs and the workspace-wide open-PRs
 // tab) — matches the header FilterBar dropdowns (pill trigger + popover + checkbox rows).
@@ -58,9 +59,7 @@ export function MetricRepoFilter({
           className={`inline-flex items-center gap-1 py-0.5 pl-2.5 ${isAll ? 'pr-2.5' : 'pr-1'}`}
         >
           {isAll ? 'All Workspace repos' : `Repos (${shown}/${total})`}
-          <span aria-hidden className="text-[9px]">
-            ▾
-          </span>
+          <CaretIcon dir="down" />
         </button>
         {!isAll && (
           <button
@@ -68,9 +67,9 @@ export function MetricRepoFilter({
             onClick={() => onChange(null)}
             title="Show all Workspace repos"
             aria-label="Show all Workspace repos"
-            className="py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
+            className="flex items-center self-stretch py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
           >
-            ✕
+            <CloseIcon size={11} />
           </button>
         )}
       </span>

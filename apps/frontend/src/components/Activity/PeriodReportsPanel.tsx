@@ -37,6 +37,13 @@ import {
 import { AdHocChatPanel } from './AdHocChatPanel.js';
 import { PeriodPeopleSection } from './PeriodPeopleSection.js';
 import { CopyButton } from '../CopyButton.js';
+import {
+  CaretIcon,
+  ChevronIcon,
+  PartialCircleIcon,
+  RefreshIcon,
+  ThinSampleIcon,
+} from '../Icons.js';
 import type { Fmt, MetricMeta } from './periodReportMarkdown.js';
 import {
   METRIC_META,
@@ -188,7 +195,11 @@ function ChangeCell({
   const fav = favourability(delta);
   return (
     <span className={`text-[11px] font-medium ${toneClass(fav)}`}>
-      {delta.absoluteChange > 0 ? '▲' : '▼'} {signed(delta.absoluteChange, format)}
+      <CaretIcon
+        dir={delta.absoluteChange > 0 ? 'up' : 'down'}
+        className="inline-block align-[-0.1em]"
+      />{' '}
+      {signed(delta.absoluteChange, format)}
       {delta.percentChange != null ? (
         <span className="ml-1 font-normal">({signed(delta.percentChange, pctFmt)})</span>
       ) : (
@@ -543,7 +554,7 @@ function WorkspaceAxis({
                   className="shrink-0 text-amber-600 dark:text-amber-400"
                   title={coverageTitle}
                 >
-                  ◔
+                  <PartialCircleIcon />
                 </span>
               )}
             </span>
@@ -555,7 +566,7 @@ function WorkspaceAxis({
                   title={`Thin sample — ${cur.sampleSize} item${cur.sampleSize === 1 ? '' : 's'} behind this figure.`}
                   aria-label="thin sample"
                 >
-                  ▵
+                  <ThinSampleIcon />
                 </span>
               )}
             </span>
@@ -580,7 +591,7 @@ function WorkspaceAxis({
                 className={`text-[10px] ${MUTED}`}
                 title={
                   coveragePartial
-                    ? 'Raw change — coverage-biased: one window was only partially tracked (see ◔), so this difference mixes memberships. No significance test is run at workspace grain, so no percentage and no verdict colour.'
+                    ? 'Raw change — coverage-biased: one window was only partially tracked (see the amber partial-coverage marker beside the workspace name), so this difference mixes memberships. No significance test is run at workspace grain, so no percentage and no verdict colour.'
                     : "Raw change over this workspace's full membership — no significance test is run at workspace grain, so no percentage and no verdict colour"
                 }
               >
@@ -703,7 +714,12 @@ function MetricTable({
                       className="mt-0.5 text-[10px] text-sky-600 hover:underline dark:text-sky-400"
                       title="This metric, per workspace, for this period and the prior one"
                     >
-                      {wsOpen ? '▾' : '▸'} By workspace
+                      <ChevronIcon
+                        dir={wsOpen ? 'down' : 'right'}
+                        size={10}
+                        className="mr-1 inline-block align-[-0.1em]"
+                      />
+                      By workspace
                     </button>
                   )}
                 </td>
@@ -738,7 +754,7 @@ function MetricTable({
                       }
                       aria-label="thin sample"
                     >
-                      ▵
+                      <ThinSampleIcon />
                     </span>
                   )}
                   {headline != null && (
@@ -851,7 +867,11 @@ function Movements({
                   : 'Moved against this metric’s good direction'
             }
           >
-            {standaloneLabelFor(meta)} {m.absoluteChange > 0 ? '▲' : '▼'}{' '}
+            {standaloneLabelFor(meta)}{' '}
+            <CaretIcon
+              dir={m.absoluteChange > 0 ? 'up' : 'down'}
+              className="inline-block align-[-0.1em]"
+            />{' '}
             {signed(m.absoluteChange, changeFmtFor(meta))}
             {m.percentChange != null && ` (${signed(m.percentChange, pctFmt)})`}
           </span>
@@ -900,7 +920,7 @@ function AskAboutPeriod({ report }: { report: PeriodReport }): JSX.Element | nul
         className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         title="Ask free-form questions grounded in this period's data (Pro, runs your configured report model)"
       >
-        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <ChevronIcon dir={open ? 'down' : 'right'} />
         Ask about this period
       </button>
       {open && (
@@ -1164,7 +1184,12 @@ function GenerateControls({
               ? 'Loading…'
               : hasReport
                 ? stale
-                  ? '↻ Regenerate'
+                  ? (
+                      <span className="inline-flex items-center gap-1">
+                        <RefreshIcon size={11} />
+                        Regenerate
+                      </span>
+                    )
                   : 'Regenerate'
                 : 'Generate'}
         </button>
@@ -1364,7 +1389,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
                   {shortPeriodLabel(p)}
                   {!p.coverageComplete && (
                     <span className="ml-1 text-amber-600 dark:text-amber-400" title="Partial repo coverage">
-                      ◔
+                      <PartialCircleIcon />
                     </span>
                   )}
                 </button>

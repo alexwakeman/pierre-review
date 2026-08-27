@@ -3,6 +3,7 @@ import { useMe } from '../hooks/useTriage.js';
 import { useMyTurnByWorkspace } from '../hooks/useMyTurnByWorkspace.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { useFilters } from '../store/filters.js';
+import { CloseIcon } from './Icons.js';
 
 // The "Welcome back" banner — ALWAYS EXACTLY ONE LINE TALL, whatever the workspace count.
 //
@@ -194,9 +195,9 @@ export function WelcomeBackBanner(): JSX.Element | null {
         onClick={() => setDismissed(true)}
         aria-label="Dismiss"
         title="Dismiss for this session"
-        className="shrink-0 rounded px-1 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300"
+        className="flex shrink-0 items-center rounded px-1 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300"
       >
-        ✕
+        <CloseIcon />
       </button>
     </div>
   );

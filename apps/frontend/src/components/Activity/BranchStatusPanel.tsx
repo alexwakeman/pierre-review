@@ -13,6 +13,7 @@ import { CHECK_STATE_META, CI_META, relativeTime, safeExternalUrl } from '../../
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { ChartCard, PALETTE } from '../charts/common.js';
 import { DayStrip } from '../charts/DayStrip.js';
+import { ChevronIcon } from '../Icons.js';
 import { CiDot } from './BranchStatusChip.js';
 
 // The GitHub URL for a PR: every segment is data, encoded, and run through safeExternalUrl
@@ -64,12 +65,8 @@ function FailingCheck({ check }: { check: BranchCheckRun }): JSX.Element {
   const label = checkLabel(check);
   const inner = (
     <span className="flex min-w-0 items-center gap-1">
-      <span
-        aria-hidden="true"
-        style={{ color: meta.color }}
-        className="shrink-0 text-[10px] font-bold"
-      >
-        {meta.icon}
+      <span aria-hidden="true" style={{ color: meta.color }} className="flex shrink-0 items-center">
+        <meta.icon size={11} />
       </span>
       <span className="min-w-0 truncate" title={label}>
         {label}
@@ -330,7 +327,7 @@ function BranchRow({
             aria-hidden="true"
             className={`w-2 shrink-0 text-[9px] text-gray-400 ${hasHistory ? '' : 'opacity-0'}`}
           >
-            {open ? '▾' : '▸'}
+            <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
           </span>
           <CiDot status={status.ciStatus} />
           {showRepoName && (

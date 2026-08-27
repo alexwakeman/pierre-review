@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { WorkspaceMetrics, WorkspaceMetricStat, WorkspaceMetricKey } from '@pierre-review/shared';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
+import { CaretIcon, ChevronIcon } from '../Icons.js';
 import {
   ChartCard,
   ChartEmpty,
@@ -63,7 +64,8 @@ function Stat({
             improved ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'
           }`}
         >
-          {delta > 0 ? '▲' : '▼'} {format(Math.abs(delta))} <span className="text-gray-400">vs last</span>
+          <CaretIcon dir={delta > 0 ? 'up' : 'down'} className="inline-block align-[-0.1em]" />{' '}
+          {format(Math.abs(delta))} <span className="text-gray-400">vs last</span>
         </div>
       ) : lowConfidence ? (
         <div
@@ -364,7 +366,8 @@ export function WorkspaceMetricsPanel({
           onClick={() => setShowMore((s) => !s)}
           className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
-          {showMore ? '▾' : '▸'} More charts
+          <ChevronIcon dir={showMore ? 'down' : 'right'} className="inline-block align-[-0.1em]" />{' '}
+          More charts
           {moreChartsSlot == null ? ' — lead time · CI · review depth' : ''}
         </button>
         {showMore &&

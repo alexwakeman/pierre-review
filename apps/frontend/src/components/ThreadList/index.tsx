@@ -23,6 +23,7 @@ import {
   ML_SEVERITY_META,
 } from '../../lib/ui.js';
 import { useMlLabelIndex, useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
+import { BotIcon } from '../Icons.js';
 import { FileGroup } from './FileGroup.js';
 import { rollupCounts, threadSeverities } from './ThreadCountChips.js';
 
@@ -349,8 +350,12 @@ export function ThreadList({
 
           {vendor && (
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-medium" style={{ color: vendor.color }}>
-                🤖 {vendor.label}
+              <span
+                className="inline-flex items-center gap-1 font-medium"
+                style={{ color: vendor.color }}
+              >
+                <BotIcon size={12} />
+                {vendor.label}
               </span>
               <span className="text-gray-500">
                 {shown.length} thread{shown.length === 1 ? '' : 's'}
@@ -423,7 +428,7 @@ export function ThreadList({
           className="mx-3 my-2 rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2 text-xs dark:border-sky-800 dark:bg-sky-950/30"
         >
           <div className="mb-1.5 flex items-center gap-1.5 font-medium text-sky-800 dark:text-sky-200">
-            <span aria-hidden="true">🤖</span>
+            <BotIcon />
             Multiple bots flagged the same {dedupClusters.length === 1 ? 'line' : 'lines'}
           </div>
           <ul className="space-y-1.5">

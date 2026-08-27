@@ -2511,7 +2511,7 @@ export async function getMergers(accountId: number): Promise<RepoMergers[]> {
  * which flips after any UPDATE on Postgres. Only set MEMBERSHIP is read here; nothing may index
  * into `userIds` positionally.
  */
-async function viewerMaintainedRepoIds(
+export async function viewerMaintainedRepoIds(
   accountId: number,
   viewerUserId: number | null,
 ): Promise<Set<number>> {

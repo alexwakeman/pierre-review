@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { DERIVED_STATES, type DerivedState } from '@pierre-review/shared';
 import { DERIVED_STATE_META } from '../lib/ui.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
+import { CaretIcon, CloseIcon } from './Icons.js';
 
 // Show/hide dropdown for the derived thread-state ("Threads") filter. Replaces the
 // old pill row: each thread state is a checkbox; checking it narrows the board to
@@ -57,9 +58,7 @@ export function ThreadStateSelectPanel({
           }`}
         >
           Threads{active ? ` (${count})` : ''}
-          <span aria-hidden className="text-[9px]">
-            ▾
-          </span>
+          <CaretIcon dir="down" />
         </button>
         {active && (
           <button
@@ -67,9 +66,9 @@ export function ThreadStateSelectPanel({
             onClick={onClear}
             title="Clear the thread-state filter"
             aria-label="Clear the thread-state filter"
-            className="py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
+            className="flex items-center self-stretch py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
           >
-            ✕
+            <CloseIcon size={11} />
           </button>
         )}
       </span>

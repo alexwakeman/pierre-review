@@ -38,6 +38,7 @@ import {
   useAiFixSelection,
 } from '../store/aiFixComments.js';
 import { Markdown } from './Markdown.js';
+import { WarningIcon } from './Icons.js';
 import { FileDiffView, type DiffFile } from './diff/FileDiffView.js';
 import { parseGitPatch } from '../lib/diff.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
@@ -546,7 +547,8 @@ function TrunkStatus({
     const files = preview.conflictFiles;
     return (
       <div className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-700 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
-        ⚠ Conflicts with <span className="font-mono">{preview.trunk}</span>
+        <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+        Conflicts with <span className="font-mono">{preview.trunk}</span>
         {files.length > 0 ? (
           <>
             {' in '}

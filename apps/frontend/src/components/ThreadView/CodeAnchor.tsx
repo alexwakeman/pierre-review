@@ -1,5 +1,6 @@
 import { useFilters } from '../../store/filters.js';
 import { DiffHunk } from '../DiffHunk.js';
+import { ChevronIcon } from '../Icons.js';
 
 type LineKind = 'add' | 'del' | 'ctx';
 
@@ -41,9 +42,10 @@ export function CodeAnchor({
           type="button"
           onClick={() => toggle(threadId)}
           aria-expanded={true}
-          className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+          className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
         >
-          ⌃ Hide code context
+          <ChevronIcon dir="up" size={11} />
+          Hide code context
         </button>
       </div>
     );
@@ -73,8 +75,9 @@ export function CodeAnchor({
       className={`flex w-full items-center gap-2 overflow-hidden rounded-r border-l-2 bg-gray-50 py-0.5 pl-2 pr-2 text-left font-mono text-[12px] leading-snug hover:bg-gray-100 dark:bg-gray-900/60 dark:hover:bg-gray-800/60 ${BORDER[kind]}`}
     >
       <span className="min-w-0 flex-1 truncate">{anchorLine || ' '}</span>
-      <span className="shrink-0 font-sans text-[10px] text-gray-400">
-        ⌄ {lines.length} lines
+      <span className="inline-flex shrink-0 items-center gap-1 font-sans text-[10px] text-gray-400">
+        <ChevronIcon dir="down" size={10} />
+        {lines.length} lines
       </span>
     </button>
   );

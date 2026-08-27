@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import { Wordmark } from './Wordmark';
+import { CloseIcon, WorkspaceIcon } from './Icons.js';
 
 // Compact, scrollable help overlay opened from the header "?" button. A very brief
 // tour of the core flows — tracking repos, the timeline, focus mode, navigation.
@@ -36,11 +37,11 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           <button
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            className="flex items-center self-stretch text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
             aria-label="Close (Esc)"
             title="Close (Esc)"
           >
-            ✕
+            <CloseIcon size={14} />
           </button>
         </div>
 
@@ -56,7 +57,8 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
 
           <Section title="Add repos & scope with Workspaces">
             Every repo lives in exactly one <strong>Workspace</strong>, and a Workspace is the
-            only scope there is: the <em>◈</em> selector top-left picks <em>one</em>, and that
+            only scope there is: the <WorkspaceIcon className="inline-block align-[-0.1em]" />{' '}
+            selector top-left picks <em>one</em>, and that
             choice narrows the whole app — Activity, Insights and the Timeline — at once. There
             is no “all repos” and no “unassigned” bucket. <strong>Default</strong> is made for
             you: you can rename it, you can’t delete it, and new repos land there. Add repos,

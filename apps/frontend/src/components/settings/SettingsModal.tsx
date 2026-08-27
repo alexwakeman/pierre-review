@@ -10,6 +10,7 @@ import { AnthropicKeySection } from './AnthropicKeySection.js';
 import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
 import { GithubAppInstallSection } from './GithubAppInstallSection.js';
 import { YourDataSection } from './YourDataSection.js';
+import { CloseIcon } from '../Icons.js';
 
 // User configuration modal, opened from the header avatar menu. Mirrors HelpModal's shell
 // (fixed overlay + role=dialog card + capture-phase Escape so a dismiss doesn't reach the global
@@ -59,7 +60,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
             aria-label="Close (Esc)"
             title="Close (Esc)"
           >
-            ✕
+            <CloseIcon size={14} />
           </button>
         </div>
 

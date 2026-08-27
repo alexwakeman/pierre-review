@@ -3,6 +3,7 @@ import { useMergeOptions } from '../hooks/usePrWrites.js';
 import { useArmAutoMerge, useDisarmAutoMerge, usePrArmedIntent } from '../hooks/useAutoMerge.js';
 import { mergeVerdict, mergeWhenReadyEligible, toMergeStateStatus } from '../lib/ui.js';
 import { ApiError } from '../api/client.js';
+import { TimerIcon } from './Icons.js';
 
 // The dedicated "Merge when ready" control — THE one place auto-merge is ARMED (MergeControl
 // keeps its richer armed panel + cancel, but no arm button). Mounted beside Merge/Close in the
@@ -54,7 +55,7 @@ export function MergeWhenReadyControl({ prId }: { prId: number }): JSX.Element |
                 : 'Limn updates it from trunk if needed and merges when checks pass — while the app is running. A new commit on the branch disarms it.'
           }
         >
-          <span aria-hidden>⏲</span>{' '}
+          <TimerIcon />
           {inQueue
             ? 'In the merge queue'
             : armed.viaMergeQueue
@@ -159,7 +160,8 @@ export function MergeWhenReadyControl({ prId }: { prId: number }): JSX.Element |
           : "Arm Limn's watcher: it updates from trunk if needed and merges when checks pass — while the app is running"
       }
     >
-      <span aria-hidden>⏲</span> {queueEnabled ? 'Queue when ready' : 'Merge when ready'}
+      <TimerIcon />
+      {queueEnabled ? 'Queue when ready' : 'Merge when ready'}
     </button>
   );
 }

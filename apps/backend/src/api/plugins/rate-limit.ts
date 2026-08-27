@@ -233,6 +233,30 @@ function tierFor(method: string, path: string): readonly Tier[] {
     return [TIERS.search, TIERS.read];
   }
 
+  // ---- The work plan (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
+  // ONE endpoint, two verbs, two costs — the synthesis shape exactly, and tiered by copying it:
+  //   POST /api/pro/work-plan  the generate path — one Haiku call behind a payload-hash $0 cache,
+  //                            plus the evidence fold below. The catch-all's `generates` branch
+  //                            would land it on `ai` anyway; spelled here so the family's two
+  //                            tiers are DECIDED together (this file's failure mode is a tier
+  //                            nobody re-examined).
+  //   GET  /api/pro/work-plan  the free cached read — but it re-runs the whole `getWorkPlan`
+  //                            evidence fold to recompute the payload hash for the `stale` probe,
+  //                            and that fold reaches getWorkspaceInsights (the stalled-review /
+  //                            untouched-thread / reviewer-load cards) on top of the attention
+  //                            cards and the open-PR merge-state walk. That is the synthesis /
+  //                            bot-behaviour shape of cost — this process's event loop and this
+  //                            database, not GitHub quota and not Anthropic — so it takes the same
+  //                            60/min `search` bucket, NOT the catch-all's 600/min GET→read
+  //                            branch. The panel sits under the Activity brief strip, so this GET
+  //                            fires on every Activity mount and on the sync cadence behind it.
+  //                            It must NEVER grow a generation leg (the
+  //                            `GET /api/pro/prs/:id/annotations` precedent).
+  if (path === '/api/pro/work-plan') {
+    if (mutating) return [TIERS.ai, TIERS.aiHourly];
+    return [TIERS.search, TIERS.read];
+  }
+
   // ---- AI generation ----
   // ⚠ RE-DECIDED, not inherited: `POST /api/pro/prs/:id/annotations/run` now spends GITHUB quota
   // as well as model tokens — one PR_DETAIL_QUERY per uncached PR for the anchor hunks

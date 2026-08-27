@@ -23,6 +23,15 @@ import {
 import { reportModelLabel } from '../../hooks/usePeriodReports.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { MentionTextarea } from '../MentionTextarea.js';
+import {
+  BotIcon,
+  ChartIcon,
+  ChevronIcon,
+  CloseIcon,
+  CommentIcon,
+  PinIcon,
+  RefreshIcon,
+} from '../Icons.js';
 import { SummaryMarkdown } from './prRefTable.js';
 import { AdHocChart } from './AdHocChart.js';
 import { suggestionGroups } from './adHocChatModel.js';
@@ -191,8 +200,8 @@ function HistoryRow({
         aria-current={selected}
       >
         <span className="min-w-0 flex-1 truncate font-medium text-gray-700 dark:text-gray-200">
-          {item.wantChart && <span aria-hidden="true">📊 </span>}
-          {item.wantBots && <span aria-hidden="true">🤖 </span>}
+          {item.wantChart && <ChartIcon size={12} className="mr-1 inline-block align-[-0.1em]" />}
+          {item.wantBots && <BotIcon size={12} className="mr-1 inline-block align-[-0.1em]" />}
           {item.question}
         </span>
         {/* The range this row was answered over. Once the range is selectable, two rows with the
@@ -222,7 +231,8 @@ function HistoryRow({
         className="shrink-0 border-l border-gray-200 px-2 text-[10px] font-medium text-ai-signal hover:bg-ai-signal/10 hover:underline dark:border-gray-800"
         title="Load this question back into the box to edit or re-ask"
       >
-        ↻ Reuse
+        <RefreshIcon size={10} className="mr-1 inline-block align-[-0.1em]" />
+        Reuse
       </button>
     </li>
   );
@@ -434,7 +444,7 @@ export function AdHocChatPanel({
     >
       <div className="flex items-center gap-2">
         <span className="text-base font-semibold text-gray-800 dark:text-gray-100">
-          <span aria-hidden="true">💬</span>{' '}
+          <CommentIcon size={15} className="inline-block align-[-0.1em]" />{' '}
           {periodLabel != null ? 'Ask about this period' : 'Ask about the sprint'}
         </span>
         <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
@@ -548,7 +558,7 @@ export function AdHocChatPanel({
                 className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                 aria-expanded={open}
               >
-                <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+                <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
                 {g.title}
               </button>
             ) : (
@@ -663,7 +673,8 @@ export function AdHocChatPanel({
                   : 'Pin this prompt to re-run later'
             }
           >
-            <span aria-hidden="true">📌</span> {alreadyPinned ? 'Pinned' : 'Pin'}
+            <PinIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+            {alreadyPinned ? 'Pinned' : 'Pin'}
           </button>
           <button
             type="button"
@@ -702,8 +713,10 @@ export function AdHocChatPanel({
                   className="max-w-[22rem] truncate text-left hover:underline disabled:opacity-50"
                   title={`Re-run: ${p.text}`}
                 >
-                  {p.wantChart && <span aria-hidden="true">📊 </span>}
-                  {p.wantBots && <span aria-hidden="true">🤖 </span>}
+                  {p.wantChart && (
+                    <ChartIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+                  )}
+                  {p.wantBots && <BotIcon size={11} className="mr-1 inline-block align-[-0.1em]" />}
                   {p.text}
                 </button>
                 <button
@@ -713,7 +726,7 @@ export function AdHocChatPanel({
                   title="Remove this pinned prompt"
                   aria-label="Remove pinned prompt"
                 >
-                  ✕
+                  <CloseIcon />
                 </button>
               </span>
             ))}
@@ -729,7 +742,7 @@ export function AdHocChatPanel({
           className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           aria-expanded={historyOpen}
         >
-          <span aria-hidden="true">{historyOpen ? '▾' : '▸'}</span>
+          <ChevronIcon dir={historyOpen ? 'down' : 'right'} />
           History
           {historyTotal > 0 && <span className="text-gray-400">· {historyTotal}</span>}
         </button>
@@ -768,7 +781,8 @@ export function AdHocChatPanel({
                   disabled={historyPage === 0}
                   className="rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:hover:border-gray-500"
                 >
-                  ← Newer
+                  <ChevronIcon dir="left" size={11} className="mr-1 inline-block align-[-0.1em]" />
+                  Newer
                 </button>
                 <span className="tabular-nums">
                   Page {historyPage + 1} of {pageCount}
@@ -779,7 +793,8 @@ export function AdHocChatPanel({
                   disabled={historyPage + 1 >= pageCount}
                   className="rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:hover:border-gray-500"
                 >
-                  Older →
+                  Older
+                  <ChevronIcon dir="right" size={11} className="ml-1 inline-block align-[-0.1em]" />
                 </button>
               </div>
             )}

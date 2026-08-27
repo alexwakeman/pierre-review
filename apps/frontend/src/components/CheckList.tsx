@@ -7,6 +7,7 @@ import {
   joinLogPages,
   useCheckLogs,
 } from '../hooks/useCheckLogs.js';
+import { ArrowIcon, ChevronIcon, ExternalLinkIcon } from './Icons.js';
 
 // A GitHub Actions check's detailsUrl is .../actions/runs/<runId>/job/<jobId>. The
 // backend parses jobId/runId into fields, but we ALSO derive them from the url here so
@@ -101,7 +102,9 @@ export function CheckRow({
       style={{ backgroundColor: m.color }}
       title={m.label}
     >
-      {m.icon}
+      {/* The state's own mark, on a filled disc — so it inherits the disc's white
+          `currentColor` rather than painting its own. */}
+      <m.icon size={10} />
     </span>
   );
   const gitHubLink = check.url ? (
@@ -112,7 +115,7 @@ export function CheckRow({
       onClick={(e) => e.stopPropagation()}
       className="text-blue-500 hover:underline"
     >
-      Open on GitHub ↗
+      Open on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
     </a>
   ) : null;
 
@@ -159,8 +162,9 @@ export function CheckRow({
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5 text-gray-400">
             <span className="text-xs">{m.label}</span>
-            <span className="text-[10px] font-medium text-blue-500">
-              {expanded ? '▾ hide logs' : '▸ logs'}
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-blue-500">
+              <ChevronIcon dir={expanded ? 'down' : 'right'} size={10} />
+              {expanded ? 'hide logs' : 'logs'}
             </span>
           </span>
         </span>
@@ -193,9 +197,14 @@ export function CheckRow({
                       onClick={loadEarlier}
                       title="Load the previous chunk of this log (or just scroll up)"
                     >
-                      {logs.isFetchingNextPage
-                        ? 'Loading earlier…'
-                        : '↑ Load earlier'}
+                      {logs.isFetchingNextPage ? (
+                        'Loading earlier…'
+                      ) : (
+                        <>
+                          <ArrowIcon dir="up" size={10} className="inline-block align-[-0.1em]" />{' '}
+                          Load earlier
+                        </>
+                      )}
                     </button>
                   )}
                   {gitHubLink}

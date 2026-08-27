@@ -5,6 +5,7 @@ import { useBotColors } from '../hooks/useBotColors.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { automatedReviewerMeta, relativeTime } from '../lib/ui.js';
 import { fmtDuration } from './charts/common.js';
+import { CommentIcon, ReviewIcon, WarningIcon } from './Icons.js';
 
 // The PrDetail "Bot activity" tab (EXPERIMENTAL, CORE, deterministic) — the per-PR view of the
 // aggregate Behaviour tab. For each automated reviewer that touched THIS PR: its on-PR timeline
@@ -39,11 +40,12 @@ function BotBlock({ bot, color }: { bot: PrBotBehaviour; color: string }): JSX.E
   const moreFollowups =
     bot.typicalFollowups != null && bot.followupCount >= bot.typicalFollowups + 2;
 
-  // TTFR vs-typical evidence line.
+  // TTFR vs-typical evidence line. The caution mark is rendered as an icon beside this text
+  // (see below) rather than baked into the string — it has to take the line's red tint.
   const ttfrNote = building
     ? 'building baseline'
     : anomaly
-      ? `⚠ slower than typical — ${dur(bot.ttfrHours)} vs ${dur(bot.typicalTtfrHours)} typical`
+      ? `slower than typical — ${dur(bot.ttfrHours)} vs ${dur(bot.typicalTtfrHours)} typical`
       : `within typical (${dur(bot.typicalTtfrHours)})`;
 
   return (
@@ -66,7 +68,8 @@ function BotBlock({ bot, color }: { bot: PrBotBehaviour; color: string }): JSX.E
           // The ABSOLUTE delta over typical (not a ratio — a ratio rounds to a misleading "1×"
           // near the threshold, and divides by ~0 when a bot's typical TTFR is 0).
           <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400">
-            ⚠ {dur((bot.ttfrHours ?? 0) - (bot.typicalTtfrHours ?? 0))} slower than usual
+            <WarningIcon size={10} className="inline-block align-[-0.1em]" />{' '}
+            {dur((bot.ttfrHours ?? 0) - (bot.typicalTtfrHours ?? 0))} slower than usual
           </span>
         )}
       </div>
@@ -80,7 +83,12 @@ function BotBlock({ bot, color }: { bot: PrBotBehaviour; color: string }): JSX.E
 
       <div className="text-[11px] text-gray-500 dark:text-gray-400">
         {/* TTFR vs the bot's own typical — the "vs typical" evidence. */}
-        <span className={anomaly ? 'font-medium text-red-600 dark:text-red-400' : ''}>{ttfrNote}</span>
+        <span className={anomaly ? 'font-medium text-red-600 dark:text-red-400' : ''}>
+          {!building && anomaly && (
+            <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+          )}
+          {ttfrNote}
+        </span>
         {bot.ttfrBasis && !building && (
           <span className="text-gray-400"> · from {bot.ttfrBasis === 'ready' ? 'ready-for-review' : 'opened'}</span>
         )}
@@ -105,7 +113,7 @@ function BotBlock({ bot, color }: { bot: PrBotBehaviour; color: string }): JSX.E
               className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] text-gray-600 dark:text-gray-300"
               title={new Date(t.at).toLocaleString()}
             >
-              <span aria-hidden>{t.kind === 'review' ? '📝' : '💬'}</span>
+              {t.kind === 'review' ? <ReviewIcon size={10} /> : <CommentIcon size={10} />}
               {relativeTime(t.at)}
             </span>
           ))}

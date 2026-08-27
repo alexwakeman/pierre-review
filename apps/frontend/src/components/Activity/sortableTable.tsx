@@ -3,6 +3,8 @@
 // header-click reducer. Each table keeps its OWN column enum + per-column sort values +
 // natural directions — only the generic mechanics live here so the three read identically.
 
+import { CaretIcon } from '../Icons.js';
+
 export type SortDir = 'asc' | 'desc';
 
 export interface SortState<C extends string> {
@@ -58,7 +60,7 @@ export function SortHeader<C extends string>({
       >
         {label}
         <span aria-hidden className={dir != null ? '' : 'invisible'}>
-          {dir === 'asc' ? '▲' : '▼'}
+          <CaretIcon dir={dir === 'asc' ? 'up' : 'down'} />
         </span>
       </button>
     </th>

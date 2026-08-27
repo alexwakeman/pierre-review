@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { skipToken, useQuery } from '@tanstack/react-query';
 import type {
   AutomationMetricKey,
@@ -47,6 +47,7 @@ import {
   indexUsers,
   relativeTime,
 } from '../../lib/ui.js';
+import { ArrowIcon, PersonIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { MlSeverityBadge } from '../MlSeverityBadge.js';
 import { KEY_LABEL, KEY_TITLE, fmtValue } from './PersonPeriodSection.js';
@@ -627,7 +628,7 @@ function HumanSection({
             className="h-[18px] w-[18px] shrink-0 rounded-full bg-gray-200 dark:bg-gray-800"
           />
         ) : (
-          <span aria-hidden="true">👤</span>
+          <PersonIcon size={18} className="shrink-0" />
         )}
         <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">
           {selection.label}
@@ -841,7 +842,8 @@ function Stat({
   title,
 }: {
   label: string;
-  value: string;
+  // ReactNode, not string: the Inflation cell renders ArrowIcons beside its two counts.
+  value: ReactNode;
   title?: string;
 }): JSX.Element {
   return (
@@ -1198,9 +1200,16 @@ function BotSection({
             <Stat
               label="Inflation"
               value={
-                inf == null || inf.badged === 0
-                  ? '—'
-                  : `↑${inf.overCall} ↓${inf.underCall} of ${inf.badged}`
+                inf == null || inf.badged === 0 ? (
+                  '—'
+                ) : (
+                  <>
+                    <ArrowIcon dir="up" size={11} className="inline-block align-[-0.1em]" />
+                    {inf.overCall}{' '}
+                    <ArrowIcon dir="down" size={11} className="inline-block align-[-0.1em]" />
+                    {inf.underCall} of {inf.badged}
+                  </>
+                )
               }
               title={
                 inf == null || inf.badged === 0

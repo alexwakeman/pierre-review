@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useClosePr } from '../hooks/usePrWrites.js';
 import { ApiError } from '../api/client.js';
+import { CloseIcon } from './Icons.js';
 
 // Close control for the Overview "Actions" row (CORE / free tier), rendered when the viewer
 // may close the PR (pr.viewerCanClose — write access OR the PR author) and it's still open +
@@ -27,7 +28,7 @@ export function ClosePrControl({ prId }: { prId: number }): JSX.Element {
           className="inline-flex items-center gap-1 rounded border border-gray-400 px-2 py-0.5 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
           title="Close this PR without merging (reversible on GitHub)"
         >
-          <span aria-hidden>✕</span> Close
+          <CloseIcon /> Close
         </button>
         {error && <span className="text-xs text-red-500">{error}</span>}
       </div>

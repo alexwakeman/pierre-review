@@ -199,6 +199,21 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/pro/synthesis')).not.toContain('ai');
   });
 
+  // /api/pro/work-plan — the synthesis shape again, and tiered by copying it. The POST is a real
+  // model spend (Haiku behind a payload-hash $0 cache) → the `ai` pair. The free GET re-runs the
+  // whole getWorkPlan evidence fold to recompute the hash for its `stale` probe — attention cards
+  // + getWorkspaceInsights + the open-PR merge-state walk — so it must sit on `search`, NOT
+  // inherit the /api/pro/ catch-all's 600/min GET→read branch. The panel lives under the Activity
+  // brief strip, so that GET fires on every Activity mount and on the sync cadence behind it.
+  it('tiers the work-plan endpoint per verb: POST on the AI pair, GET on the expensive read bucket', () => {
+    expect(tiers('POST', '/api/pro/work-plan')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/pro/work-plan')).toEqual(['search', 'read']);
+    // The free read must never be swept onto the billed bucket...
+    expect(tiers('GET', '/api/pro/work-plan')).not.toContain('ai');
+    // ...and must never drift down onto the 600/min blanket the catch-all would have handed it.
+    expect(tiers('GET', '/api/pro/work-plan')).not.toEqual(['read']);
+  });
+
   // /api/pro/bot-themes — the revived Bots "What they're flagging" panel. Both tiers land via
   // the /api/pro/ catch-all and are pinned here so the family's placement is explicit: the POST
   // /refresh is a real model spend (Haiku behind a payload-hash $0 cache) → the `ai` pair; the

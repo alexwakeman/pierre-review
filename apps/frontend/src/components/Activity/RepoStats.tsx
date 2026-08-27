@@ -1,5 +1,6 @@
 import type { ActivityRepoStats } from '@pierre-review/shared';
 import { relativeTime } from '../../lib/ui.js';
+import { BotIcon, TimerIcon } from '../Icons.js';
 
 // The one-line repo stat summary (open / draft / stalled / TTFR / oldest unreviewed).
 // Rendered by the single-repo RepoFeedHeader. "Merged" is deliberately NOT here — the
@@ -19,7 +20,8 @@ export function RepoStatsLine({ stats: s }: { stats: ActivityRepoStats }): JSX.E
       </span>
       {s.stalledPrs > 0 && (
         <span className="text-amber-500">
-          <span className="tabular-nums">{s.stalledPrs}</span> stalled ⏱
+          <span className="tabular-nums">{s.stalledPrs}</span> stalled{' '}
+          <TimerIcon size={12} className="inline-block align-[-0.1em]" />
         </span>
       )}
       {s.medianHoursToFirstReview != null && (
@@ -51,7 +53,8 @@ export function RepoStatsLine({ stats: s }: { stats: ActivityRepoStats }): JSX.E
           className="text-sky-600 dark:text-sky-400"
           title="Review-bot threads on open PRs, and the share a later commit has likely addressed (resolved or likely_addressed). An approximate signal — likely_addressed is a heuristic."
         >
-          🤖 <span className="tabular-nums">{s.botThreads}</span> bot thread
+          <BotIcon size={12} className="inline-block align-[-0.1em]" />{' '}
+          <span className="tabular-nums">{s.botThreads}</span> bot thread
           {s.botThreads === 1 ? '' : 's'} ·{' '}
           <span className="tabular-nums">
             {Math.round((s.botThreadsActedOn / s.botThreads) * 100)}%

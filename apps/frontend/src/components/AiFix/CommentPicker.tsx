@@ -28,6 +28,7 @@ import {
   useAiFixCommentActions,
   useAiFixSelection,
 } from '../../store/aiFixComments.js';
+import { CheckIcon, ExternalLinkIcon, GripIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { MlSeverityBadge } from '../MlSeverityBadge.js';
 import { UserName } from '../UserName.js';
@@ -228,9 +229,13 @@ function Grip({
           ? 'Drag into the fix scope (or press +)'
           : 'Drag out of the fix scope (or press −)'
       }
-      className="shrink-0 cursor-grab touch-none select-none px-0.5 text-xs leading-none text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400"
+      className="flex shrink-0 cursor-grab touch-none select-none items-center px-0.5 text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400"
     >
-      ⠿
+      {/* An EXPLICIT 11px box. This used to be a braille glyph (⠿), whose advance width is
+          whatever the platform's fallback font decided — and the 4px drag threshold below is
+          reasoned about against this handle's size, so "about eleven pixels" was a guess the
+          gesture depended on. Now it is a number. */}
+      <GripIcon size={11} />
     </span>
   );
 }
@@ -302,10 +307,10 @@ function CommentRowImpl({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="shrink-0 text-gray-400 hover:text-sky-600 dark:hover:text-sky-400"
+            className="flex shrink-0 items-center text-gray-400 hover:text-sky-600 dark:hover:text-sky-400"
             title="Open on GitHub"
           >
-            ↗
+            <ExternalLinkIcon size={11} />
           </a>
         )}
       </div>
@@ -351,8 +356,9 @@ function CommentRowImpl({
           }
         >
           {/* A tick, not a disabled +: "already in scope" is a STATE worth reading at a glance
-              down a 60-row list, and a greyed-out + reads as "broken" rather than "done". */}
-          {selected ? '✓' : '+'}
+              down a 60-row list, and a greyed-out + reads as "broken" rather than "done".
+              Sized to sit alongside the `+`, which the button's own `text-xl` still draws. */}
+          {selected ? <CheckIcon size={16} /> : '+'}
         </button>
       )}
     </div>

@@ -15,6 +15,7 @@ import { useFilters } from '../../store/filters.js';
 import { type TabMeta } from '../../store/pinnedTabs.js';
 import { CI_META, CONFIDENCE_META, indexUsers, relativeTime, userLabel } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
+import { CheckCircleIcon, ChevronIcon, RefreshIcon, ResolveIcon } from '../Icons.js';
 import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
 import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
 import {
@@ -317,7 +318,7 @@ export function BotThreadsDetail(): JSX.Element {
   const header = (
     <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
-          <span aria-hidden>🧹</span> Resolve bot threads
+          <ResolveIcon size={15} className="inline-block align-[-0.1em]" /> Resolve bot threads
         </h2>
         <span className="text-[11px] text-gray-400">
           PRs with likely-addressed automated-reviewer threads — a later commit touched their
@@ -348,9 +349,10 @@ export function BotThreadsDetail(): JSX.Element {
           disabled={isFetching}
           className="ml-auto rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         >
-          <span aria-hidden className={isFetching ? 'animate-spin' : ''}>
-            ↻
-          </span>{' '}
+          <RefreshIcon
+            size={11}
+            className={`inline-block align-[-0.1em] ${isFetching ? 'animate-spin' : ''}`}
+          />{' '}
           Refresh
         </button>
       </div>
@@ -371,7 +373,8 @@ export function BotThreadsDetail(): JSX.Element {
         <div className="text-sm text-red-500">Couldn’t load the resolvable threads.</div>
       ) : prs.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          No likely-addressed bot threads to review. 🎉
+          <CheckCircleIcon className="mr-1.5 inline-block align-[-0.1em] opacity-70" />
+          No likely-addressed bot threads to review.
         </div>
       ) : receiptsCollapsed ? (
         // P2.2: the synthesis leads and the receipts COLLAPSE (never hidden). Both counts are
@@ -631,9 +634,10 @@ export function BotThreadsDetail(): JSX.Element {
                 type="button"
                 onClick={() => setPage(Math.max(0, safePage - 1))}
                 disabled={safePage === 0}
-                className="rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 disabled:opacity-40 dark:border-gray-700"
+                className="inline-flex items-center gap-0.5 rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 disabled:opacity-40 dark:border-gray-700"
               >
-                ← Prev
+                <ChevronIcon dir="left" size={11} />
+                Prev
               </button>
               <span className="tabular-nums">
                 Page {safePage + 1} of {pageCount} · {sorted.length} PRs
@@ -642,9 +646,10 @@ export function BotThreadsDetail(): JSX.Element {
                 type="button"
                 onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
                 disabled={safePage >= pageCount - 1}
-                className="rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 disabled:opacity-40 dark:border-gray-700"
+                className="inline-flex items-center gap-0.5 rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 disabled:opacity-40 dark:border-gray-700"
               >
-                Next →
+                Next
+                <ChevronIcon dir="right" size={11} />
               </button>
             </div>
           )}

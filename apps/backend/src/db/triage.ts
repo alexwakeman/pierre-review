@@ -41,7 +41,7 @@ export interface TriageResult {
 // The merge-state values that mean "GitHub would let this land right now". Mirrors the
 // `canMerge` half of the frontend's `mergeVerdict()` resolver (lib/ui.ts) — the two must
 // agree, or a PR reads "approved & ready" in the triage queue and "blocked" on the PR itself.
-const READY_MERGE_STATES: ReadonlySet<MergeStateStatus> = new Set<MergeStateStatus>([
+export const READY_MERGE_STATES: ReadonlySet<MergeStateStatus> = new Set<MergeStateStatus>([
   'clean',
   'has_hooks',
   'unstable',

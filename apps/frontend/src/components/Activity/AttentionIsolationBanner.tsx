@@ -9,6 +9,7 @@ import {
   myTurnPersonalCapDisclosure,
   passesRelevanceLens,
 } from './AttentionView.js';
+import { FilterIcon } from '../Icons.js';
 
 // The isolation banner on the "Needs attention" board ("Showing only Your turn …"). Modelled on
 // FeedIsolationBanner: INLINE (it scrolls with the content — never fixed, never sticky, per the
@@ -75,7 +76,7 @@ export function AttentionIsolationBanner(): JSX.Element | null {
       : null;
   return (
     <div className="flex items-center gap-2 rounded-md border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs text-sky-800 shadow-sm dark:border-sky-500/50 dark:bg-sky-950/60 dark:text-sky-200">
-      <span aria-hidden="true">☰</span>
+      <FilterIcon className="shrink-0" />
       <span className="min-w-0 flex-1 truncate" title={cap?.title}>
         Showing only{' '}
         {/* "Review or reply" + "that personally involves you" is the same sentence as "Your

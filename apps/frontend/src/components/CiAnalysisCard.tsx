@@ -14,6 +14,7 @@ import {
 } from '../hooks/useAiFix.js';
 import { jobIdOf } from './CheckList.js';
 import { Markdown } from './Markdown.js';
+import { ChevronIcon } from './Icons.js';
 
 // The CI-failure diagnosis ("why did CI fail?"), extracted out of the AI-Fix tab so it can
 // sit INLINE on the PR detail pane next to the red checks — which is where the question is
@@ -180,7 +181,7 @@ export function CiAnalysisCard({
         aria-expanded={open}
         className="flex w-full flex-wrap items-center gap-1.5 px-2 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-900"
       >
-        <span className="text-[10px] text-gray-400">{open ? '▾' : '▸'}</span>
+        <ChevronIcon dir={open ? 'down' : 'right'} size={10} className="text-gray-400" />
         <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">
           Why did CI fail?
         </span>

@@ -19,6 +19,22 @@ const STATE_LABEL: Record<TimelinePr['state'], string> = {
   closed: 'Closed',
 };
 
+// The same drawing `WarningIcon` renders in React (components/Icons.tsx), inlined as a MARKUP
+// STRING because a vis-timeline tooltip is raw HTML handed to the library, not a React tree —
+// a component cannot go here. `currentColor` still does the work: the icon takes its colour
+// from `.pr-tt-warn`, which is the whole reason the ⚠ character had to go (an emoji-presented
+// glyph painted its own colour and ignored the row's).
+//
+// It is a DIRECT child of `.pr-tt-row` (like `.pr-tt-dot`), so the row's `align-items: center`
+// centres it. The old `.pr-tt-warn-icon` wrapper only set `font-weight`, which means nothing to
+// an SVG, so it is gone — the rule left behind in index.css is now unused.
+const WARNING_SVG =
+  `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+  `<path d="M10.7 3.9 2.4 18.6a1.5 1.5 0 0 0 1.3 2.2h16.6a1.5 1.5 0 0 0 1.3-2.2L13.3 3.9a1.5 1.5 0 0 0-2.6 0z"/>` +
+  `<line x1="12" y1="9.5" x2="12" y2="14"/>` +
+  `<circle cx="12" cy="17.3" r="1.05" fill="currentColor" stroke="none"/>` +
+  `</svg>`;
+
 // CI status as a small coloured dot. Rendered as a LEADING indicator at the very
 // start of an open PR's bar (success/fail at a glance) — the rest of the detail
 // (merge state, comment stats) now lives in the hover tooltip, not on the bar.
@@ -111,7 +127,7 @@ export function prTooltip(pr: TimelinePr, meta: PrBarMeta = {}): string {
   if (warn) {
     const why = warn.detail ? ` — ${warn.detail}` : '';
     rows.push(
-      `<div class="pr-tt-row pr-tt-warn"><span class="pr-tt-warn-icon">⚠</span><span>merge: ${escapeHtml(warn.label)}${escapeHtml(why)}</span></div>`,
+      `<div class="pr-tt-row pr-tt-warn">${WARNING_SVG}<span>merge: ${escapeHtml(warn.label)}${escapeHtml(why)}</span></div>`,
     );
   }
 

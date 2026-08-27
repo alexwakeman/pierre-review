@@ -16,6 +16,7 @@ import { WorkspaceSelector } from './WorkspaceSelector.js';
 import { GlobalSearch } from './Search/GlobalSearch.js';
 import { ThreadStateSelectPanel } from './ThreadStateSelectPanel.js';
 import { UserSelectPanel } from './UserSelectPanel.js';
+import { CloseIcon } from './Icons.js';
 
 const PRESETS: Exclude<RangePreset, 'custom'>[] = ['7d', '14d', '30d', '90d'];
 
@@ -66,9 +67,9 @@ function Chip({
         disabled={removeDisabled}
         title={removeTitle}
         aria-label={removeTitle}
-        className="py-0.5 pl-0.5 pr-2 opacity-50 hover:opacity-100 disabled:opacity-30"
+        className="flex items-center self-stretch py-0.5 pl-0.5 pr-2 opacity-50 hover:opacity-100 disabled:opacity-30"
       >
-        ✕
+        <CloseIcon size={11} />
       </button>
     </span>
   );

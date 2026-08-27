@@ -32,12 +32,16 @@ import { CopyButton } from './CopyButton.js';
 import { UserName } from './UserName.js';
 import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
 import {
+  DotIcon,
   ExternalLinkIcon,
+  EyeIcon,
   FeedIcon,
   MagnifierIcon,
   OctocatIcon,
   RefreshIcon,
   TimelineIcon,
+  TimerIcon,
+  WarningIcon,
 } from './Icons.js';
 import { ThreadList } from './ThreadList/index.js';
 import { BotTriageCard } from './BotTriageCard.js';
@@ -291,7 +295,8 @@ function ActivityList({
                     rel="noreferrer noopener"
                     className="text-gray-400 hover:text-blue-500"
                   >
-                    Open on GitHub ↗
+                    Open on GitHub{' '}
+                    <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
                   </a>
                 )}
               </div>
@@ -543,7 +548,8 @@ function PrCommentsList({
                   rel="noreferrer noopener"
                   className="text-blue-500 hover:underline"
                 >
-                  ↗ {isComment ? 'View comment on GitHub' : 'View review on GitHub'}
+                  <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />{' '}
+                  {isComment ? 'View comment on GitHub' : 'View review on GitHub'}
                 </a>
               )}
               {/* Pro (prSummary): spend one combined AI check on THIS comment alone — rewrite,
@@ -1045,7 +1051,7 @@ export function PrDetail({
             type="button"
             onClick={() => openPrFocusTab(pinnedMetaOf(pr, usersById))}
             className="shrink-0 rounded p-0.5 text-blue-500 hover:text-blue-600"
-            title="Focus — open this PR in its own isolated timeline tab (✕ on the tab to close)"
+            title="Focus — open this PR in its own isolated timeline tab (the close button on the tab closes it)"
             aria-label="Focus this PR in its own timeline tab"
           >
             <MagnifierIcon size={15} />
@@ -1124,7 +1130,8 @@ export function PrDetail({
               className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-xs font-medium text-violet-600 dark:text-violet-300"
               title="Auto-merge is armed — Limn updates it from trunk if needed and merges when checks pass, while the app is running. Cancel from Overview → Actions."
             >
-              <span aria-hidden>⏲</span> Auto-merge armed
+              <TimerIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
+              Auto-merge armed
             </span>
           )}
           {(() => {
@@ -1139,7 +1146,7 @@ export function PrDetail({
                 className="ml-auto shrink-0 rounded bg-sky-500/15 px-1.5 py-0.5 text-xs font-medium text-sky-500 hover:bg-sky-500/25"
                 title="Filter activity to what's new since you last looked"
               >
-                👁 {summary}
+                <EyeIcon size={12} className="inline-block align-[-0.1em]" /> {summary}
               </button>
             ) : null;
           })()}
@@ -1211,7 +1218,7 @@ export function PrDetail({
               {TAB_LABELS[t]}
               {t === 'overview' && failing > 0 && (
                 <span className="ml-1 text-red-500" title={`${failing} failing`}>
-                  ●
+                  <DotIcon size={7} className="inline-block align-middle" />
                 </span>
               )}
               {t === 'threads' && pr.threads.length > 0 && (
@@ -1232,7 +1239,7 @@ export function PrDetail({
                   className="ml-1 text-red-500"
                   title={`${botTtfrAnomalies} bot slower than its typical on this PR`}
                 >
-                  ⚠
+                  <WarningIcon size={11} className="inline-block align-[-0.1em]" />
                 </span>
               )}
             </button>

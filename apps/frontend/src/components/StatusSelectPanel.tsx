@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { PrStatus } from '@pierre-review/shared';
 import { ALL_PR_STATUSES, DEFAULT_PR_STATUSES } from '../store/filters.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
+import { CaretIcon, CloseIcon } from './Icons.js';
 
 const STATUS_LABELS: Record<PrStatus, string> = {
   draft: 'Draft',
@@ -91,9 +92,7 @@ export function StatusSelectPanel({
           }`}
         >
           Status{atDefault ? '' : ` (${count})`}
-          <span aria-hidden className="text-[9px]">
-            ▾
-          </span>
+          <CaretIcon dir="down" />
         </button>
         {!atDefault && (
           <button
@@ -101,9 +100,9 @@ export function StatusSelectPanel({
             onClick={reset}
             title="Reset statuses to default"
             aria-label="Reset statuses to default"
-            className="py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
+            className="flex items-center self-stretch py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
           >
-            ✕
+            <CloseIcon size={11} />
           </button>
         )}
       </span>

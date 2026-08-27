@@ -1,5 +1,6 @@
 import type { DigestPrRef, RepoDigest } from '@pierre-review/shared';
 import { relativeTime } from '../../lib/ui.js';
+import { ChevronIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { DigestMarkdown } from './DigestMarkdown.js';
 
 // Friendly model label ('claude-haiku-4-5' → 'Haiku'); falls back to the raw id.
@@ -64,10 +65,8 @@ export function RepoDigestCard({
           className="flex min-w-0 items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-ai-ink hover:text-ai-signal"
           title={collapsed ? 'Expand digest' : 'Collapse digest'}
         >
-          <span aria-hidden="true" className="text-[9px]">
-            {collapsed ? '▸' : '▾'}
-          </span>
-          <span aria-hidden="true">✨</span>
+          <ChevronIcon dir={collapsed ? 'right' : 'down'} size={10} />
+          <SparkleIcon size={12} />
           <span className="truncate normal-case">{title}</span>
         </button>
         {showProBadge && (
@@ -104,7 +103,7 @@ export function RepoDigestCard({
                     : "Regenerate this repo's digest (runs the cheap-tier model)"
               }
             >
-              <span aria-hidden="true">↻</span>
+              <RefreshIcon size={11} />
               {outOfCredits
                 ? 'Out of credits'
                 : regenerating

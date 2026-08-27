@@ -20,6 +20,7 @@ import {
   useSynthesis,
   type SynthesisDescriptor,
 } from '../../hooks/useSynthesis.js';
+import { BotIcon, CloseIcon } from '../Icons.js';
 import { SynthesisCard } from './SynthesisCard.js';
 
 // BOT COMMENTS PER MERGED PR — the drill-down behind the ROI table's "Comments/PR" column. Click a
@@ -375,10 +376,10 @@ export function BotVolumeDetail(): JSX.Element {
                 title={`Only ${botNarrowLabel(bots)}${bots.label ? '’s' : '’'} comments — opened from that bot's cell in the Bots table. Click to widen to every bot, keeping this window and scope.`}
                 className="flex items-center gap-1 rounded-full border border-ai-signal/50 bg-ai-signal/10 px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal"
               >
-                <span aria-hidden="true">🤖</span>
+                <BotIcon size={11} />
                 {botNarrowLabel(bots)} only
-                <span aria-hidden="true" className="text-ai-signal/70">
-                  ✕
+                <span className="flex items-center text-ai-signal/70">
+                  <CloseIcon size={11} />
                 </span>
               </button>
             )}

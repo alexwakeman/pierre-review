@@ -15,6 +15,7 @@ import type {
   PostReviewPreview,
   SynthesisInput,
   SynthesisScope,
+  WorkPlanEvidence,
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../github/compare.js';
 import type { PrReviewCommentHunks } from '../sync/hydrate-detail.js';
@@ -55,6 +56,13 @@ export interface ProCapabilities {
   // botTriage, which is true whenever the plugin is loaded): behaviour trends/anomalies,
   // per-bot drill-down, overlap, where-bots-work, inflation history, per-seat ROI cost.
   // The compute is CORE (db/queries.ts getBotBehaviourAnalytics etc.); this gates the surfaces.
+  workPlan: boolean; // The work plan (paid, like workspaceInsights/periodReports — the plugin
+  // returns `digestEnabled`): the prioritised "what should I work on today" worklist under the
+  // Activity daily-brief strip, plus its optional Haiku narration. Gates the WHOLE panel, both
+  // halves: the deterministic worklist is CORE compute (db/work-plan.ts) but has no free surface,
+  // and the narration is the plugin's billed POST. The ranked rows render with or without a plan.
+  // Additive, apiVersion still 21: an older plugin's register() simply returns an object without
+  // the key, which reads `undefined` → falsy → the panel stays dark, exactly like OSS mode.
 }
 
 // ---- AI Fix seams (github + coding) -------------------------------------------
@@ -888,6 +896,26 @@ export interface ProHostQueries {
     window: { fromMs: number; toMs: number },
     opts?: { evidence?: boolean },
   ): Promise<PersonPeriod | null>;
+  // The work-plan fold (core db/work-plan.ts): the workspace's prioritised worklist — every
+  // figure, id, link and RANK code-derived, capped at WORK_PLAN_ITEM_CAP, with the uncapped
+  // per-kind totals beside it. Typed with the SHARED `WorkPlanEvidence` (not `Promise<unknown>`)
+  // for the same reason getSynthesisInput and getDailyBriefCounts are: the plugin's payload hash
+  // folds these very fields, and a cast-and-hope seam is exactly where a hash formula drifts.
+  // ⚠ THE ALIGNMENT CONTRACT rides on this return: `counts` is folded from the SAME
+  // `/api/attention` cards `getDailyBriefCounts` above counts, so the panel can be ASSERTED equal
+  // to the strip above it. A divergence is a defect in ONE fold, not two opinions — so neither
+  // this seam nor the plugin may re-derive a count it could have read from here.
+  // ⚠ `evidence.generatedAt` and any `facts.ageHours` are DERIVED FROM `now`: they must never
+  // enter the plugin's payload hash, or a dormant workspace re-bills on a timer.
+  //
+  // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21. This is the `registerAccountErasure?` precedent
+  // (above) applied to a query member: a REQUIRED addition here is the case that would demand a
+  // bump, and a bump is four literals across TWO REPOS whose half-application degrades the ENTIRE
+  // plugin to OSS mode with nothing thrown. Optional degrades in ONE feature instead: a newer
+  // plugin against an older host finds it `undefined` and reports `enabled: false` for the work
+  // plan alone, while every other capability keeps serving. Purely additive — an older plugin
+  // simply never calls it.
+  getWorkPlan?(accountId: number, scope: BotScopeWire): Promise<WorkPlanEvidence>;
 }
 
 export interface ProContext {
@@ -1050,6 +1078,7 @@ export const EMPTY_CAPABILITIES: ProCapabilities = {
   botAdvisor: false,
   periodReports: false,
   botDepth: false,
+  workPlan: false,
 };
 let active: ProCapabilities = EMPTY_CAPABILITIES;
 export function setProCapabilities(c: ProCapabilities): void {

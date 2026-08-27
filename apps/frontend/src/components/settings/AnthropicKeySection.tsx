@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useClaudeKeyStatus, useSetClaudeKeyGlobal } from '../../hooks/useClaudeReview.js';
 import { SectionShell, Field, inputCls } from './ui.js';
+import { CheckIcon } from '../Icons.js';
 
 // BYO Anthropic API key — used STRICTLY for the advanced-AI agentic workflows (Claude Review
 // + AI Fix), never for summaries/digests. Stored locally only (~/.pierre-review/config.json);
@@ -23,8 +24,9 @@ export function AnthropicKeySection(): JSX.Element {
       desc="Used only for the advanced AI workflows — Claude Review and AI Fix — so they bill to your own Anthropic account. Not used for summaries or digests. Stored on this machine only; never sent anywhere but Anthropic."
     >
       {hasUserKey && (
-        <div className="text-xs text-green-700 dark:text-green-400">
-          ✓ Using your stored Anthropic key
+        <div className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400">
+          <CheckIcon size={12} />
+          Using your stored Anthropic key
         </div>
       )}
       <Field

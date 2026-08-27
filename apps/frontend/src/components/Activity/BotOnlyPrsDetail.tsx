@@ -6,6 +6,7 @@ import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { indexUsers, relativeTime, userLabel } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
+import { BotIcon, CheckCircleIcon, ExternalLinkIcon, RefreshIcon } from '../Icons.js';
 import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
 
 // The bot-only-PRs DRILL-DOWN — a persistent, singleton tab opened by the amber "only a bot
@@ -96,8 +97,9 @@ function Row({
         </td>
       )}
       <td className="py-1.5 pr-3">
-        <span className="rounded border border-amber-300 bg-amber-100/70 px-1.5 py-px text-[10px] font-medium text-amber-700 dark:border-amber-700/60 dark:bg-amber-900/30 dark:text-amber-300">
-          🤖 {pr.botLabel}
+        <span className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100/70 px-1.5 py-px text-[10px] font-medium text-amber-700 dark:border-amber-700/60 dark:bg-amber-900/30 dark:text-amber-300">
+          <BotIcon size={10} />
+          {pr.botLabel}
         </span>
       </td>
       <td className="py-1.5 pr-3 text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -121,10 +123,11 @@ function Row({
           target="_blank"
           rel="noreferrer noopener"
           onClick={(e) => e.stopPropagation()}
-          className="text-[11px] text-gray-500 hover:underline dark:text-gray-400"
+          className="inline-flex items-center gap-0.5 text-[11px] text-gray-500 hover:underline dark:text-gray-400"
           title="Open on GitHub"
         >
-          GitHub ↗
+          GitHub
+          <ExternalLinkIcon size={10} />
         </a>
       </td>
       <td className="py-1.5" onClick={(e) => e.stopPropagation()}>
@@ -322,9 +325,10 @@ export function BotOnlyPrsDetail(): JSX.Element {
           disabled={isFetching}
           className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         >
-          <span aria-hidden className={isFetching ? 'animate-spin' : ''}>
-            ↻
-          </span>{' '}
+          <RefreshIcon
+            size={11}
+            className={`inline-block align-[-0.1em] ${isFetching ? 'animate-spin' : ''}`}
+          />{' '}
           Refresh
         </button>
       </div>
@@ -339,9 +343,14 @@ export function BotOnlyPrsDetail(): JSX.Element {
         <div className="text-sm text-red-500">Couldn’t load the PR list.</div>
       ) : rows.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          {!showMerged && mergedCount > 0
-            ? `No open bot-only PRs — ${mergedCount} merged in this window. Tick “Show merged” to see them.`
-            : 'No bot-only PRs in this window. 🎉'}
+          {!showMerged && mergedCount > 0 ? (
+            `No open bot-only PRs — ${mergedCount} merged in this window. Tick “Show merged” to see them.`
+          ) : (
+            <>
+              <CheckCircleIcon className="mr-1.5 inline-block align-[-0.1em] opacity-70" />
+              No bot-only PRs in this window.
+            </>
+          )}
         </div>
       ) : (
         <div className="overflow-x-auto">

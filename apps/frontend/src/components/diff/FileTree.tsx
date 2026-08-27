@@ -3,6 +3,7 @@ import type { RefObject } from 'react';
 import type { FileTreeNode } from '../../lib/diff.js';
 import { isLockFile } from '../../lib/diff.js';
 import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
+import { ChevronIcon } from '../Icons.js';
 import { STATUS_META } from './status.js';
 
 // The Changes tab's navigation rail: the PR's CHANGED FILES ONLY, arranged in their real
@@ -10,7 +11,8 @@ import { STATUS_META } from './status.js';
 // in the diff panel (the caller turns that into a `DiffFocusTarget`).
 //
 // Styling is the house left-rail idiom (Activity/index.tsx): `border-l-2` rows with a sky
-// selected state, `aria-pressed`, plain-text carets, and a `dark:` twin on every colour.
+// selected state, `aria-pressed`, a disclosure chevron per directory, and a `dark:` twin on
+// every colour.
 // Indentation is an inline `paddingLeft` because Tailwind has no dynamic `pl-` class.
 
 const INDENT_PX = 10;
@@ -92,7 +94,9 @@ function TreeRow({
           className="flex w-full items-center gap-1.5 rounded border-l-2 border-transparent py-0.5 pr-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-800/50"
           title={`${node.path} — ${node.fileCount} file${node.fileCount === 1 ? '' : 's'}`}
         >
-          <span className="w-3 shrink-0 select-none text-gray-400">{open ? '▾' : '▸'}</span>
+          <span className="flex w-3 shrink-0 select-none justify-center text-gray-400">
+            <ChevronIcon dir={open ? 'down' : 'right'} />
+          </span>
           <span className="min-w-0 flex-1 truncate font-mono text-gray-500 dark:text-gray-400">
             {node.name}/
           </span>

@@ -1,5 +1,6 @@
 import { useFilters } from '../../store/filters.js';
 import { useWorkspaceOpenPrs } from '../../hooks/useTriage.js';
+import { FilterIcon } from '../Icons.js';
 
 // The single-PR feed-isolation banner ("Showing only #N …"). Rendered in the per-repo Activity
 // console directly UNDER the repo summary header (RepoFeedHeader) — the only place the feed can
@@ -18,7 +19,7 @@ export function FeedIsolationBanner(): JSX.Element | null {
   const isolatedPr = openPrsData?.prs.find((p) => p.id === feedIsolatedPrId) ?? null;
   return (
     <div className="flex items-center gap-2 rounded-md border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs text-sky-800 shadow-sm dark:border-sky-500/50 dark:bg-sky-950/60 dark:text-sky-200">
-      <span aria-hidden="true">☰</span>
+      <FilterIcon className="shrink-0" />
       <span className="min-w-0 flex-1 truncate">
         Showing only{' '}
         {isolatedPr != null ? (

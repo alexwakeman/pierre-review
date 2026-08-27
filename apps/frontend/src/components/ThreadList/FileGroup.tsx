@@ -1,5 +1,6 @@
 import type { ThreadDetail, User } from '@pierre-review/shared';
 import { useFilters } from '../../store/filters.js';
+import { ChevronIcon } from '../Icons.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { ThreadCountChips, rollupCounts } from './ThreadCountChips.js';
 
@@ -59,7 +60,10 @@ export function FileGroup({
         onClick={() => toggleFileGroup(path, defaultExpanded)}
         className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-900"
       >
-        <span className="text-gray-400">{isExpanded ? '▾' : '▸'}</span>
+        <ChevronIcon
+          dir={isExpanded ? 'down' : 'right'}
+          className="shrink-0 text-gray-400"
+        />
         <code className="min-w-0 flex-1 truncate font-mono text-xs" title={path}>
           {dir && <span className="text-gray-400">{dir}/</span>}
           <span className="font-semibold">{fileName}</span>

@@ -28,6 +28,7 @@ import {
   relativeTime,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
+import { BotIcon, RefreshIcon, ScalesIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { MlSeverityBadge } from '../MlSeverityBadge.js';
 import { UserName } from '../UserName.js';
@@ -523,9 +524,10 @@ export function BotPrsDetail(): JSX.Element {
           disabled={isFetching}
           className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         >
-          <span aria-hidden className={isFetching ? 'animate-spin' : ''}>
-            ↻
-          </span>{' '}
+          <RefreshIcon
+            size={11}
+            className={`inline-block align-[-0.1em] ${isFetching ? 'animate-spin' : ''}`}
+          />{' '}
           Refresh
         </button>
       </div>
@@ -567,7 +569,7 @@ export function BotPrsDetail(): JSX.Element {
                   }`}
                   style={on ? { color } : undefined}
                 >
-                  <span aria-hidden>🤖</span>
+                  <BotIcon size={12} />
                   {v.label}
                   <span className="ml-1 text-gray-400">{v.threads}</span>
                 </button>
@@ -696,7 +698,7 @@ export function BotPrsDetail(): JSX.Element {
                 }`}
                 title="Only comments where the bot's OWN declared severity badge differs from Limn's. This is a SEVERITY disagreement and nothing else: vendors declare no machine-readable category, so category disagreement is not derivable and is never claimed here."
               >
-                <span aria-hidden="true">⚖</span>
+                <ScalesIcon size={11} />
                 Bot disagrees
                 {facets.disagreements > 0 && (
                   <span className="tabular-nums opacity-70">{facets.disagreements}</span>

@@ -18,6 +18,7 @@ import {
   type ReviewerRoleInfo,
 } from './ThreadList/resolvable.js';
 import { DERIVED_STATE_META, ML_SEVERITY_META, userLabel } from '../lib/ui.js';
+import { BotIcon } from './Icons.js';
 
 // The per-PR bot triage card (Plan P3.2 / N2): one sentence that turns a bot-comment flood into
 // a decision — "N bot comments: X real issues · Y likely addressed · Z nit-flagged — [Resolve]".
@@ -226,7 +227,7 @@ export function BotTriageCard({
   const headline = (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <span className="inline-flex items-center gap-1 font-medium text-gray-700 dark:text-gray-200">
-        <span aria-hidden="true">🤖</span>
+        <BotIcon size={12} />
         {botCommentCount} bot comments
       </span>
       {segments.map((s, i) => (

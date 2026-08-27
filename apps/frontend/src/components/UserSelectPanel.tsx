@@ -3,6 +3,7 @@ import type { User } from '@pierre-review/shared';
 import { Avatar } from './CommentCard.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { userLabel } from '../lib/ui.js';
+import { CaretIcon, CloseIcon } from './Icons.js';
 
 // A labelled group of members in the picker (e.g. "Maintainers", a repo name,
 // or "Other"). The same user may appear in several sections; selection is keyed
@@ -287,7 +288,7 @@ export function UserSelectPanel({
           }`}
         >
           Members{activeCount > 0 ? ` (${activeCount})` : ''}
-          <span aria-hidden className="text-[9px]">▾</span>
+          <CaretIcon dir="down" />
         </button>
         {activeCount > 0 && (
           <button
@@ -298,9 +299,9 @@ export function UserSelectPanel({
             }}
             title="Clear members filter"
             aria-label="Clear members filter"
-            className="py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
+            className="flex items-center self-stretch py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
           >
-            ✕
+            <CloseIcon size={11} />
           </button>
         )}
       </span>

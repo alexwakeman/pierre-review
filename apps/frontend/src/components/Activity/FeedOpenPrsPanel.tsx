@@ -6,6 +6,7 @@ import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
 import { useFilters } from '../../store/filters.js';
 import { useFeedOpenPrsPanel } from '../../store/digestCollapse.js';
 import { indexUsers, sortOpenPrsByActivity } from '../../lib/ui.js';
+import { ChevronIcon } from '../Icons.js';
 import { OpenPrRows } from './RepoOpenPrList.js';
 
 interface PrGroup {
@@ -91,9 +92,10 @@ export function FeedOpenPrsPanel(): JSX.Element | null {
         aria-expanded={!collapsed}
         className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/40"
       >
-        <span aria-hidden="true" className="text-gray-400">
-          {collapsed ? '▸' : '▾'}
-        </span>
+        <ChevronIcon
+          dir={collapsed ? 'right' : 'down'}
+          className="shrink-0 text-gray-400"
+        />
         Open PRs · {openCount}
         {draftCount > 0 && (
           <span className="font-normal normal-case text-gray-400">

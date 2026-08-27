@@ -31,6 +31,11 @@ export const ACTIVITY_QUERY_KEYS = [
   // board of 3 the server-side cache split fixed. Invalidated here, they refetch IN PHASE.
   'attention-cards',
   'daily-brief',
+  // ⚠ AND THE WORK PLAN IS THE THIRD READ OF THAT SAME FOLD. It renders directly beneath the
+  // brief strip and its whole claim is that the two agree, so leaving it out reproduced the bug
+  // the note above describes — one panel refetching on the sync cadence while the panel under it
+  // froze at its first fetch, still listing PRs that had since merged.
+  'work-plan',
 ] as const;
 
 /**

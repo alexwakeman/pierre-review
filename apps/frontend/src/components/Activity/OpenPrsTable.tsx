@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import type { TimelinePr, User } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
@@ -10,6 +10,7 @@ import {
   userLabel,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
+import { CheckCircleIcon } from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
 
@@ -164,7 +165,12 @@ export function OpenPrsTable({
   isError,
   showRepoColumn,
   onOpenPr,
-  emptyLabel = 'No open PRs here. 🎉',
+  emptyLabel = (
+    <>
+      <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] text-gray-300 dark:text-gray-600" />
+      No open PRs here.
+    </>
+  ),
 }: {
   prs: TimelinePr[];
   isLoading: boolean;
@@ -172,7 +178,9 @@ export function OpenPrsTable({
   showRepoColumn: boolean;
   onOpenPr: (pr: TimelinePr) => void;
   // The zero-row copy — overridden when a client-side narrowing (not the data) emptied the list.
-  emptyLabel?: string;
+  // ReactNode, not string: the DEFAULT is the all-clear state and leads with a muted tick, while
+  // an override ("adjust the repo filter") is plain prose that must NOT wear one.
+  emptyLabel?: ReactNode;
 }): JSX.Element {
   const { data: users } = useUsers();
   const { data: repos } = useRepos();

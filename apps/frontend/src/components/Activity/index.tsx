@@ -7,6 +7,7 @@ import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
+import { BotIcon, SparkleIcon, WarningIcon, WorkspaceIcon } from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { BranchStatusChip } from './BranchStatusChip.js';
 import { BranchStatusPanel } from './BranchStatusPanel.js';
@@ -14,6 +15,7 @@ import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { RepoInsightsPanel } from './RepoInsightsPanel.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { BriefStrip } from './BriefStrip.js';
+import { WorkPlanCard } from './WorkPlanCard.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { FeedMetricsPanel } from './FeedMetricsPanel.js';
@@ -115,7 +117,8 @@ function RailRow({
               className="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400"
               title="PRs needing attention"
             >
-              ⚠{attentionCount}
+              <WarningIcon size={10} className="mr-0.5 inline-block align-[-0.1em]" />
+              {attentionCount}
             </span>
           )}
           <span className="ml-auto shrink-0 tabular-nums text-gray-400">
@@ -162,7 +165,7 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
                   : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
               }`}
             >
-              {t === 'bots' && <span aria-hidden="true">🤖</span>}
+              {t === 'bots' && <BotIcon />}
               {t === 'activity' ? 'Activity' : 'Bots'}
             </button>
           );
@@ -414,8 +417,8 @@ export function ActivityView(): JSX.Element {
               }`}
               title="Period-over-period reports for this workspace, with a grounded chat (Pro)"
             >
-              <span aria-hidden="true" className="shrink-0 text-ai-signal">
-                ◈
+              <span className="shrink-0 text-ai-signal">
+                <WorkspaceIcon />
               </span>
               <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
                 Reports
@@ -440,8 +443,8 @@ export function ActivityView(): JSX.Element {
             }`}
             title="One chronological stream across every repo in this workspace"
           >
-            <span aria-hidden="true" className="shrink-0 text-sky-500">
-              ✦
+            <span className="shrink-0 text-sky-500">
+              <SparkleIcon />
             </span>
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
               Feed
@@ -464,8 +467,8 @@ export function ActivityView(): JSX.Element {
             }`}
             title="Detect, measure and triage this workspace's automated review bots (free)"
           >
-            <span aria-hidden="true" className="shrink-0">
-              🤖
+            <span className="shrink-0">
+              <BotIcon />
             </span>
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
               Bots
@@ -488,8 +491,8 @@ export function ActivityView(): JSX.Element {
             }`}
             title="Stalled reviews, untouched threads, reviewer load and un-assigned PRs (free)"
           >
-            <span aria-hidden="true" className="shrink-0 text-amber-500">
-              ⚠
+            <span className="shrink-0 text-amber-500">
+              <WarningIcon />
             </span>
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
               Needs attention
@@ -602,6 +605,11 @@ export function ActivityView(): JSX.Element {
                     renders exactly once — the numeric-fallback FeedView below deliberately
                     doesn't carry it, and per-repo consoles never do). Self-hides at all-zero. */}
                 <BriefStrip />
+                {/* The work plan — the brief's counts turned into an ORDER. It sits here, directly
+                    under the strip, because the two are one population read two ways: the strip
+                    says how much is waiting, this says what to pick up first. Pro-only and
+                    self-hiding, so a free or OSS account sees the strip alone, unchanged. */}
+                <WorkPlanCard />
                 {/* "Is trunk green?" across every repo in scope — above the flow metrics,
                     because a red default branch invalidates every open PR's CI at once and is
                     the first thing worth knowing. Read-only; self-hides until branch-synced. */}

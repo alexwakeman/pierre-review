@@ -5,6 +5,28 @@ import { escapeHtml, profileUrl, userLabel } from '../../lib/ui.js';
 // repo (our proxy for "has merge rights"). Purple to echo the pr_merged marker.
 const SHIELD_GLYPH = `<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path fill="#8957e5" d="M8 .8 2.2 2.9v4.2c0 3.3 2.5 6.4 5.8 7.3 3.3-.9 5.8-4 5.8-7.3V2.9L8 .8Z"/><path d="M5.2 8 7.1 9.9 10.9 6" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
+// The collapse caret's two states, as the exact drawing `ChevronIcon` renders in React
+// (components/Icons.tsx — a disclosure, so a chevron and not the menu CaretIcon). They are
+// MARKUP STRINGS, not components, because a vis-timeline group label is raw HTML handed to the
+// library; a React element cannot go there. Exported because the delegated click handler in
+// Timeline/index.tsx flips the caret IN PLACE between rebuilds and must swap the same drawing —
+// two copies of this path would drift.
+//
+// ⚠ That handler now assigns `innerHTML`, not `textContent`: a `textContent` write would blow
+// the <svg> away and leave an empty button.
+function chevronSvg(points: string): string {
+  return (
+    `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    `<polyline points="${points}"/>` +
+    `</svg>`
+  );
+}
+
+/** Collapsed row — the chevron points right ("this opens"). */
+export const CHEVRON_RIGHT_SVG = chevronSvg('9 6 15 12 9 18');
+/** Expanded row — the chevron points down. */
+export const CHEVRON_DOWN_SVG = chevronSvg('6 9 12 15 18 9');
+
 // HTML for a vis-timeline user-row group label: avatar + name (+ maintainer shield).
 // Clicking the name opens the shared user popover (contribution totals + links) — the
 // same affordance every handle in the app now has. The old bar-chart metrics toggle was
@@ -46,7 +68,7 @@ export function renderUserLabel(
   // we only emit the affordance here. Omitted when no gid is supplied.
   const caretTitle = isCollapsed ? 'Expand row' : 'Collapse row';
   const caret = gid
-    ? `<button type="button" class="tl-collapse-caret" data-collapse-gid="${escapeHtml(gid)}" title="${escapeHtml(caretTitle)}" aria-label="${escapeHtml(caretTitle)}">${isCollapsed ? '▸' : '▾'}</button>`
+    ? `<button type="button" class="tl-collapse-caret" data-collapse-gid="${escapeHtml(gid)}" title="${escapeHtml(caretTitle)}" aria-label="${escapeHtml(caretTitle)}">${isCollapsed ? CHEVRON_RIGHT_SVG : CHEVRON_DOWN_SVG}</button>`
     : '';
 
   // Layout: a left gutter (caret + avatar) beside the name line — the name (+ maintainer

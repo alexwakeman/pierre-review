@@ -7,6 +7,7 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { ACTIVITY_QUERY_KEYS } from '../hooks/useActivity.js';
 import { safeExternalUrl } from '../lib/ui.js';
+import { ChevronIcon, ExternalLinkIcon, StarIcon } from './Icons.js';
 import {
   BOT_MONITORING_REPOS,
   SUGGESTED_REPOS,
@@ -322,7 +323,7 @@ export function RepoSearch({
           aria-label={`Open ${s.owner}/${s.name} on GitHub`}
           className="flex shrink-0 items-center px-2 text-[10px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
         >
-          ↗
+          <ExternalLinkIcon size={12} />
         </a>
       </div>
     );
@@ -487,8 +488,12 @@ export function RepoSearch({
                           </span>
                         )}
                         <span className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400">
-                          <span title={`${r.stargazerCount} stars`}>
-                            ★ {compactNumber(r.stargazerCount)}
+                          <span
+                            className="flex items-center gap-1"
+                            title={`${r.stargazerCount} stars`}
+                          >
+                            <StarIcon size={10} />
+                            {compactNumber(r.stargazerCount)}
                           </span>
                           <span aria-hidden>·</span>
                           <span title={`${r.openPrCount} open pull requests`}>
@@ -513,7 +518,7 @@ export function RepoSearch({
                       aria-label={`Open ${r.fullName} on GitHub`}
                       className="flex shrink-0 items-center px-2 text-[10px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                     >
-                      ↗
+                      <ExternalLinkIcon size={12} />
                     </a>
                   </div>
                 );
@@ -527,18 +532,20 @@ export function RepoSearch({
                 type="button"
                 onClick={gotoPrev}
                 disabled={pageIdx === 0}
-                className="text-gray-500 hover:text-gray-800 disabled:opacity-30 dark:text-gray-400 dark:hover:text-gray-100"
+                className="flex items-center gap-1 text-gray-500 hover:text-gray-800 disabled:opacity-30 dark:text-gray-400 dark:hover:text-gray-100"
               >
-                ← Prev
+                <ChevronIcon dir="left" size={11} />
+                Prev
               </button>
               <span className="text-gray-400">Page {pageIdx + 1}</span>
               <button
                 type="button"
                 onClick={gotoNext}
                 disabled={!hasNextPage}
-                className="text-gray-500 hover:text-gray-800 disabled:opacity-30 dark:text-gray-400 dark:hover:text-gray-100"
+                className="flex items-center gap-1 text-gray-500 hover:text-gray-800 disabled:opacity-30 dark:text-gray-400 dark:hover:text-gray-100"
               >
-                Next →
+                Next
+                <ChevronIcon dir="right" size={11} />
               </button>
             </div>
           )}

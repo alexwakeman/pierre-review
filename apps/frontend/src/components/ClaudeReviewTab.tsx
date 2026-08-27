@@ -38,7 +38,16 @@ import {
 } from '../hooks/useClaudeReview.js';
 import { Markdown } from './Markdown.js';
 import { MentionTextarea } from './MentionTextarea.js';
-import { ExternalLinkIcon } from './Icons.js';
+import {
+  ArrowIcon,
+  CheckIcon,
+  ChevronIcon,
+  ExternalLinkIcon,
+  InfoIcon,
+  PencilIcon,
+  RefreshIcon,
+  WarningIcon,
+} from './Icons.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 
 // "Show this finding in the Changes tab" — supplied by PrDetail, which owns the tab state.
@@ -217,26 +226,38 @@ function UsageBreakdown({ review }: { review: ClaudeReview }): JSX.Element | nul
     (cacheCreationTokens ?? 0);
   if (total <= 0) return null;
 
-  const items: { key: string; label: string; value: number; title: string }[] =
-    [];
+  // The mark and the words are SEPARATE fields. `label` stays a plain string (so any
+  // future consumer that concatenates it still can), and the pictograph is an icon that
+  // inherits the row's colour instead of an arrow glyph at whatever advance width the
+  // platform font picked.
+  const items: {
+    key: string;
+    icon: JSX.Element;
+    label: string;
+    value: number;
+    title: string;
+  }[] = [];
   if (outputTokens != null)
     items.push({
       key: 'out',
-      label: '↓ out',
+      icon: <ArrowIcon dir="down" size={11} />,
+      label: 'out',
       value: outputTokens,
       title: 'Output tokens generated (billed at the output rate — the priciest per token)',
     });
   if (inputTokens != null)
     items.push({
       key: 'in',
-      label: '↑ in',
+      icon: <ArrowIcon dir="up" size={11} />,
+      label: 'in',
       value: inputTokens,
       title: 'New (uncached) input tokens',
     });
   if (cacheReadTokens != null)
     items.push({
       key: 'cr',
-      label: '⟳ cache read',
+      icon: <RefreshIcon size={11} />,
+      label: 'cache read',
       value: cacheReadTokens,
       title:
         'Cached input tokens re-read each turn — billed at ~10% of the input rate, but the volume driver of a multi-turn run',
@@ -244,7 +265,8 @@ function UsageBreakdown({ review }: { review: ClaudeReview }): JSX.Element | nul
   if (cacheCreationTokens != null)
     items.push({
       key: 'cw',
-      label: '✎ cache write',
+      icon: <PencilIcon size={11} />,
+      label: 'cache write',
       value: cacheCreationTokens,
       title: 'Tokens written to the prompt cache (billed at ~1.25× the input rate)',
     });
@@ -252,8 +274,15 @@ function UsageBreakdown({ review }: { review: ClaudeReview }): JSX.Element | nul
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-xs text-gray-500 dark:text-gray-400">
       {items.map((it) => (
-        <span key={it.key} title={it.title}>
-          {it.label} {fmtTokens(it.value)}
+        <span
+          key={it.key}
+          title={it.title}
+          className="inline-flex items-center gap-1"
+        >
+          {it.icon}
+          <span>
+            {it.label} {fmtTokens(it.value)}
+          </span>
         </span>
       ))}
     </div>
@@ -323,7 +352,7 @@ function FindingHunk({ hunk }: { hunk: string }): JSX.Element {
         title="Show the code hunk"
         className="mt-1 flex w-full items-center gap-2 overflow-hidden rounded bg-gray-50 px-2 py-1.5 text-left font-mono text-xs dark:bg-gray-900/60"
       >
-        <span className="shrink-0 text-gray-400">▸</span>
+        <ChevronIcon dir="right" className="shrink-0 text-gray-400" />
         <span className={`min-w-0 flex-1 truncate ${hunkLineClass(preview)}`}>
           {preview === '' ? ' ' : preview}
         </span>
@@ -368,9 +397,10 @@ function FindingHunk({ hunk }: { hunk: string }): JSX.Element {
         type="button"
         onClick={() => setExpanded(false)}
         aria-expanded={true}
-        className="px-2 pb-1.5 text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+        className="inline-flex items-center gap-1 px-2 pb-1.5 text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
       >
-        ⌃ Hide code
+        <ChevronIcon dir="up" size={11} />
+        Hide code
       </button>
     </div>
   );
@@ -579,14 +609,16 @@ function FindingRow({
                   href={safeExternalUrl(commentUrl)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-700 hover:underline dark:text-green-400"
+                  className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-700 hover:underline dark:text-green-400"
                   title="View this comment on GitHub"
                 >
-                  posted ✓
+                  posted
+                  <CheckIcon size={10} />
                 </a>
               ) : (
-                <span className="rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-700 dark:text-green-400">
-                  posted ✓
+                <span className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-700 dark:text-green-400">
+                  posted
+                  <CheckIcon size={10} />
                 </span>
               ))}
             {hasReword && (
@@ -852,13 +884,15 @@ function FindingRow({
                   href={safeExternalUrl(commentUrl)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="text-xs text-green-700 hover:underline dark:text-green-400"
+                  className="inline-flex items-center gap-1 text-xs text-green-700 hover:underline dark:text-green-400"
                 >
-                  view comment ↗
+                  view comment
+                  <ExternalLinkIcon size={11} />
                 </a>
               ) : (
-                <span className="text-xs text-green-700 dark:text-green-400">
-                  posted ✓
+                <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400">
+                  posted
+                  <CheckIcon size={12} />
                 </span>
               ))}
             {postError != null && (
@@ -931,10 +965,11 @@ function ClaudesReview({
             warranted (scopeUsed = worktree). Prompt the user to re-review as Deep. */}
         {review.reviewMode === 'diff_only' && review.scope === 'worktree' && (
           <span
-            className="rounded bg-amber-500/10 px-1.5 py-0.5 text-xs font-normal text-amber-700 dark:text-amber-400"
+            className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-xs font-normal text-amber-700 dark:text-amber-400"
             title="Reviewed from the diff only, but Claude flagged that this change warrants a deeper, cross-file review. Re-review with depth set to Deep."
           >
-            ⚠ suggests a deeper review
+            <WarningIcon size={12} />
+            suggests a deeper review
           </span>
         )}
         {review.diffCapped && (
@@ -1132,10 +1167,11 @@ function ContextBlockDisclosure({ block }: { block: string }): JSX.Element {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="text-[10px] font-medium text-ai-signal hover:underline"
+        className="inline-flex items-center gap-1 text-[10px] font-medium text-ai-signal hover:underline"
         aria-expanded={open}
       >
-        {open ? '▾ Hide' : '▸ Show'} the exact context sent to Claude
+        <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
+        {open ? 'Hide' : 'Show'} the exact context sent to Claude
       </button>
       {open && (
         <>
@@ -1211,7 +1247,7 @@ function ReviewActionsLog({ reviewId }: { reviewId: number }): JSX.Element | nul
         className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-gray-600 dark:text-gray-300"
         aria-expanded={open}
       >
-        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <ChevronIcon dir={open ? 'down' : 'right'} />
         What this review taught the memory
         <span className="ml-auto text-[10px] font-normal text-gray-400">
           {open ? 'hide' : 'show'}
@@ -1220,7 +1256,8 @@ function ReviewActionsLog({ reviewId }: { reviewId: number }): JSX.Element | nul
       {open && (
         <div className="border-t border-gray-200 px-2 py-1 dark:border-gray-800">
           <div className="pb-1 text-[10px] text-gray-500 dark:text-gray-400">
-            ⓘ Captured from this run — these feed future reviews of PRs touching the same
+            <InfoIcon size={10} className="mr-1 inline-block align-[-0.1em]" />
+            Captured from this run — these feed future reviews of PRs touching the same
             files.
           </div>
           {actions.length === 0 ? (
@@ -1286,9 +1323,10 @@ function LearningMatchRow({ match }: { match: LearningMatch }): JSX.Element {
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
-          className="mt-0.5 text-[10px] text-gray-400 hover:underline"
+          className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-gray-400 hover:underline"
         >
-          {open ? 'hide example' : 'show example ▸'}
+          {open ? 'hide example' : 'show example'}
+          <ChevronIcon dir={open ? 'down' : 'right'} size={9} />
         </button>
       )}
       {open && hasExample && (
@@ -1333,7 +1371,7 @@ function ReviewLearningsPanel({ prId }: { prId: number }): JSX.Element | null {
         className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-ai-ink"
         aria-expanded={open}
       >
-        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <ChevronIcon dir={open ? 'down' : 'right'} />
         From your past reviews in this repo ({matches.length} signal
         {matches.length === 1 ? '' : 's'})
         <span className="ml-auto text-[10px] font-normal text-ai-muted">
@@ -1343,7 +1381,8 @@ function ReviewLearningsPanel({ prId }: { prId: number }): JSX.Element | null {
       {open && (
         <div className="border-t border-ai-hairline px-1 pb-1">
           <div className="px-2 py-1 text-[10px] text-gray-500 dark:text-gray-400">
-            ⓘ These are given to Claude as context for this run.
+            <InfoIcon size={10} className="mr-1 inline-block align-[-0.1em]" />
+            These are given to Claude as context for this run.
           </div>
           {data?.contextBlock != null && data.contextBlock !== '' && (
             <ContextBlockDisclosure block={data.contextBlock} />
@@ -1757,14 +1796,26 @@ export function ClaudeReviewTab({
           {/* Live token usage + running cost estimate (once the agent has a turn). */}
           {status?.progress?.usage && (
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-xs text-gray-500 dark:text-gray-400">
-              <span title="Output tokens generated so far">
-                ↓ {fmtTokens(status.progress.usage.outputTokens)} out
+              <span
+                className="inline-flex items-center gap-1"
+                title="Output tokens generated so far"
+              >
+                <ArrowIcon dir="down" size={11} />
+                {fmtTokens(status.progress.usage.outputTokens)} out
               </span>
-              <span title="New (uncached) input tokens billed so far">
-                ↑ {fmtTokens(status.progress.usage.inputTokens)} in
+              <span
+                className="inline-flex items-center gap-1"
+                title="New (uncached) input tokens billed so far"
+              >
+                <ArrowIcon dir="up" size={11} />
+                {fmtTokens(status.progress.usage.inputTokens)} in
               </span>
-              <span title="Cached input tokens read so far (billed at ~10% of input)">
-                ⟳ {fmtTokens(status.progress.usage.cacheReadTokens)} cache
+              <span
+                className="inline-flex items-center gap-1"
+                title="Cached input tokens read so far (billed at ~10% of input)"
+              >
+                <RefreshIcon size={11} />
+                {fmtTokens(status.progress.usage.cacheReadTokens)} cache
               </span>
               <span
                 className="font-semibold text-gray-600 dark:text-gray-300"

@@ -140,6 +140,7 @@ export function useProCapabilities(): ProCapabilities {
       botAdvisor: false,
       periodReports: false,
       botDepth: false,
+      workPlan: false,
     }
   );
 }

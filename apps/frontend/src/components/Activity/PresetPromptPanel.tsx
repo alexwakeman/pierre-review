@@ -5,6 +5,7 @@ import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useFilters } from '../../store/filters.js';
 import { usePresetPrompt, useRefreshPresetPrompt } from '../../hooks/usePresetPrompt.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
+import { ChevronIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { SummaryMarkdown } from './prRefTable.js';
 
 // One-click "ask about this Workspace" panel (Pro Haiku). The 6 fixed preset questions are now a
@@ -81,10 +82,11 @@ function PresetAnswer({
               type="button"
               onClick={() => onRegenerate(presetKey)}
               disabled={busy || outOfCredits}
-              className="ml-auto rounded border border-ai-border px-1.5 py-0.5 font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
+              className="ml-auto inline-flex items-center gap-1 rounded border border-ai-border px-1.5 py-0.5 font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
               title={outOfCredits ? 'Out of AI credits — resets next month' : 'Regenerate just this answer'}
             >
-              ↻ Regenerate
+              <RefreshIcon size={11} />
+              Regenerate
             </button>
           </div>
         </div>
@@ -163,7 +165,7 @@ export function PresetPromptPanel(): JSX.Element | null {
     >
       <div className="flex items-center gap-2">
         <span className="text-base font-semibold text-gray-800 dark:text-gray-100">
-          <span aria-hidden="true">✨</span> Sprint questions
+          <SparkleIcon size={15} className="inline-block align-[-0.1em]" /> Sprint questions
         </span>
         <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
           Pro
@@ -191,7 +193,7 @@ export function PresetPromptPanel(): JSX.Element | null {
           className="rounded border border-ai-border px-2 py-1 text-sm font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
           aria-label="Previous question"
         >
-          ◀
+          <ChevronIcon dir="left" />
         </button>
         <div className="min-w-0 flex-1 text-center">
           <div className="truncate text-sm font-medium text-gray-800 dark:text-gray-100" title={current.question}>
@@ -207,7 +209,7 @@ export function PresetPromptPanel(): JSX.Element | null {
           className="rounded border border-ai-border px-2 py-1 text-sm font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
           aria-label="Next question"
         >
-          ▶
+          <ChevronIcon dir="right" />
         </button>
       </div>
 

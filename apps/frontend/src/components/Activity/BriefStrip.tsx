@@ -18,6 +18,7 @@ import {
   personalMyTurnCount,
   type MyTurnCapDisclosure,
 } from './AttentionView.js';
+import { ChevronIcon } from '../Icons.js';
 
 // The daily-brief strip (plan P3.1/N1 + P3.3/N5) — the first thing the Feed shows: one compact
 // line per thing that needs the viewer, each line DEEP-LINKING to the surface that owns its
@@ -475,7 +476,11 @@ export function BriefStrip(): JSX.Element | null {
               className="group flex w-full items-baseline gap-2 rounded px-1.5 py-0.5 text-left hover:bg-gray-50 dark:hover:bg-gray-900/60"
             >
               <span className="w-6 shrink-0 text-right text-gray-400" aria-hidden>
-                {elsewhereOpen ? '▾' : '▸'}
+                <ChevronIcon
+                  dir={elsewhereOpen ? 'down' : 'right'}
+                  size={10}
+                  className="inline-block align-[-0.1em]"
+                />
               </span>
               <span className="min-w-0 flex-1 truncate font-medium text-gray-400 group-hover:underline">
                 Elsewhere ({elsewhereLines.length})

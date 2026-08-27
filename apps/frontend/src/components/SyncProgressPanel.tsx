@@ -9,6 +9,7 @@ import type {
 import { api } from '../api/client.js';
 import { isMlScoring, useMlEnrichmentStatus } from '../hooks/useMlLabels.js';
 import { getSyncRoundActions, useFilters } from '../store/filters.js';
+import { CheckIcon } from './Icons.js';
 
 // Download-to-tray glyph for "Deep re-sync" — visually distinguishes the heavier action.
 // Lives here (not SyncStatus) so the WorkspaceManager's deep-sync buttons can share it.
@@ -159,8 +160,9 @@ export function SyncProgressPanel({
                   ) : running ? (
                     `${percent}%${prs > 0 ? ` · ${prs} PRs` : ''}`
                   ) : (
-                    <span className="text-green-600 dark:text-green-400">
-                      ✓ done{prs > 0 ? ` · ${prs} PRs` : ''}
+                    <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+                      <CheckIcon size={12} />
+                      done{prs > 0 ? ` · ${prs} PRs` : ''}
                     </span>
                   )}
                 </span>
@@ -196,8 +198,9 @@ export function SyncProgressPanel({
               {scoring ? (
                 `${scorePercent}%${ml && ml.pending > 0 ? ` · ${ml.pending.toLocaleString()} to go` : ''}`
               ) : (
-                <span className="text-green-600 dark:text-green-400">
-                  ✓ scored{scored > 0 ? ` · ${scored.toLocaleString()}` : ''}
+                <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+                  <CheckIcon size={12} />
+                  scored{scored > 0 ? ` · ${scored.toLocaleString()}` : ''}
                 </span>
               )}
             </span>

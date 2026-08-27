@@ -8,6 +8,7 @@ import { useRepos } from '../../hooks/useTimeline.js';
 import { useWorkspaces, useWorkspaceMutations } from '../../hooks/useWorkspaces.js';
 import { getSyncRoundActions, useFilters } from '../../store/filters.js';
 import { RepoSearch } from '../RepoSearch.js';
+import { CloseIcon, PencilIcon } from '../Icons.js';
 import { DeepSyncIcon, EmbeddedSyncPanel } from '../SyncProgressPanel.js';
 
 // Repo/workspace management for the Activity console: create/rename/delete workspaces, MOVE the
@@ -270,7 +271,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
             aria-label={`Remove ${r.fullName}`}
             className="shrink-0 px-1 text-gray-400 opacity-0 hover:text-red-500 focus:opacity-100 group-hover:opacity-100 disabled:opacity-30"
           >
-            ✕
+            <CloseIcon />
           </button>
         </div>
         {hint && (
@@ -316,7 +317,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
               aria-label="Close"
               className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
             >
-              ✕
+              <CloseIcon size={14} />
             </button>
           </div>
         </div>
@@ -474,7 +475,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                       aria-label={`Rename ${w.name}`}
                       className="shrink-0 rounded px-1 text-gray-400 opacity-0 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100 dark:hover:text-gray-200"
                     >
-                      ✎
+                      <PencilIcon />
                     </button>
                     {w.isDefault ? (
                       /* Disabled, with the reason ON the control. The route 409s on this row, but
@@ -487,7 +488,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                         aria-label={`${w.name} is the default workspace and can’t be deleted`}
                         className="shrink-0 cursor-not-allowed rounded px-1 text-gray-300 opacity-0 focus:opacity-100 group-hover:opacity-100 dark:text-gray-600"
                       >
-                        ✕
+                        <CloseIcon />
                       </button>
                     ) : (
                       <button
@@ -497,7 +498,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                         aria-label={`Delete ${w.name}`}
                         className="shrink-0 rounded px-1 text-gray-400 opacity-0 hover:text-red-500 focus:opacity-100 group-hover:opacity-100"
                       >
-                        ✕
+                        <CloseIcon />
                       </button>
                     )}
                   </div>

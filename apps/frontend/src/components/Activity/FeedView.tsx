@@ -48,7 +48,17 @@ import {
 import { nearestScrollParent } from '../../lib/scrollParent.js';
 import { Avatar } from '../CommentCard.js';
 import { CommentAnnotations, ReviewCheckButton } from '../CommentAnnotations.js';
-import { MagnifierIcon } from '../Icons.js';
+import {
+  BotIcon,
+  CommentIcon,
+  CommitIcon,
+  ExternalLinkIcon,
+  MagnifierIcon,
+  PullRequestIcon,
+  SparkleIcon,
+  StarIcon,
+  WarningIcon,
+} from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
 import { StateBadge } from '../StateBadge.js';
@@ -1380,7 +1390,7 @@ export function FeedView({
                     }`}
                     title={`Show only ${v.label}`}
                   >
-                    <span aria-hidden="true">🤖</span>
+                    <BotIcon />
                     <span
                       aria-hidden="true"
                       className="inline-block h-2 w-2 rounded-full"
@@ -1408,7 +1418,7 @@ export function FeedView({
           }`}
           title="Show only items that concern you (My Turn)"
         >
-          <span aria-hidden="true">★</span> My Turn
+          <StarIcon /> My Turn
           {myTurnCount > 0 && <span className="tabular-nums opacity-70">{myTurnCount}</span>}
         </button>
         {claudeReviewEnabled && (
@@ -1423,7 +1433,7 @@ export function FeedView({
             }`}
             title="Show only Claude Reviews"
           >
-            <span aria-hidden="true">✨</span> Claude Reviews
+            <SparkleIcon /> Claude Reviews
             {claudeCount > 0 && <span className="tabular-nums opacity-70">{claudeCount}</span>}
           </button>
         )}
@@ -1440,7 +1450,7 @@ export function FeedView({
           }`}
           title="Show comment activity (review threads + PR comments)"
         >
-          <span aria-hidden="true">💬</span> Comments
+          <CommentIcon /> Comments
           {commentCount > 0 && <span className="tabular-nums opacity-70">{commentCount}</span>}
         </button>
         <button
@@ -1454,7 +1464,7 @@ export function FeedView({
           }`}
           title="Show PR events (opens, merges, closes, reopens, ready-for-review, reviews)"
         >
-          <span aria-hidden="true">⑃</span> PR events
+          <PullRequestIcon /> PR events
           {prEventsCount > 0 && <span className="tabular-nums opacity-70">{prEventsCount}</span>}
         </button>
         {/* Commits — opt-in (off by default). On: every commit-push run surfaces; off: only the
@@ -1471,7 +1481,7 @@ export function FeedView({
           }`}
           title="Show individual commit pushes in the feed (off by default) — on surfaces every push run, off keeps only pushes that addressed a review thread"
         >
-          <span aria-hidden="true">◆</span> Commits
+          <CommitIcon /> Commits
           {commitsCount > 0 && <span className="tabular-nums opacity-70">{commitsCount}</span>}
         </button>
         {/* CI failures — a THREE-state lens cycling off → feed → only → off, and the one feed
@@ -1512,7 +1522,7 @@ export function FeedView({
                 : 'CI failures are hidden — click to show them in the feed, then again for CI failures only. One card per failed check run, on pull-request heads and on the default branch.'
           }
         >
-          <span aria-hidden="true">⚠</span>
+          <WarningIcon />
           {feedCiLens === 'only' ? 'CI failures only' : 'CI failures'}
           {ciFailuresCount > 0 && feedCiLens !== 'off' && (
             <span className="tabular-nums opacity-70">{ciFailuresCount}</span>
@@ -1536,7 +1546,7 @@ export function FeedView({
             }`}
             title="Tame the bot firehose: click to cycle all activity → hide bot noise → bot activity only"
           >
-            <span aria-hidden="true">🤖</span>
+            <BotIcon />
             {feedBotLens === 'hide' ? 'Bots hidden' : feedBotLens === 'only' ? 'Bots only' : 'Bots'}
             {feedBotLens === 'all' && <span className="tabular-nums opacity-70">{botCount}</span>}
           </button>
@@ -2185,7 +2195,7 @@ function FeedRowImpl({
                 style={{ color: automatedTag.color, background: `${automatedTag.color}1a` }}
                 title={`${automatedTag.label} — an automated reviewer Limn triages`}
               >
-                <span aria-hidden>🤖</span>
+                <BotIcon size={11} />
                 {automatedTag.label}
               </span>
               {automatedTag.userId != null && (
@@ -2269,7 +2279,8 @@ function FeedRowImpl({
               onClick={(e) => e.stopPropagation()}
               className="shrink-0 font-medium text-sky-600 hover:underline dark:text-sky-400"
             >
-              commit {(item.ciHeadSha ?? '').slice(0, 7)} ↗
+              commit {(item.ciHeadSha ?? '').slice(0, 7)}{' '}
+              <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
             </a>
           )}
         </div>

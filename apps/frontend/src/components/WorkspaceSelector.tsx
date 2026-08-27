@@ -6,6 +6,7 @@ import { consumeRestoredWorkspaceScope, markUrlCorrection } from '../hooks/useUr
 import { useWorkspaces } from '../hooks/useWorkspaces.js';
 import { useFilters } from '../store/filters.js';
 import { WorkspaceManagerModal } from './Activity/WorkspaceManager.js';
+import { CaretIcon, DotIcon, GearIcon, WorkspaceIcon } from './Icons.js';
 
 /**
  * The My-Turn count badge, shared by the collapsed trigger and every menu row so the two can
@@ -253,9 +254,7 @@ export function WorkspaceSelector(): JSX.Element {
         title="The active Workspace — the one scope every view is read through"
         className="inline-flex max-w-[12rem] items-center gap-1 whitespace-nowrap rounded-full border border-gray-300 py-0.5 pl-2.5 pr-2 text-xs text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
       >
-        <span aria-hidden className="text-sky-500">
-          ◈
-        </span>
+        <WorkspaceIcon className="shrink-0 text-sky-500" />
         <span className="truncate">{activeLabel}</span>
         {/* The collapsed trigger carries the OTHER workspaces' total only — the active one's
             count is already visible on the board behind this control, whereas this figure is
@@ -276,9 +275,7 @@ export function WorkspaceSelector(): JSX.Element {
             {elsewhereCapped ? '+' : ''}
           </span>
         )}
-        <span aria-hidden className="text-[9px]">
-          ▾
-        </span>
+        <CaretIcon dir="down" className="shrink-0" />
       </button>
 
       {open && (
@@ -311,7 +308,7 @@ export function WorkspaceSelector(): JSX.Element {
                           : 'border-gray-300 dark:border-gray-600'
                       }`}
                     >
-                      {selected ? '•' : ''}
+                      {selected && <DotIcon size={5} />}
                     </span>
                     <span className="truncate">{w.name}</span>
                     {/* The Default is renameable, so its name alone doesn't identify it — but it
@@ -399,7 +396,7 @@ export function WorkspaceSelector(): JSX.Element {
             title="Add or remove repos, create Workspaces, and move repos between them"
             className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
           >
-            <span aria-hidden>⚙</span>
+            <GearIcon className="shrink-0" />
             <span className="truncate">Manage repos &amp; workspaces</span>
             {rows.length > 0 && (
               <span className="ml-auto shrink-0 tabular-nums text-[10px] text-gray-400">

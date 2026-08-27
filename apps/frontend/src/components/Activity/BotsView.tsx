@@ -9,6 +9,7 @@ import { BotAdvisorPanel } from './BotAdvisorPanel.js';
 import { BotSettingsPanel } from './BotSettingsPanel.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
+import { BotIcon } from '../Icons.js';
 
 // The Bots rail view — "the calm layer above your review bots" as a CORE, FREE feature (works
 // via the npx / OSS path, no @pierre/pro plugin). It composes:
@@ -158,7 +159,9 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               className="flex w-full items-start gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-left text-[11px] text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
             >
               <span className="flex-1">
-                🤖 Only a bot reviewed <span className="font-semibold tabular-nums">{botOnly}</span>{' '}
+                <BotIcon className="mr-1 inline-block align-[-0.1em]" />
+                Only a bot reviewed{' '}
+                <span className="font-semibold tabular-nums">{botOnly}</span>{' '}
                 open PR{botOnly === 1 ? '' : 's'} — no human review yet. Consider a human pass before
                 they merge.{' '}
                 {/* The count is a live review-state snapshot of currently-OPEN PRs (any age); merged

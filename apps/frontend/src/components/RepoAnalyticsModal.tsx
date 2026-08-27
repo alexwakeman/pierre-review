@@ -17,6 +17,7 @@ import { BarChart } from './charts/BarChart.js';
 import { StackedAreaChart } from './charts/StackedAreaChart.js';
 import { ScatterChart } from './charts/ScatterChart.js';
 import { Heatmap } from './charts/Heatmap.js';
+import { ChevronIcon, CloseIcon } from './Icons.js';
 
 const sum = (a: number[]): number => a.reduce((s, v) => s + v, 0);
 
@@ -323,9 +324,10 @@ export function Charts({
         <button
           type="button"
           onClick={() => setShowMore((s) => !s)}
-          className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="flex items-center gap-1 text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
-          {showMore ? '▾' : '▸'} More charts
+          <ChevronIcon dir={showMore ? 'down' : 'right'} size={11} />
+          More charts
         </button>
         {showMore && <div className="mt-3">{grid(false, true)}</div>}
       </div>
@@ -385,7 +387,7 @@ export function RepoAnalyticsModal({
             aria-label="Close (Esc)"
             title="Close (Esc)"
           >
-            ✕
+            <CloseIcon size={14} />
           </button>
         </div>
 

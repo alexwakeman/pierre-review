@@ -7,6 +7,7 @@ import {
   DEFAULT_REVIEW_STATES,
 } from '../store/filters.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
+import { CaretIcon, CloseIcon } from './Icons.js';
 
 // Labels for every category. `lifecycle` and `reviews` are kept here (the Record
 // requires all keys) but aren't offered as coarse toggles — lifecycle draws no
@@ -112,9 +113,7 @@ export function EventSelectPanel({
           }`}
         >
           Events{atDefault ? '' : ` (${count})`}
-          <span aria-hidden className="text-[9px]">
-            ▾
-          </span>
+          <CaretIcon dir="down" />
         </button>
         {!atDefault && (
           <button
@@ -122,9 +121,9 @@ export function EventSelectPanel({
             onClick={reset}
             title="Reset event filters to default"
             aria-label="Reset event filters to default"
-            className="py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
+            className="flex items-center self-stretch py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
           >
-            ✕
+            <CloseIcon size={11} />
           </button>
         )}
       </span>

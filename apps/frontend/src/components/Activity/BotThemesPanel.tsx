@@ -4,6 +4,7 @@ import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useBotThemes, useRefreshBotThemes } from '../../hooks/useBotThemes.js';
+import { BotIcon, MagnifierIcon, RefreshIcon } from '../Icons.js';
 import { ThemesReportBody, ThemesSkeleton } from './ThemesReportView.js';
 import { prRefToMeta } from './ThemeThreadsDetail.js';
 
@@ -112,7 +113,7 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-base font-semibold text-gray-800 dark:text-gray-100">
-          <span aria-hidden="true">🔍</span> What they’re flagging
+          <MagnifierIcon size={15} className="inline-block align-[-0.1em]" /> What they’re flagging
         </span>
         <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
           Pro
@@ -128,7 +129,16 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
               : 'Summarise what the review bots are flagging in this scope (runs the Haiku model; unchanged comments cost nothing)'
           }
         >
-          {busy ? 'Summarising…' : result ? '↻ Regenerate' : 'Generate'}
+          {busy ? (
+            'Summarising…'
+          ) : result ? (
+            <>
+              <RefreshIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+              Regenerate
+            </>
+          ) : (
+            'Generate'
+          )}
         </button>
       </div>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -165,7 +175,7 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
               themes={result.themes}
               bySeverity={result.bySeverity}
               byArea={result.byArea}
-              actorEmoji="🤖"
+              ActorIcon={BotIcon}
               emptyThemesLabel="No distinct themes surfaced from the bot comments in this window."
               reviewerSection={<BotRollup result={result} />}
               coverageLine={<BotCoverageLine result={result} />}

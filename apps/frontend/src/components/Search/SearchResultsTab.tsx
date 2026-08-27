@@ -9,7 +9,7 @@ import { indexUsers, PR_STATE_META } from '../../lib/ui.js';
 import { MagnifierIcon } from '../Icons.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { PrMetaRow, InsightPrSummary } from '../Activity/AttentionCards.js';
-import { KIND_GLYPH, KIND_LABEL, openHitPr, openSearchHit } from './searchNav.js';
+import { KIND_ICON, KIND_LABEL, openHitPr, openSearchHit } from './searchNav.js';
 import { highlightTerms } from './highlight.js';
 
 // The full cross-repo search-results tab (a singleton drill-down overlay). Reads the query from the
@@ -180,9 +180,10 @@ export function SearchResultsTab(): JSX.Element {
 // link to the PR's own detail tab (opens on Overview). It carries data-noactivate + stopPropagation
 // so, inside the whole-card-clickable PrHitCard, the ref-click opens the PR without double-firing.
 function HitHeader({ hit }: { hit: SearchHit }): JSX.Element {
+  const KindIcon = KIND_ICON[hit.kind];
   return (
     <div className="flex items-center gap-1.5 text-[11px] text-gray-400">
-      <span aria-hidden>{KIND_GLYPH[hit.kind]}</span>
+      <KindIcon size={12} />
       <span className="font-medium text-gray-500 dark:text-gray-400">{KIND_LABEL[hit.kind]}</span>
       <span aria-hidden className="text-gray-300 dark:text-gray-600">
         ·

@@ -1,3 +1,16 @@
+import {
+  CheckIcon,
+  CloseIcon,
+  DotIcon,
+  MinusIcon,
+  QuestionIcon,
+  SkipIcon,
+  WarningIcon,
+} from '../components/Icons.js';
+
+/** A check-state mark. A REFERENCE, so this `.ts` module can name it without holding JSX. */
+type IconComponent = (props: { size?: number; className?: string; title?: string }) => JSX.Element;
+
 import type {
   AddressedConfidence,
   AddressedVerdict,
@@ -498,18 +511,30 @@ export function checksRowVisible(
   return prSummary && (ciStatus === 'failure' || ciStatus === 'error');
 }
 
-// Per-check display: icon glyph + colour + short label.
+// Per-check display: icon + colour + short label.
+//
+// ⚠ `icon` is a COMPONENT REFERENCE, not an element and not a glyph. Three reasons, in order of
+// how much each one cost:
+//  • This module is `.ts`, not `.tsx`, so it cannot hold JSX at all. A reference can live here;
+//    an element cannot. Consumers render it as `<m.icon size={11} />`.
+//  • The seven states used to be seven characters (✓ ✕ • – ⤼ ! ?) drawn from whatever font the
+//    platform picked, so they landed on different baselines at different optical weights inside
+//    one vertical column of check rows — the column that is meant to be scannable at a glance.
+//  • `color` below is a HEX applied by the caller, and only a `currentColor` icon follows it.
+// `neutral`, `skipped` and `unknown` each keep a mark of their own: "it decided nothing", "it
+// never ran" and "GitHub told us nothing" are three different facts, and collapsing any of them
+// into the failure mark would report a red that nobody observed.
 export const CHECK_STATE_META: Record<
   CheckRunState,
-  { label: string; color: string; icon: string }
+  { label: string; color: string; icon: IconComponent }
 > = {
-  success: { label: 'passed', color: '#22c55e', icon: '✓' },
-  failure: { label: 'failed', color: '#ef4444', icon: '✕' },
-  pending: { label: 'running', color: '#eab308', icon: '•' },
-  neutral: { label: 'neutral', color: '#9ca3af', icon: '–' },
-  skipped: { label: 'skipped', color: '#9ca3af', icon: '⤼' },
-  error: { label: 'error', color: '#ef4444', icon: '!' },
-  unknown: { label: 'unknown', color: '#9ca3af', icon: '?' },
+  success: { label: 'passed', color: '#22c55e', icon: CheckIcon },
+  failure: { label: 'failed', color: '#ef4444', icon: CloseIcon },
+  pending: { label: 'running', color: '#eab308', icon: DotIcon },
+  neutral: { label: 'neutral', color: '#9ca3af', icon: MinusIcon },
+  skipped: { label: 'skipped', color: '#9ca3af', icon: SkipIcon },
+  error: { label: 'error', color: '#ef4444', icon: WarningIcon },
+  unknown: { label: 'unknown', color: '#9ca3af', icon: QuestionIcon },
 };
 
 // ---- The ONE merge verdict --------------------------------------------------------------

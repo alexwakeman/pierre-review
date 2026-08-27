@@ -15,6 +15,7 @@ import {
 } from '../../lib/ui.js';
 import { useCreatePrComment, useReplyToThread } from '../../hooks/usePrWrites.js';
 import { errText } from '../CiAnalysisCard.js';
+import { CheckIcon, ExternalLinkIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 
@@ -457,10 +458,10 @@ function VerdictCard({
                 href={url}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="text-blue-600 hover:underline dark:text-blue-400"
+                className="flex items-center text-blue-600 hover:underline dark:text-blue-400"
                 title="Open this comment on GitHub"
               >
-                ↗
+                <ExternalLinkIcon size={11} />
               </a>
             )}
             {/* Separate from the disposition ON PURPOSE: a valid comment can still be out of
@@ -579,7 +580,8 @@ function PushbackReply({
   if (state === 'sent') {
     return (
       <div className="mt-1 text-[11px] text-green-600 dark:text-green-400">
-        Reply posted{to.kind === 'thread' ? ' in the thread' : ' as a PR comment'} ✓
+        Reply posted{to.kind === 'thread' ? ' in the thread' : ' as a PR comment'}{' '}
+        <CheckIcon size={11} className="inline-block align-[-0.1em]" />
       </div>
     );
   }

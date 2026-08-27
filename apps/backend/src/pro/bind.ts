@@ -25,6 +25,10 @@ import { getDailyBriefCounts } from '../db/daily-brief.js';
 // The 1:1-prep person vector (P4.2) — its own module: the global-users admission probe, the
 // lane check and the one-fold first-review reuse live together, documented at the source.
 import { getPersonPeriod } from '../db/person-period.js';
+// The work-plan fold — its own core module for the same reason daily-brief.ts is: the ranking is
+// the feature, and the alignment contract (it folds the SAME /api/attention cards the brief
+// counts) only survives if both live where the next reader can see them together.
+import { getWorkPlan } from '../db/work-plan.js';
 import { forecastNext } from '../db/forecast.js';
 import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
 import { aiCreditStatus } from '../db/credits.js';
@@ -214,6 +218,12 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       // through unchanged — an older plugin passes nothing and gets the vector alone.
       getPersonPeriod: (accountId, workspaceId, userId, window, opts) =>
         getPersonPeriod(accountId, workspaceId, userId, window, opts),
+      // The work-plan fold (core db/work-plan.ts). The scope passes straight through like every
+      // other scope-bearing getter above: `workspaceId` is the judgement grain, `repoIds` narrows
+      // the data, and the plugin only ever holds a scope the host's resolver produced.
+      // The seam member is OPTIONAL (see contract.ts) so an older host degrades this ONE feature
+      // rather than the plugin; THIS host implements it, so it is always present here.
+      getWorkPlan: (accountId, scope) => getWorkPlan(accountId, scope),
     },
     recordAiUsage: (row) => recordAiUsage(row),
     aiCredits: {

@@ -5,6 +5,7 @@ import { api, ApiError } from '../../api/client.js';
 import { useFilters } from '../../store/filters.js';
 import { ACTIVITY_QUERY_KEYS } from '../../hooks/useActivity.js';
 import { RepoSearch } from '../RepoSearch.js';
+import { StarIcon } from '../Icons.js';
 
 // How many detected repos are pre-checked. Kept small so the one-click "Add selected" flow
 // doesn't kick off a 30-repo two-phase backfill storm on the user's very first action.
@@ -221,8 +222,12 @@ export function FirstRunOnboarding(): JSX.Element {
                       </span>
                     )}
                     <span className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400">
-                      <span title={`${r.stargazerCount} stars`}>
-                        ★ {compactNumber(r.stargazerCount)}
+                      <span
+                        className="flex items-center gap-1"
+                        title={`${r.stargazerCount} stars`}
+                      >
+                        <StarIcon size={10} />
+                        {compactNumber(r.stargazerCount)}
                       </span>
                       <span aria-hidden>·</span>
                       <span title={`${r.openPrCount} open pull requests`}>

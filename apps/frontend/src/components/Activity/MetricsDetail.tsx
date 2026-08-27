@@ -8,6 +8,7 @@ import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { CI_META, indexUsers, relativeTime } from '../../lib/ui.js';
 import { fmtDuration } from '../charts/common.js';
 import { Avatar } from '../CommentCard.js';
+import { CheckCircleIcon, RefreshIcon } from '../Icons.js';
 import { UserName } from '../UserName.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
 import { SortHeader, type SortDir, type SortState, compare, nextSort } from './sortableTable.js';
@@ -451,9 +452,10 @@ export function MetricsDetail(): JSX.Element {
           disabled={isFetching}
           className="ml-auto rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         >
-          <span aria-hidden className={isFetching ? 'animate-spin' : ''}>
-            ↻
-          </span>{' '}
+          <RefreshIcon
+            size={11}
+            className={`inline-block align-[-0.1em] ${isFetching ? 'animate-spin' : ''}`}
+          />{' '}
           Refresh
         </button>
       </div>
@@ -510,9 +512,14 @@ export function MetricsDetail(): JSX.Element {
         <div className="text-sm text-red-500">Couldn’t load the metric detail.</div>
       ) : rows.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          {allRows.length === 0
-            ? 'Nothing to show for this metric in the current sprint. 🎉'
-            : 'No PRs for the selected repos — adjust the repo filter.'}
+          {allRows.length === 0 ? (
+            <>
+              <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] text-gray-300 dark:text-gray-600" />
+              Nothing to show for this metric in the current sprint.
+            </>
+          ) : (
+            'No PRs for the selected repos — adjust the repo filter.'
+          )}
         </div>
       ) : (
         <Table m={active} rows={rows} usersById={usersById} onOpen={openPr} sort={sort} onSort={onSort} />

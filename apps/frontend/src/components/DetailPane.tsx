@@ -2,6 +2,7 @@ import { useDeferredValue } from 'react';
 import { useFilters } from '../store/filters.js';
 import { usePinnedTabs, parseTabKey } from '../store/pinnedTabs.js';
 import { PrDetail } from './PrDetail.js';
+import { CloseIcon } from './Icons.js';
 
 // The bottom pane's content:
 //  • a PR is selected → its detail (PrDetail)
@@ -38,10 +39,11 @@ export function DetailPane(): JSX.Element {
             type="button"
             data-testid="detail-clear"
             onClick={clearSelection}
-            className="rounded px-2 py-0.5 text-xs text-gray-400 hover:text-gray-600"
+            className="flex items-center rounded px-2 py-0.5 text-xs text-gray-400 hover:text-gray-600"
+            aria-label="Clear selection (Esc)"
             title="Clear selection (Esc)"
           >
-            ✕
+            <CloseIcon />
           </button>
         </div>
       )}

@@ -22,6 +22,7 @@ const FULL: ProCapabilities = {
   botAdvisor: true,
   periodReports: true,
   botDepth: true,
+  workPlan: true,
 };
 
 afterEach(() => {
