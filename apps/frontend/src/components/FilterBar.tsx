@@ -1,12 +1,9 @@
 import { useMemo } from 'react';
-import { type InsightsRangeKey, type User } from '@pierre-review/shared';
+import { type User } from '@pierre-review/shared';
 import { buildMemberSections } from '../hooks/useMemberSections.js';
 import { useMergers, useRepos, useSearchTimeline, useUsers } from '../hooks/useTimeline.js';
 import { useSearchOpenPrs } from '../hooks/useTriage.js';
 import { useWorkspaces, workspaceRepoIds } from '../hooks/useWorkspaces.js';
-import { useProCapabilities } from '../hooks/useTriage.js';
-import { useProSettings } from '../hooks/useProSettings.js';
-import { defaultInsightsRange, INSIGHTS_RANGE_LABEL } from '../lib/insightsRange.js';
 import { useFilters, type RangePreset } from '../store/filters.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { EventSelectPanel } from './EventSelectPanel.js';
@@ -99,52 +96,6 @@ function Section({
   );
 }
 
-// The Insights chat's Range chips — the Timeline's control, in the Timeline's slot, over a
-// different value (store `insightsRange`; see the note there on why they are not one field).
-//
-// "Sprint to date" is offered only when the account has BOTH a cadence and a start date stored: a
-// cadence alone cannot locate a window, so the chip would be a button that silently answers over a
-// rolling fortnight. When it IS offered it leads, because it is the range those accounts think in.
-//
-// The highlighted chip is the RESOLVED range, not the stored override: `insightsRange === null`
-// means "whatever Settings → Sprint says", so the bar shows that as the live selection rather than
-// as nothing selected. Clicking it re-asserts the same window, which is a no-op — correct, since
-// there is nothing to clear.
-function InsightsRangeSection(): JSX.Element | null {
-  const insightsRange = useFilters((s) => s.insightsRange);
-  const setInsightsRange = useFilters((s) => s.setInsightsRange);
-  // The chat is Pro; without the capability the pane these chips scope isn't rendered at all, so
-  // the settings fetch stays gated exactly as the config modal's does.
-  const { data: settings } = useProSettings(useProCapabilities().workspaceInsights);
-
-  const sprint = settings?.sprint;
-  const hasSprint = sprint != null && sprint.cadenceDays != null && sprint.startDate != null;
-  const active = insightsRange ?? defaultInsightsRange(sprint?.comparisonMode ?? null, hasSprint);
-
-  const keys: InsightsRangeKey[] = hasSprint
-    ? ['sprint', '7d', '14d', '30d', '90d']
-    : ['7d', '14d', '30d', '90d'];
-  const titleFor = (k: InsightsRangeKey): string =>
-    k === 'sprint'
-      ? `Answer over the current sprint so far (${sprint?.cadenceDays}-day cadence)`
-      : `Answer over the last ${k.replace('d', '')} days`;
-
-  return (
-    <Section label="Range">
-      {keys.map((k) => (
-        <Chip
-          key={k}
-          active={active === k}
-          title={titleFor(k)}
-          onClick={() => setInsightsRange(k)}
-        >
-          {INSIGHTS_RANGE_LABEL[k]}
-        </Chip>
-      ))}
-    </Section>
-  );
-}
-
 export function FilterBar(): JSX.Element {
   const { data: repos } = useRepos();
   const { data: workspaces } = useWorkspaces();
@@ -172,10 +123,6 @@ export function FilterBar(): JSX.Element {
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const isTimeline = activeTab === 'timeline';
   // The ONE non-Timeline surface with a bar control (see the Range section below). Both halves
-  // matter: the Activity board must be the active TAB and its rail must be on the Insights entry,
-  // or the chips would hang over the Feed / Bots / Compare panes, which have no window to scope.
-  const isInsights = activeTab === 'activity' && f.activityRepoId === 'insights';
-
   // The FilterBar is always fully live now — PR-isolation / My-Turn focus is a separate
   // TAB (its own keyed <Timeline>), so it no longer disables or fades the board filters.
   // Repo/workspace MANAGEMENT (add/remove/move) lives in the WorkspaceManager modal, reached from
@@ -387,12 +334,6 @@ export function FilterBar(): JSX.Element {
           </Section>
         )}
 
-        {/* THE ONE DELIBERATE EXCEPTION to the Timeline-only rule at the top of this component: the
-            Insights pane's chat answers a question about a PERIOD, so its range belongs in the bar
-            where every other range lives rather than buried in the panel. It is a different value
-            from the Timeline's `preset` (see store `insightsRange`) and carries no "Now" — that
-            recentres a timeline, which means nothing to a date range. */}
-        {isInsights && <InsightsRangeSection />}
 
       </div>
 

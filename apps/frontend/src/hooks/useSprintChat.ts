@@ -52,11 +52,11 @@ export function threadToWireHistory(turns: SprintChatTurn[]): SprintChatHistoryT
 // makes forgetting any of them impossible. The scope wire value is the workspace id as a string
 // (the plugin persists `ws:<id>` as the cache `scope_key`).
 //
-// The window has two forms, resolved here in priority order:
-//  • `periodWindow` (explicit `[fromMs, toMs)` bounds — the Reports "Ask about this period"
-//    mount passes the VIEWED period's own bounds) is sent as `window` and WINS;
-//  • otherwise the store's `insightsRange` chip, where `null` legitimately means "no override"
-//    and is therefore omitted rather than sent.
+// The window has ONE form: `periodWindow`, the explicit `[fromMs, toMs)` bounds of the report
+// being viewed, sent as `window`. There used to be a second — a FilterBar "Range" chip strip —
+// but the ONE mount of this chat lives inside the period report and always passes a window, so
+// the chips could never reach the wire. They are gone; `SprintChatBody.range` remains on the wire
+// and the plugin route still accepts it.
 //
 // The history is read from the store AT CALL TIME (`getState()`, not a subscription) — the live
 // thread for the SAME workspace key the panel renders, so a turn appended between render and
@@ -77,7 +77,6 @@ export function useSprintChat(
   periodWindow?: { fromMs: number; toMs: number } | null,
 ) {
   const qc = useQueryClient();
-  const range = useFilters((s) => s.insightsRange);
   return useMutation<
     SprintChatResponse,
     Error,
@@ -92,11 +91,14 @@ export function useSprintChat(
         ...body,
         ...(history.length > 0 ? { history } : {}),
         ...(workspaceId != null ? { scope: String(workspaceId) } : {}),
+        // ⚠ THE ONLY MOUNT ALWAYS PASSES A WINDOW. The chat lives inside the period report and
+        // is grounded in the VIEWED period's exact `[fromMs, toMs)`. The `range` fallback that
+        // used to sit here fed off a FilterBar "Range" chip strip that this precedence made
+        // unreachable — four no-op chips shipped to every user — so both are gone.
+        // `SprintChatBody.range` stays on the wire and the plugin route still accepts it.
         ...(periodWindow != null
           ? { window: { fromMs: periodWindow.fromMs, toMs: periodWindow.toMs } }
-          : range != null
-            ? { range }
-            : {}),
+          : {}),
       });
     },
     // Runs at ask time, before the options closure can be swapped — the context pins the

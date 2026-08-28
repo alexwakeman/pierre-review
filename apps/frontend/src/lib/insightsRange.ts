@@ -1,40 +1,24 @@
-import type {
-  InsightsAnswerWindow,
-  InsightsRangeKey,
-  SprintComparisonMode,
-} from '@pierre-review/shared';
+import type { InsightsAnswerWindow, InsightsRangeKey } from '@pierre-review/shared';
 import { formatDate } from './ui.js';
 
-// The Insights chat's range vocabulary, client side. Pure — no store, no query — so the FilterBar
-// chips, the answer caption and the History rows all read one implementation.
-
-// Which chip is live when the user has picked nothing. `insightsRange === null` means "use the
-// account's configured window", so the bar must show that window as the selection rather than
-// showing nothing selected.
+// The Insights chat's range vocabulary, client side. Pure — no store, no query — so the answer
+// caption and the History rows read one implementation.
 //
-// ⚠ THIS MIRRORS THE SERVER'S `resolveInsightsRange` (packages/pro/src/settings/store.ts) AND MUST
-// AGREE WITH IT. If it drifts, the bar highlights one range while the answer covers another — the
-// worst kind of disagreement, because both halves look confident. In particular the `'sprint'`
-// mode WITHOUT stored dates falls back to a rolling fortnight in both places; the chip isn't even
-// offered then, but the configured mode can still name it.
-export function defaultInsightsRange(
-  mode: SprintComparisonMode | null,
-  hasSprintDates: boolean,
-): InsightsRangeKey {
-  if (mode === 'sprint') return hasSprintDates ? 'sprint' : '14d';
-  if (mode === 'rolling_7') return '7d';
-  return '14d'; // rolling_14 is the documented default, and covers an unread/absent setting
-}
+// ⚠ `defaultInsightsRange` USED TO LIVE HERE and is deliberately gone. It existed for the
+// FilterBar "Range" chips, which the chat's window precedence made unreachable (its only mount
+// always passes an explicit period window). The SERVER's `resolveInsightsRange`
+// (packages/pro/src/settings/store.ts) survives and is now pinned on that side only — there is
+// no longer a client mirror for it to drift from.
 
-// Chip text. Short, because these sit in the filter bar next to the Timeline's own presets.
+// Range label, short. No longer chip text — it captions an answer's window.
 export const INSIGHTS_RANGE_LABEL: Record<InsightsRangeKey, string> = {
   sprint: 'Sprint to date',
   '7d': '7d',
   '14d': '14d',
   '30d': '30d',
   '90d': '90d',
-  // Never a chip (FilterBar's key lists don't include it): 'period' only ever appears on answers
-  // the Reports "Ask about this period" mount grounded in an explicit reporting period.
+  // What every answer from the Reports "Ask about this period" mount is labelled with, now that
+  // it is the only mount there is.
   period: 'Period',
 };
 

@@ -397,6 +397,9 @@ export function BranchStatusPanel({
   const { data, isLoading } = useBranchStatus(repoIds);
   const { data: repos } = useRepos();
   const nameById = new Map((repos ?? []).map((r) => [r.id, r.fullName]));
+  // Per-mount only, deliberately: this is a "let me look" toggle, not a remembered preference,
+  // and a red trunk always forces it open regardless (see `expanded`).
+  const [userExpanded, setUserExpanded] = useState(false);
 
   if (isLoading && data == null) return null;
   const rows = data?.repos ?? [];
@@ -411,15 +414,53 @@ export function BranchStatusPanel({
     (r) => r.ciStatus === 'failure' || r.ciStatus === 'error',
   ).length;
 
+  // ── COLLAPSE WHEN NOTHING IS RED ──────────────────────────────────────────────────────────
+  //
+  // The cross-repo Feed shows this panel above the stream, where a twelve-repo workspace spends
+  // most of its life rendering twelve green rows nobody reads. Collapsed, it is the header line
+  // alone — still always expandable, and `useBranchTrends` is lazy per row, so a collapsed strip
+  // issues ZERO extra requests.
+  //
+  // ⚠ "GREEN" IS NOT A BOOLEAN. `CiStatus` has six members, and `pending`/`expected`/`unknown`
+  // are neither red nor green (CiDot paints `unknown` as a HOLLOW grey dot). The rule is: collapse
+  // unless some repo is `failure|error` — a pending build is not a call to action — and the
+  // caption claims "all green" ONLY when every repo is `success`. Anything else gets the neutral
+  // count with no verdict attached.
+  //
+  // ⚠ CROSS-REPO MOUNT ONLY. `RepoFeedHeader` mounts this `compact` for a SINGLE repo, where the
+  // panel IS the trunk line; collapsing there would hide that repo's status inside its own
+  // console header.
+  const allGreen = rows.every((r) => r.ciStatus === 'success');
+  const collapsible = !compact;
+  const expanded = !collapsible || failing > 0 || userExpanded;
+
   return (
     <section
       className="rounded-lg border border-gray-200 dark:border-gray-800"
       data-testid="branch-status-panel"
     >
-      <div className="flex items-center gap-2 border-b border-gray-100 px-2 py-1 dark:border-gray-800/60">
+      <div
+        className={`flex items-center gap-2 px-2 py-1 ${
+          expanded ? 'border-b border-gray-100 dark:border-gray-800/60' : ''
+        }`}
+      >
+        {collapsible && (
+          <button
+            type="button"
+            onClick={() => setUserExpanded((v) => !v)}
+            aria-expanded={expanded}
+            className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            title={expanded ? 'Hide the per-repo rows' : 'Show the per-repo rows'}
+          >
+            <ChevronIcon dir={expanded ? 'down' : 'right'} size={10} />
+          </button>
+        )}
         <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           Default branches
         </span>
+        {!expanded && allGreen && (
+          <span className="text-[10px] text-gray-400">all green</span>
+        )}
         {failing > 0 && (
           <span
             className="rounded bg-red-500/15 px-1 text-[10px] font-semibold text-red-600 dark:text-red-400"
@@ -432,7 +473,7 @@ export function BranchStatusPanel({
           {rows.length} repo{rows.length === 1 ? '' : 's'}
         </span>
       </div>
-      <ul className={compact ? '' : 'max-h-64 overflow-y-auto'}>
+      <ul className={`${compact ? '' : 'max-h-64 overflow-y-auto'}${expanded ? '' : ' hidden'}`}>
         {rows.map((r) => (
           <BranchRow
             key={r.repoId}

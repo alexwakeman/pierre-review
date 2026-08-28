@@ -15,10 +15,8 @@ import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { RepoInsightsPanel } from './RepoInsightsPanel.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { BriefStrip } from './BriefStrip.js';
-import { WorkPlanCard } from './WorkPlanCard.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
-import { FeedMetricsPanel } from './FeedMetricsPanel.js';
 import { HumanThemesPanel } from './HumanThemesPanel.js';
 import { InsightsView } from './InsightsView.js';
 import { AttentionView } from './AttentionView.js';
@@ -256,7 +254,7 @@ export function ActivityView(): JSX.Element {
   // comparison is Reports' "By workspace" axis now, and a legacy `?activityRepo=compare` link
   // already normalizes to the Feed in useUrlState.)
   const showingFeed = activityRepoId === 'feed' || activityRepoId == null;
-  // The CORE/free "Needs attention" cards console — always available, no Pro gate.
+  // The CORE/free **Pending** cards console — always available, no Pro gate.
   const showingAttention = activityRepoId === 'attention';
   const showingInsights = activityRepoId === 'insights';
   // The CORE/free review-bot triage console (BotsView) — always available (reads the core bot
@@ -390,44 +388,14 @@ export function ActivityView(): JSX.Element {
             isFetching && data != null ? 'opacity-60 transition-opacity' : ''
           }`}
         >
-          {/* RAIL ORDER, top to bottom: Reports (Pro; store value still 'insights') · Feed ·
-              Bots · Needs attention — then the per-repo rows BENEATH the whole block. The daily
-              surfaces lead; Needs attention is the occasional one and sits at the bottom of the
-              pseudo-row block. One entry is gated (Reports on the Pro capability); the other
-              three are always present.
+          {/* RAIL ORDER, top to bottom: Feed · Pending · Bots · Reports (store value still
+              'insights') — then the per-repo rows BENEATH the whole block. The two DAILY surfaces
+              lead: the Feed is the default landing, and Pending is the worklist that absorbed the
+              "Plan for today" panel. Reports sits last as the retrospective surface.
+              ⚠ ALL FOUR ARE NOW UNGATED. Reports used to be first AND Pro-gated, from when it was
+              nothing but the Pro period report; the FREE flow metrics moved into it off the Feed,
+              so hiding the entry would have taken a free feature behind the Pro wall.
               (The "Compare workspaces" entry was folded into Reports' "By workspace" axis.) */}
-
-          {/* REPORTS pseudo-row (formerly "Insights" — renamed with plan C5, once the pane became
-              Reports-first and the chat moved inside the report). LABEL-ONLY rename: the store
-              value stays `activityRepoId === 'insights'` on purpose — it is transient but
-              referenced across several files (useUrlState's `?activityRepo=insights`, FilterBar's
-              `isInsights`, this file's default-landing effect), and renaming a wire/URL-visible
-              token buys nothing but broken deep links. Pro; workspaceInsights. When Pro is on it
-              is the FIRST entry AND the default landing view (see the effect above); hidden
-              entirely in OSS / when Pro is off. */}
-          {workspaceInsights && (
-            <button
-              type="button"
-              onClick={() => setActivityRepo('insights')}
-              aria-pressed={showingInsights}
-              className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
-                showingInsights
-                  ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
-                  : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
-              }`}
-              title="Period-over-period reports for this workspace, with a grounded chat (Pro)"
-            >
-              <span className="shrink-0 text-ai-signal">
-                <WorkspaceIcon />
-              </span>
-              <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
-                Reports
-              </span>
-              <span className="shrink-0 rounded bg-ai-signal/10 px-1 text-[9px] font-semibold uppercase text-ai-signal">
-                Pro
-              </span>
-            </button>
-          )}
 
           {/* FEED pseudo-row — this workspace's consolidated state of play, across every repo in
               it. The old "All repos" pseudo-row was removed (redundant with the Feed + the
@@ -448,6 +416,34 @@ export function ActivityView(): JSX.Element {
             </span>
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
               Feed
+            </span>
+          </button>
+
+          {/* PENDING pseudo-row — the worklist. Everything waiting on you or the workspace, in
+              ONE list, led by the ranked "Do next" head (`doNextIds`, scored by db/work-plan.ts).
+              CORE/free — the RANK is code, only its narration is Pro — so it's ALWAYS shown.
+              ⚠ LABEL-ONLY rename from "Needs attention": the rail id stays `'attention'`, because
+              an unknown `?activityRepo=` value falls into the parseInt branch, yields NaN and
+              lands the reader on the Feed, breaking Back on same-session history entries.
+              Second in the rail, directly under the Feed: it absorbed the "Plan for today" panel
+              that used to sit on the Feed, so it is now a DAILY surface rather than an
+              occasional one. */}
+          <button
+            type="button"
+            onClick={() => setActivityRepo('attention')}
+            aria-pressed={showingAttention}
+            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+              showingAttention
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            title="Everything waiting on you or your workspace, ranked most actionable first (free)"
+          >
+            <span className="shrink-0 text-amber-500">
+              <WarningIcon />
+            </span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+              Pending
             </span>
           </button>
 
@@ -475,27 +471,32 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
-          {/* NEEDS-ATTENTION pseudo-row — the attention cards (stalled reviews / untouched threads /
-              reviewer load / needs-a-reviewer), moved out from under the Pro Insights AI panels.
-              CORE/free (reads the deterministic /api/attention route), so it's ALWAYS shown. Last
-              of the top-level entries: it is the "when something is wrong" surface, not a daily
-              one. */}
+          {/* REPORTS pseudo-row (formerly "Insights" — renamed with plan C5, once the pane became
+              Reports-first and the chat moved inside the report). LABEL-ONLY rename: the store
+              value stays `activityRepoId === 'insights'` on purpose — it is transient but
+              referenced across several files (useUrlState's `?activityRepo=insights`, FilterBar's
+              `isInsights`), and renaming a wire/URL-visible token buys nothing but broken deep
+              links.
+              ⚠ SHOWN ON EVERY TIER. It used to be wrapped in `{workspaceInsights && …}`, correct
+              while the pane was nothing but the Pro period report — but the FREE flow metrics
+              moved in here off the Feed, so hiding the entry would have taken a free feature
+              behind the Pro wall. The pane gates its own Pro halves internally. */}
           <button
             type="button"
-            onClick={() => setActivityRepo('attention')}
-            aria-pressed={showingAttention}
+            onClick={() => setActivityRepo('insights')}
+            aria-pressed={showingInsights}
             className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
-              showingAttention
+              showingInsights
                 ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
                 : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
-            title="Stalled reviews, untouched threads, reviewer load and un-assigned PRs (free)"
+            title="Flow metrics for this workspace, and period-over-period reports (Pro)"
           >
-            <span className="shrink-0 text-amber-500">
-              <WarningIcon />
+            <span className="shrink-0 text-ai-signal">
+              <WorkspaceIcon />
             </span>
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
-              Needs attention
+              Reports
             </span>
           </button>
 
@@ -541,9 +542,9 @@ export function ActivityView(): JSX.Element {
           // repo data loads.
           <BotsView />
         ) : showingAttention ? (
-          // The CORE/free "Needs attention" cards (your turn / stalled reviews / untouched threads
-          // / reviewer load / needs-a-reviewer) — moved out from under the Pro Insights AI panels.
-          // Renders on every tier, before repo data loads (its own empty/loading states).
+          // The CORE/free **Pending** board — every card kind in one list, led by the ranked
+          // "Do next" head. Renders on every tier, before repo data loads (its own empty/loading
+          // states); the Pro narration decorates it and is never required for it to be complete.
           //
           // The banner above it carries the board's two narrowings — the single KIND set by the
           // daily brief's lines, and the PERSONAL lens set by the notification surfaces — each
@@ -563,9 +564,15 @@ export function ActivityView(): JSX.Element {
               : 'Detecting the repos you work on…'}
           </div>
         ) : showingFeed ? (
-          // The workspace Feed: the flow-metric header (DORA-ish tiles + trend charts — CORE/free,
-          // moved out of the Pro Insights pane) atop the consolidated feed stream. With Pro on, a
-          // "Discussion themes" sub-tab (the human sibling of Bots → Themes) sits beside it.
+          // The workspace Feed — a STREAM, and now only a stream. With Pro on, a "Discussion
+          // themes" sub-tab (the human sibling of Bots → Themes) sits beside it.
+          //
+          // ⚠ TWO PANELS LEFT THIS BRANCH and neither was deleted; do not re-add either here.
+          // The "Plan for today" card became the Pending board's ranked head (one population, one
+          // surface), and the flow-metric header moved to Reports, where analytics belongs and
+          // where the period framing gives the numbers a denominator. What is left is the brief
+          // strip, the trunk chip and the feed — which is the point: three panels of survey above
+          // a stream is not a feed.
           <div className="space-y-3">
             {feedTabs.length > 1 && (
               <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
@@ -605,16 +612,11 @@ export function ActivityView(): JSX.Element {
                     renders exactly once — the numeric-fallback FeedView below deliberately
                     doesn't carry it, and per-repo consoles never do). Self-hides at all-zero. */}
                 <BriefStrip />
-                {/* The work plan — the brief's counts turned into an ORDER. It sits here, directly
-                    under the strip, because the two are one population read two ways: the strip
-                    says how much is waiting, this says what to pick up first. Pro-only and
-                    self-hiding, so a free or OSS account sees the strip alone, unchanged. */}
-                <WorkPlanCard />
-                {/* "Is trunk green?" across every repo in scope — above the flow metrics,
-                    because a red default branch invalidates every open PR's CI at once and is
-                    the first thing worth knowing. Read-only; self-hides until branch-synced. */}
+                {/* "Is trunk green?" across every repo in scope — a red default branch
+                    invalidates every open PR's CI at once and is the first thing worth knowing.
+                    Read-only; self-hides until branch-synced, and collapses to a one-line chip
+                    while every branch is clear. */}
                 <BranchStatusPanel />
-                <FeedMetricsPanel />
                 <FeedView />
               </>
             )}

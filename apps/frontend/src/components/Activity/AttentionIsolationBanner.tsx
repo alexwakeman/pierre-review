@@ -11,7 +11,7 @@ import {
 } from './AttentionView.js';
 import { FilterIcon } from '../Icons.js';
 
-// The isolation banner on the "Needs attention" board ("Showing only Your turn …"). Modelled on
+// The isolation banner on the **Pending** board ("Showing only Your turn …"). Modelled on
 // FeedIsolationBanner: INLINE (it scrolls with the content — never fixed, never sticky, per the
 // one-toast-column rule), dismissible, and null when nothing is narrowed.
 //

@@ -26,7 +26,7 @@ import {
 } from '@pierre-review/shared';
 import { useFilters } from '../../store/filters.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
 import {
   periodReportGenerateMutationKey,
   periodReportModelChoices,
@@ -1272,6 +1272,7 @@ function Skeleton(): JSX.Element {
 // ── The panel ────────────────────────────────────────────────────────────────────────────────
 export function PeriodReportsPanel(): JSX.Element | null {
   const { periodReports } = useProCapabilities();
+  const isCloud = useMe().data?.deploymentMode === 'cloud';
   // null until the workspaces query resolves the account's Default. Nothing workspace-scoped may
   // render — and nothing billable may fire — before then.
   const workspaceId = useFilters((s) => s.workspaceId);
@@ -1327,11 +1328,30 @@ export function PeriodReportsPanel(): JSX.Element | null {
     }
   }, [report.data]);
 
-  // The capability flag and the plugin's own answer must BOTH be on. They can disagree — a stale
-  // /api/me, or the plugin's `DIGEST_ENABLED` self-gate flipping — and `enabled: false` from the
-  // route means "this workspace has no reports surface", which must render nothing rather than
-  // the "no periods yet" empty state (that copy invites a click that cannot work).
-  if (!periodReports || list.data?.enabled === false) return null;
+  // ⚠ THE TWO HALVES OF THIS GATE ARE DIFFERENT SITUATIONS AND MUST STAY SPLIT.
+  //
+  // No capability = a FREE account. Since Reports became a free-visible rail entry (the flow
+  // metrics live above this panel), a free user reaches this code every time they open the pane,
+  // so silence here is a missing explanation rather than a clean absence. Cloud gets the one-line
+  // nudge; OSS/local gets nothing, because there is nothing to upgrade to.
+  if (!periodReports) {
+    if (!isCloud) return null;
+    return (
+      <p className="text-[10px] text-gray-400">
+        <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[10px] font-semibold text-ai-signal">
+          Pro
+        </span>
+        Period-over-period reports — what changed since last sprint, and a forecast that refuses
+        when the history is too thin — are part of Pro.
+      </p>
+    );
+  }
+  // `enabled: false` from the route is the OTHER case entirely: the capability IS on (this query
+  // only runs when it is), and the plugin has self-disabled its reports surface — a stale
+  // /api/me, or `DIGEST_ENABLED` flipping. That is a PAYING account, so it must render nothing
+  // rather than either the "no periods yet" empty state (copy that invites a click which cannot
+  // work) or, worse, the buy-Pro line above.
+  if (list.data?.enabled === false) return null;
 
   // Fold `isPlaceholderData` into loading everywhere: a stale window's numbers under a new
   // window's caption is a bug this codebase has already shipped once. (Neither of these queries

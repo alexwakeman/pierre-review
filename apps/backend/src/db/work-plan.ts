@@ -9,7 +9,7 @@
 //
 // The daily-brief strip sits directly above this panel and counts the cards of ONE fold —
 // `getWorkspaceInsights(accountId, undefined, scope)`, which is also what `GET /api/attention`
-// serves. So SIX of this plan's seven signals are read off THOSE CARDS, never re-derived:
+// serves. So ALL SEVEN of this plan's signals are read off THOSE CARDS, never re-derived:
 // re-deriving "an untouched thread" here would be a second predicate, and the day it disagreed
 // with the strip the user would be looking at two numbers for one population. `counts` below
 // travels on the wire precisely so that agreement is ASSERTABLE (work-plan.test.ts asserts it
@@ -20,19 +20,18 @@
 // `relevance`, exactly as the brief does it. If you change one, change the other, and the
 // alignment test is what makes forgetting fail rather than ship.
 //
-// ── THE TWO SIGNALS THE CARDS NEVER CARRIED ─────────────────────────────────────────────────
-// "This can land right now" and "GitHub is refusing until you update the branch" are not attention
-// cards — nobody is waiting on you, the PR is simply one click from done. They come from ONE query
-// over open, non-draft PRs in scope, classified by `mergeStateStatus`:
-//   merge          → `READY_MERGE_STATES` (IMPORTED from db/triage.ts, never re-spelled — that set
-//                    is the one that must agree with the frontend `mergeVerdict()`'s canMerge half)
-//                    and `mergeable !== 'conflicting'`.
-//   update_branch  → `mergeStateStatus === 'behind'`, and ONLY that.
-// ⚠ `behindBy` IS NOT STORED. Every read of it is a live GitHub /compare, and it is the wrong
-// signal anyway: `behindBy > 0` is true of most perfectly healthy PRs, whereas 'behind' means
-// GitHub is actually blocking (it 405s the merge). Do not reach for it here.
-// ⚠ 'unstable' IS mergeable (only NON-required checks are red) and 'behind' is not. Both rules
-// already live inside READY_MERGE_STATES; do not second-guess them at this call site.
+// ── ALL SEVEN SIGNALS ARE NOW CARD-DERIVED ──────────────────────────────────────────────────
+// "This can land right now" and "GitHub is refusing until you update the branch" USED to come from
+// a standalone open-PR query in this file — which made the ranked list a SECOND POPULATION beside
+// the board it sits on. They are now `merge` / `update_branch` INSIGHT CARDS emitted by
+// `getWorkspaceInsights` (see the emitter there for the predicates and the no-author-filter rule),
+// so this file re-orders one population and derives none of it.
+//
+// ⚠ INHERITED NARROWINGS, BOTH DELIBERATE AND BOTH REAL. The card fold applies an ULTRA-STALE
+// GATE (no activity event in `INSIGHT_MAX_STALE_DAYS` = 90 ⇒ no card) and a 15-PER-KIND CAP that
+// the old standalone query did not. A long-dormant-but-mergeable PR therefore no longer appears
+// here — and that is the point: a ranked row with no card behind it would break the board's
+// `head ∪ tail === cards` partition, which every cap disclosure on that screen depends on.
 //
 // ── THE RANK IS THE CODE'S, NOT THE MODEL'S ─────────────────────────────────────────────────
 // `score = 0.50·proximity + 0.30·stallRisk + 0.20·relevanceWeight`, sorted descending with a
@@ -47,9 +46,7 @@
 import { and, count, eq, inArray } from 'drizzle-orm';
 import type {
   CiFailingCard,
-  CiStatus,
   InsightCard,
-  Mergeable,
   MergeStateStatus,
   MyTurnCard,
   MyTurnCardReason,
@@ -63,16 +60,26 @@ import type {
   WorkPlanKind,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
-import { getWorkspaceInsights, viewerMaintainedRepoIds, type BotScope } from './queries.js';
-import { computeApprovalInfoByPr, READY_MERGE_STATES } from './triage.js';
-import { getAccountUserId } from '../auth/account.js';
+import { getWorkspaceInsights, mergeCardDetail, type BotScope } from './queries.js';
+import { computeApprovalInfoByPr } from './triage.js';
 
-const { pullRequests, repos, reviewThreads } = schema;
+const { pullRequests, reviewThreads } = schema;
 
 /** How many rows the panel paints. `totals` carries the UNCAPPED population per kind, so a capped
  *  list can always disclose what it left out — a truncation nobody is told about is a lie about
  *  the size of the day. */
 export const WORK_PLAN_ITEM_CAP = 12;
+
+/**
+ * THE ONE SPELLING OF THE "DO NEXT" HEAD — the ranked evidence as `InsightCard` ids, for
+ * `GET /api/attention` to hand the board.
+ *
+ * ⚠ IT IS AN ORDERING, NOT A FILTER. The board renders every card either side of the divider;
+ * these ids only say which come first and in what order. See `AttentionCardsResponse.doNextIds`.
+ */
+export function doNextCardIds(evidence: WorkPlanEvidence): string[] {
+  return evidence.items.map((i) => i.cardId).filter((id): id is string => id != null);
+}
 
 const HOUR_MS = 3_600_000;
 
@@ -81,6 +88,8 @@ const HOUR_MS = 3_600_000;
 // the actual step. Everything in between is ordered by how much work stands between the item and
 // a merged PR.
 const BASE_PROXIMITY: Record<WorkPlanKind, number> = {
+  // ⚠ NOT the merge base — see MERGE_APPROVED_PROXIMITY below, which overrides it. This entry
+  // exists only to keep the record total over WorkPlanKind.
   merge: 0.95,
   update_branch: 0.7,
   unblock_ci: 0.6,
@@ -94,8 +103,23 @@ const BASE_PROXIMITY: Record<WorkPlanKind, number> = {
  *  it sits above the per-PR arm rather than beside it. */
 const TRUNK_CI_PROXIMITY = 0.65;
 
-/** Approved: there is nothing left to wait for, only the click. Merge kind only. */
-const APPROVED_BONUS = 0.05;
+// ── MERGE PROXIMITY IS APPROVAL-CONDITIONAL, AND THE ORDERING IS THE POINT ──────────────────
+// A `clean` PR that NOBODY HAS REVIEWED is ready for GitHub, not ready for a human. Scoring it
+// like an approved one had two visible consequences, both measured on real data:
+//   1. the ranked head's top instruction became "merge this" for unreviewed code — and on this
+//      account, most merge-ready PRs are bot-authored (9 of 11 and 7 of 8 on two workspaces), so
+//      the head filled with unreviewed Dependabot;
+//   2. because the per-PR dedup survivor is chosen by PROXIMITY, the merge row also BEAT that same
+//      PR's own `review` row — so the head said "nothing is blocking this" while the board below
+//      said "your turn" about one pull request.
+// Dropping the unapproved case BELOW `review` (0.55) and `reply` (0.5) fixes both at once: the
+// review claim wins the dedup, and the merge row only leads once someone has actually approved.
+// ⚠ On repos WITH required-review protection this changes almost nothing — those PRs are
+// `blocked`, not `clean`. It bites exactly the unprotected repos, which is where it should.
+/** Approved: there is nothing left to wait for, only the click. */
+const MERGE_APPROVED_PROXIMITY = 0.95;
+/** Ready for GitHub, not ready for a human. Deliberately below `review` and `reply`. */
+const MERGE_UNAPPROVED_PROXIMITY = 0.45;
 /** Conflicts — further out than the merge state alone makes it look. */
 const DIRTY_PENALTY = -0.15;
 /** A wall of unanswered feedback is not one step from landing. */
@@ -138,9 +162,12 @@ const clamp01 = (n: number): number => (n < 0 ? 0 : n > 1 ? 1 : n);
 /** THE ONE PROXIMITY RESOLVER. `base` overrides the per-kind default (the trunk CI arm). */
 function proximityFor(kind: WorkPlanKind, facts: WorkPlanFacts, base?: number): number {
   let p = base ?? BASE_PROXIMITY[kind];
+  // The merge base is CONDITIONAL, not a bonus on top of a high base — see the constants.
+  if (kind === 'merge') {
+    p = (facts.approvals ?? 0) > 0 ? MERGE_APPROVED_PROXIMITY : MERGE_UNAPPROVED_PROXIMITY;
+  }
   // Each adjustment is applied ONCE, then the sum is clamped — not clamped between steps, which
   // would make the order of the four matter.
-  if (kind === 'merge' && (facts.approvals ?? 0) > 0) p += APPROVED_BONUS;
   if (facts.mergeStateStatus === 'dirty') p += DIRTY_PENALTY;
   if ((facts.untouchedThreads ?? 0) >= THREAD_WALL_MIN) p += THREAD_WALL_PENALTY;
   if (facts.changedFiles != null && facts.changedFiles <= SMALL_DIFF_MAX_FILES) p += SMALL_DIFF_BONUS;
@@ -262,80 +289,82 @@ export async function getWorkPlan(
   accountId: number,
   scope: BotScope,
 ): Promise<WorkPlanEvidence> {
+  // ⚠ THE SAME CALL THE DAILY BRIEF MAKES — same fold, same scope, same DEFAULT window
+  // (`undefined`). A different window here would silently give the plan a different population
+  // from the strip and the board.
+  //
+  // ⚠ THIS SIGNATURE IS LOAD-BEARING ACROSS TWO REPOSITORIES. It is `ProHostQueries.getWorkPlan`,
+  // and changing its shape is the one thing here that would force an `apiVersion` bump in four
+  // literals spanning the host and the plugin submodule. The split below moves the BODY out; the
+  // signature does not move.
+  const insights = await getWorkspaceInsights(accountId, undefined, scope);
+  return rankWorkPlan(accountId, scope, insights);
+}
+
+/**
+ * THE RANK ITSELF, over an ALREADY-FOLDED `getWorkspaceInsights` result.
+ *
+ * Split out of `getWorkPlan` so that `GET /api/attention` — which has just run that exact fold to
+ * build the board — can rank the same cards without folding them a second time. Two folds in one
+ * request would be two populations one refresh apart, which is the whole class of bug the Pending
+ * consolidation exists to remove.
+ *
+ * ⚠ THE EMPTY-SCOPE SHORT-CIRCUIT LIVES HERE, not in the wrapper, so BOTH callers inherit it.
+ */
+export async function rankWorkPlan(
+  accountId: number,
+  scope: BotScope,
+  insights: Awaited<ReturnType<typeof getWorkspaceInsights>>,
+): Promise<WorkPlanEvidence> {
   const now = Date.now();
   const generatedAt = new Date(now);
   if (scope.repoIds.length === 0) return emptyEvidence(scope.workspaceId, generatedAt);
 
-  // ⚠ THE SAME CALL THE DAILY BRIEF MAKES — same fold, same scope, same DEFAULT window
-  // (`undefined`). A different window here would silently give the panel a different population
-  // from the strip above it.
-  const insights = await getWorkspaceInsights(accountId, undefined, scope);
   const counts = foldCounts(insights.cards);
 
-  // ── the two signals the cards never carried ───────────────────────────────────────────────
-  // ONE query. Open + non-draft, in scope, account-guarded. The merge classification itself is a
-  // JS fold over these rows, because `mergeable !== 'conflicting'` has to treat a NULL `mergeable`
-  // as "not known to conflict" and a SQL `<>` drops NULL rows silently.
-  const openRows = await db
-    .select({
-      id: pullRequests.id,
-      repoId: pullRequests.repoId,
-      number: pullRequests.number,
-      title: pullRequests.title,
-      authorId: pullRequests.authorId,
-      openedAt: pullRequests.openedAt,
-      lastCommitAt: pullRequests.lastCommitAt,
-      ciStatus: pullRequests.ciStatus,
-      mergeable: pullRequests.mergeable,
-      mergeStateStatus: pullRequests.mergeStateStatus,
-      changedFiles: pullRequests.changedFiles,
-    })
-    .from(pullRequests)
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        inArray(pullRequests.repoId, scope.repoIds),
-        eq(pullRequests.state, 'open'),
-        eq(pullRequests.isDraft, false),
-      ),
-    )
-    .execute();
-
-  const repoRows = await db
-    .select({ id: repos.id, owner: repos.owner, name: repos.name })
-    .from(repos)
-    .where(and(eq(repos.accountId, accountId), inArray(repos.id, scope.repoIds)))
-    .execute();
-  const repoFullNameById = new Map(repoRows.map((r) => [r.id, `${r.owner}/${r.name}`]));
-
-  type MergeCandidate = { row: (typeof openRows)[number]; kind: 'merge' | 'update_branch' };
-  const mergeCandidates: MergeCandidate[] = [];
-  for (const row of openRows) {
-    const state = row.mergeStateStatus as MergeStateStatus | null;
-    if (state == null) continue;
-    if (state === 'behind') {
-      mergeCandidates.push({ row, kind: 'update_branch' });
-    } else if (
-      READY_MERGE_STATES.has(state) &&
-      (row.mergeable as Mergeable | null) !== 'conflicting'
-    ) {
-      mergeCandidates.push({ row, kind: 'merge' });
-    }
-  }
-
   // ── the shared per-PR facts every PR-grained row wants ────────────────────────────────────
-  // Both are batched over the UNION of PR ids the plan could name, so the card-derived rows get
-  // the same merge/approval/thread facts the two new kinds do, for free.
-  const openById = new Map(openRows.map((r) => [r.id, r]));
+  // Batched over the UNION of PR ids the plan could name, so every row gets the same
+  // merge/approval/thread facts for free.
   const cardPrIds = new Set<number>();
   for (const c of insights.cards) {
-    if (c.kind === 'my_turn' || c.kind === 'stalled_review' || c.kind === 'untouched_thread')
+    if (
+      c.kind === 'my_turn' ||
+      c.kind === 'stalled_review' ||
+      c.kind === 'untouched_thread' ||
+      c.kind === 'reviewer_routing' ||
+      c.kind === 'merge' ||
+      c.kind === 'update_branch'
+    ) {
       cardPrIds.add(c.prId);
-    else if (c.kind === 'reviewer_routing') cardPrIds.add(c.prId);
-    else if (c.kind === 'ci_failing' && c.prId != null) cardPrIds.add(c.prId);
+    } else if (c.kind === 'ci_failing' && c.prId != null) cardPrIds.add(c.prId);
   }
-  for (const m of mergeCandidates) cardPrIds.add(m.row.id);
   const factPrIds = [...cardPrIds];
+
+  // ⚠ NARROW, AND GUARDED FOR EMPTY. Three fields, keyed on the ids the cards already named —
+  // this replaced an account-wide open-PR select that is now the card emitter's job.
+  //   • `changedFiles` MUST stay in this select. Two readers depend on it — `sharedFacts` and the
+  //     ci_failing 'your_pr' arm, which has no other source — and it is HASHED (`cf:`) as well as
+  //     driving SMALL_DIFF_BONUS, the time-free key the per-PR dedup survivor is chosen by.
+  //     Dropping it would flip every stored plan on an affected workspace permanently `stale`.
+  //   • `mergeStateStatus` MUST stay: `sharedFacts` feeds it to EVERY PR-grained row, and it is
+  //     hashed as `ms:`.
+  //   • THE EMPTY GUARD IS NOT OPTIONAL. `factPrIds` legitimately empties on a workspace with no
+  //     PR-grained cards, and `inArray(col, [])` is the pitfall this file already names.
+  const openRows =
+    factPrIds.length > 0
+      ? await db
+          .select({
+            id: pullRequests.id,
+            mergeStateStatus: pullRequests.mergeStateStatus,
+            changedFiles: pullRequests.changedFiles,
+          })
+          .from(pullRequests)
+          .where(
+            and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, factPrIds)),
+          )
+          .execute()
+      : [];
+  const openById = new Map(openRows.map((r) => [r.id, r]));
 
   const approvalByPr = await computeApprovalInfoByPr(factPrIds);
   const untouchedByPr = new Map<number, number>();
@@ -369,26 +398,16 @@ export async function getWorkPlan(
     };
   };
 
-  // ── relevance for the two new kinds ───────────────────────────────────────────────────────
-  // The SAME resolver My Turn and the ci_failing trunk arm use, so "a repo you maintain" means one
-  // thing in this app. Skipped entirely when nothing needs it.
-  const viewerId = await getAccountUserId(accountId);
-  const maintained =
-    mergeCandidates.length > 0
-      ? await viewerMaintainedRepoIds(accountId, viewerId)
-      : new Set<number>();
-  const relevanceForPr = (authorId: number | null, repoId: number): MyTurnRelevance => {
-    if (viewerId != null && authorId === viewerId) return 'direct';
-    if (maintained.has(repoId)) return 'maintained';
-    return 'none';
-  };
-
   const candidates: Candidate[] = [];
   const push = (
     kind: WorkPlanKind,
     id: string,
     tieRank: number,
     parts: {
+      /** The `InsightCard.id` this row came from — the SPA's join key from a narration step to a
+       *  board row. REQUIRED, and every arm can supply one now that all seven signals fold off
+       *  cards; a row without one would be unreachable from the Pending board's head. */
+      cardId: string;
       prId: number | null;
       repoId: number;
       repoFullName: string;
@@ -434,60 +453,47 @@ export async function getWorkPlan(
         stallRisk,
         score: scoreFor(proximity, stallRisk, parts.relevance),
         reason: parts.reason,
+        cardId: parts.cardId,
       },
     });
   };
 
-  // ── (1) merge + update_branch ─────────────────────────────────────────────────────────────
-  for (const { row, kind } of mergeCandidates) {
-    const full = repoFullNameById.get(row.repoId) ?? '';
-    // The honest clock: the head commit is the code that is ready to land. `clock` says which
-    // instant was actually used, so a row falling back to `openedAt` does not claim otherwise.
-    const clockAt = row.lastCommitAt ?? row.openedAt;
-    const facts: WorkPlanFacts = {
-      ...sharedFacts(row.id),
-      ciStatus: (row.ciStatus as CiStatus | null) ?? null,
-      changedFiles: row.changedFiles,
-      ageHours: hoursSince(clockAt.toISOString(), now),
-      clock: row.lastCommitAt != null ? 'last_commit' : 'opened',
-    };
-    const untouched = facts.untouchedThreads ?? 0;
-    let reason: string;
-    if (kind === 'update_branch') {
-      reason = 'Behind trunk — GitHub blocks the merge until the branch is updated';
-    } else {
-      // ⚠ SAY WHAT THE CHIPS CANNOT, AND NOTHING THEY ALREADY DO. This read
-      // "Mergeable now · 1 approval · checks green" directly under chips reading
-      // "1 approval | clean | checks green" — the same three facts twice, in a panel whose
-      // credibility rests on every figure appearing once and meaning something.
-      //
-      // What is left is the JUDGEMENT the chips do not carry: nothing is blocking this, except
-      // where something arguably is. `unstable` and an unanswered thread are the two states where
-      // "ready" would overclaim, so those are the only qualifications kept.
-      const caveats: string[] = [];
-      if (row.mergeStateStatus === 'unstable') caveats.push('non-required checks are red');
-      if (untouched > 0)
-        caveats.push(`${untouched} unanswered ${plural(untouched, 'thread')}`);
-      reason =
-        caveats.length === 0
-          ? 'Nothing is blocking this — it can land now'
-          : `Can land now, but ${caveats.join(' and ')}`;
-    }
-    push(kind, `wp:${kind}:${row.id}`, 0, {
-      prId: row.id,
-      repoId: row.repoId,
-      repoFullName: full,
-      prNumber: row.number,
-      prTitle: row.title,
-      githubUrl: `https://github.com/${full}/pull/${row.number}`,
-      relevance: relevanceForPr(row.authorId, row.repoId),
-      facts,
-      reason,
-    });
-  }
-
-  // ── (2) the six card-derived signals ──────────────────────────────────────────────────────
+  // ── the seven card-derived signals ────────────────────────────────────────────────────────
   for (const card of insights.cards) {
+    // ── merge + update_branch ───────────────────────────────────────────────────────────────
+    // Folded off the cards like everything else. The card already carries relevance, the repo
+    // name and the url; this arm adds only the facts the ranker scores on.
+    if (card.kind === 'merge' || card.kind === 'update_branch') {
+      const c = card;
+      // The honest clock: the head commit is the code that is ready to land. `clock` says which
+      // instant was actually used, so a row falling back to `openedAt` does not claim otherwise.
+      const facts: WorkPlanFacts = {
+        ...sharedFacts(c.prId),
+        ciStatus: c.ciStatus,
+        changedFiles: c.changedFiles,
+        ageHours: hoursSince(c.lastCommitAt ?? c.openedAt, now),
+        clock: c.lastCommitAt != null ? 'last_commit' : 'opened',
+      };
+      push(c.kind, `wp:${c.kind}:${c.prId}`, 0, {
+        cardId: c.id,
+        prId: c.prId,
+        repoId: c.repoId,
+        repoFullName: c.repoFullName,
+        prNumber: c.prNumber,
+        prTitle: c.prTitle,
+        githubUrl: c.githubUrl,
+        // ⚠ VERBATIM off the card, exactly like the my_turn arm below. The card's fold is the ONE
+        // place "a repo you maintain" is decided.
+        relevance: c.relevance,
+        facts,
+        // The SAME builder the card used — but with the real untouched-thread count, which only
+        // this fold has. One function, so the card's `detail` and the row's `reason` cannot drift
+        // into two different sentences about one PR.
+        reason: mergeCardDetail(c.kind, c.mergeStateStatus, facts.untouchedThreads ?? 0),
+      });
+      continue;
+    }
+
     if (card.kind === 'my_turn') {
       const c = card as MyTurnCard;
       const kind = kindForMyTurn(c.reason);
@@ -508,6 +514,7 @@ export async function getWorkPlan(
           : `wp:${kind}:${c.prId}`,
         SEVERITY_RANK[c.severity] * 10 + REASON_RANK[c.reason],
         {
+          cardId: c.id,
           prId: c.prId,
           repoId: c.repoId,
           repoFullName: c.repoFullName,
@@ -562,6 +569,7 @@ export async function getWorkPlan(
         trunk ? `wp:unblock_ci:trunk:${c.repoId}` : `wp:unblock_ci:${c.prId}`,
         SEVERITY_RANK[c.severity],
         {
+          cardId: c.id,
           prId: c.prId,
           repoId: c.repoId,
           repoFullName: c.repoFullName,
@@ -600,6 +608,7 @@ export async function getWorkPlan(
         clock: 'opened',
       };
       push('nudge', `wp:nudge:${c.prId}`, 0, {
+        cardId: c.id,
         prId: c.prId,
         repoId: c.repoId,
         repoFullName: c.repoFullName,
@@ -628,6 +637,7 @@ export async function getWorkPlan(
         clock: 'thread_created',
       };
       push('thread', `wp:thread:${c.prId}:${c.threadId}`, 0, {
+        cardId: c.id,
         prId: c.prId,
         repoId: c.repoId,
         repoFullName: c.repoFullName,
@@ -655,6 +665,7 @@ export async function getWorkPlan(
         clock: 'opened',
       };
       push('nudge', `wp:nudge:${c.prId}`, 1, {
+        cardId: c.id,
         prId: c.prId,
         repoId: c.repoId,
         repoFullName: c.repoFullName,
@@ -750,20 +761,17 @@ export async function getWorkPlan(
 /**
  * Cap the ranked list at {@link WORK_PLAN_ITEM_CAP}, but SEAT THE BEST ROW OF EVERY KIND FIRST.
  *
- * ⚠ A PLAIN `.slice(0, CAP)` CAN DELETE A WHOLE SIGNAL, and that is a product bug rather than a
- * presentation detail. This panel exists to answer "what should I work on today" across seven
- * named categories, and the scoring deliberately weights `relevance`, so a workspace with a dozen
- * PRs that name the viewer directly out-scores EVERY shared-work row — and the reader is told, in
- * a panel whose whole promise is coverage, that nothing is behind trunk and no thread is
- * unanswered. The absence looks like a fact. It is an artifact of the cap.
+ * ⚠ A PLAIN `.slice(0, CAP)` WOULD FILL THE WHOLE HEAD WITH ONE KIND. The old argument for this
+ * pass — that a kind deleted by the cap reads as a fact about the workspace ("nothing is behind
+ * trunk") — NO LONGER HOLDS: the head sits on top of the full board, and every displaced row is
+ * still on screen, below the divider, in the tail. Keep the pass anyway, for the reason that
+ * survives: the head PROMISES a spread of the day's work, and twelve rows of one kind above the
+ * fold is the same failure moved one screen higher. The scoring weights `relevance`, so a
+ * workspace with a dozen PRs naming the viewer directly out-scores every shared-work row.
  *
  * So: one slot per non-empty kind (highest-scoring member), then fill the remainder strictly by
  * score, then restore score order over the selection. `ranked` is already sorted by the total
  * tie-break chain above, so "first seen" IS "highest scoring", and the whole pass is stable.
- *
- * The rows this displaces are not lost — `totals` carries the uncapped population per kind, which
- * is what the panel discloses. What changes is that an EMPTY kind now means the workspace really
- * has none of that work.
  */
 function capWithKindCoverage(ranked: WorkPlanItem[]): WorkPlanItem[] {
   if (ranked.length <= WORK_PLAN_ITEM_CAP) return ranked;
@@ -779,9 +787,43 @@ function capWithKindCoverage(ranked: WorkPlanItem[]): WorkPlanItem[] {
     // rather than silently dropping the fill pass altogether.
     if (chosen.size === WORK_PLAN_ITEM_CAP) break;
   }
+  // ⚠ THE FILL PASS IS LEVELLED BY KIND *AND* BY REPO, and a plain "fill by score" is what it
+  // replaced. Seating one row per kind stops a kind being ABSENT; it does nothing to stop one
+  // kind DOMINATING, and on real data that is the failure that actually shipped:
+  //
+  //     0.725 update_branch none drizzle-team/drizzle-orm #5929
+  //     0.725 update_branch none drizzle-team/drizzle-orm #5938
+  //     …six more, byte-identical scores, same kind, same repo…
+  //
+  // EIGHT of twelve slots, one repo, one instruction — a "plan for the day" that is really one
+  // sentence copied eight times. It happens because the score DEGENERATES on a backlog: every row
+  // older than the top stall bucket carries `stallRisk === 1`, so that term is a constant, and
+  // when a workspace has no `direct` work the relevance term is constant too. What is left is
+  // `proximity`, which is per-KIND — so the ranking collapses into "sort by kind" and the fill
+  // pass takes a run.
+  //
+  // The rule: fill in LEVELS. On level N take the highest-scoring remaining rows whose kind has
+  // fewer than N seats AND whose repo has fewer than N seats. Both counters rise together, so the
+  // head spreads across kinds and repos before it doubles up on either, and it degrades cleanly —
+  // a workspace with one kind in one repo simply reaches its level and fills in score order.
+  // Deterministic, because `ranked` is already totally ordered.
+  const byKind = new Map<WorkPlanKind, number>();
+  const byRepo = new Map<number, number>();
   for (const item of ranked) {
-    if (chosen.size >= WORK_PLAN_ITEM_CAP) break;
-    chosen.add(item.id);
+    if (!chosen.has(item.id)) continue;
+    byKind.set(item.kind, (byKind.get(item.kind) ?? 0) + 1);
+    byRepo.set(item.repoId, (byRepo.get(item.repoId) ?? 0) + 1);
+  }
+  for (let level = 2; chosen.size < WORK_PLAN_ITEM_CAP && level <= WORK_PLAN_ITEM_CAP + 1; level++) {
+    for (const item of ranked) {
+      if (chosen.size >= WORK_PLAN_ITEM_CAP) break;
+      if (chosen.has(item.id)) continue;
+      if ((byKind.get(item.kind) ?? 0) >= level) continue;
+      if ((byRepo.get(item.repoId) ?? 0) >= level) continue;
+      chosen.add(item.id);
+      byKind.set(item.kind, (byKind.get(item.kind) ?? 0) + 1);
+      byRepo.set(item.repoId, (byRepo.get(item.repoId) ?? 0) + 1);
+    }
   }
   return ranked.filter((i) => chosen.has(i.id));
 }

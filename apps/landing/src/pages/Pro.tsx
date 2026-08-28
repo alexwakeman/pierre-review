@@ -275,7 +275,7 @@ export default function Pro(): JSX.Element {
 
             <ShotFrame
               src="/shots/insights.png"
-              alt="The Insights rail: cards for stalled reviews, untouched threads, reviewer load and recurring review themes."
+              alt="The Reports rail: workspace flow metrics above the period-over-period report."
               caption={`${SHOT}insights`}
               height={430}
               fit="cover"

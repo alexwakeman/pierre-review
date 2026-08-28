@@ -1,11 +1,20 @@
+import { useMemo } from 'react';
 import type { DailyBriefCounts, InsightCard } from '@pierre-review/shared';
 import { useAttentionCards } from '../../hooks/useAttentionCards.js';
+import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useDailyBrief } from '../../hooks/useDailyBrief.js';
+import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
+import {
+  useGenerateWorkPlan,
+  useWorkPlan,
+  useWorkPlanGenerating,
+} from '../../hooks/useWorkPlan.js';
 import { useFilters, type AttentionRelevanceLens } from '../../store/filters.js';
-import { CheckCircleIcon } from '../Icons.js';
+import { relativeTime } from '../../lib/ui.js';
+import { CheckCircleIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { AttentionCards, KIND_LABEL } from './AttentionCards.js';
 
-// The "Needs attention" rail entry (CORE/free) — the attention cards (your turn / stalled reviews
+// The **Pending** rail entry (CORE/free) — the attention cards (your turn / stalled reviews
 // / untouched threads / reviewer load / needs-a-reviewer) that used to sit under the Pro Insights
 // AI panels, now a first-class rail entry available on every tier. Scoped to the ACTIVE WORKSPACE
 // (a plain id, the only scope this app has); the bot cards live in the free Bots console, so
@@ -51,7 +60,7 @@ export function myTurnCapDisclosure(
     counts.myTurn,
     counts.myTurnTotal,
     (total, n) =>
-      `${total} items are on your plate in this Workspace. The board shows the most urgent ${n} — highest severity first, newest first within it — and backfills as you clear them.`,
+      `${total} items are on your plate in this Workspace. The board keeps the most urgent ${n} — chosen by severity, newest first within it — and backfills as you clear them.`,
   );
 }
 
@@ -83,7 +92,7 @@ export function myTurnPersonalCapDisclosure(
     (total, n) =>
       // Keeps the literal "in this Workspace" — `workspaceCapDisclosure` swaps that phrase for the
       // row's own workspace name, and a reword here would silently make that a no-op.
-      `${total} items on your plate in this Workspace personally involve you. The board shows the most urgent ${n} — highest severity first, newest first within it — and backfills as you clear them.`,
+      `${total} items on your plate in this Workspace personally involve you. The board keeps the most urgent ${n} — chosen by severity, newest first within it — and backfills as you clear them.`,
   );
 }
 
@@ -114,7 +123,7 @@ export function myTurnOtherCapDisclosure(
     (total, n) =>
       // Keeps the literal "in this Workspace" for the same reason the personal twin does — see
       // `workspaceCapDisclosure`'s place-name substitution.
-      `${total} items in this Workspace need a review or reply from someone, but nobody has named you on them. The board shows the most urgent ${n} — highest severity first, newest first within it — and backfills as you clear them.`,
+      `${total} items in this Workspace need a review or reply from someone, but nobody has named you on them. The board keeps the most urgent ${n} — chosen by severity, newest first within it — and backfills as you clear them.`,
   );
 }
 
@@ -198,6 +207,11 @@ export function passesOtherLens(card: InsightCard): boolean {
  * personal BY CONSTRUCTION — the server only emits your own red PRs and trunk in repos you
  * maintain — so hiding it under 'others' would hide work that IS yours from a reader who only
  * asked to see the backlog).
+ *
+ * ⚠ `merge` AND `update_branch` ARE EXEMPT TOO, even though they DO carry `relevance`. They carry
+ * it for the RANKER's weight, not as an ownership claim: a PR being ready to land says nothing
+ * about whose turn it is. Filtering them here would also stop the brief's two my-turn lines
+ * partitioning the lensed board, which is the one job this predicate has.
  */
 export function passesRelevanceLens(card: InsightCard, lens: 'mine' | 'others' | null): boolean {
   if (lens == null) return true;
@@ -246,7 +260,7 @@ export const LENS_COPY: Record<
  *
  *   'inline' — isolated to my_turn: the header count IS the my_turn count, so it reads
  *              "50 of 148 items".
- *   'aside'  — un-isolated: the header counts FIVE kinds, and "95 of 148" would pair a mixed-kind
+ *   'aside'  — un-isolated: the header counts SEVEN kinds, and "95 of 148" would pair a mixed-kind
  *              numerator with a my_turn-only denominator (one row, two populations). The
  *              disclosure gets its own clause instead.
  *   'none'   — isolated to any other kind: no my_turn card is on screen, so there is no number
@@ -319,10 +333,121 @@ export function AttentionView(): JSX.Element {
   // say "they're filtered, not gone".
   const hiddenByLens = all.length - visible.length;
 
+  // ── THE "DO NEXT" PARTITION ───────────────────────────────────────────────────────────────
+  //
+  // ⚠ HEAD ∪ TAIL === CARDS, DISJOINT, BY CONSTRUCTION. The head is a RE-ORDERING of the board,
+  // never a filter over it. Everything above this line — `visible`, `myTurnShown`, `cap`,
+  // `placement`, `ciCap`, both empty states — is computed off `all`/`visible`/`cards` and is
+  // untouched by it, which is exactly what keeps every cap disclosure arithmetically true.
+  //
+  // ⚠ AND THAT COUPLING IS INVISIBLE, SO READ IT HERE RATHER THAN IN A DOC: `capFor` gates on
+  // `shown === count`. A future "improvement" that FILTERED `cards` down to the head — or that
+  // dropped a tail row because its PR already appears in the head — would push `myTurnShown`
+  // below `brief.counts.myTurn`, and "50 of 148" would vanish with no error, on precisely the
+  // workspaces where the cap matters.
+  //
+  // Building `byId` off the FINAL `cards` means the relevance lens narrows the head for free,
+  // with no second predicate to keep in step.
+  const headSuppressed = attentionIsolation != null;
+  const head = useMemo(() => {
+    if (headSuppressed) return [];
+    const byId = new Map(cards.map((c) => [c.id, c]));
+    return (data?.doNextIds ?? [])
+      .map((id) => byId.get(id))
+      .filter((c): c is InsightCard => c != null);
+  }, [headSuppressed, cards, data?.doNextIds]);
+  const ordered = useMemo(() => {
+    if (head.length === 0) return cards;
+    const inHead = new Set(head.map((c) => c.id));
+    return [...head, ...cards.filter((c) => !inHead.has(c.id))];
+  }, [head, cards]);
+
+  // ⚠ THE RANKER'S ONE-PR-IS-ONE-JOB DEDUP APPLIES TO HEAD SEATING ONLY. If a PR carries both a
+  // `merge` card and a `my_turn` card, only the ranked winner is seated in the head; the sibling
+  // stays in the tail, marked (below) rather than dropped. Dropping it would break the partition
+  // above and take the cap disclosures with it. The dedup exists because one instruction must not
+  // burn two of twelve SCARCE head slots — not because the board may show a PR once.
+  const promotedPrIds = useMemo(
+    () => new Set(head.map((c) => ('prId' in c ? c.prId : null)).filter((p): p is number => p != null)),
+    [head],
+  );
+
+  // ── THE PRO NARRATION (optional, additive) ────────────────────────────────────────────────
+  //
+  // ⚠ EVERYTHING ABOVE THIS LINE IS THE FREE PRODUCT AND MUST STAY THAT WAY. The board, the
+  // ranked head, the divider and the tail all come from `/api/attention` alone — a core route,
+  // registered unconditionally, whose rank is computed by `db/work-plan.ts`. With the Pro
+  // submodule absent, `useWorkPlan` self-gates on the capability and never fetches, every value
+  // below is undefined, and the screen is complete. That is the property that makes the narration
+  // safe to sell separately: it decorates a surface that stands on its own.
+  const { workPlan: canNarrate } = useProCapabilities();
+  const isCloud = useMe().data?.deploymentMode === 'cloud';
+  const wp = useWorkPlan(workspaceId, canNarrate);
+  const generate = useGenerateWorkPlan(workspaceId);
+  // ⚠ THE SHARED MUTATION KEY, never a per-mount `isPending`: a per-mount flag resets the button
+  // to "Plan my day" on a tab switch mid-run, which invites a second BILLED POST.
+  const busy = useWorkPlanGenerating(workspaceId);
+  const usage = useAiUsage(canNarrate);
+  const outOfCredits =
+    usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
+  const plan = wp.data?.enabled ? (wp.data.plan ?? null) : null;
+
+  // The join: a narration step names a WORK-PLAN row id; the board renders CARDS. `cardId` is the
+  // translation table.
+  //
+  // ⚠ THE JOIN KEY STAYS `WorkPlanItem.id`. The plugin's id-intersection check, its payload hash
+  // and every stored plan speak `wp:<kind>:<id>`; `cardId` is a lookup the SPA performs, not a
+  // second spelling of row identity. Nothing in the plugin changes.
+  //
+  // ⚠ AND IT IS INTERSECTED WITH THE HEAD. The order comes from `/api/attention` and the prose
+  // from `/api/pro/work-plan` — two independent requests that can be out of phase — so without
+  // this, a sentence reading "start here" can render under the "Everything else" divider.
+  const whyById = useMemo(() => {
+    const out = new Map<string, string>();
+    if (headSuppressed || plan == null) return out;
+    const inHead = new Set(head.map((c) => c.id));
+    const wpToCard = new Map(
+      (wp.data?.evidence?.items ?? []).flatMap((i) =>
+        i.cardId != null ? ([[i.id, i.cardId]] as const) : [],
+      ),
+    );
+    for (const step of plan.steps) {
+      const cardId = wpToCard.get(step.id);
+      if (cardId != null && inHead.has(cardId)) out.set(cardId, step.why);
+    }
+    return out;
+  }, [headSuppressed, plan, head, wp.data?.evidence?.items]);
+
+  // ⚠ SUPPRESSED TOGETHER WITH THE HEAD. A `why` says "do this first"; on an isolated flat list
+  // there is no first, so the headline, every `why`, `parked` and the dropped-id note all go dark
+  // as one — and the generate button is DISABLED rather than hidden, because an enabled button
+  // whose output cannot render spends a credit for nothing and gets clicked twice.
+  const narration = headSuppressed ? null : plan;
+
+  const notice = generate.data?.throttled
+    ? 'A plan is already being written — the latest shows here shortly.'
+    : generate.data?.creditsExhausted
+      ? 'Out of AI credits this month — the plan below is the last one written.'
+      : generate.data?.empty
+        ? 'Nothing needs doing in this workspace right now.'
+        : null;
+
+  // ⚠ THE ALL-CLEAR MUST STAY REACHABLE. A healthy workspace can hold 15-30 `merge`/
+  // `update_branch` rows (one real workspace has 114 merge-ready PRs against a 15-per-kind cap),
+  // while the daily-brief strip self-hides at all-zero. Without this the board would show thirty
+  // rows beside a hidden strip and "Nothing needs attention" would be unreachable on a workspace
+  // where genuinely nothing is waiting on anyone. So when EVERY card is a forward kind, the board
+  // says so — above the rows, which still render.
+  const onlyForward = cards.length > 0 && cards.every((c) => c.kind === 'merge' || c.kind === 'update_branch');
+
   return (
     <div className="space-y-3" data-testid="attention-view">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Needs attention</h2>
+        {/* LABEL-ONLY rename (the Insights→Reports precedent): the store/URL literal stays
+            `'attention'`, because an unknown `?activityRepo=` value falls into the parseInt
+            branch, yields NaN and lands the reader on the Feed — breaking Back on history
+            entries minted earlier in the same session. */}
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Pending</h2>
         {!isLoading && !isError && (
           <span
             className="text-[11px] text-gray-400"
@@ -348,7 +473,90 @@ export function AttentionView(): JSX.Element {
             · {ciCap.shown} of {ciCap.total} red builds
           </span>
         )}
+        {/* ── the Pro narration's controls + honesty signals ──────────────────────────────
+            ⚠ `stale` matters MORE here than it did in the standalone panel: the board
+            re-orders on the attention query's own 5-minute clock while the prose does not, so
+            without it the italic lines would silently describe a list that has moved. */}
+        {canNarrate && !isLoading && !isError && cards.length > 0 && (
+          <div className="ml-auto flex items-center gap-1.5">
+            {narration != null && wp.data?.stale === true && (
+              <span
+                className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+                title="The list has moved on since this plan was written — the rows are current, the italic lines describe the list as it stood."
+              >
+                stale
+              </span>
+            )}
+            {narration != null && (
+              <span className="shrink-0 text-[10px] text-gray-400" title={narration.model}>
+                written {relativeTime(narration.generatedAt)}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => generate.mutate()}
+              disabled={busy || outOfCredits || headSuppressed}
+              className="rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
+              title={
+                headSuppressed
+                  ? 'Clear the filter to plan your day — an ordered plan has nothing to order inside a single kind.'
+                  : outOfCredits
+                    ? 'Out of AI credits — resets next month'
+                    : 'Have the model say why the top items are worth doing now. The rows, figures and ranking are computed either way.'
+              }
+            >
+              {busy ? (
+                'Planning…'
+              ) : narration != null ? (
+                <span className="inline-flex items-center gap-1">
+                  <RefreshIcon size={11} />
+                  Regenerate
+                </span>
+              ) : (
+                'Plan my day'
+              )}
+            </button>
+          </div>
+        )}
+        {/* Capability off: cloud gets ONE line, OSS/local gets nothing at all (absence, never an
+            advert). ⚠ IT MUST NOT IMPLY THE ORDER IS PRO — the ranking above is free, and only
+            the sentences are not. */}
+        {!canNarrate && isCloud && !isLoading && !isError && cards.length > 0 && (
+          <span className="ml-auto text-[10px] text-gray-400">
+            <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[10px] font-semibold text-ai-signal">
+              Pro
+            </span>
+            Have the model say why these are first.
+          </span>
+        )}
       </div>
+
+      {canNarrate && generate.isError && (
+        <div className="text-[11px] text-red-500">
+          {(generate.error as Error)?.message ?? 'Couldn’t write the plan.'}
+        </div>
+      )}
+      {canNarrate && !generate.isError && notice != null && (
+        <div className="text-[11px] text-gray-400">{notice}</div>
+      )}
+
+      {/* GENERATED — the one sentence framing the day, above the head it describes. */}
+      {narration != null && narration.headline.trim() !== '' && (
+        <p
+          key={narration.generatedAt}
+          className="digest-fade-in flex items-start gap-1.5 text-[12px] italic text-ai-ink"
+        >
+          <SparkleIcon size={12} className="mt-0.5 shrink-0 text-ai-signal" />
+          <span>{narration.headline}</span>
+        </p>
+      )}
+      {narration != null && narration.droppedIds > 0 && (
+        <p className="text-[10px] text-amber-600 dark:text-amber-400">
+          {narration.droppedIds} reference{narration.droppedIds === 1 ? '' : 's'} the model named{' '}
+          {narration.droppedIds === 1 ? 'was' : 'were'} not on this list and{' '}
+          {narration.droppedIds === 1 ? 'was' : 'were'} discarded.
+        </p>
+      )}
 
       {isLoading ? (
         <div className="space-y-3">
@@ -424,14 +632,36 @@ export function AttentionView(): JSX.Element {
       ) : cards.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
           <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] text-gray-300 dark:text-gray-600" />
-          Nothing needs attention in this Workspace right now.
+          Nothing is pending in this Workspace right now.
           <div className="mt-1 text-[11px]">
-            Items on your plate, stalled reviews, untouched threads, reviewer load and un-assigned
-            PRs will surface here.
+            Everything waiting on you or your workspace shows up here, most actionable first. PRs
+            that are simply ready to land are listed too, but are not counted as waiting on you.
           </div>
         </div>
       ) : (
-        <AttentionCards cards={cards} users={data?.users} />
+        <>
+          {/* THE ALL-CLEAR VARIANT — see `onlyForward`. The rows below are real work, but nothing
+              on this board is WAITING on anyone, and saying so is what keeps this screen and the
+              (self-hiding) daily-brief strip telling the same story. */}
+          {onlyForward && (
+            <div className="rounded-lg border border-dashed border-gray-300 px-3 py-2 text-[12px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] text-gray-300 dark:text-gray-600" />
+              Nothing is waiting on you in this Workspace —{' '}
+              <span className="font-medium text-gray-600 dark:text-gray-300">
+                {cards.length} ready to land
+              </span>
+              .
+            </div>
+          )}
+          <AttentionCards
+            cards={ordered}
+            users={data?.users}
+            headCount={head.length}
+            promotedPrIds={promotedPrIds}
+            whyById={whyById}
+            parked={narration?.parked ?? null}
+          />
+        </>
       )}
     </div>
   );

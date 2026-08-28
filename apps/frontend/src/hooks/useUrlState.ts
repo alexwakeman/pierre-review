@@ -51,6 +51,8 @@ export const INSIGHT_KINDS: readonly InsightKind[] = [
   'untouched_thread',
   'reviewer_load',
   'reviewer_routing',
+  'merge',
+  'update_branch',
   'bot_signal',
   'bot_only_review',
 ];
@@ -313,8 +315,9 @@ export function readFromUrl(): Partial<FilterState> {
     // 'insights' USED to be write-only-by-omission: a landing default that stayed out of the URL
     // and was not parsed here either. That made the period report unforwardable — `?report=` names
     // a period on a console the link could not select, so the recipient landed on the Feed and saw
-    // no report at all. It is parsed and emitted now; the one-shot landing default in
-    // Activity/index.tsx only fires from a pristine 'feed', so a deep link still wins.
+    // no report at all. It is parsed and emitted now. (The one-shot landing default that used to
+    // auto-select this rail entry for Pro accounts is GONE — the store default is 'feed' on every
+    // tier, so making Reports free-visible changes nothing about where the app lands.)
     else if (activityRepo === 'insights') out.activityRepoId = 'insights';
     else {
       const n = Number.parseInt(activityRepo, 10);
@@ -322,7 +325,7 @@ export function readFromUrl(): Partial<FilterState> {
     }
   }
 
-  // The "Needs attention" board's single-KIND isolation — the daily brief's lines. THE reason
+  // The **Pending** board's single-KIND isolation — the daily brief's lines. THE reason
   // this key exists: a reader clicks "3 PRs stalled awaiting review", lands on a narrowed board,
   // and presses Back. Before the board AND its narrowing were both addressable, that Back left
   // the app entirely, because the whole session had exactly one history entry.
@@ -555,7 +558,7 @@ export function writeToUrl(s: FilterState): void {
     if (s.activityRepoId === 'bots' && s.botsInnerTab !== 'roi') {
       p.set('botsTab', s.botsInnerTab);
     }
-    // A single-repo console and the CORE Bots / "Needs attention" consoles are deep-linkable,
+    // A single-repo console and the CORE Bots / **Pending** consoles are deep-linkable,
     // and so is 'insights' — it is a landing default AND a real destination, and omitting it
     // made the period report's `?report=` link land on the Feed.
     // Only 'feed' stays out of the URL now, because it is the bare state a link means when it

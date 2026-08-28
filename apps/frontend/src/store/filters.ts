@@ -15,7 +15,6 @@ import {
   type EventCategory,
   type EventType,
   type InsightKind,
-  type InsightsRangeKey,
   type MlSeverity,
   type PrStatus,
   type ReviewBotKind,
@@ -192,7 +191,7 @@ export interface SyncRoundState {
   scopeIds: number[];
 }
 
-// ── The "Needs attention" RELEVANCE lens ─────────────────────────────────────────────────────
+// ── The **Pending** board's RELEVANCE lens ─────────────────────────────────────────────────────
 //
 // Which half of the `my_turn` population the board is showing, or null for all of it:
 //
@@ -384,7 +383,7 @@ export interface FilterState {
   // `attentionIsolation`: it is a whole screen the user navigated TO, so Back must be able to
   // leave it. URL-visible ≠ persisted — a fresh tab still opens the un-isolated feed.
   feedIsolatedPrId: number | null;
-  // Activity "Needs attention" single-KIND isolation: null (default) → every attention card in
+  // Activity **Pending** single-KIND isolation: null (default) → every attention card in
   // scope; an InsightKind → the board shows ONLY that kind. Set by the daily brief's lines, each
   // of which is ABOUT one kind ("3 PRs stalled awaiting review" → the stalled cards), so the
   // number the user clicked and the list they land on are the same population. Cleared on rail /
@@ -400,7 +399,7 @@ export interface FilterState {
   // complaint). URL-visible and PERSISTED are different questions — a link may name the narrowed
   // board; a fresh tab must not restore it from a stale blob. See hooks/useUrlState.
   attentionIsolation: InsightKind | null;
-  // Activity "Needs attention" RELEVANCE lens: null (default) → the board paints every card;
+  // Activity **Pending** RELEVANCE lens: null (default) → the board paints every card;
   // 'mine' → only `my_turn` cards whose `relevance` is direct-or-maintained; 'others' → only the
   // ones whose `relevance` is 'none'.
   //
@@ -677,19 +676,6 @@ export interface FilterState {
   // (freshDefaults() only — not persisted, not URL-synced); deliberately NOT cleared by
   // setActivityRepo — surviving rail switches is the point.
   repoConsoleTabs: Record<number, RepoConsoleTab>;
-  // How far back the Insights chat's next question reaches — the FilterBar Range chips while the
-  // Insights pane is open. **null = "no override", i.e. the account's configured window** (Settings
-  // → Sprint), and that is the whole reason it is transient rather than a persisted filter key: the
-  // default is a SERVER value the user can change in Settings, so a stored choice with a static
-  // default would quietly outrank it forever. `FilterDefaults` holds constants; this doesn't have
-  // one. Sent verbatim as `SprintChatBody.range`, so null simply omits the field and the server
-  // resolves the same window every other Insights surface uses.
-  //
-  // ⚠ NOT the Timeline's `preset`. They look identical and sit in the same FilterBar slot, but the
-  // boards answer different questions ('sprint' means nothing to a timeline zoom, 'Now' means
-  // nothing to a date range) and sharing one value would make each board silently reposition the
-  // other.
-  insightsRange: InsightsRangeKey | null;
 
   // file groups + diff hunks (PR detail thread view)
   expandedFileGroups: string[]; // paths explicitly toggled by the user
@@ -801,7 +787,7 @@ export interface FilterState {
   setFeedCiLens: (v: FeedCiLens) => void;
   // Isolate the Feed to a single PR (or clear with null) — the Feed "open PRs" panel.
   setFeedIsolatedPrId: (id: number | null) => void;
-  // Isolate the "Needs attention" board to one card kind (or clear with null) — the daily
+  // Isolate the **Pending** board to one card kind (or clear with null) — the daily
   // brief's lines.
   //
   // ⚠ ORDERING: `setActivityRepo` CLEARS this (and early-returns `{}` when the rail id is
@@ -810,7 +796,7 @@ export interface FilterState {
   // bot-only-PRs "Show in Activity feed" buttons follow for `setFeedIsolatedPrId`.
   setAttentionIsolation: (kind: InsightKind | null) => void;
   /**
-   * Narrow the "Needs attention" board to one half of the `my_turn` population — 'mine' (work
+   * Narrow the **Pending** board to one half of the `my_turn` population — 'mine' (work
    * tied to you) or 'others' (the review-or-reply backlog) — or `null` for the whole board.
    *
    * ⚠ SAME ORDERING TRAP AS `setAttentionIsolation`, and one more: `setActivityRepo` clears this
@@ -1061,10 +1047,6 @@ export interface FilterState {
   setRepoConsoleTab: (repoId: number, tab: RepoConsoleTab) => void;
   // Select the Reports period (see insightsReportKey). `null` = the newest completed period.
   setInsightsReportKey: (periodKey: string | null) => void;
-  // Pick the Insights chat's range for the next question. `null` restores "use the account's
-  // configured window" — the chips express that as the settings-derived default being active, so
-  // re-clicking the highlighted chip is a no-op rather than a clear.
-  setInsightsRange: (range: InsightsRangeKey | null) => void;
   toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
   // Reset every user-set FILTER (repos, members, range, categories, PR statuses,
@@ -1332,7 +1314,6 @@ function freshDefaults(): FilterData {
     activityRepoId: 'feed',
     activityThreadFilter: null,
     repoConsoleTabs: {},
-    insightsRange: null,
     expandedFileGroups: [],
     collapsedFileGroups: [],
     expandedDiffHunks: [],
@@ -1829,7 +1810,6 @@ export const useFilters = create<FilterState>((set, get) => ({
   setRepoConsoleTab: (repoId, tab) =>
     set((s) => ({ repoConsoleTabs: { ...s.repoConsoleTabs, [repoId]: tab } })),
   setInsightsReportKey: (periodKey) => set({ insightsReportKey: periodKey }),
-  setInsightsRange: (range) => set({ insightsRange: range }),
   toggleFileGroup: (path, defaultExpanded) =>
     set((s) => {
       // Track explicit user intent against the default so re-renders are stable.

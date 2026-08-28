@@ -14,6 +14,7 @@ import {
   getWorkspaceMetricsForScope,
   resolveWorkspaceScope,
 } from '../../db/queries.js';
+import { doNextCardIds, rankWorkPlan } from '../../db/work-plan.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 function parseIntList(raw: string | undefined): number[] | null {
@@ -69,9 +70,12 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
   // WorkspaceMetrics matrix.)
 
   // The attention cards (your turn / red builds that are yours / stalled reviews / untouched
-  // threads / reviewer load / needs-a-reviewer) — CORE/free (the same cards Pro Insights computes
-  // in core getWorkspaceInsights), for the Feed "Needs attention" tab. The bot cards are excluded
-  // (they live in the free Bots console).
+  // threads / reviewer load / needs-a-reviewer / ready-to-land / behind-trunk) — CORE/free (the
+  // same cards Pro Insights computes in core getWorkspaceInsights), for the **Pending** rail
+  // entry. The bot cards are excluded (they live in the free Bots console).
+  //
+  // IT ALSO SERVES THE RANKED "DO NEXT" HEAD, free on every tier — `doNextIds`, the card ids in
+  // `db/work-plan.ts`'s deterministic score order. The rank is code; only its NARRATION is Pro.
   //
   // ⚠ THIS FILTER IS A DENY-LIST OF EXACTLY TWO KINDS, and it must stay one: a new InsightKind
   // ships here by default, which is the behaviour every non-bot kind wants. It is also one of the
@@ -91,7 +95,16 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
     const cards = insights.cards.filter(
       (c) => c.kind !== 'bot_signal' && c.kind !== 'bot_only_review',
     );
-    return { cards, users: insights.users };
+    // ⚠ ONE FOLD, RANKED — `rankWorkPlan` takes the insights we already have rather than
+    // re-folding them. Two folds in one request would be two populations one refresh apart,
+    // which is precisely the defect the Pending consolidation removed.
+    const evidence = await rankWorkPlan(accountId, scope, insights);
+    // ⚠ THE HEAD MUST BE A STRICT SUBSET OF WHAT THE BOARD RENDERS. No work-plan row can be a bot
+    // card today, so this filter is belt-and-braces — but if one ever could, an id here with no
+    // card behind it would silently cost the board a head slot rather than erroring.
+    const rendered = new Set(cards.map((c) => c.id));
+    const doNextIds = doNextCardIds(evidence).filter((id) => rendered.has(id));
+    return { cards, users: insights.users, doNextIds };
   });
 
   // Heavier per-repo analytics for the drill-down chart panel — loaded on demand.

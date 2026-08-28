@@ -27,7 +27,7 @@ import { CloseIcon } from './Icons.js';
 // list: "12 new items" opened a feed pill, not twelve things.
 //
 // It now counts the STANDING `my_turn` CARDS per workspace — the things actually on your plate —
-// through `useMyTurnByWorkspace`, which is the same fold the "Needs attention" board paints and
+// through `useMyTurnByWorkspace`, which is the same fold the **Pending** board paints and
 // the daily brief's my-turn line counts. Banner line, dropdown badge, brief line and destination
 // board are one population and one number.
 //
@@ -35,7 +35,7 @@ import { CloseIcon } from './Icons.js';
 // This banner NOTIFIES, so it counts `myTurnPersonal`: reviews requested of you, your PRs,
 // threads awaiting your reply, and new PRs only in repos you MAINTAIN or were @-mentioned on.
 // Adding a repo you have never touched used to put every open PR in it here (425 of 459 items on
-// the reporter's account). The "Needs attention" BOARD still holds all of them — they do need a
+// the reporter's account). The **Pending** board still holds all of them — they do need a
 // review — which is why the click below goes through `openMyTurnInWorkspace`, the one gesture
 // that also seats the board's matching 'mine' lens. A line that says 4 must not open a list
 // of 50. There is consequently NO per-workspace "seen" state

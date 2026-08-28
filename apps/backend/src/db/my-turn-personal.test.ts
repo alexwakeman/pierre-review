@@ -3,7 +3,7 @@
 //
 // WHAT THIS PINS. The "New PRs" section admits every non-draft human PR in every repo the account
 // has added. On a real account that is hundreds of strangers' PRs in repos the viewer only reads
-// — correct for the "Needs attention" BOARD (they do need a review) and completely wrong for the
+// — correct for the **Pending** board (they do need a review) and completely wrong for the
 // NOTIFICATION surfaces, which reach for the user rather than waiting to be opened. So each row
 // carries an advisory `personal` flag, and:
 //

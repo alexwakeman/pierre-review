@@ -335,6 +335,9 @@ beforeAll(async () => {
     await untouchedThread(pr('wall'), `wall${i}`, `src/wall${i}.ts`, now - 2 * HOUR);
 
   // ── the `none` half of the ranking twins: same clean state, same age, nobody's repo ──────
+  // ⚠ IT CARRIES THE SAME TWO APPROVALS AS ITS `direct` TWIN, and it must. Merge proximity is
+  // APPROVAL-CONDITIONAL (0.95 approved / 0.45 not), so an unapproved twin would differ in TWO
+  // scoring inputs and the relevance-weight assertion below would be measuring the wrong thing.
   await insertPr(other, 't-none', {
     authorId: aliceId,
     mergeable: 'mergeable',
@@ -342,6 +345,8 @@ beforeAll(async () => {
     ciStatus: 'success',
   });
   await touch(other, pr('t-none'));
+  await review(pr('t-none'), bobId, 'tnone-a', 'approved');
+  await review(pr('t-none'), viewerId, 'tnone-b', 'approved');
 
   // ── the viewer's own RED PR (ci_failing 'your_pr') ───────────────────────────────────────
   await insertPr(mine, 'ci-mine', {
@@ -539,8 +544,9 @@ describe('the deterministic rank', () => {
     const ev = await plan();
     const direct = itemFor(ev, `wp:merge:${pr('m-clean-direct')}`)!;
     const none = itemFor(ev, `wp:merge:${pr('t-none')}`)!;
-    // Identical in every scoring input but relevance — same kind, same (clamped) proximity, same
-    // stall bucket.
+    // Identical in every scoring input but relevance — same kind, same approval standing (which
+    // merge proximity is conditional on), same (clamped) proximity, same stall bucket.
+    expect(direct.facts.approvals).toBe(none.facts.approvals);
     expect(direct.proximity).toBe(none.proximity);
     expect(direct.stallRisk).toBe(none.stallRisk);
     expect(direct.relevance).toBe('direct');
@@ -552,11 +558,15 @@ describe('the deterministic rank', () => {
 
   it('applies the proximity adjustments exactly once', async () => {
     const ev = await plan();
-    // merge 0.95 + approved 0.05 + small-diff 0.05 = 1.05, CLAMPED to 1.
+    // merge APPROVED base 0.95 + small-diff 0.05 = 1.00 (at the clamp, not over it — the old
+    // +0.05 approval bonus was absorbed into the conditional base).
     expect(itemFor(ev, `wp:merge:${pr('m-clean-direct')}`)?.proximity).toBe(1);
     expect(itemFor(ev, `wp:merge:${pr('m-clean-direct')}`)?.facts.approvals).toBe(2);
-    // merge 0.95 + small-diff 0.05 − thread-wall 0.10 = 0.90 (three untouched threads).
-    expect(itemFor(ev, `wp:merge:${pr('wall')}`)?.proximity).toBe(0.9);
+    // merge UNAPPROVED base 0.45 + small-diff 0.05 − thread-wall 0.10 = 0.40 (three untouched
+    // threads, no approvals). ⚠ THE UNAPPROVED BASE IS THE POINT: a clean PR nobody has reviewed
+    // is ready for GitHub, not ready for a human, and 0.45 puts it below `review` (0.55).
+    expect(itemFor(ev, `wp:merge:${pr('wall')}`)?.facts.approvals).toBe(0);
+    expect(itemFor(ev, `wp:merge:${pr('wall')}`)?.proximity).toBe(0.4);
     expect(itemFor(ev, `wp:merge:${pr('wall')}`)?.facts.untouchedThreads).toBe(3);
     // nudge 0.25 + small-diff 0.05 − dirty 0.15 = 0.15, on a CARD-derived row: the adjustments are
     // not a merge-fold-only affair.
@@ -684,6 +694,76 @@ describe('the empty workspace', () => {
     expect([counts.myTurn, counts.ciFailing, counts.stalled, counts.untouchedThreads]).toEqual([
       0, 0, 0, 0,
     ]);
+  });
+});
+
+describe('the head spreads across kinds AND repos', () => {
+  // ⚠ THE REGRESSION THIS EXISTS FOR, seen only by running the app against real data. Seating one
+  // row per kind stops a kind being ABSENT; it did nothing to stop one kind DOMINATING, and the
+  // first real workspace produced EIGHT of twelve head slots as `update_branch` in ONE repo, with
+  // byte-identical scores — one instruction printed eight times, presented as a plan for the day.
+  //
+  // It happens because the score DEGENERATES on a backlog: every row past the top stall bucket
+  // carries `stallRisk === 1`, and a workspace with no `direct` work has a constant relevance
+  // term too, so the ranking collapses to `proximity`, which is per-KIND.
+  it('never lets one kind or one repo own the head when others are available', async () => {
+    const ev = await plan(fillerScope);
+    expect(ev.items.length).toBe(workPlan.WORK_PLAN_ITEM_CAP);
+    const kinds = new Map<string, number>();
+    const repos = new Map<number, number>();
+    for (const i of ev.items) {
+      kinds.set(i.kind, (kinds.get(i.kind) ?? 0) + 1);
+      repos.set(i.repoId, (repos.get(i.repoId) ?? 0) + 1);
+    }
+    // The filler workspace is deliberately over the cap. However its rows are distributed, no
+    // single kind may take more than half the head while a second kind is available.
+    const distinctKinds = new Set(ev.items.map((i) => i.kind)).size;
+    if (distinctKinds > 1) {
+      expect(Math.max(...kinds.values())).toBeLessThanOrEqual(workPlan.WORK_PLAN_ITEM_CAP / 2);
+    }
+    const distinctRepos = new Set(ev.items.map((i) => i.repoId)).size;
+    if (distinctRepos > 1) {
+      expect(Math.max(...repos.values())).toBeLessThanOrEqual(workPlan.WORK_PLAN_ITEM_CAP / 2);
+    }
+  });
+
+  it('still fills the whole head when only one kind exists', async () => {
+    // The levelling must DEGRADE, not truncate: a workspace whose work is all one kind still gets
+    // a full head, in score order.
+    const ev = await plan(fillerScope);
+    expect(ev.items.length).toBe(workPlan.WORK_PLAN_ITEM_CAP);
+  });
+});
+
+describe('every row joins back to a card', () => {
+  // ⚠ THE PENDING BOARD'S PARTITION DEPENDS ON THIS. `GET /api/attention` hands the SPA
+  // `doNextIds` — card ids in rank order — and the board renders ONE list split into head and
+  // tail where `head ∪ tail === cards`. A ranked row whose `cardId` names no rendered card would
+  // silently cost the head a slot: no error, no empty state, just a shorter head than the rank
+  // asked for. Asserted over the whole fixture so a NEW signal that forgets to pass `cardId`
+  // fails here rather than in the browser.
+  it('carries a cardId that exists in the fold it was ranked from', async () => {
+    const insights = await q.getWorkspaceInsights(1, undefined, planScope);
+    const ev = await workPlan.rankWorkPlan(1, planScope, insights);
+    const cardIds = new Set(insights.cards.map((c: { id: string }) => c.id));
+    expect(ev.items.length).toBeGreaterThan(0);
+    for (const item of ev.items) {
+      expect([item.id, item.cardId != null]).toEqual([item.id, true]);
+      expect([item.id, cardIds.has(item.cardId!)]).toEqual([item.id, true]);
+    }
+    // …and the head the route would serve is a strict subset of the board, same length as the
+    // ranked list (nothing is dropped by the join).
+    expect(workPlan.doNextCardIds(ev)).toHaveLength(ev.items.length);
+  });
+
+  // The two forward kinds are now CARDS, so the board renders them and the ranker merely
+  // re-orders them. Before this change they existed only inside the ranker, off a standalone
+  // query — which is what made the ranked list a second population.
+  it('emits merge and update_branch as insight cards, not as ranker-only rows', async () => {
+    const insights = await q.getWorkspaceInsights(1, undefined, planScope);
+    const kinds = insights.cards.map((c: { kind: string }) => c.kind);
+    expect(kinds).toContain('merge');
+    expect(kinds).toContain('update_branch');
   });
 });
 

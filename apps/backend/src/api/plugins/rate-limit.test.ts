@@ -243,6 +243,16 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/daily-brief')).toEqual(['search', 'read']);
   });
 
+  // GET /api/attention — the Pending board. It used to be a plain card read on the blanket
+  // bucket; it now ALSO runs `rankWorkPlan` (approvals fold + untouched-thread group-by + a PR
+  // select) on top of a `getWorkspaceInsights` whose maintained-repo resolution the merge-card
+  // emitter makes effectively unconditional. The negative assertion is the point: the failure
+  // this file guards against is a tier left on the default after the cost moved.
+  it('puts the attention board on the expensive bucket after it absorbed the ranked head', () => {
+    expect(tiers('GET', '/api/attention')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/attention')).not.toEqual(['read']);
+  });
+
   // The comments drill-down ships comment BODIES (up to 3000/source) plus a three-way label
   // join per request — the same shape of cost as the rollup — while its /prs sibling is PR
   // metadata only and stays on the blanket bucket. Both pinned so neither drifts into the other.

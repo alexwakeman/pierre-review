@@ -69,29 +69,38 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           </Section>
 
           <Section title="Activity console (the default)">
-            The left rail is your state of play: <strong>Insights</strong>, a cross-repo{' '}
-            <strong>Feed</strong>, <strong>Bots</strong>, <strong>Needs&nbsp;attention</strong>,
-            then the Workspace’s repos as a flat list. The Feed is one chronological stream of
-            real activity — opens, merges, reviews, comments, and pushes that addressed a thread —
-            under the free flow-metric header (throughput, lead time, time-to-first-review, CI
-            success &amp; recovery). Filter it with the pills: <strong>My Turn</strong> (things
-            that concern you — you authored it, were asked to review, or already chimed in),{' '}
-            <strong>Comments</strong> / <strong>PR events</strong> by category, and the
-            <strong> Bots</strong> lens (all → hide → only). Click any card to open that PR;{' '}
-            <strong>Back</strong> returns you to the exact card. To compare Workspaces, expand any
-            metric row in Insights → <strong>Reports</strong> — the “By workspace” breakdown shows
-            every Workspace side by side for that period.
+            The left rail is your state of play: a cross-repo <strong>Feed</strong>,{' '}
+            <strong>Pending</strong>, <strong>Bots</strong> and <strong>Reports</strong>, then the
+            Workspace’s repos as a flat list. The Feed is one chronological stream of real activity
+            — opens, merges, reviews, comments, and pushes that addressed a thread. Filter it with
+            the pills: <strong>My Turn</strong> (things that concern you — you authored it, were
+            asked to review, or already chimed in), <strong>Comments</strong> /{' '}
+            <strong>PR events</strong> by category, and the <strong>Bots</strong> lens (all → hide
+            → only). Click any card to open that PR; <strong>Back</strong> returns you to the exact
+            card. To compare Workspaces, expand any metric row in <strong>Reports</strong> — the
+            “By workspace” breakdown shows every Workspace side by side for that period.
           </Section>
 
-          <Section title="Insights (Pro)">
-            AI review-intelligence over the selected Workspace.{' '}
+          <Section title="Pending">
+            Everything waiting on you or your Workspace, in one list: items on your plate, red
+            builds you are on the hook for, stalled reviews, untouched threads, un-assigned PRs,
+            and PRs that are simply ready to land. The top of the list is <strong>Do next</strong>
+            — ranked by how close each item is to landing and how likely it is to stall — and
+            everything else sits below the divider. The ranking is computed, free, and identical
+            on every plan; Pro adds a sentence per item saying why it is worth doing now.
+          </Section>
+
+          <Section title="Reports">
+            <strong>Flow metrics</strong> for the selected Workspace — throughput, lead time,
+            time-to-first-review, CI success &amp; recovery — are free and sit at the top of this
+            pane. Below them, Pro adds the period-over-period report.{' '}
             <strong>Ask about the sprint</strong> answers a question from that Workspace&rsquo;s own
             sprint data — pick a quick-question pill (sprint report, retro, bottlenecks,
             biggest changes, …) or type your own, <Code>@</Code>-mention a contributor, and
             optionally attach a chart. PR mentions in an answer are clickable, and answers can
             be pinned. <strong>Track&nbsp;usage</strong> shows your month-to-date AI credits.
-            The flow metrics and the attention cards are not here — they are free, and live on
-            the Feed and the <strong>Needs&nbsp;attention</strong> rail entry.
+            The attention cards are not here — they are free, and live on{' '}
+            <strong>Pending</strong>.
           </Section>
 
           <Section title="Review-bot triage">

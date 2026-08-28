@@ -5595,6 +5595,14 @@ export type InsightKind =
   | 'untouched_thread' // a review thread nobody has responded to
   | 'reviewer_load' // a reviewer's pending-queue depth (+ sprint load)
   | 'reviewer_routing' // a PR with no reviewer + who should review it
+  // ⚠ THE TWO "FORWARD" KINDS. Every kind above is something that is WRONG; these two are
+  // something that is READY, and they exist because the Pending board's ranked head has to be
+  // able to say "the shortest path to a merged PR" and not only "here is what is broken". They
+  // were previously computed by `db/work-plan.ts` off its own standalone open-PR query, which
+  // made the ranked list a SECOND POPULATION beside the board — the defect the Pending
+  // consolidation removes. All seven WorkPlanKinds now fold off these cards.
+  | 'merge' // approved-or-clean and GitHub will take it
+  | 'update_branch' // mergeStateStatus === 'behind' — GitHub is REFUSING the merge
   | 'bot_signal' // AI-review-bot signal-to-noise across the sprint (deterministic)
   | 'bot_only_review'; // PRs whose only review(s) came from an automated reviewer (WS7)
 
@@ -5833,6 +5841,45 @@ export interface BotOnlyReviewCard extends InsightCardBase {
          botLabel: string; state: string; githubUrl: string }[];
 }
 
+// ---- the two "forward" cards (see InsightKind) ----------------------------------------------
+//
+// DELIBERATELY TWO INTERFACES, NOT ONE WITH A UNION `kind`. `Record<InsightCard['kind'], …>`
+// maps (KIND_LABEL, kindRank) and the board's render switch are per-kind, and a shared interface
+// would let one of them silently cover both. They carry identical fields today; that is a
+// coincidence of the current predicates, not a contract.
+//
+// ⚠ `detail` IS CODE-WRITTEN AND MUST BE TIME-FREE. It is re-derived by the ranker as the row's
+// `reason` (through the ONE exported `mergeCardDetail`), so a relative clock in it would let the
+// card and the ranked row drift apart between two polls of the same unchanged data.
+
+/** Approved-or-clean and GitHub will take it: the shortest path to a merged PR. */
+export interface MergeReadyCard extends InsightCardBase, InsightPrRef {
+  kind: 'merge';
+  /** GitHub's protection-aware state, verbatim. Always a member of READY_MERGE_STATES. */
+  mergeStateStatus: MergeStateStatus;
+  /** ⚠ null = NOT OBSERVED, never "not conflicting" — the three-state rule for a column that may
+   *  only be cleared on a positive statement from GitHub. */
+  mergeable: Mergeable | null;
+  /** ISO head-commit clock; null ⇒ the ranker falls back to `openedAt`. */
+  lastCommitAt: string | null;
+  /** Carried for the RANKER's relevance weight. ⚠ The board's relevance LENS deliberately does
+   *  not filter on it — see the lens predicate in AttentionView. */
+  relevance: MyTurnRelevance;
+  /** CODE-WRITTEN, time-free. See the ⚠ above. */
+  detail: string;
+}
+
+/** `mergeStateStatus === 'behind'` — GitHub is REFUSING the merge until the branch is updated.
+ *  ⚠ NOT "the base branch moved on" (`behindBy > 0`), which is true of most healthy PRs. */
+export interface UpdateBranchCard extends InsightCardBase, InsightPrRef {
+  kind: 'update_branch';
+  mergeStateStatus: 'behind';
+  mergeable: Mergeable | null;
+  lastCommitAt: string | null;
+  relevance: MyTurnRelevance;
+  detail: string;
+}
+
 export type InsightCard =
   | MyTurnCard
   | CiFailingCard
@@ -5840,6 +5887,8 @@ export type InsightCard =
   | UntouchedThreadCard
   | ReviewerLoadCard
   | ReviewerRoutingCard
+  | MergeReadyCard
+  | UpdateBranchCard
   | BotSignalCard
   | BotOnlyReviewCard;
 
@@ -5991,13 +6040,35 @@ export interface WorkspaceInsightsResponse {
   ciFailingTotal?: number;
 }
 
-// The attention cards (stalled reviews / untouched threads / reviewer load / needs-a-reviewer),
-// served CORE/free by GET /api/attention for the Feed "Needs attention" tab — the same cards the
-// (Pro) Insights pane computes in core getWorkspaceInsights, minus the bot-signal cards (those live
-// in the free Bots console). No AI, no capability gate.
+// The attention cards (your turn / red builds / stalled reviews / untouched threads / reviewer
+// load / needs-a-reviewer / ready-to-land / behind-trunk), served CORE/free by GET /api/attention
+// for the **Pending** rail entry — the same cards the (Pro) Insights pane computes in core
+// getWorkspaceInsights, minus the bot-signal cards (those live in the free Bots console).
+// No AI, no capability gate.
 export interface AttentionCardsResponse {
   cards: InsightCard[];
   users: User[];
+  /**
+   * THE "DO NEXT" HEAD — card ids in the deterministic rank order of `db/work-plan.ts`
+   * (`score = 0.50·proximity + 0.30·stallRisk + 0.20·relevanceWeight`), capped at
+   * WORK_PLAN_ITEM_CAP with one row seated per non-empty kind.
+   *
+   * ⚠ IT IS AN ORDERING, NOT A FILTER. The board renders ONE list partitioned into head and
+   * tail where `head ∪ tail === cards` and the two are disjoint. That is what keeps every cap
+   * disclosure ("50 of 148") arithmetically true and keeps the brief strip and the board one
+   * population. A future "improvement" that instead FILTERED `cards` down to the head would
+   * break `capFor`'s `shown === count` guard with no error, on exactly the workspaces where the
+   * disclosure matters.
+   *
+   * ⚠ FREE ON EVERY TIER — this is code-derived rank, not narration. The Pro layer only
+   * decorates these rows (see WorkPlanItem.cardId).
+   *
+   * TRAILING OPTIONAL, and the reason is NOT persistence (`shouldDehydrateQuery` persists only
+   * pr | thread | pr-files, so this response never reaches IndexedDB): the SPA and the server
+   * deploy independently and `useAttentionCards` serves a 60s-stale cached body, so a response
+   * predating this field must render a HEADLESS board rather than throw.
+   */
+  doNextIds?: string[];
 }
 
 // The Insights flow-metric header (WorkspaceMetrics tiles + trend charts) computed for a SINGLE
@@ -8432,6 +8503,18 @@ export interface WorkPlanItem {
   /** A CODE-WRITTEN one-liner naming the concrete blocker ("behind trunk", "2 approvals,
    *  checks green"). ⚠ NEVER model output — this renders even when nothing was generated. */
   reason: string;
+  /**
+   * The `InsightCard.id` this row was folded from — THE JOIN KEY between a narration step and a
+   * board row. The SPA resolves `WorkPlanStep.id → WorkPlanItem.id → cardId` to land each model
+   * sentence under the right card.
+   *
+   * ⚠ Deliberately ABSENT from the plugin's `itemSignature` allow-list, so it never enters
+   * `workPlanPayloadHash`: it is redundant with `id` + `prId`, and folding it in would move every
+   * stored hash for no change in meaning.
+   *
+   * Trailing optional for the same independent-deploy reason as `AttentionCardsResponse.doNextIds`.
+   */
+  cardId?: string;
 }
 
 export interface WorkPlanEvidence {

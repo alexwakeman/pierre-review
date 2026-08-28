@@ -243,14 +243,13 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //   GET  /api/pro/work-plan  the free cached read — but it re-runs the whole `getWorkPlan`
   //                            evidence fold to recompute the payload hash for the `stale` probe,
   //                            and that fold reaches getWorkspaceInsights (the stalled-review /
-  //                            untouched-thread / reviewer-load cards) on top of the attention
-  //                            cards and the open-PR merge-state walk. That is the synthesis /
-  //                            bot-behaviour shape of cost — this process's event loop and this
-  //                            database, not GitHub quota and not Anthropic — so it takes the same
-  //                            60/min `search` bucket, NOT the catch-all's 600/min GET→read
-  //                            branch. The panel sits under the Activity brief strip, so this GET
-  //                            fires on every Activity mount and on the sync cadence behind it.
-  //                            It must NEVER grow a generation leg (the
+  //                            untouched-thread / reviewer-load / merge / update_branch cards).
+  //                            That is the synthesis / bot-behaviour shape of cost — this
+  //                            process's event loop and this database, not GitHub quota and not
+  //                            Anthropic — so it takes the same 60/min `search` bucket, NOT the
+  //                            catch-all's 600/min GET→read branch. The narration now decorates
+  //                            the Pending board, so this GET fires whenever that board is
+  //                            mounted. It must NEVER grow a generation leg (the
   //                            `GET /api/pro/prs/:id/annotations` precedent).
   if (path === '/api/pro/work-plan') {
     if (mutating) return [TIERS.ai, TIERS.aiHourly];
@@ -352,6 +351,15 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // cache bounds the work per request; the tier bounds request COUNT — complementary, neither a
   // substitute (the ml-status rationale verbatim).
   if (!mutating && path.startsWith('/api/daily-brief')) return [TIERS.search, TIERS.read];
+  // GET /api/attention — the Pending board. RE-TIERED off the 600/min blanket `read` when it
+  // absorbed the ranked head: one request now runs `getWorkspaceInsights` (including the
+  // maintained-repo resolution, which the merge-card emitter makes effectively unconditional)
+  // AND `rankWorkPlan` on top of it — the approvals fold, the untouched-thread group-by and a
+  // narrow PR select. Same cost shape as the daily brief above, same 60/min bucket.
+  // ⚠ "This route is DB-only" is exactly the sentence this file exists to distrust: the fold
+  // moved into it, so the tier moves with it. The board mounts on navigation and refetches on a
+  // 5-minute cadence, so request COUNT is genuinely bounded and 60/min is comfortable.
+  if (!mutating && path === '/api/attention') return [TIERS.search, TIERS.read];
   // ---- Emoji reactions: BOTH routes reach GitHub, and NEITHER lives under /api/prs/<id>/ ----
   //
   // Spelled as two EXACT string matches, above the mutating block, for the reason this file has

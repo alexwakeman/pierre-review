@@ -211,7 +211,7 @@ export function WorkspaceSelector(): JSX.Element {
   //
   // ⚠ IT COUNTS THE PERSONAL SUBSET (`myTurnPersonal`), like every other surface that NOTIFIES —
   // a badge that lit up because a stranger opened a PR in a repo you only read is a summons to
-  // nothing. The "Needs attention" BOARD and the daily-brief strip keep the broad count: that
+  // nothing. The **Pending** board and the daily-brief strip keep the broad count: that
   // work is real, it is just not yours. (See useMyTurnByWorkspace.)
   //
   // ⚠ INFORMATIONAL ONLY, on purpose. A row's click means "switch scope" and nothing more: this

@@ -5,12 +5,15 @@ import type {
   InsightCard,
   InsightPrRef,
   InsightSeverity,
+  MergeReadyCard,
+  MergeStateStatus,
   MyTurnCard,
   MyTurnCardReason,
   MyTurnDismissKind,
   ReviewerRoutingCard,
   StalledReviewCard,
   UntouchedThreadCard,
+  UpdateBranchCard,
   User,
 } from '@pierre-review/shared';
 import { usePr, useThread } from '../../hooks/usePr.js';
@@ -28,7 +31,7 @@ import {
   safeExternalUrl,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
-import { BotIcon, CheckIcon, ChevronIcon, ExternalLinkIcon } from '../Icons.js';
+import { BotIcon, CheckIcon, ChevronIcon, ExternalLinkIcon, SparkleIcon } from '../Icons.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
 import { AiSummary } from '../AiSummary.js';
@@ -38,7 +41,7 @@ import { ThreadCard } from '../ThreadView/index.js';
 // cards, with the full drill-down behaviour (click a card to open the PR / thread, inline thread
 // reply+resolve, suggested-reviewer assign, lazy PR summary, and back-from-a-click flash). Extracted
 // from InsightsView so it can be rendered in BOTH the (Pro) Insights pane and the CORE/free Feed
-// "Needs attention" tab — the same JSX, just fed from a different data hook. It depends only on core
+// **Pending** rail entry — the same JSX, just fed from a different data hook. It depends only on core
 // stores/hooks (usePinnedTabs / useFilters / usePr / useThread / useRequestReviewers), so it's tier-
 // agnostic. Callers pass already-filtered `cards` (bot cards excluded upstream).
 
@@ -70,6 +73,26 @@ export const KIND_LABEL: Record<InsightCard['kind'], string> = {
   untouched_thread: 'Untouched thread',
   reviewer_load: 'Review load',
   reviewer_routing: 'Needs a reviewer',
+  // The two FORWARD kinds — something that is READY rather than something that is wrong. Neutral
+  // at the kind level like the rest; `cardKindLabel` is deliberately NOT extended for them,
+  // because neither makes an ownership claim to soften.
+  merge: 'Ready to merge',
+  update_branch: 'Behind trunk',
+};
+
+/** GitHub's protection-aware merge state, as a short chip label. Transplanted from the deleted
+ *  WorkPlanCard — `lib/ui.ts` carries `MERGE_STATE_STATUSES` and `mergeVerdict()` but no label
+ *  map. Kept a total `Record<MergeStateStatus, …>` so a new GitHub state forces a decision here
+ *  rather than rendering a raw enum. */
+const MERGE_STATE_LABEL: Record<MergeStateStatus, string | null> = {
+  clean: 'clean',
+  dirty: 'conflicts',
+  // ⚠ `unstable` IS mergeable — only non-required checks are red.
+  unstable: 'unstable',
+  blocked: 'blocked',
+  behind: 'behind trunk',
+  has_hooks: 'has hooks',
+  unknown: null,
 };
 
 /**
@@ -409,6 +432,8 @@ function CardShell({
   children,
   innerRef,
   flash = false,
+  why,
+  promoted = false,
 }: {
   card: InsightCard;
   right?: React.ReactNode;
@@ -416,6 +441,20 @@ function CardShell({
   children: React.ReactNode;
   innerRef?: (el: HTMLLIElement | null) => void;
   flash?: boolean;
+  /**
+   * ONE SENTENCE OF MODEL PROSE about why this row is worth doing now (Pro `workPlan`), or
+   * undefined on every free account and every un-narrated row.
+   *
+   * ⚠ THE LABELLED-APART RULE. A model-derived line and a code-derived figure may never share a
+   * line. Everything in `children` — chips, counts, `detail` — is DATA in neutral ink and renders
+   * whether or not anything was ever generated; this gets its own line, its own palette
+   * (`--ai-*`), its own type style and a SparkleIcon. The board is fully usable with every one of
+   * these absent, which is what makes the narration safe to sell separately.
+   */
+  why?: string;
+  /** This card's PR is already seated in the "Do next" head above — see AttentionCards'
+   *  `promotedPrIds`. It renders a back-reference so the row does not read as a second job. */
+  promoted?: boolean;
 }): JSX.Element {
   const sev = SEV[card.severity];
   const onClick = onActivate
@@ -437,9 +476,24 @@ function CardShell({
         <span className="font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           {cardKindLabel(card)}
         </span>
+        {promoted && (
+          <span
+            className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-gray-500 dark:text-gray-400"
+            title="This pull request is already listed in “Do next” above — same PR, a different thing to do on it."
+          >
+            already in Do next
+          </span>
+        )}
         <span className="ml-auto text-gray-400">{right}</span>
       </div>
       {children}
+      {/* GENERATED. Its own line, never mixed with a chip — see the `why` prop's contract. */}
+      {why != null && why.trim() !== '' && (
+        <p className="mt-1.5 flex items-start gap-1 text-[11px] italic text-ai-ink">
+          <SparkleIcon size={11} className="mt-0.5 shrink-0 not-italic text-ai-signal" />
+          <span className="min-w-0">{why}</span>
+        </p>
+      )}
     </li>
   );
 }
@@ -448,7 +502,13 @@ function PrLine({
   card,
   onOpen,
 }: {
-  card: MyTurnCard | StalledReviewCard | UntouchedThreadCard | ReviewerRoutingCard;
+  card:
+    | MyTurnCard
+    | StalledReviewCard
+    | UntouchedThreadCard
+    | ReviewerRoutingCard
+    | MergeReadyCard
+    | UpdateBranchCard;
   onOpen: () => void;
 }): JSX.Element {
   return (
@@ -576,12 +636,60 @@ function CiFailingBody({
   );
 }
 
+/**
+ * Does the "Everything else" divider render, and where?
+ *
+ * ⚠ BOTH BOUNDS MATTER AND EACH GUARDS A REAL STATE.
+ *   • `headCount > 0` — the HEADLESS board, which is COMMON, not an edge: every isolated board
+ *     suppresses the head (every daily-brief line click, the Welcome-back banner, every workspace
+ *     "Elsewhere" row), as does any response predating `doNextIds`. Without this the board opens
+ *     with a divider and nothing above it.
+ *   • `headCount < total` — the head swallowing the whole board, where a trailing rule would
+ *     introduce an empty section.
+ *
+ * Exported so this is pinned by a test rather than by reading the JSX.
+ */
+export function shouldShowDivider(headCount: number | undefined, total: number): boolean {
+  return headCount != null && headCount > 0 && headCount < total;
+}
+
 export function AttentionCards({
   cards,
   users,
+  headCount,
+  whyById,
+  parked,
+  promotedPrIds,
 }: {
+  /** ALREADY PARTITIONED by the caller: the ranked head first, then everything else. This is one
+   *  list, not two — see `headCount`. */
   cards: InsightCard[];
   users: User[] | undefined;
+  /**
+   * How many leading cards form the "Do next" head. A divider `<li>` is rendered BEFORE index
+   * `headCount`, inside the same `<ul>`.
+   *
+   * ⚠ ZERO IS THE COMMON CASE, NOT AN EDGE — every isolated board (every daily-brief line click,
+   * the Welcome-back banner, every workspace "Elsewhere" row) suppresses the head, as does any
+   * response predating `doNextIds`. Hence the explicit `headCount > 0` guard below: without it
+   * the board opens with an "Everything else" rule and nothing above it.
+   */
+  headCount?: number;
+  /** Pro `workPlan` narration, keyed by CARD id. Absent on every free account. See CardShell's
+   *  `why` for the labelled-apart rule. */
+  whyById?: Map<string, string>;
+  /** Pro: one sentence on what can wait. Rendered on the divider, where "everything else"
+   *  literally begins — never above the head, which would frame the day's work as deferrable. */
+  parked?: string | null;
+  /**
+   * PRs already seated in the head. A TAIL card for one of these is a second card about a PR the
+   * reader has already been told to do — it renders a quiet back-reference rather than reading as
+   * a separate job.
+   *
+   * ⚠ IT MARKS, IT DOES NOT DROP. Removing the sibling would break `head ∪ tail === cards` and,
+   * through it, every cap disclosure on this board (`capFor` gates on `shown === count`).
+   */
+  promotedPrIds?: Set<number>;
 }): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const selectThread = useFilters((s) => s.selectThread);
@@ -627,7 +735,7 @@ export function AttentionCards({
   };
   const openThread = (card: UntouchedThreadCard): void => openThreadOn(card, card.threadId);
 
-  const renderCard = (card: InsightCard): JSX.Element | null => {
+  const renderCard = (card: InsightCard, promoted = false): JSX.Element | null => {
     switch (card.kind) {
       // The VIEWER'S OWN inbox as cards — the same population GET /api/my-turn serves, and the
       // list the daily brief's "N need your review or reply" line counts. Clicking opens the PR
@@ -645,6 +753,7 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
+            promoted={promoted}
             right={<span title={dateTime(card.since)}>{relativeTime(card.since)}</span>}
             onActivate={() =>
               card.reason === 'thread' && card.threadId != null
@@ -674,6 +783,7 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
+            promoted={promoted}
             right={
               card.observedAt != null ? (
                 <span title={dateTime(card.observedAt)}>{relativeTime(card.observedAt)}</span>
@@ -710,6 +820,7 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
+            promoted={promoted}
             right={`waiting ${ageLabel(card.ageHours)}`}
             onActivate={() => open(metaFor(card, usersById), card.id)}
           >
@@ -746,6 +857,7 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
+            promoted={promoted}
             right={`${ageLabel(card.ageHours)} old`}
           >
             {/* Only this header chrome navigates (→ the thread on the PR's Threads tab). The
@@ -781,6 +893,7 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
+            promoted={promoted}
             right="unassigned"
             onActivate={() => open(metaFor(card, usersById), card.id)}
           >
@@ -795,6 +908,49 @@ export function AttentionCards({
             <InsightPrSummary prId={card.prId} />
           </CardShell>
         );
+      // ── the two FORWARD kinds, sharing one case ─────────────────────────────────────────
+      // ⚠ THIS CASE IS NOT OPTIONAL AND tsc DOES NOT DEMAND IT. The union widening forces
+      // `KIND_LABEL` and the server's `kindRank`, but the `default: return null` below swallows a
+      // missing case in silence — the card vanishes while the ranked head still names its id and
+      // the board comes up a row short. That is exactly how `my_turn` shipped invisible.
+      //
+      // ⚠ NO "Done" CONTROL, deliberately. These carry no `dismissRefId` because they are
+      // SELF-CLEARING: the card is gone the moment the PR merges or falls behind, unlike a
+      // "new PR" my_turn row that persists until someone acts on it. Dismissing a fact about
+      // GitHub's merge state would be dismissing the world, not an item.
+      case 'merge':
+      case 'update_branch': {
+        const state = MERGE_STATE_LABEL[card.mergeStateStatus];
+        return (
+          <CardShell
+            key={card.id}
+            card={card}
+            innerRef={(el) => setCardRef(card.id, el)}
+            flash={flashId === card.id}
+            promoted={promoted}
+            why={whyById?.get(card.id)}
+            right={
+              card.lastCommitAt != null ? (
+                <span title={dateTime(card.lastCommitAt)}>{relativeTime(card.lastCommitAt)}</span>
+              ) : undefined
+            }
+            onActivate={() => open(metaFor(card, usersById), card.id)}
+          >
+            <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
+            <PrMetaRow pr={card} />
+            <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+              {state != null && (
+                <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
+                  {state}
+                </span>
+              )}
+              {/* CODE-WRITTEN, and the ONE spelling — `mergeCardDetail` on the server also writes
+                  the ranked row's `reason`. */}
+              <span className="min-w-0">{card.detail}</span>
+            </div>
+          </CardShell>
+        );
+      }
       case 'reviewer_load':
         return (
           <CardShell
@@ -802,6 +958,7 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
+            promoted={promoted}
             right={`${card.reviewsThisSprint} review${card.reviewsThisSprint === 1 ? '' : 's'} this sprint`}
           >
             <div className="flex items-center gap-2 text-sm">
@@ -853,5 +1010,41 @@ export function AttentionCards({
     }
   };
 
-  return <ul className="space-y-2">{cards.map((card) => renderCard(card))}</ul>;
+  const showDivider = shouldShowDivider(headCount, cards.length);
+  /** True for a TAIL card whose PR is already seated in the head — see `promotedPrIds`. */
+  const isPromotedSibling = (card: InsightCard, index: number): boolean =>
+    headCount != null &&
+    index >= headCount &&
+    promotedPrIds != null &&
+    'prId' in card &&
+    card.prId != null &&
+    promotedPrIds.has(card.prId);
+
+  // ⚠ ONE `<ul>`, ONE `<AttentionCards>` MOUNT — never a head list and a tail list. Two mounts
+  // would race on the single `usePinnedTabs.activityFlashItemId` token: each mount's rAF calls
+  // `clearFlash()` unconditionally, so whichever ran second would clear a flash the first had
+  // just claimed. Today's correctness there is a scheduling coincidence, not a design.
+  return (
+    <ul className="space-y-2">
+      {cards.flatMap((card, i) =>
+        showDivider && i === headCount
+          ? [
+              <li key="__do-next-divider" className="flex items-baseline gap-2 pt-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                  Everything else
+                </span>
+                <span className="h-px flex-1 bg-gray-200 dark:bg-gray-800" aria-hidden />
+                {parked != null && parked.trim() !== '' && (
+                  <span className="flex items-start gap-1 text-[11px] italic text-ai-ink">
+                    <SparkleIcon size={11} className="mt-0.5 shrink-0 not-italic text-ai-signal" />
+                    <span className="min-w-0">{parked}</span>
+                  </span>
+                )}
+              </li>,
+              renderCard(card, isPromotedSibling(card, i)),
+            ]
+          : [renderCard(card, isPromotedSibling(card, i))],
+      )}
+    </ul>
+  );
 }

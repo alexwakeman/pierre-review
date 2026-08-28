@@ -131,14 +131,21 @@ Timeline on the **tab axis** (`ActiveTab = 'timeline' | 'activity' | <Tab.key>` 
 active workspace's repos**:
 
 ```
-◈ Reports (Pro)       gate: caps.workspaceInsights  (label renamed from "Insights"; store value stays 'insights')
 ✦ Feed                always — THE default landing, BriefStrip on top
+⚠ Pending             always (CORE/free) — the worklist, led by the ranked "Do next" head
 🤖 Bots               always (CORE/free)
-⚠ Needs attention     always (CORE/free)
+◈ Reports             always — FREE flow metrics above the PRO period report
 ── repos ──           flat: no grouping headers, no colour dots, no "Other" bucket
 ```
 
-The daily surfaces lead; Needs attention is the occasional one. (The "Compare workspaces" rail
+⚠ **ALL FOUR ARE UNGATED.** Reports used to be FIRST and wrapped in `{caps.workspaceInsights && …}`,
+from when it was nothing but the Pro period report. The FREE flow-metric header moved into it off
+the Feed, so gating the entry would have taken a free feature behind the Pro wall; the pane gates
+its own Pro halves internally instead. The two DAILY surfaces now lead — the Feed, and Pending,
+which absorbed the "Plan for today" panel and is no longer an occasional surface.
+⚠ **"Pending" is a LABEL-ONLY rename of "Needs attention"** — the store/URL literal stays
+`'attention'`, because an unknown `?activityRepo=` value falls into the `parseInt` branch, yields
+NaN and lands the reader on the Feed, breaking Back on same-session history entries. (The "Compare workspaces" rail
 entry is GONE — cross-workspace comparison is Reports' "By workspace" axis; `'compare'` left the
 `activityRepoId` union and the URL parser, and `lib/workspaceColors.ts` went with
 `WorkspaceComparisonPanel`, its only importer.) **The rail is no
@@ -1775,39 +1782,74 @@ directory layout is unverified against their docs (single `greptile.json` served
 
 ## The work plan — "what should I work on today"
 
-A Pro-only panel mounted **directly under the daily-brief strip** in the Activity feed
-(`Activity/index.tsx`, immediately after `<BriefStrip />`). It renders a deterministically ranked
-worklist for one Workspace, optionally narrated by Haiku.
+> **THE CODE RANKS, FREE. THE MODEL NARRATES, PAID.**
 
-Capability `workPlan`, gated like `workspaceInsights` (`digestEnabled`). Free/OSS renders nothing
-and issues no request.
+**There is no "Plan for today" panel any more.** It was a Pro-only card under the daily-brief strip
+rendering a ranked worklist that was, by its own alignment contract, the SAME POPULATION as the
+attention board two rail clicks away — one population on two surfaces, one of them behind a
+paywall. It has been folded into the **Pending** board:
+
+- the two signals the cards never carried (`merge`, `update_branch`) are now real `InsightKind`s
+  emitted by `getWorkspaceInsights`, so **all seven** WorkPlanKinds fold off cards;
+- core `GET /api/attention` returns **`doNextIds`** — the ranked head as CARD ids — **free on every
+  tier**, and the board renders ONE list partitioned head / divider / tail;
+- the `workPlan` capability now gates **the sentences only**: a headline, one `why` per head row,
+  and `parked` on the divider. A free or OSS account gets the entire ordered board with no prose.
+
+⚠ **HEAD ∪ TAIL === CARDS, DISJOINT.** The head is a RE-ORDERING, never a filter. Every cap
+disclosure on that board gates on `shown === count`, so an "improvement" that filtered `cards` down
+to the head — or dropped a tail row because its PR is already in the head — would make "50 of 148"
+vanish with no error, on exactly the workspaces where the cap matters. A tail row whose PR is
+seated in the head is MARKED ("already in Do next"), never removed.
+
+⚠ **THE HEAD IS SUPPRESSED UNDER AN ISOLATION, NOT UNDER A RELEVANCE LENS.** An isolated board is
+single-kind, so there is no cross-kind ordering question and `capWithKindCoverage` is meaningless;
+a relevance-lensed board is still multi-kind (`passesRelevanceLens` narrows `my_turn` and nothing
+else), so the head is a legitimate re-ordering there. Consequence, stated rather than discovered:
+every daily-brief line and `openMyTurnInWorkspace` seat an isolation as well as a lens, so the head
+is dark on every notification entry point. That is the ruling, not an oversight.
+
+⚠ **THE TWO FORWARD KINDS INHERIT TWO NARROWINGS** the old standalone query did not have: the card
+fold's **90-day ultra-stale gate** and its **15-per-kind cap**. A long-dormant-but-mergeable PR no
+longer appears — which is the point, since a ranked row with no card behind it breaks the partition.
+
+⚠ **MERGE PROXIMITY IS APPROVAL-CONDITIONAL** (0.95 approved / 0.45 not, the latter deliberately
+below `review` 0.55 and `reply` 0.5). A clean PR nobody has reviewed is ready for GitHub, not ready
+for a human — and because the per-PR dedup survivor is chosen by proximity, the old flat 0.95 also
+let a merge row beat that same PR's `review` row, so the head said "nothing is blocking this" while
+the board said "your turn" about one pull request. Measured context: on the reporting account, 9 of
+11 and 7 of 8 merge-ready PRs on two workspaces are bot-authored.
 
 ### The division of labour, which is the safety property
 
 **Every figure, id, link and rank is CODE-derived.** The model receives the already-ranked items
 and may only (a) choose which to foreground, (b) order those, (c) write one sentence each about
 why now, plus a headline and an optional "what can wait". It may not invent an item, restate a
-number, or take work off the board — anything it omits still renders under "Also on the list".
+number, or take work off the board — anything it omits still renders, below the divider, in the
+board's own tail.
 
 Enforced three ways, none of them the prompt alone:
 
 - ids the model names are intersected with the evidence; strays are dropped **and counted** into
-  `StoredWorkPlan.droppedIds`, which the panel shows when non-zero;
+  `StoredWorkPlan.droppedIds`, which the board shows when non-zero;
 - the **D4 digit gate** (`/^[^\p{Nd}\p{No}\p{Nl}]*$/u`, Unicode numerals — the input includes
   attacker-authored PR titles) runs on the headline, every `why`, and `parked`. A string carrying a
   digit is **dropped, never rewritten**;
 - the **second-person gate** fires on steps whose item `relevance === 'none'` and nowhere else —
   second person is a *fact* for `direct`/`maintained` rows and a guess for shared work. This is a
-  deliberate narrowing of the synthesis rule; do not widen it "because the panel is personal", the
-  panel is personal but the ROW is not.
+  deliberate narrowing of the synthesis rule; do not widen it "because the surface is personal" —
+  the reader's DAY is personal, the ROW is not, and this matters MORE now that the narration sits on
+  a board explicitly holding other people's work.
 
 ### Alignment with the brief
 
 > THE BRIEF SAYS HOW MUCH. THE PLAN SAYS IN WHAT ORDER. THEY ARE ONE POPULATION.
 
-Six of the seven signals are folded off `getWorkspaceInsights`' `InsightCard[]` — the same fold
+**All seven** signals are folded off `getWorkspaceInsights`' `InsightCard[]` — the same fold
 `computeBriefCounts` counts — rather than re-derived, because a second predicate for "an untouched
-thread" is a second number for one population, inches away on screen. `WorkPlanEvidence.counts`
+thread" is a second number for one population, inches away on screen. (It was six until `merge` and
+`update_branch` became card kinds; the seventh was the standalone open-PR query that made the plan
+a second population.) `WorkPlanEvidence.counts`
 travels on the wire **so the agreement is assertable**; `work-plan.test.ts` pins it field-by-field
 against `getDailyBriefEntry`, and that assertion is mutation-tested.
 

@@ -1251,6 +1251,34 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   survives a pre-split response) and `'others'` reads `relevance === 'none'`, so an old response
   paints an EMPTY `'others'` board rather than a mislabelled full one — and the brief does not
   offer that line on such a response, so nobody lands there.
+  ⚠ **`merge` AND `update_branch` ARE EXEMPT TOO, even though they DO carry `relevance`.** They
+  carry it for the RANKER's weight, not as an ownership claim — a PR being ready to land says
+  nothing about whose turn it is — and filtering them would stop the brief's two my-turn lines
+  partitioning the lensed board, which is the one job this predicate has.
+- ⚠ **THE PENDING BOARD IS `head ∪ tail === cards`, DISJOINT, AND THE HEAD IS A RE-ORDERING — NEVER
+  A FILTER.** `GET /api/attention` returns `doNextIds` (card ids in `db/work-plan.ts`'s score
+  order, free on every tier); `AttentionView` partitions the FINAL `cards` array into head and
+  tail and renders ONE `<ul>` with a divider between them. Everything above the partition —
+  `visible`, `myTurnShown`, `cap`, `placement`, `ciCap`, both empty states — is computed off
+  `all`/`visible`/`cards` and untouched by it, which is exactly what keeps every cap disclosure
+  true. **The coupling is invisible and expensive:** `capFor` gates on `shown === count`, so an
+  "improvement" that filtered `cards` down to the head — or dropped a tail row because its PR is
+  already seated in the head — would make "50 of 148" vanish with no error, on precisely the
+  workspaces where the cap matters. A tail row whose PR is in the head is MARKED ("already in Do
+  next"), never removed. ⚠ ONE `<AttentionCards>` MOUNT, never a head list and a tail list: two
+  mounts race on the single `activityFlashItemId` token, each clearing it unconditionally.
+- ⚠ **THE HEAD IS SUPPRESSED UNDER AN ISOLATION, NOT UNDER A RELEVANCE LENS.** An isolated board is
+  single-kind, so there is no cross-kind ordering question and `capWithKindCoverage`'s
+  one-slot-per-kind pass is meaningless; a relevance-lensed board is still multi-kind (the lens
+  narrows `my_turn` alone), so the head is a legitimate re-ordering of the lensed set. `headCount
+  === 0` is therefore the COMMON case, which is why the divider is guarded on `headCount > 0 &&
+  headCount < cards.length` — without the lower bound the board opens with an "Everything else"
+  rule and nothing above it. **Consequence, stated rather than discovered:** every daily-brief line
+  and `openMyTurnInWorkspace` seat an isolation as well as a lens, so the head is dark on every
+  notification entry point. That is the ruling, not an oversight. The Pro narration — headline,
+  every `why`, `parked`, the dropped-id note — is suppressed with it, and the generate button is
+  DISABLED rather than hidden (an enabled button whose output cannot render spends a credit for
+  nothing and gets clicked twice).
 - **The lens must be VISIBLE, NAMED and REVERSIBLE.** `AttentionIsolationBanner` carries both
   narrowings, says WHICH lens is on (one shared `LENS_COPY` table, so the banner and
   `AttentionView`'s filtered empty state cannot phrase the same narrowing two ways), names how many

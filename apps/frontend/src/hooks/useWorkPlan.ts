@@ -92,6 +92,22 @@ export function useGenerateWorkPlan(workspaceId: number | null) {
       );
       // A generation may have spent credits → refresh the meter and the out-of-credits gate.
       void qc.invalidateQueries({ queryKey: ['ai-usage'] });
+      // ⚠ AND RE-READ THE BOARD, so the head and the prose describe ONE fold.
+      //
+      // The narration joins a step to a card through `WorkPlanItem.cardId`, then INTERSECTS with
+      // the head — the ids `/api/attention` returned. Both sides fold `getWorkspaceInsights`, but
+      // at different INSTANTS: this POST folds fresh while the board is serving a body up to 60s
+      // old, and with `MY_TURN_CARD_CAP` (50) biting a 176-item population, which rows are in the
+      // fold genuinely moves between the two. Observed on real data: two of six sentences were
+      // written about rows the board's head did not contain, so the intersection correctly dropped
+      // them — no misattribution, but no sentence either.
+      //
+      // Refetching the board here brings the two into phase, so the model's work is actually
+      // rendered. It is ONE extra `search`-tier read per user-initiated, billed generation.
+      // ⚠ It must stay an INVALIDATION, never a source of the board's ORDER: the head is served
+      // free by core `/api/attention`, and a board whose ranking depended on a Pro response would
+      // put the free product's ordering behind the paywall.
+      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
     },
   });
 }

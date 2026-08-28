@@ -26,7 +26,7 @@ import { ChevronIcon } from '../Icons.js';
 // per-workspace counts when other workspaces have something to say.
 //
 // ⚠ A LINE'S CLICK MUST LAND ON THE LIST ITS NUMBER COUNTS. The four workspace lines open the
-// "Needs attention" board ISOLATED to their own card kind (`setAttentionIsolation`), because a
+// **Pending** board ISOLATED to their own card kind (`setAttentionIsolation`), because a
 // figure that drops the reader on an undifferentiated board is a figure with no list behind it.
 // The my-turn line used to be worse than that: it flipped a Feed pill sitting below three
 // panels, through a setter that no-ops when the rail is already 'feed' — a click with no
@@ -220,7 +220,7 @@ export function BriefStrip(): JSX.Element | null {
         });
       }
     };
-    // Every line below lands on the "Needs attention" board ISOLATED to the one card kind the
+    // Every line below lands on the **Pending** board ISOLATED to the one card kind the
     // line is about, so the number the user clicked and the list they land on are the same
     // population. Four brief lines used to drop the reader on one undifferentiated board.
     //
@@ -521,6 +521,37 @@ export function BriefStrip(): JSX.Element | null {
           </li>
         )}
       </ul>
+
+      {/* ── ONE-RELEASE MIGRATION AID ─────────────────────────────────────────────────────────
+          Two panels left this screen in the Pending consolidation: the "Plan for today" card
+          became the Pending board's ranked head, and the flow-metric header moved to Reports.
+          Both are a rail click away, but a regular reader will look for them HERE first, so the
+          Feed points at where they went for a release. Delete this block once that has landed.
+
+          ⚠ The Pending link obeys the ordering rule documented above `openAttention`:
+          `setActivityRepo` FIRST, then BOTH lenses UNCONDITIONALLY — the setter early-returns an
+          empty patch when the rail is unchanged, so a lens left over from an earlier click would
+          otherwise survive and open a narrower list than this link promises. */}
+      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-gray-400">
+        <button
+          type="button"
+          onClick={() => {
+            setActivityRepo('attention');
+            setAttentionIsolation(null);
+            setAttentionRelevance(null);
+          }}
+          className="hover:text-gray-600 hover:underline dark:hover:text-gray-200"
+        >
+          Plan for today moved to Pending →
+        </button>
+        <button
+          type="button"
+          onClick={() => setActivityRepo('insights')}
+          className="hover:text-gray-600 hover:underline dark:hover:text-gray-200"
+        >
+          Flow metrics moved to Reports →
+        </button>
+      </div>
     </section>
   );
 }

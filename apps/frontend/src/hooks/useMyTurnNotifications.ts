@@ -22,7 +22,7 @@ import { dateTime } from '../lib/ui.js';
 // ⚠ IT FIRES ONLY FOR PERSONALLY RELEVANT ROWS (`MyTurnPr.personal`) — an OS notification is the
 // most interrupting surface in the product, and "someone opened a PR in a repo you added and have
 // never touched" is not worth interrupting anyone for (it was 425 of 459 rows on the reporter's
-// account). The flag is ADVISORY and the wire keeps every row: the "Needs attention" board still
+// account). The flag is ADVISORY and the wire keeps every row: the **Pending** board still
 // paints them all, because they do need a review. Absent ⇒ treated as personal, which is the
 // pre-narrowing behaviour and the safe way round for a row we cannot classify.
 //

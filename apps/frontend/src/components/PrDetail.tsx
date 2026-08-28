@@ -899,7 +899,7 @@ export function PrDetail({
       // ⚠ VIEWING A PR IS A MY-TURN MUTATION. `your_pr` rows leave getMyTurn's `yourPrs` section
       // the instant this stamps `pr_views` (the section filters on newSinceLastViewed) — so the
       // `my_turn` CARD built from that row, and the daily-brief count OF those cards, are both
-      // wrong the moment this succeeds. Without these two the card sat on the "Needs attention"
+      // wrong the moment this succeeds. Without these two the card sat on the **Pending**
       // board until its 60s staleTime or the 5-min interval: the user opens the PR the card
       // pointed at, comes back, and the card is still there telling them to look at it.
       // Invalidated at the PREFIX (both keys are `[name, 'ws:<id>']` — see useAttentionCards /

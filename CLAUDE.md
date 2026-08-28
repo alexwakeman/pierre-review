@@ -335,8 +335,22 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
 - **The repo picker (`RepoSelectPanel`) is Timeline-ONLY.** Activity, Feed, Bots and Reports
   always cover every repo in the workspace — never let the picker scope a screen that doesn't
   render it.
+- **The Feed is a STREAM: `BriefStrip` → `BranchStatusPanel` → `FeedView`, and nothing else.** Two
+  survey panels were removed from above it — the work plan (now the Pending head) and the
+  flow-metric header (now `WorkspaceFlowMetrics` on Reports). Do not re-add either. ⚠ **The Reports
+  rail entry is UNGATED on every tier** precisely because those free metrics live there now; the
+  pane gates its Pro half (`PeriodReportsPanel`, Track usage) internally.
+- **The Pending board is `head ∪ tail === cards`, DISJOINT** — `GET /api/attention`'s `doNextIds`
+  is the ranked "Do next" head as CARD ids (free on every tier; only its NARRATION is Pro), and the
+  board renders ONE list with a divider. The head is a **RE-ORDERING, never a filter**: every cap
+  disclosure gates on `shown === count`, so a partition that dropped a card — including a tail row
+  whose PR is already in the head, which is MARKED rather than removed — kills "50 of 148" with no
+  error. The head is suppressed under an ISOLATION only (an isolated board is single-kind), never
+  under the relevance lens, so `headCount === 0` is the common case and the divider needs both
+  bounds (`> 0 && < cards.length`). ⚠ "Pending" is a LABEL-ONLY rename of "Needs attention" — the
+  store/URL literal stays `'attention'`.
 - **A surface that NOTIFIES counts `myTurnPersonal`; a surface you OPEN counts `myTurn`** (banner,
-  Workspace badges, "Elsewhere" rows, browser notification vs the "Needs attention" board). ⚠ A
+  Workspace badges, "Elsewhere" rows, browser notification vs the Pending board). ⚠ A
   narrow count may only navigate through ITS OWN lens — `attentionRelevance` is THREE-VALUED
   (`'mine'` = direct + maintained = the retired `personal`; `'others'` = `relevance === 'none'`;
   `null` = everything), and every entry point SEATS its value, `null` included, because
@@ -496,8 +510,12 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   touchpoint sits behind a diff-guard `llm-isolation.test.ts` pins unreachable); **a cell with
   ANY acted-on high-severity finding never earns a full suppress**; **a suppression needs ≥1
   untouched thread on a PR that has since MERGED**; nothing it computes may feed `botVerdict`.
-- **The work plan** (Pro, `workPlan`): "what should I work on today" for one Workspace, under the
-  daily-brief strip. CORE ranks (`db/work-plan.ts`), the PLUGIN narrates. Contract in
+- **The work plan** (`workPlan` gates the NARRATION ONLY): "what should I work on today", folded
+  into the **Pending** board as its ranked "Do next" head. **THE CODE RANKS, FREE; THE MODEL
+  NARRATES, PAID** — the rank is CORE (`db/work-plan.ts`) and served free by `GET /api/attention`,
+  and the plugin adds a headline, one `why` per head row and a `parked` line. There is no
+  "Plan for today" panel; it was the attention board's own population on a second, paywalled
+  surface. Contract in
   [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § The work plan. What bites:
   **the brief says how much, the plan says in what order, and they are ONE population** (both fold
   `getWorkspaceInsights`' cards; `counts` rides the wire so the agreement is ASSERTABLE); the CODE

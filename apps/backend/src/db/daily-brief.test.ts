@@ -133,6 +133,57 @@ beforeAll(async () => {
     prIdByKey.set(key, pr.id);
   }
 
+  // ── one READY-TO-LAND PR, so the "counted by nobody" pin is not vacuous ───────────────────
+  // ⚠ IT NEEDS AN `events` ROW. `getWorkspaceInsights`' open-PR population is gated on a real
+  // activity event inside INSIGHT_MAX_STALE_DAYS, so a PR seeded without one produces NO card at
+  // all — and the assertion that the strip does not count it would pass because nothing exists to
+  // count. (The `my_turn` fixtures above need no event: they come from `getMyTurn`, a different
+  // fold with a different population.)
+  {
+    const { events, reviewRequests } = schema;
+    const bobId = await insertUser('bob-dev');
+    // ⚠ OPENED BEFORE THE REPO'S "New PRs" CUTOFF (`repos.createdAt`), so it is NOT also a
+    // `my_turn` watched-repo card — which would move the my_turn count this file's first
+    // assertion pins, for a reason that has nothing to do with what this pin is about.
+    const openedAt = new Date(REPO_ADDED - DAY);
+    const [readyPr] = await db
+      .insert(pullRequests)
+      .values({
+        githubNodeId: 'PR_brief_ready',
+        accountId: 1,
+        repoId: repo.id,
+        number: n++,
+        title: 'ready to land fixture',
+        state: 'open',
+        isDraft: false,
+        authorId: aliceId,
+        openedAt,
+        updatedAt: openedAt,
+        lastCommitAt: new Date(now - 60 * 60 * 1000),
+        mergeable: 'mergeable',
+        mergeStateStatus: 'clean',
+        ciStatus: 'success',
+      })
+      .returning()
+      .execute();
+    await db
+      .insert(events)
+      .values({
+        accountId: 1,
+        repoId: repo.id,
+        prId: readyPr.id,
+        actorId: aliceId,
+        type: 'commit_pushed',
+        occurredAt: new Date(now - 60 * 60 * 1000),
+        dedupeKey: 'brief_ev_ready',
+      })
+      .execute();
+    // A pending request from someone who is NOT the viewer keeps this PR off the
+    // `reviewer_routing` orphan path — which would otherwise reach for CODEOWNERS over the
+    // network from a unit test.
+    await db.insert(reviewRequests).values({ prId: readyPr.id, userId: bobId }).execute();
+  }
+
   // ⚠ Through the production resolver, never a hand-built {workspaceId, repoIds}: it is
   // `ensureRepoMemberships` that puts a repo inserted straight into `repos` into the account's
   // Default workspace. Hand-build it and the repo belongs to no workspace, every count is 0, and
@@ -199,5 +250,31 @@ describe('the daily brief counts what the click opens', () => {
       untouched_thread: live.untouched_thread ?? 0,
       reviewer_routing: live.reviewer_routing ?? 0,
     });
+  });
+
+  // ⚠ THE TWO FORWARD KINDS ARE COUNTED BY NOBODY, ON PURPOSE — and that is a DECISION, so it
+  // gets a pin rather than an absence.
+  //
+  // `merge` and `update_branch` reach the Pending board (and the ranked head), but the daily-brief
+  // strip does not count them: the strip answers "how much is WAITING ON YOU", and a PR that is
+  // ready to land is not waiting on anyone. Adding them to `computeBriefCounts`' allow-list would
+  // also stop the strip self-hiding on a clear workspace, since something is nearly always
+  // mergeable. The board's own header carries the all-clear wording instead.
+  //
+  // The fixture must actually PRODUCE a merge card for this to mean anything — hence the
+  // assertion that one exists before the assertion that nothing counted it.
+  it('lets a ready-to-land PR reach the board WITHOUT entering the brief', async () => {
+    const live = await liveCardCounts();
+    expect((live.merge ?? 0) + (live.update_branch ?? 0)).toBeGreaterThan(0);
+    const { counts } = await brief.getDailyBriefEntry(1, scope.workspaceId);
+    // Not folded into any scalar the strip renders.
+    const total =
+      counts.myTurn +
+      (counts.ciFailing ?? 0) +
+      counts.stalled +
+      counts.untouchedThreads +
+      counts.needsReviewer;
+    const board = Object.entries(live).reduce((n, [, v]) => n + v, 0);
+    expect(board).toBeGreaterThan(total);
   });
 });

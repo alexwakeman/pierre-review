@@ -655,7 +655,7 @@ export const api = {
   // The workspace flow-metric header (DORA-ish tiles + trends) — CORE/free, rendered in the Feed.
   workspaceMetrics: (workspaceId: number) =>
     get<WorkspaceMetricsResponse>(withQuery('/api/workspace-metrics', workspaceParam(workspaceId))),
-  // The attention cards (CORE/free) for the Feed "Needs attention" tab.
+  // The attention cards (CORE/free) for the **Pending** rail entry.
   attentionCards: (workspaceId: number) =>
     get<AttentionCardsResponse>(withQuery('/api/attention', workspaceParam(workspaceId))),
   // The daily brief (CORE/free, counts only — plan P3.1/P3.3). `rollup` adds the per-workspace

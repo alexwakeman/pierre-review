@@ -131,11 +131,16 @@ async function proShots() {
     await ctx.close();
   });
 
-  // 4. Insights — the Pro team review-intelligence rail view (default landing with Pro on).
+  // 4. Reports — the rail view carrying the FREE flow metrics above the PRO period report.
+  //
+  // ⚠ NAVIGATED EXPLICITLY. This used to open a bare `?view=activity` on the claim that Reports
+  // was "the default landing with Pro on" — a one-shot landing effect that has since been
+  // deleted; the store default is 'feed' on every tier, so the bare URL lands on the Feed and
+  // this waited on a testid that was never going to render.
   await shot('insights.png', async () => {
     const ctx = await newCtx({ width: 1600, height: 1100 });
     const page = await ctx.newPage();
-    await openApp(page, '?view=activity');
+    await openApp(page, '?view=activity&activityRepo=insights');
     await page.getByTestId('insights-view').waitFor({ timeout: 8000 });
     await page.waitForTimeout(2500); // cards + metrics + sprint report load
     await page.screenshot({ path: out('insights.png') });
@@ -145,17 +150,18 @@ async function proShots() {
   // 5. Flow metrics — the DORA-style charts panel (element shot; tall viewport so
   // the whole panel renders without inner scroll).
   //
-  // The panel MOVED out of the Pro Insights pane onto the cross-repo FEED rail
-  // entry when the metrics went CORE/free, and `?view=activity` now opens on
-  // Insights — so this used to time out waiting for a testid that was never going
-  // to render. It cannot be fixed with a query param either: useUrlState only
-  // parses `activityRepo` as 'bots' | 'attention' | <numeric repo id>, so 'feed'
-  // is silently dropped. Click the rail row, which is what a reader does.
+  // The panel has moved TWICE. It left the Pro Insights pane for the cross-repo FEED when the
+  // metrics went CORE/free, and it has now moved BACK into Reports — where analytics belongs, and
+  // which is why that rail entry is no longer Pro-gated. Navigate straight there: `useUrlState`
+  // DOES parse `activityRepo=insights` (the earlier note here claiming otherwise was about
+  // 'feed', which it still does not parse).
+  //
+  // ⚠ NOTE FOR WHOEVER REPAIRS THIS: `flow-metrics.png` has ZERO references in apps/landing/src —
+  // only README.md mentions it. Fixing this shot repairs an UNUSED asset.
   await shot('flow-metrics.png', async () => {
     const ctx = await newCtx({ width: 1400, height: 2000 });
     const page = await ctx.newPage();
-    await openApp(page, '?view=activity');
-    await page.getByRole('button', { name: 'Feed', exact: true }).first().click();
+    await openApp(page, '?view=activity&activityRepo=insights');
     const panel = page.getByTestId('flow-metrics');
     await panel.waitFor({ timeout: 8000 });
     await page.waitForTimeout(2500); // chart render

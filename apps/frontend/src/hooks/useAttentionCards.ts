@@ -3,8 +3,8 @@ import type { AttentionCardsResponse, MyTurnDismissKind } from '@pierre-review/s
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 
-// The "Needs attention" cards (stalled reviews / untouched threads / reviewer load / needs-a-
-// reviewer) — CORE/free, powering the Activity rail's "Needs attention" entry. Same scope semantics
+// The **Pending** cards (stalled reviews / untouched threads / reviewer load / needs-a-
+// reviewer) — CORE/free, powering the Activity rail's **Pending** entry. Same scope semantics
 // + sync cadence as the Pro Insights hook, but NO capability gate (every tier). The workspace is in
 // the cache key so each one caches independently, and the key stays `['attention-cards', …]` so a
 // reviewer "Assign" (which invalidates that PREFIX — see usePrWrites) refreshes every workspace's

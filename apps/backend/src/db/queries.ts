@@ -33,9 +33,11 @@ import type {
   InsightKind,
   InsightPrRef,
   InsightSeverity,
+  MergeReadyCard,
   MyTurnCard,
   MyTurnCardReason,
   ReviewerSuggestion,
+  UpdateBranchCard,
   WorkspaceInsightsResponse,
   WorkspaceMetrics,
   WorkspaceMetricStat,
@@ -176,6 +178,7 @@ import { createHash } from 'node:crypto';
 import {
   computeApprovalInfoByPr,
   computeTriage,
+  READY_MERGE_STATES,
   type TriageResult,
 } from './triage.js';
 import { getAccountById, getAccountUserId } from '../auth/account.js';
@@ -3654,6 +3657,40 @@ const INSIGHT_ROUTING_MIN_AGE_HOURS = 4; // ignore brand-new PRs
 // max range — beyond it, a PR is off everyone's radar.
 const INSIGHT_MAX_STALE_DAYS = 90;
 const INSIGHT_CARD_CAP = 15; // per-kind cap so the board stays digestible
+
+/**
+ * THE ONE SPELLING of a merge / update_branch card's one-line detail — used by the card emitter
+ * in `getWorkspaceInsights` AND, with the real untouched-thread count, by `db/work-plan.ts` as the
+ * ranked row's `reason`. Two spellings would be two sentences about one PR, inches apart on screen.
+ *
+ * ⚠ SAY WHAT THE CHIPS CANNOT, AND NOTHING THEY ALREADY DO. An earlier version read
+ * "Mergeable now · 1 approval · checks green" directly under chips reading the same three facts —
+ * in a surface whose credibility rests on every figure appearing once and meaning something. What
+ * is left is the JUDGEMENT the chips do not carry.
+ *
+ * ⚠ TIME-FREE ON PURPOSE. This string is hashable state on the Pro side and is re-derived on every
+ * poll; a relative clock in it would make the card and its ranked row disagree between two reads of
+ * unchanged data.
+ */
+export function mergeCardDetail(
+  kind: 'merge' | 'update_branch',
+  mergeStateStatus: MergeStateStatus,
+  untouchedThreads: number,
+): string {
+  if (kind === 'update_branch') {
+    return 'Behind trunk — GitHub blocks the merge until the branch is updated';
+  }
+  // `unstable` and an unanswered thread are the two states where a bare "ready" would overclaim,
+  // so they are the only qualifications kept.
+  const caveats: string[] = [];
+  if (mergeStateStatus === 'unstable') caveats.push('non-required checks are red');
+  if (untouchedThreads > 0) {
+    caveats.push(`${untouchedThreads} unanswered ${untouchedThreads === 1 ? 'thread' : 'threads'}`);
+  }
+  return caveats.length === 0
+    ? 'Nothing is blocking this — it can land now'
+    : `Can land now, but ${caveats.join(' and ')}`;
+}
 // `my_turn` gets its OWN, much larger cap. Every other kind is a SURVEY of the workspace, where 15
 // is a digestible sample of a long tail; my_turn is the viewer's actual inbox, where a cap is a
 // LIE — the daily brief reports the number of cards emitted, so capping at 15 would silently
@@ -4570,6 +4607,13 @@ export async function getWorkspaceInsights(
       untouched_thread: 5,
       reviewer_load: 6,
       reviewer_routing: 7,
+      // ⚠ THE TWO "FORWARD" KINDS RANK LAST WITHIN THEIR SEVERITY TIER, and that is not a
+      // demotion — it is the board's severity sort staying honest. "You could merge this" is an
+      // opportunity, and every kind above it is a problem; the RANKED HEAD is where these rows get
+      // to lead, on proximity rather than severity. The two orderings answer different questions
+      // and must not be made to agree.
+      merge: 8,
+      update_branch: 9,
     };
     const sevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
     cards.sort(
@@ -4985,6 +5029,12 @@ export async function getWorkspaceInsights(
       // The ci_failing 'your_pr' arm's clock — the head commit the CI verdict is ABOUT. It is not
       // a "red since": there is no stored per-PR CI transition to read one from.
       lastCommitAt: pullRequests.lastCommitAt,
+      // The two columns behind the `merge` / `update_branch` cards. ⚠ BOTH are needed and neither
+      // is inferable from the other: `mergeStateStatus` is GitHub's PROTECTION-AWARE verdict (the
+      // field to lead with), while `mergeable` reports ONLY conflict state. NULL in either means
+      // NOT OBSERVED, never "fine".
+      mergeable: pullRequests.mergeable,
+      mergeStateStatus: pullRequests.mergeStateStatus,
     })
     .from(pullRequests)
     .where(
@@ -5035,8 +5085,26 @@ export async function getWorkspaceInsights(
   //      per-commit table plus a sync step to fill it, and it was judged not worth building (0 of
   //      96 red heads on the reporting account were the viewer's). So the card names the LANDING PR
   //      of the CURRENT head and claims nothing whatsoever about who broke the build.
+  const viewerId = await getAccountUserId(accountId);
+  // THE MAINTAINED-REPO SET, RESOLVED AT MOST ONCE PER CALL AND ONLY WHEN SOMETHING NEEDS IT.
+  //
+  // Two blocks now want it — the ci_failing trunk arm (rare: only when a trunk is red) and the
+  // merge/update_branch emitter (common: nearly every workspace has at least one ready or behind
+  // PR). It is an account-wide `repos` select plus `getMergers(accountId)`, so resolving it twice
+  // would double that cost, and resolving it eagerly would charge every caller for it.
+  //
+  // ⚠ BE HONEST ABOUT WHAT THIS MEANS: because the merge arm fires on almost every workspace, this
+  // resolution is now EFFECTIVELY UNCONDITIONAL inside `getWorkspaceInsights` — which is also the
+  // fold behind `GET /api/daily-brief` (multiplied by workspace count under `?rollup=1`) and
+  // `GET /api/pro/insights`. Do not read the memoisation as "it got cheaper"; it got dearer, and
+  // `/api/attention` is re-tiered to `search` because of it.
+  //
+  // ⚠ `getMyTurn` resolves the same set independently and is deliberately LEFT ALONE — folding it
+  // in would change that function's signature for a saving it cannot observe.
+  let maintainedPromise: Promise<Set<number>> | undefined;
+  const maintainedRepoIds = (): Promise<Set<number>> =>
+    (maintainedPromise ??= viewerMaintainedRepoIds(accountId, viewerId));
   {
-    const viewerId = await getAccountUserId(accountId);
     // Sorted and capped together, so the two arms compete on urgency rather than one arm always
     // winning the cap. `sortAt` is the card's own clock (see `observedAt`), 0 when it has none.
     const ciSeeds: { card: CiFailingCard; sortAt: number }[] = [];
@@ -5106,10 +5174,7 @@ export async function getWorkspaceInsights(
     // thing in this app, and that resolver is the union of GitHub's viewerPermission and "you have
     // landed a PR on its default branch". Skipped entirely when no trunk is red, because membership
     // is the only thing that could change the answer.
-    const maintained =
-      redTrunks.length > 0
-        ? await viewerMaintainedRepoIds(accountId, viewerId)
-        : new Set<number>();
+    const maintained = redTrunks.length > 0 ? await maintainedRepoIds() : new Set<number>();
     const myRedTrunks = redTrunks.filter((r) => maintained.has(r.id));
     // ONE lookup for every red head, before the loop — resolving inside it would repeat the same
     // two queries per repo.
@@ -5175,6 +5240,106 @@ export async function getWorkspaceInsights(
     // ⚠ AND THE SLICE IS OURS TO CALL. There is no central cap in this function: every builder
     // slices itself, so a block that forgets ships an uncapped card kind.
     for (const seed of ciSeeds.slice(0, INSIGHT_CARD_CAP)) cards.push(seed.card);
+  }
+
+  // ── merge / update_branch cards (CORE, deterministic, no AI) ──────────────────────
+  // THE TWO "FORWARD" KINDS — see `InsightKind`. Every other card on this board is something
+  // that is WRONG; these two are something that is READY, and they exist so the Pending board's
+  // ranked head can name the shortest path to a merged PR instead of only listing breakage.
+  //
+  // ⚠ THEY USED TO LIVE IN `db/work-plan.ts` ON ITS OWN STANDALONE OPEN-PR QUERY. That made the
+  // ranked list a SECOND POPULATION beside this board, which is the defect the Pending
+  // consolidation removes: all seven WorkPlanKinds now fold off cards emitted here.
+  //
+  // ⚠ CLASSIFICATION IS A JS FOLD, NOT SQL, AND MUST STAY ONE. A SQL `mergeable <> 'conflicting'`
+  // silently drops rows where the column is NULL — and NULL means NOT OBSERVED, which is not the
+  // same as conflicting. The fold keeps them.
+  //
+  // ⚠ NO AUTHOR FILTER, DELIBERATELY. Bot-authored PRs dominate this population on real data
+  // (measured: 9 of 11 and 7 of 8 merge-ready PRs on two workspaces of the reporting account), and
+  // excluding them would be a new unexplained predicate — "merge the Dependabot PR" is genuine
+  // one-click work. The ranker keeps them off the head instead, by scoring an UNAPPROVED
+  // merge-ready PR below an outstanding review claim (see `proximityFor`).
+  {
+    const mergeSeeds: { card: MergeReadyCard | UpdateBranchCard; sortAt: number }[] = [];
+    const candidates: { p: (typeof openPrs)[number]; kind: 'merge' | 'update_branch' }[] = [];
+    for (const p of openPrs) {
+      const state = p.mergeStateStatus as MergeStateStatus | null;
+      if (state == null) continue;
+      if (state === 'behind') candidates.push({ p, kind: 'update_branch' });
+      else if (
+        READY_MERGE_STATES.has(state) &&
+        (p.mergeable as Mergeable | null) !== 'conflicting'
+      ) {
+        candidates.push({ p, kind: 'merge' });
+      }
+    }
+    // Only now is the maintained set worth resolving — and only once (see `maintainedRepoIds`).
+    const maintained = candidates.length > 0 ? await maintainedRepoIds() : new Set<number>();
+    for (const { p, kind } of candidates) {
+      const relevance: MyTurnRelevance =
+        viewerId != null && p.authorId === viewerId
+          ? 'direct'
+          : maintained.has(p.repoId)
+            ? 'maintained'
+            : 'none';
+      const at = p.lastCommitAt ?? p.openedAt;
+      const base = {
+        ...prRef(p),
+        // ⚠ NOT `high`. These are opportunities, not problems: a `high` accent would put "you
+        // could merge this" above "your build is red" in the board's severity sort.
+        severity: (relevance === 'direct' ? 'warn' : 'info') as InsightSeverity,
+        mergeable: (p.mergeable as Mergeable | null) ?? null,
+        lastCommitAt: p.lastCommitAt?.toISOString() ?? null,
+        relevance,
+      };
+      addUser(p.authorId);
+      const card: MergeReadyCard | UpdateBranchCard =
+        kind === 'update_branch'
+          ? {
+              ...base,
+              id: `wp:update_branch:${p.id}`,
+              kind: 'update_branch',
+              mergeStateStatus: 'behind',
+              // The ranker re-derives this sentence with the real untouched-thread count; this
+              // fold does not have one, so it passes 0. ONE function, so the two cannot drift.
+              detail: mergeCardDetail('update_branch', 'behind', 0),
+            }
+          : {
+              ...base,
+              id: `wp:merge:${p.id}`,
+              kind: 'merge',
+              mergeStateStatus: p.mergeStateStatus as MergeStateStatus,
+              detail: mergeCardDetail('merge', p.mergeStateStatus as MergeStateStatus, 0),
+            };
+      mergeSeeds.push({ sortAt: at.getTime(), card });
+    }
+    // ⚠ RELEVANCE-FIRST, THEN NEWEST. The 15-per-kind cap below is applied BEFORE the ranker ever
+    // sees these rows, so this ordering decides which survive to be rankable. Sorting by age alone
+    // would let fifteen stale bot PRs bury the viewer's own ready-to-land work. It cannot see
+    // APPROVALS (they are not in this fold), so an approved PR in a repo the viewer neither
+    // authored in nor maintains can still be capped out — a known, accepted narrowing.
+    const relRank: Record<MyTurnRelevance, number> = { direct: 0, maintained: 1, none: 2 };
+    mergeSeeds.sort(
+      (a, b) =>
+        relRank[a.card.relevance] - relRank[b.card.relevance] ||
+        b.sortAt - a.sortAt ||
+        a.card.repoFullName.localeCompare(b.card.repoFullName),
+    );
+    // Each kind gets its OWN cap, like every other builder here — a shared one would let a
+    // hundred ready PRs delete the behind-trunk signal entirely.
+    let merged = 0;
+    let behind = 0;
+    for (const seed of mergeSeeds) {
+      if (seed.card.kind === 'merge') {
+        if (merged >= INSIGHT_CARD_CAP) continue;
+        merged += 1;
+      } else {
+        if (behind >= INSIGHT_CARD_CAP) continue;
+        behind += 1;
+      }
+      cards.push(seed.card);
+    }
   }
 
   if (openPrIds.length === 0) return finish();
