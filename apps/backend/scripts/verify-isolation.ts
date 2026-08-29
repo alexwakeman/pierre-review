@@ -2148,7 +2148,7 @@ check(
           submittedAt: new Date(openedAt.getTime() + 34 * H),
         })
         .execute();
-      await db
+      const [slowThread] = await db
         .insert(schema.reviewThreads)
         .values({
           githubNodeId: `TH_flow_${tag}_${i}`,
@@ -2161,7 +2161,24 @@ check(
           // the stray key was a compile error that broke `pnpm typecheck` for the whole backend.
           createdAt: openedAt,
         })
+        .returning()
         .execute();
+      // ⚠ CONCENTRATION IS MEASURED OVER REVIEW COMMENTS, anchored to the thread's PATH — never
+      // over review submissions. A seed carrying only `reviews` produces no cell at all, which is
+      // exactly how the productivity guard above caught this the moment the measurement changed.
+      for (let k = 0; k < 2; k++) {
+        await db
+          .insert(schema.reviewComments)
+          .values({
+            githubNodeId: `RC_flow_${tag}_${i}_${k}`,
+            threadId: slowThread!.id,
+            prId: pr!.id,
+            authorId: i < 8 ? owner.id : other.id,
+            body: 'x',
+            createdAt: new Date(openedAt.getTime() + (30 + k) * H),
+          })
+          .execute();
+      }
       // A FAST second directory drags the workspace median down, so the slow one stands out.
       const [fastPr] = await db
         .insert(schema.pullRequests)

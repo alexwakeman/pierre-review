@@ -111,10 +111,16 @@ const FLOW_LATENCY_RATIO = 1.5;
 const FLOW_LATENCY_MIN_DELTA_HOURS = 4;
 const FLOW_PARKED_MIN_DELTA_HOURS = 6;
 const FLOW_SIZE_RATIO = 1.6;
+/** A ratio this large tells its own story regardless of the absolute scale, so it waives the
+ *  minimum-delta gate. Shared by every kind so "three times longer" means one thing here. */
+const FLOW_STRONG_RATIO = 3;
 const FLOW_ROUND_TRIP_RATIO = 1.5;
-const FLOW_ROUND_TRIP_MIN_DELTA = 1; // comments
-/** Below this a "round trip" is a question and an answer, not a negotiation. */
-const FLOW_ROUND_TRIP_MIN_ABS = 3;
+/** Comments that make a thread a NEGOTIATION rather than a question and an answer. */
+const FLOW_ROUND_TRIP_DEEP_COMMENTS = 3;
+/** Below this share, an area's threads essentially never need a second pass — no comparison
+ *  against the workspace makes that a finding. */
+const FLOW_ROUND_TRIP_MIN_RATE = 0.12;
+const FLOW_ROUND_TRIP_MIN_DELTA_RATE = 0.05;
 /** An author's median PR size, as a multiple of the workspace's, before they are row evidence. */
 const FLOW_BIG_AUTHOR_RATIO = 2;
 
@@ -184,10 +190,136 @@ function median(xs: number[]): number {
  * PR reviewed within the same minute) would make every ratio undefined; there the absolute delta
  * is the whole test, which is the conservative reading.
  */
-function materiallyWorse(value: number, baseline: number, ratio: number, minDelta: number): boolean {
-  if (value - baseline < minDelta) return false;
-  if (baseline <= 0) return true;
-  return value >= baseline * ratio;
+/**
+ * ⚠ A RATIO *AND* AN ABSOLUTE DELTA — except that a LARGE ENOUGH ratio stands on its own.
+ *
+ * Requiring both was blinding fast workspaces entirely. Measured: `erxes` reported
+ * "Large changes are picked up about as quickly as small ones here (2.9h against 0.4h)" — a
+ * SEVENFOLD difference, suppressed because 2.5h fell under the 4h minimum, and then described to
+ * the reader as "about as quickly", which is simply false. `cdp` did the same at 19 min against
+ * 7 min. The absolute floor exists to stop "12 minutes against 5 minutes, 2.4x worse!" on a team
+ * that reviews in minutes, and that is still worth having — but it must not swallow a 7x gap.
+ *
+ * So: the ratio gate ALWAYS applies; the absolute delta is waived once the ratio reaches
+ * `strongRatio`, which is a "several times longer" story a reader will recognise regardless of the
+ * absolute scale.
+ */
+function materiallyWorse(
+  value: number,
+  baseline: number,
+  ratio: number,
+  minDelta: number,
+  strongRatio: number,
+): boolean {
+  if (baseline <= 0) return value > 0;
+  const observed = value / baseline;
+  if (observed < ratio) return false;
+  if (observed >= strongRatio) return true;
+  return value - baseline >= minDelta;
+}
+
+// ── The bucket grain, and the paths that are noise ────────────────────────────────────────────
+//
+// ⚠ DELIBERATELY NOT `pathBucket` (db/queries.ts), which stays exactly as it is: it is the BOTS
+// advisor's grain and its comment requires the two panels to name the same directories. This is a
+// third bucket in the codebase (db/person-period.ts already has its own two-segment one), and it
+// exists because the shared single-segment grain produced garbage HERE specifically:
+//
+//   • A ROOT-LEVEL FILE BECAME A "DIRECTORY". `seg === path` returns the path itself, so real
+//     output read "One reviewer takes 95% of the reviews in `command.go`" and called a file a
+//     directory. Root files now aggregate into ONE honest cell per repo.
+//   • ONE SEGMENT IS TOO COARSE FOR A MONOREPO. Measured on bevy: every finding collapsed onto a
+//     single `crates/**` covering 1,195 threads. At two segments the same data separates into
+//     `crates/bevy_ecs/**` (252), `crates/bevy_render/**` (113), `crates/bevy_pbr/**` (71) — the
+//     areas a maintainer would actually name.
+//   • ⚠ BUT TWO SEGMENTS IS NOT SIMPLY BETTER. On a flat docs repo (`cdp`) it took the qualifying
+//     bucket count from 1 to ZERO. So BOTH grains are emitted as candidate cells and the
+//     evidence-overlap dedup below keeps whichever one actually earned a finding, preferring the
+//     more specific. The grain is chosen by the data, per repo, not asserted up front.
+const FLOW_BUCKET_ROOT = '(repository root)';
+const FLOW_BUCKET_DEPTHS = [1, 2] as const;
+
+function flowBucket(path: string, depth: number): string {
+  const segs = path.split('/');
+  if (segs.length <= 1) return FLOW_BUCKET_ROOT;
+  return `${segs.slice(0, Math.min(depth, segs.length - 1)).join('/')}/**`;
+}
+
+/** How specific a bucket is, for the dedup's preference. The root cell is the least specific. */
+function bucketDepth(bucket: string): number {
+  if (bucket === FLOW_BUCKET_ROOT) return 0;
+  return bucket.split('/').length - 1;
+}
+
+// ⚠ PATHS WHERE ONE REVIEWER IS NORMAL, NOT A BOTTLENECK. Lockfiles and manifests are touched by
+// every dependency bump and skimmed rather than reviewed; CI config is owned by whoever owns CI.
+// Measured: these filled THREE of three `single_reviewer_path` rows on one workspace and two of
+// three on another, crowding out real signal — and `package.json` and `package-lock.json` cited
+// BYTE-IDENTICAL evidence, because every bump touches both.
+//
+// They are excluded from `single_reviewer_path` ONLY. A protracted argument in `.github/**` is a
+// real round trip, so `round_trips` still sees them.
+const FLOW_LOCKFILE_RE =
+  /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|go\.sum|poetry\.lock|Gemfile\.lock|composer\.lock)$|\.lock$/;
+const FLOW_MANIFEST_RE =
+  /(^|\/)(package\.json|Cargo\.toml|go\.mod|pyproject\.toml|Gemfile|composer\.json|requirements[^/]*\.txt)$/;
+const FLOW_CI_CONFIG_RE = /^\.(github|circleci|gitlab|buildkite|husky)\//;
+
+/** True for a path whose review concentration carries no signal. See the block above. */
+function isRoutinePath(path: string): boolean {
+  return (
+    FLOW_LOCKFILE_RE.test(path) || FLOW_MANIFEST_RE.test(path) || FLOW_CI_CONFIG_RE.test(path)
+  );
+}
+
+/**
+ * Drop candidates that are RESTATEMENTS of one already kept, judged by their evidence.
+ *
+ * ⚠ THIS IS NOT COSMETIC. Real output, verbatim, from two workspaces:
+ *
+ *     package.json       prs=[57, 58, 59, 62, 63]
+ *     package-lock.json  prs=[57, 58, 59, 62, 63]      ← identical
+ *
+ *     command.go     prs=[3942, 3955, 3960, 3961, 3995]
+ *     osscluster.go  prs=[3942, 3960, 3161, 3964, 3990]
+ *     .github/**     prs=[3942, 3960, 3961, 3964, 3967]  ← one fact, three rows
+ *
+ * The per-kind cap of three was being filled with the same finding restated, so a board that
+ * looked full was carrying one fact. Two cells whose evidence overlaps this heavily ARE one
+ * finding: the same pull requests, seen through two paths they both touch.
+ *
+ * Candidates arrive already ordered strongest-first, so the walk keeps the strongest of a
+ * colliding group — and among near-equals prefers the MORE SPECIFIC bucket, which is what makes
+ * the dual-depth emission above resolve to one grain per repo.
+ */
+const FLOW_DEDUPE_OVERLAP = 0.6;
+
+function dedupeByEvidence(candidates: FlowFinding[]): FlowFinding[] {
+  const kept: { finding: FlowFinding; prs: Set<number> }[] = [];
+  for (const c of candidates) {
+    const prs = new Set(c.evidence.map((e) => e.prId));
+    if (prs.size === 0) {
+      kept.push({ finding: c, prs });
+      continue;
+    }
+    const collision = kept.find((k) => {
+      if (k.finding.repoId !== c.repoId) return false;
+      let shared = 0;
+      for (const id of prs) if (k.prs.has(id)) shared += 1;
+      return shared / Math.min(prs.size, k.prs.size) >= FLOW_DEDUPE_OVERLAP;
+    });
+    if (collision == null) {
+      kept.push({ finding: c, prs });
+      continue;
+    }
+    // Same fact. Keep the more specific SUBJECT when the two are describing it equally well —
+    // `crates/bevy_ecs/**` tells a maintainer where to look; `crates/**` does not.
+    if (bucketDepth(c.subject) > bucketDepth(collision.finding.subject)) {
+      collision.finding = c;
+      collision.prs = prs;
+    }
+  }
+  return kept.map((k) => k.finding);
 }
 
 /** Severity for the per-kind ordering. Never rendered — `value`/`baseline` are what a reader sees. */
@@ -532,7 +664,11 @@ export async function getFlowFindings(
         .where(inArray(reviewThreads.prId, ids))
         .limit(FLOW_THREAD_PATH_CAP)
         .execute();
-      for (const r of rows) bucketsFor(r.prId).add(pathBucket(r.path));
+      for (const r of rows) {
+        if (isRoutinePath(r.path)) continue;
+        const s = bucketsFor(r.prId);
+        for (const d of FLOW_BUCKET_DEPTHS) s.add(flowBucket(r.path, d));
+      }
       noteCap(caps, rows.length, FLOW_THREAD_PATH_CAP);
     }
 
@@ -544,7 +680,10 @@ export async function getFlowFindings(
       fileAttributed += 1;
       if (m.filesTruncated) fileTruncatedPrs += 1;
       const s = bucketsFor(m.id);
-      for (const f of m.files) s.add(pathBucket(f.path));
+      for (const f of m.files) {
+        if (isRoutinePath(f.path)) continue;
+        for (const d of FLOW_BUCKET_DEPTHS) s.add(flowBucket(f.path, d));
+      }
     }
     // ⚠ NOT `caps.truncated`. A capped FILE LIST means this PR's paths are partly unattributed;
     // it does NOT mean a scan stopped early, and conflating them made a 262-PR workspace announce
@@ -562,21 +701,38 @@ export async function getFlowFindings(
       return;
     }
 
-    // In-window human reviews on those PRs. `ne(state, 'pending')` matches the one first-review
-    // fold's definition of "a review happened".
-    const reviewersByPr = new Map<number, Map<number, number>>();
+    // ── WHO REVIEWS THIS DIRECTORY, anchored to the directory ───────────────────────────────────
+    //
+    // ⚠ THE ROW USED TO CLAIM SOMETHING IT HAD NOT MEASURED. Concentration was counted over the
+    // PR's reviews and then attributed to EVERY bucket that PR touched, so "one reviewer takes 95%
+    // of the 178 human reviews in `command.go`" actually meant "95% of reviews on pull requests
+    // that happened to touch command.go" — which for most repos degenerates to "…in this repo",
+    // and which is why three findings on one workspace named the same person with near-identical
+    // numbers.
+    //
+    // A review COMMENT carries a thread, and a thread carries a PATH. That is a real per-directory
+    // signal, and it is not scarcer: measured, one workspace has 780 human review comments across
+    // 64 buckets where the old attribution left 4 buckets above the floor.
+    //
+    // The LATENCY half stays a per-PR fact — "when did a person first look at this pull request"
+    // has no path — so the sentence now says which half is which rather than blurring them.
+    const commentsByCell = new Map<string, Map<number, number>>();
     for (const ids of chunk(measuredPrIds, ID_CHUNK)) {
       const rows = await db
-        .select({ prId: reviews.prId, authorId: reviews.authorId })
-        .from(reviews)
-        .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+        .select({
+          prId: reviewThreads.prId,
+          path: reviewThreads.path,
+          authorId: reviewComments.authorId,
+        })
+        .from(reviewComments)
+        .innerJoin(reviewThreads, eq(reviewThreads.id, reviewComments.threadId))
+        .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
         .where(
           and(
             eq(pullRequests.accountId, accountId),
-            inArray(reviews.prId, ids),
-            ne(reviews.state, 'pending'),
-            gte(reviews.submittedAt, from),
-            lt(reviews.submittedAt, to),
+            inArray(reviewThreads.prId, ids),
+            gte(reviewComments.createdAt, from),
+            lt(reviewComments.createdAt, to),
           ),
         )
         .limit(FLOW_REVIEW_SCAN_CAP)
@@ -588,12 +744,18 @@ export async function getFlowFindings(
         // duplicated identity (`github-actions` vs `github-actions[bot]`) carries `automated: 0`
         // and would otherwise be counted as the directory's busiest HUMAN reviewer.
         if (lanes.laneOf(r.authorId) !== 'human') continue;
-        let byUser = reviewersByPr.get(r.prId);
-        if (!byUser) {
-          byUser = new Map<number, number>();
-          reviewersByPr.set(r.prId, byUser);
+        if (isRoutinePath(r.path)) continue;
+        const meta = measuredById.get(r.prId);
+        if (meta == null) continue;
+        for (const d of FLOW_BUCKET_DEPTHS) {
+          const key = `${meta.repoId} ${flowBucket(r.path, d)}`;
+          let byUser = commentsByCell.get(key);
+          if (!byUser) {
+            byUser = new Map<number, number>();
+            commentsByCell.set(key, byUser);
+          }
+          byUser.set(r.authorId, (byUser.get(r.authorId) ?? 0) + 1);
         }
-        byUser.set(r.authorId, (byUser.get(r.authorId) ?? 0) + 1);
       }
     }
 
@@ -610,21 +772,23 @@ export async function getFlowFindings(
       if (h == null) continue;
       const bs = bucketsByPr.get(m.id);
       if (!bs) continue;
-      const prReviewers = reviewersByPr.get(m.id);
       for (const bucket of bs) {
         const key = `${m.repoId} ${bucket}`;
         let c = cells.get(key);
         if (!c) {
-          c = { repoId: m.repoId, bucket, hours: [], prIds: [], reviewsByUser: new Map() };
+          c = {
+            repoId: m.repoId,
+            bucket,
+            hours: [],
+            prIds: [],
+            // The cell's OWN comment tally, keyed the same way it was accumulated above — never
+            // the PR's reviews spread across every path it touched.
+            reviewsByUser: commentsByCell.get(key) ?? new Map<number, number>(),
+          };
           cells.set(key, c);
         }
         c.hours.push(h);
         c.prIds.push(m.id);
-        if (prReviewers) {
-          for (const [uid, n] of prReviewers) {
-            c.reviewsByUser.set(uid, (c.reviewsByUser.get(uid) ?? 0) + n);
-          }
-        }
       }
     }
 
@@ -654,6 +818,7 @@ export async function getFlowFindings(
           workspaceFirstReadMedian,
           FLOW_LATENCY_RATIO,
           FLOW_LATENCY_MIN_DELTA_HOURS,
+          FLOW_STRONG_RATIO,
         )
       ) {
         continue;
@@ -668,11 +833,16 @@ export async function getFlowFindings(
         subjectKind: 'path',
         subject: c.bucket,
         repoId: c.repoId,
+        // ⚠ EACH HALF NAMES ITS OWN POPULATION. The share is over review comments ANCHORED TO
+        // this directory; the wait is a per-pull-request fact about the ones that touch it. One
+        // sentence, two measurements, and the reader can tell which is which — the previous
+        // wording implied both were about the directory and only one was.
         headline: (() => {
           const [v, b] = fmtHoursPair(value, workspaceFirstReadMedian);
-          return `One reviewer takes ${fmtPct(share)} of the ${totalReviews} human reviews in ${c.bucket}, and a first read there waits ${v} against ${b} across the workspace.`;
+          const where = c.bucket === FLOW_BUCKET_ROOT ? 'files at the repository root' : c.bucket;
+          return `One reviewer wrote ${fmtPct(share)} of the ${totalReviews} review comments on ${where}, and pull requests touching it wait ${v} for a first read against ${b} across the workspace.`;
         })(),
-        detail: `Widening who reviews ${c.bucket} — a second name in its CODEOWNERS, or routing its pull requests to a group — is what shortens that wait.`,
+        detail: `Widening who reviews ${c.bucket === FLOW_BUCKET_ROOT ? 'the repository root' : c.bucket} — a second name in its CODEOWNERS, or routing its pull requests to a group — is what shortens that wait.`,
         value,
         baseline: workspaceFirstReadMedian,
         unit: 'hours',
@@ -891,6 +1061,7 @@ export async function getFlowFindings(
           workspaceParkedMedian,
           FLOW_LATENCY_RATIO,
           FLOW_PARKED_MIN_DELTA_HOURS,
+          FLOW_STRONG_RATIO,
         )
       ) {
         continue;
@@ -1006,7 +1177,15 @@ export async function getFlowFindings(
       );
       return;
     }
-    if (!materiallyWorse(value, baseline, FLOW_SIZE_RATIO, FLOW_LATENCY_MIN_DELTA_HOURS)) {
+    if (
+      !materiallyWorse(
+        value,
+        baseline,
+        FLOW_SIZE_RATIO,
+        FLOW_LATENCY_MIN_DELTA_HOURS,
+        FLOW_STRONG_RATIO,
+      )
+    ) {
       refuse(
         'size_latency',
         `Large changes are picked up about as quickly as small ones here (${fmtHoursPair(value, baseline)[0]} against ${fmtHoursPair(value, baseline)[1]} over the last ${windowDays} days).`,
@@ -1084,7 +1263,8 @@ export async function getFlowFindings(
   await (async (): Promise<void> => {
     interface ThreadAgg {
       repoId: number;
-      bucket: string;
+      /** The RAW path — bucketed at BOTH grains below, so the dedup can pick the specific one. */
+      path: string;
       prId: number;
       humanComments: number;
     }
@@ -1124,7 +1304,7 @@ export async function getFlowFindings(
       if (lastThreadId != null && r.threadId === lastThreadId) continue;
       let t = threads.get(r.threadId);
       if (!t) {
-        t = { repoId: r.repoId, bucket: pathBucket(r.path), prId: r.prId, humanComments: 0 };
+        t = { repoId: r.repoId, path: r.path, prId: r.prId, humanComments: 0 };
         threads.set(r.threadId, t);
       }
       if (r.authorId != null && lanes.laneOf(r.authorId) === 'human') t.humanComments += 1;
@@ -1160,7 +1340,21 @@ export async function getFlowFindings(
       reposWithData.add(t.repoId);
     }
 
-    const workspaceRoundTripMedian = median(live.map((t) => t.humanComments));
+    // ⚠ A RATE, NOT A CENTRAL TENDENCY — and this kind produced ZERO findings on NINE real
+    // workspaces at two window sizes before the change.
+    //
+    // The measured distribution of human comments per thread is 1 to 3, mean 1.0–2.4. A MEDIAN
+    // over that quantises to the integer 1 or 2 and throws the signal away: bevy's
+    // `crates/bevy_mesh/**` (mean 2.11) and go-redis's `multidb/**` (mean 1.00) were
+    // indistinguishable to it, and the old `FLOW_ROUND_TRIP_MIN_ABS = 3` floor sat above the
+    // entire real distribution, so the kind could never fire at all.
+    //
+    // "How often does a thread here need SEVERAL passes" is the question the finding actually
+    // asks, and as a share it separates cleanly on the same data: 27.8% / 25.0% / 23.5% in bevy's
+    // busiest areas against 0.0% in two go-redis ones and 0.5% in erxes'.
+    const deepShare = (counts: number[]): number =>
+      counts.length === 0 ? 0 : counts.filter((n) => n >= FLOW_ROUND_TRIP_DEEP_COMMENTS).length / counts.length;
+    const workspaceRoundTripRate = deepShare(live.map((t) => t.humanComments));
     interface RtCell {
       repoId: number;
       bucket: string;
@@ -1169,14 +1363,18 @@ export async function getFlowFindings(
     }
     const cells = new Map<string, RtCell>();
     for (const t of live) {
-      const key = `${t.repoId} ${t.bucket}`;
-      let c = cells.get(key);
-      if (!c) {
-        c = { repoId: t.repoId, bucket: t.bucket, counts: [], threads: [] };
-        cells.set(key, c);
+      // BOTH grains, same as single_reviewer_path: the dedup keeps whichever earned the finding.
+      for (const d of FLOW_BUCKET_DEPTHS) {
+        const bucket = flowBucket(t.path, d);
+        const key = `${t.repoId} ${bucket}`;
+        let c = cells.get(key);
+        if (!c) {
+          c = { repoId: t.repoId, bucket, counts: [], threads: [] };
+          cells.set(key, c);
+        }
+        c.counts.push(t.humanComments);
+        c.threads.push(t);
       }
-      c.counts.push(t.humanComments);
-      c.threads.push(t);
     }
 
     let clearedFloor = 0;
@@ -1184,14 +1382,16 @@ export async function getFlowFindings(
     for (const c of cells.values()) {
       if (c.counts.length < FLOW_MIN_BUCKET_THREADS) continue;
       clearedFloor += 1;
-      const value = median(c.counts);
-      if (value < FLOW_ROUND_TRIP_MIN_ABS) continue;
+      const value = deepShare(c.counts);
+      // An area where almost nothing needs a second pass is not a finding however it compares.
+      if (value < FLOW_ROUND_TRIP_MIN_RATE) continue;
       if (
         !materiallyWorse(
           value,
-          workspaceRoundTripMedian,
+          workspaceRoundTripRate,
           FLOW_ROUND_TRIP_RATIO,
-          FLOW_ROUND_TRIP_MIN_DELTA,
+          FLOW_ROUND_TRIP_MIN_DELTA_RATE,
+          FLOW_STRONG_RATIO,
         )
       ) {
         continue;
@@ -1205,11 +1405,11 @@ export async function getFlowFindings(
         subjectKind: 'path',
         subject: c.bucket,
         repoId: c.repoId,
-        headline: `A review thread in ${c.bucket} takes ${fmtCount(value)} human ${plural(value, 'comment', 'comments')} to settle, against ${fmtCount(workspaceRoundTripMedian)} across the workspace.`,
+        headline: `${fmtPct(value)} of review threads in ${c.bucket === FLOW_BUCKET_ROOT ? 'files at the repository root' : c.bucket} take ${FLOW_ROUND_TRIP_DEEP_COMMENTS} or more human comments to settle, against ${fmtPct(workspaceRoundTripRate)} across the workspace.`,
         detail: `Repeated back-and-forth in one area is usually a convention nobody wrote down. Writing it down — a lint rule, or a short note in the directory — removes the conversation instead of speeding it up.`,
         value,
-        baseline: workspaceRoundTripMedian,
-        unit: 'comments',
+        baseline: workspaceRoundTripRate,
+        unit: 'pct',
         sampleSize: c.counts.length,
         evidence: evidenceFor([...new Set(noisiest)]),
         // ⚠ DELIBERATELY EMPTY. "Who argues most in this directory" is the exact person-shaped
@@ -1269,15 +1469,18 @@ export async function getFlowFindings(
  *  produce byte-identical order — a panel people read top-down may not reshuffle between polls
  *  (the work plan's rank rule). */
 function takeTop(candidates: FlowFinding[]): FlowFinding[] {
-  return [...candidates]
-    .sort(
-      (a, b) =>
-        severityOf(b.value, b.baseline) - severityOf(a.value, a.baseline) ||
-        b.sampleSize - a.sampleSize ||
-        (a.repoId ?? 0) - (b.repoId ?? 0) ||
-        (a.subject < b.subject ? -1 : a.subject > b.subject ? 1 : 0),
-    )
-    .slice(0, FLOW_FINDINGS_PER_KIND_CAP);
+  const ranked = [...candidates].sort(
+    (a, b) =>
+      severityOf(b.value, b.baseline) - severityOf(a.value, a.baseline) ||
+      b.sampleSize - a.sampleSize ||
+      (a.repoId ?? 0) - (b.repoId ?? 0) ||
+      (a.subject < b.subject ? -1 : a.subject > b.subject ? 1 : 0),
+  );
+  // ⚠ DEDUPE BEFORE THE CAP, NEVER AFTER. The cap is three; restatements of one fact were filling
+  // all three, so a board that looked full carried one finding. Deduping after the slice would
+  // leave the board SHORTER instead of fuller — the point is to spend the three slots on three
+  // different things.
+  return dedupeByEvidence(ranked).slice(0, FLOW_FINDINGS_PER_KIND_CAP);
 }
 
 /** Exposed for the unit test — the floors and thresholds a fixture has to clear or miss. */
@@ -1292,7 +1495,13 @@ export const __flowTesting = {
   FLOW_LATENCY_MIN_DELTA_HOURS,
   FLOW_PARKED_MIN_DELTA_HOURS,
   FLOW_SIZE_RATIO,
-  FLOW_ROUND_TRIP_MIN_ABS,
+  FLOW_ROUND_TRIP_DEEP_COMMENTS,
+  FLOW_ROUND_TRIP_MIN_RATE,
+  FLOW_BUCKET_ROOT,
+  flowBucket,
+  isRoutinePath,
+  dedupeByEvidence,
+  takeTop,
   FLOW_FINDINGS_PER_KIND_CAP,
   SIZE_BANDS,
   median,

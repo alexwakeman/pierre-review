@@ -246,11 +246,15 @@ beforeAll(async () => {
   let th = 1;
   let rc = 1;
   /** One thread with `humanComments` human comments plus, optionally, a BOT comment on top. */
+  /** `authors` names WHO wrote the comments, because concentration is measured over review
+   *  COMMENTS anchored to the path — not over review submissions. Omit it for the neutral
+   *  round-robin (a thread whose authorship is not what the test is about). */
   const thread = async (
     prId: number,
     path: string,
     humanComments: number,
     withBot: boolean,
+    authors?: number[],
   ): Promise<void> => {
     const [t] = await db
       .insert(reviewThreads)
@@ -273,7 +277,7 @@ beforeAll(async () => {
           githubNodeId: `RC_flow_${rc++}`,
           threadId: t.id,
           prId,
-          authorId: humans[i % humans.length],
+          authorId: authors ? authors[i % authors.length] : humans[i % humans.length],
           body: 'x',
           createdAt: new Date(now - 10 * DAY + i * HOUR),
         })
@@ -327,7 +331,9 @@ beforeAll(async () => {
     // alice reviews ten, bob two → 10/12 = 83% concentration.
     await review(pr(key), i < 10 ? aliceId : bobId, 'commented', now - 36 * HOUR);
     // Four human comments, plus a bot one that must NOT enter the round-trip median.
-    await thread(pr(key), 'src/api/handler.ts', 4, true);
+    // alice writes three of the four comments -> 75% of this directory's review comments, which
+    // is what `single_reviewer_path` measures. Four comments keeps the thread DEEP for round_trips.
+    await thread(pr(key), 'src/api/handler.ts', 4, true, [aliceId, aliceId, aliceId, bobId]);
   }
   for (let i = 0; i < CALM_PRS; i++) {
     const key = `c${i}`;
@@ -342,7 +348,9 @@ beforeAll(async () => {
     // bob and carol split them 12/12 → 50%, under the concentration bar. The NEGATIVE control:
     // docs/** clears every floor and is deliberately not a finding.
     await review(pr(key), i % 2 === 0 ? bobId : carolId, 'commented', now - 16 * HOUR);
-    await thread(pr(key), 'docs/guide.md', 1, false);
+    // CONCENTRATED (every comment alice's) but FAST. The LATENCY bar is the only thing keeping
+    // docs/** out; drop that bar and this becomes a finding.
+    await thread(pr(key), 'docs/guide.md', 1, false, [aliceId]);
   }
   for (let i = 0; i < SHARED_PRS; i++) {
     const key = `s${i}`;
@@ -356,7 +364,9 @@ beforeAll(async () => {
     });
     // Three reviewers, four each → a 33% top share. SLOW (20h) but not owned by anybody.
     await review(pr(key), [bobId, carolId, daveId][i % 3]!, 'commented', now - 20 * HOUR);
-    await thread(pr(key), 'pkg/core/index.ts', 1, false);
+    // SLOW (20h against a 12h workspace median) but spread three ways -> 33%, under the bar.
+    // The CONCENTRATION control; drop that bar and this becomes a finding.
+    await thread(pr(key), 'pkg/core/index.ts', 1, false, [[bobId, carolId, daveId][i % 3]!]);
   }
 
   // ══ 'Parked': approve → merge, and the CI-blocked rows that must never count ════════════════
@@ -821,7 +831,8 @@ describe('value and baseline are always the same unit', () => {
     single_reviewer_path: 'hours',
     approval_parked: 'hours',
     size_latency: 'hours',
-    round_trips: 'comments',
+    // ⚠ A RATE, not a count. See the round-trip test below for why the count could not work.
+    round_trips: 'pct',
   };
 
   it('declares one unit per row, and every row really is worse than the thing it names', async () => {
@@ -840,17 +851,26 @@ describe('value and baseline are always the same unit', () => {
     }
   });
 
-  it('reports round trips in COMMENTS on both sides, not hours', async () => {
+  // ⚠ THE UNIT IS A SHARE, AND THE COUNT IT REPLACED COULD NEVER HAVE WORKED. Measured across
+  // nine real workspaces at two window sizes, this kind produced ZERO findings: human comments per
+  // thread run 1 to 3 (mean 1.0-2.4), so a MEDIAN quantises to the integer 1 or 2 and cannot
+  // separate bevy's `crates/bevy_mesh/**` from go-redis's `multidb/**` — and the old absolute floor
+  // of 3 sat above the entire real distribution. "How OFTEN does a thread here need several
+  // passes" separates the same data cleanly: 27.8% against 0.0%.
+  it('reports round trips as a SHARE of threads on both sides, never a raw count', async () => {
     const resp = await findings(flowScope);
     const rows = of(resp, 'round_trips');
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
-    expect(row.unit).toBe('comments');
-    // Four human comments per hot thread against one per calm thread. ⚠ Each hot thread ALSO
-    // carries a bot comment: a 5 here means the human-lane filter was dropped, and the whole
-    // finding would then be measuring automation volume.
-    expect(row.value).toBe(4);
-    expect(row.baseline).toBe(1);
+    expect(row.unit).toBe('pct');
+    // Every hot thread carries four human comments, so ALL of them are deep: a rate of 1. The calm
+    // and shared threads carry one each and never are, which drags the workspace rate down.
+    // ⚠ Each hot thread ALSO carries a bot comment. The bot cannot lift a thread over the
+    // three-comment bar on its own here, but a 1.0 baseline would mean the human-lane filter was
+    // dropped and the finding had become a measure of automation volume.
+    expect(row.value).toBe(1);
+    expect(row.baseline).toBeGreaterThan(0);
+    expect(row.baseline).toBeLessThan(1);
     expect(row.sampleSize).toBe(HOT_PRS);
   });
 
@@ -893,10 +913,24 @@ describe('the subject of a finding is the flow; people are evidence inside the r
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
     expect(row.subjectKind).toBe('path');
-    expect(row.subject).toBe('src/**');
+    // ⚠ THE DEEPER GRAIN, and it is the point. Cells are emitted at ONE and TWO segments and the
+    // evidence-overlap dedup keeps the more specific of a colliding pair — because `crates/**`
+    // told a bevy maintainer nothing where `crates/bevy_ecs/**` tells them where to look. A flat
+    // repo, where two segments qualify nothing, keeps its one-segment cell instead.
+    expect(row.subject).toBe('src/api/**');
     expect(row.repoId).toBe(repoIdByKey.get('hot'));
     expect(row.actorIds).toEqual([aliceId]);
-    expect(row.headline).toContain('83%');
+    // ⚠ 75% OF COMMENTS, not 83% of review submissions — and the difference IS the fix. The share
+    // used to be counted over the pull request's REVIEWS and then attributed to every directory
+    // that pull request touched, so "95% of the reviews in command.go" really meant "95% of the
+    // reviews on pull requests that happened to touch command.go", which for most repos is just
+    // "in this repo". A comment carries a THREAD, and a thread carries a PATH. alice writes three
+    // of every four comments here: 36 of 48.
+    expect(row.headline).toContain('75%');
+    expect(row.headline).toContain('48 review comments');
+    // Each half of the sentence names its own population — the share is about the directory, the
+    // wait is about the pull requests touching it.
+    expect(row.headline).toContain('pull requests touching it');
     // Both figures in HOURS, off the one shared first-human-review fold: 24h in src/** against a
     // 12h workspace median that the calm and shared repos set between them.
     expect(row.value).toBeCloseTo(24, 5);
@@ -907,7 +941,10 @@ describe('the subject of a finding is the flow; people are evidence inside the r
     //   pkg/** clears every floor AND is materially slow (20h against 12h): only the 60%
     //     concentration bar excludes it. Delete that bar and this line fails.
     expect(rows.some((f) => f.subject === 'docs/**')).toBe(false);
+    // ⚠ BOTH GRAINS of the shared control, since cells are emitted at one AND two segments — an
+    // assertion naming only `pkg/**` would pass while `pkg/core/**` shipped.
     expect(rows.some((f) => f.subject === 'pkg/**')).toBe(false);
+    expect(rows.some((f) => f.subject === 'pkg/core/**')).toBe(false);
     // `actorIds` resolve through the response's own table, exactly as AttentionCardsResponse does.
     expect(resp.users.map((u) => u.id)).toContain(aliceId);
   });
@@ -1034,5 +1071,154 @@ describe('coverage tells the reader what the figures rest on', () => {
     expect((await findings(flowScope, 1)).windowDays).toBe(7);
     expect((await findings(flowScope, 3650)).windowDays).toBe(90);
     expect((await findings(flowScope, 30)).windowDays).toBe(30);
+  });
+});
+
+// ═══ THE FIVE FIXES FROM THE CROSS-WORKSPACE ASSESSMENT ════════════════════════════════════════
+//
+// Measured across nine real workspaces at two window sizes: six of eighteen runs produced any
+// finding, thirteen findings collapsed to about seven distinct facts, and `round_trips` never
+// fired once. Each block below pins one of the causes.
+
+describe('a strong ratio survives a small absolute delta', () => {
+  // ⚠ REQUIRING BOTH GATES BLINDED FAST WORKSPACES. Real output: "Large changes are picked up
+  // about as quickly as small ones here (2.9h against 0.4h)" — SEVENFOLD, suppressed because
+  // 2.5h < the 4h minimum, and then described as "about as quickly", which is false. The absolute
+  // floor still stops "12 minutes against 5 minutes, 2.4x worse!" on a fast team.
+  it('admits a large ratio the absolute delta would have rejected', () => {
+    // 7.25x on a 2.5h delta — under any 4h minimum, over the 3x strong-ratio escape.
+    expect(flow.__flowTesting.materiallyWorse(2.9, 0.4, 1.6, 4, 3)).toBe(true);
+    // Same shape, ratio too small to stand alone and delta too small to qualify.
+    expect(flow.__flowTesting.materiallyWorse(0.317, 0.117, 1.6, 4, 3)).toBe(false);
+  });
+
+  it('still requires the ratio, however large the absolute gap', () => {
+    // 100h against 90h is ten hours and means nothing: 1.11x.
+    expect(flow.__flowTesting.materiallyWorse(100, 90, 1.5, 4, 3)).toBe(false);
+  });
+
+  it('keeps the absolute floor for a modest ratio', () => {
+    // 2x, but two minutes apart. The floor is the whole reason this gate is not a bare ratio.
+    expect(flow.__flowTesting.materiallyWorse(0.1, 0.05, 1.5, 4, 3)).toBe(false);
+    expect(flow.__flowTesting.materiallyWorse(20, 10, 1.5, 4, 3)).toBe(true);
+  });
+});
+
+describe('paths where one reviewer is NORMAL carry no concentration signal', () => {
+  // ⚠ THESE FILLED THREE OF THREE ROWS ON ONE REAL WORKSPACE AND TWO OF THREE ON ANOTHER. A
+  // lockfile reviewed by one person is not a bottleneck; it is a lockfile.
+  it('classes lockfiles, manifests and CI config as routine', () => {
+    for (const p of [
+      'package-lock.json',
+      'pnpm-lock.yaml',
+      'apps/web/yarn.lock',
+      'Cargo.lock',
+      'go.sum',
+      'package.json',
+      'Cargo.toml',
+      'go.mod',
+      'requirements-dev.txt',
+      '.github/workflows/ci.yml',
+      '.circleci/config.yml',
+    ]) {
+      expect(flow.__flowTesting.isRoutinePath(p), p).toBe(true);
+    }
+  });
+
+  it('does NOT class ordinary source as routine', () => {
+    for (const p of [
+      'src/api/handler.ts',
+      'crates/bevy_ecs/src/lib.rs',
+      'command.go',
+      'docs/guide.md',
+      'internal/pool/conn.go',
+    ]) {
+      expect(flow.__flowTesting.isRoutinePath(p), p).toBe(false);
+    }
+  });
+});
+
+describe('the bucket grain is chosen by the data, and a root file is not a directory', () => {
+  it('aggregates root-level files into ONE cell instead of calling each a directory', () => {
+    // Real output called `command.go` and `osscluster.go` directories, then reported them as two
+    // findings citing overlapping pull requests.
+    expect(flow.__flowTesting.flowBucket('command.go', 1)).toBe(flow.__flowTesting.FLOW_BUCKET_ROOT);
+    expect(flow.__flowTesting.flowBucket('command.go', 2)).toBe(flow.__flowTesting.FLOW_BUCKET_ROOT);
+    expect(flow.__flowTesting.flowBucket('README.md', 1)).toBe(flow.__flowTesting.FLOW_BUCKET_ROOT);
+  });
+
+  it('deepens to two segments where there are two to take', () => {
+    expect(flow.__flowTesting.flowBucket('crates/bevy_ecs/src/lib.rs', 1)).toBe('crates/**');
+    expect(flow.__flowTesting.flowBucket('crates/bevy_ecs/src/lib.rs', 2)).toBe('crates/bevy_ecs/**');
+    // A two-segment path has only ONE directory, so both grains agree — this is what keeps a flat
+    // repo from losing every cell to a depth it cannot reach.
+    expect(flow.__flowTesting.flowBucket('docs/guide.md', 1)).toBe('docs/**');
+    expect(flow.__flowTesting.flowBucket('docs/guide.md', 2)).toBe('docs/**');
+  });
+});
+
+describe('two cells describing the same pull requests are ONE finding', () => {
+  const row = (subject: string, prIds: number[], value: number): FlowFinding => ({
+    id: `single_reviewer_path:1:${subject}`,
+    kind: 'single_reviewer_path',
+    subjectKind: 'path',
+    subject,
+    repoId: 1,
+    headline: 'h',
+    detail: 'd',
+    value,
+    baseline: 1,
+    unit: 'hours',
+    sampleSize: 10,
+    evidence: prIds.map((prId) => ({
+      prId,
+      repoFullName: 'o/r',
+      prNumber: prId,
+      prTitle: 't',
+      githubUrl: 'https://github.com/o/r/pull/1',
+    })),
+    actorIds: [],
+  });
+
+  it('collapses byte-identical evidence to one row, keeping the more specific subject', () => {
+    // The real pair: package.json and package-lock.json cited prs=[57,58,59,62,63] each.
+    const out = flow.__flowTesting.dedupeByEvidence([
+      row('pkg/**', [57, 58, 59, 62, 63], 10),
+      row('pkg/core/**', [57, 58, 59, 62, 63], 10),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.subject).toBe('pkg/core/**');
+  });
+
+  it('keeps cells whose evidence genuinely differs', () => {
+    const out = flow.__flowTesting.dedupeByEvidence([
+      row('a/**', [1, 2, 3, 4, 5], 10),
+      row('b/**', [6, 7, 8, 9, 10], 9),
+    ]);
+    expect(out).toHaveLength(2);
+  });
+
+  it('never merges across repositories', () => {
+    // Two accounts can track the same repo and two repos can share a path; the pull request ids
+    // are what identify a fact, and they are only comparable within one repository.
+    const a = row('src/**', [1, 2, 3, 4, 5], 10);
+    const b = { ...row('src/**', [1, 2, 3, 4, 5], 9), repoId: 2, id: 'x' };
+    expect(flow.__flowTesting.dedupeByEvidence([a, b])).toHaveLength(2);
+  });
+
+  it('runs BEFORE the cap, so three slots hold three different facts', () => {
+    // Deduping after the slice would leave the board shorter instead of fuller.
+    const out = flow.__flowTesting.takeTop([
+      row('x/**', [1, 2, 3, 4, 5], 10),
+      row('x/core/**', [1, 2, 3, 4, 5], 10),
+      row('y/**', [6, 7, 8, 9, 10], 9),
+      row('z/**', [11, 12, 13, 14, 15], 8),
+    ]);
+    expect(out).toHaveLength(3);
+    expect(out.map((f: FlowFinding) => f.subject).sort()).toEqual([
+      'x/core/**',
+      'y/**',
+      'z/**',
+    ]);
   });
 });
