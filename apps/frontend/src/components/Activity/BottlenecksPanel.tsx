@@ -26,7 +26,7 @@ import {
   truncationLineFor,
 } from './bottlenecksModel.js';
 
-// "Where it's stuck" — the COURT LEDGER, on the Reports rail.
+// "Chronology" — the COURT LEDGER, on the Reports rail.
 //
 // Every hour a pull request is open, somebody is holding the ball: a REVIEWER who has not looked,
 // an AUTHOR who owes a response, or nobody at all — approved and waiting to land.
@@ -233,7 +233,7 @@ export function BottlenecksPanel(): JSX.Element {
       <div>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-            Where it’s stuck
+            Chronology
           </h3>
           <span className="text-[11px] text-gray-400">
             Every hour a pull request is open, somebody is holding it. Automation is measured on the

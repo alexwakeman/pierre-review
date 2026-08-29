@@ -1,6 +1,6 @@
 // THE COURT LEDGER'S STATE MACHINE, as a pure fold — no database, no fixture, no clock.
 //
-// `walkCourts` is the whole feature in one function: every figure on the "Where it's stuck" screen
+// `walkCourts` is the whole feature in one function: every figure on the "Chronology" screen
 // is a sum over its output. It is also a HEURISTIC with three judgement calls inside it, and this
 // repo's rule is that a heuristic gets fixture tests (`sync/__fixtures__/threads/` carries the same
 // rule for `derive-thread-state`). Each block below pins one decision, and the comment says what

@@ -8,7 +8,7 @@ import type {
 } from '@pierre-review/shared';
 import type { InsightsInnerTab } from '../../store/filters.js';
 
-// The render model for "Where it's stuck" — the COURT LEDGER panel on the Reports rail.
+// The render model for "Chronology" — the COURT LEDGER panel on the Reports rail.
 //
 // ⚠ WHAT THIS REPLACED. The pane used to render path-bucket findings and say things like
 // "src/** is a bottleneck". A directory is four proxies from anything a manager can change, and on

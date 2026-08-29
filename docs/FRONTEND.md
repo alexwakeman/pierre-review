@@ -1016,10 +1016,10 @@ to removable chips.
 
 ## The Reports pane is two tabs, and the Pending board can now merge
 
-### Reports → Overview | Where it's stuck (`insightsTab`)
+### Reports → Overview | Chronology (`insightsTab`)
 
 `InsightsView` is a TWO-TAB pane. **Overview** is the pane as it was — free Flow metrics above the
-Pro-badged Period reports. **Where it's stuck** is the COURT LEDGER panel (`BottlenecksPanel.tsx`, contract in
+Pro-badged Period reports. **Chronology** is the COURT LEDGER panel (`BottlenecksPanel.tsx`, contract in
 [BOTTLENECKS.md](BOTTLENECKS.md)). ⚠ It renders NO PERSON — not a login, not an avatar, not a
 per-head count — and the server sends no actor ids, which makes that structural rather than a
 convention this file has to remember.

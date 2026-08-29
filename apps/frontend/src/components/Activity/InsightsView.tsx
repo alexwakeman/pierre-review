@@ -38,7 +38,7 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 //
 // ── THE PANE IS TWO TABS ─────────────────────────────────────────────────────────────────────
 //   • Overview    — exactly the body described above, unchanged.
-//   • Where it's stuck — the COURT LEDGER (BottlenecksPanel). CORE, FREE ON EVERY TIER,
+//   • Chronology — the COURT LEDGER (BottlenecksPanel). CORE, FREE ON EVERY TIER,
 //     deterministic, and the twin of the Bots rail: that surface measures automation, this one
 //     measures people's time. It renders in OSS mode with no plugin present.
 //
@@ -96,7 +96,8 @@ export function InsightsView(): JSX.Element {
         {(
           [
             { key: 'overview', label: 'Overview' },
-            { key: 'bottlenecks', label: "Where it's stuck" },
+            // ⚠ LABEL-ONLY: the store/URL literal stays 'bottlenecks' (see InsightsInnerTab).
+            { key: 'bottlenecks', label: 'Chronology' },
           ] as const
         ).map((t) => {
           const on = effectiveTab === t.key;

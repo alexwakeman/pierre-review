@@ -3,7 +3,7 @@ import type { FlowResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 
-// The "Where it's stuck" tab's one read — `GET /api/flow-findings`, the COURT LEDGER.
+// The "Chronology" tab's one read — `GET /api/flow-findings`, the COURT LEDGER.
 // The human-lane twin of the Bots rail. CORE and FREE ON EVERY TIER: no `useProCapabilities`, no `enabled` gate, no 402/404 path
 // to defend against, and it renders identically under `npx pierre-review` with no plugin present.
 // (The route is deterministic — no model, no GitHub call — which is what makes free affordable.)

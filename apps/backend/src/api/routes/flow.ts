@@ -4,7 +4,7 @@ import { FLOW_DEFAULT_WINDOW_DAYS, getFlowCourts } from '../../db/pr-intervals.j
 import { resolveWorkspaceScope } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
-// GET /api/flow-findings — "Where it's stuck": the COURT LEDGER for a workspace.
+// GET /api/flow-findings — "Chronology": the COURT LEDGER for a workspace.
 //
 // CORE and FREE ON EVERY TIER. It is deterministic — no model, no plugin, no GitHub call — and
 // every sentence it returns is templated in db/pr-intervals.ts. (If it ever needs to be paid,

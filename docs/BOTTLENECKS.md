@@ -1,4 +1,4 @@
-# Where it's stuck — the court ledger
+# Chronology — the court ledger
 
 Every hour a pull request is open, somebody is holding the ball. Charge each interval to its holder
 and the hours account for themselves.

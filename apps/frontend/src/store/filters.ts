@@ -60,7 +60,12 @@ export type RepoConsoleTab = 'activity' | 'bots';
 //   • 'bottlenecks' — the human-lane findings from `GET /api/flow-findings` (CORE, FREE on every
 //                     tier, deterministic). The Bots rail's twin: that one measures automation,
 //                     this one measures where HUMAN review time goes.
-// ⚠ NEITHER MEMBER IS CAPABILITY-GATED, which is the whole point of putting Bottlenecks here —
+// ⚠ 'bottlenecks' IS A LABEL-ONLY MISMATCH: the tab reads **"Chronology"** on screen and the store
+// and URL literal stays `'bottlenecks'`. Same rule as "Pending" (store `'attention'`) and "Reports"
+// (store `'insights'`) — the literal ships in bookmarks and in history entries Back replays, so
+// renaming it would silently drop readers onto Overview. Rename the LABEL, never the member.
+//
+// ⚠ NEITHER MEMBER IS CAPABILITY-GATED, which is the whole point of putting the second tab here —
 // the pane is already un-gated so the free metrics stay reachable, and a second free surface on
 // it needs no wall. That also means the effective-tab derive below has only one job (normalising
 // a value outside the union), not a capability fallback like BotsView's.
@@ -499,7 +504,8 @@ export interface FilterState {
   // an account without the capability must not be written back as a correction.
   feedInnerTab: 'feed' | 'themes';
   // Which inner sub-tab the Reports pane shows: 'overview' (free Flow metrics + the Pro Period
-  // reports) or 'bottlenecks' (the free human-lane findings). See InsightsInnerTab.
+  // reports) or 'bottlenecks' — labelled "Chronology" on screen, the free court ledger. See
+  // InsightsInnerTab for why the literal and the label differ.
   //
   // Transient — freshDefaults() ONLY, never in FilterDefaults / pickFilterBarState, so NO
   // FILTER_STORAGE_VERSION bump is owed for it: nothing persists it, and a version that tracks

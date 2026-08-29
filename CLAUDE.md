@@ -28,7 +28,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [FRONTEND](docs/FRONTEND.md) | stores, tabs/overlays, FilterBar scoping, timeline internals, PrDetail |
 | [MERGE-CI-TRUNK](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, auto-merge runner, CI logs, trunk status |
 | [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) | the agentic PR-review feature |
-| [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports -> "Where it's stuck" |
+| [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports -> "Chronology" |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) | ML severity/category of bot comments (`packages/ml`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
 | [PRO-PLUGIN-AND-ACTIVITY](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity, Feed, the bot platform, annotations, digests, the work plan |
@@ -600,7 +600,7 @@ with a SECTION per pick; contract in
 
 ---
 
-## Where it's stuck — the court ledger (Insights -> Reports)
+## Chronology — the court ledger (Insights -> Reports)
 
 Every hour a pull request is open, somebody is holding the ball: a **reviewer** who has not looked,
 an **author** who owes a response, or nobody - approved and waiting to land. CORE, **free on every

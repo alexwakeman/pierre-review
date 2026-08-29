@@ -2077,7 +2077,7 @@ export interface AdvisorBriefResponse {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════
-// Where it's stuck — the COURT LEDGER
+// Chronology — the COURT LEDGER
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 //
 // Every hour a pull request is open, somebody is holding the ball: a REVIEWER who has not looked
