@@ -4550,46 +4550,32 @@ export async function getWorkspaceInsights(
     scope.repoIds.length === 0
       ? [] // an empty workspace → no repos (also dodges the empty-array inArray pitfall)
       : await db
-          .select({ id: repos.id, owner: repos.owner, name: repos.name })
+          .select({
+            id: repos.id,
+            owner: repos.owner,
+            name: repos.name,
+            viewerPermission: repos.viewerPermission,
+          })
           .from(repos)
           .where(and(eq(repos.accountId, accountId), inArray(repos.id, scope.repoIds)))
           .execute();
   const repoName = new Map(scopedRepos.map((r) => [r.id, `${r.owner}/${r.name}`]));
   const repoIds = scopedRepos.map((r) => r.id);
+  // The repos this viewer may PUSH to — the VISIBILITY gate on the Pending board's merge controls
+  // (`MergeReadyCard.viewerCanPush`). It rides the CARD because the board must not fetch to find
+  // out: PrDetail answers this from the live merge-options call (~3 GitHub calls per PR) and fifty
+  // cards doing that on mount would be ~150 calls to paint one board.
+  //
+  // ⚠ `WRITE_PERMISSIONS`, the ONE set — NOT `viewerMaintainedRepoIds`, whose union also counts
+  // "has landed a PR on the default branch". That is a maintainer PROXY (deliberately behavioural,
+  // for My Turn's relevance gate) and would show merge buttons to someone GitHub will refuse.
+  // Folded off `scopedRepos`, which is already selected, so this costs no extra query.
+  const writableRepoIds = new Set(
+    scopedRepos.filter((r) => WRITE_PERMISSIONS.has(r.viewerPermission ?? '')).map((r) => r.id),
+  );
 
   const ghUrl = (repoId: number, number: number): string =>
     `https://github.com/${repoName.get(repoId)}/pull/${number}`;
-
-  // THE ONE BUILDER OF AN `InsightPrRef`. Every PR-bearing card kind (stalled_review,
-  // untouched_thread, reviewer_routing, my_turn) fills its shared PR context through this, so a
-  // new kind cannot quietly invent a different shape — or a different null policy — for the same
-  // eleven fields. `openedAt`/`additions`/`deletions`/`changedFiles` are NOT NULL columns;
-  // `ciStatus` is the only genuinely nullable one (null = no checks) and stays null.
-  const prRef = (p: {
-    id: number;
-    repoId: number;
-    number: number;
-    title: string;
-    authorId: number | null;
-    openedAt: Date;
-    ciStatus: CiStatus | null;
-    changedFiles: number;
-    additions: number;
-    deletions: number;
-  }): InsightPrRef => ({
-    prId: p.id,
-    repoId: p.repoId,
-    repoFullName: repoName.get(p.repoId) ?? '',
-    prNumber: p.number,
-    prTitle: p.title,
-    authorId: p.authorId,
-    githubUrl: ghUrl(p.repoId, p.number),
-    ciStatus: p.ciStatus,
-    changedFiles: p.changedFiles,
-    additions: p.additions,
-    deletions: p.deletions,
-    openedAt: p.openedAt.toISOString(),
-  });
 
   const finish = async (): Promise<WorkspaceInsightsResponse> => {
     const kindRank: Record<InsightKind, number> = {
@@ -4642,6 +4628,70 @@ export async function getWorkspaceInsights(
     };
   };
   if (repoIds.length === 0) return finish();
+
+  // WHO OPENED IT — the one bot judgement this fold makes, resolved ONCE into two maps that
+  // `prRef` below reads. `prRef` stays SYNCHRONOUS: it is called from six card builders inside
+  // tight loops, and making it async to answer "is this a bot" per row would issue one lookup per
+  // card for an answer that is the same for the whole workspace.
+  //
+  // ⚠ THE RESOLUTION IS NOT THE LOGIN, AND IT IS NOT A NEW ONE. `hiddenBotUserIds` is the exact
+  // union the SPA's "hide bots" lens already hides by — `users.isBot` ∪ THIS workspace's automated
+  // reviewers (vendor-login seed + `workspace_reviewers` rows flagged automated), with a manual
+  // "this is a human" winning BOTH directions — and `classificationKindForUser` is the exact map
+  // every other vendor chip on this board reads (the untouched-thread pill below is one). A second
+  // classifier here would let the Timeline call an actor a bot while the card beside it calls the
+  // same actor a person, which is the "stored role/kind beats the login seed" rule losing to a
+  // convenience `reviewBotKind(login)`.
+  //
+  // ⚠ DELIBERATELY BELOW THE EMPTY-WORKSPACE EARLY RETURN: a workspace with no repos emits no
+  // cards, so it must not pay for four reads to classify nobody.
+  const [botAuthorIds, authorBotKinds] = await Promise.all([
+    hiddenBotUserIds(accountId, scope.workspaceId),
+    classificationKindForUser(accountId, scope.workspaceId),
+  ]);
+  const botAuthorIdSet = new Set(botAuthorIds);
+
+  // THE ONE BUILDER OF AN `InsightPrRef`. Every PR-bearing card kind (stalled_review,
+  // untouched_thread, reviewer_routing, my_turn, merge, update_branch) fills its shared PR context
+  // through this, so a new kind cannot quietly invent a different shape — or a different null
+  // policy — for the same thirteen fields. `openedAt`/`additions`/`deletions`/`changedFiles` are
+  // NOT NULL columns; `ciStatus` is the only genuinely nullable one (null = no checks) and stays
+  // null.
+  const prRef = (p: {
+    id: number;
+    repoId: number;
+    number: number;
+    title: string;
+    authorId: number | null;
+    openedAt: Date;
+    ciStatus: CiStatus | null;
+    changedFiles: number;
+    additions: number;
+    deletions: number;
+  }): InsightPrRef => {
+    const authorId = p.authorId;
+    const authorIsBot = authorId != null && botAuthorIdSet.has(authorId);
+    return {
+      prId: p.id,
+      repoId: p.repoId,
+      repoFullName: repoName.get(p.repoId) ?? '',
+      prNumber: p.number,
+      prTitle: p.title,
+      authorId,
+      githubUrl: ghUrl(p.repoId, p.number),
+      ciStatus: p.ciStatus,
+      changedFiles: p.changedFiles,
+      additions: p.additions,
+      deletions: p.deletions,
+      openedAt: p.openedAt.toISOString(),
+      authorIsBot,
+      // ⚠ A KIND ONLY EVER RIDES ALONG WITH THE FLAG. The two maps agree by construction (both
+      // start from the same vendor-login seed and the same workspace rows, and a manual "human"
+      // removes the actor from both), but gating the kind on the flag means a future divergence
+      // costs a chip's BRAND, never a vendor chip painted over a person's name.
+      authorBotKind: authorIsBot && authorId != null ? authorBotKinds.get(authorId) ?? null : null,
+    };
+  };
 
   // ── my_turn cards (CORE, deterministic, no AI) ─────────────────────────────
   // The VIEWER'S OWN inbox, promoted from an uncountable Feed facet to first-class cards.
@@ -5292,6 +5342,10 @@ export async function getWorkspaceInsights(
         mergeable: (p.mergeable as Mergeable | null) ?? null,
         lastCommitAt: p.lastCommitAt?.toISOString() ?? null,
         relevance,
+        // A VISIBILITY gate, never the authority — the board HIDES its merge controls without it
+        // (the ChecksTab rule), and the merge/update/arm routes each re-check permission, the head
+        // oid and the live merge state before anything irreversible happens.
+        viewerCanPush: writableRepoIds.has(p.repoId),
       };
       addUser(p.authorId);
       const card: MergeReadyCard | UpdateBranchCard =
@@ -9366,7 +9420,13 @@ function inferSeverity(text: string | null | undefined): string | null {
 // The path bucket a deterministic tuning suggestion groups by: the top-level dir as a
 // `<seg>/**` glob, or the file path itself when it's at root. Advisory only (the pathGlob
 // rides along in the suggestion for display; nothing matches against it anymore).
-function pathBucket(path: string): string {
+//
+// EXPORTED for db/flow-findings.ts, which buckets HUMAN review time at the same grain the bot
+// advisor buckets bot findings at — the two panels name the same directories, so a second
+// spelling would let them disagree about which directory a file is in. (db/person-period.ts has
+// a DIFFERENT, two-segment bucket of its own on purpose; it is not this one and must not be
+// collapsed into it.)
+export function pathBucket(path: string): string {
   const seg = path.split('/')[0];
   return seg && seg !== path ? `${seg}/**` : path;
 }

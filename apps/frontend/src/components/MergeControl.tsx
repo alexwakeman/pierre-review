@@ -43,7 +43,24 @@ const METHOD_VERB: Record<MergeMethod, string> = {
   rebase: 'Rebase and merge',
 };
 
-export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: string }): JSX.Element {
+export function MergeControl({
+  prId,
+  githubUrl,
+  label = 'Merge',
+}: {
+  prId: number;
+  githubUrl: string;
+  /**
+   * The COLLAPSED trigger's verb. Defaults to "Merge" (PrDetail's Actions row).
+   *
+   * The Pending board passes "Update branch" on an `update_branch` card: the panel this expands
+   * into is the same one either way — its Update-branch button already lives in it — but the verb
+   * on the button the reader clicks has to match what the card is about. "Merge" on a PR
+   * `mergeStateStatus === 'behind'` is exactly the 405 `mergeVerdict` exists to prevent, promised
+   * before the fetch that would have said so.
+   */
+  label?: string;
+}): JSX.Element {
   const [open, setOpen] = useState(false);
   const { data: options, isLoading, isError } = useMergeOptions(prId, open);
   const merge = useMergePr(prId);
@@ -81,7 +98,7 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
         className="inline-flex items-center gap-1 rounded border border-violet-500 px-2 py-0.5 text-sm font-medium text-violet-700 hover:bg-violet-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
       >
         <MergeIcon />
-        Merge
+        {label}
         <CaretIcon />
       </button>
     );

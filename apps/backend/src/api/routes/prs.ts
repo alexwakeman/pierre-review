@@ -58,6 +58,11 @@ import {
   upsertLocalPrComment,
   upsertLocalReview,
 } from '../../db/queries.js';
+import { resolveArmedQueues, withArmedQueueFields } from '../../db/merge-queue.js';
+// The watcher's live marks (yields + queue-disabled fallbacks). Read-only, and the reason this
+// import is not a layering smell: every one of them is a LIVE observation of GitHub made inside
+// the tick, so the runner is the only thing that can own them, and the route only reports them.
+import { armedQueueMarks } from '../../merge/auto-merge-runner.js';
 import { enrichReviewerSuggestions } from '../../github/reviewer-suggest.js';
 import {
   buildFileAnchors,
@@ -596,7 +601,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     }
     try {
       const token = await getAccessToken(accountId);
-      const [cfg, m, queue, armed] = await Promise.all([
+      const [cfg, m, queue, armed, armedQueues] = await Promise.all([
         fetchRepoMergeConfig(token, ctx.owner, ctx.name),
         fetchMergeability(token, ctx.owner, ctx.name, ctx.number),
         // Merge-queue state is BEST-EFFORT: a repo without a queue, an older GHES, or a token
@@ -604,6 +609,9 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         fetchMergeQueueState(token, ctx.owner, ctx.name, ctx.number).catch(() => null),
         // Pierre-side auto-merge intent — a pure DB read, never a GitHub call.
         getAutoMergeRequest(accountId, id),
+        // …as is its place in the repo's landing queue, so the armed panel can say "2nd of 5"
+        // without a second request.
+        resolveArmedQueues(accountId, armedQueueMarks()),
       ]);
       const allowedMethods = (['merge', 'squash', 'rebase'] as const).filter((meth) =>
         meth === 'merge'
@@ -644,7 +652,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
           // THIS account's token, so it can never do more than the user already can. Permission
           // is re-checked at arm time AND again at land time.
           allowedByRepo: canWrite && allowedMethods.length > 0,
-          armed,
+          armed: armed ? withArmedQueueFields(armed, armedQueues) : null,
         },
       };
       return result;
@@ -874,7 +882,12 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       // The full row, identity and `phase: 'pending_first_check'` included — the SPA seeds its
       // progress card from this response, so the surface appears on the click rather than on
       // the next poll (and, before it, the watcher's next tick, up to two minutes away).
-      return armed;
+      // The landing position is resolved AFTER the arm, so the fifth click already reads "5 of
+      // 5" instead of appearing to be next up until the first poll corrects it.
+      return withArmedQueueFields(
+        armed,
+        await resolveArmedQueues(accountId, armedQueueMarks()),
+      );
     } catch (err) {
       reply.status(502);
       return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
@@ -923,8 +936,17 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
   // per-PR routes directly above; keeping the pair together is what stops the two drifting.
   app.get('/api/auto-merge', async (req) => {
     const accountId = accountIdOf(req);
-    const requests = await listAutoMergeRequests(accountId);
-    const result: ArmedMergeListResponse = { requests };
+    // The per-repo landing order rides along (still a pure DB read — one tiny extra scan, no
+    // GitHub). Computing it HERE rather than storing it on the row is deliberate: the order is
+    // a fact about the whole set, it changes whenever anyone arms or cancels, and a stored
+    // position would be wrong for every row but the one the watcher last touched.
+    const [requests, queues] = await Promise.all([
+      listAutoMergeRequests(accountId),
+      resolveArmedQueues(accountId, armedQueueMarks()),
+    ]);
+    const result: ArmedMergeListResponse = {
+      requests: requests.map((r) => withArmedQueueFields(r, queues)),
+    };
     return result;
   });
 

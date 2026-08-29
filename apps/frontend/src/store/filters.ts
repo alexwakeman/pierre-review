@@ -52,6 +52,20 @@ export type FeedCiLens = 'feed' | 'only' | 'off';
 // transient (freshDefaults only, never persisted, never URL-emitted — `?report=` reads into
 // `insightsReportKey` alone), so no stored blob or link can carry a stale value anywhere.
 export type RepoConsoleTab = 'activity' | 'bots';
+
+// The Reports pane's OWN sub-tab strip, reintroduced with two members and nothing in common with
+// the deleted `InsightsSubTab` above except the surface it sits on:
+//   • 'overview'    — exactly what the pane already was (free Flow metrics + the Pro Period
+//                     reports half, each carrying its own posture).
+//   • 'bottlenecks' — the human-lane findings from `GET /api/flow-findings` (CORE, FREE on every
+//                     tier, deterministic). The Bots rail's twin: that one measures automation,
+//                     this one measures where HUMAN review time goes.
+// ⚠ NEITHER MEMBER IS CAPABILITY-GATED, which is the whole point of putting Bottlenecks here —
+// the pane is already un-gated so the free metrics stay reachable, and a second free surface on
+// it needs no wall. That also means the effective-tab derive below has only one job (normalising
+// a value outside the union), not a capability fallback like BotsView's.
+export type InsightsInnerTab = 'overview' | 'bottlenecks';
+export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'bottlenecks'];
 // PrDetail's inner tab strip. It lives HERE, not in PrDetail's local state, because it is
 // URL-ADDRESSABLE: `?view=pr:<id>&prTab=changes` names one screen, so browser Back/Forward can
 // move between "the PR's diff" and "the PR's threads" like every other view. Which member is
@@ -484,6 +498,18 @@ export interface FilterState {
   // this RAW value; the derived-effective-tab rule above is unchanged — a URL naming 'themes' on
   // an account without the capability must not be written back as a correction.
   feedInnerTab: 'feed' | 'themes';
+  // Which inner sub-tab the Reports pane shows: 'overview' (free Flow metrics + the Pro Period
+  // reports) or 'bottlenecks' (the free human-lane findings). See InsightsInnerTab.
+  //
+  // Transient — freshDefaults() ONLY, never in FilterDefaults / pickFilterBarState, so NO
+  // FILTER_STORAGE_VERSION bump is owed for it: nothing persists it, and a version that tracks
+  // the meaning of STORED keys does not move for a key that is never stored.
+  //
+  // ⚠ URL-SERIALIZED (`?insightsTab=bottlenecks`, the 'overview' default omitted) and a NAVIGATION
+  // key, but ONLY alongside `activityRepo=insights` — a sub-tab that is not on screen is not a
+  // view, the same rule `feedTab` / `botsTab` follow. The READ seats the RAW value and InsightsView
+  // DERIVES what it renders; a corrective write-back would permanently forget the choice.
+  insightsInnerTab: InsightsInnerTab;
   // Which inner tab the PR-detail overlay shows (see PrDetailTab), PAIRED WITH THE PR IT BELONGS
   // TO. null = nothing chosen yet → 'overview'.
   //
@@ -861,6 +887,9 @@ export interface FilterState {
   focusAdvisor: (botKey: string, intent: 'tune' | 'drop') => void;
   clearAdvisorFocus: () => void;
   setFeedInnerTab: (v: 'feed' | 'themes') => void;
+  // Switch the Reports pane's inner sub-tab (Overview / Bottlenecks). Seats the CHOICE; the pane
+  // derives what it renders from it.
+  setInsightsInnerTab: (v: InsightsInnerTab) => void;
   /**
    * Seat PrDetail's inner tab FOR ONE PR (see prDetailTab). Always call it with the prId the
    * component is rendering — the pair is what keeps one PR's tab out of another's.
@@ -1283,6 +1312,10 @@ function freshDefaults(): FilterData {
     botsInnerTab: 'roi',
     advisorFocus: null,
     feedInnerTab: 'feed',
+    // The Reports pane opens on Overview — the free flow metrics + the period-report half. A
+    // `?report=` deep link therefore lands where the report actually renders, without the tab
+    // needing to know anything about the report key.
+    insightsInnerTab: 'overview',
     prDetailTab: null,
     sprintChatDraft: { question: '', wantChart: false, wantBots: false },
     sprintChatThreads: {},
@@ -1364,6 +1397,7 @@ export type UrlOwnedState = Pick<
   | 'prDetailTab'
   | 'feedInnerTab'
   | 'botsInnerTab'
+  | 'insightsInnerTab'
 >;
 
 /** The fresh values of the URL-owned keys — read off freshDefaults() so the two cannot drift. */
@@ -1380,6 +1414,7 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
     prDetailTab: d.prDetailTab,
     feedInnerTab: d.feedInnerTab,
     botsInnerTab: d.botsInnerTab,
+    insightsInnerTab: d.insightsInnerTab,
   };
 }
 
@@ -1512,6 +1547,7 @@ export const useFilters = create<FilterState>((set, get) => ({
     set({ advisorFocus: { botKey, intent }, botsInnerTab: 'advisor' }),
   clearAdvisorFocus: () => set({ advisorFocus: null }),
   setFeedInnerTab: (v) => set({ feedInnerTab: v }),
+  setInsightsInnerTab: (v) => set({ insightsInnerTab: v }),
   setPrDetailTab: (prId, tab) =>
     set((s) =>
       s.prDetailTab?.prId === prId && s.prDetailTab.tab === tab

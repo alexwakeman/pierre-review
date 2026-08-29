@@ -141,6 +141,7 @@ beforeEach(() => {
     feedIsolatedPrId: null,
     feedInnerTab: 'feed',
     botsInnerTab: 'roi',
+    insightsInnerTab: 'overview',
     prDetailTab: null,
     selectedPrId: null,
     selectedThreadId: null,
@@ -655,6 +656,31 @@ describe('the Activity sub-tab strips', () => {
     seat('/app/?workspace=5&view=activity&feedTab=themes');
     applyUrlToStores({ fromPop: true });
     expect(useFilters.getState().feedInnerTab).toBe('themes');
+  });
+
+  // The Reports pane's Overview | Bottlenecks strip, on the same three rules as its two siblings:
+  // a switch is a NAVIGATION (it changes what the pane is, not how it is filtered), the DEFAULT
+  // member stays out of the URL, and the key rides ONLY the rail entry that renders the strip.
+  it('switching the Reports sub-tab pushes, round-trips, and omits the default', () => {
+    gesture(() => useFilters.getState().setActivityRepo('insights'));
+    expect(location.search).not.toContain('insightsTab');
+
+    gesture(() => useFilters.getState().setInsightsInnerTab('bottlenecks'));
+    expect(location.search).toContain('insightsTab=bottlenecks');
+    expect(entries).toHaveLength(3);
+
+    back();
+    expect(useFilters.getState().insightsInnerTab).toBe('overview');
+    expect(location.search).not.toContain('insightsTab');
+  });
+
+  // A sub-tab that is not on screen is not part of the view: the scalar survives a rail move (so
+  // returning to Reports restores the choice) but never rides a Feed link.
+  it('does not emit insightsTab from a rail entry that has no Reports strip', () => {
+    gesture(() => useFilters.getState().setInsightsInnerTab('bottlenecks'));
+    gesture(() => useFilters.getState().setActivityRepo('feed'));
+    expect(location.search).not.toContain('insightsTab');
+    expect(useFilters.getState().insightsInnerTab).toBe('bottlenecks');
   });
 });
 

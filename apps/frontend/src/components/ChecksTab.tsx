@@ -746,7 +746,7 @@ export function ChecksTab({
         <Row label="Checks">
           {checks.length > 0 && (
             <>
-              <ChecksList prId={pr.id} checks={checks} />
+              <ChecksList prId={pr.id} prGithubUrl={pr.githubUrl} checks={checks} />
               <CiRerunControl
                 prId={pr.id}
                 checks={checks}

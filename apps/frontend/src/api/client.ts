@@ -49,6 +49,7 @@ import type {
   WorkspaceInsightsResponse,
   AttentionCardsResponse,
   DailyBriefResponse,
+  FlowFindingsResponse,
   RepoWorkspaceMetricsResponse,
   WorkspaceMetricsDetailResponse,
   WorkspaceMetricsResponse,
@@ -663,6 +664,18 @@ export const api = {
   dailyBrief: (workspaceId: number, rollup: boolean) =>
     get<DailyBriefResponse>(
       withQuery('/api/daily-brief', workspaceParam(workspaceId), rollup ? 'rollup=1' : undefined),
+    ),
+  // The Bottlenecks tab (CORE/free on every tier, deterministic — no model anywhere behind it):
+  // where human review time goes in this workspace, as evidence cells with sample floors, plus a
+  // NAMED refusal for every kind that could not clear one. `days` is the window; the server
+  // clamps it to [7, 90] rather than trusting it, so a bookmarked value can never widen the scan.
+  flowFindings: (workspaceId: number, days?: number) =>
+    get<FlowFindingsResponse>(
+      withQuery(
+        '/api/flow-findings',
+        workspaceParam(workspaceId),
+        days != null ? `days=${days}` : undefined,
+      ),
     ),
   // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click) — CORE/free
   // too, so a Feed tile opens the drill-down for everyone.

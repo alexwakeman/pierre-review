@@ -253,6 +253,18 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/attention')).not.toEqual(['read']);
   });
 
+  // GET /api/flow-findings — the Bottlenecks tab. CORE, free, no model and no GitHub, which is
+  // exactly the profile that would otherwise be waved onto the 600/min blanket bucket: one call
+  // runs the lane resolver, the shared first-human-review fold, a thread-path scan, an in-window
+  // review scan, a merged-PR walk with its approving reviews, an open-PR snapshot with the
+  // approvals fold and the round-trip comment join. The negative assertion is the point.
+  it('puts the bottlenecks fold on the expensive bucket, not the blanket read one', () => {
+    expect(tiers('GET', '/api/flow-findings')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/flow-findings')).not.toEqual(['read']);
+    // Free and deterministic — it must never be swept onto a billed bucket either.
+    expect(tiers('GET', '/api/flow-findings')).not.toContain('ai');
+  });
+
   // The comments drill-down ships comment BODIES (up to 3000/source) plus a three-way label
   // join per request — the same shape of cost as the rollup — while its /prs sibling is PR
   // metadata only and stays on the blanket bucket. Both pinned so neither drifts into the other.

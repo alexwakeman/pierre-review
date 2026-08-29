@@ -33,6 +33,7 @@ import { activityRoutes } from './api/routes/activity.js';
 import { mentionsRoutes } from './api/routes/mentions.js';
 import { searchRoutes } from './api/routes/search.js';
 import { dailyBriefRoutes } from './api/routes/daily-brief.js';
+import { flowRoutes } from './api/routes/flow.js';
 import { billingRoutes } from './api/routes/billing.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
 import { mlLabelRoutes } from './api/routes/ml-labels.js';
@@ -226,6 +227,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   // DB reads over the owning surfaces' own folds, TTL-cached; the Pro narration is the plugin's
   // synthesis seam, not this route.
   await app.register(dailyBriefRoutes);
+  // Bottlenecks (CORE, FREE on every tier, no AI, no GitHub): the Bot Tuning Advisor's evidence-
+  // cell machinery aimed at the HUMAN lane — where review time goes, with sample floors and a
+  // NAMED refusal for anything that cannot clear one. Every sentence it returns is templated in
+  // db/flow-findings.ts; there is no narration seam and no plugin half.
+  await app.register(flowRoutes);
   // Bot-triage platform (CORE, always registered): detection/override, ROI analytics,
   // cross-bot dedup, confirm-gated bot-thread resolve. Account-scoped; no AI.
   await app.register(botTriageRoutes);

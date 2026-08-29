@@ -6,6 +6,7 @@ import {
   DEFAULT_CATEGORIES,
   DEFAULT_PR_STATUSES,
   DEFAULT_REVIEW_STATES,
+  INSIGHTS_INNER_TABS,
   PR_DETAIL_TABS,
   freshFilterDefaults,
   freshUrlOwnedDefaults,
@@ -15,6 +16,7 @@ import {
   sanitizePersistedScope,
   useFilters,
   type FilterState,
+  type InsightsInnerTab,
   type PrDetailTab,
   type RangePreset,
 } from '../store/filters.js';
@@ -96,6 +98,9 @@ const NAV_KEYS = [
   'feedPr',
   'feedTab',
   'botsTab',
+  // The Reports pane's Overview | Bottlenecks strip. A sub-tab switch is a navigation for the
+  // same reason its two siblings above are: it changes what the pane IS, not how it is filtered.
+  'insightsTab',
   'prTab',
 ] as const;
 
@@ -361,6 +366,14 @@ export function readFromUrl(): Partial<FilterState> {
   if (botsTab === 'roi' || botsTab === 'advisor' || botsTab === 'settings') {
     out.botsInnerTab = botsTab;
   }
+  // The Reports pane's strip. Same raw-seat rule: InsightsView derives what it renders (a value
+  // outside the union normalises to 'overview' FOR THE RENDER), so an unknown literal here would
+  // be corrected on screen — but correcting the STORE would forget a choice the moment a future
+  // member is added back behind a gate.
+  const insightsTab = p.get('insightsTab');
+  if ((INSIGHTS_INNER_TABS as readonly string[]).includes(insightsTab ?? '')) {
+    out.insightsInnerTab = insightsTab as InsightsInnerTab;
+  }
   // PrDetail's inner tab, and it is only meaningful PAIRED with the PR tab `view=` names — the
   // store field is a {prId, tab} pair precisely so one PR's tab cannot be read on another's
   // screen. A `?prTab=` with no PR view (or on a `pr-focus`, which renders a timeline) seats
@@ -575,6 +588,11 @@ export function writeToUrl(s: FilterState): void {
       p.set('activityRepo', 'attention');
     } else if (s.activityRepoId === 'insights') {
       p.set('activityRepo', 'insights');
+      // The pane's sub-tab, on the same "only where the strip is on screen" gate as `feedTab` /
+      // `botsTab`. ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT — 'overview' stays out of the URL
+      // because a bare `?activityRepo=insights` means it; flip the default and this comparison
+      // flips with it, or every emitted link starts naming the tab it no longer opens.
+      if (s.insightsInnerTab !== 'overview') p.set('insightsTab', s.insightsInnerTab);
       // The period being read, emitted ONLY alongside the console that renders it — a bare
       // `?report=` on the Feed would be inert noise in every link the app produces.
       if (s.insightsReportKey) p.set('report', s.insightsReportKey);
@@ -682,7 +700,7 @@ const FILTER_STORAGE_KEY = 'pierre:filterBarState';
 // the noisy feed forever — the exact failure the v2→v3 note describes, in the other direction.
 //
 // ⚠ NO BUMP IS OWED for the history work that made `attn` / `feedPr` / `feedTab` / `botsTab` /
-// `prTab` URL-visible: not one of them is PERSISTED. This blob's version tracks the meaning of
+// `insightsTab` / `prTab` URL-visible: not one of them is PERSISTED. This blob's version tracks the meaning of
 // what is STORED, and those keys are transient view state that dies with the tab — the version
 // moves only when a stored key's meaning changes, or when a default flips on a key
 // `pickFilterBarState` writes unconditionally.

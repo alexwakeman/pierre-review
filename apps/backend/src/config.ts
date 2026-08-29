@@ -316,16 +316,25 @@ export const config = {
   // sites. Inert until the plugin is present AND digestEnabled.
   pro: {
     digestModel: process.env.PRO_DIGEST_MODEL ?? 'claude-haiku-4-5',
-    // The period-report narration's default model (plan P4.1 — a forwarded sprint retro is worth
-    // more prose care than a per-repo digest, at ~2 generations/month/workspace). Reaches the
-    // plugin the same way digestModel does — the env var itself (@pierre/pro reads
-    // PRO_REPORT_MODEL in llm/seam.ts's DEFAULT_REPORT_MODEL); this entry keeps the model ids in
-    // the one place they are all documented. The plugin validates the value against its
-    // REPORT_MODELS allowlist — an unpriceable id here silently falls back to the plugin's
-    // default rather than reaching a meter. Per-account override: pro_settings.report_model;
-    // per-run override: the generate call's `model` body field. The model id is folded into the
-    // narration's payload hash, so changing this regenerates each report deliberately, once.
-    reportModel: process.env.PRO_REPORT_MODEL ?? 'claude-sonnet-5',
+    // The period-report narration's default model. Reaches the plugin the same way digestModel
+    // does — the env var itself (@pierre/pro reads PRO_REPORT_MODEL in llm/seam.ts's
+    // DEFAULT_REPORT_MODEL); this entry keeps the model ids in the one place they are all
+    // documented. The plugin validates the value against its REPORT_MODELS allowlist — an
+    // unselectable id here silently falls back to the plugin's default rather than reaching a
+    // meter. Per-account override: pro_settings.report_model; per-run override: the generate
+    // call's `model` body field.
+    //
+    // ⚠ THE TWO SPELLINGS MUST AGREE. This literal and `DEFAULT_REPORT_MODEL`'s fallback in
+    // packages/pro/src/llm/seam.ts are the same default written twice (the plugin cannot import
+    // host config, and this line is where the model ids are documented); a half-edit makes this
+    // comment lie about what actually narrates. Both now say claude-haiku-4-5.
+    //
+    // It was claude-sonnet-5 — plan P4.1's "a forwarded sprint retro is worth more prose care
+    // than a per-repo digest". Retired: Haiku narrates every summary surface now, so a report
+    // cannot differ from the one a colleague forwarded by model. The model id is folded into the
+    // narration's payload hash (and the stored row's key), so this flip is a deliberate one-off
+    // re-bill: the next generate of each period is a cache miss.
+    reportModel: process.env.PRO_REPORT_MODEL ?? 'claude-haiku-4-5',
     digestEnabled: process.env.PRO_DIGEST_ENABLED === 'true',
     digestMaxUsdPerRefresh: floatFromEnv('PRO_DIGEST_MAX_USD', 0.5),
     digestMaxReposPerRefresh: intFromEnv('PRO_DIGEST_MAX_REPOS', 30),

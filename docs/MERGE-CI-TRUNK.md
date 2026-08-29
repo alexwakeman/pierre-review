@@ -120,6 +120,119 @@ interactive route) and sets `merged`; a merge/close that happened outside Pierre
 `disarmed_blocked`, NOT `merged` — the latter means "the watcher did it" and would raise a false
 toast. `MAX_CONSECUTIVE_FAILURES` 3, counted in memory so a restart errs towards retrying.
 
+#### The per-repo landing queue — rule 8 (`db/merge-queue.ts`)
+
+**Arming five bumps on one repo used to be BROKEN, not merely slow.** `freshenedIntents` was
+once per intent **LIFETIME** (cleared only by `forgetIntent`, i.e. only on a TERMINAL outcome),
+so: all five freshened from trunk at once, #1 merged, **the trunk moved**, and #2–#5 were behind
+again with their one freshen already spent. Two failure modes, depending on how GitHub words the
+block — and both fixed here:
+
+- `mergeStateStatus === 'behind'` still re-freshens (`blockedByBehind` bypasses the mark), so the
+  batch churned: **N(N+1)/2 branch updates and CI runs for N PRs**, each racing the next merge.
+- anything else that is really "out of date" (a repo that reports `blocked` while `behindBy > 0`)
+  went through `couldFreshen`, which the mark gates — so those intents were **stranded at their
+  blocker until the 72-hour expiry**, having updated exactly once, against a trunk long gone.
+
+The fix, per `(accountId, repoId)` — ⚠ **the composite key, never `repoId` alone**: two accounts
+can track the same repo, and a repoId-keyed group would serialise one tenant's landings behind
+another's:
+
+1. **Armed DIRECT-merge intents form a FIFO ordered `armedAt ASC, id ASC`** — click order. ⚠ The
+   id tiebreak is load-bearing: sqlite stores these timestamps as **unix SECONDS**, so one
+   click-through gives every intent the same `armedAt` and the autoincrement id is the only
+   surviving record of the order the feature promises to land them in.
+2. **Exactly ONE intent per repo holds the SLOT.** Only the slot-holder may freshen, enqueue or
+   merge; the rest record phase **`queued_local`** and their place ("waiting its turn — 2nd of 5
+   armed on acme/api"). ⚠ **`queued_local` ≠ `queued`**: the latter means GitHub has the PR in a
+   merge queue and is testing it. Two queues, two sides of the network, and the copy must never
+   merge them.
+3. ⚠ **RULES 1–4 STILL RUN FOR EVERY INTENT — this split is the crux.** Expiry, a closed/merged
+   PR, a head move and a retarget resolve on the tick that observes them, slot or no slot. Parking
+   a gone-bad intent behind a slot-holder for hours is the same starvation the queue exists to
+   prevent, reintroduced one level up. Only the freshen/enqueue/merge half is gated.
+4. ⚠ **`viaMergeQueue` intents are excluded from all of it — BY THE LIVE QUEUE VERDICT, NEVER THE
+   STORED FLAG.** GitHub already serialises them; a second queue in front would halve throughput
+   for nothing. A genuinely queued intent gets `holdsSlot: true` with a null position, so the wire
+   fields stay absent and "freshen once BEFORE the first enqueue, never while queued" is
+   untouched. ⚠ But the runner re-verifies the queue live each tick, and an intent whose queue was
+   **DISABLED since arming falls back to the DIRECT merge** — which is exactly the action rule 8
+   serialises. Exempting it off the stored flag merged a second PR on the repo **in the same
+   tick** as its actual slot-holder. So the first tick that observes the queue gone only
+   re-classifies the intent (mark `queueDisabled`, park at `queued_local` with a reason that says
+   so); the next fold puts it in the direct FIFO and it lands from its place there.
+5. **HEAD-OF-LINE: a slot-holder the watcher CANNOT ITSELF UNBLOCK yields**, exactly as a merge
+   queue ejects a failing entry — it needs its author, not a turn. It stays **ARMED** and **keeps
+   its FIFO place**; the mark clears on any tick that observes the blocker gone, and it is the
+   slot-holder again on the next one. **TWO blockers qualify, and they are separate sets so the
+   copy can tell them apart:**
+   - **failed required checks** — ⚠ decided on a **LIVE** read (`fetchPrHeadCheckRollup`, one
+     GraphQL point), never `syncedCiStatus`: that column is fine for LABELLING a wait, but
+     yielding re-orders the user's clicks and is not a call to make on sync-stale data. A null
+     rollup is UNPROVEN and never yields. This is the one that sets the wire's
+     `yieldedForFailedChecks`.
+   - **conflicts** — ⚠ they DO yield, and the reasoning that said otherwise ("the fix is a push,
+     a push moves the head, rule 1 frees the slot next tick") assumed an author action that may
+     never come. A conflicting slot-holder can never be landed by the watcher, so holding the slot
+     for it parked every other armed PR on that repo **until the 72-hour expiry** — a REGRESSION
+     against no queue at all, where the clean PR behind it merged immediately. Free to detect:
+     `mergeable === false` is already in the snapshot every intent pays for.
+   ⚠ **A yield is only ENTERED when there is somebody to yield TO** (`slot.canYield` — another
+   direct intent that has not itself stepped aside), which is also what stops the paid rollup read
+   from repeating every tick on a repo where everything is red. ⚠ And when **EVERY** direct intent
+   has yielded, **the first one keeps the slot**: handing it over merges nothing (the runner
+   re-reads a live snapshot and parks on the same blocker), while having NO holder left a lone
+   yielded intent claiming it was "letting the next armed PR through" with no next armed PR, and
+   unable to reach the branches that report its real state.
+6. ⚠ **A WAITER'S OWN BLOCKER OUTRANKS ITS POSITION.** The rule-8 park writes the place in line,
+   but never over the truth: a waiter GitHub reports as conflicting keeps phase
+   `waiting_conflicts` (one of the banner's STALLED phases) with the position in its prose
+   ("waiting: conflicts with main — 2nd of 2 armed on acme/api"). Overwriting it with
+   `{queued_local, "waiting its turn — 2nd of 2"}` was true, useless, and *calmer* than the truth:
+   a PR that cannot land in any position read as ordinary progress.
+7. **THE FRESHEN FIX: a LANDING clears every other armed intent's freshen mark on that repo**
+   (`clearSiblingFreshenMarks`, called from all three landing observations — our merge, our queue
+   entry merging, and a merge we merely observed). The trunk they were freshened against just
+   moved; who moved it is an attribution question, not a freshness one. That makes the mark mean
+   "freshened against the CURRENT trunk" instead of "freshened, ever" — **N branch updates and N
+   CI runs for N PRs, in click order**.
+
+**Where it is computed, and why not on the row.** `listArmedMergeRequestsForRunner` is LIMITed to
+one tick's GitHub budget (25, LRU), and **a queue position cannot come from a partial scan** —
+"2nd of 5" is a fact about all five rows. So the order rides its own tiny UNLIMITED read
+(`listArmedIntentOrder`: five scalar columns, one join, no GitHub), folded by the pure
+`buildArmedRepoQueues`. The runner derives it once per tick and **sorts slot-holders first** in
+the page it works (stable sort, so the LRU fairness rotation survives inside each half and a
+slot-holder outside the page is picked up by that same rotation next tick). The routes derive it
+per request and decorate the wire with `withArmedQueueFields`; nothing is stored, because the
+order changes whenever anyone arms or cancels and a stored position would be wrong for every row
+but the one the watcher last touched.
+
+**`queuePosition` / `queueDepth` / `yieldedForFailedChecks` are TRAILING OPTIONALS** on
+`ArmedMergeRequest`, populated by all three builders (`GET /api/auto-merge`, the arm POST's
+response, `GET …/merge-options`). Absent on every terminal row, on every `viaMergeQueue` intent,
+and when the yield flag is false — a client that has never heard of them renders exactly what it
+did before. `AutoMergeBanner` reads them for the `queued_local` headline ("Waiting its turn — 2 of
+5 on this repo"; a yielded row says "checks failed, letting the next PR through" and takes the
+STALLED tone, since same phase / two very different states). ⚠ **`yieldedForFailedChecks` is set
+by that reason ALONE** — a CONFLICT yield carries its own truthful phase instead, and flagging it
+here would put "checks failed" over a PR whose checks are fine. ⚠ **A WAIT NEEDS SOMEBODY AHEAD:**
+the headline phrases a position only when `queuePosition > 1`. `phase` is whatever the watcher last
+STORED (up to a tick ago) while the position is recomputed LIVE per request, so the slot-holder
+merging inside the same tick that parked a row left the card reading "Waiting its turn — 1 of 1 on
+this repo" for two minutes; position 1 falls through to a neutral "Next up on this repo". **No migration was needed**: `phase`
+is a plain `text` column in both dialects (sqlite `0055` / pg `0042` add it with no CHECK), and
+drizzle's `text(..., { enum })` is TypeScript-only metadata.
+
+**The three marks live in the runner's process memory** — `yieldedForFailedChecks`,
+`yieldedForConflicts` and `queueDisabledIntents` — alongside `failureCounts` / `pendingUpdates` /
+`freshenedIntents` and dropped by the same `forgetIntent`. A restart forgets a yield, the intent
+takes its slot back, re-observes the failure and re-yields — one wasted tick, never a merge nobody
+asked for. The fold and the routes read all three through the runner's `armedQueueMarks()`
+accessor (one `ArmedQueueMarks` object, so a fourth mark is a field rather than another positional
+parameter), which is why `api/routes/prs.ts` imports the runner: every one of them is a LIVE
+observation of GitHub made inside the tick, so the runner is the only thing that can own them.
+
 **`phase` — the machine-readable half of `lastReason`** (shared `ArmedMergePhase`, a nullable
 column on `auto_merge_requests`, sqlite `0055` / pg `0042`). `lastReason` is PROSE for a human
 and is **NULL at success**, so a cross-PR surface reading it alone would be string-matching a log

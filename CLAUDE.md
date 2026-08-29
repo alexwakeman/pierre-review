@@ -28,6 +28,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [FRONTEND](docs/FRONTEND.md) | stores, tabs/overlays, FilterBar scoping, timeline internals, PrDetail |
 | [MERGE-CI-TRUNK](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, auto-merge runner, CI logs, trunk status |
 | [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) | the agentic PR-review feature |
+| [BOTTLENECKS](docs/BOTTLENECKS.md) | the human-bottleneck findings behind Reports → Bottlenecks |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) | ML severity/category of bot comments (`packages/ml`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
 | [PRO-PLUGIN-AND-ACTIVITY](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity, Feed, the bot platform, annotations, digests, the work plan |
@@ -340,6 +341,21 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   flow-metric header (now `WorkspaceFlowMetrics` on Reports). Do not re-add either. ⚠ **The Reports
   rail entry is UNGATED on every tier** precisely because those free metrics live there now; the
   pane gates its Pro half (`PeriodReportsPanel`, Track usage) internally.
+- **Pending cards carry MERGE-RELATED ACTIONS, on the two FORWARD kinds only** (`merge`,
+  `update_branch`) - Merge, Merge-when-ready, Cancel, Update branch. ⚠ **NOTHING ON THE BOARD
+  MAY FETCH ON MOUNT**: `MergeWhenReadyControl` fetches merge-options EAGERLY (~3 GitHub calls per
+  PR), so fifty cards would be 150 calls to paint a board. The buttons gate on the card's OWN
+  synced `mergeStateStatus`/`mergeable`/`viewerCanPush` through `mergeVerdict()`, and the live
+  fetch is CLICK-GATED. `viewerCanPush` rides the card for the same reason; it is a VISIBILITY
+  gate only - the merge route re-checks permission, head oid and live merge state. HIDE, never
+  disable.
+- **`InsightPrRef.authorIsBot`/`authorBotKind` say who opened a PR**, built in the ONE `prRef`
+  builder. WARN The resolution is NOT the login: a manual workspace judgement wins BOTH
+  directions, then `users.isBot`, then the login seeds a vendor - the same resolution the
+  bot-hiding union uses, never a second classifier that can disagree with the Timeline. WARN
+  `authorIsBot: true` with a NULL kind is a real, common state (an unbranded CI account) and
+  renders a generic "Bot"; a bot chip on a person is a false claim about a human, so only bots
+  are badged.
 - **The Pending board is `head ∪ tail === cards`, DISJOINT** — `GET /api/attention`'s `doNextIds`
   is the ranked "Do next" head as CARD ids (free on every tier; only its NARRATION is Pro), and the
   board renders ONE list with a divider. The head is a **RE-ORDERING, never a filter**: every cap
@@ -364,7 +380,8 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   invent an ownership claim on screen. ⚠ `?attnPersonal=1` is retired but still PARSED (as
   `'mine'`) — it shipped, so it is in bookmarks and in history entries Back replays; `?attnRel=` is
   the only key emitted.
-- **Visible sub-tabs are DERIVED, never written back** (`feedInnerTab`, `botsInnerTab`) —
+- **Visible sub-tabs are DERIVED, never written back** (`feedInnerTab`, `botsInnerTab`,
+  `insightsTab` — Reports' Overview/Bottlenecks) —
   compute an `effectiveTab` for the render only; a corrective `set…` permanently forgets the
   choice.
 - **Timeline vertical scroll is GATED.** Every programmatic scroll goes through
@@ -440,6 +457,13 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   `updateStrategy`. Merge-queue repos arm the same way with a head-pinned ENQUEUE — freshen
   once BEFORE the first enqueue, never while queued; disarm with `enqueuedAt` set also dequeues
   (cancel must win).
+- **A repo's armed intents land ONE AT A TIME** (`db/merge-queue.ts`): one slot per
+  `(accountId, repoId)` in `armedAt` order, the rest at phase `queued_local`. ⚠ **RULES 1–4 STILL
+  RUN FOR EVERY INTENT** — only freshen/enqueue/merge is gated, or a queued intent whose PR was
+  closed sits unresolved for hours. ⚠ **`queued_local` ≠ `queued`** (GitHub's merge queue), and
+  `viaMergeQueue` intents are excluded from the local queue entirely. ⚠ **`freshenedIntents` is
+  once per TURN, not per lifetime** — a landing clears its repo-siblings' marks, or a batch
+  strands itself at "behind" until the 72h expiry.
 - CI logs are live ranged reads of the signed Actions blob URL — server-side only, **NEVER
   returned to a client** (it is unauthenticated).
 - Trunk status (`/api/branch-status`) is **informational only** — no attention counts, badges
@@ -575,6 +599,36 @@ with a SECTION per pick; contract in
   only through an evidence id that EXISTS.
 
 ---
+
+## Bottlenecks — the human lane (Insights → Reports → Bottlenecks)
+
+The Bots rail asks "is this bot worth its seat". **Bottlenecks asks the twin question about
+people: where does human review time go, and what keeps costing it.** `getAdvisorFindings`'
+architecture pointed at the human lane — evidence CELLS, sample FLOORS, a NAMED refusal for a cell
+that cannot clear one. CORE, **free on every tier**, no model anywhere in it. Full contract:
+**[docs/BOTTLENECKS.md](docs/BOTTLENECKS.md)**. Without opening it:
+
+- ⚠ **THE SUBJECT OF A ROW IS THE FLOW, NEVER A PERSON.** People ride only as `actorIds` INSIDE a
+  row. No cross-person sort, no comparison table, no leaderboard — "guide the work, never rank the
+  people" is the whole licence this feature operates under.
+- ⚠ **EVERY SENTENCE IS TEMPLATED** in `db/flow-findings.ts`; no model, no plugin, no AI import.
+- ⚠ **EVERY KIND ACCOUNTS FOR ITSELF — a finding OR a refusal, never silence**, and
+  `FlowFindingRefusal.basis` separates "could not measure" from "measured, nothing stood out".
+  Both failures shipped once; both are pinned across every fixture scope.
+- ⚠ **`approval_parked` MUST exclude `mergeStateStatus === 'blocked'`** — that PR waits on required
+  checks, not on people, and counting it makes the flagship finding a CI finding in disguise. ⚠ But
+  **GitHub STOPS COMPUTING that column once a PR merges** (measured: 5,478 of 5,507 merged rows read
+  `unknown`, ZERO `blocked`; 553 OPEN ones do), so only the OPEN half's exclusion really fires and
+  **NO SENTENCE MAY CLAIM IT** — the detail carries the true caveat instead. CI history is not a
+  substitute (41% precise, 29% recall, 0–66% coverage BY REPO — the comparison axis).
+- ⚠ **`size_latency`'s workspace size median is HUMAN-AUTHORED PRs ONLY** — the same filter the
+  per-author medians use. Take it over every PR and a bot's bumps halve the bar, and the row NAMES
+  PEOPLE whose changes are ordinary. ⚠ `coverage.truncated` (a row scan hit its cap ⇒ a prefix of
+  the WINDOW) and `filesTruncatedPrs` (partial PATH attribution) are different claims; and
+  `loadFirstHumanReviewHours` REPORTS ITS OWN truncation through a trailing optional sink — it is
+  extended, never forked, and a `hours.length >= CAP` call-site guess under-fires.
+- ⚠ **A value/baseline pair shares ONE unit** (`fmtHoursPair` / `formatFlowPair`, which must
+  agree). Independent formatting shipped "2.6 days vs 36h".
 
 ## ML severity/category on bot comments (CORE, free tier, no LLM)
 

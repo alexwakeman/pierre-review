@@ -1014,6 +1014,61 @@ to removable chips.
   Bot sections are deterministic, no AI. Every per-section query key carries `ws:` + `u:<userId>`
   + `pw:<from>-<to>` fixed-arity slots, so two chips can never share a cache entry.
 
+## The Reports pane is two tabs, and the Pending board can now merge
+
+### Reports → Overview | Bottlenecks (`insightsTab`)
+
+`InsightsView` is a TWO-TAB pane. **Overview** is the pane as it was — free Flow metrics above the
+Pro-badged Period reports. **Bottlenecks** is the human-lane findings panel
+(`BottlenecksPanel.tsx`, contract in [BOTTLENECKS.md](BOTTLENECKS.md)).
+
+- ⚠ **The visible tab is DERIVED, never written back** — `effectiveTab` normalises an unknown
+  `?insightsTab=` FOR THE RENDER ONLY. Exactly the `feedInnerTab` / `botsInnerTab` rule: a
+  corrective `set…()` permanently forgets the reader's choice the moment a member becomes gated.
+- The store key lives in `freshDefaults()` only, so **no `FILTER_STORAGE_VERSION` bump is owed**,
+  and `'overview'` — the current default — is the OMITTED URL value.
+- Both tabs are free on every tier. The pane's Pro half is still `PeriodReportsPanel`, which
+  carries its own free posture; the `Pro` chip sits on that heading, never on the pane header.
+
+### The Pending board's merge row (`PendingMergeActions`)
+
+The two FORWARD kinds (`merge`, `update_branch`) carry Merge · Merge-when-ready · Cancel · Update
+branch. Nothing else does — a `my_turn` "review this" card gets no Merge button.
+
+- ⚠ **NOTHING ON THE BOARD FETCHES ON MOUNT.** `MergeWhenReadyControl` fetches merge-options
+  EAGERLY (`useMergeOptions(prId, true)`, ~3 GitHub calls per PR); fifty cards mounting it is 150
+  GitHub calls to paint a board. The board passes the eager-fetch opt-out and gates its buttons on
+  the CARD's own synced `mergeStateStatus` / `mergeable` / `viewerCanPush` through `mergeVerdict()`.
+  The live fetch is CLICK-GATED, the way `MergeControl` already does it.
+- The arm/cancel logic stays in ONE component. `MergeWhenReadyControl` is documented as the one
+  path that arms; the board passes a prop rather than forking it.
+- The armed state is FREE to read — `usePrArmedIntent(prId)` selects over the already-polled
+  account-wide list. Never add a per-card fetch for it.
+- ⚠ `viewerCanPush` is a VISIBILITY gate only. The merge route re-checks permission, the head oid
+  and the live merge state before anything irreversible. **HIDE, never disable** — what ChecksTab
+  does — so a reader without write access sees a clean card rather than a wall of dead buttons.
+- `mergeVerdict().canMerge` is true in exactly three cases (`armed`, `unstable`, `clean`/
+  `has_hooks`). ⚠ `behind` is FALSE (GitHub 405s), so a `update_branch` card's control is **Update
+  branch**, never Merge.
+- ⚠ The buttons must not filter, reorder or drop a card: `head ∪ tail === cards` is what keeps
+  every cap disclosure arithmetically true (`apps/frontend/test/pendingPartition.test.ts`).
+- `CardShell`'s `onActivate` skips `a`/`button`/`textarea`/`input`/`[data-noactivate]`, so the
+  controls do not also open the PR.
+
+### The per-repo landing queue on screen
+
+A waiting intent reads **"Waiting its turn — N of M on this repo"**, from the trailing-optional
+`queuePosition`/`queueDepth`. `armedPhaseHeadline` is THE ONE spelling, shared by the
+`AutoMergeBanner` stack and the board's merge row — two surfaces describing one intent must not
+phrase it two ways.
+
+- ⚠ **`queued_local` suppresses the `lastReason` line.** For every other phase the reason carries
+  the specifics (which branch, which error) beneath the headline; for this one the watcher writes
+  "waiting its turn — 3rd of 3 armed on acme/mine", which is the same fact the headline already
+  derived, in a second spelling. Both lines are correct and the pair reads as two statuses. The
+  prose stays ON THE WIRE — it is the fallback for a client that does not know the phase — and is
+  simply not drawn beneath its own restatement.
+
 ## The AI-surface palette (`ai-*` tokens) — and the purple that STAYS
 
 The AI panels moved off violet/purple onto the landing's ink · vermilion · paper vocabulary.

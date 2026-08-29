@@ -16,10 +16,12 @@ import type {
   UpdateBranchCard,
   User,
 } from '@pierre-review/shared';
+import type { MergeVerdictInfo } from '@pierre-review/shared';
 import { usePr, useThread } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useRequestReviewers } from '../../hooks/usePrWrites.js';
 import { useDismissMyTurn } from '../../hooks/useAttentionCards.js';
+import { usePrArmedIntent } from '../../hooks/useAutoMerge.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
 import {
@@ -27,6 +29,8 @@ import {
   CI_META,
   dateTime,
   indexUsers,
+  MERGE_TONE_CLASS,
+  mergeVerdict,
   relativeTime,
   safeExternalUrl,
 } from '../../lib/ui.js';
@@ -36,6 +40,9 @@ import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
 import { AiSummary } from '../AiSummary.js';
 import { ThreadCard } from '../ThreadView/index.js';
+import { armedPhaseHeadline } from '../AutoMergeBanner.js';
+import { MergeControl } from '../MergeControl.js';
+import { MergeWhenReadyControl } from '../MergeWhenReadyControl.js';
 
 // The attention-card list — the stalled-review / untouched-thread / reviewer-load / needs-a-reviewer
 // cards, with the full drill-down behaviour (click a card to open the PR / thread, inline thread
@@ -149,7 +156,15 @@ function ageLabel(hours: number): string {
   return `${Math.round(hours / 24)}d`;
 }
 
-function metaFor(
+/**
+ * The tab meta for a PR named by an Activity card. EXPORTED so a second card surface (the
+ * Bottlenecks panel's evidence PRs) opens a PR the SAME way rather than hand-building a
+ * `PinnedPr` beside it: the author chrome comes from the response's own `users` table when the
+ * ref carries an `authorId`, and stays null when it does not — PrDetail backfills it on load via
+ * `syncMeta`. A hand-built literal is how one surface ends up opening a tab with a different
+ * title or a missing avatar from the identical click on another.
+ */
+export function metaFor(
   card: { prId: number; prNumber: number; prTitle: string; repoFullName: string; authorId?: number | null },
   usersById: Map<number, User>,
 ): PinnedPr {
@@ -181,26 +196,84 @@ function UserChip({
   );
 }
 
-// A small vendor pill for an automated reviewer — the same 🤖 chip grammar the bot-signal
-// card + provenance badges use (color from automatedReviewerMeta). Rendered on an untouched
-// thread whose original commenter is a classified review bot.
-function BotVendorPill({ kind }: { kind: AutomatedReviewerKind }): JSX.Element {
-  const meta = automatedReviewerMeta(kind);
+// A small vendor pill for an automated actor — the same chip grammar the bot-signal card +
+// provenance badges use (colour from automatedReviewerMeta). Rendered on an untouched thread
+// whose original commenter is a classified review bot, and on any card whose PR AUTHOR is
+// automation.
+//
+// ⚠ `kind: null` IS A FIRST-CLASS CASE, not a "shouldn't happen": an unbranded CI service account
+// is a bot we recognise (via `users.isBot` or a workspace judgement) whose VENDOR we do not, and
+// it is common. It renders the generic pill — never nothing, which would read as "a person".
+function BotVendorPill({
+  kind,
+  title,
+}: {
+  kind: AutomatedReviewerKind | null;
+  title?: string;
+}): JSX.Element {
+  const meta = kind != null ? automatedReviewerMeta(kind) : null;
+  // ⚠ The TEXT comes from `botKindLabel`, never from `meta?.label ?? 'Bot'` spelled again here —
+  // `authorSourceLabel` (which decides whether this pill appears at all, and is what the test
+  // asserts on) reads the same function, so the two can never disagree about what the chip says.
+  // The unbranded pill borrows the neutral ink the rest of the meta row uses rather than
+  // inventing a colour — a colour is a brand claim, and this is precisely the case where we
+  // have no brand.
   return (
     <span
-      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium"
-      style={{ color: meta.color, background: `${meta.color}1a` }}
-      title="This thread was opened by an automated reviewer"
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium${
+        meta == null ? ' bg-gray-500/10 text-gray-600 dark:text-gray-300' : ''
+      }`}
+      style={meta != null ? { color: meta.color, background: `${meta.color}1a` } : undefined}
+      title={title ?? 'This thread was opened by an automated reviewer'}
     >
       <BotIcon size={12} />
-      {meta.label}
+      {botKindLabel(kind)}
     </span>
   );
 }
 
-// At-a-glance CI dot + files-changed count + a green/red LOC delta — mirrors the
-// PR-detail size label (ChangesTab / PrDetail).
-export function PrMetaRow({ pr }: { pr: InsightPrRef }): JSX.Element {
+/** The BRAND NAME for an automated actor, or the generic "Bot" when no vendor is recognised.
+ *  ONE spelling, read by the pill that draws it AND by `authorSourceLabel` below. */
+function botKindLabel(kind: AutomatedReviewerKind | null): string {
+  return kind != null ? automatedReviewerMeta(kind).label : 'Bot';
+}
+
+/** The two PR-source facts a meta row renders its chip from — its OWN type rather than the whole
+ *  `InsightPrRef`, so a surface with no workspace bot judgement (the search card, which adapts a
+ *  loaded PR detail) can omit them instead of being forced to invent `authorIsBot: false`. */
+export type PrSourceRef = Pick<InsightPrRef, 'authorIsBot' | 'authorBotKind'>;
+
+/**
+ * THE CHIP A CARD'S AUTHOR EARNS: a vendor name, the generic "Bot", or null for no chip at all.
+ *
+ * ⚠ THE CHIP ONLY EVER MAKES A POSITIVE CLAIM. "A person" is said by the card's author name and
+ * avatar, never by a chip — one on every row of a fifty-card board is noise, and it is also the
+ * claim we are least entitled to make. So `authorIsBot !== true` returns null, which covers BOTH
+ * "the server said person" and "this surface never said" (the search card). Neither may paint a
+ * bot chip, and neither needs to paint a "human" one.
+ *
+ * ⚠ AND A KIND WITHOUT THE FLAG IS STILL NULL. The server gates the kind on the flag already;
+ * repeating the gate here means a wire regression costs a missing brand, never a vendor chip over
+ * a colleague's name.
+ */
+export function authorSourceLabel(pr: Partial<PrSourceRef>): string | null {
+  if (pr.authorIsBot !== true) return null;
+  return botKindLabel(pr.authorBotKind ?? null);
+}
+
+/** The fields `PrMetaRow` reads. The source pair is OPTIONAL here and REQUIRED on the wire
+ *  (`InsightPrRef`), so every board card is compiler-forced to carry it while a non-board caller
+ *  can honestly say nothing. See `authorSourceLabel` for what absence renders. */
+export type PrMetaFields = Pick<
+  InsightPrRef,
+  'ciStatus' | 'changedFiles' | 'additions' | 'deletions'
+> &
+  Partial<PrSourceRef>;
+
+// At-a-glance CI dot + files-changed count + a green/red LOC delta + WHO OPENED IT when that was
+// automation — mirrors the PR-detail size label (ChangesTab / PrDetail). One row, one place, so a
+// new card kind that renders it gets the source chip without remembering to.
+export function PrMetaRow({ pr }: { pr: PrMetaFields }): JSX.Element {
   const ci = pr.ciStatus ? CI_META[pr.ciStatus] : null;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
@@ -219,6 +292,20 @@ export function PrMetaRow({ pr }: { pr: InsightPrRef }): JSX.Element {
         <span className="text-green-600 dark:text-green-400">+{pr.additions}</span>{' '}
         <span className="text-red-500 dark:text-red-400">−{pr.deletions}</span>
       </span>
+      {/* A Dependabot bump and a colleague's refactor are the same shape of row and want
+          completely different attention, so the SOURCE has to be legible without opening the PR.
+          ⚠ Gated on `authorSourceLabel`, the ONE decision — not a second `authorIsBot === true`
+          spelled here, which is how a rule and its test drift apart. */}
+      {authorSourceLabel(pr) != null && (
+        <BotVendorPill
+          kind={pr.authorBotKind ?? null}
+          title={
+            pr.authorBotKind != null
+              ? 'This pull request was opened by an automated author'
+              : 'This pull request was opened by automation whose vendor we don’t recognise'
+          }
+        />
+      )}
     </div>
   );
 }
@@ -421,6 +508,122 @@ function MyTurnActions({ card }: { card: MyTurnCard }): JSX.Element | null {
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <MyTurnDoneButton kind={card.reason} refId={card.dismissRefId} cardId={card.id} />
+    </div>
+  );
+}
+
+/** What the board's merge row offers for one FORWARD card, decided WITHOUT a network call. */
+export interface PendingMergeGate {
+  /** Does the row render at all? False HIDES it — never disables it (the ChecksTab rule: an
+   *  affordance you may not use is noise, not information). */
+  show: boolean;
+  /** The primary control's verb, or null when the card's own fields say nothing can be offered
+   *  (conflicts, or a state GitHub hasn't computed yet). Arming may still be worth a look. */
+  action: 'merge' | 'update_branch' | null;
+  /** The ONE verdict, run over the card's synced fields — the copy behind an absent button. */
+  verdict: MergeVerdictInfo;
+}
+
+/**
+ * THE BOARD'S MERGE GATE — pure, and deliberately fed only the card's OWN synced fields.
+ *
+ * ⚠ IT MAY NEVER BECOME A FETCH. `MergeWhenReadyControl` asks GitHub for live merge-options
+ * (~3 calls per PR) because PrDetail shows ONE pull request; this board shows up to fifty, and
+ * fifty rows resolving their buttons on mount is ~150 GitHub calls to PAINT A SCREEN. So the
+ * board decides what to OFFER from `mergeStateStatus` / `mergeable` / `viewerCanPush`, which
+ * every card already carries, and only a CLICK buys the live answer.
+ *
+ * ⚠ AND IT GOES THROUGH `mergeVerdict`, not a second reading of the same enum. `unstable` IS
+ * mergeable (only non-required checks are red) and `behind` is NOT (GitHub 405s the merge) —
+ * two rules that are counter-intuitive in opposite directions, which is exactly why exactly one
+ * resolver in this codebase is allowed to know them.
+ *
+ * `autoMergeArmed` is deliberately NOT passed, for MergeControl's reason: an 'armed' verdict
+ * reports `canMerge: true`, which would enable a Merge button on a still-blocked PR. An armed
+ * intent gets its own row instead. `behindBy` and `isDraft` are absent from the card by
+ * construction (the server's fold is non-draft only), and `mergeVerdict` degrades honestly
+ * without them — "update the branch first" simply loses its commit count.
+ */
+export function pendingMergeGate(card: MergeReadyCard | UpdateBranchCard): PendingMergeGate {
+  const verdict = mergeVerdict({
+    // ⚠ null is NOT OBSERVED, never "not conflicting" — the three-state rule. 'unknown' is what
+    // `mergeVerdict` calls that, and it is the honest input.
+    mergeable: card.mergeable ?? 'unknown',
+    mergeStateStatus: card.mergeStateStatus,
+  });
+  // HIDDEN, not disabled. `viewerCanPush` is the synced `repos.viewerPermission` and a VISIBILITY
+  // gate only; every route re-checks permission, the head oid and the live merge state before
+  // anything irreversible happens.
+  if (!card.viewerCanPush) return { show: false, action: null, verdict };
+  const action =
+    card.kind === 'update_branch'
+      ? // The whole point of this card is that GitHub is REFUSING the merge until the branch is
+        // updated, so the verb is "Update branch", never "Merge". A behind PR that ALSO conflicts
+        // resolves to the 'conflicts' verdict and gets no button — updating it cannot help.
+        verdict.verdict === 'behind'
+        ? 'update_branch'
+        : null
+      : verdict.canMerge
+        ? 'merge'
+        : null;
+  return { show: true, action, verdict };
+}
+
+/**
+ * MERGE ACTIONS ON A PENDING CARD — the two FORWARD kinds only, because those are exactly the
+ * rows where the thing to do is "land it". A `my_turn` "review this" card gets no Merge button;
+ * reviewing is not merging.
+ *
+ * ⚠ NOTHING HERE FETCHES ON MOUNT.
+ *   • `usePrArmedIntent` is a SELECTOR over the account-wide armed list the app already polls —
+ *     one query for the whole board, not one per card.
+ *   • `MergeControl` is collapsed and its `useMergeOptions(prId, open)` is disabled until the
+ *     reader opens it.
+ *   • `MergeWhenReadyControl` is mounted with `eager={false}`, which is what that prop exists
+ *     for: the armed chip + Cancel stay free, and the GitHub call waits for a click. (Its query
+ *     key is shared with MergeControl's, so opening either warms the other for nothing.)
+ *
+ * Arming and cancelling stay in `MergeWhenReadyControl` — the ONE path that arms — rather than
+ * being re-spelled compactly here.
+ */
+function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard }): JSX.Element | null {
+  const gate = pendingMergeGate(card);
+  const armed = usePrArmedIntent(card.prId);
+  if (!gate.show) return null;
+  return (
+    // ⚠ `data-noactivate` ON THE WHOLE ROW. `CardShell.onActivate` opens the PR unless the click
+    // landed inside a/button/textarea/input/[data-noactivate] — a `<select>` (the merge-method
+    // picker) is in none of those, so without this, choosing "Squash and merge" would navigate
+    // away mid-choice.
+    <div className="mt-2 flex flex-wrap items-center gap-2" data-noactivate>
+      {armed != null ? (
+        // ONE SPELLING of where a live intent stands, shared with the AutoMergeBanner stack. The
+        // repo is not named because `PrLine` above already prints `owner/name #number`.
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+          {armedPhaseHeadline(armed)}
+        </span>
+      ) : gate.action == null ? (
+        // No button, but never a silent row: the verdict IS the answer to "why can't I merge
+        // this?", and it is the same sentence PrDetail leads its merge panel with.
+        <span className={`text-[11px] font-medium ${MERGE_TONE_CLASS[gate.verdict.tone]}`}>
+          {gate.verdict.label}
+          {gate.verdict.detail != null && (
+            <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">
+              — {gate.verdict.detail}
+            </span>
+          )}
+        </span>
+      ) : null}
+      {/* Collapsed = zero requests. Expanding buys the live merge state ONCE and unlocks the real
+          method picker, so the board can never promise a merge method the repo forbids. */}
+      {armed == null && gate.action != null && (
+        <MergeControl
+          prId={card.prId}
+          githubUrl={card.githubUrl}
+          label={gate.action === 'update_branch' ? 'Update branch' : 'Merge'}
+        />
+      )}
+      <MergeWhenReadyControl prId={card.prId} eager={false} />
     </div>
   );
 }
@@ -948,6 +1151,10 @@ export function AttentionCards({
                   the ranked row's `reason`. */}
               <span className="min-w-0">{card.detail}</span>
             </div>
+            {/* ⚠ ONLY THE TWO FORWARD KINDS GET THESE. They are the rows where the work IS the
+                landing; a "review or reply" card is not one click from merged and must not
+                pretend to be. Nothing here fetches on mount — see `PendingMergeActions`. */}
+            <PendingMergeActions card={card} />
           </CardShell>
         );
       }

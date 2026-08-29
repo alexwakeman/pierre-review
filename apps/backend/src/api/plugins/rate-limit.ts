@@ -360,6 +360,17 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // moved into it, so the tier moves with it. The board mounts on navigation and refetches on a
   // 5-minute cadence, so request COUNT is genuinely bounded and 60/min is comfortable.
   if (!mutating && path === '/api/attention') return [TIERS.search, TIERS.read];
+  // GET /api/flow-findings — the Bottlenecks tab (CORE/free, deterministic, no model and no
+  // GitHub). DECIDED, not inherited: "this route is DB-only" is the sentence this file exists to
+  // distrust, and one call here runs the lane resolver, the shared first-human-review fold (two
+  // capped candidate walks), a thread-path scan, an in-window review scan, a merged-PR walk plus
+  // its approving reviews, an open-PR snapshot with the approvals fold, and the round-trip
+  // comment join. That is strictly the daily-brief / attention shape of cost — this event loop
+  // and this database — so it takes the same 60/min `search` bucket rather than the 600/min
+  // blanket. The tab mounts on navigation and refetches on the sync cadence, so request COUNT is
+  // genuinely bounded; the engine's own scan caps bound the work per request. Complementary,
+  // neither a substitute.
+  if (!mutating && path === '/api/flow-findings') return [TIERS.search, TIERS.read];
   // ---- Emoji reactions: BOTH routes reach GitHub, and NEITHER lives under /api/prs/<id>/ ----
   //
   // Spelled as two EXACT string matches, above the mutating block, for the reason this file has

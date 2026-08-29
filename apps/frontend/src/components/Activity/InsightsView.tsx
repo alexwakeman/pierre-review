@@ -3,6 +3,8 @@ import { useWorkspaceMetrics } from '../../hooks/useWorkspaceInsights.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { ChevronIcon } from '../Icons.js';
+import { BottlenecksPanel } from './BottlenecksPanel.js';
+import { effectiveInsightsTab } from './bottlenecksModel.js';
 import { PeriodReportsPanel } from './PeriodReportsPanel.js';
 import { TrackUsage } from './TrackUsage.js';
 import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
@@ -33,10 +35,26 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 // The ad-hoc chat that WAS the Overview tab lives INSIDE PeriodReportsPanel as the collapsed
 // "Ask about this period" section under the report, grounded in the viewed period's own
 // [fromMs, toMs) rather than a trailing window.
+//
+// ── THE PANE IS TWO TABS ─────────────────────────────────────────────────────────────────────
+//   • Overview    — exactly the body described above, unchanged.
+//   • Bottlenecks — where HUMAN review time goes (BottlenecksPanel). CORE, FREE ON EVERY TIER,
+//     deterministic, and the twin of the Bots rail: that surface measures automation, this one
+//     measures people's time. It renders in OSS mode with no plugin present.
+//
+// ⚠ THE VISIBLE TAB IS DERIVED, NEVER WRITTEN BACK (`effectiveInsightsTab`) — the rule
+// `botsInnerTab` / `feedInnerTab` are commented against. A corrective `setInsightsInnerTab()`
+// would permanently forget the reader's choice the moment a value it could not render arrived
+// (a hand-edited `?insightsTab=`, or a history entry naming a member a later build gates).
+// Neither member is gated TODAY, which is exactly why the temptation to "just normalise it in
+// the store" is easy to give in to and still wrong.
 export function InsightsView(): JSX.Element {
   const [showUsage, setShowUsage] = useState(false);
   const { activityDigest, periodReports } = useProCapabilities();
   const workspaceId = useFilters((s) => s.workspaceId);
+  const innerTab = useFilters((s) => s.insightsInnerTab);
+  const setInnerTab = useFilters((s) => s.setInsightsInnerTab);
+  const effectiveTab = effectiveInsightsTab(innerTab);
   // `workspaceId === null` means "not resolved yet" — the hook holds itself idle until then, so
   // this reads `undefined` rather than another workspace's numbers.
   const metrics = useWorkspaceMetrics(workspaceId);
@@ -71,7 +89,39 @@ export function InsightsView(): JSX.Element {
 
       {showUsage && activityDigest && <TrackUsage />}
 
-      {nothingToShow ? (
+      {/* The pane's sub-tab strip. Both members are FREE on every tier, so neither carries a
+          badge and neither is conditionally listed — the list is a constant, and `effectiveTab`
+          (derived, never written back) decides which body renders. */}
+      <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
+        {(
+          [
+            { key: 'overview', label: 'Overview' },
+            { key: 'bottlenecks', label: 'Bottlenecks' },
+          ] as const
+        ).map((t) => {
+          const on = effectiveTab === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              onClick={() => setInnerTab(t.key)}
+              className={`-mb-px flex items-center gap-1 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
+                on
+                  ? 'border-gray-300 bg-white text-sky-600 dark:border-gray-700 dark:bg-gray-950 dark:text-sky-300'
+                  : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
+              }`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {effectiveTab === 'bottlenecks' ? (
+        <BottlenecksPanel />
+      ) : nothingToShow ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
           Nothing to measure in this Workspace yet.
           <div className="mt-1 text-[11px]">

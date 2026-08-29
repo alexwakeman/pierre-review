@@ -1165,7 +1165,7 @@ way, so a boundary-ms row lands in exactly one period. The same `toBound` rule g
 `BotWindowKind | {kind, fromMs, toMs}` form.
 
 **The grounded-figure check (`insights/grounded-figures.ts`) and the timestamp bypass it
-closed.** D4 at the report grain: every numeral token in the Sonnet period-report narrative must
+closed.** D4 at the report grain: every numeral token in the period-report narrative must
 match a figure in the **NARRATION PAYLOAD** — the projection the model was actually shown — or
 the narrative is rejected at generation time and the templated summary is stored instead. ⚠ The
 grounding base was originally the raw `PeriodReport`, which made the check BYPASSABLE two ways:
@@ -1252,14 +1252,23 @@ forward is the transcript, not stale data), and the answer may end in a `FOLLOWU
   kept. A client cap is a convenience, not the enforcement.
 - **The answering model is the account's resolved REPORT model**, not the hardcoded Haiku
   `DIGEST_MODEL`: `pro_settings.report_model` → `readReportModel` → `DEFAULT_REPORT_MODEL`
-  (`PRO_REPORT_MODEL`, default `claude-sonnet-5`), through `makeReportClient`. There is
+  (`PRO_REPORT_MODEL`, default `claude-haiku-4-5`), through `makeReportClient`. There is
   deliberately no per-request override — a follow-up is fresh work billed at the model the
   account chose. The ledger row, the response's `model` and the stored history row all carry the
   RESOLVED id, so `costUsd` (priced from that model's `REPORT_MODEL_PRICING` row) and the ledger
   agree by construction. `CHAT_MAX_TOKENS_BY_MODEL` is a `Record<ReportModel, number>` (Haiku
-  900 / Sonnet 3000) so a model added to the pricing allowlist is a compile error until it gets a
+  900 / Sonnet 3000) so a model added to the PRICING table is a compile error until it gets a
   row — the 750 sized for Haiku prose truncates a reasoning model mid-answer, because the model
-  draws its thinking from the same allowance. **The optional CHART pass stays on the injected
+  draws its thinking from the same allowance.
+  - ⚠ **`REPORT_MODELS` and `REPORT_MODEL_PRICING` are TWO TABLES answering different questions,
+    and re-welding them is a silent defect.** Pricing spans every model that has ever narrated a
+    stored row — how HISTORY stays priceable and labellable; `REPORT_MODELS` is what a REQUEST may
+    select today, and it is **Haiku-only**: Sonnet was retired as a choice (P4.1's "a forwarded
+    retro is worth the prose tier" argument no longer held once the two were read side by side)
+    while keeping its pricing row. `resolveReportModel`/`isReportModel` gate on **REPORT_MODELS**,
+    so a stored `report_model` of `claude-sonnet-5` degrades to the default **without throwing** —
+    that path runs on FREE GETs. `packages/pro/test/report-model-allowlist.test.ts` pins the split.
+    The SPA hides the picker below two options, so the singleton removes the control by itself. **The optional CHART pass stays on the injected
   Haiku `llm`.**
 - ⚠ **The chart pass gets the grounding MINUS `conversation`.** `CHART_SYSTEM`'s provenance rule
   ("use ONLY numbers present in the DATA json") makes everything in DATA a legal chart value, so

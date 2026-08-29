@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { InsightPrRef, SearchHit, SearchHitKind, User } from '@pierre-review/shared';
+import type { SearchHit, SearchHitKind, User } from '@pierre-review/shared';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue.js';
 import { useSearchResults } from '../../hooks/useSearch.js';
 import { usePr, useThread } from '../../hooks/usePr.js';
@@ -8,7 +8,7 @@ import { useFilters } from '../../store/filters.js';
 import { indexUsers, PR_STATE_META } from '../../lib/ui.js';
 import { MagnifierIcon } from '../Icons.js';
 import { ThreadCard } from '../ThreadView/index.js';
-import { PrMetaRow, InsightPrSummary } from '../Activity/AttentionCards.js';
+import { PrMetaRow, InsightPrSummary, type PrMetaFields } from '../Activity/AttentionCards.js';
 import { KIND_ICON, KIND_LABEL, openHitPr, openSearchHit } from './searchNav.js';
 import { highlightTerms } from './highlight.js';
 
@@ -278,23 +278,22 @@ function ThreadHitCard({
 function PrHitCard({ hit, query }: { hit: SearchHit; query: string }): JSX.Element {
   const { data: pr } = usePr(hit.prId);
   const stateMeta = PR_STATE_META[hit.prState];
-  // PrMetaRow reads an InsightPrRef; adapt the loaded PR detail (which carries the CI/LOC fields
+  // PrMetaRow reads `PrMetaFields`; adapt the loaded PR detail (which carries the CI/LOC fields
   // under slightly different names — changedFilesCount, and a non-null ciStatus). Rendered only
   // once the detail loads, so PrMetaRow is skipped while fetching rather than fed a mismatch.
-  const metaRef: InsightPrRef | null = pr
+  //
+  // ⚠ IT IS `PrMetaFields`, NOT `InsightPrRef`, PRECISELY SO THE SOURCE PAIR CAN BE OMITTED. A
+  // search hit is not workspace-scoped, so nothing on this path holds the workspace bot
+  // judgement `authorIsBot`/`authorBotKind` are resolved from, and re-deriving them off the
+  // author's login here would be a second, differently-behaving classifier — the exact drift the
+  // "stored role/kind beats the login seed" rule exists to prevent. Absent ⇒ NO chip, which
+  // claims nothing; a hard-coded `authorIsBot: false` would claim "a person".
+  const metaRef: PrMetaFields | null = pr
     ? {
-        prId: hit.prId,
-        repoId: hit.repoId,
-        repoFullName: hit.repoFullName,
-        prNumber: hit.prNumber,
-        prTitle: hit.prTitle,
-        authorId: hit.authorId,
-        githubUrl: pr.githubUrl,
         ciStatus: pr.ciStatus,
         changedFiles: pr.changedFilesCount,
         additions: pr.additions,
         deletions: pr.deletions,
-        openedAt: pr.openedAt,
       }
     : null;
   const activate = (): void => openSearchHit(hit);

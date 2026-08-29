@@ -2076,6 +2076,145 @@ export interface AdvisorBriefResponse {
   dedupeKeys: string[];
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// Bottlenecks — the Bot Tuning Advisor's shape, pointed at the HUMAN lane
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+//
+// The Bots rail answers "is this bot worth its seat". This answers the twin question nothing in
+// the product asked before: WHERE DOES HUMAN REVIEW TIME GO, and what keeps costing it. Same
+// architecture as the advisor — CORE emits evidence cells over stored data, every sentence is
+// TEMPLATED, and a cell that cannot clear its sample floor is REFUSED BY NAME rather than drawn
+// as a zero. No model is involved anywhere in this feature.
+//
+// ⚠ THE SUBJECT OF A FINDING IS THE FLOW, NEVER A PERSON. A directory, a repo, a size band, a
+// thread shape — something you can change. People appear ONLY as `actorIds` inside a finding, as
+// evidence for a claim about the flow, and the UI must keep it that way. "guide the work, never
+// rank the people" is the whole licence this feature operates under: the moment a row's subject
+// becomes an engineer it is a performance dashboard, which is a different product with different
+// buyers and a much worse reason to exist. The same rule already keeps the work plan from calling
+// a red trunk a pull request.
+//
+// ⚠ EVERY FIGURE IS CODE-DERIVED. There is no narration seam here on purpose — see
+// `FlowFinding.headline`.
+
+/**
+ *  - `single_reviewer_path` — one person is the de-facto owner of a directory, and review there
+ *    waits longer than everywhere else. The bus-factor finding. Subject: a path bucket.
+ *  - `approval_parked`      — work that PASSED review then sat. Subject: a repo.
+ *    ⚠ Must exclude PRs whose merge was blocked by CHECKS — that is a CI finding wearing a
+ *      review-flow costume, and it lands on exactly the PRs an EM would most want to trust.
+ *  - `size_latency`         — big PRs wait disproportionately longer to get a first human read.
+ *    Subject: a size band. Authors are evidence, never the row.
+ *  - `round_trips`          — threads in one area take N passes to settle: a convention nobody
+ *    wrote down, or a design still being argued. Subject: a path bucket.
+ */
+export type FlowFindingKind =
+  | 'single_reviewer_path'
+  | 'approval_parked'
+  | 'size_latency'
+  | 'round_trips';
+
+/** What kind of thing the row is ABOUT. There is deliberately no `'person'` member. */
+export type FlowFindingSubjectKind = 'path' | 'repo' | 'size_band';
+
+/** The unit `value` and `baseline` are both expressed in, so one renderer formats every row and
+ *  a comparison can never be drawn between two different units. */
+export type FlowFindingUnit = 'hours' | 'days' | 'pct' | 'count' | 'comments';
+
+export interface FlowFindingPrRef {
+  prId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  githubUrl: string;
+}
+
+export interface FlowFinding {
+  /** Stable across recomputes of the same window: `<kind>:<repoId|'ws'>:<subject>`. The UI keys
+   *  rows on it and a future "dismiss this finding" writes against it. */
+  id: string;
+  kind: FlowFindingKind;
+  subjectKind: FlowFindingSubjectKind;
+  /** The thing being described, rendered verbatim: 'packages/api/**', 'acme/api', '800+ lines'. */
+  subject: string;
+  /** null for a workspace-wide finding (only `size_latency` produces one today). */
+  repoId: number | null;
+  /** ⚠ TEMPLATED, code-written, no model. Sentences are assembled from the measured cell in
+   *  `db/flow-findings.ts` — the same discipline `llm-isolation.test.ts` pins for the bot
+   *  advisor. A generated headline here would launder an unverified figure into a screen an EM
+   *  makes staffing decisions from. */
+  headline: string;
+  /** One templated sentence naming what to do about it. Never an instruction about a person. */
+  detail: string;
+  /** The measured figure, and what it is measured AGAINST — always the same unit, and both
+   *  rendered, because a magnitude with no comparison is not a finding. */
+  value: number;
+  baseline: number;
+  unit: FlowFindingUnit;
+  /** ⚠ How many observations `value` rests on. Rendered on every row: it is the reader's only
+   *  defence against a confident number computed from four threads. */
+  sampleSize: number;
+  /** Openable PRs behind the claim, capped. The row is not believable without them. */
+  evidence: FlowFindingPrRef[];
+  /** People implicated by the finding — resolved through `users` on the response.
+   *  ⚠ EVIDENCE INSIDE THE ROW, never the row's subject. See the header. */
+  actorIds: number[];
+}
+
+/** A finding kind that could NOT be computed, and why. Rendered — never silently dropped: an
+ *  absent section reads as "we checked and there's nothing here", which is a different and much
+ *  stronger claim than "not enough data to say". (Same rule as the severity Inflation index,
+ *  which NAMES the bot it had to omit rather than drawing it as a zero.) */
+export interface FlowFindingRefusal {
+  kind: FlowFindingKind;
+  reason: string;
+  /**
+   * ⚠ WHICH SILENCE THIS IS. The two are opposite claims and must never render as one sentence:
+   *
+   *   'insufficient_data' — nothing cleared the sample floor. We could not measure. An apology.
+   *   'measured_clean'    — the floors WERE cleared and nothing crossed the emission bar. We did
+   *                         measure, and the flow is fine. A clean bill of health, and the more
+   *                         useful of the two.
+   *
+   * Rendering a 'measured_clean' row under "Not enough data to say" tells an EM to go hunting for
+   * a sync problem that does not exist — which is exactly what happened when this field was
+   * missing and the panel had no way to tell the cases apart.
+   */
+  basis: 'insufficient_data' | 'measured_clean';
+}
+
+/** ⚠ Retroactive history is COVERAGE-BIASED — a workspace that onboarded repos over the window
+ *  will show trends that are entirely onboarding. Every response carries its own coverage so the
+ *  panel can say so on screen instead of the reader having to know. */
+export interface FlowCoverage {
+  reposInWorkspace: number;
+  reposWithData: number;
+  prsScanned: number;
+  /** ⚠ A ROW-SCAN HIT ITS CAP, so the figures cover only a PREFIX OF THE WINDOW. A claim about
+   *  the window itself, and the more serious of the two — every median on screen is computed
+   *  from part of the period the header names. */
+  truncated: boolean;
+  /** ⚠ A DIFFERENT AND MUCH SMALLER FACT: how many scanned pull requests had more files than the
+   *  sync stores (`files(first: 100)`), so their PATH ATTRIBUTION is partial. The window was
+   *  scanned in full; only the per-directory split under-counts those PRs.
+   *
+   *  These two were ONE FLAG and it shipped wrong: a single 120-file pull request made a
+   *  262-PR workspace announce "a scan reached its cap, so these figures come from part of the
+   *  window only", which is a claim about the period that had not happened. A caveat the reader
+   *  cannot act on is worse than none — it teaches them to ignore the line that matters. */
+  filesTruncatedPrs: number;
+}
+
+export interface FlowFindingsResponse {
+  workspaceId: number;
+  windowDays: number;
+  findings: FlowFinding[];
+  refusals: FlowFindingRefusal[];
+  coverage: FlowCoverage;
+  /** Resolution table for `actorIds`, exactly as AttentionCardsResponse carries one. */
+  users: User[];
+}
+
 export interface AdvisorConfigPrBody {
   repoId: number; // must be in the resolved workspace's membership
   botUserId: number;
@@ -2916,9 +3055,16 @@ export type ArmedMergeState =
 //   awaiting_review     — required reviews aren't in (or changes were requested)
 //   blocked_protection  — branch protection unmet for a reason that isn't checks
 //   enqueuing           — adding the PR to the merge queue right now
-//   queued              — sitting in the merge queue
+//   queued              — sitting in GitHub's merge queue
+//   queued_local        — armed, but another intent on the SAME REPO holds the slot (see below)
 //   merging             — the merge call is in flight
 //   retrying            — a GitHub error, being retried (a persistent one ends in 'failed')
+//
+// ⚠ `queued` AND `queued_local` ARE DIFFERENT QUEUES and the copy must not merge them. `queued`
+// means GitHub has the PR in a merge queue and is testing it; `queued_local` means Limn is
+// holding it back so the intents on that repo land ONE AT A TIME. A repo with a real GitHub merge
+// queue never sees `queued_local` — GitHub already serialises, and adding a second queue in front
+// of it would halve throughput for nothing.
 export type ArmedMergePhase =
   | 'pending_first_check'
   | 'waiting_conflicts'
@@ -2930,6 +3076,7 @@ export type ArmedMergePhase =
   | 'blocked_protection'
   | 'enqueuing'
   | 'queued'
+  | 'queued_local'
   | 'merging'
   | 'retrying';
 
@@ -2967,6 +3114,24 @@ export interface ArmedMergeRequest {
   // client falls back to `lastReason` in both cases.
   phase: ArmedMergePhase | null;
   expiresAt: string; // ISO-8601 — the hard stop, so an intent can't linger for weeks
+  // ── The per-repo landing order ─────────────────────────────────────────────────────────────
+  //
+  // Arm five bumps on one repo and they cannot all land: each merge moves the trunk, so on a repo
+  // that requires an up-to-date branch the other four go `behind` the moment the first lands. The
+  // watcher therefore gives ONE intent per repo the slot and holds the rest at `queued_local`,
+  // freshening each only when its turn comes — N branch updates and N CI runs, not N².
+  //
+  // Both fields are TRAILING OPTIONAL: they describe a live, direct-merge intent, so they are
+  // absent on every terminal row and on every `viaMergeQueue` intent (GitHub owns that order).
+  // A client that has never heard of them renders exactly what it did before.
+  /** 1-based place in this repo's armed queue. 1 = holds the slot and is being worked. */
+  queuePosition?: number;
+  /** How many armed intents this repo has, so a card can say "2nd of 5" without a second call. */
+  queueDepth?: number;
+  /** This intent's required checks have FAILED, so it stepped aside and let the next through — it
+   *  needs its author, not a turn. Still armed: if the checks go green it takes its place back.
+   *  ⚠ Not a terminal state and NOT a disarm; `state` is still 'armed'. */
+  yieldedForFailedChecks?: boolean;
 }
 
 // POST /api/prs/:id/auto-merge — arm. `updateStrategy` defaults to 'none' server-side.
@@ -5629,6 +5794,23 @@ export interface InsightPrRef {
   additions: number; // LOC added
   deletions: number; // LOC removed
   openedAt: string; // ISO-8601 PR open time — drives the deterministic LOC×age priority + the age column
+  // ── Who opened it: automation, or a person? ────────────────────────────────────────────────
+  //
+  // On the Pending board a Dependabot bump and a colleague's refactor are the same shape of row
+  // and want completely different attention, so the SOURCE has to be legible without opening the
+  // PR. Both fields are REQUIRED and built by the one `prRef` builder, because an optional
+  // `authorIsBot` that arrives undefined renders as "a person" — a claim about a human that we
+  // did not make. (Same rule as MyTurnCard.relevance: an absent field may never invent an
+  // identity on screen.)
+  //
+  // ⚠ RESOLUTION ORDER, and it is not the login: a MANUAL workspace judgement wins in BOTH
+  // directions (a login in AUTOMATION_VENDORS marked "human" is a person; a no-name service
+  // account marked automated is a bot), then `users.isBot`. Only then does the login seed a
+  // VENDOR. This is the stored-beats-seed rule that the reviewer table already lives by.
+  authorIsBot: boolean;
+  /** The vendor family when one is recognised. ⚠ `null` WITH `authorIsBot: true` is a real and
+   *  common state — an unbranded CI account — and renders as a generic "Bot", never as a person. */
+  authorBotKind: AutomatedReviewerKind | null;
 }
 
 // A CORE suggested reviewer (used by BOTH the PR-detail "Suggested reviewers" row and the
@@ -5867,6 +6049,15 @@ export interface MergeReadyCard extends InsightCardBase, InsightPrRef {
   relevance: MyTurnRelevance;
   /** CODE-WRITTEN, time-free. See the ⚠ above. */
   detail: string;
+  /** Does this account have write access to the repo? The board's merge controls are HIDDEN
+   *  without it, exactly as PrDetail's Actions row is.
+   *
+   *  ⚠ It rides the CARD because the board must not fetch to find out. PrDetail answers this from
+   *  the live `merge-options` call (3 GitHub calls per PR); fifty cards doing the same on mount
+   *  would be 150 calls to paint a board. This is the synced `repos.viewerPermission`, and it is
+   *  a VISIBILITY gate only — never the authority. The merge route re-checks permission, the head
+   *  oid and the live merge state before anything irreversible happens. */
+  viewerCanPush: boolean;
 }
 
 /** `mergeStateStatus === 'behind'` — GitHub is REFUSING the merge until the branch is updated.
@@ -5878,6 +6069,9 @@ export interface UpdateBranchCard extends InsightCardBase, InsightPrRef {
   lastCommitAt: string | null;
   relevance: MyTurnRelevance;
   detail: string;
+  /** See MergeReadyCard.viewerCanPush — same field, same reason, same "visibility gate, never the
+   *  authority" caveat. */
+  viewerCanPush: boolean;
 }
 
 export type InsightCard =

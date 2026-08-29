@@ -588,6 +588,8 @@ export const autoMergeRequests = pgTable(
         'blocked_protection',
         'enqueuing',
         'queued',
+        // Limn's own per-repo hold — NOT GitHub's merge queue. See ArmedMergePhase in shared.
+        'queued_local',
         'merging',
         'retrying',
       ],

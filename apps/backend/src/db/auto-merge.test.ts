@@ -29,6 +29,9 @@ vi.mock('../github/mutations.js', () => ({
   updatePullRequestBranch: vi.fn(),
   fetchMergeQueueState: vi.fn(),
   enqueuePullRequestOnQueue: vi.fn(),
+  // The head-of-line rule's LIVE check read. Reset to a bare vi.fn() it resolves undefined,
+  // which is the "we don't know" answer — and "don't know" never yields a slot.
+  fetchPrHeadCheckRollup: vi.fn(),
 }));
 vi.mock('../auth/account.js', () => ({
   getAccessToken: vi.fn(async () => 'gho_test'),
@@ -61,6 +64,13 @@ let prB = 0;
 // A third PR, on a repo the account has WRITE on and with a SYNCED base ref — the shape the
 // watcher needs (no write permission ⇒ it disarms; no synced base ⇒ it can't confirm consent).
 let prC = 0;
+// prD is a SECOND PR on the SAME repo as prC — the whole point of the landing-queue tests: two
+// armed intents that must land one at a time. prE is the same shape on a DIFFERENT repo, which
+// is what proves the queue is per-repo and not one global line. prF is a THIRD on repo C: a
+// fallback that must take a PLACE in the FIFO can only be caught with somebody still in it.
+let prD = 0;
+let prE = 0;
+let prF = 0;
 
 beforeAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
@@ -133,6 +143,47 @@ beforeAll(async () => {
     .returning()
     .execute();
   prC = pr.id;
+
+  // A workable PR: WRITE on the repo + a synced base ref, so the watcher's pre-flight passes.
+  const workablePr = async (
+    repoId: number,
+    tag: string,
+    number: number,
+  ): Promise<number> => {
+    const [row] = await db
+      .insert(pullRequests)
+      .values({
+        githubNodeId: `PR_${tag}`,
+        accountId: A,
+        repoId,
+        number,
+        title: `PR ${tag}`,
+        state: 'open',
+        isDraft: false,
+        baseRefName: 'main',
+        headRefName: `feat-${tag}`,
+        openedAt: new Date(now - 4 * HOUR),
+        updatedAt: new Date(now - HOUR),
+      })
+      .returning()
+      .execute();
+    return row.id;
+  };
+  prD = await workablePr(repoC.id, 'd', 8);
+  prF = await workablePr(repoC.id, 'f', 10);
+
+  const [repoE] = await db
+    .insert(repos)
+    .values({
+      accountId: A,
+      owner: 'orge',
+      name: 'repoe',
+      githubNodeId: 'R_e',
+      viewerPermission: 'WRITE',
+    })
+    .returning()
+    .execute();
+  prE = await workablePr(repoE.id, 'e', 9);
 });
 
 afterAll(async () => {
@@ -349,6 +400,7 @@ describe('the auto-merge watcher', () => {
       gh.updatePullRequestBranch,
       gh.fetchMergeQueueState,
       gh.enqueuePullRequestOnQueue,
+      gh.fetchPrHeadCheckRollup,
     ]) {
       fn.mockReset();
     }
@@ -617,6 +669,7 @@ describe('the auto-merge watcher on a merge-queue repo', () => {
       gh.updatePullRequestBranch,
       gh.fetchMergeQueueState,
       gh.enqueuePullRequestOnQueue,
+      gh.fetchPrHeadCheckRollup,
     ]) {
       fn.mockReset();
     }
@@ -738,6 +791,16 @@ describe('the auto-merge watcher on a merge-queue repo', () => {
     gh.fetchMergeQueueState.mockResolvedValue(queueState({ enabled: false }));
     gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed3' });
 
+    // ⚠ TWO ticks, and the first one is the fix for a double merge, not latency for its own
+    // sake: this intent is exempt from the per-repo landing FIFO *because the fold saw
+    // `viaMergeQueue: true`*, and a direct merger exempt from the direct FIFO lands a second PR
+    // on the repo in the same tick as its actual slot-holder (case (i) below). The first tick
+    // that observes the queue gone re-classifies the intent and takes it a number; the next
+    // fold gives it a real place and it merges from there.
+    await runner.runAutoMergeTick(log);
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+    expect((await rowFor(prC)).phase).toBe('queued_local');
+
     await runner.runAutoMergeTick(log);
 
     expect(gh.enqueuePullRequestOnQueue).not.toHaveBeenCalled();
@@ -786,5 +849,627 @@ describe('the auto-merge watcher on a merge-queue repo', () => {
     await runner.runAutoMergeTick(log);
     expect(gh.updatePullRequestBranch).toHaveBeenCalledTimes(1);
     expect((await rowFor(prC)).state).toBe('armed');
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// The PER-REPO LANDING QUEUE (rule 8). See db/merge-queue.ts for the bug it fixes: arming five
+// bumps on one repo used to freshen all five against a trunk the first merge then moved, after
+// which `freshenedIntents` (once per intent LIFETIME) refused to let any of them update again.
+// ---------------------------------------------------------------------------------------
+
+describe('the armed FIFO, as a pure fold', () => {
+  let mq: any;
+  const row = (
+    id: number,
+    accountId: number,
+    repoId: number,
+    armedAtMs: number,
+    viaMergeQueue = false,
+  ) => ({ id, accountId, repoId, prId: id * 100, armedAt: new Date(armedAtMs), viaMergeQueue });
+
+  // The runner's LIVE observations, which the fold cannot derive from the rows. Named fields
+  // rather than one set: a conflict yield and a failed-check yield need different copy, and a
+  // queue-disabled fallback is not a yield at all.
+  const marks = (over: Record<string, Set<number>> = {}) => ({
+    yieldedForFailedChecks: new Set<number>(),
+    yieldedForConflicts: new Set<number>(),
+    queueDisabled: new Set<number>(),
+    ...over,
+  });
+
+  beforeAll(async () => {
+    mq = await import('./merge-queue.js');
+  });
+
+  it('gives ONE intent per repo the slot and everyone else a place in line', () => {
+    // All five armed in the SAME second — which is what sqlite actually stores, so the id
+    // tiebreak is the only surviving record of click order. Shuffled on the way in to prove the
+    // fold owns the order rather than trusting the caller's.
+    const rows = [row(3, 1, 9, now), row(1, 1, 9, now), row(5, 1, 9, now), row(2, 1, 9, now)];
+    const { byIntentId } = mq.buildArmedRepoQueues(rows, marks());
+    expect([1, 2, 3, 5].map((id) => byIntentId.get(id).position)).toEqual([1, 2, 3, 4]);
+    expect([1, 2, 3, 5].map((id) => byIntentId.get(id).holdsSlot)).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(byIntentId.get(2).depth).toBe(4);
+    // Siblings are what a landing clears the freshen marks of: everyone else on this repo.
+    expect([...byIntentId.get(1).siblingIds].sort()).toEqual([2, 3, 5]);
+  });
+
+  it('keys the group on (accountId, repoId), never repoId alone', () => {
+    // Two tenants tracking the SAME repo. A repoId-keyed group would put B behind A — one
+    // tenant's landings serialised behind another's, which is a side channel as well as a bug.
+    const rows = [row(1, 1, 9, now), row(2, 2, 9, now + 1000)];
+    const { byIntentId } = mq.buildArmedRepoQueues(rows, marks());
+    expect(byIntentId.get(1).holdsSlot).toBe(true);
+    expect(byIntentId.get(2).holdsSlot).toBe(true);
+    expect(byIntentId.get(2).position).toBe(1);
+    expect(byIntentId.get(1).siblingIds).toEqual([]);
+  });
+
+  it('EXCLUDES viaMergeQueue intents from the FIFO — GitHub already serialises them', () => {
+    const rows = [row(1, 1, 9, now, true), row(2, 1, 9, now + 1000)];
+    const { byIntentId } = mq.buildArmedRepoQueues(rows, marks());
+    // The queue intent is never held back and carries NO Limn position — a second queue drawn
+    // in front of GitHub's would halve throughput and put two different "queues" on one card.
+    expect(byIntentId.get(1)).toMatchObject({ holdsSlot: true, position: null, depth: null });
+    // …and it does not count towards the direct intents' depth either.
+    expect(byIntentId.get(2)).toMatchObject({ holdsSlot: true, position: 1, depth: 1 });
+    // It DOES know its direct siblings: when the queue lands it, the trunk moved for them too.
+    expect(byIntentId.get(1).siblingIds).toEqual([2]);
+  });
+
+  it('hands the slot past a yielded intent WITHOUT moving it down the line', () => {
+    const rows = [row(1, 1, 9, now), row(2, 1, 9, now + 1000), row(3, 1, 9, now + 2000)];
+    const { byIntentId } = mq.buildArmedRepoQueues(
+      rows,
+      marks({ yieldedForFailedChecks: new Set([1]) }),
+    );
+    expect(byIntentId.get(2).holdsSlot).toBe(true);
+    // #1 keeps its place: the moment its checks go green the mark clears and it is 1st again.
+    expect(byIntentId.get(1)).toMatchObject({
+      position: 1,
+      holdsSlot: false,
+      yieldReason: 'failed_checks',
+    });
+  });
+
+  // ── DEFECT #4: a yielded intent that becomes the only one could never reclaim the slot ─────
+  it('gives the slot back when EVERY direct intent has yielded — there is nobody to yield to', () => {
+    // THE REPRO. #1 stepped aside for failed checks while #2 was behind it; #2 then merged and
+    // left. `slotHolderId = direct.find(r => !yielded.has(r.id))` now finds NOBODY, so the one
+    // intent on the repo holds no slot: its row claims it is "letting the next armed PR through"
+    // when there is no next armed PR, and it never reaches the branches that would report its
+    // real block, because only a slot-holder gets that far. The :695 gate already refuses to
+    // ENTER a yield with nobody to yield to, so staying in one here was inconsistent as well.
+    const alone = mq.buildArmedRepoQueues(
+      [row(1, 1, 9, now)],
+      marks({ yieldedForFailedChecks: new Set([1]) }),
+    );
+    expect(alone.byIntentId.get(1)).toMatchObject({
+      holdsSlot: true,
+      position: 1,
+      depth: 1,
+      yieldReason: 'failed_checks',
+      // …and it may not re-enter the yield from there: nobody is waiting, so the runner does not
+      // even pay for the live rollup read that would.
+      canYield: false,
+    });
+
+    // The same rule at depth > 1: all yielded ⇒ the FIRST keeps the slot rather than the repo
+    // going dark. Handing it over merges nothing — the runner re-reads a live snapshot and a PR
+    // whose checks failed still parks on its blocker.
+    const rows = [row(1, 1, 9, now), row(2, 1, 9, now + 1000), row(3, 1, 9, now + 2000)];
+    const all = mq.buildArmedRepoQueues(
+      rows,
+      marks({ yieldedForFailedChecks: new Set([1, 2]), yieldedForConflicts: new Set([3]) }),
+    );
+    expect([1, 2, 3].map((id) => all.byIntentId.get(id).holdsSlot)).toEqual([true, false, false]);
+    expect([1, 2, 3].every((id) => all.byIntentId.get(id).canYield === false)).toBe(true);
+    // Each keeps its OWN reason — "checks failed" and "conflicts" send the author to different
+    // screens, and only the first is the wire's `yieldedForFailedChecks`.
+    expect(all.byIntentId.get(3).yieldReason).toBe('conflicts');
+  });
+
+  // ── DEFECT #2: the queue exemption must follow the LIVE verdict, not the stored flag ───────
+  it('puts a queue-DISABLED intent back in the direct FIFO', () => {
+    const rows = [row(1, 1, 9, now, true), row(2, 1, 9, now + 1000)];
+    // Stored flag says "GitHub serialises me"; the runner has since watched the queue answer
+    // `enabled: false`, so this intent direct-merges now — and a direct merger exempt from the
+    // direct FIFO lands a second PR on the repo in the same tick.
+    const { byIntentId } = mq.buildArmedRepoQueues(rows, marks({ queueDisabled: new Set([1]) }));
+    expect(byIntentId.get(1)).toMatchObject({ holdsSlot: true, position: 1, depth: 2 });
+    expect(byIntentId.get(2)).toMatchObject({ holdsSlot: false, position: 2, depth: 2 });
+  });
+
+  it('leaves the wire fields ABSENT wherever they would not describe a live direct intent', () => {
+    const index = mq.buildArmedRepoQueues([row(1, 1, 9, now, true), row(2, 1, 9, now)], marks());
+    // A queue intent gets none of the three — a client that has never heard of them must render
+    // exactly what it did before.
+    expect(mq.withArmedQueueFields({ prId: 100 } as any, index)).toEqual({ prId: 100 });
+    // A terminal row is not in the scan at all, so it is the same "absent" path.
+    expect(mq.withArmedQueueFields({ prId: 999 } as any, index)).toEqual({ prId: 999 });
+    expect(mq.withArmedQueueFields({ prId: 200 } as any, index)).toEqual({
+      prId: 200,
+      queuePosition: 1,
+      queueDepth: 1,
+    });
+    // False is absent too, never a literal `yieldedForFailedChecks: false`.
+    const yielded = mq.buildArmedRepoQueues(
+      [row(2, 1, 9, now)],
+      marks({ yieldedForFailedChecks: new Set([2]) }),
+    );
+    expect(mq.withArmedQueueFields({ prId: 200 } as any, yielded)).toMatchObject({
+      yieldedForFailedChecks: true,
+    });
+    // ⚠ …and ONLY that reason writes it. A CONFLICT yield carries its own truthful phase
+    // (`waiting_conflicts`); flagging it here would put "checks failed, letting the next PR
+    // through" over a PR whose checks are fine.
+    const conflicted = mq.buildArmedRepoQueues(
+      [row(2, 1, 9, now)],
+      marks({ yieldedForConflicts: new Set([2]) }),
+    );
+    expect(mq.withArmedQueueFields({ prId: 200 } as any, conflicted)).toEqual({
+      prId: 200,
+      queuePosition: 1,
+      queueDepth: 1,
+    });
+  });
+});
+
+describe('the armed-order scan', () => {
+  let mq: any;
+  beforeAll(async () => {
+    mq = await import('./merge-queue.js');
+    await db.delete(schema.autoMergeRequests).execute();
+  });
+
+  it('is UNBOUNDED, carries repoId, and scopes to one account when asked', async () => {
+    await q.armAutoMerge(A, prC, armArgs('o1'));
+    await q.armAutoMerge(A, prD, armArgs('o2'));
+    await q.armAutoMerge(B, prB, armArgs('o3'));
+
+    // The runner's own cross-tenant scan (null = every account), the sanctioned twin of
+    // `listArmedMergeRequestsForRunner`.
+    const all = await mq.listArmedIntentOrder(null);
+    expect(all.map((r: any) => r.prId).sort()).toEqual([prB, prC, prD].sort());
+
+    // A per-request path passes a real id and must never see, or pay for, another tenant's rows.
+    const mine = await mq.listArmedIntentOrder(A);
+    expect(mine.map((r: any) => r.prId).sort()).toEqual([prC, prD].sort());
+    // prC and prD are the SAME repo — the fact the position fold needs and the intent row does
+    // not carry.
+    const [c, d] = [prC, prD].map((id) => mine.find((r: any) => r.prId === id));
+    expect(c.repoId).toBe(d.repoId);
+    expect(c.repoId).not.toBe(mine.find((r: any) => r.prId === prC)?.accountId);
+
+    await db.delete(schema.autoMergeRequests).execute();
+  });
+});
+
+describe('the auto-merge watcher lands a repo’s batch one at a time', () => {
+  let runner: any;
+  let gh: any;
+  const log = { info: () => {}, warn: () => {}, error: () => {} } as any;
+
+  const snapshot = (over: Record<string, unknown> = {}) => ({
+    headSha: 'aaa',
+    headRef: 'feat',
+    headRepoFullName: 'orgc/repoc',
+    isFork: false,
+    maintainerCanModify: true,
+    mergeable: true,
+    mergeableState: 'clean',
+    baseRef: 'main',
+    baseSha: 'base0',
+    behindBy: 0,
+    aheadBy: 1,
+    ...over,
+  });
+
+  // The queue tests run two or three PRs through ONE tick, so the snapshot stub has to answer
+  // per PR. Keyed on the PR NUMBER, which is `fetchPrMergeSnapshot`'s 4th argument.
+  const snapshotsByNumber = (byNumber: Record<number, Record<string, unknown>>): void => {
+    gh.fetchPrMergeSnapshot.mockImplementation(
+      async (_t: string, _o: string, _n: string, number: number) =>
+        snapshot({ headSha: `h${number}`, ...byNumber[number] }),
+    );
+  };
+
+  const rowFor = async (prId: number): Promise<any> => {
+    const rows = await db.select().from(schema.autoMergeRequests).execute();
+    return rows.find((r: any) => r.prId === prId);
+  };
+
+  beforeAll(async () => {
+    runner = await import('../merge/auto-merge-runner.js');
+    gh = await import('../github/mutations.js');
+  });
+
+  beforeEach(async () => {
+    for (const fn of [
+      gh.fetchPrMergeSnapshot,
+      gh.fetchCommitParents,
+      gh.isCommitContainedInRef,
+      gh.mergePullRequest,
+      gh.updatePullRequestBranch,
+      gh.fetchMergeQueueState,
+      gh.enqueuePullRequestOnQueue,
+      gh.fetchPrHeadCheckRollup,
+    ]) {
+      fn.mockReset();
+    }
+    await db.delete(schema.autoMergeRequests).execute();
+    const { eq, inArray } = await import('drizzle-orm');
+    void eq;
+    await db
+      .update(schema.pullRequests)
+      .set({ state: 'open' })
+      .where(inArray(schema.pullRequests.id, [prC, prD, prE, prF]))
+      .execute();
+  });
+
+  it('(a) gives ONE intent on a repo the slot and parks the other at queued_local', async () => {
+    // The click order: prC first, prD second. Both are perfectly mergeable — under the old
+    // runner BOTH would have merged in this one tick, and the second would have been merging
+    // against a trunk that moved out from under it mid-tick.
+    await q.armAutoMerge(A, prC, armArgs('h7'));
+    await q.armAutoMerge(A, prD, armArgs('h8'));
+    snapshotsByNumber({ 7: {}, 8: {} });
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed_a' });
+
+    await runner.runAutoMergeTick(log);
+
+    // Exactly ONE merge, and it is the one the user clicked first.
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
+    expect(gh.mergePullRequest.mock.calls[0][3]).toBe(7);
+    expect((await rowFor(prC)).state).toBe('merged');
+
+    const waiting = await rowFor(prD);
+    expect(waiting.state).toBe('armed');
+    // ⚠ 'queued_local', NOT 'queued' — the latter means GitHub has it in a merge queue. Two
+    // different queues on two sides of the network; conflating them is the whole reason the
+    // phase got its own member.
+    expect(waiting.phase).toBe('queued_local');
+    expect(waiting.lastReason).toContain('2nd of 2');
+    expect(waiting.lastReason).toContain('orgc/repoc');
+  });
+
+  it('(b) does NOT serialise across repos — one line per repo, not one global line', async () => {
+    await q.armAutoMerge(A, prC, armArgs('h7'));
+    await q.armAutoMerge(A, prE, armArgs('h9'));
+    snapshotsByNumber({ 7: {}, 9: {} });
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed_b' });
+
+    await runner.runAutoMergeTick(log);
+
+    // Both hold their own repo's slot, so both land on the same tick.
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(2);
+    expect(gh.mergePullRequest.mock.calls.map((c: any[]) => c[3]).sort()).toEqual([7, 9]);
+    expect((await rowFor(prC)).state).toBe('merged');
+    expect((await rowFor(prE)).state).toBe('merged');
+  });
+
+  it('(c) never parks a viaMergeQueue intent at queued_local', async () => {
+    // prD (direct) is armed FIRST, so a naive "everyone on this repo takes a number" would make
+    // the queue intent 2nd of 2 and hold it behind — halving throughput on the one repo where
+    // GitHub is already serialising for us.
+    await q.armAutoMerge(A, prD, armArgs('h8'));
+    await q.armAutoMerge(A, prC, { ...armArgs('h7'), viaMergeQueue: true });
+    snapshotsByNumber({ 7: { mergeableState: 'blocked' }, 8: {} });
+    gh.fetchMergeQueueState.mockResolvedValue({
+      enabled: true,
+      inQueue: false,
+      position: null,
+      state: null,
+      estimatedTimeToMergeMs: null,
+      enqueuedAt: null,
+      prState: 'OPEN',
+      reviewDecision: null,
+    });
+    gh.enqueuePullRequestOnQueue.mockResolvedValue({
+      position: 1,
+      state: 'QUEUED',
+      estimatedTimeToMergeMs: null,
+    });
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed_c' });
+
+    await runner.runAutoMergeTick(log);
+
+    const queued = await rowFor(prC);
+    expect(queued.phase).toBe('queued');
+    expect(queued.enqueuedAt).not.toBeNull();
+    // The direct intent is unaffected by the queue intent sharing its repo, and vice versa.
+    expect((await rowFor(prD)).state).toBe('merged');
+  });
+
+  it('(d) still RESOLVES a waiting intent whose PR went away (rules 1–4 run for everyone)', async () => {
+    // The crux of the split. A queued intent that has gone bad must resolve on the tick that
+    // observes it — parking it behind a slot-holder for hours is the same starvation this queue
+    // exists to prevent, one level up.
+    await q.armAutoMerge(A, prC, armArgs('h7'));
+    await q.armAutoMerge(A, prD, armArgs('h8'));
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(schema.pullRequests)
+      .set({ state: 'closed' })
+      .where(eq(schema.pullRequests.id, prD))
+      .execute();
+    // The slot-holder is parked on something we can't characterise, so it neither merges nor
+    // finishes — the waiter has to resolve anyway.
+    snapshotsByNumber({ 7: { mergeableState: 'unknown' }, 8: {} });
+
+    await runner.runAutoMergeTick(log);
+
+    const closed = await rowFor(prD);
+    expect(closed.state).toBe('disarmed_blocked');
+    expect(closed.lastReason).toContain('closed outside auto-merge');
+    // A terminal row carries no live phase — least of all the one it would have had.
+    expect(closed.phase).toBeNull();
+    expect((await rowFor(prC)).state).toBe('armed');
+  });
+
+  it('(e) clears a sibling’s freshen mark when a PR on the repo LANDS', async () => {
+    // THE REGRESSION, in one test. `freshenedIntents` used to be once per intent LIFETIME, so
+    // an intent that freshened before a sibling landed could never update again and sat at
+    // "behind" until the 72-hour expiry. `mergeableState: 'clean'` with `behindBy > 0` is the
+    // shape that actually depends on the mark (a literal 'behind' state re-freshens regardless).
+    await q.armAutoMerge(A, prC, { ...armArgs('h7'), updateStrategy: 'merge' });
+    await q.armAutoMerge(A, prD, { ...armArgs('h8'), updateStrategy: 'merge' });
+    snapshotsByNumber({ 7: { behindBy: 2 }, 8: { behindBy: 2 } });
+    gh.updatePullRequestBranch.mockResolvedValue({ ok: true });
+
+    // Tick 1: prC holds the slot and freshens; prD waits its turn (and does NOT also freshen —
+    // N branch updates for N PRs, not N²).
+    await runner.runAutoMergeTick(log);
+    expect(gh.updatePullRequestBranch).toHaveBeenCalledTimes(1);
+    expect(gh.updatePullRequestBranch.mock.calls[0][3]).toBe(7);
+    expect((await rowFor(prD)).phase).toBe('queued_local');
+
+    // Meanwhile a human merges prD's PR on GitHub. The trunk just moved under prC — whose one
+    // freshen is already spent.
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(schema.pullRequests)
+      .set({ state: 'merged' })
+      .where(eq(schema.pullRequests.id, prD))
+      .execute();
+
+    // Tick 2: prC is worked first (it holds the slot) and is still marked, so it does nothing;
+    // prD's pre-flight then observes the landing and clears its siblings' marks. Deciding on
+    // this tick and acting on the next is the contract.
+    snapshotsByNumber({ 7: { mergeableState: 'unknown', behindBy: 2 }, 8: {} });
+    await runner.runAutoMergeTick(log);
+    expect(gh.updatePullRequestBranch).toHaveBeenCalledTimes(1);
+    expect((await rowFor(prD)).state).toBe('disarmed_blocked');
+
+    // Tick 3: prC freshens AGAINST THE NEW TRUNK. Without the sibling clear this call never
+    // happens and the intent expires at 72h having never updated again.
+    snapshotsByNumber({ 7: { behindBy: 2 } });
+    await runner.runAutoMergeTick(log);
+    expect(gh.updatePullRequestBranch).toHaveBeenCalledTimes(2);
+    expect(gh.updatePullRequestBranch.mock.calls[1][3]).toBe(7);
+  });
+
+  it('(f) yields the slot when the slot-holder’s checks FAILED, keeping its place', async () => {
+    await q.armAutoMerge(A, prC, armArgs('h7'));
+    await q.armAutoMerge(A, prD, armArgs('h8'));
+    snapshotsByNumber({ 7: { mergeableState: 'blocked' }, 8: { mergeableState: 'blocked' } });
+    // The LIVE read, not the synced CI column: yielding re-orders the user's clicks, which is
+    // not a decision to make on a sync-interval-stale "failure" that may have gone green.
+    gh.fetchPrHeadCheckRollup.mockResolvedValue('FAILURE');
+
+    await runner.runAutoMergeTick(log);
+
+    // Paid for only where it can change something: the slot-holder, on a repo with someone
+    // waiting behind it. The waiter returns at the queue hold and never reaches this read.
+    expect(gh.fetchPrHeadCheckRollup).toHaveBeenCalledTimes(1);
+    expect(gh.fetchPrHeadCheckRollup.mock.calls[0][3]).toBe(7);
+    const yielded = await rowFor(prC);
+    expect(yielded.state).toBe('armed'); // ⚠ a yield is NOT a disarm
+    expect(yielded.phase).toBe('queued_local');
+    expect(yielded.lastReason).toContain('checks failed');
+
+    // Tick 2: the slot passed to prD, which is green — it lands while prC waits for its author.
+    snapshotsByNumber({ 7: { mergeableState: 'blocked' }, 8: {} });
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed_f' });
+    await runner.runAutoMergeTick(log);
+
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
+    expect(gh.mergePullRequest.mock.calls[0][3]).toBe(8);
+    const still = await rowFor(prC);
+    expect(still.state).toBe('armed');
+    expect(still.lastReason).toContain('checks failed');
+  });
+
+  // ── DEFECT #1: a conflicting slot-holder used to hold the repo for the full 72 hours ───────
+  it('(g) a CONFLICTING slot-holder RELEASES the repo instead of parking it for 72h', async () => {
+    // THE REPRO, and it is a REGRESSION the queue introduced: before rule 8 existed, #8 merged
+    // on the very first tick. With the queue, #7 held the slot, hit the conflicts branch and
+    // returned WITHOUT releasing it — five consecutive ticks merged nothing, and the row would
+    // have sat there until the 72-hour expiry. The in-code justification ("a conflict fix is a
+    // push, rule 1 then disarms and frees the slot") assumed an author action that may never
+    // come. The queue must never make a repo worse than no queue.
+    await q.armAutoMerge(A, prC, armArgs('h7'));
+    await q.armAutoMerge(A, prD, armArgs('h8'));
+    snapshotsByNumber({ 7: { mergeable: false, mergeableState: 'dirty' }, 8: {} });
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed_g' });
+
+    // Tick 1: #7 steps aside. #8 was parked off the order derived at the TOP of this tick, so
+    // it takes the slot on the next one — deciding here and acting next tick is the contract
+    // (same shape as (f2)), and two minutes is not 72 hours.
+    await runner.runAutoMergeTick(log);
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+    const conflicted = await rowFor(prC);
+    expect(conflicted.state).toBe('armed'); // ⚠ a yield is NOT a disarm
+    expect(conflicted.phase).toBe('waiting_conflicts');
+    expect(conflicted.lastReason).toContain('conflicts with main');
+
+    await runner.runAutoMergeTick(log);
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
+    expect(gh.mergePullRequest.mock.calls[0][3]).toBe(8);
+    // The conflicting intent is untouched by any of it: still armed, still 1st in the FIFO,
+    // still telling its author exactly what is wrong.
+    const still = await rowFor(prC);
+    expect(still.state).toBe('armed');
+    expect(still.phase).toBe('waiting_conflicts');
+
+    // …and it does not merge on some later tick either — a released slot is not a green light.
+    await runner.runAutoMergeTick(log);
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('(g2) takes the slot back the tick after the CONFLICT clears', async () => {
+    // The un-mark is the same rule in reverse, and it runs for every intent, slot or no slot:
+    // the moment GitHub stops reporting a conflict the intent is a slot candidate again. (A
+    // conflict fixed by a PUSH never reaches here — rule 1 disarms on the moved head — but a
+    // conflict can also clear because the BASE moved, with no head move at all.)
+    await q.armAutoMerge(A, prC, armArgs('h7'));
+    await q.armAutoMerge(A, prD, armArgs('h8'));
+    snapshotsByNumber({ 7: { mergeable: false, mergeableState: 'dirty' }, 8: {} });
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed_g2' });
+    await runner.runAutoMergeTick(log);
+    await runner.runAutoMergeTick(log); // prD lands
+    expect((await rowFor(prD)).state).toBe('merged');
+
+    // prC's conflict resolves itself on GitHub's side.
+    snapshotsByNumber({ 7: {} });
+    await runner.runAutoMergeTick(log); // clears the mark; the order was derived before it
+    await runner.runAutoMergeTick(log);
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(2);
+    expect(gh.mergePullRequest.mock.calls[1][3]).toBe(7);
+  });
+
+  // ── DEFECT #3: the queue position must not erase the waiter's own blocker ──────────────────
+  it('(h) a WAITER’s real blocker survives its place in line', async () => {
+    // prC holds the slot on something we can't characterise (so it neither merges nor finishes)
+    // and prD — 2nd in line — is CONFLICTING. The rule-8 park used to return before the
+    // conflicts branch, overwriting prD with {queued_local, "waiting its turn — 2nd of 2"}: true,
+    // and a status that sends nobody to fix anything. Worse in tone than in wording —
+    // `waiting_conflicts` is one of the banner's STALLED phases, a plain `queued_local` reads as
+    // ordinary progress — so a PR that cannot land AT ALL looked like one that was simply next.
+    await q.armAutoMerge(A, prC, armArgs('h7'));
+    await q.armAutoMerge(A, prD, armArgs('h8'));
+    snapshotsByNumber({
+      7: { mergeableState: 'unknown' },
+      8: { mergeable: false, mergeableState: 'dirty' },
+    });
+
+    await runner.runAutoMergeTick(log);
+
+    const waiter = await rowFor(prD);
+    expect(waiter.state).toBe('armed');
+    expect(waiter.phase).toBe('waiting_conflicts');
+    // BOTH facts reach the user: what is wrong, and where it stands.
+    expect(waiter.lastReason).toContain('conflicts with main');
+    expect(waiter.lastReason).toContain('2nd of 2');
+  });
+
+  // ── DEFECT #2: the queue exemption must follow the LIVE verdict, not the stored flag ───────
+  it('(i) a queue-DISABLED intent cannot merge alongside the repo’s slot-holder', async () => {
+    // THE REPRO: ONE tick produced `mergePullRequest` for TWO PRs on the same repo — the exact
+    // thrash the local queue exists to prevent. `viaMergeQueue` rows are exempt from the FIFO
+    // because GitHub serialises them, but the runner re-verifies the queue LIVE and, finding it
+    // disabled since arming, fell through to the DIRECT merge path with the exemption still on.
+    await q.armAutoMerge(A, prF, armArgs('h10')); // armed first ⇒ holds the direct slot
+    await q.armAutoMerge(A, prD, armArgs('h8'));
+    await q.armAutoMerge(A, prC, { ...armArgs('h7'), viaMergeQueue: true });
+    snapshotsByNumber({ 7: {}, 8: {}, 10: {} });
+    gh.fetchMergeQueueState.mockResolvedValue({
+      enabled: false, // …turned off since the user armed
+      inQueue: false,
+      position: null,
+      state: null,
+      estimatedTimeToMergeMs: null,
+      enqueuedAt: null,
+      prState: 'OPEN',
+      reviewDecision: null,
+    });
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed_i' });
+
+    // Tick 1: the repo lands exactly ONE PR — its actual slot-holder. The fallback only
+    // re-classifies itself and takes a number.
+    await runner.runAutoMergeTick(log);
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
+    expect(gh.mergePullRequest.mock.calls[0][3]).toBe(10);
+    const parked = await rowFor(prC);
+    expect(parked.state).toBe('armed');
+    expect(parked.phase).toBe('queued_local');
+    expect(parked.lastReason).toContain('no longer enabled');
+
+    // Tick 2: it is a DIRECT intent now, so it queues behind prD (armed first) instead of
+    // merging beside it — one landing per repo per tick, still exactly one.
+    await runner.runAutoMergeTick(log);
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(2);
+    expect(gh.mergePullRequest.mock.calls[1][3]).toBe(8);
+    const waiting = await rowFor(prC);
+    expect(waiting.phase).toBe('queued_local');
+    expect(waiting.lastReason).toContain('2nd of 2');
+
+    // Tick 3: its turn.
+    await runner.runAutoMergeTick(log);
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(3);
+    expect(gh.mergePullRequest.mock.calls[2][3]).toBe(7);
+  });
+
+  // ── DEFECT #4: a yielded intent that becomes the only one could never reclaim the slot ─────
+  it('(j) a yielded intent left ALONE on the repo reports its real state, not a phantom queue', async () => {
+    await q.armAutoMerge(A, prC, armArgs('h7'));
+    await q.armAutoMerge(A, prD, armArgs('h8'));
+    snapshotsByNumber({ 7: { mergeableState: 'blocked' }, 8: { mergeableState: 'blocked' } });
+    gh.fetchPrHeadCheckRollup.mockResolvedValue('FAILURE');
+
+    await runner.runAutoMergeTick(log); // prC yields to prD
+    expect((await rowFor(prC)).phase).toBe('queued_local');
+
+    // prD goes away — merged by a human, say — and prC is the only armed intent on the repo,
+    // still marked. `direct.find(r => !yielded.has(r.id))` then finds NOBODY.
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(schema.pullRequests)
+      .set({ state: 'merged' })
+      .where(eq(schema.pullRequests.id, prD))
+      .execute();
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prD)).state).toBe('disarmed_blocked');
+
+    // With nobody to yield to, prC holds its own slot again and says what is actually wrong.
+    await runner.runAutoMergeTick(log);
+    const alone = await rowFor(prC);
+    expect(alone.state).toBe('armed');
+    expect(alone.phase).toBe('blocked_protection');
+    expect(alone.lastReason).not.toContain('letting the next armed PR');
+    // …and it does NOT pay for a second live rollup read to re-enter a yield that would hand
+    // the slot to nobody. One read, on the tick where yielding could still change something.
+    expect(gh.fetchPrHeadCheckRollup).toHaveBeenCalledTimes(1);
+  });
+
+  it('(f2) takes the slot back the tick after the block clears', async () => {
+    await q.armAutoMerge(A, prC, armArgs('h7'));
+    await q.armAutoMerge(A, prD, armArgs('h8'));
+    snapshotsByNumber({ 7: { mergeableState: 'blocked' }, 8: { mergeableState: 'blocked' } });
+    gh.fetchPrHeadCheckRollup.mockResolvedValue('FAILURE');
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).phase).toBe('queued_local');
+
+    // A CI re-run goes green with no push (the one repair that does NOT move the head, and so
+    // the one the head pin can't notice for us). The snapshot we already hold is the whole test.
+    snapshotsByNumber({ 7: {}, 8: { mergeableState: 'blocked' } });
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed_f2' });
+    await runner.runAutoMergeTick(log);
+    // Tick 2 only CLEARS the mark (prD held the slot when the tick's order was derived)…
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+    // …and prD, blocked and holding the slot, does NOT pay for a live rollup read: the only
+    // other intent on the repo has already stepped aside, so a yield would hand the slot to
+    // nobody and its copy would name a PR that does not exist. `canYield`, not `depth > 1`.
+    expect(gh.fetchPrHeadCheckRollup).toHaveBeenCalledTimes(1);
+    // …and tick 3 hands prC its place back — 1st of 2, which it never lost.
+    await runner.runAutoMergeTick(log);
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
+    expect(gh.mergePullRequest.mock.calls[0][3]).toBe(7);
   });
 });

@@ -25,6 +25,50 @@
 //                              value of arming. Only the head-moved case disarms.
 //   7. clean / unstable      → re-read the intent (the user may have hit Cancel mid-tick) and
 //                              merge. ('unstable' = non-required checks red; GitHub merges it.)
+//   8. the LOCAL LANDING QUEUE → exactly ONE intent per (accountId, repoId) may run rules 5–7;
+//                              the rest wait at phase 'queued_local'. See below.
+//
+// THE LOCAL LANDING QUEUE (rule 8, `db/merge-queue.ts`). Arming five bumps on one repo used to
+// be BROKEN, not merely slow: all five freshened from trunk at once, #1 merged, THE TRUNK
+// MOVED, and #2–#5 were out of date again with their one freshen already spent. VERIFIED
+// against the pre-change code, and it failed two different ways depending on how GitHub words
+// the block: a literal `mergeableState: 'behind'` re-freshened anyway (`blockedByBehind`
+// bypasses the mark), so the batch churned N(N+1)/2 branch updates and CI runs, each racing the
+// next merge; anything else that is really out of date (a repo reporting 'blocked' while
+// `behindBy > 0`) went through `couldFreshen`, which the mark DOES gate — so those intents sat
+// at their blocker until the 72-hour expiry, having updated once, against a trunk long gone. So:
+//   • armed DIRECT-merge intents on one (accountId, repoId) form a FIFO ordered by `armedAt`
+//     (id as the tiebreak — sqlite stores seconds, so one click-through ties) — click order;
+//   • the head of that FIFO holds the SLOT and is the only one that may freshen, enqueue or
+//     merge; everyone else records `queued_local` and its place;
+//   • ⚠ RULES 1–4 STILL RUN FOR EVERY INTENT, slot or no slot. A queued intent whose PR was
+//     closed, retargeted, force-pushed or expired must resolve NOW — parking it behind a
+//     slot-holder for hours before anyone looks at it is exactly the failure this queue exists
+//     to prevent, reintroduced one level up. That split is the crux of the whole design;
+//   • ⚠ NEITHER MAY A WAITER'S OWN BLOCKER BE ERASED. The park writes the position, but it
+//     writes it UNDER the truth: a waiter GitHub says is conflicting keeps `waiting_conflicts`
+//     (an amber, stalled phase) with the position in its prose, because "waiting its turn — 2nd
+//     of 2" over a PR that cannot land at all is a status that sends nobody to fix anything;
+//   • HEAD-OF-LINE: a slot-holder the watcher CANNOT ITSELF UNBLOCK yields its slot to the next
+//     in line (what a merge queue does by ejecting a failure). Two blockers qualify — a FAILED
+//     required check (proven by a LIVE `fetchPrHeadCheckRollup`, never the synced CI column)
+//     and a CONFLICT, which no amount of waiting will clear without the author. It stays ARMED
+//     and keeps its FIFO place; when the block clears the mark goes and it takes the slot back.
+//     A yield is only entered when there is somebody to yield TO (`slot.canYield`), and when
+//     EVERY direct intent on a repo has yielded the first one keeps the slot rather than the
+//     repo going dark with no holder at all;
+//   • a LANDING clears the freshen mark of every other armed intent on that repo, because the
+//     trunk they were freshened against just moved. Freshening is therefore once per TURN, not
+//     once per lifetime — N branch updates and N CI runs for N PRs, in click order.
+//
+// ⚠ `viaMergeQueue` INTENTS ARE EXCLUDED FROM RULE 8 — BY THE LIVE QUEUE VERDICT, NEVER THE
+// STORED FLAG. GitHub already serialises them; a second queue in front of it would halve
+// throughput for nothing, so a genuinely queued intent behaves exactly as before,
+// freshen-once-before-the-first-enqueue included. But an intent whose queue was DISABLED since
+// arming falls back to the direct merge below, and a direct merger exempt from the direct FIFO
+// is a repo landing two PRs in one tick. So the first tick that observes the queue gone parks
+// the intent at `queued_local` and marks it (`queueDisabledIntents`); the next tick's fold gives
+// it a real place in the FIFO and it lands from there.
 //
 // MERGE-QUEUE repos (`viaMergeQueue`, stamped at arm time, re-verified live each tick): the
 // terminal action replaces rule 7's direct merge — GitHub refuses PUT .../merge on a
@@ -45,6 +89,12 @@ import type { FastifyBaseLogger } from 'fastify';
 import { config } from '../config.js';
 import { getAccessToken, getAccountUserId } from '../auth/account.js';
 import {
+  buildArmedRepoQueues,
+  listArmedIntentOrder,
+  type ArmedQueueMarks,
+  type ArmedQueueSlot,
+} from '../db/merge-queue.js';
+import {
   getAutoMergeRequest,
   listArmedMergeRequestsForRunner,
   markPrMergedLocally,
@@ -56,6 +106,7 @@ import {
   enqueuePullRequestOnQueue,
   fetchCommitParents,
   fetchMergeQueueState,
+  fetchPrHeadCheckRollup,
   fetchPrMergeSnapshot,
   isCommitContainedInRef,
   mergePullRequest,
@@ -101,12 +152,78 @@ const PENDING_UPDATE_TTL_MS = 15 * 60 * 1000;
 // almost every healthy PR (any trunk commit since the branch point), so freshening on it every
 // tick would push a merge commit — and a CI run — every two minutes for the intent's whole
 // 72-hour life. Once is what "update before merging" means.
+//
+// ⚠ ONCE PER TURN, NOT ONCE PER LIFETIME. This mark used to be cleared only by `forgetIntent`,
+// i.e. only when the intent RESOLVED — which broke batch arming outright (the two failure modes
+// are spelled out in the file header). ⚠ Note it gates only `couldFreshen`: a literal
+// `mergeableState: 'behind'` freshens THROUGH the mark, which is why the once-per-lifetime bug
+// stranded some repos and merely churned others. A landing now clears its repo-siblings' marks
+// (`clearSiblingFreshenMarks`), which is what makes the mark mean "freshened against the CURRENT
+// trunk" rather than "freshened, ever".
 const freshenedIntents = new Set<number>();
+
+// Slot-holders that stepped aside because their required checks FAILED (rule 8's head-of-line
+// rule). Process-local exactly like the two maps above, and the same direction of failure: a
+// restart forgets the yield, the intent takes its slot back, observes the failure again on its
+// next tick and re-yields — one wasted tick, never a merge nobody asked for.
+const yieldedForFailedChecks = new Set<number>();
+
+// ⚠ THE SECOND YIELD, AND THE REGRESSION IT REPAIRS. An intent GitHub reports as CONFLICTING
+// also steps aside. The rule is "release the slot on any blocker THE WATCHER CANNOT ITSELF
+// CLEAR", and a conflict is the purest case of it: the fix is a push, by a human, that may never
+// come. Holding the slot for one used to park every other armed PR on that repo until the
+// 72-hour expiry — VERIFIED: arm a conflicting PR then a clean one and five consecutive ticks
+// merged nothing, where the pre-queue runner landed the clean one immediately. The queue must
+// never make a repo worse than no queue.
+//
+// It is its OWN set rather than a second member of the one above so the copy can still tell
+// "checks failed" from "conflicts": they need different things from the author, and only the
+// first is `ArmedMergeRequest.yieldedForFailedChecks`.
+const yieldedForConflicts = new Set<number>();
+
+// `viaMergeQueue` intents whose queue we have LIVE-verified as disabled since arming, so their
+// landing verb is a direct merge. The fold puts them back in the direct FIFO (a direct merger
+// exempt from the direct FIFO merged a second PR on the repo in the same tick); process-local,
+// re-verified every tick, and cleared the moment the queue answers `enabled` again.
+const queueDisabledIntents = new Set<number>();
+
+/**
+ * The live marks, for the fold and for the routes that decorate `ArmedMergeRequest`. Read-only
+ * on purpose: the ONE writer is the tick below, which is the only place that has a live
+ * observation of GitHub to write from.
+ */
+export function armedQueueMarks(): ArmedQueueMarks {
+  return { yieldedForFailedChecks, yieldedForConflicts, queueDisabled: queueDisabledIntents };
+}
 
 function forgetIntent(id: number): void {
   failureCounts.delete(id);
   pendingUpdates.delete(id);
   freshenedIntents.delete(id);
+  yieldedForFailedChecks.delete(id);
+  yieldedForConflicts.delete(id);
+  queueDisabledIntents.delete(id);
+}
+
+/**
+ * A PR on this repo just LANDED, so the trunk moved out from under every other armed intent on
+ * it: whatever they were freshened against is stale, and the mark they earned for it has to go
+ * or they can never update again (the landmine documented on `freshenedIntents`).
+ *
+ * Called from all three landing observations — our direct merge, our queue entry merging, and a
+ * merge we merely OBSERVED (a human's, or the queue's, seen first by the sync). The trunk moved
+ * in every one of them; who moved it is an attribution question, not a freshness one.
+ */
+function clearSiblingFreshenMarks(slot: ArmedQueueSlot | undefined): void {
+  for (const siblingId of slot?.siblingIds ?? []) freshenedIntents.delete(siblingId);
+}
+
+/** 1 → "1st", 2 → "2nd", 11 → "11th". For the `queued_local` prose only. */
+function ordinal(n: number): string {
+  const teens = n % 100;
+  if (teens >= 11 && teens <= 13) return `${n}th`;
+  const last = n % 10;
+  return `${n}${last === 1 ? 'st' : last === 2 ? 'nd' : last === 3 ? 'rd' : 'th'}`;
 }
 
 // One tick at a time. A slow tick (a big backlog, a slow clone-based rebase) must not overlap
@@ -191,11 +308,14 @@ async function isOurUpdateMerge(
 async function settleQueuedIntent(
   work: ArmedMergeWork,
   queue: MergeQueueState,
+  slot: ArmedQueueSlot | undefined,
   log: FastifyBaseLogger,
 ): Promise<boolean> {
   // The LIVE PR state, not the synced one: a fast queue can merge within a tick, and the
   // synced row lags until the next sync observes it.
   if (queue.prState === 'MERGED') {
+    // Landed ⇒ the trunk moved, whoever's entry it was. See `clearSiblingFreshenMarks`.
+    clearSiblingFreshenMarks(slot);
     if (work.enqueuedAt != null) {
       forgetIntent(work.id);
       // Stamp locally exactly like the direct-merge landing, so the SPA reflects it before
@@ -324,10 +444,16 @@ async function enqueueWhenReady(
 /**
  * Evaluate ONE armed intent. Returns nothing — every outcome is recorded on the row. Throws
  * only on an unexpected GitHub/network error, which the caller converts into a failure strike.
+ *
+ * `slot` is this intent's place in its repo's landing queue, derived ONCE at the top of the
+ * tick (rule 8). Undefined only in the narrow race where the intent resolved between the two
+ * scans, which reads as "unqueued" and therefore as "may proceed" — the compare-and-set before
+ * the merge is what actually guards that, not this.
  */
 async function processOne(
   work: ArmedMergeWork,
   token: string,
+  slot: ArmedQueueSlot | undefined,
   log: FastifyBaseLogger,
 ): Promise<void> {
   const now = Date.now();
@@ -342,6 +468,8 @@ async function processOne(
   // merges asynchronously, and the sync can observe it before the next tick does) — that is
   // 'merged', so the toast fires, not "outside auto-merge".
   if (work.prState !== 'open') {
+    // A merged PR moved the trunk under this repo's other armed intents, whoever merged it.
+    if (work.prState === 'merged') clearSiblingFreshenMarks(slot);
     if (work.prState === 'merged' && work.viaMergeQueue && work.enqueuedAt != null) {
       await resolve(work.id, 'merged', null);
       log.info(
@@ -421,22 +549,20 @@ async function processOne(
     return;
   }
 
-  // ---- The merge-queue fork, part 1: where does the intent stand with the queue? --------
-  // Queue intents fork BEFORE the freshen gates, because a PR already sitting in the queue
-  // (or just merged by it) must never be freshened — a branch update moves the head, which
-  // kicks the entry out of the queue. The state is re-read LIVE each tick (one GraphQL
-  // point, paid only by queue intents): a queue disabled since arming makes the direct
-  // merge below the right verb again, so `queue` drops back to null and nothing here runs.
-  let queue: MergeQueueState | null = null;
-  if (work.viaMergeQueue) {
-    queue = await fetchMergeQueueState(token, work.owner, work.name, work.number);
-    if (queue && queue.enabled) {
-      if (await settleQueuedIntent(work, queue, log)) return;
-    } else {
-      queue = null;
-    }
-  }
-
+  // ---- Rule 8: the local landing queue --------------------------------------------------
+  //
+  // EVERYTHING ABOVE ran for every intent on purpose — rules 1–4 resolve an intent that has
+  // gone bad (expired, closed, retargeted, force-pushed), and a queued intent must resolve as
+  // promptly as a working one. The ACTIONS below are the slot-holder's alone: freshening,
+  // enqueueing and merging are the three things that must happen one PR at a time on a repo.
+  //
+  // Read the snapshot's own verdict FIRST, though, because two things every intent is entitled
+  // to depend on it. ⚠ It is computed here rather than after the park for two reasons that are
+  // both defects when it slides back down: a WAITER has to be able to report its own blocker
+  // instead of only its place in line, and a waiter that cannot land has to drop out of the slot
+  // running (and back into it) exactly like the slot-holder does. Nothing between here and the
+  // gates below touches this intent's `freshenedIntents` mark, so reading `couldFreshen` early
+  // is the same answer.
   const conflicts = m.mergeable === false || m.mergeableState === 'dirty';
   // GitHub's 'behind' merge state is the only thing that BLOCKS a merge — it appears when the
   // base requires strictly-up-to-date branches. `behindBy` comes from an independent
@@ -448,12 +574,97 @@ async function processOne(
     m.behindBy > 0 && work.updateStrategy !== 'none' && !freshenedIntents.has(work.id);
   const behind = blockedByBehind || couldFreshen;
 
-  if (conflicts) {
-    // Keep waiting: a conflict is usually cleared by the author pushing a fix — which moves
-    // the head, which disarms us on the next tick with a clear reason. Either way the user
-    // finds out from the row, not from a surprise merge.
+  // A yielded intent stops yielding the moment GitHub stops blocking it — the snapshot we
+  // already hold is the whole test, so noticing costs nothing extra, and the re-derivation at
+  // the top of the next tick is what hands the slot back. (A fix delivered as a PUSH never
+  // reaches here at all: it moves the head, disarms at rule 1, and `forgetIntent` drops every
+  // mark.) ⚠ BOTH un-marks run for EVERY intent, slot or no slot — that is what makes the
+  // recovery automatic; gating them on the slot would leave a repaired waiter permanently
+  // skipped for a slot it was never asked to want. The writes below still report the tick's OWN
+  // decision (`slot.yieldReason`), so phase and prose can never describe two states of the queue.
+  if (m.mergeableState !== 'blocked') yieldedForFailedChecks.delete(work.id);
+  if (!conflicts) yieldedForConflicts.delete(work.id);
+
+  // ⚠ The stored `viaMergeQueue` flag is deliberately NOT consulted here. `buildArmedRepoQueues`
+  // gives a LIVE queue intent `holdsSlot: true`, and it is the only thing that knows whether the
+  // runner has since found that queue disabled — a stored-flag exemption let a queue-disabled
+  // intent direct-merge alongside the repo's actual slot-holder, two merges in one tick.
+  if (slot && !slot.holdsSlot) {
+    const place = `${ordinal(slot.position ?? 0)} of ${slot.depth} armed on ${work.owner}/${work.name}`;
+    if (conflicts) {
+      // ⚠ THE POSITION MUST NOT ERASE THE BLOCKER. This row used to be overwritten with
+      // {queued_local, "waiting its turn — 2nd of 2"}, which is true and useless: the PR cannot
+      // land in ANY position until its author rebases, and `queued_local` is not one of the
+      // banner's stalled phases, so a PR that needs a human read as ordinary progress. The
+      // truthful phase wins and the place rides in the prose. Marked too, for the same reason
+      // the slot-holder below is: a waiter that cannot land must not be a slot candidate either.
+      yieldedForConflicts.add(work.id);
+      await updateAutoMergeState(work.id, {
+        lastReason: `waiting: conflicts with ${m.baseRef} — ${place}`,
+        phase: 'waiting_conflicts',
+      });
+      return;
+    }
     await updateAutoMergeState(work.id, {
-      lastReason: `waiting: conflicts with ${m.baseRef}`,
+      lastReason:
+        slot.yieldReason === 'failed_checks'
+          ? `its required checks failed — letting the next armed PR on ${work.owner}/${work.name} through; still armed`
+          : `waiting its turn — ${place}`,
+      phase: 'queued_local',
+    });
+    return;
+  }
+
+  // ---- The merge-queue fork, part 1: where does the intent stand with the queue? --------
+  // Queue intents fork BEFORE the freshen gates, because a PR already sitting in the queue
+  // (or just merged by it) must never be freshened — a branch update moves the head, which
+  // kicks the entry out of the queue. The state is re-read LIVE each tick (one GraphQL
+  // point, paid only by queue intents): a queue disabled since arming makes the direct
+  // merge below the right verb again, so `queue` drops back to null, nothing here runs — and
+  // the intent takes a place in the local FIFO first, because that verb is the one rule 8
+  // serialises.
+  let queue: MergeQueueState | null = null;
+  if (work.viaMergeQueue) {
+    queue = await fetchMergeQueueState(token, work.owner, work.name, work.number);
+    if (queue && queue.enabled) {
+      // The queue answered for itself, so any earlier "it's gone" observation is stale.
+      queueDisabledIntents.delete(work.id);
+      if (await settleQueuedIntent(work, queue, slot, log)) return;
+    } else {
+      queue = null;
+      // ⚠ THE FALLBACK JOINS THE LOCAL FIFO BEFORE IT MAY MERGE. This intent is exempt from
+      // rule 8 *in this tick's fold* because the fold saw `viaMergeQueue: true` — and the
+      // direct merge below is exactly the action rule 8 serialises. Falling straight through
+      // merged a second PR on the repo alongside the actual slot-holder, in ONE tick: the
+      // precise thrash the local queue exists to prevent. So the FIRST tick that observes the
+      // queue gone only re-classifies the intent; the next fold reads the mark, gives it a real
+      // place in line, and it lands from there (or waits its turn like everyone else).
+      const firstObservation = !queueDisabledIntents.has(work.id);
+      queueDisabledIntents.add(work.id);
+      if (firstObservation) {
+        await updateAutoMergeState(work.id, {
+          lastReason: `the merge queue is no longer enabled on ${work.owner}/${work.name} — taking a place in the landing order`,
+          phase: 'queued_local',
+        });
+        return;
+      }
+    }
+  }
+
+  if (conflicts) {
+    // ⚠ RELEASE THE SLOT (rule 8's head-of-line rule, second blocker). Keep waiting — a conflict
+    // is usually cleared by the author pushing a fix, which moves the head and disarms us on the
+    // next tick with a clear reason — but do it OUT OF THE WAY. The watcher can never land this
+    // PR itself, so holding the repo's slot for it buys nothing and costs everything: it parked
+    // every other armed intent on the repo at `queued_local` until the 72-hour expiry. The
+    // previous justification ("the author will push, rule 1 then frees the slot") assumed an
+    // author action that may never come. Un-marked by the `!conflicts` rule above, on any tick
+    // that observes GitHub no longer reporting the conflict.
+    yieldedForConflicts.add(work.id);
+    await updateAutoMergeState(work.id, {
+      lastReason: slot?.canYield
+        ? `waiting: conflicts with ${m.baseRef} — letting the next armed PR on ${work.owner}/${work.name} through`
+        : `waiting: conflicts with ${m.baseRef}`,
       phase: 'waiting_conflicts',
     });
     return;
@@ -544,6 +755,44 @@ async function processOne(
   }
 
   if (m.mergeableState === 'blocked') {
+    // HEAD-OF-LINE (rule 8). A slot-holder whose checks have FAILED is not going to go green on
+    // its own — it needs its author — and holding the slot for it would park the rest of the
+    // repo's batch behind it for up to 72 hours. So it steps aside, exactly as a merge queue
+    // ejects a failing entry: still armed, still 1st in the FIFO, and back in the slot the tick
+    // after the block clears.
+    //
+    // ⚠ The decision is a LIVE read, never `syncedCiStatus` (which the phase line below is
+    // welcome to use — it only LABELS a wait). Yielding is a decision to let somebody else's
+    // code merge first, and re-ordering the user's clicks off a sync-interval-stale "failure"
+    // that has since gone green is not a wait it can shrug off.
+    //
+    // It is paid for only when it can change something: the slot-holder, on a repo where
+    // somebody is actually waiting behind it AND has not itself stepped aside. ⚠ That is
+    // `slot.canYield`, not `depth > 1`: at depth 5 with the other four yielded there is nobody
+    // to hand the slot to, so the read would buy a GitHub call per tick to re-enter a yield
+    // whose own copy ("letting the next armed PR through") names a PR that does not exist.
+    // `canYield` is false for a live `viaMergeQueue` intent too — it has no place in the local
+    // FIFO, so it can't yield a slot to anyone.
+    //
+    // The rollup is every check, not just the REQUIRED ones — but a red NON-required check on
+    // its own reads as 'unstable', not 'blocked', and we merge that. Reaching here with a
+    // FAILURE means either a required check failed or a review is missing on top of a red one,
+    // and both of those need a human, which is the whole test. Null (unreadable, no CI, a
+    // partial response) is UNPROVEN and never yields.
+    //
+    // (Conflicts yield too, but far earlier — they never reach this branch, and they need no
+    // extra read: `mergeable === false` is already in the snapshot every intent pays for.)
+    if (slot?.holdsSlot && slot.canYield) {
+      const rollup = await fetchPrHeadCheckRollup(token, work.owner, work.name, work.number);
+      if (rollup === 'FAILURE' || rollup === 'ERROR') {
+        yieldedForFailedChecks.add(work.id);
+        await updateAutoMergeState(work.id, {
+          lastReason: `its required checks failed — letting the next armed PR on ${work.owner}/${work.name} through; still armed`,
+          phase: 'queued_local',
+        });
+        return;
+      }
+    }
     await updateAutoMergeState(work.id, {
       lastReason: 'waiting: branch protection not satisfied (required reviews or checks)',
       // 'blocked' is GitHub's word for BOTH "the required checks are still running" and "the
@@ -600,6 +849,12 @@ async function processOne(
   });
   if (out.ok) {
     forgetIntent(work.id);
+    // ⚠ THE FRESHEN FIX (rule 8). We just moved the trunk, so every other armed intent on this
+    // repo is behind by exactly the commit that landed — and the freshen mark each of them
+    // earned against the OLD trunk is what would stop them ever updating again. Clearing the
+    // siblings' marks here is what makes freshening once-per-TURN: with the one-slot rule, N
+    // PRs cost N branch updates and N CI runs, in click order.
+    clearSiblingFreshenMarks(slot);
     // Stamp locally exactly like the interactive merge route, so the SPA reflects the merge
     // before the next sync; then mark the intent merged (what the toast diffs on). The merge
     // is attributed to the ACCOUNT owner — it went out on their token, so GitHub will
@@ -637,13 +892,33 @@ export async function runAutoMergeTick(log: FastifyBaseLogger): Promise<void> {
   if (running) return;
   running = true;
   try {
-    const work = await listArmedMergeRequestsForRunner(MAX_INTENTS_PER_TICK);
+    // TWO scans, and they answer different questions. The bounded one is the tick's WORK —
+    // capped at `MAX_INTENTS_PER_TICK`, least-recently-checked first, so it is the ceiling on
+    // GitHub traffic. The unbounded one is the ORDER: a queue position is a fact about all of a
+    // repo's armed intents, and it simply cannot be computed from a page that may hold three of
+    // five. The second scan is five scalar columns and one join — no GitHub, no bodies.
+    const [work, order] = await Promise.all([
+      listArmedMergeRequestsForRunner(MAX_INTENTS_PER_TICK),
+      listArmedIntentOrder(null),
+    ]);
     if (work.length === 0) return;
+    const queues = buildArmedRepoQueues(order, armedQueueMarks());
+
+    // SLOT-HOLDERS FIRST, so a repo with more armed intents than one tick's budget still makes
+    // progress on the one that can actually move. `sort` is stable in Node, so the
+    // least-recently-checked order the scan established survives INSIDE each half — the
+    // fairness rotation that keeps intent #26 from starving is untouched, and a slot-holder
+    // that does fall outside the page is picked up by that same rotation on the next tick.
+    const ranked = [...work].sort(
+      (a, b) =>
+        (queues.byIntentId.get(a.id)?.holdsSlot === false ? 1 : 0) -
+        (queues.byIntentId.get(b.id)?.holdsSlot === false ? 1 : 0),
+    );
 
     // Group by account so each tenant's token is fetched once and one bad token fails only
     // that tenant's intents.
     const byAccount = new Map<number, ArmedMergeWork[]>();
-    for (const w of work) {
+    for (const w of ranked) {
       const list = byAccount.get(w.accountId);
       if (list) list.push(w);
       else byAccount.set(w.accountId, [w]);
@@ -659,7 +934,7 @@ export async function runAutoMergeTick(log: FastifyBaseLogger): Promise<void> {
       }
       for (const intent of intents) {
         try {
-          await processOne(intent, token, log);
+          await processOne(intent, token, queues.byIntentId.get(intent.id), log);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           const strikes = (failureCounts.get(intent.id) ?? 0) + 1;

@@ -42,9 +42,58 @@ const PHASE_LABEL: Record<ArmedMergePhase, string> = {
   blocked_protection: 'Waiting — branch protection not satisfied',
   enqueuing: 'Adding to the merge queue…',
   queued: 'In the merge queue',
+  // ⚠ NOT GitHub's merge queue — Limn's own per-repo hold, so the batch lands one PR at a time
+  // instead of every intent freshening against a trunk the previous merge just moved. The word
+  // "queue" is deliberately absent from this line: `queued` above owns it, and the two are
+  // different queues on different sides of the network. `queuedLocalHeadline` refines it with
+  // the position when the row carries one.
+  queued_local: 'Waiting its turn on this repo',
   merging: 'Merging…',
   retrying: 'Retrying after a GitHub error',
 };
+
+/**
+ * The `queued_local` headline, given what the row knows about its place in the repo's landing
+ * order. `queuePosition`/`queueDepth`/`yieldedForFailedChecks` are TRAILING OPTIONALS on the
+ * wire, so every branch here degrades to the plain label rather than rendering a hole — a row
+ * from a backend that predates them, or a `viaMergeQueue` intent, simply has none of them.
+ *
+ * The repo is not named: `RowHeader` above already carries `owner/name` for this very row.
+ */
+function queuedLocalHeadline(row: ArmedMergeRequest): string {
+  if (row.yieldedForFailedChecks) return 'Waiting — checks failed, letting the next PR through';
+  // ⚠ A WAIT NEEDS SOMEBODY AHEAD — `position > 1`, checked here rather than assumed. The two
+  // halves of this row are read at different times: `phase` is whatever the watcher last STORED
+  // (up to a full tick, two minutes, ago) while `queuePosition`/`queueDepth` are recomputed LIVE
+  // on every request. The slot-holder merging inside the same tick that parked this row is the
+  // ordinary case, and it left the card reading "Waiting its turn — 1 of 1 on this repo" — a
+  // queue of one, with the row itself at the head of it — until the watcher next looked.
+  if (row.queuePosition != null && row.queueDepth != null && row.queuePosition > 1) {
+    return `Waiting its turn — ${row.queuePosition} of ${row.queueDepth} on this repo`;
+  }
+  // Position 1 with a stored `queued_local`: its turn has already come and the watcher simply
+  // hasn't looked yet. Neutral, and never a count.
+  if (row.queuePosition === 1) return 'Next up on this repo';
+  // No position at all — a client-side row that predates the fields, or the one tick a
+  // queue-disabled intent spends taking its place in the landing order. The plain label is the
+  // honest one: it IS waiting a turn, we just can't say which.
+  return PHASE_LABEL.queued_local;
+}
+
+/**
+ * WHERE A LIVE ARMED INTENT STANDS, in one sentence — THE ONE spelling, shared by this stack and
+ * by the Pending board's merge row (`PendingMergeActions`). Two surfaces describing the same
+ * intent must not phrase it two ways; that is the same rule `myTurnCapDisclosure` enforces for
+ * the cap and `KIND_LABEL` for the kinds.
+ *
+ * Like `queuedLocalHeadline` it never names the repo — both callers already print `owner/name`
+ * for the row above it — and a phase the watcher could not honestly characterise comes back as
+ * the truthful "Waiting…", never a hole.
+ */
+export function armedPhaseHeadline(row: ArmedMergeRequest): string {
+  if (row.phase === 'queued_local') return queuedLocalHeadline(row);
+  return row.phase != null ? PHASE_LABEL[row.phase] : 'Waiting…';
+}
 
 // Phases where Limn (or GitHub) is actively doing something right now, as opposed to waiting
 // on a human or a check — the only ones that earn a spinner.
@@ -233,10 +282,15 @@ function LiveRow({ row }: { row: ArmedMergeRequest }): JSX.Element {
         ? 'working'
         : STALLED_PHASES.has(phase)
           ? 'stalled'
-          : 'waiting';
+          : // Waiting its TURN is ordinary progress, but a row that yielded because its checks
+            // failed is parked on a human exactly like `blocked_protection` — same phase, two
+            // very different states, so the tone reads the field rather than the phase.
+            phase === 'queued_local' && row.yieldedForFailedChecks
+            ? 'stalled'
+            : 'waiting';
   // A phase the watcher couldn't honestly characterise comes back null; the prose is then the
   // only line there is, and "Waiting…" is the truthful headline for it.
-  const headline = phase != null ? PHASE_LABEL[phase] : 'Waiting…';
+  const headline = armedPhaseHeadline(row);
 
   return (
     <li className="px-3 py-2 text-xs">
@@ -259,7 +313,17 @@ function LiveRow({ row }: { row: ArmedMergeRequest }): JSX.Element {
       <div className="mt-0.5 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-gray-500 dark:text-gray-400">{headline}</div>
-          {row.lastReason && (
+          {/* ⚠ `lastReason` is the SPECIFICS under the headline — which branch, which error. For
+              a POSITIONED `queued_local` alone it is not: the watcher writes "waiting its turn —
+              3rd of 3 armed on acme/mine", which is the same fact the headline already derived
+              from `queuePosition`/`queueDepth`, in a second spelling ("3rd of 3" under "3 of 3").
+              Both lines are correct and the pair reads as two different statuses. The prose stays
+              on the wire — it is the fallback for a client that does not know the phase — and is
+              simply not drawn beneath its own restatement. ⚠ The position is what makes it a
+              restatement, so the test is the FIELD, not the phase: a `queued_local` row with no
+              position (an intent spending one tick taking its place in the landing order after
+              its merge queue was disabled) has prose that says something the headline cannot. */}
+          {row.lastReason && !(row.phase === 'queued_local' && row.queuePosition != null) && (
             <div className="mt-0.5 text-[11px] leading-snug text-gray-400">{row.lastReason}</div>
           )}
         </div>

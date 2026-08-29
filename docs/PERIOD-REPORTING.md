@@ -30,7 +30,7 @@ table:
 | The **1:1 person vector** (People report sections) | `db/person-period.ts` | CORE |
 | **Storage, narration, routes, hashing, backfill** | `packages/pro/src/insights/period-report.ts` (+ pro migrations `0025`/`0026`) | Pro `periodReports` |
 
-The plugin half — the stored rows, the Sonnet narration, `/api/pro/insights/period*`, the
+The plugin half — the stored rows, the Haiku narration, `/api/pro/insights/period*`, the
 `payloadHashFor` cache key, the "By workspace" axis and the People-report contract — is
 documented in [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) (§ apiVersion 21,
 § The People report). This doc is the core side: the definitions, why they are shaped this
@@ -454,8 +454,8 @@ with **approvals counted separately** (a different act: governance, not review v
 
 ## "Time until a person reviewed it" has ONE fold
 
-**`loadFirstHumanReviewHours(accountId, scope, from, to, lanes, authorUserId?, samplesOut?)`**
-is the single definition, read by BOTH the vector's
+**`loadFirstHumanReviewHours(accountId, scope, from, to, lanes, authorUserId?, samplesOut?,
+truncatedOut?)`** is the single definition, read by BOTH the vector's
 `median_time_to_first_human_review_hours` and the lane panel's
 `medianTimeToFirstHumanReviewHours` — which render **one directly above the other on the same
 screen**.
@@ -495,7 +495,16 @@ driver error rather than a truncated result. A period is a sprint: 5,000 human-r
 one is far beyond anything real. (`PERIOD_COMMENT_SCAN_CAP` is 200,000 and bounds the row
 scans, not the bind list.)
 
-### The two optional parameters exist so nobody writes a second fold
+⚠ **AND THE FOLD REPORTS ITS OWN TRUNCATION — a caller cannot infer it.** All three caps above
+(the candidate break, and both `PERIOD_COMMENT_SCAN_CAP` row limits) cut the population silently:
+the return is a bare `number[]` plus a positional sink, so a cut fold and a complete one are
+indistinguishable. **A call-site heuristic (`hours.length >= CAP`) UNDER-FIRES** — the caps sit on
+the candidate and review-row scans while `hours` is that population after two further narrowings,
+so it is routinely far below any cap on a fold that really was truncated. `db/flow-findings.ts`
+consequently reported `coverage.truncated: false` on a cut `?days=90` fold, which is the exact
+silent truncation that field exists to prevent. Hence `truncatedOut` below.
+
+### The three optional parameters exist so nobody writes a second fold
 
 - **`authorUserId`** narrows the candidate PR population to one author — the People report's
   "median hours THEIR PRs waited for a first human review". Query 2 runs over those candidates,
@@ -504,6 +513,10 @@ scans, not the bind list.)
   EXACTLY the PRs whose hours entered the median, off this one fold, so no caller writes a
   sibling predicate to name the sample population. Optional and append-only — both period-vector
   call sites pass nothing and are byte-identical to before.
+- **`truncatedOut`** (`ReviewFoldTruncation`) is the truncation sink: set to `true` — and only
+  ever to `true`, so one sink can be OR'd across several folds — when any of the three caps cut.
+  Bottlenecks ORs it into `coverage.truncated`. ⚠ **The fold is EXTENDED, never forked**: it has
+  three other callers, and a second fold of this number is the shipped bug this section opens with.
 
 `median()` and `round2()` are exported from `period-metrics.ts` for `db/person-period.ts`, so
 the person vector rounds and medians identically. `round2` is not cosmetic: an unrounded
@@ -547,7 +560,7 @@ exactly one period. Pinned by `db/bot-analytics-window-bounds.test.ts`.
 ## See also
 
 - [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) — the plugin half: stored rows,
-  `payloadHashFor`, the Sonnet narration + the D4 digit gate, the "By workspace" axis
+  `payloadHashFor`, the Haiku narration + the D4 digit gate, the "By workspace" axis
   (`getPeriodMetricsForWorkspaces`), and the **People report** (`?evidence=1`,
   `PERSON_REPORT_VERSION`, the bot section's two vectors).
 - [API.md](API.md) — `/api/pro/insights/period*`, `/api/bot-analytics` (`fromMs`/`toMs`),

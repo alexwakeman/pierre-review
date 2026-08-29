@@ -18,13 +18,32 @@ import { TimerIcon } from './Icons.js';
 // are in — the copy says so, and a PR already IN the queue gets no button (its 'queued'
 // verdict fails eligibility; it is already landing).
 //
-// merge-options is fetched EAGERLY here (unlike MergeControl's click-gated fetch): eligibility
-// needs the LIVE behindBy, and the user is looking at this exact PR — 3 GitHub calls per
-// viewed eligible PR is the accepted cost. The query KEY is shared with MergeControl (30s
+// merge-options is fetched EAGERLY by default (unlike MergeControl's click-gated fetch):
+// eligibility needs the LIVE behindBy, and the user is looking at this exact PR — 3 GitHub calls
+// per viewed eligible PR is the accepted cost. The query KEY is shared with MergeControl (30s
 // staleTime), so one fetch serves both controls.
-export function MergeWhenReadyControl({ prId }: { prId: number }): JSX.Element | null {
+//
+// ⚠ AND THAT COST IS WHY `eager` EXISTS. This is the ONE component that arms, so a LIST surface
+// (the Pending board, up to 50 rows) has to be able to mount it without each row paying that
+// fetch on mount — 50 × ~3 GitHub calls to PAINT a board. `eager={false}` makes the fetch
+// click-gated instead: the control renders a compact trigger, and only a click asks GitHub.
+// Forking the component for the board was the alternative, and it would have put a second arm
+// path in the codebase.
+export function MergeWhenReadyControl({
+  prId,
+  eager = true,
+}: {
+  prId: number;
+  /** false ⇒ never fetch merge-options on mount; render a trigger and fetch on the click.
+   *  The ARMED state still renders for free either way — it is a selector over the account-wide
+   *  list the app already polls, and cancelling must always be possible. */
+  eager?: boolean;
+}): JSX.Element | null {
   const [confirming, setConfirming] = useState(false);
-  const { data: options } = useMergeOptions(prId, true);
+  // ⚠ THE ONLY GATE ON THE GITHUB CALL. `asked` is one-way (a click), so a board row that has
+  // been opened keeps its answer for the rest of the mount, exactly as MergeControl's `open` does.
+  const [asked, setAsked] = useState(false);
+  const { data: options } = useMergeOptions(prId, eager || asked);
   const armedIntent = usePrArmedIntent(prId);
   const arm = useArmAutoMerge(prId);
   const disarm = useDisarmAutoMerge(prId);
@@ -77,7 +96,28 @@ export function MergeWhenReadyControl({ prId }: { prId: number }): JSX.Element |
 
   // No button until eligibility is KNOWN — a guess from the synced row would either flash a
   // button that vanishes or (worse) gate on behindBy facts the lean row doesn't carry.
-  if (options == null) return null;
+  //
+  // Under `eager` that means rendering NOTHING while the fetch is in flight (PrDetail's
+  // behaviour, unchanged). Un-eager, the same ignorance is the reason for the trigger: the
+  // reader asks, THEN we ask GitHub. Note `options` can already be non-null here without any
+  // click — MergeControl shares the query key, so opening it warms this control for free.
+  if (options == null) {
+    if (eager) return null;
+    if (!asked) {
+      return (
+        <button
+          type="button"
+          onClick={() => setAsked(true)}
+          className="inline-flex items-center gap-1 rounded border border-violet-400 px-2 py-0.5 text-[11px] font-medium text-violet-600 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30"
+          title="Check whether Limn's watcher can land this for you — it asks GitHub for the live merge state"
+        >
+          <TimerIcon size={11} />
+          Merge when ready
+        </button>
+      );
+    }
+    return <span className="text-[11px] text-gray-400">Checking merge state…</span>;
+  }
 
   const queue = options.mergeQueue;
   // Same construction as MergeControl's, and like there `autoMergeArmed` is deliberately NOT
@@ -101,7 +141,20 @@ export function MergeWhenReadyControl({ prId }: { prId: number }): JSX.Element |
     verdict,
     behindBy: options.behindBy,
   });
-  if (!eligible) return null;
+  // ⚠ AN INELIGIBLE PR RENDERS NOTHING WHEN EAGER (PrDetail: the button simply never appeared) but
+  // must SAY SO once the reader has clicked — a trigger that answers a question by vanishing reads
+  // as a broken button, and gets clicked again on the next render.
+  if (!eligible) {
+    if (eager || !asked) return null;
+    return (
+      <span
+        className="text-[11px] text-gray-400"
+        title="Arming only helps while something is blocking the merge. There is nothing here for the watcher to wait out — or this repo won’t let this account merge."
+      >
+        Nothing to arm.
+      </span>
+    );
+  }
 
   if (confirming) {
     return (

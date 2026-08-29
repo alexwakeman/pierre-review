@@ -115,6 +115,12 @@ export function useMergePr(prId: number) {
       void qc.invalidateQueries({ queryKey: ['me'] });
       void qc.invalidateQueries({ queryKey: ['activity'] });
       void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
+      // The Pending board can now MERGE — so the `merge` card the click came from has to leave it,
+      // and the daily-brief strip that counts the same cards has to agree. ⚠ An INVALIDATION, not
+      // a local edit: the board's ORDER is the server's `doNextIds`, and a mutation response has
+      // no business re-ranking it.
+      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
+      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
       // The viewer's first merge in a repo grants them merge rights → refresh the shield.
       void qc.invalidateQueries({ queryKey: ['mergers'] });
     },
@@ -178,6 +184,11 @@ export function useUpdatePrBranch(prId: number) {
       void qc.invalidateQueries({ queryKey: ['merge-options', prId] });
       void qc.invalidateQueries({ queryKey: ['timeline'] });
       void qc.invalidateQueries({ queryKey: ['open-prs'] });
+      // An `update_branch` card exists BECAUSE `mergeStateStatus === 'behind'`; a successful
+      // update is the fact that retires it (or turns it into a `merge` card). Same invalidate-
+      // don't-edit rule as the merge mutation above.
+      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
+      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
     },
   });
 }

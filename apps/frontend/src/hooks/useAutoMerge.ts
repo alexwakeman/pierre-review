@@ -79,6 +79,13 @@ export function useArmAutoMerge(prId: number) {
           : { requests: [armed, ...prev.requests.filter((r) => r.prId !== armed.prId)] },
       );
       void qc.invalidateQueries({ queryKey: ARMED_MERGES_KEY });
+      // ⚠ ['attention-cards'] IS DELIBERATELY ABSENT, even though the Pending board now arms from
+      // its own rows. Arming changes nothing that board's response carries — the PR is still
+      // merge-ready and still on it — and the armed row it draws reads `usePrArmedIntent`, a
+      // selector over the list seeded three lines up, so the card updates on the click either way.
+      // `/api/attention` is on the `search` rate tier (it folds getWorkspaceInsights); spending a
+      // round trip there to re-render an unchanged list is a cost with no observable effect. The
+      // MERGE itself does invalidate it — see useMergePr — because that really does retire a card.
     },
   });
 }

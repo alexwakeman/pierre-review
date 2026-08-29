@@ -222,6 +222,24 @@ export interface ReviewSampleRef {
   atMs: number;
 }
 
+/**
+ * Truncation sink for `loadFirstHumanReviewHours` — the fold's own answer to "did I see the whole
+ * window?".
+ *
+ * ⚠ IT HAS TO BE THE FOLD'S ANSWER, NOT THE CALLER'S. The fold returns a bare `number[]` plus a
+ * positional samples sink, so a caller cannot tell a complete fold from a cut one; and a call-site
+ * heuristic (`hours.length >= CAP`) UNDER-FIRES, because the caps sit on the CANDIDATE and
+ * REVIEW-ROW scans while the returned array is those populations after two further narrowings —
+ * routinely an order of magnitude smaller than any cap on a fold that really was truncated.
+ * db/flow-findings.ts then reported `coverage.truncated: false` on a cut ?days=90 fold, which is
+ * the silent truncation that field exists to prevent.
+ *
+ * ONLY EVER SET TO TRUE, so one sink can be handed to several folds and OR'd together.
+ */
+export interface ReviewFoldTruncation {
+  truncated: boolean;
+}
+
 // ── The ONE definition of "time until a person reviewed it" ──────────────────────────────────
 //
 // Extracted because it is read by TWO surfaces — the vector's
@@ -255,7 +273,22 @@ export async function loadFirstHumanReviewHours(
   // this one fold, so no caller ever writes a sibling predicate to name it. Optional + append-
   // only: both period-vector call sites pass nothing and are byte-identical to before.
   samplesOut?: ReviewSampleRef[],
+  // Truncation sink (see `ReviewFoldTruncation`): when given, set to true if ANY of this fold's
+  // three caps cut the population — the two PERIOD_COMMENT_SCAN_CAP limits below, or the
+  // PERIOD_FIRST_REVIEW_PR_CAP candidate break.
+  //
+  // Optional and APPEND-ONLY for the same reason `samplesOut` is: this is THE ONE FOLD for this
+  // number (the shipped 18.16h-vs-18.27h bug this block opens with), so it gets extended, never
+  // forked, and the three call sites that pass nothing are byte-identical to before.
+  truncatedOut?: ReviewFoldTruncation,
 ): Promise<number[]> {
+  // A scan that came back exactly at its cap is ASSUMED to have been cut — the `noteCap`
+  // convention db/flow-findings.ts uses. A second COUNT(*) is not worth it, and the cost of a
+  // false positive is one honest caveat on screen.
+  const noteTruncated = (): void => {
+    if (truncatedOut) truncatedOut.truncated = true;
+  };
+
   const inScope = and(
     eq(pullRequests.accountId, accountId),
     inArray(pullRequests.repoId, scope.repoIds),
@@ -280,6 +313,7 @@ export async function loadFirstHumanReviewHours(
     .orderBy(desc(reviews.submittedAt), desc(reviews.id))
     .limit(PERIOD_COMMENT_SCAN_CAP)
     .execute();
+  if (reviewedPrRows.length >= PERIOD_COMMENT_SCAN_CAP) noteTruncated();
 
   // Deduped in TS rather than with a `groupBy`, which keeps the query free of an aggregate:
   // `min(submitted_at)` comes back as an epoch integer on SQLite and a Date on Postgres
@@ -291,7 +325,13 @@ export async function loadFirstHumanReviewHours(
     if (seenPr.has(r.prId)) continue;
     seenPr.add(r.prId);
     candidatePrIds.push(r.prId);
-    if (candidatePrIds.length >= PERIOD_FIRST_REVIEW_PR_CAP) break;
+    if (candidatePrIds.length >= PERIOD_FIRST_REVIEW_PR_CAP) {
+      // The one cap a caller can NEVER infer from the return value: the ids dropped here never
+      // reach query (2), so the hours array is short by an unknowable amount rather than clipped
+      // at a recognisable length.
+      noteTruncated();
+      break;
+    }
   }
   if (candidatePrIds.length === 0) return [];
 
@@ -318,6 +358,7 @@ export async function loadFirstHumanReviewHours(
     .orderBy(reviews.submittedAt, reviews.id)
     .limit(PERIOD_COMMENT_SCAN_CAP)
     .execute();
+  if (rows.length >= PERIOD_COMMENT_SCAN_CAP) noteTruncated();
 
   const firstHumanByPr = new Map<number, { at: number; openedAt: number }>();
   for (const r of rows) {

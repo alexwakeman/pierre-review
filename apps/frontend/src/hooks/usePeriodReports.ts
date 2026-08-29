@@ -136,8 +136,16 @@ export function useGeneratePeriodReport(workspaceId: number | null, periodKey: s
 // What stays client-side is PRESENTATION ONLY: a friendly label per model id. An id with no entry
 // falls back to showing the id, so a model added server-side appears in the picker — priced
 // correctly — without a frontend release.
+//
+// ⚠ THIS TABLE IS A LABEL SET, NOT A CHOICE SET, and the two go out of sync ON PURPOSE. The server
+// serves ONE selectable model now (`REPORT_MODELS` in packages/pro/src/llm/seam.ts is Haiku-only),
+// so 'claude-sonnet-5' can never reach the picker again — but reports NARRATED by it are stored,
+// and the report header, the period list and the transcript captions all name the model that wrote
+// what you are reading. Dropping the row would degrade those to a raw id for no gain.
 const MODEL_LABELS: Record<string, { label: string; hint: string }> = {
   'claude-haiku-4-5': { label: 'Haiku', hint: 'fast · cheapest' },
+  // Retired as a choice, kept as a label — see above. The hint is unreachable (only the picker
+  // renders one) and stays for the day it is a choice again.
   'claude-sonnet-5': { label: 'Sonnet', hint: 'more considered prose' },
 };
 
@@ -161,6 +169,11 @@ export interface PeriodReportModelChoice {
  * `modelInfo` is optional on the wire — an older plugin build simply omits it — so this returns an
  * EMPTY list rather than inventing prices, and the caller hides the selector instead of quoting a
  * number it made up.
+ *
+ * ⚠ A ONE-ENTRY LIST IS THE NORMAL CASE NOW and the caller must not render a selector for it (see
+ * `choices.length > 1` in PeriodReportsPanel). The server decides how many models are selectable;
+ * this stays a plain map so that re-adding one server-side puts the control back with no frontend
+ * release — which is also why the length test lives at the mount, not in here.
  */
 export function periodReportModelChoices(
   info: PeriodReportModelInfo | undefined,

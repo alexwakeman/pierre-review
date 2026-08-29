@@ -581,6 +581,65 @@ export async function isCommitContainedInRef(
   }
 }
 
+interface GqlPrCheckRollup {
+  repository?: {
+    pullRequest?: {
+      commits?: {
+        nodes?: Array<{ commit?: { statusCheckRollup?: { state?: string | null } | null } }>;
+      } | null;
+    } | null;
+  } | null;
+}
+
+const PR_CHECK_ROLLUP_QUERY = /* GraphQL */ `
+  query PrCheckRollup($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        commits(last: 1) {
+          nodes {
+            commit {
+              statusCheckRollup {
+                state
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * The LIVE rollup state of every check on a PR's head commit (SUCCESS / FAILURE / PENDING /
+ * ERROR / EXPECTED), or null.
+ *
+ * GraphQL rather than REST because `statusCheckRollup` is the ONE field that spans both check
+ * runs and legacy commit statuses; REST needs `/check-runs` and `/status` separately and still
+ * makes the caller fold them. One point, one call.
+ *
+ * ⚠ NULL MEANS "WE DON'T KNOW", never "green". A deleted PR, a token that can't read checks
+ * (`statusCheckRollup` is one of the sub-fields GitHub NULLS on a partial 200 — see
+ * github/client.ts), or a commit no CI ever ran on all land here, so every caller must treat
+ * null as "unproven" and take the conservative branch. Errors are swallowed for the same
+ * reason: the auto-merge watcher reads this only to decide whether to let a LATER PR go first,
+ * and a network blip must not turn into a reordering — or into a failure strike.
+ */
+export async function fetchPrHeadCheckRollup(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+): Promise<string | null> {
+  try {
+    const gql = getGraphqlClientFor(token);
+    const res = await gql<GqlPrCheckRollup>(PR_CHECK_ROLLUP_QUERY, { owner, name, number });
+    const nodes = res.repository?.pullRequest?.commits?.nodes ?? [];
+    return nodes[0]?.commit?.statusCheckRollup?.state ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ---- PR merge + update-from-trunk (CORE / free tier) ----
 
 // The repo's enabled merge methods + default branch (GET /repos/{o}/{n}). Not synced — a

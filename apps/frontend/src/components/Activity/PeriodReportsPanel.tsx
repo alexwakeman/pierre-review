@@ -30,6 +30,7 @@ import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
 import {
   periodReportGenerateMutationKey,
   periodReportModelChoices,
+  reportModelLabel,
   useGeneratePeriodReport,
   usePeriodReport,
   usePeriodReportsList,
@@ -1105,16 +1106,26 @@ function GenerateControls({
   reportLoading: boolean;
   // The server's model list + its pre-flight quotes. Optional on the wire (an older plugin omits
   // it), in which case the selector is hidden and no number is quoted — the SPA holds no price
-  // table of its own to fall back on, deliberately.
+  // table of its own to fall back on, deliberately. A PRESENT list with one entry is the normal
+  // case now (Haiku is the only selectable model): the selector goes, the quote stays.
   modelInfo: PeriodReportModelInfo | undefined;
 }): JSX.Element {
   const choices = useMemo(() => periodReportModelChoices(modelInfo), [modelInfo]);
   // `null` = "whatever the account is configured for": with no explicit choice the POST body omits
   // `model` and `pro_settings.report_model` governs, which is what that setting is FOR. Picking
-  // from the selector overrides it for this run only.
+  // from the selector overrides it for this run only. With the selector hidden (one model) nothing
+  // ever writes this, so every generation goes out without a `model` field — the account setting
+  // and the server default stay in charge, which is what we want when there is nothing to choose.
   const [model, setModel] = useState<string | null>(null);
   const effectiveModel = model ?? modelInfo?.model ?? null;
   const estimate = choices.find((c) => c.id === effectiveModel)?.estimate ?? null;
+  // A ONE-OPTION `<select>` is a control that cannot be operated: it invites a click, absorbs it,
+  // and changes nothing. Haiku is the only selectable model now (REPORT_MODELS in the plugin's
+  // llm/seam.ts), so the whole label comes out — but the QUOTE beside it does not, because "what
+  // will this cost" is a live question whether or not there is anything to pick. The test is on
+  // the SERVER's list length, not on a hardcoded id, so re-adding a model server-side brings the
+  // selector back with no frontend release.
+  const showModelPicker = choices.length > 1;
   const generate = useGeneratePeriodReport(workspaceId, periodKey);
   // Mount-shared in-flight state. `generate.isPending` is per-mount and resets to "Generate" the
   // moment this component remounts (a sub-tab switch mid-run), which invites a second BILLED POST
@@ -1133,7 +1144,7 @@ function GenerateControls({
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
-        {choices.length > 0 && (
+        {showModelPicker && (
           <label className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
             Model
             <select
@@ -1154,11 +1165,14 @@ function GenerateControls({
             costs several times more is visible before the click rather than in next month's
             usage. SERVED, not computed here — the prices and the token envelope are the
             server's, and a second copy of either only ever produces a differently-wrong promise
-            about money. Credits, never dollars: the app's one currency for AI spend. */}
+            about money. Credits, never dollars: the app's one currency for AI spend.
+            ⚠ It stays mounted when the selector is HIDDEN: with one model there is nothing to
+            switch between, but a button about to spend credits must still say how many. The
+            tooltip then carries the model name the vanished label used to. */}
         {estimate && (
           <span
             className="text-[11px] text-gray-400"
-            title="Estimated model cost for one generation, priced by the server"
+            title={`Estimated cost of one generation with ${reportModelLabel(estimate.model)}, priced by the server`}
           >
             ≈ {estimate.estimatedCredits} credits
           </span>

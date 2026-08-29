@@ -26,7 +26,7 @@ for (const suffix of ['', '-shm', '-wal']) {
 const { runMigrations } = await import('../src/db/run-migrations.js');
 const { closeDb, db, schema } = await import('../src/db/client.js');
 const q = await import('../src/db/queries.js');
-const { and, eq } = await import('drizzle-orm');
+const { and, eq, inArray } = await import('drizzle-orm');
 
 await runMigrations();
 
@@ -2070,6 +2070,252 @@ check(
   check(
     'getAutomationOutput(A) refuses a HUMAN outright — the mirror image of the person fold',
     humanRow != null && (await getAutomationOutput(1, scopeA, humanRow.id, winAO)) === null,
+  );
+}
+
+// ── Bottlenecks (db/flow-findings.ts) ────────────────────────────────────────────────────────
+//
+// WHY THIS FOLD IS IN HERE. Its rows LEAVE THE TENANT: a finding carries PR titles, GitHub URLs
+// and `actorIds` resolved into a `users` table — the same shape that made
+// `getBenchmarkContributions` an ALLOW-list rather than a deny-list. It is also the newest kind of
+// getter in the codebase (a multi-scan fold over six tables), and every one of those scans needs
+// its own `accountId` predicate; a single omission reads as "the query returned rows" rather than
+// as an error.
+{
+  const { getFlowFindings } = await import('../src/db/flow-findings.js');
+  const WIN = 90;
+  const H = 60 * 60 * 1000;
+
+  // ── A PRODUCTIVE FIXTURE, seeded on BOTH tenants ─────────────────────────────────────────────
+  // Enough for `single_reviewer_path` to fire: one directory, ≥8 PRs with a measured first human
+  // review and ≥12 human reviews, one reviewer taking ≥60% of them, and a first-read wait far
+  // enough above the workspace median to clear both the ratio and the absolute delta. Each tenant
+  // gets its OWN copy under its own repo, so "A never sees B's rows" is a claim with something on
+  // both sides of it.
+  const seedFlow = async (
+    accountId: number,
+    repoId: number,
+    tag: string,
+    owner: { id: number },
+    other: { id: number },
+  ): Promise<void> => {
+    for (let i = 0; i < 10; i++) {
+      const openedAt = new Date(now.getTime() - (30 - i) * 24 * H);
+      const [pr] = await db
+        .insert(schema.pullRequests)
+        .values({
+          githubNodeId: `PR_flow_${tag}_${i}`,
+          accountId,
+          repoId,
+          number: 900 + i,
+          title: `${tag} flow fixture ${i}`,
+          state: 'open',
+          isDraft: false,
+          authorId: other.id,
+          openedAt,
+          updatedAt: openedAt,
+          additions: 120,
+          deletions: 30,
+          // ⚠ MUST equal files.length: the fold reads `changedFiles > files.length` as the sync's
+          // 100-file truncation, and a mismatch here refuses single_reviewer_path outright.
+          changedFiles: 1,
+          files: [{ path: 'packages/api/handler.ts', additions: 120, deletions: 30 }],
+        })
+        .returning()
+        .execute();
+      // A SLOW first read (30h), and the concentrated reviewer takes 8 of 10.
+      const reviewer = i < 8 ? owner : other;
+      await db
+        .insert(schema.reviews)
+        .values({
+          githubNodeId: `RV_flow_${tag}_${i}`,
+          prId: pr!.id,
+          authorId: reviewer.id,
+          state: 'commented',
+          submittedAt: new Date(openedAt.getTime() + 30 * H),
+        })
+        .execute();
+      // ⚠ A SECOND review per PR. The bucket floor is TWO numbers — >=8 reviewed pull requests
+      // AND >=12 human reviews — and ten PRs with one review each clears the first and misses the
+      // second, which refuses the kind and leaves every assertion below vacuous.
+      await db
+        .insert(schema.reviews)
+        .values({
+          githubNodeId: `RV_flow2_${tag}_${i}`,
+          prId: pr!.id,
+          authorId: owner.id,
+          state: 'commented',
+          submittedAt: new Date(openedAt.getTime() + 34 * H),
+        })
+        .execute();
+      await db
+        .insert(schema.reviewThreads)
+        .values({
+          githubNodeId: `TH_flow_${tag}_${i}`,
+          prId: pr!.id,
+          path: 'packages/api/handler.ts',
+          isResolved: false,
+          isOutdated: false,
+          derivedState: 'untouched',
+          // NO `updatedAt` — `review_threads` has no such column (createdAt/resolvedAt only), and
+          // the stray key was a compile error that broke `pnpm typecheck` for the whole backend.
+          createdAt: openedAt,
+        })
+        .execute();
+      // A FAST second directory drags the workspace median down, so the slow one stands out.
+      const [fastPr] = await db
+        .insert(schema.pullRequests)
+        .values({
+          githubNodeId: `PR_flowfast_${tag}_${i}`,
+          accountId,
+          repoId,
+          number: 950 + i,
+          title: `${tag} fast fixture ${i}`,
+          state: 'open',
+          isDraft: false,
+          authorId: other.id,
+          openedAt,
+          updatedAt: openedAt,
+          additions: 20,
+          deletions: 5,
+          changedFiles: 1,
+          files: [{ path: 'docs/readme.md', additions: 20, deletions: 5 }],
+        })
+        .returning()
+        .execute();
+      await db
+        .insert(schema.reviews)
+        .values({
+          githubNodeId: `RV_flowfast_${tag}_${i}`,
+          prId: fastPr!.id,
+          authorId: (i % 2 === 0 ? owner : other).id,
+          state: 'commented',
+          submittedAt: new Date(openedAt.getTime() + 1 * H),
+        })
+        .execute();
+      await db
+        .insert(schema.reviewThreads)
+        .values({
+          githubNodeId: `TH_flowfast_${tag}_${i}`,
+          prId: fastPr!.id,
+          path: 'docs/readme.md',
+          isResolved: false,
+          isOutdated: false,
+          derivedState: 'untouched',
+          // NO `updatedAt` — `review_threads` has no such column (createdAt/resolvedAt only), and
+          // the stray key was a compile error that broke `pnpm typecheck` for the whole backend.
+          createdAt: openedAt,
+        })
+        .execute();
+    }
+  };
+  const [flowA1] = await db
+    .insert(schema.users)
+    .values({ githubLogin: 'flow-owner-a', githubNodeId: 'U_flow_a1', isBot: false })
+    .returning()
+    .execute();
+  const [flowA2] = await db
+    .insert(schema.users)
+    .values({ githubLogin: 'flow-other-a', githubNodeId: 'U_flow_a2', isBot: false })
+    .returning()
+    .execute();
+  const [flowB1] = await db
+    .insert(schema.users)
+    .values({ githubLogin: 'flow-owner-b', githubNodeId: 'U_flow_b1', isBot: false })
+    .returning()
+    .execute();
+  const [flowB2] = await db
+    .insert(schema.users)
+    .values({ githubLogin: 'flow-other-b', githubNodeId: 'U_flow_b2', isBot: false })
+    .returning()
+    .execute();
+  await seedFlow(1, A.repoId, 'a', flowA1!, flowA2!);
+  await seedFlow(2, B.repoId, 'b', flowB1!, flowB2!);
+
+  const aOut = await getFlowFindings(1, scopeA, WIN);
+  const bOut = await getFlowFindings(2, scopeB, WIN);
+
+  // ⚠ NON-VACUITY FIRST. Every assertion below is an `.every()` over findings/evidence/users, and
+  // `[].every()` is `true` — so a fixture that produces NO findings turns this whole block into
+  // six green lines that test nothing. That failure mode has already shipped here once (a
+  // cross-repo check that was vacuous until the decoy repo got a red trunk), so the fixture's
+  // productivity is asserted rather than assumed.
+  const aEvidence = aOut.findings.flatMap((f) => f.evidence);
+  check(
+    'getFlowFindings FIXTURE IS PRODUCTIVE — findings, openable evidence AND a resolved actor',
+    aOut.findings.length > 0 &&
+      aEvidence.length > 0 &&
+      aOut.findings.some((f) => f.actorIds.length > 0) &&
+      aOut.users.length > 0,
+  );
+
+  check(
+    'getFlowFindings echoes the scope it was handed, never another tenant workspace',
+    aOut.workspaceId === scopeA.workspaceId && bOut.workspaceId === scopeB.workspaceId,
+  );
+
+  // Every evidence PR must belong to a repo in the caller's own workspace. `repoFullName` is the
+  // cheap oracle: the fixture gives the two accounts disjoint repo names.
+  const reposOf = async (accountId: number, scope: typeof scopeA): Promise<Set<string>> => {
+    const rows = await db
+      .select({ owner: schema.repos.owner, name: schema.repos.name })
+      .from(schema.repos)
+      .where(
+        and(
+          eq(schema.repos.accountId, accountId),
+          scope.repoIds.length > 0
+            ? inArray(schema.repos.id, scope.repoIds)
+            : eq(schema.repos.id, -1),
+        ),
+      )
+      .execute();
+    return new Set(rows.map((r) => `${r.owner}/${r.name}`));
+  };
+  const ownA = await reposOf(1, scopeA);
+  const ownB = await reposOf(2, scopeB);
+
+  const evidenceRepos = (out: typeof aOut): string[] =>
+    out.findings.flatMap((f) => f.evidence.map((e) => e.repoFullName));
+  check(
+    'getFlowFindings evidence names only repos inside the caller own workspace',
+    evidenceRepos(aOut).every((r) => ownA.has(r)) && evidenceRepos(bOut).every((r) => ownB.has(r)),
+  );
+
+  // `users` is one of the two GLOBAL tables, so the resolution table is the leak that would not
+  // look like one: an unscoped read there hands a tenant every login in the database.
+  check(
+    'getFlowFindings resolves ONLY the actors its own findings named — never the global users table',
+    aOut.users.every((u) => aOut.findings.some((f) => f.actorIds.includes(u.id))) &&
+      bOut.users.every((u) => bOut.findings.some((f) => f.actorIds.includes(u.id))),
+  );
+
+  // A repo-grained finding must carry a repoId the caller owns (null is legal — `size_latency` is
+  // workspace-wide).
+  const repoIdsOf = (out: typeof aOut): number[] =>
+    out.findings.map((f) => f.repoId).filter((id): id is number => id != null);
+  check(
+    'getFlowFindings repoId on every finding is one of the caller own repos',
+    repoIdsOf(aOut).every((id) => scopeA.repoIds.includes(id)) &&
+      repoIdsOf(bOut).every((id) => scopeB.repoIds.includes(id)),
+  );
+
+  // The coverage line is a claim about the CALLER's workspace; counting another tenant's repos
+  // into it would be a quiet cross-tenant disclosure in a footnote nobody audits.
+  check(
+    'getFlowFindings coverage counts the caller own repos only',
+    aOut.coverage.reposInWorkspace === scopeA.repoIds.length &&
+      bOut.coverage.reposInWorkspace === scopeB.repoIds.length,
+  );
+
+  // An EMPTY workspace must refuse, never widen to the account — the `[]`-is-a-real-answer rule.
+  const emptyWs = await q.createWorkspace(1, 'iso-flow-empty');
+  const emptyScope = await q.resolveWorkspaceScope(1, emptyWs.id);
+  const emptyOut = await getFlowFindings(1, emptyScope, WIN);
+  check(
+    'getFlowFindings on an EMPTY workspace refuses rather than widening to the account',
+    emptyOut.findings.length === 0 &&
+      emptyOut.refusals.length === 4 &&
+      emptyOut.coverage.prsScanned === 0,
   );
 }
 
