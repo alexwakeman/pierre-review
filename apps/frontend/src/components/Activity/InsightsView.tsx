@@ -38,7 +38,7 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 //
 // ── THE PANE IS TWO TABS ─────────────────────────────────────────────────────────────────────
 //   • Overview    — exactly the body described above, unchanged.
-//   • Bottlenecks — where HUMAN review time goes (BottlenecksPanel). CORE, FREE ON EVERY TIER,
+//   • Where it's stuck — the COURT LEDGER (BottlenecksPanel). CORE, FREE ON EVERY TIER,
 //     deterministic, and the twin of the Bots rail: that surface measures automation, this one
 //     measures people's time. It renders in OSS mode with no plugin present.
 //
@@ -96,7 +96,7 @@ export function InsightsView(): JSX.Element {
         {(
           [
             { key: 'overview', label: 'Overview' },
-            { key: 'bottlenecks', label: 'Bottlenecks' },
+            { key: 'bottlenecks', label: "Where it's stuck" },
           ] as const
         ).map((t) => {
           const on = effectiveTab === t.key;

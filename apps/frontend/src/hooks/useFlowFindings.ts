@@ -1,10 +1,10 @@
 import { skipToken, useQuery } from '@tanstack/react-query';
-import type { FlowFindingsResponse } from '@pierre-review/shared';
+import type { FlowResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 
-// The Bottlenecks tab's one read — `GET /api/flow-findings`, the human-lane twin of the Bots
-// rail. CORE and FREE ON EVERY TIER: no `useProCapabilities`, no `enabled` gate, no 402/404 path
+// The "Where it's stuck" tab's one read — `GET /api/flow-findings`, the COURT LEDGER.
+// The human-lane twin of the Bots rail. CORE and FREE ON EVERY TIER: no `useProCapabilities`, no `enabled` gate, no 402/404 path
 // to defend against, and it renders identically under `npx pierre-review` with no plugin present.
 // (The route is deterministic — no model, no GitHub call — which is what makes free affordable.)
 //
@@ -33,12 +33,12 @@ export function flowFindingsQueryKey(
 // landing sync, and everything on it is either cheap or has to agree with a sibling panel on
 // screen (the brief / the board / the work plan are ONE fold read three times, so they must
 // refetch in phase). Neither is true here: the route sits on the `search` rate tier because one
-// call runs the lane resolver, the first-human-review fold, a thread-path scan, an in-window
-// review scan, a merged-PR walk and the round-trip comment join — and nothing else on screen
+// call runs the lane resolver and four chunked action scans over every merge in the window —
+// and nothing else on screen
 // claims to describe the same population. The 5-minute interval below already tracks the sync
 // cadence; adding it to the sweep would spend that fold again on every repo edit.
 export function useFlowFindings(workspaceId: number | null, days: number) {
-  return useQuery<FlowFindingsResponse>({
+  return useQuery<FlowResponse>({
     queryKey: flowFindingsQueryKey(workspaceId, days),
     queryFn: workspaceId == null ? skipToken : () => api.flowFindings(workspaceId, days),
     // The same cadence every workspace-scoped survey on this pane runs at: findings are folded

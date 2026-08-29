@@ -2077,142 +2077,180 @@ export interface AdvisorBriefResponse {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════
-// Bottlenecks — the Bot Tuning Advisor's shape, pointed at the HUMAN lane
+// Where it's stuck — the COURT LEDGER
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 //
-// The Bots rail answers "is this bot worth its seat". This answers the twin question nothing in
-// the product asked before: WHERE DOES HUMAN REVIEW TIME GO, and what keeps costing it. Same
-// architecture as the advisor — CORE emits evidence cells over stored data, every sentence is
-// TEMPLATED, and a cell that cannot clear its sample floor is REFUSED BY NAME rather than drawn
-// as a zero. No model is involved anywhere in this feature.
+// Every hour a pull request is open, somebody is holding the ball: a REVIEWER who has not looked
+// yet, an AUTHOR who owes a response, or nobody at all — approved and waiting to land. Charge each
+// interval to its holder and the hours account for themselves.
 //
-// ⚠ THE SUBJECT OF A FINDING IS THE FLOW, NEVER A PERSON. A directory, a repo, a size band, a
-// thread shape — something you can change. People appear ONLY as `actorIds` inside a finding, as
-// evidence for a claim about the flow, and the UI must keep it that way. "guide the work, never
-// rank the people" is the whole licence this feature operates under: the moment a row's subject
-// becomes an engineer it is a performance dashboard, which is a different product with different
-// buyers and a much worse reason to exist. The same rule already keeps the work plan from calling
-// a red trunk a pull request.
+// ⚠ WHY THIS REPLACED A CELL MODEL. The previous feature emitted findings at a PATH-BUCKET grain
+// and named things like "src/** is a bottleneck", which is meaningless: a directory is four proxies
+// from anything a manager can change (directory -> file -> pull request -> thread -> commenter ->
+// the wait), and on a conventional single-package repo `src/**` IS the repository. A unit is only
+// useful at PR stage if it carries an OWNER, a DURATION and an EXIT CONDITION. A waiting interval
+// carries all three; a directory carries none.
 //
-// ⚠ EVERY FIGURE IS CODE-DERIVED. There is no narration seam here on purpose — see
-// `FlowFinding.headline`.
+// The research is unanimous on this point: every code-review intervention with a published effect
+// size acts on a WAIT owned by an identified party — a reminder on an overdue pull request
+// (-60.6% lifetime, randomised, 8,500 PRs), assigning an individual rather than a group (-11.6%
+// time-in-review, Meta), automatic merge (29-63% of review lifetime is post-acceptance, 569,914
+// reviews). None of them act on a property of the code. The two interventions aimed at code
+// properties and at people measured NOTHING: reviewer workload balancing (no significant change)
+// and pull-request size (r_s = 0.26 over 845,316 PRs, the field's strongest negative result).
+//
+// ⚠ A BOT ACTION NEVER MOVES THE BALL. This is the whole moat and it is one predicate: a tool
+// keying on `user.type === 'Bot'` cannot tell "this pull request was reviewed" from "a person
+// looked at this". Human-ness here comes from the lane resolver's UNION, never `users.isBot`
+// alone.
+//
+// ⚠ NO MODEL TOUCHES THIS. Every sentence is templated in `db/pr-intervals.ts`. An EM makes
+// staffing decisions off this screen.
 
-/**
- *  - `single_reviewer_path` — one person is the de-facto owner of a directory, and review there
- *    waits longer than everywhere else. The bus-factor finding. Subject: a path bucket.
- *  - `approval_parked`      — work that PASSED review then sat. Subject: a repo.
- *    ⚠ Must exclude PRs whose merge was blocked by CHECKS — that is a CI finding wearing a
- *      review-flow costume, and it lands on exactly the PRs an EM would most want to trust.
- *  - `size_latency`         — big PRs wait disproportionately longer to get a first human read.
- *    Subject: a size band. Authors are evidence, never the row.
- *  - `round_trips`          — threads in one area take N passes to settle: a convention nobody
- *    wrote down, or a design still being argued. Subject: a path bucket.
- */
-export type FlowFindingKind =
-  | 'single_reviewer_path'
-  | 'approval_parked'
-  | 'size_latency'
-  | 'round_trips';
+/** Who holds the ball. Exactly three, and they partition the open life of a pull request. */
+export type PrCourt = 'reviewer' | 'author' | 'landing';
 
-/** What kind of thing the row is ABOUT. There is deliberately no `'person'` member. */
-export type FlowFindingSubjectKind = 'path' | 'repo' | 'size_band';
+export interface CourtShare {
+  court: PrCourt;
+  /** Absolute hours charged to this court across the measured population. */
+  hours: number;
+  /** 0..1 of that population's total open hours. Always sums to 1 across the three. */
+  share: number;
+}
 
-/** The unit `value` and `baseline` are both expressed in, so one renderer formats every row and
- *  a comparison can never be drawn between two different units. */
-export type FlowFindingUnit = 'hours' | 'days' | 'pct' | 'count' | 'comments';
-
-export interface FlowFindingPrRef {
+/** A pull request offered as evidence for a court claim, with the figure that earned it its place. */
+export interface CourtEvidencePr {
   prId: number;
   repoFullName: string;
   prNumber: number;
   prTitle: string;
   githubUrl: string;
+  /** Hours this pull request spent in the court the row is about. */
+  hoursInCourt: number;
+  /** Its total open->merged hours, so a reader can see what share that was. */
+  leadHours: number;
+  /** ⚠ Whether the author is automation. A dependency bump sitting in the reviewer court is a
+   *  different story from a colleague's feature waiting, and the row must not blur them. */
+  authorIsBot: boolean;
 }
 
-export interface FlowFinding {
-  /** Stable across recomputes of the same window: `<kind>:<repoId|'ws'>:<subject>`. The UI keys
-   *  rows on it and a future "dismiss this finding" writes against it. */
-  id: string;
-  kind: FlowFindingKind;
-  subjectKind: FlowFindingSubjectKind;
-  /** The thing being described, rendered verbatim: 'packages/api/**', 'acme/api', '800+ lines'. */
-  subject: string;
-  /** null for a workspace-wide finding (only `size_latency` produces one today). */
-  repoId: number | null;
-  /** ⚠ TEMPLATED, code-written, no model. Sentences are assembled from the measured cell in
-   *  `db/flow-findings.ts` — the same discipline `llm-isolation.test.ts` pins for the bot
-   *  advisor. A generated headline here would launder an unverified figure into a screen an EM
-   *  makes staffing decisions from. */
-  headline: string;
-  /** One templated sentence naming what to do about it. Never an instruction about a person. */
-  detail: string;
-  /** The measured figure, and what it is measured AGAINST — always the same unit, and both
-   *  rendered, because a magnitude with no comparison is not a finding. */
-  value: number;
-  baseline: number;
-  unit: FlowFindingUnit;
-  /** ⚠ How many observations `value` rests on. Rendered on every row: it is the reader's only
-   *  defence against a confident number computed from four threads. */
-  sampleSize: number;
-  /** Openable PRs behind the claim, capped. The row is not believable without them. */
-  evidence: FlowFindingPrRef[];
-  /** People implicated by the finding — resolved through `users` on the response.
-   *  ⚠ EVIDENCE INSIDE THE ROW, never the row's subject. See the header. */
-  actorIds: number[];
-}
-
-/** A finding kind that could NOT be computed, and why. Rendered — never silently dropped: an
- *  absent section reads as "we checked and there's nothing here", which is a different and much
- *  stronger claim than "not enough data to say". (Same rule as the severity Inflation index,
- *  which NAMES the bot it had to omit rather than drawing it as a zero.) */
-export interface FlowFindingRefusal {
-  kind: FlowFindingKind;
-  reason: string;
+/**
+ * One repository's profile. THE UNIT OF THE SCREEN.
+ *
+ * ⚠ A SHARE WITHOUT A MAGNITUDE MANUFACTURES PROBLEMS. One real repo here is 73% author-court and
+ * its p75 lead time is EIGHTEEN MINUTES — reporting the share alone would invent a crisis in a
+ * healthy repository, which is the same failure as the path row it replaced. `dominant` is
+ * therefore null unless the repo is BOTH lopsided AND slow, and `narrative` is null with it.
+ */
+export interface RepoCourtProfile {
+  repoId: number;
+  repoFullName: string;
+  /** Human-touched merged pull requests that entered the attribution. */
+  prs: number;
+  /** Always three, ordered reviewer, author, landing. */
+  courts: CourtShare[];
+  medianLeadHours: number;
+  p75LeadHours: number;
+  /** The court to act on, or null when nothing here needs attention. */
+  dominant: PrCourt | null;
   /**
-   * ⚠ WHICH SILENCE THIS IS. The two are opposite claims and must never render as one sentence:
+   * ⚠ TEMPLATED, code-written, never generated. Null exactly when `dominant` is null.
    *
-   *   'insufficient_data' — nothing cleared the sample floor. We could not measure. An apology.
-   *   'measured_clean'    — the floors WERE cleared and nothing crossed the emission bar. We did
-   *                         measure, and the flow is fine. A clean bill of health, and the more
-   *                         useful of the two.
-   *
-   * Rendering a 'measured_clean' row under "Not enough data to say" tells an EM to go hunting for
-   * a sync problem that does not exist — which is exactly what happened when this field was
-   * missing and the panel had no way to tell the cases apart.
+   * ⚠ AND IT CARRIES NO ADVICE. The first cut put the full "this is a routing problem, request a
+   * named person" recommendation on every repo row, and on a real workspace six of six repos were
+   * reviewer-dominant — six paragraphs of identical advice, which is the same wall of restatement
+   * that made the path findings worthless. The advice belongs ONCE PER COURT (`CourtDirective`);
+   * this line carries only what is specific to THIS repository.
    */
+  narrative: string | null;
+  /** The worst offenders in the dominant court. Empty when there is nothing to claim. */
+  evidence: CourtEvidencePr[];
+}
+
+/**
+ * The advice, stated ONCE for each court that has repositories under it.
+ *
+ * ⚠ THE ADVICE IS A PROPERTY OF THE COURT, NOT OF THE REPOSITORY, and that is why it lives here.
+ * Each of the three names a genuinely different action — which is the entire reason to split the
+ * clock in the first place. "Your pull requests are slow" is not a finding; "nothing is blocked on
+ * the author or on checks, so this is a routing problem" is.
+ *
+ * The actions are the ones with published effect sizes behind them: a reminder on an overdue pull
+ * request and naming an individual rather than a team (reviewer court); automatic merge, which
+ * this product already ships (landing court). The author court deliberately gets no instruction
+ * aimed at a person — there is no evidenced lever there, and inventing one would be the
+ * performance-dashboard failure this feature exists to avoid.
+ */
+export interface CourtDirective {
+  court: PrCourt;
+  /** How many of the listed repositories sit under it. */
+  repos: number;
+  /** ⚠ TEMPLATED. One short paragraph. */
+  directive: string;
+}
+
+/** Merged without a human review — a governance fact, not a productivity one. */
+export interface UnreviewedRepoStat {
+  repoId: number;
+  repoFullName: string;
+  merged: number;
+  withoutHumanReview: number;
+  share: number;
+  evidence: CourtEvidencePr[];
+}
+
+/** A kind that could not be computed, or was computed and found nothing. Rendered by name —
+ *  an absent section asserts "we checked and there is nothing here", which is a much stronger
+ *  claim than either thing that actually happened. */
+export interface FlowRefusal {
+  kind: 'courts' | 'unreviewed';
+  reason: string;
   basis: 'insufficient_data' | 'measured_clean';
 }
 
-/** ⚠ Retroactive history is COVERAGE-BIASED — a workspace that onboarded repos over the window
- *  will show trends that are entirely onboarding. Every response carries its own coverage so the
- *  panel can say so on screen instead of the reader having to know. */
+/** ⚠ Retroactive history is COVERAGE-BIASED — a workspace that onboarded repos across the window
+ *  shows trends that are entirely onboarding. Always rendered. */
 export interface FlowCoverage {
   reposInWorkspace: number;
   reposWithData: number;
   prsScanned: number;
-  /** ⚠ A ROW-SCAN HIT ITS CAP, so the figures cover only a PREFIX OF THE WINDOW. A claim about
-   *  the window itself, and the more serious of the two — every median on screen is computed
-   *  from part of the period the header names. */
+  /** A row scan hit its cap, so the figures cover a PREFIX of the window. */
   truncated: boolean;
-  /** ⚠ A DIFFERENT AND MUCH SMALLER FACT: how many scanned pull requests had more files than the
-   *  sync stores (`files(first: 100)`), so their PATH ATTRIBUTION is partial. The window was
-   *  scanned in full; only the per-directory split under-counts those PRs.
+  /** Merged pull requests excluded from the court split because no human ever acted on them.
+   *  ⚠ They MUST be excluded: their ledger is 100% reviewer by construction and would swamp
+   *  every share. They are reported separately as the unreviewed-merge finding. */
+  excludedNoHumanTouch: number;
+  /**
+   * Merged pull requests excluded because AUTOMATION opened them.
    *
-   *  These two were ONE FLAG and it shipped wrong: a single 120-file pull request made a
-   *  262-PR workspace announce "a scan reached its cap, so these figures come from part of the
-   *  window only", which is a claim about the period that had not happened. A caveat the reader
-   *  cannot act on is worse than none — it teaches them to ignore the line that matters. */
-  filesTruncatedPrs: number;
+   * ⚠ THE SECOND HALF OF THE LANE SEPARATION, and it changes the answer. On a real workspace 43%
+   * of merges were bot-authored and they sat LONGER than human ones (32h against 24h mean), so
+   * blending them moved every share on the screen. It also made the evidence absurd: a row reading
+   * "99% of open time waiting for somebody to look at it" cited `Bump actions/checkout from 4 to
+   * 7`. Nobody is waiting on a dependency bump — that is housekeeping, and the Bots rail owns it.
+   * This screen is about work a person wrote.
+   */
+  excludedBotAuthored: number;
 }
 
-export interface FlowFindingsResponse {
+export interface FlowResponse {
   workspaceId: number;
   windowDays: number;
-  findings: FlowFinding[];
-  refusals: FlowFindingRefusal[];
+  /** Human-touched merged pull requests behind every figure below. */
+  measuredPrs: number;
+  /** Workspace-wide, always three. */
+  courts: CourtShare[];
+  medianLeadHours: number;
+  p75LeadHours: number;
+  /** ⚠ TEMPLATED. The one sentence at the top of the screen. Null when nothing was measurable. */
+  headline: string | null;
+  /** Ranked worst-first; only repos that cleared the sample floor. */
+  repos: RepoCourtProfile[];
+  /** One per court that has at least one repository in `repos`, in reviewer/author/landing order. */
+  directives: CourtDirective[];
+  unreviewed: UnreviewedRepoStat[];
+  refusals: FlowRefusal[];
   coverage: FlowCoverage;
-  /** Resolution table for `actorIds`, exactly as AttentionCardsResponse carries one. */
-  users: User[];
 }
 
 export interface AdvisorConfigPrBody {

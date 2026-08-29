@@ -28,7 +28,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [FRONTEND](docs/FRONTEND.md) | stores, tabs/overlays, FilterBar scoping, timeline internals, PrDetail |
 | [MERGE-CI-TRUNK](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, auto-merge runner, CI logs, trunk status |
 | [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) | the agentic PR-review feature |
-| [BOTTLENECKS](docs/BOTTLENECKS.md) | the human-bottleneck findings behind Reports → Bottlenecks |
+| [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports -> "Where it's stuck" |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) | ML severity/category of bot comments (`packages/ml`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
 | [PRO-PLUGIN-AND-ACTIVITY](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity, Feed, the bot platform, annotations, digests, the work plan |
@@ -600,35 +600,29 @@ with a SECTION per pick; contract in
 
 ---
 
-## Bottlenecks — the human lane (Insights → Reports → Bottlenecks)
+## Where it's stuck — the court ledger (Insights -> Reports)
 
-The Bots rail asks "is this bot worth its seat". **Bottlenecks asks the twin question about
-people: where does human review time go, and what keeps costing it.** `getAdvisorFindings`'
-architecture pointed at the human lane — evidence CELLS, sample FLOORS, a NAMED refusal for a cell
-that cannot clear one. CORE, **free on every tier**, no model anywhere in it. Full contract:
-**[docs/BOTTLENECKS.md](docs/BOTTLENECKS.md)**. Without opening it:
+Every hour a pull request is open, somebody is holding the ball: a **reviewer** who has not looked,
+an **author** who owes a response, or nobody - approved and waiting to land. CORE, **free on every
+tier**, no model anywhere in it. `db/pr-intervals.ts` + `api/routes/flow.ts` +
+`Activity/BottlenecksPanel.tsx`. Full contract: **[docs/BOTTLENECKS.md](docs/BOTTLENECKS.md)**.
 
-- ⚠ **THE SUBJECT OF A ROW IS THE FLOW, NEVER A PERSON.** People ride only as `actorIds` INSIDE a
-  row. No cross-person sort, no comparison table, no leaderboard — "guide the work, never rank the
-  people" is the whole licence this feature operates under.
-- ⚠ **EVERY SENTENCE IS TEMPLATED** in `db/flow-findings.ts`; no model, no plugin, no AI import.
-- ⚠ **EVERY KIND ACCOUNTS FOR ITSELF — a finding OR a refusal, never silence**, and
-  `FlowFindingRefusal.basis` separates "could not measure" from "measured, nothing stood out".
-  Both failures shipped once; both are pinned across every fixture scope.
-- ⚠ **`approval_parked` MUST exclude `mergeStateStatus === 'blocked'`** — that PR waits on required
-  checks, not on people, and counting it makes the flagship finding a CI finding in disguise. ⚠ But
-  **GitHub STOPS COMPUTING that column once a PR merges** (measured: 5,478 of 5,507 merged rows read
-  `unknown`, ZERO `blocked`; 553 OPEN ones do), so only the OPEN half's exclusion really fires and
-  **NO SENTENCE MAY CLAIM IT** — the detail carries the true caveat instead. CI history is not a
-  substitute (41% precise, 29% recall, 0–66% coverage BY REPO — the comparison axis).
-- ⚠ **`size_latency`'s workspace size median is HUMAN-AUTHORED PRs ONLY** — the same filter the
-  per-author medians use. Take it over every PR and a bot's bumps halve the bar, and the row NAMES
-  PEOPLE whose changes are ordinary. ⚠ `coverage.truncated` (a row scan hit its cap ⇒ a prefix of
-  the WINDOW) and `filesTruncatedPrs` (partial PATH attribution) are different claims; and
-  `loadFirstHumanReviewHours` REPORTS ITS OWN truncation through a trailing optional sink — it is
-  extended, never forked, and a `hours.length >= CAP` call-site guess under-fires.
-- ⚠ **A value/baseline pair shares ONE unit** (`fmtHoursPair` / `formatFlowPair`, which must
-  agree). Independent formatting shipped "2.6 days vs 36h".
+⚠ **This REPLACED a path-bucket feature that emitted "`src/**` is a bottleneck".** A
+directory is four proxies from anything an EM can change and on a single-package repo IS the
+repository. `single_reviewer_path` and `round_trips` are deleted; `size_latency` is deleted as a
+finding (845k PRs say size does not predict time-to-merge, r_s = 0.26); `approval_parked` survives
+as the LANDING court. Without opening the doc:
+
+- ⚠ **A BOT ACTION NEVER MOVES THE BALL, AND BOT-AUTHORED PULL REQUESTS ARE NOT MEASURED** -
+  the moat, and it changed the answer: bot work was 43% of merges and SLOWER, so blending moved the
+  split 72/10/18 to 60/16/24 and cited dependency bumps as things people waited on.
+- ⚠ **LOPSIDED *AND* SLOW, or say nothing.** A real repo is 73% author-court with an
+  eighteen-minute p75; a share without a magnitude invents a crisis in a healthy repo.
+- ⚠ **THE ADVICE IS PER COURT, NOT PER REPO.** Stated once per section - six repos in one
+  court produced six identical paragraphs on the first cut.
+- ⚠ **A NEVER-HUMAN-TOUCHED PR IS EXCLUDED** (46% of merges) - its ledger is 100% reviewer by
+  construction. Reported separately as a governance finding.
+- ⚠ **NO PERSON IS NAMED ANYWHERE**, and the server sends no actor ids, so it is structural.
 
 ## ML severity/category on bot comments (CORE, free tier, no LLM)
 

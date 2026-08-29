@@ -49,7 +49,7 @@ import type {
   WorkspaceInsightsResponse,
   AttentionCardsResponse,
   DailyBriefResponse,
-  FlowFindingsResponse,
+  FlowResponse,
   RepoWorkspaceMetricsResponse,
   WorkspaceMetricsDetailResponse,
   WorkspaceMetricsResponse,
@@ -670,7 +670,7 @@ export const api = {
   // NAMED refusal for every kind that could not clear one. `days` is the window; the server
   // clamps it to [7, 90] rather than trusting it, so a bookmarked value can never widen the scan.
   flowFindings: (workspaceId: number, days?: number) =>
-    get<FlowFindingsResponse>(
+    get<FlowResponse>(
       withQuery(
         '/api/flow-findings',
         workspaceParam(workspaceId),

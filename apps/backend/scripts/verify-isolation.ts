@@ -2082,7 +2082,7 @@ check(
 // its own `accountId` predicate; a single omission reads as "the query returned rows" rather than
 // as an error.
 {
-  const { getFlowFindings } = await import('../src/db/flow-findings.js');
+  const { getFlowCourts } = await import('../src/db/pr-intervals.js');
   const WIN = 90;
   const H = 60 * 60 * 1000;
 
@@ -2092,15 +2092,28 @@ check(
   // enough above the workspace median to clear both the ratio and the absolute delta. Each tenant
   // gets its OWN copy under its own repo, so "A never sees B's rows" is a claim with something on
   // both sides of it.
+  // ⚠ THE COURT LEDGER MEASURES **MERGED** PULL REQUESTS ONLY, and this seed produced open ones
+  // when it was written for the previous engine — which the productivity guard below caught
+  // immediately. That is the second time this fixture has silently stopped exercising the thing it
+  // guards after a measurement changed under it; assert productivity, always.
+  //
+  // The shape seeded here is deliberately REVIEWER-DOMINANT AND SLOW, because a repo has to be
+  // BOTH before a court is named: opened, then nothing happens for 30 hours, then a human reviews
+  // and it lands within the hour. Fourteen of them clears FLOW_MIN_REPO_PRS. Each tenant gets an
+  // identical copy under its own repo, so "A never sees B's rows" is a claim with something on
+  // both sides of it.
   const seedFlow = async (
     accountId: number,
     repoId: number,
     tag: string,
     owner: { id: number },
     other: { id: number },
+    botAuthor: { id: number },
   ): Promise<void> => {
-    for (let i = 0; i < 10; i++) {
-      const openedAt = new Date(now.getTime() - (30 - i) * 24 * H);
+    for (let i = 0; i < 14; i++) {
+      const openedAt = new Date(now.getTime() - (40 - i) * 24 * H);
+      const reviewedAt = new Date(openedAt.getTime() + 30 * H);
+      const mergedAt = new Date(openedAt.getTime() + 31 * H);
       const [pr] = await db
         .insert(schema.pullRequests)
         .values({
@@ -2109,119 +2122,92 @@ check(
           repoId,
           number: 900 + i,
           title: `${tag} flow fixture ${i}`,
-          state: 'open',
+          // ⚠ MERGED, and merged INSIDE the window — the engine folds on `mergedAt`.
+          state: 'merged',
           isDraft: false,
+          // ⚠ A HUMAN author. Automation's own pull requests are excluded from the population, so
+          // a bot author here would empty the fixture without failing anything but the guard.
           authorId: other.id,
           openedAt,
-          updatedAt: openedAt,
+          mergedAt,
+          updatedAt: mergedAt,
           additions: 120,
           deletions: 30,
-          // ⚠ MUST equal files.length: the fold reads `changedFiles > files.length` as the sync's
-          // 100-file truncation, and a mismatch here refuses single_reviewer_path outright.
           changedFiles: 1,
           files: [{ path: 'packages/api/handler.ts', additions: 120, deletions: 30 }],
         })
         .returning()
         .execute();
-      // A SLOW first read (30h), and the concentrated reviewer takes 8 of 10.
-      const reviewer = i < 8 ? owner : other;
+      // One human review, 30 hours in: the ball sits in the reviewer court for almost the whole
+      // life, which is what makes this repo reviewer-dominant.
       await db
         .insert(schema.reviews)
         .values({
           githubNodeId: `RV_flow_${tag}_${i}`,
           prId: pr!.id,
-          authorId: reviewer.id,
-          state: 'commented',
-          submittedAt: new Date(openedAt.getTime() + 30 * H),
-        })
-        .execute();
-      // ⚠ A SECOND review per PR. The bucket floor is TWO numbers — >=8 reviewed pull requests
-      // AND >=12 human reviews — and ten PRs with one review each clears the first and misses the
-      // second, which refuses the kind and leaves every assertion below vacuous.
-      await db
-        .insert(schema.reviews)
-        .values({
-          githubNodeId: `RV_flow2_${tag}_${i}`,
-          prId: pr!.id,
           authorId: owner.id,
-          state: 'commented',
-          submittedAt: new Date(openedAt.getTime() + 34 * H),
+          state: 'approved',
+          submittedAt: reviewedAt,
         })
         .execute();
-      const [slowThread] = await db
-        .insert(schema.reviewThreads)
+    }
+    // ⚠ AUTOMATION'S OWN PULL REQUESTS, seeded slow and reviewed, so the exclusion has something to
+    // exclude. Without these the bot gate is unpinned: removing it changed nothing in any test
+    // while it moved the real workspace split from 72/10/18 to 60/16/24.
+    for (let i = 0; i < 6; i++) {
+      const openedAt = new Date(now.getTime() - (35 - i) * 24 * H);
+      const [botPr] = await db
+        .insert(schema.pullRequests)
         .values({
-          githubNodeId: `TH_flow_${tag}_${i}`,
-          prId: pr!.id,
-          path: 'packages/api/handler.ts',
-          isResolved: false,
-          isOutdated: false,
-          derivedState: 'untouched',
-          // NO `updatedAt` — `review_threads` has no such column (createdAt/resolvedAt only), and
-          // the stray key was a compile error that broke `pnpm typecheck` for the whole backend.
-          createdAt: openedAt,
+          githubNodeId: `PR_flowbot_${tag}_${i}`,
+          accountId,
+          repoId,
+          number: 980 + i,
+          title: `${tag} bump fixture ${i}`,
+          state: 'merged',
+          isDraft: false,
+          authorId: botAuthor.id,
+          openedAt,
+          mergedAt: new Date(openedAt.getTime() + 200 * H),
+          updatedAt: new Date(openedAt.getTime() + 200 * H),
+          additions: 2,
+          deletions: 2,
+          changedFiles: 1,
         })
         .returning()
         .execute();
-      // ⚠ CONCENTRATION IS MEASURED OVER REVIEW COMMENTS, anchored to the thread's PATH — never
-      // over review submissions. A seed carrying only `reviews` produces no cell at all, which is
-      // exactly how the productivity guard above caught this the moment the measurement changed.
-      for (let k = 0; k < 2; k++) {
-        await db
-          .insert(schema.reviewComments)
-          .values({
-            githubNodeId: `RC_flow_${tag}_${i}_${k}`,
-            threadId: slowThread!.id,
-            prId: pr!.id,
-            authorId: i < 8 ? owner.id : other.id,
-            body: 'x',
-            createdAt: new Date(openedAt.getTime() + (30 + k) * H),
-          })
-          .execute();
-      }
-      // A FAST second directory drags the workspace median down, so the slow one stands out.
-      const [fastPr] = await db
+      await db
+        .insert(schema.reviews)
+        .values({
+          githubNodeId: `RV_flowbot_${tag}_${i}`,
+          prId: botPr!.id,
+          authorId: owner.id,
+          state: 'approved',
+          submittedAt: new Date(openedAt.getTime() + 199 * H),
+        })
+        .execute();
+    }
+    // A handful merged with NO human action at all — the governance half, and the population the
+    // court split must EXCLUDE (their ledger would be 100% reviewer by construction).
+    for (let i = 0; i < 12; i++) {
+      const openedAt = new Date(now.getTime() - (20 - i) * 24 * H);
+      await db
         .insert(schema.pullRequests)
         .values({
-          githubNodeId: `PR_flowfast_${tag}_${i}`,
+          githubNodeId: `PR_flowraw_${tag}_${i}`,
           accountId,
           repoId,
           number: 950 + i,
-          title: `${tag} fast fixture ${i}`,
-          state: 'open',
+          title: `${tag} unreviewed fixture ${i}`,
+          state: 'merged',
           isDraft: false,
           authorId: other.id,
           openedAt,
-          updatedAt: openedAt,
-          additions: 20,
-          deletions: 5,
+          mergedAt: new Date(openedAt.getTime() + 1 * H),
+          updatedAt: new Date(openedAt.getTime() + 1 * H),
+          additions: 5,
+          deletions: 1,
           changedFiles: 1,
-          files: [{ path: 'docs/readme.md', additions: 20, deletions: 5 }],
-        })
-        .returning()
-        .execute();
-      await db
-        .insert(schema.reviews)
-        .values({
-          githubNodeId: `RV_flowfast_${tag}_${i}`,
-          prId: fastPr!.id,
-          authorId: (i % 2 === 0 ? owner : other).id,
-          state: 'commented',
-          submittedAt: new Date(openedAt.getTime() + 1 * H),
-        })
-        .execute();
-      await db
-        .insert(schema.reviewThreads)
-        .values({
-          githubNodeId: `TH_flowfast_${tag}_${i}`,
-          prId: fastPr!.id,
-          path: 'docs/readme.md',
-          isResolved: false,
-          isOutdated: false,
-          derivedState: 'untouched',
-          // NO `updatedAt` — `review_threads` has no such column (createdAt/resolvedAt only), and
-          // the stray key was a compile error that broke `pnpm typecheck` for the whole backend.
-          createdAt: openedAt,
         })
         .execute();
     }
@@ -2246,28 +2232,55 @@ check(
     .values({ githubLogin: 'flow-other-b', githubNodeId: 'U_flow_b2', isBot: false })
     .returning()
     .execute();
-  await seedFlow(1, A.repoId, 'a', flowA1!, flowA2!);
-  await seedFlow(2, B.repoId, 'b', flowB1!, flowB2!);
+  const [flowBotA] = await db
+    .insert(schema.users)
+    .values({ githubLogin: 'flow-bump-a[bot]', githubNodeId: 'U_flow_bot_a', isBot: true })
+    .returning()
+    .execute();
+  const [flowBotB] = await db
+    .insert(schema.users)
+    .values({ githubLogin: 'flow-bump-b[bot]', githubNodeId: 'U_flow_bot_b', isBot: true })
+    .returning()
+    .execute();
+  await seedFlow(1, A.repoId, 'a', flowA1!, flowA2!, flowBotA!);
+  await seedFlow(2, B.repoId, 'b', flowB1!, flowB2!, flowBotB!);
 
-  const aOut = await getFlowFindings(1, scopeA, WIN);
-  const bOut = await getFlowFindings(2, scopeB, WIN);
+  const aOut = await getFlowCourts(1, scopeA, WIN);
+  const bOut = await getFlowCourts(2, scopeB, WIN);
 
-  // ⚠ NON-VACUITY FIRST. Every assertion below is an `.every()` over findings/evidence/users, and
-  // `[].every()` is `true` — so a fixture that produces NO findings turns this whole block into
-  // six green lines that test nothing. That failure mode has already shipped here once (a
-  // cross-repo check that was vacuous until the decoy repo got a red trunk), so the fixture's
-  // productivity is asserted rather than assumed.
-  const aEvidence = aOut.findings.flatMap((f) => f.evidence);
+  // ⚠ NON-VACUITY FIRST. Every assertion below is an `.every()` over repos/evidence, and
+  // `[].every()` is `true` — so a fixture that produces NO profiles turns this whole block into
+  // green lines that test nothing. That failure mode has shipped here twice: once as a cross-repo
+  // check that was vacuous until the decoy repo got a red trunk, and once when the concentration
+  // measurement changed under a seed that carried no review comments. Assert productivity.
+  const aEvidence = aOut.repos.flatMap((r) => r.evidence);
   check(
-    'getFlowFindings FIXTURE IS PRODUCTIVE — findings, openable evidence AND a resolved actor',
-    aOut.findings.length > 0 &&
-      aEvidence.length > 0 &&
-      aOut.findings.some((f) => f.actorIds.length > 0) &&
-      aOut.users.length > 0,
+    'getFlowCourts FIXTURE IS PRODUCTIVE — a named court with openable evidence',
+    aOut.measuredPrs > 0 &&
+      aOut.repos.length > 0 &&
+      aOut.repos.some((r) => r.dominant != null) &&
+      aEvidence.length > 0,
+  );
+
+  // ⚠ THE BOT GATE, pinned end to end. Removing the exclusion failed NO test while it moved the
+  // real workspace split from 72/10/18 to 60/16/24 and put "Bump actions/checkout from 4 to 7" on
+  // screen as something a person was waiting on. The bot pull requests here are seeded SLOWER than
+  // the human ones, so including them would visibly move the shares.
+  check(
+    'getFlowCourts EXCLUDES automation own pull requests, and counts them where a reader can see',
+    // `measuredPrs` is the sharp one: exactly the 14 human-authored, human-reviewed pull requests
+    // this fixture seeds. The bot merges are slower, so if the gate regressed they would enter the
+    // population AND move every share. (`excludedBotAuthored` is >= 6 rather than === 6 because
+    // this harness seeds other automation earlier for unrelated checks.)
+    aOut.measuredPrs === 14 &&
+      bOut.measuredPrs === 14 &&
+      aOut.coverage.excludedBotAuthored >= 6 &&
+      bOut.coverage.excludedBotAuthored >= 6 &&
+      aOut.repos.every((r) => r.evidence.every((e) => !e.authorIsBot)),
   );
 
   check(
-    'getFlowFindings echoes the scope it was handed, never another tenant workspace',
+    'getFlowCourts echoes the scope it was handed, never another tenant workspace',
     aOut.workspaceId === scopeA.workspaceId && bOut.workspaceId === scopeB.workspaceId,
   );
 
@@ -2291,35 +2304,41 @@ check(
   const ownA = await reposOf(1, scopeA);
   const ownB = await reposOf(2, scopeB);
 
-  const evidenceRepos = (out: typeof aOut): string[] =>
-    out.findings.flatMap((f) => f.evidence.map((e) => e.repoFullName));
+  // ⚠ EVERY repoFullName THAT LEAVES THE TENANT, from all three places one can appear: the
+  // profile row, its evidence, and the unreviewed-merge stat. Checking only the profiles would
+  // pass while an evidence row named another account's repo.
+  const namesOut = (out: typeof aOut): string[] => [
+    ...out.repos.map((r) => r.repoFullName),
+    ...out.repos.flatMap((r) => r.evidence.map((e) => e.repoFullName)),
+    ...out.unreviewed.map((u) => u.repoFullName),
+    ...out.unreviewed.flatMap((u) => u.evidence.map((e) => e.repoFullName)),
+  ];
   check(
-    'getFlowFindings evidence names only repos inside the caller own workspace',
-    evidenceRepos(aOut).every((r) => ownA.has(r)) && evidenceRepos(bOut).every((r) => ownB.has(r)),
+    'getFlowCourts names only repos inside the caller own workspace, in profiles AND evidence',
+    namesOut(aOut).every((r) => ownA.has(r)) && namesOut(bOut).every((r) => ownB.has(r)),
   );
 
-  // `users` is one of the two GLOBAL tables, so the resolution table is the leak that would not
-  // look like one: an unscoped read there hands a tenant every login in the database.
+  const idsOut = (out: typeof aOut): number[] => [
+    ...out.repos.map((r) => r.repoId),
+    ...out.unreviewed.map((u) => u.repoId),
+  ];
   check(
-    'getFlowFindings resolves ONLY the actors its own findings named — never the global users table',
-    aOut.users.every((u) => aOut.findings.some((f) => f.actorIds.includes(u.id))) &&
-      bOut.users.every((u) => bOut.findings.some((f) => f.actorIds.includes(u.id))),
+    'getFlowCourts repoId on every row is one of the caller own repos',
+    idsOut(aOut).every((id) => scopeA.repoIds.includes(id)) &&
+      idsOut(bOut).every((id) => scopeB.repoIds.includes(id)),
   );
 
-  // A repo-grained finding must carry a repoId the caller owns (null is legal — `size_latency` is
-  // workspace-wide).
-  const repoIdsOf = (out: typeof aOut): number[] =>
-    out.findings.map((f) => f.repoId).filter((id): id is number => id != null);
+  // The two tenants seed IDENTICAL shapes under different repos, so a leak would show up as one
+  // account's totals carrying the other's hours.
   check(
-    'getFlowFindings repoId on every finding is one of the caller own repos',
-    repoIdsOf(aOut).every((id) => scopeA.repoIds.includes(id)) &&
-      repoIdsOf(bOut).every((id) => scopeB.repoIds.includes(id)),
+    'getFlowCourts counts each tenant own pull requests only',
+    aOut.measuredPrs === bOut.measuredPrs && aOut.measuredPrs > 0,
   );
 
   // The coverage line is a claim about the CALLER's workspace; counting another tenant's repos
   // into it would be a quiet cross-tenant disclosure in a footnote nobody audits.
   check(
-    'getFlowFindings coverage counts the caller own repos only',
+    'getFlowCourts coverage counts the caller own repos only',
     aOut.coverage.reposInWorkspace === scopeA.repoIds.length &&
       bOut.coverage.reposInWorkspace === scopeB.repoIds.length,
   );
@@ -2327,11 +2346,12 @@ check(
   // An EMPTY workspace must refuse, never widen to the account — the `[]`-is-a-real-answer rule.
   const emptyWs = await q.createWorkspace(1, 'iso-flow-empty');
   const emptyScope = await q.resolveWorkspaceScope(1, emptyWs.id);
-  const emptyOut = await getFlowFindings(1, emptyScope, WIN);
+  const emptyOut = await getFlowCourts(1, emptyScope, WIN);
   check(
-    'getFlowFindings on an EMPTY workspace refuses rather than widening to the account',
-    emptyOut.findings.length === 0 &&
-      emptyOut.refusals.length === 4 &&
+    'getFlowCourts on an EMPTY workspace refuses rather than widening to the account',
+    emptyOut.repos.length === 0 &&
+      emptyOut.measuredPrs === 0 &&
+      emptyOut.refusals.length === 2 &&
       emptyOut.coverage.prsScanned === 0,
   );
 }

@@ -1,13 +1,13 @@
 import type { FastifyInstance } from 'fastify';
-import type { FlowFindingsResponse } from '@pierre-review/shared';
-import { FLOW_DEFAULT_WINDOW_DAYS, getFlowFindings } from '../../db/flow-findings.js';
+import type { FlowResponse } from '@pierre-review/shared';
+import { FLOW_DEFAULT_WINDOW_DAYS, getFlowCourts } from '../../db/pr-intervals.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
-// GET /api/flow-findings — the "Bottlenecks" tab: where human review time goes in a workspace.
+// GET /api/flow-findings — "Where it's stuck": the COURT LEDGER for a workspace.
 //
 // CORE and FREE ON EVERY TIER. It is deterministic — no model, no plugin, no GitHub call — and
-// every sentence it returns is templated in db/flow-findings.ts. (If it ever needs to be paid,
+// every sentence it returns is templated in db/pr-intervals.ts. (If it ever needs to be paid,
 // gating it is a one-line `req.pro?.capabilities` check HERE; nothing in the engine reads a
 // capability and nothing in it should, so the free/paid decision stays a routing decision.)
 //
@@ -24,12 +24,11 @@ import { accountIdOf } from '../plugins/auth.js';
 //
 // Rate tier: `search` (60/min), a DELIBERATE entry in `tierFor` and pinned in rate-limit.test.ts.
 // It is DB-only, but "this route is DB-only" is exactly the sentence that file exists to distrust:
-// one call runs the lane resolver, the shared first-human-review fold (two capped candidate
-// walks), a thread-path scan, an in-window review scan, a merged-PR walk with its approving
-// reviews, an open-PR snapshot with the approvals fold, and the round-trip comment join — the
-// same shape of cost that put `GET /api/attention` and `GET /api/daily-brief` on this bucket.
+// one call runs the lane resolver and then FOUR chunked action scans (reviews, review comments,
+// conversation comments, commits) across every pull request merged in the window — the same shape
+// of cost that put `GET /api/attention` and `GET /api/daily-brief` on this bucket.
 export async function flowRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/flow-findings', async (req): Promise<FlowFindingsResponse> => {
+  app.get('/api/flow-findings', async (req): Promise<FlowResponse> => {
     const q = req.query as { workspace?: string; days?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
@@ -37,6 +36,6 @@ export async function flowRoutes(app: FastifyInstance): Promise<void> {
     // bookmark, and the same "never an error out of a scope hint" rule `?workspace=` follows.
     const parsed = q.days == null ? Number.NaN : Number.parseInt(q.days, 10);
     const days = Number.isInteger(parsed) && parsed > 0 ? parsed : FLOW_DEFAULT_WINDOW_DAYS;
-    return getFlowFindings(accountId, scope, days);
+    return getFlowCourts(accountId, scope, days);
   });
 }

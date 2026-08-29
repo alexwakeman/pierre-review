@@ -1016,11 +1016,13 @@ to removable chips.
 
 ## The Reports pane is two tabs, and the Pending board can now merge
 
-### Reports → Overview | Bottlenecks (`insightsTab`)
+### Reports → Overview | Where it's stuck (`insightsTab`)
 
 `InsightsView` is a TWO-TAB pane. **Overview** is the pane as it was — free Flow metrics above the
-Pro-badged Period reports. **Bottlenecks** is the human-lane findings panel
-(`BottlenecksPanel.tsx`, contract in [BOTTLENECKS.md](BOTTLENECKS.md)).
+Pro-badged Period reports. **Where it's stuck** is the COURT LEDGER panel (`BottlenecksPanel.tsx`, contract in
+[BOTTLENECKS.md](BOTTLENECKS.md)). ⚠ It renders NO PERSON — not a login, not an avatar, not a
+per-head count — and the server sends no actor ids, which makes that structural rather than a
+convention this file has to remember.
 
 - ⚠ **The visible tab is DERIVED, never written back** — `effectiveTab` normalises an unknown
   `?insightsTab=` FOR THE RENDER ONLY. Exactly the `feedInnerTab` / `botsInnerTab` rule: a

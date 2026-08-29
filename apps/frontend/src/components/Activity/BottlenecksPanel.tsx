@@ -1,320 +1,413 @@
 import { useMemo } from 'react';
-import type { User } from '@pierre-review/shared';
+import type { CourtEvidencePr, PrCourt, RepoCourtProfile } from '@pierre-review/shared';
 import { useFlowFindings } from '../../hooks/useFlowFindings.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { safeExternalUrl } from '../../lib/ui.js';
-import { Avatar } from '../CommentCard.js';
-import { UserName } from '../UserName.js';
 import {
+  BotIcon,
   CheckCircleIcon,
   ExternalLinkIcon,
   InfoIcon,
-  PartialCircleIcon,
   PullRequestIcon,
-  ThinSampleIcon,
+  WarningIcon,
 } from '../Icons.js';
 import { metaFor } from './AttentionCards.js';
 import {
   buildBottlenecksModel,
-  type BottleneckRow,
-  type BottleneckSection,
+  barWidth,
+  COURT_LABEL,
+  COURT_ORDER,
+  COURT_SHORT,
+  coverageLineFor,
+  exclusionLineFor,
+  formatHours,
+  formatPct,
+  truncationLineFor,
 } from './bottlenecksModel.js';
 
-// ── BOTTLENECKS — the human layer of the Reports pane ─────────────────────────────────────────
+// "Where it's stuck" — the COURT LEDGER, on the Reports rail.
 //
-// The Bots rail answers "is this bot worth its seat". This answers the twin question: WHERE DOES
-// HUMAN REVIEW TIME GO, and what keeps costing it. The header says so out loud and points at the
-// twin, because the two surfaces measure different populations with deliberately similar
-// machinery and a reader who confuses them draws the wrong conclusion from both.
+// Every hour a pull request is open, somebody is holding the ball: a REVIEWER who has not looked,
+// an AUTHOR who owes a response, or nobody at all — approved and waiting to land.
 //
-// CORE and FREE ON EVERY TIER — no `useProCapabilities`, no nudge, no wall. It renders identically
-// under `npx pierre-review` with no plugin present, which is why the Reports rail entry being
-// un-gated matters: this is the second free surface behind it.
+// ⚠ THIS SCREEN NAMES NO PERSON. Not a login, not an avatar, not a per-head count. The subject of
+// every row is a repository and a court; people do not appear, and the server no longer sends
+// actor ids to make that structural rather than a convention. "Guide the work, never rank the
+// people" is the licence this feature operates under, and a screen an EM makes staffing decisions
+// from is exactly where that line has to hold.
 //
-// ⚠ EVERY SENTENCE ON SCREEN IS THE SERVER'S TEMPLATED PROSE, rendered verbatim. There is no
-// narration seam here and there must not be one: an EM makes staffing decisions off this screen,
-// and a generated headline would launder an unverified figure into it (`db/flow-findings.ts`
-// carries the same note at the other end of the wire).
-//
-// ── WHAT THIS FILE MAY NOT BECOME ────────────────────────────────────────────────────────────
-// ⚠ THE SUBJECT OF A ROW IS THE FLOW, NEVER A PERSON. Every row leads with `subject` — a
-// directory, a repo, a size band — and people appear ONLY as chips INSIDE a row, under a caption
-// saying what they are evidence of. No sort by person, no group by person, no person-vs-person
-// column, no leaderboard. The moment a row's subject becomes an engineer this is a performance
-// dashboard, which is a different product with a much worse reason to exist.
-// ⚠ REFUSALS RENDER. A kind that could not clear its sample floor gets a NAMED "not enough data
-// to say X" line. Dropping it would make the panel claim it checked and found nothing, which is a
-// far stronger statement than the one the data supports.
-// ⚠ VALUE AND BASELINE ALWAYS RENDER TOGETHER, and `sampleSize` on every row — it is the reader's
-// only defence against a confident number computed from four threads.
+// ⚠ EVERY SENTENCE IS THE SERVER'S, TEMPLATED. No model touches this feature at any point. The
+// panel formats FIGURES (bottlenecksModel) and renders PROSE (the server's) — it never composes a
+// claim of its own out of the numbers.
 
-/**
- * The window, in days. Sent EXPLICITLY rather than relying on the route's default so the query
- * key names the window it actually measured — a server-side default change would otherwise move
- * every cached answer without moving its key. The server clamps to [7, 90] regardless, and the
- * response echoes `windowDays`, which is what the coverage line renders.
- */
-const FLOW_WINDOW_DAYS = 30;
+/** The evidence rows carry no author identity, so the lookup is always empty by construction. */
+const NO_AUTHOR_LOOKUP = new Map<number, never>() as never;
 
-/** `FlowFindingPrRef` carries no `authorId` — a finding's evidence is a PR the CLAIM rests on,
- *  not a PR whose author is part of the claim — so there is nothing to resolve an author against.
- *  A named empty map says that, where a bare `new Map()` at the call site would read as an
- *  oversight (and allocate per row per render). */
-const NO_AUTHOR_LOOKUP: Map<number, User> = new Map();
+const COURT_BAR: Record<PrCourt, string> = {
+  reviewer: 'bg-amber-500 dark:bg-amber-400',
+  author: 'bg-teal-600 dark:bg-teal-400',
+  landing: 'bg-indigo-500 dark:bg-indigo-400',
+};
+const COURT_TEXT: Record<PrCourt, string> = {
+  reviewer: 'text-amber-700 dark:text-amber-400',
+  author: 'text-teal-700 dark:text-teal-400',
+  landing: 'text-indigo-600 dark:text-indigo-400',
+};
 
-function SubjectChip({ label }: { label: string }): JSX.Element {
+function CourtBar({
+  courts,
+  title,
+}: {
+  courts: { court: PrCourt; share: number }[];
+  title?: string;
+}): JSX.Element {
+  const by = new Map(courts.map((c) => [c.court, c.share]));
   return (
-    <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-      {label}
-    </span>
-  );
-}
-
-/** A person implicated by a finding — INSIDE a row, never a row. */
-function ActorChip({ id, user }: { id: number; user: User | undefined }): JSX.Element {
-  return (
-    <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px]">
-      <Avatar user={user} size={13} />
-      <UserName user={user} fallbackId={id} />
-    </span>
-  );
-}
-
-function EvidenceLinks({ row }: { row: BottleneckRow }): JSX.Element | null {
-  const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  if (row.evidence.length === 0) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <span className="text-[11px] text-gray-400">Behind this:</span>
-      {row.evidence.map((pr) => {
-        const label = `${pr.repoFullName}#${pr.prNumber}`;
-        // Opened through the SAME path every other Activity card uses (AttentionCards' metaFor +
-        // openPrDetailTab with `fromActivity`), so the tab, its chrome and the Back-to-Activity
-        // arming are identical to a click from the Pending board — rather than a `PinnedPr`
-        // literal built beside it that drifts. The author chrome backfills when PrDetail loads
-        // and calls syncMeta.
-        const meta = metaFor(
-          {
-            prId: pr.prId,
-            prNumber: pr.prNumber,
-            prTitle: pr.prTitle,
-            repoFullName: pr.repoFullName,
-          },
-          NO_AUTHOR_LOOKUP,
-        );
-        const href = safeExternalUrl(pr.githubUrl);
-        return (
-          <span key={pr.prId} className="inline-flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => openPrDetailTab(meta, { fromActivity: true })}
-              title={pr.prTitle}
-              className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
-            >
-              <PullRequestIcon size={11} />
-              {label}
-            </button>
-            {href != null && (
-              // ⚠ `githubUrl` is data-derived, so it goes through safeExternalUrl — React renders
-              // a `javascript:` href with nothing but a console warning.
-              <a
-                href={href}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-              >
-                <ExternalLinkIcon size={10} title={`Open ${label} on GitHub`} />
-              </a>
-            )}
-          </span>
-        );
-      })}
+    <div
+      className="flex h-2 w-full overflow-hidden rounded-sm bg-gray-200 dark:bg-gray-800"
+      title={title}
+    >
+      {COURT_ORDER.map((court) => (
+        <div
+          key={court}
+          className={COURT_BAR[court]}
+          style={{ width: barWidth(by.get(court) ?? 0) }}
+        />
+      ))}
     </div>
   );
 }
 
-function FindingRow({ row }: { row: BottleneckRow }): JSX.Element {
+function Legend(): JSX.Element {
   return (
-    <li
-      data-testid="bottleneck-row"
-      className="rounded-lg border border-gray-200 p-3 dark:border-gray-800"
-    >
-      {/* THE SUBJECT LEADS. A kind chip, then the flow itself, verbatim and monospaced — a
-          directory, a repo or a size band reads as a thing you can change. */}
-      <div className="flex flex-wrap items-baseline gap-2">
-        <SubjectChip label={row.subjectKindLabel} />
-        <span
-          data-testid="bottleneck-subject"
-          className="font-mono text-[12px] font-semibold text-gray-800 dark:text-gray-100"
-        >
-          {row.subject}
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+      {COURT_ORDER.map((court) => (
+        <span key={court} className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+          <span className={`h-2 w-2 rounded-sm ${COURT_BAR[court]}`} />
+          {COURT_SHORT[court]}
         </span>
-        {/* Value AND baseline, in the same unit, in one breath. A magnitude with no comparison
-            is not a finding, so these never render apart. */}
-        <span className="ml-auto whitespace-nowrap text-[11px] text-gray-500 dark:text-gray-400">
-          <strong className="text-[13px] font-semibold text-gray-800 dark:text-gray-100">
-            {row.value}
-          </strong>{' '}
-          vs {row.baseline} {row.baselineLabel}
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One openable pull request.
+ *
+ * ⚠ `githubUrl` is data-derived, so the external link goes through safeExternalUrl — React renders
+ * a `javascript:` href with nothing but a console warning.
+ *
+ * ⚠ `court` is null for the merged-without-review list, where `hoursInCourt` carries no meaning.
+ * Rendering it anyway printed "0h of 15m" — a figure that is not so much wrong as not a
+ * measurement. A row shows the court clock only where there was a court to sit in.
+ */
+function EvidenceRow({ pr, court }: { pr: CourtEvidencePr; court: PrCourt | null }): JSX.Element {
+  const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
+  const href = safeExternalUrl(pr.githubUrl);
+  // Opened through the SAME path every other Activity card uses, so the tab, its chrome and the
+  // Back-to-Activity arming are identical to a click from the Pending board.
+  const meta = metaFor(
+    { prId: pr.prId, prNumber: pr.prNumber, prTitle: pr.prTitle, repoFullName: pr.repoFullName },
+    NO_AUTHOR_LOOKUP,
+  );
+  return (
+    <li className="flex items-baseline gap-2 py-1 text-[11px]">
+      <button
+        type="button"
+        onClick={() => openPrDetailTab(meta, { fromActivity: true })}
+        title={pr.prTitle}
+        className="inline-flex min-w-0 items-center gap-1 font-medium text-sky-600 hover:underline dark:text-sky-400"
+      >
+        <PullRequestIcon size={11} className="shrink-0" />
+        <span className="shrink-0">#{pr.prNumber}</span>
+        <span className="truncate text-gray-600 dark:text-gray-300">{pr.prTitle}</span>
+      </button>
+      {pr.authorIsBot && (
+        // Should not occur — automation's own pull requests are excluded from this population —
+        // but if the exclusion ever regresses, the row says so rather than passing a dependency
+        // bump off as somebody's waiting work.
+        <span
+          className="inline-flex shrink-0 items-center gap-0.5 rounded bg-gray-100 px-1 text-[10px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+          title="Opened by automation"
+        >
+          <BotIcon size={9} />
+          bot
+        </span>
+      )}
+      <span className="ml-auto shrink-0 whitespace-nowrap tabular-nums text-gray-500 dark:text-gray-400">
+        {court != null ? (
+          <>
+            <span className={`font-semibold ${COURT_TEXT[court]}`}>
+              {formatHours(pr.hoursInCourt)}
+            </span>
+            {' of '}
+            {formatHours(pr.leadHours)}
+          </>
+        ) : (
+          <>merged in {formatHours(pr.leadHours)}</>
+        )}
+      </span>
+      {href != null && (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open on GitHub"
+          className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+        >
+          <ExternalLinkIcon size={10} />
+        </a>
+      )}
+    </li>
+  );
+}
+
+function RepoRow({ repo }: { repo: RepoCourtProfile }): JSX.Element {
+  const court = repo.dominant;
+  return (
+    <li className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <span className="font-mono text-xs font-semibold text-gray-800 dark:text-gray-100">
+          {repo.repoFullName}
+        </span>
+        <span className="whitespace-nowrap text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+          median {formatHours(repo.medianLeadHours)} · p75{' '}
+          <span className="font-semibold text-gray-700 dark:text-gray-200">
+            {formatHours(repo.p75LeadHours)}
+          </span>
         </span>
       </div>
-
-      {/* Templated, code-written, verbatim. */}
-      <p className="mt-1.5 text-[12px] text-gray-700 dark:text-gray-200">{row.headline}</p>
-      <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{row.detail}</p>
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-gray-100 pt-2 dark:border-gray-800/60">
-        {/* ON EVERY ROW, never behind a hover: how many observations the figure rests on. */}
-        <span
-          className="inline-flex items-center gap-1 text-[11px] text-gray-400"
-          title="How many observations this figure was computed from"
-        >
-          <ThinSampleIcon size={10} />
-          from {row.sample}
-        </span>
-        <EvidenceLinks row={row} />
+      <div className="mt-2">
+        <CourtBar
+          courts={repo.courts}
+          title={repo.courts
+            .map((c) => `${COURT_SHORT[c.court]} ${formatPct(c.share)}`)
+            .join(' · ')}
+        />
       </div>
-
-      {row.actors.length > 0 && (
-        // People, INSIDE the row, under a caption naming what they are evidence OF. This block is
-        // never the row's heading, never sorted on, and never counted across rows.
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-[11px] text-gray-400">{row.actorCaption}:</span>
-          {row.actors.map((a) => (
-            <ActorChip key={a.id} id={a.id} user={a.user} />
-          ))}
+      {/* The server's sentence, verbatim. Figures inside it are the server's own formatting; the
+          per-court chips beside it are this file's. They describe the same numbers, so both come
+          from the one `courts` array rather than being recomputed. */}
+      {repo.narrative != null && (
+        <p className="mt-2 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+          {repo.narrative}
+        </p>
+      )}
+      {repo.evidence.length > 0 && court != null && (
+        <div className="mt-2 border-t border-gray-100 pt-1.5 dark:border-gray-800/70">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+            Longest in this court
+          </div>
+          <ul>
+            {repo.evidence.map((pr) => (
+              <EvidenceRow key={pr.prId} pr={pr} court={court} />
+            ))}
+          </ul>
         </div>
       )}
     </li>
   );
 }
 
-function Section({
-  section,
-  windowDays,
-}: {
-  section: BottleneckSection;
-  windowDays: number;
-}): JSX.Element {
-  return (
-    <section className="space-y-1.5" data-testid={`bottleneck-section-${section.kind}`}>
-      <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-        {section.label}
-      </h4>
-      {section.state === 'findings' ? (
-        <ul className="space-y-2">
-          {section.rows.map((r) => (
-            <FindingRow key={r.id} row={r} />
-          ))}
-        </ul>
-      ) : section.state === 'refused' ? (
-        // ⚠ THE REFUSAL IS THE OUTPUT. Named, with the server's reason verbatim — "we could not
-        // say this" is information, and hiding it would upgrade it to "there is nothing here".
-        <p
-          data-testid="bottleneck-refusal"
-          className="flex items-start gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400"
-        >
-          <InfoIcon size={12} className="mt-0.5 shrink-0" />
-          <span>
-            <strong className="font-medium">Not enough data to say.</strong>{' '}
-            {section.refusalReason}
-          </span>
-        </p>
-      ) : (
-        // Floors cleared, nothing crossed a threshold. This is the ONLY state entitled to say
-        // "nothing stands out", and it says so in its own words rather than borrowing the
-        // refusal's.
-        <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-gray-200 px-3 py-2 text-[11px] text-gray-400 dark:border-gray-800">
-          <CheckCircleIcon size={12} className="mt-0.5 shrink-0" />
-          {/* The server's own sentence names WHAT was measured ("Measured 10 directories … none
-              combined a single dominant reviewer with a slower first read"), which is the useful
-              half. The generic line stays as the fallback for the case where a kind emitted no
-              refusal at all — an older backend, or a future kind that forgets to account for
-              itself. */}
-          <span>
-            {section.refusalReason ??
-              `Measured over the last ${windowDays} days — nothing here stands out.`}
-          </span>
-        </p>
-      )}
-    </section>
-  );
-}
-
 export function BottlenecksPanel(): JSX.Element {
-  // `workspaceId === null` means "not resolved yet" — the hook holds itself idle on skipToken
-  // until it lands, so nothing workspace-scoped renders against another workspace's numbers.
   const workspaceId = useFilters((s) => s.workspaceId);
-  const { data, isPending, isError } = useFlowFindings(workspaceId, FLOW_WINDOW_DAYS);
-  const model = useMemo(() => buildBottlenecksModel(data), [data]);
-  // The panel covers the WHOLE workspace: the repo picker is Timeline-only, so there is no
-  // `repoIds` here and nothing on this screen scopes it.
+  // ⚠ `workspaceId === null` means "not resolved yet" — the hook holds itself idle on skipToken,
+  // so nothing here renders another workspace's numbers during the gap.
+  const q = useFlowFindings(workspaceId, 30);
+  const model = useMemo(() => buildBottlenecksModel(q.data), [q.data]);
+
+  if (model == null) {
+    return (
+      <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+        {q.isError ? 'Could not load this workspace’s flow.' : 'Measuring…'}
+      </div>
+    );
+  }
+
+  const exclusions = exclusionLineFor(model.coverage);
+  const truncation = truncationLineFor(model.coverage);
 
   return (
-    <div className="space-y-3" data-testid="bottlenecks-panel">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <h3 className="text-[12px] font-semibold text-gray-700 dark:text-gray-200">
-          Where human review time goes
-        </h3>
-        <span className="text-[11px] text-gray-400">
-          The human layer of the review flow. Automation is measured on the Bots rail.
-        </span>
+    <div className="space-y-4" data-testid="bottlenecks-panel">
+      <div>
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+            Where it’s stuck
+          </h3>
+          <span className="text-[11px] text-gray-400">
+            Every hour a pull request is open, somebody is holding it. Automation is measured on the
+            Bots rail.
+          </span>
+        </div>
+        <div className="mt-1 text-[11px] text-gray-400">
+          {coverageLineFor(model.coverage, model.windowDays)}
+        </div>
+        {exclusions != null && <div className="text-[11px] text-gray-400">{exclusions}</div>}
+        {truncation != null && (
+          <div className="mt-1 flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+            <WarningIcon size={11} className="mt-0.5 shrink-0" />
+            <span>{truncation}</span>
+          </div>
+        )}
       </div>
 
-      {isError ? (
-        <p className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          Could not measure this Workspace’s review flow just now.
-        </p>
-      ) : model == null || isPending ? (
-        <div className="space-y-1.5 py-0.5" aria-hidden="true">
-          {['62%', '94%', '80%'].map((w) => (
-            <div key={w} className="digest-skeleton-line h-3.5" style={{ width: w }} />
-          ))}
+      {model.nothingMeasured ? (
+        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+          Nothing to measure in this Workspace yet.
+          <div className="mt-1 text-[11px]">
+            A pull request has to merge, and a person has to have reviewed or commented on it,
+            before its waiting time can be attributed.
+          </div>
         </div>
       ) : (
         <>
-          {/* ⚠ ALWAYS ON SCREEN. Retroactive history is coverage-biased and the reader should not
-              have to know that — so the panel states what it measured, and flags partial coverage
-              or a capped scan as a caution rather than leaving it to be inferred. */}
-          <p className="text-[11px] text-gray-400">{model.coverageLine}</p>
-          {model.coverageCaution != null && (
-            <p
-              data-testid="bottleneck-coverage-caution"
-              className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-300"
-            >
-              <PartialCircleIcon size={11} className="mt-0.5 shrink-0" />
-              <span>{model.coverageCaution}</span>
-            </p>
-          )}
-
-          {model.nothingStandsOut ? (
-            // Nothing found AND nothing refused: every kind cleared its floors and none crossed a
-            // threshold. An honest "nothing stands out" rather than a blank pane — and distinct
-            // from the per-kind refusals, which say something much weaker.
-            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-              Nothing stands out in this Workspace’s review flow.
-              <div className="mt-1 text-[11px]">
-                Every check cleared its sample floor over the last {model.windowDays} days and none
-                of them found a wait worth naming.
-              </div>
+          {/* ── The headline: one sentence, the whole workspace ────────────────────────── */}
+          <section className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+            <CourtBar courts={model.courts} />
+            <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              {COURT_ORDER.map((court) => {
+                const c = model.courts.find((x) => x.court === court);
+                return (
+                  <span key={court} className="inline-flex items-baseline gap-1.5">
+                    <span className={`text-lg font-semibold tabular-nums ${COURT_TEXT[court]}`}>
+                      {formatPct(c?.share ?? 0)}
+                    </span>
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                      {COURT_LABEL[court].toLowerCase()}
+                    </span>
+                  </span>
+                );
+              })}
             </div>
-          ) : (
-            <div className="space-y-4">
-              {/* FRAMING ONLY. Four dashed boxes with one reason between them (the empty-workspace
-                  case) reads as a broken panel; this line says it is deliberate. ⚠ It never
-                  replaces the sections — each refusal still renders under its own name, because
-                  that name is the "X" in "not enough data to say X". */}
-              {model.allRefused && (
-                <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Nothing could be measured here yet. Each check below says what it was missing.
+            {model.headline != null && (
+              <p className="mt-2 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+                {model.headline}
+              </p>
+            )}
+          </section>
+
+          {/* ── One section per court, advice stated ONCE ──────────────────────────────── */}
+          {model.sections.map((section) => (
+            <section key={section.court} className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className={`h-2.5 w-2.5 rounded-sm ${COURT_BAR[section.court]}`} />
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  {section.label}
+                </h4>
+                <span className="text-[11px] text-gray-400">
+                  {section.repos.length}{' '}
+                  {section.repos.length === 1 ? 'repository' : 'repositories'}
+                </span>
+              </div>
+              {/* ⚠ THE ADVICE LIVES HERE, ONCE. It is a property of the COURT, not of a repository:
+                  putting it on every row produced six identical paragraphs on a real workspace,
+                  which is the restatement problem that made the old path findings worthless. */}
+              {section.directive !== '' && (
+                <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+                  {section.directive}
                 </p>
               )}
-              {model.sections.map((s) => (
-                <Section key={s.kind} section={s} windowDays={model.windowDays} />
-              ))}
-            </div>
+              <ul className="space-y-2">
+                {section.repos.map((r) => (
+                  <RepoRow key={r.repoId} repo={r} />
+                ))}
+              </ul>
+            </section>
+          ))}
+
+          {/* ── Merged without a human review ──────────────────────────────────────────── */}
+          {model.unreviewed.length > 0 && (
+            <section className="space-y-2">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Merged without a human review
+              </h4>
+              <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+                These landed with no review, comment or approval from a person. That is a branch
+                protection setting, not a habit — and it is counted over work a person wrote, so
+                automation’s own pull requests are not inflating it.
+              </p>
+              <ul className="space-y-2">
+                {model.unreviewed.map((u) => (
+                  <li
+                    key={u.repoId}
+                    className="rounded-lg border border-gray-200 p-3 dark:border-gray-800"
+                  >
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="font-mono text-xs font-semibold text-gray-800 dark:text-gray-100">
+                        {u.repoFullName}
+                      </span>
+                      <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+                        <span className="font-semibold text-amber-700 dark:text-amber-400">
+                          {formatPct(u.share)}
+                        </span>{' '}
+                        — {u.withoutHumanReview} of {u.merged} merges
+                      </span>
+                    </div>
+                    <ul className="mt-1.5 border-t border-gray-100 pt-1 dark:border-gray-800/70">
+                      {u.evidence.map((pr) => (
+                        <EvidenceRow key={pr.prId} pr={pr} court={null} />
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
+
+          {/* ── Quiet repos, and the refusals ──────────────────────────────────────────── */}
+          {model.quiet.length > 0 && (
+            <section className="space-y-2">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Nothing stands out
+              </h4>
+              <ul className="space-y-1.5">
+                {model.quiet.map((r) => (
+                  <li
+                    key={r.repoId}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-dashed border-gray-200 px-3 py-2 dark:border-gray-800"
+                  >
+                    <CheckCircleIcon size={12} className="shrink-0 text-gray-400" />
+                    <span className="font-mono text-[11px] text-gray-600 dark:text-gray-300">
+                      {r.repoFullName}
+                    </span>
+                    <span className="w-24 shrink-0">
+                      <CourtBar courts={r.courts} />
+                    </span>
+                    <span className="ml-auto text-[11px] tabular-nums text-gray-400">
+                      {r.prs} PRs · p75 {formatHours(r.p75LeadHours)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* ⚠ REFUSALS RENDER BY NAME. An absent section asserts "we checked and there is nothing
+              here", which is a much stronger claim than either thing that actually happened. */}
+          {model.refusals.map((r) => (
+            <p
+              key={r.kind}
+              data-testid="bottleneck-refusal"
+              className="flex items-start gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400"
+            >
+              {r.basis === 'measured_clean' ? (
+                <CheckCircleIcon size={12} className="mt-0.5 shrink-0" />
+              ) : (
+                <InfoIcon size={12} className="mt-0.5 shrink-0" />
+              )}
+              <span>
+                {r.basis === 'insufficient_data' && (
+                  <strong className="font-medium">Not enough data to say. </strong>
+                )}
+                {r.reason}
+              </span>
+            </p>
+          ))}
+
+          <div className="pt-1">
+            <Legend />
+          </div>
         </>
       )}
     </div>
