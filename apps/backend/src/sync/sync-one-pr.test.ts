@@ -31,6 +31,10 @@ vi.mock('../github/client.js', () => ({
     Array.isArray(e) && e.some((x) => (x as { saml?: boolean })?.saml === true),
   graphqlChecksHint: () => '',
   summarizeGraphqlErrors: () => '',
+  // Read only by the thread drain's failure path (drain-review-threads.ts). A mock factory
+  // REPLACES the module, so omitting a real export turns any future case that reaches that
+  // path into an unrelated "no export defined" error rather than the behaviour under test.
+  isRateLimitError: () => ({ limited: false, resumeAt: null }),
 }));
 vi.mock('./auth-notices.js', () => ({ recordSamlBlock: vi.fn(), clearSamlBlock: vi.fn() }));
 vi.mock('./commit-files.js', () => ({ ensureCommitFiles: vi.fn(async () => new Map()) }));
@@ -43,7 +47,12 @@ import { graphqlTolerant } from '../github/client.js';
 import { ensureCommitFiles } from './commit-files.js';
 import { persistPr } from './upsert.js';
 import { recordSamlBlock, clearSamlBlock } from './auth-notices.js';
-import { PR_ACTIVITY_ONE_QUERY, REPO_ACTIVITY_QUERY } from '../github/queries.js';
+import {
+  PR_ACTIVITY_ONE_QUERY,
+  PR_REVIEW_THREADS_PAGE_QUERY,
+  REPO_ACTIVITY_QUERY,
+} from '../github/queries.js';
+import { __resetRateBudget } from '../github/rate-budget.js';
 import { syncOnePr, enqueuePrSync, __resetTargetedSyncState } from './sync-one-pr.js';
 
 const mockGraphql = vi.mocked(graphqlTolerant) as unknown as Mock;
@@ -80,6 +89,9 @@ const okResponse = (pr: unknown) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   __resetTargetedSyncState();
+  // The thread drain consults the real per-account budget (it declines to spend inside a known
+  // limit window), so a leaked limit from another case would silently make it a no-op.
+  __resetRateBudget();
   mockEnsure.mockResolvedValue(new Map());
   mockPersist.mockResolvedValue(undefined);
 });
@@ -105,6 +117,71 @@ describe('syncOnePr', () => {
     // A clean read self-dismisses any prior SAML flag; nothing recorded.
     expect(mockClearSaml).toHaveBeenCalledWith(7, 'o');
     expect(mockRecordSaml).not.toHaveBeenCalled();
+  });
+
+  // WIRING PIN for the review-thread drain (sync/drain-review-threads.ts). This is the
+  // webhook / adaptive-scheduler / post-write path, so a bot-flooded PR reached through it is
+  // exactly the population the drain exists for — and the call is one line that a refactor can
+  // drop or relocate with nothing else complaining.
+  //
+  // The fixture makes ORDER assertable, which is the half a "was it called?" spy would miss.
+  // The PR's ONLY unresolved thread arrives on the CONTINUATION, and the commit cutoff for the
+  // addressed-state heuristic is derived from the unresolved threads — so `ensureCommitFiles`
+  // sees SHA_LATER only if the drain ran BEFORE the gather. Delete the drain, or move it below
+  // the gather (the two edits the comment there warns against), and this asks GitHub for no
+  // commit files at all.
+  it('drains the review-thread tail before deriving the commit cutoff, and persists one merged list', async () => {
+    const pr = {
+      reviewThreads: {
+        totalCount: 2,
+        pageInfo: { hasNextPage: true, endCursor: 'CURSOR_1' },
+        // Page one holds only a RESOLVED thread: on its own it contributes no cutoff.
+        nodes: [
+          { id: 'T_OLD', isResolved: true, comments: { nodes: [{ createdAt: '2026-07-01T00:00:00Z' }] } },
+        ],
+      },
+      commits: {
+        nodes: [
+          { commit: { oid: 'SHA_LATER', committedDate: '2026-07-11T00:00:00Z' } },
+          { commit: { oid: 'SHA_EARLIER', committedDate: '2026-07-05T00:00:00Z' } },
+        ],
+      },
+    };
+    const continuation = {
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                id: 'T_NEW',
+                isResolved: false,
+                comments: { nodes: [{ createdAt: '2026-07-10T00:00:00Z' }] },
+              },
+            ],
+          },
+        },
+      },
+      rateLimit: { remaining: 4000, resetAt: '2030-01-01T00:00:00Z', cost: 1 },
+    };
+    mockGraphql.mockImplementation(async (_c: unknown, query: unknown) =>
+      query === PR_REVIEW_THREADS_PAGE_QUERY ? continuation : okResponse(pr),
+    );
+
+    const ok = await syncOnePr(1, 70, makeLog());
+
+    expect(ok).toBe(true);
+    // One fat PR fetch, then one continuation from the first page's cursor.
+    expect(mockGraphql).toHaveBeenCalledTimes(2);
+    expect(mockGraphql.mock.calls[1]?.[1]).toBe(PR_REVIEW_THREADS_PAGE_QUERY);
+    expect(mockGraphql.mock.calls[1]?.[2]).toMatchObject({ cursor: 'CURSOR_1', number: 70 });
+    // The cutoff came from the DRAINED thread — the ordering assertion.
+    expect(mockEnsure).toHaveBeenCalledWith('o', 'n', ['SHA_LATER'], 'tok', 10);
+    // persistPr receives ONE complete list, never a page at a time (see drain-review-threads.ts:
+    // its prior-thread snapshot is read once, up front).
+    expect(mockPersist).toHaveBeenCalledTimes(1);
+    const persisted = mockPersist.mock.calls[0]?.[0] as typeof pr;
+    expect(persisted.reviewThreads.nodes.map((t) => t.id)).toEqual(['T_OLD', 'T_NEW']);
   });
 
   it('skips (no persist) when the PR is gone / inaccessible', async () => {

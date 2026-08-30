@@ -14,6 +14,7 @@ import { gateBudget, noteBudget, noteLimited } from '../github/rate-budget.js';
 import { clearSamlBlock, recordSamlBlock } from './auth-notices.js';
 import { REPO_ACTIVITY_QUERY, type RepoActivityResponse } from '../github/queries.js';
 import { ensureCommitFiles } from './commit-files.js';
+import { drainReviewThreads } from './drain-review-threads.js';
 import { syncBranchStatus } from './branch-status.js';
 import { createUserResolver, persistPr, upsertRepo } from './upsert.js';
 
@@ -322,6 +323,25 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
           break;
         }
         newestMs ??= updatedMs;
+
+        // Drain the review-thread tail BEFORE anything reads the list. Ordering is
+        // load-bearing twice over: the SHA gather below derives its cutoff from the
+        // unresolved threads, so a tail that arrived late would have its commits skipped for
+        // the addressed-state heuristic; and persistPr must receive ONE complete list (see
+        // drain-review-threads.ts). No request at all unless GitHub said this PR overflows,
+        // which is the overwhelming majority of PRs — the walk's cost is unchanged for them.
+        const tDrain = performance.now();
+        const drained = await drainReviewThreads(pr.reviewThreads, {
+          owner,
+          name,
+          number: pr.number,
+          accountId,
+          token: opts.token,
+          log,
+          shouldCancel: opts.shouldCancel,
+        });
+        graphqlMs += performance.now() - tDrain;
+        totalCost += drained.pages;
 
         const unresolved = pr.reviewThreads.nodes.filter(
           (t) => !t.isResolved && t.comments.nodes.length > 0,

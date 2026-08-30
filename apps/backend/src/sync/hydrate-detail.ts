@@ -40,10 +40,20 @@ import {
 } from '../github/client.js';
 import { isLimited, noteBudget, noteLimited } from '../github/rate-budget.js';
 import { PR_DETAIL_QUERY, type PrDetailResponse } from '../github/queries.js';
+import { drainDetailThreads } from './drain-review-threads.js';
 import { checkRunsFrom } from './upsert.js';
 
 const { reviews, reviewComments, prComments, reviewThreads, pullRequests, repos } =
   schema;
+
+// Hydration has no request-scoped logger (it is reached from routes, the plugin seam and the
+// SPA's poll alike), so its diagnostics have always gone straight to console with a
+// `[hydrate]` tag. This adapts that to the sync `Logger` shape the thread drain takes.
+const hydrateLog = {
+  info: (m: string): void => console.log(`[hydrate] ${m}`),
+  warn: (m: string): void => console.warn(`[hydrate] ${m}`),
+  error: (m: string): void => console.error(`[hydrate] ${m}`),
+};
 
 // Parsed GitHub text for one PR, keyed for overlay onto stored rows.
 interface GhPrText {
@@ -212,8 +222,12 @@ async function fetchGhPrTextUncached(
 ): Promise<{ data: GhPrText | null; samlBlocked: boolean }> {
   let resp: PrDetailResponse;
   let samlBlocked = false;
+  // Hoisted out of the try because the thread drain below needs it too. Still resolved
+  // INSIDE the try, so `fetchReviewCommentHunks`' "never throws" contract stays structural:
+  // a token failure lands on the same catch it always did.
+  let token: string;
   try {
-    const token = await getAccessToken(accountId);
+    token = await getAccessToken(accountId);
     const client = getGraphqlClientFor(token);
     // Tolerate partial errors: if the token is FORBIDDEN one sub-field (e.g. `statusCheckRollup`
     // check runs on a private repo it can't reach), that used to throw away the ENTIRE hydration
@@ -252,6 +266,19 @@ async function fetchGhPrTextUncached(
   });
   const pr = resp.repository?.pullRequest;
   if (!pr) return { data: null, samlBlocked };
+
+  // Drain the review-thread tail before building the overlay maps. Hydration matches stored
+  // rows by node id, so a thread past the first page is not "a comment with no hunk" — it is
+  // a comment GitHub was never asked about, and the two are indistinguishable downstream once
+  // the map is built. One extra point per overflow page, nothing at all for a PR that fits.
+  await drainDetailThreads(pr.reviewThreads, {
+    owner,
+    name,
+    number,
+    accountId,
+    token,
+    log: hydrateLog,
+  });
 
   const reviewBodyByNode = new Map<string, string | null>();
   for (const r of pr.reviews.nodes) reviewBodyByNode.set(r.id, r.body);
@@ -541,9 +568,15 @@ export interface PrReviewCommentHunks {
   hunkByNodeId: Map<string, string>;
   /**
    * How many review comments GitHub's snapshot carried. Load-bearing for the UI's deterministic
-   * explanation: PR_DETAIL_QUERY pages `reviewThreads(first: 50)`, so on a bot-flooded PR — this
-   * app's target workload — a thread past #50 is ABSENT rather than hunk-less, and "GitHub's
-   * snapshot didn't include this thread" is a different sentence from "there is no code context".
+   * explanation: "GitHub's snapshot didn't include this thread" is a different sentence from
+   * "there is no code context", and the caller can only tell them apart by this count.
+   *
+   * PR_DETAIL_QUERY still asks for `reviewThreads(first: 50)` — the cap is priced per request,
+   * not per row, so widening it would tax every PR for the sake of a few — but the tail is now
+   * DRAINED (`drainDetailThreads`), so on a bot-flooded PR this is the true comment count
+   * rather than the first fifty threads' worth. It can still fall short of the truth when the
+   * drain is cut off by a rate limit or a partial response, which is exactly why the caller
+   * must keep treating a missing key as "not in the snapshot" rather than as "no hunk exists".
    */
   commentsSeen: number;
   reason: HunkFetchReason | null;

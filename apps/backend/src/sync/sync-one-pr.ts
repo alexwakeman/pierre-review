@@ -27,6 +27,7 @@ import {
 } from '../github/queries.js';
 import { clearSamlBlock, recordSamlBlock } from './auth-notices.js';
 import { ensureCommitFiles } from './commit-files.js';
+import { drainReviewThreads } from './drain-review-threads.js';
 import { createUserResolver, persistPr } from './upsert.js';
 import type { Logger } from './sync-repo.js';
 
@@ -169,6 +170,18 @@ async function runOnePrSync(
     // Read cleanly → the token IS authorized for this owner's org; self-dismiss any
     // prior SAML flag (guarded so a partial SAML error can't erroneously clear it).
     if (!samlBlocked) clearSamlBlock(accountId, owner);
+
+    // Drain the review-thread tail before anything reads the list — same ordering rule as
+    // the per-repo walk: the SHA cutoff below is derived from the unresolved threads, and
+    // persistPr must see ONE complete list. Costs nothing unless this PR overflows one page.
+    await drainReviewThreads(pr.reviewThreads, {
+      owner,
+      name,
+      number: prNumber,
+      accountId,
+      token,
+      log,
+    });
 
     // Gather the commit SHAs whose changed files the thread-state heuristic needs —
     // commits that landed AFTER an unresolved thread's last comment (identical to the

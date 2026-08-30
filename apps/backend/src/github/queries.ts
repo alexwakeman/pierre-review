@@ -12,6 +12,44 @@ const commitMessageField = fullText ? '\n                message' : '';
 const reviewCommentDiffHunkField = fullText ? '\n                  diffHunk' : '';
 const prCommentBodyField = '\n              body';
 
+// One review thread as the SYNC path needs it, shared by the fat walk/targeted queries
+// (inside PR_NODE_FIELDS) and by PR_REVIEW_THREADS_PAGE_QUERY, the continuation that drains
+// a PR whose threads overflow one page. Extracted for the same reason PR_NODE_FIELDS is: a
+// drained thread is persisted by the SAME persistPr as a first-page one, so if the two
+// selections drift, threads 51+ silently arrive with fewer fields than threads 1-50 and
+// `deriveThreadState` starts answering differently depending on which page a thread landed on.
+const REVIEW_THREAD_NODE_FIELDS = /* GraphQL */ `
+  id
+  isResolved
+  isOutdated
+  isCollapsed
+  path
+  line
+  resolvedBy {
+    login
+  }
+  comments(first: 50) {
+    nodes {
+      id
+      fullDatabaseId
+      body
+      createdAt${reviewCommentDiffHunkField}
+      author {
+        login
+        __typename
+        ... on User {
+          id
+          name
+          avatarUrl
+        }
+        ... on Bot {
+          id
+        }
+      }
+    }
+  }
+`;
+
 // The full PR-node field selection, shared by the per-repo walk (REPO_ACTIVITY_QUERY)
 // and the single-PR targeted fetch (PR_ACTIVITY_ONE_QUERY) so their result shape can
 // NEVER drift — both feed the same persistPr(pr: GqlPullRequest, …) unchanged. Edit the
@@ -176,38 +214,36 @@ const PR_NODE_FIELDS = /* GraphQL */ `
       }
     }
   }
+  # ---- review threads: capped at 50, DRAINED on demand ---------------------------------
+  #
+  # ⚠ MEASURED COST — DO NOT RAISE THIS CAP. GitHub prices a GraphQL query off the DECLARED
+  # \`first:\`/\`last:\` arguments, NOT off the rows that come back, so the cap is charged on
+  # every page of every repo whether or not anybody has that many threads. Measured against
+  # this exact document at \`pullRequests(first: 25)\`:
+  #
+  #     reviewThreads(first: 50)  → 15 points/page      ← today
+  #     reviewThreads(first: 60)  → 18 points/page
+  #     reviewThreads(first: 100) → 28 points/page      (+87%, forever, on every repo)
+  #
+  # Identical numbers on a bot-flooded repo and on a near-thread-less one, confirming the
+  # price is the shape and not the data. Against 5000 points/hour that is the difference
+  # between a comfortable backfill and a rate-limited one, bought for a tail of 2.6% of PRs —
+  # and it does not even close the gap: real PRs in this corpus carry 108 threads, so 100
+  # truncates too. Raising a cap only moves a silent cliff further out.
+  #
+  # \`totalCount\` + \`pageInfo\` measured FREE (still 15 points/page), and they turn the silent
+  # truncation into a fact the walk can act on: sync/drain-review-threads.ts follows the cursor
+  # with 1-point-per-page continuations, so ONLY the PRs that actually overflow pay anything.
+  # Before this, \`first: 50\` on a 108-thread PR stored the OLDEST 50 and dropped the rest —
+  # and \`reviewThreads\` is ordered oldest-first, so the half that vanished was the NEWEST
+  # review round, i.e. exactly the unresolved bot findings this product exists to surface.
   reviewThreads(first: 50) {
-    nodes {
-      id
-      isResolved
-      isOutdated
-      isCollapsed
-      path
-      line
-      resolvedBy {
-        login
-      }
-      comments(first: 50) {
-        nodes {
-          id
-          fullDatabaseId
-          body
-          createdAt${reviewCommentDiffHunkField}
-          author {
-            login
-            __typename
-            ... on User {
-              id
-              name
-              avatarUrl
-            }
-            ... on Bot {
-              id
-            }
-          }
-        }
-      }
+    totalCount
+    pageInfo {
+      hasNextPage
+      endCursor
     }
+    nodes {${REVIEW_THREAD_NODE_FIELDS}    }
   }
   comments(first: 50) {
     nodes {
@@ -297,6 +333,23 @@ export const REPO_ID_QUERY = /* GraphQL */ `
   }
 `;
 
+// One review thread as the HYDRATION path needs it — id plus the per-comment text. Shared
+// by PR_DETAIL_QUERY and its continuation for the same anti-drift reason as
+// REVIEW_THREAD_NODE_FIELDS: hydration keys on `id`/`fullDatabaseId`, so a continuation that
+// forgot a key would hand back threads that match nothing and look like "GitHub has no body
+// for this comment".
+const DETAIL_THREAD_NODE_FIELDS = /* GraphQL */ `
+  id
+  comments(first: 50) {
+    nodes {
+      id
+      fullDatabaseId
+      body
+      diffHunk
+    }
+  }
+`;
+
 // Single-PR detail fetch for on-demand text hydration (cloud "lean storage" mode).
 // Only the bulky text the DB no longer stores: PR body, review/comment/PR-comment
 // bodies, review-comment diff hunks, commit messages, and the head-commit checks
@@ -352,18 +405,19 @@ export const PR_DETAIL_QUERY = /* GraphQL */ `
             body
           }
         }
+        # Same cap, same drain as the sync walk (see the note on PR_NODE_FIELDS'
+        # reviewThreads). Hydration matches stored rows by node id, so a thread past the
+        # first page arrives here as MISSING KEYS — a body that never gets its legacy
+        # NULL-fill and, worse, a review comment the annotation platform reports as
+        # hunk-less when the truth is that it was never in the snapshot. pageInfo lets
+        # hydrate-detail.ts drain the remainder at 1 point per extra page.
         reviewThreads(first: 50) {
-          nodes {
-            id
-            comments(first: 50) {
-              nodes {
-                id
-                fullDatabaseId
-                body
-                diffHunk
-              }
-            }
+          totalCount
+          pageInfo {
+            hasNextPage
+            endCursor
           }
+          nodes {${DETAIL_THREAD_NODE_FIELDS}          }
         }
         comments(first: 50) {
           nodes {
@@ -389,6 +443,99 @@ export const PR_DETAIL_QUERY = /* GraphQL */ `
     }
   }
 `;
+
+// ---------------------------------------------------------------------------------------
+// Review-thread CONTINUATIONS — draining a PR whose threads overflow one page
+// ---------------------------------------------------------------------------------------
+//
+// Two queries because the two callers need different per-thread selections (the sync walk
+// persists a full thread; hydration only refills text), but they share one response SHAPE so
+// `sync/drain-review-threads.ts` can page either with the same loop.
+//
+// ⚠ THREADS ONLY. Nothing else about the PR is re-selected. That is what makes a continuation
+// cost 1 point (MEASURED) instead of re-paying the ~15-point fat page: cost tracks the
+// declared shape, so a continuation that "helpfully" re-fetched commits or checks would
+// charge the overflow tail the price of a whole extra walk.
+//
+// `$cursor` is REQUIRED (String!, not String) on purpose — these are only ever issued to
+// continue from a `pageInfo.endCursor` the caller already holds. A null cursor would silently
+// re-read page 1 forever, which is an infinite loop that looks like healthy paging.
+export const PR_REVIEW_THREADS_PAGE_QUERY = /* GraphQL */ `
+  query PrReviewThreadsPage(
+    $owner: String!
+    $name: String!
+    $number: Int!
+    $cursor: String!
+  ) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        reviewThreads(first: 50, after: $cursor) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          nodes {${REVIEW_THREAD_NODE_FIELDS}          }
+        }
+      }
+    }
+    rateLimit {
+      remaining
+      resetAt
+      cost
+    }
+  }
+`;
+
+export const PR_DETAIL_THREADS_PAGE_QUERY = /* GraphQL */ `
+  query PrDetailThreadsPage(
+    $owner: String!
+    $name: String!
+    $number: Int!
+    $cursor: String!
+  ) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        reviewThreads(first: 50, after: $cursor) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          nodes {${DETAIL_THREAD_NODE_FIELDS}          }
+        }
+      }
+    }
+    rateLimit {
+      remaining
+      resetAt
+      cost
+    }
+  }
+`;
+
+/**
+ * A `reviewThreads` connection as either continuation returns it. Generic in the node type so
+ * the one pager in `sync/drain-review-threads.ts` serves the walk and the hydration shapes.
+ *
+ * ⚠ Every field is OPTIONAL because `graphqlTolerant` hands back partial data with forbidden
+ * selections NULLED and hand-built fixtures predate the connection metadata entirely. The
+ * drain treats anything short of a positive `hasNextPage: true` + a string cursor as "stop",
+ * which is exactly the pre-drain behaviour — so a partial response degrades to the old
+ * truncation rather than to a loop or a throw.
+ */
+export interface GqlThreadPage<TNode> {
+  totalCount?: number;
+  pageInfo?: { hasNextPage?: boolean | null; endCursor?: string | null } | null;
+  nodes: TNode[];
+}
+
+export interface ThreadsPageResponse<TNode> {
+  repository: {
+    pullRequest: {
+      reviewThreads: GqlThreadPage<TNode>;
+    } | null;
+  } | null;
+  rateLimit?: { remaining: number; resetAt: string; cost: number } | null;
+}
 
 // Live repository search for the Add-repo picker. `searchQuery` is built by the route
 // from the user term: it always restricts matching to the repo name (`in:name`), and
@@ -659,7 +806,12 @@ export interface GqlPullRequest {
   headCommit: { nodes: GqlHeadCommit[] };
   commits: { nodes: GqlCommitNode[] };
   reviews: { nodes: GqlReview[] };
-  reviewThreads: { nodes: GqlReviewThread[] };
+  // `nodes` is the FIRST page; `totalCount`/`pageInfo` describe the rest of it and are both
+  // optional so every hand-built fixture (and every tolerant-salvaged partial) still
+  // typechecks. `sync/drain-review-threads.ts` appends the remaining pages into `nodes`
+  // BEFORE persistPr sees the PR, so persistence keeps taking one complete list and nothing
+  // downstream has to know a drain happened.
+  reviewThreads: GqlThreadPage<GqlReviewThread>;
   comments: { nodes: GqlPrComment[] };
 }
 
@@ -716,6 +868,20 @@ export interface RepoIdResponse {
 
 // Response shape for PR_DETAIL_QUERY (on-demand text hydration). Node ids
 // (`id`/`fullDatabaseId`) and commit `oid` are the keys hydration matches on.
+
+/** One thread as PR_DETAIL_QUERY / PR_DETAIL_THREADS_PAGE_QUERY select it — text only. */
+export interface GqlDetailThread {
+  id: string;
+  comments: {
+    nodes: Array<{
+      id: string;
+      fullDatabaseId: string | null;
+      body: string;
+      diffHunk: string | null;
+    }>;
+  };
+}
+
 export interface PrDetailResponse {
   repository: {
     pullRequest: {
@@ -730,19 +896,7 @@ export interface PrDetailResponse {
       reviews: {
         nodes: Array<{ id: string; fullDatabaseId: string | null; body: string | null }>;
       };
-      reviewThreads: {
-        nodes: Array<{
-          id: string;
-          comments: {
-            nodes: Array<{
-              id: string;
-              fullDatabaseId: string | null;
-              body: string;
-              diffHunk: string | null;
-            }>;
-          };
-        }>;
-      };
+      reviewThreads: GqlThreadPage<GqlDetailThread>;
       comments: {
         nodes: Array<{ id: string; fullDatabaseId: string | null; body: string }>;
       };

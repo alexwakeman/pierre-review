@@ -55,11 +55,21 @@ vi.mock('../github/client.js', () => ({
   isSamlBlock: () => false,
   graphqlChecksHint: () => '',
   summarizeGraphqlErrors: () => '',
+  // Read by hydration's own catch and by the thread drain's. A mock factory REPLACES the
+  // module, so omitting a real export turns any case that reaches a failure path into an
+  // unrelated "no export defined" error rather than the behaviour under test.
+  isRateLimitError: () => ({ limited: false, resumeAt: null }),
 }));
 vi.mock('./upsert.js', () => ({ checkRunsFrom: () => [] }));
 
 import { graphqlTolerant } from '../github/client.js';
-import { hydratePrDetail, invalidatePrHydration } from './hydrate-detail.js';
+import { PR_DETAIL_THREADS_PAGE_QUERY } from '../github/queries.js';
+import { __resetRateBudget } from '../github/rate-budget.js';
+import {
+  fetchReviewCommentHunks,
+  hydratePrDetail,
+  invalidatePrHydration,
+} from './hydrate-detail.js';
 
 const mockGraphql = vi.mocked(graphqlTolerant) as unknown as Mock;
 
@@ -100,6 +110,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Start each case from a clean cache for this key.
   invalidatePrHydration(1, 'acme', 'api', 7);
+  // Hydration and the thread drain both pre-empt on the real per-account budget, so a leaked
+  // limit from another case would make either a silent no-op.
+  __resetRateBudget();
 });
 
 describe('hydration cache', () => {
@@ -184,5 +197,70 @@ describe('hydration cache', () => {
     mockGraphql.mockResolvedValue(node('after-write'));
     expect(await hydrate()).toBe('after-write');
     expect(mockGraphql).toHaveBeenCalledTimes(2);
+  });
+});
+
+// WIRING PIN for the review-thread drain (sync/drain-review-threads.ts). PR_DETAIL_QUERY still
+// asks for `reviewThreads(first: 50)` — the cap is priced per REQUEST, not per row — so on a
+// bot-flooded PR the tail exists only because one line in fetchGhPrTextUncached fetches it.
+//
+// ORDER is what makes this more than a "was it called?" spy: hydration matches stored rows by
+// node id, so a comment past the first page must be in the map by the time the map is BUILT.
+// Delete the drain, or move it below the `reviewCommentByNode` loop, and RC_TAIL becomes
+// indistinguishable from a comment GitHub says has no code context — the exact confusion
+// `commentsSeen` exists to let the caller resolve.
+describe('review-thread drain wiring', () => {
+  const detailWithTail = (): unknown => ({
+    repository: {
+      pullRequest: {
+        body: 'b',
+        reviews: { nodes: [] },
+        reviewThreads: {
+          totalCount: 2,
+          pageInfo: { hasNextPage: true, endCursor: 'CURSOR_1' },
+          nodes: [
+            { comments: { nodes: [{ id: 'RC_PAGE1', body: 'p', diffHunk: '@@ -1 +1 @@ head' }] } },
+          ],
+        },
+        comments: { nodes: [] },
+        commits: { nodes: [] },
+        headCommit: { nodes: [] },
+        additions: 1,
+        deletions: 0,
+        changedFiles: 1,
+        files: { nodes: [] },
+      },
+    },
+    rateLimit: { remaining: 4000, resetAt: '2030-01-01T00:00:00Z', cost: 1 },
+  });
+
+  const threadsContinuation = {
+    repository: {
+      pullRequest: {
+        reviewThreads: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          nodes: [
+            { comments: { nodes: [{ id: 'RC_TAIL', body: 't', diffHunk: '@@ -9 +9 @@ tail' }] } },
+          ],
+        },
+      },
+    },
+    rateLimit: { remaining: 3999, resetAt: '2030-01-01T00:00:00Z', cost: 1 },
+  };
+
+  it('puts a thread past the first page into the hunk map and the seen count', async () => {
+    mockGraphql.mockImplementation(async (_c: unknown, query: unknown) =>
+      query === PR_DETAIL_THREADS_PAGE_QUERY ? threadsContinuation : detailWithTail(),
+    );
+
+    const res = await fetchReviewCommentHunks(1, 'acme', 'api', 7);
+
+    expect(res.ok).toBe(true);
+    // One detail fetch, then one continuation from the first page's cursor.
+    expect(mockGraphql).toHaveBeenCalledTimes(2);
+    expect(mockGraphql.mock.calls[1]?.[2]).toMatchObject({ cursor: 'CURSOR_1', number: 7 });
+    expect(res.commentsSeen).toBe(2);
+    expect(res.hunkByNodeId.get('RC_TAIL')).toBe('@@ -9 +9 @@ tail');
+    expect(res.hunkByNodeId.get('RC_PAGE1')).toBe('@@ -1 +1 @@ head');
   });
 });
