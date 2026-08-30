@@ -11,8 +11,18 @@ import type {
 import { api } from '../api/client.js';
 import { ACTIVITY_GC_TIME, workspaceKey } from './useActivity.js';
 import { repoKeySlot } from './useBotTriage.js';
+import { useProCapabilities } from './useTriage.js';
 
-// Bot comment VOLUME — "how much does each bot say on a PR" (CORE, free, deterministic).
+// Bot comment VOLUME — "how much does each bot say on a PR" (PAID `botDepth`, deterministic).
+//
+// ⚠ ALL THREE HOOKS AND ALL THREE ROUTES ARE `botDepth`, and the gate lives INSIDE each hook
+// (`enabled: enabled && botDepth`), not at the call sites. The routes 402 now, and a hook that took
+// entitlement only from its caller would 402 the moment a mounted consumer outlived a live
+// entitlement change — a plan downgrade, or /api/me refetching after `PRO_DIGEST_ENABLED` flips.
+// Two of these are INFINITE queries driven by an IntersectionObserver sentinel, so that state is a
+// 402 loop on every scroll against the 60/min `search` bucket, which then rate-limits the FREE
+// surfaces sharing the screen. Gating inside the hook is also what makes a future second mount
+// inherit the gate instead of having to remember it. Precedent: `useBotBehaviour`, useBotTriage.ts.
 //
 // TWO hooks over the same server-side scan: `useBotVolume` backs the ROI table's per-bot average
 // column, `useBotVolumePrs` backs the paginated PR drill-down behind it. They must be called with
@@ -45,13 +55,14 @@ export function useBotVolume(
   enabled = true,
   repoIds?: number[] | null,
 ) {
+  const { botDepth } = useProCapabilities();
   return useQuery<BotVolumeResponse>({
     queryKey: ['bot-volume', window, workspaceKey(workspaceId), repoKeySlot(repoIds)],
     // `skipToken`, not a bare `enabled`: it NARROWS `workspaceId` to a number, so a request with
     // no workspace — which the server answers from the account's DEFAULT — cannot be written.
     queryFn:
       workspaceId == null ? skipToken : () => api.botVolume(window, workspaceId, repoIds),
-    enabled,
+    enabled: enabled && botDepth,
     staleTime: 60_000,
     gcTime: ACTIVITY_GC_TIME,
     // ⚠ DELIBERATELY NO `refetchInterval`, unlike `useBotAnalytics`'s 5-minute sync-cadence poll.
@@ -79,11 +90,12 @@ export function useBotVolumeScatter(
   enabled = true,
   repoIds?: number[] | null,
 ) {
+  const { botDepth } = useProCapabilities();
   return useQuery<BotVolumeScatterResponse>({
     queryKey: ['bot-volume-scatter', window, workspaceKey(workspaceId), repoKeySlot(repoIds)],
     queryFn:
       workspaceId == null ? skipToken : () => api.botVolumeScatter(window, workspaceId, repoIds),
-    enabled,
+    enabled: enabled && botDepth,
     staleTime: 60_000,
     gcTime: ACTIVITY_GC_TIME,
     placeholderData: (prev) => prev,
@@ -116,6 +128,7 @@ export function useBotVolumePrs(p: {
   isFetchingMore: boolean;
 } {
   const { workspaceId, repoIds, window: windowKind, sort, authorUserIds, enabled } = p;
+  const { botDepth } = useProCapabilities();
 
   const qc = useQueryClient();
   const key = useMemo(
@@ -168,7 +181,10 @@ export function useBotVolumePrs(p: {
               cursor: pageParam as string | null,
             }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    enabled,
+    // ⚠ `botDepth` HERE MATTERS MORE THAN ON THE PLAIN QUERIES ABOVE: this is an infinite query
+    // whose `fetchMore` fires from an IntersectionObserver sentinel, so an unentitled mount is a
+    // 402 on every scroll tick, not once.
+    enabled: enabled && botDepth,
     staleTime: 60_000,
     gcTime: ACTIVITY_GC_TIME,
     // ⚠ NOT `refetchOnMount: false`. In query-core v5 `shouldFetchOnMount` short-circuits on

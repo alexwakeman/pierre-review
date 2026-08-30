@@ -41,21 +41,38 @@ export interface ProCapabilities {
   claudeReview: boolean; // agentic Claude Review (Agent SDK; the product lives in the plugin)
   slackDigest: boolean; // Slack webhook delivery of the sprint + repo digest (Pro; mirrors activityDigest)
   issueLinks: boolean; // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI)
-  botTriage: boolean; // Review-bot triage tier — CORE/FREE, but its advanced settings + cost
-  // overlay are pro_settings-backed, so this flag is true whenever the plugin is loaded
-  // (regardless of the paid PRO_* flags). It gates the free bot Settings section + overlays,
-  // NOT the Bots rail view (that reads the core bot routes and shows even with no plugin).
+  botTriage: boolean; // Review-bot triage tier — CORE/FREE, but its advanced settings are
+  // pro_settings-backed, so this flag is true whenever the plugin is loaded (regardless of the
+  // paid PRO_* flags). It gates the free bot Settings section + overlays, NOT the Bots rail view
+  // (that reads the core bot routes and shows even with no plugin) — MINUS the ROI panel, which
+  // is `botDepth` below. ⚠ It no longer covers the cost overlay: seat prices moved to `botDepth`
+  // when the whole ROI table went paid, and all four routes that echo a reviewer row strip the
+  // price without it (api/routes/bot-triage.ts `stripCost`).
   botAdvisor: boolean; // Bot Tuning Advisor (paid, like workspaceInsights): findings → intents →
   // config-PR/brief/issue outputs + the effect panel. Gates the Bots "Advisor" inner tab and
-  // the Tune/Drop row pills; the free amber TuningSuggestions box stays regardless.
+  // the Tune/Drop row pills; the free amber TuningSuggestions box stays regardless — and that is
+  // now true BY CONSTRUCTION rather than by convention: the box was HOISTED out of BotRoiPanel
+  // into BotsView's free area, and `GET /api/bot-analytics` deliberately keeps `suggestions`
+  // populated in its narrowed unentitled shape so it still has data. Do not move it back inside
+  // the panel.
   periodReports: boolean; // Period-over-period reporting (paid, like workspaceInsights): the
-  // Insights "Reports" sub-tab — a stored, forwardable per-sprint artifact with a
-  // coverage-honest comparison, a refusable forecast and a narrated summary. The metric vector
-  // itself is CORE compute (db/period-metrics.ts), but it has no free surface.
+  // Reports pane's stored, forwardable per-sprint artifact with a coverage-honest comparison, a
+  // refusable forecast and a narrated summary. The metric vector itself is CORE compute
+  // (db/period-metrics.ts), but it has no free surface.
+  // ⚠ IT NOW GATES FOUR SURFACES, NOT ONE, and three of them are CORE routes rather than plugin
+  // ones: the period report + its by-workspace axis, the People report (`/api/pro/insights/person`
+  // plus the core `/api/bot-authoring` and `…/vendor/:key/comments` its bot sections read), and
+  // CHRONOLOGY (`GET /api/flow-findings`, which carries its own 402). Chronology rides this flag
+  // deliberately rather than taking a fifteenth capability member, which would mean bumping
+  // apiVersion across four literals in two repositories to gate one route.
   botDepth: boolean; // Non-AI paid DEPTH tier (paid, like workspaceInsights — NOT like
   // botTriage, which is true whenever the plugin is loaded): behaviour trends/anomalies,
-  // per-bot drill-down, overlap, where-bots-work, inflation history, per-seat ROI cost.
-  // The compute is CORE (db/queries.ts getBotBehaviourAnalytics etc.); this gates the surfaces.
+  // per-bot drill-down, overlap, where-bots-work, inflation history, per-seat ROI cost — and, as
+  // of the ROI gate, THE WHOLE Bots → ROI PANEL: the per-bot table, its verdicts, the ML flagging
+  // strip, the volume family and every drill-down off them. The compute is CORE (db/queries.ts
+  // getBotBehaviourAnalytics etc.); this gates the surfaces AND, now, six core routes in
+  // api/routes/bot-triage.ts. Two of those (`/api/bot-analytics`, `…/vendor/:key/comments`) are
+  // shared with the People report and take the UNION `botDepth || periodReports`.
   workPlan: boolean; // The work plan's NARRATION (paid, like workspaceInsights/periodReports —
   // the plugin returns `digestEnabled`): the headline, the per-row "why" and the "what can wait"
   // line on the Pending board.

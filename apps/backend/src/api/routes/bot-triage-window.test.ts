@@ -6,6 +6,16 @@
 // 400s: only-together, `fromMs < toMs`, span ≤ 200 days, digits only (ajv). A valid pair is
 // echoed back as the response's real window bounds; no pair keeps the enum behaviour untouched.
 //
+// ⚠ THE HARNESS MUST BE ENTITLED, OR THIS FILE ONLY EVER TESTS THE 402. Both routes under test are
+// paid now (`/api/bot-analytics` NARROWS on `botDepth || periodReports`; `…/vendor/:key/comments`
+// 402s on the same union), and reaching an entitled path needs TWO things, not one:
+//   1. `registerAccountContext` — otherwise `req.account` is undefined and every gate fails closed;
+//   2. `setProCapabilities(FULL)` — `entitledProCapabilities` INTERSECTS the account with the loaded
+//      plugin's live singleton, which is `EMPTY_CAPABILITIES` in a process that never bound a
+//      plugin, so even a synthesized `isLocal` account is legitimately unentitled without it.
+// The 402/200 split itself is pinned next door in bot-triage-entitlement.test.ts; this file is
+// about the BOUNDS contract, and it seeds entitlement only so the bounds branch is reachable.
+//
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -17,6 +27,8 @@ process.env.DISABLE_SCHEDULER = 'true';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let app: any;
 let closeDb: (() => Promise<void> | void) | undefined;
+let setProCapabilities: ((c: any) => void) | undefined;
+let emptyCapabilities: any;
 
 const DAY = 86_400_000;
 const FROM = Date.UTC(2026, 6, 1);
@@ -35,15 +47,42 @@ beforeAll(async () => {
   await runMigrations();
 
   const routes = await import('./bot-triage.js');
+  const { registerAccountContext } = await import('../plugins/auth.js');
+  const contract = await import('../../pro/contract.js');
+  setProCapabilities = contract.setProCapabilities;
+  emptyCapabilities = contract.EMPTY_CAPABILITIES;
+  // "Plugin loaded, everything on" — the literal from pro/contract.test.ts. Every member, so a new
+  // capability makes this a tsc error rather than a silently-false flag.
+  setProCapabilities({
+    activityDigest: true,
+    reviewMemory: true,
+    aiAnalysis: true,
+    prSummary: true,
+    aiFix: true,
+    workspaceInsights: true,
+    claudeReview: true,
+    slackDigest: true,
+    issueLinks: true,
+    botTriage: true,
+    botAdvisor: true,
+    periodReports: true,
+    botDepth: true,
+    workPlan: true,
+  });
+
   const { default: Fastify } = await import('fastify');
   app = Fastify({ logger: false });
-  // Local mode: accountIdOf falls back to the local account (1); the routes' entitlement reads
-  // guard on req.account themselves, so no auth plugin is needed for these paths.
+  // Local mode: this synthesizes the isLocal account (id 1) onto every request, which
+  // `entitledProCapabilities` then intersects with the singleton seeded above.
+  registerAccountContext(app);
   await app.register(routes.botTriageRoutes);
   await app.ready();
 });
 
 afterAll(async () => {
+  // The singleton is module-global — restore the OSS default so nothing leaks to a later file
+  // sharing this worker.
+  setProCapabilities?.(emptyCapabilities);
   await app?.close();
   await closeDb?.();
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });

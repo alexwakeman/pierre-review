@@ -214,6 +214,15 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
         kind: workspaceReviewers.kind,
         label: workspaceReviewers.label,
         identitySource: workspaceReviewers.identitySource,
+        // ⚠ THE PRICE IS EXPORTED EVEN THOUGH THE PRODUCT SURFACES STRIP IT, and that is a
+        // decision, not an oversight. Reading a seat price on `GET /api/bot-reviewers` (and the
+        // three sibling routes that echo a reviewer row) needs the paid `botDepth` entitlement —
+        // `stripCost` in api/routes/bot-triage.ts. This export does not: Art. 15/20 are about the
+        // SUBJECT'S OWN DATA, and `monthly_cents` is a number this account typed in. A downgraded
+        // account can therefore still export prices it can no longer see in the UI, which is the
+        // correct answer for a portability endpoint and the wrong one for a feature tier. If that
+        // is ever reversed, it must be reversed HERE and recorded in bot-triage.ts's `stripCost`
+        // note, which names this file as the one exemption.
         monthlyCents: workspaceReviewers.monthlyCents,
         // The price's reading rule ('flat' | 'per_seat') — user-typed the same way the price is.
         costModel: workspaceReviewers.costModel,

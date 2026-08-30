@@ -253,15 +253,17 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/attention')).not.toEqual(['read']);
   });
 
-  // GET /api/flow-findings — the Bottlenecks tab. CORE, free, no model and no GitHub, which is
-  // exactly the profile that would otherwise be waved onto the 600/min blanket bucket: one call
+  // GET /api/flow-findings — the Chronology tab. PAID (`periodReports`) but deterministic, with no
+  // model and no GitHub, which is exactly the profile that would otherwise be waved onto the
+  // 600/min blanket bucket: one call
   // runs the lane resolver, the shared first-human-review fold, a thread-path scan, an in-window
   // review scan, a merged-PR walk with its approving reviews, an open-PR snapshot with the
   // approvals fold and the round-trip comment join. The negative assertion is the point.
   it('puts the bottlenecks fold on the expensive bucket, not the blanket read one', () => {
     expect(tiers('GET', '/api/flow-findings')).toEqual(['search', 'read']);
     expect(tiers('GET', '/api/flow-findings')).not.toEqual(['read']);
-    // Free and deterministic — it must never be swept onto a billed bucket either.
+    // Deterministic — no model behind it, so it must never be swept onto the BILLED `ai` bucket
+    // either. Paid ≠ AI: the `ai` tier meters token spend, and this route spends none.
     expect(tiers('GET', '/api/flow-findings')).not.toContain('ai');
   });
 

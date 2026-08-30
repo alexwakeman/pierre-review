@@ -53,7 +53,7 @@ const STATS: { n: string; d: string }[] = [
 ];
 
 const FOR_MANAGERS = [
-  'Which of the bots you pay for earns its keep — a keep / tune / noisy verdict per bot, receipt attached.',
+  'Which of the bots you pay for earns its keep — a keep / tune / noisy verdict per bot, receipt attached (Pro).',
   'A reliable state of play — stalled PRs, waiting reviews, quiet threads — without asking anyone.',
   'Period reports and 1:1 prep you can hand to a director. Mirrors, not scorecards.',
 ];
@@ -311,9 +311,10 @@ export default function Home(): JSX.Element {
             <p className="mb-6">
               Five vendors currently claim #1 on the same public benchmark.{' '}
               <span className="text-ink">{SITE_NAME}’s number is about your repos.</span>{' '}
-              And the verdict is in the free tier — a measurement you’d have to pay for is
-              a measurement you’d doubt. Pro adds the depth: history, overlap, and what
-              each vendor costs per comment a human acted on.
+              The grading itself is in the free tier, on every comment where you read it —
+              a ruler you’d have to pay for is a ruler you’d doubt. Pro is the scoreboard
+              built from it: the per-bot verdict table, history, overlap, and what each
+              vendor costs per comment a human acted on.
             </p>
             <MonoLink to="/bots">The receipt, in depth →</MonoLink>
           </div>

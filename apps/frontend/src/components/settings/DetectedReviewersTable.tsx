@@ -38,8 +38,9 @@ import {
   useSetWorkspaceReviewer,
 } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
-import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useRepos } from '../../hooks/useTimeline.js';
+import { ProBadge } from '../ProGate.js';
 import { SectionShell, inputCls } from './ui.js';
 
 const MAX_SEARCH_MATCHES = 8;
@@ -81,7 +82,10 @@ type ReviewerPatch = Omit<WorkspaceReviewerPatchBody, 'workspaceId'>;
 
 type BotColorFn = (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
 
-// The bot-reviewer settings surface. CORE (free) — no capability gate.
+// The bot-reviewer settings surface. FREE, and the SCREEN carries no capability gate: classifying
+// a reviewer, naming its vendor and setting its role all work on every tier, including a plugin-
+// less `npx` install. The one paid thing on it is the PRICE (`botDepth`) — the editor on each card
+// and the workspace total below the lists. See the note at `showCost` for how that is enforced.
 //
 // ── ONE CARD PER BOT, AND THE WORKSPACE IS THE ONLY SCOPE ───────────────────────────────────
 // A bot is configured once per Workspace. `judgement` (is it automated, is it reviewing or
@@ -142,13 +146,22 @@ export function DetectedReviewersTable({
   const botColor = useBotColors(workspaceId);
 
   // ── THE COST SURFACES ARE PAID (`botDepth`), THE REST OF THIS SCREEN IS FREE ──────────────
-  // Classification / identity / role editing stays exactly as gated before (i.e. not at all —
-  // the deliberate OSS fix). Only the price editor, the workspace cost total and the ROI's
-  // $/acted-on column re-gated from "plugin loaded" (`botTriage`) to the paid `botDepth`
-  // capability (plan P0.3). With `botDepth` false: absence in OSS, a small Pro nudge in cloud —
-  // never an error. The server enforces the same gate on PUT …/cost.
+  // Classification / identity / role editing stays exactly as gated before (i.e. not at all — the
+  // deliberate OSS fix: an `npx` user must be able to classify a reviewer). Only the price editor
+  // and the workspace cost total are gated here; `botDepth` now also covers the whole Bots → ROI
+  // panel, which is where the $/acted-on column lives.
+  //
+  // With `botDepth` false: one Pro nudge under the list, in BOTH deployment modes (it used to be
+  // cloud-only — see the note at the nudge itself), never an error.
+  //
+  // ⚠ THE SERVER ENFORCES BOTH HALVES NOW, ON ALL FOUR ROUTES THAT ECHO A REVIEWER ROW. `PUT
+  // …/cost` has always 402'd; as of the ROI gate the LISTING this screen reads strips
+  // `costMonthlyUsd` / `costModel` / `effectiveMonthlyUsd` for an unentitled account — and so do
+  // the PATCH and both resets, which this screen also calls and which would otherwise be a
+  // perfectly good read path for the same numbers (`stripCost`, api/routes/bot-triage.ts). So
+  // `showCost` is a rendering decision over data that is genuinely absent, not a client-side
+  // curtain over a price that arrived anyway.
   const { botDepth: showCost } = useProCapabilities();
-  const isCloud = useMe().data?.deploymentMode === 'cloud';
 
   const patch = useSetWorkspaceReviewer();
   const cost = useSetReviewerCost();
@@ -321,19 +334,27 @@ export function DetectedReviewersTable({
             </p>
           )}
 
-          {/* The workspace cost total — a cost surface, so paid (`botDepth`). With the
-              capability off: cloud shows the one Pro nudge for the whole pricing feature,
-              OSS shows nothing (absence, never an error). */}
+          {/* The workspace cost total — a cost surface, so paid (`botDepth`). With the capability
+              off, ONE line stands in for the whole pricing feature.
+
+              ⚠ IT NO LONGER BRANCHES ON `isCloud`. It used to render in cloud and nothing in OSS,
+              on the reasoning that a local install has nothing to upgrade to. That reasoning is
+              retired for this surface: seat pricing and the ROI table it feeds are Pro in BOTH
+              deployment modes, and a local reader who sees the price editor simply missing has no
+              way to tell "not built" from "not included". The shared `ProLockPanel` on the ROI tab
+              carries the same statement at panel scale and resolves the destination per mode, so
+              this line does not need to know which mode it is in.
+
+              It stays a one-line NUDGE rather than a locked pane: this is a footnote under a list
+              the reader came here to use, not a view they navigated to and found closed. One badge,
+              one sentence, no button. */}
           {!showCost ? (
-            isCloud ? (
-              <p className="text-[10px] text-gray-400">
-                <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[10px] font-semibold text-ai-signal">
-                  Pro
-                </span>
-                Per-bot monthly prices and the $/acted-on ROI column are part of Pro — upgrade to
-                put a cost against each bot in this Workspace.
-              </p>
-            ) : null
+            <p className="text-[10px] text-gray-400">
+              <ProBadge className="mr-1" title="Per-bot pricing is part of Pro." />
+              Per-bot pricing and the ROI table it feeds are part of Pro: put a monthly cost against
+              each bot in this Workspace and read what each acted-on comment cost, beside what every
+              bot actually produced. Classifying bots here is free.
+            </p>
           ) : (
           <p className="text-[10px] text-gray-400">
             {costTotal.totalUsd == null ? (

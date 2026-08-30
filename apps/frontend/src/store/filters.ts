@@ -57,18 +57,27 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // the deleted `InsightsSubTab` above except the surface it sits on:
 //   • 'overview'    — exactly what the pane already was (free Flow metrics + the Pro Period
 //                     reports half, each carrying its own posture).
-//   • 'bottlenecks' — the human-lane findings from `GET /api/flow-findings` (CORE, FREE on every
-//                     tier, deterministic). The Bots rail's twin: that one measures automation,
-//                     this one measures where HUMAN review time goes.
+//   • 'bottlenecks' — the human-lane findings from `GET /api/flow-findings` (PAID `periodReports`,
+//                     deterministic — no model anywhere in it). The Bots rail's twin: that one
+//                     measures automation, this one measures where HUMAN review time goes.
 // ⚠ 'bottlenecks' IS A LABEL-ONLY MISMATCH: the tab reads **"Chronology"** on screen and the store
 // and URL literal stays `'bottlenecks'`. Same rule as "Pending" (store `'attention'`) and "Reports"
 // (store `'insights'`) — the literal ships in bookmarks and in history entries Back replays, so
 // renaming it would silently drop readers onto Overview. Rename the LABEL, never the member.
 //
-// ⚠ NEITHER MEMBER IS CAPABILITY-GATED, which is the whole point of putting the second tab here —
-// the pane is already un-gated so the free metrics stay reachable, and a second free surface on
-// it needs no wall. That also means the effective-tab derive below has only one job (normalising
-// a value outside the union), not a capability fallback like BotsView's.
+// ⚠ `'bottlenecks'` IS GATED (`periodReports`) AND THE DERIVE STILL HAS ONLY ONE JOB. The two are
+// not in tension, and the reason matters: `effectiveInsightsTab` normalises a value outside the
+// union and NOTHING ELSE — it must NOT gain a capability fallback. An unentitled
+// `?insightsTab=bottlenecks` ships in bookmarks and in history entries Back replays, and it has to
+// land on the tab the URL named and render the LOCKED pane there; redirecting it to Overview would
+// silently drop the reader onto a different screen with no explanation, and would make the derive
+// impure (breaking the round-trip urlHistory.test.ts pins). The GATE LIVES IN THE PANE, never in
+// the tab resolution. The RAIL ENTRY itself stays ungated on every tier — the free flow metrics
+// live under Overview precisely so it can.
+//
+// ⚠ This is the OPPOSITE of `BotsView`'s `effectiveTab`, which does correct `'advisor'` away. That
+// one predates the visible-but-locked posture; do not copy it here, and note that BotsView's own
+// `'roi'` member is now handled this way too (selectable, body locks).
 export type InsightsInnerTab = 'overview' | 'bottlenecks';
 export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'bottlenecks'];
 // PrDetail's inner tab strip. It lives HERE, not in PrDetail's local state, because it is
@@ -504,8 +513,9 @@ export interface FilterState {
   // an account without the capability must not be written back as a correction.
   feedInnerTab: 'feed' | 'themes';
   // Which inner sub-tab the Reports pane shows: 'overview' (free Flow metrics + the Pro Period
-  // reports) or 'bottlenecks' — labelled "Chronology" on screen, the free court ledger. See
-  // InsightsInnerTab for why the literal and the label differ.
+  // reports) or 'bottlenecks' — labelled "Chronology" on screen, the court ledger, Pro on
+  // `periodReports`. See InsightsInnerTab for why the literal and the label differ, and for why a
+  // gated member still must not gain a capability fallback in the derive.
   //
   // Transient — freshDefaults() ONLY, never in FilterDefaults / pickFilterBarState, so NO
   // FILTER_STORAGE_VERSION bump is owed for it: nothing persists it, and a version that tracks

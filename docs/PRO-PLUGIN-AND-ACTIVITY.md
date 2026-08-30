@@ -202,10 +202,14 @@ tab exists only where it means something):
   `freshDefaults()` but not in `FilterDefaults`/`pickFilterBarState`/`sanitizePersistedFilters`, and
   `useUrlState` never touches it, so a stale `'compare'` cannot survive a reload and needed no
   migration.)
-- **Bots** (`BotsView`) — `ROI` (the Measure surface) | `Advisor` (Pro `botAdvisor`) |
-  **`Settings`** (CORE/free — the classification tab, see below; it shows in the per-repo Bots tab
-  too, where it is the same WORKSPACE listing filtered CLIENT-SIDE to the actors with a footprint
-  in that repo). `'behaviour'` and `'themes'` were REMOVED from `botsInnerTab` with their tabs:
+- **Bots** (`BotsView`) — `ROI` (the Measure surface; the PANEL is Pro `botDepth` and shows a
+  badge + locked pane, the caution / resolve backlog / tuning suggestions / bot feed around it stay
+  free — see § The Bots ROI panel is paid) | `Advisor` (Pro `botAdvisor`, LISTED only when
+  entitled) | **`Settings`** (CORE/free — the classification tab, see below; it shows in the
+  per-repo Bots tab too, where it is the same WORKSPACE listing filtered CLIENT-SIDE to the actors
+  with a footprint in that repo). ⚠ **The Bots RAIL ENTRY stays ungated on every tier**, exactly as
+  the Reports one does, because the free Settings tab and the free triage flows live behind it.
+  `'behaviour'` and `'themes'` were REMOVED from `botsInnerTab` with their tabs:
   per-bot depth is the `bot-detail` pinned drill-down, the workspace charts are a collapsed Pro
   section under ROI (`WorkspaceBotCharts`), and the bot-themes summary became the synthesis seam's
   "What they're flagging" card on Measure. The field is transient + URL-silent, so member removal
@@ -286,10 +290,12 @@ analytics lane dark. The paired **visible footer** (`bots.pierreFooter`, "🤖 R
 Claude") appeared in NO detector and is DELETED. `PostReviewArgs.pierreMarker?`/`pierreFooter?` stay
 DECLARED on both contract files (removing an optional field would want an apiVersion bump for no
 gain) but nothing passes them — apiVersion stays **19**. **Bot-ROI** (`getBotAnalytics(accountId,
-window, scope)`, CORE) → per-kind volume/actedOn%/untouched/`overdueUntouched`/`medianAddressedMs`/oldest/humanFollowThrough/noiseRatio/`verdict`
-(keep|tune|**noisy**) + ≤12wk trend + deterministic tuning suggestions → `BotRoiPanel`; **cost is
-SERVER-resolved from the workspace row**, with the `pro_settings` `bots.cost` blob surviving only as
-a null-only client fallback. The `noisy` (ex-`kill`)
+window, scope)` — the FOLD is core and capability-blind; its ROUTE is what gates, and the panel it
+feeds is Pro `botDepth`) → per-kind volume/actedOn%/untouched/`overdueUntouched`/`medianAddressedMs`/oldest/humanFollowThrough/noiseRatio/`verdict`
+(keep|tune|**noisy**) + ≤12wk trend → `BotRoiPanel`, and deterministic tuning suggestions →
+`BotsView` (free — hoisted out of the panel, § The Bots ROI panel is paid); **cost is
+SERVER-resolved from the workspace row** and the route STRIPS it for an unentitled account, with the
+`pro_settings` `bots.cost` blob surviving only as a null-only client fallback. The `noisy` (ex-`kill`)
 verdict is **response-time-gated**: it keys on `overdueUntouched` (untouched threads older than a
 FIXED 36h grace window, `totals.overdueGraceMs`; `medianAddressedMs` per bot = time-to-addressed, display-only), never raw `untouched`, so a bot
 isn't flagged noisy for threads still inside the normal response window (tested in
@@ -336,9 +342,11 @@ like `bot_auto_resolve*`, with no migration. ⚠ **Keep the section shell and it
 `data-testid="bot-settings-section"`** even when the toggle is gated off —
 `scripts/capture-shots.mjs` targets it and `pnpm shots` breaks without it. The per-reviewer
 `DetectedReviewersTable` lives in the Bots **Settings** sub-tab (below), which shows in the per-repo
-Bots tab too, where it is the same WORKSPACE listing filtered client-side to that repo's footprints. Deterministic tuning suggestions on the ROI panel are **advisory only** (no mute action).
-**Tiers:** detection/analytics/dedup/resolve are **CORE (free)**; the analytics PANELS and the Slack
-block are **PRO** (gated on the existing `workspaceInsights`/`slackDigest` caps — no new cap); the
+Bots tab too, where it is the same WORKSPACE listing filtered client-side to that repo's footprints. Deterministic tuning suggestions are **advisory only** (no mute action) and are **FREE** — they were hoisted OUT of the ROI panel into `BotsView` when the panel went paid.
+**Tiers:** detection/dedup/resolve/classification are **CORE (free)**; the ROI ANALYTICS —
+`BotRoiPanel` itself and the routes behind it — are **PRO `botDepth`** (§ The Bots ROI panel is
+paid), and the analytics PANELS + the Slack block ride the existing
+`workspaceInsights`/`slackDigest` caps. No new cap for any of it. The
 Pierre marker is now unconditional and therefore free. **Migrations:** core `0027` (`users.github_type`), `0028` (`bot_review_classification`), `0029`
 (`bot_mute_rules`, now orphaned), `0042` (pg `0029`: RE-KEY to `repo_reviewers`, per repo, and
 DROP `bot_review_classification`), `0043` (pg `0030`: NORMALISE the actor grain out into
@@ -786,11 +794,9 @@ What 20 → 21 changed:
   per-seat ROI cost overlay. Gated exactly like `workspaceInsights` (`PRO_DIGEST_ENABLED` is the
   "paid tier on" proxy — no new env var; `entitledProCapabilities` zeroes it for free cloud
   plans). ⚠ **NOT gated like `botTriage`**, which is `true` whenever the plugin is merely loaded
-  — that distinction is the whole tier line. Two core routes read the same entitlement view
-  directly: `PUT /api/bot-reviewers/:userId/cost` **402s** without it (the ONLY bot-reviewers
-  route behind the check — classification/identity/role stay free), and
-  `GET /api/bot-analytics` withholds the inflation `weekly` series (field simply ABSENT — hidden,
-  not upsold, never an error).
+  — that distinction is the whole tier line. **Its reach WIDENED after 21 shipped, with no
+  apiVersion change** (no new capability member, no plugin change): it now covers **the WHOLE
+  `BotRoiPanel`**, not just the cost overlay — see § The Bots ROI panel is paid, below.
 - **`ProHostQueries` gains FIVE members.** Two landed live: `getBotBehaviour(accountId, window,
   scope, botUserId?)` — the existing CORE rollup (`getBotBehaviourAnalytics`) re-exposed so the
   route could MOVE from core `/api/bot-behaviour` to plugin `GET /api/pro/bot-behaviour`
@@ -1056,7 +1062,119 @@ rank, no cross-person sort by any metric and no comparison table. The guardrail 
 `db/person-period.ts`, `insights/person-routes.ts` and `PeriodPeopleSection.tsx` were reworded
 in lockstep; if they ever disagree, the narrow reading (no cross-person shape) wins.
 
+### The Bots ROI panel is paid — the whole panel, and where the free line falls
+
+`BotRoiPanel` used to be CORE/FREE with three cost surfaces cut out of it on `botDepth` (the
+`$/acted-on` column, the "Depth →" pill, the price editor in Settings). That line never held: the
+TABLE is the answer people buy — what each bot produced, what got acted on, what sat, what
+repeated another bot. **The whole component is now `botDepth`.** No new capability member, no
+apiVersion change, no plugin change.
+
+**The reader's experience is VISIBLE-BUT-LOCKED, not absent** — the `ROI` sub-tab keeps its place
+for everyone, wears the shared `<ProBadge variant="tab">`, and `BotRoiPanel` renders `ProLockPanel`
+in its own place (`data-testid="bot-roi-locked"`; the entitled body keeps `bot-roi-panel`, which
+`scripts/capture-shots.mjs` waits on). That reverses this codebase's older "hidden, never upsold"
+posture, and the reversal is scoped to five named surfaces — see `components/ProGate.tsx`'s header.
+Its sibling `WorkspaceBotCharts` keeps the OLD posture (silently absent on the same capability),
+deliberately: two upsells stacked in one tab read as a paywall page.
+
+**⚠ THE RAIL ENTRY AND FOUR SURFACES INSIDE THE `roi` BRANCH STAY FREE.** Gating "the Bots view"
+rather than "the panel" takes all of them with it:
+
+| Free (`botTriage`) | Where it lives |
+|---|---|
+| "Only a bot reviewed N open PRs" governance caution + its list | `BotsView`, reads `totals.botOnlyPrs` |
+| `ResolveBacklogBanner` → review-and-resolve | exported FROM `BotRoiPanel.tsx`, mounted in `BotsView` |
+| `TuningSuggestions` (the amber advisory box) | **hoisted OUT of the panel** into `BotsView` |
+| the bot-only `FeedView` and the whole `Settings` sub-tab | `BotsView` |
+
+`TuningSuggestions` is the one that moved. It is a free surface that was rendered inside the paid
+body, so it was exported and re-mounted above the panel; it now reads as a heading over the table
+rather than a footnote under it. `QualityCheckSection` did **not** move and goes paid — its
+mis-role safeguard survives because the free Settings tab lists "Other automation" with each row's
+role picker, which is where the re-role happens anyway.
+
+**Server enforcement — one route NARROWS, six 402.** A client-only gate is not a monetisation gate,
+and `/api/bot-analytics/volume/scatter` was already in exactly that state (component gated, route
+open). Two predicates in `api/routes/bot-triage.ts` say which is which:
+
+- `botDepthEntitled` → **402** on `…/volume`, `…/volume/prs`, `…/volume/scatter`, `…/flagging`,
+  `…/vendor/:key/prs`. Each is ROI-only, so a 402 is honest where an empty list would read as
+  "this bot did nothing".
+- `botAnalyticsEntitled` = `botDepth || periodReports` → the **three** routes the ROI panel SHARES
+  with the People report's bot sections. `…/vendor/:key/comments` and **`/api/bot-authoring`**
+  (the report's per-bot AUTHORING vector plus its `?evidence=1` receipt cards) **402** on the union;
+  **`GET /api/bot-analytics` NARROWS instead of refusing** — it is also the source of the FREE
+  governance caution and the hoisted suggestions, so it keeps `totals.botOnlyPrs`,
+  `totals.overdueGraceMs` and `suggestions` and withholds `vendors` (empty), `qualityChecks`/`ml`
+  (absent) and the ROI half of `totals` (zeroed). ⚠ **A blanket 402 there deletes the free caution
+  with no error anywhere** — the client reads `?? 0` — and re-fires every 5 minutes on the hook's
+  poll.
+- `GET /api/bot-reviewers` **stays free** (it is the app-wide bot identity/colour backbone and the
+  free classification screen) but its **price columns are stripped**: `costMonthlyUsd` and
+  `effectiveMonthlyUsd` come back null with `costModel: 'flat'` — the shape a never-priced row
+  already has. Previously the client merely hid a price it had received.
+  ⚠ **The strip is ONE helper (`stripCost`) applied by ALL FOUR handlers that echo a
+  `WorkspaceReviewer`** — the listing, `PATCH :userId`, and BOTH resets. Stripping only the listing
+  left `DELETE …/identity` (free, body-less, echoes the whole row) as a perfectly good read path for
+  every price a downgraded account had entered. ⚠ **Consumers must decide cost state from `/api/me`,
+  never from the value**: `null` now means EITHER "no price set" OR "not entitled to see it", and
+  `costStateOf` (frontend `lib/botCost.ts`) maps null → `'none'`, which is only correct beneath a
+  capability check. ⚠ **`GET /api/me/export` is the ONE deliberate exemption** and still ships
+  `monthly_cents`: Art. 15/20 are about the subject's own data, not a feature tier
+  (`db/export-account.ts` records the split).
+
+⚠ **`/api/bot-analytics/bot-only-prs` STAYS FREE and must not be swept in by a later "finish the
+job" pass** — it is the list behind the free amber caution, and a caption and its list have to
+agree. Likewise the resolvable-thread read/resolve pair and per-PR dedup.
+
+⚠ **`vendors`, `suggestions` and `totals` are REQUIRED on `BotAnalyticsResponse`**, which is why the
+narrowed `totals` carries zeros rather than absence (`actedOnPct` takes the honest `null`). Nothing
+free renders them and the SPA decides what to draw from `/api/me`, never by sniffing the payload.
+⚠ **Making the three optional was CONSIDERED AND DEFERRED, not forgotten**: all three are read by
+the PRIVATE plugin submodule as well (`packages/pro/src/insights/chat.ts` grounds on `vendors`,
+`totals` and `suggestions`), so widening them is a two-repository, gitlink-coordinated edit for a
+distinction nothing currently reads — every consumer is contractually forbidden from sniffing this
+payload for entitlement. Do it with the next apiVersion bump, when the plugin half is being touched
+anyway. The ambiguity is pinned in `bot-triage-entitlement.test.ts` so it stays a known shape.
+
+⚠ **`useBotAnalytics` MUST STAY UNGATED** for the same reason the route narrows. Every OTHER hook
+onto a now-402 route needs `enabled: … && botDepth` (`useBotBehaviour` is the pattern), or a mounted
+component re-fires the 402 on its own cadence — twice over for the two infinite queries with scroll
+sentinels (`useBotFlagging`, `useBotVolumePrs`).
+
+⚠ **A flag-less `pnpm dev` now shows the ROI panel LOCKED.** `botDepth` is `PRO_DIGEST_ENABLED`
+(plugin `index.ts`), which `pnpm demo` and the shots PRO pass set and the ordinary dev loop does
+not. That is the same reason the price editor is already invisible on a flag-less local run, so it
+is consistent — but the panel is a much more visible casualty.
+
 ### The People report — `?evidence=1`, `person_report`, and the bot half
+
+**It is VISIBLE-BUT-LOCKED on `periodReports`, not absent** — one of the five surfaces that reverse
+this codebase's "hidden, never upsold" posture (`components/ProGate.tsx` enumerates them; the
+reversal is scoped to those five and nothing else converts). Three locked panes, each with a testid
+DISTINCT from its entitled body so no screenshot run can photograph a lock:
+
+| Pane | testid | Stands in for |
+|---|---|---|
+| `PeopleReportDetail` | `people-report-locked` | the whole report tab |
+| `PersonPeriodSection` | `person-period-locked` | the **1:1 prep** section on the contributor-activity tab |
+| `PeriodReportsPanel` | `period-reports-locked` | the sibling period report |
+
+⚠ **`PersonPeriodSection`'s lock heads "1:1 prep" and describes ONE person's vector**, not the
+multi-pick report — there is no picker on that tab, and the entitled body is a single person. It
+names Reports → People as the destination for the multi-pick version rather than promising it here.
+⚠ **`PeriodPeopleSection` (the picker) carries a `ProBadge` but no lock**: it sits under the
+already-badged pane heading. So does the by-workspace expander — that axis has no independent
+surface, so a lock there would be unreachable code. ⚠ **No badge on the people-report tab CHIP in
+`PinnedTabsBar`**: a strip of closable drill-downs is not a view.
+
+⚠ **`PeopleReportDetail`'s entitlement check sits BEFORE its seed check**, deliberately: a tab
+restored after a live downgrade used to render "This period is no longer listed for the current
+workspace" — a disabled query is not `isLoading`, so `period` came out null and a BILLING problem
+was reported as a DATA problem. ⚠ In all three, `list.data?.enabled === false` is a SEPARATE branch
+that still returns null — that is a paying account whose plugin self-disabled, and the lock would
+bill-nudge a customer who already paid.
 
 **Evidence is an option on the ONE fold, never a sibling.** `getPersonPeriod(…, {evidence:
 true})` (wire `?evidence=1`) widens each windowed scan from `count()` to a capped
@@ -1105,15 +1223,17 @@ serve the old prompt's sections at $0. The `pm…` vector items are byte-identic
   NOT in `ORDERING_KINDS` — it is the SECTIONS mode, and `routes.ts` branches on the kind. The
   `k:` slot is what keeps a `person`row and a `person_report` row apart for one subject+period.
 
-**The bot sections are deterministic — NO AI.** They read the FREE core `/api/bot-analytics` row
-(ONE shared fetch per report, rows picked client-side by `u<userId>`) plus the per-bot comments
-drill-down, both narrowed to the real period by the routes' new `fromMs`/`toMs` pair. Paid depth
-stays a "Depth →" link.
+**The bot sections are deterministic — NO AI.** They read the core `/api/bot-analytics` row (ONE
+shared fetch per report, rows picked client-side by `u<userId>`) plus the per-bot comments
+drill-down, both narrowed to the real period by the routes' `fromMs`/`toMs` pair. Paid depth stays
+a "Depth →" link. ⚠ **Those routes are no longer free** — all three the bot half reads take the
+UNION `botDepth || periodReports` (§ The Bots ROI panel is paid), so this report's own capability
+is what admits them; "core" here names where the code lives, never the tier.
 
 **A bot section now renders TWO vectors, and which ones appear is decided by the DATA, not by the
 role.** The review half above answers "what did it flag"; the AUTHORING half — `GET
-/api/bot-authoring` over `db/automation-output.ts` (CORE, free, deterministic) — answers "what did
-it write", and the section fetches both for every selection. Either fold returning null hides its
+/api/bot-authoring` over `db/automation-output.ts` (core code, PAID on the union, deterministic) —
+answers "what did it write", and the section fetches both for every selection. Either fold returning null hides its
 own half; both null is the only real "it did nothing here" state.
 - ⚠ **This closed a gap that was previously disclosed in prose.** Authoring-family automation
   (`dependency` / `code_agent` / `release` / `housekeeping`) has no review output at all, so the

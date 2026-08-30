@@ -37,6 +37,13 @@ import { MaintainerShield, MemberSectionList } from '../UserSelectPanel.js';
 // truth — comment-only reviewers included, the bot-settings-comment-only lesson), never from a
 // login heuristic. The server stays the final word anyway: a stranger's section renders the
 // report's own null state (core getPersonPeriod resolves lanes).
+//
+// PRO (`periodReports`). It carries NO `Pro` badge of its own, deliberately: it is a section
+// inside the "Period reports" pane, whose heading already wears one, and an unentitled reader
+// never gets this far — the whole panel around it is replaced by the locked pane. The badge
+// belongs where the People report is its OWN surface: the report tab's heading
+// (PeopleReportDetail) and the 1:1-prep section (PersonPeriodSection). The guard below is
+// defensive, not the reader-facing gate.
 
 // Short per-role suffix for a bot row — what the automation DOES, next to its vendor name.
 const ROLE_SHORT: Record<ReviewerRole, string> = {
@@ -273,6 +280,16 @@ export function PeriodPeopleSection(): JSX.Element | null {
   }, [maintainerIds, mergers, inScopeRepoIds, byUserId]);
 
   if (workspaceId == null) return null;
+  // ⚠ INTRINSIC, NOT POSITIONAL. This section's only mount is inside PeriodReportsPanel's
+  // ENTITLED branch, so until now it had no capability check of its own — it was safe purely
+  // because of where it hangs. That is the kind of safety a refactor deletes without noticing,
+  // and the cost would be real: everything above this line has already fired the roster, repos,
+  // workspaces, mergers, detected-reviewers, bot-colour, timeline and open-PR queries.
+  //
+  // Absence, not a second locked pane: ONE LOCK PER PANE. The reader who cannot see this picker
+  // is already looking at the "Period reports" lock a few rows up, which says the same thing
+  // better; stacking a second one under it would read as two different broken sections.
+  if (!periodReports) return null;
 
   const selectionOfUser = (u: User): PeopleReportSelection => ({
     kind: 'human',

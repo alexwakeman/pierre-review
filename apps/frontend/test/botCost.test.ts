@@ -27,6 +27,21 @@ describe('costStateOf — two states, and nothing behind either', () => {
     expect(costStateOf({ costMonthlyUsd: null })).toBe('none');
   });
 
+  // ⚠ THE NULL IS NOW THREE-VALUED ON THE WIRE, AND THIS FUNCTION CANNOT SPLIT IT — pinned so the
+  // ambiguity is a documented property rather than something a later reader discovers. Since the
+  // ROI panel went paid, every route echoing a `WorkspaceReviewer` STRIPS the price for an account
+  // without `botDepth`, deliberately into the never-priced SHAPE (null + `costModel:'flat'`), so a
+  // withheld $240 seat and a bot nobody priced are byte-identical here. The entitlement answer
+  // comes from `/api/me`; a caller that renders 'none' without checking it is claiming "no price
+  // set" about a bot that has one.
+  it('a WITHHELD price is indistinguishable from an unset one — read /api/me, not the value', () => {
+    const unpriced = { costMonthlyUsd: null, costModel: 'flat' as const };
+    const strippedByTheServer = { costMonthlyUsd: null, costModel: 'flat' as const };
+    expect(costStateOf(unpriced)).toBe('none');
+    expect(costStateOf(strippedByTheServer)).toBe('none');
+    expect(costStateOf(strippedByTheServer)).toBe(costStateOf(unpriced));
+  });
+
   it('a price is "set"', () => {
     expect(costStateOf({ costMonthlyUsd: 120 })).toBe('set');
   });

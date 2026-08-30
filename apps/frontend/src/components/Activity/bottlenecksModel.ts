@@ -41,10 +41,17 @@ export const COURT_SHORT: Record<PrCourt, string> = {
 /**
  * DERIVE the visible tab; never write a correction back to the store.
  *
- * The only degradation left is a value outside the union — a hand-edited `?insightsTab=`, or a
- * member removed in a later build whose literal still sits in a history entry a browser Back
+ * The only degradation it handles is a value outside the union — a hand-edited `?insightsTab=`, or
+ * a member removed in a later build whose literal still sits in a history entry a browser Back
  * replays. It normalises FOR THE RENDER only: a `set…()` here would permanently forget the
  * reader's choice, which is the bug `botsInnerTab` / `feedInnerTab` carry the same comment against.
+ *
+ * ⚠ `'bottlenecks'` IS NOW PRO (`periodReports`) AND STILL BELONGS IN THE UNION HERE. Do not add a
+ * capability fallback: an unentitled `?insightsTab=bottlenecks` — which ships in bookmarks and in
+ * history entries Back replays — must land on the tab the URL named and render the LOCKED pane
+ * there, not be silently redirected to Overview by a screen that then explains nothing. Sending
+ * entitlement into this function would also make it impure and break the round-trip that
+ * urlHistory.test.ts pins.
  */
 export function effectiveInsightsTab(raw: string | null | undefined): InsightsInnerTab {
   return raw === 'bottlenecks' ? 'bottlenecks' : 'overview';

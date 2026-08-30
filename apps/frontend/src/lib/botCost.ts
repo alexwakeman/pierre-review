@@ -25,8 +25,14 @@ import type { BotVendorAnalytics, CostModel, ReviewerCostBody } from '@pierre-re
 //
 // ⚠ THERE IS NO INHERITANCE, AND NO FAN-OUT. There is no default row to fall back to and no
 // sibling row that gets seeded when this one is written, so `null` means exactly "no price set" —
-// not "ask my parent". Exactly TWO states — null and a number (0 being the real, deliberate "we
-// pay nothing") — with nothing behind either. Do not reintroduce a third.
+// not "ask my parent". Exactly TWO STORED states — null and a number (0 being the real, deliberate
+// "we pay nothing") — with nothing behind either. Do not reintroduce a third STORED state.
+//
+// ⚠ THE WIRE, HOWEVER, IS NOW THREE-VALUED, AND ONLY `/api/me` CAN SPLIT IT. Seat prices went paid
+// with the ROI panel, and every route that echoes a `WorkspaceReviewer` strips them for an account
+// without `botDepth` — deliberately into the never-priced SHAPE (null + `costModel:'flat'`) so no
+// consumer has to learn a fourth state. The cost of that choice is that "nobody said" and "you may
+// not see it" are indistinguishable in the payload. Read the capability, never the value.
 
 // ── Row state ───────────────────────────────────────────────────────────────────────────────
 
@@ -39,6 +45,14 @@ import type { BotVendorAnalytics, CostModel, ReviewerCostBody } from '@pierre-re
  * Trivial today because the server's answer is final — kept as a named function anyway so the
  * component's input chrome keys on a state with a docstring rather than on an inline `== null`,
  * and so a future third state (if one is ever justified) has one place to land.
+ *
+ * ⚠ ONLY CALL THIS BELOW A `botDepth` CHECK. Since the Bots ROI panel went paid, the server STRIPS
+ * the price for an unentitled account — every route that echoes a `WorkspaceReviewer` returns
+ * `costMonthlyUsd: null` with `costModel: 'flat'`, which is byte-for-byte a never-priced row. So on
+ * the WIRE null is three-valued ("no price set" / "you may not see it"), and this function cannot
+ * tell them apart — nothing can, from the value alone. The entitlement answer comes from
+ * `/api/me`'s `pro.botDepth`, never from the payload. A surface that renders 'none' without that
+ * check tells the reader "no price set" about a bot that has a price.
  */
 export type CostState = 'none' | 'set';
 

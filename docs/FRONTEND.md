@@ -810,12 +810,24 @@ but broken deep links).
   the SAME folds the Threads tab uses (`rollupCounts`/`threadSeverities`/
   `resolvableBotThreadIds`) restricted to the bot subset, so card and tab cannot disagree.
 - **Bots view is down to `ROI ('roi' = Measure) | Advisor | Settings`** (`botsInnerTab` lost
-  `'behaviour'`/`'themes'` — transient + URL-silent, so member removal is safe). Measure =
-  cautions + the ROI table (now carrying the **Inflation column**, free current-window counts;
-  the weekly sparkline renders only when the server sent `mlInflation.weekly`, i.e. `botDepth`)
-  + the "What they're flagging" block with its `SynthesisCard` verdict + the collapsed Pro
-  "**Workspace charts**" section (`WorkspaceBotCharts` — the old BotBehaviourPanel's
-  workspace-grain charts behind `useBotBehaviour`, gated on `botDepth`) + the bot feed.
+  `'behaviour'`/`'themes'` — transient + URL-silent, so member removal is safe). ⚠ **THE `roi`
+  SUB-TAB IS PAID (`botDepth`) AND THE WHOLE `BotRoiPanel` LOCKS IN PLACE** — the tab stays
+  selectable (no corrective `setBotsInnerTab`; only `'advisor'` is still corrected), wears an
+  unconditional `ProBadge variant="tab"`, and the BODY renders `ProLockPanel`
+  (`testId="bot-roi-locked"`, distinct from the entitled `bot-roi-panel` so the screenshot pipeline
+  can never photograph the lock). Inside the panel and therefore paid: the vendor table, its
+  keep/tune/noisy verdicts, the **Inflation column INCLUDING its current-window counts** (the
+  weekly sparkline stays separately conditional on `mlInflation.weekly`, an extra scan width), the
+  "What they're flagging" ML block with its `SynthesisCard` verdict, the volume column and every
+  drill-down. What stays FREE around it, in `BotsView`: the amber bot-only governance caution, the
+  resolve backlog, the **hoisted `TuningSuggestions` box** (moved OUT of the panel so the narrowed
+  `/api/bot-analytics` can keep feeding it — do not move it back, and note it now sits ABOVE the
+  table for entitled readers), the bot feed, and the whole Settings tab. `WorkspaceBotCharts`
+  (`botDepth`) keeps the older ABSENCE posture on purpose — a second upsell stacked under the first
+  reads as a paywall page.
+- **The Bots RAIL ENTRY stays ungated on every tier**, exactly like Reports': it owns the free
+  classification/Settings screen, the free triage flows and the governance caution. Its tooltip says
+  which half is which.
 - **`bot-detail` is a new `TabKind`** (the per-bot depth drill-down that replaced the Behaviour
   tab): keyed PER BOT on `users.id` (`bot-detail:<userId>` — the user-activity pattern; the key's
   id and the fetch's `botUserId` narrowing can never name different bots), `TabBotMeta` chip
@@ -852,8 +864,27 @@ but broken deep links).
   `basis:'live'` keys labelled "now", coverage annotations; period selector defaults to the
   report being read via `insightsReportKey`; Pro narration phrases via synthesis kind
   `'person'`). `UserProfilePopover` gains a second, capability-gated "1:1 prep →" entry beside
-  "View activity →" — same tab, named entry point; absent (never a nudge) when the capability is
-  off.
+  "View activity →" — same tab, named entry point; **still absent (never a nudge) when the
+  capability is off**, and that is now a deliberate asymmetry rather than the default: its sibling
+  "View activity →" reaches the same tab, which DOES carry the lock, so hiding one of two entry
+  points costs the reader nothing.
+- ⚠ **`PersonPeriodSection` NO LONGER RENDERS NOTHING.** It was the codebase's stock example of the
+  absent-not-upsold posture and is now one of the five VISIBLE-BUT-LOCKED surfaces: on the
+  contributor-activity tab it renders `ProLockPanel` (`testId="person-period-locked"`) — the ONLY
+  place an unentitled reader can meet the People report at all, since the picker lives inside the
+  Reports Pro half and the report tab opens only from that picker. ⚠ Its lock heads **"1:1 prep"**
+  and describes ONE person's period vector, which is what the entitled body renders here; an
+  earlier draft advertised the multi-pick report, which lives on a different rail entry and would
+  not have been there after upgrading. Cite `AskAboutPeriod` or `NarrativePanel` (both
+  `activityDigest`, both deliberately silent) as the absence example instead.
+- ⚠ The gate on the picker is now INTRINSIC, not positional: `PeriodPeopleSection` carries its own
+  `if (!periodReports) return null` above the eight roster/repo/workspace/reviewer queries it
+  fires, rather than relying on where it happens to be mounted. `PeopleReportDetail`'s check sits
+  deliberately BEFORE its seed check — a tab restored after a live downgrade used to report a
+  billing problem as "This period is no longer listed for the current workspace".
+- ⚠ A `list.data?.enabled === false` branch is KEPT SEPARATE from the lock in all three components
+  and still returns null: that is a PAYING account whose plugin self-disabled, and showing it the
+  lock would bill-nudge a customer who already paid.
 
 Deleted outright with this wave: `BotBehaviourPanel`,
 `WorkspaceComparisonPanel` + `useWorkspaceComparison` + the `'compare'` rail value (no longer
@@ -1026,11 +1057,34 @@ convention this file has to remember.
 
 - ⚠ **The visible tab is DERIVED, never written back** — `effectiveTab` normalises an unknown
   `?insightsTab=` FOR THE RENDER ONLY. Exactly the `feedInnerTab` / `botsInnerTab` rule: a
-  corrective `set…()` permanently forgets the reader's choice the moment a member becomes gated.
+  corrective `set…()` permanently forgets the reader's choice.
+- ⚠ **`'bottlenecks'` IS NOW GATED AND THE DERIVE STILL MUST NOT LEARN ABOUT IT.** The parenthetical
+  "the moment a member becomes gated" is no longer hypothetical: Chronology went PRO on
+  `periodReports`. `effectiveInsightsTab` keeps exactly one job — normalising a value outside the
+  union — and must NOT gain a capability fallback. An unentitled `?insightsTab=bottlenecks` ships in
+  bookmarks and in history entries Back replays; it has to land on the tab the URL named and render
+  the LOCKED pane there. A fallback would silently redirect the reader to Overview with no
+  explanation, and would make the function impure, breaking the round-trip `urlHistory.test.ts`
+  pins. **The gate lives in the PANE, never in the tab resolution.**
 - The store key lives in `freshDefaults()` only, so **no `FILTER_STORAGE_VERSION` bump is owed**,
   and `'overview'` — the current default — is the OMITTED URL value.
-- Both tabs are free on every tier. The pane's Pro half is still `PeriodReportsPanel`, which
-  carries its own free posture; the `Pro` chip sits on that heading, never on the pane header.
+- **The RAIL ENTRY stays ungated on every tier** (the free flow metrics live under Overview
+  precisely so it can), and BOTH tabs stay listed and selectable. What is gated is two BODIES, each
+  VISIBLE-BUT-LOCKED: `PeriodReportsPanel` (`period-reports-locked`) and the Chronology tab
+  (`chronology-locked`, wrapping `BottlenecksPanel`). Both wear a `ProBadge` from
+  `components/ProGate.tsx` — `variant="heading"` on the "Period reports" `<h3>`, `variant="tab"`
+  inside the Chronology `<button>` so the accessible name composes as "Chronology, Pro feature" —
+  and both badges are UNCONDITIONAL: they tell a paying admin which panes a free teammate cannot
+  open, and a badge keyed on the capability would flicker while `/api/me` is in flight.
+- ⚠ **Route the body through `useProGateState(cap)`, never a naked `!cap`.** `useProCapabilities()`
+  reads all-false until `/api/me` resolves, so the obvious branch paints "See what Pro includes" for
+  one frame at an account that PAYS. `'pending'` (which now also covers an /api/me ERROR — entitlement
+  unknown is not entitlement denied) renders null or the host's own skeleton.
+- ⚠ **`BottlenecksPanel` itself holds NO capability read**, which is what keeps its
+  "Measuring…" / "Could not load this workspace's flow." branch a two-state question about the
+  REQUEST rather than a paywall it has to render. `useFlowFindings` gates its own `enabled`
+  (unconditionally — the hook has one mount and the query POLLS, so a disabled query also stops the
+  five-minute timer).
 
 ### The Pending board's merge row (`PendingMergeActions`)
 

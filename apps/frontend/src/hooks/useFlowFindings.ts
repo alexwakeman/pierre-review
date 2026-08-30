@@ -1,12 +1,26 @@
 import { skipToken, useQuery } from '@tanstack/react-query';
 import type { FlowResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { useProCapabilities } from './useTriage.js';
 import { workspaceKey } from './useActivity.js';
 
 // The "Chronology" tab's one read — `GET /api/flow-findings`, the COURT LEDGER.
-// The human-lane twin of the Bots rail. CORE and FREE ON EVERY TIER: no `useProCapabilities`, no `enabled` gate, no 402/404 path
-// to defend against, and it renders identically under `npx pierre-review` with no plugin present.
-// (The route is deterministic — no model, no GitHub call — which is what makes free affordable.)
+// The human-lane twin of the Bots rail: that surface measures automation, this one measures where
+// people's time went. (Deterministic — no model, no GitHub call. Paid for the DB work, not tokens.)
+//
+// ⚠ PRO, ON `periodReports` — THE SAME FLAG THE ROUTE 402s ON. The two gates are one decision
+// written twice and they must not drift: the route is the monetisation gate, `enabled` below is
+// what stops the SPA finding out by error. It matters more here than on most hooks because this
+// query POLLS every five minutes — an ungated hook against a 402 is a request every five minutes
+// per mounted pane, forever, and BottlenecksPanel would render "Could not load this workspace's
+// flow.", an ERROR where the truth is a paywall. A disabled query runs no interval, so gating
+// `enabled` stops the timer too.
+//
+// ⚠ `useProCapabilities()` IS ALL-FALSE UNTIL /api/me RESOLVES, so on a cold load an entitled
+// account holds this query idle for one beat and then fires it. That ordering is correct and not
+// worth "fixing": the alternative is issuing a request we may not be allowed to make. The panel is
+// not mounted during that beat anyway — InsightsView routes the render through `useProGateState`,
+// which waits on the same /api/me rather than painting a lock at a paying customer.
 //
 // ⚠ NO `repoIds`. The Reports pane covers the WHOLE workspace: the repo picker (RepoSelectPanel)
 // is Timeline-only, so narrowing here would scope a screen that renders no control to un-scope it
@@ -38,11 +52,17 @@ export function flowFindingsQueryKey(
 // claims to describe the same population. The 5-minute interval below already tracks the sync
 // cadence; adding it to the sweep would spend that fold again on every repo edit.
 export function useFlowFindings(workspaceId: number | null, days: number) {
+  const { periodReports } = useProCapabilities();
   return useQuery<FlowResponse>({
     queryKey: flowFindingsQueryKey(workspaceId, days),
     queryFn: workspaceId == null ? skipToken : () => api.flowFindings(workspaceId, days),
+    // ⚠ THE CAPABILITY, NOT A CALLER FLAG. Chronology has exactly one mount, so there is no
+    // `enabled` argument to `&&` this with — and a future second caller must not be able to
+    // widen the gate by forgetting to pass one.
+    enabled: periodReports,
     // The same cadence every workspace-scoped survey on this pane runs at: findings are folded
-    // from already-synced rows, so they can only change when a sync lands.
+    // from already-synced rows, so they can only change when a sync lands. Held with the query:
+    // a disabled query does not refetch on an interval, on focus or on reconnect.
     refetchInterval: 5 * 60_000,
     refetchIntervalInBackground: false,
     staleTime: 60_000,

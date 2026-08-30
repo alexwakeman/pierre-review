@@ -717,3 +717,24 @@ export function PencilIcon({ size = 12, ...rest }: IconProps): JSX.Element {
     </IconShell>
   );
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   Entitlement
+   ───────────────────────────────────────────────────────────────────────────────────────── */
+
+// A closed padlock — a pane the current plan does not include. The ONE mark for that state, and
+// deliberately quiet: it is drawn in the `--ai-*` signal colour at a small size inside a calm
+// empty state (`ProLockPanel`), never as a red barrier and never on a button. Pair it with a
+// sentence naming what the pane answers — a lock with no sentence is a wall.
+//
+// A padlock is one of the glyphs most likely to be reached for as an emoji (🔒 paints its own
+// yellow-and-grey and ignores `text-ai-signal` entirely), so it is here for exactly the reason
+// the module header gives.
+export function LockIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <rect x="4.6" y="10.4" width="14.8" height="9.8" rx="2.1" />
+      <path d="M8.2 10.4V7.6a3.8 3.8 0 0 1 7.6 0v2.8" />
+    </IconShell>
+  );
+}

@@ -19,7 +19,46 @@ Three courts, and they partition the open life of a pull request:
 | The panel | `apps/frontend/src/components/Activity/BottlenecksPanel.tsx` + `bottlenecksModel.ts` |
 | Tests | `apps/backend/src/db/pr-intervals.test.ts` · the `getFlowCourts` block in `verify-isolation.ts` |
 
-CORE, deterministic, **free on every tier**, and **no model touches any part of it**.
+Deterministic, **no model touches any part of it** — and **PRO**, on the existing `periodReports`
+capability. What it costs is database work, not tokens.
+
+## Tier
+
+**Pro, on `periodReports`** — deliberately not a capability of its own. Chronology and the period
+report answer the same question at two grains ("where did a completed stretch of work actually
+go"), and a fifteenth `ProCapabilities` member would mean bumping `apiVersion` across four literals
+in two repositories to gate one route. `apiVersion` stays **21** and `packages/pro` is untouched.
+
+Three places carry it, and they are ONE decision written three times:
+
+| Where | What |
+|---|---|
+| `api/routes/flow.ts` | `if (!req.account \|\| !entitledProCapabilities(req.account).periodReports)` → `402 {error:'pro required'}`. **THE monetisation gate**; same shape as `PUT /api/bot-reviewers/:userId/cost`. |
+| `hooks/useFlowFindings.ts` | `enabled: periodReports`. Stops the SPA learning it by error — this query **polls**, so an ungated hook is a 402 every five minutes, per mounted pane, forever. |
+| `Activity/InsightsView.tsx` | The tab keeps its place in the strip, wears a `ProBadge`, and opens onto `ProLockPanel` (`chronology-locked`) instead of the panel. |
+
+- ⚠ **THE ENGINE STAYS CAPABILITY-BLIND.** `getFlowCourts` takes no flag and reads no account
+  state; `verify:isolation` calls that fold directly. The free/paid line is a ROUTING decision, and
+  the day it moves into `pr-intervals.ts` those assertions need an account to run. Same reason the
+  `[7, 90]` window clamp lives in the engine and the entitlement check does not.
+- ⚠ **THE REPORTS RAIL ENTRY IS UNGATED ON EVERY TIER AND THIS DID NOT CHANGE THAT.** The free flow
+  metrics share the pane and are the reason the entry is free. Only the named sub-tab is gated.
+- ⚠ **VISIBLE-BUT-LOCKED, WHICH REVERSES THE APP'S USUAL POSTURE** (elsewhere a missing capability
+  is silent absence — `WorkspaceBotCharts` returns null, the "Depth →" pill is omitted). The
+  reversal is scoped to five named surfaces; `apps/frontend/src/components/ProGate.tsx` enumerates
+  them and owns the badge and the locked pane. Nothing hand-rolls either.
+- ⚠ **AN UNENTITLED `?insightsTab=bottlenecks` RENDERS THE LOCK UNDER THE TAB IT NAMED.**
+  `effectiveInsightsTab` normalises values outside the union only — never a gated member. That
+  literal ships in bookmarks and in history entries Back replays, and a redirect to Overview would
+  explain nothing.
+- ⚠ **LOCAL IS GATED TOO, and needed no entitlement change to be.**
+  `entitledProCapabilities` hands a local account whatever the bound plugin advertises, and the
+  plugin advertises `periodReports: PRO_DIGEST_ENABLED === 'true'`. So OSS (no plugin) is locked —
+  and so is a **flag-less `pnpm dev` with the submodule checked out**, which is the ordinary dev
+  loop. `pnpm demo` and the screenshot pipeline's Pro pass both set the flag.
+- ⚠ **NOTHING PINS THE 402 IN EITHER DIRECTION YET.** `rate-limit.test.ts` pins the route's tier
+  (`['search','read']`), not its entitlement, and no test asserts either a 200 for an entitled
+  account or a 402 for a free one. A regression here would be invisible to CI.
 
 ## What this replaced, and why
 

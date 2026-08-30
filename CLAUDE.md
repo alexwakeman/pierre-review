@@ -340,7 +340,12 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   survey panels were removed from above it — the work plan (now the Pending head) and the
   flow-metric header (now `WorkspaceFlowMetrics` on Reports). Do not re-add either. ⚠ **The Reports
   rail entry is UNGATED on every tier** precisely because those free metrics live there now; the
-  pane gates its Pro half (`PeriodReportsPanel`, Track usage) internally.
+  pane gates its Pro half internally — `PeriodReportsPanel`, Track usage, **and now the Chronology
+  sub-tab**, each as a visible-but-locked pane. The same rule holds on the **Bots** rail: the entry
+  and the sub-tab strip stay open on every tier (it owns the free Settings/classification screen),
+  and the `roi` BODY locks. ⚠ **A gated sub-tab must still be SELECTABLE** — `effectiveInsightsTab`
+  normalises an out-of-union value and nothing else, never a capability fallback, or an unentitled
+  `?insightsTab=bottlenecks` from a bookmark silently lands on Overview explaining nothing.
 - **Pending cards carry MERGE-RELATED ACTIONS, on the two FORWARD kinds only** (`merge`,
   `update_branch`) - Merge, Merge-when-ready, Cancel, Update branch. ⚠ **NOTHING ON THE BOARD
   MAY FETCH ON MOUNT**: `MergeWhenReadyControl` fetches merge-options EAGERLY (~3 GitHub calls per
@@ -501,11 +506,23 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   production and LOGS the entry it bound — check that first when a Pro route unexpectedly 404s.
 - `ctx.schema` is `Record<string, any>` — a leftover `ctx.schema.teams` type-checks and throws
   only when the query runs. Grep, don't trust the compiler.
-- Tiers — **free gets the verdict, paid gets history/depth/explanation**: **core** is free and
-  AI-free (feed/timeline/My Turn, the Bots ROI table + ML severity + current-window Inflation
-  counts, Settings classification, the daily-brief COUNTS strip, the `BotTriageCard` grade);
-  **pro** adds `botDepth` (paid, NON-AI depth), `activityDigest`, `periodReports`; **pro+** is
-  AI Analysis + AI Fix + Claude Review, gated by the ONE flag `PRO_ADVANCED_AI_ENABLED`.
+- Tiers — **free gets the per-PR truth, paid gets the cross-team roll-up**: **core** is free and
+  AI-free (feed/timeline/My Turn, per-COMMENT ML severity badges, Settings classification, the
+  bot-only caution + `TuningSuggestions`, the daily-brief COUNTS strip, the `BotTriageCard` grade);
+  **pro** adds `botDepth` (NON-AI depth **and the WHOLE Bots → ROI panel** — vendor table,
+  keep/tune/noisy verdicts, the Inflation column *counts included*, ML flagging, volume, seat
+  prices), `activityDigest`, and `periodReports` (period reports + by-workspace axis + the People
+  report + **Chronology**); **pro+** is AI Analysis + AI Fix + Claude Review, on the ONE flag
+  `PRO_ADVANCED_AI_ENABLED`.
+- ⚠ **Those last five surfaces are VISIBLE-BUT-LOCKED, reversing the app's "absent, never upsold"
+  posture** (Chronology, period reports, the People report, the by-workspace axis, the ROI panel):
+  tab listed, `ProBadge` on it, body renders `ProLockPanel` — all from `components/ProGate.tsx`
+  (badge + lock + `useProGateState`; nothing hand-rolls a vermilion chip). Scoped to those five.
+  **Every one is server-enforced with a 402** (a client gate is not a monetisation gate) **and
+  every hook reaching a gated route ANDs the capability into its own `enabled`**, or the SPA polls
+  a 402. ⚠ Local/OSS is gated too — `entitledProCapabilities` short-circuits on `isLocal` to
+  whatever the plugin published, so a flag-less `pnpm dev` with the submodule shows all five
+  LOCKED; `PRO_DIGEST_ENABLED=true` is the fully-entitled dev run (`pnpm demo` sets it).
 - **Generation is cost-gated everywhere** — every gate is a bill somebody paid: the
   payload-hash cache (⚠ **the hash must zero `Date.now()`-derived fields**, or a dormant scope
   re-bills on a timer); a per-account in-flight slot **claimed SYNCHRONOUSLY, with the credit
@@ -603,9 +620,11 @@ with a SECTION per pick; contract in
 ## Chronology — the court ledger (Insights -> Reports)
 
 Every hour a pull request is open, somebody is holding the ball: a **reviewer** who has not looked,
-an **author** who owes a response, or nobody - approved and waiting to land. CORE, **free on every
-tier**, no model anywhere in it. `db/pr-intervals.ts` + `api/routes/flow.ts` +
-`Activity/BottlenecksPanel.tsx`. Full contract: **[docs/BOTTLENECKS.md](docs/BOTTLENECKS.md)**.
+an **author** who owes a response, or nobody - approved and waiting to land. **PRO on
+`periodReports`** (no new capability, apiVersion stays 21), deterministic — no model anywhere in
+it. `db/pr-intervals.ts` + `api/routes/flow.ts` + `Activity/BottlenecksPanel.tsx`. Full contract:
+**[docs/BOTTLENECKS.md](docs/BOTTLENECKS.md)**. ⚠ The 402 lives on the ROUTE; `getFlowCourts` stays
+capability-blind because `verify:isolation` calls that fold directly, with no account row.
 
 ⚠ **This REPLACED a path-bucket feature that emitted "`src/**` is a bottleneck".** A
 directory is four proxies from anything an EM can change and on a single-package repo IS the
@@ -654,8 +673,10 @@ microservice from **`packages/ml`**. Full detail: **[docs/ML-SEVERITY.md](docs/M
   backlog with nothing draining it is real.
 - **The vendor's own severity badge is stored to be SHOWN, never to be BELIEVED** — it is never
   an input to the model.
-- **The severity INFLATION index** is the ROI table's Inflation column (current-window counts
-  FREE; the weekly history only under paid `botDepth`, ABSENT — not empty — for free accounts).
+- **The severity INFLATION index** is the ROI table's Inflation column — **PAID in full**
+  (`botDepth`): the column is a cell of the paid vendor table, so an unentitled account receives no
+  `vendors[]` to draw it in (the weekly history is separately ABSENT — not empty — because it is an
+  extra scan WIDTH). The per-COMMENT severity badge is a different route and stays free.
   ⚠ It counts only the BADGED findings, so a bot that badges nothing is **OMITTED and NAMED**,
   never drawn as a zero. CRITICAL is under-recalled, so the product buckets **major+critical as
   "high"** and nothing auto-acts on a label.

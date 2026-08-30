@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type {
   BotAnalyticsResponse,
   BotFlaggingRefine,
@@ -65,6 +65,89 @@ function parseIntList(raw?: string): number[] | null {
     .map((s) => Number.parseInt(s.trim(), 10))
     .filter((n) => Number.isInteger(n) && n > 0);
   return ids.length > 0 ? ids : null;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   ENTITLEMENT — WHO MAY READ THE ROI POPULATION
+   ─────────────────────────────────────────────────────────────────────────────────────────────
+
+   The Bot-ROI panel went PAID (`botDepth`) — the whole panel, not just its cost columns: the
+   per-bot signal-to-noise table, the verdicts, the ML flagging strip, the volume column and every
+   drill-down hanging off them. Which means the analytics ROUTES that feed it need the gate too; a
+   client-side `if (!botDepth) return <lock/>` is a rendering decision, not a monetisation gate, and
+   leaves the whole table one `curl` away (which is exactly the state /volume/scatter was in — its
+   only consumer was capability-gated, its route was not).
+
+   TWO PREDICATES, because two different questions get asked of this file:
+
+     • `botDepthEntitled` — "may this account see the ROI panel's own data?" Used by the routes
+       whose ENTIRE population is that panel: the volume family, the flagging drill-down, the
+       per-vendor PR list, and the seat PRICES on the reviewer listing.
+
+     • `botAnalyticsEntitled` — the UNION `botDepth || periodReports`, for the THREE routes the ROI
+       panel SHARES with the People report's bot sections (`GET /api/bot-analytics`,
+       `…/vendor/:key/comments` and `GET /api/bot-authoring`, all three read by PeopleReportDetail).
+       Gating those on `botDepth` alone would dark a surface someone had already bought under a
+       different capability. They are genuinely two products over one fold, so the predicate says
+       so rather than pretending one flag covers both.
+
+   ⚠ ALL THREE UNION ROUTES MUST USE **THE SAME PREDICATE**, not "the union where it was convenient".
+   `/api/bot-authoring` shipped ungated in the first cut of this change precisely because it does
+   not live under `/api/pro/` and reads as a plain core route — and it is the People report's bot
+   AUTHORING vector plus its evidence cards, i.e. exactly the paid population the locked pane
+   promises. A free cloud account could collect bot user ids from the (deliberately free) reviewer
+   listing and read the whole vector by URL. If a fourth surface ever shares this fold, add it here
+   rather than inventing a third predicate.
+
+   ⚠ WHAT IS **NOT** GATED, and must not be swept in by a later "finish the job" pass: the reviewer
+   LISTING itself (`GET /api/bot-reviewers` is the app-wide bot identity/colour backbone and the
+   free classification screen — its price COLUMNS are stripped, the rows are not withheld),
+   `…/bot-only-prs` (the list behind the FREE governance caution — its caption and its list must
+   agree, and the caption is outside the panel), the resolvable-thread read/resolve pair, and
+   per-PR dedup. Those are `botTriage`-free surfaces.
+
+   ⚠ `!req.account` READS AS UNENTITLED, matching the cost route's long-standing shape. In the real
+   app the account is always populated (local synthesizes one; cloud 401s first), so this only ever
+   fires in a bare test harness — where "no account" genuinely is "no entitlement".
+
+   ⚠ A TEST HARNESS NEEDS **TWO** THINGS TO REACH A GATED ROUTE, and registering the auth plugin is
+   only the first. `entitledProCapabilities` intersects the account with the LOADED PLUGIN's live
+   capability singleton, which is `EMPTY_CAPABILITIES` in any process that never bound a plugin — so
+   even a synthesized `isLocal` account is legitimately unentitled. A test that wants a 200 must
+   also `setProCapabilities({...})` (pro/contract.ts) in its `beforeAll`. */
+function botDepthEntitled(req: FastifyRequest): boolean {
+  return Boolean(req.account && entitledProCapabilities(req.account).botDepth);
+}
+
+function botAnalyticsEntitled(req: FastifyRequest): boolean {
+  if (!req.account) return false;
+  const caps = entitledProCapabilities(req.account);
+  return caps.botDepth || caps.periodReports;
+}
+
+// The 402 body every gate here answers with — the same shape the `/api/pro/*` blanket gate sends
+// (api/plugins/auth.ts), so a client cannot tell a core paid route from a plugin one.
+const PRO_REQUIRED = { error: 'pro required' } as const;
+
+/* THE PRICE STRIP — the ONE spelling, applied by EVERY handler that returns a reviewer row.
+ *
+ * `PUT …/cost` is the only route that WRITES a price, and it is 402'd without `botDepth`. But four
+ * routes READ one back: the listing, the PATCH, and both resets. Stripping only the listing left
+ * three doors open — a downgraded account could still read every seat price it had entered by
+ * calling `DELETE /api/bot-reviewers/:id/identity` (a free route, no body, echoes the whole row).
+ *
+ * ⚠ THE STRIPPED SHAPE IS EXACTLY A NEVER-PRICED ROW, `costModel: 'flat'` included
+ * (`WorkspaceReviewer` documents "a row with no price is always 'flat'"), so nothing downstream has
+ * to learn a fourth cost state. The consequence — a `null` price now means EITHER "no price set"
+ * OR "you may not see it" — is documented on the field in packages/shared: decide which from
+ * `/api/me`'s capability, never from the value.
+ *
+ * ⚠ THE GDPR EXPORT IS A DELIBERATE EXEMPTION, not a hole this missed. `GET /api/me/export`
+ * (db/export-account.ts) still carries `workspace_reviewers.monthly_cents`: it is data the subject
+ * typed in, and Art. 15/20 access/portability are about the subject's own data, not about a
+ * feature tier. That is a considered split — see the note in export-account.ts's column list. */
+function stripCost(r: WorkspaceReviewer): WorkspaceReviewer {
+  return { ...r, costMonthlyUsd: null, costModel: 'flat', effectiveMonthlyUsd: null };
 }
 
 // The explicit-bounds span cap — mirrors the synthesis person grain's PERSON_WINDOW_MAX_MS
@@ -484,8 +567,9 @@ const flaggingSchema = {
   },
 };
 
-// ── Bot comment VOLUME (CORE, free, deterministic — db/bot-volume.ts) ───────────────────────
-// Three routes over ONE base scan: the per-bot column, its PR drill-down, and the LOC chart.
+// ── Bot comment VOLUME (PAID `botDepth`, deterministic — db/bot-volume.ts) ──────────────────
+// Three routes over ONE base scan: the per-bot column, its PR drill-down, and the LOC chart. The
+// FOLD stays core and capability-blind; the three handlers below carry the gate.
 //
 // ⚠ `workspace`/`repoIds` are STRING here for the same reason they are everywhere else on this
 // surface — an ajv `integer` would 400 on a stale bookmark, and a stale bookmark must degrade to
@@ -586,18 +670,47 @@ const scopeResolveSchema = {
   },
 };
 
-// Bot-triage platform routes (CORE, always registered). Detection/override, ROI analytics,
-// per-PR cross-bot dedup, and the confirm-gated workspace-wide bot-thread resolve. Every handler
-// is account-scoped via accountIdOf(req); id-addressed reads/writes verify ownership → 404. No AI.
+// Bot-triage platform routes (CORE, always registered — never "core" in the TIER sense). Two tiers
+// live in this one file and the split is deliberate:
+//
+//   FREE (`botTriage`)  detection/override + the reviewer listing, the bot-only governance list,
+//                       per-PR cross-bot dedup, and the confirm-gated workspace-wide thread resolve
+//                       — everything an `npx` install needs to classify and triage its bots.
+//   PAID (`botDepth`)   the ROI ANALYTICS: the per-bot table, the ML flagging strip, the volume
+//                       family, every drill-down off them, and the seat PRICES. See the two
+//                       entitlement predicates at the top of this file for the exact split and for
+//                       the two routes the People report shares.
+//
+// Every handler is account-scoped via accountIdOf(req); id-addressed reads/writes verify ownership
+// → 404. No AI anywhere in here — paid does not mean model-backed, it means the analysis is the
+// product.
 export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // One row per (workspace, actor), each carrying its judgement, identity, price and the evidence
   // behind them — including `repoFootprints[]`, the real blast radius of an edit that is
   // workspace-wide by design. Powers the Bots "Settings" tab.
+  //
+  // ⚠ THE ROUTE IS FREE AND MUST STAY FREE — but its PRICE COLUMNS ARE NOT. This is the identity
+  // and colour backbone for the whole SPA (the feed's vendor tags, ThreadList, BotTriageCard, the
+  // People picker, every drill-down header), so a 402 here would black out bot identity app-wide,
+  // and it also serves the free classification screen an OSS user needs. What it may NOT do is
+  // ship seat pricing to an account that cannot see pricing: today the client merely HIDES those
+  // cells, which is a rendering decision, not a gate. So the rows come back with the money
+  // stripped — exactly the shape a never-priced row already has, `costModel: 'flat'` included
+  // (`WorkspaceReviewer` documents "a row with no price is always 'flat'"), so nothing downstream
+  // has to learn a fourth cost state.
+  //
+  // `workspaceSeatCount` SURVIVES the strip: it is a derived HEADCOUNT (distinct human PR authors),
+  // not a price, and it is already visible in other free surfaces.
   app.get('/api/bot-reviewers', { schema: listReviewersSchema }, async (req) => {
     const { workspace, repoIds } = req.query as { workspace?: string; repoIds?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
-    const resp: DetectedReviewersResponse = await listDetectedReviewers(accountId, scope);
+    const listing: DetectedReviewersResponse = await listDetectedReviewers(accountId, scope);
+    if (botDepthEntitled(req)) return listing;
+    const resp: DetectedReviewersResponse = {
+      ...listing,
+      reviewers: listing.reviewers.map(stripCost),
+    };
     return resp;
   });
 
@@ -645,7 +758,8 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
         message: `Reviewer ${userId} not found in workspace ${body.workspaceId}`,
       };
     }
-    const resp: WorkspaceReviewer = reviewer;
+    // The classification WRITE is free; the price it echoes back is not — see `stripCost`.
+    const resp: WorkspaceReviewer = botDepthEntitled(req) ? reviewer : stripCost(reviewer);
     return resp;
   });
 
@@ -682,7 +796,8 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
       // Echoed, unlike its 204-answering predecessor: the row still exists (it still holds the
       // identity and the price), and this is the re-derived verdict the caller asked to fall back
       // to — which saves the client a refetch to learn what auto detection actually came back as.
-      const resp: WorkspaceReviewer = reviewer;
+      // The price it carries is stripped for an unentitled reader, exactly as on the listing.
+      const resp: WorkspaceReviewer = botDepthEntitled(req) ? reviewer : stripCost(reviewer);
       return resp;
     },
   );
@@ -714,7 +829,9 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
           message: `Reviewer ${userId} not found in workspace ${workspaceId}`,
         };
       }
-      const resp: WorkspaceReviewer = reviewer;
+      // ⚠ IT KEEPS THE PRICE (above) but does not necessarily SHOW it: same strip as the listing,
+      // or this free, body-less DELETE becomes the read path for every price on the workspace.
+      const resp: WorkspaceReviewer = botDepthEntitled(req) ? reviewer : stripCost(reviewer);
       return resp;
     },
   );
@@ -742,11 +859,17 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     // (`botTriage`) to the paid depth tier. Same entitlement view /api/me serves and the
     // /api/pro/* 402 gate mirrors: local accounts are fully entitled whenever the plugin is
     // bound (so a flags-on local run keeps working), a free cloud account gets the same 402
-    // shape as the plugin routes. Everything else on this resource (classification, identity,
-    // role) stays free — this is the ONLY bot-reviewers route behind the check.
-    if (!req.account || !entitledProCapabilities(req.account).botDepth) {
+    // shape as the plugin routes. Everything else that WRITES on this resource (classification,
+    // identity, role) stays free — this is still the only bot-reviewers WRITE behind the check.
+    //
+    // ⚠ THE READ SIDE IS FOUR ROUTES, NOT ONE. The listing, the PATCH and both resets all echo a
+    // `WorkspaceReviewer`, so all four run `stripCost` (see its note) — otherwise the free,
+    // body-less `DELETE …/identity` is a perfectly good read path for every price this route
+    // refuses to write. The ONE deliberate exemption is the GDPR export, which is the subject's
+    // own data rather than a product surface.
+    if (!botDepthEntitled(req)) {
       reply.status(402);
-      return { error: 'pro required' };
+      return PRO_REQUIRED;
     }
     const { userId } = req.params as { userId: number };
     const { workspaceId, monthlyUsd, costModel } = req.body as ReviewerCostBody;
@@ -773,10 +896,23 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // the workspace row — a null here is FINAL.
   //
   // ⚠ Never sum the price across workspaces. Within this one workspace's rows it is a plain sum.
-  // The authoring-automation vector: CORE, free, deterministic, no AI. `output: null` is the ONE
-  // degrade shape (unknown/foreign id, a HUMAN, or an automation that has never authored a PR in
-  // this workspace) so the route is not an existence oracle — the person route's posture.
+  // The authoring-automation vector: deterministic, no AI. `output: null` is the ONE degrade shape
+  // (unknown/foreign id, a HUMAN, or an automation that has never authored a PR in this workspace)
+  // so the route is not an existence oracle — the person route's posture.
+  //
+  // PAID ON THE UNION (`botDepth || periodReports`), like its two siblings. Its ONE consumer is the
+  // People report's bot sections (PeopleReportDetail's `useReportBotAuthoring` — the only call site
+  // in the SPA), which is now a locked pane without `periodReports`; and `?evidence=1` adds the
+  // receipt PR cards on top of the vector. `botDepth` alone would blank the bot half of a report a
+  // `periodReports` customer already paid for.
+  //
+  // The gate goes FIRST, ahead of `parseWindowBounds`, so the 400/402 split cannot be read as an
+  // oracle over which bounds the fold would have accepted.
   app.get('/api/bot-authoring', { schema: authoringSchema }, async (req, reply) => {
+    if (!botAnalyticsEntitled(req)) {
+      reply.status(402);
+      return PRO_REQUIRED;
+    }
     const { userId, workspace, repoIds, fromMs, toMs, evidence } = req.query as {
       userId: string;
       workspace?: string;
@@ -828,17 +964,69 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     // which data is measured — and the narrowing is already bounded by the workspace's membership,
     // so the two cannot describe different sets of repos.
     const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
-    // The Inflation column's split tier (plan P1.2/C2, open-question Q2): the current-window
-    // counts are FREE (they ride the already-free ML fold — a verdict), while the WEEKLY history
-    // behind the sparkline ships only under the paid `botDepth` entitlement — the same view
-    // /api/me serves and the cost route above checks. Unentitled ⇒ the field is simply absent,
-    // never an error (hidden, not upsold — the P0.2/P0.3 posture).
-    const inflationHistory = Boolean(
-      req.account && entitledProCapabilities(req.account).botDepth,
-    );
-    const resp: BotAnalyticsResponse = await getBotAnalytics(accountId, bounds.window, scope, {
-      inflationHistory,
+    const entitled = botAnalyticsEntitled(req);
+    // The Inflation column's weekly history — folded only when the account can see the column it
+    // draws in, which since the whole table went paid means "whenever the rest of this response is
+    // populated". Kept as its own flag because it is an extra SCAN WIDTH inside the getter (the
+    // trend span), not just a field to drop.
+    const analytics: BotAnalyticsResponse = await getBotAnalytics(accountId, bounds.window, scope, {
+      inflationHistory: entitled,
     });
+    if (entitled) return analytics;
+
+    // ── THE NARROWED (unentitled) SHAPE ───────────────────────────────────────────────────────
+    // ⚠ THIS ROUTE IS NOT 402-ABLE, and that is the single most important thing to know before
+    // editing it. One response feeds FOUR consumers on two tiers: the paid ROI panel and its
+    // drill-downs, the paid People report's bot sections — and the FREE amber "Only a bot reviewed
+    // N open PRs" governance caution, which lives in BotsView OUTSIDE the panel and reads nothing
+    // but `totals.botOnlyPrs`. A blanket 402 would make that caution silently vanish (the client
+    // reads `?? 0`, so there is no error anywhere) and would re-fire every five minutes on the
+    // hook's sync-cadence poll. So the paid POPULATION is withheld and the free verdicts stay.
+    //
+    // The fold above still RUNS for an unentitled account — it is where `botOnlyPrs` and
+    // `suggestions` come from, so there is nothing cheaper to call and this costs exactly what the
+    // route cost before the gate. Only `inflationHistory` (an extra scan WIDTH, not a field) is
+    // actually skipped.
+    //
+    // WHAT SURVIVES, and why each one:
+    //   • `totals.botOnlyPrs` + `overdueGraceMs` — the free governance caution and its wording.
+    //   • `suggestions` — the free amber tuning-suggestions box, which is hoisted OUT of the panel
+    //     into BotsView's free area precisely so this narrowing can keep feeding it.
+    // WHAT IS WITHHELD: `vendors` (the ROI table: verdicts, noise ratios, PRICES), `qualityChecks`,
+    // the whole `ml` block (the flagging strip), and the ROI half of `totals`.
+    //
+    // ⚠ THE ZEROS IN `totals` ARE A WIRE ARTEFACT, NOT DATA. `vendors`, `suggestions` and `totals`
+    // are REQUIRED on `BotAnalyticsResponse` (`ml`/`qualityChecks` are optional, which is why those
+    // two are simply absent — the honest spelling). Nothing free renders these numbers, and the SPA
+    // decides what to draw from its own `/api/me` capability rather than by sniffing the payload,
+    // so no screen can read a zero as a measurement. `actedOnPct` is already nullable, so it takes
+    // the honest `null` rather than a 0%.
+    //
+    // ⚠ MAKING THE THREE OPTIONAL IN `packages/shared` WAS CONSIDERED AND DEFERRED, deliberately.
+    // It would let "not entitled" and "nothing happened" differ on the wire, which is the tidier
+    // contract — but `BotAnalyticsResponse.totals`/`.vendors`/`.suggestions` are read by the PRIVATE
+    // plugin submodule too (`packages/pro/src/insights/chat.ts` grounds on all three), so widening
+    // them is a two-repository, gitlink-coordinated edit for a distinction NOTHING currently reads:
+    // every consumer is contractually forbidden from sniffing this payload for entitlement. Revisit
+    // it with the next apiVersion bump, when the plugin half is already being touched. The ambiguity
+    // is pinned in bot-triage-entitlement.test.ts so it stays a known shape rather than a surprise.
+    const resp: BotAnalyticsResponse = {
+      enabled: analytics.enabled,
+      generatedAt: analytics.generatedAt,
+      window: analytics.window,
+      vendors: [],
+      totals: {
+        threads: 0,
+        comments: 0,
+        actedOn: 0,
+        actedOnPct: null,
+        untouched: 0,
+        botOnlyPrs: analytics.totals.botOnlyPrs,
+        overdueGraceMs: analytics.totals.overdueGraceMs,
+        overlapClusters: 0,
+      },
+      suggestions: analytics.suggestions,
+    };
     return resp;
   });
 
@@ -868,7 +1056,15 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // touched in the window (threads/comments/acted-on/untouched/bot-only), newest-activity first.
   // `key` is the analytics row identity — `u<userId>` (a single reviewer) or the 'pierre' sentinel;
   // anything else is a client bug → 400.
+  //
+  // PAID (`botDepth`). It reproduces ONE ROW of the paid table and has no other opener, so unlike
+  // /api/bot-analytics there is no free half to preserve: a 402 is the honest answer rather than an
+  // empty list, which would read as "this bot touched nothing".
   app.get('/api/bot-analytics/vendor/:key/prs', { schema: vendorPrsSchema }, async (req, reply) => {
+    if (!botDepthEntitled(req)) {
+      reply.status(402);
+      return PRO_REQUIRED;
+    }
     const { key } = req.params as { key: string };
     const { window, workspace, repoIds } = req.query as {
       window: BotWindowKind;
@@ -901,10 +1097,20 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // the 'pierre' sentinel answers empty (verbatim reviews are human-posted — no per-comment
   // rows to attribute). ⚠ Rate tier `search`, pinned in rate-limit.test.ts — this ships up to
   // 3000 comment BODIES per source plus a three-way label join per request.
+  //
+  // PAID ON THE UNION (`botDepth || periodReports`) — one of the two routes with two paid owners:
+  // the ROI table's comments drill-down AND every bot section of the People report's per-bot
+  // evidence cards. Gating it on `botDepth` alone would blank evidence a `periodReports` customer
+  // had already bought. 402 rather than an empty list, for the /prs sibling's reason: `comments:
+  // []` is indistinguishable from "this bot said nothing in the window", which is a claim.
   app.get(
     '/api/bot-analytics/vendor/:key/comments',
     { schema: vendorCommentsSchema },
     async (req, reply) => {
+      if (!botAnalyticsEntitled(req)) {
+        reply.status(402);
+        return PRO_REQUIRED;
+      }
       const { key } = req.params as { key: string };
       const { window, workspace, repoIds, fromMs, toMs } = req.query as {
         window: BotWindowKind;
@@ -963,7 +1169,15 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // strip's whole 50k-row label scan (the page offset is a JS slice over the fold) or the
   // window's whole thread scan plus ±3-line clustering, then hydrates a page of comment BODIES —
   // and an IntersectionObserver fires it again on every scroll.
+  //
+  // PAID (`botDepth`). Its only openers are the ROI panel's ML strip tiles and the Inflation
+  // cells, both inside the locked panel — and the gate goes FIRST, above the selector parsing, so
+  // an unentitled caller cannot use the 400/200 split as an oracle over which selectors exist.
   app.get('/api/bot-analytics/flagging', { schema: flaggingSchema }, async (req, reply) => {
+    if (!botDepthEntitled(req)) {
+      reply.status(402);
+      return PRO_REQUIRED;
+    }
     const q = req.query as {
       select: 'findings' | 'summaries' | 'severity' | 'category' | 'overlap';
       severities?: string;
@@ -1086,7 +1300,18 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // the window (up to 5000) plus three grouped comment counts over them, then folds in JS. No
   // GitHub, no model — this process's event loop, the flagging-drill-down shape of cost — so it
   // borrows the same 60/min bucket rather than the 600/min blanket one.
-  app.get('/api/bot-analytics/volume', { schema: volumeScopeSchema }, async (req) => {
+  //
+  // ── ALL THREE VOLUME ROUTES ARE PAID (`botDepth`) ─────────────────────────────────────────
+  // Their only consumers are the ROI table's "Comments/PR" column, that column's drill-down tab,
+  // and the `botDepth`-gated WorkspaceBotCharts scatter — no free surface reads any of them, so
+  // there is nothing here to narrow and a 402 is the whole gate. The scatter in particular was the
+  // file's one CLIENT-ONLY gate (component gated, route open); it is closed in the same pass,
+  // because "the component that draws it is hidden" has never been a gate.
+  app.get('/api/bot-analytics/volume', { schema: volumeScopeSchema }, async (req, reply) => {
+    if (!botDepthEntitled(req)) {
+      reply.status(402);
+      return PRO_REQUIRED;
+    }
     const q = req.query as { window: BotWindowKind; workspace?: string; repoIds?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
@@ -1097,7 +1322,11 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // GET /api/bot-analytics/volume/prs — the paginated drill-down behind that column. Default sort
   // is raw `botComments` DESC; `sort=ratio` ranks by the bucket-relative expectation, which is
   // the only ordering that surfaces a small PR a bot tore apart (raw count mostly ranks by size).
-  app.get('/api/bot-analytics/volume/prs', { schema: volumePrsSchema }, async (req) => {
+  app.get('/api/bot-analytics/volume/prs', { schema: volumePrsSchema }, async (req, reply) => {
+    if (!botDepthEntitled(req)) {
+      reply.status(402);
+      return PRO_REQUIRED;
+    }
     const q = req.query as {
       window: BotWindowKind;
       workspace?: string;
@@ -1140,7 +1369,11 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // SIZED merged PR (capped at 2000, newest first) plus the five bucket means over the WHOLE
   // scope. The buckets are what make the chart readable — size is sublinear in comments, so the
   // expectation curve bends and the naive "comments per 100 LOC" reading is the one to avoid.
-  app.get('/api/bot-analytics/volume/scatter', { schema: volumeScopeSchema }, async (req) => {
+  app.get('/api/bot-analytics/volume/scatter', { schema: volumeScopeSchema }, async (req, reply) => {
+    if (!botDepthEntitled(req)) {
+      reply.status(402);
+      return PRO_REQUIRED;
+    }
     const q = req.query as { window: BotWindowKind; workspace?: string; repoIds?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));

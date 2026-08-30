@@ -360,9 +360,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // moved into it, so the tier moves with it. The board mounts on navigation and refetches on a
   // 5-minute cadence, so request COUNT is genuinely bounded and 60/min is comfortable.
   if (!mutating && path === '/api/attention') return [TIERS.search, TIERS.read];
-  // GET /api/flow-findings — the Bottlenecks tab (CORE/free, deterministic, no model and no
-  // GitHub). DECIDED, not inherited: "this route is DB-only" is the sentence this file exists to
-  // distrust, and one call here runs the lane resolver, the shared first-human-review fold (two
+  // GET /api/flow-findings — the Chronology tab (PAID `periodReports`, deterministic, no model and
+  // no GitHub — the route 402s before it touches the DB). The TIER is unaffected by that gate and
+  // must stay where it is: an entitled account still runs the whole fold, and the tier answers
+  // "what does one accepted request cost", never "who may make it". DECIDED, not inherited: "this
+  // route is DB-only" is the sentence this file exists to distrust, and one call here runs the
+  // lane resolver, the shared first-human-review fold (two
   // capped candidate walks), a thread-path scan, an in-window review scan, a merged-PR walk plus
   // its approving reviews, an open-PR snapshot with the approvals fold, and the round-trip
   // comment join. That is strictly the daily-brief / attention shape of cost — this event loop

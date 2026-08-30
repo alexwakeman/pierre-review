@@ -13,7 +13,15 @@ import { api } from '../api/client.js';
 import { refineQueryKey, selectorQueryKey } from '../lib/severityAgreement.js';
 import { ACTIVITY_GC_TIME, workspaceKey } from './useActivity.js';
 import { repoKeySlot } from './useBotTriage.js';
+import { useProCapabilities } from './useTriage.js';
 
+// PAID (`botDepth`). `GET /api/bot-analytics/flagging` 402s without it, and the gate is AND-ed into
+// `enabled` INSIDE this hook rather than left to the caller — this is an infinite query whose
+// `fetchMore` fires from an IntersectionObserver sentinel, so an unentitled mount that survived a
+// live entitlement change (a plan downgrade, /api/me refetching after `PRO_DIGEST_ENABLED` flips)
+// would 402 on every scroll tick against the 60/min `search` bucket and rate-limit the free
+// surfaces sharing the screen. Precedent: `useBotBehaviour`, useBotTriage.ts.
+//
 // The "what the bots are flagging" drill-down: one paginated stream per (selector, refine) over
 // the SAME window/workspace/repo triple the ML totals strip was measured at. Modelled on
 // useSearchResults — one infinite query, pages flattened, the aggregate numbers taken from the
@@ -61,6 +69,7 @@ export function useBotFlagging(p: {
   isFetchingMore: boolean;
 } {
   const { workspaceId, repoIds, window: windowKind, selector, refine, enabled } = p;
+  const { botDepth } = useProCapabilities();
   const limit = selector.kind === 'overlap' ? OVERLAP_PAGE_SIZE : COMMENT_PAGE_SIZE;
 
   const qc = useQueryClient();
@@ -116,7 +125,7 @@ export function useBotFlagging(p: {
               cursor: pageParam as string | null,
             }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    enabled,
+    enabled: enabled && botDepth,
     staleTime: 60_000,
     gcTime: ACTIVITY_GC_TIME,
     // ⚠ `refetchOnMount: false` WAS WRONG HERE, in a way that broke this feature's one promise.

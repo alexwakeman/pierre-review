@@ -26,7 +26,7 @@ import {
 } from '@pierre-review/shared';
 import { useFilters } from '../../store/filters.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
-import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
 import {
   periodReportGenerateMutationKey,
   periodReportModelChoices,
@@ -45,6 +45,7 @@ import {
   RefreshIcon,
   ThinSampleIcon,
 } from '../Icons.js';
+import { ProBadge, ProLockPanel, useProGateState } from '../ProGate.js';
 import type { Fmt, MetricMeta } from './periodReportMarkdown.js';
 import {
   METRIC_META,
@@ -706,7 +707,14 @@ function MetricTable({
                   {meta.note && <div className="text-[10px] text-gray-400">{meta.note}</div>}
                   {/* The C4 expander. Only rendered when the response carries the axis — the
                       server already omits it for single-workspace accounts, older plugins send
-                      nothing, and in both cases this row is byte-identical to the pre-axis one. */}
+                      nothing, and in both cases this row is byte-identical to the pre-axis one.
+                      It is also the ONLY control that names the cross-workspace comparison, so
+                      it is where that surface's `Pro` mark lives. The axis itself has no gate of
+                      its own: it rides the one-report GET, which is `/api/pro/*`, and this whole
+                      panel is already behind `periodReports` — so the badge is a LABEL on a
+                      transitively-gated view, never the thing enforcing it.
+                      `inline-block` on the chip keeps the button's hover underline from being
+                      drawn across it (decoration propagates into inline descendants). */}
                   {byWorkspace != null && (
                     <button
                       type="button"
@@ -721,6 +729,11 @@ function MetricTable({
                         className="mr-1 inline-block align-[-0.1em]"
                       />
                       By workspace
+                      <ProBadge
+                        variant="tab"
+                        className="ml-1 inline-block"
+                        title="Comparing Workspaces is part of Pro."
+                      />
                     </button>
                   )}
                 </td>
@@ -900,8 +913,13 @@ function Movements({
 // the numbers in a pill are computed (the same `signed`/`changeFmtFor` the table renders), never
 // model-authored (D4).
 //
-// Gated on `activityDigest` exactly as the panel gates itself: absent → the section renders
-// nothing (free posture — absence, never an error). The transcript/draft live in the filters
+// Gated on `activityDigest` — a DIFFERENT capability from the panel's `periodReports`, and one
+// that keeps the ABSENCE posture: no capability → the section renders nothing, no badge, no
+// nudge. That is deliberate and it is NOT an inconsistency to tidy up. The visible-but-locked
+// treatment is scoped to the named panes (this panel, the People report, the by-workspace axis,
+// Chronology, Bots ROI); every reader who gets far enough to see this chat is already inside one
+// they paid for, and a second upsell bolted to a sub-section of a pane they own is an advert.
+// The transcript/draft live in the filters
 // store keyed by WORKSPACE, so an answer asked under one period can survive into another
 // period's view — the answer's own window caption ("Report period · 5 Aug – 19 Aug") is the
 // existing defence, stating what it covered.
@@ -1286,7 +1304,9 @@ function Skeleton(): JSX.Element {
 // ── The panel ────────────────────────────────────────────────────────────────────────────────
 export function PeriodReportsPanel(): JSX.Element | null {
   const { periodReports } = useProCapabilities();
-  const isCloud = useMe().data?.deploymentMode === 'cloud';
+  // Entitlement, resolved AGAINST /api/me's flight rather than read naked — see the gate below.
+  // A hook, so it sits above every early return (hooks-order rule).
+  const gate = useProGateState(periodReports);
   // null until the workspaces query resolves the account's Default. Nothing workspace-scoped may
   // render — and nothing billable may fire — before then.
   const workspaceId = useFilters((s) => s.workspaceId);
@@ -1346,25 +1366,40 @@ export function PeriodReportsPanel(): JSX.Element | null {
   //
   // No capability = a FREE account. Since Reports became a free-visible rail entry (the flow
   // metrics live above this panel), a free user reaches this code every time they open the pane,
-  // so silence here is a missing explanation rather than a clean absence. Cloud gets the one-line
-  // nudge; OSS/local gets nothing, because there is nothing to upgrade to.
-  if (!periodReports) {
-    if (!isCloud) return null;
+  // so silence here is a missing explanation rather than a clean absence.
+  //
+  // ── WHAT CHANGED: VISIBLE-BUT-LOCKED, IN BOTH MODES ────────────────────────────────────────
+  // This used to answer with a one-line nudge in cloud and NOTHING in OSS/local, on the reasoning
+  // that a local install has nothing to upgrade to. Two things were wrong with that. The reader
+  // of a local install was left staring at a "Period reports [Pro]" heading with a blank space
+  // under it, which reads as a broken pane rather than an unbought one; and "local" is not
+  // "unpaid" — a flag-less `pnpm dev` with the plugin checked out reports `periodReports: false`
+  // too, so the silent branch was also what a developer saw. Both now land on the same locked
+  // pane, which states what the view answers and carries ONE link. `ProLockPanel` picks the URL
+  // per deployment mode (same-origin `/pricing` in cloud, the public site in local, because local
+  // never serves the landing) — that decision lives in exactly one place, not here.
+  //
+  // Routed through `useProGateState` rather than `!periodReports` directly: `useProCapabilities()`
+  // is an ALL-FALSE literal until /api/me resolves, so the naked check paints "See what Pro
+  // includes" for one frame on every cold load OF AN ACCOUNT THAT PAYS.
+  if (gate === 'pending') return <Skeleton />;
+  if (gate === 'locked') {
     return (
-      <p className="text-[10px] text-gray-400">
-        <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[10px] font-semibold text-ai-signal">
-          Pro
-        </span>
-        Period-over-period reports — what changed since last sprint, and a forecast that refuses
-        when the history is too thin — are part of Pro.
-      </p>
+      // ⚠ A testid DISTINCT from the entitled body's `period-reports` — same-id states are how a
+      // screenshot pipeline photographs a lock screen and ships it as marketing.
+      <ProLockPanel heading="Period reports" testId="period-reports-locked">
+        A stored report for each completed period: what moved since the one before it, which of
+        those movements the history can actually stand behind, and a forecast that refuses rather
+        than guessing when the data is too thin.
+      </ProLockPanel>
     );
   }
   // `enabled: false` from the route is the OTHER case entirely: the capability IS on (this query
   // only runs when it is), and the plugin has self-disabled its reports surface — a stale
   // /api/me, or `DIGEST_ENABLED` flipping. That is a PAYING account, so it must render nothing
   // rather than either the "no periods yet" empty state (copy that invites a click which cannot
-  // work) or, worse, the buy-Pro line above.
+  // work) or, worse, the LOCKED PANE above — which would invite a customer who has already paid
+  // to go and pay again. Never collapse these two branches into one "no reports" state.
   if (list.data?.enabled === false) return null;
 
   // Fold `isPlaceholderData` into loading everywhere: a stale window's numbers under a new
@@ -1513,7 +1548,12 @@ export function PeriodReportsPanel(): JSX.Element | null {
           {/* People (plan P4.2, now the People-report picker): pick people AND bots from the
               WORKSPACE's own membership, then "Begin report" opens the people-report tab for
               the period selected above (via `insightsReportKey`). Alphabetical, metric-free,
-              never a leaderboard. */}
+              never a leaderboard.
+
+              It sits inside the entitled branch, so an unentitled reader meets the locked pane
+              above and never this — but the section ALSO carries its own `periodReports` guard
+              now, because "safe by where it is mounted" stops being true the first time someone
+              moves the mount, and this one fires eight roster queries on mount. */}
           <PeriodPeopleSection />
         </>
       )}

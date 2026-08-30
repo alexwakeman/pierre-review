@@ -899,9 +899,18 @@ export interface WorkspaceReviewer {
   // per-seat price the user typed, not the monthly figure; `effectiveMonthlyUsd` below carries
   // that.
   //
-  // null = NO PRICE SET. 0 is a real, deliberate price meaning "we pay nothing for this". TWO
-  // STATES, and NOTHING INHERITS — so `??` vs `||` is an ordinary display bug here, not a silent
-  // wrong-price trap.
+  // null = NO PRICE SET. 0 is a real, deliberate price meaning "we pay nothing for this". NOTHING
+  // INHERITS — so `??` vs `||` is an ordinary display bug here, not a silent wrong-price trap.
+  //
+  // ⚠ null NOW CARRIES A SECOND MEANING ON THE WIRE: "this account may not see prices". The Bots
+  // ROI panel is paid (`botDepth`), and all four routes that echo a `WorkspaceReviewer` — the
+  // listing, the PATCH, and both resets — run `stripCost` for an unentitled account, returning
+  // exactly the shape a never-priced row has (`costModel: 'flat'` included) so nothing downstream
+  // has to learn a fourth cost state. DECIDE WHICH MEANING APPLIES FROM `/api/me`'s `pro.botDepth`,
+  // NEVER FROM THE VALUE: a surface that renders cost state without checking the capability first
+  // will tell an unentitled reader "no price set" about a bot that has a price. `costStateOf`
+  // (frontend lib/botCost.ts) maps null → 'none' and is correct only below a capability check.
+  // (The GDPR export is the one place the real number still ships — see db/export-account.ts.)
   //
   // ⚠ RENDERING RULE, and it is the client's job because no schema can enforce it: this price is
   // per WORKSPACE. Totalling a single workspace's listing is correct (one row per actor). Totalling
@@ -1119,7 +1128,10 @@ export interface BotVendorAnalytics {
   overlapThreads: number;
   overlapPct: number | null;
   topOverlapPartner: { key: string; label: string; clusters: number } | null;
-  // ── ML severity mix (CORE, free — docs/ML-SEVERITY.md), WINDOWED like every other column ──
+  // ── ML severity mix (docs/ML-SEVERITY.md), WINDOWED like every other column ──
+  // ⚠ PAID with the rest of this row: these columns are withheld along with `vendors[]` for an
+  // account without `botDepth`. The per-COMMENT severity badge (`GET /api/prs/:id/ml-labels`) is a
+  // DIFFERENT route and stays free on every tier — that is the line the tier draws.
   // Aggregated from `ml_comment_labels` over the SAME window as the ROI numbers, for THIS bot.
   // ALL FOUR ARE ABSENT (undefined) when the bot has no labels in the window — the UI renders
   // blanks, never zeros ("no data yet" and "zero findings" are different claims). A present
@@ -1152,9 +1164,13 @@ export interface BotVendorAnalytics {
   // with `badged: 0` means the bot badges nothing — the UI renders a DASH, never a zero ("never
   // inflates" and "makes no calls" are different claims).
   //
-  // `weekly` is the Pro half (`botDepth`): ≤12 weekly points oldest→newest over the same trend
-  // span as `trend`, ABSENT (not empty) for unentitled accounts — counts are the free verdict,
-  // the history is paid.
+  // `weekly` is ≤12 weekly points oldest→newest over the same trend span as `trend`.
+  //
+  // ⚠ THE WHOLE INFLATION COLUMN IS PAID NOW, counts included. It used to be a split tier (current
+  // -window counts free, the weekly history under `botDepth`) — but the Inflation cell is a cell of
+  // the ROI table, and the ROI table went behind `botDepth` in one piece, so an unentitled account
+  // receives no `vendors[]` to draw it in. `weekly` keeps its own absent/present flag because it is
+  // an extra SCAN WIDTH in the getter, not just a field to drop.
   mlInflation?: BotVendorInflation;
   // keep | tune | noisy. Thread math first (volume, acted-on, OVERDUE-untouched), plus ONE ML
   // input: a bot past the nit gates (findings ≥ 20 AND nit share ≥ 0.7 — the same gates as the
@@ -1187,7 +1203,12 @@ export interface BotVendorAnalytics {
   // within-workspace total — shows seat-adjusted dollars without knowing seats exist. The stored
   // unit survives as `costUnitMonthlyUsd` for tooltip copy only.
   //
-  // Cost is CORE/free: it is read from a core table, so an OSS/npx install can set and see it.
+  // ⚠ COST IS PAID (`botDepth`), and so is every other column on this row. The price is READ from
+  // a core table and computed with no model — "core" describes where the code lives, never the
+  // tier. The whole ROI table this row draws went behind `botDepth`, so an unentitled account
+  // never receives a populated `vendors[]` at all (`GET /api/bot-analytics` narrows: `vendors`
+  // empty, `ml`/`qualityChecks` absent, the ROI half of `totals` zeroed). An OSS/npx install can
+  // neither set nor see a price unless the plugin is bound and advertising `botDepth`.
   costMonthlyUsd: number | null;
   costPerActedOnUsd: number | null;
   // How the stored price is metered — display metadata only: `costMonthlyUsd` above is already
@@ -3379,8 +3400,12 @@ export interface ProCapabilities {
   issueLinks: boolean;
   // Review-bot triage tier — CORE/FREE. The Bots rail view reads the core bot routes and shows
   // regardless; this flag is true whenever the plugin is LOADED (independent of the paid PRO_*
-  // flags) so the free bot Settings section + the ROI cost overlay (both pro_settings-backed)
-  // stay reachable. All-false only when the plugin is absent.
+  // flags) so the free bot Settings section (pro_settings-backed) stays reachable. All-false only
+  // when the plugin is absent.
+  //
+  // ⚠ IT NO LONGER COVERS THE ROI COST OVERLAY, OR THE ROI TABLE AT ALL. That whole panel moved to
+  // the paid `botDepth` flag below; what `botTriage` still buys is classification, identity, the
+  // bot-only governance caution, the tuning suggestions and the thread-resolve flows.
   botTriage: boolean;
   // Bot Tuning Advisor (paid, gated like workspaceInsights): the Bots "Advisor" inner tab,
   // the per-row Tune/Drop pills, findings → config-PR/brief/issue outputs, the effect panel.
@@ -3505,7 +3530,10 @@ export interface ProSettings {
      * `pro_settings.bot_cost_json` blob, superseded by `account_reviewers.monthly_cents` in CORE
      * (one row per (account, actor), nullable — NULL is "no price set", 0 is "free" — edited on
      * the bot row in Activity → Bots → Settings). Cost became CORE/free in the move: an OSS/npx
-     * install can now set and see a price.
+     * install can now set and see a price — but the READ is `botDepth`-gated as of the ROI panel
+     * going paid, so an unentitled account gets `costMonthlyUsd: null` on every row regardless of
+     * where the number came from. This legacy blob's read-time fallback is subject to the same
+     * strip (it fills `costMonthlyUsd`, which is what gets nulled).
      *
      * Plugin migration 0019 copies what it can into that column. Unlike its predecessor it writes
      * nothing but the price: cost sits on the actor's own identity row, so importing one
@@ -7611,8 +7639,13 @@ export interface BotFlaggingClustersResponse extends BotFlaggingBase {
 export type BotFlaggingResponse = BotFlaggingCommentsResponse | BotFlaggingClustersResponse;
 
 // ---------------------------------------------------------------------------------------
-// Bot comment VOLUME per PR (CORE, free tier — deterministic, no model, no new table)
+// Bot comment VOLUME per PR (PAID `botDepth` — deterministic, no model, no new table)
 // ---------------------------------------------------------------------------------------
+//
+// ⚠ ALL THREE VOLUME ROUTES 402 WITHOUT `botDepth` (`/api/bot-analytics/volume`, `…/volume/prs`,
+// `…/volume/scatter`). Both surfaces below live inside the paid ROI panel, so there is no free
+// half to narrow for — unlike `/api/bot-analytics`, which serves a free caution and therefore
+// narrows instead of refusing. Deterministic and core-computed; "core" is where the code lives.
 //
 // Two surfaces, one getter family (backend db/bot-volume.ts):
 //   • the Bots ROI tab's "avg bot comments per PR" column + the PR drill-down behind it, and

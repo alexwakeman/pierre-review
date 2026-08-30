@@ -64,7 +64,7 @@ export default function Bots(): JSX.Element {
       {/* ---------- hero ---------- */}
       <Section divider="none" pad="none" className="pb-12 pt-20">
         <MonoLabel wide className="mb-[26px] text-secondary">
-          The bot receipt — free
+          The bot receipt — grading free, scoreboard Pro
         </MonoLabel>
         <h1 className="mb-6 max-w-[24ch] text-pretty font-display text-hero-sm font-semibold text-ink type:text-page-title">
           Your AI reviewer has an invoice. This is the receipt.
@@ -303,8 +303,8 @@ export default function Bots(): JSX.Element {
               Where the noise comes from — and where nobody’s listening.
             </h2>
             <p className="mb-9 max-w-answer">
-              Noise concentrates: in a repo, in a bot, in a category. The free receipt
-              flags the <span className="text-ink">bot-only reviews</span> no human ever
+              Noise concentrates: in a repo, in a bot, in a category. The free tier flags
+              the <span className="text-ink">bot-only reviews</span> no human ever
               handled — the clearest sign a bot needs tuning, not a bigger audience — and
               counts your <span className="text-ink">in-house bots</span> like any vendor:
               lint-wrapper or $30 seat, same receipt. Pro’s depth layer then locates the
@@ -397,8 +397,10 @@ export default function Bots(): JSX.Element {
               Free. Because you’d doubt a ruler you rented.
             </h2>
             <p className="max-w-[56ch]">
-              The receipt is in the free tier — sign in with GitHub, point it at your
-              repos, and read this month’s number. Grading runs in the hosted service
+              The grading is in the free tier — sign in with GitHub, point it at your
+              repos, and every bot comment arrives labelled, with a triage grade on every
+              PR and a warning on the ones no human reviewed. The per-bot scoreboard those
+              grades add up to is Pro. Grading runs in the hosted service
               today; bringing the model to the local install is on the{' '}
               <InlineLink to="/how-it-works#roadmap">roadmap</InlineLink>.
             </p>

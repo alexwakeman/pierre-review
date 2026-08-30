@@ -186,6 +186,13 @@ function TabChip({
   // The people-report chip's period label resolves against the SAME cached list the picker
   // gated Begin on (a shared cache read — warm whenever this tab can exist at all); every
   // other tab kind holds the query disabled.
+  //
+  // ⚠ THE `periodReports` CONJUNCT IS LOAD-BEARING, not belt-and-braces. The list route is
+  // `/api/pro/*` and 402s an unentitled cloud account, and this chip is mounted for the whole
+  // life of the tab strip — an ungated query here would retry a paywall on every mount and every
+  // refocus. It is also reachable: the tab OUTLIVES a live entitlement change (a plan downgrade,
+  // `PRO_DIGEST_ENABLED` flipping), which is exactly when the label falls back to the bare period
+  // key below and the tab's body renders the locked pane instead of the report.
   const reportsList = usePeriodReportsList(
     periodReports && tab.kind === 'people-report' && peopleReportSeed != null,
     workspaceId,
@@ -409,10 +416,14 @@ function TabChip({
     };
   } else if (tab.kind === 'people-report') {
     // The People report — labelled with its period (resolved from the transient seed against
-    // the cached period list; the bare key stands in until the list is warm). `ai` tone: the
-    // tab hosts an AI narrative.
+    // the cached period list; the bare key stands in until the list is warm, and PERMANENTLY if
+    // the account is no longer entitled, since the query above is then held disabled). `ai` tone:
+    // the tab hosts an AI narrative.
     // ⚠ Not cosmetic: without this branch the tab falls through to the PR ladder below and
     // renders as a two-line `#undefined` chip with no title and no author.
+    // No `Pro` chip here, deliberately: the badge belongs on the VIEW, not on a strip of
+    // closable drill-downs, and this tab can only be opened by someone who is entitled. What an
+    // unentitled reader needs to be told is said by the pane the chip opens (PeopleReportDetail).
     const period = peopleReportSeed
       ? (reportsList.data?.periods ?? []).find(
           (p) => p.periodKey === peopleReportSeed.periodKey,

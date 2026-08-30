@@ -257,8 +257,11 @@ export function ActivityView(): JSX.Element {
   // The CORE/free **Pending** cards console — always available, no Pro gate.
   const showingAttention = activityRepoId === 'attention';
   const showingInsights = activityRepoId === 'insights';
-  // The CORE/free review-bot triage console (BotsView) — always available (reads the core bot
-  // routes), independent of the Pro Insights caps.
+  // The review-bot triage console (BotsView) — the RAIL ENTRY is always available and must stay
+  // that way: it owns the free classification/Settings screen, the free bot-only governance
+  // caution, the tuning suggestions and the thread-resolve flows, all of which an `npx` install
+  // needs. Its ROI sub-tab is the paid half (`botDepth`) and locks its own BODY; the entry, the
+  // sub-tab strip and every other tab stay open on every tier.
   const showingBots = activityRepoId === 'bots';
 
   // (The one-shot "default to Insights when Pro is on" effect lived here — removed with P3.1:
@@ -461,7 +464,7 @@ export function ActivityView(): JSX.Element {
                 ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
                 : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
-            title="Detect, measure and triage this workspace's automated review bots (free)"
+            title="Detect, measure and triage this workspace's automated review bots — classification and triage are free; the ROI table is Pro"
           >
             <span className="shrink-0">
               <BotIcon />

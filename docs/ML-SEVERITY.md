@@ -331,7 +331,14 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
   non-summary comments carries a selected severity (not when its *worst* equals it — filtering
   to "major" should surface the thread with one major among five nits). The row hides itself
   entirely when nothing on the PR is labelled.
-- **The merged Bots ROI table (`BotRoiPanel`)** — the severity surface on the Bots rail. The
+- **The merged Bots ROI table (`BotRoiPanel`) — PAID (`botDepth`)** — the severity surface on the
+  Bots rail. ⚠ **THIS IS WHERE THE TIER LINE FALLS, AND IT IS A GRAIN LINE, NOT A FEATURE LINE.**
+  Everything ABOVE this bullet — the per-COMMENT badge, `ThreadList`'s severity pills, the per-PR
+  `BotTriageCard` grade, all served by the untouched, free `GET /api/prs/:id/ml-labels` — stays
+  FREE ON EVERY TIER: the ruler is free. Everything in THIS bullet is the workspace-grain
+  SCOREBOARD folded from those labels, and it is paid: the `MlTotalsStrip`, the per-vendor `ml*`
+  columns, the Inflation column *counts included*, and the flagging drill-downs behind them. An
+  unentitled `/api/bot-analytics` carries no `ml` block and no `vendors[]` at all. The
   old standalone `BotSeverityPanel` (its own `/api/bot-severity` fetch, corpus-wide while every
   panel around it was windowed) is RETIRED; what survives, all computed from the ONE windowed
   `/api/bot-analytics` response (`ml` block + per-vendor `ml*` fields), is:
@@ -377,10 +384,12 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
   as `trend` (a second copy of that arithmetic is how two charts come to disagree by a week with
   nothing failing) — and the same role-`'review'` bot set. Where the seven charts went:
   - **The severity INFLATION INDEX is now the ROI table's Inflation column** (`mlInflation` on
-    the same `/api/bot-analytics` vendor row): the current-window `overCall`/`underCall` COUNTS
-    are FREE (the verdict — they ride the same free ML fold as the severity columns); the
-    ≤12-week `weekly` sparkline beside them is the HISTORY, present on the wire only under the
-    `botDepth` entitlement (`inflationHistory` in `getBotAnalytics` — absent, never an error).
+    the same `/api/bot-analytics` vendor row). ⚠ **THE WHOLE COLUMN IS PAID NOW, counts included** —
+    it used to be a split tier (current-window `overCall`/`underCall` COUNTS free, history paid),
+    but the cell is a cell of the vendor table and that table went behind `botDepth` in one piece,
+    so an unentitled account receives no `vendors[]` to draw it in. The ≤12-week `weekly` sparkline
+    keeps its own absent/present flag anyway (`inflationHistory` in `getBotAnalytics` — absent,
+    never an error), because it is an extra scan WIDTH rather than just a field to drop.
     The semantics travelled unchanged: `vendorAgree`/`vendorOverCall`/`vendorUnderCall` partition
     the bot's BADGED findings on the `vendorDeclared` denominator (`agree + over + under ===
     vendorDeclared`, exactly as `SeverityAgreementMatrix` has it); an unbadged finding is SILENCE

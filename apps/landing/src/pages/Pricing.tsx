@@ -36,10 +36,17 @@ import { PixelIcon } from '../components/feint/PixelIcon';
 // page, not just this one.
 // ---------------------------------------------------------------------------
 
+// ⚠ THIS LIST IS A PROMISE, AND THE APP IS THE ARBITER. Before adding a line here, find the
+// component that renders it on a free account and check nothing above it gates on a capability.
+// The keep/tune/noisy verdict chip and the per-bot inflation count used to sit here; both render
+// only inside `BotRoiPanel`'s vendor table, which went behind `botDepth` when the whole ROI panel
+// went Pro, so both moved to PRO_FEATURES. What stayed free on the bot side is everything OUTSIDE
+// that panel: per-comment ML grading, the per-PR triage grade, one-pass resolve, the bot-only
+// governance caution, the tuning suggestions and classification settings.
 const FREE_FEATURES = [
-  'The verdict on every bot — keep / tune / noisy, computed from what your team actually did with its comments',
-  'Every bot comment graded for severity & category by an independent ML model, with this window’s inflation count per bot (hosted today; coming to the local install)',
+  'Every bot comment graded for severity & category by an independent ML model, shown on the comment itself (hosted today; coming to the local install)',
   'A per-PR bot triage grade — “12 bot comments: 2 awaiting a look · 6 likely addressed · 4 nit-flagged” — with one-pass resolve',
+  'The bots-only warning — which open PRs no human has reviewed — plus per-bot tuning suggestions you can act on',
   'My Turn + the daily brief’s counts — what needs you, and what changed overnight, as checkable numbers',
   `Activity console + cross-repo feed — the view ${SITE_NAME} opens on`,
   'The timeline board · review-thread states — resolved / likely addressed / replied / untouched',
@@ -49,10 +56,12 @@ const FREE_FEATURES = [
 ];
 
 const PRO_FEATURES = [
+  'The bot ROI table — a keep / tune / noisy verdict per bot, what each one raised, what your team acted on, and how much it over-called',
   'Per-bot depth — every bot’s own tab: trends, anomalies, overlap, where it works, what your team does with it',
   'Inflation history — each bot’s over-calling as a weekly line, not just this window’s count',
   'Per-seat bot ROI — type the price, read what every acted-on comment cost, per workspace',
   'Synthesised verdicts on every drill-down — the receipt read for you; every count computed, never model-authored',
+  'Chronology — every hour a PR was open, who was holding it: a reviewer who hadn’t looked, an author who owed a reply, or nobody, approved and waiting to land',
   'Period reports — what changed since last period, by workspace, with an honest forecast and a narrative checked against the figures',
   '1:1 prep — a per-person period summary for walking into the meeting informed. Prep, not scoring',
   'Daily-brief narration + “Ask about this period” — chat grounded in the report you’re reading',
@@ -72,11 +81,11 @@ const PROPLUS_FEATURES = [
 const FAQ: { q: string; a: string }[] = [
   {
     q: 'Is free really free?',
-    a: `Yes. ${SITE_NAME} is open-core: the free dashboard is the product, not a trial. The Activity feed, the timeline, PR detail with real GitHub write actions, the bot receipt with its keep/tune/noisy verdicts — all of it stays free, with no repo or seat limits. The line is simple: free gets the verdict; paid gets the history, the depth and the explanation.`,
+    a: `Yes. ${SITE_NAME} is open-core: the free dashboard is the product, not a trial. The Activity feed, the timeline, PR detail with real GitHub write actions, independent grading on every bot comment, the per-PR triage grade and one-pass resolve — all of it stays free, with no repo or seat limits. The line is simple: free tells you what happened on a pull request; paid tells you what it adds up to across the team — the per-bot scoreboard, the history, the depth and the explanation.`,
   },
   {
     q: 'Why is the bot grading free?',
-    a: `Because a measurement you have to pay for is a measurement you'd doubt. The grading model is ${SITE_NAME}'s own and runs on plain CPU — no LLM meter — so it costs next to nothing to serve, and the paid tiers are the layers on top of the ruler, never the ruler itself: the verdict and this window's counts are free, the week-by-week history and per-bot depth are Pro. It runs in the hosted service today; grading in the local install is on the roadmap.`,
+    a: `Because a measurement you have to pay for is a measurement you'd doubt. The grading model is ${SITE_NAME}'s own and runs on plain CPU — no LLM meter — so it costs next to nothing to serve, and the ruler itself is never the paid part: every bot comment is graded for severity and category on the free tier, on the comment where you read it, and every PR gets its triage grade. What Pro adds is the scoreboard built from those grades — the per-bot keep / tune / noisy verdict, over-calling as a weekly line, per-seat ROI and per-bot depth. It runs in the hosted service today; grading in the local install is on the roadmap.`,
   },
   {
     q: 'What counts as a seat?',

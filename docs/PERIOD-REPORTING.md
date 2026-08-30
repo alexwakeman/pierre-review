@@ -48,6 +48,76 @@ bytes** around offset 132k, so every search tool silently under-reports matches 
 
 ---
 
+## What an UNENTITLED reader sees: visible-but-locked, not absent
+
+The app's older posture on a capability the account does not have is **absence** — the control
+is simply not rendered, and there is no nudge (`WorkspaceBotCharts` returns null, the "Depth →"
+pill is omitted). That posture is deliberate and still correct for most controls.
+
+**Period reports, the People report and the by-workspace axis are exceptions**, along with
+Chronology and the Bots ROI panel: they are **VISIBLE-BUT-LOCKED**. The pane exists, it carries a
+`Pro` badge, and an unentitled reader lands on a calm statement of what the view answers plus one
+link. Everything renders through the one shared component — **`components/ProGate.tsx`**
+(`ProBadge`, `ProLockPanel`, `useProGateState`) — and nothing hand-rolls either half.
+
+| Surface | Locked pane lives in | `data-testid` |
+|---|---|---|
+| Period reports | `PeriodReportsPanel` (replaces the whole panel) | `period-reports-locked` |
+| The People report — 1:1 prep | `PersonPeriodSection`, on the contributor-activity tab | `person-period-locked` |
+| The People report — the report | `PeopleReportDetail`, before the seed check | `people-report-locked` |
+| By workspace | *(none — transitively gated, see below)* | — |
+
+Four rules, each of which has a matching comment in the code:
+
+- ⚠ **THE LOCKED PANE'S TESTID IS NOT THE ENTITLED BODY'S.** `PeriodReportsPanel`'s real body is
+  `period-reports`; the lock is `period-reports-locked`. Sharing one id is how a screenshot
+  pipeline photographs a lock screen and ships it as marketing (`scripts/capture-shots.mjs` waits
+  on testids).
+- ⚠ **`enabled: false` IS NOT "UNENTITLED" AND MUST STAY SILENT.** `GET /api/pro/insights/reports`
+  answers `{enabled:false}` when the plugin has self-disabled its reports surface (a stale
+  `/api/me`, `PRO_DIGEST_ENABLED` flipping). That is a **paying** account. Both
+  `PeriodReportsPanel` and `PersonPeriodSection` keep this as a separate branch returning `null` —
+  collapsing the two asks a customer to buy what they have already bought.
+- ⚠ **NEVER READ THE CAPABILITY NAKED — GO THROUGH `useProGateState`.** `useProCapabilities()`
+  returns an all-false literal until `/api/me` resolves, so `!periodReports ? <lock/> : <real/>`
+  paints "See what Pro includes" for one frame on every cold load **of an account that pays**.
+  The helper holds at `'pending'` for that flight and resolves an `/api/me` error to `'locked'`.
+- **ONE LOCK PER PANE.** `PeriodPeopleSection` gained an *intrinsic* `periodReports` guard (it was
+  previously safe only because of where it is mounted, and it fires eight roster queries on
+  mount), but that guard returns `null` — the reader is already looking at the panel's lock a few
+  rows above, and a second dashed box under it reads as two broken sections.
+
+**The by-workspace axis has no independent surface.** It rides `byWorkspace` on the one-report
+GET, it has no route of its own (`GET /api/workspace-metrics/compare` is deleted and must not
+return), and its only control is the per-metric "By workspace" expander inside the already-gated
+panel. So it is gated **transitively** and carries only the badge on that expander — there is
+nothing to lock, because an unentitled reader never reaches the table the expander sits in.
+
+**Local/OSS is gated too, and that is a real change to the dev loop.** `entitledProCapabilities`
+short-circuits on `account.isLocal`, so local entitlement collapses to whatever the plugin
+published — and the plugin publishes `periodReports: PRO_DIGEST_ENABLED === 'true'`. A flag-less
+`pnpm dev` with the submodule checked out therefore reports `periodReports: false` and now shows
+the **locked** panes where it used to show nothing. `pnpm demo` and the shots Pro pass set the
+flag; the ordinary dev loop does not. Set `PRO_DIGEST_ENABLED=true` to work on these panes.
+
+**Server enforcement is unchanged and already exists — three layers, none of them client-side:**
+the routes are `/api/pro/*`, so a free cloud account is 402'd by the blanket gate in
+`api/plugins/auth.ts`; in OSS the routes are never registered; and the plugin self-gates on
+`DIGEST_ENABLED`. Every hook already takes the capability as its `enabled`
+(`usePeriodReportsList`, `usePeriodReport`, `usePersonPeriod`), so nothing polls a paywall.
+
+⚠ **The People report's BOT sections read three routes it does not own** — `/api/bot-analytics`,
+`/api/bot-analytics/vendor/:key/comments` and `/api/bot-authoring`, all core and all shared with
+the Bots ROI panel, which gates on **`botDepth`**. **All three now carry an entitlement check, and
+all three take the UNION `botDepth || periodReports`** (`botAnalyticsEntitled`, one predicate in
+`api/routes/bot-triage.ts`) — because `botDepth` alone would open a report a Reports customer paid
+for with every bot section blank and no explanation on screen. Their client hooks mirror the same
+predicate, and so must any future one. Two of the three refuse outright (402); `/api/bot-analytics`
+NARROWS instead, because the same response also feeds two free surfaces in `BotsView` — details in
+[API.md](API.md).
+
+---
+
 ## Window purity — no "as of now" snapshot may enter the vector
 
 **Every metric is WINDOW-PURE: a function of events timestamped in `[fromMs, toMs)` and

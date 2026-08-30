@@ -90,8 +90,15 @@ export function UserActivityDetail(): JSX.Element {
 
       {/* 1:1 prep (Pro `periodReports`, plan P4.2): the person-period vector for one sprint
           period, in the period table's idiom — mounted HERE because this tab IS the person
-          surface (no new tab kind). Renders nothing on free/OSS, and its own quiet null state
-          when the workspace has never seen this person act. */}
+          surface (no new tab kind).
+
+          It no longer renders nothing on free/OSS. This mount is the ONLY route by which someone
+          without the capability can meet the People report at all — its picker lives inside the
+          Reports pane's Pro half, and its report tab opens only from that picker — so the section
+          states what it answers and offers one link instead of leaving a hole. The tab around it
+          (this contributor's feed) is free and unchanged: the locked state is one dashed box
+          above the feed, never in front of it. It still renders its own quiet null state when the
+          workspace has never seen this person act. */}
       <PersonPeriodSection userId={userId} />
 
       {/* The feed itself — the shared FeedView, scoped to this one actor. It drops its

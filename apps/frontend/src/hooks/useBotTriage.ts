@@ -27,11 +27,23 @@ const RESOLVE_CHUNK_SIZE = 25;
 // gcTime only keeps the last snapshot resident so the charts/table repaint WARM immediately
 // instead of blank. Reuses the Activity ceiling (45 min).
 
-// The bot-triage read/write hooks (CORE, deterministic — no AI). Detection, dedup and the
-// confirm-gated thread resolve are free-tier; the Bot-ROI analytics panel that consumes
-// useBotAnalytics is UI-gated on caps.workspaceInsights by its component (the route itself is
-// core). Every getter is account-scoped server-side; these are plain DB reads that refresh on the
-// sync cadence.
+// The bot-triage read/write hooks — deterministic, no AI on either tier. Every getter is
+// account-scoped server-side; these are plain DB reads that refresh on the sync cadence.
+//
+// ── WHICH OF THESE ARE FREE AND WHICH ARE PAID ──────────────────────────────────────────────────
+// FREE (`botTriage`): the reviewer listing + the four write/reset hooks (classification is free so
+// an `npx` install can do it), the bot-only-PR list, per-PR dedup and behaviour, and the resolvable
+// bot-thread read/resolve pair. Free means free — no `enabled` gate on any of them.
+//
+// PAID (`botDepth`): `useBotBehaviour` (whose route lives in the plugin), and — since the Bot-ROI
+// panel went paid as a whole — the volume family and the per-vendor / flagging drill-downs, whose
+// hooks live in useBotVolume.ts, useBotVendorPrs.ts and useBotFlagging.ts. Those routes 402 now, so
+// a hook reaching one must gate its `enabled` on the capability or a mounted component will re-fire
+// the 402 on its own cadence. `useBotBehaviour` below is the pattern.
+//
+// ⚠ `useBotAnalytics` IS THE EXCEPTION AND IT IS NOT AN OVERSIGHT — it stays UNGATED because its
+// route serves both tiers by NARROWING rather than refusing. Read its own note before adding an
+// `enabled: … && botDepth` to it.
 
 // ── THE TWO SCOPE INPUTS, AND WHY THEY ARE SEPARATE SLOTS ───────────────────────────────────────
 // `workspaceId` decides the VERDICT — who counts as an automated reviewer, what its vendor and
@@ -63,6 +75,21 @@ export function repoKeySlot(repoIds?: number[] | null): string {
 // ⚠ THE PRICE IS PER WORKSPACE. Within this one response there is exactly one row per actor, so a
 // total here is a plain sum — but the same actor's row in another workspace may legitimately hold
 // a different number, and nothing may add those together. `enabled` lets the caller gate the fetch.
+//
+// ── TWO TIERS, ONE RESPONSE: DO NOT GATE THIS HOOK ON `botDepth` ────────────────────────────────
+// The ROI table this feeds is paid, but the SAME response carries two free things: the amber "only
+// a bot reviewed N open PRs" governance caution (`totals.botOnlyPrs`) and the tuning-suggestions
+// box (`suggestions`), both mounted in BotsView OUTSIDE the paid panel. So the ROUTE narrows rather
+// than 402s — an unentitled account gets those two fields real and the ROI population withheld
+// (`vendors` empty, `ml`/`qualityChecks` absent, the ROI half of `totals` zeroed) — and this hook
+// stays open on every tier. A `botDepth` gate here would make the caution and the suggestions
+// silently vanish: both read with `?? 0` / `?? []`, so nothing would error, they would just stop
+// appearing.
+//
+// ⚠ THE CLIENT DECIDES WHAT TO DRAW FROM `/api/me`, NEVER BY SNIFFING THIS PAYLOAD. The zeroed
+// `totals` fields are a wire artefact of three REQUIRED keys on `BotAnalyticsResponse`, not a
+// measurement — the paid consumers (BotRoiPanel and its drill-downs) gate on the capability and
+// never render them.
 export function useBotAnalytics(
   workspaceId: number | null,
   window: BotWindowKind,
@@ -150,6 +177,13 @@ export function useBotOnlyPrs(
 // behind them (`footprint` + `repoFootprints`). Feeds the Bots "Settings" list, the feed's vendor
 // tag, ThreadList's resolve count and the bot colour map. There is no rows/reviewers split any
 // more — one grain, one row.
+//
+// ⚠ FREE ROUTE, PAID COLUMNS. The listing itself must never be gated — it is the identity and
+// colour backbone for the whole SPA (feed vendor tags, ThreadList, BotTriageCard, the People
+// picker) and it backs the free classification screen. But the PRICE columns
+// (`costMonthlyUsd` / `effectiveMonthlyUsd`) arrive null-and-'flat' for an account without
+// `botDepth` — the server strips them, so a consumer that shows a price is showing one the account
+// is entitled to rather than one the client was trusted to hide.
 //
 // ⚠ THE WORKSPACE IS THE GRAIN, so it is REQUIRED and it is in the key. Identity used to be
 // account-wide, which is why several callers deliberately passed nothing; under this model an

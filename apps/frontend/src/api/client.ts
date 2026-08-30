@@ -665,10 +665,15 @@ export const api = {
     get<DailyBriefResponse>(
       withQuery('/api/daily-brief', workspaceParam(workspaceId), rollup ? 'rollup=1' : undefined),
     ),
-  // The Bottlenecks tab (CORE/free on every tier, deterministic — no model anywhere behind it):
-  // where human review time goes in this workspace, as evidence cells with sample floors, plus a
-  // NAMED refusal for every kind that could not clear one. `days` is the window; the server
-  // clamps it to [7, 90] rather than trusting it, so a bookmarked value can never widen the scan.
+  // The Chronology tab (PAID on `periodReports` — the route 402s with `{error:'pro required'}`;
+  // deterministic all the same, no model anywhere behind it): where human review time goes in this
+  // workspace, as evidence cells with sample floors, plus a NAMED refusal for every kind that could
+  // not clear one. `days` is the window; the server clamps it to [7, 90] rather than trusting it,
+  // so a bookmarked value can never widen the scan.
+  //
+  // ⚠ `useFlowFindings` gates its `enabled` on the same capability, so an unentitled SPA never
+  // calls this. It polls on a 5-minute interval — an ungated hook would be a 402 on a timer, per
+  // mounted pane, and the panel would report a paywall as "Could not load this workspace's flow."
   flowFindings: (workspaceId: number, days?: number) =>
     get<FlowResponse>(
       withQuery(

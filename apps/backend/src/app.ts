@@ -227,13 +227,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   // DB reads over the owning surfaces' own folds, TTL-cached; the Pro narration is the plugin's
   // synthesis seam, not this route.
   await app.register(dailyBriefRoutes);
-  // Bottlenecks (CORE, FREE on every tier, no AI, no GitHub): the Bot Tuning Advisor's evidence-
+  // Chronology (PAID on `periodReports`, no AI, no GitHub): the Bot Tuning Advisor's evidence-
   // cell machinery aimed at the HUMAN lane — where review time goes, with sample floors and a
   // NAMED refusal for anything that cannot clear one. Every sentence it returns is templated in
-  // db/flow-findings.ts; there is no narration seam and no plugin half.
+  // db/pr-intervals.ts; there is no narration seam and no plugin half. The route carries the 402
+  // itself (the ENGINE stays capability-blind — verify:isolation calls that fold directly).
   await app.register(flowRoutes);
-  // Bot-triage platform (CORE, always registered): detection/override, ROI analytics,
-  // cross-bot dedup, confirm-gated bot-thread resolve. Account-scoped; no AI.
+  // Bot-triage platform (CORE code, always registered — but TWO tiers inside one file): free
+  // detection/override + the governance list + confirm-gated bot-thread resolve; PAID (`botDepth`)
+  // ROI analytics, the volume family and the seat prices. Account-scoped; no AI on either tier.
   await app.register(botTriageRoutes);
   // ML severity/category labels on bot text (CORE, FREE TIER, no AI, no GitHub). Registered
   // UNCONDITIONALLY: both routes are pure DB reads that answer honestly when no severity-api is

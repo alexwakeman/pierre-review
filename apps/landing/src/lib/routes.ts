@@ -46,20 +46,20 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/features': {
     title: 'Open Core — the free multi-repo GitHub dashboard',
     description:
-      'The free, open-core tier in full: the cross-repo Activity feed, derived thread states, the repo→contributor timeline, per-repo consoles, PR detail with real write actions, the bot receipt, and cross-repo search. Free, forever.',
+      'The free, open-core tier in full: the cross-repo Activity feed, derived thread states, the repo→contributor timeline, per-repo consoles, PR detail with real write actions, per-comment bot grading with the per-PR triage grade, and cross-repo search. Free, forever.',
   },
   '/bots': {
     title: 'The receipt — independent grading of your AI review bots',
-    description: `Every bot comment on your repos, graded by ${SITE_NAME}’s own ML model — severity, category and a keep/tune/noisy verdict per bot. On adjudicated ground truth the model agrees 0.700 exactly; the vendor’s own badge manages 0.474. The verdict is free in the hosted service; per-bot depth, overlap and history are Pro.`,
+    description: `Every bot comment on your repos, graded by ${SITE_NAME}’s own ML model — severity, category and a keep/tune/noisy verdict per bot. On adjudicated ground truth the model agrees 0.700 exactly; the vendor’s own badge manages 0.474. Per-comment grading and the per-PR triage grade are free in the hosted service; the per-bot verdict table, depth, overlap and history are Pro.`,
   },
   '/pro': {
     title: `${SITE_NAME} Pro & Pro+ — the measurement depth, and the full loop`,
     description:
-      'Pro is the depth under the free verdicts: per-bot behaviour and inflation history, per-seat ROI, synthesised verdicts on every drill-down, period reports with 1:1 prep, narrated daily briefs, thread validity and CI diagnosis. Pro+ closes the loop — Claude reviews that learn, and fixes you approve, pushed to GitHub.',
+      'Pro is the scoreboard over the free grades: the per-bot keep/tune/noisy ROI table, behaviour and inflation history, per-seat ROI, synthesised verdicts on every drill-down, Chronology, period reports with 1:1 prep, narrated daily briefs, thread validity and CI diagnosis. Pro+ closes the loop — Claude reviews that learn, and fixes you approve, pushed to GitHub.',
   },
   '/pricing': {
     title: `Pricing — ${SITE_NAME} is open-core and free. Pro from $15 a seat`,
-    description: `The ${SITE_NAME} dashboard — including the bot receipt and its keep/tune/noisy verdicts — is free forever. Pro is $15 a seat for the history, depth and reports; Pro+ is $29 a seat for Claude reviews and fixes on your own key.`,
+    description: `The ${SITE_NAME} dashboard — including independent grading on every bot comment and the per-PR triage grade — is free forever. Pro is $15 a seat for the per-bot verdict table, the history, depth and reports; Pro+ is $29 a seat for Claude reviews and fixes on your own key.`,
   },
   '/how-it-works': {
     title: 'How it works — sync, architecture & roadmap',

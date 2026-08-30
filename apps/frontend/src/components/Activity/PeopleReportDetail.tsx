@@ -50,6 +50,7 @@ import {
 import { ArrowIcon, PersonIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { MlSeverityBadge } from '../MlSeverityBadge.js';
+import { ProBadge, ProLockPanel, useProGateState } from '../ProGate.js';
 import { KEY_LABEL, KEY_TITLE, fmtValue } from './PersonPeriodSection.js';
 import { periodTitle } from './periodReportMarkdown.js';
 import { buildPrRefIndex } from './prRefLinks.js';
@@ -67,9 +68,23 @@ import { prRefToMeta } from './ThemeThreadsDetail.js';
 //  • humans — the person GET with `evidence=1` (vector verbatim + receipt cards), plus the Pro
 //    `person_report` narrative on the ONE synthesis seam, generated SEQUENTIALLY through the
 //    narration queue (lib/peopleReport.ts) so two sections never bill concurrently.
-//  • bots — deterministic, NO AI: the FREE core bot-analytics row (ONE shared fetch for the
-//    whole report, rows picked client-side by `u<userId>`) + the per-bot comment evidence,
-//    both period-bounded via the routes' fromMs/toMs. Paid depth stays a "Depth →" link.
+//  • bots — deterministic, NO AI: the core bot-analytics row (ONE shared fetch for the whole
+//    report, rows picked client-side by `u<userId>`) + the per-bot comment evidence, both
+//    period-bounded via the routes' fromMs/toMs. Paid depth stays a "Depth →" link.
+//
+// ⚠ THE BOT HALF READS ROUTES THIS REPORT DOES NOT OWN. `/api/bot-analytics`,
+// `/api/bot-analytics/vendor/:key/comments` and `/api/bot-authoring` are core routes shared with
+// the Bots ROI panel, which is gated on `botDepth` — a DIFFERENT capability from the one that
+// unlocks this report. If any of them ever grows an entitlement check it must accept the UNION
+// (`botDepth || periodReports`), or an account entitled to Reports and not to bot depth opens a
+// report it paid for with every bot section blank and no explanation on screen.
+//
+// This whole surface is Pro `periodReports`, and — unlike the app's older absent-not-upsold
+// posture — an unentitled reader now gets a locked pane rather than a misleading empty state.
+// The gate is in the component below; the reason it sits before the seed check is written there.
+// ⚠ That reversal stops at the pane. The `activityDigest` NARRATIVE inside a section keeps the
+// absence posture (`NarrativePanel` returns null) on purpose: its reader is already inside a
+// report they paid for, and a second upsell bolted to a sub-section is an advert, not a gate.
 //
 // Key discipline (the refineQueryKey rule): every per-section query carries `ws:` + its own
 // `u:<userId>` + the `pw:<from>-<to>` period slot, so two chips can never share a cache entry.
@@ -140,11 +155,15 @@ function useReportBotComments(
   });
 }
 
-// The AUTHORING half of a bot section (CORE, free). Fetched for EVERY bot, not only the ones the
-// review fold came back empty for: a code agent can both author PRs and review them, and deciding
-// client-side which half "counts" would be the login heuristic this codebase keeps deleting. The
-// server answers `output: null` for anything that has never authored here, and that null is what
-// hides the panel.
+// The AUTHORING half of a bot section. Fetched for EVERY bot, not only the ones the review fold
+// came back empty for: a code agent can both author PRs and review them, and deciding client-side
+// which half "counts" would be the login heuristic this codebase keeps deleting. The server answers
+// `output: null` for anything that has never authored here, and that null is what hides the panel.
+//
+// ⚠ `GET /api/bot-authoring` 402s without `botDepth || periodReports` — it is not a free core route
+// (it shipped as one and was closed; it is this report's paid bot vector plus its evidence cards).
+// Callers pass the capability into `enabled`; the early `gate === 'locked'` return below already
+// prevents the mount, and this is the second lock so a future caller cannot lose it.
 function useReportBotAuthoring(
   workspaceId: number | null,
   userId: number,
@@ -1027,14 +1046,18 @@ function BotSection({
   row: BotVendorAnalytics | null;
   analyticsLoading: boolean;
 }): JSX.Element {
-  const { botDepth } = useProCapabilities();
+  const { botDepth, periodReports } = useProCapabilities();
   const openBotDetailTab = usePinnedTabs((s) => s.openBotDetailTab);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const botColor = useBotColors(workspaceId);
   const [showAllComments, setShowAllComments] = useState(false);
 
-  const comments = useReportBotComments(workspaceId, selection.userId, bounds, true);
-  const authoring = useReportBotAuthoring(workspaceId, selection.userId, bounds, true);
+  // Both routes are paid (`…/vendor/:key/comments` on the union, `/api/bot-authoring` on the same
+  // union). The capability is the `enabled` rather than a bare `true`: the early lock return keeps
+  // this component off screen without it, but a hook that trusts its position is one refactor from
+  // polling a 402.
+  const comments = useReportBotComments(workspaceId, selection.userId, bounds, periodReports);
+  const authoring = useReportBotAuthoring(workspaceId, selection.userId, bounds, periodReports);
   const authored = authoring.data?.output ?? null;
   const { data: usersForRefs } = useUsers();
   const usersById = useMemo(() => indexUsers(usersForRefs), [usersForRefs]);
@@ -1297,6 +1320,8 @@ export function PeopleReportDetail(): JSX.Element {
   const seed = useFilters((s) => s.peopleReportSeed);
   const workspaceId = useFilters((s) => s.workspaceId);
   const { periodReports } = useProCapabilities();
+  // Entitlement, resolved against /api/me's flight — see the gate below the hooks.
+  const gate = useProGateState(periodReports);
 
   // The narration queue — ONE granted section at a time (alphabetical: sections mount in
   // render order and request in effect order; a throttled retry re-queues at the back).
@@ -1325,7 +1350,10 @@ export function PeopleReportDetail(): JSX.Element {
   const hasBots = ordered.some((s) => s.kind === 'bot');
 
   // ONE analytics fetch for every bot section; rows picked client-side by `u<userId>`.
-  const analytics = useReportBotAnalytics(workspaceId, bounds, hasBots);
+  // ⚠ `hasBots && periodReports`, not `hasBots`. Hooks cannot be conditional, so this runs on the
+  // LOCKED render too — and `/api/bot-analytics` narrows rather than 402ing, so an ungated fetch
+  // here would be a silent, useless request behind the lock pane rather than a visible error.
+  const analytics = useReportBotAnalytics(workspaceId, bounds, hasBots && periodReports);
   const rowByKey = useMemo(() => {
     const m = new Map<string, BotVendorAnalytics>();
     for (const v of analytics.data?.vendors ?? []) m.set(v.key, v);
@@ -1334,6 +1362,33 @@ export function PeopleReportDetail(): JSX.Element {
     for (const v of analytics.data?.qualityChecks ?? []) m.set(v.key, v);
     return m;
   }, [analytics.data]);
+
+  // ⚠ ENTITLEMENT IS CHECKED BEFORE THE SEED, AND THAT ORDER IS THE POINT.
+  //
+  // This tab is opened from a picker that only exists with the capability, so it looked as though
+  // it could never be reached without one — but the tab OUTLIVES a live entitlement change (a
+  // plan downgrade, or /api/me refetching after `PRO_DIGEST_ENABLED` flips), and what it rendered
+  // in that state was a LIE: `usePeriodReportsList` is disabled without the capability, a disabled
+  // query is not `isLoading`, so `period` came out null and the reader was told "This period is no
+  // longer listed for the current workspace" — a data problem, in place of a billing one. Naming
+  // the real reason costs one branch.
+  //
+  // Through `useProGateState` for the usual reason: capabilities read all-false until /api/me
+  // lands, and this tab is restored on the same cold load the query starts on.
+  if (gate === 'pending') {
+    return <div className="p-6 text-sm text-gray-400">Loading…</div>;
+  }
+  if (gate === 'locked') {
+    return (
+      <div className="mx-auto max-w-[100rem] p-4">
+        <ProLockPanel heading="The People report" testId="people-report-locked">
+          One report with a section per person or bot you pick — what they reviewed, what they
+          authored, and how long others waited on them over a completed period. Built for 1:1
+          prep: sections are alphabetical, and nothing here ranks anyone against anyone.
+        </ProLockPanel>
+      </div>
+    );
+  }
 
   if (seed == null) {
     return (
@@ -1350,6 +1405,9 @@ export function PeopleReportDetail(): JSX.Element {
           People report
           {period != null ? ` · ${periodTitle(period.periodStart, period.periodEnd)}` : ''}
         </h2>
+        {/* The Pro mark on the artifact itself — rendered for the entitled reader, who is the
+            only one who gets this far. Unentitled readers met the locked pane above. */}
+        <ProBadge variant="heading" title="The People report is part of Pro." />
         <span className="text-[11px] text-gray-400">
           {ordered.length} section{ordered.length === 1 ? '' : 's'}
         </span>
