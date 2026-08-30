@@ -140,9 +140,16 @@ if (withPro) {
         '(and check the submodule is initialized: `git submodule update --init`).',
     );
   }
-  log('copying @pierre/pro (dist + migrations) → release/pro');
+  log('copying @pierre/pro (dist + migrations + data) → release/pro');
   cpSync(proDist, join(releaseDir, 'pro', 'dist'), { recursive: true });
-  for (const sub of ['migrations', 'migrations-pg']) {
+  // `data` joins the list for the SAME reason `migrations` is on it: the plugin resolves it as a
+  // SIBLING of dist (`new URL('../../../data/benchmark/…', import.meta.url)`), so the layout has
+  // to survive the flattening. It holds the peer-benchmark corpus
+  // (`data/benchmark/benchmark-fit.json`, ~200 KB today) — identical for every tenant, no
+  // repository and no actor named in it. ⚠ Forgetting it fails ONLY IN PRODUCTION: local dev and
+  // `pnpm demo` read the file straight out of the workspace and look perfect, while the cloud
+  // image reports `available:false`. Hence the mustExist assert below as well.
+  for (const sub of ['migrations', 'migrations-pg', 'data']) {
     const src = join(proDir, sub);
     if (existsSync(src)) cpSync(src, join(releaseDir, 'pro', sub), { recursive: true });
   }
@@ -274,8 +281,12 @@ const mustExist = [
 for (const route of ['features', 'pro', 'pricing', 'how-it-works', 'privacy', 'cookies', 'terms']) {
   mustExist.push(`public-landing/${route}/index.html`);
 }
-// The cloud image must actually contain the plugin entry it points PRO_PLUGIN_PATH at.
+// The cloud image must actually contain the plugin entry it points PRO_PLUGIN_PATH at…
 if (withPro) mustExist.push('pro/dist/index.js');
+// …and the peer-benchmark corpus the plugin reads as a sibling of that entry. A missing copy step
+// is silent everywhere else: the route answers 200 with `available:false`, which is
+// indistinguishable from a deliberate OSS build until someone opens the tab in production.
+if (withPro) mustExist.push('pro/data/benchmark/benchmark-fit.json');
 for (const rel of mustExist) {
   if (!existsSync(join(releaseDir, rel))) fail(`missing required file: ${rel}`);
 }

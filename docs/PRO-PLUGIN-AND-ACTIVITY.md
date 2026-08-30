@@ -1148,6 +1148,133 @@ sentinels (`useBotFlagging`, `useBotVolumePrs`).
 not. That is the same reason the price editor is already invisible on a flag-less local run, so it
 is consistent — but the panel is a much more visible casualty.
 
+### The peer benchmark — serving the cohort (`GET /api/pro/bot-benchmark`)
+
+The COHORT half of "how does our bot compare": per-(vendor × activity band) distributions fitted in
+`packages/ml` (`bot_monitor.panel.fit`), bundled as a JSON artifact and projected onto the wire.
+**Pro on `botDepth`, no new capability, apiVersion stays 21** — nothing was added to `ProContext`,
+`ProHostQueries` or `ProCapabilities`, and no host literal moved. It is deterministic: no model, no
+database, no GitHub, no write, no cron.
+
+**Files.** `packages/pro/src/bots/benchmark-routes.ts` + `benchmark/{artifact,map,percentile}.ts` ·
+`packages/pro/data/benchmark/benchmark-fit.json` (the bundled corpus) · wire types in
+`packages/shared/src/types.ts` · `api.botBenchmark()` in the SPA client · the tier entry in
+`api/plugins/rate-limit.ts`. Tests: `packages/pro/test/benchmark-{artifact,percentile}.test.ts`
+(**hand-run — `packages/pro/test/` is not in CI**) and the host-side
+`api/plugins/pro-benchmark-entitlement.test.ts`.
+
+**Nothing about the caller reaches the response, and that is the design.** The artifact is
+IDENTICAL FOR EVERY TENANT — the one non-account-scoped body of data in the system — and it names
+no repository and no actor. So the route takes **no `?workspace=`** and echoes **no `workspaceId`**:
+a deliberate exception to §5.1, because the scope parameter exists to bound which of a tenant's
+repos a response covers and this response covers none of them. There is no tenant data, therefore
+no IDOR surface and no existence oracle. ⚠ The moment it grows a customer-side PLACEMENT leg, all
+of that reverses and the scope rules apply again.
+
+**Why the artifact is BUNDLED, not a table and not a bare env path.** Every plugin table is
+account-scoped, joins `registerAccountErasure` and is covered by the plugin's isolation test; a
+global singleton table inverts all three, and would need a loader with write access, two dialects
+and a story for local SQLite — to buy "refresh without redeploy", which is worth nothing at a
+quarterly cadence. And an env-configured path has nowhere to point: `railway.json` declares no
+volume, and the runtime stage is `COPY --from=build /app/release ./`. The plugin is already
+deployed by rebuilding the image, so a corpus refresh rides an existing motion with zero new
+machinery. `PRO_BENCHMARK_FIT_PATH` is an **override only** (dev pointing at a fresh
+`packages/ml/data/benchmark/fit_*.json`; an ops escape hatch).
+
+- ⚠ **The path is the `../migrations` precedent, applied deliberately.** `data/` is a SIBLING of
+  `src/` and of `dist/`, so `new URL('../../../data/benchmark/…', import.meta.url)` resolves from
+  `src/bots/benchmark/` (dev — `bind.ts` prefers `src`), from `dist/bots/benchmark/` (`rootDir:
+  src`, so identical depth) and from `/app/pro/dist/bots/benchmark/` in the image. A `./data/…`
+  path relative to `dist` would work in production and break under `pnpm dev`. **This is the
+  plugin's first runtime file read** — the rule is not inherited from anything.
+- ⚠ **`build-release.mjs` copies `data` beside `migrations`, and asserts
+  `pro/data/benchmark/benchmark-fit.json` in `mustExist`.** Without the copy the failure is
+  PRODUCTION-ONLY and silent: dev and `pnpm demo` read it straight out of the workspace, while the
+  cloud image answers `available:false` — indistinguishable from a deliberate OSS build.
+  `.dockerignore` excludes `packages/ml` but not `packages/pro/data`, so no change there.
+  `pnpm package` WITHOUT `--with-pro` never touches it, so `npx pierre-review` ships no corpus.
+- ⚠ **Identity lives INSIDE the file.** Fixed filename, no date suffix, no directory scan, no
+  newest-by-mtime. `fit_key` (`fit-v1+corpus-v3+panel-…+model-unscored+params-…`) is the whole
+  identity and rides every response.
+
+**Refusals are the product, not a degraded state.** Today's real bundled corpus is 8 repositories
+against a floor of 30, so `cells_total: 18, cells_fitted: 0` and all 234 metric entries refuse with
+`rule: 'cell_floor'`. That is correct output, and several vendor cells will refuse permanently even
+at full panel size. The response lets the SPA tell **five** situations apart:
+
+| Situation | Shape |
+|---|---|
+| Whole artifact refuses | `manifest.summary.cellsFitted === 0` — ONE banner, not 13 identical paragraphs per cell; `metricCellsRefusedByRule` gives the reason distribution |
+| A cell / a metric refuses | the `status: 'refused'` arm: `refusal {rule, message, observed, required}` and **no distribution keys** |
+| A metric refuses INSIDE a fitted cell | real and common — `cell.status === 'fitted'` means ANY metric cleared the floor, so `metricsFitted`/`metricsTotal` ride the cell |
+| No cell exists | the `status: 'absent'` arm — `vendor_unfittable` / `cell_not_in_corpus` / `vendor_not_in_corpus_vocabulary`, three different sentences |
+| No corpus in this build | `available: false, reason: 'artifact_missing'` — **200, not 500** |
+
+- ⚠ **NEVER NORMALISE A REFUSAL INTO A DISTRIBUTION SHAPE.** No `{quantiles: null}`, no
+  `{nRepos: 0}`, no `grid: []`. `fit.py`'s `_refusal()` omits those keys so that reading a
+  percentile off a refusal RAISES instead of returning a plausible small number; the discriminated
+  union is the TypeScript equivalent, and the mapper is the single place it can be lost. An
+  interface with optional fields silently discards the guarantee.
+- ⚠ **STALENESS IS RECOMPUTED PER REQUEST**, against `corpus.observed_at_max` — the stored
+  `corpus_age_days`/`state` pair is as-of `generated_at` and DECAYS ON DISK (the explicit inverse
+  of the walk's frozen-age rule; `fit.py` says so on the artifact). Copying it ships a corpus that
+  reports "fresh" forever.
+- ⚠ **`metricSpecs` ships IN FULL and is never trimmed as "just docs".** Each spec's
+  `numerator`/`denominator`/`population`/`minUnits`/`direction` is the mitigation for this
+  feature's biggest correctness risk — **the app's own columns are not these columns.**
+  `getBotAnalytics`' `actedOnPct` folds in the `likely_addressed` COMMIT HEURISTIC
+  (`isActedOnThreadState`) and divides by every in-window thread; the cohort's `acted_on_rate`
+  divides by SETTLED (≥72h), fully-read threads. `overdueUntouched` uses a fixed 36h grace vs the
+  cohort's 72h/168h; `overlapPct` uses ±3-line clustering vs an exact `(path, line)`; six of the
+  thirteen have no app counterpart at all. A size optimisation that deletes this prose is a
+  correctness regression, not a saving.
+- ⚠ **`absentMetrics` rides every response** — the three model-derived metrics are STRUCTURALLY
+  ABSENT (no cell holds the key) while `scoring.state !== 'scored'`, so the SPA can say "severity
+  comparison arrives when the corpus is scored" rather than showing nothing.
+- ⚠ **The vendor vocabularies of the two repos DIVERGE.** `packages/ml` knows `codeant`; the host's
+  `REVIEW_BOT_KINDS` does not. The host knows `github_code_quality`, `github_advanced_security`,
+  `pierre`, `vendor`; the fitter has never seen them. The overlap is exact for the seven vendors in
+  the current corpus, which makes the divergence easy to miss — hence the explicit
+  `vendor_not_in_corpus_vocabulary` absent-reason instead of a silent empty.
+
+**Selection, the cap, and the tier.** `?cells=<vendor>:<band>,…`, at most **24** pairs; omitted ⇒
+manifest only. ⚠ **Over-cap is a 400, never a truncation** — a truncated cell list reads to the
+consumer as "those cohorts do not exist", the one claim this feature must never make by accident.
+The route sits on `[TIERS.search, TIERS.read]` as an **exact `===` match ABOVE the `/api/pro/`
+catch-all**, because *the response body is the work*: measured, the manifest is 16 KB, a 24-cell
+refused request 44 KB, a fitted cell ~10 KB, and no `@fastify/compress` is registered in this
+backend, so the JSON size is the wire size. The cap bounds work per request; the tier bounds
+request count. ⚠ Exact match, not `startsWith` — `/api/pro/bot-b…` is one sibling away from
+swallowing `/api/pro/bot-behaviour`. ⚠ **`?cells=` is caller-controlled, so the artifact's cells are
+re-keyed into a `Map` at parse time** — `parsed.cells[vendor][band]` on a plain object is reachable
+with `__proto__`/`constructor`.
+
+**Entitlement is the standard three-layer `/api/pro/*` stack** (registration → the `DIGEST_ENABLED`
+self-gate 404 → the host's automatic 402). ⚠ The 402 is the CHEAPEST possible gate and the most
+deletable, because nothing in the route file mentions it: it comes entirely from `isProPath`, in
+the OTHER repository. `api/plugins/pro-benchmark-entitlement.test.ts` pins both directions and is
+the only thing that would go red if the route were moved out from under `/api/pro/`.
+
+**Publishing is a THREE-repo motion and the gitlink is the step that gets forgotten** — the same
+failure shape as the four `apiVersion` literals. `packages/ml` fits → `fit.py --publish
+<path>` writes the artifact into the PRIVATE `packages/pro` submodule → the host gitlink moves.
+`--publish` runs `assert_publishable()` first, which re-verifies that **corpus rows never travel**:
+it scans every corpus-derived string (skipping the authored-prose blocks) and refuses on a repo
+slug, a `[bot]` login or an `@mention`. That property is a property of the artifact's SHAPE, which
+one careless new disclosure field would remove silently inside 200 KB of generated JSON — so it is
+re-checked on every publish, not assumed. Commit a refreshed corpus only on a material change
+(a `fit_key` move); a genuinely weekly cadence would add ~90 MB/year to the submodule's history and
+should prompt revisiting the transport rather than living with the bloat.
+
+**What is NOT here.** The Bots → Benchmark TAB, the customer-side placement fold, the
+metric-definition reconciliation, and every rendered number. `direction` and `ci_median_95` are
+SERVED here and CONSUMED there — ⚠ at the 30-repo floor a rate's median CI routinely spans 20
+points, so "your 41% vs the cohort's 38%" without it is reporting noise as a gap. ⚠ Note that a
+Benchmark tab rendered visible-but-locked would be a **SIXTH** surface in a reversal
+`components/ProGate.tsx` currently documents as scoped to exactly five — a deliberate product
+decision with its own justification, not a side effect of adding a tab (and unnecessary if the tab
+sits inside the already-locked `roi` branch).
+
 ### The People report — `?evidence=1`, `person_report`, and the bot half
 
 **It is VISIBLE-BUT-LOCKED on `periodReports`, not absent** — one of the five surfaces that reverse

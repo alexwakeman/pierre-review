@@ -60,6 +60,7 @@ import type {
   BotThemesResponse,
   HumanThemesResponse,
   BotBehaviourResponse,
+  BotBenchmarkResponse,
   BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
   BotVendorCommentsResponse,
@@ -1400,6 +1401,24 @@ export const api = {
         workspaceParam(workspaceId),
         repoIdsParam(repoIds),
         botUserId != null ? `botUserId=${botUserId}` : undefined,
+      ),
+    ),
+  // The PEER COHORT distributions (`botDepth`): the bundled `bot_monitor.benchmark_fit` artifact
+  // from packages/ml, projected. ⚠ NO WORKSPACE PARAMETER AND NO `workspaceId` ECHO — deliberate:
+  // the artifact is identical for every tenant and names no repository and no actor, so there is
+  // no scope to narrow and no cross-tenant surface. Nothing about the caller reaches the response.
+  //
+  // `cells` selects `vendor:band` cohorts (at most BOT_BENCHMARK_MAX_CELLS — the server 400s over
+  // the cap rather than truncating, because a truncated list reads as "those cohorts do not
+  // exist"). Omit it for the manifest alone, which is what the picker needs. Callers must AND the
+  // `botDepth` capability into their own `enabled`, or the SPA polls a 402.
+  botBenchmark: (cells?: Array<{ vendor: string; band: number }>) =>
+    get<BotBenchmarkResponse>(
+      withQuery(
+        '/api/pro/bot-benchmark',
+        cells && cells.length > 0
+          ? `cells=${encodeURIComponent(cells.map((c) => `${c.vendor}:${c.band}`).join(','))}`
+          : undefined,
       ),
     ),
   // The ONE synthesis endpoint (plan P2.1): GET = the free cached read + stale flag (never

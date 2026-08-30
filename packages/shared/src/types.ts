@@ -8841,3 +8841,314 @@ export interface WorkPlanResponse {
   /** POST only: nothing needs doing in this workspace — nothing generated, nothing stored. */
   empty?: boolean;
 }
+
+// ── The bot PEER BENCHMARK — GET /api/pro/bot-benchmark (plugin-owned, rides `botDepth`) ────────
+//
+// The cohort side of "how does our bot compare": per-(vendor x activity band) distributions fitted
+// in `packages/ml` (`bot_monitor.panel.fit`), published as a bundled JSON artifact and PROJECTED
+// here. Nothing on this wire is account-scoped — the artifact is IDENTICAL FOR EVERY TENANT, names
+// no repository and no actor, and carries counts + quantile grids only. Hence no `workspaceId` echo
+// and no `?workspace=`: there is no tenant data in the response and therefore no IDOR surface.
+//
+// ⚠ REFUSALS ARE THE PRODUCT, NOT A DEGRADED STATE. Every arm below is discriminated on `status`
+// so a refused metric has NO `grid`/`quantiles`/`nRepos` keys AT COMPILE TIME — the TypeScript
+// equivalent of the fitter's `_refusal()`, which omits them so that reading a percentile off a
+// refusal raises instead of returning a plausible small number. An interface with optional fields
+// would silently discard that guarantee, so never normalise a refusal into a distribution shape
+// (`{ quantiles: null }`, `{ nRepos: 0 }`, `grid: []` are all the same defect).
+
+/** Whether a bigger number is better, worse, or neither. SERVED here, CONSUMED by the renderer —
+ *  no colour, arrow or verdict may be invented without it. */
+export type BotBenchmarkDirection = 'higher_is_better' | 'lower_is_better' | 'neutral';
+
+/** `code` = counted from the corpus rows. `model` = inferred by the severity model. ⚠ Rides the
+ *  METRIC ENTRY, not only the spec table, so a consumer looping a cell's metrics can tell them
+ *  apart without joining back — a model-derived figure and a code-derived one must be labelled
+ *  apart in any panel that mixes them. */
+export type BotBenchmarkDerivation = 'code' | 'model';
+
+/** Recomputed AT READ TIME against `corpus.observedAtMax` — the stored value decays on disk. */
+export type BotBenchmarkStaleness = 'fresh' | 'aging' | 'stale' | 'expired';
+
+/** Why an answer was withheld, with the numbers behind it so the SPA can write the sentence from
+ *  `observed`/`required` rather than inventing one. */
+export interface BotBenchmarkRefusal {
+  rule: string; // e.g. 'cell_floor'
+  message: string; // authored by the fitter; safe to render verbatim
+  observed: Record<string, number>; // e.g. { contributing_repos: 1 }
+  required: Record<string, number>; // e.g. { contributing_repos: 30 }
+}
+
+/** A metric's DEFINITION. ⚠ Shipped in full and never trimmed as "just docs": `numerator` /
+ *  `denominator` / `population` / `minUnits` are the mitigation for this feature's biggest
+ *  correctness risk — the app's own columns are NOT these columns (the app's acted-on rate folds
+ *  in the `likely_addressed` commit heuristic and divides by every in-window thread; the cohort's
+ *  divides by settled, fully-read threads). A size optimisation that deletes this prose is a
+ *  correctness regression, not a saving. */
+export interface BotBenchmarkMetricSpec {
+  name: string;
+  definition: string;
+  numerator: string;
+  denominator: string;
+  population: string; // keys into BotBenchmarkManifest.populations
+  derivation: BotBenchmarkDerivation;
+  direction: BotBenchmarkDirection;
+  minUnits: number;
+  unit: string; // 'rate' | 'hours' | 'count' | …
+}
+
+/** A metric that is STRUCTURALLY ABSENT from every cell — not empty, not zero. The three
+ *  model-derived metrics while the corpus is unscored. Passing them through is what lets the SPA
+ *  say "severity comparison arrives when the corpus is scored" instead of showing nothing. */
+export interface BotBenchmarkAbsentMetric {
+  name: string;
+  definition: string;
+  derivation: BotBenchmarkDerivation;
+  direction: BotBenchmarkDirection;
+  unit: string;
+  reason: string; // e.g. 'not_scored'
+  note: string;
+  requires: Record<string, string>; // the precondition, spelled out
+}
+
+/** Evidence about the distribution's shape, and a REFUSAL to name a parametric family in fit v1. */
+export interface BotBenchmarkShape {
+  n: number;
+  family: string | null; // always null in fit v1
+  familyReason: string;
+  zeroShare: number | null;
+  skew: number | null;
+  excessKurtosis: number | null;
+  iqrOverMedian: number | null;
+}
+
+/** The 21-knot empirical inverse CDF. `p` and `v` are parallel and ascending in `p`. */
+export interface BotBenchmarkGrid {
+  p: number[];
+  v: number[];
+}
+
+interface BotBenchmarkMetricCommon {
+  derivation: BotBenchmarkDerivation;
+  population: string;
+  /** Per-repository drop tally, keyed by `BotBenchmarkManifest.exclusionReasons`. ⚠ Not one number
+   *  called "excluded": `vendor_silent` and `below_min_units` mean opposite things about whether a
+   *  blind spot exists. */
+  excluded: Record<string, number>;
+  reposConsidered: number;
+}
+
+export interface BotBenchmarkMetricFitted extends BotBenchmarkMetricCommon {
+  status: 'fitted';
+  nRepos: number;
+  /** The headline five, READ OUT OF THE GRID so the two can never disagree. */
+  quantiles: Record<string, number>; // p10 / p25 / p50 / p75 / p90
+  grid: BotBenchmarkGrid;
+  mean: number;
+  sd: number | null;
+  min: number;
+  max: number;
+  /** ⚠ THE ONLY THING THAT SAYS HOW MUCH THE MEDIAN COULD MOVE. At the 30-repo floor a rate's
+   *  median CI routinely spans 20 points; "your 41% vs the cohort's 38%" without it is reporting
+   *  noise as a gap. `null` below n=2. */
+  ciMedian95: [number, number] | null;
+  shape: BotBenchmarkShape;
+}
+
+export interface BotBenchmarkMetricRefused extends BotBenchmarkMetricCommon {
+  status: 'refused';
+  refusal: BotBenchmarkRefusal;
+}
+
+export type BotBenchmarkMetric = BotBenchmarkMetricFitted | BotBenchmarkMetricRefused;
+
+/** Per-cell disclosure counters. ⚠ PER CELL and cells OVERLAP — one repository belongs to one cell
+ *  per vendor it runs, so these must never be summed across cells (`manifest.corpus` holds the
+ *  corpus-wide totals). `counts` is an open map on purpose: a new disclosure counter in the fitter
+ *  should reach the SPA without a mapper edit. */
+export interface BotBenchmarkCoverage {
+  counts: Record<string, number>;
+  observedAt: { min: string; max: string } | null;
+}
+
+/** ⚠ RULE 2's DECLARED SLOTS. Permanently null in fit v1 because nothing widens; a future widening
+ *  MUST fill them, and a consumer is entitled to refuse any cell whose cohort is not exactly its
+ *  key. */
+export interface BotBenchmarkCohort {
+  vendor: string;
+  activityBand: number;
+  pooledOver: string[] | null;
+  widenedFrom: string | null;
+}
+
+interface BotBenchmarkCellPresent {
+  vendor: string;
+  activityBand: number;
+  cohort: BotBenchmarkCohort;
+  coverage: BotBenchmarkCoverage;
+  metrics: Record<string, BotBenchmarkMetric>;
+  /** ⚠ `status: 'fitted'` means AT LEAST ONE of the thirteen cleared the floor — which is why the
+   *  counts ride beside it. A card gated on the status alone can be drawn for a cell where twelve
+   *  metrics refused, and the status would not say so. */
+  metricsFitted: number;
+  metricsRefused: number;
+  metricsTotal: number;
+}
+
+export interface BotBenchmarkCellFitted extends BotBenchmarkCellPresent {
+  status: 'fitted';
+}
+
+export interface BotBenchmarkCellRefused extends BotBenchmarkCellPresent {
+  status: 'refused';
+  refusal: { rule: string; message: string };
+}
+
+/** Why the artifact holds no cell at this key at all. Three DIFFERENT sentences: "your bot's cohort
+ *  is structurally impossible", "this stratum is empty", "we have never seen this vendor". */
+export type BotBenchmarkAbsentReason =
+  | 'vendor_unfittable'
+  | 'cell_not_in_corpus'
+  | 'vendor_not_in_corpus_vocabulary';
+
+export interface BotBenchmarkCellAbsent {
+  status: 'absent';
+  vendor: string;
+  activityBand: number;
+  reason: BotBenchmarkAbsentReason;
+  message: string;
+  /** Only on `vendor_unfittable` — how much of the corpus the refusal dropped. */
+  unfittable?: BotBenchmarkUnfittableVendor;
+}
+
+export type BotBenchmarkCellEntry =
+  | BotBenchmarkCellFitted
+  | BotBenchmarkCellRefused
+  | BotBenchmarkCellAbsent;
+
+/** A vendor string that names no product, so it forms NO cell at any n. ⚠ Counts are CORPUS-grain:
+ *  "we refused this much" is a statement about the corpus, and an understated refusal is the same
+ *  failure as an unstated one, one decimal place quieter. */
+export interface BotBenchmarkUnfittableVendor {
+  vendor: string;
+  reason: string;
+  repos: number;
+  reviewBotComments: number;
+}
+
+/** One rank-decile band of `panelPrsPerPeriod` (MERGED PRs in the frame's 14-day window). */
+export interface BotBenchmarkBand {
+  band: number;
+  /** [min, max] of the contributing repositories' merged-PR counts. */
+  panelPrsPerPeriod: [number, number];
+  repos: number;
+}
+
+/** Which (vendor, band) keys the artifact actually holds — the SPA's selectable set, so it can
+ *  render the picker without fetching a single cell. */
+export interface BotBenchmarkCellKey {
+  vendor: string;
+  band: number;
+  status: 'fitted' | 'refused';
+  metricsFitted: number;
+  metricsTotal: number;
+}
+
+export interface BotBenchmarkManifest {
+  /** The artifact's WHOLE identity, and the only one — never the filename.
+   *  `fit-v1+corpus-v3+panel-…+model-unscored+params-…`. */
+  fitKey: string;
+  fitVersion: number;
+  generatedAt: string;
+  corpus: {
+    corpusVersion: string;
+    benchmarkCorpusVersion: number;
+    panelSha256: string;
+    walkIds: string[];
+    observedAtMin: string;
+    observedAtMax: string;
+    rows: Record<string, number>;
+    reposTotal: number;
+    reposOk: number;
+    reposAbsent: Record<string, number>;
+  };
+  scoring: {
+    state: string; // 'unscored' | 'scored' | 'mixed_model_versions' | 'scored_unversioned'
+    modelVersion: string | null;
+    backend: string | null;
+    scoredComments: number;
+    note: string;
+  };
+  /** ⚠ `corpusAgeDays` and `state` are RECOMPUTED per request against `corpusObservedAtMax` — the
+   *  stored pair is as-of `generatedAt` and decays on disk. Copying it ships an artifact that says
+   *  "fresh" forever. */
+  staleness: {
+    asOf: string;
+    corpusObservedAtMax: string;
+    corpusAgeDays: number;
+    state: BotBenchmarkStaleness;
+    thresholdsDays: { aging: number; stale: number; expired: number };
+    note: string;
+  };
+  params: {
+    minReposPerCell: number;
+    settleHours: number;
+    overdueGraceHours: number[];
+    quantileGrid: number[];
+    quantileMethod: string;
+    bootstrapSamples: number;
+    bootstrapSeed: number;
+    shapeMinN: number;
+    stalenessThresholdsDays: { aging: number; stale: number; expired: number };
+  };
+  cohortAxes: { vendor: string; activityBand: string };
+  activityBands: BotBenchmarkBand[];
+  metricSpecs: BotBenchmarkMetricSpec[];
+  absentMetrics: BotBenchmarkAbsentMetric[];
+  populations: Record<string, string>;
+  unfittableVendors: BotBenchmarkUnfittableVendor[];
+  exclusionReasons: Record<string, string>;
+  coverageNote: string;
+  available: BotBenchmarkCellKey[];
+  /** ⚠ `cellsFitted === 0` is a FIRST-CLASS state, and today's real one: the SPA renders ONE banner
+   *  ("the peer corpus is 8 repositories; every cohort needs 30") instead of thirteen identical
+   *  refusal paragraphs per cell. `metricCellsRefusedByRule` hands it the reason distribution. */
+  summary: {
+    vendors: string[];
+    cellsTotal: number;
+    cellsFitted: number;
+    cellsRefused: number;
+    metricCellsTotal: number;
+    metricCellsFitted: number;
+    metricCellsRefusedByRule: Record<string, number>;
+    units: number;
+  };
+}
+
+/** Why no artifact is being served. NOT an error and NOT a refusal — a build-configuration fact:
+ *  an OSS/dev checkout, or a `--with-pro` image where the `data/` copy step was forgotten. The
+ *  SPA's sentence ("peer benchmarking isn't available in this build") is a different sentence from
+ *  "there isn't enough peer data yet", so it must be a different field. */
+export type BotBenchmarkUnavailableReason =
+  | 'artifact_missing'
+  | 'artifact_unreadable'
+  | 'fit_version_unsupported';
+
+/** ⚠ THE GUARANTEE: the SPA can always render a sentence. There is no code path where it receives
+ *  an empty object and has to guess between "no data", "not entitled", "not built" and "not enough
+ *  peers". */
+export interface BotBenchmarkResponse {
+  available: boolean;
+  reason?: BotBenchmarkUnavailableReason;
+  message?: string;
+  manifest?: BotBenchmarkManifest;
+  /** Present only when `?cells=` was sent; one entry per requested key, in request order. */
+  cells?: BotBenchmarkCellEntry[];
+}
+
+/** The `?cells=` cap. The response body IS the work on this route (a fitted cell is ~10 KB and no
+ *  response compression is registered in this backend), so the cap bounds the work per request
+ *  while the rate tier bounds the request count — complementary, neither a substitute. ⚠ Over-cap
+ *  is a 400, never a silent truncation: a truncated cell list reads to the consumer as "those
+ *  cohorts do not exist", which is the one claim this feature must never make by accident. */
+export const BOT_BENCHMARK_MAX_CELLS = 24;

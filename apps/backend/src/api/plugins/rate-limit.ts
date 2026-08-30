@@ -212,6 +212,34 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // about, corrected in the move.) The SPA fires it once per Bots view on the 5-min sync cadence.
   if (!mutating && path === '/api/pro/bot-behaviour') return [TIERS.search, TIERS.read];
 
+  // ---- The peer-cohort benchmark (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
+  // GET /api/pro/bot-benchmark — the plugin's projection of the bundled distribution artifact.
+  //
+  // FOLLOWING THE TOKEN, NOT THE SENTENCE. "This route is DB-only" is not even true in the
+  // reassuring direction here: it touches no database, no GitHub and no Anthropic, which makes the
+  // naive read "it is free, put it on the 600/min blanket". It is not free, and the cost sits
+  // somewhere unusual — THE RESPONSE BODY IS THE WORK. MEASURED against today's corpus: the
+  // manifest alone is 16 KB, a 24-cell request of refused cells is 44 KB, and a FITTED cell is
+  // ~10 KB, so a capped request at full panel size is ~260 KB of JSON.stringify on the event loop
+  // and straight onto the socket (no @fastify/compress is registered in this backend, so the JSON
+  // size IS the wire size for whatever the edge does not gzip). At 600/min that is ~150 MB/min
+  // from one account; at 60/min it is 15 MB/min — the same order as the flagging/volume/behaviour
+  // reads beside it, and the same shape of cost, so the same bucket by the identical argument.
+  //
+  // The CELL CAP bounds the work per request; this tier bounds the request count. Complementary,
+  // neither a substitute — and the cap is part of THIS decision, not a separate nicety: without
+  // it a single request can name every cell in the artifact and the arithmetic above is wrong by
+  // an order of magnitude.
+  //
+  // EXACT `===`, never a prefix. The family has one member and must keep one: a `startsWith`
+  // on `/api/pro/bot-b…` is one sibling away from swallowing `/api/pro/bot-behaviour`, which is
+  // the near-miss failure this file has already recorded three times.
+  //
+  // ⚠ STANDING INVARIANT, WRITTEN BEFORE THE FOLD EXISTS: if this route ever grows a customer-side
+  // PLACEMENT leg (a per-repo × vendor read of the tenant's own PRs), the tier must be re-decided
+  // IN THAT SAME CHANGE. `/api/attention` moved its tier only after the fold had landed.
+  if (!mutating && path === '/api/pro/bot-benchmark') return [TIERS.search, TIERS.read];
+
   // ---- Synthesis (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
   // ONE endpoint, two verbs, two costs (plan P2.1):
   //   POST /api/pro/synthesis  the generate path — one Haiku call behind a payload-hash $0 cache,

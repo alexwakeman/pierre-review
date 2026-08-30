@@ -187,6 +187,26 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/pro/bot-behaviour')).toEqual(['search', 'read']);
   });
 
+  // GET /api/pro/bot-benchmark — the bundled peer-cohort artifact. It touches NO database, NO
+  // GitHub and NO Anthropic, which makes "put it on the blanket read tier" the obvious wrong
+  // answer: the cost is the RESPONSE BODY (a capped 24-cell request is ~300 KB of JSON.stringify
+  // on the event loop, uncompressed — no @fastify/compress is registered here). Same shape of cost
+  // as its bot-behaviour neighbour, so the same 60/min bucket.
+  it('puts the peer-benchmark projection on the expensive bucket despite touching no database', () => {
+    expect(tiers('GET', '/api/pro/bot-benchmark')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/pro/bot-benchmark')).not.toContain('ai');
+  });
+
+  // ⚠ THE NEAR-MISS GUARD. The entry is an EXACT `===`, and the two routes differ from the fourth
+  // character of the last segment. A `startsWith('/api/pro/bot-b')` would pass the assertion above
+  // and silently re-tier its sibling; asserting they resolve INDEPENDENTLY is what catches that.
+  it('does not let the benchmark entry swallow its bot-behaviour sibling', () => {
+    expect(tiers('GET', '/api/pro/bot-behaviour')).toEqual(['search', 'read']);
+    // A path that merely starts with the benchmark route's spelling is NOT the benchmark route,
+    // so it falls through to the /api/pro/ catch-all's GET→read branch.
+    expect(tiers('GET', '/api/pro/bot-benchmark/cells')).toEqual(['read']);
+  });
+
   // /api/pro/synthesis (P2.1) — one endpoint, two verbs, two DECIDED tiers. The POST is a real
   // model spend (Haiku behind a payload-hash $0 cache) → the `ai` pair, same as every generator.
   // The free GET recomputes the payload hash via getSynthesisInput, i.e. it re-runs the

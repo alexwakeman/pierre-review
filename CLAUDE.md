@@ -551,6 +551,21 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   touchpoint sits behind a diff-guard `llm-isolation.test.ts` pins unreachable); **a cell with
   ANY acted-on high-severity finding never earns a full suppress**; **a suppression needs ≥1
   untouched thread on a PR that has since MERGED**; nothing it computes may feed `botVerdict`.
+- **The peer benchmark** (`GET /api/pro/bot-benchmark`, Pro on `botDepth`, apiVersion stays 21): the
+  COHORT half of "how does our bot compare" — per-(vendor × activity band) distributions fitted in
+  `packages/ml` and BUNDLED at `packages/pro/data/benchmark/benchmark-fit.json`, resolved as a
+  SIBLING of `src`/`dist` (the `../migrations` precedent; a `./data/` path breaks in dev).
+  Deterministic; **no `?workspace=` and no `workspaceId` echo** because nothing about the caller
+  reaches the response. Contract in
+  [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § The peer benchmark. What
+  bites: ⚠ **refusals are the PRODUCT** — today every cell refuses (8 repos vs a floor of 30), so
+  never normalise one into a distribution shape (`{quantiles: null}`, `nRepos: 0`, `grid: []`); ⚠
+  **staleness is RECOMPUTED per request**, the stored age decays on disk; ⚠ `metricSpecs` ships in
+  FULL because **the app's columns are NOT the cohort's** (`actedOnPct` folds in `likely_addressed`
+  and divides by every thread; `acted_on_rate` divides by SETTLED ones); ⚠ `?cells=` caps at 24 and
+  **400s over-cap, never truncates**; ⚠ `build-release.mjs` must copy `data` or the failure is
+  PRODUCTION-ONLY and silent; ⚠ a refresh is a THREE-repo motion (`fit.py --publish` → commit in the
+  submodule → **move the gitlink**).
 - **The work plan** (`workPlan` gates the NARRATION ONLY): "what should I work on today", folded
   into the **Pending** board as its ranked "Do next" head. **THE CODE RANKS, FREE; THE MODEL
   NARRATES, PAID** — the rank is CORE (`db/work-plan.ts`) and served free by `GET /api/attention`,
