@@ -935,6 +935,32 @@ export interface ProHostQueries {
   // plan alone, while every other capability keeps serving. Purely additive — an older plugin
   // simply never calls it.
   getWorkPlan?(accountId: number, scope: BotScopeWire): Promise<WorkPlanEvidence>;
+  // The workspace's derived HUMAN SEAT COUNT (core db/queries.ts `workspaceHumanSeatCount`):
+  // distinct human PR authors across the workspace's repos over a FIXED trailing 30 days, judged
+  // by the workspace's own bot verdicts (a manual "this is a human" makes a seat of a `users.isBot`
+  // login; a workspace-classified in-house bot is excluded even where the global table calls it
+  // human). ONE number per workspace.
+  //
+  // ⚠ IT EXISTS FOR EXACTLY ONE JOB: reading a `per_seat` price. `monthly_cents` under
+  // `cost_model: 'per_seat'` is the per-developer UNIT, and the monthly figure is unit × this
+  // number — MULTIPLIED ON READ, never stored (the product can exceed int4 as cents and would go
+  // stale). Every other per-seat derivation in the app (`effectiveMonthlyUsd`, the ROI table's
+  // effective `costMonthlyUsd`) multiplies by this same function, so exposing it is what stops the
+  // benchmark quoting a different price for the same bot than the Bots tab does.
+  //
+  // ⚠ THE WINDOW IS FIXED AND MUST STAY FIXED. It deliberately does NOT follow whatever analytics
+  // window the caller is rendering: a price is an invoice-shaped fact, and a monthly figure that
+  // moved when a chart flipped from 7d to 30d would read as a billing bug. It also keys on
+  // WORKSPACE MEMBERSHIP, never on a `repoIds` narrowing — a per-seat invoice does not shrink
+  // because the reader filtered a chart.
+  //
+  // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the `getWorkPlan` precedent above, verbatim. A
+  // required addition is the case that would demand a bump, and a bump is four literals across TWO
+  // REPOS whose half-application degrades the ENTIRE plugin to OSS mode with nothing thrown.
+  // Optional degrades ONE reading instead: a newer plugin against an older host cannot resolve a
+  // per-seat price, EXCLUDES it from the figure rather than reading the unit as the monthly one
+  // (which would understate it by the seat count, silently), and discloses that it did.
+  workspaceHumanSeatCount?(accountId: number, workspaceId: number): Promise<number>;
 }
 
 export interface ProContext {

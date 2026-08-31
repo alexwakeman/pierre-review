@@ -408,6 +408,28 @@ export function ScalesIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// Coin — money. The mark on the Benchmark tab's cost block, where the figures are a price somebody
+// actually pays rather than another rate.
+//
+// ⚠ A DRAWN COIN, NOT A "$" CHARACTER. The currency symbol belongs in the FIGURE ("US$412.00"),
+// where it is part of the number's meaning and must be read; a glyph doing duty as a section mark
+// would be a font lookup with a platform-dependent width and baseline, sitting next to text that
+// already contains the real symbol. This is the rule at the top of this file, in the one place
+// where the tempting shortcut is a plain ASCII character rather than an emoji.
+export function CoinIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.7} {...rest}>
+      <circle cx="12" cy="12" r="9" />
+      {/* ⚠ THE "S" FILLS THE COIN ON PURPOSE. A timid one leaves a dot-and-bar silhouette that is
+          indistinguishable from `InfoIcon` at 12-13px — and `InfoIcon` is the mark on every other
+          note in this panel, so the two would sit inches apart meaning different things. Checked at
+          the size it actually ships at. */}
+      <path d="M15 9.2c-.55-.95-1.7-1.5-3-1.5-1.75 0-3 .95-3 2.2 0 2.85 6 1.55 6 4.4 0 1.25-1.25 2.2-3 2.2-1.3 0-2.45-.55-3-1.5" />
+      <line x1="12" y1="5.6" x2="12" y2="18.4" />
+    </IconShell>
+  );
+}
+
 // A filled dot — a status bullet where a CSS circle would not inherit the icon's sizing rules.
 export function DotIcon({ size = 8, ...rest }: IconProps): JSX.Element {
   return (

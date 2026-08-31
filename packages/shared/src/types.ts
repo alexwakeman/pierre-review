@@ -9395,6 +9395,308 @@ export interface BotBenchmarkPlacementReviewer {
   label: string | null;
 }
 
+// ── WHAT THE REVIEWER COSTS PER UNIT OF WORK ────────────────────────────────────────────────────
+//
+// The price is `workspace_reviewers.monthly_cents`, read through the same rules every other cost
+// surface reads it through. Five of those rules decide the SHAPE of everything below:
+//
+//  ⚠ 0. EVERY MONEY FIGURE HERE IS A RATE AT THE CURRENT PRICE, NEVER A HISTORY. We know one price
+//     (today's) and one throughput (recently observed), and neither licenses a statement about what
+//     was spent in the past. The block shipped prorating today's price across the reviewer's whole
+//     comment span — "US$236.53 over 8.6 weeks" — which the app cannot evidence: the price may have
+//     changed, the subscription may be younger than the span, and nothing bounds the span by how
+//     long the host has held the repository. A cap would have kept the false claim and shrunk it,
+//     so the CLAIM changed instead: `$/month`, `$ per acted-on thread` at the observed pace, and a
+//     span that annualises the WORK and carries no money at all.
+//  ⚠ 1. `null` IS NOT `0`. `null` = nobody has said what this costs; `0` = a real, deliberate
+//     "we pay nothing for this". They are different facts and nothing may coalesce one into the
+//     other. The no-price case is expressed by the ABSENCE of `BotBenchmarkPlacementUnit.cost` —
+//     not by a zero, not by an empty object, not by a refusal arm. A "$0.00 per acted-on thread"
+//     is a CLAIM about a reviewer nobody priced; absence is the truth. ⚠ AND A THIRD STATE JOINS
+//     THEM: a price ENTERED that could not be stated (`monthlyUsd: null`, `pricedReviewers: 0`,
+//     every figure refusing `price_unresolved`) — because the only alternative was answering the
+//     no-price case, which is silence on a card where a human typed a number.
+//  ⚠ 2. `per_seat` MULTIPLIES ON READ. `monthlyUsd` below is always the EFFECTIVE monthly figure
+//     (unit × the workspace's derived human seat count); the product is never stored, because it
+//     can exceed int4 as cents and would go stale. `unitMonthlyUsd`/`seats` carry the two halves
+//     for the tooltip, and a consumer that multiplies again double-charges. ⚠ AND A SEAT COUNT OF
+//     ZERO IS RULE 1 ONE LEVEL DOWN: multiplying a real per-developer price by a derived 0 produces
+//     a COMPUTED zero that is indistinguishable from a STORED one, and the block then says
+//     "recorded as free" about a reviewer somebody priced. Such a row is EXCLUDED and counted in
+//     `seatCountZero`, exactly as an unresolvable seat count is.
+//  ⚠ 3. THE PRICE IS PER WORKSPACE, AND THE UNIT HERE IS PER (REPOSITORY, VENDOR). One $120/month
+//     subscription covering six repositories produces SIX blocks each carrying $120 — so every
+//     figure below is "the whole Workspace subscription measured against ONE repository's work",
+//     an upper bound and never a share. `sharedWithUnits` says how many blocks in this response
+//     carry the same price so the renderer can say so out loud; ADDING them up is the
+//     "six repos of CodeRabbit become $720" defect at one remove.
+//  ⚠ 4. THE WHOLE ROUTE IS `botDepth`-GATED, which is the only reason a price may travel on it at
+//     all. Do not lift any of this onto a free payload — every other route that echoes a price
+//     runs `stripCost` for an unentitled account.
+
+/** Why a cost figure is withheld. NINE SENTENCES, joining the fourteen this tab already
+ *  distinguishes — and the tenth state, "no price set", is the ABSENCE of the block. */
+export type BotBenchmarkCostRefusalReason =
+  /** ⚠ A PARTIAL WINDOW IS AN UNDERCOUNT, AND HERE IT LANDS IN A DENOMINATOR. The placement refuses
+   *  a repository held for less than the activity window because its merge count is too low; cost
+   *  divides BY that count, so the same undercount inflates every figure — a repository tracked for
+   *  three days would report five times its true cost per merged PR, which is this tab's most
+   *  quotable number. Same fact as `repo_window_incomplete` one level up, same sentence. */
+  | 'repo_window_incomplete'
+  /** ⚠ THE DIVISION THE PLACEMENT ALREADY REFUSED. Zero merges in the activity window is
+   *  `repo_inactive_in_window` one level up; cost must not resurrect it as a divide-by-zero. */
+  | 'no_merges_in_window'
+  /** ⚠ THE WORK HAS NO MEASURABLE PACE. The span is the reviewer's OWN observed working period on
+   *  the walked slice (earliest → latest comment), and fewer than two timestamped comments — or
+   *  several in one instant — leaves no stretch of time at all. Every reviewer-side figure is a
+   *  RATE at the current price, so all three refuse: a rate asserts a RECENT PACE, and counts with
+   *  no observable stretch behind them are not evidence of one. ⚠ THIS IS WIDER THAN THE
+   *  ARITHMETIC — `unactedUsd` and `conversionGapUsd` no longer divide by the span at all, and
+   *  still refuse, because the warrant for the claim comes from the observation and not from the
+   *  formula. `perMergedPr` is unaffected: it carries the 14-day window at both ends. */
+  | 'span_unobserved'
+  /** The customer's own `acted_on_rate` was withheld for this unit, so nothing may be derived from
+   *  it. ⚠ THE GATE IS THE METRIC, NOT THE RAW COUNT: the fold withholds a rate over a handful of
+   *  threads (`below_min_units`) precisely because it is noise wearing a percentage sign, and
+   *  reading the counters straight past that gate resurrects the number it refused.
+   *  `metric`/`metricReason` name which gate fired rather than a generic "not enough data". */
+  | 'own_rate_withheld'
+  /** The rate is real and it is 0: NO thread this reviewer settled here was acted on, so a cost PER
+   *  acted-on thread is a division by zero. ⚠ The UNACTED figure and the COUNTERFACTUAL still
+   *  render here — this is exactly the case they exist for, and the unacted figure is then the
+   *  WHOLE MONTHLY PRICE. */
+  | 'nothing_acted_on'
+  /** ⚠ A REAL PRICE OF EXACTLY 0. Every figure derived from it is exactly 0.00, which is TRUE and
+   *  says nothing — so the derived figures refuse with a sentence instead of printing a row of
+   *  zeros that reads as a broken panel. The price itself still renders, as "recorded as free". */
+  | 'price_is_zero'
+  /** The cohort published no fitted `acted_on_rate` in this cell, so there is no median to swap
+   *  in. The customer's own figures are unaffected and still render. */
+  | 'cohort_rate_unfitted'
+  /** The cohort's median acted-on rate is 0 — the counterfactual's denominator would be 0. */
+  | 'cohort_rate_zero'
+  /** ⚠ A PRICE WAS ENTERED AND NONE OF IT COULD BE STATED — `monthlyUsd` is `null`, which is NOT a
+   *  price of 0 and NOT an absent block. Every priced row folded into this unit is per-seat and
+   *  every one was dropped: the seat seam is absent, or the workspace resolved to zero human seats.
+   *  ⚠ THE ALTERNATIVE WAS SILENCE, and silence was wrong: dropping the rows and then answering "no
+   *  price" hands the no-price experience (no block at all) to a workspace where somebody typed a
+   *  number, and takes `seatPriceUnresolved`/`seatCountZero` off the screen with it. The block
+   *  renders, every figure refuses, and the two counters say which of the two happened. */
+  | 'price_unresolved';
+
+export interface BotBenchmarkCostRefusal {
+  status: 'refused';
+  reason: BotBenchmarkCostRefusalReason;
+  message: string;
+  /** `own_rate_withheld` only — the fitter's metric name and the unit exclusion that withheld it. */
+  metric?: string;
+  metricReason?: BotBenchmarkUnitExclusionReason;
+}
+
+/**
+ * THE OBSERVED SPAN — the stretch of time this reviewer's own output on the walked slice covers.
+ *
+ * ⚠ IT MEASURES THE WORK AND NEVER THE MONEY, AND THAT IS THE CORRECTION IT CARRIES. It shipped
+ * with a `usd` field — `monthlyUsd × days ÷ 30.44` — and every reviewer-side figure was a share of
+ * it, so the card asserted "US$236.53 over 8.6 weeks": a historical spend the app cannot evidence.
+ * The price may have changed, the subscription may be younger than the span, and nothing bounds the
+ * span by how long the host has held the repository. A CAP WOULD HAVE KEPT THE CLAIM AND SHRUNK IT;
+ * the claim was the defect, so `usd` is GONE from this type and every money figure is now a RATE at
+ * the current price, with the span used only to restate a COUNT as a count per month
+ * (`actedPerMonth = actedThreads × 30.44 ÷ days`). Do not put a price back on this interface.
+ *
+ * ⚠ IT IS STILL NOT THE 14-DAY WINDOW, and it is still disclosed. The slice is
+ * `ORDER BY updated_at DESC LIMIT walkBudget` with NO time predicate, and `walkBudget` is
+ * calibrated to roughly ninety days, so the pace measured here is a pace over months while
+ * `perMergedPr` sits on the fortnight at both ends of its fraction. `spanNote` says so.
+ *
+ * ⚠ AND IT IS READ OFF THE REVIEWER'S COMMENTS, NOT OFF MERGE TIMES. The thread-outcome population
+ * is every HUMAN-AUTHORED pull request in the slice, merged or not, and a bot writes while a pull
+ * request is OPEN — so a span read off merge timestamps would be narrower than the population it
+ * measures.
+ *
+ * `null` ⇒ the span could not be observed, and every reviewer-side figure REFUSES with
+ * `span_unobserved` rather than asserting a pace nothing was measured over.
+ */
+export interface BotBenchmarkCostSpan {
+  /** Days between the reviewer's earliest and latest observed comment on the pull requests read.
+   *  ⚠ ALWAYS > 0 AT SIX DECIMAL PLACES — a span that is zero-length, or that rounds to none, is
+   *  `null` instead. This rounded figure is the one the per-month arithmetic divides by, so the
+   *  quotients on this block are recomputable from the payload. */
+  days: number;
+  /** ISO-8601, so the panel can state the period rather than only its length. */
+  fromIso: string;
+  toIso: string;
+  /** How many of its comments carried a readable timestamp. ⚠ ≥ 2 by construction. */
+  comments: number;
+}
+
+/**
+ * ⚠ WHAT THE PRICE CURRENTLY BUYS AND NOBODY ACTS ON — measured, own data only, PER MONTH, and NOT
+ * the counterfactual.
+ *
+ * `monthlyUsd × (1 − actedOnRate)`: the share of the CURRENT monthly price that buys feedback
+ * nobody acts on, at the pace recently observed. ⚠ A RATE, NEVER A HISTORY — it shipped as
+ * `span.usd × (1 − actedOnRate)`, a spend over the reviewer's whole comment span, which is a claim
+ * about the past that a current price and a recent throughput do not license.
+ *
+ * It answers a DIFFERENT question from `BotBenchmarkCostAtPeerEngagement.conversionGapUsd` ("what
+ * better engagement would be worth"), it is always the LARGER of the two whenever the cohort median
+ * is below 1, and the two must never be rendered in one sentence. The headline shipped printing the
+ * counterfactual gap under this one's words.
+ *
+ * ⚠ IT SURVIVES A ZERO ACTED-ON RATE, which is the whole reason it is its own arm rather than a
+ * field on `BotBenchmarkCostYours`: at `actedOnRate === 0` the per-thread figure is a division by
+ * zero and refuses, and this figure is the entire monthly price — the strongest finding the block
+ * can produce.
+ */
+export interface BotBenchmarkCostUnacted {
+  status: 'value';
+  /** `actedThreads ÷ settledThreads`, DERIVED FROM THE COUNTS rather than copied off the metric —
+   *  one source, so the rate and the counts beside it on screen cannot disagree. */
+  actedOnRate: number;
+  actedThreads: number;
+  settledThreads: number;
+  /** `monthlyUsd × (1 − actedOnRate)`, US dollars A MONTH. ⚠ BOUNDED in `[0, monthlyUsd]` — the
+   *  second factor is a rate — and that bound is structural, not a clamp. */
+  unactedUsd: number;
+}
+
+/** The customer's own arithmetic: their price, THEIR MEASURED THREADS, their engagement. ⚠ COUNTED,
+ *  NEVER PROJECTED — `actedThreads` is `threadsSettledCompleteActed`, an actual number of threads
+ *  over the walked slice, and the span beside it is that same slice's own stretch of time. */
+export interface BotBenchmarkCostYours {
+  status: 'value';
+  /** ⚠ REAL COUNTS, from the fold's own outcome counters — the numerator and denominator of
+   *  `acted_on_rate`, which is why they are consistent with the metric row above by construction. */
+  actedThreads: number;
+  settledThreads: number;
+  actedOnRate: number;
+  /** `actedThreads × 30.44 ÷ span.days` — the same count restated as a PACE, threads acted on per
+   *  month. ⚠ THE SPAN'S ONLY JOB: it annualises the WORK so a monthly price has something current
+   *  to divide by. It is on the wire because the quotient below is otherwise uncheckable. */
+  actedPerMonth: number;
+  /** `monthlyUsd ÷ actedPerMonth`. ⚠ ARITHMETICALLY IDENTICAL to the `span.usd ÷ actedThreads` it
+   *  replaced — the change was in the CLAIM, not the value — and still NOT `windowUsd ÷ a
+   *  projection`. */
+  perActedOnUsd: number;
+}
+
+/**
+ * ⚠ ONE FACTOR SWAPPED, AND IT IS A COUNTERFACTUAL RATHER THAN A PEER DISTRIBUTION.
+ *
+ * "Your volume, your price, THEIR engagement rate" — the cohort's median `acted_on_rate` replaces
+ * the customer's, and NOTHING ELSE MOVES. Multiplying a cohort-p50 volume by a cohort-p50
+ * engagement rate and calling the result "what a peer pays" is a real statistical error: THE MEDIAN
+ * OF A PRODUCT IS NOT THE PRODUCT OF THE MEDIANS, it would be invisible on screen, and it would be
+ * wrong in a direction nobody could check. Do not construct a "peer cost" from two cohort
+ * quantiles, and do not let a second cohort figure into this arm.
+ */
+export interface BotBenchmarkCostAtPeerEngagement {
+  status: 'value';
+  /** THE ONE SWAPPED FACTOR — the cohort's median `acted_on_rate` in this (vendor, band) cell. */
+  cohortActedOnRate: number;
+  /** `settledThreads × cohortActedOnRate` — the customer's OWN settled-thread count with the
+   *  cohort's rate. Fractional, and counterfactual by construction rather than by projection. */
+  actedThreadsAtPeer: number;
+  /** `actedThreadsAtPeer × 30.44 ÷ span.days` — that count as a monthly PACE, the divisor below.
+   *  On the wire for the same reason its sibling on `BotBenchmarkCostYours` is. */
+  actedPerMonthAtPeer: number;
+  /** `monthlyUsd ÷ actedPerMonthAtPeer`. */
+  perActedOnUsd: number;
+  /** yours − counterfactual, per acted-on thread. `null` when the customer's own figure refused
+   *  (nothing acted on), where a difference has no left-hand side. */
+  perActedOnGapUsd: number | null;
+  /**
+   * WHAT BETTER ENGAGEMENT WOULD BE WORTH, PER MONTH: `monthlyUsd × (cohortRate − yourRate)` — the
+   * additional share of the SAME monthly price that peer-level engagement would convert. SIGNED:
+   * negative means this team engages MORE than the cohort's median, a real and good state that must
+   * not be rendered as waste. ⚠ A RATE, NEVER A HISTORY — it shipped multiplied by `span.usd`,
+   * which made it a claim about money already spent (see `BotBenchmarkCostSpan`).
+   *
+   * ⚠ IT IS A DIFFERENCE OF TWO SHARES, NEVER A RATIO, AND THAT IS WHAT BOUNDS IT. The first cut
+   * was `× (1 − yourRate ÷ cohortRate)`, which is bounded only while `yourRate` is at or below the
+   * cohort median: a team engaging at three times a real fitted median (there are cells whose
+   * `acted_on_rate` p50 is 0.24) produced a NEGATIVE figure four times the entire spend, and the
+   * renderer stated it as a dollar amount of that spend. Both factors here are rates in [0,1], so
+   * this is bounded in `[−monthlyUsd, monthlyUsd]` in both directions, structurally.
+   *
+   * ⚠ AND IT IS NOT THE SAME QUANTITY AS `BotBenchmarkCostUnacted.unactedUsd`. That one is what the
+   * price currently buys and nobody acts on; this one is what closing the gap to the median is
+   * worth. They differ by a factor of the cohort rate, and a sentence that names one while printing
+   * the other is the defect this pair of fields was split apart to prevent.
+   *
+   * ⚠ NOT NULLABLE: this arm is only reached when `acted_on_rate` COMPARED, which is exactly the
+   * condition under which both rates exist — so it is defined even when `yours` REFUSED.
+   */
+  conversionGapUsd: number;
+}
+
+export interface BotBenchmarkPlacementCost {
+  /** The EFFECTIVE monthly price in THIS Workspace, US dollars — seat-multiplied already (rule 2),
+   *  and the BASIS OF EVERY REVIEWER-SIDE FIGURE HERE, each of which is a rate at this price rather
+   *  than a spend over a past period.
+   *  ⚠ THREE VALUES, THREE MEANINGS. `0` is a real, stored price ("we pay nothing for this").
+   *  `null` is NOT that and NOT an absent block: it is a price somebody ENTERED that could not be
+   *  stated, because every priced row folded here is per-seat and every one was dropped —
+   *  `pricedReviewers` is then `0`, `seatPriceUnresolved`/`seatCountZero` say which, and every
+   *  figure refuses with `price_unresolved`. A unit with NO price carries no cost block at all. */
+  monthlyUsd: number | null;
+  costModel: CostModel;
+  /** The STORED per-seat unit and the workspace's derived human seat count. Both `null` under
+   *  `'flat'`, where the stored figure IS the monthly one. */
+  unitMonthlyUsd: number | null;
+  seats: number | null;
+  /** How many of the unit's folded reviewer logins carried a price. ⚠ Two logins the workspace
+   *  classifies as one vendor are ONE unit, so their prices are SUMMED — the sanctioned
+   *  within-workspace total (one row per actor) — and this says how many rows went into it. */
+  pricedReviewers: number;
+  /** ⚠ A DISCLOSURE, NOT A FIGURE: folded reviewers whose price is per-seat and whose seat count
+   *  this build could not resolve (the host seam is absent). Their price is EXCLUDED from
+   *  `monthlyUsd` rather than read as the unmultiplied unit, which would understate it. Normally 0. */
+  seatPriceUnresolved: number;
+  /** ⚠ A SEPARATE DISCLOSURE FROM `seatPriceUnresolved`, AND ITS OWN SENTENCE — folded reviewers
+   *  whose price is per-seat and whose workspace resolved to ZERO human seats. A computed zero is
+   *  not a stored zero: somebody typed US$15 per developer and the derived seat count (distinct
+   *  human pull-request authors over a fixed trailing 30 days) came back empty, which is a failure
+   *  of the proxy and not a bill of nothing. Multiplying it out shipped a real "Recorded as free"
+   *  on a priced reviewer. Excluded from `monthlyUsd` exactly like the unresolved case; normally 0. */
+  seatCountZero: number;
+  /** The 14-day activity window the placement is BANDED on. ⚠ IT IS THE BASIS OF `perMergedPr`
+   *  ALONE — that figure divides this window's price by this window's merges, both ends of the
+   *  fraction inside it. Every reviewer-side figure is a rate at `monthlyUsd` instead. */
+  windowDays: number;
+  /** `monthlyUsd × windowDays ÷ 30.44`. ⚠ A MONTH IS NOT 28 DAYS and it is not 30 either. `null`
+   *  exactly when `monthlyUsd` is. */
+  windowUsd: number | null;
+  /** ⚠ THE WORK'S MEASUREMENT WINDOW — see `BotBenchmarkCostSpan`; it carries no money. `null` ⇒
+   *  the three reviewer-side arms refuse with `span_unobserved`; `perMergedPr` is unaffected. */
+  span: BotBenchmarkCostSpan | null;
+  /** ⚠ HOW MANY BLOCKS IN THIS RESPONSE CARRY THIS SAME WORKSPACE PRICE (rule 3). `1` is the
+   *  simple case; anything higher means these figures are per-repository upper bounds that must
+   *  not be added together. */
+  sharedWithUnits: number;
+  /** `windowUsd ÷ mergedPrsLast14d`. ⚠ INDEPENDENT OF THE REVIEWER: it divides a price by a
+   *  repository's own merges, so it still renders when every metric about the bot was withheld —
+   *  and it is the ONE figure here anchored on the 14-day window at both ends. ⚠ A RATIO, NOT A
+   *  WINDOWED TOTAL: it is dollars per merged pull request and does not scale with the window, so a
+   *  renderer must not suffix it "per 14 days" (that shipped, and reads as $/PR/fortnight). */
+  perMergedPr:
+    | { status: 'value'; value: number; mergedPrs: number }
+    | BotBenchmarkCostRefusal;
+  /** ⚠ WHAT THE PRICE CURRENTLY BUYS AND NOBODY ACTS ON, PER MONTH — measured, and a DIFFERENT
+   *  quantity from the counterfactual gap. */
+  unacted: BotBenchmarkCostUnacted | BotBenchmarkCostRefusal;
+  yours: BotBenchmarkCostYours | BotBenchmarkCostRefusal;
+  atPeerEngagement: BotBenchmarkCostAtPeerEngagement | BotBenchmarkCostRefusal;
+  /** ⚠ THE TIME BASE'S OWN CAVEAT, SERVED SO A RENDERER CANNOT DROP IT. The reviewer-side figures
+   *  are RATES at today's price over a recently-measured pace; the span is the measurement window
+   *  for that pace and NOT a billing period; `perMergedPr` is on the fortnight instead. A card
+   *  carrying all of that has to say which figure sits on which — and must not imply, as the note
+   *  this replaced did, that a subscription was prorated across the span. */
+  spanNote: string;
+}
+
 export interface BotBenchmarkPlacementUnit {
   repoId: number;
   repoOwner: string;
@@ -9414,6 +9716,9 @@ export interface BotBenchmarkPlacementUnit {
   metrics: Record<string, BotBenchmarkPlacementMetric>;
   /** Empty is the common and healthy answer. */
   anomalies: BotBenchmarkAnomaly[];
+  /** ⚠ ABSENT WHEN NO PRICE IS SET FOR THIS REVIEWER IN THIS WORKSPACE — not empty, not zero. The
+   *  key simply is not there to read, and the panel renders nothing for that unit. */
+  cost?: BotBenchmarkPlacementCost;
 }
 
 export interface BotBenchmarkPlacementResponse {

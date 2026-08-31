@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type {
   BotBenchmarkDirection,
+  BotBenchmarkPlacementCost,
   BotBenchmarkPlacementResponse,
   BotBenchmarkPlacementUnit,
 } from '@pierre-review/shared';
@@ -12,12 +13,15 @@ import {
   BotIcon,
   ChartIcon,
   ChevronIcon,
+  CoinIcon,
   InfoIcon,
   ScalesIcon,
   ThinSampleIcon,
   WarningIcon,
 } from '../Icons.js';
 import {
+  COST_BASIS_LABEL,
+  COST_REFUSAL_HEADLINE,
   DERIVATION_LABEL,
   EXCLUSION_HEADLINE,
   FINDINGS_EMPTY_HEADLINE,
@@ -27,10 +31,20 @@ import {
   absentMetricRows,
   anomalyRows,
   bandFitNote,
+  collapsedCostRefusal,
   collapsedExclusion,
+  costHeadline,
+  costPriceLine,
+  costPricedReviewersNote,
+  costSeatUnresolvedNote,
+  costSeatZeroNote,
+  costSharedNote,
   findingsEmptyState,
   formatCount,
   formatMetricValue,
+  formatSpanDays,
+  formatThreadCount,
+  formatUsd,
   metricLabel,
   metricRows,
   orderedUnits,
@@ -40,6 +54,7 @@ import {
   reviewerLabel,
   stripGeometry,
   unitTitle,
+  type CostBasis,
   type StripGeometry,
 } from './benchmarkModel.js';
 
@@ -258,6 +273,270 @@ function RefusalNote({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   Cost — what this reviewer costs per unit of the work it produces
+   ───────────────────────────────────────────────────────────────────────────────────────── */
+
+/** The small chip that says WHERE a row's number came from. ⚠ Three sources sit in this one block
+ *  — a price a human typed, rates counted from this Workspace's rows, and an engagement rate FITTED
+ *  from the peer corpus — and the counterfactual is the one that must never read as an invoice. */
+function BasisChip({ basis }: { basis: CostBasis }): JSX.Element {
+  return (
+    <span
+      className="rounded bg-gray-500/10 px-1 text-[9px] font-semibold uppercase tracking-wide text-gray-500"
+      data-testid={`benchmark-cost-basis-${basis}`}
+    >
+      {COST_BASIS_LABEL[basis]}
+    </span>
+  );
+}
+
+/** One refused cost figure, inline — the same grammar an excluded metric row uses. The server's
+ *  own sentence rides the `title`; the headline is the scannable half. */
+function CostRefusedRow({
+  label,
+  refusal,
+}: {
+  label: string;
+  refusal: { reason: keyof typeof COST_REFUSAL_HEADLINE; message: string };
+}): JSX.Element {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-2 py-1">
+      <span className="w-44 shrink-0 text-[11px] text-gray-500 dark:text-gray-400">{label}</span>
+      <span
+        className="text-[11px] font-medium text-gray-400"
+        title={refusal.message}
+        data-testid={`benchmark-cost-refused-${refusal.reason}`}
+      >
+        <ThinSampleIcon className="mr-1 inline-block align-[-0.05em]" />
+        {COST_REFUSAL_HEADLINE[refusal.reason]}
+      </span>
+    </div>
+  );
+}
+
+function CostValueRow({
+  label,
+  figure,
+  detail,
+  basis,
+  testId,
+}: {
+  label: string;
+  figure: string;
+  detail: string;
+  basis: CostBasis;
+  testId: string;
+}): JSX.Element {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-2 py-1" data-testid={testId}>
+      <span className="w-44 shrink-0 text-[11px] text-gray-600 dark:text-gray-300">{label}</span>
+      <span className="shrink-0 text-[11px] font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+        {figure}
+      </span>
+      <span className="text-[10px] tabular-nums text-gray-400">{detail}</span>
+      <BasisChip basis={basis} />
+    </div>
+  );
+}
+
+/**
+ * What this reviewer costs per unit of the work it produces, and what better engagement with it
+ * would be worth.
+ *
+ * ⚠ THIS COMPONENT IS NEVER MOUNTED WITHOUT A PRICE. `unit.cost` is ABSENT when no price is set for
+ * this reviewer in this Workspace — not empty, not zero — so there is no placeholder, no "add a
+ * price" prompt and no US$0.00 anywhere in the no-price case. TWO other states are DIFFERENT and
+ * both render: a price of exactly 0 is real and shows as "recorded as free"; a `monthlyUsd` of
+ * `null` is a price somebody ENTERED that could not be multiplied out of a per-seat unit, and the
+ * card says exactly that rather than going silent. Both refuse every derived figure with a
+ * sentence, rather than printing a row of zeros that reads as a broken panel.
+ *
+ * ⚠ EVERY REVIEWER-SIDE FIGURE IS A RATE AT THE CURRENT PRICE, NOT A SPEND. The span on this card
+ * is the window the WORK was measured over; it carries no money, and no sentence here may imply a
+ * subscription was prorated across it.
+ *
+ * ⚠ NOTHING HERE COMPUTES A COST. Every figure, gap and expected count is the server's — the same
+ * rule the rest of this panel keeps. This file positions marks and picks words.
+ */
+function CostBlock({ cost }: { cost: BotBenchmarkPlacementCost }): JSX.Element {
+  const headline = costHeadline(cost);
+  const collapsed = collapsedCostRefusal(cost);
+  const shared = costSharedNote(cost);
+  const summed = costPricedReviewersNote(cost);
+  const seatNote = costSeatUnresolvedNote(cost);
+  const seatZeroNote = costSeatZeroNote(cost);
+  // The span caveat rides any figure anchored on the span — which is every reviewer-side one.
+  const showsSpan =
+    cost.yours.status === 'value' ||
+    cost.atPeerEngagement.status === 'value' ||
+    cost.unacted.status === 'value';
+
+  return (
+    <div
+      className="mt-2 rounded border border-gray-200 bg-gray-50/60 px-2.5 py-2 dark:border-gray-800 dark:bg-gray-900/30"
+      data-testid="benchmark-cost"
+    >
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+          <CoinIcon size={12} className="text-gray-400" />
+          Cost
+        </span>
+        <span className="text-[11px] tabular-nums text-gray-600 dark:text-gray-300">
+          {costPriceLine(cost)}
+        </span>
+        <BasisChip basis="stored" />
+      </div>
+
+      {/* ⚠ THE PRICE IS PER WORKSPACE AND THIS CARD IS PER REPOSITORY. Said out loud UNCONDITIONALLY
+          — the per-repository Bots tab narrows to one repository, so a caveat gated on "more than
+          one card" would never appear on the screen that needs it most. ⚠ The ONE exception is a
+          price that could not be STATED: this sentence points at a figure, and there is none. */}
+      {cost.monthlyUsd != null && (
+        <p
+          className="mt-1 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400"
+          data-testid="benchmark-cost-shared"
+        >
+          {shared}
+        </p>
+      )}
+      {summed != null && (
+        <p className="mt-0.5 text-[10px] leading-relaxed text-gray-400">{summed}</p>
+      )}
+      {seatNote != null && (
+        <p
+          className="mt-0.5 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400"
+          data-testid="benchmark-cost-seat-unresolved"
+        >
+          {seatNote}
+        </p>
+      )}
+      {/* ⚠ ITS OWN LINE AND ITS OWN TESTID. A seat count this build could not READ and a seat count
+          that is genuinely ZERO have different remedies, and a per-seat price silently multiplied
+          by 0 is what put "Recorded as free" on a reviewer somebody priced. */}
+      {seatZeroNote != null && (
+        <p
+          className="mt-0.5 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400"
+          data-testid="benchmark-cost-seat-zero"
+        >
+          {seatZeroNote}
+        </p>
+      )}
+
+      {collapsed != null ? (
+        // ⚠ ONE SENTENCE, NOT THREE. A price of 0 (or a repository that merged nothing) refuses
+        // every derived figure for the SAME reason, and three identical dimmed rows read as three
+        // separate measurements that each came back empty.
+        <div className="mt-1.5">
+          <RefusalNote
+            testId={`benchmark-cost-collapsed-${collapsed}`}
+            headline={COST_REFUSAL_HEADLINE[collapsed]}
+            message={
+              (cost.perMergedPr.status === 'refused' ? cost.perMergedPr.message : '') +
+              ' Every figure this price would produce is withheld for the same reason, so this is ' +
+              'one refusal rather than three measurements that each came back empty.'
+            }
+          />
+        </div>
+      ) : (
+        <div className="mt-1 divide-y divide-gray-200/70 dark:divide-gray-800/70">
+          {/* ⚠ NO WINDOW SUFFIX ON A RATIO. "US$5.52 per 14 days" reads as $/PR/fortnight and
+              invites the reader to double it for a month, but a cost per merged pull request does
+              not scale with the window at all — both halves of the fraction scale together. The
+              basis belongs in the detail, as prose. That shipped on both ratio rows. */}
+          {cost.perMergedPr.status === 'value' ? (
+            <CostValueRow
+              testId="benchmark-cost-per-merged-pr"
+              label="Per merged PR"
+              figure={formatUsd(cost.perMergedPr.value)}
+              detail={
+                `over ${formatCount(cost.perMergedPr.mergedPrs)} merged in the last ` +
+                `${formatCount(cost.windowDays)} days`
+              }
+              basis="counted"
+            />
+          ) : (
+            <CostRefusedRow label="Per merged PR" refusal={cost.perMergedPr} />
+          )}
+
+          {cost.yours.status === 'value' ? (
+            <CostValueRow
+              testId="benchmark-cost-per-acted-on"
+              label="Per acted-on thread"
+              figure={formatUsd(cost.yours.perActedOnUsd)}
+              // ⚠ COUNTED, NOT PROJECTED, and the detail says so: real threads over the stretch of
+              // time they were measured across, not a fortnight's merges times two rates. ⚠ AND THE
+              // SPAN IS NAMED AS A MEASUREMENT WINDOW, NEVER AS A BILLING PERIOD — "2 of 20 threads
+              // acted on, over 9 days" is the pace this monthly price is divided by, which is the
+              // whole reason `actedPerMonth` rides the wire beside the quotient.
+              detail={
+                `${formatThreadCount(cost.yours.actedThreads)} of ` +
+                `${formatCount(cost.yours.settledThreads)} threads acted on` +
+                (cost.span == null ? '' : `, over ${formatSpanDays(cost.span.days)}`) +
+                ` — about ${formatThreadCount(cost.yours.actedPerMonth)} a month`
+              }
+              basis="counted"
+            />
+          ) : (
+            <CostRefusedRow label="Per acted-on thread" refusal={cost.yours} />
+          )}
+
+          {cost.atPeerEngagement.status === 'value' ? (
+            <CostValueRow
+              testId="benchmark-cost-counterfactual"
+              label="At peer engagement"
+              figure={formatUsd(cost.atPeerEngagement.perActedOnUsd)}
+              // ⚠ WORDED AS A COUNTERFACTUAL, NEVER AS A PEER DISTRIBUTION. Your threads, your
+              // price, THEIR rate — exactly one factor moved, and the row says which one.
+              detail={
+                `your threads and price with the cohort's median ` +
+                `${formatMetricValue(cost.atPeerEngagement.cohortActedOnRate, 'rate')} acted-on ` +
+                `rate — ${formatThreadCount(cost.atPeerEngagement.actedThreadsAtPeer)} acted on, ` +
+                `about ${formatThreadCount(cost.atPeerEngagement.actedPerMonthAtPeer)} a month`
+              }
+              basis="fitted"
+            />
+          ) : (
+            <CostRefusedRow label="At peer engagement" refusal={cost.atPeerEngagement} />
+          )}
+        </div>
+      )}
+
+      {/* ⚠ THE HEADLINE IS A FIGURE, NOT A FINDING, so it does NOT borrow the amber chrome the
+          anomaly cards use — those cleared a share gate, a magnitude gate and the cohort's own
+          median CI. This one is arithmetic and says so.
+
+          ⚠ AND IT IS TWO PARAGRAPHS, NEVER ONE. The MEASURED figure and the COUNTERFACTUAL gap are
+          different quantities that differ by a factor of the cohort's rate; the first cut printed
+          the second's number under the first's words. They are two fields on the model and two
+          elements here, so a renderer cannot reunite them by accident.
+
+          ⚠ BOTH ARE PER-MONTH RATES AT TODAY'S PRICE, never a spend over the span. The sentences
+          shipped as shares of a prorated `span.usd` — "US$189.22 of this reviewer's US$236.53 over
+          the 8.6 weeks its comments span here" — which is a history this app cannot evidence. */}
+      {headline != null && (
+        <div
+          className="mt-1.5 space-y-1 border-t border-gray-200 pt-1.5 text-[11px] leading-relaxed text-gray-700 dark:border-gray-800 dark:text-gray-200"
+          data-testid={`benchmark-cost-headline-${headline.tone}`}
+        >
+          <p data-testid="benchmark-cost-headline-spend">{headline.spend}</p>
+          {headline.comparison != null && (
+            <p className="text-gray-500 dark:text-gray-400" data-testid="benchmark-cost-headline-comparison">
+              {headline.comparison}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* The time base's own caveat, server-authored so it cannot be dropped by a renderer that
+          did not know it existed. */}
+      {showsSpan && (
+        <p className="mt-1 text-[10px] leading-relaxed text-gray-400">{cost.spanNote}</p>
+      )}
     </div>
   );
 }
@@ -593,6 +872,10 @@ function UnitCard({
         })}
       </div>
       )}
+
+      {/* ⚠ BENEATH THE STRIPS, AND ABSENT WHEN NO PRICE IS SET. `unit.cost` is simply not on the
+          wire for a reviewer nobody priced — no placeholder, no empty card, no zero. */}
+      {unit.cost != null && <CostBlock cost={unit.cost} />}
     </Card>
   );
 }

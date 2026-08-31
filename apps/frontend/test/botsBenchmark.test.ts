@@ -46,6 +46,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type {
+  BotBenchmarkCostRefusalReason,
+  BotBenchmarkPlacementCost,
   BotBenchmarkPlacementMetric,
   BotBenchmarkPlacementRefusalReason,
   BotBenchmarkPlacementUnit,
@@ -55,6 +57,8 @@ import type {
 import {
   ANOMALY_HEADLINE,
   ANOMALY_KIND_ORDER,
+  COST_BASIS_LABEL,
+  COST_REFUSAL_HEADLINE,
   DERIVATION_LABEL,
   EXCLUSION_HEADLINE,
   FINDINGS_EMPTY_HEADLINE,
@@ -64,10 +68,21 @@ import {
   anomalyRows,
   bandFitNote,
   benchmarkBodyFor,
+  collapsedCostRefusal,
   collapsedExclusion,
+  costHeadline,
+  costPriceLine,
+  costPricedReviewersNote,
+  costSeatUnresolvedNote,
+  costSeatZeroNote,
+  costSharedNote,
+  costWindowLabel,
   effectiveBotsTab,
   findingsEmptyState,
   formatMetricValue,
+  formatSpanDays,
+  formatThreadCount,
+  formatUsd,
   metricRows,
   orderedUnits,
   percentileSentence,
@@ -674,5 +689,504 @@ describe('the placement query key', () => {
       botBenchmarkPlacementQueryKey(5, [1, 2]),
     );
     expect(JSON.stringify(botBenchmarkPlacementQueryKey(5, null))).toContain('ws:5');
+  });
+});
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   9. Cost — the price, the counterfactual, and the four things that must not render
+   ───────────────────────────────────────────────────────────────────────────────────────── */
+
+/** The house fixture, mirroring `packages/pro/test/benchmark-cost.test.ts`'s: a US$120/month
+ *  reviewer whose comments span SIXTY days here, twenty settled threads of which four were acted
+ *  on, against a cohort median of 60 %.
+ *
+ *  ⚠ THE SPAN CARRIES NO MONEY. It held a `usd` of 236.53088 — today's price prorated across those
+ *  sixty days — and every reviewer-side figure was a share of it, so the headline claimed a spend
+ *  the app cannot evidence. The money is now a RATE at the monthly price (`unactedUsd` 96 rather
+ *  than 189.224704, `conversionGapUsd` 48 rather than 94.612352) while the per-thread figures are
+ *  the SAME numbers, because `spanUsd ÷ acted` == `monthlyUsd ÷ actedPerMonth`.
+ *
+ *  ⚠ The span is still deliberately NOT the 14-day window — it is the window the WORK was measured
+ *  over, and `formatSpanDays` says so in weeks. */
+function costBlock(over: Partial<BotBenchmarkPlacementCost> = {}): BotBenchmarkPlacementCost {
+  return {
+    monthlyUsd: 120,
+    costModel: 'flat',
+    unitMonthlyUsd: null,
+    seats: null,
+    pricedReviewers: 1,
+    seatPriceUnresolved: 0,
+    seatCountZero: 0,
+    windowDays: 14,
+    windowUsd: 55.190539,
+    span: {
+      days: 60,
+      fromIso: '2026-06-02T00:00:00.000Z',
+      toIso: '2026-08-01T00:00:00.000Z',
+      comments: 20,
+    },
+    sharedWithUnits: 1,
+    perMergedPr: { status: 'value', value: 5.519054, mergedPrs: 10 },
+    unacted: {
+      status: 'value',
+      actedOnRate: 0.2,
+      actedThreads: 4,
+      settledThreads: 20,
+      unactedUsd: 96, // 120 × 0.8, a month
+    },
+    yours: {
+      status: 'value',
+      actedThreads: 4,
+      settledThreads: 20,
+      actedOnRate: 0.2,
+      actedPerMonth: 2.029333, // 4 × 30.44 ÷ 60
+      perActedOnUsd: 59.13272, // 120 ÷ 2.029333 — unchanged by the change of basis
+    },
+    atPeerEngagement: {
+      status: 'value',
+      cohortActedOnRate: 0.6,
+      actedThreadsAtPeer: 12,
+      actedPerMonthAtPeer: 6.088, // 12 × 30.44 ÷ 60
+      perActedOnUsd: 19.710907,
+      perActedOnGapUsd: 39.421813,
+      conversionGapUsd: 48, // 120 × (0.6 − 0.2), a month
+    },
+    spanNote: 'a rate at today’s price, over the window the work was measured in',
+    ...over,
+  };
+}
+
+const refused = (reason: BotBenchmarkCostRefusalReason) =>
+  ({ status: 'refused', reason, message: 'because.' }) as const;
+
+describe('the cost block renders only what it may claim', () => {
+  it('is ABSENT for a reviewer with no price — not empty, not zero, not a prompt', () => {
+    // ⚠ THE RULE THE WHOLE FEATURE TURNS ON, on the render side. The panel branches on the field's
+    // presence and there is nothing else to branch on: a "set a price" placeholder or an empty card
+    // would both be a surface making a claim the data cannot support.
+    expect(unit().cost).toBeUndefined();
+    const panel = readFileSync(
+      fileURLToPath(new URL('../src/components/Activity/BenchmarkPanel.tsx', import.meta.url)),
+      'utf8',
+    );
+    // ⚠ SOURCE GUARD — see the file header. With no renderer in this suite, this line is the only
+    // thing between an unpriced reviewer and a US$0.00 on screen. Mutation-tested: dropping the
+    // guard turns this red.
+    expect(panel).toMatch(/\{unit\.cost != null && <CostBlock cost=\{unit\.cost\} \/>\}/);
+  });
+
+  it('renders currency unambiguously and never as a bare dollar sign', () => {
+    // ⚠ `$412` is four currencies AND, read next to a monthly subscription, invites the reader to
+    // assume a month. Both halves are fixed here: US$ and the window.
+    expect(formatUsd(412)).toBe('US$412.00');
+    expect(formatUsd(1234.5)).toBe('US$1,234.50');
+    expect(formatUsd(0)).toBe('US$0.00');
+    expect(formatUsd(-27.6)).toBe('-US$27.60');
+    // ⚠ A NON-ZERO FIGURE NEVER PRINTS AS US$0.00. A high-volume reviewer can genuinely cost
+    // fractions of a cent per thread, and rounding it to two places prints exactly the row of zeros
+    // the zero-price refusal exists to avoid, arriving from the other direction.
+    expect(formatUsd(0.004)).toBe('<US$0.01');
+    expect(formatUsd(0.004)).not.toBe('US$0.00');
+    expect(formatUsd(Number.POSITIVE_INFINITY)).toBe('—');
+  });
+
+  it('states the window on the windowed TOTAL, and never on a ratio', () => {
+    expect(costWindowLabel(14)).toBe('per 14 days');
+    const line = costPriceLine(costBlock());
+    expect(line).toContain('US$120.00 a month');
+    expect(line).toContain('US$55.19 per 14 days');
+
+    // ⚠ THE DEFECT: the two RATIO rows shipped suffixed with the same label, so "Per merged PR"
+    // read "US$5.52 per 14 days" and "Per acted-on thread" read "US$27.60 per 14 days". Those are
+    // dollars per pull request and dollars per thread — neither scales with the window, because
+    // both halves of the fraction scale together, so the suffix invites a reader to double a figure
+    // that is exactly the same at any window length. SOURCE GUARD, since this suite has no
+    // renderer: the figure prop of both value rows must be a bare `formatUsd(...)`.
+    const panel = readFileSync(
+      fileURLToPath(new URL('../src/components/Activity/BenchmarkPanel.tsx', import.meta.url)),
+      'utf8',
+    );
+    expect(panel).toMatch(/figure=\{formatUsd\(cost\.perMergedPr\.value\)\}/);
+    expect(panel).toMatch(/figure=\{formatUsd\(cost\.yours\.perActedOnUsd\)\}/);
+    expect(panel).toMatch(/figure=\{formatUsd\(cost\.atPeerEngagement\.perActedOnUsd\)\}/);
+    // …and nothing on this card interpolates the window label into a `figure` at all.
+    expect(panel).not.toMatch(/figure=\{`\$\{formatUsd\([^)]*\)\} \$\{window\}`\}/);
+    // ⚠ AND EACH PER-THREAD ROW NAMES THE PACE IT DIVIDED BY, which is what makes a rate at the
+    // current price checkable on screen: "2 of 20 threads acted on, over 9 days — about 6.8 a
+    // month". Without it the row is a dollar figure over a raw count and a span, and the reader has
+    // to know `30.44` to see where it came from. SOURCE GUARD, same reason as above.
+    expect(panel).toMatch(/formatThreadCount\(cost\.yours\.actedPerMonth\)\} a month/);
+    expect(panel).toMatch(/formatThreadCount\(cost\.atPeerEngagement\.actedPerMonthAtPeer\)\} a month/);
+  });
+
+  it('states a span in units a reader holds in their head', () => {
+    // "94.3 days" is a number nobody carries; the panel says months, weeks or days by size.
+    expect(formatSpanDays(9)).toBe('9 days');
+    expect(formatSpanDays(9.25)).toBe('9.3 days');
+    expect(formatSpanDays(21)).toBe('3 weeks');
+    expect(formatSpanDays(94.3)).toBe('3.1 months');
+    // ⚠ A ZERO OR NEGATIVE SPAN NEVER REACHES A SENTENCE — the server sends `span: null` and every
+    // span-anchored arm refuses — but a formatter that printed "0 days" beside a real figure would
+    // be a contradiction on one line.
+    expect(formatSpanDays(0)).toBe('—');
+    expect(formatSpanDays(Number.NaN)).toBe('—');
+  });
+
+  it('shows both halves of a per-seat price, because "US$120" beside a stored 15 is unexplainable', () => {
+    const line = costPriceLine(
+      costBlock({ costModel: 'per_seat', unitMonthlyUsd: 15, seats: 8 }),
+    );
+    expect(line).toContain('US$15.00 per seat × 8 seats');
+    expect(line).toContain('US$120.00 a month');
+    // Singular seats read as English, not as "1 seats".
+    expect(
+      costPriceLine(costBlock({ costModel: 'per_seat', unitMonthlyUsd: 120, seats: 1 })),
+    ).toContain('× 1 seat');
+  });
+
+  it('ALWAYS says the price is per WORKSPACE, and counts the cards when there is more than one', () => {
+    // ⚠ THE RULE IS UNCONDITIONAL AND THE COUNT IS THE BONUS. `sharedWithUnits` counts the cards in
+    // THIS RESPONSE, and the per-repository Bots tab narrows to one repository — so a caveat gated
+    // on `> 1` would be invisible on exactly the screen where a reader is most likely to read a
+    // Workspace-wide subscription as this repository's bill. That shipped; this pins the fix.
+    const single = costSharedNote(costBlock({ sharedWithUnits: 1 }));
+    expect(single).toMatch(/Workspace price/);
+    expect(single).toMatch(/upper bound/i);
+    expect(single).toMatch(/not shown here/);
+    // One US$120 subscription over four repositories is four cards each carrying US$120.
+    const many = costSharedNote(costBlock({ sharedWithUnits: 4 }));
+    expect(many).toMatch(/4 cards/);
+    expect(many).toMatch(/adding them together/i);
+    expect(many).toMatch(/upper bounds/i);
+    expect(many).not.toBe(single);
+  });
+
+  it('never prints a fractional thread count as a whole "0", and keeps a measured one whole', () => {
+    // ⚠ THE COUNTERFACTUAL'S COUNT IS FRACTIONAL. "0 acted on" beside a real cost-per-thread figure
+    // is a contradiction on one line — a price per unit of something the same row says there is
+    // none of.
+    expect(formatThreadCount(0.4)).toBe('0.4');
+    expect(formatThreadCount(0.4)).not.toBe('0');
+    expect(formatThreadCount(0.02)).toBe('<0.1');
+    expect(formatThreadCount(9.25)).toBe('9.3');
+    expect(formatThreadCount(142.6)).toBe('143');
+    // …and the customer's own count is a REAL integer now, so it must not gain a decimal point.
+    expect(formatThreadCount(3)).toBe('3');
+    expect(formatThreadCount(4)).toBe('4');
+  });
+
+  it('discloses a summed price and BOTH unusable per-seat cases, and stays quiet otherwise', () => {
+    expect(costPricedReviewersNote(costBlock())).toBeNull();
+    expect(costPricedReviewersNote(costBlock({ pricedReviewers: 2 }))).toMatch(/2 priced accounts/);
+    expect(costSeatUnresolvedNote(costBlock())).toBeNull();
+    expect(costSeatZeroNote(costBlock())).toBeNull();
+    // ⚠ A missing disclosure is the same defect as a wrong number, one line quieter: a per-seat
+    // price left out of the figure must be visible or the total silently understates.
+    expect(costSeatUnresolvedNote(costBlock({ seatPriceUnresolved: 1 }))).toMatch(
+      /per-seat price is left out/,
+    );
+    // ⚠ AND A ZERO SEAT COUNT IS A DIFFERENT SENTENCE FROM AN UNREADABLE ONE. "This build cannot
+    // read your seat count" and "your Workspace has no human authors this month" have different
+    // remedies; collapsing them is the defect every vocabulary on this tab exists to prevent. The
+    // conflation itself shipped one level down — a per-seat price times 0 seats rendered as
+    // "Recorded as free" about a reviewer somebody priced.
+    const zero = costSeatZeroNote(costBlock({ seatCountZero: 1 }));
+    expect(zero).toMatch(/per-seat price is left out/);
+    expect(zero).toMatch(/no human pull-request authors/);
+    expect(zero).not.toBe(costSeatUnresolvedNote(costBlock({ seatPriceUnresolved: 1 })));
+    // Plural reads as English on both.
+    expect(costSeatZeroNote(costBlock({ seatCountZero: 2 }))).toMatch(/2 per-seat prices are/);
+  });
+
+  it('names the MEASURED figure in the sentence that claims it — not the counterfactual gap', () => {
+    // ⚠ THE DEFECT THIS TEST EXISTS FOR. The headline printed `windowGapUsd` — the shortfall
+    // RELATIVE TO PEER ENGAGEMENT — followed by the words "is buying feedback nobody acts on",
+    // which name the ABSOLUTE unacted figure. The two differ by a factor of the cohort's rate.
+    const head = costHeadline(costBlock());
+    expect(head?.tone).toBe('behind');
+    // Sentence one is the MEASURED figure, and it is the one the "nobody acts on" words sit on.
+    expect(head?.spend).toContain('US$96.00');
+    expect(head?.spend).toMatch(/is buying feedback nobody acts on/);
+    // ⚠ A RATE AT THE MONTHLY PRICE, NEVER A SPEND OVER THE SPAN. The sentence shipped as
+    // "US$189.22 of this reviewer's US$236.53 over the 8.6 weeks its comments span here bought
+    // feedback nobody acted on" — a claim about money already spent, which today's price and a
+    // recent throughput do not license. Both of those figures are named here so a revert is loud.
+    expect(head?.spend).toContain('US$120.00');
+    expect(head?.spend).toMatch(/monthly price/);
+    expect(head?.spend).toMatch(/a month/);
+    expect(head?.spend).not.toContain('US$189.22');
+    expect(head?.spend).not.toContain('US$236.53');
+    expect(head?.spend).not.toMatch(/bought feedback/);
+    // ⚠ THE SPAN IS STILL DISCLOSED, AS THE WINDOW THE WORK WAS MEASURED IN. Sixty days of
+    // observed output, said in weeks, and never "per 14 days".
+    expect(head?.spend).toMatch(/measured over the 8\.6 weeks its comments span here/);
+    expect(head?.spend).not.toMatch(/14 days/);
+    expect(head?.spend).toMatch(/20 threads/);
+    // ⚠ AND THE COUNTERFACTUAL'S NUMBER IS NOWHERE NEAR THOSE WORDS.
+    expect(head?.spend).not.toContain('US$48.00');
+    expect(head?.spend).not.toMatch(/cohort/i);
+  });
+
+  it('puts the counterfactual in a SECOND sentence, worded as one, never as what a peer pays', () => {
+    const head = costHeadline(costBlock());
+    expect(head?.comparison).toContain('US$48.00');
+    expect(head?.comparison).toMatch(/cohort's median acted-on rate of 60%/);
+    // ⚠ PRESENT TENSE AND PER MONTH. "would have been acted on" is a claim about a period that has
+    // already happened, which is the same history the spend sentence stopped making.
+    expect(head?.comparison).toMatch(/a month more of that same price would be acted on/);
+    expect(head?.comparison).not.toMatch(/would have been/);
+    expect(head?.comparison).toMatch(/your threads and your price, their engagement/);
+    // ⚠ IT MUST NOT CLAIM TO BE A PEER'S BILL. "What a peer pays" would be a figure built from two
+    // cohort quantiles — the median of a product is not the product of the medians.
+    expect(head?.comparison).not.toMatch(/peers? pays?|peer cost|a peer would pay/i);
+    // ⚠ AND THE TWO FIGURES ARE STRUCTURALLY UNMIXABLE: two fields, so a renderer cannot put the
+    // second's number under the first's words by accident. Neither string carries the other's.
+    expect(head?.comparison).not.toContain('US$96.00');
+    expect(head?.spend).not.toContain('US$48.00');
+  });
+
+  it('does not word a NEGATIVE gap as waste — engaging more than the cohort is a good state', () => {
+    const head = costHeadline(
+      costBlock({
+        unacted: {
+          status: 'value',
+          actedOnRate: 0.88,
+          actedThreads: 17.6,
+          settledThreads: 20,
+          unactedUsd: 14.4, // 120 × 0.12, a month
+        },
+        atPeerEngagement: {
+          status: 'value',
+          cohortActedOnRate: 0.6,
+          actedThreadsAtPeer: 12,
+          actedPerMonthAtPeer: 6.088,
+          perActedOnUsd: 19.71,
+          perActedOnGapUsd: -3,
+          conversionGapUsd: -33.6, // 120 × (0.6 − 0.88)
+        },
+      }),
+    );
+    expect(head?.tone).toBe('ahead');
+    expect(head?.comparison).toMatch(/acts on more of this reviewer/);
+    expect(head?.comparison).toContain('US$33.60');
+    // ⚠ No minus sign in the sentence and no "wasted": "-US$33.60 is buying feedback nobody acts
+    // on" is a sentence that means nothing.
+    expect(head?.comparison).not.toContain('-US$');
+    expect(head?.comparison).not.toMatch(/nobody acts on/);
+    // …and the measured sentence still stands, saying what the price still buys unacted at that
+    // better rate.
+    expect(head?.spend).toContain('US$14.40');
+  });
+
+  it('never renders an AHEAD figure larger than the monthly price it is a share of', () => {
+    // ⚠ THE UNBOUNDED-BRANCH DEFECT, AT THE RENDERER. `windowGapUsd` was
+    // `spend × (1 − own ÷ cohort)`, bounded only while the customer sat at or below the median —
+    // and the shipped corpus holds real fitted `acted_on_rate` medians as low as 0.242857, so a
+    // repository acting on everything produced −4.1 × the spend and this branch printed
+    // "US$172.06 more of the US$55.19 reaches something". The server's figure is a difference of
+    // two rates times the MONTHLY PRICE, so `-gap` cannot exceed that price; this pins the
+    // renderer's half.
+    const monthly = 120;
+    const head = costHeadline(
+      costBlock({
+        unacted: {
+          status: 'value',
+          actedOnRate: 1,
+          actedThreads: 20,
+          settledThreads: 20,
+          unactedUsd: 0,
+        },
+        atPeerEngagement: {
+          status: 'value',
+          cohortActedOnRate: 0.242857,
+          actedThreadsAtPeer: 4.857143,
+          actedPerMonthAtPeer: 2.463813,
+          perActedOnUsd: 48.698298,
+          perActedOnGapUsd: -36.87,
+          conversionGapUsd: -90.85716, // 120 × (0.242857 − 1)
+        },
+      }),
+    );
+    expect(head?.tone).toBe('ahead');
+    expect(head?.comparison).toContain('US$90.86');
+    expect(90.85716).toBeLessThanOrEqual(monthly);
+    // ⚠ TWO OLD ANSWERS NAMED SO NEITHER REVERT IS SILENT. The RATIO formula gives
+    // 120 × (1 − 1 ÷ 0.242857) = −374.12, three times the price it is a share of; the SPAN basis
+    // gives 236.53088 × (0.242857 − 1) = −179.09, a share of a spend nobody can evidence.
+    expect(head?.comparison).not.toContain('US$374.12');
+    expect(head?.comparison).not.toContain('US$179.09');
+  });
+
+  it('keeps the MEASURED sentence when the counterfactual refused, and drops only the comparison', () => {
+    // ⚠ A COHORT THAT PUBLISHED NO MEDIAN IS A FACT ABOUT THE CORPUS. It must not delete the
+    // customer's own figure, which needs nothing but their data — the headline shipped returning
+    // null here, which threw away the only sentence on this card that is purely measured.
+    const head = costHeadline(costBlock({ atPeerEngagement: refused('cohort_rate_unfitted') }));
+    expect(head?.tone).toBe('measured');
+    expect(head?.spend).toContain('US$96.00');
+    expect(head?.comparison).toBeNull();
+    // …and with the MEASURED arm refused there is no headline at all: sentence one is the
+    // precondition, not the comparison.
+    expect(costHeadline(costBlock({ unacted: refused('own_rate_withheld') }))).toBeNull();
+    // ⚠ A SPAN THE SERVER COULD NOT OBSERVE TAKES THE WHOLE HEADLINE WITH IT, even though neither
+    // figure divides by it any more: both sentences assert a CURRENT pace, and the span is the only
+    // evidence that the counts describe one. The server refuses all three arms for the same reason,
+    // so this is belt-and-braces on a shape that should never arrive.
+    expect(costHeadline(costBlock({ span: null }))).toBeNull();
+    // …and so does a price that could not be stated: there is no monthly figure to state a rate at.
+    expect(costHeadline(costBlock({ monthlyUsd: null, windowUsd: null }))).toBeNull();
+  });
+
+  it('says the monthly figure is MISSING, never US$0.00, when a per-seat price could not be read', () => {
+    // ⚠ THE THIRD PRICE STATE, ON THE RENDER SIDE. `monthlyUsd: null` is a price somebody ENTERED
+    // whose per-seat unit could not be multiplied out — not "no price" (which is the absence of the
+    // whole block) and not a stored 0 (which is "recorded as free"). Running it through `formatUsd`
+    // prints "US$0.00 a month", which is the exact false claim the seat-count drop exists to
+    // prevent, arriving one line up from the refusal that was supposed to prevent it.
+    const line = costPriceLine(costBlock({ monthlyUsd: null, windowUsd: null }));
+    expect(line).not.toContain('US$0.00');
+    expect(line).toMatch(/No monthly figure/);
+    expect(line).toMatch(/per seat/);
+    // …and its refusal headline is its own sentence, never the zero-price one.
+    expect(COST_REFUSAL_HEADLINE.price_unresolved).not.toBe(COST_REFUSAL_HEADLINE.price_is_zero);
+    expect(COST_REFUSAL_HEADLINE.price_unresolved).not.toMatch(/free/i);
+    // ⚠ SOURCE GUARD, since this suite has no renderer: the "this is the Workspace price" caveat
+    // points at a figure, so it must not render when there is none.
+    const panel = readFileSync(
+      fileURLToPath(new URL('../src/components/Activity/BenchmarkPanel.tsx', import.meta.url)),
+      'utf8',
+    );
+    expect(panel).toMatch(/\{cost\.monthlyUsd != null && \(\s*<p[\s\S]{0,300}benchmark-cost-shared/);
+  });
+
+  it('gives the nine cost refusals nine DIFFERENT sentences, and every union member one', () => {
+    // ⚠ THE SAME PAIRWISE RULE THE OTHER THREE VOCABULARIES KEEP. A renderer that collapsed two of
+    // these tells a customer their reviewer costs nothing when in fact nobody merged anything.
+    const reasons: BotBenchmarkCostRefusalReason[] = [
+      'repo_window_incomplete',
+      'no_merges_in_window',
+      'span_unobserved',
+      'own_rate_withheld',
+      'nothing_acted_on',
+      'price_is_zero',
+      'price_unresolved',
+      'cohort_rate_unfitted',
+      'cohort_rate_zero',
+    ];
+    expect(Object.keys(COST_REFUSAL_HEADLINE).sort()).toEqual([...reasons].sort());
+    for (const reason of reasons) {
+      expect(COST_REFUSAL_HEADLINE[reason], reason).toBeTruthy();
+      expect(COST_REFUSAL_HEADLINE[reason], reason).not.toMatch(/undefined/);
+    }
+    expect(new Set(Object.values(COST_REFUSAL_HEADLINE)).size).toBe(reasons.length);
+    // ⚠ AND IT REUSES THE PLACEMENT'S OWN WORDS for the one cause both refuse. Two different
+    // sentences for one fact on one card is how a reader stops believing either.
+    expect(COST_REFUSAL_HEADLINE.no_merges_in_window).toBe(
+      PLACEMENT_REFUSAL_HEADLINE.repo_inactive_in_window,
+    );
+    expect(COST_REFUSAL_HEADLINE.repo_window_incomplete).toBe(
+      PLACEMENT_REFUSAL_HEADLINE.repo_window_incomplete,
+    );
+  });
+
+  it('collapses four identical refusals into one, and keeps a mix in full', () => {
+    // ⚠ A price of 0 refuses all four (every figure is exactly 0.00); a repository that merged
+    // nothing refuses all four for the placement's reason. Four consecutive dimmed rows read as
+    // four separate measurements that each came back empty.
+    expect(
+      collapsedCostRefusal(
+        costBlock({
+          perMergedPr: refused('price_is_zero'),
+          unacted: refused('price_is_zero'),
+          yours: refused('price_is_zero'),
+          atPeerEngagement: refused('price_is_zero'),
+        }),
+      ),
+    ).toBe('price_is_zero');
+    // A MIX says different things about where the blind spot is and keeps its full list — here all
+    // four refused, for four different reasons.
+    //
+    // ⚠ ALL FOUR ARMS MUST REFUSE FOR THIS ASSERTION TO REACH THE LOOP AT ALL. An earlier draft
+    // left `perMergedPr` as a value, so the function returned null from its first guard and the
+    // reason-equality check was never executed — the assertion passed against an implementation
+    // that had DELETED that check. Mutation-tested after the fix: dropping
+    // `|| arm.reason !== first.reason` turns this red.
+    expect(
+      collapsedCostRefusal(
+        costBlock({
+          perMergedPr: refused('no_merges_in_window'),
+          unacted: refused('span_unobserved'),
+          yours: refused('own_rate_withheld'),
+          atPeerEngagement: refused('cohort_rate_unfitted'),
+        }),
+      ),
+    ).toBeNull();
+    // Three of four sharing a reason is still a mix.
+    expect(
+      collapsedCostRefusal(
+        costBlock({
+          perMergedPr: refused('price_is_zero'),
+          unacted: refused('price_is_zero'),
+          yours: refused('price_is_zero'),
+          atPeerEngagement: refused('cohort_rate_unfitted'),
+        }),
+      ),
+    ).toBeNull();
+    // ⚠ `unacted` IS IN THE LIST EVEN THOUGH IT HAS NO ROW OF ITS OWN — it is the headline's first
+    // sentence, and a collapse blind to it would fold three rows into one line while the headline
+    // above them vanished for a fourth reason nobody was told about. Mutation-tested: dropping
+    // `cost.unacted` from the arm list turns this line green when it must be red.
+    expect(
+      collapsedCostRefusal(
+        costBlock({
+          perMergedPr: refused('price_is_zero'),
+          unacted: refused('span_unobserved'),
+          yours: refused('price_is_zero'),
+          atPeerEngagement: refused('price_is_zero'),
+        }),
+      ),
+    ).toBeNull();
+    // …and a block with any real figure in it never collapses, whichever arm holds it.
+    expect(collapsedCostRefusal(costBlock())).toBeNull();
+    expect(
+      collapsedCostRefusal(
+        costBlock({ yours: refused('nothing_acted_on'), atPeerEngagement: refused('nothing_acted_on') }),
+      ),
+    ).toBeNull();
+  });
+
+  it('labels the three sources apart — a typed price, counted rates, a fitted cohort median', () => {
+    // ⚠ THE TAB'S OWN RULE, one block down: a model-derived figure and a code-derived one must be
+    // labelled apart in a panel that mixes them. Here it is three, and the counterfactual's FITTED
+    // median is the one that must never read as an invoice.
+    expect(Object.keys(COST_BASIS_LABEL).sort()).toEqual(['counted', 'fitted', 'stored']);
+    expect(new Set(Object.values(COST_BASIS_LABEL)).size).toBe(3);
+    expect(COST_BASIS_LABEL.fitted).toMatch(/fitted/i);
+    expect(COST_BASIS_LABEL.fitted).toMatch(/peer/i);
+    expect(COST_BASIS_LABEL.counted).toMatch(/yours|your data/i);
+    expect(COST_BASIS_LABEL.stored).toMatch(/you entered/i);
+    const panel = readFileSync(
+      fileURLToPath(new URL('../src/components/Activity/BenchmarkPanel.tsx', import.meta.url)),
+      'utf8',
+    );
+    // SOURCE GUARD: the counterfactual row is the one that must carry `fitted`, and the two
+    // customer-side rows must not.
+    expect(panel).toMatch(/testId="benchmark-cost-counterfactual"[\s\S]{0,900}basis="fitted"/);
+    expect(panel).toMatch(/testId="benchmark-cost-per-merged-pr"[\s\S]{0,600}basis="counted"/);
+  });
+
+  it('draws the coin as an icon component, never as a "$" glyph doing duty as one', () => {
+    // The SPA ships no icon library and no icon glyphs; the currency symbol belongs in the FIGURE,
+    // where it is part of the number's meaning.
+    const icons = readFileSync(
+      fileURLToPath(new URL('../src/components/Icons.tsx', import.meta.url)),
+      'utf8',
+    );
+    expect(icons).toContain('export function CoinIcon');
+    const panel = readFileSync(
+      fileURLToPath(new URL('../src/components/Activity/BenchmarkPanel.tsx', import.meta.url)),
+      'utf8',
+    );
+    expect(panel).toContain('<CoinIcon');
   });
 });

@@ -263,6 +263,14 @@ fixture tests (see Conventions).
     verbatim: same single writer (`setReviewerCost`, one UPDATE), same standalone cost route,
     never in the PATCH body, never in any derived write; clearing the price resets the model to
     `'flat'` in that same UPDATE.
+    ⚠ **THE PLUGIN NOW READS THIS PAIR TOO** — the Bots → Benchmark tab's cost block
+    (`packages/pro/src/bots/benchmark/{collect,cost}.ts`) selects `monthly_cents` + `cost_model` on
+    the SAME single-workspace-predicate read that fetches the judgement beside them, and resolves
+    `per_seat` through the OPTIONAL host seam `ProHostQueries.workspaceHumanSeatCount?` — core's own
+    function, so there is still exactly ONE multiplier in the product and the Benchmark cannot quote
+    a different monthly figure for the same bot than the ROI table does. It is a READ ONLY: nothing
+    in the plugin writes either column, and `null` never becomes `0` on the way past. A per-seat
+    price the seam cannot resolve is EXCLUDED from the figure and disclosed, never read as the unit.
   - ⚠ **Never sum cost ACROSS workspaces on one screen.** Six workspaces each listing a $120
     CodeRabbit is either six subscriptions or one seen six ways and **the app must not assert
     which** — Compare-workspaces shows the figures side by side and does not total them. WITHIN one

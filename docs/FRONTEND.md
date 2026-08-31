@@ -872,6 +872,75 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
 - ⚠ **SEVERITY AND CATEGORY ARE STRUCTURALLY ABSENT, not empty and not zero** — model-derived, and
   the corpus is unscored. They render in their own block, labelled `Model-derived` against every
   other figure's `Counted`, with the precondition spelled out.
+- ⚠ **THE COST BLOCK IS ABSENT WHEN NO PRICE IS SET — not empty, not zero, and not a "set a price"
+  prompt.** `unit.cost` simply is not on the wire for a reviewer nobody priced, and `<CostBlock>`
+  mounts on the field's presence and nothing else. TWO other states are DIFFERENT and both RENDER:
+  a price of exactly **0** is real and deliberate ("recorded as free"), and a **`monthlyUsd` of
+  `null`** is a price somebody entered whose per-seat unit could not be multiplied out
+  (`price_unresolved`). Both refuse every derived figure with a sentence rather than printing
+  US$0.00 three times. Contract:
+  [docs/PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § "Cost on the Benchmark tab".
+  What the renderer owns:
+  - **`formatUsd` prints `US$`, never a bare `$`**, and a non-zero sub-cent figure prints `<US$0.01`
+    rather than rounding to `US$0.00` — that is the zero-price failure mode arriving from the other
+    direction. The windowed TOTAL carries `per 14 days` (`costWindowLabel`), because a bare "US$412"
+    beside a monthly subscription invites the reader to assume a month.
+  - ⚠ **A RATIO NEVER CARRIES THE WINDOW.** Both value rows shipped with the label appended, so
+    "Per merged PR" read "US$5.52 per 14 days" and "Per acted-on thread" read "US$27.60 per 14 days"
+    — which reads as $/PR/fortnight and invites doubling for a month. Neither scales with the
+    window: both halves of each fraction scale together, so the figure is the same at any window
+    length. The basis moved into the detail line, as prose, and the frontend test carries a SOURCE
+    GUARD on the three `figure=` props.
+  - ⚠ **THE HEADLINE IS TWO SENTENCES CARRYING TWO DIFFERENT FIGURES** (`CostHeadline` is
+    `{tone, spend, comparison}`). `spend` is what the price CURRENTLY BUYS AND NOBODY ACTS ON, per
+    month — measured, own data only — and `comparison` is what CLOSING THE GAP to the cohort median
+    is worth, per month. They differ by a factor of the cohort's rate; the first cut printed the
+    second's number under the first's words. Two fields, so a renderer cannot reunite them. `tone`
+    gains `'measured'` for the case where the cohort published no median: the measured sentence
+    stands alone rather than the whole headline vanishing, which is what shipped.
+  - ⚠ **EVERY REVIEWER FIGURE IS A RATE AT TODAY'S PRICE, NEVER A SPEND OVER THE SPAN.** The
+    sentences shipped as shares of a prorated `span.usd` — "US$189.22 of this reviewer's US$236.53
+    over the 8.6 weeks its comments span here" — which is a history the app cannot evidence, and a
+    cap would have kept the claim and shrunk it. `span.usd` is gone from the wire; the span still
+    renders (`formatSpanDays`, days → weeks → months) as the window the WORK was measured in, and
+    the per-month divisors (`yours.actedPerMonth`, `atPeerEngagement.actedPerMonthAtPeer`) ride the
+    wire beside their quotients so the rows are checkable. `$ per merged PR` is the one 14-day
+    figure on the card, and `spanNote` says which figure sits on which basis.
+  - **`costSeatZeroNote` is a DIFFERENT sentence from `costSeatUnresolvedNote`** — "this build
+    cannot read your seat count" and "your Workspace has no human authors this month" have
+    different remedies, and a per-seat price silently multiplied by 0 is what put "recorded as
+    free" on a reviewer somebody priced. ⚠ **BOTH ARE REACHABLE ON A CARD WITH NO MONTHLY FIGURE**,
+    which is why that state renders at all: when the drop empties the unit the server sends
+    `monthlyUsd: null` rather than no block, and these two lines are the only thing on screen
+    explaining a price the reader typed. `costPriceLine` says "No monthly figure — …" instead of
+    `formatUsd(null)`, and `costSharedNote` is the one caveat GATED OFF there (it points at a
+    figure); every other line stays.
+  - **Three sources, three chips** (`COST_BASIS_LABEL`): a price a human TYPED, rates COUNTED from
+    this workspace, an engagement rate FITTED from the corpus. Same model-vs-code rule as the
+    absent-metrics block, with a third arm — and the fitted one is the one that must never read as
+    an invoice, so the counterfactual row is worded "your volume and price with the cohort's
+    median …", never "what a peer pays".
+  - **`costSharedNote` ALWAYS returns a sentence.** It shipped gated on `sharedWithUnits > 1`, which
+    counts cards in THIS response — and the per-repo Bots tab narrows to one repository, so the
+    caveat was invisible on the screen most likely to read a Workspace-wide subscription as one
+    repository's bill. The RULE is unconditional; only the count is a bonus.
+  - **`collapsedCostRefusal` is `collapsedExclusion`'s rule one block down** — a zero price (or a
+    repository that merged nothing) refuses all FOUR figures for one reason, and four identical
+    dimmed rows read as four measurements that each came back empty. ⚠ `unacted` is in the arm list
+    even though it has no row of its own: it is the headline's first sentence, and a collapse blind
+    to it would fold three rows into one line while the headline vanished for a fourth reason
+    nobody was told about.
+  - **`formatThreadCount` never rounds a fractional counterfactual count to a whole `0`** — "0
+    acted on" beside a real cost-per-thread figure is a contradiction on one line — and never adds
+    a decimal point to the customer's own measured integer.
+  - **The gap headline is a FIGURE, not a finding**, so it uses the block's own neutral chrome and
+    not the amber anomaly card: it cleared no share gate, no magnitude gate and no median CI. A
+    NEGATIVE gap is a good state (this team engages more than the cohort's median) and is worded as
+    one — never as "-US$27.60 wasted". ⚠ It is also BOUNDED: the server's `conversionGapUsd` is a
+    difference of two rates times the MONTHLY PRICE, so the 'ahead' branch can never render more
+    money than the price it is a share of. The ratio it replaced could, and did — a team at 1.0
+    against a real fitted median of 0.242857 rendered "US$172.06 more of the US$55.19 reaches
+    something".
 - Charts: small-multiple SVG strips over the existing zero-dependency toolkit (ONE `useChartWidth`
   for the whole panel, not one per row). ⚠ **NO RADAR CHART** — a rate, a count-per-PR and a
   duration on one polygon claims they share a scale. `stripGeometry()` returns `null` rather than

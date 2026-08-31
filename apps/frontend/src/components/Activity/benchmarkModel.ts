@@ -2,6 +2,8 @@ import type {
   BotBenchmarkAbsentMetric,
   BotBenchmarkAnomaly,
   BotBenchmarkAnomalyKind,
+  BotBenchmarkCostRefusalReason,
+  BotBenchmarkPlacementCost,
   BotBenchmarkPlacementMetric,
   BotBenchmarkPlacementRefusalReason,
   BotBenchmarkPlacementUnit,
@@ -597,6 +599,363 @@ export function orderedUnits(units: BotBenchmarkPlacementUnit[]): BotBenchmarkPl
       reviewerLabel(a.botKind).localeCompare(reviewerLabel(b.botKind))
     );
   });
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   Cost — what the reviewer costs per unit of the work it produces
+   ───────────────────────────────────────────────────────────────────────────────────────── */
+
+// ⚠ NO PRICE ⇒ NOTHING RENDERS. `unit.cost` is ABSENT when no price is set for this reviewer in
+// this Workspace, and there is deliberately no "set a price" placeholder, no empty card and no
+// zero: a "$0.00 per acted-on thread" is a claim about a reviewer nobody priced. The whole
+// vocabulary below only ever runs on a block the server chose to send.
+//
+// ⚠ THREE DIFFERENT SOURCES SIT IN ONE BLOCK AND MUST BE LABELLED APART — the same rule that keeps
+// the model-derived metrics off the strips. The price is a number a HUMAN TYPED; the rates and
+// merge counts are COUNTED from this Workspace's own rows; the counterfactual's engagement rate is
+// FITTED from the peer corpus. Mixing them under one visual weight is how a what-if starts reading
+// as an invoice.
+
+export type CostBasis = 'stored' | 'counted' | 'fitted';
+
+// ⚠ KEPT SHORT ENOUGH TO SIT BESIDE ITS FIGURE. These are inline chips on a row that already
+// carries a number and a sentence of detail; the first draft's "Fitted from the peer cohort"
+// wrapped onto a line of its own on the counterfactual row, orphaning the one label on this card
+// that must be read with the number it qualifies.
+export const COST_BASIS_LABEL: Record<CostBasis, string> = {
+  stored: 'Price you entered',
+  counted: 'Counted from yours',
+  fitted: 'Fitted peer median',
+};
+
+/** NINE SENTENCES — and the tenth state, "no price set", never reaches here because the block is
+ *  absent. Each is a different fact with a different remedy, exactly like the placement and
+ *  exclusion vocabularies above. */
+export const COST_REFUSAL_HEADLINE: Record<BotBenchmarkCostRefusalReason, string> = {
+  // ⚠ THE SAME WORDS THE PLACEMENT REFUSALS USE ONE CARD UP, for the two facts both refuse on. Two
+  // different sentences for one cause on one card is how a reader stops believing either.
+  repo_window_incomplete: PLACEMENT_REFUSAL_HEADLINE.repo_window_incomplete,
+  no_merges_in_window: 'No recent merges to measure',
+  // ⚠ A SENTENCE ABOUT TIME, NOT ABOUT VOLUME, AND NOT ABOUT A BILLING PERIOD. "Said nothing here"
+  // is a different fact one card up; this reviewer may have written plenty, all of it in one
+  // instant or with no readable timestamp, which leaves no observed pace for a monthly rate to be
+  // stated against.
+  span_unobserved: 'No measurable pace to state a rate against',
+  own_rate_withheld: 'Your acted-on rate was withheld',
+  nothing_acted_on: 'Nothing acted on to divide by',
+  price_is_zero: 'Recorded as free',
+  // ⚠ NOT "Recorded as free" AND NOT SILENCE. Somebody entered a price; it is per seat and the
+  // seat count could not be multiplied out, so the figure is missing and the price is not.
+  price_unresolved: 'Price entered, monthly figure not statable',
+  cohort_rate_unfitted: 'No peer engagement rate in this cohort',
+  cohort_rate_zero: 'Peers act on none of it either',
+};
+
+/**
+ * US dollars, unambiguously.
+ *
+ * ⚠ `US$`, NOT A BARE `$`. A lone dollar sign is four currencies, and this figure is a real price
+ * somebody pays. Two decimals always — a price that prints as "US$120" invites the reader to
+ * wonder what happened to the cents.
+ *
+ * ⚠ AND A NON-ZERO FIGURE NEVER PRINTS AS `US$0.00`. A high-volume reviewer can genuinely cost
+ * fractions of a cent per thread; rounding that to two decimals prints exactly the row of zeros the
+ * zero-price refusal exists to avoid, arriving from the opposite direction. Sub-cent renders as
+ * "<US$0.01", which is true and is visibly not a zero.
+ */
+export function formatUsd(usd: number): string {
+  if (!Number.isFinite(usd)) return '—';
+  const abs = Math.abs(usd);
+  const sign = usd < 0 ? '-' : '';
+  if (abs > 0 && abs < 0.005) return `${sign}<US$0.01`;
+  return `${sign}US$${abs.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+/**
+ * ⚠ THE WINDOW RIDES A WINDOWED **TOTAL**, AND NOTHING ELSE. A bare "US$412" invites the reader to
+ * assume a month, so the price line carries it.
+ *
+ * ⚠ IT MUST NEVER BE SUFFIXED TO A RATIO. "US$5.52 per 14 days" on a row labelled "Per merged PR"
+ * reads as dollars-per-PR-per-fortnight and invites the reader to double it for a month — but cost
+ * per merged pull request does not scale with the window at all (numerator and denominator scale
+ * together), so the figure is US$5.52 whatever window is chosen. That shipped on both ratio rows.
+ * A ratio's basis belongs in its detail line, where it is prose rather than a unit.
+ */
+export function costWindowLabel(windowDays: number): string {
+  return `per ${formatCount(windowDays)} days`;
+}
+
+/** How long the reviewer's own observed output ran, in the reader's units. Days below a fortnight,
+ *  then weeks, then months — a "94.3 days" is a number nobody holds in their head. */
+export function formatSpanDays(days: number): string {
+  if (!Number.isFinite(days) || days <= 0) return '—';
+  if (days < 14) return `${trimZero(days.toFixed(1))} days`;
+  if (days < 70) return `${trimZero((days / 7).toFixed(1))} weeks`;
+  return `${trimZero((days / 30.44).toFixed(1))} months`;
+}
+
+/**
+ * A thread count — an INTEGER when it is the customer's own measured one, FRACTIONAL when it is the
+ * counterfactual's `settledThreads × cohortRate`.
+ *
+ * ⚠ IT MUST NOT ROUND A FRACTION TO A WHOLE NUMBER. A quiet repository can legitimately sit at 0.4
+ * threads at peer engagement, and printing "0" beside a real cost-per-thread figure is a
+ * contradiction on one line — the reader is being shown a price per unit of something the same row
+ * says there is none of. One decimal below ten, none above, and the trailing zero trimmed, so a
+ * measured 3 still prints as "3".
+ */
+export function formatThreadCount(n: number): string {
+  if (!Number.isFinite(n)) return '—';
+  const abs = Math.abs(n);
+  if (abs > 0 && abs < 0.05) return '<0.1';
+  return trimZero(n.toFixed(abs < 10 ? 1 : 0));
+}
+
+/**
+ * The price line: the monthly figure a human typed — the basis of every reviewer-side rate on this
+ * card — and the same money over the fortnight `$ per merged PR` sits on. Under `per_seat` the two
+ * halves of the multiplication are shown, because "US$120/month" with no explanation beside a
+ * stored "15" is unexplainable.
+ *
+ * ⚠ A `null` MONTHLY IS NOT `US$0.00` AND NOT AN EMPTY LINE. It is a price somebody entered that
+ * could not be stated (every priced row is per-seat and the seat count was unreadable or empty), so
+ * the line says exactly that — running it through `formatUsd` would print "US$0.00 a month", which
+ * is the "recorded as free" lie this whole vocabulary exists to prevent.
+ */
+export function costPriceLine(cost: BotBenchmarkPlacementCost): string {
+  if (cost.monthlyUsd == null || cost.windowUsd == null) {
+    return 'No monthly figure — every price recorded here is per seat, and the seat count could not be multiplied out';
+  }
+  const base = `${formatUsd(cost.monthlyUsd)} a month · ${formatUsd(cost.windowUsd)} ${costWindowLabel(
+    cost.windowDays,
+  )}`;
+  if (cost.costModel !== 'per_seat' || cost.unitMonthlyUsd == null || cost.seats == null) {
+    return base;
+  }
+  return (
+    `${base} — ${formatUsd(cost.unitMonthlyUsd)} per seat × ${formatCount(cost.seats)} ` +
+    `seat${cost.seats === 1 ? '' : 's'}`
+  );
+}
+
+/**
+ * ⚠ THE PRICE IS PER WORKSPACE AND THIS CARD IS PER REPOSITORY, so the same money appears on
+ * several cards at once.
+ *
+ * ⚠ IT ALWAYS RETURNS A SENTENCE, and that is the correction of a defect this function shipped
+ * with: the caveat was conditional on `sharedWithUnits > 1`, which is a count of the cards IN THIS
+ * RESPONSE. The per-repository Bots tab narrows to one repository, so the count there is always 1
+ * and the disclosure never appeared — on precisely the screen where a reader is most likely to read
+ * a Workspace-wide subscription as this repository's bill. The RULE is unconditional; only the
+ * count is a bonus.
+ *
+ * Apportioning the subscription across repositories was considered and rejected: there is no basis
+ * in the data for any split, and an invented allocation would be indistinguishable on screen from a
+ * measured one. Saying it out loud is the honest option — the figures are upper bounds, and the one
+ * thing the reader must not do is add them up.
+ */
+export function costSharedNote(cost: BotBenchmarkPlacementCost): string {
+  if (cost.sharedWithUnits > 1) {
+    return (
+      `This is the Workspace price, and ${formatCount(cost.sharedWithUnits)} cards here carry it ` +
+      '— each one measures the whole subscription against one repository, so these are upper ' +
+      'bounds and adding them together would count the same money more than once.'
+    );
+  }
+  return (
+    'This is the Workspace price, measured against this repository’s work alone. The same ' +
+    'subscription may cover repositories not shown here, so it is an upper bound rather than this ' +
+    'repository’s share.'
+  );
+}
+
+/** Two prices folded into one card: two logins the Workspace calls one vendor are ONE unit, so
+ *  their rows were summed. `null` for the ordinary single-row case. */
+export function costPricedReviewersNote(cost: BotBenchmarkPlacementCost): string | null {
+  if (cost.pricedReviewers <= 1) return null;
+  return (
+    `Summed over ${formatCount(cost.pricedReviewers)} priced accounts the Workspace classifies as ` +
+    'this one reviewer.'
+  );
+}
+
+/** ⚠ A MISSING DISCLOSURE IS THE SAME DEFECT AS A WRONG NUMBER, ONE LINE QUIETER. A per-seat price
+ *  this build could not resolve is EXCLUDED from the figure rather than read as its per-developer
+ *  unit, and the exclusion has to be visible or the total silently understates. */
+export function costSeatUnresolvedNote(cost: BotBenchmarkPlacementCost): string | null {
+  if (cost.seatPriceUnresolved <= 0) return null;
+  return (
+    `${formatCount(cost.seatPriceUnresolved)} per-seat price${
+      cost.seatPriceUnresolved === 1 ? ' is' : 's are'
+    } left out of this figure: this build could not read the Workspace's seat count, and a ` +
+    'per-developer unit price is not a monthly one.'
+  );
+}
+
+/**
+ * ⚠ A COMPUTED ZERO IS NOT A STORED ZERO, AND THIS IS ITS OWN SENTENCE.
+ *
+ * A per-seat price multiplied by a seat count of 0 is exactly 0 — indistinguishable, one line down,
+ * from the deliberate "we pay nothing for this" the block renders as "Recorded as free". Somebody
+ * typed a price; the Workspace's derived seat count (distinct human pull-request authors over a
+ * fixed trailing 30 days) came back empty, which is the proxy failing rather than the bill. Such a
+ * row is EXCLUDED from the figure and said out loud here.
+ *
+ * ⚠ A DIFFERENT SENTENCE FROM `costSeatUnresolvedNote`, deliberately: "this build cannot read your
+ * seat count" and "your seat count is zero this month" have different remedies, and collapsing two
+ * facts with two remedies into one is the defect every vocabulary on this tab exists to prevent.
+ */
+export function costSeatZeroNote(cost: BotBenchmarkPlacementCost): string | null {
+  if (cost.seatCountZero <= 0) return null;
+  return (
+    `${formatCount(cost.seatCountZero)} per-seat price${
+      cost.seatCountZero === 1 ? ' is' : 's are'
+    } left out of this figure: this Workspace has no human pull-request authors in the last 30 ` +
+    'days, so there are no seats to multiply by. A price you entered is not a price of nothing.'
+  );
+}
+
+/**
+ * ⚠ FOUR IDENTICAL REFUSALS ARE ONE REFUSAL — `collapsedExclusion`'s rule, one block down.
+ *
+ * The two cases that hit it are the two that matter most: a price of exactly 0 refuses all four
+ * derived figures (every one of them is 0.00, which is true and reads as broken), and a repository
+ * that merged nothing refuses all four for the reason the placement above it already gave. Four
+ * consecutive dimmed rows saying the same thing read as four separate measurements that each came
+ * back empty.
+ *
+ * Returns the shared reason ONLY when all four refuse under it — a MIX (a peer rate missing here,
+ * a withheld own rate there) keeps its full list, because those say different things about where
+ * the blind spot is.
+ *
+ * ⚠ `unacted` IS IN THE LIST EVEN THOUGH IT HAS NO ROW OF ITS OWN. It is the headline's first
+ * sentence, and a collapse that ignored it would fold three refused rows into one line while the
+ * headline above them silently vanished for a fourth reason nobody was told.
+ */
+export function collapsedCostRefusal(
+  cost: BotBenchmarkPlacementCost,
+): BotBenchmarkCostRefusalReason | null {
+  const arms = [cost.perMergedPr, cost.unacted, cost.yours, cost.atPeerEngagement];
+  const first = arms[0];
+  // ⚠ THE UNION NARROWING, not a redundant runtime check — the same note `collapsedExclusion`
+  // carries. The loop below already returns null for a non-refused first arm, so deleting this line
+  // changes no behaviour and NO TEST GOES RED; it is killed by `tsc` instead (`Property 'reason'
+  // does not exist on type …`). Mutation-tested; recorded so it is not "simplified" away.
+  if (first == null || first.status !== 'refused') return null;
+  for (const arm of arms) {
+    if (arm.status !== 'refused' || arm.reason !== first.reason) return null;
+  }
+  return first.reason;
+}
+
+export interface CostHeadline {
+  /** `behind` — peer-level engagement would convert more · `ahead` — this team engages MORE than
+   *  the cohort's median · `even` — the two rates match · `measured` — no cohort median to compare
+   *  against, so the spend sentence stands alone. */
+  tone: 'behind' | 'ahead' | 'even' | 'measured';
+  /**
+   * SENTENCE ONE — WHAT THE PRICE CURRENTLY BUYS AND NOBODY ACTS ON, PER MONTH. Measured, own data
+   * only, and the figure it names is `unacted.unactedUsd`.
+   *
+   * ⚠ THIS IS A SEPARATE FIELD FROM `comparison` BECAUSE THAT IS THE FIX. The two figures answer
+   * different questions and differ by a factor of the cohort's rate; the first cut printed the
+   * COMPARISON's number after this sentence's words ("US$11.04 … is buying feedback nobody acts
+   * on", where the spend nobody acted on was US$33.11 — a third of the truth, in the direction that
+   * under-reports waste). Two questions, two sentences, two fields; a renderer cannot reunite them
+   * by accident.
+   */
+  spend: string;
+  /** SENTENCE TWO — WHAT BETTER ENGAGEMENT WOULD BE WORTH, naming `conversionGapUsd`. `null` when
+   *  the cohort published no median for this cell: the measured sentence stands on its own. */
+  comparison: string | null;
+}
+
+/**
+ * THE MONEY — what this block leads with, in TWO sentences carrying TWO different figures.
+ *
+ * ⚠ BOTH SENTENCES STATE A RATE, NEVER A HISTORY. They name `monthlyUsd × (1 − yourRate)` and
+ * `monthlyUsd × (cohortRate − yourRate)` — dollars A MONTH, at the price recorded today, against
+ * the pace measured over the span. They shipped as shares of `spanUsd`, so the first read
+ * "US$189.22 of this reviewer's US$236.53 over the 8.6 weeks its comments span here" — a past spend
+ * nobody can evidence, since the price may have changed and the subscription may be younger than
+ * the span. The span still appears, as the WINDOW THE PACE WAS MEASURED OVER, never as a bill.
+ *
+ * ⚠ SENTENCE ONE IS MEASURED AND SENTENCE TWO IS A COUNTERFACTUAL, AND THAT SPLIT IS THE POINT.
+ * They differ by a factor of the cohort's rate and the first is always the larger while that rate
+ * is below 1. The first cut printed the SECOND number under the FIRST's words — "US$11.04 of your
+ * US$55.19 is buying feedback nobody acts on", where the figure nobody acted on was US$33.11. Both
+ * are legitimate; only naming them apart is.
+ *
+ * ⚠ SENTENCE TWO IS WORDED AS A COUNTERFACTUAL. "Your threads, your price, the cohort's median
+ * engagement rate" is a clearly-bounded what-if; "what a peer pays" would be a claim about a
+ * distribution nobody fitted, built by multiplying two cohort quantiles — the median of a product
+ * is not the product of the medians. Only ONE factor moved, and the sentence says which.
+ *
+ * ⚠ AND BOTH ARE FIGURES, NOT FINDINGS. The panel's amber chrome is reserved for anomalies, which
+ * cleared a share gate, a magnitude gate and the cohort's own uncertainty about its median. These
+ * cleared no gate — they are arithmetic — so they render in the block's own neutral chrome however
+ * large they are.
+ *
+ * ⚠ A NEGATIVE GAP IS A GOOD STATE AND MUST NOT BE WORDED AS WASTE. A team that acts on more of a
+ * reviewer than the cohort's median is getting MORE for the money, and "-US$40 wasted" is a
+ * sentence that means nothing. ⚠ It is also BOUNDED: the server's `conversionGapUsd` is a
+ * difference of two rates times the MONTHLY PRICE, so `-gap` can never exceed the price it is a
+ * share of. The ratio it replaced could, and did — a team at 1.0 against a real fitted median of
+ * 0.24 rendered "US$172.06 more of the US$55.19 reaches something".
+ */
+export function costHeadline(cost: BotBenchmarkPlacementCost): CostHeadline | null {
+  const unacted = cost.unacted;
+  // ⚠ THE MEASURED SENTENCE IS THE PRECONDITION, NOT THE COMPARISON. A cohort that published no
+  // median for this cell is a fact about the corpus; it must not delete the customer's own figure,
+  // which needs nothing but their data.
+  if (unacted.status !== 'value') return null;
+  const span = cost.span;
+  // ⚠ THE SPAN STILL GATES THE HEADLINE even though the figures no longer divide by it: every
+  // sentence here asserts a CURRENT pace, and the span is the only evidence that the counts
+  // describe one. A price with no observed pace behind it has no rate to state.
+  if (span == null || cost.monthlyUsd == null) return null;
+  // ⚠ THE MEASUREMENT WINDOW FOR THE WORK, NOT A BILLING PERIOD — the words have to say which, or
+  // this sentence is back to claiming a spend over the span.
+  const measured = `measured over the ${formatSpanDays(span.days)} its comments span here`;
+  const spend =
+    `${formatUsd(unacted.unactedUsd)} a month of this reviewer's ${formatUsd(cost.monthlyUsd)} ` +
+    `monthly price is buying feedback nobody acts on — you acted on ` +
+    `${formatMetricValue(unacted.actedOnRate, 'rate')} of the ` +
+    `${formatCount(unacted.settledThreads)} threads it settled here, ${measured}.`;
+
+  const peer = cost.atPeerEngagement;
+  if (peer.status !== 'value') return { tone: 'measured', spend, comparison: null };
+  const gap = peer.conversionGapUsd;
+  const median = formatMetricValue(peer.cohortActedOnRate, 'rate');
+  if (gap > 0) {
+    return {
+      tone: 'behind',
+      spend,
+      comparison:
+        `At the cohort's median acted-on rate of ${median}, ${formatUsd(gap)} a month more of that ` +
+        'same price would be acted on — your threads and your price, their engagement.',
+    };
+  }
+  if (gap < 0) {
+    return {
+      tone: 'ahead',
+      spend,
+      comparison:
+        `Your team acts on more of this reviewer than the cohort's median (${median}): ` +
+        `${formatUsd(-gap)} a month more of that price reaches something than it would at peer ` +
+        'engagement.',
+    };
+  }
+  return {
+    tone: 'even',
+    spend,
+    comparison:
+      `Your acted-on rate matches the cohort's median (${median}), so peer-level engagement would ` +
+      'convert none of that price differently.',
+  };
 }
 
 /** The model-derived block: named, with its precondition, and NEVER drawn as a zero or an empty

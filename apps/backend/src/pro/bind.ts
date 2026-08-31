@@ -224,6 +224,15 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       // The seam member is OPTIONAL (see contract.ts) so an older host degrades this ONE feature
       // rather than the plugin; THIS host implements it, so it is always present here.
       getWorkPlan: (accountId, scope) => getWorkPlan(accountId, scope),
+      // The workspace's derived human seat count — the ONE multiplier a `per_seat` price is read
+      // through, shared with `effectiveMonthlyUsd` and the ROI table's effective `costMonthlyUsd`
+      // so the Benchmark tab cannot quote a different monthly figure for the same bot than the
+      // Bots tab does. Takes a workspaceId and NOT a scope on purpose: the count keys on workspace
+      // MEMBERSHIP, never on a repoIds narrowing (a per-seat invoice does not shrink because the
+      // reader filtered a chart). The seam member is OPTIONAL (see contract.ts); THIS host
+      // implements it, so it is always present here.
+      workspaceHumanSeatCount: (accountId, workspaceId) =>
+        hostQueries.workspaceHumanSeatCount(accountId, workspaceId),
     },
     recordAiUsage: (row) => recordAiUsage(row),
     aiCredits: {
