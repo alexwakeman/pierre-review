@@ -8971,14 +8971,28 @@ export interface BotBenchmarkCoverage {
   observedAt: { min: string; max: string } | null;
 }
 
-/** ⚠ RULE 2's DECLARED SLOTS. Permanently null in fit v1 because nothing widens; a future widening
- *  MUST fill them, and a consumer is entitled to refuse any cell whose cohort is not exactly its
- *  key. */
+/** ⚠ RULE 2's DECLARED SLOTS. `pooledOver`/`widenedFrom` are permanently null in fit v1 because
+ *  nothing widens; a future widening MUST fill them, and a consumer is entitled to refuse any cell
+ *  whose cohort is not exactly its key. */
 export interface BotBenchmarkCohort {
   vendor: string;
   activityBand: number;
   pooledOver: string[] | null;
   widenedFrom: string | null;
+  /** ⚠ HOW MANY BANDS THIS VENDOR EARNED (fit v2; 0 on a v1 artifact, which published one
+   *  vendor-agnostic table). It must ride EVERY rendered percentile: "you are in the upper fifth"
+   *  is honest at 5 bands and a misrepresentation at 10, and the band counts are 10/10/9/7/4/3/2
+   *  across the seven fitted vendors. */
+  nBands: number;
+  /** e.g. `"6 of 10"` — the denominator, pre-rendered so it cannot be dropped by a caller that
+   *  forgot it existed. Empty string on a v1 artifact. */
+  bandLabel: string;
+  /** The SUPPORT units' observed activity range — the interval the rank cut actually drew, not the
+   *  range over all members (a repository placed into the band can sit outside it). `null` on a v1
+   *  artifact. */
+  panelPrsPerPeriod: [number, number] | null;
+  /** Repositories that DEFINED the cut in this band. */
+  reposBandSupport: number;
 }
 
 interface BotBenchmarkCellPresent {
@@ -9036,12 +9050,24 @@ export interface BotBenchmarkUnfittableVendor {
   reviewBotComments: number;
 }
 
-/** One rank-decile band of `panelPrsPerPeriod` (MERGED PRs in the frame's 14-day window). */
+/** One rank band of `panelPrsPerPeriod` (MERGED PRs in the frame's 14-day window, ANY AUTHOR). */
 export interface BotBenchmarkBand {
   band: number;
-  /** [min, max] of the contributing repositories' merged-PR counts. */
+  /** [min, max] of the SUPPORT repositories' merged-PR counts — the interval the cut drew. */
   panelPrsPerPeriod: [number, number];
   repos: number;
+}
+
+/** One vendor's whole stratification. ⚠ PER VENDOR, not per artifact: the cut is drawn over each
+ *  vendor's own support repositories, so one repository running two products lands in two
+ *  different bands of two differently-sized ladders. A single flat band table (fit v1) is not a
+ *  projection of this and is deliberately not fanned out into one. */
+export interface BotBenchmarkVendorBands {
+  vendor: string;
+  nBands: number;
+  reposBandSupport: number;
+  /** Ascending by `band`. The PLACEMENT RULE reads the HIGH edges only, in this order. */
+  bands: BotBenchmarkBand[];
 }
 
 /** Which (vendor, band) keys the artifact actually holds — the SPA's selectable set, so it can
@@ -9102,7 +9128,9 @@ export interface BotBenchmarkManifest {
     stalenessThresholdsDays: { aging: number; stale: number; expired: number };
   };
   cohortAxes: { vendor: string; activityBand: string };
-  activityBands: BotBenchmarkBand[];
+  /** ⚠ PER VENDOR (fit v2). EMPTY on a fit v1 artifact — and placement then REFUSES rather than
+   *  reading a stratum that does not describe the vendor it is being asked about. */
+  activityBands: BotBenchmarkVendorBands[];
   metricSpecs: BotBenchmarkMetricSpec[];
   absentMetrics: BotBenchmarkAbsentMetric[];
   populations: Record<string, string>;
@@ -9110,9 +9138,12 @@ export interface BotBenchmarkManifest {
   exclusionReasons: Record<string, string>;
   coverageNote: string;
   available: BotBenchmarkCellKey[];
-  /** ⚠ `cellsFitted === 0` is a FIRST-CLASS state, and today's real one: the SPA renders ONE banner
-   *  ("the peer corpus is 8 repositories; every cohort needs 30") instead of thirteen identical
-   *  refusal paragraphs per cell. `metricCellsRefusedByRule` hands it the reason distribution. */
+  /** ⚠ `cellsFitted === 0` is a FIRST-CLASS state — the SPA renders ONE banner ("every cohort
+   *  needs 30 repositories") instead of thirteen identical refusal paragraphs per cell, and
+   *  `metricCellsRefusedByRule` hands it the reason distribution. It is no longer TODAY's state:
+   *  the bundled fit v2 corpus fits 43 of 45 cells over 2,204 repositories. Keep the branch — a
+   *  vendor cell can still refuse permanently, and a build with no corpus at all is a different
+   *  field entirely (`available: false`). */
   summary: {
     vendors: string[];
     cellsTotal: number;
@@ -9152,3 +9183,274 @@ export interface BotBenchmarkResponse {
  *  is a 400, never a silent truncation: a truncated cell list reads to the consumer as "those
  *  cohorts do not exist", which is the one claim this feature must never make by accident. */
 export const BOT_BENCHMARK_MAX_CELLS = 24;
+
+// ── The CUSTOMER'S PLACEMENT in the peer cohort — GET /api/pro/bot-benchmark/placement ──────────
+//
+// The other half of "how does our bot compare". `GET /api/pro/bot-benchmark` serves the COHORT and
+// makes no claim about any caller; this route computes the caller's OWN metric vector over the
+// corpus's populations and places it. They are two decisions and they stayed two routes, because
+// mixing them is how a benchmark starts comparing two columns that share a name and nothing else.
+//
+// ⚠ THE UNIT OF COMPARISON IS ONE (repository, vendor) PAIR. Never a workspace aggregate: every
+// distribution in every cell is over (repo, vendor) units, so a workspace-wide acted-on rate is a
+// number no member of any cell resembles and its percentile is a rank in a distribution it does not
+// belong to. Bands are per vendor, so one repository running CodeRabbit and Copilot gets TWO
+// placements. A workspace view is n placements side by side, or it is nothing.
+//
+// ⚠ THE CUSTOMER'S METRICS ARE NOT THE APP'S METRICS. `getBotAnalytics.actedOnPct` folds the
+// `likely_addressed` commit heuristic into its numerator and divides by every in-window thread;
+// `overdueUntouched` uses a fixed 36 h grace; `overlapPct` clusters anchors within ±3 lines. All
+// three stay exactly as they are — this route computes the corpus's definitions from scratch
+// (`packages/ml/docs/METRIC-CONTRACT.md`, pinned by a golden cross-language fixture). Two
+// independent implementations of `acted_on_rate` do not compare a customer to a cohort; they
+// compare two questions and render the difference as a finding.
+
+/** Why no cohort exists for this (vendor, activity) pair. FIVE DIFFERENT SENTENCES, and collapsing
+ *  them into one "no peer data" is the failure these arms exist to prevent. */
+export type BotBenchmarkPlacementRefusalReason =
+  /** "We have never measured this bot." DeepSource, `github_code_quality`,
+   *  `github_advanced_security`, `codex` and every unbranded reviewer. */
+  | 'vendor_not_in_corpus_vocabulary'
+  /** "This is not a product." The corpus's catch-all strings (`in_house`, `unknown`, `''`). */
+  | 'vendor_unfittable'
+  /** "We have too little of this bot." Measured, then declined to stratify — a single cohort
+   *  spanning the vendor's whole activity range is the ABSENCE of a stratum, not a coarse one. */
+  | 'vendor_unstratifiable'
+  /** The vendor has cells; this band is not among them. Never widened to the nearest band. */
+  | 'cell_not_in_corpus'
+  /** ⚠ ONE OF TWO REFUSALS THAT ARE ABOUT THE CUSTOMER, NOT THE CORPUS. A repository the host has
+   *  held for less than the activity window has a PARTIAL window, so its merged-PR count is an
+   *  undercount and would place it too LOW — silently. `repos.createdAt` is the app's only
+   *  visibility axis and is already load-bearing for My Turn's cutoff. */
+  | 'repo_window_incomplete'
+  /** ⚠ THE OTHER ONE: a COMPLETE window the repository simply did not use. `walkBudget` is derived
+   *  from the merge count, so zero merges means the fold reads ZERO pull requests — and every
+   *  reviewer then returns `vendor_silent`, "said nothing here", however much it actually wrote.
+   *  Observed: a repository whose 20 merged PRs carried 20 CodeRabbit findings, all merged 40 days
+   *  ago, reported all thirteen metrics as silence. An empty read must REFUSE rather than resolve
+   *  to a claim about a bot — the distinction this whole feature is built on. Note this is NOT
+   *  `repo_window_incomplete`: the window is whole, the work is elsewhere in time. */
+  | 'repo_inactive_in_window';
+
+/** Why one metric was withheld for this unit. The corpus's own exclusion vocabulary — spelled
+ *  identically so a refusal stays joinable to `BotBenchmarkManifest.exclusionReasons` — plus one
+ *  customer-side-only arm the corpus cannot have. */
+export type BotBenchmarkUnitExclusionReason =
+  | 'repo_not_walked'
+  /** ⚠ CUSTOMER-SIDE ONLY, AND IT MUST OUTRANK `vendor_silent`. `walkBudget` is derived from the
+   *  repository's merge count in the activity window, so a repository that merged nothing recently
+   *  has a budget of zero and the fold reads NO pull requests — every counter is 0 and the reviewer
+   *  would otherwise be reported as having said nothing. Observed: twenty real findings on pull
+   *  requests merged 40 days ago, rendered as silence across all thirteen metrics.
+   *  NOT `repo_not_walked`: the walk succeeded. Nothing was read because there was nothing in the
+   *  window to read — a fact about the repository's recent activity, not about our access to it. */
+  | 'no_prs_in_window'
+  /** No comment from this vendor anywhere in the repository's outcome population. ⚠ UNDEFINED,
+   *  NEVER 0.0 — uninstalled, path-scoped and category-suppressed are indistinguishable from here
+   *  and all three differ from "commented and was ignored". This is the rule whose violation
+   *  manufactures the product's headline finding out of nothing. */
+  | 'vendor_silent'
+  /** Live in the repository, nothing inside THIS metric's population — a reviewer whose comments
+   *  all sit on unmerged pull requests. A different claim: the bot is demonstrably reviewing. */
+  | 'vendor_absent_from_population'
+  /** Live in the population, population empty — a summariser that opens no review threads has no
+   *  thread-outcome rate. Unreachable on the volume side by construction. */
+  | 'denominator_empty'
+  /** Smaller than the metric's `minUnits`. A refusal and not a caveat, twice over: a per-repository
+   *  rate over two threads is noise wearing a percentage sign, AND the cohort EXCLUDED units like
+   *  this one, so comparing against a distribution it would not have joined is not a comparison. */
+  | 'below_min_units'
+  /** ⚠ CUSTOMER-SIDE ONLY. A comment whose body and excerpt are both null (a legacy row from the
+   *  2026-06 lean window) cannot be classified as a finding or an approval, so the two
+   *  body-reading volume metrics refuse rather than guess. */
+  | 'body_unobserved';
+
+/** Every counter the fold accumulates, published in full. ⚠ NOT SUMMARISED: a metric value that
+ *  disagrees with the cohort says something is odd, a counter says which population, which gate and
+ *  which row. Open maps keyed by the fitter's own names so a new counter needs no wire edit. */
+export interface BotBenchmarkPlacementCounters {
+  volume: Record<string, number>;
+  outcome: Record<string, number>;
+  /** Grace hours → count, e.g. `{ '72': 11, '168': 4 }`. */
+  overdueEligible: Record<string, number>;
+  overdueUntouched: Record<string, number>;
+  /** Repository-level disclosure. Belongs to no vendor's population and is never a numerator. */
+  repository: Record<string, number>;
+}
+
+/** The cohort side of one comparison — read off the placed cell, never recomputed. */
+export interface BotBenchmarkPlacementCohortMetric {
+  nRepos: number;
+  quantiles: Record<string, number>;
+  /** ⚠ THE ONLY THING THAT SAYS HOW MUCH THE MEDIAN COULD MOVE. At the 30-repo floor a rate's
+   *  median CI routinely spans 20 points; "your 41% vs the cohort's 38%" without it is reporting
+   *  noise as a gap. An anomaly whose value lies INSIDE this interval is suppressed. */
+  ciMedian95: [number, number] | null;
+  direction: BotBenchmarkDirection;
+  minUnits: number;
+  unit: string;
+}
+
+export type BotBenchmarkPlacementMetric =
+  | {
+      status: 'compared';
+      value: number;
+      /** The customer's OWN denominator size for this metric — the thing `minUnits` is applied to. */
+      units: number;
+      /** 0-100. Fraction-below-plus-half-ties off the cell's 21-knot inverse CDF. */
+      percentile: number;
+      cohort: BotBenchmarkPlacementCohortMetric;
+    }
+  | {
+      /** The customer has a real value; the COHORT refused this metric in this cell. A percentile
+       *  is structurally unavailable — never 0, never a plausible small number. */
+      status: 'uncompared';
+      value: number;
+      units: number;
+      reason: 'cohort_metric_refused';
+      cohortRefusal: { rule: string; message: string };
+    }
+  | { status: 'excluded'; reason: BotBenchmarkUnitExclusionReason; message: string };
+
+/** ⚠ FOUR KINDS, FOUR ACTIONS. A single "this bot is anomalous" verdict is not actionable; the
+ *  point of the split is that each one maps to a different thing to do about it. */
+export type BotBenchmarkAnomalyKind = 'volume' | 'engagement' | 'latency' | 'overlap';
+
+/**
+ * ⚠ AN ANOMALY NEEDS BOTH A SHARE AND A MAGNITUDE — the Chronology lesson, verbatim: "lopsided AND
+ * slow, or say nothing". A percentile alone invents a crisis in a healthy repository, because the
+ * 95th percentile of a cohort that is fine everywhere is still fine. Both gates are published, not
+ * just their conjunction, so a reader can see WHY it fired and a reviewer can argue with the
+ * threshold instead of the verdict.
+ */
+export interface BotBenchmarkAnomaly {
+  kind: BotBenchmarkAnomalyKind;
+  /** The metric name it fired on — the fitter's vocabulary, joinable to `metricSpecs`. */
+  metric: string;
+  /** What to DO about it. One sentence, templated — never model-generated. */
+  action: string;
+  /** GATE 1 — rank within the cohort. */
+  share: { percentile: number; threshold: number; direction: BotBenchmarkDirection };
+  /** GATE 2 — absolute distance from the cohort median, in the metric's own unit. */
+  magnitude: { value: number; cohortMedian: number; gap: number; threshold: number; unit: string };
+  /** The customer's own denominator — the sample this claim rests on. */
+  units: number;
+  /** The cohort it is a rank within, and how many bands that rank is out of. ⚠ "Upper fifth" is
+   *  honest at 5 bands and a misrepresentation at 10. */
+  cohortRepos: number;
+  bandLabel: string;
+}
+
+export interface BotBenchmarkPlacementActivity {
+  /** ⚠ MERGED PULL REQUESTS IN THE LAST 14 DAYS, **ANY AUTHOR**. The cohort's axis comes from
+   *  GH Archive's merged `PullRequestEvent` count with NO author predicate, so machine-authored
+   *  merges are IN the banding axis even though they are OUT of the volume denominator. Two
+   *  populations, two jobs: the denominator excludes bumps so a vendor is not judged against
+   *  lockfiles; the axis includes them because it proxies how busy the repository is. Excluding
+   *  them here would place a bump-heavy repository one or more bands too low (MEASURED: machine
+   *  merges are a median 13.2% of merges per cell, IQR 9.3-17.6%). */
+  mergedPrsLast14d: number;
+  /** The per-repository pull-request cap the corpus walk enforced, applied to the customer's set:
+   *  `min(150, round(mergedPrsLast14d * 90 / 14))`. ⚠ A FIDELITY CHOICE, not a definition. */
+  walkBudget: number;
+  /** How many of the repository's pull requests the fold actually read (`<= walkBudget`). */
+  prsConsidered: number;
+  /** Days since the host first held this repository. Below the activity window the placement
+   *  refuses — a partial window is a silent undercount. */
+  repoHeldDays: number;
+}
+
+export type BotBenchmarkPlacementCohort =
+  | {
+      status: 'placed';
+      activityBand: number;
+      nBands: number;
+      /** e.g. `"6 of 10"`. ⚠ Rides every rendered percentile. */
+      bandLabel: string;
+      /** The support units' observed activity range — the interval the rank cut actually drew. */
+      bandRange: [number, number];
+      cohortRepos: number;
+      /** Set only when the customer is busier than the top band's own high edge. A real caveat
+       *  about the outermost band ("the busiest CodeRabbit repository we measured lands 258 merges
+       *  a fortnight; you land 400"), NOT a refusal — the outermost bands are open in the direction
+       *  they face. */
+      aboveTopBandBy: number | null;
+    }
+  | {
+      status: 'refused';
+      reason: BotBenchmarkPlacementRefusalReason;
+      message: string;
+      /** R2 only — how far short the vendor fell, straight off the artifact's refusal block, so
+       *  the UI can say HOW MUCH rather than "no data". */
+      observed?: Record<string, number>;
+      required?: Record<string, number>;
+    };
+
+/** ⚠ AN ARRAY, NOT ONE ACTOR. The corpus's unit is `(repository, VENDOR)`, so two logins the
+ *  workspace classifies as the same vendor are ONE unit — merging them is the corpus semantics,
+ *  and reporting only the first would be a false claim about which account produced the numbers. */
+export interface BotBenchmarkPlacementReviewer {
+  userId: number;
+  login: string;
+  label: string | null;
+}
+
+export interface BotBenchmarkPlacementUnit {
+  repoId: number;
+  repoOwner: string;
+  repoName: string;
+  /** The automated reviewer(s) this unit folds, in the app's own vocabulary. */
+  reviewers: BotBenchmarkPlacementReviewer[];
+  /** The CORPUS vendor string this reviewer maps onto — `null` when the app knows a brand the
+   *  corpus has never seen (the placement then refuses with `vendor_not_in_corpus_vocabulary`). */
+  vendor: string | null;
+  /** The app's own `AutomatedReviewerKind`, so the SPA can label the bot even when the corpus
+   *  cannot place it. */
+  botKind: string | null;
+  activity: BotBenchmarkPlacementActivity;
+  placement: BotBenchmarkPlacementCohort;
+  counters: BotBenchmarkPlacementCounters;
+  /** Keyed by the fitter's metric names. */
+  metrics: Record<string, BotBenchmarkPlacementMetric>;
+  /** Empty is the common and healthy answer. */
+  anomalies: BotBenchmarkAnomaly[];
+}
+
+export interface BotBenchmarkPlacementResponse {
+  /** ⚠ ONE BANNER, NOT n IDENTICAL PARAGRAPHS. `false` covers the whole-artifact states: no corpus
+   *  in this build, or a `fit_version` this build will not half-read. */
+  available: boolean;
+  reason?: BotBenchmarkUnavailableReason;
+  message?: string;
+  /** Echoed on every scoped response — unlike the cohort route, this one IS tenant data. */
+  workspaceId: number;
+  /** The artifact's whole identity, so a placement can be joined back to the cohort it used. */
+  fitKey?: string;
+  /** Recomputed per request against `corpus.observedAtMax` — the stored value decays on disk. */
+  staleness?: { corpusAgeDays: number; state: BotBenchmarkStaleness };
+  /** The parameters the fold ran on, read from the artifact and never inlined. */
+  params?: { settleHours: number; overdueGraceHours: number[]; activityWindowDays: number };
+  units?: BotBenchmarkPlacementUnit[];
+  /** ⚠ STRUCTURAL ABSENCE, PASSED THROUGH. `high_severity_share` / `nit_share` /
+   *  `distinct_category_count` are model-derived and appear in NO cell while the corpus is
+   *  unscored. It matters most HERE, because the host already HAS these numbers — ML severity is a
+   *  shipped free feature — so the temptation is to render the customer's severity distribution
+   *  against nothing, or against a placeholder. The key is not there to read. */
+  absentMetrics?: BotBenchmarkAbsentMetric[];
+  /** Prose caveats that are NOT refusals: the cohort's fixed historical fortnight versus the
+   *  customer's trailing one, the public-repository corpus, the recency cap. */
+  disclosures?: string[];
+  /** ⚠ NEVER A SILENT TRUNCATION. `true` when the workspace held more (repository × reviewer)
+   *  pairs than one request may fold; the omitted pairs are not "no data". */
+  truncated?: boolean;
+}
+
+/** The per-request cap on REPOSITORIES folded. The response body is small; the WORK is a real fold
+ *  over the tenant's pull requests, threads and comments, and the repository count is the cost
+ *  driver (each one reads up to its own `walkBudget` pull requests and everything hanging off
+ *  them). This bounds the work per request while the rate tier bounds the request count —
+ *  complementary, neither a substitute.
+ *
+ *  ⚠ NEVER A SILENT TRUNCATION. Over the cap the response sets `truncated: true` and the caller
+ *  narrows with `?repoIds=`; the omitted repositories are not "no data". */
+export const BOT_BENCHMARK_MAX_PLACEMENT_REPOS = 12;

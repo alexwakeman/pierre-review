@@ -238,7 +238,39 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // ⚠ STANDING INVARIANT, WRITTEN BEFORE THE FOLD EXISTS: if this route ever grows a customer-side
   // PLACEMENT leg (a per-repo × vendor read of the tenant's own PRs), the tier must be re-decided
   // IN THAT SAME CHANGE. `/api/attention` moved its tier only after the fold had landed.
+  //
+  // THE FOLD LANDED, AND IT LANDED AS A SIBLING PATH RATHER THAN A LEG — so the invariant is
+  // honoured by the line BELOW, decided here, in the same change. Both stay EXACT `===` matches
+  // (see the near-miss note above); an `===` on the parent cannot swallow the child, and a
+  // `startsWith` on either would be one sibling away from the failure this file has recorded three
+  // times.
   if (!mutating && path === '/api/pro/bot-benchmark') return [TIERS.search, TIERS.read];
+
+  // GET /api/pro/bot-benchmark/placement — the CUSTOMER side: the caller's own (repository ×
+  // vendor) metric vector, folded over the corpus's populations, placed in an activity band and
+  // compared against the cell.
+  //
+  // FOLLOWING THE TOKEN. Its parent route's cost is its RESPONSE BODY; this one's cost is a
+  // DATABASE FOLD, and the two arguments are unrelated — which is exactly why the tier is spelled
+  // separately instead of being read across from the line above. Per request it reads, for up to
+  // BOT_BENCHMARK_MAX_PLACEMENT_REPOS (12) repositories: one windowed merged-PR count, up to
+  // `walk_budget` (≤150) pull-request rows, and every review thread, review comment, PR comment
+  // and review body hanging off them — then folds thirteen metrics per (repository × automated
+  // reviewer) pair. That is the same shape of cost as the flagging/volume/bot-behaviour family
+  // beside it (this process's event loop and this database, not GitHub quota and not Anthropic),
+  // so it takes the same 60/min `search` bucket by the identical argument, and emphatically NOT
+  // the `/api/pro/` catch-all's 600/min GET→read branch, which is what it would silently inherit.
+  //
+  // The REPOSITORY CAP bounds the work per request; this tier bounds the request count.
+  // Complementary, neither a substitute — and the cap is part of THIS decision, not a separate
+  // nicety: without it one request folds an entire workspace and the arithmetic above is wrong by
+  // whatever a tenant's repository count happens to be.
+  //
+  // It must NEVER grow a GENERATION leg (the `GET /api/pro/prs/:id/annotations` precedent) — there
+  // is no model anywhere in this feature and its anomaly sentences are templated.
+  if (!mutating && path === '/api/pro/bot-benchmark/placement') {
+    return [TIERS.search, TIERS.read];
+  }
 
   // ---- Synthesis (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
   // ONE endpoint, two verbs, two costs (plan P2.1):

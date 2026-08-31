@@ -45,7 +45,7 @@ Three places carry it, and they are ONE decision written three times:
   metrics share the pane and are the reason the entry is free. Only the named sub-tab is gated.
 - ⚠ **VISIBLE-BUT-LOCKED, WHICH REVERSES THE APP'S USUAL POSTURE** (elsewhere a missing capability
   is silent absence — `WorkspaceBotCharts` returns null, the "Depth →" pill is omitted). The
-  reversal is scoped to five named surfaces; `apps/frontend/src/components/ProGate.tsx` enumerates
+  reversal is scoped to six named surfaces; `apps/frontend/src/components/ProGate.tsx` enumerates
   them and owns the badge and the locked pane. Nothing hand-rolls either.
 - ⚠ **AN UNENTITLED `?insightsTab=bottlenecks` RENDERS THE LOCK UNDER THE TAB IT NAMED.**
   `effectiveInsightsTab` normalises values outside the union only — never a gated member. That

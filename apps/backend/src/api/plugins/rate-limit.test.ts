@@ -197,14 +197,29 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/pro/bot-benchmark')).not.toContain('ai');
   });
 
-  // ⚠ THE NEAR-MISS GUARD. The entry is an EXACT `===`, and the two routes differ from the fourth
-  // character of the last segment. A `startsWith('/api/pro/bot-b')` would pass the assertion above
-  // and silently re-tier its sibling; asserting they resolve INDEPENDENTLY is what catches that.
-  it('does not let the benchmark entry swallow its bot-behaviour sibling', () => {
+  // GET /api/pro/bot-benchmark/placement — the CUSTOMER side, and a completely different cost
+  // argument from its parent's: the parent's cost is the response body, this one's is a DATABASE
+  // FOLD (up to 12 repositories × ≤150 pull requests, every thread/comment/review hanging off them,
+  // then thirteen metrics per repository × reviewer). Same shape of cost as the bot-behaviour and
+  // synthesis-GET neighbours — this process's event loop and this database — so the same 60/min
+  // bucket, and emphatically NOT the /api/pro/ catch-all's 600/min GET→read branch that it would
+  // otherwise inherit. The parent route's own comment declared this re-decision mandatory the day
+  // a placement leg landed; this is that decision.
+  it('puts the customer PLACEMENT fold on the expensive bucket, decided not inherited', () => {
+    expect(tiers('GET', '/api/pro/bot-benchmark/placement')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/pro/bot-benchmark/placement')).not.toContain('ai');
+  });
+
+  // ⚠ THE NEAR-MISS GUARD. Both entries are EXACT `===`, and the routes differ from the fourth
+  // character of a segment. A `startsWith('/api/pro/bot-b')` would pass the assertions above and
+  // silently re-tier their siblings; asserting they resolve INDEPENDENTLY is what catches that.
+  it('does not let the benchmark entries swallow their siblings', () => {
     expect(tiers('GET', '/api/pro/bot-behaviour')).toEqual(['search', 'read']);
-    // A path that merely starts with the benchmark route's spelling is NOT the benchmark route,
-    // so it falls through to the /api/pro/ catch-all's GET→read branch.
+    // A path that merely starts with a benchmark route's spelling is NOT that route, so it falls
+    // through to the /api/pro/ catch-all's GET→read branch.
     expect(tiers('GET', '/api/pro/bot-benchmark/cells')).toEqual(['read']);
+    expect(tiers('GET', '/api/pro/bot-benchmark/placements')).toEqual(['read']);
+    expect(tiers('GET', '/api/pro/bot-benchmark/placement/extra')).toEqual(['read']);
   });
 
   // /api/pro/synthesis (P2.1) — one endpoint, two verbs, two DECIDED tiers. The POST is a real

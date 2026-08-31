@@ -4,7 +4,7 @@ import { ExternalLinkIcon, LockIcon } from './Icons.js';
 import { useMe } from '../hooks/useTriage.js';
 
 // THE ONE PRO INDICATOR. Every surface that is Pro-only wears the badge and the locked pane
-// from this file, and nothing anywhere hand-rolls either — five surfaces drifting into five
+// from this file, and nothing anywhere hand-rolls either — six surfaces drifting into six
 // slightly different vermilion chips is exactly how "is this broken or is this paid?" gets
 // asked in a support thread.
 //
@@ -19,11 +19,20 @@ import { useMe } from '../hooks/useTriage.js';
 // opposite: it renders a `ProLockPanel` on the contributor-activity tab, because that tab is the
 // only place an unentitled reader can meet the People report at all.
 //
-// Five named surfaces now do the opposite: Chronology, period reports, the People report, the
-// by-workspace comparison and the Bots ROI panel are VISIBLE-BUT-LOCKED. The reader sees the
-// tab, the tab says Pro, and clicking it lands on a calm statement of what the view answers
-// plus one way to read more. The reversal is scoped to those five; do not "make it consistent"
-// by converting the absent ones.
+// SIX named surfaces now do the opposite: Chronology, period reports, the People report, the
+// by-workspace comparison, the Bots ROI panel and the Bots PEER BENCHMARK are VISIBLE-BUT-LOCKED.
+// The reader sees the tab, the tab says Pro, and clicking it lands on a calm statement of what the
+// view answers plus one way to read more. The reversal is scoped to those six; do not "make it
+// consistent" by converting the absent ones.
+//
+// ⚠ THE SIXTH WAS ADDED DELIBERATELY, AND THE ARGUMENT IS ON THE RECORD. The Benchmark tab could
+// have hidden inside the already-locked `roi` branch and cost no new upsell. It did not, because
+// it is the only surface in the product that answers "is this bot NORMAL?" — a question a reader
+// cannot discover from anywhere else, and cannot ask of their own data at all. A locked tab that
+// names the question is the whole of rule 2 below; an absent one would leave the question
+// unasked. That is a product decision with its own justification, not a side effect of adding a
+// tab, and it is why the count in this comment is load-bearing: the NEXT one needs its own
+// argument too.
 //
 // ── THE THREE RULES THIS COMPONENT KEEPS ─────────────────────────────────────────────────────
 //  1. IT NEVER READS A CAPABILITY. The caller passes entitlement in, so the gate is legible at
@@ -70,7 +79,7 @@ import { useMe } from '../hooks/useTriage.js';
 // often than it looks. `entitledProCapabilities` short-circuits on `isLocal` to whatever the bound
 // plugin published, and the plugin publishes `periodReports`/`botDepth` as
 // `PRO_DIGEST_ENABLED === 'true'` — so an ordinary flag-less `pnpm dev` WITH the submodule checked
-// out renders all five locked panes, each offering this off-site link. `pnpm demo` and the shots
+// out renders all six locked panes, each offering this off-site link. `pnpm demo` and the shots
 // Pro pass set the flag; the ordinary dev loop does not (`PRO_DIGEST_ENABLED=true` is the
 // fully-entitled local run, recorded in CLAUDE.md § Tiers).
 //

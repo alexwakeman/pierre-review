@@ -6,6 +6,7 @@ import {
   DEFAULT_CATEGORIES,
   DEFAULT_PR_STATUSES,
   DEFAULT_REVIEW_STATES,
+  BOTS_INNER_TABS,
   INSIGHTS_INNER_TABS,
   PR_DETAIL_TABS,
   freshFilterDefaults,
@@ -15,6 +16,7 @@ import {
   sanitizePersistedFilters,
   sanitizePersistedScope,
   useFilters,
+  type BotsInnerTab,
   type FilterState,
   type InsightsInnerTab,
   type PrDetailTab,
@@ -362,9 +364,12 @@ export function readFromUrl(): Partial<FilterState> {
   // permanently forget a choice the moment a capability blinked.
   const feedTab = p.get('feedTab');
   if (feedTab === 'themes' || feedTab === 'feed') out.feedInnerTab = feedTab;
+  // ⚠ 'benchmark' IS PARSED ON EVERY TIER, capability or not. It is one of the visible-but-locked
+  // members, so an unentitled bookmark must land on the tab it names and meet the LOCK there —
+  // dropping it here would silently seat 'roi' and explain nothing.
   const botsTab = p.get('botsTab');
-  if (botsTab === 'roi' || botsTab === 'advisor' || botsTab === 'settings') {
-    out.botsInnerTab = botsTab;
+  if ((BOTS_INNER_TABS as readonly string[]).includes(botsTab ?? '')) {
+    out.botsInnerTab = botsTab as BotsInnerTab;
   }
   // The Reports pane's strip. Same raw-seat rule: InsightsView derives what it renders (a value
   // outside the union normalises to 'overview' FOR THE RENDER), so an unknown literal here would

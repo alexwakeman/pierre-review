@@ -343,7 +343,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   pane gates its Pro half internally — `PeriodReportsPanel`, Track usage, **and now the Chronology
   sub-tab**, each as a visible-but-locked pane. The same rule holds on the **Bots** rail: the entry
   and the sub-tab strip stay open on every tier (it owns the free Settings/classification screen),
-  and the `roi` BODY locks. ⚠ **A gated sub-tab must still be SELECTABLE** — `effectiveInsightsTab`
+  and the `roi` and `benchmark` BODIES lock. ⚠ **A gated sub-tab must still be SELECTABLE** — `effectiveInsightsTab`
   normalises an out-of-union value and nothing else, never a capability fallback, or an unentitled
   `?insightsTab=bottlenecks` from a bookmark silently lands on Overview explaining nothing.
 - **Pending cards carry MERGE-RELATED ACTIONS, on the two FORWARD kinds only** (`merge`,
@@ -514,10 +514,12 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   prices), `activityDigest`, and `periodReports` (period reports + by-workspace axis + the People
   report + **Chronology**); **pro+** is AI Analysis + AI Fix + Claude Review, on the ONE flag
   `PRO_ADVANCED_AI_ENABLED`.
-- ⚠ **Those last five surfaces are VISIBLE-BUT-LOCKED, reversing the app's "absent, never upsold"
-  posture** (Chronology, period reports, the People report, the by-workspace axis, the ROI panel):
-  tab listed, `ProBadge` on it, body renders `ProLockPanel` — all from `components/ProGate.tsx`
-  (badge + lock + `useProGateState`; nothing hand-rolls a vermilion chip). Scoped to those five.
+- ⚠ **Those last SIX surfaces are VISIBLE-BUT-LOCKED, reversing the app's "absent, never upsold"
+  posture** (Chronology, period reports, the People report, the by-workspace axis, the ROI panel,
+  and the Bots → **Benchmark** tab): tab listed, `ProBadge` on it, body renders `ProLockPanel` — all
+  from `components/ProGate.tsx`
+  (badge + lock + `useProGateState`; nothing hand-rolls a vermilion chip). Scoped to those six — a
+  seventh needs its own argument, written down where ProGate.tsx keeps the other six.
   **Every one is server-enforced with a 402** (a client gate is not a monetisation gate) **and
   every hook reaching a gated route ANDs the capability into its own `enabled`**, or the SPA polls
   a 402. ⚠ Local/OSS is gated too — `entitledProCapabilities` short-circuits on `isLocal` to
@@ -558,14 +560,21 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   Deterministic; **no `?workspace=` and no `workspaceId` echo** because nothing about the caller
   reaches the response. Contract in
   [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § The peer benchmark. What
-  bites: ⚠ **refusals are the PRODUCT** — today every cell refuses (8 repos vs a floor of 30), so
+  bites: ⚠ **refusals are the PRODUCT** — the bundled corpus is now REAL (2,204 repos, fit v2:
+  43 fitted cells over 7 vendors, 415 fitted metric-cells) but 2 cells and 170 metric-cells still
+  refuse on `cell_floor`, and severity/category are absent entirely because the corpus is UNSCORED;
   never normalise one into a distribution shape (`{quantiles: null}`, `nRepos: 0`, `grid: []`); ⚠
   **staleness is RECOMPUTED per request**, the stored age decays on disk; ⚠ `metricSpecs` ships in
   FULL because **the app's columns are NOT the cohort's** (`actedOnPct` folds in `likely_addressed`
-  and divides by every thread; `acted_on_rate` divides by SETTLED ones); ⚠ `?cells=` caps at 24 and
+  and divides by every thread; `acted_on_rate` divides by SETTLED ones) — and the SPA renders
+  display labels only, never a re-typed definition; ⚠ `?cells=` caps at 24 and
   **400s over-cap, never truncates**; ⚠ `build-release.mjs` must copy `data` or the failure is
   PRODUCTION-ONLY and silent; ⚠ a refresh is a THREE-repo motion (`fit.py --publish` → commit in the
-  submodule → **move the gitlink**).
+  submodule → **move the gitlink**). Its SIBLING `GET /api/pro/bot-benchmark/placement` places the
+  CUSTOMER (workspace-scoped, echoes `workspaceId`); the SPA half is **Bots → Benchmark**, the SIXTH
+  visible-but-locked surface — ONE fetch on mount, the anomaly list as the headline, every
+  percentile carrying its cohort n AND its band count (bands are 10/10/9/7/4/3/2 per vendor), and
+  fourteen distinct refusal sentences ([docs/FRONTEND.md](docs/FRONTEND.md) § Bots → Benchmark).
 - **The work plan** (`workPlan` gates the NARRATION ONLY): "what should I work on today", folded
   into the **Pending** board as its ranked "Do next" head. **THE CODE RANKS, FREE; THE MODEL
   NARRATES, PAID** — the rank is CORE (`db/work-plan.ts`) and served free by `GET /api/attention`,

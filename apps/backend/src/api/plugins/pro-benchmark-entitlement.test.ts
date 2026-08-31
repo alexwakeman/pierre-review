@@ -45,8 +45,19 @@ const cloudAccount = (plan: string): any => ({
 /** The synthesized single-tenant account a `pnpm dev` / `npx pierre-review` run always has. */
 const LOCAL_ACCOUNT = { ...cloudAccount('free'), id: 1, isLocal: true };
 
-/** Every plugin route this file cares about, plus a CORE route that must never be swept in. */
-const PRO_ROUTES = ['/api/pro/bot-benchmark', '/api/pro/bot-behaviour'] as const;
+/** Every plugin route this file cares about, plus a CORE route that must never be swept in.
+ *
+ *  ⚠ `/api/pro/bot-benchmark/placement` IS THE ONE THAT ACTUALLY LEAKS TENANT DATA. Its parent
+ *  serves a corpus identical for every tenant — an unentitled reader of that learns market data.
+ *  The placement route answers with the CALLER'S OWN repositories, reviewers and rates, so a gate
+ *  that silently stopped covering it would hand a free account a paid analysis of its own bots. It
+ *  is gated by exactly one thing — being under `/api/pro/` — and nothing in the plugin's route file
+ *  mentions that, which is why it is pinned here. */
+const PRO_ROUTES = [
+  '/api/pro/bot-benchmark',
+  '/api/pro/bot-benchmark/placement',
+  '/api/pro/bot-behaviour',
+] as const;
 const FREE_ROUTE = '/api/bot-reviewers';
 
 async function get(url: string): Promise<{ status: number; body: any }> {
@@ -126,5 +137,22 @@ describe('GET /api/pro/bot-benchmark rides the automatic /api/pro/* paywall', ()
   it('leaves the free bot routes free — this half catches OVER-gating', async () => {
     account = cloudAccount('free');
     expect((await get(FREE_ROUTE)).status).toBe(200);
+  });
+
+  it('gates the PLACEMENT leg, which is the half that carries tenant data', async () => {
+    // Spelled separately from the loop above because the argument is different: the cohort route
+    // leaks market data, this one leaks the customer's own analysis. A `startsWith` narrowing of
+    // `isProPath` that happened to keep the parent covered while dropping the child would pass
+    // every other assertion in this file.
+    account = cloudAccount('free');
+    const res = await get('/api/pro/bot-benchmark/placement?workspace=3&repoIds=1,2');
+    expect(res.status).toBe(402);
+    expect(res.body).toEqual({ error: 'pro required' });
+    // …and 401 ahead of the 402, so an unauthenticated caller cannot use the status to learn that
+    // the route exists.
+    account = null;
+    expect((await get('/api/pro/bot-benchmark/placement')).status).toBe(401);
+    account = cloudAccount('pro');
+    expect((await get('/api/pro/bot-benchmark/placement')).status).toBe(200);
   });
 });

@@ -51,9 +51,9 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 // capability the account does not have is ABSENCE — `WorkspaceBotCharts` returns null, the
 // "Depth →" pill is simply omitted, `AskAboutPeriod` below renders nothing without
 // `activityDigest` — and that stays true everywhere else. (⚠ Not `PersonPeriodSection`: it used to
-// be the stock example and is now one of the five locked surfaces.) Here the tab is listed for
+// be the stock example and is now one of the six locked surfaces.) Here the tab is listed for
 // everyone, wears a `Pro` chip, and opens onto
-// `ProLockPanel`: what the view answers, plus one link. The reversal is scoped to five named
+// `ProLockPanel`: what the view answers, plus one link. The reversal is scoped to six named
 // surfaces (components/ProGate.tsx enumerates them); do not "make it consistent" by converting
 // the absent ones.
 //

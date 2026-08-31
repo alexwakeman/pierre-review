@@ -80,6 +80,17 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // `'roi'` member is now handled this way too (selectable, body locks).
 export type InsightsInnerTab = 'overview' | 'bottlenecks';
 export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'bottlenecks'];
+// The Bots rail's sub-tab strip. ⚠ TWO POSTURES IN ONE UNION, both deliberate:
+//   • `'advisor'` is only LISTED when entitled (`botAdvisor`) and BotsView's `effectiveBotsTab`
+//     degrades it to `'roi'` when it is not — the older "absent, never upsold" posture.
+//   • `'roi'` and `'benchmark'` are VISIBLE-BUT-LOCKED (`botDepth`): listed on every tier, badged,
+//     and their BODIES render `ProLockPanel`. They must NEVER be corrected away, or an unentitled
+//     `?botsTab=benchmark` from a bookmark lands somewhere else and explains nothing.
+// The visible member is DERIVED per render (`effectiveBotsTab` in `Activity/benchmarkModel.ts`);
+// a corrective `setBotsInnerTab()` permanently forgets the reader's choice for the OTHER mount
+// that shares this one scalar (the per-repo console's Bots tab).
+export type BotsInnerTab = 'roi' | 'advisor' | 'settings' | 'benchmark';
+export const BOTS_INNER_TABS: readonly BotsInnerTab[] = ['roi', 'advisor', 'settings', 'benchmark'];
 // PrDetail's inner tab strip. It lives HERE, not in PrDetail's local state, because it is
 // URL-ADDRESSABLE: `?view=pr:<id>&prTab=changes` names one screen, so browser Back/Forward can
 // move between "the PR's diff" and "the PR's threads" like every other view. Which member is
@@ -479,11 +490,14 @@ export interface FilterState {
   // effectiveTab fallback still owns any degradation ('advisor' is capability-gated — the
   // derived-effective-tab rule). Transient, URL-silent.
   //
-  // ⚠ URL-SERIALIZED (`?botsTab=advisor|settings`, the 'roi' default omitted) and a NAVIGATION
-  // key, but ONLY alongside `activityRepo=bots` — the cross-repo Bots rail, where the strip is on
-  // screen. The per-repo console's Bots tab shares this scalar and does NOT emit it; a sub-tab
-  // that is not visible is not a view. Still transient: URL-visible ≠ persisted.
-  botsInnerTab: 'roi' | 'advisor' | 'settings';
+  // ⚠ URL-SERIALIZED (`?botsTab=advisor|settings|benchmark`, the 'roi' default omitted) and a
+  // NAVIGATION key, but ONLY alongside `activityRepo=bots` — the cross-repo Bots rail, where the
+  // strip is on screen. The per-repo console's Bots tab shares this scalar and does NOT emit it; a
+  // sub-tab that is not visible is not a view. Still transient: URL-visible ≠ persisted.
+  //
+  // ⚠ 'benchmark' (the peer-cohort placement, `botDepth`) is VISIBLE-BUT-LOCKED, so it is never
+  // corrected away — see the BotsInnerTab declaration above.
+  botsInnerTab: BotsInnerTab;
   // The Advisor tab's one-shot focus, set by the Tune/Drop pills on the Bots table: which
   // bot the advisor should open on, and with what intent ('tune' = its tuning findings,
   // 'drop' = the drop-shaped evidence: overlap + suppressions + cost). The PANEL treats it
@@ -897,7 +911,7 @@ export interface FilterState {
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
   // Switch the Bots view's inner sub-tab (ROI / experimental Behaviour / Themes / Settings).
-  setBotsInnerTab: (v: 'roi' | 'advisor' | 'settings') => void;
+  setBotsInnerTab: (v: BotsInnerTab) => void;
   // The Tune/Drop pills' entry point: focus the advisor on one bot AND switch the Bots view
   // to the Advisor tab in one action.
   focusAdvisor: (botKey: string, intent: 'tune' | 'drop') => void;

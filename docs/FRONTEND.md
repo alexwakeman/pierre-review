@@ -809,8 +809,9 @@ but broken deep links).
   legacy login-string classification PrDetail's bot chips still use; and every figure comes from
   the SAME folds the Threads tab uses (`rollupCounts`/`threadSeverities`/
   `resolvableBotThreadIds`) restricted to the bot subset, so card and tab cannot disagree.
-- **Bots view is down to `ROI ('roi' = Measure) | Advisor | Settings`** (`botsInnerTab` lost
-  `'behaviour'`/`'themes'` — transient + URL-silent, so member removal is safe). ⚠ **THE `roi`
+- **Bots view is `ROI ('roi' = Measure) | Advisor | Benchmark | Settings`** (`botsInnerTab` lost
+  `'behaviour'`/`'themes'` — transient + URL-silent, so member removal is safe — and gained
+  `'benchmark'`). ⚠ **THE `roi`
   SUB-TAB IS PAID (`botDepth`) AND THE WHOLE `BotRoiPanel` LOCKS IN PLACE** — the tab stays
   selectable (no corrective `setBotsInnerTab`; only `'advisor'` is still corrected), wears an
   unconditional `ProBadge variant="tab"`, and the BODY renders `ProLockPanel`
@@ -828,6 +829,55 @@ but broken deep links).
 - **The Bots RAIL ENTRY stays ungated on every tier**, exactly like Reports': it owns the free
   classification/Settings screen, the free triage flows and the governance caution. Its tooltip says
   which half is which.
+
+### Bots → Benchmark (the peer-cohort placement, `botDepth`)
+
+`BenchmarkPanel.tsx` + the pure `benchmarkModel.ts` + `hooks/useBotBenchmark.ts`, mounted by
+`BotsView`'s `BenchmarkTabBody`. It renders `GET /api/pro/bot-benchmark/placement` — this
+workspace's (repository × reviewer) units, folded over the CORPUS's own metric definitions, placed
+in a per-vendor activity band and ranked against the fitted cell. Tests:
+`apps/frontend/test/botsBenchmark.test.ts` (**hand-run — `apps/frontend/test/` is not in CI**).
+
+- ⚠ **SIXTH VISIBLE-BUT-LOCKED SURFACE, and the argument is in `ProGate.tsx`'s header.** It could
+  have hidden inside the already-locked `roi` branch; it does not, because it is the only place in
+  the product that answers "is this bot NORMAL?", and an absent tab leaves that question
+  undiscoverable. Tab listed on every tier, unconditional `ProBadge variant="tab"`, body renders
+  `ProLockPanel testId="benchmark-locked"` — DISTINCT from the entitled `benchmark-panel`.
+- ⚠ **THE VISIBLE TAB IS DERIVED AND `'benchmark'` IS NEVER CORRECTED.** `effectiveBotsTab()`
+  (in `benchmarkModel.ts`, so it can be tested without a renderer) degrades ONLY `'advisor'`;
+  `?botsTab=benchmark` is parsed on every tier off `BOTS_INNER_TABS` itself, so an unentitled
+  bookmark lands on the tab it names and meets the lock there.
+- ⚠ **THE ANOMALY LIST IS THE HEADLINE; the distributions are evidence beneath it.** A percentile
+  alone is trivia — the server's four templated `action` sentences are the product. Each finding
+  renders BOTH gates separately (`share` and `magnitude`), never their conjunction, so a reader can
+  argue with the threshold instead of the verdict. Empty renders a tally ("N comparisons across M
+  placed reviewers") so "nothing stands out" reads as CHECKED, not as NOT RUN.
+- ⚠ **EVERY RENDERED PERCENTILE CARRIES ITS COHORT n AND ITS BAND COUNT** (`percentileSentence`).
+  The seven fitted vendors carry 10/10/9/7/4/3/2 bands, so "upper fifth" is honest at 5 and a
+  misrepresentation at 10. The rank's denominator is the METRIC's own `cohort.nRepos`, NOT
+  `anomaly.cohortRepos` (the repositories that defined the band cut) — two different numbers.
+- ⚠ **FOURTEEN DISTINCT REFUSAL SENTENCES, pairwise asserted.** Five placement refusals, three
+  whole-artifact ones ("this build ships no corpus" is NOT "there isn't enough peer data yet"), six
+  per-metric exclusions, plus a fourteenth for "no automated reviewer to place". A customer's
+  biggest bot can be absent from the corpus entirely (DeepSource is real) — it renders NAMED, with
+  "we have never measured this reviewer", never a zero.
+- ⚠ **ONE FETCH ON MOUNT.** `useBotBenchmarkPlacement` is the tab's only query; the "How these are
+  measured" disclosure (`useBotBenchmarkSpecs`) is CLICK-GATED (`enabled: botDepth && open`) —
+  the Pending-board precedent, where an eager per-card fetch became 150 GitHub calls. Both hooks AND
+  `botDepth` into their own `enabled`, because a mounted-but-unentitled pane would otherwise poll a
+  402 on a timer.
+- ⚠ **THE DEFINITIONS ARE SERVED, NEVER RE-TYPED.** `METRIC_LABEL` holds DISPLAY names only; the
+  numerator/denominator/population comes from `metricSpecs` on the cohort route, because the app's
+  own bot columns are NOT these columns.
+- ⚠ **SEVERITY AND CATEGORY ARE STRUCTURALLY ABSENT, not empty and not zero** — model-derived, and
+  the corpus is unscored. They render in their own block, labelled `Model-derived` against every
+  other figure's `Counted`, with the precondition spelled out.
+- Charts: small-multiple SVG strips over the existing zero-dependency toolkit (ONE `useChartWidth`
+  for the whole panel, not one per row). ⚠ **NO RADAR CHART** — a rate, a count-per-PR and a
+  duration on one polygon claims they share a scale. `stripGeometry()` returns `null` rather than
+  drawing a partial grid, and its domain always CONTAINS the customer's value (a clipped dot reads
+  as "nothing there"). The dot carries NO verdict colour: `direction` is rendered as words, and the
+  only coloured mark is on a row that produced a finding.
 - **`bot-detail` is a new `TabKind`** (the per-bot depth drill-down that replaced the Behaviour
   tab): keyed PER BOT on `users.id` (`bot-detail:<userId>` — the user-activity pattern; the key's
   id and the fetch's `botUserId` narrowing can never name different bots), `TabBotMeta` chip
@@ -869,7 +919,7 @@ but broken deep links).
   "View activity →" reaches the same tab, which DOES carry the lock, so hiding one of two entry
   points costs the reader nothing.
 - ⚠ **`PersonPeriodSection` NO LONGER RENDERS NOTHING.** It was the codebase's stock example of the
-  absent-not-upsold posture and is now one of the five VISIBLE-BUT-LOCKED surfaces: on the
+  absent-not-upsold posture and is now one of the six VISIBLE-BUT-LOCKED surfaces: on the
   contributor-activity tab it renders `ProLockPanel` (`testId="person-period-locked"`) — the ONLY
   place an unentitled reader can meet the People report at all, since the picker lives inside the
   Reports Pro half and the report tab opens only from that picker. ⚠ Its lock heads **"1:1 prep"**

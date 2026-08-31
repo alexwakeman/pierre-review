@@ -60,6 +60,7 @@ import type {
   BotThemesResponse,
   HumanThemesResponse,
   BotBehaviourResponse,
+  BotBenchmarkPlacementResponse,
   BotBenchmarkResponse,
   BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
@@ -1419,6 +1420,22 @@ export const api = {
         cells && cells.length > 0
           ? `cells=${encodeURIComponent(cells.map((c) => `${c.vendor}:${c.band}`).join(','))}`
           : undefined,
+      ),
+    ),
+  // The CUSTOMER side of the benchmark (`botDepth`): the caller's own (repository × vendor) metric
+  // vector, folded over the CORPUS's populations, placed in an activity band and compared against
+  // the cell. ⚠ A SIBLING OF `botBenchmark`, NOT AN OPTION ON IT — the cohort response is identical
+  // for every tenant and takes no scope; this one IS tenant data, so it is workspace-scoped and
+  // echoes `workspaceId`, and its rate tier is argued from a database fold rather than a response
+  // body. `repoIds` narrows the DATA only (server-side it is intersected with the workspace's
+  // membership); send it whenever the array exists, INCLUDING when empty. Callers must AND the
+  // `botDepth` capability into their own `enabled`, or the SPA polls a 402.
+  botBenchmarkPlacement: (workspaceId: number, repoIds?: number[]) =>
+    get<BotBenchmarkPlacementResponse>(
+      withQuery(
+        '/api/pro/bot-benchmark/placement',
+        `workspace=${workspaceId}`,
+        repoIds ? `repoIds=${repoIds.join(',')}` : undefined,
       ),
     ),
   // The ONE synthesis endpoint (plan P2.1): GET = the free cached read + stale flag (never

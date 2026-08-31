@@ -7,10 +7,12 @@ import { WorkspaceBotCharts } from './WorkspaceBotCharts.js';
 import { BotThemesPanel } from './BotThemesPanel.js';
 import { BotAdvisorPanel } from './BotAdvisorPanel.js';
 import { BotSettingsPanel } from './BotSettingsPanel.js';
+import { BenchmarkPanel } from './BenchmarkPanel.js';
+import { benchmarkBodyFor, effectiveBotsTab } from './benchmarkModel.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { BotIcon } from '../Icons.js';
-import { ProBadge } from '../ProGate.js';
+import { ProBadge, ProLockPanel, useProGateState } from '../ProGate.js';
 
 // The Bots rail view — "the calm layer above your review bots". It composes:
 //   • the ROI / utilisation panel (per-bot signal-to-noise + trend + keep/tune/noisy verdicts),
@@ -26,18 +28,20 @@ import { ProBadge } from '../ProGate.js';
 // matters because a reader reaching for "just gate the view" would take four free surfaces with it.
 //
 //   PAID (`botDepth`)  the ROI / utilisation PANEL — `BotRoiPanel` locks itself and renders
-//                      `ProLockPanel` in its own place. The `WorkspaceBotCharts` section below it
-//                      was already `botDepth` and stays silently absent (its own, older posture).
+//                      `ProLockPanel` in its own place — and the BENCHMARK sub-tab, the peer-cohort
+//                      placement, which locks the same way. The `WorkspaceBotCharts` section below
+//                      the ROI table was already `botDepth` and stays silently absent (its own,
+//                      older posture).
 //   FREE (`botTriage`) everything else in the `roi` branch: the "only a bot reviewed N open PRs"
 //                      governance caution, the resolve backlog, the hoisted tuning suggestions and
 //                      the bot-only feed — plus the whole `Settings` sub-tab, which is the reason
 //                      the RAIL ENTRY MUST STAY UNGATED (an `npx` user has to be able to classify a
 //                      reviewer, and there is real free triage on this screen).
 //
-// The `ROI` sub-tab therefore keeps its place in the tab list for everyone and wears a Pro badge:
-// visible-but-locked, not absent. (`Advisor` keeps the opposite posture — it is only LISTED when
-// entitled — because it is workspace-grain and has no free half to sit beside. Two postures in one
-// tab strip is deliberate, not drift.)
+// The `ROI` and `Benchmark` sub-tabs therefore keep their place in the tab list for everyone and
+// wear a Pro badge: visible-but-locked, not absent. (`Advisor` keeps the opposite posture — it is
+// only LISTED when entitled — because it is workspace-grain and has no free half to sit beside.
+// Two postures in one tab strip is deliberate, not drift.)
 //
 // ── SCOPE: ONE WORKSPACE, ALWAYS ─────────────────────────────────────────────────────────────
 // Every panel here is scoped by `filters.workspaceId` — the single scope this app has. A BOT IS A
@@ -96,7 +100,11 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // render it. ('behaviour' and 'themes' left the union itself — the field is transient and
   // URL-silent, so no stored value can resurrect them; a removed key needs no runtime mapping,
   // only this derive-never-write-back rule for the capability-gated ones.)
-  const effectiveTab = innerTab === 'advisor' && !showAdvisor ? 'roi' : innerTab;
+  //
+  // ⚠ THE RULE NOW LIVES IN `benchmarkModel.ts` so it can be tested without a renderer, and it
+  // degrades ONLY `'advisor'`. `'benchmark'` and `'roi'` are visible-but-locked and are never
+  // corrected: an unentitled `?botsTab=benchmark` must land on the tab it names and meet the lock.
+  const effectiveTab = effectiveBotsTab(innerTab, { showAdvisor });
 
   return (
     <div className="space-y-3" data-testid="bots-view">
@@ -115,6 +123,10 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         {([
           { key: 'roi', label: 'ROI' },
           ...(showAdvisor ? [{ key: 'advisor', label: 'Advisor' } as const] : []),
+          // ⚠ LISTED ON EVERY TIER, exactly like ROI. The tab is the only place an unentitled
+          // reader learns the product can answer "is our bot normal?" at all, and a gated sub-tab
+          // must still be SELECTABLE or a bookmarked `?botsTab=benchmark` lands elsewhere.
+          { key: 'benchmark', label: 'Benchmark' },
           { key: 'settings', label: 'Settings' },
         ] as const).map((t) => {
           const on = effectiveTab === t.key;
@@ -132,8 +144,8 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               }`}
             >
               {t.label}
-              {/* The two paid sub-tabs, badged from the ONE shared badge so five surfaces cannot
-                  drift into five slightly different chips. `Settings` carries none — it is free.
+              {/* The three paid sub-tabs, badged from the ONE shared badge so six surfaces cannot
+                  drift into six slightly different chips. `Settings` carries none — it is free.
 
                   ⚠ THE ROI BADGE IS UNCONDITIONAL, not `!botDepth`. Advisor's has always shown to
                   the entitled (it is only listed for them at all), so a chip that appeared and
@@ -145,13 +157,15 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
                   The badge sits INSIDE the tab button so the accessible name composes as
                   "ROI, Pro feature"; it is a label with no click target of its own, because a link
                   inside a tab button is a nested interactive control. */}
-              {(t.key === 'advisor' || t.key === 'roi') && (
+              {(t.key === 'advisor' || t.key === 'roi' || t.key === 'benchmark') && (
                 <ProBadge
                   variant="tab"
                   title={
                     t.key === 'roi'
                       ? 'The ROI table is part of Pro.'
-                      : 'The Bot Tuning Advisor is part of Pro.'
+                      : t.key === 'benchmark'
+                        ? 'The peer benchmark is part of Pro.'
+                        : 'The Bot Tuning Advisor is part of Pro.'
                   }
                 />
               )}
@@ -167,6 +181,8 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
 
       {effectiveTab === 'advisor' ? (
         <BotAdvisorPanel />
+      ) : effectiveTab === 'benchmark' ? (
+        <BenchmarkTabBody repoId={repoId} />
       ) : effectiveTab === 'settings' ? (
         /* A per-repo Bots tab shows the SAME workspace listing, filtered client-side to the bots
            with a footprint in that repo — every edit there is still workspace-wide, and the panel
@@ -245,7 +261,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               until opened). The bottom of the Measure surface, above the bot feed.
 
               ⚠ SAME CAPABILITY AS THE PANEL ABOVE, DELIBERATELY DIFFERENT POSTURE: the panel is
-              visible-but-locked, this is silently absent. The reversal was scoped to five named
+              visible-but-locked, this is silently absent. The reversal was scoped to six named
               surfaces and this is not one of them — a second upsell stacked directly under the
               first would read as a paywall page rather than a screen with a paid section on it. If
               that is ever revisited, revisit it here, not by "making it consistent" in passing. */}
@@ -262,4 +278,39 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
       )}
     </div>
   );
+}
+
+/**
+ * The Benchmark tab's body: the real panel, the locked pane, or nothing at all for the beat
+ * `/api/me` is in flight.
+ *
+ * ⚠ THE BLANK BEAT IS THE POINT. `useProCapabilities()` reads all-false until `/api/me` resolves,
+ * so the obvious `!botDepth ? <lock/> : <panel/>` paints "See what Pro includes" for one frame on
+ * every cold load AT AN ACCOUNT THAT PAYS. `useProGateState` is the three-state answer.
+ *
+ * ⚠ AND THE GATE IS DOUBLED ON PURPOSE. `useBotBenchmarkPlacement` ANDs `botDepth` into its own
+ * `enabled` as well, because a client gate is not a monetisation gate: the route 402s, and a
+ * mounted-but-unentitled pane that polled it would be finding out by error on a timer. The lock
+ * decides what the reader SEES; the hook decides what the SPA asks for.
+ *
+ * The lock names the QUESTION this view answers, never the price (ProGate.tsx, rule 2), and it
+ * carries a testid DISTINCT from the entitled body's so no screenshot run can photograph a lock.
+ */
+function BenchmarkTabBody({ repoId }: { repoId?: number }): JSX.Element | null {
+  const { botDepth } = useProCapabilities();
+  // ⚠ THROUGH `benchmarkBodyFor`, not a hand-rolled two-way branch — the three-state decision is
+  // pinned by `apps/frontend/test/botsBenchmark.test.ts`, which has no renderer to mount this with.
+  const body = benchmarkBodyFor(useProGateState(botDepth));
+  if (body === 'blank') return null;
+  if (body === 'locked') {
+    return (
+      <ProLockPanel heading="Peer benchmark" testId="benchmark-locked">
+        Is this reviewer normal? Benchmark places each of your bots against the same product
+        running in repositories of comparable activity — how much it writes, how much of it your
+        team acts on, how long a person takes to reach it — and names the ones that are far enough
+        from their peers, in both rank and real terms, to be worth acting on.
+      </ProLockPanel>
+    );
+  }
+  return <BenchmarkPanel repoId={repoId} />;
 }

@@ -1074,7 +1074,7 @@ apiVersion change, no plugin change.
 for everyone, wears the shared `<ProBadge variant="tab">`, and `BotRoiPanel` renders `ProLockPanel`
 in its own place (`data-testid="bot-roi-locked"`; the entitled body keeps `bot-roi-panel`, which
 `scripts/capture-shots.mjs` waits on). That reverses this codebase's older "hidden, never upsold"
-posture, and the reversal is scoped to five named surfaces — see `components/ProGate.tsx`'s header.
+posture, and the reversal is scoped to six named surfaces — see `components/ProGate.tsx`'s header.
 Its sibling `WorkspaceBotCharts` keeps the OLD posture (silently absent on the same capability),
 deliberately: two upsells stacked in one tab read as a paywall page.
 
@@ -1197,10 +1197,14 @@ machinery. `PRO_BENCHMARK_FIT_PATH` is an **override only** (dev pointing at a f
   newest-by-mtime. `fit_key` (`fit-v1+corpus-v3+panel-…+model-unscored+params-…`) is the whole
   identity and rides every response.
 
-**Refusals are the product, not a degraded state.** Today's real bundled corpus is 8 repositories
-against a floor of 30, so `cells_total: 18, cells_fitted: 0` and all 234 metric entries refuse with
-`rule: 'cell_floor'`. That is correct output, and several vendor cells will refuse permanently even
-at full panel size. The response lets the SPA tell **five** situations apart:
+**Refusals are the product, not a degraded state.** ⚠ **This paragraph used to read "8
+repositories, `cells_fitted: 0`"; the bundled corpus is now REAL** — fit v2, 2,204 repositories,
+`cells_total: 45, cells_fitted: 43` over seven vendors and 415 of 585 metric-cells fitted, with 2
+cells and 170 metric-cells still refusing on `rule: 'cell_floor'` and severity/category absent
+entirely (`scoring.state: 'unscored'`). A refusing cell is still correct output, and several vendor
+cells will refuse permanently even at full panel size — so `cellsFitted === 0` remains a
+first-class state to render, it is simply no longer today's. The response lets the SPA tell **five**
+situations apart:
 
 | Situation | Shape |
 |---|---|
@@ -1266,20 +1270,92 @@ re-checked on every publish, not assumed. Commit a refreshed corpus only on a ma
 (a `fit_key` move); a genuinely weekly cadence would add ~90 MB/year to the submodule's history and
 should prompt revisiting the transport rather than living with the bloat.
 
-**What is NOT here.** The Bots → Benchmark TAB, the customer-side placement fold, the
-metric-definition reconciliation, and every rendered number. `direction` and `ci_median_95` are
-SERVED here and CONSUMED there — ⚠ at the 30-repo floor a rate's median CI routinely spans 20
-points, so "your 41% vs the cohort's 38%" without it is reporting noise as a gap. ⚠ Note that a
-Benchmark tab rendered visible-but-locked would be a **SIXTH** surface in a reversal
-`components/ProGate.tsx` currently documents as scoped to exactly five — a deliberate product
-decision with its own justification, not a side effect of adding a tab (and unnecessary if the tab
-sits inside the already-locked `roi` branch).
+**The metric-definition reconciliation is DONE and lives in `packages/ml/docs/METRIC-CONTRACT.md`**
+— the exact numerator/denominator/population/settle rule/exclusions for all 13 code-derived metrics,
+each mapped onto core's tables, plus the band-placement rule and the five refusals. Its proof is a
+GOLDEN FIXTURE emitted by the Python side through the real fitter, committed byte-identically at
+`packages/ml/tests/fixtures/metric-contract-v1.json` **and** `packages/pro/test/fixtures/metric-contract-v1.json`
+(a TEST fixture, so it stays out of `data/` and out of the release image). Three things from it that
+reverse a natural guess: ⚠ **the banding axis `panel_prs_per_period` counts merged PRs of ANY
+AUTHOR** — `frame.py`'s extractor has no author predicate, while the volume DENOMINATOR excludes
+machine-authored merges, so the two populations differ on purpose (machine merges are a median 13.2%
+of merges per cell); ⚠ **the corpus's per-repo population is the `min(150, round(P*90/14))`
+most-recently-updated PRs**, which actually bound in 85.5% of live repos in the median cell, so a
+customer fold over full history measures an older, wider population; ⚠ **`thread_resolved_rate` is
+the ONE outcome metric whose denominator includes TRUNCATED threads** (`isResolved` survives
+truncation), so copying the `*_complete` denominator across all of them is the likeliest single
+port error.
+
+**The Bots → Benchmark TAB now renders both halves** — see
+[docs/FRONTEND.md](FRONTEND.md) § "Bots → Benchmark". It consumes the PLACEMENT route (below) for
+every number and this cohort route ONLY for the click-gated metric definitions. ⚠ It is the
+**SIXTH** visible-but-locked surface, taken deliberately rather than hidden inside the already-
+locked `roi` branch: it is the only place in the product that answers "is this bot NORMAL?", and an
+absent tab leaves that question undiscoverable. The argument is written down in
+`components/ProGate.tsx`'s header beside the other five, and a seventh needs its own.
+
+### The peer benchmark — placing the customer (`GET /api/pro/bot-benchmark/placement`)
+
+**A SIBLING ROUTE, not a leg of the one above.** Serving the cohort and placing a customer in it are
+two decisions with two costs: the cohort route's cost is its RESPONSE BODY, this one's is a
+DATABASE FOLD. So they carry two rate-tier arguments (both `search`, by two different arguments —
+`api/plugins/rate-limit.ts` spells each), and this one is workspace-scoped and echoes `workspaceId`
+while that one takes no scope at all. Files: `bots/benchmark/{fold,collect,place,anomalies,
+placement-routes}.ts`.
+
+- **`fold.ts` is the CORPUS's definitions, ported — never the app's.** The host already has columns
+  with these names and they are DIFFERENT columns: `getBotAnalytics.actedOnPct` folds
+  `likely_addressed` into its numerator and divides by every in-window thread; `overdueUntouched`
+  uses a fixed 36 h grace; `overlapPct` clusters anchors within ±3 lines. All three stay as they
+  are. ⚠ Two independent implementations of `acted_on_rate` do not compare a customer to a cohort —
+  they compare two questions and render the difference as a finding.
+- **`test/benchmark-metric-contract.test.ts` is the proof, and it is the most important test in the
+  feature.** It drives the golden fixture (`test/fixtures/metric-contract-v1.json`, emitted by the
+  REAL Python fold) through the TypeScript one and compares **every counter and every value with
+  `===`, never a tolerance** — each rate is one IEEE-754 division of two integers, so two correct
+  implementations agree bit for bit. All 14 units reproduce exactly. ⚠ **Counters are compared
+  FIRST**: a value that disagrees says something is wrong, a counter says which population, which
+  gate and which row.
+- ⚠ **Three refusal families, and none may be normalised into a distribution shape.** The cohort
+  side (`vendor_not_in_corpus_vocabulary` / `vendor_unfittable` / `vendor_unstratifiable` /
+  `cell_not_in_corpus`), the customer side (the corpus's own five exclusion reasons, plus
+  `body_unobserved` where `body` AND `excerpt` are both null), and `repo_window_incomplete` — the
+  ONE refusal about the customer rather than the corpus: a repository held for less than 14 days has
+  a partial window, so its merge count is an undercount that places it too LOW, silently.
+- ⚠ **An anomaly needs BOTH a share and a magnitude** — the Chronology lesson verbatim. A percentile
+  alone invents a crisis in a healthy repository: somebody is always in the 95th percentile. Four
+  kinds, four actions, all templated (there is no model anywhere in this feature), and a THIRD gate
+  the cohort supplies — a value inside the cohort's 95 % median CI is suppressed, because at the
+  30-repo floor that interval routinely spans 20 points and "your 41% vs the cohort's 38%" inside it
+  is noise reported as a gap. `direction` and `ci_median_95` are SERVED by the cohort route and
+  CONSUMED here.
+- ⚠ **The band rule reads the HIGH edges only** and a tie resolves DOWNWARD. The ranges OVERLAP at
+  ties (coderabbit band 0 is `2..2`, band 1 is `2..3`), so "the band whose interval contains the
+  value" is not a function; the derivation is in `place.ts` and the alternative low-edge reading is
+  pinned as an in-test mutation that must disagree at exactly 2 and 3. The customer's axis is
+  **merged PRs in 14 days, ANY AUTHOR** — machine merges are IN the banding axis and OUT of the
+  volume denominator, two populations doing two jobs.
+- ⚠ **`SUPPORTED_FIT_VERSIONS` is `{1, 2}` and getting it wrong is SILENT.** It was `1` while the
+  bundled artifact moved to fit v2, so `loadBenchmarkArtifact()` refused and every caller got
+  `available: false` on a 200 — with `test/fixtures/benchmark-fit-smoke.json` still at v1, so the
+  pro suite stayed green. fit v2 also made `activity_bands` PER VENDOR (10/10/9/7/4/3/2) and added
+  `cohort.n_bands`/`band_label`, both of which now ride the wire: "upper fifth" is honest at 5 bands
+  and a misrepresentation at 10.
+- **The SPA half is `Bots → Benchmark`** — `BenchmarkPanel.tsx` + the pure `benchmarkModel.ts` +
+  `hooks/useBotBenchmark.ts`, contract in [docs/FRONTEND.md](FRONTEND.md) § "Bots → Benchmark". Two
+  things the wire's shape assumes and the panel therefore keeps: **the anomaly list leads and the
+  distributions sit beneath it** (a percentile is trivia; the templated `action` is the product),
+  and **a rank's denominator is the metric's own `cohort.nRepos`, not `anomaly.cohortRepos`** —
+  that field is the band-SUPPORT count, and printing it as "of N" beside a percentile puts the rank
+  in a population it was not ranked within. ⚠ Everything the panel draws comes from THIS route; the
+  cohort route is reached only by a click-gated definitions disclosure, so the tab makes exactly one
+  request on mount.
 
 ### The People report — `?evidence=1`, `person_report`, and the bot half
 
-**It is VISIBLE-BUT-LOCKED on `periodReports`, not absent** — one of the five surfaces that reverse
+**It is VISIBLE-BUT-LOCKED on `periodReports`, not absent** — one of the six surfaces that reverse
 this codebase's "hidden, never upsold" posture (`components/ProGate.tsx` enumerates them; the
-reversal is scoped to those five and nothing else converts). Three locked panes, each with a testid
+reversal is scoped to those six and nothing else converts). Three locked panes, each with a testid
 DISTINCT from its entitled body so no screenshot run can photograph a lock:
 
 | Pane | testid | Stands in for |

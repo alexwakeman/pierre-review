@@ -57,7 +57,7 @@ import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js
 // table IS the answer people buy — what each bot produced, what got acted on, what sat. So the
 // component now gates as one, and an unentitled reader gets `ProLockPanel` in this component's own
 // place rather than absence, which is the deliberate reversal for this surface (see ProGate.tsx's
-// header for the five surfaces it applies to and the ones that stay silently absent).
+// header for the six surfaces it applies to and the ones that stay silently absent).
 //
 // ⚠ WHAT DID **NOT** GO PAID, AND MUST NOT BE SWEPT IN LATER. Three things sit in this file or next
 // to this mount and stay free:
