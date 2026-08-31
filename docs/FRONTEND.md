@@ -826,6 +826,18 @@ but broken deep links).
   table for entitled readers), the bot feed, and the whole Settings tab. `WorkspaceBotCharts`
   (`botDepth`) keeps the older ABSENCE posture on purpose — a second upsell stacked under the first
   reads as a paywall page.
+- ⚠ **`BotRoiPanel`'s `$/acted-on` COLUMN IS A GRAIN GATE AS WELL AS A TIER GATE:
+  `showCost = botDepth && repoId == null`.** A price is stored ONCE PER WORKSPACE, so dividing a
+  whole month of it by ONE repository's work reads as spend and cannot be summed across repos — the
+  same argument that deleted `BotBenchmarkPlacementUnit.cost`. The RAIL mount keeps the column and
+  its footer instruction (that data is already workspace-grained and therefore already exact); the
+  per-repo mount loses the `<th>`, the `<td>` and the "set a monthly price" clause, and gets a
+  REPLACEMENT sentence naming the reason and pointing at the rail — an elision alone reads as a bug
+  or a permissions glitch, and invites the next reader to "restore" the column. ⚠ **Do NOT simplify
+  `showCost` back to `botDepth`** (its `false` branch used to be unreachable from the live mount and
+  the docstring said so; every per-repo Bots tab reaches it now). The `ProLockPanel` body drops its
+  cost clause on the per-repo mount too — a lock is a PROMISE about what paying reveals, and paying
+  no longer reveals that figure there.
 - **The Bots RAIL ENTRY stays ungated on every tier**, exactly like Reports': it owns the free
   classification/Settings screen, the free triage flows and the governance caution. Its tooltip says
   which half is which.
@@ -838,6 +850,33 @@ workspace's (repository × reviewer) units, folded over the CORPUS's own metric 
 in a per-vendor activity band and ranked against the fitted cell. Tests:
 `apps/frontend/test/botsBenchmark.test.ts` (**hand-run — `apps/frontend/test/` is not in CI**).
 
+- ⚠ **ONE COMPONENT, TWO BODIES, AND `repoId` IS WHAT PICKS ONE.** `BenchmarkPanel({repoId})`
+  computes `isRail = repoId == null` and passes it into `Body` **as its own prop** — deliberately
+  NOT `data.rollup != null`, so a version skew (an older plugin serving no rollup) cannot silently
+  change which screen the reader believes they are on.
+  - **RAIL (`repoId == null`)**: header meta → truncation note → `FindingsSection` → **the ROLLUP
+    CARDS** → absent metrics → `MeasuredDisclosure` → disclosures. **NO `UnitCard` renders here.**
+  - **REPO TAB (`repoId != null`)**: exactly what it always did — one `UnitCard` per unit, with its
+    thirteen metric strips, band placement and refusals — **MINUS money entirely**. The old
+    `CostBlock` is DELETED, not hidden: `BotBenchmarkPlacementUnit.cost` is off the wire, and a
+    `?repoIds=`-narrowed request receives no `rollup` either, so there is no figure in the payload
+    for a future renderer to find. See [docs/PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md)
+    § "The WORKSPACE ROLLUP".
+  - ⚠ **THE FINDINGS SECTION LEADS ON BOTH SCREENS, UNCHANGED.** An anomaly is per (repository ×
+    reviewer) and stays that way — it is the one thing on the rail that names a repository, because
+    "acted on far less of this reviewer than its peers" is work somebody does IN a repository.
+    Folding findings up to the vendor would turn n actionable rows into one unactionable average.
+  - ⚠ **THREE DISTINCT EMPTY SENTENCES, and collapsing any pair has already shipped a defect.**
+    `benchmark-no-units` (nothing is classified as an automated reviewer), `benchmark-no-rollup`
+    (`rollup` key ABSENT — this build served placements but no rollup; the rail draws no
+    per-repository cards, so it would otherwise be a findings list with nothing under it), and
+    `benchmark-no-live-reviewers` (`rollup === []` — the fold RAN and no reviewer has commented
+    yet). ⚠ A `?? []` collapsing the last two told a reader whose bots simply had not commented that
+    their BUILD was deficient — the ordinary state right after classifying a reviewer in
+    Bots → Settings.
+  - The truncation note's remedy clause ("open a repository's own Bots tab", plus the sentence
+    saying money is withheld while counters and spread still render) is **rail-only**; on the
+    repository tab that advice is a no-op, and it shipped unconditional.
 - ⚠ **SIXTH VISIBLE-BUT-LOCKED SURFACE, and the argument is in `ProGate.tsx`'s header.** It could
   have hidden inside the already-locked `roi` branch; it does not, because it is the only place in
   the product that answers "is this bot NORMAL?", and an absent tab leaves that question
@@ -860,8 +899,17 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   whole-artifact ones ("this build ships no corpus" is NOT "there isn't enough peer data yet"), six
   per-metric exclusions, plus a fourteenth for "no automated reviewer to place". A customer's
   biggest bot can be absent from the corpus entirely (DeepSource is real) — it renders NAMED, with
-  "we have never measured this reviewer", never a zero.
-- ⚠ **ONE FETCH ON MOUNT.** `useBotBenchmarkPlacement` is the tab's only query; the "How these are
+  "we have never measured this reviewer", never a zero. ⚠ The rail adds two more vocabularies on top
+  of those fourteen: **ten** `COST_REFUSAL_HEADLINE` entries (the tenth is `workspace_truncated`) and
+  **five** `ROLLUP_REFUSAL_HEADLINE` entries. `vendor_not_in_corpus` deliberately reuses
+  `PLACEMENT_REFUSAL_HEADLINE.vendor_not_in_corpus_vocabulary`'s exact words — same fact, same
+  sentence; two wordings for one cause on one card is how a reader stops believing either.
+- ⚠ **ONE FETCH ON MOUNT, AND THE ROLLUP RIDES IT.** `rollup[]` arrives on the SAME placement
+  response as `units[]` — do not add a second eager query for it. `useBotBenchmarkPlacement` uses
+  `skipToken` (not `enabled`) while `workspaceId === null`, which means NOT RESOLVED YET; leave that
+  alone. ⚠ `repoKeySlot([])` and `repoKeySlot(null)` BOTH return `'all'` while the wire distinguishes
+  them, so a caller that ever passes a FILTERED array would serve an empty selection's answer out of
+  the whole-workspace cache slot. `useBotBenchmarkPlacement` is the tab's only query; the "How these are
   measured" disclosure (`useBotBenchmarkSpecs`) is CLICK-GATED (`enabled: botDepth && open`) —
   the Pending-board precedent, where an eager per-card fetch became 150 GitHub calls. Both hooks AND
   `botDepth` into their own `enabled`, because a mounted-but-unentitled pane would otherwise poll a
@@ -872,15 +920,89 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
 - ⚠ **SEVERITY AND CATEGORY ARE STRUCTURALLY ABSENT, not empty and not zero** — model-derived, and
   the corpus is unscored. They render in their own block, labelled `Model-derived` against every
   other figure's `Counted`, with the precondition spelled out.
-- ⚠ **THE COST BLOCK IS ABSENT WHEN NO PRICE IS SET — not empty, not zero, and not a "set a price"
-  prompt.** `unit.cost` simply is not on the wire for a reviewer nobody priced, and `<CostBlock>`
-  mounts on the field's presence and nothing else. TWO other states are DIFFERENT and both RENDER:
-  a price of exactly **0** is real and deliberate ("recorded as free"), and a **`monthlyUsd` of
-  `null`** is a price somebody entered whose per-seat unit could not be multiplied out
-  (`price_unresolved`). Both refuse every derived figure with a sentence rather than printing
-  US$0.00 three times. Contract:
-  [docs/PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § "Cost on the Benchmark tab".
-  What the renderer owns:
+- **THE ROLLUP CARD (`RollupCard`, rail only) — one per vendor, in this order:** reviewer pill +
+  `row.coverage` ("live in 4 of 8 repositories") + folded logins → `PooledCounters` →
+  `WorkspaceCostBlock` (only when `rollup.cost != null`) → the spread sentence → the estate-matched
+  expectation → `EvidenceTable`. It takes a whole `RollupRow` from `benchmarkModel`'s `rollupRows`,
+  so the key, title, label and colour are resolved in ONE place.
+  - ⚠ **THE REACT KEY IS `rollup.key` — the WORKSPACE's vendor key.** `UnitCard`'s
+    `${repoId}:${vendor}` collides with itself on a card that has n repositories, and `vendor` is
+    `null` for every brand the corpus never saw (most of what a real workspace runs), so keying on
+    it collapses every unbranded bot onto one card. `unitTitle` is likewise the SORT KEY for
+    `anomalyRows`/`orderedUnits` and cannot serve here; `orderedRollups` sorts spread-bearing cards
+    first, then reviewer label, then key — **never by a figure**.
+  - ⚠ **THE CARD RENDERS NO PERCENTILE OF ITS OWN, EVER.** There is no distribution of workspaces,
+    and a volume-weighted pool against a one-repo-one-vote cohort is a number no cohort member
+    resembles. Its two comparisons — the spread and the expectation — are both built out of the
+    PER-REPOSITORY placements, and every rank on the card lives in the evidence table against its
+    own band.
+  - **The header prints the pill + `row.coverage` with `row.title` on the `title=` attribute** —
+    rendering `rollupTitle` verbatim beside the pill prints the vendor's name twice.
+- **`PooledCounters` renders ALL FOUR counter maps IN FULL**, in a fixed `COUNTER_GROUPS` order
+  (never `Object.entries` order), `formatCount` on every value, `tabular-nums`. ⚠ **A curated
+  shortlist would break the additivity invariant the section exists to make checkable** — the whole
+  is the sum of the parts for EVERY key, and a reader must be able to check the headline against the
+  table below it. Density, not omission, is the answer if it gets heavy. ⚠ The two overdue maps stay
+  their own groups rather than being joined into "4 untouched of 11", because the join needs an
+  absent key to read as `0`, which this panel refuses everywhere else.
+- **`EvidenceTable` — the audit trail, one row per LIVE repository** (`contributionRows`, fold
+  order preserved): Repository · Activity band · Merged PRs, 14 days · Acted on · Rank in its band.
+  Inside its own `overflow-x-auto` with `min-w-[32rem]` — the panel body must never scroll
+  horizontally and five columns do not fit a laptop rail.
+  - ⚠ **A DASH IS A WITHHELD FIGURE, NEVER A ZERO**, and the footnote says so: `actedOnRate` and
+    `percentile` are `null` whenever that repository's own metric was withheld, and printing `0%` /
+    `0th` would read as "worst in the cohort" for a comparison that never happened. **Its COUNTS
+    still pool into the headline** — pooling is the remedy for a thin sample, which is why the gate
+    is on the ROW and not on the fold.
+  - ⚠ **A REPOSITORY WHOSE PLACEMENT REFUSED STILL EARNS A ROW**, with the refusal's headline
+    (+ `ThinSampleIcon`) in the band cell instead of a band. Dropping it would make the table
+    disagree with `liveInRepos` — and the money above it is divided by that estate.
+  - The footnote also states that each rank is read against that repository's OWN cohort band, so
+    the ranks are not comparable with each other.
+- **The spread and the expectation are TWO SIBLING conditionals, each with its own refusal note.**
+  `rollupSpreadSentence` names every non-zero side ("sits below it in 5 and above it in 1"), and its
+  denominator is spelled "placed with a comparable acted-on rate" so it can never be read as
+  `liveInRepos`. ⚠ **`rollupExpectationSentence` PRINTS BOTH RATES SIDE BY SIDE AND SUBTRACTS
+  NEITHER** — "across the 3 repositories with a fitted peer median, your team acts on 41% … where an
+  estate of this shape at its cohorts' medians acts on 58%", then names the excluded repositories
+  and says the pooled rate above is a different number. That is PERIOD-REPORTING's "ONE ROW MUST
+  NEVER MIX THE HEADLINE AND SUBSET POPULATIONS", one grain over.
+- ⚠ **THE COST BLOCK IS WORKSPACE-GRAINED AND ABSENT WHEN NO PRICE IS SET — not empty, not zero, and
+  not a "set a price" prompt.** `WorkspaceCostBlock({cost, expectation})` mounts on
+  `rollup.cost != null` and nothing else; the per-repository `CostBlock` and `unit.cost` are GONE.
+  TWO other states are DIFFERENT and both RENDER: a price of exactly **0** is real and deliberate
+  ("recorded as free"), and a **`monthlyUsd` of `null`** is a price somebody entered whose per-seat
+  unit could not be multiplied out (`price_unresolved`). Both refuse every derived figure with a
+  sentence rather than printing US$0.00 three times. Contract:
+  [docs/PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § "The WORKSPACE ROLLUP" (the
+  superseded per-repository § "Cost on the Benchmark tab" keeps the reasoning behind every rule the
+  fold still imports). What the renderer owns:
+  - ⚠ **TESTIDS ARE `benchmark-workspace-cost-*` WHEREVER THE CLAIM CHANGED GRAIN** (the block, its
+    three figure rows, the collapsed refusal, the headline, the coverage note, the two disclosures);
+    ids emitted by a shared primitive or describing the PRICE — `benchmark-cost-basis-*`,
+    `benchmark-cost-refused-*`, `benchmark-cost-seat-unresolved`, `benchmark-cost-seat-zero` — kept
+    their names, because a price was per-Workspace at both grains. Reusing the old ids wholesale
+    would let a test written against the per-repository claim stay green while asserting it about a
+    new number.
+  - **`workspaceCostHeadline` takes TWO arguments, `(cost, expectation)`** — at this grain the
+    counterfactual is a SIBLING of cost, not an arm inside it, so a vendor the corpus never saw
+    renders its money while only the comparison refuses. Sentence one quotes the POOLED population,
+    sentence two OPENS by naming the fitted subset before either rate.
+  - **`AtPeerEngagementRow` renders NOTHING when the expectation refused** — the sibling expectation
+    section states that refusal in full a few elements below, and a dimmed row carrying the same
+    headline reads as two measurements that each came back empty. It DOES render a money-half
+    refusal (`moneyRefusal`), which is a cost-vocabulary reason nothing else on the card accounts
+    for.
+  - **`workspaceCostSpanUnobservedNote` and `workspaceCostPartialWindowNote` must both render.**
+    They are the wire's two disclosures: an unrendered `spanUnobservedRepos` makes the pace silently
+    understate, and an unrendered `partialWindowRepos` makes `$/merged PR` silently inflate in the
+    flattering direction. "A missing disclosure is the same defect as a wrong number, one line
+    quieter."
+  - **`workspaceCostCoverageNote` REPLACED `costSharedNote`** — the "upper bound / n other cards
+    carry this same number" caveat retired with the grain it compensated for. ⚠ `costSharedNote`'s
+    full argumentative docstring survives verbatim as a `── HISTORICAL ──` block above its
+    replacement: it is the written record of a shipped defect, and the function itself is dead code
+    awaiting a delete-with-test-rewrites.
   - **`formatUsd` prints `US$`, never a bare `$`**, and a non-zero sub-cent figure prints `<US$0.01`
     rather than rounding to `US$0.00` — that is the zero-price failure mode arriving from the other
     direction. The windowed TOTAL carries `per 14 days` (`costWindowLabel`), because a bare "US$412"
@@ -902,10 +1024,13 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
     sentences shipped as shares of a prorated `span.usd` — "US$189.22 of this reviewer's US$236.53
     over the 8.6 weeks its comments span here" — which is a history the app cannot evidence, and a
     cap would have kept the claim and shrunk it. `span.usd` is gone from the wire; the span still
-    renders (`formatSpanDays`, days → weeks → months) as the window the WORK was measured in, and
-    the per-month divisors (`yours.actedPerMonth`, `atPeerEngagement.actedPerMonthAtPeer`) ride the
-    wire beside their quotients so the rows are checkable. `$ per merged PR` is the one 14-day
-    figure on the card, and `spanNote` says which figure sits on which basis.
+    renders as the window the WORK was measured in, and the per-month divisors
+    (`cost.yours.actedPerMonth`, `expectation.actedPerMonthAtPeer`) ride the wire beside their
+    quotients so the rows are checkable. `$ per merged PR` is the one 14-day figure on the card, and
+    `spanNote` says which figure sits on which basis. ⚠ At the rollup grain the pace is **a SUM of
+    per-repository rates**, and the served `spanNote` (`ROLLUP_SPAN_NOTE`, a second note beside
+    `cost.ts`'s original) adds the sentence saying the stretches are NOT joined — a union span would
+    understate the pace and inflate every $/thread by the same factor.
   - **`costSeatZeroNote` is a DIFFERENT sentence from `costSeatUnresolvedNote`** — "this build
     cannot read your seat count" and "your Workspace has no human authors this month" have
     different remedies, and a per-seat price silently multiplied by 0 is what put "recorded as
@@ -913,23 +1038,31 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
     which is why that state renders at all: when the drop empties the unit the server sends
     `monthlyUsd: null` rather than no block, and these two lines are the only thing on screen
     explaining a price the reader typed. `costPriceLine` says "No monthly figure — …" instead of
-    `formatUsd(null)`, and `costSharedNote` is the one caveat GATED OFF there (it points at a
-    figure); every other line stays.
+    `formatUsd(null)`, and `workspaceCostCoverageNote` is the one caveat GATED OFF there (it points
+    at a figure); every other line stays. ⚠ These four — `costPriceLine`, `costPricedReviewersNote`,
+    `costSeatUnresolvedNote`, `costSeatZeroNote` — take STRUCTURAL parameter types
+    (`PriceLineFacts` / `SeatDisclosureFacts`) so both grains call the SAME functions. A second copy
+    would let the per-seat multiply and the two dropped-row disclosures be worded differently
+    depending on which card the reader is standing on.
   - **Three sources, three chips** (`COST_BASIS_LABEL`): a price a human TYPED, rates COUNTED from
     this workspace, an engagement rate FITTED from the corpus. Same model-vs-code rule as the
     absent-metrics block, with a third arm — and the fitted one is the one that must never read as
     an invoice, so the counterfactual row is worded "your volume and price with the cohort's
     median …", never "what a peer pays".
-  - **`costSharedNote` ALWAYS returns a sentence.** It shipped gated on `sharedWithUnits > 1`, which
-    counts cards in THIS response — and the per-repo Bots tab narrows to one repository, so the
-    caveat was invisible on the screen most likely to read a Workspace-wide subscription as one
-    repository's bill. The RULE is unconditional; only the count is a bonus.
-  - **`collapsedCostRefusal` is `collapsedExclusion`'s rule one block down** — a zero price (or a
-    repository that merged nothing) refuses all FOUR figures for one reason, and four identical
-    dimmed rows read as four measurements that each came back empty. ⚠ `unacted` is in the arm list
-    even though it has no row of its own: it is the headline's first sentence, and a collapse blind
-    to it would fold three rows into one line while the headline vanished for a fourth reason
-    nobody was told about.
+  - **`workspaceCostCoverageNote` states what the figure IS and keeps the ONE surviving caveat** —
+    that a subscription may cover repositories outside this Workspace. Its predecessor
+    `costSharedNote` shipped gated on `sharedWithUnits > 1`, which counted cards in THIS response,
+    so the caveat was invisible on the per-repo tab — the screen most likely to read a
+    Workspace-wide subscription as one repository's bill. ⚠ That whole caveat existed to compensate
+    for a grain mismatch; **the grain moved instead**, so there is now nothing to disclose and
+    nothing a reader can double-count.
+  - **`collapsedWorkspaceCostRefusal` is `collapsedCostRefusal`'s rule at estate grain, over THREE
+    arms** (`perMergedPr`, `yours`, `unacted`) — a zero price refuses all three for one reason, and
+    three identical dimmed rows read as three measurements that each came back empty. ⚠ `unacted` is
+    in the arm list even though it has no row of its own: it is the headline's first sentence, and a
+    collapse blind to it would fold the rows into one line while the headline vanished for a reason
+    nobody was told about. ⚠ It does NOT reach across to the expectation — that section's money
+    halves carry the SAME `BotBenchmarkCostRefusal` object, so one sentence already covers both.
   - **`formatThreadCount` never rounds a fractional counterfactual count to a whole `0`** — "0
     acted on" beside a real cost-per-thread figure is a contradiction on one line — and never adds
     a decimal point to the customer's own measured integer.

@@ -209,7 +209,7 @@ import {
   vendorAgreementOf,
 } from './ml-labels.js';
 import { clusterThreadsByLine } from './line-overlap.js';
-import { botWindowMs } from './bot-window.js';
+import { DAYS_PER_MONTH, botWindowMs } from './bot-window.js';
 import { detectChangepoints } from './changepoint.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
@@ -11286,6 +11286,12 @@ export async function getBotAnalytics(
   const from = new Date(
     typeof window === 'string' ? nowMs - botWindowMs(window) : window.fromMs,
   );
+  // The span ACTUALLY MEASURED, in days — the divisor that turns an in-window count into a monthly
+  // rate for `costPerActedOnUsd`. ⚠ Derived from the resolved bounds rather than from
+  // `botWindowDays(kind)`, because the explicit-bounds form exists precisely so a real sprint is
+  // not a 14-day stand-in, and a money figure that ignored that would report the stand-in's answer
+  // under the sprint's label.
+  const windowDays = (to.getTime() - from.getTime()) / 86_400_000;
   // The 12-week trend series must COVER the measured window, or a 90-day range would chart only
   // its most recent 84 days while the totals beside it counted all 90. Anchored on `from`, not on
   // now, so an explicit (possibly future-ending) sprint window is covered too.
@@ -11991,8 +11997,17 @@ export async function getBotAnalytics(
       // monthly and is null whenever the price is unknown or nothing was acted on — dividing by 0
       // would print Infinity.
       costMonthlyUsd: costMonthlyUsd,
+      // ⚠ A MONTHLY PRICE OVER A MONTHLY RATE — both ends of the fraction on the same time base.
+      // This divided by the RAW in-window count until it was read beside the benchmark rollup's
+      // own $/acted-on for the same bot at the same price: $2.23 against $21.24, because a month's
+      // price was being spread over a fortnight's work. `actedOn` is annualised over the window
+      // ACTUALLY MEASURED (`to - from`, which explicit bounds can make something other than the
+      // kind's nominal length) rather than over `botWindowDays(kind)`, so the Insights chat's real
+      // sprint dates and a 14-day stand-in do not silently produce the same divisor.
       costPerActedOnUsd:
-        costMonthlyUsd != null && acc.actedOn > 0 ? costMonthlyUsd / acc.actedOn : null,
+        costMonthlyUsd != null && acc.actedOn > 0 && windowDays > 0
+          ? costMonthlyUsd / ((acc.actedOn * DAYS_PER_MONTH) / windowDays)
+          : null,
       costModel,
       costSeatCount: seatCount,
       costUnitMonthlyUsd: costModel === 'per_seat' ? unitUsd : null,

@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react';
 import type {
   BotBenchmarkDirection,
-  BotBenchmarkPlacementCost,
+  BotBenchmarkPlacementCounters,
   BotBenchmarkPlacementResponse,
   BotBenchmarkPlacementUnit,
+  BotBenchmarkRollupExpectation,
+  BotBenchmarkRollupRefusalReason,
+  BotBenchmarkWorkspaceCost,
 } from '@pierre-review/shared';
 import { useBotBenchmarkPlacement, useBotBenchmarkSpecs } from '../../hooks/useBotBenchmark.js';
 import { useFilters } from '../../store/filters.js';
@@ -17,7 +20,9 @@ import {
   InfoIcon,
   ScalesIcon,
   ThinSampleIcon,
+  ThreadsIcon,
   WarningIcon,
+  WorkspaceIcon,
 } from '../Icons.js';
 import {
   COST_BASIS_LABEL,
@@ -26,23 +31,21 @@ import {
   EXCLUSION_HEADLINE,
   FINDINGS_EMPTY_HEADLINE,
   PLACEMENT_REFUSAL_HEADLINE,
+  ROLLUP_REFUSAL_HEADLINE,
   STALENESS_LABEL,
   UNAVAILABLE_HEADLINE,
   absentMetricRows,
   anomalyRows,
   bandFitNote,
-  collapsedCostRefusal,
   collapsedExclusion,
-  costHeadline,
-  costPriceLine,
+  collapsedWorkspaceCostRefusal,
+  contributionRows,
   costPricedReviewersNote,
   costSeatUnresolvedNote,
   costSeatZeroNote,
-  costSharedNote,
   findingsEmptyState,
   formatCount,
   formatMetricValue,
-  formatSpanDays,
   formatThreadCount,
   formatUsd,
   metricLabel,
@@ -52,9 +55,19 @@ import {
   placementTally,
   reviewerColor,
   reviewerLabel,
+  rollupExpectationSentence,
+  rollupRows,
+  rollupSpreadSentence,
+  sharedComparisonRefusal,
   stripGeometry,
   unitTitle,
+  workspaceCostCoverageNote,
+  workspaceCostHeadline,
+  workspaceCostPartialWindowNote,
+  workspaceCostPriceLine,
+  workspaceCostSpanUnobservedNote,
   type CostBasis,
+  type RollupRow,
   type StripGeometry,
 } from './benchmarkModel.js';
 
@@ -81,6 +94,18 @@ import {
 //     repository of this size runs it", "your repository is too new to place" and "this build
 //     ships no corpus" are five different facts. Every one of them renders its own sentence plus
 //     the server's own message; none of them renders a zero, an empty axis or a blank cell.
+//
+//  4. TWO GRAINS, TWO SCREENS, AND THE PROP THAT DECIDES IS `repoId`. The RAIL (`repoId == null`)
+//     draws ONE CARD PER VENDOR over the whole Workspace — pooled counters, the money, the spread
+//     of placements and the estate-matched expectation, with the per-repository placements folded
+//     underneath as an evidence table. The REPOSITORY's own Bots tab (`repoId != null`) draws the
+//     per-repository cards it always drew — thirteen metric strips, band placement, refusals.
+//     ⚠ NEITHER SCREEN DRAWS THE OTHER'S CARD, and MONEY LIVES ONLY ON THE ROLLUP. A price is
+//     bought once for a Workspace, so a subscription measured against ONE repository's work was an
+//     upper bound that shipped once per repository under a "do not add these up" caveat. The server
+//     enforces the same split — a repo-narrowed request carries no `rollup` and no cost figure
+//     anywhere in its payload — so there is nothing here to render even if a future edit went
+//     looking.
 //
 // ── AND ONE COST RULE ──────────────────────────────────────────────────────────────────────────
 // NOTHING FETCHES ON MOUNT except the ONE scoped placement query. The definitions disclosure at
@@ -278,7 +303,7 @@ function RefusalNote({
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
-   Cost — what this reviewer costs per unit of the work it produces
+   Cost primitives — shared by the Workspace cost block and the estate-matched expectation
    ───────────────────────────────────────────────────────────────────────────────────────── */
 
 /** The small chip that says WHERE a row's number came from. ⚠ Three sources sit in this one block
@@ -296,7 +321,13 @@ function BasisChip({ basis }: { basis: CostBasis }): JSX.Element {
 }
 
 /** One refused cost figure, inline — the same grammar an excluded metric row uses. The server's
- *  own sentence rides the `title`; the headline is the scannable half. */
+ *  own sentence rides the `title`; the headline is the scannable half.
+ *
+ *  ⚠ IT SPEAKS ONE VOCABULARY, `BotBenchmarkCostRefusalReason`, AND ONLY THAT ONE. The rollup
+ *  sections beside this block refuse in a DIFFERENT vocabulary — money reasons all have a remedy
+ *  involving a price, comparison reasons have none — and they render their own sentences in their
+ *  own sections rather than borrowing this row. A shared row keyed on a union of the two would let
+ *  a renderer reach for the wrong sentence with nothing to stop it. */
 function CostRefusedRow({
   label,
   refusal,
@@ -340,203 +371,6 @@ function CostValueRow({
       </span>
       <span className="text-[10px] tabular-nums text-gray-400">{detail}</span>
       <BasisChip basis={basis} />
-    </div>
-  );
-}
-
-/**
- * What this reviewer costs per unit of the work it produces, and what better engagement with it
- * would be worth.
- *
- * ⚠ THIS COMPONENT IS NEVER MOUNTED WITHOUT A PRICE. `unit.cost` is ABSENT when no price is set for
- * this reviewer in this Workspace — not empty, not zero — so there is no placeholder, no "add a
- * price" prompt and no US$0.00 anywhere in the no-price case. TWO other states are DIFFERENT and
- * both render: a price of exactly 0 is real and shows as "recorded as free"; a `monthlyUsd` of
- * `null` is a price somebody ENTERED that could not be multiplied out of a per-seat unit, and the
- * card says exactly that rather than going silent. Both refuse every derived figure with a
- * sentence, rather than printing a row of zeros that reads as a broken panel.
- *
- * ⚠ EVERY REVIEWER-SIDE FIGURE IS A RATE AT THE CURRENT PRICE, NOT A SPEND. The span on this card
- * is the window the WORK was measured over; it carries no money, and no sentence here may imply a
- * subscription was prorated across it.
- *
- * ⚠ NOTHING HERE COMPUTES A COST. Every figure, gap and expected count is the server's — the same
- * rule the rest of this panel keeps. This file positions marks and picks words.
- */
-function CostBlock({ cost }: { cost: BotBenchmarkPlacementCost }): JSX.Element {
-  const headline = costHeadline(cost);
-  const collapsed = collapsedCostRefusal(cost);
-  const shared = costSharedNote(cost);
-  const summed = costPricedReviewersNote(cost);
-  const seatNote = costSeatUnresolvedNote(cost);
-  const seatZeroNote = costSeatZeroNote(cost);
-  // The span caveat rides any figure anchored on the span — which is every reviewer-side one.
-  const showsSpan =
-    cost.yours.status === 'value' ||
-    cost.atPeerEngagement.status === 'value' ||
-    cost.unacted.status === 'value';
-
-  return (
-    <div
-      className="mt-2 rounded border border-gray-200 bg-gray-50/60 px-2.5 py-2 dark:border-gray-800 dark:bg-gray-900/30"
-      data-testid="benchmark-cost"
-    >
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
-          <CoinIcon size={12} className="text-gray-400" />
-          Cost
-        </span>
-        <span className="text-[11px] tabular-nums text-gray-600 dark:text-gray-300">
-          {costPriceLine(cost)}
-        </span>
-        <BasisChip basis="stored" />
-      </div>
-
-      {/* ⚠ THE PRICE IS PER WORKSPACE AND THIS CARD IS PER REPOSITORY. Said out loud UNCONDITIONALLY
-          — the per-repository Bots tab narrows to one repository, so a caveat gated on "more than
-          one card" would never appear on the screen that needs it most. ⚠ The ONE exception is a
-          price that could not be STATED: this sentence points at a figure, and there is none. */}
-      {cost.monthlyUsd != null && (
-        <p
-          className="mt-1 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400"
-          data-testid="benchmark-cost-shared"
-        >
-          {shared}
-        </p>
-      )}
-      {summed != null && (
-        <p className="mt-0.5 text-[10px] leading-relaxed text-gray-400">{summed}</p>
-      )}
-      {seatNote != null && (
-        <p
-          className="mt-0.5 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400"
-          data-testid="benchmark-cost-seat-unresolved"
-        >
-          {seatNote}
-        </p>
-      )}
-      {/* ⚠ ITS OWN LINE AND ITS OWN TESTID. A seat count this build could not READ and a seat count
-          that is genuinely ZERO have different remedies, and a per-seat price silently multiplied
-          by 0 is what put "Recorded as free" on a reviewer somebody priced. */}
-      {seatZeroNote != null && (
-        <p
-          className="mt-0.5 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400"
-          data-testid="benchmark-cost-seat-zero"
-        >
-          {seatZeroNote}
-        </p>
-      )}
-
-      {collapsed != null ? (
-        // ⚠ ONE SENTENCE, NOT THREE. A price of 0 (or a repository that merged nothing) refuses
-        // every derived figure for the SAME reason, and three identical dimmed rows read as three
-        // separate measurements that each came back empty.
-        <div className="mt-1.5">
-          <RefusalNote
-            testId={`benchmark-cost-collapsed-${collapsed}`}
-            headline={COST_REFUSAL_HEADLINE[collapsed]}
-            message={
-              (cost.perMergedPr.status === 'refused' ? cost.perMergedPr.message : '') +
-              ' Every figure this price would produce is withheld for the same reason, so this is ' +
-              'one refusal rather than three measurements that each came back empty.'
-            }
-          />
-        </div>
-      ) : (
-        <div className="mt-1 divide-y divide-gray-200/70 dark:divide-gray-800/70">
-          {/* ⚠ NO WINDOW SUFFIX ON A RATIO. "US$5.52 per 14 days" reads as $/PR/fortnight and
-              invites the reader to double it for a month, but a cost per merged pull request does
-              not scale with the window at all — both halves of the fraction scale together. The
-              basis belongs in the detail, as prose. That shipped on both ratio rows. */}
-          {cost.perMergedPr.status === 'value' ? (
-            <CostValueRow
-              testId="benchmark-cost-per-merged-pr"
-              label="Per merged PR"
-              figure={formatUsd(cost.perMergedPr.value)}
-              detail={
-                `over ${formatCount(cost.perMergedPr.mergedPrs)} merged in the last ` +
-                `${formatCount(cost.windowDays)} days`
-              }
-              basis="counted"
-            />
-          ) : (
-            <CostRefusedRow label="Per merged PR" refusal={cost.perMergedPr} />
-          )}
-
-          {cost.yours.status === 'value' ? (
-            <CostValueRow
-              testId="benchmark-cost-per-acted-on"
-              label="Per acted-on thread"
-              figure={formatUsd(cost.yours.perActedOnUsd)}
-              // ⚠ COUNTED, NOT PROJECTED, and the detail says so: real threads over the stretch of
-              // time they were measured across, not a fortnight's merges times two rates. ⚠ AND THE
-              // SPAN IS NAMED AS A MEASUREMENT WINDOW, NEVER AS A BILLING PERIOD — "2 of 20 threads
-              // acted on, over 9 days" is the pace this monthly price is divided by, which is the
-              // whole reason `actedPerMonth` rides the wire beside the quotient.
-              detail={
-                `${formatThreadCount(cost.yours.actedThreads)} of ` +
-                `${formatCount(cost.yours.settledThreads)} threads acted on` +
-                (cost.span == null ? '' : `, over ${formatSpanDays(cost.span.days)}`) +
-                ` — about ${formatThreadCount(cost.yours.actedPerMonth)} a month`
-              }
-              basis="counted"
-            />
-          ) : (
-            <CostRefusedRow label="Per acted-on thread" refusal={cost.yours} />
-          )}
-
-          {cost.atPeerEngagement.status === 'value' ? (
-            <CostValueRow
-              testId="benchmark-cost-counterfactual"
-              label="At peer engagement"
-              figure={formatUsd(cost.atPeerEngagement.perActedOnUsd)}
-              // ⚠ WORDED AS A COUNTERFACTUAL, NEVER AS A PEER DISTRIBUTION. Your threads, your
-              // price, THEIR rate — exactly one factor moved, and the row says which one.
-              detail={
-                `your threads and price with the cohort's median ` +
-                `${formatMetricValue(cost.atPeerEngagement.cohortActedOnRate, 'rate')} acted-on ` +
-                `rate — ${formatThreadCount(cost.atPeerEngagement.actedThreadsAtPeer)} acted on, ` +
-                `about ${formatThreadCount(cost.atPeerEngagement.actedPerMonthAtPeer)} a month`
-              }
-              basis="fitted"
-            />
-          ) : (
-            <CostRefusedRow label="At peer engagement" refusal={cost.atPeerEngagement} />
-          )}
-        </div>
-      )}
-
-      {/* ⚠ THE HEADLINE IS A FIGURE, NOT A FINDING, so it does NOT borrow the amber chrome the
-          anomaly cards use — those cleared a share gate, a magnitude gate and the cohort's own
-          median CI. This one is arithmetic and says so.
-
-          ⚠ AND IT IS TWO PARAGRAPHS, NEVER ONE. The MEASURED figure and the COUNTERFACTUAL gap are
-          different quantities that differ by a factor of the cohort's rate; the first cut printed
-          the second's number under the first's words. They are two fields on the model and two
-          elements here, so a renderer cannot reunite them by accident.
-
-          ⚠ BOTH ARE PER-MONTH RATES AT TODAY'S PRICE, never a spend over the span. The sentences
-          shipped as shares of a prorated `span.usd` — "US$189.22 of this reviewer's US$236.53 over
-          the 8.6 weeks its comments span here" — which is a history this app cannot evidence. */}
-      {headline != null && (
-        <div
-          className="mt-1.5 space-y-1 border-t border-gray-200 pt-1.5 text-[11px] leading-relaxed text-gray-700 dark:border-gray-800 dark:text-gray-200"
-          data-testid={`benchmark-cost-headline-${headline.tone}`}
-        >
-          <p data-testid="benchmark-cost-headline-spend">{headline.spend}</p>
-          {headline.comparison != null && (
-            <p className="text-gray-500 dark:text-gray-400" data-testid="benchmark-cost-headline-comparison">
-              {headline.comparison}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* The time base's own caveat, server-authored so it cannot be dropped by a renderer that
-          did not know it existed. */}
-      {showsSpan && (
-        <p className="mt-1 text-[10px] leading-relaxed text-gray-400">{cost.spanNote}</p>
-      )}
     </div>
   );
 }
@@ -873,9 +707,629 @@ function UnitCard({
       </div>
       )}
 
-      {/* ⚠ BENEATH THE STRIPS, AND ABSENT WHEN NO PRICE IS SET. `unit.cost` is simply not on the
-          wire for a reviewer nobody priced — no placeholder, no empty card, no zero. */}
-      {unit.cost != null && <CostBlock cost={unit.cost} />}
+      {/* ⚠ NO COST BLOCK ON A UNIT CARD, AND NOT BECAUSE THE PRICE IS MISSING. A unit is one
+          (repository, vendor) pair and the price is per WORKSPACE, so any figure here was the whole
+          subscription measured against one repository's work — an upper bound that shipped once per
+          repository under a "do not add these up" caveat. Money is stated once per vendor on the
+          rollup card instead; `cost` is no longer on `BotBenchmarkPlacementUnit` and the server
+          sends no cost figure at all on a repo-narrowed request, so there is nothing here to render
+          even if a future edit went looking. THE COMPONENT IS GONE, not merely unmounted — an
+          unmounted renderer for a removed field is an invitation. */}
+    </Card>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   The Workspace rollup — one card per VENDOR
+   ───────────────────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * WHAT THIS VENDOR COSTS PER UNIT OF WORK, AT THE GRAIN THE PRICE IS BOUGHT AT.
+ *
+ * ⚠ THIS COMPONENT IS NEVER MOUNTED WITHOUT A PRICE. `rollup.cost` is ABSENT when nobody priced
+ * this reviewer in this Workspace — not empty, not zero — so the caller's presence check is the
+ * only thing between an unpriced reviewer and a confident US$0.00. TWO other states are DIFFERENT
+ * and both render: a stored price of exactly 0 is real and reads as "recorded as free", and a
+ * `monthlyUsd` of `null` is a price somebody ENTERED that could not be multiplied out of a per-seat
+ * unit, which the card says out loud rather than going silent.
+ *
+ * ⚠ EVERY FIGURE IS A RATE AT TODAY'S PRICE, NEVER A SPEND OVER A PERIOD. The observation spans on
+ * this card measure the WORK; they carry no money, and no sentence here may imply a subscription was
+ * prorated across them.
+ *
+ * ⚠ NOTHING HERE COMPUTES A COST — the panel's standing rule. Every figure, sum, gap and expected
+ * count is the server's; this file positions marks and picks words.
+ *
+ * ⚠ IT TAKES THE EXPECTATION AS A SECOND ARGUMENT because at THIS grain the counterfactual is a
+ * SIBLING of the cost rather than an arm inside it: a vendor the corpus has never measured — Sonar,
+ * GHAS, `github-actions`, most of a real estate — still gets its money while only the comparison
+ * refuses. The "At peer engagement" row and the headline's second sentence both read from it, and
+ * both go quiet when it withheld its money halves.
+ */
+function WorkspaceCostBlock({
+  cost,
+  expectation,
+}: {
+  cost: BotBenchmarkWorkspaceCost;
+  expectation: BotBenchmarkRollupExpectation;
+}): JSX.Element {
+  const headline = workspaceCostHeadline(cost, expectation);
+  const collapsed = collapsedWorkspaceCostRefusal(cost);
+  const coverage = workspaceCostCoverageNote(cost);
+  const summed = costPricedReviewersNote(cost);
+  const seatNote = costSeatUnresolvedNote(cost);
+  const seatZeroNote = costSeatZeroNote(cost);
+  const spanUnobserved = workspaceCostSpanUnobservedNote(cost);
+  const partialWindow = workspaceCostPartialWindowNote(cost);
+  const atPeerUsd = expectation.status === 'value' ? expectation.perActedOnUsd : null;
+  // The span caveat rides any figure anchored on an observation span — the two reviewer-side ones.
+  const showsSpan = cost.yours.status === 'value' || atPeerUsd != null;
+
+  return (
+    <div
+      className="mt-2 rounded border border-gray-200 bg-gray-50/60 px-2.5 py-2 dark:border-gray-800 dark:bg-gray-900/30"
+      data-testid="benchmark-workspace-cost"
+    >
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+          <CoinIcon size={12} className="text-gray-400" />
+          Cost
+        </span>
+        <span className="text-[11px] tabular-nums text-gray-600 dark:text-gray-300">
+          {workspaceCostPriceLine(cost)}
+        </span>
+        <BasisChip basis="stored" />
+      </div>
+
+      {/* ⚠ THE ONE HONEST CAVEAT THAT SURVIVED THE GRAIN CHANGE, and it is UNCONDITIONAL. The price
+          and the work now describe the same repositories, so there is nothing left to add up — but
+          a subscription may also cover repositories OUTSIDE this Workspace, which this app cannot
+          see. In that one direction the figure is still an upper bound, and dropping the sentence
+          because the big error was fixed would leave the small one unstated. ⚠ The ONE exception is
+          a price that could not be STATED: this sentence points at a figure, and there is none. */}
+      {cost.monthlyUsd != null && (
+        <p
+          className="mt-1 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400"
+          data-testid="benchmark-workspace-cost-coverage"
+        >
+          {coverage}
+        </p>
+      )}
+      {summed != null && (
+        <p className="mt-0.5 text-[10px] leading-relaxed text-gray-400">{summed}</p>
+      )}
+      {seatNote != null && (
+        <p
+          className="mt-0.5 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400"
+          data-testid="benchmark-cost-seat-unresolved"
+        >
+          {seatNote}
+        </p>
+      )}
+      {/* ⚠ ITS OWN LINE AND ITS OWN TESTID. A seat count this build could not READ and a seat count
+          that is genuinely ZERO have different remedies, and a per-seat price silently multiplied
+          by 0 is what put "Recorded as free" on a reviewer somebody priced. */}
+      {seatZeroNote != null && (
+        <p
+          className="mt-0.5 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400"
+          data-testid="benchmark-cost-seat-zero"
+        >
+          {seatZeroNote}
+        </p>
+      )}
+
+      {collapsed != null ? (
+        // ⚠ ONE SENTENCE, NOT THREE. A price of 0 (or an estate that merged nothing, or a truncated
+        // request) refuses every derived figure for the SAME reason, and three identical dimmed rows
+        // read as three separate measurements that each came back empty.
+        <div className="mt-1.5">
+          <RefusalNote
+            testId={`benchmark-workspace-cost-collapsed-${collapsed}`}
+            headline={COST_REFUSAL_HEADLINE[collapsed]}
+            message={
+              (cost.perMergedPr.status === 'refused' ? cost.perMergedPr.message : '') +
+              ' Every figure this price would produce is withheld for the same reason, so this is ' +
+              'one refusal rather than three measurements that each came back empty.'
+            }
+          />
+        </div>
+      ) : (
+        <div className="mt-1 divide-y divide-gray-200/70 dark:divide-gray-800/70">
+          {/* ⚠ NO WINDOW SUFFIX ON A RATIO. "US$5.52 per 14 days" reads as $/PR/fortnight and
+              invites the reader to double it for a month, but a cost per merged pull request does
+              not scale with the window at all — both halves of the fraction scale together. The
+              basis belongs in the detail, as prose. That shipped on both ratio rows. */}
+          {cost.perMergedPr.status === 'value' ? (
+            <CostValueRow
+              testId="benchmark-workspace-cost-per-merged-pr"
+              label="Per merged PR"
+              figure={formatUsd(cost.perMergedPr.value)}
+              detail={
+                `over ${formatCount(cost.perMergedPr.mergedPrs)} merged across the estate in the ` +
+                `last ${formatCount(cost.windowDays)} days`
+              }
+              basis="counted"
+            />
+          ) : (
+            <CostRefusedRow label="Per merged PR" refusal={cost.perMergedPr} />
+          )}
+
+          {cost.yours.status === 'value' ? (
+            <CostValueRow
+              testId="benchmark-workspace-cost-per-acted-on"
+              label="Per acted-on thread"
+              // ⚠ COUNTED, NOT PROJECTED, and the detail says so: real threads pooled over the
+              // repositories this reviewer is live in. ⚠ AND THE PACE IS A SUM OF PER-REPOSITORY
+              // PACES, never a count over a joined stretch of time — which is why the detail names
+              // the estate rather than a single span the way the per-repository block could.
+              figure={formatUsd(cost.yours.perActedOnUsd)}
+              detail={
+                `${formatThreadCount(cost.yours.actedThreads)} of ` +
+                `${formatCount(cost.yours.settledThreads)} threads acted on across ` +
+                `${formatCount(cost.coveredRepos)} ` +
+                `${cost.coveredRepos === 1 ? 'repository' : 'repositories'} — about ` +
+                `${formatThreadCount(cost.yours.actedPerMonth)} a month`
+              }
+              basis="counted"
+            />
+          ) : (
+            <CostRefusedRow label="Per acted-on thread" refusal={cost.yours} />
+          )}
+
+          <AtPeerEngagementRow expectation={expectation} />
+        </div>
+      )}
+
+      {/* ⚠ THE HEADLINE IS A FIGURE, NOT A FINDING, so it does NOT borrow the amber chrome the
+          anomaly cards use — those cleared a share gate, a magnitude gate and the cohort's own
+          median CI. This one is arithmetic and says so.
+
+          ⚠ AND IT IS TWO PARAGRAPHS, NEVER ONE. The MEASURED figure and the COUNTERFACTUAL gap are
+          different quantities that differ by a factor of the cohort's rate, AND THEY ARE QUOTED
+          OVER DIFFERENT POPULATIONS — the first over every live repository, the second over the
+          fitted subset alone. They are two fields on the model and two elements here, so a renderer
+          cannot reunite them by accident. */}
+      {headline != null && (
+        <div
+          className="mt-1.5 space-y-1 border-t border-gray-200 pt-1.5 text-[11px] leading-relaxed text-gray-700 dark:border-gray-800 dark:text-gray-200"
+          data-testid={`benchmark-workspace-cost-headline-${headline.tone}`}
+        >
+          <p data-testid="benchmark-workspace-cost-headline-spend">{headline.spend}</p>
+          {headline.comparison != null && (
+            <p
+              className="text-gray-500 dark:text-gray-400"
+              data-testid="benchmark-workspace-cost-headline-comparison"
+            >
+              {headline.comparison}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* The time base's own caveat, server-authored so it cannot be dropped by a renderer that
+          did not know it existed. */}
+      {showsSpan && (
+        <p className="mt-1 text-[10px] leading-relaxed text-gray-400">{cost.spanNote}</p>
+      )}
+
+      {/* ⚠ TWO DISCLOSURES WITH TWO CAUSES AND TWO SENTENCES, and neither is optional chrome: a
+          repository whose span could not be read contributed nothing to the pace above (so the pace
+          understates), and a repository the host has held for less than the window is left out of
+          the per-merged-PR denominator alone (so leaving it in would inflate that figure, silently
+          and in the flattering direction). A missing disclosure is the same defect as a wrong
+          number, one line quieter. */}
+      {spanUnobserved != null && (
+        <p
+          className="mt-0.5 text-[10px] leading-relaxed text-gray-400"
+          data-testid="benchmark-workspace-cost-span-unobserved"
+        >
+          {spanUnobserved}
+        </p>
+      )}
+      {partialWindow != null && (
+        <p
+          className="mt-0.5 text-[10px] leading-relaxed text-gray-400"
+          data-testid="benchmark-workspace-cost-partial-window"
+        >
+          {partialWindow}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The counterfactual row — your threads, your price, each repository's OWN cohort median.
+ *
+ * ⚠ ONE FACTOR IS SWAPPED, NEVER TWO, and the row's words say which one. The thread counts and the
+ * price stay the customer's; only the rate comes from the corpus, and it comes from each
+ * repository's own cell rather than from a single blended median.
+ *
+ * ⚠ IT DRAWS NOTHING WHEN THE EXPECTATION ITSELF REFUSED, and that is the "one sentence, not three"
+ * rule crossing a section boundary. A refused expectation is stated ONCE, in full and in the
+ * server's own words, in the expectation section further down this card; a dimmed row up here
+ * carrying the same headline would read as a second measurement that also came back empty. The row
+ * DOES render a refusal when the expectation stands and only its MONEY halves went quiet — that is
+ * a COST reason, it is the same object the arms above are refusing with, and nothing else on the
+ * card would otherwise account for it.
+ */
+function AtPeerEngagementRow({
+  expectation,
+}: {
+  expectation: BotBenchmarkRollupExpectation;
+}): JSX.Element | null {
+  const label = 'At peer engagement';
+  if (expectation.status !== 'value') return null;
+  if (expectation.perActedOnUsd != null && expectation.actedPerMonthAtPeer != null) {
+    return (
+      <CostValueRow
+        testId="benchmark-workspace-cost-counterfactual"
+        label={label}
+        figure={formatUsd(expectation.perActedOnUsd)}
+        detail={
+          `your threads and price with each repository's own cohort median — about ` +
+          `${formatThreadCount(expectation.actedPerMonthAtPeer)} a month across the ` +
+          `${formatCount(expectation.fittedRepos)} ` +
+          `${expectation.fittedRepos === 1 ? 'repository' : 'repositories'} with a fitted median`
+        }
+        basis="fitted"
+      />
+    );
+  }
+  if (expectation.moneyRefusal != null) {
+    return <CostRefusedRow label={label} refusal={expectation.moneyRefusal} />;
+  }
+  // ⚠ NO ROW RATHER THAN AN EMPTY ONE. `moneyRefusal === null` with the figures absent means the
+  // card carries no price at all — and this component only renders inside a cost block, so it is
+  // unreachable here. Drawing a dimmed placeholder for it would assert a measurement nobody made.
+  return null;
+}
+
+/** ⚠ THE FOUR COUNTER MAPS IN A FIXED ORDER, so two cards on one screen never disagree about how a
+ *  reviewer's numbers are laid out. Iterating `Object.entries(counters)` would take the order off
+ *  the wire, which is stable today and is not a promise. */
+const COUNTER_GROUPS: readonly (keyof BotBenchmarkPlacementCounters)[] = [
+  'volume',
+  'outcome',
+  'overdueEligible',
+  'overdueUntouched',
+  'repository',
+];
+
+/**
+ * ⚠ EVERY GROUP NAMES ITS POPULATION, BECAUSE TWO OF THEM SHARE A KEY AND DISAGREE.
+ *
+ * `volume.commentsObserved` and `outcome.commentsObserved` are different numbers — 22 and 53 for one
+ * real reviewer — because the fitter's two populations are different: VOLUME is merged, human-
+ * authored, detail-observed pull requests (merged, because an open PR is still accumulating comments
+ * and averaging it in understates every vendor); OUTCOME is the same set MERGED OR NOT (conditioning
+ * a thread outcome on the merge would select on the dependent variable). Printed under bare headings
+ * the two read as a contradiction — as does "Threads 18" beside "Threads settled 38" — and a reader
+ * who spots an apparent contradiction stops believing the rest of the card. The populations are the
+ * corpus's own, quoted from `populations` in the artifact.
+ */
+const COUNTER_GROUP_LABEL: Record<
+  keyof BotBenchmarkPlacementCounters,
+  { label: string; population: string }
+> = {
+  volume: { label: 'Volume', population: 'merged PRs only' },
+  outcome: { label: 'Thread outcomes', population: 'merged or not' },
+  overdueEligible: { label: 'Eligible to go overdue', population: 'by grace' },
+  overdueUntouched: { label: 'Still untouched past grace', population: 'by grace' },
+  repository: { label: 'Repository disclosure', population: 'what was read' },
+};
+
+/** ⚠ REDUNDANT PREFIXES THE GROUP HEADING ALREADY CARRIES. Nine of the thirteen outcome keys begin
+ *  "threads", and four of those "threadsSettled" — printing them in full gave a column of
+ *  "Threads settled complete acted outdated", which is unscannable and pushed the value an inch
+ *  away from its label. Stripping is per GROUP, never global: `volume.threads` keeps its name
+ *  because there is nothing above it to supply the word. */
+const COUNTER_KEY_PREFIX: Partial<Record<keyof BotBenchmarkPlacementCounters, RegExp>> = {
+  outcome: /^threads(?=[A-Z])/,
+};
+
+/** ⚠ A PRESENTATION FACT ONLY — how to print a key the FITTER named, so a new counter needs no wire
+ *  edit and no edit here. The two overdue maps are keyed by grace HOURS rather than by a name. */
+function counterLabel(key: string, group?: keyof BotBenchmarkPlacementCounters): string {
+  if (/^\d+$/.test(key)) return `${key} h`;
+  const prefix = group != null ? COUNTER_KEY_PREFIX[group] : undefined;
+  // Strip only when something survives it — `outcome.threadsSettled` itself must stay "Settled",
+  // and a hypothetical bare `threads` key must not become the empty string.
+  const stripped = prefix != null ? key.replace(prefix, '') : key;
+  const base = stripped.length > 0 ? stripped : key;
+  const spaced = base.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().trim();
+  const sentence = spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  // ⚠ THE ONE ACRONYM THE FITTER'S camelCase DESTROYS. `prsWithFinding` sentence-cases to "Prs with
+  // finding", which reads as a typo of a word rather than as "pull requests" — and this block is
+  // the audit trail, where looking sloppy costs it the trust it exists to earn. Applied to the
+  // rendered LABEL only; the wire key is the fitter's and is never rewritten.
+  return sentence.replace(/\bPrs\b/g, 'PRs');
+}
+
+/**
+ * THE POOLED COUNTERS — plain sums over the repositories this vendor is live in.
+ *
+ * ⚠ PUBLISHED IN FULL, NOT SUMMARISED, AND THAT IS THE POINT. The additivity invariant is that the
+ * whole equals the sum of the parts for EVERY key; a curated shortlist would make the card's own
+ * arithmetic uncheckable against the evidence table underneath it. Nothing in here is a rate, so
+ * nothing in here needs a denominator to be honest — which is exactly why the RATES on this card
+ * live elsewhere, each beside the population it was computed over.
+ */
+function PooledCounters({ counters }: { counters: BotBenchmarkPlacementCounters }): JSX.Element {
+  // ⚠ FOLDED BY DEFAULT, AND LAST ON THE CARD — a deliberate demotion, not a hiding. Twenty-five
+  // raw fitter counters were the FIRST thing on every card, above the price and the comparison,
+  // so the card led with its workings and buried its answer. They stay in full (the additivity
+  // invariant is only checkable against a complete list) and one click away, which is what an
+  // audit trail needs to be.
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2" data-testid="benchmark-rollup-counters">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        data-testid="benchmark-rollup-counters-toggle"
+        className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-50"
+      >
+        <ChevronIcon dir={open ? 'down' : 'right'} />
+        <ThreadsIcon size={12} className="text-gray-400" />
+        Pooled counts behind every figure on this card
+      </button>
+      {/* ⚠ THE VALUE SITS AGAINST ITS OWN LABEL, NOT AT THE FAR EDGE OF THE CARD. The first cut was
+          `justify-between` inside a half-width column, which on a wide rail put ~650px of empty
+          space between "Threads settled complete acted" and the number it names — a reader had to
+          track across the card per row, twenty-five times. Pairs wrap instead: adjacency beats
+          decimal alignment here because nothing in this block is compared DOWN a column (they are
+          different quantities), only read one at a time. */}
+      {!open ? null : (
+        <div className="mt-1 flex flex-col gap-1.5">
+        {COUNTER_GROUPS.map((group) => {
+          const entries = Object.entries(counters[group]);
+          if (entries.length === 0) return null;
+          const meta = COUNTER_GROUP_LABEL[group];
+          return (
+            <div key={group}>
+              <div className="text-[9px] font-semibold uppercase tracking-wide text-gray-400">
+                {meta.label}{' '}
+                <span className="font-normal normal-case tracking-normal text-gray-400/80">
+                  · {meta.population}
+                </span>
+              </div>
+              <dl className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                {entries.map(([key, value]) => (
+                  <div key={key} className="flex items-baseline gap-1">
+                    <dt className="text-[10px] text-gray-500 dark:text-gray-400">
+                      {counterLabel(key, group)}
+                    </dt>
+                    <dd className="text-[10px] font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+                      {formatCount(value)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          );
+        })}
+      </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * THE EVIDENCE TABLE — one row per repository this vendor is live in.
+ *
+ * ⚠ THE AUDIT TRAIL FOR EVERY SUM ON THE CARD. A reader who doubts a total can find the repository
+ * responsible for it without leaving the card, and a card whose spread says "3 of 5 above the
+ * median" while the table lists four repositories is caught on sight — which is why it ships beside
+ * the numbers rather than behind a link.
+ *
+ * ⚠ EVERY `—` MEANS WITHHELD AND NEVER ZERO, and a REFUSED PLACEMENT KEEPS ITS ROW with its reason
+ * where the band would be. The repository is live, it contributed counts, and it is part of the
+ * estate the money is divided by; dropping it would make the table disagree with the card's own
+ * coverage. Both rules are enforced in `contributionRows`, so this component holds no arithmetic.
+ */
+function EvidenceTable({
+  rows,
+  statedRefusal,
+}: {
+  rows: ReturnType<typeof contributionRows>;
+  /** The card-level comparison refusal, when one note already covers both sections. Rows whose own
+   *  refusal is that same VENDOR-WIDE fact then show `—` instead of restating it. */
+  statedRefusal: BotBenchmarkRollupRefusalReason | null;
+}): JSX.Element {
+  return (
+    <div className="mt-2" data-testid="benchmark-rollup-evidence">
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+        <WorkspaceIcon size={12} className="text-gray-400" />
+        Where these numbers come from
+      </div>
+      {/* ⚠ THE TABLE SCROLLS INSIDE ITS OWN BOX. The panel's body must never scroll horizontally —
+          the rail is a narrow column on a laptop and five columns do not fit it. */}
+      <div className="mt-1 overflow-x-auto">
+        <table className="w-full min-w-[32rem] border-collapse text-[11px]">
+          <thead>
+            <tr className="border-b border-gray-200 text-left text-[9px] uppercase tracking-wide text-gray-400 dark:border-gray-800">
+              <th scope="col" className="py-1 pr-3 font-semibold">
+                Repository
+              </th>
+              <th scope="col" className="py-1 pr-3 font-semibold">
+                Activity band
+              </th>
+              <th scope="col" className="py-1 pr-3 text-right font-semibold">
+                Merged PRs, 14 days
+              </th>
+              <th scope="col" className="py-1 pr-3 text-right font-semibold">
+                Acted on
+              </th>
+              <th scope="col" className="py-1 text-right font-semibold">
+                Rank in its band
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-800/70">
+            {rows.map((row) => (
+              <tr key={row.key}>
+                <td className="py-1 pr-3 text-gray-700 dark:text-gray-200">{row.repo}</td>
+                <td className="py-1 pr-3 text-gray-500 dark:text-gray-400">
+                  {!row.bandRefused ? (
+                    <span className="tabular-nums">{row.band}</span>
+                  ) : statedRefusal != null && row.refusalIsVendorWide ? (
+                    <span className="text-gray-400">—</span>
+                  ) : (
+                    <span className="text-gray-400">
+                      <ThinSampleIcon className="mr-1 inline-block align-[-0.05em]" />
+                      {row.band}
+                    </span>
+                  )}
+                </td>
+                <td className="py-1 pr-3 text-right tabular-nums text-gray-600 dark:text-gray-300">
+                  {row.mergedPrs}
+                </td>
+                <td className="py-1 pr-3 text-right tabular-nums text-gray-600 dark:text-gray-300">
+                  {row.actedOn}
+                </td>
+                <td className="py-1 text-right tabular-nums text-gray-600 dark:text-gray-300">
+                  {row.percentile}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1 text-[10px] leading-relaxed text-gray-400">
+        A dash is a figure this repository withheld, never a zero — its counts still pool into the
+        totals above, because pooling is the remedy for a thin sample. Each rank is read against
+        that repository’s own cohort band, so the ranks are not comparable with each other.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * ONE VENDOR, ONE CARD, THE WHOLE WORKSPACE.
+ *
+ * ⚠ THE REACT KEY IS THE WORKSPACE'S VENDOR KEY, NEVER `repoId:vendor`. A rollup card has n
+ * repositories and would collide with itself on the unit card's key; and it cannot key on `vendor`
+ * either, which is `null` for every brand the corpus has never seen — most of the reviewers a real
+ * workspace runs — so n unbranded vendors would collapse onto one card. `rollupRows` resolves the
+ * key, the title, the label and the colour once, so no renderer re-derives any of them.
+ *
+ * ⚠ THE CARD COMPUTES A PERCENTILE NOWHERE, because there is no distribution of workspaces. The
+ * ranks on it are the per-repository ones, in the evidence table, each against its own band.
+ */
+function RollupCard({ row }: { row: RollupRow }): JSX.Element {
+  const { rollup } = row;
+  const contributions = useMemo(
+    () => contributionRows(rollup.contributions),
+    [rollup.contributions],
+  );
+  const spread = rollupSpreadSentence(rollup.spread);
+  const expectation = rollupExpectationSentence(rollup.expectation);
+  const shared = sharedComparisonRefusal(rollup.spread, rollup.expectation);
+
+  return (
+    <Card>
+      {/* The unit card's header grammar, one grain up: the reviewer is the identity here, and the
+          repositories are the evidence. */}
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1" title={row.title}>
+        <span
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
+          style={row.color != null ? { color: row.color, background: `${row.color}1a` } : undefined}
+        >
+          <BotIcon size={12} />
+          {/* ⚠ THE REVIEWER IS NAMED EVEN WHEN THE COHORT REFUSES IT. A bot the corpus has never
+              seen is still this workspace's biggest reviewer, and it must not read as a zero. */}
+          {row.label}
+        </span>
+        {/* ⚠ BOTH NUMBERS, ALWAYS — "live in 4 of 8 repositories". `liveInRepos` alone is an
+            unanchored count, and it is the denominator every sum on this card runs over. */}
+        <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{row.coverage}</span>
+        {/* The logins folded into this one card — two accounts the workspace classifies as one
+            vendor are ONE card, which is the corpus's own semantics. */}
+        {rollup.reviewers.length > 0 && (
+          <span className="text-[10px] text-gray-400">
+            {rollup.reviewers.map((r) => r.login).join(', ')}
+          </span>
+        )}
+      </div>
+
+      {/* ⚠ ABSENT, NEVER A US$0.00. `cost` is missing exactly when nobody priced this reviewer in
+          this Workspace, and this presence check is the whole of the difference between saying
+          nothing and asserting that the reviewer is free. */}
+      {rollup.cost != null && (
+        <WorkspaceCostBlock cost={rollup.cost} expectation={rollup.expectation} />
+      )}
+
+      {/* ⚠ A SHAPE, NEVER A TOTAL, and its denominator is the PLACED subset rather than the card's
+          coverage — the sentence says which. Averaging n percentiles is the obvious alternative and
+          is meaningless twice over: they come from different cohorts, and a mean of ranks is not
+          the rank of anything. */}
+      {spread != null && (
+        <div
+          className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-gray-600 dark:text-gray-300"
+          data-testid="benchmark-rollup-spread"
+        >
+          <ScalesIcon className="mt-0.5 shrink-0 text-gray-400" />
+          <p>{spread}</p>
+        </div>
+      )}
+      {/* ⚠ ONE NOTE WHEN ONE REASON DISQUALIFIES BOTH — see `sharedComparisonRefusal`. This card
+          shipped printing the identical `vendor_not_in_corpus` paragraph twice in a row, which is
+          the commonest case of all: most reviewers a real workspace runs are not in the corpus. */}
+      {shared != null ? (
+        <div className="mt-2">
+          <RefusalNote
+            testId={`benchmark-rollup-comparisons-refused-${shared.reason}`}
+            headline={ROLLUP_REFUSAL_HEADLINE[shared.reason]}
+            message={shared.message}
+          />
+        </div>
+      ) : (
+        rollup.spread.status === 'refused' && (
+          <div className="mt-2">
+            <RefusalNote
+              testId={`benchmark-rollup-spread-refused-${rollup.spread.reason}`}
+              headline={ROLLUP_REFUSAL_HEADLINE[rollup.spread.reason]}
+              message={rollup.spread.message}
+            />
+          </div>
+        )
+      )}
+
+      {/* ⚠⚠ THE ONE SENTENCE ON THIS CARD CARRYING TWO RATES, AND IT NAMES ITS POPULATION TWICE.
+          `expectedRate` exists only where a cohort published a median, so the customer's rate it is
+          set against is computed over that SAME fitted subset — never the pooled headline rate the
+          cost block quotes. Both are on the wire, with both repository counts, precisely so this
+          renderer is physically able to label them apart. Mixing them in one row is the defect
+          docs/PERIOD-REPORTING.md names "ONE ROW MUST NEVER MIX THE HEADLINE AND SUBSET
+          POPULATIONS", shipped three times in that feature before it was believed. */}
+      {expectation != null && (
+        <div
+          className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-gray-600 dark:text-gray-300"
+          data-testid="benchmark-rollup-expectation"
+        >
+          <ChartIcon size={13} className="mt-0.5 shrink-0 text-gray-400" />
+          <p>{expectation}</p>
+        </div>
+      )}
+      {shared == null && rollup.expectation.status === 'refused' && (
+        <div className="mt-2">
+          <RefusalNote
+            testId={`benchmark-rollup-expectation-refused-${rollup.expectation.reason}`}
+            headline={ROLLUP_REFUSAL_HEADLINE[rollup.expectation.reason]}
+            message={rollup.expectation.message}
+          />
+        </div>
+      )}
+
+      {/* ⚠ THE BAND COLUMN GOES SILENT WHEN THE NOTE ABOVE ALREADY SAID IT. A two-repository card
+          otherwise printed "We have never measured this reviewer" four times — twice as notes and
+          once per row. Rows whose refusal DIFFERS from the shared one still name it, because that
+          is a fact the card has not stated anywhere else. */}
+      <EvidenceTable rows={contributions} statedRefusal={shared?.reason ?? null} />
+
+      <PooledCounters counters={rollup.counters} />
     </Card>
   );
 }
@@ -965,7 +1419,17 @@ export function BenchmarkPanel({ repoId }: { repoId?: number } = {}): JSX.Elemen
 
   return (
     <div className="space-y-3" ref={wrapRef} data-testid="benchmark-panel">
-      <Body data={data} isLoading={isLoading} isError={isError} width={width} />
+      {/* ⚠ THE GRAIN IS DECIDED BY THE PROP, NOT BY THE PAYLOAD. `repoId == null` is the rail and
+          draws the vendor rollups; anything else is a repository's own Bots tab and draws that
+          repository's placements. Branching on `data.rollup != null` instead would let a version
+          skew silently change which screen the reader is looking at. */}
+      <Body
+        data={data}
+        isLoading={isLoading}
+        isError={isError}
+        width={width}
+        isRail={repoId == null}
+      />
     </div>
   );
 }
@@ -975,15 +1439,18 @@ function Body({
   isLoading,
   isError,
   width,
+  isRail,
 }: {
   data: BotBenchmarkPlacementResponse | undefined;
   isLoading: boolean;
   isError: boolean;
   width: number;
+  isRail: boolean;
 }): JSX.Element {
   const units = useMemo(() => orderedUnits(data?.units ?? []), [data?.units]);
   const tally = useMemo(() => placementTally(units), [units]);
   const absent = useMemo(() => absentMetricRows(data?.absentMetrics), [data?.absentMetrics]);
+  const rollups = useMemo(() => rollupRows(data?.rollup ?? []), [data?.rollup]);
 
   if (isLoading) return <SkeletonBlock className="h-40" />;
   if (isError || data == null) {
@@ -1036,15 +1503,26 @@ function Body({
         )}
       </div>
 
-      {/* ⚠ NEVER A SILENT TRUNCATION. The omitted repositories are not "no data". */}
+      {/* ⚠ NEVER A SILENT TRUNCATION. The omitted repositories are not "no data".
+          ⚠ AND THE REMEDY IS ONLY OFFERED WHERE IT IS ONE. "Open a repository's own Bots tab" is
+          advice on the rail and a no-op on that very tab, where it shipped unconditionally; on the
+          rail it also has to say what truncation costs, which is the MONEY — a whole price divided
+          by a partial estate is wrong in the inflating direction, so the rollups below withhold it
+          while their counters and spreads, which are honest sums over a stated subset, still
+          render. */}
       {data.truncated === true && (
         <RefusalNote
           testId="benchmark-truncated"
           headline="More repositories than one request folds"
           message={
             'This Workspace holds more (repository × reviewer) pairs than one request may measure, ' +
-            'so only the first are shown. The rest are not “no data” — open a repository’s own ' +
-            'Bots tab to place it.'
+            'so only the first are shown. The rest are not “no data”' +
+            (isRail
+              ? ': every card below sums a partial estate, so its counters and its spread still ' +
+                'read as sums over the repositories named on it, while its money is withheld — a ' +
+                'whole subscription over part of the work is not an approximation of the answer. ' +
+                'Open a repository’s own Bots tab to place it on its own.'
+              : '.')
           }
         />
       )}
@@ -1063,12 +1541,73 @@ function Body({
         />
       ) : (
         <>
+          {/* ⚠ THE ANOMALY LIST LEADS ON BOTH SCREENS. A finding is per (repository × reviewer) and
+              stays that way — it is the one thing on the rail that names a repository, because
+              "acted on far less of this reviewer than its peers" is a work item somebody has to do
+              IN a repository. Folding findings up to the vendor would turn n actionable rows into
+              one unactionable average. */}
           <FindingsSection units={units} tally={tally} />
-          <div className="space-y-2">
-            {units.map((unit) => (
-              <UnitCard key={`${unit.repoId}:${unit.vendor ?? unit.botKind ?? 'bot'}`} unit={unit} width={width} />
-            ))}
-          </div>
+          {isRail ? (
+            rollups.length > 0 ? (
+              <div className="space-y-2">
+                {rollups.map((row) => (
+                  <RollupCard key={row.key} row={row} />
+                ))}
+              </div>
+            ) : data.rollup == null ? (
+              // ⚠ A SENTENCE RATHER THAN A BLANK. The rollup is OPTIONAL on the wire, so a host
+              // running an older plugin serves units with no rollup — and the rail deliberately
+              // draws no per-repository cards, which would otherwise leave the reader with a
+              // findings list and nothing under it.
+              <RefusalNote
+                testId="benchmark-no-rollup"
+                headline="No Workspace rollup is being served"
+                message={
+                  'This build served the per-repository placements but no per-vendor rollup, which ' +
+                  'is what this view is made of. A repository’s own Bots tab still shows its ' +
+                  'placements, and nothing here is a statement about your reviewers.'
+                }
+              />
+            ) : (
+              // ⚠⚠ ABSENT AND EMPTY ARE TWO DIFFERENT FACTS AND THEY GET TWO DIFFERENT SENTENCES.
+              // The server is deliberate about the distinction — a MISSING `rollup` key says the
+              // fold did not run, `[]` says it ran and dropped every card because no reviewer was
+              // live anywhere — and the route has a test pinning each. Collapsing them with a
+              // `?? []` told a reader whose bots simply had not commented yet that their BUILD was
+              // deficient, sending them to chase a deployment problem that does not exist. This is
+              // the ordinary state right after somebody classifies a reviewer in Bots → Settings.
+              // ⚠ THE HEADLINE IS SCOPED TO WHAT WAS READ, AND THAT IS NOT PEDANTRY. The first
+              // wording — "No reviewer has been active in this Workspace yet" — is FALSE of a
+              // workspace whose bots are merely quiet in the sampled window: one real workspace
+              // showing this note has 906 comments from one reviewer across four repositories and
+              // 369 from another. The body sentence was correctly qualified ("in the pull requests
+              // read here") while the headline made the unqualified claim, and the headline is the
+              // half that gets read. The walk is capped at each repository's most recently updated
+              // pull requests, so "we saw nothing" and "there is nothing" are genuinely different
+              // statements and only the first is ours to make.
+              <RefusalNote
+                testId="benchmark-no-live-reviewers"
+                headline="No reviewer commented on the pull requests we read"
+                message={
+                  'The rollup ran and found no automated reviewer that has commented in the pull ' +
+                  'requests read here, so there is nothing to place, pool or price — every card ' +
+                  'would be a column of zeros about a reviewer that has not been given the chance ' +
+                  'to do anything. That is a statement about this sample, not about your ' +
+                  'reviewers: the walk is capped at each repository’s most recently updated pull ' +
+                  'requests, so a reviewer that is busy outside that window is absent here and ' +
+                  'still working. A reviewer classified in Bots → Settings appears once it has ' +
+                  'commented on a pull request in range; each repository’s own Bots tab says the ' +
+                  'same thing per repository.'
+                }
+              />
+            )
+          ) : (
+            <div className="space-y-2">
+              {units.map((unit) => (
+                <UnitCard key={`${unit.repoId}:${unit.vendor ?? unit.botKind ?? 'bot'}`} unit={unit} width={width} />
+              ))}
+            </div>
+          )}
         </>
       )}
 

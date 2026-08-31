@@ -575,6 +575,29 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   visible-but-locked surface — ONE fetch on mount, the anomaly list as the headline, every
   percentile carrying its cohort n AND its band count (bands are 10/10/9/7/4/3/2 per vendor), and
   fourteen distinct refusal sentences ([docs/FRONTEND.md](docs/FRONTEND.md) § Bots → Benchmark).
+  ⚠ **THAT ROUTE IS TWO SCREENS AT TWO GRAINS, AND MONEY LIVES ON EXACTLY ONE.** The RAIL renders
+  `rollup[]` (ONE CARD PER VENDOR over the workspace — pooled counters, a per-repo evidence table, a
+  spread, the price); the REPO TAB renders the per-repository units and **no money at all**. Same
+  route, same ONE fetch; `apiVersion` STAYS 21 (`rollup?` is an optional field on a
+  `packages/shared` wire type, which is not `ProContext`). ⚠ **THE ROLLUP CARRIES NO PERCENTILE OF
+  ITS OWN** — pooling is VOLUME-weighted while the cohort distribution is one-repo-one-vote, so a
+  workspace spanning four bands folds to a number belonging to no cell, and there is no distribution
+  of workspaces to rank it in anyway. Its comparison arrives as the SPREAD (how many of its
+  per-repo placements sit below/at/above their own medians) and the estate-matched EXPECTATION —
+  both DERIVED FROM THE PER-REPO UNITS, never computed at estate grain.
+  `BotBenchmarkPlacementUnit.cost` is **DELETED from the wire** (a price is stored once PER
+  WORKSPACE; the old block divided a whole subscription by one repository's work), and the guarantee
+  is STRUCTURAL — a `?repoIds=`-NARROWED request builds no rollup, and it is the NARROWING that
+  decides, never the resulting repo count. `BotRoiPanel`'s `$/acted-on` follows the same rule
+  (`showCost = botDepth && repoId == null` — do NOT simplify back to `botDepth`). Four fold rules
+  in [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md), each of which has already
+  cost a bug: rates are additive but **spans are NOT**; the pooled headline rate (over every live
+  repo) and the fitted-subset rate are TWO NUMBERS that must be labelled apart and **NEVER
+  SUBTRACTED** — both, plus both repo counts, ride the wire (PERIOD-REPORTING's headline-vs-subset
+  defect, one grain over); a cohort median of **`0` is NO median** — all three `qodo` bands in the
+  shipped corpus publish one; and **`workspace_truncated` OUTRANKS every other cost refusal**,
+  because a partial estate makes the exact claim false in the INFLATING direction — money refuses
+  on all three arms while counters and the spread, honest sums over a stated subset, still render.
 - **The work plan** (`workPlan` gates the NARRATION ONLY): "what should I work on today", folded
   into the **Pending** board as its ranked "Do next" head. **THE CODE RANKS, FREE; THE MODEL
   NARRATES, PAID** — the rank is CORE (`db/work-plan.ts`) and served free by `GET /api/attention`,

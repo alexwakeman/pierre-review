@@ -981,11 +981,19 @@ function VendorTable({
   // bot + direction (the exact opener the removed workspace inflation charts used). null ⇒ the
   // counts render as plain text.
   onOpenInflation: ((direction: 'over' | 'under', bots: BotFlaggingBotNarrowing) => void) | null;
-  // The $/acted-on cost column — paid (`botDepth`), and false renders NO cost chrome at all. ⚠ Same
-  // note as `onOpenDepth`: unreachable from the live mount now that the whole panel rides the same
-  // capability. The upgrade nudge for pricing still lives on the price editor in Bots → Settings,
-  // never on this table — a locked TABLE and an in-table upsell are two different answers to the
-  // same question.
+  // The $/acted-on cost column — false renders NO cost chrome at all (header AND cell).
+  //
+  // ⚠ THIS IS THE ONE PROP HERE THAT IS NOT JUST A TIER GATE — IT IS ALSO A GRAIN GATE. The
+  // caller passes `botDepth && repoId == null`: paid, AND measured over the whole Workspace. The
+  // numerator is a monthly WORKSPACE price and the denominator is the acted-on threads in
+  // whatever scope this table was measured at, so the two halves only describe one population on
+  // the un-narrowed mount. Unlike `onOpenDepth`'s null, this false IS reachable from the live
+  // mount — every per-repo Bots tab hits it.
+  //
+  // The upgrade nudge for pricing still lives on the price editor in Bots → Settings, never on
+  // this table — a locked TABLE and an in-table upsell are two different answers to the same
+  // question. And nothing in here may reintroduce a cost figure behind a caveat: the caveat was
+  // tried and the grain moved instead.
   showCost: boolean;
   // The Bot Tuning Advisor entry point (Pro `botAdvisor`): per-row Tune/Drop pills that open
   // the Advisor tab focused on this bot. BOTH null in free mode → the Actions column does not
@@ -1145,7 +1153,20 @@ function VendorTable({
               <th
                 rowSpan={headSpan}
                 className="px-2 py-1.5 text-right font-medium"
-                title="Monthly cost ÷ acted-on threads. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Bots → Settings. Narrowed to a single repo this divides a whole month's price by part of that bot's work, so read it as a rate, not as spend, and never add it up across workspaces."
+                // ⚠ THE OLD "narrowed to a single repo…" CAVEAT IS GONE BECAUSE THE STATE IS.
+                // This column no longer renders on the per-repo mount at all (`showCost` is
+                // `botDepth && repoId == null`), so both halves of the figure now describe the
+                // same population — the whole Workspace — and a caveat about a case that cannot
+                // occur would only teach the reader to distrust a number that is exact. The
+                // cross-workspace warning stays: prices are per Workspace and are never summed.
+                // ⚠ THE FRACTION'S TWO ENDS ARE ON ONE TIME BASE, AND THE TITLE SAYS SO. This
+                // divided the monthly price by the raw in-window count until the benchmark rollup
+                // landed one tab away with its own $/acted-on: $2.23 here against $21.24 there,
+                // same bot, same price. The count is now annualised over the selected window, so
+                // the two figures differ only by the stretch each was measured over — which both
+                // surfaces state. Benchmark measures the reviewer's whole observed span; this
+                // measures the window in the picker, so a bot busier lately reads cheaper here.
+                title="Monthly cost ÷ acted-on threads a month, both over this whole Workspace — the acted-on count is scaled from the selected window to a month, so the price and the work are on the same time base. Bots → Benchmark measures the same fraction over each reviewer's whole observed span instead, so the two answer different questions and need not match. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Bots → Settings. Another Workspace may hold a different figure for the same bot; the two are never added together."
               >
                 $/acted-on
               </th>
@@ -1583,6 +1604,23 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   const gate = useProGateState(botDepth);
   const entitled = gate === 'entitled';
   const advisorPillsOn = botAdvisor && repoId == null;
+  // ⚠ MONEY IS WORKSPACE-GRAINED, SO IT RENDERS ONLY ON THE WORKSPACE-GRAINED MOUNT.
+  // `costPerActedOnUsd` is this bot's whole MONTHLY WORKSPACE price divided by the acted-on
+  // threads in the measured scope. On the bare rail mount both halves describe the same
+  // population and the figure is exact. With `repoId` set, the denominator shrinks to ONE
+  // repository's work while the numerator stays the whole subscription — an UPPER BOUND that
+  // reads as spend, cannot be added up across the repos of one workspace without counting the
+  // same subscription n times, and is wrong in the flattering-to-nobody direction (it inflates
+  // the apparent cost of every bot on every repo tab). The server figure is unchanged and still
+  // correct for the rail; it is the per-repo VIEW that had no honest way to show it.
+  //
+  // This is the same grain move the Bots → Benchmark rollup makes: money lives at the workspace
+  // grain or it does not ship. A reader who wants the exact figure has it one rail up.
+  //
+  // ⚠ NOT NOW-TRIVIAL — see the note below the lock: these per-control gates are the local
+  // statement of which tier (and now which GRAIN) each control belongs to. This one carries a
+  // second predicate and must not be inlined away.
+  const showCost = botDepth && repoId == null;
   // The workspace decides the VERDICT; `repoIds` only narrows the measured data. Both occupy
   // their own query-key slot, so either change refetches and two workspaces can never share a
   // cache entry.
@@ -1671,19 +1709,41 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   // screenshot with nothing failing.
   if (gate === 'pending') return null;
   if (gate === 'locked') {
+    // ⚠ THE COST CLAUSE IS GATED ON THE SAME PREDICATE THE COLUMN IS, AND HERE IS WHY.
+    //
+    // Rule 2 of ProGate is "say what the view ANSWERS, never what it costs", and this clause
+    // passes that test on its own terms — "what that works out to per acted-on comment" is a
+    // question, not a price tag. It fails a different test: a lock is a PROMISE about what
+    // paying reveals, and on the per-repo mount paying now reveals everything in this sentence
+    // EXCEPT that clause. Leaving it would be the one thing worse than an advert — an
+    // unentitled reader pays, opens this very tab, and the promised figure is not there. The
+    // reader would have no way to learn that the answer exists one rail up, at a different
+    // grain, which is a fact about the product, not about their subscription.
+    //
+    // So the clause survives on the rail mount, where it is true, and is dropped on the per-repo
+    // mount, where the entitled view does not answer it. The remaining sentence still names four
+    // questions, so the locked pane keeps doing its job on both mounts.
     return (
       <ProLockPanel heading="Bot ROI" testId="bot-roi-locked">
         What each review bot actually produced this window: threads raised, how many were acted on,
-        how long they sat, how much repeated another bot — and what that works out to per acted-on
-        comment against the price of the seat.
+        how long they sat, how much repeated another bot
+        {showCost ? (
+          <> — and what that works out to per acted-on comment against the price of the seat.</>
+        ) : (
+          <>.</>
+        )}
       </ProLockPanel>
     );
   }
 
-  // ⚠ EVERYTHING BELOW RUNS ONLY UNDER `botDepth`, so the per-control `botDepth ? …` gates further
-  // down (the $/acted-on column, the "Depth →" pill) are now trivially true. They are kept as the
-  // local statement of which tier each control belongs to — and as the thing that still holds if
-  // this panel's gate is ever narrowed back to a per-column one.
+  // ⚠ EVERYTHING BELOW RUNS ONLY UNDER `botDepth`, so a per-control gate that reads `botDepth`
+  // ALONE (the "Depth →" pill) is now trivially true. Those are kept as the local statement of
+  // which tier each control belongs to — and as the thing that still holds if this panel's gate is
+  // ever narrowed back to a per-column one.
+  //
+  // ⚠ `showCost` IS NO LONGER ONE OF THEM. It is `botDepth && repoId == null`, and the second
+  // conjunct is live: the $/acted-on column really does disappear on the per-repo mount, for the
+  // grain reason written where `showCost` is declared. Do not "simplify" it back to `botDepth`.
 
   const header = (
     // The "Review-bot ROI" heading was dropped (the rail line already has a header); just the
@@ -1796,7 +1856,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           onOpenVendor={(key) => openBotPrsDetail(key, repoId ?? null)}
           overdueGraceMs={t.overdueGraceMs}
           showMl={showMlColumns}
-          showCost={botDepth}
+          showCost={showCost}
           volume={volume}
           volumeLoading={volumeLoading}
           // ⚠ THE SAME `repoId ?? null` THIRD LEG the flagging drill-down gets: on the per-repo
@@ -1856,13 +1916,33 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             taken it paid the moment the panel was gated. Do not re-add it — two mounts would draw
             it twice for a paying account. */}
         <QualityCheckSection rows={qualityChecks} botColor={botColor} />
+        {/* ⚠ THE PRICING INSTRUCTION IS GATED ON THE SAME PREDICATE AS THE COLUMN IT DESCRIBES.
+            "Set a price to see $/acted-on" is a promise about THIS table, and on the per-repo
+            mount there is no $/acted-on column for a price to fill — a reader who followed it
+            would set a price, come back, and find nothing changed here. The rail mount keeps the
+            sentence because there the instruction is true and the figure it produces is exact.
+            The per-repo mount says instead where the money does live, so the absence reads as a
+            grain decision rather than as a missing column. */}
         <div className="text-[11px] text-gray-400">
           “Acted on” = a later commit likely addressed the thread, it was resolved, or a human
           replied/resolved after the bot (approximate). Noise ratio = the untouched share of a
-          bot's threads. Set a bot's monthly price in{' '}
-          <span className="font-medium">Bots → Settings</span> to see $/acted-on — the price is per{' '}
-          <span className="font-medium">Workspace</span>, so another Workspace may hold a different
-          figure for the same bot and the two are never added together.
+          bot's threads.{' '}
+          {showCost ? (
+            <>
+              Set a bot's monthly price in <span className="font-medium">Bots → Settings</span> to
+              see $/acted-on — the price is per <span className="font-medium">Workspace</span>, so
+              another Workspace may hold a different figure for the same bot and the two are never
+              added together.
+            </>
+          ) : (
+            <>
+              Cost is not shown per repository: a bot's price is per{' '}
+              <span className="font-medium">Workspace</span>, so dividing a whole month of it by
+              one repo's work would read as spend and could not be added up across repos. The
+              $/acted-on figures are on the cross-repo{' '}
+              <span className="font-medium">Bots</span> rail.
+            </>
+          )}
         </div>
       </div>
     );

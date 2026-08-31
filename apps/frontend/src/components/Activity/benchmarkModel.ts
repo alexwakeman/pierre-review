@@ -7,9 +7,16 @@ import type {
   BotBenchmarkPlacementMetric,
   BotBenchmarkPlacementRefusalReason,
   BotBenchmarkPlacementUnit,
+  BotBenchmarkRollupContribution,
+  BotBenchmarkRollupExpectation,
+  BotBenchmarkRollupRefusalReason,
+  BotBenchmarkRollupSpread,
   BotBenchmarkStaleness,
   BotBenchmarkUnavailableReason,
   BotBenchmarkUnitExclusionReason,
+  BotBenchmarkWorkspaceCost,
+  BotBenchmarkWorkspaceRollup,
+  CostModel,
 } from '@pierre-review/shared';
 import type { BotsInnerTab } from '../../store/filters.js';
 import type { ProGateState } from '../ProGate.js';
@@ -628,7 +635,7 @@ export const COST_BASIS_LABEL: Record<CostBasis, string> = {
   fitted: 'Fitted peer median',
 };
 
-/** NINE SENTENCES — and the tenth state, "no price set", never reaches here because the block is
+/** TEN SENTENCES — and the eleventh state, "no price set", never reaches here because the block is
  *  absent. Each is a different fact with a different remedy, exactly like the placement and
  *  exclusion vocabularies above. */
 export const COST_REFUSAL_HEADLINE: Record<BotBenchmarkCostRefusalReason, string> = {
@@ -649,6 +656,10 @@ export const COST_REFUSAL_HEADLINE: Record<BotBenchmarkCostRefusalReason, string
   price_unresolved: 'Price entered, monthly figure not statable',
   cohort_rate_unfitted: 'No peer engagement rate in this cohort',
   cohort_rate_zero: 'Peers act on none of it either',
+  // ⚠ THE ROLLUP-ONLY ONE, AND IT IS ABOUT THE ESTATE RATHER THAN THIS REVIEWER. The price is whole
+  // and the work it would be divided by is not, so every figure would read too high — a fact about
+  // how much was read, never a fact about the bot.
+  workspace_truncated: 'Too many repositories to price the Workspace',
 };
 
 /**
@@ -714,6 +725,31 @@ export function formatThreadCount(n: number): string {
   return trimZero(n.toFixed(abs < 10 ? 1 : 0));
 }
 
+/* ⚠ THE PRICE AND THE SEAT DISCLOSURES ARE STATED THE SAME WAY AT BOTH GRAINS, so they are typed
+   STRUCTURALLY rather than against one wire interface. The four functions below read nothing but the
+   fields named here, and `BotBenchmarkPlacementCost` (per repository, no longer serialised) and
+   `BotBenchmarkWorkspaceCost` (per vendor, what the rollup card carries) both satisfy them.
+
+   A second copy for the rollup was the alternative and it is the one that goes wrong: the per-seat
+   multiplication, the "price entered but not statable" line and the two dropped-row disclosures are
+   four sentences a reader may not be told two different ways depending on which card they are
+   standing on. One implementation, two callers, one wording. */
+
+interface PriceLineFacts {
+  monthlyUsd: number | null;
+  windowUsd: number | null;
+  windowDays: number;
+  costModel: CostModel;
+  unitMonthlyUsd: number | null;
+  seats: number | null;
+}
+
+interface SeatDisclosureFacts {
+  pricedReviewers: number;
+  seatPriceUnresolved: number;
+  seatCountZero: number;
+}
+
 /**
  * The price line: the monthly figure a human typed — the basis of every reviewer-side rate on this
  * card — and the same money over the fortnight `$ per merged PR` sits on. Under `per_seat` the two
@@ -725,7 +761,7 @@ export function formatThreadCount(n: number): string {
  * the line says exactly that — running it through `formatUsd` would print "US$0.00 a month", which
  * is the "recorded as free" lie this whole vocabulary exists to prevent.
  */
-export function costPriceLine(cost: BotBenchmarkPlacementCost): string {
+export function costPriceLine(cost: PriceLineFacts): string {
   if (cost.monthlyUsd == null || cost.windowUsd == null) {
     return 'No monthly figure — every price recorded here is per seat, and the seat count could not be multiplied out';
   }
@@ -742,6 +778,11 @@ export function costPriceLine(cost: BotBenchmarkPlacementCost): string {
 }
 
 /**
+ * ⚠ RETIRED, AND KEPT ONLY AS THE RECORD OF WHY THE GRAIN MOVED. Nothing mounts it: money is now
+ * stated once per vendor over the whole Workspace, where the numerator and the denominator describe
+ * the same population, and `workspaceCostCoverageNote` is the sentence that replaced it. The
+ * argument below is the one that produced that change and is reproduced beside the successor.
+ *
  * ⚠ THE PRICE IS PER WORKSPACE AND THIS CARD IS PER REPOSITORY, so the same money appears on
  * several cards at once.
  *
@@ -774,7 +815,7 @@ export function costSharedNote(cost: BotBenchmarkPlacementCost): string {
 
 /** Two prices folded into one card: two logins the Workspace calls one vendor are ONE unit, so
  *  their rows were summed. `null` for the ordinary single-row case. */
-export function costPricedReviewersNote(cost: BotBenchmarkPlacementCost): string | null {
+export function costPricedReviewersNote(cost: SeatDisclosureFacts): string | null {
   if (cost.pricedReviewers <= 1) return null;
   return (
     `Summed over ${formatCount(cost.pricedReviewers)} priced accounts the Workspace classifies as ` +
@@ -785,7 +826,7 @@ export function costPricedReviewersNote(cost: BotBenchmarkPlacementCost): string
 /** ⚠ A MISSING DISCLOSURE IS THE SAME DEFECT AS A WRONG NUMBER, ONE LINE QUIETER. A per-seat price
  *  this build could not resolve is EXCLUDED from the figure rather than read as its per-developer
  *  unit, and the exclusion has to be visible or the total silently understates. */
-export function costSeatUnresolvedNote(cost: BotBenchmarkPlacementCost): string | null {
+export function costSeatUnresolvedNote(cost: SeatDisclosureFacts): string | null {
   if (cost.seatPriceUnresolved <= 0) return null;
   return (
     `${formatCount(cost.seatPriceUnresolved)} per-seat price${
@@ -808,7 +849,7 @@ export function costSeatUnresolvedNote(cost: BotBenchmarkPlacementCost): string 
  * seat count" and "your seat count is zero this month" have different remedies, and collapsing two
  * facts with two remedies into one is the defect every vocabulary on this tab exists to prevent.
  */
-export function costSeatZeroNote(cost: BotBenchmarkPlacementCost): string | null {
+export function costSeatZeroNote(cost: SeatDisclosureFacts): string | null {
   if (cost.seatCountZero <= 0) return null;
   return (
     `${formatCount(cost.seatCountZero)} per-seat price${
@@ -965,4 +1006,482 @@ export function absentMetricRows(
   absent: BotBenchmarkAbsentMetric[] | undefined,
 ): Array<BotBenchmarkAbsentMetric & { label: string }> {
   return (absent ?? []).map((m) => ({ ...m, label: metricLabel(m.name) }));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   The Workspace rollup — one card per VENDOR, over every repository it is live in
+   ───────────────────────────────────────────────────────────────────────────────────────── */
+
+// ⚠ THE ROLLUP IS THE UNIT OF DECISION; THE UNIT ABOVE IS THE UNIT OF COMPARISON. Every distribution
+// in the corpus is over (repository, vendor) pairs, so a percentile only exists one grain down — but
+// "is this reviewer worth what we pay for it" is a question about a SUBSCRIPTION, and a subscription
+// is bought once for a Workspace. So the rail's card is per vendor, folds the per-repository
+// placements into it as EVIDENCE, and is the only place money is stated. The per-repository card
+// still exists in full; it moved to the repository's own Bots tab, where its grain matches its
+// screen.
+//
+// ⚠ AND THE ROLLUP NEVER STATES A PERCENTILE OF ITS OWN. There is no distribution of workspaces to
+// rank one within, so the shape of the estate is COUNTED (`rollupSpreadSentence`) rather than
+// averaged: the percentiles come from different cohorts with different n, and a mean of ranks is
+// not the rank of anything.
+//
+// ⚠⚠ THE POOLED RATE AND THE FITTED-SUBSET RATE ARE TWO DIFFERENT NUMBERS AND EVERY SENTENCE HERE
+// CARRIES ITS OWN DENOMINATOR. `cost.unacted.actedOnRate` is pooled over every live repository;
+// `expectation.yoursRateOnFitted` is over the subset whose cohort published a median. They routinely
+// differ by several points, and putting them in one row — or subtracting one from the other — is the
+// defect docs/PERIOD-REPORTING.md names "ONE ROW MUST NEVER MIX THE HEADLINE AND SUBSET
+// POPULATIONS", shipped three times in that feature before it was believed. The two sentences below
+// name their populations out loud precisely so a test can assert that they did.
+
+/** `12 repositories` / `1 repository` — the count and its noun, agreed. Every sentence on this card
+ *  quotes a denominator, so the disagreement is worth one helper. */
+function countNoun(n: number, one: string, many: string): string {
+  return `${formatCount(n)} ${n === 1 ? one : many}`;
+}
+
+/** `a, b and c` — Oxford-free, because these are counts in a sentence rather than a list of names. */
+function joinList(parts: readonly string[]): string {
+  if (parts.length <= 1) return parts[0] ?? '';
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1] as string}`;
+}
+
+/**
+ * WHY A WHOLE ROLLUP SECTION IS WITHHELD. Five facts, five remedies — the same discipline as the
+ * placement, exclusion and cost vocabularies above, and pairwise distinct for the same reason.
+ *
+ * ⚠ THESE WITHHOLD A COMPARISON, NEVER A MONEY FIGURE. A card that refuses every one of them still
+ * renders its counters, its evidence table and its cost: those are the customer's own measurements
+ * and owe the corpus nothing. Sonar, GitHub Advanced Security and `github-actions` — the multi-repo
+ * reviewers a real Workspace actually runs — are all `vendor_not_in_corpus`, so this is the COMMON
+ * card rather than the edge case, and it must not read as a card that failed.
+ */
+export const ROLLUP_REFUSAL_HEADLINE: Record<BotBenchmarkRollupRefusalReason, string> = {
+  single_repo: 'Live in one repository — no spread to describe',
+  no_placed_repos: 'No repository here could be placed',
+  no_fitted_cohort_rate: 'No peer engagement rate for these bands',
+  no_settled_threads: 'No settled threads to rate',
+  // ⚠ THE SAME WORDS THE PLACEMENT REFUSAL USES ONE GRAIN DOWN, for the one fact both refuse on —
+  // `COST_REFUSAL_HEADLINE`'s rule. Two sentences for one cause on one screen is how a reader stops
+  // believing either.
+  vendor_not_in_corpus: PLACEMENT_REFUSAL_HEADLINE.vendor_not_in_corpus_vocabulary,
+};
+
+/**
+ * HOW MUCH OF THE ESTATE THIS CARD SPEAKS FOR — "live in 4 of 8 repositories".
+ *
+ * ⚠ BOTH NUMBERS, ALWAYS. `liveInRepos` alone is an unanchored count ("live in 4" of what?) and
+ * `reposConsidered` alone hides that the reviewer runs on half the estate. The pair is what makes
+ * every sum on the card readable as a sum over a stated population, and it is the denominator a
+ * reader checks the evidence table against.
+ */
+export function rollupCoverageLabel(rollup: BotBenchmarkWorkspaceRollup): string {
+  const scope = countNoun(rollup.reposConsidered, 'repository', 'repositories');
+  return `live in ${formatCount(rollup.liveInRepos)} of ${scope}`;
+}
+
+/**
+ * THE CARD'S TITLE — A REVIEWER, NOT A REPOSITORY.
+ *
+ * ⚠ NOT `unitTitle`, WHICH RETURNS `owner/name`. A rollup card has n repositories, so titling it
+ * with one of them is a false claim and keying it on one of them collides n cards onto one key. The
+ * card's identity is `rollup.key`, the Workspace's own automation key — NOT `vendor`, which is
+ * `null` for every brand the corpus has never seen and would collapse every unbranded reviewer onto
+ * one card.
+ */
+export function rollupTitle(rollup: BotBenchmarkWorkspaceRollup): string {
+  return `${reviewerLabel(rollup.botKind)} — ${rollupCoverageLabel(rollup)}`;
+}
+
+/**
+ * THE SPREAD, AS A SENTENCE A READER CAN CHECK AGAINST THE TABLE UNDERNEATH IT.
+ *
+ * ⚠ ITS DENOMINATOR IS THE PLACED SUBSET, NOT `liveInRepos`, AND THE SENTENCE SAYS SO. Only a
+ * repository that was placed in a band AND whose acted-on rate compared holds a percentile at all,
+ * so `placed` is routinely smaller than the card's own coverage — quoting the wrong one turns a
+ * partial comparison into a claim about the whole estate.
+ *
+ * ⚠ EVERY NON-ZERO SIDE IS NAMED. Reporting only the largest ("below the median in 5 of 6") reads
+ * as a clean story and hides the two repositories that sit above it; the counts are the finding.
+ *
+ * Returns `null` on a refusal — the caller renders `ROLLUP_REFUSAL_HEADLINE` and the server's own
+ * sentence instead, never a zeroed-out spread.
+ */
+export function rollupSpreadSentence(spread: BotBenchmarkRollupSpread): string | null {
+  if (spread.status !== 'value') return null;
+  const parts: string[] = [];
+  if (spread.below > 0) parts.push(`below it in ${formatCount(spread.below)}`);
+  if (spread.at > 0) parts.push(`level with it in ${formatCount(spread.at)}`);
+  if (spread.above > 0) parts.push(`above it in ${formatCount(spread.above)}`);
+  if (parts.length === 0) return null;
+  const scope = countNoun(spread.placed, 'repository', 'repositories');
+  return (
+    `Of the ${scope} placed with a comparable acted-on rate, this reviewer sits ` +
+    `${joinList(parts)}.`
+  );
+}
+
+/**
+ * THE ESTATE-MATCHED EXPECTATION — and the ONE sentence on this card that carries two rates, which
+ * is why it is the one that has to name its population twice.
+ *
+ * ⚠⚠ BOTH RATES ARE OVER THE FITTED SUBSET. `expectedRate` can only exist where a cohort published
+ * a median, so the customer's rate it is set against is `yoursRateOnFitted` — computed over the same
+ * repositories — and NEVER the card's pooled headline rate. The sentence opens by naming that subset
+ * so a reader cannot read either figure as covering the whole estate, and closes by saying which
+ * repositories are outside it when any are.
+ *
+ * ⚠ NAMED SIDE BY SIDE, NEVER SUBTRACTED. "Your 41% against their 58%" is two measurements; "17
+ * points behind" is a derived finding this panel did not earn, and the only difference of two rates
+ * that is licensed here is the SERVER's `conversionGapUsd`, which is a difference over ONE
+ * population and arrives already computed.
+ *
+ * ⚠ AND IT IS A COUNTERFACTUAL, NOT A PEER'S BILL. One factor moved — the rate — with the thread
+ * counts and the price left as the customer's; the wording says "an estate of this shape at its
+ * cohorts' medians" rather than "what a peer pays", which would be a claim about a distribution
+ * nobody fitted.
+ */
+export function rollupExpectationSentence(
+  expectation: BotBenchmarkRollupExpectation,
+): string | null {
+  if (expectation.status !== 'value') return null;
+  const fitted = countNoun(expectation.fittedRepos, 'repository', 'repositories');
+  const base =
+    `Across the ${fitted} with a fitted peer median, your team acts on ` +
+    `${formatMetricValue(expectation.yoursRateOnFitted, 'rate')} of what this reviewer settles, ` +
+    `where an estate of this shape at its cohorts' medians acts on ` +
+    `${formatMetricValue(expectation.expectedRate, 'rate')}.`;
+  if (expectation.excludedRepos <= 0) return base;
+  const excluded = countNoun(expectation.excludedRepos, 'repository', 'repositories');
+  const agree =
+    expectation.excludedRepos === 1
+      ? 'carries no fitted median and is'
+      : 'carry no fitted median and are';
+  return (
+    `${base} The other ${excluded} this reviewer is live in ${agree} outside both figures — the ` +
+    'pooled rate above covers every one of them and is a different number.'
+  );
+}
+
+/**
+ * THE TWO COMPARISONS REFUSE FOR ONE REASON MORE OFTEN THAN NOT — say it once.
+ *
+ * ⚠ THIS IS A RENDERING RULE, NEVER A MERGE OF TWO FACTS. The spread and the expectation are
+ * independent sections that fail independently, and the wire keeps them apart for that reason. But
+ * `vendor_not_in_corpus` disqualifies BOTH by construction — there is no cohort, so there is neither
+ * a rank to spread nor a median to substitute — and a card that prints the identical three-line
+ * paragraph twice in a row reads as a rendering bug, which costs the refusal the credibility it is
+ * entirely made of. So: identical reason ⇒ ONE note. Different reasons ⇒ both, because then they
+ * genuinely are two facts with two remedies.
+ *
+ * Returns `null` when the two must be rendered separately (either one has a value, or they refuse
+ * for different reasons); the caller then falls back to a note per section.
+ */
+export function sharedComparisonRefusal(
+  spread: BotBenchmarkRollupSpread,
+  expectation: BotBenchmarkRollupExpectation,
+): { reason: BotBenchmarkRollupRefusalReason; message: string } | null {
+  if (spread.status !== 'refused' || expectation.status !== 'refused') return null;
+  if (spread.reason !== expectation.reason) return null;
+  return { reason: spread.reason, message: spread.message };
+}
+
+/**
+ * The price line at Workspace grain. Same words, same per-seat explanation, same "entered but not
+ * statable" line as the per-repository block — one implementation, because a reader must not be
+ * told about their own subscription two different ways depending on which card they are standing on.
+ */
+export function workspaceCostPriceLine(cost: BotBenchmarkWorkspaceCost): string {
+  return costPriceLine(cost);
+}
+
+/**
+ * WHAT THE FIGURE IS, NOW THAT IT IS TRUE — the successor to `costSharedNote`.
+ *
+ * ── HISTORICAL, AND THE ARGUMENT FOR THIS WHOLE CHANGE ──────────────────────────────────────────
+ * `costSharedNote` said: the price is per Workspace and that card was per repository, so the same
+ * money appeared on several cards at once, each one measuring a whole subscription against one
+ * repository's work. It shipped with the caveat conditional on `sharedWithUnits > 1` — a count of
+ * the cards IN THAT RESPONSE — so on the per-repository Bots tab, which narrows to one repository,
+ * the count was always 1 and the disclosure never appeared, on precisely the screen where a reader
+ * is most likely to read a Workspace-wide subscription as this repository's bill. Making the caveat
+ * unconditional was the FIRST fix. Apportioning the subscription across repositories was considered
+ * and rejected: there is no basis in the data for any split, and an invented allocation would be
+ * indistinguishable on screen from a measured one. So the figures were disclosed as upper bounds
+ * with one instruction — do not add them up.
+ *
+ * The caveat was the weak fix, and this is the real one: THE GRAIN MOVED. One subscription, one
+ * card, one figure, whose numerator and denominator describe the same population. There is nothing
+ * left to add up, so there is nothing to warn about — `sharedWithUnits` is gone from the wire and
+ * double-counting is structurally impossible rather than merely discouraged.
+ * ────────────────────────────────────────────────────────────────────────────────────────────────
+ *
+ * ⚠ ONE HONEST CAVEAT SURVIVES AND IT IS STILL UNCONDITIONAL. A subscription may also cover
+ * repositories OUTSIDE this Workspace, which this app cannot see and cannot count; in that one
+ * direction the figure remains an upper bound. Dropping the sentence because the big error was
+ * fixed would leave the small one unstated.
+ */
+export function workspaceCostCoverageNote(cost: BotBenchmarkWorkspaceCost): string {
+  const scope = countNoun(cost.coveredRepos, 'repository', 'repositories');
+  return (
+    `One Workspace price, set against the work of the ${scope} this reviewer is live in — the ` +
+    'price and the work describe the same repositories, so there is nothing here to add together. ' +
+    'The same subscription may also cover repositories outside this Workspace, which this app ' +
+    'cannot see; in that direction alone the figure is an upper bound.'
+  );
+}
+
+/** ⚠ A DISCLOSURE, NOT A FIGURE, AND THE FOLD DEPENDS ON IT BEING RENDERED. A live repository whose
+ *  observation span could not be read contributed NOTHING to the per-month pace: imputing a
+ *  sibling's span would inflate the pace by counting threads over time nobody observed, and dropping
+ *  it silently understates the pace with no way for a reader to notice. `null` in the ordinary case
+ *  where every live repository had a readable span. */
+export function workspaceCostSpanUnobservedNote(cost: BotBenchmarkWorkspaceCost): string | null {
+  if (cost.spanUnobservedRepos <= 0) return null;
+  const n = countNoun(cost.spanUnobservedRepos, 'repository', 'repositories');
+  return (
+    `${n} contributed nothing to the per-month pace: this reviewer's own working period could not ` +
+    'be read there. Its threads still count; only its pace is missing, and no sibling’s stretch of ' +
+    'time was borrowed to stand in for it.'
+  );
+}
+
+/** ⚠ A SECOND DISCLOSURE WITH A DIFFERENT CAUSE, AND A DIFFERENT SENTENCE — `costSeatZeroNote`'s
+ *  rule. A repository the host has held for less than the activity window has a merge count that is
+ *  a known undercount, so it is excluded from the `$ per merged PR` denominator ALONE. Leaving it in
+ *  would inflate the estate's cost per merged pull request, silently and in the direction that
+ *  flatters the finding; its counters and threads still pool, because only the merge count is
+ *  windowed. */
+export function workspaceCostPartialWindowNote(cost: BotBenchmarkWorkspaceCost): string | null {
+  if (cost.partialWindowRepos <= 0) return null;
+  const n = countNoun(cost.partialWindowRepos, 'repository', 'repositories');
+  return (
+    `${n} left out of the cost per merged pull request: this build has held ` +
+    `${cost.partialWindowRepos === 1 ? 'it' : 'them'} for less than ` +
+    `${countNoun(cost.windowDays, 'day', 'days')}, so the merge count there is a partial-window ` +
+    'undercount and would divide the price by too little work. Everything else on this card still ' +
+    'includes it.'
+  );
+}
+
+/**
+ * ⚠ THREE IDENTICAL REFUSALS ARE ONE REFUSAL — `collapsedCostRefusal`'s rule at the estate grain,
+ * over the three arms this block actually carries. The counterfactual is NOT among them: at this
+ * grain it lives on `expectation`, which refuses on its own vocabulary, and the server hands its
+ * money halves the SAME `BotBenchmarkCostRefusal` object these arms carry — so a truncated estate or
+ * a zero price already produces one sentence across both sections without this function reaching
+ * over there.
+ *
+ * Returns the shared reason only when all three refuse under it; a MIX keeps its full list, because
+ * those say different things about where the blind spot is.
+ */
+export function collapsedWorkspaceCostRefusal(
+  cost: BotBenchmarkWorkspaceCost,
+): BotBenchmarkCostRefusalReason | null {
+  const arms = [cost.perMergedPr, cost.unacted, cost.yours];
+  const first = arms[0];
+  // ⚠ THE UNION NARROWING, not a redundant runtime check — the note `collapsedExclusion` and
+  // `collapsedCostRefusal` both carry. Deleting this line changes no behaviour and no test goes red;
+  // `tsc` is what kills it.
+  if (first == null || first.status !== 'refused') return null;
+  for (const arm of arms) {
+    if (arm.status !== 'refused' || arm.reason !== first.reason) return null;
+  }
+  return first.reason;
+}
+
+/**
+ * THE MONEY, AT THE GRAIN THE PRICE IS BOUGHT AT — `costHeadline`'s two-sentence shape, unchanged,
+ * and unchanged for the same reason: the first cut printed the COUNTERFACTUAL's figure under the
+ * MEASURED sentence's words, a third of the truth in the direction that under-reports waste. Two
+ * questions, two sentences, two fields, so a renderer cannot reunite them by accident.
+ *
+ * ⚠ IT TAKES THE EXPECTATION AS A SECOND ARGUMENT, AND THAT IS THE GRAIN CHANGE SHOWING THROUGH.
+ * One grain down the counterfactual was an arm of the cost block; here it is a SIBLING section, so
+ * that a vendor the corpus has never measured — Sonar, GHAS, `github-actions`, most of a real
+ * estate — still gets its cost while only the comparison refuses. The headline needs both objects to
+ * write both sentences, and it may not reach for a comparison the expectation withheld.
+ *
+ * ⚠⚠ SENTENCE ONE QUOTES THE POOLED POPULATION AND SENTENCE TWO QUOTES THE FITTED SUBSET, EACH BY
+ * NAME. `unacted.actedOnRate` is `Σ acted ÷ Σ settled` over every live repository;
+ * `yoursRateOnFitted` is over the repositories with a cohort median. Different numbers, and the
+ * whole reason both are on the wire.
+ *
+ * ⚠ A NEGATIVE GAP IS A GOOD STATE AND IS NOT WORDED AS WASTE, and it is BOUNDED: the server's
+ * `conversionGapUsd` is a difference of two rates times the monthly price, so it can never exceed
+ * the price it is a share of. The ratio form it replaced could, and did — it once rendered −4.1×
+ * the spend as money.
+ *
+ * `null` when the measured sentence itself cannot be written (no pooled rate, or no statable
+ * monthly price): a comparison with no left-hand side is not a headline.
+ */
+export function workspaceCostHeadline(
+  cost: BotBenchmarkWorkspaceCost,
+  expectation: BotBenchmarkRollupExpectation,
+): CostHeadline | null {
+  const unacted = cost.unacted;
+  // ⚠ THE MEASURED SENTENCE IS THE PRECONDITION, NOT THE COMPARISON — `costHeadline`'s rule. A
+  // corpus that never measured this brand is a fact about the corpus and must not delete the
+  // customer's own figure, which needs nothing but their data.
+  if (unacted.status !== 'value') return null;
+  if (cost.monthlyUsd == null) return null;
+  const scope = countNoun(cost.coveredRepos, 'repository', 'repositories');
+  const spend =
+    `${formatUsd(unacted.unactedUsd)} a month of this reviewer's ${formatUsd(cost.monthlyUsd)} ` +
+    'monthly price is buying feedback nobody acts on — across the ' +
+    `${scope} it is live in you acted on ${formatMetricValue(unacted.actedOnRate, 'rate')} of the ` +
+    `${formatCount(unacted.settledThreads)} threads it settled.`;
+
+  if (expectation.status !== 'value' || expectation.conversionGapUsd == null) {
+    return { tone: 'measured', spend, comparison: null };
+  }
+  const gap = expectation.conversionGapUsd;
+  const fitted = countNoun(expectation.fittedRepos, 'repository', 'repositories');
+  // ⚠ THE SUBSET IS NAMED BEFORE EITHER RATE IS. This clause is the only thing standing between the
+  // reader and reading `yoursRateOnFitted` as the pooled figure sentence one just quoted.
+  const against =
+    `Across the ${fitted} with a fitted peer median, your ` +
+    `${formatMetricValue(expectation.yoursRateOnFitted, 'rate')} against their ` +
+    `${formatMetricValue(expectation.expectedRate, 'rate')}`;
+  if (gap > 0) {
+    return {
+      tone: 'behind',
+      spend,
+      comparison:
+        `${against}: ${formatUsd(gap)} a month more of that same price would be acted on — your ` +
+        'threads and your price, their engagement.',
+    };
+  }
+  if (gap < 0) {
+    return {
+      tone: 'ahead',
+      spend,
+      comparison:
+        `${against}: ${formatUsd(-gap)} a month more of that price reaches something than it would ` +
+        'at peer engagement.',
+    };
+  }
+  return {
+    tone: 'even',
+    spend,
+    comparison: `${against}: peer-level engagement would convert none of that price differently.`,
+  };
+}
+
+/**
+ * ONE ROW OF THE EVIDENCE TABLE, PRE-FORMATTED — the audit trail for every sum on the card.
+ *
+ * ⚠ EVERY `—` HERE MEANS WITHHELD AND NEVER ZERO. A repository whose own acted-on rate was gated
+ * (`below_min_units` and friends) has no printable rate, and a repository that was not compared has
+ * no percentile — 0% and "0th percentile" are both real readings that would be false claims. The
+ * COUNTS behind them still pool into the headline, because pooling is the remedy for a thin sample.
+ *
+ * ⚠ AND A REFUSED PLACEMENT KEEPS ITS ROW, NAMING ITS REASON WHERE THE BAND WOULD BE. The repository
+ * is live, it contributed counts, and it is part of the estate the money is divided by; dropping it
+ * would make the table disagree with the card's own coverage — which is exactly the disagreement a
+ * reader is meant to be able to check here.
+ */
+export interface ContributionRow {
+  /** ⚠ THE REPOSITORY ID, NOT ITS NAME — one row per repository within one vendor's card. */
+  key: string;
+  repo: string;
+  /** `"6 of 10"`, or the placement refusal's headline. ⚠ `nBands` rides the label because "band 6"
+   *  is honest at 10 bands and a misrepresentation at 3. */
+  band: string;
+  /** `true` when `band` is holding a refusal rather than a placement, so the cell can be drawn as
+   *  the absence it is instead of as a result. */
+  bandRefused: boolean;
+  mergedPrs: string;
+  /** This repository's own rate, or `—`. Never the card's pooled rate. */
+  actedOn: string;
+  /** Its rank within its OWN cohort band, or `—`. */
+  percentile: string;
+  /**
+   * `true` when this row's placement refusal is a fact about the VENDOR rather than about this
+   * repository — so the card's own comparison note has already said it, in the rollup vocabulary,
+   * and repeating it per row is noise. ⚠ The two vocabularies are NOT the same enum:
+   * `vendor_not_in_corpus` (rollup) and `vendor_not_in_corpus_vocabulary` (placement) are the same
+   * fact under two names, which is why this is a classification and not an equality test.
+   */
+  refusalIsVendorWide: boolean;
+}
+
+/** ⚠ THE THREE PLACEMENT REFUSALS THAT ARE TRUE OF THE REVIEWER EVERYWHERE, not of one repository.
+ *  The others — `cell_not_in_corpus`, `repo_window_incomplete`, `repo_inactive_in_window` — vary
+ *  repository by repository and MUST keep their row, because nothing else on the card states them. */
+const VENDOR_WIDE_PLACEMENT_REFUSALS: ReadonlySet<BotBenchmarkPlacementRefusalReason> = new Set([
+  'vendor_not_in_corpus_vocabulary',
+  'vendor_unfittable',
+  'vendor_unstratifiable',
+]);
+
+export function contributionRows(
+  contributions: readonly BotBenchmarkRollupContribution[],
+): ContributionRow[] {
+  // ⚠ IN THE ORDER THE FOLD READ THEM, NEVER SORTED BY A FIGURE. A table ordered by acted-on rate is
+  // a ranking of repositories nobody asked for, and it would move rows between refetches.
+  return contributions.map((c) => ({
+    key: String(c.repoId),
+    repo: `${c.repoOwner}/${c.repoName}`,
+    band:
+      c.band != null
+        ? `Band ${c.band.bandLabel}`
+        : c.placementRefusal != null
+          ? PLACEMENT_REFUSAL_HEADLINE[c.placementRefusal]
+          : '—',
+    bandRefused: c.band == null,
+    mergedPrs: formatCount(c.mergedPrsLast14d),
+    actedOn: c.actedOnRate == null ? '—' : formatMetricValue(c.actedOnRate, 'rate'),
+    percentile: c.percentile == null ? '—' : ordinal(c.percentile),
+    refusalIsVendorWide:
+      c.placementRefusal != null && VENDOR_WIDE_PLACEMENT_REFUSALS.has(c.placementRefusal),
+  }));
+}
+
+/** One rollup card's identity, resolved once. ⚠ `key` IS `rollup.key` — the Workspace's own
+ *  automation key. Not `owner/name` (a card has n repositories) and not `vendor` (`null` for every
+ *  brand the corpus has never seen, which would collapse every unbranded reviewer onto one card). */
+export interface RollupRow {
+  key: string;
+  rollup: BotBenchmarkWorkspaceRollup;
+  title: string;
+  label: string;
+  color: string | null;
+  coverage: string;
+}
+
+/**
+ * A STABLE READING ORDER, AND DELIBERATELY NOT A RANKING.
+ *
+ * Cards with a spread first — those are the ones with a comparison to read — then by reviewer
+ * label, then by key so two unbranded reviewers never swap places between refetches.
+ *
+ * ⚠ NEVER BY A FIGURE. Ordering by spend, by acted-on rate or by conversion gap would publish a
+ * league table of the customer's vendors that nothing in the data supports: the cards' cohorts are
+ * different, their prices are entered by hand, and `orderedUnits` refuses the same temptation one
+ * grain down for the same reason.
+ */
+export function orderedRollups(
+  rollups: readonly BotBenchmarkWorkspaceRollup[],
+): BotBenchmarkWorkspaceRollup[] {
+  return [...rollups].sort((a, b) => {
+    const spreadA = a.spread.status === 'value' ? 0 : 1;
+    const spreadB = b.spread.status === 'value' ? 0 : 1;
+    if (spreadA !== spreadB) return spreadA - spreadB;
+    return (
+      reviewerLabel(a.botKind).localeCompare(reviewerLabel(b.botKind)) || a.key.localeCompare(b.key)
+    );
+  });
+}
+
+/** The ordered cards with their identity resolved — one call for the whole list, so a renderer
+ *  never re-derives a label or invents a key. */
+export function rollupRows(rollups: readonly BotBenchmarkWorkspaceRollup[]): RollupRow[] {
+  return orderedRollups(rollups).map((rollup) => ({
+    key: rollup.key,
+    rollup,
+    title: rollupTitle(rollup),
+    label: reviewerLabel(rollup.botKind),
+    color: reviewerColor(rollup.botKind),
+    coverage: rollupCoverageLabel(rollup),
+  }));
 }

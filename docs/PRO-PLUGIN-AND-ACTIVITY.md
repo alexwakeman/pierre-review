@@ -1351,15 +1351,177 @@ placement-routes}.ts`.
   cohort route is reached only by a click-gated definitions disclosure, so the tab makes exactly one
   request on mount.
 
+#### The WORKSPACE ROLLUP — one card per vendor, and the only place money lives
+
+**The Bots RAIL's Benchmark tab is the rollup ONLY** (one card per vendor + a compact
+one-line-per-repository evidence table); the full per-repository card moved to **the repository's own
+Bots tab**. Files: `bots/benchmark/rollup.ts` (PURE — no db, no clock, no request; `cost.ts` is its
+sibling and its dependency, so every null-vs-zero, seat and money-refusal SENTENCE is imported rather
+than restated) + the `buildRollups` fold in `placement-routes.ts`. Wire:
+`BotBenchmarkPlacementResponse.rollup?: BotBenchmarkWorkspaceRollup[]` (OPTIONAL and additive —
+`apiVersion` stays 21). Tests: `packages/pro/test/benchmark-rollup.test.ts` (the arithmetic, pure) and
+the `cost` block of `benchmark-placement.test.ts` (the route).
+
+**The wire, in full** (all in `packages/shared/src/types.ts`, under the
+`── THE WORKSPACE ROLLUP ──` banner). Nothing here is a `ProContext` member, so nothing here moves
+`apiVersion`:
+
+| Type | What it is |
+|---|---|
+| `BotBenchmarkWorkspaceRollup` | THE CARD: `key` (the workspace's own automation key — **the identity AND the React key**), `vendor`/`botKind` (labels; `vendor` is `null` for every brand the corpus never saw, so it can never be the key), `reviewers[]` (an ARRAY — two logins the workspace calls one vendor are ONE card), `liveInRepos` / `reposConsidered`, `counters`, `contributions[]`, `spread`, `expectation`, `cost?` |
+| `BotBenchmarkRollupContribution` | ONE EVIDENCE ROW: `repoId/repoOwner/repoName`, `mergedPrsLast14d` (ANY author), `band {activityBand, nBands, bandLabel} \| null`, `placementRefusal`, `actedOnRate \| null`, `percentile \| null`, `settledThreads`, `actedThreads`, `spanDays \| null` |
+| `BotBenchmarkRollupSpread` | `{status:'value'; placed; below; at; above}` — `below+at+above === placed`, and `placed ≤ liveInRepos` — or a refusal |
+| `BotBenchmarkRollupExpectation` | `{status:'value'; yoursRateOnFitted; expectedRate; fittedRepos; excludedRepos; actedAtPeer; actedPerMonthAtPeer; perActedOnUsd; conversionGapUsd; moneyRefusal}` or a refusal. ⚠ A SIBLING of `cost`, not an arm inside it — a vendor the corpus never saw renders its cost while only this refuses |
+| `BotBenchmarkWorkspaceCost` | `monthlyUsd \| null`, `costModel`, `unitMonthlyUsd`, `seats`, `pricedReviewers`, `seatPriceUnresolved`, `seatCountZero`, `windowDays`, `windowUsd`, `coveredRepos`, `spanUnobservedRepos`, `partialWindowRepos`, `perMergedPr`, `unacted`, `yours`, `spanNote`. The three arms REUSE `BotBenchmarkCostUnacted`/`…Yours`/`…Refusal`, so one set of components draws both grains |
+| `BotBenchmarkRollupRefusal` | `{status:'refused'; reason: BotBenchmarkRollupRefusalReason; message}` — shaped like `BotBenchmarkCostRefusal` for the same reason |
+| `BotBenchmarkPlacementResponse.rollup?` | OPTIONAL and ADDITIVE. ⚠ **ABSENT ≠ EMPTY** — a missing key says the fold did not run (a narrowed request, or an older plugin), `[]` says it ran and no reviewer was live anywhere. The panel gives them two different sentences |
+
+**The arithmetic — five folds, and every one of them is a sum over the LIVE repositories `R`** (a
+repository where `commentsObserved > 0`; `liveInRepos = |R|`). `windowDays` is the corpus's
+`activity_window_days`, 14. `C ⊆ R` is the FITTED subset: the repositories whose own cohort cell
+published a usable `acted_on_rate` median.
+
+```
+POOLED COUNTERS   every key of every counter map, summed over R, absent-key-contributes-0
+                  ⚠ THE ADDITIVITY INVARIANT: the whole IS the sum of the parts, for EVERY key —
+                    which is what makes the evidence table checkable against the headline.
+
+windowUsd       = monthlyUsd × windowDays ÷ 30.44
+perMergedPr     = windowUsd ÷ Σ_R mergedPrsLast14d_r        ← a fortnight at BOTH ends; the only
+                                                              14-day figure, and the only one that
+                                                              asks nothing of the reviewer
+                  ⚠ a PARTIAL-WINDOW repo leaves this denominator (undercount ⇒ inflates the cost,
+                    flatteringly) and is disclosed in `partialWindowRepos`. Its counters still pool.
+
+actedPerMonth   = Σ_R ( acted_r × 30.44 ÷ spanDays_r )      ← RATES ARE ADDITIVE; SPANS ARE NOT
+                  ⚠ never Σacted ÷ a UNION span: January in repo A + July in repo B is a
+                    seven-month union over two months of work — understates the pace threefold and
+                    inflates every $/thread by the same, plausibly. A repo with no observable span
+                    contributes NOTHING and is counted in `spanUnobservedRepos`, never imputed.
+yours.perActedOnUsd = monthlyUsd ÷ actedPerMonth
+
+pooledActedRate = Σ_R acted_r ÷ Σ_R settled_r               ← the card's HEADLINE rate, over R
+unacted.unactedUsd = monthlyUsd × (1 − pooledActedRate)     ← what the price buys that nobody acts
+                                                              on, per month
+
+── THE ESTATE-MATCHED EXPECTATION, over C ──────────────────────────────────────────────────────
+actedAtPeer          = Σ_C ( settled_r × cohortMedian_r )   ← ONE FACTOR SWAPPED, PER REPOSITORY,
+                                                              BEFORE ANYTHING IS SUMMED
+actedPerMonthAtPeer  = Σ_C ( settled_r × cohortMedian_r × 30.44 ÷ spanDays_r )
+perActedOnUsd        = monthlyUsd ÷ actedPerMonthAtPeer
+expectedRate         = Σ_C (settled_r × cohortMedian_r) ÷ Σ_C settled_r   ← thread-count WEIGHTED
+yoursRateOnFitted    = Σ_C acted_r ÷ Σ_C settled_r          ← ⚠⚠ OVER C, NOT OVER R
+conversionGapUsd     = monthlyUsd × (expectedRate − yoursRateOnFitted)
+```
+
+⚠ **`pooledActedRate` AND `yoursRateOnFitted` ARE TWO DIFFERENT NUMBERS AND MUST NEVER BE
+SUBTRACTED FROM ONE ANOTHER** — one is over `R`, the other over `C`, and the wire carries both
+plus `fittedRepos`/`excludedRepos` precisely so a renderer is physically able to label them apart
+and a test can assert that it did. ⚠ **THE ROLLUP COMPUTES NO PERCENTILE ANYWHERE.** Pooling is
+volume-weighted and every corpus distribution is one-repo-one-vote, so an estate rate is a number
+no cohort member resembles — and there is no distribution of workspaces to rank it in regardless.
+Every rank on the card is a per-repository one, in the evidence table, each against its own band.
+
+- ⚠ **`BotBenchmarkPlacementUnit.cost` IS DELETED FROM THE WIRE AND NOTHING MAY PUT IT BACK.** A unit
+  is one (repository, vendor) pair; a price is stored ONCE PER WORKSPACE. The old block therefore
+  divided a whole subscription by one repository's work and disclosed, via `sharedWithUnits`, that n
+  other cards carried the same number — a caveat compensating for a grain mismatch. The GRAIN MOVED
+  instead: numerator and denominator now describe the same population, so there is nothing to
+  disclose and nothing a reader can double-count. `sharedWithUnits` retired with it.
+  `BotBenchmarkPlacementCost`/`buildUnitCost` survive as the pinned executable specification of the
+  rules `rollup.ts` imports piecewise; **no request builds one any more.**
+- ⚠ **NO MONEY IN A REPO-GRAINED VIEW, STRUCTURALLY.** A `?repoIds=`-narrowed request builds no
+  rollup, so there is no figure in the payload to find — rather than every present and future
+  renderer declining to draw one. ⚠ **It is the NARROWING that decides, not the resulting repository
+  count**: a workspace that genuinely holds one repository DOES get its rollup (price and work then
+  describe the same population), which is why `narrowed` travels into `buildPlacement` as its own
+  argument — `resolveRequestScope` cannot tell the two apart. The same rule governs `BotRoiPanel`'s
+  `$/acted-on` column: `showCost = botDepth && repoId == null`, and it must NOT be simplified back to
+  `botDepth`.
+- ⚠ **RATES ARE ADDITIVE; SPANS ARE NOT.** `actedPerMonth = Σ_r (acted_r × 30.44 ÷ spanDays_r)`,
+  never `Σ acted ÷ a union span`. A reviewer that ran in repository A in January and B in July has a
+  seven-month union and was active for two — the union form understates the pace threefold, inflates
+  every cost-per-thread figure by the same, and reads entirely plausible on screen. A repository with
+  no observable span contributes NOTHING (never borrows a sibling's) and is counted in
+  `spanUnobservedRepos`.
+- ⚠⚠ **THE COMPARISON'S TWO HALVES SHARE ONE POPULATION.** `expectedRate` exists only over the
+  repositories whose cohort published a usable median — the FITTED subset — so the customer rate set
+  against it is `yoursRateOnFitted` over that SAME subset, **never** the card's pooled headline rate
+  (`cost.unacted.actedOnRate`), which is a different number over a different denominator. Both rates
+  AND both counts (`fittedRepos`, `excludedRepos`) ride the wire so a renderer can label them apart
+  and a test can assert it did. This is [docs/PERIOD-REPORTING.md](PERIOD-REPORTING.md)'s "ONE ROW
+  MUST NEVER MIX THE HEADLINE AND SUBSET POPULATIONS", which shipped three times there.
+- ⚠ **A COHORT MEDIAN OF `0` IS NO MEDIAN** — `cohortMedianOf` gates `p50 <= 0`, spelled identically
+  to `cost.ts`'s `cohortActedOnRate` (which refuses `cohort_rate_zero`). **Not hypothetical: all
+  THREE `qodo` bands in the shipped corpus publish exactly 0**, so every Qodo repository hits it.
+  Admitting the cell diluted `expectedRate` toward zero (an estate reported a peer expectation of
+  30 % where the one usable cohort said 60 %, and a gap of US$12 against a true US$48 — understated
+  fourfold, in the flattering direction), and an all-degenerate estate drove `actedPerMonthAtPeer` to
+  zero, which the span guard then reported as `span_unobserved`: a flat lie about repositories whose
+  spans were observed. Such a cell now leaves the subset and lands in `excludedRepos`; an estate with
+  none left refuses `no_fitted_cohort_rate`, whose sentence names the zero cause explicitly.
+- ⚠ **ONE FACTOR IS SWAPPED, PER REPOSITORY, BEFORE ANYTHING IS SUMMED** —
+  `actedAtPeer = Σ_r (settled_r × cohortMedian_r)`. Blending medians into one estate figure and
+  multiplying by an estate thread count is the median-of-a-product error wearing a sum.
+- ⚠ **TRUNCATION KILLS THE MONEY AND SPARES THE REST**, and outranks every other guard.
+  `workspace_truncated` is the TENTH `BotBenchmarkCostRefusalReason`, reachable ONLY from the rollup,
+  and it fires on all three cost arms AND on `expectation.moneyRefusal`. Counters and the spread
+  still render — a sum of counts over eight repositories is an honest sum over eight repositories.
+  ⚠ `benchmark-cost.test.ts`'s nine-reason sweep is still CORRECT at nine: it folds `buildUnitCost`
+  outputs, which can never reach the tenth. The vocabulary is asserted whole elsewhere.
+- ⚠ **A PARTIAL-WINDOW REPOSITORY LEAVES `perMergedPr`'s DENOMINATOR ALONE** (its merge count is a
+  known undercount, and leaving it in inflates the estate's cost-per-merged-PR in the flattering
+  direction) — counted in `partialWindowRepos`; its counters and threads still pool, because only the
+  merge count is windowed. Fatal only when EVERY live repository is partial.
+- ⚠ **`liveInRepos` IS DERIVED IN THE FOLD, NOT PASSED IN** (`commentsObserved > 0`). The workspace's
+  declared lineup emits a unit for every reviewer in EVERY repository, so a vendor on 1 of 11 arrives
+  with 10 all-zero units; counting those would claim "live in 11 of 11" and drop 10 silent
+  repositories' merge counts into a denominator the reviewer had no part in. A vendor with zero live
+  repositories gets **NO CARD** (the per-repository unit still ships and still says `vendor_silent`).
+- ⚠ **ABSENT `rollup` AND `rollup: []` ARE TWO DIFFERENT FACTS** and the panel gives them two
+  different sentences: a MISSING key says the fold did not run (an older plugin), `[]` says it ran and
+  no reviewer was live anywhere. Collapsing them with a `?? []` told a reader whose bots simply had
+  not commented yet that their BUILD was deficient — the ordinary state right after somebody
+  classifies a reviewer in Bots → Settings.
+- **TEN MONEY REFUSALS AND FIVE COMPARISON REFUSALS — TWO VOCABULARIES, FIFTEEN SENTENCES, ALL
+  PAIRWISE DISTINCT AND ALL >40 CHARACTERS.** They are separate because the money's withhold a figure
+  a PRICE would fix and the rollup's withhold a comparison no price can buy.
+  - `BotBenchmarkCostRefusalReason` (ten): `workspace_truncated` · `repo_window_incomplete` ·
+    `no_merges_in_window` · `span_unobserved` · `own_rate_withheld` (carrying WHICH metric and WHICH
+    gate) · `nothing_acted_on` · `price_is_zero` · `price_unresolved` · `cohort_rate_unfitted` ·
+    `cohort_rate_zero`. ⚠ **THE GUARD ORDER IS `workspace_truncated` → repository → money → reviewer
+    → span → cohort** — `cost.ts`'s own order with truncation bolted on TOP, because a partial estate
+    makes the exact claim false and no other refusal in the list describes that. At estate grain the
+    two REPOSITORY reasons are fatal only when EVERY live repository trips them (one partial repo is
+    excluded-and-disclosed instead), and an empty pooled denominator lands on `own_rate_withheld`
+    with `metricReason: 'denominator_empty'` — pooling IS the remedy `below_min_units` exists for, so
+    no metric gate fires one grain up.
+  - `BotBenchmarkRollupRefusalReason` (five): `single_repo` (one point is not a spread — a category
+    error, not a thin sample) · `no_placed_repos` · `no_fitted_cohort_rate` (its sentence names the
+    ZERO-median cause explicitly, or it would itself be a false claim) · `no_settled_threads` ·
+    `vendor_not_in_corpus` (⚠ **the CARD STILL RENDERS** — its counters and its cost are the
+    customer's own facts and owe the corpus nothing; only the two comparison sections refuse. Sonar,
+    GHAS and `github-actions` are real multi-repo bots and none is in the seven-vendor corpus).
+
 #### Cost on the Benchmark tab — the price per unit of work, and the counterfactual
+
+> ⚠ **THE GRAIN IN THIS SECTION IS SUPERSEDED — READ "THE WORKSPACE ROLLUP" ABOVE FIRST.** The
+> per-repository cost block described below is **no longer on the wire and no longer built on any
+> request**; money moved to `BotBenchmarkWorkspaceRollup.cost`, one card per vendor. What survives
+> verbatim is every RULE it establishes — null-is-not-zero, the per-seat multiply, one-factor-swapped,
+> state-a-rate-never-a-history, the two money figures being different quantities, and the
+> difference-of-shares bound — because `rollup.ts` IMPORTS them from `cost.ts` piecewise rather than
+> restating them, and `benchmark-cost.test.ts` still pins them against `buildUnitCost`. Read the rest
+> of this section for the reasoning; read the rollup section for what ships.
 
 **What the reviewer costs per unit of the work it produces, and what better engagement with it
 would be worth.** Rides the SAME placement response (no new route, no new capability, no new rate
 tier — the whole tab is already `botDepth`). Files: `bots/benchmark/cost.ts` (PURE: no db, no clock,
-no request) + the two columns `collect.ts` now selects + the second pass in `placement-routes.ts`.
-Wire: `BotBenchmarkPlacementUnit.cost?`. Tests: `packages/pro/test/benchmark-cost.test.ts` (the
-arithmetic and every refusal) + the `cost —` describe in `benchmark-placement.test.ts` (end to end,
-over a real database and the real shipped corpus).
+no request) + the two columns `collect.ts` now selects. Wire: **formerly**
+`BotBenchmarkPlacementUnit.cost?`, now `BotBenchmarkWorkspaceRollup.cost?`. Tests:
+`packages/pro/test/benchmark-cost.test.ts` (the arithmetic and every refusal, still against
+`buildUnitCost`) + the `cost —` describe in `benchmark-placement.test.ts` (end to end at the ROLLUP
+grain, over a real database and the real shipped corpus).
 
 **STATE A RATE, NEVER A HISTORY.** Two facts are available and neither is historical: a price
 recorded TODAY and a throughput observed RECENTLY. So every money figure is a rate at the current
@@ -1456,7 +1618,10 @@ SENTENCE 2, what-if    = effectiveMonthlyUsd × (actedOnRate(COHORT p50) − you
   medians**), invisible on screen and wrong in a direction nobody could check. Both tests pin it
   with a fixture whose cohort thread-rate DIFFERS from the customer's — without that the mutation is
   unobservable — and both were mutation-tested by actually making the swap.
-- ⚠ **NINE REFUSALS, NINE SENTENCES** (`BotBenchmarkCostRefusalReason`), joining the fourteen the
+- ⚠ **NINE REFUSALS, NINE SENTENCES** (`BotBenchmarkCostRefusalReason` — a TENTH,
+  `workspace_truncated`, was added later and is reachable ONLY from the rollup, so `buildUnitCost`
+  still produces exactly these nine and `benchmark-cost.test.ts`'s nine-reason sweep is CORRECT at
+  nine), joining the fourteen the
   tab already distinguishes: `repo_window_incomplete` · `no_merges_in_window` · `span_unobserved` ·
   `own_rate_withheld` (carrying WHICH metric and WHICH gate) · `nothing_acted_on` · `price_is_zero` ·
   `price_unresolved` · `cohort_rate_unfitted` · `cohort_rate_zero`. ⚠ The newest pair is the
