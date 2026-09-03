@@ -9,8 +9,9 @@
 
 `pnpm test` is SQLite-only. **No automated check ever executes a `migrations-pg/` file**, so a pg
 twin can be malformed, unregistered, or subtly divergent and every suite stays green. The single
-source of confidence is replaying it by hand into a throwaway database. Last done 2026-08-27 on
-**PostgreSQL 16.9**: core 44/44 + all 28 plugin twins, full table parity with SQLite.
+source of confidence is replaying it by hand into a throwaway database. Last done **2026-09-03** on
+**PostgreSQL 16.9**: core 45/45 + all **33** plugin twins, full table parity with SQLite (52 = 52),
+with `0030`–`0033` additionally exercised WITH DATA.
 
 There is a **standing local Postgres** on `:5432` (the `bng-metric-backend-postgres-1` container,
 user/password `dev`/`dev`). Use a SEPARATE database inside it — never the app database that
@@ -188,25 +189,95 @@ recipe under Dependency posture, and mind the `DROP SCHEMA public CASCADE` gotch
 drizzle's own `drizzle` schema behind and the migrator then no-ops, reporting success having done
 nothing).
 **Known gaps on this branch:**
-- **The one remaining ACCOUNT-WIDE Pro CRON covers the DEFAULT WORKSPACE ONLY** — the Slack digest
-  (`slack/report.ts`). It has no request and therefore no `?workspace=`, and its old
-  `scope = 'all'` default has no image under a single-id scope, so it resolves
-  `ctx.queries.defaultWorkspaceId(accountId)`. Previously it covered every repo in the account. This is a real behaviour reduction, taken deliberately over iterating all workspaces,
-  which would multiply a billed LLM call by workspace count on a sweep. **State it in the
-  Settings copy for the Slack digest.**
+- ✅ **CLOSED — the Slack digest is now PER WORKSPACE, capped** (plugin migration `0030`,
+  `workspace_slack_targets`). This entry used to read "the one remaining account-wide Pro cron
+  covers the DEFAULT workspace only", a deliberate reduction taken over iterating all workspaces
+  "which would multiply a billed LLM call by workspace count on a sweep". **That reduction has been
+  reversed on purpose, and the cost story is now this:**
+  - **Only the SPRINT REPORT multiplies.** `refreshSprintReport` is keyed (account, workspace) —
+    its own throttle key, its own `sprint_reports` row at `scope_key = 'ws:<id>'`, its own payload
+    hash — so N selected workspaces are up to N Haiku calls per send, and **$0 for any workspace
+    whose insights have not moved**.
+  - **The per-repo digests do NOT multiply.** `runRefresh` is throttled and payload-hash-cached per
+    ACCOUNT and is still called account-wide (`requested: null`); the first due workspace of a
+    sweep may regenerate and every later one is served its cached rows. `buildSlackReport` narrows
+    them for **display** only. ⚠ Do not pass a workspace's repo ids as `requested` to "scope" it —
+    that narrows the GENERATION plan and each workspace would bill its own subset.
+  - **The bound is `SLACK_TARGET_WORKSPACE_CAP` (12)**, enforced at the write (it **refuses** an
+    over-cap save rather than truncating) and re-applied defensively in the sweep (which
+    **truncates** by workspace id — nobody is there to be told). **It is DISCLOSED in the Settings
+    copy**, alongside the sentence "every selected workspace generates its own report on every
+    send". That closes the standing "state it in the Settings copy" obligation this entry carried,
+    which had never been honoured.
+  - ⚠ **`slack_last_sent_slot` moved with it and had to.** It was ONE column per account; under a
+    per-workspace sweep a single marker re-sends the workspaces that already went out and skips
+    the ones that had not. Migration `0030` CARRIES the old marker onto the Default-workspace row
+    so the first sweep after an upgrade does not re-post an already-delivered digest — pinned by
+    `packages/pro/test/slack-targets.test.ts`.
+  - The seven `pro_settings.slack_*` columns are now **DORMANT** (still present, removed from the
+    drizzle schema, never selected, never written) — the `ai_update_mode` precedent. ONE live
+    spelling.
   (This gap used to name TWO crons; the other — the AI-policy sprint refresh,
   `ai-policy/scheduler.ts` → `refreshSprintReport` — was DELETED along with the "AI summary
   updates" setting. ⚠ **"The AI summaries are now manual-only" is TRUE ONLY FOR AN ACCOUNT WITH NO
   SLACK CADENCE.** `buildSlackReport` independently regenerates the per-repo digests AND the sprint
   report on the Slack cadence, so a configured account still has an automated billed path — it is
-  just a delivery schedule the user chose rather than a background policy.)
+  just a delivery schedule the user chose rather than a background policy. Since `0030` that path is
+  **one sprint report per SELECTED WORKSPACE**, up to the cap, per send.)
 - **PrDetail still classifies bots CLIENT-SIDE by LOGIN** — `ChecksTab`'s "Bots" chips group
   threads by `botVendorMeta(user)` and `ThreadList`'s vendor filter by `threadBotKind`, both
   login→`ReviewBotKind` only. A stored workspace judgement and the `quality_check` role never reach
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
-- ✅ **The pg chain is currently REPLAYED AND GREEN — see § Replaying the pg chain below.** As of
-  2026-08-27, core `0000`→`0043` (44/44) and all 28 plugin pg twins (`0028_work_plan` replayed
+- ✅ **The pg chain is currently REPLAYED AND GREEN — see § Replaying the pg chain below.** Last
+  re-run **2026-09-03** on the standing local Postgres (16.x): core through `db:migrate`
+  (**45 applied = 45 journal entries**) plus all **33** plugin pg twins, including the new
+  `0032_workspace_comparison_mode` and `0033_slack_target_bot_digest` — applied clean and
+  idempotent on a second pass.
+  ⚠ **Both new twins were exercised WITH DATA, not just DDL**, since both carry a backfill and the
+  standing warning is that an empty replay proves DDL only. Seeded three accounts: one with
+  `comparison_mode='sprint'`, `bot_slack_digest=true`, THREE workspaces (one already holding a
+  `pro_workspace_settings` row with `sprint_cadence_days=7`) and TWO Slack target rows; one with an
+  explicit `comparison_mode='rolling_14'` and the flag off; one with the flag on and NO target row.
+  Result: 0032 wrote `'sprint'` into all three of the first account's workspaces (the pre-existing
+  row UPDATED, keeping its cadence 7 — `DO NOTHING` would have skipped exactly the workspace that
+  had bothered to configure a sprint), copied NOTHING for the explicit `rolling_14` (the product
+  default is not a stored value) and nothing for the NULL; 0033 switched on both of the first
+  account's deliveries, left the flag-off account's row NULL (which reads as false) and created NO
+  row for the account with the flag on and no delivery — a row there is a delivery, and
+  `webhook_url` is NOT NULL. A second pass of both files changed no counts.
+  (Earlier: **2026-09-02**, 45 core + 30 plugin twins through `0030_workspace_slack_targets`.) Both new named composite FKs VERIFIED by hand: an insert of
+  `(workspace_id, account_id) = (20, 1)` where workspace 20 belongs to account 2 is rejected by the
+  database, and deleting the owning workspace CASCADES the config row away.
+  ⚠ **`0030` was also exercised WITH DATA, not just DDL** — the standing warning that "an empty
+  replay proves DDL, never DATA" applies squarely to its `INSERT … SELECT`. Seeded a `pro_settings`
+  row with a whitespace-padded webhook, a `twice_daily` cadence, a timezone and a
+  `slack_last_sent_slot`, plus a second account holding a blank webhook: the migration produced
+  exactly one row, on the account's `is_default` workspace, `btrim`-ed, **carrying the dedupe
+  marker** (the column whose absence would re-post an already-delivered digest on the first sweep
+  after an upgrade), and nothing for the blank account. The sqlite twin's `trim()` / `is_default = 1`
+  path is pinned by `packages/pro/test/slack-targets.test.ts`.
+  ✅ **`0031_workspace_issue_tracker` WAS REPLAYED ON pg on 2026-09-03** (it had been in the
+  standing "unreplayed until someone repeats this" bucket; this line used to say so and was stale
+  for one day — ⚠ if you replay the chain, UPDATE THIS LINE, because a stale "unreplayed" warning
+  and a stale "replayed" claim are equally misleading and only one of them is safe). Two things
+  were exercised WITH DATA, and are what to re-exercise on any future replay:
+  because both are `INSERT … SELECT` behaviour rather than DDL: (a) the backfill fans an account's
+  `issue_*` config into a row for **EVERY** workspace it owns, not just `is_default` — the opposite
+  of `0030`'s shape, and a Default-only result is the regression to watch for; (b) the
+  `ON CONFLICT … DO UPDATE` must UPDATE a workspace that already carries a `0029` cadence row
+  rather than skipping it, and must leave that row's `sprint_cadence_days` intact. The sqlite twin's
+  behaviour is pinned by `packages/pro/test/workspace-settings.test.ts`. ⚠ **THE TWO DIALECTS
+  DIVERGE ON REPLAY-SAFETY HERE, DELIBERATELY**: the pg file uses `ADD COLUMN IF NOT EXISTS` (it
+  must — a plugin pg migration that throws is downgraded to a WARNING and silently drops the whole
+  plugin to OSS mode), while SQLite has no such syntax and re-execing the sqlite file raises
+  "duplicate column name", exactly like plugin `0006`'s bare `ADD COLUMN`. Run-once is guaranteed by
+  `pro_migrations`, not by the statement; the DATA half is idempotent in both.
+  ⚠ `0029` also DROPs `wpr_account_ws_period_model` and recreates it as
+  `wpr_account_ws_period_model_cadence`; `persistReport`'s `onConflictDoUpdate` target moved with
+  it, and a half-applied swap would leave `workspace_period_reports` with no unique key at all —
+  which is why that file is deliberately UNWRAPPED (no warning-downgrading `DO` block). Earlier, as
+  of 2026-08-27, core `0000`→`0043` (44/44) and all 28 plugin pg twins (`0028_work_plan` replayed
   into a throwaway DB the day it was written, and idempotent on a second run) — including plugin `0020`,
   the `0021`–`0027` batch and `0027`'s deliberately UNWRAPPED `CREATE TABLE` — apply cleanly into
   a throwaway database on PostgreSQL 16.9, reaching full table parity with SQLite.

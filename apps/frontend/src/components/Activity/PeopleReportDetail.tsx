@@ -49,6 +49,7 @@ import {
 } from '../../lib/ui.js';
 import { ArrowIcon, PersonIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
+import { MetaChip } from '../MetaChip.js';
 import { MlSeverityBadge } from '../MlSeverityBadge.js';
 import { ProBadge, ProLockPanel, useProGateState } from '../ProGate.js';
 import { KEY_LABEL, KEY_TITLE, fmtValue } from './PersonPeriodSection.js';
@@ -184,17 +185,11 @@ function useReportBotAuthoring(
 
 // ── Shared card pieces ────────────────────────────────────────────────────────────────────────
 
+// The local `StateChip` was a byte-for-byte copy of BotCommentCard's chip; both now come from the
+// ONE `MetaChip`. This stays a named wrapper only because the call sites pass a derived state and
+// nothing else — the DERIVED_STATE_META lookup belongs here, not repeated at each of them.
 function StateChip({ state }: { state: PersonEvidenceThreadRef['derivedState'] }): JSX.Element {
-  const meta = DERIVED_STATE_META[state];
-  return (
-    <span
-      className="shrink-0 rounded px-1 py-px text-[10px] font-medium"
-      style={{ color: meta.color, background: `${meta.color}1a` }}
-      title={meta.description}
-    >
-      {meta.label}
-    </span>
-  );
+  return <MetaChip meta={DERIVED_STATE_META[state]} />;
 }
 
 /** A clamped markdown body (the BotCommentCard discipline without its ResizeObserver — a plain

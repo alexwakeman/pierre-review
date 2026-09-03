@@ -68,6 +68,9 @@ export const accounts = pgTable('accounts', {
   // CLOUD-ONLY, opt-in (default OFF): contribute de-identified aggregate weekly review-bot
   // outcome stats to the cross-org benchmark network. See the sqlite twin + benchmarkContributions.
   benchmarkOptIn: boolean('benchmark_opt_in').notNull().default(false),
+  // The LARGE-PR FLAG's per-account code-churn threshold; NULL = the 1,500-line product default.
+  // See the sqlite twin. Kept in sync by hand (schema-parity.test.ts).
+  largePrCodeLocThreshold: integer('large_pr_code_loc_threshold'),
 });
 
 export const repos = pgTable(

@@ -234,9 +234,17 @@ export default function Privacy(): JSX.Element {
             ],
             [
               'Slack',
-              'The digest content you configured',
+              // ⚠ THIS ROW IS A PUBLISHED CLAIM ABOUT WHAT LEAVES THE SERVICE, AND IT WAS
+              // RE-CHECKED WHEN THE DIGEST BECAME PER-WORKSPACE. "The digest content you
+              // configured" was true when the message was prose plus GitHub links; it now also
+              // carries the workspace's NAME (in the header, so a reader can tell whose figures
+              // they are) and LINKS BACK INTO THE APP whose query strings contain workspace and
+              // repository ids. Those are tenant identifiers, not prose, so the sentence had to
+              // widen. If a future change puts anything else in that message — a person's name,
+              // an author login — this row widens again, in the same change.
+              'The digest content: the summary prose, the repository names it covers, the name of the workspace it is for, and links back into the app (which contain workspace and repository ids). It is sent to the channel behind the webhook URL you supply, per workspace.',
               'USA',
-              'Only if you set up a Slack digest webhook yourself',
+              'Only if you set up a Slack digest webhook yourself, and only for the workspaces you select',
             ],
           ]}
         />

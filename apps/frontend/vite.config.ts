@@ -2,6 +2,12 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const BACKEND_PORT = process.env.BACKEND_PORT ?? '4000';
+// ⚠ THE SAME ENV VAR THE BACKEND READS. config.ts builds the SPA's browser-facing base
+// (`appWebUrl`, the root of the Slack digest's deep links) as
+// `http://localhost:${FRONTEND_PORT ?? 5173}` whenever it is not serving the SPA itself — so this
+// port and that link must move together. Reading one variable in both places is what makes that
+// true; a hardcoded port here would drift silently into a 404 in someone's Slack channel.
+const FRONTEND_PORT = Number(process.env.FRONTEND_PORT ?? 5173);
 
 export default defineConfig({
   // In production the SPA is served under /app; the API stays at the origin
@@ -45,7 +51,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: FRONTEND_PORT,
     proxy: {
       '/api': {
         target: `http://127.0.0.1:${BACKEND_PORT}`,

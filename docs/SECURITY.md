@@ -114,6 +114,29 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
   (`https://hooks.slack.com/services/…` only, exact host — not `endsWith`), enforced at BOTH the
   storage and the `fetch` sink, `redirect: 'error'`, and the response body no longer comes back
   in the error (it was a read primitive against the Railway private network).
+  ⚠ **There are now N webhooks per account**, one per configured workspace
+  (`workspace_slack_targets`, plugin 0030) — so the storage-side half runs in `slack/targets.ts`'s
+  `writeTarget`, and **any further write path must route through the same normaliser**: a write
+  that skips it bypasses the control at storage time, leaving only the sink check standing.
+  A bad URL refuses the write outright and changes NOTHING — not even the fields beside it, since
+  the URL is validated before the upsert is built — and each of the six classic bypasses is pinned
+  in `packages/pro/test/slack-targets.test.ts`.
+  ⚠ **The write path is now SINGLE-WORKSPACE** (`PUT /api/pro/slack/target?workspace=<id>`; the
+  plural `/targets` and its whole-selection body are DELETED). The workspace id therefore arrives
+  in a QUERY resolved by `resolveRequestWorkspaceId` rather than in a request BODY as a list — one
+  fewer place a client-supplied id reaches a write — with the named composite FK
+  `workspace_slack_targets_workspace_account_fk` still the structural backstop beneath it.
+- **The Slack webhook URL is stored PLAINTEXT — a decision re-made when the count went from one
+  per account to N** (plugin migration 0030's header carries the full argument). Short form: it is
+  write-only capability to one channel the account owner chose, granting no read of Slack and
+  carrying no tenant data — different in KIND from the GitHub token, which is AES-256-GCM sealed
+  because it reads private source. Multiplying the count multiplies blast radius of the same
+  shape, not its kind. Sealing was rejected because `ENCRYPTION_KEY` is CLOUD-ONLY, so a sealed
+  column would be sealed in one deployment mode and plaintext in the other — two storage formats
+  for one field — and a key rotation would silently break every delivery. The mitigations that do
+  apply are enforced in code and must stay: **never returned by any route** (`configured` only),
+  **never logged** (the cron and the test route log account + workspace ids), and every write
+  through the allowlist. REVISIT if core grows a mode-independent secret-sealing seam.
 - **`resolution-check` fan-out (plugin)**: `MAX_TARGETS_PER_BATCH` 50 + per-account in-flight set
   + 30s interval + abort wiring on the JSON twin. One billed LLM call per thread, uncapped, on an
   app built for bot-flooded PRs.

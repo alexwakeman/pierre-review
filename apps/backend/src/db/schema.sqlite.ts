@@ -79,6 +79,14 @@ export const accounts = sqliteTable('accounts', {
   // so it must be explicit + reversible; withdrawing (set false) deletes the account's
   // contributions. Local accounts never contribute (never phone home) — always false.
   benchmarkOptIn: integer('benchmark_opt_in', { mode: 'boolean' }).notNull().default(false),
+  // The LARGE-PR FLAG's threshold: how many lines of CODE churn (additions + deletions over the
+  // PR's non-documentation, non-config files — see db/code-loc.ts) make a pull request "large"
+  // enough to warn about. ONE PER-ACCOUNT SETTING, deliberately not per-workspace: there is no
+  // inheritance chain to resolve and therefore no "which grain am I reading?" question.
+  // NULL = use the product default (1,500). Two states, nothing else — a stored value is always
+  // a positive integer the user typed (the route rejects anything else), so a reader that sees
+  // null knows the user never expressed an opinion, rather than guessing at a sentinel.
+  largePrCodeLocThreshold: integer('large_pr_code_loc_threshold'),
 });
 
 export const repos = sqliteTable(

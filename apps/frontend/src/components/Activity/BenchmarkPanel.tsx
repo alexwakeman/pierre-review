@@ -61,11 +61,14 @@ import {
   sharedComparisonRefusal,
   stripGeometry,
   unitTitle,
+  workspaceCostActedOnDetail,
+  workspaceCostActedOnLabel,
   workspaceCostCoverageNote,
   workspaceCostHeadline,
   workspaceCostPartialWindowNote,
   workspaceCostPriceLine,
   workspaceCostSpanUnobservedNote,
+  workspaceCostWindowIncompleteNote,
   type CostBasis,
   type RollupRow,
   type StripGeometry,
@@ -761,9 +764,7 @@ function WorkspaceCostBlock({
   const seatZeroNote = costSeatZeroNote(cost);
   const spanUnobserved = workspaceCostSpanUnobservedNote(cost);
   const partialWindow = workspaceCostPartialWindowNote(cost);
-  const atPeerUsd = expectation.status === 'value' ? expectation.perActedOnUsd : null;
-  // The span caveat rides any figure anchored on an observation span — the two reviewer-side ones.
-  const showsSpan = cost.yours.status === 'value' || atPeerUsd != null;
+  const windowIncomplete = workspaceCostWindowIncompleteNote(cost);
 
   return (
     <div
@@ -854,26 +855,22 @@ function WorkspaceCostBlock({
             <CostRefusedRow label="Per merged PR" refusal={cost.perMergedPr} />
           )}
 
+          {/* ⚠ THE ONE FIGURE ON THIS CARD A READER IS INVITED TO CHECK. Label names the window,
+              detail names the two numbers, figure is their quotient — `US$783.00 ÷ 243 = US$3.22`.
+              The version this replaced printed "255 of 544 threads acted on across 1 repository —
+              about 32.7 a month" beside US$23.94, where 32.7 came from dividing by a 237-day span
+              that appeared nowhere on the card and was never chosen. Nothing here computes: both
+              halves and the quotient are the server's. */}
           {cost.yours.status === 'value' ? (
             <CostValueRow
               testId="benchmark-workspace-cost-per-acted-on"
-              label="Per acted-on thread"
-              // ⚠ COUNTED, NOT PROJECTED, and the detail says so: real threads pooled over the
-              // repositories this reviewer is live in. ⚠ AND THE PACE IS A SUM OF PER-REPOSITORY
-              // PACES, never a count over a joined stretch of time — which is why the detail names
-              // the estate rather than a single span the way the per-repository block could.
+              label={workspaceCostActedOnLabel(cost)}
               figure={formatUsd(cost.yours.perActedOnUsd)}
-              detail={
-                `${formatThreadCount(cost.yours.actedThreads)} of ` +
-                `${formatCount(cost.yours.settledThreads)} threads acted on across ` +
-                `${formatCount(cost.coveredRepos)} ` +
-                `${cost.coveredRepos === 1 ? 'repository' : 'repositories'} — about ` +
-                `${formatThreadCount(cost.yours.actedPerMonth)} a month`
-              }
+              detail={workspaceCostActedOnDetail(cost, cost.yours)}
               basis="counted"
             />
           ) : (
-            <CostRefusedRow label="Per acted-on thread" refusal={cost.yours} />
+            <CostRefusedRow label={workspaceCostActedOnLabel(cost)} refusal={cost.yours} />
           )}
 
           <AtPeerEngagementRow expectation={expectation} />
@@ -906,10 +903,14 @@ function WorkspaceCostBlock({
         </div>
       )}
 
-      {/* The time base's own caveat, server-authored so it cannot be dropped by a renderer that
-          did not know it existed. */}
-      {showsSpan && (
-        <p className="mt-1 text-[10px] leading-relaxed text-gray-400">{cost.spanNote}</p>
+      {/* THE BASIS, server-authored so it cannot be dropped by a renderer that did not know it
+          existed — one sentence naming the two numbers the per-thread figure divides.
+
+          ⚠ IT RIDES THE MONEY, NOT A SPAN. Its predecessor was gated on whether a span-anchored
+          figure was on screen; there are no span-anchored figures left, and the sentence a reader
+          uses to check the arithmetic must be there whenever the arithmetic is. */}
+      {collapsed == null && (
+        <p className="mt-1 text-[10px] leading-relaxed text-gray-400">{cost.basisNote}</p>
       )}
 
       {/* ⚠ TWO DISCLOSURES WITH TWO CAUSES AND TWO SENTENCES, and neither is optional chrome: a
@@ -932,6 +933,18 @@ function WorkspaceCostBlock({
           data-testid="benchmark-workspace-cost-partial-window"
         >
           {partialWindow}
+        </p>
+      )}
+      {/* ⚠ A THIRD CAUSE AND A THIRD SENTENCE — and the only one that explains a WITHHELD figure
+          rather than a missing term. A repository younger than the cost window makes the month of
+          work partial against a whole price, which inflates; the figure refuses and this says why
+          and for how long. */}
+      {windowIncomplete != null && (
+        <p
+          className="mt-0.5 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400"
+          data-testid="benchmark-workspace-cost-window-incomplete"
+        >
+          {windowIncomplete}
         </p>
       )}
     </div>

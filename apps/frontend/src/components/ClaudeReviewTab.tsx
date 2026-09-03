@@ -1636,10 +1636,21 @@ export function ClaudeReviewTab({
                 'Claude is not authenticated. Set up Claude credentials to run a review.'}
             </div>
           </div>
-          {/* Key management now lives in Settings — point the user there to fix a no-auth run. */}
+          {/* ⚠ THERE IS NOWHERE IN THE APP TO FIX THIS, AND THE COPY MUST NOT PRETEND OTHERWISE.
+              This line used to read "Add your Anthropic API key in Settings" — true while a BYO
+              key was stored in `~/.pierre-review/config.json`, and a dead end the moment that form
+              and its routes were retired. Local Claude Review now has exactly TWO credential rungs
+              and BOTH are outside the SPA: an ambient Claude session (preferred, so a subscription
+              pays for the run) and the environment's `ANTHROPIC_API_KEY`. Sending a reader to a
+              Settings section that no longer exists costs them the one thing this banner owes
+              them — the next action. */}
           <div className="mt-2 text-xs text-amber-800 dark:text-amber-300">
-            Add your Anthropic API key in <span className="font-medium">Settings</span> (the avatar
-            menu, top-right), or set up a logged-in Claude session, then re-run.
+            Sign in to Claude on this machine (a logged-in Claude session is used first, so a
+            subscription covers the run), or start the server with{' '}
+            <code className="rounded bg-amber-100/60 px-1 font-mono dark:bg-amber-900/40">
+              ANTHROPIC_API_KEY
+            </code>{' '}
+            set — then re-run. There is no key to enter in Settings.
           </div>
         </div>
       ) : (

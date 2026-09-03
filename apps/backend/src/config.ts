@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
 
@@ -85,6 +86,40 @@ const rawDbUrl =
 const syncAdaptive = process.env.SYNC_ADAPTIVE
   ? process.env.SYNC_ADAPTIVE === 'true'
   : true;
+
+// ---- Does THIS process serve the built SPA? ----
+//
+// The single source of truth for a question two places need: app.ts, to decide whether to
+// register the @fastify/static instance at `/app/`, and `appWebUrl` below, to decide whether a
+// deep link handed to a person should point here at all.
+//
+// The SPA ships next to the compiled server (release/dist → release/public), so its presence on
+// disk IS the answer: true for the packaged release and for cloud on Railway, false under
+// `pnpm dev`, where there is no sibling public/ dir and Vite serves the UI while proxying /api
+// back to this process.
+//
+// ⚠ SPELLED ONCE, ON PURPOSE. app.ts used to compute this inline; two copies of an existsSync
+// against a hand-written relative path is exactly the "TWO SPELLINGS MUST AGREE" hazard, and the
+// failure mode if they ever drifted is silent — a deep link that 404s, or a static root that
+// never registers.
+export const spaPublicDir = resolve(backendRoot, 'public');
+export const spaLandingDir = resolve(backendRoot, 'public-landing');
+export const serverServesSpa = existsSync(resolve(spaPublicDir, 'index.html'));
+
+// The browser-facing base for deep links. See `appWebUrl` on the config object for the full
+// contract; this is the resolution it names.
+function resolveAppWebUrl(): string {
+  const explicit = process.env.APP_WEB_URL?.trim().replace(/\/+$/, '');
+  if (explicit) return explicit;
+  const apiOrigin =
+    process.env.APP_BASE_URL?.replace(/\/$/, '') ??
+    `http://localhost:${intFromEnv('PORT', 4000)}`;
+  if (serverServesSpa) return apiOrigin;
+  // Nothing here serves the SPA, so a link to this origin would 404. The dev server does.
+  // Its port is `server.port` in apps/frontend/vite.config.ts; FRONTEND_PORT covers the demo
+  // stack (:5273) and anyone who moved it.
+  return `http://localhost:${intFromEnv('FRONTEND_PORT', 5173)}`;
+}
 
 export const config = {
   deploymentMode,
@@ -249,6 +284,32 @@ export const config = {
   appBaseUrl:
     process.env.APP_BASE_URL?.replace(/\/$/, '') ??
     `http://localhost:${intFromEnv('PORT', 4000)}`,
+
+  // Where a HUMAN'S BROWSER reaches the SPA — the base for deep links we hand to a person
+  // (today: the workspace + per-repo links in the Slack digest).
+  //
+  // ⚠ THIS IS NOT `appBaseUrl` AND THE TWO MUST NOT BE MERGED. `appBaseUrl` is THIS SERVER's own
+  // public origin: it builds the OAuth `redirect_uri` and is the EXACT CORS allowlist entry in
+  // cloud, so it must keep naming the API origin whatever the SPA is served from. `appWebUrl`
+  // answers a different question — "where do I send someone to open the app?" — and the two
+  // diverge in exactly one deployment: `pnpm dev`, where this server runs on :4000 and NEVER
+  // serves the SPA (see `serverServesSpa` below), while Vite serves it on :5173. A deep link
+  // built on `appBaseUrl` 404s there. That is the bug this exists to fix.
+  //
+  // Resolution, in order:
+  //   1. APP_WEB_URL — an explicit override, for any split deployment (SPA on a CDN or a
+  //      separate host). Always wins.
+  //   2. This server serves the SPA itself ⇒ `appBaseUrl`. True for the packaged release
+  //      (`npx pierre-review`) and for cloud on Railway — one origin, one answer.
+  //   3. Otherwise this server does NOT serve the SPA, so something else does: the Vite dev
+  //      origin, `http://localhost:${FRONTEND_PORT ?? 5173}`.
+  //
+  // ⚠ STEP 2 KEYS ON WHETHER THE SPA IS ACTUALLY ON DISK, NOT ON `isCloud` AND NOT ON WHETHER
+  // APP_BASE_URL IS SET. docs/LOCAL-CLOUD-TESTING.md § Option A runs `DEPLOYMENT_MODE=cloud
+  // pnpm dev` WITH `APP_BASE_URL=http://localhost:4000` (the OAuth callback needs it) while Vite
+  // still serves the SPA on :5173 — so keying on either of those would put that mode back on the
+  // 404. Serving the files is the only ground truth.
+  appWebUrl: resolveAppWebUrl(),
   // Cloud supports TWO sign-in providers side by side; a deployment configures either or both
   // and the SignInGate offers whatever's set. They are SEPARATE GitHub registrations (distinct
   // client id/secret) but share the same authorize/token endpoints — the flow only differs in

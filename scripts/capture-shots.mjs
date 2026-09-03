@@ -224,20 +224,26 @@ async function proShots() {
     await ctx.close();
   });
 
-  // 7d. Bot settings — Settings → the "Review bots" section: the detected-reviewers table,
-  // the in-house detection toggles + login allowlist, Pierre attribution, and the mute /
-  // auto-triage rules editor. Element shot of the whole control surface.
+  // 7d. Bot settings — Activity → Bots → Settings: one card per detected reviewer carrying its
+  // whole configuration (is it automated, is it REVIEWING or quality-checking, who is it, what
+  // does it cost here) plus the per-repo footprint chips that state the workspace-wide blast
+  // radius. Element shot of `BotSettingsPanel`.
+  //
+  // ⚠ IT USED TO TARGET THE SETTINGS MODAL's `bot-settings-section`, WHICH NO LONGER EXISTS. That
+  // account-wide "Review bots" section was an explainer POINTING AT THIS SCREEN plus one Slack
+  // toggle; the toggle became a per-delivery field on the Slack section (plugin migration 0033)
+  // and the section was deleted. The shot is strictly better here — this is where a reviewer is
+  // actually classified, priced and named, and it is CORE/free, so it also renders in the FREE
+  // pass rather than needing the plugin.
   await shot('bot-settings.png', async () => {
     const ctx = await newCtx({ width: 1600, height: 1400 });
     const page = await ctx.newPage();
-    await openApp(page, '?view=activity');
-    await page.locator('button[aria-haspopup="menu"][title^="Signed in as"]').click();
-    await page.getByRole('menuitem', { name: 'Settings' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Settings' });
-    await dialog.waitFor({ timeout: 8000 });
-    const section = page.getByTestId('bot-settings-section');
+    // `?botsTab=settings` seats the sub-tab directly — it is URL-serialized, so no clicking
+    // through the tab strip (and no dependence on the strip's labels) is needed.
+    await openApp(page, '?view=activity&activityRepo=bots&botsTab=settings');
+    const section = page.getByTestId('bot-settings-panel');
     await section.waitFor({ timeout: 8000 });
-    await page.waitForTimeout(1200); // detected-reviewers query + settings load
+    await page.waitForTimeout(1500); // detected-reviewers query + per-repo footprints
     await section.scrollIntoViewIfNeeded();
     await page.waitForTimeout(300);
     await section.screenshot({ path: out('bot-settings.png') });

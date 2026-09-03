@@ -3,7 +3,13 @@ import { resolve } from 'node:path';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import { config, intFromEnv } from './config.js';
+import {
+  config,
+  intFromEnv,
+  serverServesSpa,
+  spaLandingDir,
+  spaPublicDir,
+} from './config.js';
 import { registerErrorHandler } from './api/plugins/error-handler.js';
 import {
   registerAccountContext,
@@ -171,9 +177,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   // compiled server (release/dist → release/public + release/public-landing). In
   // dev there is no sibling public dir, so this no-ops and Vite serves the UI by
   // proxying /api back to this server — dev stays unchanged.
-  const publicDir = resolve(import.meta.dirname, '../public');
-  const publicLandingDir = resolve(import.meta.dirname, '../public-landing');
-  const serveSpa = existsSync(resolve(publicDir, 'index.html'));
+  // ⚠ THESE THREE COME FROM config.ts, NOT AN INLINE existsSync. `serverServesSpa` is also what
+  // decides `config.appWebUrl` — whether a deep link handed to a PERSON may point at this origin
+  // at all — so the two answers must be the same answer. Spelled twice they could drift silently:
+  // a digest link that 404s, or a static root that never registers.
+  const publicDir = spaPublicDir;
+  const publicLandingDir = spaLandingDir;
+  const serveSpa = serverServesSpa;
   const serveLanding =
     config.isCloud && existsSync(resolve(publicLandingDir, 'index.html'));
   if (serveSpa) {

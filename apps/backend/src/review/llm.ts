@@ -25,11 +25,12 @@ export interface CheapCompleteOpts {
   // Claude session (Agent SDK). The seam NEVER falls back to process.env or the
   // Claude Review key on its own — the caller decides its credential.
   apiKey?: string;
-  // 'local-review-key' → CORE resolves the local BYO key (review/local-settings.ts)
-  // itself and uses it on the raw metered path when set; unset falls through to the
-  // ambient session. The key never crosses the plugin boundary — the advisor's local
-  // refine ladder (BYOK → ambient) names the POLICY, not the secret. Ignored when an
-  // explicit `apiKey` is given; a no-op in cloud (the local store reads null there).
+  // ⚠ RETIRED, AND KEPT ONLY SO THE ProContext SHAPE DOES NOT MOVE. It used to mean "CORE
+  // resolves the local BYO Anthropic key itself and uses it on the raw metered path". That
+  // stored key no longer exists — local advanced-AI auth is two rungs now (ambient Claude
+  // session, else the environment's ANTHROPIC_API_KEY), and the ambient path below already
+  // resolves BOTH through the Agent SDK. So this option resolves to exactly the same thing as
+  // omitting it. Do not re-add a resolver behind it; the ladder it named is gone.
   credential?: 'local-review-key';
 }
 
@@ -45,17 +46,13 @@ export async function cheapComplete(
 ): Promise<CheapCompleteResult> {
   const model = opts.model ?? DEFAULT_MODEL;
 
-  // An explicit key → the cheap, metered, exact-cost raw path. No key → the ambient
-  // session via the Agent SDK. (No implicit env / Claude-Review-key fallback here.)
+  // An explicit key → the cheap, metered, exact-cost raw path. No key → the ambient session
+  // via the Agent SDK, which itself resolves an ambient login or the environment's
+  // ANTHROPIC_API_KEY. (No implicit env read here — the SDK owns that half.)
+  //
+  // ⚠ `opts.credential` IS NO LONGER BRANCHED ON. The stored BYO key it named is retired, so
+  // its rung would resolve to nothing; the two-rung ladder IS `agentComplete`.
   if (opts.apiKey) return rawComplete(opts.apiKey, model, opts);
-  if (opts.credential === 'local-review-key') {
-    // The caller opted into the local BYO-key ladder: the stored key (if any) on the
-    // metered path, else fall through to the ambient session. Lazy import — the store
-    // module is fs-only but this keeps the no-credential path untouched.
-    const { getUserAnthropicKey } = await import('./local-settings.js');
-    const localKey = getUserAnthropicKey();
-    if (localKey) return rawComplete(localKey, model, opts);
-  }
   return agentComplete(model, opts);
 }
 

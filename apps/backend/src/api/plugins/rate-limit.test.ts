@@ -49,8 +49,47 @@ describe('tierFor — AI generation', () => {
 
   it('does not bill cancels or config writes as generation', () => {
     expect(tiers('POST', '/api/prs/42/claude-review/cancel')).toEqual(['read']);
-    expect(tiers('PUT', '/api/claude-review/key')).toEqual(['read']);
+    // (`PUT /api/claude-review/key` used to be asserted here. The route is DELETED — the BYO
+    // Anthropic key is retired, so there is nothing left to tier. `/budget` is the surviving
+    // config write on this prefix and carries the same property.)
     expect(tiers('PUT', '/api/claude-review/budget')).toEqual(['read']);
+    expect(tiers('PUT', '/api/pro/settings')).toEqual(['read']);
+    // ⚠ AND EVERY SETTINGS WRITE BENEATH IT. The per-workspace sprint cadence is one DB upsert —
+    // no model, no GitHub quota — but its path does not END in `/settings`, so the catch-all's
+    // suffix heuristic would have parked it on the 20/min AI bucket. A settings write is a settings
+    // write at every depth.
+    expect(tiers('PUT', '/api/pro/settings/workspace')).toEqual(['read']);
+    expect(tiers('GET', '/api/pro/settings/workspace')).toEqual(['read']);
+    // ...and the exemption must not leak past the settings family onto a real generation path.
+    expect(tiers('POST', '/api/pro/synthesis')).toContain('ai');
+  });
+});
+
+// The Slack digest family: TWO paths under one prefix with OPPOSITE costs. The `/api/pro/`
+// catch-all tiers on the VERB, so both are mutating and both would land on the 20/min AI bucket —
+// right for exactly one of them.
+describe('tierFor — Slack digest', () => {
+  it('the per-workspace delivery config is a settings write, not generation', () => {
+    // At most SLACK_TARGET_WORKSPACE_CAP upserts plus one delete on one small table. No model,
+    // no GitHub. Its path does not sit under `/api/pro/settings/`, so without an explicit line it
+    // would inherit the AI tier purely from where it lives.
+    expect(tiers('PUT', '/api/pro/slack/target')).toEqual(['read']);
+    expect(tiers('GET', '/api/pro/slack/target')).toEqual(['read']);
+    // DELETE is the off switch and costs exactly one row delete — same tier as the PUT, and
+    // spelled here so the verb cannot quietly land on the /api/pro/ AI catch-all.
+    expect(tiers('DELETE', '/api/pro/slack/target')).toEqual(['read']);
+  });
+
+  it('"Send test" stays on the AI tier — it runs the cron\'s billed path', () => {
+    // NOT a probe: refreshSprintReport (a Haiku call unless the payload hash is unchanged) plus
+    // the account-wide repo-digest refresh, then an outbound POST to a user-supplied host.
+    expect(tiers('POST', '/api/pro/slack/test')).toEqual(['ai', 'ai_hourly']);
+  });
+
+  it('neither line swallows its siblings', () => {
+    // Exact matches, never a `startsWith('/api/pro/slack')` — the near-miss failure this file has
+    // already recorded three times.
+    expect(tiers('POST', '/api/pro/synthesis')).toContain('ai');
     expect(tiers('PUT', '/api/pro/settings')).toEqual(['read']);
   });
 });
@@ -144,6 +183,18 @@ describe('tierFor — period reports', () => {
     // A path that merely STARTS the same must not be captured by the family prefix.
     expect(tiers('POST', '/api/pro/insights/reports-export/generate')).toEqual(['ai', 'ai_hourly']);
   });
+
+  // GET /api/pro/insights/month-to-date — the OPEN calendar month, recomputed on every read
+  // (Reports → Month grain). It sits OUTSIDE the `…/insights/reports` family prefix, so without
+  // its own entry the /api/pro/ catch-all's GET→read branch would park six indexed scans on the
+  // 600/min blanket bucket. `search`, like every other route of that cost shape here.
+  it('puts month-to-date on the search bucket, not the blanket read one', () => {
+    expect(tiers('GET', '/api/pro/insights/month-to-date')).toEqual(['search', 'read']);
+    // It never generates and never writes a row — it must not drift onto the AI tier either.
+    expect(tiers('GET', '/api/pro/insights/month-to-date')).not.toContain('ai');
+    // The decision is anchored on the exact path: a neighbour must keep falling through.
+    expect(tiers('GET', '/api/pro/insights/month-to-date-export')).toEqual(['read']);
+  });
 });
 
 // GET /api/pro/insights/person/:userId (plan P4.2 — the 1:1-prep vector). DECIDED onto `search`:
@@ -166,6 +217,18 @@ describe('tierFor — GitHub quota spenders', () => {
   it('throttles live repo search separately', () => {
     expect(tiers('GET', '/api/repos/search')).toEqual(['search', 'read']);
     expect(tiers('GET', '/api/repos/suggested')).toEqual(['search', 'read']);
+  });
+
+  // POST /api/me/large-pr-threshold — the large-PR flag's per-account threshold. One validated
+  // UPDATE of one integer column: no GitHub, no model, no fold. `read` is the right bucket AND
+  // the recorded decision, and the near-miss it guards against is the `/api/me` prefix, which
+  // would also swallow `/api/mention-candidates`.
+  it('keeps the account settings write on read, without swallowing its neighbours', () => {
+    expect(tiers('POST', '/api/me/large-pr-threshold')).toEqual(['read']);
+    expect(tiers('POST', '/api/me/large-pr-threshold')).not.toContain('github_write');
+    // The neighbours a loose prefix would have taken with it.
+    expect(tiers('GET', '/api/mention-candidates')).toEqual(['read']);
+    expect(tiers('DELETE', '/api/me/account')).toEqual(['read']);
   });
 
   // The ML label surface spends NO GitHub quota and NO Anthropic credit — the model is called

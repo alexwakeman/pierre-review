@@ -1,0 +1,14 @@
+-- The LARGE-PR FLAG's threshold (CORE, free, no AI). How many lines of CODE churn — additions +
+-- deletions over a PR's non-documentation, non-config files, folded by db/code-loc.ts — make a
+-- pull request "large" enough to warn about.
+--
+-- ONE PER-ACCOUNT SETTING. Not per-workspace and not per-repo: a threshold with an inheritance
+-- chain would need a resolver, and "which grain am I reading?" is the question this app spent a
+-- migration pair (0044/0045) removing from the reviewer object.
+--
+-- NULLABLE with NO default and NO backfill: NULL means "the user has never expressed an opinion",
+-- and the reader resolves it to the 1,500-line product default. Two states, so a future change to
+-- the default reaches every account that never overrode it — which a backfilled 1500 would freeze.
+-- Written only by POST /api/me/large-pr-threshold, which validates a positive integer or null.
+-- The Postgres twin is migrations-pg/0044_large_pr_threshold.sql.
+ALTER TABLE `accounts` ADD `large_pr_code_loc_threshold` integer;

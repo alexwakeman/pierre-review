@@ -97,7 +97,10 @@ the `bind.ts` gate, assignability at `index.ts`) plus a boot check that `/api/me
   builder). Without it both are unimplementable.
 - **NEW `ctx.queries.defaultWorkspaceId(accountId)`** — for the ACCOUNT-WIDE CRON paths that have
   no request and therefore no `?workspace=`. That was two (the Slack digest and the AI-policy sprint
-  refresh); the AI-policy sweep has since been DELETED, so today it is just the Slack digest. It is
+  refresh); the AI-policy sweep was DELETED, and **the Slack digest stopped needing it in plugin
+  migration 0030** — every delivery now carries its OWN `workspace_id` on its
+  `workspace_slack_targets` row, so the sweep names a workspace explicitly instead of falling back
+  to Default. The seam survives for `resolveRequestWorkspaceId`'s fallback. It is
   a signature change, not vocabulary: their old `scope = 'all'` default has no image.
 - Capability **`teamInsights` → `workspaceInsights`**; the other nine fields (`botTriage` included)
   are untouched.
@@ -321,9 +324,19 @@ identical pills for one verbose bot), per-reviewer labels (custom → vendor →
 catch-all group KEPT → consensus/conflict, a rollup in `ThreadList` (its only mount — the old
 FeedView claim was stale). Pinned by `bot-dedup.test.ts`. **Slack:** a
 deterministic "Review bots" block in `buildSlackReport` (reads the `bot_signal` card from
-`getWorkspaceInsights`), gated on `pro_settings` `bot_slack_digest`, sent even when the AI digest is
-empty. ⚠ It is a CRON with no request, so it now resolves `ctx.queries.defaultWorkspaceId(accountId)`
-and covers the **Default workspace ONLY** — see Known gaps.
+`getWorkspaceInsights` for THIS delivery's workspace), gated on **that delivery's own
+`workspace_slack_targets.bot_digest`** (plugin migration 0033), sent even when the AI digest is
+empty. ⚠ **THE TOGGLE WAS ACCOUNT-WIDE UNTIL 0033 AND THE JUSTIFICATION FOR THAT DIED IN 0030.**
+`report.ts` carried a comment reading *"the `bot_slack_digest` TOGGLE stays account-wide: it is a
+'do I want this block at all' preference, not a per-team fact"* — true while there was ONE digest
+per account, false the moment 0030 made the digest one row per (account, workspace): from then on a
+single account flag decided the CONTENT of N independently-scheduled messages about N different
+teams' bots, and a team with no bots got a section about somebody else's problem. The flag now lives
+on the row that IS the delivery; 0033 copied the account value onto every existing target row (an
+UPDATE, never an INSERT — a row here is a delivery, and `webhook_url` is NOT NULL), and
+`pro_settings.bot_slack_digest` is dormant. `buildBotBlocks` RE-READS the target row rather than
+taking the flag as a parameter, even though both callers hold it: one extra indexed read per send
+buys the guarantee that the flag governing the block is the flag on the delivery being built.
 **Resolve (user-initiated only):** resolving `likely_addressed` bot threads on GitHub is a strictly
 **user-initiated, confirm-gated** action via the shared `resolveThreadsOnGitHub` helper
 (`src/bot-triage/resolve.ts`) — the per-PR `resolve-bot-threads` route + the workspace-wide
@@ -335,12 +348,18 @@ changed no behaviour, and the unattended cron was replaced by the confirm-gated 
 still creates an orphan table; `pro_settings.bot_auto_resolve*` columns are now vestigial.)_
 **"Only a bot reviewed this" risk flag:** a `bot_only_review` Insights card (`getBotOnlyReviewPrs`;
 Pierre-verbatim counts as bot-derived) + a `ChecksTab` caution. **Settings:** the account-wide
-"Review bots" section (`BotSection`) is down to ONE knob — the `caps.slackDigest`-gated "Slack bot
-digest" toggle (`bot_slack_digest`) — plus the explainer pointing at the Bots rail. Its "Detection"
-and "Limn attribution" sections were removed (above); their `pro_settings` columns are left DORMANT,
-like `bot_auto_resolve*`, with no migration. ⚠ **Keep the section shell and its
-`data-testid="bot-settings-section"`** even when the toggle is gated off —
-`scripts/capture-shots.mjs` targets it and `pnpm shots` breaks without it. The per-reviewer
+"Review bots" section (`BotSection`) is **DELETED**. Its last knob, the `caps.slackDigest`-gated
+"Slack bot digest" toggle, moved to the per-workspace Slack section with the flag itself in plugin
+0033 (`WorkspaceSlackTargetUpdate.botDigest`), which left the section holding only an explainer
+pointing at the Bots rail — a signpost, not a setting. Its "Detection" and "Limn attribution"
+sections were removed earlier (above); every one of those `pro_settings` columns is left DORMANT,
+like `bot_auto_resolve*`, with no migration — `ProSettings.bots.slackDigest` survives on the wire as
+a husk that always reads `false`, and `caps.botTriage` came off the section-inventory gate with it
+(`useHasProWorkspaceSettings`; a `botTriage`-only account would otherwise open the modal to a
+"Workspace" heading with nothing under it). ⚠ **`data-testid="bot-settings-section"` IS GONE WITH
+IT** — shot 7d in `scripts/capture-shots.mjs` now targets `data-testid="bot-settings-panel"`, the
+Bots → Settings sub-tab (`?view=activity&activityRepo=bots&botsTab=settings`), which is the screen
+the deleted explainer pointed at and is CORE/free, so it renders in the FREE pass too. The per-reviewer
 `DetectedReviewersTable` lives in the Bots **Settings** sub-tab (below), which shows in the per-repo
 Bots tab too, where it is the same WORKSPACE listing filtered client-side to that repo's footprints. Deterministic tuning suggestions are **advisory only** (no mute action) and are **FREE** — they were hoisted OUT of the ROI panel into `BotsView` when the panel went paid.
 **Tiers:** detection/dedup/resolve/classification are **CORE (free)**; the ROI ANALYTICS —
@@ -468,8 +487,9 @@ considered and overruled.
   — the derivation always runs and `persist` declines only the halves a human owns.
 - **The division now:** *is this login a bot, who is it, and what does it cost* are all per
   **WORKSPACE**. There is no longer an account-wide *counterpart*: detection takes no configuration
-  and the Limn marker is unconditional, so `BotSection` in the Settings modal is left holding only
-  the Slack bot-digest toggle. Price is edited INLINE on the reviewer card
+  and the Limn marker is unconditional, and the Slack bot-digest toggle became a field on the
+  DELIVERY row in plugin 0033 — so `BotSection` in the Settings modal is DELETED outright. Price is
+  edited INLINE on the reviewer card
   (`DetectedReviewersTable`) and its label reads **"Price for this Workspace"** — not a bare "Price",
   which on an otherwise workspace-scoped card would read as a global setting and invite exactly the
   cross-workspace totalling that is forbidden. `BotSection`'s old "Per-bot cost (account-wide)"
@@ -1062,6 +1082,204 @@ rank, no cross-person sort by any metric and no comparison table. The guardrail 
 `db/person-period.ts`, `insights/person-routes.ts` and `PeriodPeopleSection.tsx` were reworded
 in lockstep; if they ever disagree, the narrow reading (no cross-person shape) wins.
 
+### The sprint cadence is PER-WORKSPACE (plugin migration 0029)
+
+`pro_workspace_settings` — one row per `(account_id, workspace_id)` holding
+`sprint_cadence_days` + `sprint_start_at`, with the named composite FK
+`pro_workspace_settings_workspace_account_fk` against core's `workspaces (id, account_id)`.
+`resolveSprintCadence(ctx, accountId, workspaceId)` (settings/store.ts) is the ONE resolver — the
+account-level fallback was retired in 0031; `GET`/`PUT
+/api/pro/settings/workspace?workspace=<id>` is its control surface. `apiVersion` STAYS 21 — nothing
+here touches `ProContext`, and every wire addition is a trailing optional field.
+
+⚠ **A cadence change is REFUSE-AND-PRESERVE, and it closed three silent defects** (a stored artifact
+being overwritten in place, most of the history listing as clickable-but-blank, and every colliding
+row reading `stale` forever). The full contract — `cadenceCurrentPool`, the widened
+`workspace_period_reports` unique index, the archive at `<periodKey>@cad<days>`, and the
+by-workspace axis's `cadence_changed` refusal — is in
+[PERIOD-REPORTING.md](PERIOD-REPORTING.md) § The sprint cadence is PER-WORKSPACE.
+
+### The Slack digest is PER-WORKSPACE (plugin migration 0030), bot block included (0033)
+
+`workspace_slack_targets` — one row per `(account_id, workspace_id)` holding `webhook_url`,
+`cadence`, `hour1`/`hour2`, `timezone`, `bot_digest` and the **per-row** `last_sent_slot` /
+`last_sent_at`, with
+the named composite FK `workspace_slack_targets_workspace_account_fk` against core's
+`workspaces (id, account_id)`. Control surface: `GET`/`PUT`/`DELETE
+/api/pro/slack/target?workspace=<id>`, plus `POST /api/pro/slack/test?workspace=<id>`.
+`apiVersion` **STAYS 21** — the only `ProContext` addition is a TRAILING OPTIONAL field,
+`host.appWebUrl?: string`.
+
+**A ROW IS A DELIVERY TARGET.** It exists ⇒ that workspace's digest is generated on this schedule
+and posted to this channel; no row ⇒ nothing.
+
+⚠ **THE "REVIEW BOTS" BLOCK IS PART OF THE DELIVERY, NOT AN ACCOUNT PREFERENCE (plugin migration
+0033).** `bot_digest` on this row replaces `pro_settings.bot_slack_digest`, whose account grain was
+justified as "a 'do I want this block at all' preference, not a per-team fact". **That premise died
+with 0030**: once the digest became one row per workspace, a single account flag was deciding the
+CONTENT of N independently-scheduled messages about N different teams' bots — a team drowning in
+bot comments and a team with no bots at all got the same answer. The migration COPIES the account
+value onto every EXISTING target row so nobody loses the block on upgrade; it is an `UPDATE` and
+never an `INSERT`, because a row here is a delivery (and `webhook_url` is NOT NULL, so there would
+be nothing honest to insert). `buildBotBlocks` re-reads the target row rather than accepting the
+flag as a parameter — one indexed read buys the guarantee that the flag governing the block belongs
+to the delivery being built. Wire: `SlackTarget.botDigest` (always present, null → false) and
+`WorkspaceSlackTargetUpdate.botDigest?` (omitted = unchanged); `apiVersion` stays 21 — both are
+`packages/shared` wire types, not `ProContext`.
+
+⚠ **THE WRITE IS SINGLE-WORKSPACE AND `DELETE` IS THE OFF SWITCH.** The multi-select picker and the
+whole-selection PUT are GONE: settings are for the workspace the reader is currently in, so
+`writeTarget` upserts exactly one row and `deleteTarget` removes exactly one. Under the old shape,
+"stop sending to this workspace" was expressed by OMITTING it from a submitted list — which meant
+any client bug that shortened the list silently cancelled deliveries. `cadence: 'off'` PAUSES and
+keeps the channel; `DELETE` removes the row, frees a cap slot, and takes the dedupe marker with it
+(re-configuring later is a new delivery, and a surviving marker would swallow its first digest).
+
+⚠ **THERE IS NO ACCOUNT-LEVEL WEBHOOK AND NO INHERITANCE.** A nullable "inherit" column would be
+the null-means-INHERIT bug class CLAUDE.md names, and a webhook is its worst case: a new team's
+private figures would silently land in a channel somebody configured years ago. Two states: a
+channel, or none. As of plugin `0031` the sprint cadence and the issue tracker are the SAME shape —
+per-workspace with nothing beneath them — so this is no longer the exception it was when `0029`
+kept an account pair as a product default.
+
+⚠ **THE OLD `pro_settings.slack_*` COLUMNS ARE MIGRATED, THEN DORMANT.** `0030` copies each
+account's configured webhook — **including `slack_last_sent_slot`** — into a row for that account's
+DEFAULT workspace, which is exactly the population the old cron served; the seven columns are then
+left in place and removed from the drizzle schema (the `ai_update_mode` precedent), so nothing
+selects or writes them. **ONE live spelling.** `ProSettings.slack` / `ProSettingsUpdate.slack` are
+gone from the wire; a stale client sending one is silently stripped by
+`additionalProperties: false` and still gets a 200.
+
+⚠ **THE DEDUPE MARKER HAD TO MOVE WITH IT.** One `last_sent_slot` per ACCOUNT under a per-workspace
+sweep re-sends the workspaces that already went out and skips the ones that had not — and the
+in-process guard had to move too (`Set<string>` keyed `${accountId}:${workspaceId}`, not
+`Set<number>` of account ids). Both halves, plus the upgrade case where the migration's carried
+marker is the only thing preventing a duplicate first send, are pinned in
+`packages/pro/test/slack-targets.test.ts`.
+
+**THE COST STORY — this feature REVERSED a documented reduction, on purpose, capped.** Only the
+SPRINT REPORT multiplies (keyed (account, workspace); $0 for a workspace whose insights have not
+moved). The per-repo digests do NOT: `runRefresh` is throttled and cached per ACCOUNT and is still
+called account-wide, and `buildSlackReport` narrows the result for **display** only — ⚠ do not pass
+a workspace's repo ids as `requested`, which would narrow the GENERATION plan and bill per
+workspace. The bound is `SLACK_TARGET_WORKSPACE_CAP` (12), and ⚠ **it survived the picker with a
+different job**: the sweep's population is now *every workspace that HAS a row* rather than a
+user's submitted selection, so the cap is what stands between "add a Slack channel", repeated, and
+N billed report generations per send. It is enforced on the write that would ADD a row past it
+(REFUSED, with the count in the message — editing an existing row is always allowed, since that
+adds no cost and an account at the bound must still be able to turn things off), TRUNCATED in the
+sweep (nobody is there to be told), and DISCLOSED on the read: `cap` + `configuredCount` ride
+`WorkspaceSlackTargetResponse`, because with no picker there is no screen that lists every delivery
+and the count is the only warning a reader gets before a Save is refused. That honours the "state
+it in the Settings copy" obligation [MIGRATIONS.md](MIGRATIONS.md) had carried unhonoured since the
+reduction shipped.
+
+**The app deep links.** `host.appWebUrl` (core `config.appWebUrl`) reaches the plugin ACROSS THE
+SEAM — ⚠ the plugin must never read `process.env.APP_BASE_URL` itself, which would duplicate core's
+fallback (the "two spellings must agree" hazard) and emit a hostless link on every LOCAL install.
+
+⚠ **`appWebUrl` IS NOT `appBaseUrl`, AND CONFLATING THEM SHIPPED 404ing LINKS.** `appBaseUrl` is
+the API origin — it builds the OAuth `redirect_uri` and is the exact CORS allowlist entry in cloud,
+so it must keep naming *this server* whatever serves the SPA. `appWebUrl` answers "where do I send
+a person to open the app?". They are the same string in every SINGLE-ORIGIN deployment (the
+packaged release, cloud on Railway) and differ under `pnpm dev`, where the backend is `:4000` and
+serves NO SPA while Vite serves it on `:5173`. The first cut of this feature linked the API origin
+and every digest link 404'd locally. Resolution order in `config.ts`: `APP_WEB_URL` (explicit
+override, for a split deployment) → `appBaseUrl` **when this process actually serves the SPA** →
+`http://localhost:${FRONTEND_PORT ?? 5173}`.
+⚠ The middle test is `serverServesSpa` — whether the built SPA is on disk beside the server — and
+NOT `isCloud`, and NOT "is APP_BASE_URL set". [LOCAL-CLOUD-TESTING.md](LOCAL-CLOUD-TESTING.md)
+§ Option A runs `DEPLOYMENT_MODE=cloud pnpm dev` WITH `APP_BASE_URL=http://localhost:4000` set (the
+OAuth callback needs it) while Vite still serves the SPA, so keying on either would put that mode
+straight back on the 404. Serving the files is the only ground truth; it is spelled ONCE, in
+`config.ts`, and `app.ts` reads it from there to decide its static root.
+⚠ `FRONTEND_PORT` is read by `apps/frontend/vite.config.ts` TOO, so the dev server's port and the
+link move together — `scripts/demo-stack.mjs` passes it (`:5273`) for the same reason. Pinned by
+`apps/backend/src/config-app-web-url.test.ts` (6 cases, mutation-checked: 4 go red if the
+`serverServesSpa` branch is removed). The message carries a header
+workspace link (`?view=activity&workspace=<id>`) and per-repo section links
+(`&activityRepo=<repoId>`); absent the seam every builder returns null and the digest simply has no
+app links. ⚠ **The per-PR references stay github.com links** (`slack/format.ts`) — a per-PR app link
+needs a LOCAL pr id, and format.ts holds only `repoFullName` + `prNumber`, which resolves to a
+local id only within `(accountId, repoId)`. They also serve a reader with no app account, which is
+most of a Slack channel.
+
+**Rate limits, erasure, secrets.** `PUT`/`DELETE /api/pro/slack/target` is a SETTINGS WRITE on
+`read` (one upsert or one delete, no model, no GitHub) and `POST /api/pro/slack/test` stays on
+`ai` + `ai_hourly`
+because it runs the cron's real billed path — both spelled explicitly in `tierFor`, above the
+`/api/pro/` catch-all, and pinned in `rate-limit.test.ts`. The table joins the plugin's
+`registerAccountErasure` list (core's `accountScopedTables()` cannot see it). The webhook URL stays
+PLAINTEXT — the decision was RE-MADE when the count went from one to N; see
+[SECURITY.md](SECURITY.md) and migration `0030`'s header.
+
+### The issue tracker is PER-WORKSPACE too (plugin migration 0031) — and the comparison MODE (0032)
+
+The Jira/Linear settings left `pro_settings` and joined the sprint cadence on
+`pro_workspace_settings` — same table, same `(account_id, workspace_id)` key, same named composite
+FK. **Plugin 0032 added the third and last one: `comparison_mode`.** Control surface: `GET`/`PUT
+/api/pro/settings/workspace?workspace=<id>`, a partial patch (`{sprint?, issue?, comparisonMode?}`)
+served by ONE writer, `writeWorkspaceSettings`. `apiVersion` **STAYS 21** — nothing on `ProContext`
+moved; `WorkspaceProSettings.comparisonMode` and `WorkspaceProSettingsUpdate.comparisonMode?` are
+`packages/shared` wire types.
+
+⚠ **THE MODE MOVED BECAUSE THE CLAIM THAT KEPT IT ACCOUNT-WIDE WAS FALSE.** Four sites asserted it
+was "a reading preference with no per-team meaning"; `resolveComparisonWindow` falsifies that —
+under `'sprint'` a workspace WITH a cadence gets a sprint-position window and one WITHOUT silently
+gets rolling-14, so one account setting produced two different window SHAPES with nothing on screen
+naming which. It composes with the cadence, so it lives on the cadence's row, with the same
+two-state rule (a stored mode, or the product default `'rolling_14'` — no chain) and the same
+dormancy treatment for `pro_settings.comparison_mode`. `comparisonMode` is TOP-LEVEL on the patch
+rather than inside `sprint`, because that section declares `cadenceDays` REQUIRED so that clearing a
+cadence is always explicit — which would make a mode-only patch inexpressible. Full contract:
+[PERIOD-REPORTING.md](PERIOD-REPORTING.md) § `comparisonMode` IS PER-WORKSPACE TOO.
+
+**Why the workspace is reachable at all.** The enricher's input is a PULL REQUEST, and
+`PrEnrichInput` ALREADY carries `repoId`. A repo belongs to EXACTLY ONE workspace
+(`workspace_repos` is unique on `(account_id, repo_id)`; assignment is an upsert = a MOVE), so one
+indexed read answers it. **The host seam did not have to widen**, which is why this stayed at 21.
+
+⚠ **A REPO WITH NO MEMBERSHIP ROW DEGRADES TO `{configured:false}`.** That state is reachable —
+core's `ensureRepoMemberships` insert keeps `ON CONFLICT … DO NOTHING` precisely because a repo can
+exist without one. Falling back to the account's DEFAULT workspace was the tempting option and is
+the wrong one: it renders one team's tracker configuration against another team's pull request —
+ticket chips deep-linking into a Jira instance this PR's team does not use, from a setting they
+cannot see or edit. **Absent, never wrong.** Throwing is also wrong (`resolvePrTickets` swallows it
+into `null` anyway, so it would be an invisible failure with a stack trace attached).
+
+⚠ **THE BACKFILL COPIED INTO EVERY WORKSPACE, NOT JUST THE DEFAULT** — the OPPOSITE of `0030`'s
+shape, and deliberately. A webhook had only ever delivered to one channel, so Default-only was the
+population the old cron served. The tracker was account-wide and **applied to every PR on the
+account**, so a Default-only copy would have silently dropped ticket links for every other
+workspace on upgrade. The upsert is `DO UPDATE`, not `DO NOTHING`: a workspace that already had a
+`0029` cadence row must gain the tracker columns too, or the most engaged users get the worst
+upgrade.
+
+**The match scope — `IssueMatchScope` = `'title' | 'title_branch'`.** A per-workspace choice of
+where a configured project key is looked for, defaulting (NULL column ⇒ `'title_branch'`) to
+today's behaviour so no existing detection changes.
+
+⚠ **NOTHING HAS EVER SCANNED COMMIT MESSAGES**, in any scope. `extractTicketKeys` reads the PR
+TITLE and the HEAD BRANCH NAME and nothing else — commit messages are not even loaded on the
+lean-storage read path this enricher runs on. Recorded because "it also needs commit messages" is a
+natural reading of the two-source behaviour.
+
+⚠ **`'title'` IS INERT WITHOUT A PROJECT-KEY ALLOWLIST.** The branch is only scanned in allowlist
+mode to begin with: a lowercase branch key (`eng-123`) is structurally indistinguishable from
+`node-18` / `release-2` / a dependency bump, which is why branch scanning is allowlist-gated. So
+the setting narrows an allowlisted setup and changes nothing otherwise — a UI offering the choice
+beside an empty keys field is offering a control that does nothing, and should say so.
+
+⚠ **THE ROW NOW HOLDS TWO SETTINGS, SO A PATCH MUST NOT CLOBBER ITS NEIGHBOUR.** `mergeWorkspace`
+seeds EVERY column from the stored row; a column in `WorkspaceMutableCols` that is not seeded is
+NULLED by the upsert on any unrelated patch. And clearing a cadence NULLS THE PAIR rather than
+deleting the row — the old `writeWorkspaceCadence` delete would now take the tracker with it. Both
+are pinned in `packages/pro/test/workspace-settings.test.ts`.
+
+**Erasure.** `pro_workspace_settings` was already in the plugin's `registerAccountErasure` list, so
+`0031` added no entry — which is exactly why it is easy to stop thinking about. The row now carries
+a customer's internal tracker hostname: infrastructure disclosure, not just a number.
+
 ### The Bots ROI panel is paid — the whole panel, and where the free line falls
 
 `BotRoiPanel` used to be CORE/FREE with three cost surfaces cut out of it on `botDepth` (the
@@ -1359,8 +1577,11 @@ Bots tab**. Files: `bots/benchmark/rollup.ts` (PURE — no db, no clock, no requ
 sibling and its dependency, so every null-vs-zero, seat and money-refusal SENTENCE is imported rather
 than restated) + the `buildRollups` fold in `placement-routes.ts`. Wire:
 `BotBenchmarkPlacementResponse.rollup?: BotBenchmarkWorkspaceRollup[]` (OPTIONAL and additive —
-`apiVersion` stays 21). Tests: `packages/pro/test/benchmark-rollup.test.ts` (the arithmetic, pure) and
-the `cost` block of `benchmark-placement.test.ts` (the route).
+`apiVersion` stays 21). Tests: `packages/pro/test/benchmark-rollup.test.ts` (the arithmetic, pure), the
+`cost` block of `benchmark-placement.test.ts` (the route), and
+`packages/pro/test/benchmark-roi-agreement.test.ts` — ⚠ **the cross-tab check**, which drives
+`getBotAnalytics` and this route over ONE database and one fixture and fails if their
+`$ per acted-on thread` diverge. Nothing pinned that agreement before, which is why it broke twice.
 
 **The wire, in full** (all in `packages/shared/src/types.ts`, under the
 `── THE WORKSPACE ROLLUP ──` banner). Nothing here is a `ProContext` member, so nothing here moves
@@ -1369,10 +1590,10 @@ the `cost` block of `benchmark-placement.test.ts` (the route).
 | Type | What it is |
 |---|---|
 | `BotBenchmarkWorkspaceRollup` | THE CARD: `key` (the workspace's own automation key — **the identity AND the React key**), `vendor`/`botKind` (labels; `vendor` is `null` for every brand the corpus never saw, so it can never be the key), `reviewers[]` (an ARRAY — two logins the workspace calls one vendor are ONE card), `liveInRepos` / `reposConsidered`, `counters`, `contributions[]`, `spread`, `expectation`, `cost?` |
-| `BotBenchmarkRollupContribution` | ONE EVIDENCE ROW: `repoId/repoOwner/repoName`, `mergedPrsLast14d` (ANY author), `band {activityBand, nBands, bandLabel} \| null`, `placementRefusal`, `actedOnRate \| null`, `percentile \| null`, `settledThreads`, `actedThreads`, `spanDays \| null` |
+| `BotBenchmarkRollupContribution` | ONE EVIDENCE ROW: `repoId/repoOwner/repoName`, `mergedPrsLast14d` (ANY author), `band {activityBand, nBands, bandLabel} \| null`, `placementRefusal`, `actedOnRate \| null`, `percentile \| null`, `settledThreads`, `actedThreads`, `spanDays \| null` (⚠ a DISCLOSURE — the observation-period column; no money divides by it any more) |
 | `BotBenchmarkRollupSpread` | `{status:'value'; placed; below; at; above}` — `below+at+above === placed`, and `placed ≤ liveInRepos` — or a refusal |
 | `BotBenchmarkRollupExpectation` | `{status:'value'; yoursRateOnFitted; expectedRate; fittedRepos; excludedRepos; actedAtPeer; actedPerMonthAtPeer; perActedOnUsd; conversionGapUsd; moneyRefusal}` or a refusal. ⚠ A SIBLING of `cost`, not an arm inside it — a vendor the corpus never saw renders its cost while only this refuses |
-| `BotBenchmarkWorkspaceCost` | `monthlyUsd \| null`, `costModel`, `unitMonthlyUsd`, `seats`, `pricedReviewers`, `seatPriceUnresolved`, `seatCountZero`, `windowDays`, `windowUsd`, `coveredRepos`, `spanUnobservedRepos`, `partialWindowRepos`, `perMergedPr`, `unacted`, `yours`, `spanNote`. The three arms REUSE `BotBenchmarkCostUnacted`/`…Yours`/`…Refusal`, so one set of components draws both grains |
+| `BotBenchmarkWorkspaceCost` | `monthlyUsd \| null`, `costModel`, `unitMonthlyUsd`, `seats`, `pricedReviewers`, `seatPriceUnresolved`, `seatCountZero`, `windowDays`, `windowUsd`, `coveredRepos`, `spanUnobservedRepos`, `partialWindowRepos`, `costWindowDays?`, `costWindowIncompleteRepos?`, `perMergedPr`, `unacted`, `yours`, `basisNote`. The three arms REUSE `BotBenchmarkCostUnacted`/`…Yours`/`…Refusal`, so one set of components draws both grains. ⚠ **TWO WINDOWS, TWO FIELDS**: `windowDays` is the cohort's fortnight and `perMergedPr`'s basis ALONE; `costWindowDays` is the calendar month `yours` divides by. ⚠ `yours` carries the WINDOW's thread pair while `unacted` carries the SLICE's, under the same field names — the renderer names each. ⚠ `basisNote` REPLACED `spanNote`: one sentence printing both numbers the figure divides ("US$783.00 a month divided by the 243 threads acted on in the last 30 days. Both halves cover the same month."), because the 106-word span caveat it replaced described a time base that no longer exists |
 | `BotBenchmarkRollupRefusal` | `{status:'refused'; reason: BotBenchmarkRollupRefusalReason; message}` — shaped like `BotBenchmarkCostRefusal` for the same reason |
 | `BotBenchmarkPlacementResponse.rollup?` | OPTIONAL and ADDITIVE. ⚠ **ABSENT ≠ EMPTY** — a missing key says the fold did not run (a narrowed request, or an older plugin), `[]` says it ran and no reviewer was live anywhere. The panel gives them two different sentences |
 
@@ -1393,12 +1614,13 @@ perMergedPr     = windowUsd ÷ Σ_R mergedPrsLast14d_r        ← a fortnight at
                   ⚠ a PARTIAL-WINDOW repo leaves this denominator (undercount ⇒ inflates the cost,
                     flatteringly) and is disclosed in `partialWindowRepos`. Its counters still pool.
 
-actedPerMonth   = Σ_R ( acted_r × 30.44 ÷ spanDays_r )      ← RATES ARE ADDITIVE; SPANS ARE NOT
-                  ⚠ never Σacted ÷ a UNION span: January in repo A + July in repo B is a
-                    seven-month union over two months of work — understates the pace threefold and
-                    inflates every $/thread by the same, plausibly. A repo with no observable span
-                    contributes NOTHING and is counted in `spanUnobservedRepos`, never imputed.
-yours.perActedOnUsd = monthlyUsd ÷ actedPerMonth
+── THE COST WINDOW, `COST_WINDOW_DAYS` = 30.44 — one CHOSEN calendar month ─────────────────────
+actedInWindow   = Σ_R ( acted_r whose SETTLE POINT — thread creation + 72 h — fell in
+                        [now − 30.44 d, now) )                ← two-sided, half-open, `<` not `<=`
+settledInWindow = Σ_R ( the same population's denominator )
+yours.perActedOnUsd = monthlyUsd ÷ actedInWindow             ← BOTH HALVES COVER ONE MONTH
+yours.actedPerMonth === yours.actedThreads                    ← the window IS a month, so a count
+                                                                inside it already is a pace
 
 pooledActedRate = Σ_R acted_r ÷ Σ_R settled_r               ← the card's HEADLINE rate, over R
 unacted.unactedUsd = monthlyUsd × (1 − pooledActedRate)     ← what the price buys that nobody acts
@@ -1407,7 +1629,8 @@ unacted.unactedUsd = monthlyUsd × (1 − pooledActedRate)     ← what the pric
 ── THE ESTATE-MATCHED EXPECTATION, over C ──────────────────────────────────────────────────────
 actedAtPeer          = Σ_C ( settled_r × cohortMedian_r )   ← ONE FACTOR SWAPPED, PER REPOSITORY,
                                                               BEFORE ANYTHING IS SUMMED
-actedPerMonthAtPeer  = Σ_C ( settled_r × cohortMedian_r × 30.44 ÷ spanDays_r )
+actedPerMonthAtPeer  = Σ_C ( settledInWindow_r × cohortMedian_r )   ← THE SAME MONTH, one factor
+                                                                     swapped, per repository
 perActedOnUsd        = monthlyUsd ÷ actedPerMonthAtPeer
 expectedRate         = Σ_C (settled_r × cohortMedian_r) ÷ Σ_C settled_r   ← thread-count WEIGHTED
 yoursRateOnFitted    = Σ_C acted_r ÷ Σ_C settled_r          ← ⚠⚠ OVER C, NOT OVER R
@@ -1438,12 +1661,42 @@ Every rank on the card is a per-repository one, in the evidence table, each agai
   argument — `resolveRequestScope` cannot tell the two apart. The same rule governs `BotRoiPanel`'s
   `$/acted-on` column: `showCost = botDepth && repoId == null`, and it must NOT be simplified back to
   `botDepth`.
-- ⚠ **RATES ARE ADDITIVE; SPANS ARE NOT.** `actedPerMonth = Σ_r (acted_r × 30.44 ÷ spanDays_r)`,
-  never `Σ acted ÷ a union span`. A reviewer that ran in repository A in January and B in July has a
-  seven-month union and was active for two — the union form understates the pace threefold, inflates
-  every cost-per-thread figure by the same, and reads entirely plausible on screen. A repository with
-  no observable span contributes NOTHING (never borrows a sibling's) and is counted in
-  `spanUnobservedRepos`.
+- ⚠⚠ **THE MONEY DIVIDES BY A CHOSEN CALENDAR MONTH, NEVER BY AN OBSERVED SPAN** —
+  `COST_WINDOW_DAYS`, in `cost.ts`. `perActedOnUsd = monthlyUsd ÷ actedInWindow`, where
+  `actedInWindow` counts the threads whose SETTLE POINT (creation + the corpus's 72 h) fell in
+  `[now − 30.44 d, now)`. **What it replaced** was `Σ_r (acted_r × 30.44 ÷ spanDays_r)`, `spanDays`
+  being the reviewer's earliest-to-latest comment on the walked slice — a window NOBODY CHOSE (237
+  days on a real card, for a repository this build had held for 52), an ORDER STATISTIC one old
+  comment on one long-lived pull request could set, and a number NO COMPONENT EVER RENDERED
+  (`grep -rn spanDays apps/frontend/src` returned nothing), so the figure could not be recomputed
+  from anything on screen. It printed **US$23.94** where the ROI tab, one tab away, said US$3.2 for
+  the same reviewer at the same price.
+  - ⚠ **WHY 30.44 AND NOT 30, AND IT IS PINNED.** `monthlyUsd` is a price for a CALENDAR month;
+    `DAYS_PER_MONTH` is named rather than inlined precisely because a 30-day stand-in is wrong by
+    1.4 % in the flattering direction. And the ROI tab computes
+    `monthlyUsd ÷ ((acted × DAYS_PER_MONTH) ÷ windowDays)`, which collapses to this module's
+    `monthlyUsd ÷ acted` at **exactly one** window length. Anywhere else the two tabs disagree
+    forever. `test/benchmark-roi-agreement.test.ts` drives both folds over ONE database and fails if
+    the constant moves.
+  - ⚠ **FIXED, NOT THE ROI TAB'S CHIP.** A peer placement that changed because somebody flipped a
+    window selector on another tab would be worse than the contradiction it fixed — the argument
+    `dormantVendorKeys` already makes for bot dormancy.
+  - ⚠ **THE SETTLE POINT, NOT THE THREAD'S BIRTH.** Windowing on creation admits the last 72 h of
+    threads that CANNOT yet be acted on and reports them un-acted: a denominator inflated by the
+    calendar.
+  - ⚠ **RATES ARE ADDITIVE; SPANS ARE NOT — now VACUOUS, and kept for its argument.** No figure
+    divides by a span, so spans have nothing to be non-additive about; the rule is written down in
+    `rollup.ts`'s header because the defect it guards (a per-month claim resting on a window nobody
+    chose) is the shape of the one this change fixed. A repository with no observable span now
+    contributes NORMALLY; `spanUnobservedRepos` survives as a note about the evidence table's
+    observation-period column, not about the money.
+  - ⚠ **THE TWO TABS STILL DIFFER, AND IT IS NOW A POPULATION DIFFERENCE RATHER THAN AN ARITHMETIC
+    ONE — DO NOT "FIX" IT.** On the real erxes/CodeRabbit card the ROI tab reads US$1.97 over 398
+    acted-on threads and the Benchmark US$3.22 over 243, because `getBotAnalytics.actedOnPct` folds
+    `likely_addressed` in and divides by every in-window thread while `acted_on_rate` divides by the
+    SETTLED ones on the walked slice of human-authored pull requests. Those are the two definitions
+    this feature exists to keep apart (§ `fold.ts` is the CORPUS's definitions). Before this change
+    the same pair read US$1.97 against US$23.94.
 - ⚠⚠ **THE COMPARISON'S TWO HALVES SHARE ONE POPULATION.** `expectedRate` exists only over the
   repositories whose cohort published a usable median — the FITTED subset — so the customer rate set
   against it is `yoursRateOnFitted` over that SAME subset, **never** the card's pooled headline rate
@@ -1483,19 +1736,30 @@ Every rank on the card is a per-repository one, in the evidence table, each agai
   no reviewer was live anywhere. Collapsing them with a `?? []` told a reader whose bots simply had
   not commented yet that their BUILD was deficient — the ordinary state right after somebody
   classifies a reviewer in Bots → Settings.
-- **TEN MONEY REFUSALS AND FIVE COMPARISON REFUSALS — TWO VOCABULARIES, FIFTEEN SENTENCES, ALL
+- **ELEVEN MONEY REFUSALS AND FIVE COMPARISON REFUSALS — TWO VOCABULARIES, SIXTEEN SENTENCES, ALL
   PAIRWISE DISTINCT AND ALL >40 CHARACTERS.** They are separate because the money's withhold a figure
   a PRICE would fix and the rollup's withhold a comparison no price can buy.
-  - `BotBenchmarkCostRefusalReason` (ten): `workspace_truncated` · `repo_window_incomplete` ·
+  - `BotBenchmarkCostRefusalReason` (**eleven**): `workspace_truncated` · `repo_window_incomplete` ·
     `no_merges_in_window` · `span_unobserved` · `own_rate_withheld` (carrying WHICH metric and WHICH
-    gate) · `nothing_acted_on` · `price_is_zero` · `price_unresolved` · `cohort_rate_unfitted` ·
-    `cohort_rate_zero`. ⚠ **THE GUARD ORDER IS `workspace_truncated` → repository → money → reviewer
-    → span → cohort** — `cost.ts`'s own order with truncation bolted on TOP, because a partial estate
-    makes the exact claim false and no other refusal in the list describes that. At estate grain the
-    two REPOSITORY reasons are fatal only when EVERY live repository trips them (one partial repo is
-    excluded-and-disclosed instead), and an empty pooled denominator lands on `own_rate_withheld`
-    with `metricReason: 'denominator_empty'` — pooling IS the remedy `below_min_units` exists for, so
-    no metric gate fires one grain up.
+    gate) · `nothing_acted_on` · **`window_underpopulated`** · `price_is_zero` · `price_unresolved` ·
+    `cohort_rate_unfitted` · `cohort_rate_zero`. ⚠ **THE GUARD ORDER IS `workspace_truncated` →
+    repository → money → reviewer → WINDOW → cohort** — `cost.ts`'s own order with truncation bolted
+    on TOP and the span step replaced by the cost window's, because a partial estate makes the exact
+    claim false and no other refusal in the list describes that. The WINDOW step is three gates in
+    order, and none of them falls back:
+    `repo_window_incomplete` (a repository held for less than `COST_WINDOW_DAYS` — a partial month
+    of work against a WHOLE price, inflating; ⚠ **excluding it would push the figure HIGHER**, since
+    the price does not shrink with it, so it refuses rather than being disclosed and carried) →
+    `nothing_acted_on` (a whole and EMPTY month — a DORMANT reviewer, and a lifetime average smeared
+    against today's price is a plausible number measuring nothing) → `window_underpopulated`
+    (< **10** acted-on threads: `below_min_units`' argument applied to money, whose remedy is TIME
+    rather than pooling, and which withholds the per-thread figure ALONE — counters, the pooled rate
+    and `unacted` are over the whole read slice and are unaffected). ⚠ `span_unobserved` is now
+    UNREACHABLE from the rollup and survives only in `buildUnitCost`'s pinned per-repository
+    specification. At estate grain the two 14-day REPOSITORY reasons are fatal only when EVERY live
+    repository trips them (one partial repo is excluded-and-disclosed instead), and an empty pooled
+    denominator lands on `own_rate_withheld` with `metricReason: 'denominator_empty'` — pooling IS
+    the remedy `below_min_units` exists for, so no metric gate fires one grain up.
   - `BotBenchmarkRollupRefusalReason` (five): `single_repo` (one point is not a spread — a category
     error, not a thin sample) · `no_placed_repos` · `no_fitted_cohort_rate` (its sentence names the
     ZERO-median cause explicitly, or it would itself be a false claim) · `no_settled_threads` ·
@@ -1505,6 +1769,12 @@ Every rank on the card is a per-repository one, in the evidence table, each agai
 
 #### Cost on the Benchmark tab — the price per unit of work, and the counterfactual
 
+> ⚠ **THE TIME BASE IN THIS SECTION IS ALSO SUPERSEDED.** Every `span`-anchored figure below
+> describes `buildUnitCost`, which no request builds; the rollup's `$ per acted-on thread` divides by
+> a CHOSEN calendar month (`COST_WINDOW_DAYS`) at both ends and reads no span at all. The reasoning
+> is kept because its argument outlives its conclusion — see "THE MONEY DIVIDES BY A CHOSEN CALENDAR
+> MONTH" above.
+>
 > ⚠ **THE GRAIN IN THIS SECTION IS SUPERSEDED — READ "THE WORKSPACE ROLLUP" ABOVE FIRST.** The
 > per-repository cost block described below is **no longer on the wire and no longer built on any
 > request**; money moved to `BotBenchmarkWorkspaceRollup.cost`, one card per vendor. What survives
@@ -2301,7 +2571,7 @@ Turns the graded-comment corpus (thread states + ML labels + acted-on + overlap 
 The pipeline is `Finding → Intent → Emitter → Output`, and the governing constraint is the
 deterministic/templated/LLM boundary: **the recommendation itself is never model-generated**.
 Plan of record: `~/limn/plans/bot-tuning-advisor.md` (2026-08-09; four product decisions recorded
-there — verification loop Pro-gated, local BYOK+ambient refine ladder, DB-primary manifests with
+there — verification loop Pro-gated, local ambient-session refine path (the BYOK rung is retired), DB-primary manifests with
 repo export, GitHub-issue export in v1).
 
 **Core/plugin split (the getBotAnalytics precedent, CI vs not).** CORE owns the deterministic math,
@@ -2396,9 +2666,13 @@ every evidence object and rendered in brief + PR body.
 
 **Refine (the ONE LLM touchpoint).** `POST …/refine`, prose targets only — structured formats have
 no LLM code path at all. Cloud: credit gate + `SUMMARY_ANTHROPIC_API_KEY` + `recordAiUsage(seam:
-'summary', feature:'advisor_refine')` (the bot-themes pattern). Local: `cheapComplete`'s new
-`credential:'local-review-key'` — core resolves the BYO key itself (it never crosses the plugin
-boundary) and falls through to the ambient agent-SDK session ($0 ⇒ unmetered by existing design).
+'summary', feature:'advisor_refine')` (the bot-themes pattern). Local: a plain `cheapComplete` with
+NO credential — the ambient agent-SDK session, which resolves a logged-in `claude` session and
+otherwise the environment's `ANTHROPIC_API_KEY` ($0 ⇒ unmetered by existing design). ⚠ It used to
+pass `credential:'local-review-key'`, a BYOK→ambient ladder in which core resolved a key stored in
+`~/.pierre-review/config.json` (the key never crossed the plugin boundary). **That stored key is
+RETIRED** — form, routes and `ReviewSeam.setLocalKey` all deleted — so the ladder is two rungs and
+the option is inert; it survives on the seam type only so the `ProContext` shape does not move.
 Output re-passes the **deterministic diff-guard** (markers intact, intents header verbatim, char
 budget, no fences) — and so does any client-supplied `refinedByPath` at config-PR time; rejected ⇒
 the templated version ships, never an error.

@@ -50,6 +50,7 @@ export function registerAccountContext(app: FastifyInstance): void {
           stripeCustomerId: null,
           aiCreditAllowance: null,
           benchmarkOptIn: false,
+          largePrCodeLocThreshold: null,
         };
     }
   });
@@ -127,7 +128,8 @@ export function registerAuthGate(app: FastifyInstance): void {
 // `/api/pro/*` is the convention, but it is NOT the whole surface: when Claude Review moved
 // into the plugin it deliberately KEPT its pre-plugin URLs so the core frontend client did
 // not have to change — `/api/prs/:id/claude-review*`, `/api/claude-reviews/*`,
-// `/api/claude-findings/*`, `/api/claude-review/key|budget`. A prefix test on `/api/pro/`
+// `/api/claude-findings/*`, `/api/claude-review/budget` (its `/key` sibling is DELETED with the
+// retired BYO Anthropic key). A prefix test on `/api/pro/`
 // therefore missed the most expensive routes in the product.
 //
 // Today that is latent rather than exploitable, because agentic AI is off in cloud

@@ -2,7 +2,9 @@ import type { DerivedState, TimelinePr } from '@pierre-review/shared';
 import {
   CI_META,
   DERIVED_STATE_META,
+  currentLargePrThreshold,
   escapeHtml,
+  largePrFlag,
   mergeVerdictWarning,
 } from '../../lib/ui.js';
 
@@ -128,6 +130,25 @@ export function prTooltip(pr: TimelinePr, meta: PrBarMeta = {}): string {
     const why = warn.detail ? ` — ${warn.detail}` : '';
     rows.push(
       `<div class="pr-tt-row pr-tt-warn">${WARNING_SVG}<span>merge: ${escapeHtml(warn.label)}${escapeHtml(why)}</span></div>`,
+    );
+  }
+
+  // ── The LARGE-PR FLAG, TOOLTIP-ONLY ───────────────────────────────────────────────────────
+  //
+  // ⚠ IT DOES NOT GO ON THE BAR. `renderPrBar` above is deliberately ONE uniform row for every
+  // PR state — the second status line, with its comment glyph and thread dots, was moved into
+  // this tooltip precisely so an open bar is no taller than a merged one. A persistent mark
+  // would reverse that decision, and "subtle" argues against it anyway.
+  //
+  // The threshold comes from the module cell in lib/ui.ts rather than a default spelled here:
+  // this file builds raw HTML strings for vis-timeline and cannot call a hook, and a timeline
+  // that flagged a different set of PRs from the boards would be worse than no flag at all.
+  // Same `largePrFlag` resolver as every React surface, so the three data traps are handled in
+  // exactly one place — an unmeasured or under-threshold PR gets no row.
+  const large = largePrFlag(pr, currentLargePrThreshold());
+  if (large) {
+    rows.push(
+      `<div class="pr-tt-row pr-tt-warn">${WARNING_SVG}<span>${escapeHtml(large.label)}</span></div>`,
     );
   }
 

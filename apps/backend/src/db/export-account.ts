@@ -118,6 +118,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       hasStoredGithubToken: accounts.accessTokenEnc,
       aiCreditAllowance: accounts.aiCreditAllowance,
       benchmarkOptIn: accounts.benchmarkOptIn,
+      largePrCodeLocThreshold: accounts.largePrCodeLocThreshold,
       lastLoginAt: accounts.lastLoginAt,
       lastActiveAt: accounts.lastActiveAt,
       createdAt: accounts.createdAt,

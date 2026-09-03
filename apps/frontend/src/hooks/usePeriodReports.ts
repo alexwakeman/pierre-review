@@ -10,6 +10,7 @@
 // wrong document.
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  PeriodGrain,
   PeriodReportCostEstimate,
   PeriodReportGenerateResponse,
   PeriodReportModelInfo,
@@ -19,8 +20,14 @@ import type {
 import { api } from '../api/client.js';
 import { ACTIVITY_GC_TIME, workspaceKey } from './useActivity.js';
 
-export function periodReportsListKey(workspaceId: number | null): [string, string] {
-  return ['period-reports', workspaceKey(workspaceId)];
+// ⚠ THE GRAIN IS PART OF THE LIST KEY. Sprint and month are two different lists of two different
+// periods from one route; sharing a cache slot would serve fortnights under the Month toggle for
+// as long as the entry stayed fresh — a picker whose rows do not match the grain beside it.
+export function periodReportsListKey(
+  workspaceId: number | null,
+  grain: PeriodGrain = 'sprint',
+): [string, string, string] {
+  return ['period-reports', workspaceKey(workspaceId), grain];
 }
 
 export function periodReportKey(
@@ -34,12 +41,41 @@ export function periodReportKey(
 // read. `cadenceConfigured: false` is NOT an error state — it is the setup prompt (§6.1): the
 // surface refuses to generate rather than silently falling back to a rolling 14 days, because a
 // period the user never chose is not an artifact they will forward.
-export function usePeriodReportsList(enabled: boolean, workspaceId: number | null) {
+export function usePeriodReportsList(
+  enabled: boolean,
+  workspaceId: number | null,
+  grain: PeriodGrain = 'sprint',
+) {
   return useQuery<PeriodReportsListResponse>({
-    queryKey: periodReportsListKey(workspaceId),
-    queryFn: workspaceId == null ? skipToken : () => api.periodReports(workspaceId),
+    queryKey: periodReportsListKey(workspaceId, grain),
+    queryFn: workspaceId == null ? skipToken : () => api.periodReports(workspaceId, grain),
     enabled,
     staleTime: 60_000,
+    gcTime: ACTIVITY_GC_TIME,
+  });
+}
+
+// The OPEN calendar month — Reports → Month → "Month to date".
+//
+// ⚠ IT IS A DIFFERENT KIND OF THING FROM `usePeriodReport` AND MUST NOT BE FOLDED INTO IT. That
+// hook reads a STORED, IMMUTABLE artifact and reports a staleness flag; this one recomputes a
+// LIVE period on every call. There is no row, no `payload_hash`, no narration, no model and no
+// billing — and there must never be a Generate button pointed at it (see the server's
+// `buildMonthToDate` for the two mechanisms that make an open period unstorable).
+//
+// A SHORT `staleTime` on purpose, and no `placeholderData`: the figures move under the reader by
+// definition, so holding a minute-old answer under a heading that says "to date" is the one thing
+// this view must not do. It is still bounded — the route is on the 60/min `search` bucket.
+export function periodMonthToDateKey(workspaceId: number | null): [string, string] {
+  return ['period-month-to-date', workspaceKey(workspaceId)];
+}
+
+export function usePeriodMonthToDate(enabled: boolean, workspaceId: number | null) {
+  return useQuery<PeriodReportResponse>({
+    queryKey: periodMonthToDateKey(workspaceId),
+    queryFn: workspaceId == null ? skipToken : () => api.periodMonthToDate(workspaceId),
+    enabled,
+    staleTime: 30_000,
     gcTime: ACTIVITY_GC_TIME,
   });
 }
@@ -109,7 +145,10 @@ export function useGeneratePeriodReport(workspaceId: number | null, periodKey: s
       }));
       // A first generate BACKFILLS up to 8 prior periods (metrics-only, no LLM), so the list
       // gains rows the moment this returns — refetch it rather than assuming it is unchanged.
-      void qc.invalidateQueries({ queryKey: periodReportsListKey(workspaceId) });
+      // ⚠ INVALIDATE THE WHOLE FAMILY, not one grain's key. The backfill writes rows for the grain
+      // that was generated, and the reader may have switched grains while it ran; matching on the
+      // key PREFIX covers both lists without either having to name the other.
+      void qc.invalidateQueries({ queryKey: ['period-reports', workspaceKey(workspaceId)] });
       // A real generation spends the summary-turn budget → refresh the meter and the
       // out-of-credits gate. A `generated: false` cache hit spent nothing, but re-reading a
       // cheap counter is not worth a branch.

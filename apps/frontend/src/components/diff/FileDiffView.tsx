@@ -341,15 +341,34 @@ function InlineThread({
             style={{ backgroundColor: meta.color }}
           />
         )}
-        {fileChip && (
+        {/* `outdated` drops once open — ThreadCard's own header prints it. "line not in this diff"
+            stays: it is a fact about where this pill had to be PARKED, which the card never states. */}
+        {fileChip && !(open && thread.isOutdated) && (
           <span className="shrink-0 text-gray-400 dark:text-gray-500">
             {thread.isOutdated ? 'outdated' : 'line not in this diff'} ·
           </span>
         )}
-        <span className="shrink-0 font-medium">{author}</span>
-        <span className="shrink-0 text-gray-400 dark:text-gray-500">
-          · {relativeTime(thread.createdAt)}
-        </span>
+        {/* ── COLLAPSE-ONLY CHROME ────────────────────────────────────────────────────────────
+            Author, age, reply count and the body excerpt are the pill's whole job while it is
+            SHUT: they are what lets a reader decide whether to open it. The moment it is open the
+            ThreadCard below states every one of them properly — the author and the timestamp on
+            each comment's own header, the replies as themselves, the excerpt as the rendered body
+            ~30px lower — so keeping them here printed the same four facts twice, with the excerpt
+            as a truncated copy of the paragraph directly beneath it.
+
+            ⚠ SCOPED TO `open`. Do NOT drop them outright: the shut pill is the only description of
+            the thread a reader gets while scrolling the diff, and a bare state dot describes
+            nothing. */}
+        {!open && (
+          <>
+            <span className="shrink-0 font-medium">{author}</span>
+            <span className="shrink-0 text-gray-400 dark:text-gray-500">
+              · {relativeTime(thread.createdAt)}
+            </span>
+          </>
+        )}
+        {/* Stays in BOTH states: it is a claim about where this pill was PLACED in the diff, which
+            the conversation below never makes. */}
         {approximate && (
           <span
             className="shrink-0 text-gray-400 dark:text-gray-500"
@@ -358,15 +377,23 @@ function InlineThread({
             ~
           </span>
         )}
-        {replies > 0 && (
+        {!open && replies > 0 && (
           <span className="shrink-0 text-gray-400 dark:text-gray-500">
             · {replies} repl{replies === 1 ? 'y' : 'ies'}
           </span>
         )}
-        {excerpt && (
+        {!open && excerpt && (
           // Plain text ONLY — bodies are untrusted, so markdown/images/links stay inert here.
           <span className="min-w-0 flex-1 truncate text-gray-400 dark:text-gray-500">
             · {excerpt}
+          </span>
+        )}
+        {/* The open pill keeps a label — a lone dot + chevron is an unreadable control. It names
+            the ACTION rather than the thread: every description of the thread is now in the card
+            below, and a state word here would just be the StateBadge again. */}
+        {open && (
+          <span className="min-w-0 flex-1 truncate text-gray-400 dark:text-gray-500">
+            Hide thread
           </span>
         )}
         <ChevronIcon

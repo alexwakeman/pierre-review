@@ -3,6 +3,7 @@ import type { PrDetail, PrFileChange } from '@pierre-review/shared';
 import { usePrFiles } from '../hooks/usePr.js';
 import { useUsers } from '../hooks/useTimeline.js';
 import { buildFileTree, indexThreadsByPath, type FileTreeEntry } from '../lib/diff.js';
+import { useResizablePane } from '../hooks/useResizablePane.js';
 import { indexUsers } from '../lib/ui.js';
 import {
   FileDiffView,
@@ -25,6 +26,18 @@ const TREE_MIN_FILES = 5;
 // Floor for the measured rail height, so dragging the detail split almost shut leaves the tree
 // scrollable rather than collapsing it to a sliver.
 const MIN_RAIL_PX = 160;
+
+// ---- the rail's user-draggable WIDTH ----
+// The rail shipped at a fixed `md:w-56`, which is fine for `src/api/foo.ts` and useless for the
+// deeply-nested paths a monorepo produces. The width is now dragged and REMEMBERED (localStorage,
+// never the filter store — a filter reset must not move the furniture).
+const RAIL_W_KEY = 'pierre:changesRailWidth';
+const DEFAULT_RAIL_W_PX = 224; // exactly the old `md:w-56`, so nothing moves until you drag it
+const MIN_RAIL_W_PX = 140;
+const MAX_RAIL_W_PX = 720;
+// The diff is the point of the tab: the rail's ceiling yields to it, so neither pane can be
+// dragged (or restored from a wider window's stored value) down to nothing.
+const MIN_DIFF_W_PX = 320;
 
 // ---- fallback metadata row (when patches aren't available) ----
 
@@ -120,12 +133,41 @@ export function ChangesTab({
     if (externalFocus != null) setFocus(externalFocus);
   }, [externalFocus]);
 
+  // The split row's own width bounds the rail's ceiling — measured, because the tab lives in a
+  // pane the user resizes (and, pinned full-screen, in a much wider one).
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [rowW, setRowW] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = rowRef.current;
+    if (el == null) return;
+    const measure = (): void => setRowW(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // The row only exists once files have loaded — on the first run the ref is still null.
+  }, [data]);
+
+  const {
+    width: railW,
+    paneRef: railRef,
+    separatorProps,
+  } = useResizablePane({
+    storageKey: RAIL_W_KEY,
+    defaultWidth: DEFAULT_RAIL_W_PX,
+    minWidth: MIN_RAIL_W_PX,
+    maxWidth:
+      rowW != null && rowW > 0
+        ? Math.min(MAX_RAIL_W_PX, rowW - MIN_DIFF_W_PX)
+        : MAX_RAIL_W_PX,
+    label: 'Resize the changed-files list',
+  });
+
   // The rail is `sticky top-0` inside PrDetail's scrolling pane, so the height available to it
   // is that pane's client height — NOT a fraction of the window. A fixed `70vh` overflows the
   // pane whenever the PR detail is a bottom split (measured: an 851px rail in a 405px pane),
   // and because the box's bottom then sits below the fold, its final ~446px of rows can never
   // be scrolled into sight — the tail of the tree is simply unreachable. Measure instead.
-  const railRef = useRef<HTMLDivElement>(null);
   const [railMaxH, setRailMaxH] = useState<number | null>(null);
   useLayoutEffect(() => {
     const el = railRef.current;
@@ -260,42 +302,57 @@ export function ChangesTab({
           ) : undefined
         }
       />
-      <div className="flex items-start">
+      <div ref={rowRef} className="flex items-start">
         {/* NAVIGATION RAIL — the changed files in their real directory hierarchy. Sticky
             rather than its own `h-full overflow-auto` column: the Changes tab has NO scroll
             container of its own (PrDetail's `min-h-0 flex-1 overflow-auto` is what every
             per-file `sticky top-0` header sticks to), so a nested full-height scroller here
-            would move that containing block. Hidden below `md` and below TREE_MIN_FILES. */}
+            would move that containing block. Hidden below `md` and below TREE_MIN_FILES.
+            The rail + its drag handle share ONE sticky flex wrapper so the handle inherits
+            the rail's height (and its stickiness) instead of needing its own measurement. */}
         {showTree && (
-          <div
-            ref={railRef}
-            // `max-h-[70vh]` is the pre-measure fallback only; the inline value below is the
-            // real cap and wins. See the measuring effect for why a viewport fraction is wrong.
-            style={railMaxH != null ? { maxHeight: railMaxH } : undefined}
-            className="sticky top-0 z-20 hidden max-h-[70vh] shrink-0 self-start overflow-y-auto overscroll-contain border-r border-gray-200 bg-white md:block md:w-56 dark:border-gray-800 dark:bg-gray-950"
-          >
-            <FileTree
-              nodes={tree}
-              selectedPath={selectedTreePath}
-              revealNonce={focus?.nonce}
-              railHeight={railMaxH}
-              onSelectFile={(path) => setFocus({ path, nonce: Date.now() })}
-              note={
-                data?.truncated ? (
-                  <div className="px-2 pb-1 pt-0.5 text-[10px] leading-snug text-amber-600 dark:text-amber-400">
-                    Showing {files.length} of {pr.changedFilesCount} files.{' '}
-                    <a
-                      href={`${pr.githubUrl}/files`}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="text-blue-500 hover:underline"
-                    >
-                      All on GitHub{' '}
-                      <ExternalLinkIcon size={10} className="inline-block align-[-0.1em]" />
-                    </a>
-                  </div>
-                ) : null
-              }
+          <div className="sticky top-0 z-20 hidden shrink-0 self-start md:flex">
+            <div
+              ref={railRef}
+              // `max-h-[70vh]` is the pre-measure fallback only; the inline value below is the
+              // real cap and wins. See the measuring effect for why a viewport fraction is wrong.
+              // The WIDTH is the user's dragged value (useResizablePane), which is why the old
+              // `md:w-56` is gone — an inline style and a utility class would fight.
+              style={{ width: railW, ...(railMaxH != null ? { maxHeight: railMaxH } : null) }}
+              className="max-h-[70vh] min-w-0 shrink-0 overflow-y-auto overscroll-contain border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950"
+            >
+              <FileTree
+                nodes={tree}
+                selectedPath={selectedTreePath}
+                revealNonce={focus?.nonce}
+                railHeight={railMaxH}
+                onSelectFile={(path) => setFocus({ path, nonce: Date.now() })}
+                note={
+                  data?.truncated ? (
+                    <div className="px-2 pb-1 pt-0.5 text-[10px] leading-snug text-amber-600 dark:text-amber-400">
+                      Showing {files.length} of {pr.changedFilesCount} files.{' '}
+                      <a
+                        href={`${pr.githubUrl}/files`}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-blue-500 hover:underline"
+                      >
+                        All on GitHub{' '}
+                        <ExternalLinkIcon size={10} className="inline-block align-[-0.1em]" />
+                      </a>
+                    </div>
+                  ) : null
+                }
+              />
+            </div>
+            {/* THE SPLITTER. `touch-none` so a touch drag resizes instead of scrolling the
+                pane. 6px wide: enough to grab without an overlay that would steal clicks
+                from the diff's gutter, and it reads as the rail's own edge next to the rail's
+                1px border. Keyboard: ←/→ (×4 with Shift), Home/End, Enter to reset — the same
+                reset as a double-click. */}
+            <div
+              {...separatorProps}
+              className="w-1.5 shrink-0 cursor-col-resize touch-none bg-gray-200 transition-colors hover:bg-blue-400 focus-visible:bg-blue-500 focus-visible:outline-none dark:bg-gray-800 dark:hover:bg-blue-500"
             />
           </div>
         )}

@@ -43,6 +43,7 @@ import { ThreadCard } from '../ThreadView/index.js';
 import { armedPhaseHeadline } from '../AutoMergeBanner.js';
 import { MergeControl } from '../MergeControl.js';
 import { MergeWhenReadyControl } from '../MergeWhenReadyControl.js';
+import { LargePrFlag } from './LargePrFlag.js';
 
 // The attention-card list — the stalled-review / untouched-thread / reviewer-load / needs-a-reviewer
 // cards, with the full drill-down behaviour (click a card to open the PR / thread, inline thread
@@ -266,7 +267,10 @@ export function authorSourceLabel(pr: Partial<PrSourceRef>): string | null {
  *  can honestly say nothing. See `authorSourceLabel` for what absence renders. */
 export type PrMetaFields = Pick<
   InsightPrRef,
-  'ciStatus' | 'changedFiles' | 'additions' | 'deletions'
+  // ⚠ `codeLoc`/`codeLocIsLowerBound` are OPTIONAL on InsightPrRef, so Pick keeps them optional
+  // here — a caller that has no measurement (or a payload cached before this feature existed)
+  // simply renders no flag, which is the correct answer for "unknown".
+  'ciStatus' | 'changedFiles' | 'additions' | 'deletions' | 'codeLoc' | 'codeLocIsLowerBound'
 > &
   Partial<PrSourceRef>;
 
@@ -296,6 +300,11 @@ export function PrMetaRow({ pr }: { pr: PrMetaFields }): JSX.Element {
           completely different attention, so the SOURCE has to be legible without opening the PR.
           ⚠ Gated on `authorSourceLabel`, the ONE decision — not a second `authorIsBot === true`
           spelled here, which is how a rule and its test drift apart. */}
+      {/* The large-PR flag. It sits beside the +/− delta on purpose: those two numbers are the
+          WHOLE diff, and this one is the same diff with the docs/config/lockfile/generated churn
+          removed — the comparison is the information. Renders nothing at all when the PR is
+          under the threshold OR was never measured (see lib/ui.ts's `largePrFlag`). */}
+      <LargePrFlag pr={pr} />
       {authorSourceLabel(pr) != null && (
         <BotVendorPill
           kind={pr.authorBotKind ?? null}

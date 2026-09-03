@@ -1,7 +1,18 @@
 import type { FastifyInstance } from 'fastify';
-import type { AiUsageResponse, MeResponse, MyTurnDismissBody } from '@pierre-review/shared';
+import type {
+  AiUsageResponse,
+  LargePrThresholdBody,
+  LargePrThresholdResponse,
+  MeResponse,
+  MyTurnDismissBody,
+} from '@pierre-review/shared';
 import { config } from '../../config.js';
-import { accountToLocalUser, setBenchmarkConsent } from '../../auth/account.js';
+import {
+  accountToLocalUser,
+  setBenchmarkConsent,
+  setLargePrCodeLocThreshold,
+} from '../../auth/account.js';
+import { resolveLargePrThreshold } from '../../db/code-loc.js';
 import { aiCreditStatus, monthStartMs } from '../../db/credits.js';
 import { eraseAccountData } from '../../db/erase-account.js';
 import { exportAccountData } from '../../db/export-account.js';
@@ -41,6 +52,29 @@ const benchmarkConsentSchema = {
     required: ['optIn'],
     additionalProperties: false,
     properties: { optIn: { type: 'boolean' } },
+  },
+};
+
+// The LARGE-PR FLAG's threshold. `null` is a first-class value meaning "reset to the product
+// default", so the type is the union — NOT an optional key, which would make "clear it" and
+// "don't change it" the same request. The bounds are validation, not taste: `minimum: 1` because a
+// threshold of 0 flags literally every pull request, and an upper bound because an unbounded
+// integer is a number nobody could ever hit, i.e. a setting that silently means "off" while
+// looking like it is on. `multipleOf: 1` rejects 1500.5 (ajv's `integer` already does, but the
+// column is an INTEGER in both dialects and the intent is worth spelling).
+const largePrThresholdSchema = {
+  body: {
+    type: 'object',
+    required: ['threshold'],
+    additionalProperties: false,
+    properties: {
+      threshold: {
+        type: ['integer', 'null'],
+        minimum: 1,
+        maximum: 1_000_000,
+        multipleOf: 1,
+      },
+    },
   },
 };
 
@@ -100,6 +134,14 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       mlSeverity: isSeverityApiConfigured(),
       // Cross-org benchmark consent (cloud-only; always false in local). Drives the Settings toggle.
       benchmarkOptIn: config.isCloud ? req.account?.benchmarkOptIn ?? false : false,
+      // The LARGE-PR FLAG's threshold, RESOLVED (stored value, else the product default) so no
+      // renderer has to know about the null. TOP-LEVEL and not inside `pro` above: the flag is
+      // free, and `entitledProCapabilities` zeroes that object for free cloud accounts — exactly
+      // this feature's audience (the `mlSeverity` argument, verbatim).
+      largePrCodeLocThreshold: resolveLargePrThreshold(
+        req.account?.largePrCodeLocThreshold ?? null,
+      ),
+      largePrCodeLocThresholdIsDefault: req.account?.largePrCodeLocThreshold == null,
       // Orgs currently SAML-blocked for this account (empty in the normal case + in local).
       authNotices: getAuthNotices(accountId),
       aiUsage,
@@ -125,6 +167,43 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     }
     return { status: 'ok', benchmarkOptIn: optIn };
   });
+
+  // The LARGE-PR FLAG's threshold — ONE PER-ACCOUNT SETTING, in lines of CODE churn (the
+  // docs/config/lockfile/generated churn is excluded before the sum; see db/code-loc.ts).
+  //
+  // Deliberately NOT per-workspace and not per-repo: a second grain would need a resolver, and
+  // "which grain am I reading?" is the question the reviewer object spent migration 0045 removing.
+  // `threshold: null` RESETS to the product default rather than storing 1500 — the two states are
+  // "the user has an opinion" and "the user does not", so a future change to the default still
+  // reaches everyone who never overrode it.
+  //
+  // Available in BOTH modes and on every tier: the flag is free, so its setting must be too.
+  // Rate tier: the schema-validated single-column UPDATE falls through `tierFor` to the blanket
+  // `read` bucket, which is DECIDED (and pinned in rate-limit.test.ts), not inherited — it reaches
+  // no GitHub API and no model, exactly like POST /api/me/benchmark-consent beside it.
+  app.post(
+    '/api/me/large-pr-threshold',
+    { schema: largePrThresholdSchema },
+    async (req, reply) => {
+      const accountId = accountIdOf(req);
+      const { threshold } = req.body as LargePrThresholdBody;
+      // Belt and braces over the JSON schema: `Number.isInteger` also rejects NaN/Infinity, which
+      // a hand-rolled body validator elsewhere could let through as `type: 'integer'` never sees.
+      if (threshold !== null && !(Number.isInteger(threshold) && threshold > 0)) {
+        return reply.code(400).send({
+          error: 'BadRequest',
+          message: 'threshold must be a positive whole number of lines, or null to reset.',
+        });
+      }
+      await setLargePrCodeLocThreshold(accountId, threshold);
+      const body: LargePrThresholdResponse = {
+        status: 'ok',
+        largePrCodeLocThreshold: resolveLargePrThreshold(threshold),
+        largePrCodeLocThresholdIsDefault: threshold == null,
+      };
+      return body;
+    },
+  );
 
   // ---- Data-subject rights (UK/EU GDPR Arts. 15, 17, 20; CCPA/CPRA) ----
   //

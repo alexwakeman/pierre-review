@@ -79,6 +79,7 @@ import type {
   ThreadDetail,
   ThreadStateCounts,
   TimelineEvent,
+  StoredPrFile,
   TimelinePr,
   TimelineResponse,
   User,
@@ -209,8 +210,10 @@ import {
   vendorAgreementOf,
 } from './ml-labels.js';
 import { clusterThreadsByLine } from './line-overlap.js';
+import { codeLocFor } from './code-loc.js';
 import { DAYS_PER_MONTH, botWindowMs } from './bot-window.js';
 import { detectChangepoints } from './changepoint.js';
+import { dormantBotUserIds } from './bot-dormancy.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
 // timestamptz (drizzle binds the Date through the codec), whereas SQLite columns
@@ -1376,6 +1379,10 @@ function mapTimelinePr(
     isApproved: tr?.isApproved ?? false,
     isChangesRequested: tr?.isChangesRequested ?? false,
     newSinceLastViewed: tr?.newSinceLastViewed ?? null,
+    // THE LARGE-PR FLAG. Two small scalars folded from columns already on this row — the
+    // per-file breakdown itself NEVER rides the timeline (see "keep /api/timeline lean"): the
+    // client gets the number and the honest null, not `files[]`.
+    ...codeLocFor(p),
   };
 }
 
@@ -4668,6 +4675,11 @@ export async function getWorkspaceInsights(
     changedFiles: number;
     additions: number;
     deletions: number;
+    // THE LARGE-PR FLAG's input. REQUIRED on the parameter, not optional, deliberately: every
+    // caller must SELECT `pull_requests.files`, because an omitted column would silently degrade
+    // every card on that path to `codeLoc: null` — an "unknown" that looks exactly like the
+    // honest one and is indistinguishable at the render. A missing select is a compile error.
+    files: StoredPrFile[] | null;
   }): InsightPrRef => {
     const authorId = p.authorId;
     const authorIsBot = authorId != null && botAuthorIdSet.has(authorId);
@@ -4690,6 +4702,10 @@ export async function getWorkspaceInsights(
       // removes the actor from both), but gating the kind on the flag means a future divergence
       // costs a chip's BRAND, never a vendor chip painted over a person's name.
       authorBotKind: authorIsBot && authorId != null ? authorBotKinds.get(authorId) ?? null : null,
+      // Code-only churn beside the raw diff size above. ⚠ `codeLoc: null` is UNKNOWN, never
+      // "not large"; `codeLocIsLowerBound` marks a truncated file list, which the renderer must
+      // read asymmetrically (over-threshold asserts, under-threshold does not).
+      ...codeLocFor(p),
     };
   };
 
@@ -4864,6 +4880,9 @@ export async function getWorkspaceInsights(
           changedFiles: pullRequests.changedFiles,
           additions: pullRequests.additions,
           deletions: pullRequests.deletions,
+          // The large-PR flag's per-file breakdown. `prRef` REQUIRES it — omitting it here
+          // would make every my_turn card report an unknown code size.
+          files: pullRequests.files,
         })
         .from(pullRequests)
         .where(
@@ -5508,6 +5527,8 @@ export async function getWorkspaceInsights(
       changedFiles: pullRequests.changedFiles,
       additions: pullRequests.additions,
       deletions: pullRequests.deletions,
+      // The large-PR flag's per-file breakdown — required by `prRef` (see (a) above).
+      files: pullRequests.files,
     })
     .from(reviewThreads)
     .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
@@ -6044,6 +6065,9 @@ export async function getConsolidatedFeed(
   const mergedByPr = new Map<number, number | null>();
   const ciByPr = new Map<number, CiStatus>();
   const filesByPr = new Map<number, number | null>();
+  // THE LARGE-PR FLAG, folded once per PR on the page (never per item — a busy PR contributes
+  // many rows). Stores the whole result, so `codeLocIsLowerBound` travels with its number.
+  const codeLocByPr = new Map<number, ReturnType<typeof codeLocFor>>();
   const reviewersByPr = new Map<number, { userId: number; state: ReviewState }[]>();
   if (prIdsForCtx.size > 0) {
     const prIdList = [...prIdsForCtx];
@@ -6055,6 +6079,11 @@ export async function getConsolidatedFeed(
         mergedById: pullRequests.mergedById,
         ciStatus: pullRequests.ciStatus,
         changedFiles: pullRequests.changedFiles,
+        // The three extra columns the large-PR flag needs. `files` is the only bulky one and it
+        // never reaches the client — it is folded to two scalars right here.
+        additions: pullRequests.additions,
+        deletions: pullRequests.deletions,
+        files: pullRequests.files,
       })
       .from(pullRequests)
       .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, prIdList)))
@@ -6062,6 +6091,7 @@ export async function getConsolidatedFeed(
       mergedByPr.set(row.id, row.mergedById);
       ciByPr.set(row.id, (row.ciStatus ?? 'unknown') as CiStatus);
       filesByPr.set(row.id, row.changedFiles);
+      codeLocByPr.set(row.id, codeLocFor(row));
     }
 
     // reviewers — `reviews` has NO accountId, so isolation MUST come from the join to
@@ -6105,6 +6135,10 @@ export async function getConsolidatedFeed(
     // status once the re-run passed — the one item kind where the live answer is the wrong one.
     if (!isCiFeedKind(it.kind)) it.ciStatus = ciByPr.get(it.prId) ?? null;
     it.changedFilesCount = filesByPr.get(it.prId) ?? null;
+    // ⚠ A PR MISSING FROM THE MAP IS UNKNOWN, NOT ZERO — same rule as `codeLoc: null` itself.
+    const cl = codeLocByPr.get(it.prId);
+    it.codeLoc = cl?.codeLoc ?? null;
+    it.codeLocIsLowerBound = cl?.codeLocIsLowerBound ?? false;
   }
 
   // Backfill any referenced users on the page not already loaded by getMyTurn / getFeed —
@@ -12692,16 +12726,49 @@ export async function getAdvisorFindings(
       b.sharedClusters - a.sharedClusters || a.botUserId - b.botUserId || a.partnerUserId - b.partnerUserId,
   );
 
-  const totalLabelled = bots.reduce((s, b) => s + b.mlLabelled, 0);
-  const totalWithPath = [...botAgg.values()].reduce((s, a) => s + a.mlWithPath, 0);
+  // ── DORMANT REVIEWERS ARE DROPPED HERE, AT EMISSION, AND NOWHERE EARLIER ────────────────────
+  //
+  // ⚠ THE POSITION OF THIS FILTER IS THE DESIGN. Every fold above ran over the COMPLETE evidence,
+  // exactly as it did before this gate existed. Filtering the thread population instead would
+  // change what the plugin is ALLOWED TO RECOMMEND rather than merely what it shows: the advisory
+  // rules are evidence-shaped — "a cell with ANY acted-on high-severity finding never earns a full
+  // suppress" and "a suppression needs >=1 untouched thread on a PR that has since MERGED" — and a
+  // live bot's cells are also read against the same-line OVERLAP pass, which clusters every bot's
+  // threads together. Removing a dormant bot's threads from that pass would silently redraw a LIVE
+  // bot's overlap counts and partner. So: complete evidence in, whole reviewers out.
+  //
+  // Dormancy is the fixed 30-day, workspace-grained predicate in db/bot-dormancy.ts — the SAME one
+  // the Bots -> Benchmark tab hides on, so the two paid surfaces cannot disagree about whether a
+  // reviewer is running. It matches the ROI table's own evidence union (threads, review comments,
+  // submitted reviews), which is WIDER than this query's own emission gate below
+  // (`threads === 0 && mlLabelled === 0`) — a bot with neither can already be absent here, and
+  // that asymmetry is deliberate: hiding is only ever additive to what the Advisor already omits.
+  const dormant = new Set(
+    await dormantBotUserIds(accountId, scope.workspaceId, automatedIds),
+  );
+  const visibleBots = bots.filter((b) => !dormant.has(b.botUserId));
+  const visibleIds = new Set(visibleBots.map((b) => b.botUserId));
+  // ⚠ BOTH SIDES OF AN OVERLAP CELL. The cell is about `botUserId`, but it NAMES `partnerUserId`,
+  // and a partner with no row in `bots` has no label to render — a hidden reviewer would come back
+  // as a bare id on the surface it was hidden from.
+  const visibleOverlapCells = overlapCells.filter(
+    (c) => visibleIds.has(c.botUserId) && visibleIds.has(c.partnerUserId),
+  );
+  const totalLabelled = visibleBots.reduce((s, b) => s + b.mlLabelled, 0);
+  // Coverage is a statement ABOUT THE EMITTED CORPUS, so its numerator is narrowed with it —
+  // otherwise a hidden reviewer's path coverage would still be inside the percentage on screen.
+  const totalWithPath = [...botAgg.entries()].reduce(
+    (s, [id, a]) => (visibleIds.has(id) ? s + a.mlWithPath : s),
+    0,
+  );
   return {
     generatedAt,
     window: win,
     workspaceId: scope.workspaceId,
-    bots,
-    pathCells,
-    categoryCells,
-    overlapCells,
+    bots: visibleBots,
+    pathCells: pathCells.filter((c) => visibleIds.has(c.botUserId)),
+    categoryCells: categoryCells.filter((c) => visibleIds.has(c.botUserId)),
+    overlapCells: visibleOverlapCells,
     pathCoveragePct: totalLabelled > 0 ? Math.round((totalWithPath / totalLabelled) * 100) : null,
     floors,
   };

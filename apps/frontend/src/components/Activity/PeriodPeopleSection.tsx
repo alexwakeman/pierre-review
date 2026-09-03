@@ -77,6 +77,12 @@ export function PeriodPeopleSection(): JSX.Element | null {
   const { periodReports } = useProCapabilities();
   const workspaceId = useFilters((s) => s.workspaceId);
   const reportKey = useFilters((s) => s.insightsReportKey);
+  // ⚠ THE GRAIN MUST MATCH THE PANEL'S. `usePeriodReportsList` is keyed on it, so reading the
+  // default here while the panel is on the calendar grain would land on a DIFFERENT cache entry —
+  // `reportKey` (a `month-…` key) would fail to resolve in the sprint list, the fallback below
+  // would silently seat the newest FORTNIGHT, and the roster under a month heading would be read
+  // over fourteen days.
+  const grain = useFilters((s) => s.insightsReportGrain);
   const openPeopleReport = useFilters((s) => s.openPeopleReport);
 
   const { data: users } = useUsers();
@@ -88,7 +94,7 @@ export function PeriodPeopleSection(): JSX.Element | null {
 
   // The periods list — the SAME query the Reports panel holds (shared cache entry); "Begin
   // report" needs the selected key to actually resolve in it before a tab can be seeded.
-  const list = usePeriodReportsList(periodReports, workspaceId);
+  const list = usePeriodReportsList(periodReports, workspaceId, grain);
   const periods = list.data?.periods ?? [];
   // The period the roster is read over — DERIVED, never written back (D7: the Reports panel owns
   // `insightsReportKey` and seats it; a scalar may legitimately hold a key this list no longer
@@ -98,7 +104,10 @@ export function PeriodPeopleSection(): JSX.Element | null {
     const p = all.find((x) => x.periodKey === reportKey) ?? all[0] ?? null;
     if (p == null) return null;
     const fromMs = Date.parse(p.periodStart);
-    const toMs = Date.parse(p.periodEnd);
+    // ⚠ AN OPEN PERIOD'S `periodEnd` IS IN THE FUTURE (month-to-date carries the month's true
+    // end). Reading the roster to a future bound would report activity "over August" while August
+    // is half over — clamp to now, which is what "to date" means.
+    const toMs = p.inProgress ? Math.min(Date.parse(p.periodEnd), Date.now()) : Date.parse(p.periodEnd);
     return Number.isFinite(fromMs) && Number.isFinite(toMs) ? { fromMs, toMs } : null;
   }, [list.data, reportKey]);
 
@@ -350,7 +359,10 @@ export function PeriodPeopleSection(): JSX.Element | null {
   const disabledReason = beginDisabledReason({
     chipCount: chips.length,
     reportKey,
-    periodKeys: periods.map((p) => p.periodKey),
+    // ⚠ AN OPEN PERIOD IS NOT A REPORTABLE ONE. The People report resolves its key against the
+    // period grid server-side, and the grid deliberately refuses the in-progress period — so
+    // seeding a tab with the open month's key would open a report that renders nothing.
+    periodKeys: periods.filter((p) => !p.inProgress).map((p) => p.periodKey),
     listLoading: list.isLoading,
   });
   const canBegin = disabledReason == null;

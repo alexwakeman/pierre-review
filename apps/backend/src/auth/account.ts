@@ -26,6 +26,10 @@ export interface Account {
   // CLOUD-ONLY consent (default false): contribute aggregate weekly bot stats to the cross-org
   // benchmark. Local accounts never contribute (always false).
   benchmarkOptIn: boolean;
+  // The LARGE-PR FLAG's threshold in lines of CODE churn, or null when the user has never set
+  // one (→ the 1,500-line product default; resolve through `resolveLargePrThreshold`). ONE
+  // per-account setting — no workspace or repo grain, so nothing here needs a resolver.
+  largePrCodeLocThreshold: number | null;
 }
 
 export type AccountPlan = 'free' | 'pro';
@@ -71,6 +75,7 @@ function rowToAccount(row: typeof schema.accounts.$inferSelect): Account {
     stripeCustomerId: row.stripeCustomerId,
     aiCreditAllowance: row.aiCreditAllowance ?? null,
     benchmarkOptIn: row.benchmarkOptIn ?? false,
+    largePrCodeLocThreshold: row.largePrCodeLocThreshold ?? null,
   };
 }
 
@@ -310,6 +315,28 @@ export async function setBenchmarkConsent(
     const { deleteBenchmarkContributions } = await import('../db/queries.js');
     await deleteBenchmarkContributions(accountId);
   }
+}
+
+/**
+ * Set (or clear) an account's LARGE-PR FLAG threshold, in lines of CODE churn.
+ *
+ * `null` CLEARS it — back to the two-state "no opinion → product default", which is what makes a
+ * later change to that default reach every account that never overrode it. It is a column write,
+ * never a delete of anything, and it is deliberately validated HERE as well as by the route's
+ * schema: a threshold of 0 or a fraction would flag every PR or none, silently.
+ */
+export async function setLargePrCodeLocThreshold(
+  accountId: number,
+  threshold: number | null,
+): Promise<void> {
+  const { accounts } = schema;
+  const value =
+    threshold != null && Number.isInteger(threshold) && threshold > 0 ? threshold : null;
+  await db
+    .update(accounts)
+    .set({ largePrCodeLocThreshold: value })
+    .where(eq(accounts.id, accountId))
+    .execute();
 }
 
 /** Resolve an account by its Stripe customer id (subscription webhooks). */

@@ -64,6 +64,7 @@ import { PrCommentComposer } from '../PrCommentComposer.js';
 import { StateBadge } from '../StateBadge.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { FeedOpenPrsPanel } from './FeedOpenPrsPanel.js';
+import { LargePrFlag } from './LargePrFlag.js';
 import { UserName } from '../UserName.js';
 
 // The two SYNTHESIZED CI kinds (`db/queries.ts` isCiFeedKind's client twin). One predicate so
@@ -1765,19 +1766,32 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
           aria-expanded={expanded}
           className="group/rt flex w-full cursor-pointer items-center gap-1.5 rounded border border-gray-200 bg-white/60 px-2 py-1 text-left text-[11px] hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
         >
-          {/* The Resolved pill, anchored top-LEFT, stays visible while the thread is
-              collapsed — the reader knows it's resolved without expanding. Same pill the
-              expanded ThreadCard shows, so collapsed and expanded read uniformly. */}
-          <span className="shrink-0">
-            <StateBadge state={thread.derivedState} />
-          </span>
+          {/* ── COLLAPSE-ONLY CHROME ────────────────────────────────────────────────────────
+              The Resolved pill, the anchor line and the comment tally are what make this row
+              self-describing while it is SHUT — the reader knows it's resolved, where it sits and
+              how big it is without expanding. EXPANDED, the ThreadCard immediately below states
+              all three itself: the same StateBadge in its header, the same `line N` beside it, and
+              the comments as themselves. So they are dropped once open rather than printed twice
+              ~8px apart.
+
+              ⚠ SCOPED TO `expanded`. The collapsed row must stay fully self-describing — that is
+              the entire reason it exists as a summary instead of just rendering the card. The FILE
+              NAME survives in both states: ThreadCard never prints a path, so it is this row's own
+              fact, not a repeat. */}
+          {!expanded && (
+            <span className="shrink-0">
+              <StateBadge state={thread.derivedState} />
+            </span>
+          )}
           <code className="truncate font-mono text-gray-600 group-hover/rt:text-sky-600 dark:text-gray-300">
             {file}
-            {thread.line != null ? `:${thread.line}` : ''}
+            {!expanded && thread.line != null ? `:${thread.line}` : ''}
           </code>
-          <span className="shrink-0 text-gray-400">
-            {count === 1 ? '1 comment' : `${count} comments`}
-          </span>
+          {!expanded && (
+            <span className="shrink-0 text-gray-400">
+              {count === 1 ? '1 comment' : `${count} comments`}
+            </span>
+          )}
           <span
             className={`ml-auto shrink-0 text-sky-600 dark:text-sky-400 ${
               expanded ? '' : 'opacity-0 group-hover/rt:opacity-100'
@@ -2265,6 +2279,12 @@ function FeedRowImpl({
               {prLabel}
             </button>
           )}
+          {/* The large-PR flag on the PR-ref line — it is a fact about the PULL REQUEST, so it
+              belongs beside its number rather than inside `PrOpenedExtras` (which only renders on
+              `pr_opened` cards, while the server enriches `codeLoc` onto EVERY item on the page).
+              Icon-only here: this line already truncates the title, so the count rides the
+              accessible label and the hover title instead of taking horizontal space. */}
+          <LargePrFlag pr={item} iconOnly className="self-center" />
           {item.path != null && (
             <span className="shrink-0 text-gray-400">· {item.path.split('/').pop()}</span>
           )}

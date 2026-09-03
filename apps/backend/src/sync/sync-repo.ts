@@ -62,6 +62,17 @@ export interface SyncRepoOptions {
   // completes. Phase 1 of a two-phase sync passes false so the repo stays "not
   // fully synced" until phase 2 finishes the deep backfill. Defaults to true.
   commitState?: boolean;
+  // The LOCAL repos-row id, when the caller already knows it (every scheduler and
+  // sync-manager path does — that is how it found the repo at all).
+  //
+  // ⚠ FAILURE VISIBILITY, not a performance hint. The walk learns its own repoId from
+  // `upsertRepo`, which runs only AFTER the first page comes back — so a walk that dies
+  // before that (a 404/inaccessible repo, a dead token, a SAML wall) used to write NO
+  // sync_state row at all: `getSyncStatus` reported 'idle' with lastSyncError null, and
+  // planSync, finding no lastIncrementalSyncAt, planned another full walk on the next tick.
+  // Four repos ran that loop once a minute for five weeks and nothing on screen said so.
+  // With this set, the catch below records the error either way.
+  knownRepoId?: number;
   // Max concurrent commit-file REST fetches per page (see ensureCommitFiles).
   commitFileConcurrency?: number;
   log?: Logger;
@@ -278,6 +289,13 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
         // "Reconnect GitHub" banner (an authorization gap the user can self-fix), then fail
         // this repo's sync as usual.
         if (samlBlocked) recordSamlBlock(accountId, owner);
+        // ⚠ THIS BAIL MUST STAY ABOVE THE upsertRepo BELOW. GitHub declining to resolve the
+        // repository is the only moment we can refuse to MINT a repos row for a name that
+        // does not resolve — and a row that exists is a row the scheduler walks forever.
+        // (An existing row is left ALONE, never deleted: a null `repository` is equally what
+        // a revoked token, a rename and a SAML wall look like, and auto-deleting would
+        // destroy real synced history on a transient permission change. The failure is
+        // surfaced instead — see `knownRepoId` and the catch at the bottom.)
         const err = new Error(`Repository ${owner}/${name} not found or inaccessible`);
         (err as { statusCode?: number }).statusCode = 404;
         throw err;
@@ -480,7 +498,12 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (repoId !== null) {
+    // The walk's OWN id once the first page landed, else the caller's — see `knownRepoId`.
+    // Without the fallback, every failure that happens BEFORE the first page is parsed
+    // (404 / no such repo, dead token, SAML wall, a network fault on page one) writes
+    // nothing at all and the repo reads 'idle', forever.
+    const stateRepoId = repoId ?? opts.knownRepoId ?? null;
+    if (stateRepoId !== null) {
       // UPSERT, not a bare UPDATE. A FIRST backfill that fails has no syncState row yet
       // (phase 1 runs commitState:false → never inserts; phase 2 inserts only on success),
       // so an UPDATE would match zero rows and the failure would VANISH — the repo sits
@@ -488,14 +511,24 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       // "nothing loaded". Insert-or-update records the error either way, WITHOUT stamping the
       // sync timestamps (they stay null), so the repo is still treated as never-fully-synced
       // and gets retried on the next scheduled tick.
-      await db
-        .insert(syncState)
-        .values({ repoId, lastSyncStatus: 'error', lastSyncError: message })
-        .onConflictDoUpdate({
-          target: syncState.repoId,
-          set: { lastSyncStatus: 'error', lastSyncError: message },
-        })
-        .execute();
+      try {
+        await db
+          .insert(syncState)
+          .values({ repoId: stateRepoId, lastSyncStatus: 'error', lastSyncError: message })
+          .onConflictDoUpdate({
+            target: syncState.repoId,
+            set: { lastSyncStatus: 'error', lastSyncError: message },
+          })
+          .execute();
+      } catch (stateErr) {
+        // Recording the failure must never REPLACE it. With knownRepoId the row is the
+        // caller's claim rather than one this walk just upserted, so a repo deleted mid-walk
+        // would fail the FK here and mask the real error the caller is about to see.
+        log.warn(
+          `sync ${owner}/${name}: could not record the failure on sync_state: ` +
+            `${stateErr instanceof Error ? stateErr.message.slice(0, 200) : String(stateErr)}`,
+        );
+      }
     }
     log.error(`sync ${owner}/${name} failed: ${message}`);
     throw err;

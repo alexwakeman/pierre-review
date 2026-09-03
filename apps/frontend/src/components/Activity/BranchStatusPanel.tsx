@@ -397,9 +397,12 @@ export function BranchStatusPanel({
   const { data, isLoading } = useBranchStatus(repoIds);
   const { data: repos } = useRepos();
   const nameById = new Map((repos ?? []).map((r) => [r.id, r.fullName]));
-  // Per-mount only, deliberately: this is a "let me look" toggle, not a remembered preference,
-  // and a red trunk always forces it open regardless (see `expanded`).
-  const [userExpanded, setUserExpanded] = useState(false);
+  // ⚠ THREE-STATE, NOT A BOOLEAN. `null` = "nobody has touched this control, so fall back to the
+  // red-trunk default"; `true`/`false` = an explicit choice, which ALWAYS wins from then on.
+  // This was a two-state boolean OR-ed with `failing > 0`, which made the chevron a dead control
+  // on exactly the panel a reader most wants to collapse — see the block above `expanded`.
+  // Per-mount only, deliberately: this is a "let me look" toggle, not a remembered preference.
+  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
 
   if (isLoading && data == null) return null;
   const rows = data?.repos ?? [];
@@ -430,9 +433,20 @@ export function BranchStatusPanel({
   // ⚠ CROSS-REPO MOUNT ONLY. `RepoFeedHeader` mounts this `compact` for a SINGLE repo, where the
   // panel IS the trunk line; collapsing there would hide that repo's status inside its own
   // console header.
+  //
+  // ⚠ `failing > 0` IS A DEFAULT, NEVER AN OVERRIDE — and getting that backwards is what broke
+  // this control. It read `failing > 0 || userExpanded`, so on any workspace with a red default
+  // branch the disjunct was permanently true: the chevron flipped `userExpanded` faithfully,
+  // `expanded` never moved, and the panel could not be collapsed. Worse, it was dead precisely
+  // when the panel is at its tallest and most in the way (a red trunk is also the state that
+  // renders the failing-check names), so the one reader who needed the control was the one it
+  // ignored. `??` instead of `||` is the whole fix: the red-trunk default only applies while the
+  // reader has expressed no preference, and the first click retires it for this mount. A red
+  // default branch therefore still ARRIVES open — the alerting behaviour is unchanged — it simply
+  // no longer wins an argument with a person who has clicked.
   const allGreen = rows.every((r) => r.ciStatus === 'success');
   const collapsible = !compact;
-  const expanded = !collapsible || failing > 0 || userExpanded;
+  const expanded = !collapsible || (userExpanded ?? failing > 0);
 
   return (
     <section
@@ -447,7 +461,12 @@ export function BranchStatusPanel({
         {collapsible && (
           <button
             type="button"
-            onClick={() => setUserExpanded((v) => !v)}
+            // ⚠ `!expanded`, NOT a `(v) => !v` updater. The updater would read the THREE-state
+            // flag, and `!null` is `true` — so the first click on a panel already open by its
+            // red-trunk default would "toggle" it to open, doing nothing visible. Negating the
+            // RESOLVED state is what guarantees every click flips what the reader can see, and it
+            // is also what seats the explicit choice that retires the default.
+            onClick={() => setUserExpanded(!expanded)}
             aria-expanded={expanded}
             className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
             title={expanded ? 'Hide the per-repo rows' : 'Show the per-repo rows'}

@@ -11,9 +11,11 @@ import type {
   PeriodMetricDelta,
   PeriodMetricKey,
   PeriodMetricValue,
+  PeriodGrain,
   PeriodMovement,
   PeriodRefusalReason,
   PeriodReport,
+  PeriodArchivedReport,
   PeriodReportListItem,
   PeriodReportModelInfo,
   PeriodWorkspaceRow,
@@ -32,6 +34,7 @@ import {
   periodReportModelChoices,
   reportModelLabel,
   useGeneratePeriodReport,
+  usePeriodMonthToDate,
   usePeriodReport,
   usePeriodReportsList,
 } from '../../hooks/usePeriodReports.js';
@@ -45,7 +48,7 @@ import {
   RefreshIcon,
   ThinSampleIcon,
 } from '../Icons.js';
-import { ProBadge, ProLockPanel, useProGateState } from '../ProGate.js';
+import { ProLockPanel, useProGateState } from '../ProGate.js';
 import type { Fmt, MetricMeta } from './periodReportMarkdown.js';
 import {
   METRIC_META,
@@ -88,8 +91,14 @@ import { SummaryMarkdown } from './prRefTable.js';
 //  • The comparison states its coverage subset VERBATIM. Retroactive history is biased by repo
 //    onboarding — merged-PR counts across the dev workspace's last 6 months read 570…39, which
 //    looks like explosive growth and is actually 18 repos shrinking to 4.
-//  • The title is the DATE RANGE. The words "monthly" / "month on month" appear nowhere: a
-//    14-day cadence is ~2.17 periods per calendar month and that label would simply be false.
+//  • THE TITLE IS THE DATE RANGE AT SPRINT GRAIN, AND THE MONTH'S NAME AT MONTH GRAIN — the
+//    month-word rule is GRAIN-CONDITIONAL, not gone. At sprint grain the words "monthly" /
+//    "month on month" still appear nowhere: a 14-day cadence is ~2.17 periods per calendar month
+//    and that label would simply be false. At month grain the period IS a calendar month and
+//    naming it one is the only honest title — but the sprint formatter would render it
+//    "1 Aug – 1 Sep" (the EXCLUSIVE end), which reads as a 32-day span, so months get their own.
+//  • MONTH TO DATE IS AN OPEN PERIOD and says so. No Generate button, no staleness badge, no
+//    narration — it is recomputed live on every read and no row is ever written for it.
 
 // ── Metric presentation ──────────────────────────────────────────────────────────────────────
 //
@@ -99,7 +108,19 @@ import { SummaryMarkdown } from './prRefTable.js';
 // `rowFigures` is re-exported below for its unit test (periodMetricRow.test.ts).
 
 function shortPeriodLabel(p: PeriodReportListItem): string {
-  return periodTitle(p.periodStart, p.periodEnd);
+  const base = periodTitle(p.periodStart, p.periodEnd, p.grain ?? 'sprint');
+  // ⚠ THE OPEN PERIOD IS MARKED IN THE PICKER ITSELF, not only once it is selected. Two buttons
+  // reading "August 2026" and "July 2026" side by side would invite the reader to compare a
+  // part-month against a whole one without noticing.
+  return p.inProgress ? `${base} · to date` : base;
+}
+
+/** "sprint · 14 days" / "calendar month · 31 days" — the grain named beside the title, so a
+ *  forwarded screenshot says what it measured. */
+function grainCaption(grain: PeriodGrain, cadenceDays: number): string {
+  return grain === 'month'
+    ? `calendar month · ${cadenceDays} days`
+    : `sprint · ${cadenceDays} days`;
 }
 
 const GOOD = 'text-green-600 dark:text-green-400';
@@ -502,6 +523,39 @@ function WorkspaceAxis({
   metricKey: PeriodMetricKey;
   meta: MetricMeta;
 }): JSX.Element {
+  // ⚠ THE WHOLE AXIS REFUSES WHEN THE COMPARED WORKSPACES DO NOT SHARE THIS ONE'S SPRINT CADENCE,
+  // and it is NAMED. The server hands ONE window to every workspace, so a team on a 7-day sprint
+  // measured over a 14-day window contributes roughly double its per-sprint throughput to a column
+  // headed "this period" — every count wrong, the medians and percentages wrong less visibly and
+  // therefore worse. The server refuses WHOLESALE rather than dropping the mismatched rows, so this
+  // renders a sentence and no table: half a table beside a refusal reads as "here are the ones that
+  // worked", and a table whose membership changes because ANOTHER team edited their settings is a
+  // surface that mutates for a reason its reader cannot see.
+  if (axis.refusal != null) {
+    const diverging = axis.refusalWorkspaces ?? [];
+    return (
+      <div className={`text-[11px] ${MUTED}`}>
+        No like-for-like comparison: these workspaces do not all run the same sprint length, and one
+        window measured over two cadences is not one figure.
+        {diverging.length > 0 && (
+          <>
+            {' '}
+            <span className="text-gray-500 dark:text-gray-400">
+              {diverging
+                .map((w) =>
+                  w.cadenceDays == null
+                    ? `${w.name} (no cadence set)`
+                    : `${w.name} (${w.cadenceDays} days)`,
+                )
+                .join(', ')}
+              .
+            </span>
+          </>
+        )}{' '}
+        Set a matching cadence in Settings to compare them.
+      </div>
+    );
+  }
   const priorBy =
     axis.prior == null ? null : new Map(axis.prior.map((r) => [r.workspaceId, r]));
   const cellFor = (row: PeriodWorkspaceRow | undefined): PeriodMetricValue | undefined =>
@@ -708,13 +762,15 @@ function MetricTable({
                   {/* The C4 expander. Only rendered when the response carries the axis — the
                       server already omits it for single-workspace accounts, older plugins send
                       nothing, and in both cases this row is byte-identical to the pre-axis one.
-                      It is also the ONLY control that names the cross-workspace comparison, so
-                      it is where that surface's `Pro` mark lives. The axis itself has no gate of
-                      its own: it rides the one-report GET, which is `/api/pro/*`, and this whole
-                      panel is already behind `periodReports` — so the badge is a LABEL on a
-                      transitively-gated view, never the thing enforcing it.
-                      `inline-block` on the chip keeps the button's hover underline from being
-                      drawn across it (decoration propagates into inline descendants). */}
+                      ⚠ NO `Pro` CHIP HERE, AND THE FEATURE IS STILL PRO. This expander repeats
+                      once per METRIC ROW, so the badge was drawn a dozen times down one column —
+                      a chip repeated that often stops reading as a mark and starts reading as
+                      noise. It was only ever a LABEL: the axis rides the one-report GET, which is
+                      `/api/pro/*` and 402s unentitled, and this whole panel is already behind
+                      `periodReports` (`ProLockPanel` above). Removing the chip removes no gate.
+                      The Pro mark for this surface lives where it belongs and is drawn ONCE — on
+                      the Reports tab itself (InsightsView's `ProBadge variant="tab"`) and on this
+                      panel's own heading. */}
                   {byWorkspace != null && (
                     <button
                       type="button"
@@ -729,11 +785,6 @@ function MetricTable({
                         className="mr-1 inline-block align-[-0.1em]"
                       />
                       By workspace
-                      <ProBadge
-                        variant="tab"
-                        className="ml-1 inline-block"
-                        title="Comparing Workspaces is part of Pro."
-                      />
                     </button>
                   )}
                 </td>
@@ -928,7 +979,11 @@ function AskAboutPeriod({ report }: { report: PeriodReport }): JSX.Element | nul
   const [open, setOpen] = useState(true);
   if (!activityDigest) return null;
   const fromMs = Date.parse(report.periodStart);
-  const toMs = Date.parse(report.periodEnd);
+  // ⚠ AN OPEN PERIOD'S `periodEnd` IS IN THE FUTURE — month-to-date carries the month's true end,
+  // because that is what the period IS. Grounding the chat to that bound would hand the model a
+  // window running past today under a caption saying "to date". `generatedAt` on an in-progress
+  // report is the instant it was computed, which is exactly the upper bound its figures used.
+  const toMs = report.inProgress ? Date.parse(report.generatedAt) : Date.parse(report.periodEnd);
   if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return null;
   return (
     <div className="border-t border-gray-200 pt-2 dark:border-gray-800 print:hidden">
@@ -946,7 +1001,9 @@ function AskAboutPeriod({ report }: { report: PeriodReport }): JSX.Element | nul
         <div className="mt-2">
           <AdHocChatPanel
             periodWindow={{ fromMs, toMs }}
-            periodLabel={periodTitle(report.periodStart, report.periodEnd)}
+            periodLabel={`${periodTitle(report.periodStart, report.periodEnd, report.grain)}${
+              report.inProgress ? ' · to date' : ''
+            }`}
             suggestedQuestions={suggestedDeltaQuestions(report)}
           />
         </div>
@@ -1280,8 +1337,11 @@ function SetupPrompt(): JSX.Element {
         Set a sprint cadence first
       </div>
       Reports are cut on your sprint boundary, so there is nothing to report until one is set. Open
-      the header menu → <span className="font-medium">Settings</span> →{' '}
-      <span className="font-medium">Sprint</span> and give it a length and a start date.
+      the header menu → <span className="font-medium">Settings</span> and give this workspace a
+      sprint length and a start date — either under{' '}
+      <span className="font-medium">Sprint cadence</span> for this workspace alone, or under{' '}
+      <span className="font-medium">Sprint (account default)</span> for every workspace that has
+      not set its own.
       <div className="mt-1.5 text-[11px] text-gray-400">
         There is deliberately no fallback to a rolling two weeks: a period you did not choose is
         not an artifact you would forward to anyone.
@@ -1311,8 +1371,18 @@ export function PeriodReportsPanel(): JSX.Element | null {
   // render — and nothing billable may fire — before then.
   const workspaceId = useFilters((s) => s.workspaceId);
 
-  const list = usePeriodReportsList(periodReports, workspaceId);
+  // ⚠ THE GRAIN IS A READING CHOICE, HELD IN THE STORE AND MIRRORED TO `?reportGrain=`. It is
+  // deliberately NOT the sprint-cadence setting: that is a stored per-workspace fact which also
+  // grids the FREE flow-metrics comparison window on another tab, so overloading it would move a
+  // number on a screen nobody was looking at.
+  const grain = useFilters((s) => s.insightsReportGrain);
+  const setGrain = useFilters((s) => s.setInsightsReportGrain);
+  const list = usePeriodReportsList(periodReports, workspaceId, grain);
   const periods = useMemo<PeriodReportListItem[]>(() => list.data?.periods ?? [], [list.data]);
+  // Stored artifacts this workspace's CURRENT cadence grid cannot name — reports generated under a
+  // cadence the team has since changed, plus anything aged past the look-back horizon. They are
+  // preserved, never deleted, and readable at their own `<periodKey>@cad<days>` key.
+  const archived = useMemo<PeriodArchivedReport[]>(() => list.data?.archived ?? [], [list.data]);
 
   // The selection lives in the FILTERS STORE, not in local state, because it is URL-mirrored as
   // `?report=<periodKey>` (see hooks/useUrlState.ts) — and a link to the period you are reading is
@@ -1338,12 +1408,26 @@ export function PeriodReportsPanel(): JSX.Element | null {
       if (selectedKey != null) setSelectedKey(null);
       return;
     }
-    if (selectedKey == null || !periods.some((p) => p.periodKey === selectedKey)) {
+    // ⚠ AN ARCHIVED KEY IS A VALID SELECTION. It is not in `periods` by construction (that is what
+    // "archived" means), so without this the re-seat would bounce a reader off an old-cadence
+    // report the instant they opened one — and rewrite the URL of the link that brought them.
+    const valid =
+      periods.some((p) => p.periodKey === selectedKey) ||
+      archived.some((a) => a.archivedKey === selectedKey);
+    if (selectedKey == null || !valid) {
       setSelectedKey(periods[0]!.periodKey);
     }
-  }, [list.data, periods, selectedKey, setSelectedKey]);
+  }, [list.data, periods, archived, selectedKey, setSelectedKey]);
 
-  const report = usePeriodReport(periodReports, workspaceId, selectedKey);
+  // ⚠ TWO SOURCES, ONE SELECTION — and which one answers is decided by the LIST ROW, not by the
+  // key's shape. A completed period is a STORED, immutable artifact read through `usePeriodReport`
+  // (which also reports staleness); the open month is a LIVE recompute with no row behind it. Both
+  // hooks are always called (hook order), and exactly one is enabled.
+  const selectedItem = periods.find((p) => p.periodKey === selectedKey) ?? null;
+  const isMonthToDate = selectedItem?.inProgress === true;
+  const stored = usePeriodReport(periodReports && !isMonthToDate, workspaceId, selectedKey);
+  const live = usePeriodMonthToDate(periodReports && isMonthToDate, workspaceId);
+  const report = isMonthToDate ? live : stored;
 
   // The "Copy as Markdown" text — the report rendered by the deterministic exporter, built from
   // the SAME METRIC_META/REFUSAL_TEXT/rowFigures this panel renders (periodReportMarkdown.ts).
@@ -1411,7 +1495,16 @@ export function PeriodReportsPanel(): JSX.Element | null {
   // that has plenty of reports.
   const reportLoading = report.isLoading || report.isPlaceholderData || selectedKey == null;
 
-  const selected = periods.find((p) => p.periodKey === selectedKey) ?? null;
+  const selectedArchived = archived.find((a) => a.archivedKey === selectedKey) ?? null;
+  // One shape for the title row, whichever list the selection came from. An archived entry carries
+  // the same start/end/cadence fields; `coverageComplete` is a live-period annotation and is simply
+  // absent, which renders as no marker rather than as a false "complete".
+  const selected: {
+    periodStart: string;
+    periodEnd: string;
+    cadenceDays: number;
+    grain?: PeriodGrain;
+  } | null = selectedItem ?? selectedArchived;
   const current = report.data?.report ?? null;
 
   return (
@@ -1419,14 +1512,50 @@ export function PeriodReportsPanel(): JSX.Element | null {
     // pane prints THIS subtree — title, coverage, figures table, forecast, narrative — with the
     // rail/tabs/chat/buttons hidden and light colors forced. Print-to-PDF is the board-pack path.
     <div className="space-y-3" data-testid="period-reports" data-print-report>
+      {/* ── GRAIN TOGGLE ────────────────────────────────────────────────────────────────────
+          Both grains COEXIST and sprint stays the default — this is an additional way to read
+          the same window-pure vector, not a replacement for the team's cadence. It sits OUTSIDE
+          the loading branches so the control never disappears while a list reloads (switching
+          grain is exactly when that reload happens). */}
+      <div className="flex flex-wrap items-center gap-1.5 print:hidden">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+          Grain
+        </span>
+        {(
+          [
+            ['sprint', 'Sprint', 'Periods of the length this workspace runs its sprints at'],
+            [
+              'month',
+              'Month',
+              'Real calendar months, aligned to the 1st (UTC). Needs no cadence setting — and month-to-date is live',
+            ],
+          ] as [PeriodGrain, string, string][]
+        ).map(([g, label, hint]) => (
+          <button
+            key={g}
+            type="button"
+            onClick={() => setGrain(g)}
+            aria-pressed={grain === g}
+            title={hint}
+            className={`rounded border px-1.5 py-0.5 text-[11px] ${
+              grain === g
+                ? 'border-ai-signal/50 bg-ai-signal/10 text-ai-signal'
+                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       {workspaceId == null || listLoading ? (
         <Skeleton />
       ) : list.data?.cadenceConfigured === false ? (
         <SetupPrompt />
       ) : periods.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-4 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
-          No periods yet. A report covers one completed sprint — the first one appears once a
-          sprint boundary has passed with activity behind it.
+          {grain === 'month'
+            ? 'No months yet. A report covers one completed calendar month — the first one appears once a month has ended with activity behind it.'
+            : 'No periods yet. A report covers one completed sprint — the first one appears once a sprint boundary has passed with activity behind it.'}
         </div>
       ) : (
         <>
@@ -1486,15 +1615,59 @@ export function PeriodReportsPanel(): JSX.Element | null {
           {selected && (
             <div className="flex flex-wrap items-baseline gap-2">
               <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                {periodTitle(selected.periodStart, selected.periodEnd)}
+                {periodTitle(
+                  selected.periodStart,
+                  selected.periodEnd,
+                  selected.grain ?? current?.grain ?? 'sprint',
+                )}
               </h3>
-              <span className="text-[11px] text-gray-400">
-                sprint · {selected.cadenceDays} days
+              <span
+                className="text-[11px] text-gray-400"
+                title={
+                  (selected.grain ?? current?.grain ?? 'sprint') === 'month'
+                    ? 'A real calendar month, aligned to the 1st (UTC). Months are 28–31 days long, so their lengths are not comparable — which is why no forecast is offered at this grain.'
+                    : list.data?.cadenceSource === 'workspace'
+                      ? 'This workspace runs its own sprint length'
+                      : 'This workspace follows the account-default sprint length'
+                }
+              >
+                {grainCaption(
+                  selected.grain ?? current?.grain ?? 'sprint',
+                  selected.cadenceDays,
+                )}
+                {/* Named only when it is this WORKSPACE's own setting. The account default is the
+                    unremarkable case and saying so on every report would be noise; a per-workspace
+                    cadence is the one a reader may not expect, and it is the one they would go
+                    looking for after seeing a period they did not recognise. Month grain has no
+                    per-workspace anything — the calendar is not a setting. */}
+                {(selected.grain ?? current?.grain ?? 'sprint') === 'sprint' &&
+                  list.data?.cadenceSource === 'workspace' &&
+                  !current?.archived && <span className="ml-1">· this workspace</span>}
               </span>
-              {current && (
+              {current && !current.inProgress && (
                 <span className="text-[10px] text-gray-400" title={current.periodKey}>
                   {current.model ? `${current.model} · ` : ''}
                   generated {new Date(current.generatedAt).toLocaleString()}
+                </span>
+              )}
+              {/* ⚠ AN OPEN PERIOD SAYS SO, AND SAYS IT DIFFERENTLY FROM "not generated yet".
+                  It carries no stored row at all: it is recomputed on every read, so there is
+                  nothing to generate, nothing to go stale, and nothing written up. */}
+              {current?.inProgress && (
+                <span
+                  className="rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal"
+                  title="This month is still running. The figures are recomputed live on every read — nothing is stored, nothing is written up, and there is nothing to regenerate. The comparison is against the SAME stretch of the previous month, not against the whole of it."
+                >
+                  in progress · {current.elapsedDays ?? 0} day
+                  {current.elapsedDays === 1 ? '' : 's'} so far
+                </span>
+              )}
+              {current?.archived && (
+                <span
+                  className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300"
+                  title="Generated under a sprint cadence this workspace no longer runs. It is kept exactly as it was written and cannot be regenerated — its window is not on the current period grid."
+                >
+                  archived · {current.cadenceDays}-day cadence
                 </span>
               )}
               {current?.stale && (
@@ -1512,7 +1685,17 @@ export function PeriodReportsPanel(): JSX.Element | null {
             </div>
           )}
 
-          {/* Generation is a screen affordance, not part of the printed artifact. */}
+          {/* Generation is a screen affordance, not part of the printed artifact.
+              ⚠ ABSENT ENTIRELY ON AN ARCHIVED REPORT, not disabled. Its window is not on the
+              current cadence grid, so there is nothing the server could generate — and offering the
+              button is how a reader used to be invited to overwrite the artifact they were
+              reading. */}
+          {/* ⚠ ABSENT ON AN OPEN PERIOD as well as an archived one, and for the mirror-image
+              reason: an archived window is off the grid so there is nothing the server COULD
+              generate, and an open window must never be stored at all (its data fingerprint moves
+              on every merge, so the row would read stale forever and invite a billed regenerate on
+              every load). Absent, never disabled. */}
+          {!(current?.archived === true) && !isMonthToDate && !(current?.inProgress === true) && (
           <div className="print:hidden">
           <GenerateControls
             workspaceId={workspaceId}
@@ -1523,6 +1706,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
             modelInfo={list.data?.modelInfo}
           />
           </div>
+          )}
 
           {reportLoading ? (
             <Skeleton />
@@ -1539,9 +1723,11 @@ export function PeriodReportsPanel(): JSX.Element | null {
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-gray-300 p-4 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              This period has not been generated yet. Use{' '}
-              <span className="font-medium">Generate</span> above — the first run also backfills
-              earlier periods with figures only, so the forecast has something to fit.
+              {isMonthToDate
+                ? 'Month-to-date figures could not be read just now. This view is computed live — nothing is stored for an open month — so retrying is the whole recovery.'
+                : grain === 'month'
+                  ? 'This month has not been generated yet. Use Generate above — the first run also backfills earlier months with figures only.'
+                  : 'This period has not been generated yet. Use Generate above — the first run also backfills earlier periods with figures only, so the forecast has something to fit.'}
             </div>
           )}
 
@@ -1555,6 +1741,52 @@ export function PeriodReportsPanel(): JSX.Element | null {
               now, because "safe by where it is mounted" stops being true the first time someone
               moves the mount, and this one fires eight roster queries on mount. */}
           <PeriodPeopleSection />
+
+          {/* ── EARLIER CADENCES ────────────────────────────────────────────────────────────
+              Stored reports the current period grid cannot name. They are here because a report is
+              an artifact somebody forwarded: changing the sprint length regrids the boundaries, so
+              a report measured over 14 days is not a period on a 7-day grid — but it is still a
+              real document, and it stays readable rather than being deleted, rewritten, or (worse)
+              left CLICKABLE in the picker above where it opened as an ordinary empty state.
+              Collapsed by default: this is a shelf, not part of the current reading. */}
+          {archived.length > 0 && (
+            <details className="print:hidden">
+              <summary className="cursor-pointer text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                Earlier cadences ({archived.length})
+              </summary>
+              <div className="mt-1.5 space-y-1 border-l border-gray-200 pl-2 dark:border-gray-800">
+                <p className="text-[10px] text-gray-400">
+                  Generated under a sprint length this workspace no longer runs, or older than the
+                  grid reaches. Kept exactly as written — they cannot be regenerated, because their
+                  windows are not on the current grid.
+                </p>
+                {archived.map((a) => (
+                  <button
+                    key={a.archivedKey}
+                    type="button"
+                    onClick={() => setSelectedKey(a.archivedKey)}
+                    aria-pressed={a.archivedKey === selectedKey}
+                    className={`block text-left text-[11px] hover:underline ${
+                      a.archivedKey === selectedKey
+                        ? 'text-ai-signal'
+                        : 'text-gray-500 dark:text-gray-400'
+                    }`}
+                    title={
+                      a.reason === 'cadence_changed'
+                        ? `Measured over a ${a.cadenceDays}-day sprint, which this workspace no longer runs`
+                        : 'Older than the period grid reaches back'
+                    }
+                  >
+                    {periodTitle(a.periodStart, a.periodEnd, a.grain ?? 'sprint')}
+                    <span className="ml-1.5 text-gray-400">
+                      {a.cadenceDays}-day
+                      {a.hasNarrative ? ' · written up' : ' · figures only'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
         </>
       )}
     </div>

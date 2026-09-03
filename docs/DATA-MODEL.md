@@ -282,10 +282,14 @@ fixture tests (see Conventions).
     64-bit integers accept it happily, so an unbounded field means the same request succeeds locally
     and 500s in cloud.
 
-  The plugin-owned `pro_settings` still HAS its 11 `bot_*` columns, but only ONE is live:
-  `bot_slack_digest`. `bot_cost_json` is a deprecated READ-only legacy source
-  (`ProSettingsUpdate.bots.cost` was REMOVED, there is no write path left), and the other NINE are
-  **DORMANT** — present in every database, dropped from the drizzle schema modules and from the
+  The plugin-owned `pro_settings` still HAS its 11 `bot_*` columns, and **NONE of them is live any
+  more**. `bot_cost_json` is a deprecated READ-only legacy source (`ProSettingsUpdate.bots.cost` was
+  REMOVED, there is no write path left); `bot_slack_digest` was the last live one and went DORMANT
+  in plugin migration **0033**, when the "Review bots" Slack block became a property of the DELIVERY
+  (`workspace_slack_targets.bot_digest`, one row per (account, workspace)) — a single account flag
+  had been deciding the CONTENT of N independently-scheduled messages about N different teams' bots
+  ever since plugin 0030 made the digest per-workspace; the migration copied the account value onto
+  every existing target row. The other NINE are **DORMANT** — present in every database, dropped from the drizzle schema modules and from the
   wire, never selected and never written, with **no migration**: `bot_auto_resolve*` backed the
   removed mute feature; `bot_inhouse_detect` / `bot_auto_tag` / `bot_login_allowlist` /
   `bot_deep_detect` / `bot_ai_tiebreak` backed the removed "Detection" settings (which had no

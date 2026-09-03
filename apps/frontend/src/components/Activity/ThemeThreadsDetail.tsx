@@ -14,6 +14,7 @@ import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { usePr, DETAIL_GC_TIME } from '../../hooks/usePr.js';
 import { prMlLabelsKey, useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { DERIVED_STATE_META, ML_SEVERITY_META, indexUsers } from '../../lib/ui.js';
+import { MetaChip } from '../MetaChip.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { CommentCard } from '../CommentCard.js';
 import { SeverityPill } from './ThemesReportView.js';
@@ -365,14 +366,7 @@ function matchedStateChips(m: ThemeDetailMetrics): JSX.Element | null {
     <span className="flex items-center gap-1">
       {DERIVED_STATES.map((s) =>
         m.states[s] > 0 ? (
-          <span
-            key={s}
-            className="rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
-            style={{ color: DERIVED_STATE_META[s].color, background: `${DERIVED_STATE_META[s].color}1a` }}
-            title={DERIVED_STATE_META[s].description}
-          >
-            {DERIVED_STATE_META[s].label} · {m.states[s]}
-          </span>
+          <MetaChip key={s} meta={DERIVED_STATE_META[s]} count={m.states[s]} />
         ) : null,
       )}
     </span>

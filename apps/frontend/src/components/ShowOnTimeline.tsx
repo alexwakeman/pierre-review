@@ -9,21 +9,29 @@ import { MagnifierIcon } from './Icons.js';
 // the button falls back to centring on the shared board).
 export const PrFocusMetaContext = createContext<TabMeta | null>(null);
 
-// A small magnifying-glass "Show" button next to a thread / PR comment. With a PR-focus
-// meta in context (inside PrDetail) it opens that PR's isolated focus tab and highlights
-// this event's marker there; without one it centres the event on the shared board. Shared
-// so both look and behave identically.
+// A "show this moment on a timeline" control next to a thread / PR comment / activity
+// entry. With a PR-focus meta in context (inside PrDetail) it opens that PR's ISOLATED
+// focus tab and highlights this event's marker there; without one it centres the event
+// on the shared board. Shared so every such control behaves identically.
+//
+// Two renderings, ONE behaviour: the default is a compact magnifying-glass icon button
+// (dense headers — thread cards, comment rows); passing `label` renders a text link
+// instead, for rows that already read as a list of actions ("Timeline view" ·
+// "Open on GitHub"). The label is the ONLY difference — do not fork the onClick.
 export function ShowOnTimeline({
   prId,
   at,
   event,
   title = 'Show this on the timeline',
+  label,
   className = '',
 }: {
   prId: number;
   at: string;
   event: { type: EventType; refId: number | null };
   title?: string;
+  // Render as a text link with this wording instead of the magnifier icon.
+  label?: string;
   className?: string;
 }): JSX.Element {
   const showEventOnTimeline = useFilters((s) => s.showEventOnTimeline);
@@ -43,6 +51,19 @@ export function ShowOnTimeline({
       showEventOnTimeline(prId, at, event);
     }
   };
+
+  if (label != null) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`shrink-0 text-blue-500 hover:underline ${className}`}
+        title={title}
+      >
+        {label}
+      </button>
+    );
+  }
 
   return (
     <button

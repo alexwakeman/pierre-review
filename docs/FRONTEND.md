@@ -495,6 +495,16 @@ the header and the rail can never disagree about what "R" means.
   overflow-auto` column.** The Changes tab has no scroll container of its own: PrDetail's
   `min-h-0 flex-1 overflow-auto` is what every per-file `sticky top-0` header sticks to, and a
   nested full-height scroller here would move that containing block and break them.
+- **The rail's WIDTH is user-dragged and persisted** (`hooks/useResizablePane.ts`, localStorage
+  key `pierre:changesRailWidth`, default 224px = the old `md:w-56`). The rail and its
+  `role="separator"` handle share ONE sticky flex wrapper, so the handle inherits the rail's
+  measured height instead of needing a second measurement. ⚠ The width is deliberately NOT in the
+  Zustand filter store: persistence and "Clear filters" share one list there, so a filter reset
+  would teleport the furniture. ⚠ The ceiling YIELDS to the diff — `min(720, rowWidth − 320)`,
+  measured off the split row — so neither pane can be dragged, or restored from a wider window's
+  stored value, down to nothing; `clampPaneWidth` is the ONE place that decides, and on a
+  container too narrow for both minimums the FLOOR wins (the rail overflows) rather than the
+  bounds inverting. Keyboard: ←/→ (×4 with Shift), Home/End, Enter; double-click resets.
 - **Directory collapse is EPHEMERAL local state** in `FileTree`, deliberately not the global
   `expandedFileGroups`/`collapsedFileGroups` slice — those are unkeyed by PR, and directory paths
   collide across repos far more than file paths do. Default: everything open.
@@ -900,7 +910,9 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   per-metric exclusions, plus a fourteenth for "no automated reviewer to place". A customer's
   biggest bot can be absent from the corpus entirely (DeepSource is real) — it renders NAMED, with
   "we have never measured this reviewer", never a zero. ⚠ The rail adds two more vocabularies on top
-  of those fourteen: **ten** `COST_REFUSAL_HEADLINE` entries (the tenth is `workspace_truncated`) and
+  of those fourteen: **eleven** `COST_REFUSAL_HEADLINE` entries (the tenth is `workspace_truncated`,
+  the eleventh `window_underpopulated` — "too few acted-on threads this month to price", which is a
+  different fact from `nothing_acted_on`'s whole-and-empty month and must not borrow its words) and
   **five** `ROLLUP_REFUSAL_HEADLINE` entries. `vendor_not_in_corpus` deliberately reuses
   `PLACEMENT_REFUSAL_HEADLINE.vendor_not_in_corpus_vocabulary`'s exact words — same fact, same
   sentence; two wordings for one cause on one card is how a reader stops believing either.
@@ -993,13 +1005,36 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
     headline reads as two measurements that each came back empty. It DOES render a money-half
     refusal (`moneyRefusal`), which is a cost-vocabulary reason nothing else on the card accounts
     for.
-  - **`workspaceCostSpanUnobservedNote` and `workspaceCostPartialWindowNote` must both render.**
-    They are the wire's two disclosures: an unrendered `spanUnobservedRepos` makes the pace silently
-    understate, and an unrendered `partialWindowRepos` makes `$/merged PR` silently inflate in the
-    flattering direction. "A missing disclosure is the same defect as a wrong number, one line
-    quieter."
+  - ⚠ **THE `$ per acted-on thread` ROW IS THE ONE FIGURE A READER CAN CHECK, AND IT IS BUILT TO BE.**
+    `workspaceCostActedOnLabel` names the window from the SERVER's `costWindowDays` (never an inlined
+    "30"), and `workspaceCostActedOnDetail` prints the two numbers the figure divides — "243 of 479
+    threads acted on · US$783.00 a month", against a figure of US$3.22. The row it replaced read
+    "255 of 544 threads acted on across 1 repository — about 32.7 a month" beside US$23.94, where the
+    32.7 came from dividing by a 237-day observed span that appeared NOWHERE on the card. ⚠ "across
+    1 repository" is DROPPED at `coveredRepos === 1` — that clause exists to make a POOLED figure
+    legible and is noise otherwise. ⚠ The server's `basisNote` says the same division in a sentence
+    and renders whenever the money does.
+  - ⚠ **`yours` AND `unacted` CARRY DIFFERENT POPULATIONS UNDER THE SAME FIELD NAMES.** `yours` is
+    the last calendar month (the money's window); `unacted` is every pull request the walk read.
+    Each sentence names its own — the headline's spend clause ends "…on every pull request read
+    here" for exactly that reason. Dropping either qualifier rebuilds PERIOD-REPORTING's
+    headline-vs-subset defect as two rows a reader takes for one.
+  - **`workspaceCostSpanUnobservedNote`, `workspaceCostPartialWindowNote` and
+    `workspaceCostWindowIncompleteNote` must all render — THREE causes, three sentences.** An
+    unrendered `partialWindowRepos` makes `$/merged PR` silently inflate in the flattering direction;
+    `costWindowIncompleteRepos` explains a WITHHELD per-thread figure (a repository younger than the
+    cost window has a partial month of work against a whole price, and excluding it would push the
+    quotient higher still). ⚠ `workspaceCostSpanUnobservedNote` was REWORDED, not kept: it said those
+    repositories "contributed nothing to the per-month pace", which was true while the pace divided
+    by an observed span and became FALSE the moment the money moved to a chosen month. A caveat that
+    no longer describes the arithmetic is worse than none. "A missing disclosure is the same defect
+    as a wrong number, one line quieter."
   - **`workspaceCostCoverageNote` REPLACED `costSharedNote`** — the "upper bound / n other cards
-    carry this same number" caveat retired with the grain it compensated for. ⚠ `costSharedNote`'s
+    carry this same number" caveat retired with the grain it compensated for. ⚠ Its own FIRST HALF
+    then went too: it argued that the price and the work describe the same repositories "so there is
+    nothing here to add together", a rebuttal of `unit.cost`, which was DELETED FROM THE WIRE before
+    this shipped. What survives is the one claim still true and still actionable — a subscription may
+    cover repositories outside this Workspace, and in that direction the figure is an upper bound. ⚠ `costSharedNote`'s
     full argumentative docstring survives verbatim as a `── HISTORICAL ──` block above its
     replacement: it is the written record of a shipped defect, and the function itself is dead code
     awaiting a delete-with-test-rewrites.
@@ -1108,6 +1143,18 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   and **Print** (`@media print` in `index.css` + `print:hidden` on picker/controls/chat;
   print-to-PDF is the board-pack path). `?report=<periodKey>` pairs with
   `?activityRepo=insights` as before — it no longer needs to seed a sub-tab.
+  **A GRAIN TOGGLE (`Sprint | Month`) sits above every loading branch** — the two grains COEXIST
+  and sprint stays the default. It reads `filters.insightsReportGrain`, mirrored to
+  `?reportGrain=month` (omitted at the default, per the standing URL rule), and ⚠
+  **`setInsightsReportGrain` CLEARS `insightsReportKey`**: `sprint-2026-08-18` names no period on
+  the calendar grid and `month-2026-08` names none on the sprint grid, so carrying the key across
+  would render the ordinary "not generated yet" box for a document that cannot exist. Titles are
+  grain-aware (`periodTitle(start, end, grain)` — a month is NAMED, "August 2026"; the sprint
+  formatter would print the EXCLUSIVE end and read "1 Aug – 1 Sep", a 32-day span). At month grain
+  the picker leads with **month to date**, marked `· to date`, whose body comes from
+  `usePeriodMonthToDate` — a LIVE read with no stored row, so **Generate is ABSENT (not disabled)**
+  and no staleness badge is possible. Full contract:
+  [PERIOD-REPORTING.md](PERIOD-REPORTING.md) § The CALENDAR-MONTH grain.
 - **People / 1:1 prep** (Pro `periodReports`): `PeriodPeopleSection` in Reports lists the
   workspace's humans (roster minus the UNION bot verdict) — ⚠ ALPHABETICAL, no metrics on the
   row, deliberately un-rankable ("prep, not scoring"); each row opens the EXISTING
@@ -1115,7 +1162,12 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   vector in the period table's idiom: null renders "—" never 0, `lowSample` flagged, the three
   `basis:'live'` keys labelled "now", coverage annotations; period selector defaults to the
   report being read via `insightsReportKey`; Pro narration phrases via synthesis kind
-  `'person'`). `UserProfilePopover` gains a second, capability-gated "1:1 prep →" entry beside
+  `'person'`). ⚠ **`PeriodPeopleSection` must read the SAME `insightsReportGrain` the panel does** —
+  it holds its own `usePeriodReportsList` call and that key is grain-scoped, so the default would
+  land on a different cache entry, fail to resolve a `month-…` key, and silently seat the newest
+  FORTNIGHT under a month heading. It also drops `inProgress` periods from the "Begin report" seed
+  (the person route resolves against the grid, which refuses an open period) and clamps an open
+  period's roster window to `now`. `UserProfilePopover` gains a second, capability-gated "1:1 prep →" entry beside
   "View activity →" — same tab, named entry point; **still absent (never a nudge) when the
   capability is off**, and that is now a deliberate asymmetry rather than the default: its sibling
   "View activity →" reaches the same tab, which DOES carry the lock, so hiding one of two entry
@@ -1376,6 +1428,59 @@ phrase it two ways.
   derived, in a second spelling. Both lines are correct and the pair reads as two statuses. The
   prose stays ON THE WIRE — it is the fallback for a client that does not know the phase — and is
   simply not drawn beneath its own restatement.
+
+## The Settings modal is TWO HALVES, split by GRAIN, and the split IS the layout
+
+`components/settings/SettingsModal.tsx`. Every GLOBAL section first, then ONE `Workspace · <name>`
+heading and every workspace-scoped section beneath it. Before this the two grains were interleaved
+— an account key, cloud account sections, a per-workspace cadence, an account-wide bot toggle, two
+more per-workspace sections — and the only thing announcing a section's grain was each
+workspace-scoped one appending `— acme-web` to its own title, which said nothing about the ones
+that carried no suffix.
+
+| # | Section | Grain | Gate |
+|---|---|---|---|
+| 1 | `GithubAppInstallSection` | global | `isCloud` (+ self-gates on the App provider) |
+| 2 | `BenchmarkConsentSection` | global | `isCloud` |
+| 3 | `LargePrThresholdSection` | global | none — both modes, every tier |
+| 4 | `YourDataSection` | global | `isCloud` |
+| — | **`Workspace · <name>`** | — | `useHasProWorkspaceSettings()` |
+| 5 | `SprintSection` (cadence + comparison window) | workspace | `caps.workspaceInsights` |
+| 6 | `SlackSection` (schedule + the bot block) | workspace | `caps.slackDigest` |
+| 7 | `IssueLinksSection` | workspace | `caps.issueLinks` |
+
+- ⚠ **THE HEADING IS THE NAMING RULE NOW, AND IT IS STILL LOAD-BEARING.** There is no workspace
+  picker in Settings — the rail's selection is the scope — so a screen that does not say which team
+  it is retuning is a set of controls with a hidden blast radius. What changed is that the name is
+  stated ONCE, as a BOUNDARY rather than a suffix, which also marks which settings are *not* a
+  team's. Sections below it name a workspace only in a sentence that names a DIFFERENT one
+  (`SlackSection`'s cap disclosure). A workspace-scoped control mounted anywhere but under that
+  heading names its workspace itself.
+- ⚠ **A CONTROL AT THE ACCOUNT GRAIN GOES ABOVE THE HEADING, WITH ITS OWN SAVE.** One Save spanning
+  two grains is how an edit meant for one team travels to every team. The comparison-window mode was
+  the last such control and it is gone from the account grain (plugin 0032) — so `SprintSection` has
+  one Save because it has one grain, not because mixing became safe.
+- ⚠ **THE GLOBAL HALF SITS ABOVE THE `pro_settings` LOADING GATE AND MUST STAY THERE.** Every
+  section in it reads `/api/me` or `/api/auth/providers`, never `pro_settings` (which 404s with no
+  plugin), so an OSS install still gets its large-PR threshold and a cloud account still gets
+  export/delete when the Pro fetch fails outright. That fetch is now PURELY a gate — no section
+  reads account `ProSettings` any more — and `useProSettings` is enabled only when the Workspace
+  half has something in it.
+- ⚠ **`workspaceId === null` HOLDS BACK THE WHOLE HALF, IN ONE PLACE.** Three sections each
+  rendering their own `ScopePendingSection` under a heading that cannot yet name anybody reads as
+  three broken sections rather than one unfinished request. Each section KEEPS its own guard — that
+  one sits at the point of the WRITE, where a PUT with no `?workspace=` would be answered by the
+  account's Default.
+- ⚠ **TWO GATE FUNCTIONS, DELIBERATELY.** `useHasProSettings` stays wide (it gates the avatar-menu
+  entry and `BotRoiPanel`'s legacy-cost fetch); `useHasProWorkspaceSettings` is the SECTION
+  INVENTORY — the list where every cap must still own a section — and gates the heading. Narrowing
+  the first would take the Settings entry away from accounts that still have the global half.
+- **Deleted, and neither returns:** `AnthropicKeySection` (the stored BYO key is retired — local
+  Claude Review is an ambient Claude session, else `ANTHROPIC_API_KEY`; the routes and the three
+  `useClaudeReview` key hooks went with it) and `BotSection` (an explainer pointing at
+  Activity → Bots → Settings plus one toggle, which became a per-delivery field inside
+  `SlackSection`). ⚠ `data-testid="bot-settings-section"` died with the latter — `pnpm shots`' 7d
+  targets `bot-settings-panel` on the Bots rail instead.
 
 ## The AI-surface palette (`ai-*` tokens) — and the purple that STAYS
 

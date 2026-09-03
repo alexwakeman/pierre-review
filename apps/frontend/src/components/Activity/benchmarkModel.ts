@@ -3,6 +3,7 @@ import type {
   BotBenchmarkAnomaly,
   BotBenchmarkAnomalyKind,
   BotBenchmarkCostRefusalReason,
+  BotBenchmarkCostYours,
   BotBenchmarkPlacementCost,
   BotBenchmarkPlacementMetric,
   BotBenchmarkPlacementRefusalReason,
@@ -650,6 +651,11 @@ export const COST_REFUSAL_HEADLINE: Record<BotBenchmarkCostRefusalReason, string
   span_unobserved: 'No measurable pace to state a rate against',
   own_rate_withheld: 'Your acted-on rate was withheld',
   nothing_acted_on: 'Nothing acted on to divide by',
+  // ⚠ A SENTENCE ABOUT THE LAST MONTH, NOT ABOUT THE REVIEWER. "Nothing acted on" one line up is a
+  // whole and empty month; this is a whole month with too little in it to divide a price by. The
+  // remedy is time, and the counters above are unaffected — which is why it does not borrow either
+  // neighbour's words.
+  window_underpopulated: 'Too few acted-on threads this month to price',
   price_is_zero: 'Recorded as free',
   // ⚠ NOT "Recorded as free" AND NOT SILENCE. Somebody entered a price; it is per seat and the
   // seat count could not be multiplied out, so the figure is missing and the price is not.
@@ -1195,6 +1201,57 @@ export function workspaceCostPriceLine(cost: BotBenchmarkWorkspaceCost): string 
 }
 
 /**
+ * THE PER-ACTED-ON ROW'S LABEL — the window, named, because the row above it is on a different one.
+ *
+ * ⚠ THE WINDOW IS SERVED, NEVER INLINED. `costWindowDays` is the server's `COST_WINDOW_DAYS`; a
+ * hard-coded "30" here would go on printing 30 the day the constant moves, on the one card whose
+ * whole claim is that a price and a thread count cover the SAME month. Absent (an older plugin) ⇒
+ * the label says nothing about a window rather than guessing at one.
+ *
+ * ⚠ IT IS A SCOPE, NOT A UNIT — the distinction `costWindowLabel` exists to protect. "(last 30
+ * days)" says WHICH threads were counted; "per 30 days" would say the figure scales with the
+ * window, and a cost per thread does not.
+ */
+export function workspaceCostActedOnLabel(cost: BotBenchmarkWorkspaceCost): string {
+  const days = cost.costWindowDays;
+  if (days == null || !Number.isFinite(days) || days <= 0) return 'Per acted-on thread';
+  return `Per acted-on thread (last ${formatCount(Math.round(days))} days)`;
+}
+
+/**
+ * THE DETAIL LINE THAT MAKES THE DIVISION CHECKABLE — the two numbers the figure divides, and
+ * nothing else.
+ *
+ * ⚠ THIS IS THE WHOLE FIX, IN ONE LINE. The row it replaced read "255 of 544 threads acted on
+ * across 1 repository — about 32.7 a month", where 32.7 came from dividing by a 237-day span
+ * nothing on the card mentioned; a reader could not get from US$783.00 and 255 to the US$23.94
+ * printed beside it. Now the price is on the line, the count is on the line, and their quotient is
+ * the figure.
+ *
+ * ⚠ THE COUNTS ARE THE WINDOW'S, AND THEY ARE NOT THE HEADLINE'S. `yours.actedThreads` /
+ * `settledThreads` are the threads that settled inside the last month; the headline sentence below
+ * quotes `unacted`'s pooled pair over every pull request read. Different numbers under the same
+ * field names, one card — so each says its own population out loud.
+ *
+ * ⚠ "across 1 repository" IS DROPPED. That clause exists to make a POOLED figure legible; on a
+ * single-repository Workspace it is noise that makes a plain sentence read like a qualified one.
+ */
+export function workspaceCostActedOnDetail(
+  cost: BotBenchmarkWorkspaceCost,
+  yours: BotBenchmarkCostYours,
+): string {
+  const scope =
+    cost.coveredRepos > 1
+      ? ` across ${countNoun(cost.coveredRepos, 'repository', 'repositories')}`
+      : '';
+  const price = cost.monthlyUsd == null ? '' : ` · ${formatUsd(cost.monthlyUsd)} a month`;
+  return (
+    `${formatThreadCount(yours.actedThreads)} of ` +
+    `${formatCount(yours.settledThreads)} threads acted on${scope}${price}`
+  );
+}
+
+/**
  * WHAT THE FIGURE IS, NOW THAT IT IS TRUE — the successor to `costSharedNote`.
  *
  * ── HISTORICAL, AND THE ARGUMENT FOR THIS WHOLE CHANGE ──────────────────────────────────────────
@@ -1219,29 +1276,72 @@ export function workspaceCostPriceLine(cost: BotBenchmarkWorkspaceCost): string 
  * repositories OUTSIDE this Workspace, which this app cannot see and cannot count; in that one
  * direction the figure remains an upper bound. Dropping the sentence because the big error was
  * fixed would leave the small one unstated.
+ *
+ * ⚠ AND THE FIRST HALF IS NOW GONE, DELIBERATELY. It argued that the price and the work describe
+ * the same repositories "so there is nothing here to add together" — an answer to `unit.cost`,
+ * which was DELETED FROM THE WIRE before this shipped. A caveat rebutting a figure no response
+ * carries teaches a reader that there was once a reason to distrust these numbers, and gives them
+ * nothing to do about it. What is left is the one claim that is still true and still actionable.
  */
-export function workspaceCostCoverageNote(cost: BotBenchmarkWorkspaceCost): string {
-  const scope = countNoun(cost.coveredRepos, 'repository', 'repositories');
+export function workspaceCostCoverageNote(_cost: BotBenchmarkWorkspaceCost): string {
   return (
-    `One Workspace price, set against the work of the ${scope} this reviewer is live in — the ` +
-    'price and the work describe the same repositories, so there is nothing here to add together. ' +
-    'The same subscription may also cover repositories outside this Workspace, which this app ' +
-    'cannot see; in that direction alone the figure is an upper bound.'
+    'The same subscription may cover repositories outside this Workspace, which this app cannot ' +
+    'see; in that direction the figure is an upper bound.'
   );
 }
 
-/** ⚠ A DISCLOSURE, NOT A FIGURE, AND THE FOLD DEPENDS ON IT BEING RENDERED. A live repository whose
- *  observation span could not be read contributed NOTHING to the per-month pace: imputing a
- *  sibling's span would inflate the pace by counting threads over time nobody observed, and dropping
- *  it silently understates the pace with no way for a reader to notice. `null` in the ordinary case
- *  where every live repository had a readable span. */
+/**
+ * ⚠ A DISCLOSURE ABOUT THE EVIDENCE TABLE, AND NO LONGER ABOUT THE MONEY.
+ *
+ * It used to say these repositories "contributed nothing to the per-month pace" — TRUE while that
+ * pace divided by each repository's observed comment span, and FALSE the moment the money moved to
+ * a chosen calendar month. A caveat that no longer describes the arithmetic is worse than none: it
+ * is a wrong account of how the number was made, in the voice of a disclosure. What is left is the
+ * smaller, still-true claim about the column it explains.
+ *
+ * ⚠ IT SAYS "NO READABLE OBSERVATION PERIOD", NOT "NO OBSERVATION PERIOD *BELOW*". There is no
+ * observation-period column: `BotBenchmarkRollupContribution.spanDays` rides the wire and
+ * `contributionRows()` does not map it, so the earlier wording pointed the reader at a column that
+ * does not exist — a false claim about this very UI, in the voice of a disclosure. Either render
+ * the column or do not promise it; this sentence no longer promises it.
+ *
+ * `null` in the ordinary case where every live repository had a readable span.
+ */
 export function workspaceCostSpanUnobservedNote(cost: BotBenchmarkWorkspaceCost): string | null {
   if (cost.spanUnobservedRepos <= 0) return null;
   const n = countNoun(cost.spanUnobservedRepos, 'repository', 'repositories');
   return (
-    `${n} contributed nothing to the per-month pace: this reviewer's own working period could not ` +
-    'be read there. Its threads still count; only its pace is missing, and no sibling’s stretch of ' +
-    'time was borrowed to stand in for it.'
+    `${n} carries no readable observation period: this reviewer's own earliest-to-latest comment ` +
+    'stretch could not be read there. Nothing on this card divides by it — the money is a fixed ' +
+    'window at both ends — and every thread it settled still counts.'
+  );
+}
+
+/**
+ * ⚠ THE THIRD DISCLOSURE, AND THE ONLY ONE THAT IS ALSO A REFUSAL'S EXPLANATION. A repository the
+ * host has held for less than the cost window has an UNDERCOUNTED month of work against a WHOLE
+ * monthly price, so `$ per acted-on thread` would read too high — the inflating direction, the same
+ * argument `workspace_truncated` makes about a partial estate. Excluding the repository would push
+ * the figure higher still (the price does not shrink with it), so the figure is withheld and this
+ * says for how long. `null` in the ordinary case.
+ */
+export function workspaceCostWindowIncompleteNote(
+  cost: BotBenchmarkWorkspaceCost,
+): string | null {
+  const n = cost.costWindowIncompleteRepos ?? 0;
+  if (n <= 0) return null;
+  const repos = countNoun(n, 'repository', 'repositories');
+  // ⚠ THE VERB AGREES WITH THE COUNT, NOT WITH THE SINGULAR CASE. `countNoun` pluralises the noun
+  // while a hard-coded `has` does not, which rendered "2 repositories has been tracked". The test
+  // that covers this asserted only `toContain('2 repositories')`, so it stayed green over a broken
+  // sentence — assert the VERB too, or the next hard-coded one survives the same way.
+  const verb = n === 1 ? 'has' : 'have';
+  const days = cost.costWindowDays == null ? null : formatCount(Math.round(cost.costWindowDays));
+  return (
+    `${repos} ${verb} been tracked for less than ${days == null ? 'the cost window' : `${days} days`}, ` +
+    'so the month of work the price would be divided by is incomplete while the price is whole. ' +
+    'The per-acted-on figure is withheld rather than reported too high; every other number here ' +
+    'still includes it.'
   );
 }
 
@@ -1325,11 +1425,24 @@ export function workspaceCostHeadline(
   if (unacted.status !== 'value') return null;
   if (cost.monthlyUsd == null) return null;
   const scope = countNoun(cost.coveredRepos, 'repository', 'repositories');
+  // ⚠⚠ "EVERY PULL REQUEST READ HERE" IS LOAD-BEARING, NOT PADDING. This sentence quotes the POOLED
+  // rate over the whole walked slice; the `$ per acted-on thread` row three lines above it quotes a
+  // rate over the last month, under the same words ("threads acted on") and different numbers. The
+  // rate is honest and window-free — it is a share of the monthly price, not a per-thread price —
+  // but a share stated beside a windowed figure with no population named is exactly
+  // docs/PERIOD-REPORTING.md's "ONE ROW MUST NEVER MIX THE HEADLINE AND SUBSET POPULATIONS",
+  // arriving as two rows a reader reads as one.
+  // ⚠ THE SCOPE CLAUSE IS DROPPED AT ONE REPOSITORY, for the same reason the detail row above
+  // drops it: "across the 1 repository it is live in" tells the reader nothing they cannot see, and
+  // it is the pooled fold's disclosure — it earns its words only when there is a fold. Leaving it
+  // in at N=1 while the row three lines up had just removed it made two adjacent sentences
+  // disagree about whether the count was worth saying.
+  const scopeClause = cost.coveredRepos === 1 ? '' : `across the ${scope} it is live in `;
   const spend =
     `${formatUsd(unacted.unactedUsd)} a month of this reviewer's ${formatUsd(cost.monthlyUsd)} ` +
-    'monthly price is buying feedback nobody acts on — across the ' +
-    `${scope} it is live in you acted on ${formatMetricValue(unacted.actedOnRate, 'rate')} of the ` +
-    `${formatCount(unacted.settledThreads)} threads it settled.`;
+    `monthly price is buying feedback nobody acts on — ${scopeClause}you acted on ` +
+    `${formatMetricValue(unacted.actedOnRate, 'rate')} of the ` +
+    `${formatCount(unacted.settledThreads)} threads it settled on every pull request read here.`;
 
   if (expectation.status !== 'value' || expectation.conversionGapUsd == null) {
     return { tone: 'measured', spend, comparison: null };

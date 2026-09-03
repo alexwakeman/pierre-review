@@ -123,6 +123,23 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // sibling vocabularies is precisely how one silently swallows the other.
   if (path === '/api/workspaces' || path.startsWith('/api/workspaces/')) return [TIERS.read];
 
+  // ---- Per-account settings writes: `read`, RECORDED rather than inherited ----
+  //
+  // POST /api/me/large-pr-threshold — the large-PR flag's code-churn threshold. One schema-
+  // validated UPDATE of one integer column on one row. No GitHub call, no model call, no fold:
+  // following the token, there is no token. `read` is the same answer the fall-through at the
+  // bottom of this function would give, and it is spelled out anyway for this file's stated
+  // reason — the two documented mistakes here were both a route whose tier was never decided,
+  // only inherited. Its sibling POST /api/me/benchmark-consent still takes the fall-through
+  // because it DOES have a leg worth thinking about (a fire-and-forget rollup on opt-in), and
+  // pinning it here would hide that.
+  //
+  // EXACT `===`. `/api/me` is a family with an export, an account deletion and a data-subject
+  // GET in it, so a `startsWith('/api/me/')` would sweep all of them into one bucket — and a
+  // `startsWith('/api/me')` is worse still: it ALSO matches `/api/mention-candidates`, a live
+  // sibling vocabulary. That is this file's recorded near-miss failure, one character away.
+  if (path === '/api/me/large-pr-threshold') return [TIERS.read];
+
   // ---- Bot Tuning Advisor (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
   // "Follow the token": most advisor routes are DB-only reads/writes, but the generic
   // /api/pro/ branch below puts every mutating POST on the 20/min AI bucket — which would
@@ -175,6 +192,19 @@ function tierFor(method: string, path: string): readonly Tier[] {
     // matches: the list root and a GET spelling of `…/generate` stay on the plain read bucket.
     if (/^\/api\/pro\/insights\/reports\/[^/]+$/.test(path)) return [TIERS.search, TIERS.read];
     return [TIERS.read];
+  }
+
+  // GET /api/pro/insights/month-to-date — the OPEN calendar month, computed live on every read
+  // (Reports → Month grain). DECIDED, not inherited: it does NOT match the `…/insights/reports`
+  // family block above, so without this line it would fall through to the `/api/pro/` catch-all's
+  // GET→`read` branch and sit on the 600/min blanket bucket. It costs SIX indexed scans per call
+  // — the headline metric vector, two `repos.createdAt` coverage reads, the lane breakdown, and
+  // both sides of the elapsed-slice comparison — which is the one-report GET's shape of cost, on a
+  // surface the SPA re-reads whenever the pane regains focus (an open period's figures move, so
+  // there is nothing to cache for long). Same 60/min `search` bucket, same argument. It NEVER
+  // generates and NEVER writes a row, so it must never move to the AI tier either.
+  if (!mutating && path === '/api/pro/insights/month-to-date') {
+    return [TIERS.search, TIERS.read];
   }
 
   // ---- 1:1 prep (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
@@ -316,6 +346,38 @@ function tierFor(method: string, path: string): readonly Tier[] {
     return [TIERS.search, TIERS.read];
   }
 
+  // ---- The Slack digest family (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
+  // TWO paths under one prefix with OPPOSITE costs, which is exactly the shape the catch-all gets
+  // wrong: it tiers on the VERB, so both of these are mutating and both would land on the 20/min
+  // `ai` bucket — right for one of them and wrong for the other.
+  //
+  //   PUT/DELETE
+  //   /api/pro/slack/target       ONE workspace's delivery config (plugin 0030; narrowed to a
+  //                               single workspace when the picker was removed). A `?workspace=`
+  //                               resolution plus ONE upsert or ONE delete on one small table. No
+  //                               model, no GitHub: following the token, there is no token.
+  //                               `read`, decided — it is a SETTINGS WRITE, and the file already
+  //                               records that a settings write is a settings write at every depth
+  //                               (the `/api/pro/settings/workspace` note below). ⚠ THE PATH IS
+  //                               SINGULAR NOW. The plural `/targets` is DELETED; a stale client
+  //                               calling it 404s, which is the catch-all's problem, not a tier's.
+  //   POST /api/pro/slack/test    "Send test" — and it is NOT a probe. It runs the SAME billed
+  //                               path the cron does: `refreshSprintReport` (one Haiku call unless
+  //                               the payload hash is unchanged) plus the account-wide repo-digest
+  //                               refresh, then an outbound POST to a user-supplied host. It stays
+  //                               on `ai` + `aiHourly` — where the catch-all would have put it
+  //                               anyway, spelled here so the family's two tiers are DECIDED
+  //                               together rather than one of them being inherited. ⚠ It takes ONE
+  //                               `?workspace=` and must never fan out over the whole selection: a
+  //                               test button that generated twelve reports would be the most
+  //                               expensive control in the app.
+  //
+  // Anchored on exact paths. A `startsWith('/api/pro/slack')` would be one sibling away from
+  // swallowing whatever this family grows next — the near-miss failure this file has recorded
+  // three times.
+  if (path === '/api/pro/slack/target') return [TIERS.read];
+  if (mutating && path === '/api/pro/slack/test') return [TIERS.ai, TIERS.aiHourly];
+
   // ---- AI generation ----
   // ⚠ RE-DECIDED, not inherited: `POST /api/pro/prs/:id/annotations/run` now spends GITHUB quota
   // as well as model tokens — one PR_DETAIL_QUERY per uncached PR for the anchor hunks
@@ -340,12 +402,19 @@ function tierFor(method: string, path: string): readonly Tier[] {
     // the generation verbs spend. `/refresh` and `/ask` are POSTs; so are the
     // review/fix starts. The one GET that generates is a `…/stream` SSE subscribe,
     // which attaches to an already-started run, so it stays a read.
+    // ⚠ THE SETTINGS EXEMPTIONS ARE A LIST, NOT A SUFFIX. `endsWith('/settings')` covered
+    // `PUT /api/pro/settings` and nothing beneath it, so `PUT /api/pro/settings/workspace` — the
+    // per-workspace sprint cadence, one DB upsert, no model and no GitHub quota — would have landed
+    // on the 20/min AI bucket purely because of where its path sits. A settings write is a settings
+    // write at every depth; the "follow the token" rule cuts BOTH ways.
+    const isSettingsWrite =
+      path === '/api/pro/settings' || path.startsWith('/api/pro/settings/');
     const generates =
       mutating &&
       !path.endsWith('/cancel') &&
       !path.endsWith('/key') &&
       !path.endsWith('/budget') &&
-      !path.endsWith('/settings');
+      !isSettingsWrite;
     if (generates) return [TIERS.ai, TIERS.aiHourly];
     return [TIERS.read];
   }

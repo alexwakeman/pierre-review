@@ -614,15 +614,30 @@ export interface ReviewSeam {
   postReview(args: PostReviewArgs): Promise<PostReviewOutcome>;
   // Post ONE finding as a standalone inline / PR-level comment.
   postFinding(args: PostFindingArgs): Promise<PostFindingOutcome>;
-  // Local Anthropic key (local-only credential store) — applied inside runReview.
-  // Also carries the local per-review budget: `reviewBudgetUsd` is the effective cap a
-  // run will use (user override or operator default), `reviewBudgetMax` the hard ceiling.
+  // The local per-review BUDGET: `reviewBudgetUsd` is the effective cap a run will use
+  // (user override or operator default), `reviewBudgetMax` the hard ceiling the user may set.
+  //
+  // ⚠ THE NAME IS HISTORICAL AND THE KEY HALF IS GONE. This used to report a stored BYO Anthropic
+  // key (`hasUserKey`) alongside the budget, and `setLocalKey` wrote it. The stored key is RETIRED:
+  // local Claude Review resolves credentials from an ambient Claude session first — so a
+  // subscription pays rather than a meter — and otherwise leaves the environment's
+  // `ANTHROPIC_API_KEY` in place. Two rungs, no stored secret, no form, no write path. THIS member
+  // survives NARROWED rather than deleted because the budget is still live
+  // (`ReviewBudgetPanel` / `PUT /api/claude-review/budget` / `getEffectiveReviewBudget()`).
+  //
+  // ⚠ ITS SIBLING `setLocalKey` WAS DELETED OUTRIGHT, AND THAT FAILS THE "NARROW ADDITIVE" TEST —
+  // a removed member is not a trailing optional field. apiVersion deliberately STAYS 21 anyway:
+  // bumping would turn "one dead local route 500s against a lagging submodule" into "the ENTIRE
+  // plugin goes dark, silently" for every account whose gitlink trails, which is strictly worse.
+  // ⚠ THE PRICE OF THAT CHOICE IS A LANDING REQUIREMENT: this host is NOT runtime-compatible with
+  // a plugin commit that still calls `setLocalKey` — the version gate passes and
+  // `PUT /api/claude-review/key` then throws `ctx.review.setLocalKey is not a function`. Host
+  // commit, plugin commit and GITLINK MOVE must land together. Nothing else in the plugin is
+  // affected, and the new SPA never calls that route.
   getLocalKeyStatus(): {
-    hasUserKey: boolean;
     reviewBudgetUsd: number;
     reviewBudgetMax: number;
   };
-  setLocalKey(key: string | null): { hasUserKey: boolean; auth: 'ok' | 'none' };
   // Set (number, clamped to the max) or clear (null → operator default) the local per-review
   // budget cap; returns the new effective value.
   setReviewBudget(usd: number | null): { reviewBudgetUsd: number };
@@ -961,11 +976,65 @@ export interface ProHostQueries {
   // per-seat price, EXCLUDES it from the figure rather than reading the unit as the monthly one
   // (which would understate it by the seat count, silently), and discloses that it did.
   workspaceHumanSeatCount?(accountId: number, workspaceId: number): Promise<number>;
+  // DORMANT AUTOMATION (core db/bot-dormancy.ts): of the reviewer ids the caller hands in, the ones
+  // that produced NO observable work in this workspace over a FIXED trailing 30 days — no review
+  // thread opened, no review comment left, no review submitted (a body-only "nothing to flag" pass
+  // counts as work). The same evidence union the Bots ROI table calls a reviewer `dormant` on.
+  //
+  // ⚠ IT EXISTS SO TWO PAID SURFACES CANNOT DISAGREE ABOUT WHETHER A BOT IS RUNNING. The Advisor
+  // already hides dormant reviewers (the filter sits at the END of `getAdvisorFindings`, over
+  // complete evidence); the Benchmark's placement route hides them through this seam. A second
+  // dormancy rule computed plugin-side would be a different sentence about the same reviewer.
+  //
+  // ⚠ THE WINDOW IS FIXED AND MUST STAY FIXED — it is NOT the ROI table's user-flipped chip. A
+  // workspace's peer placement may not vanish because somebody changed a window selector on
+  // another tab. The grain is the WORKSPACE (membership, never a `repoIds` narrowing), because the
+  // Advisor cannot narrow by repository at all and a narrowed benchmark request builds no rollup.
+  //
+  // ⚠ CANDIDATES ARE THE CALLER'S — this seam never re-decides who is a bot, and the result is
+  // always a subset of what was passed in.
+  //
+  // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the `getWorkPlan` / `workspaceHumanSeatCount`
+  // precedent verbatim. Absent, the plugin hides nothing and the Benchmark behaves exactly as it
+  // did before this existed; nothing else degrades.
+  dormantBotUserIds?(
+    accountId: number,
+    workspaceId: number,
+    candidateUserIds: number[],
+  ): Promise<number[]>;
 }
 
 export interface ProContext {
   log: FastifyBaseLogger;
-  host: { version: string; deploymentMode: 'local' | 'cloud'; isCloud: boolean };
+  host: {
+    version: string;
+    deploymentMode: 'local' | 'cloud';
+    isCloud: boolean;
+    // WHERE A HUMAN'S BROWSER REACHES THE SPA, no trailing slash (core config.ts `appWebUrl`).
+    // The plugin builds DEEP LINKS back into the SPA from it — today, the workspace + per-repo
+    // links in the Slack digest.
+    //
+    // ⚠ THIS IS `appWebUrl`, NOT `appBaseUrl`, AND THE DIFFERENCE IS LOAD-BEARING. `appBaseUrl`
+    // is the API origin: it builds the OAuth `redirect_uri` and is the exact CORS allowlist entry
+    // in cloud. They are the same string in every SINGLE-ORIGIN deployment (the packaged release,
+    // cloud on Railway) and differ under `pnpm dev`, where this server is :4000 and never serves
+    // the SPA while Vite serves it on :5173. Wiring a deep link to `appBaseUrl` 404s there —
+    // which is exactly the bug that produced this seam's current name.
+    //
+    // ⚠ IT IS PASSED IN RATHER THAN READ FROM `process.env`. The plugin reading APP_BASE_URL
+    // itself would duplicate core's `?? http://localhost:${PORT}` fallback across the open-core
+    // boundary — the "TWO SPELLINGS MUST AGREE" hazard this file's sibling config.ts already
+    // records for the report model id — and, because a LOCAL install sets no APP_BASE_URL at all,
+    // it would emit a link with no host on exactly the deployment mode the feature exists to
+    // serve.
+    //
+    // ⚠ OPTIONAL, SO apiVersion STAYS 21 — a TRAILING optional FIELD on an existing object, the
+    // narrow "additive" test. A newer plugin against an older host finds it `undefined` and emits
+    // a digest with no app links; nothing else degrades. A required field here would be the case
+    // that demands a bump, and a bump is four literals across TWO REPOS whose half-application
+    // degrades the ENTIRE plugin to OSS mode with nothing thrown.
+    appWebUrl?: string;
+  };
   accountIdOf(req: FastifyRequest): number; // the single scoping seam
   // node-postgres-TYPED drizzle instance → a stray .get()/.all()/.run() is a
   // compile error in the plugin too.
@@ -1004,9 +1073,10 @@ export interface ProContext {
       // Explicit API key → the raw metered path; omitted → the ambient Claude
       // session. Lets the summary use its OWN discrete credential.
       apiKey?: string;
-      // 'local-review-key' → CORE resolves the local BYO Anthropic key
-      // (review/local-settings.ts) itself — the key never crosses the plugin boundary —
-      // falling through to the ambient session when unset. Ignored when `apiKey` is given.
+      // ⚠ RETIRED AND INERT — kept ONLY so this ProContext shape does not move (apiVersion
+      // stays 21). It used to mean "CORE resolves the local BYO Anthropic key itself"; that
+      // stored key no longer exists, local advanced-AI auth is ambient-session-then-env, and
+      // the ambient path resolves both. Passing it is identical to omitting it.
       credential?: 'local-review-key';
     }): Promise<{
       text: string;

@@ -24,7 +24,6 @@ import { GlobalLoadingBar } from './components/GlobalLoadingBar.js';
 import { WelcomeBackBanner } from './components/WelcomeBackBanner.js';
 import { HelpModal } from './components/HelpModal.js';
 import { SettingsModal } from './components/settings/SettingsModal.js';
-import { useHasProSettings } from './hooks/useProSettings.js';
 import { SignInGate } from './components/SignInGate.js';
 import { AuthNoticeBanner } from './components/AuthNoticeBanner.js';
 import { UserMenu } from './components/UserMenu.js';
@@ -70,7 +69,6 @@ export default function App(): JSX.Element {
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // The config modal (and its avatar-menu entry) only exist when there's a Pro setting to show.
-  const hasProSettings = useHasProSettings();
 
   // Opt-in browser notifications for new My Turn items + completed Claude reviews.
   // Shared pref (the Claude-review banner reads it too); the watcher fires only
@@ -331,7 +329,14 @@ export default function App(): JSX.Element {
               user={meUser}
               canSignOut={isCloud}
               onSignOut={onSignOut}
-              onOpenSettings={hasProSettings ? () => setSettingsOpen(true) : null}
+              // ⚠ UNGATED, AND THAT IS THE FIX FOR A REAL REGRESSION. This read
+              // `hasProSettings ? … : null`, which is FALSE when the plugin is absent — i.e. the
+              // public `npx pierre-review` release. The modal now opens with a GLOBAL half that
+              // includes the large-PR threshold, which is CORE, free, and ungated on every tier,
+              // so gating the only entry point on a PRO capability stranded a free setting behind
+              // a menu item that never rendered. The modal can no longer be empty in any
+              // configuration, so the entry point no longer needs a gate.
+              onOpenSettings={() => setSettingsOpen(true)}
             />
           )}
         </div>

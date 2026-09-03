@@ -521,37 +521,11 @@ export function BriefStrip(): JSX.Element | null {
           </li>
         )}
       </ul>
-
-      {/* ── ONE-RELEASE MIGRATION AID ─────────────────────────────────────────────────────────
-          Two panels left this screen in the Pending consolidation: the "Plan for today" card
-          became the Pending board's ranked head, and the flow-metric header moved to Reports.
-          Both are a rail click away, but a regular reader will look for them HERE first, so the
-          Feed points at where they went for a release. Delete this block once that has landed.
-
-          ⚠ The Pending link obeys the ordering rule documented above `openAttention`:
-          `setActivityRepo` FIRST, then BOTH lenses UNCONDITIONALLY — the setter early-returns an
-          empty patch when the rail is unchanged, so a lens left over from an earlier click would
-          otherwise survive and open a narrower list than this link promises. */}
-      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-gray-400">
-        <button
-          type="button"
-          onClick={() => {
-            setActivityRepo('attention');
-            setAttentionIsolation(null);
-            setAttentionRelevance(null);
-          }}
-          className="hover:text-gray-600 hover:underline dark:hover:text-gray-200"
-        >
-          Plan for today moved to Pending →
-        </button>
-        <button
-          type="button"
-          onClick={() => setActivityRepo('insights')}
-          className="hover:text-gray-600 hover:underline dark:hover:text-gray-200"
-        >
-          Flow metrics moved to Reports →
-        </button>
-      </div>
+      {/* The two "moved to …" breadcrumbs that sat here are GONE. They were a deliberately
+          one-release migration aid for the Pending consolidation (the "Plan for today" card and
+          the flow-metric header leaving this screen); that release has long landed, both
+          surfaces are a labelled rail click away, and a permanent footnote describing an old
+          layout is just noise on the app's default landing screen. */}
     </section>
   );
 }

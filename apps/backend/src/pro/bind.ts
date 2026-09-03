@@ -29,6 +29,7 @@ import { getPersonPeriod } from '../db/person-period.js';
 // the feature, and the alignment contract (it folds the SAME /api/attention cards the brief
 // counts) only survives if both live where the next reader can see them together.
 import { getWorkPlan } from '../db/work-plan.js';
+import { dormantBotUserIds } from '../db/bot-dormancy.js';
 import { forecastNext } from '../db/forecast.js';
 import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
 import { aiCreditStatus } from '../db/credits.js';
@@ -38,8 +39,6 @@ import { registerPrDetailEnricher } from '../pr/detail-enricher.js';
 import { cheapComplete } from '../review/llm.js';
 import { detectClaudeAuth } from '../review/auth.js';
 import {
-  hasUserAnthropicKey,
-  setUserAnthropicKey,
   getEffectiveReviewBudget,
   setUserReviewBudget,
   MAX_REVIEW_BUDGET_USD,
@@ -124,6 +123,13 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       version: process.env.npm_package_version ?? '0.0.0',
       deploymentMode: config.deploymentMode,
       isCloud: config.isCloud,
+      // The ONE spelling of the SPA's BROWSER-FACING base (config.ts `appWebUrl`). Passed across
+      // the seam so the plugin never re-derives it from the environment — see the contract's note.
+      //
+      // ⚠ `appWebUrl`, NOT `appBaseUrl`. Under `pnpm dev` this server is :4000 and serves no SPA;
+      // Vite serves it on :5173. Handing the plugin `appBaseUrl` here is what made the Slack
+      // digest's deep links 404 locally.
+      appWebUrl: config.appWebUrl,
     },
     accountIdOf,
     db,
@@ -233,6 +239,14 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       // implements it, so it is always present here.
       workspaceHumanSeatCount: (accountId, workspaceId) =>
         hostQueries.workspaceHumanSeatCount(accountId, workspaceId),
+      // Which of the plugin's OWN candidate reviewers said nothing anywhere in this workspace over
+      // the fixed 30-day dormancy window (core db/bot-dormancy.ts). The Benchmark hides those cards
+      // through this; the Advisor hides them inside `getAdvisorFindings`, off the same predicate,
+      // so the two paid surfaces cannot disagree about whether a bot is running. Takes a
+      // workspaceId and NOT a scope on purpose: dormancy keys on workspace MEMBERSHIP, never on a
+      // repoIds narrowing. The seam member is OPTIONAL (see contract.ts); THIS host implements it.
+      dormantBotUserIds: (accountId, workspaceId, candidateUserIds) =>
+        dormantBotUserIds(accountId, workspaceId, candidateUserIds),
     },
     recordAiUsage: (row) => recordAiUsage(row),
     aiCredits: {
@@ -333,15 +347,14 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       runReview: async (a) => (await import('../review/agent.js')).runReview(a),
       postReview: async (a) => (await import('../review/post-seam.js')).postReview(a),
       postFinding: async (a) => (await import('../review/post-seam.js')).postFinding(a),
+      // ⚠ BUDGET ONLY. The `hasUserKey` half and the whole `setLocalKey` member went with the
+      // stored BYO Anthropic key: local Claude Review authenticates from an ambient Claude session,
+      // else the environment's `ANTHROPIC_API_KEY` (review/auth.ts). Nothing here reads or writes
+      // `~/.pierre-review/config.json`'s `anthropicApiKey` any more.
       getLocalKeyStatus: () => ({
-        hasUserKey: hasUserAnthropicKey(),
         reviewBudgetUsd: getEffectiveReviewBudget(),
         reviewBudgetMax: MAX_REVIEW_BUDGET_USD,
       }),
-      setLocalKey: (k) => {
-        setUserAnthropicKey(k ?? '');
-        return { hasUserKey: hasUserAnthropicKey(), auth: detectClaudeAuth().status };
-      },
       setReviewBudget: (usd) => {
         setUserReviewBudget(usd);
         return { reviewBudgetUsd: getEffectiveReviewBudget() };

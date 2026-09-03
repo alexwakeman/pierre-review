@@ -16,6 +16,7 @@ import {
   type EventType,
   type InsightKind,
   type MlSeverity,
+  type PeriodGrain,
   type PrStatus,
   type ReviewBotKind,
   type ReviewState,
@@ -574,6 +575,23 @@ export interface FilterState {
   // state, so it is NOT in FilterDefaults and "Clear filters" leaves it alone.
   // null = show the newest completed period.
   insightsReportKey: string | null;
+  // Which PERIOD GRID the Reports picker is browsing: the configured sprint cadence (default) or
+  // real calendar months. URL-mirrored as `?reportGrain=`.
+  //
+  // ⚠ IT IS A SEPARATE FIELD FROM `insightsReportKey` EVEN THOUGH THE KEY ENCODES THE GRAIN.
+  // The key names the DOCUMENT (`sprint-2026-08-18` / `month-2026-08`); this names the LIST the
+  // reader is browsing, which still has to be right while the key is null (a fresh load, or the
+  // moment after a grain switch clears the selection). Without it the picker would reset to
+  // sprint on every refresh of a month link.
+  //
+  // ⚠ IT IS NOT THE SPRINT CADENCE SETTING AND MUST NEVER BE FOLDED INTO IT. The cadence is a
+  // stored, per-workspace fact that also grids the FREE flow-metrics comparison window on another
+  // tab; the grain is one reader's view of Reports. Storing the grain would silently move a
+  // number on a screen nobody was looking at.
+  //
+  // Selection/reading state, so — like `insightsReportKey` — it is NOT in FilterDefaults and
+  // "Clear filters" leaves it alone.
+  insightsReportGrain: PeriodGrain;
   // PR-detail Threads-tab bot filter: when set, the Threads tab shows ONLY that review
   // vendor's threads (set by clicking a "CodeRabbit · 12 · 3 unresolved" chip in Overview).
   // null = no filter. Transient; cleared when the PR changes / selection clears.
@@ -1106,6 +1124,10 @@ export interface FilterState {
   setRepoConsoleTab: (repoId: number, tab: RepoConsoleTab) => void;
   // Select the Reports period (see insightsReportKey). `null` = the newest completed period.
   setInsightsReportKey: (periodKey: string | null) => void;
+  // Switch the Reports period GRID. ⚠ It CLEARS the selected period: a `sprint-…` key names no
+  // period on the calendar grid (and vice versa), so carrying it across would leave the panel
+  // asking for a document that cannot exist and rendering "not generated yet" for it.
+  setInsightsReportGrain: (grain: PeriodGrain) => void;
   toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
   // Reset every user-set FILTER (repos, members, range, categories, PR statuses,
@@ -1352,6 +1374,7 @@ function freshDefaults(): FilterData {
     selectedPrId: null,
     selectedThreadId: null,
     insightsReportKey: null,
+    insightsReportGrain: 'sprint',
     threadBotFilter: null,
     threadStateFilter: new Set<DerivedState>(),
     threadSeverityFilter: new Set<MlSeverity>(),
@@ -1419,6 +1442,7 @@ export type UrlOwnedState = Pick<
   FilterData,
   | 'activityRepoId'
   | 'insightsReportKey'
+  | 'insightsReportGrain'
   | 'selectedPrId'
   | 'selectedThreadId'
   | 'attentionIsolation'
@@ -1436,6 +1460,7 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
   return {
     activityRepoId: d.activityRepoId,
     insightsReportKey: d.insightsReportKey,
+    insightsReportGrain: d.insightsReportGrain,
     selectedPrId: d.selectedPrId,
     selectedThreadId: d.selectedThreadId,
     attentionIsolation: d.attentionIsolation,
@@ -1876,6 +1901,15 @@ export const useFilters = create<FilterState>((set, get) => ({
   setRepoConsoleTab: (repoId, tab) =>
     set((s) => ({ repoConsoleTabs: { ...s.repoConsoleTabs, [repoId]: tab } })),
   setInsightsReportKey: (periodKey) => set({ insightsReportKey: periodKey }),
+  // ⚠ CLEARING THE KEY IS PART OF THE SWITCH, not a convenience. The two grains share one key
+  // space but not one grid: `sprint-2026-08-18` resolves to nothing on the calendar and
+  // `month-2026-08` resolves to nothing on the sprint grid, so keeping the old key would leave
+  // the panel requesting a period that cannot exist — which renders as the ordinary "not
+  // generated yet" box, indistinguishable from a period nobody has run.
+  setInsightsReportGrain: (grain) =>
+    set((s) =>
+      s.insightsReportGrain === grain ? {} : { insightsReportGrain: grain, insightsReportKey: null },
+    ),
   toggleFileGroup: (path, defaultExpanded) =>
     set((s) => {
       // Track explicit user intent against the default so re-renders are stable.

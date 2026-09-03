@@ -4,13 +4,10 @@ import type {
   BotFlaggingCluster,
   BotFlaggingClusterMember,
   BotFlaggingComment,
-  MlLabel,
   MlLabelTargetKind,
   MlSeverity,
   User,
 } from '@pierre-review/shared';
-import { disagreeDirection } from '../../lib/severityAgreement.js';
-import type { StateMeta } from '../../lib/ui.js';
 import {
   CONFIDENCE_META,
   dateTime,
@@ -20,8 +17,9 @@ import {
   safeExternalUrl,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
-import { ArrowIcon, BotIcon, ExternalLinkIcon } from '../Icons.js';
+import { BotIcon, ExternalLinkIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
+import { MetaChip } from '../MetaChip.js';
 import { MlSeverityBadge } from '../MlSeverityBadge.js';
 
 // The two row types of the "what the bots are flagging" drill-down: one bot comment, and one
@@ -148,78 +146,6 @@ function CardBody({ body }: { body: string }): JSX.Element {
   );
 }
 
-/**
- * What the BOT claimed about its own comment, next to what our model rated it — the one thing
- * this screen exists to show, said per row.
- *
- * It carries only what `MlSeverityBadge` does not. That badge already prints "bot said <X>" when
- * the two contradict, and stays silent otherwise — correct everywhere else, but on a screen whose
- * facets are `agree` / `overCall` / `underCall` / `undeclared`, silence would leave three of the
- * four states looking identical. So: the DIRECTION word on a contradiction, and an explicit (muted)
- * marker for the other two.
- *
- * ⚠ Direction is the two SEVERITY ORDINALS and nothing else (`disagreeDirection`) — never
- * `severityProb`, never `vendorSeverityConfidence`. And this is a display of two claims, never a
- * reconciliation: our severity is the more accurate rater (0.700 exact on the adjudicated gold-300
- * against the vendor badge's 0.474), so nothing here invites the reader to resolve the
- * disagreement, and nothing anywhere derives our label from theirs.
- */
-function VendorClaim({ label }: { label: MlLabel }): JSX.Element {
-  const vendor = label.vendorSeverity;
-  const ours = ML_SEVERITY_META[label.severity];
-
-  if (vendor == null) {
-    return (
-      <span
-        className="text-[10px] text-gray-400 dark:text-gray-500"
-        title="This bot posted no severity badge of its own, so there is nothing here to agree or disagree with — the matrix's 'none' column. Silence is not agreement, which is why the two are counted apart."
-      >
-        bot declared nothing
-      </span>
-    );
-  }
-
-  const vendorMeta = ML_SEVERITY_META[vendor];
-  const dir = disagreeDirection(label);
-
-  if (dir == null) {
-    return (
-      <span
-        className="text-[10px] text-gray-400 dark:text-gray-500"
-        title={`The bot badged this ${vendorMeta.label} itself — the matrix's diagonal. Said out loud here because on this screen agreement is a finding of its own; on an ordinary comment the badge stays quiet about it.`}
-      >
-        bot agreed
-      </span>
-    );
-  }
-
-  return (
-    <span
-      className="inline-flex items-center gap-0.5 text-[10px] font-medium"
-      style={{ color: vendorMeta.color }}
-      title={`The bot badged this ${vendorMeta.label}; our model rated it ${ours.label}. The direction is the two severity ordinals — not anyone's confidence. Ours is the more accurate rating (70% agreement with human adjudication against the bot's 47%), so this is a disagreement to look at, not one to resolve.`}
-    >
-      <ArrowIcon dir={dir === 'over' ? 'up' : 'down'} size={10} />
-      {dir === 'over' ? 'bot called it worse' : 'bot called it milder'}
-    </span>
-  );
-}
-
-/** Derived-state / confidence chip chrome — the same tinted-at-10%-opacity form used wherever a
- *  `StateMeta` is shown as a pill (DERIVED_STATE_META, CONFIDENCE_META, ML_SEVERITY_META). */
-function MetaChip({ meta, prefix }: { meta: StateMeta; prefix?: string }): JSX.Element {
-  return (
-    <span
-      className="shrink-0 rounded px-1 py-px text-[10px] font-medium"
-      style={{ color: meta.color, background: `${meta.color}1a` }}
-      title={meta.description}
-    >
-      {prefix}
-      {meta.label}
-    </span>
-  );
-}
-
 interface BotCommentCardProps {
   c: BotFlaggingComment;
   /** From the ONE shared `useUsers()` the screen already holds — for the author's avatar. */
@@ -304,13 +230,13 @@ function BotCommentCardImpl({
         </span>
       </div>
 
-      {/* severity row: our rating, then the bot's own claim about the same comment */}
+      {/* Severity row: our rating, with the bot's own claim about the same comment folded INTO the
+          badge (`vendorClaim`). It used to be two components on one identical condition, which
+          printed the vendor's severity twice — "[Major] bot said Minor  ↑ bot called it worse". The
+          badge now says it once, with the direction on it; all four facet states still speak. */}
       <div className="mt-1 flex flex-wrap items-center gap-2">
         {c.mlLabel ? (
-          <>
-            <MlSeverityBadge label={c.mlLabel} />
-            <VendorClaim label={c.mlLabel} />
-          </>
+          <MlSeverityBadge label={c.mlLabel} vendorClaim />
         ) : (
           <span
             className="text-[10px] text-gray-400 dark:text-gray-500"

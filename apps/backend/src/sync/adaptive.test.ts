@@ -14,9 +14,13 @@ vi.mock('../github/client.js', () => ({ ghRestGetConditional: vi.fn() }));
 
 import { ghRestGetConditional } from '../github/client.js';
 import {
+  backoffMsFor,
   bucketFor,
   decideIncrementalWalk,
   isDue,
+  noteAttempt,
+  noteWalkFailure,
+  noteWalkSuccess,
   recordFullWalk,
   __resetAdaptiveState,
 } from './adaptive.js';
@@ -117,5 +121,90 @@ describe('decideIncrementalWalk (conditional probe)', () => {
     mockProbe.mockResolvedValueOnce(unchanged('etag-1'));
     await decideIncrementalWalk(1, 'o', 'n', 'tok', T0 + 200_000);
     expect(mockProbe).toHaveBeenNthCalledWith(2, 'tok', expect.any(String), 'etag-1');
+  });
+});
+
+// THE REGRESSION THIS FILE EXISTS FOR NOW.
+//
+// isDue() is the only thing between a repo and the */1 tick, and it gates on `lastAttemptAt`
+// — which, for a long time, ONLY decideIncrementalWalk wrote. A repo planned as `full` never
+// reached that call, so it was due on every tick: four repos that 404 on GitHub were re-walked
+// once a minute, at 15 GraphQL points each, for five weeks — 3,600 points/hour of a 5,000/hour
+// budget, with nothing on screen saying so.
+//
+// Two halves, and BOTH are load-bearing: the unconditional attempt stamp (a floor no future
+// mode can slip past) and the health backoff (because the stamp alone leaves an unreadable
+// repo in the HOT bucket — 30 walks an hour instead of 60).
+describe('noteAttempt (the floor under isDue)', () => {
+  it('gates a repo that never goes through the incremental probe', () => {
+    // The full-mode path: no probe, no decideIncrementalWalk, so this stamp is the only one.
+    noteAttempt(1, T0);
+    expect(isDue(1, T0)).toBe(false);
+    expect(isDue(1, T0 + 60_000)).toBe(false); // the next tick, one minute later
+    expect(isDue(1, T0 + 121_000)).toBe(true); // ...and no sooner than the hot interval
+  });
+
+  it('is NOT sufficient on its own — a first-sighted repo reads hot', () => {
+    // Documents exactly why the backoff below has to exist: ensure() seeds lastChangeAt=now,
+    // so a repo nobody has ever successfully read still looks like the busiest repo there is.
+    noteAttempt(1, T0);
+    expect(bucketFor(1, T0)).toBe('hot');
+    expect(backoffMsFor(1)).toBe(0);
+  });
+});
+
+describe('health backoff on consecutive failures', () => {
+  it('widens with each consecutive failure, from the cold interval up to the 6h cap', () => {
+    const HOUR_MS = 60 * 60 * 1000;
+    expect(backoffMsFor(1)).toBe(0); // healthy (and unseen)
+
+    expect(noteWalkFailure(1, T0)).toBe(1);
+    expect(backoffMsFor(1)).toBe(2 * 900_000); // 2 × the 900s cold interval = 30 min
+    expect(noteWalkFailure(1, T0)).toBe(2);
+    expect(backoffMsFor(1)).toBe(4 * 900_000); // 1h
+    expect(noteWalkFailure(1, T0)).toBe(3);
+    expect(backoffMsFor(1)).toBe(8 * 900_000); // 2h
+    expect(noteWalkFailure(1, T0)).toBe(4);
+    expect(backoffMsFor(1)).toBe(4 * HOUR_MS);
+
+    // ...and it stops at the cap rather than growing without bound.
+    for (let i = 0; i < 20; i += 1) noteWalkFailure(1, T0);
+    expect(backoffMsFor(1)).toBe(6 * HOUR_MS);
+  });
+
+  it('overrides the activity bucket: a failing HOT repo waits out the backoff', () => {
+    noteAttempt(1, T0);
+    noteWalkFailure(1, T0);
+    expect(bucketFor(1, T0)).toBe('hot'); // the bucket still says "busy"...
+    expect(isDue(1, T0 + 5 * MIN)).toBe(false); // ...but health decides. Was: true, x60/hour.
+    expect(isDue(1, T0 + 29 * MIN)).toBe(false);
+    expect(isDue(1, T0 + 31 * MIN)).toBe(true);
+
+    // A second failure at that attempt widens it again.
+    noteAttempt(1, T0 + 31 * MIN);
+    noteWalkFailure(1, T0 + 31 * MIN);
+    expect(isDue(1, T0 + 31 * MIN + 45 * MIN)).toBe(false); // 1h now, not 30 min
+    expect(isDue(1, T0 + 31 * MIN + 61 * MIN)).toBe(true);
+  });
+
+  it('a success clears it — the repo returns to its activity cadence immediately', () => {
+    noteAttempt(1, T0);
+    noteWalkFailure(1, T0);
+    noteWalkFailure(1, T0);
+    expect(isDue(1, T0 + 45 * MIN)).toBe(false);
+
+    noteWalkSuccess(1, T0);
+    expect(backoffMsFor(1)).toBe(0);
+    // Back to the plain hot interval, from the same (unchanged) attempt stamp.
+    expect(isDue(1, T0 + 119_000)).toBe(false);
+    expect(isDue(1, T0 + 121_000)).toBe(true);
+  });
+
+  it('never widens a healthy repo (the cadence is exactly what it always was)', async () => {
+    mockProbe.mockResolvedValue(changed('e1'));
+    await decideIncrementalWalk(1, 'o', 'n', 'tok', T0);
+    noteWalkSuccess(1, T0);
+    expect(isDue(1, T0 + 119_000)).toBe(false);
+    expect(isDue(1, T0 + 121_000)).toBe(true);
   });
 });

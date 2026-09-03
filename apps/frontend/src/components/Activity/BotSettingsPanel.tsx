@@ -50,12 +50,18 @@ export function BotSettingsPanel({ repoId }: { repoId?: number } = {}): JSX.Elem
           the note above promises). */}
       <DetectedReviewersTable workspaceId={workspaceId} repoId={repoId} />
 
+      {/* ⚠ THIS USED TO POINT AT "Settings → Review bots (account-wide)", WHICH NO LONGER EXISTS.
+          Its three referents each ended somewhere different: detection takes no configuration at
+          all (the toggles had zero production consumers and were removed), the Limn marker is
+          stamped unconditionally because it is the only producer of the 'pierre' reviewer kind,
+          and the Slack bot block became a field on the DELIVERY row (plugin migration 0033) — a
+          checkbox inside the per-workspace Slack section. A pointer to a deleted screen is worse
+          than no pointer: it sends a reader looking for a control that was never coming back. */}
       <p className="border-t border-gray-200 pt-2.5 text-[11px] text-gray-400 dark:border-gray-800">
-        Bot <span className="font-medium">detection</span> heuristics, the{' '}
-        <span className="font-medium">Limn attribution</span> markers and the Slack bot digest are
-        account-wide policy about our own behaviour, not judgements about a particular
-        Workspace&apos;s tooling — they live in{' '}
-        <span className="font-medium">Settings → Review bots (account-wide)</span>.
+        Bot <span className="font-medium">detection</span> needs no configuration, and Limn stamps
+        its own review marker unconditionally. To put a review-bot summary into a Slack digest,
+        turn it on for that workspace&apos;s delivery in{' '}
+        <span className="font-medium">Settings → Workspace → Slack digest</span>.
       </p>
     </div>
   );

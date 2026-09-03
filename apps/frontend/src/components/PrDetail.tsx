@@ -10,6 +10,7 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
+import { usePrCodeLoc } from '../hooks/useLargePr.js';
 import { usePrLiveRefresh } from '../hooks/usePrLiveRefresh.js';
 import { usePrArmedIntent } from '../hooks/useAutoMerge.js';
 import { useMe, useProCapabilities } from '../hooks/useTriage.js';
@@ -45,6 +46,7 @@ import {
 } from './Icons.js';
 import { ThreadList } from './ThreadList/index.js';
 import { BotTriageCard } from './BotTriageCard.js';
+import { LargePrFlag } from './Activity/LargePrFlag.js';
 import { ChecksTab } from './ChecksTab.js';
 import { CommentAnnotations, ReviewCheckButton } from './CommentAnnotations.js';
 import type { MlSeverity } from '@pierre-review/shared';
@@ -209,7 +211,6 @@ function ActivityList({
 }): JSX.Element {
   const all = useMemo(() => buildActivity(pr), [pr]);
   const rows = since ? all.filter((r) => r.time > since) : all;
-  const showEventOnTimeline = useFilters((s) => s.showEventOnTimeline);
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
   const [flashKey, setFlashKey] = useState<string | null>(null);
 
@@ -280,14 +281,20 @@ function ActivityList({
                 </div>
               )}
               <div className="mt-1 flex items-center gap-3 text-xs">
-                <button
-                  type="button"
-                  onClick={() => showEventOnTimeline(pr.id, r.time, r.event)}
-                  className="text-blue-500 hover:underline"
-                  title="Show this event on the timeline"
-                >
-                  Show
-                </button>
+                {/* Was a hand-rolled "Show" that centred this event on the SHARED
+                    board — a second focus-entry funnel that could drift from the one
+                    every other "show this moment" control uses. It now goes through
+                    ShowOnTimeline, so it opens the PR's OWN isolated timeline tab
+                    (fitted to the PR) with this event centred + glowing. The header's
+                    TimelineIcon button is the one that still means the shared board;
+                    the tooltips are what tell them apart. */}
+                <ShowOnTimeline
+                  prId={pr.id}
+                  at={r.time}
+                  event={r.event}
+                  label="Timeline view"
+                  title="Timeline view — open this PR's own timeline tab, centred on this event"
+                />
                 {r.href && (
                   <a
                     href={safeExternalUrl(r.href)}
@@ -639,6 +646,12 @@ export function PrDetail({
   selectedThreadId: number | null;
 }): JSX.Element {
   const { data: pr, isLoading, error } = usePr(prId);
+  // The large-PR flag's two numbers. ⚠ They ride the LEAN LIST payloads, not `/api/prs/:id` — the
+  // classifier that decides what counts as "code" lives server-side in `db/code-loc.ts`, and
+  // re-summing `pr.files` here would be a second classifier free to disagree with the boards. So
+  // the header borrows the measurement the timeline/open-PR caches already hold; a PR in neither
+  // resolves to "no measurement" and therefore no flag, exactly like an unmeasured PR.
+  const codeLocFields = usePrCodeLoc(prId);
   const { data: repos } = useRepos();
   const { aiAnalysis, aiFix, claudeReview: claudeReviewEnabled } = useProCapabilities();
   const aiFixTabEnabled = aiAnalysis || aiFix;
@@ -1179,6 +1192,11 @@ export function PrDetail({
               </button>
             </>
           )}
+          {/* Deliberately OUTSIDE the `changedFilesCount > 0` block: the flag's own resolver is
+              the only gate it needs, and it renders nothing for an unmeasured or under-threshold
+              PR. Placed right after the raw +/− delta so the two readings sit together — that
+              total includes docs, config, lockfiles and generated files; this one does not. */}
+          <LargePrFlag pr={codeLocFields} className="ml-0.5" />
         </div>
       </div>
 

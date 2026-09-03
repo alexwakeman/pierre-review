@@ -131,7 +131,14 @@ async function startBackend(tier) {
   console.log(`\n▸ starting demo backend :${BACKEND_PORT} (${tier} tier, gh off PATH)`);
   const child = run(join(BACKEND, 'node_modules', '.bin', 'tsx'), ['src/index.ts'], {
     cwd: BACKEND,
-    env: { ...baseEnv, PORT: String(BACKEND_PORT), ...(tier === 'free' ? freeEnv : proEnv) },
+    // FRONTEND_PORT so the backend's `appWebUrl` (the base for app deep links, e.g. in the Slack
+    // digest) points at THIS stack's Vite on :5273 rather than the default :5173.
+    env: {
+      ...baseEnv,
+      PORT: String(BACKEND_PORT),
+      FRONTEND_PORT: String(FRONTEND_PORT),
+      ...(tier === 'free' ? freeEnv : proEnv),
+    },
   });
   await waitFor(`http://localhost:${BACKEND_PORT}/api/health`, 'backend');
   return child;

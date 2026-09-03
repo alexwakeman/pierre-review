@@ -32,7 +32,6 @@ import type {
   FailingCheckInput,
   GenerateFixBody,
   PrSummaryResponse,
-  ClaudeKeyResponse,
   ClaudeReview,
   ClaudeReviewListResponse,
   ClaudeReviewModel,
@@ -40,7 +39,6 @@ import type {
   ClaudeReviewResponse,
   ClaudeReviewStatusResponse,
   ClaudeReviewVerdict,
-  ClaudeKeyStatusResponse,
   ReviewBudgetResponse,
   CreatePrCommentBody,
   CreatePrCommentResult,
@@ -112,6 +110,8 @@ import type {
   MyTurnResponse,
   ActivityResponse,
   InsightsResponse,
+  LargePrThresholdBody,
+  LargePrThresholdResponse,
   RepoAnalytics,
   RepoClaudeReviewsResponse,
   RepoDigest,
@@ -135,11 +135,15 @@ import type {
   PeriodReportGenerateResponse,
   PeriodReportResponse,
   PersonPeriodResponse,
+  PeriodGrain,
   PeriodReportsListResponse,
   PinnedPromptsResponse,
   CreatePinnedPromptBody,
   ProSettings,
-  ProSettingsUpdate,
+  WorkspaceProSettings,
+  WorkspaceProSettingsUpdate,
+  WorkspaceSlackTargetResponse,
+  WorkspaceSlackTargetUpdate,
   Repo,
   RepoSearchResponse,
   SuggestedReposResponse,
@@ -649,6 +653,15 @@ export const api = {
     fetch('/api/me/benchmark-consent', jsonBody('POST', { optIn })).then((r) =>
       handle<{ status: string; benchmarkOptIn: boolean }>(r),
     ),
+  // The account's large-PR threshold, in lines of CODE churn. ACCOUNT-GRAINED — there is no
+  // `?workspace=`, and the backend strips an unknown key rather than rejecting it, so a caller
+  // that "scoped" this would get a silent account-wide write. `null` RESETS to the product
+  // default (a column write, never a row delete); the response echoes the same two fields
+  // /api/me carries, so the Settings section renders the result without waiting for a refetch.
+  setLargePrThreshold: (threshold: number | null) =>
+    fetch('/api/me/large-pr-threshold', jsonBody('POST', { threshold } as LargePrThresholdBody)).then(
+      (r) => handle<LargePrThresholdResponse>(r),
+    ),
   // Workspace review-intelligence "Insights" (Pro; workspaceInsights capability) — the attention
   // CARDS (+ the sprint report). The flow-metric HEADER moved OUT to the free
   // /api/workspace-metrics, the Retro panel was deleted, and cross-workspace comparison is the
@@ -790,9 +803,28 @@ export const api = {
   // is punctuated with a hyphen rather than the colon the plan sketched. It is still
   // `encodeURIComponent`-wrapped here: the key's shape is a server contract, not something the
   // client gets to assume stays path-safe.
-  periodReports: (workspaceId: number) =>
+  //
+  // ⚠ `grain` IS A READING CHOICE ON THE REQUEST, never a stored setting — picking "Month" on
+  // Reports must not move the free flow-metrics comparison window on another tab. It is spelled
+  // out ONLY on the list: every other call here is given a period KEY, whose shape already says
+  // which grid it names (`sprint-2026-08-18` vs `month-2026-08`), so no second parameter exists
+  // that could disagree with the key beside it.
+  periodReports: (workspaceId: number, grain: PeriodGrain = 'sprint') =>
     get<PeriodReportsListResponse>(
-      withQuery('/api/pro/insights/reports', workspaceParam(workspaceId)),
+      withQuery(
+        '/api/pro/insights/reports',
+        workspaceParam(workspaceId),
+        // Omitted when it is the default, so a plain link never names a grain it does not change.
+        grain === 'sprint' ? undefined : `grain=${grain}`,
+      ),
+    ),
+  // The OPEN calendar month. FREE, LIVE and never stored — there is no row behind it, no
+  // narration, no staleness flag and no generate verb anywhere near it. Its own path (not a
+  // `…/reports/:key` sibling) is what keeps it structurally outside the billing family, and it
+  // carries its own `search` rate-limit tier in core.
+  periodMonthToDate: (workspaceId: number) =>
+    get<PeriodReportResponse>(
+      withQuery('/api/pro/insights/month-to-date', workspaceParam(workspaceId)),
     ),
   periodReport: (workspaceId: number, periodKey: string) =>
     get<PeriodReportResponse>(
@@ -917,19 +949,74 @@ export const api = {
     get<ReviewActionsResponse>(`/api/pro/claude-reviews/${reviewId}/actions`),
 
   // ---- Pro per-account settings (packages/pro `pro_settings`; the config modal) ----
-  // Sprint window + Slack webhook + AI-update policy + Jira/Linear provider. The Slack
-  // webhook URL is write-only (never returned; `slack.configured` reflects storage). Absent
-  // plugin → 404. Only fetched when at least one Pro capability is on.
+  // ⚠ WHAT IS LEFT HERE IS ONE READING PREFERENCE PLUS THE BOT TOGGLES. Three things left this
+  // route for the WORKSPACE grain and none of them kept an account-level default beneath it: the
+  // Slack digest (plugin 0030), and the sprint cadence + the Jira/Linear tracker (plugin 0031).
+  // `sprint.cadenceDays` / `sprint.startDate` / `issue` still ride the read shape but are ALWAYS
+  // empty, and the PUT schema STRIPS them silently — write `updateWorkspaceProSettings` instead.
+  // Absent plugin → 404. Only fetched when at least one Pro capability is on.
   proSettings: () => get<ProSettings>('/api/pro/settings'),
-  updateProSettings: (patch: ProSettingsUpdate) =>
-    fetch('/api/pro/settings', jsonBody('PUT', patch)).then((r) =>
-      handle<ProSettings>(r),
+  // ⚠ THERE IS NO `updateProSettings` ANY MORE, AND THE ROUTE IT WROTE IS NOT GONE — it simply has
+  // nothing left to write. The comparison-window MODE was the last live field on it and moved to
+  // the workspace row in plugin migration 0032 (`WorkspaceProSettingsUpdate.comparisonMode`); the
+  // bot Slack-digest flag moved to the delivery row in 0033 (`WorkspaceSlackTargetUpdate.botDigest`).
+  // Every remaining key in `ProSettingsUpdate` is STRIPPED by the PUT schema, so a client method
+  // for it would be a write that always answers 200 and always changes nothing. Restore it only
+  // alongside a field the account grain genuinely owns.
+
+  // ---- The PER-WORKSPACE Pro config (packages/pro `pro_workspace_settings`) ----
+  // ONE route, ONE row, TWO sections: the sprint cadence + phase anchor, and the Jira/Linear
+  // tracker. Both are properties of the TEAM — a sprint length is what one team runs, and a PR's
+  // repo belongs to exactly one workspace — so both are scoped by `?workspace=` like every other
+  // scoped route (absent / unknown / another tenant's id all degrade to the account's Default,
+  // never a 404). The PUT is a PARTIAL, SECTIONED patch: an omitted section is untouched, which is
+  // what lets the two Settings sections keep their own Save buttons without clobbering each other.
+  // `sprint.cadenceDays: null` CLEARS the cadence (it nulls the pair, the row survives because it
+  // also holds the tracker); an OMITTED `sprint.startDate` keeps the stored anchor, so a
+  // cadence-only edit does not silently re-phase the grid.
+  workspaceProSettings: (workspaceId: number) =>
+    get<WorkspaceProSettings>(
+      withQuery('/api/pro/settings/workspace', workspaceParam(workspaceId)),
     ),
-  // Send a one-off Slack digest to the account's configured webhook now (the modal's "Send test").
-  testSlackDigest: () =>
-    fetch('/api/pro/slack/test', jsonBody('POST')).then((r) =>
-      handle<{ sent: boolean; message?: string }>(r),
+  updateWorkspaceProSettings: (workspaceId: number, patch: WorkspaceProSettingsUpdate) =>
+    fetch(
+      withQuery('/api/pro/settings/workspace', workspaceParam(workspaceId)),
+      jsonBody('PUT', patch),
+    ).then((r) => handle<WorkspaceProSettings>(r)),
+
+  // ---- The PER-WORKSPACE Slack digest (packages/pro `workspace_slack_targets`) ----
+  // ⚠ ONE WORKSPACE PER CALL — THE ONE IN `?workspace=`. The plural list endpoints
+  // (`GET/PUT /api/pro/slack/targets`) are DELETED: Settings configure the workspace the reader is
+  // currently in, so there is no selection to submit and no fan-out to perform.
+  // The webhook URL is WRITE-ONLY — the GET returns `configured` and never the secret, and an
+  // OMITTED `webhookUrl` on the PUT KEEPS the stored one (a form that re-submitted what it was
+  // shown would otherwise blank it).
+  // ⚠ DELETE IS THE OFF SWITCH AND IT IS A VERB. `cadence: 'off'` pauses and keeps the channel;
+  // DELETE removes the row and frees a slot under the cap. All three verbs answer the SAME shape,
+  // so one cache key holds the result of each.
+  // The PUT 400s with the number in `{message}` when adding a row would pass the cap — every
+  // configured workspace is its own billed report on every send, so the cap is a spend bound.
+  slackTarget: (workspaceId: number) =>
+    get<WorkspaceSlackTargetResponse>(
+      withQuery('/api/pro/slack/target', workspaceParam(workspaceId)),
     ),
+  updateSlackTarget: (workspaceId: number, patch: WorkspaceSlackTargetUpdate) =>
+    fetch(
+      withQuery('/api/pro/slack/target', workspaceParam(workspaceId)),
+      jsonBody('PUT', patch),
+    ).then((r) => handle<WorkspaceSlackTargetResponse>(r)),
+  deleteSlackTarget: (workspaceId: number) =>
+    fetch(
+      withQuery('/api/pro/slack/target', workspaceParam(workspaceId)),
+      jsonBody('DELETE'),
+    ).then((r) => handle<WorkspaceSlackTargetResponse>(r)),
+  // Send a one-off digest for ONE workspace to that workspace's webhook now (the modal's "Send
+  // test"). It runs the cron's real billed path, which is why it takes one workspace.
+  testSlackDigest: (workspaceId: number) =>
+    fetch(
+      withQuery('/api/pro/slack/test', workspaceParam(workspaceId)),
+      jsonBody('POST'),
+    ).then((r) => handle<{ sent: boolean; message?: string }>(r)),
 
   me: () => get<MeResponse>('/api/me'),
   // Cloud-mode sign-out. 204 No Content; resolves once the session is cleared.
@@ -968,15 +1055,13 @@ export const api = {
   // ---- Claude Review ----
   claudeReview: (prId: number) =>
     get<ClaudeReviewResponse>(`/api/prs/${prId}/claude-review`),
-  // Store (or clear, with an empty string) a user-supplied Anthropic API key.
-  // Write-only: the key is never read back; the response just confirms auth state.
-  setClaudeKey: (key: string) =>
-    fetch('/api/claude-review/key', jsonBody('PUT', { key })).then((r) =>
-      handle<ClaudeKeyResponse>(r),
-    ),
-  // Non-PR read of whether a local Anthropic key is stored (for the Settings modal).
-  claudeKeyStatus: () =>
-    get<ClaudeKeyStatusResponse>('/api/claude-review/key'),
+  // ⚠ NO `setClaudeKey` / `claudeKeyStatus`. The BYO Anthropic key is RETIRED — the routes
+  // `GET`/`PUT /api/claude-review/key` are gone, and so is the Settings form that drove them.
+  // Local Claude Review resolves credentials from an ambient Claude session first (so a
+  // subscription pays) and otherwise from the environment's `ANTHROPIC_API_KEY`; both rungs are
+  // already reported by `ClaudeReviewResponse.auth`. Do not re-add a method "just to clear the
+  // stored key" — an already-stored key is left on disk and simply never read, and a clear route
+  // is a write path back to a secret nothing consumes.
   // Set (a number, clamped server-side) or clear (null → operator default) the local
   // per-review budget cap.
   setReviewBudget: (usd: number | null) =>

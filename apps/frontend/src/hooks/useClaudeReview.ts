@@ -188,34 +188,16 @@ export function useAllClaudeReviews(enabled: boolean) {
   });
 }
 
-// Store or clear the user-supplied Anthropic API key, then refetch the review so
-// the auth status (and `hasUserKey`) reflects the change.
-export function useSetClaudeKey(prId: number) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (key: string) => api.setClaudeKey(key),
-    onSuccess: () =>
-      void qc.invalidateQueries({ queryKey: ['claude-review', prId] }),
-  });
-}
-
-// Non-PR-scoped key status + setter for the Settings modal (which manages the BYO Anthropic
-// key outside any PR context). Setting invalidates BOTH the global key-status query AND every
-// per-PR claude-review query so any open review tab reflects the change.
-export function useClaudeKeyStatus() {
-  return useQuery({ queryKey: ['claude-key-status'], queryFn: () => api.claudeKeyStatus() });
-}
-
-export function useSetClaudeKeyGlobal() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (key: string) => api.setClaudeKey(key),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['claude-key-status'] });
-      void qc.invalidateQueries({ queryKey: ['claude-review'] });
-    },
-  });
-}
+// ⚠ THE THREE ANTHROPIC-KEY HOOKS ARE GONE — `useSetClaudeKey`, `useClaudeKeyStatus` and
+// `useSetClaudeKeyGlobal`, along with the `['claude-key-status']` query key and the Settings form
+// that drove them. The BYO key stored in `~/.pierre-review/config.json` is retired: local Claude
+// Review now has exactly TWO credential rungs — an ambient Claude session (preferred, so a
+// subscription pays) and the environment's `ANTHROPIC_API_KEY` — and `ClaudeReviewResponse.auth`
+// already reports which one answered. There is nothing for a hook to set, and nothing for one to
+// read: `hasUserKey` left the wire with the routes.
+//
+// (`useSetClaudeKey(prId)` was additionally DEAD before any of this — no caller anywhere — so its
+// removal is not part of the retirement, merely overdue.)
 
 // Set or clear the per-review budget cap, then refetch the review so the displayed
 // value reflects the (server-clamped) result.

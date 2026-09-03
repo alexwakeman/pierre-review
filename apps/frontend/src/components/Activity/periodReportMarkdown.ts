@@ -1,5 +1,6 @@
 import type {
   PeriodForecast,
+  PeriodGrain,
   PeriodMetricDelta,
   PeriodMetricKey,
   PeriodMetricValue,
@@ -200,6 +201,12 @@ export const REFUSAL_TEXT: Record<PeriodRefusalReason, string> = {
     'Not enough complete periods yet — a trend needs several periods where every repo in the subset was already being tracked.',
   too_volatile:
     'Too volatile to forecast: the uncertainty band came out wider than the estimate itself.',
+  // The CALENDAR-MONTH refusal. The estimator fits a line on the period's POSITION in the series,
+  // which assumes every period is the same length — true of a sprint grid, false of the calendar
+  // (28 to 31 days is a ±5.4% swing in every count). Without this it would read February's short
+  // month as a genuine dip, every year, and put a confident band around it.
+  uneven_periods:
+    'Calendar months are 28–31 days long, so a trend fitted across them would read their own uneven lengths as a change in the work. No forecast is offered at this grain — the sprint grain, whose periods are all the same length, still forecasts.',
 };
 
 // ── Dates ────────────────────────────────────────────────────────────────────────────────────
@@ -211,10 +218,30 @@ export const REFUSAL_TEXT: Record<PeriodRefusalReason, string> = {
 // 18 Aug is titled "18 Aug – 1 Sep", which is how the cadence is spoken about. Do not
 // "fix" it by subtracting a day.
 const DAY_MONTH: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', timeZone: 'UTC' };
+const MONTH_YEAR: Intl.DateTimeFormatOptions = {
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+};
 
-export function periodTitle(startIso: string, endIso: string): string {
+/**
+ * The period's title.
+ *
+ * ⚠ A CALENDAR MONTH NEEDS ITS OWN FORMATTER, and the sprint one is actively wrong for it.
+ * `periodEnd` is the EXCLUSIVE bound, so August would render "1 Aug – 1 Sep" — which reads as a
+ * 32-day span, and is the title on a document somebody forwards. A month is NAMED: "August 2026".
+ *
+ * `grain` is a TRAILING OPTIONAL parameter defaulting to `'sprint'`, so every existing call site
+ * (and every stored row written before the calendar grain existed) is unchanged.
+ */
+export function periodTitle(
+  startIso: string,
+  endIso: string,
+  grain: PeriodGrain = 'sprint',
+): string {
   const s = new Date(startIso);
   const e = new Date(endIso);
+  if (grain === 'month') return s.toLocaleDateString(undefined, MONTH_YEAR);
   const sameYear = s.getUTCFullYear() === e.getUTCFullYear();
   const thisYear = new Date().getUTCFullYear();
   const withYear: Intl.DateTimeFormatOptions = { ...DAY_MONTH, year: 'numeric' };
@@ -351,10 +378,21 @@ export function renderPeriodReportMarkdown(
   const notComputed = figuresOnly(report);
   const hasPriorPeriod = report.comparison.priorPeriodKey != null;
 
-  // The title IS the date range — never "monthly" (a 14-day cadence is ~2.17 periods/month).
-  lines.push(`# ${periodTitle(report.periodStart, report.periodEnd)}`);
+  // ⚠ THE MONTH-WORD RULE IS GRAIN-CONDITIONAL, NOT GONE. At sprint grain the title is the DATE
+  // RANGE and the words "month"/"monthly" appear nowhere (a 14-day cadence is ~2.17 periods per
+  // calendar month, so the label would be false). At month grain the period IS a calendar month
+  // and naming it one is the only honest title.
+  lines.push(`# ${periodTitle(report.periodStart, report.periodEnd, report.grain)}`);
   lines.push('');
-  const genHeader = [`Sprint · ${report.cadenceDays} days`];
+  const genHeader = [
+    report.grain === 'month' ? `Calendar month · ${report.cadenceDays} days` : `Sprint · ${report.cadenceDays} days`,
+  ];
+  // An OPEN period. Stated first and plainly: this artifact is a snapshot of an unfinished month,
+  // and whoever it is forwarded to has to know that before they read a figure.
+  if (report.inProgress)
+    genHeader.push(
+      `IN PROGRESS — ${report.elapsedDays ?? 0} day${report.elapsedDays === 1 ? '' : 's'} elapsed, not written up`,
+    );
   if (report.model) genHeader.push(`written up with ${report.model}`);
   genHeader.push(`generated ${report.generatedAt}`);
   if (report.stale)

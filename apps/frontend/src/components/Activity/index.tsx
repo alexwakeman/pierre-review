@@ -7,7 +7,7 @@ import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
-import { BotIcon, SparkleIcon, WarningIcon, WorkspaceIcon } from '../Icons.js';
+import { BotIcon, SparkleIcon, TimerIcon, WarningIcon, WorkspaceIcon } from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { BranchStatusChip } from './BranchStatusChip.js';
 import { BranchStatusPanel } from './BranchStatusPanel.js';
@@ -442,8 +442,16 @@ export function ActivityView(): JSX.Element {
             }`}
             title="Everything waiting on you or your workspace, ranked most actionable first (free)"
           >
+            {/* A STOPWATCH, not a warning triangle. This rail entry is a standing worklist that
+                is non-empty on every healthy day, and a warning glyph sitting permanently in the
+                navigation asserts a problem that usually isn't there — the icon that means
+                "something is wrong" cannot also be the icon that means "here is your queue", or
+                it stops meaning either. `TimerIcon` is the existing house stopwatch (auto-merge
+                armed, a stalled PR, time-to-first-review): waiting on a clock, which is exactly
+                what a pending item is. `WarningIcon` stays in this file for the per-repo
+                attention COUNT chip, where a number genuinely is the alarm. */}
             <span className="shrink-0 text-amber-500">
-              <WarningIcon />
+              <TimerIcon />
             </span>
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
               Pending

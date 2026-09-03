@@ -1,5 +1,7 @@
 import type { MlCategory, MlLabel, MlSeverity, MlSeverityCounts } from '@pierre-review/shared';
 import { ML_CATEGORY_LABEL, ML_SEVERITY_META } from '../lib/ui.js';
+import { disagreeDirection } from '../lib/severityAgreement.js';
+import { ArrowIcon } from './Icons.js';
 
 // `severityProb` is the RAW probability of the CHOSEN class, and the argmax of a FOUR-class
 // softmax can never be below 1/4. So a stored label under 0.25 is one the MODEL DID NOT PICK —
@@ -25,6 +27,7 @@ const LOW_CONFIDENCE = 0.5;
 export function MlSeverityBadge({
   label,
   compact,
+  vendorClaim,
 }: {
   label: MlLabel | undefined;
   /**
@@ -34,6 +37,28 @@ export function MlSeverityBadge({
    * shown against a number that summarises several of our verdicts.
    */
   compact?: boolean;
+  /**
+   * SAY SOMETHING IN ALL FOUR VENDOR STATES, not just the contradiction.
+   *
+   * The default is silence on agreement and on a bot that declared nothing — correct everywhere a
+   * severity pill is incidental, because two pills saying the same thing is noise. It is WRONG on
+   * the bot-flagging drill-down, whose facets are exactly `agree` / `overCall` / `underCall` /
+   * `undeclared`: there, silence leaves three of the four looking identical. So this mode adds the
+   * two muted markers, and marks the contradiction with its DIRECTION.
+   *
+   * ⚠ Direction is the two SEVERITY ORDINALS and nothing else (`disagreeDirection`) — never
+   * `severityProb` (our confidence in our own class), never `vendorSeverityConfidence` (the marker
+   * reader's confidence that it read a real badge). And this is a display of two claims, never a
+   * reconciliation: our severity is the more accurate rater (0.700 exact on the adjudicated
+   * gold-300 against the vendor badge's 0.474), so nothing here invites the reader to resolve the
+   * disagreement, and nothing anywhere derives our label from theirs.
+   *
+   * Ignored under `compact`, which is a rollup and has no single vendor claim to report.
+   *
+   * (This absorbed `BotCommentCard`'s `VendorClaim`, which rendered BESIDE this badge on the
+   * identical condition and produced rows reading "[Major] bot said Minor ↑ bot called it worse".)
+   */
+  vendorClaim?: boolean;
 }): JSX.Element | null {
   if (!label) return null;
   const meta = ML_SEVERITY_META[label.severity];
@@ -56,7 +81,8 @@ export function MlSeverityBadge({
   const dim = label.severityProb < LOW_CONFIDENCE;
 
   // ── The bot's OWN badge — shown only when it CONTRADICTS ours ────────────────────────────
-  // Agreement stays silent (two pills saying the same thing is noise). This is a display of what
+  // Agreement stays silent (two pills saying the same thing is noise) UNLESS `vendorClaim` asks
+  // for all four states — see that prop. This is a display of what
   // the vendor claimed, never a correction of our label and never a second opinion of equal
   // weight: on a held-out adjudicated sample our severities score 0.700 exact / 0.303 ordinal MAE
   // against the vendor badge's 0.474 / 0.697 — we are the more accurate rater, and the
@@ -65,6 +91,23 @@ export function MlSeverityBadge({
   const vendorMeta =
     !compact && label.vendorSeverity && label.vendorSeverity !== label.severity
       ? ML_SEVERITY_META[label.vendorSeverity]
+      : null;
+  // Which way it contradicts — ordinals only. Non-null exactly when `vendorMeta` is, but computed
+  // through the shared fold so the direction can never be re-derived a second, different way here.
+  const dir = vendorMeta ? disagreeDirection(label) : null;
+  // The other two states, said out loud only in `vendorClaim` mode (see the prop's note).
+  const quietVendorState =
+    vendorClaim && !compact && !vendorMeta
+      ? label.vendorSeverity == null
+        ? {
+            text: 'bot declared nothing',
+            title:
+              'This bot posted no severity badge of its own, so there is nothing here to agree or disagree with — the matrix’s ‘none’ column. Silence is not agreement, which is why the two are counted apart.',
+          }
+        : {
+            text: 'bot agreed',
+            title: `The bot badged this ${meta.label} itself — the matrix’s diagonal. Said out loud here because on this screen agreement is a finding of its own; on an ordinary comment the badge stays quiet about it.`,
+          }
       : null;
   // How sure the marker parser is that it READ a real declared badge — metadata about the
   // vendor's claim, never about ours. Only worth saying when it is not 'high', so we don't
@@ -113,13 +156,36 @@ export function MlSeverityBadge({
         {meta.label}
       </span>
       {/* Bare tinted text against our filled pill — the form difference is what carries the
-          hierarchy, while the severity hue keeps the contradiction scannable. */}
+          hierarchy, while the severity hue keeps the contradiction scannable. ONE element for the
+          whole contradiction: the vendor's own severity IS the claim, so the direction rides it as
+          an arrow + a muted word rather than as a second chip repeating the same fact. */}
       {vendorMeta && (
-        <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500">
-          bot said{' '}
+        <span
+          className="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400 dark:text-gray-500"
+          title={
+            vendorClaim && dir != null
+              ? `The bot badged this ${vendorMeta.label}; our model rated it ${meta.label}. The direction is the two severity ordinals — not anyone's confidence. Ours is the more accurate rating (70% agreement with human adjudication against the bot's 47%), so this is a disagreement to look at, not one to resolve.`
+              : undefined
+          }
+        >
+          {vendorClaim && dir != null && (
+            <ArrowIcon dir={dir === 'over' ? 'up' : 'down'} size={10} />
+          )}
+          <span>bot said</span>
           <span className="font-semibold" style={{ color: vendorMeta.color }}>
             {vendorMeta.label}
           </span>
+          {vendorClaim && dir != null && (
+            <span className="opacity-80">· {dir === 'over' ? 'worse' : 'milder'}</span>
+          )}
+        </span>
+      )}
+      {quietVendorState && (
+        <span
+          className="text-[10px] text-gray-400 dark:text-gray-500"
+          title={quietVendorState.title}
+        >
+          {quietVendorState.text}
         </span>
       )}
       {!compact && categoryText && (
@@ -140,8 +206,8 @@ export function MlSeverityBadge({
 }
 
 /**
- * The WORST severity across a set of labels — a thread's rollup, shown on its collapsed header
- * so a conversation can be triaged without expanding it.
+ * The WORST severity across a set of labels — a thread's rollup, shown on its header so a long
+ * conversation can be triaged without reading every reply's own badge.
  *
  * Summary comments are excluded from the rollup: a vendor walkthrough scored `major` would
  * otherwise flag every thread it happens to sit in.
@@ -149,6 +215,10 @@ export function MlSeverityBadge({
  * ⚠ The returned label is one comment's row, standing in for a whole conversation, so its
  * `vendorSeverity` is NOT a rollup and must not be rendered as one — which is why the caller
  * passes `compact` (see the prop's note above).
+ *
+ * ⚠ AND ON A ONE-COMMENT THREAD IT IS NOT A ROLLUP AT ALL — it returns that comment's own row,
+ * which the comment renders for itself a few pixels lower. `ThreadCard` therefore does not call
+ * this below two comments; read the note there before changing the call site.
  */
 export function worstSeverity(labels: MlLabel[]): MlLabel | undefined {
   let worst: MlLabel | undefined;

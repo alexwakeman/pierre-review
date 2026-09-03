@@ -18,6 +18,13 @@ import {
 // Globs for files whose diffs are noise to a human reviewer: stripped from the diff so the
 // agent spends its budget on real code, not a 4000-line lockfile churn. Only the three glob
 // shapes below are supported (exact basename, `*.ext` suffix, `**​/segment/**` path segment).
+//
+// ⚠ THIS LIST IS A PAID AGENT'S DIFF BUDGET — DO NOT WIDEN IT FOR ANOTHER FEATURE. It deliberately
+// keeps `.md`, `.yml`, `.json` and `docs/` IN the diff, because a review agent reading a config
+// change is doing its job. The large-PR flag needs a much broader "is this code?" answer, and it
+// has its OWN classifier for exactly that reason: `isNonCodeFile` in `db/code-loc.ts`, which
+// documents how the two (and the frontend's narrower `isLockFile`) relate. Editing this list to
+// satisfy that feature would silently change what Claude Review reviews, with no test to catch it.
 export const NOISE_GLOBS: string[] = [
   'package-lock.json',
   'pnpm-lock.yaml',

@@ -395,6 +395,13 @@ export function readFromUrl(): Partial<FilterState> {
   // `?activityRepo=insights` above — either alone is a half-link, which is why they landed together.
   // (This used to also seed the Insights SUB-TAB; that apparatus is gone — the pane is
   // Reports-first now, so the console + the period key ARE the whole link.)
+  // The Reports period GRID (`?reportGrain=month`). ⚠ It is parsed SEPARATELY from `?report=`
+  // even though the key encodes the grain: the grain has to be right while the key is absent —
+  // a bare `?activityRepo=insights&reportGrain=month` link opens the Month picker on its newest
+  // period, which is what a "show me the months" link means.
+  if (p.get('reportGrain') === 'month') {
+    out.insightsReportGrain = 'month';
+  }
   const report = p.get('report');
   if (report) {
     out.insightsReportKey = report;
@@ -600,6 +607,10 @@ export function writeToUrl(s: FilterState): void {
       if (s.insightsInnerTab !== 'overview') p.set('insightsTab', s.insightsInnerTab);
       // The period being read, emitted ONLY alongside the console that renders it — a bare
       // `?report=` on the Feed would be inert noise in every link the app produces.
+      // ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT — 'sprint' stays out of the URL because a bare
+      // link means it. Flip the default and this comparison flips with it, or every emitted link
+      // starts naming a grain it no longer opens.
+      if (s.insightsReportGrain !== 'sprint') p.set('reportGrain', s.insightsReportGrain);
       if (s.insightsReportKey) p.set('report', s.insightsReportKey);
     }
   } else if (

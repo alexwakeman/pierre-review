@@ -73,13 +73,26 @@ export function ThreadCard({
   const mlEnabled = useMlSeverityEnabled();
   const mlIndex = useMlLabelIndex(thread.prId, mlEnabled);
   // The thread's WORST non-summary severity — triage without expanding the conversation.
-  const threadWorst = mlIndex
-    ? worstSeverity(
-        thread.comments
-          .map((c) => mlIndex.get(mlLabelKey('review_comment', c.id)))
-          .filter((l): l is NonNullable<typeof l> => l != null),
-      )
-    : undefined;
+  //
+  // ⚠ SUPPRESSED ON A ONE-COMMENT THREAD, AND THE KEY IS THE COMMENT COUNT, NOT THE SURFACE. With
+  // a single comment `worstSeverity` returns THAT comment's own row, so the header pill and the
+  // per-comment badge below it were provably the same label ~30px apart — and the single-comment
+  // thread is the commonest shape there is. The per-comment badge is the one kept because it is
+  // strictly the richer of the two: it carries the CATEGORY and the vendor's contradicting claim,
+  // both of which the compact rollup deliberately drops (MlSeverityBadge's `compact` note).
+  //
+  // The rollup is NOT dead chrome, so do not remove it outright and do not key the suppression on
+  // the SURFACE instead: on a multi-comment thread it is the one place the conversation's WORST
+  // severity is stated, and reading it off the per-comment badges means scanning every reply. A
+  // long back-and-forth is exactly where a reader triages from the header alone.
+  const threadWorst =
+    mlIndex && thread.comments.length > 1
+      ? worstSeverity(
+          thread.comments
+            .map((c) => mlIndex.get(mlLabelKey('review_comment', c.id)))
+            .filter((l): l is NonNullable<typeof l> => l != null),
+        )
+      : undefined;
 
   return (
     <div

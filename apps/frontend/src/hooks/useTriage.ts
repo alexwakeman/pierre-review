@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type {
   DismissedMyTurnResponse,
@@ -9,6 +10,7 @@ import type {
   RepoAnalytics,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { noteLargePrThreshold } from '../lib/ui.js';
 import { buildOpenPrsSearch, useFilters } from '../store/filters.js';
 import { workspaceKey } from './useActivity.js';
 
@@ -119,7 +121,20 @@ export function useScopedOpenPrs(repoIds: number[] | null) {
 export function useMe() {
   // `retry: false` so a cloud-mode 401 (signed out) surfaces immediately to the
   // App auth gate instead of being retried.
-  return useQuery<MeResponse>({ queryKey: ['me'], queryFn: api.me, retry: false });
+  //
+  // ACCOUNT-GRAINED KEY, deliberately: `['me']` carries no `ws:<id>` segment because nothing on
+  // this response is workspace-scoped — the large-PR threshold included (it is one number per
+  // account, set once in Settings).
+  const q = useQuery<MeResponse>({ queryKey: ['me'], queryFn: api.me, retry: false });
+  // ⚠ THE ONE WRITER of lib/ui.ts's large-PR threshold cell. `components/Timeline/prBar.ts`
+  // builds raw HTML strings for vis-timeline, so it cannot call a hook to learn the account's
+  // threshold; it reads that cell instead. App.tsx mounts `useMe()` at the root, so the cell is
+  // seeded before any board paints, and every other `useMe()` caller re-writes the same value.
+  const threshold = q.data?.largePrCodeLocThreshold;
+  useEffect(() => {
+    noteLargePrThreshold(threshold);
+  }, [threshold]);
+  return q;
 }
 
 // Premium capability flags (mirrors claudeReviewEnabled). All-false until /api/me

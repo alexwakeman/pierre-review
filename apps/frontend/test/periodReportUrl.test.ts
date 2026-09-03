@@ -110,4 +110,62 @@ describe('the period report link', () => {
     useFilters.getState().resetAllFilters();
     expect(useFilters.getState().insightsReportKey).toBe('sprint-2026-08-18');
   });
+
+  // ── THE GRAIN ────────────────────────────────────────────────────────────────────────────
+  //
+  // Two grains write ONE `insightsReportKey` field, so the grain has to travel too — and it has to
+  // travel SEPARATELY from the key, because it must be right while the key is null (a bare
+  // "show me the months" link, or the frame after a grain switch clears the selection).
+  it('round-trips the grain, and omits the DEFAULT so a plain link never names it', () => {
+    writeToUrl(state({ activityRepoId: 'insights', insightsReportGrain: 'sprint' }));
+    // ⚠ THE OMITTED VALUE MUST TRACK THE CURRENT DEFAULT. Flip the default without flipping this
+    // and every emitted link starts naming a grain it no longer opens.
+    expect(location.search).not.toContain('reportGrain=');
+
+    writeToUrl(
+      state({
+        activityRepoId: 'insights',
+        insightsReportGrain: 'month',
+        insightsReportKey: 'month-2026-08',
+      }),
+    );
+    expect(location.search).toContain('reportGrain=month');
+    expect(location.search).toContain('report=month-2026-08');
+
+    const back = readFromUrl();
+    expect(back.insightsReportGrain).toBe('month');
+    expect(back.insightsReportKey).toBe('month-2026-08');
+  });
+
+  it('opens the Month picker from a link that names the grain and no period', () => {
+    location.search = '?activityRepo=insights&reportGrain=month';
+    const back = readFromUrl();
+    expect(back.activityRepoId).toBe('insights');
+    expect(back.insightsReportGrain).toBe('month');
+    expect(back.insightsReportKey).toBeUndefined();
+  });
+
+  // ⚠ SWITCHING GRAIN CLEARS THE SELECTION, and that is part of the switch rather than a
+  // convenience. `sprint-2026-08-18` names no period on the calendar grid and `month-2026-08`
+  // names none on the sprint grid, so carrying the key across would leave the panel asking for a
+  // document that cannot exist — which renders as the ordinary "not generated yet" box,
+  // indistinguishable from a period nobody has run.
+  it('clears the selected period when the grain changes, and only then', () => {
+    useFilters.getState().setInsightsReportKey('sprint-2026-08-18');
+    useFilters.getState().setInsightsReportGrain('sprint'); // unchanged — a no-op
+    expect(useFilters.getState().insightsReportKey).toBe('sprint-2026-08-18');
+
+    useFilters.getState().setInsightsReportGrain('month');
+    expect(useFilters.getState().insightsReportGrain).toBe('month');
+    expect(useFilters.getState().insightsReportKey).toBeNull();
+  });
+
+  // The grain is a READING choice, like the period — not a filter, and emphatically not the
+  // sprint-cadence SETTING (which is stored per workspace and also grids the free flow-metrics
+  // comparison window on another tab).
+  it('survives "Clear filters" too', () => {
+    useFilters.getState().setInsightsReportGrain('month');
+    useFilters.getState().resetAllFilters();
+    expect(useFilters.getState().insightsReportGrain).toBe('month');
+  });
 });

@@ -30,6 +30,7 @@ import {
 import { Avatar } from '../CommentCard.js';
 import { BotIcon, RefreshIcon, ScalesIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
+import { MetaChip } from '../MetaChip.js';
 import { MlSeverityBadge } from '../MlSeverityBadge.js';
 import { UserName } from '../UserName.js';
 
@@ -118,15 +119,7 @@ function CommentRow({
         <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[10px] text-gray-400">
           <span className="uppercase tracking-wide">{TARGET_KIND_LABEL[c.targetKind]}</span>
           {c.path && <span className="truncate font-mono">{c.path}</span>}
-          {state && (
-            <span
-              className="rounded px-1 py-px font-medium"
-              style={{ color: state.color, background: `${state.color}1a` }}
-              title={state.description}
-            >
-              {state.label}
-            </span>
-          )}
+          {state && <MetaChip meta={state} />}
         </div>
         {/* Full markdown — comment/review bodies are always persisted (lean storage keeps them). */}
         <div className="text-xs">

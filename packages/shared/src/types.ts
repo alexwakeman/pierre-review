@@ -2675,8 +2675,8 @@ export const SPRINT_CHAT_MAX_TURNS = 10;
 
 export interface SprintChatBody {
   question: string;
-  // Absent = the account's configured window (Settings → Sprint `comparisonMode`). Present =
-  // this one question covers that range instead.
+  // Absent = the WORKSPACE's configured window (its `comparisonMode`, plugin migration 0032).
+  // Present = this one question covers that range instead.
   range?: InsightsRangeKey;
   // Explicit bounds for THIS question — the Reports "Ask about this period" mount sends the
   // viewed period's exact `[fromMs, toMs)` so the answer covers the period on screen, not a
@@ -3396,7 +3396,7 @@ export interface ProCapabilities {
   // repo digest on a cadence. The report is AI-generated (Haiku), so this mirrors activityDigest.
   slackDigest: boolean;
   // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI). Gated (like workspaceInsights) on
-  // PRO_DIGEST_ENABLED. Config (provider + base URL) lives in pro_settings.
+  // PRO_DIGEST_ENABLED. Config (provider + base URL) is PER WORKSPACE, in pro_workspace_settings.
   issueLinks: boolean;
   // Review-bot triage tier — CORE/FREE. The Bots rail view reads the core bot routes and shows
   // regardless; this flag is true whenever the plugin is LOADED (independent of the paid PRO_*
@@ -3442,6 +3442,54 @@ export interface AuthProvidersResponse {
   appSlug: string;
 }
 
+// ---- the LARGE-PR FLAG (CORE, free, no AI) ----------------------------------------------
+//
+// A subtle warning on a pull request whose CODE churn is big enough that reviewing it well is
+// unlikely. "Code" is the load-bearing word: documentation, structured config, lockfiles,
+// generated/vendored output and binary payloads are all excluded before the sum, by the backend's
+// `db/code-loc.ts` classifier. A 4,000-line lockfile bump is not a large PR.
+//
+// ⚠ THE WIRE CARRIES A NUMBER (`codeLoc`), NEVER A BOOLEAN `isLarge`. The comparison against the
+// threshold is a pure RENDER-TIME operation, so changing the threshold in Settings repaints every
+// surface instantly with no query-cache invalidation anywhere — and the number is also what lets a
+// tooltip say "2,140 lines of code" instead of just "large".
+//
+// ⚠ `codeLoc: null` IS A REAL AND COMMON STATE, and it means UNKNOWN, never "not large". Roughly a
+// fifth of synced PRs have no stored per-file breakdown or no observed size at all; rendering
+// "not large" about a PR nobody measured would be a false claim. Render nothing for a null.
+//
+// ⚠ `codeLocIsLowerBound` MUST BE READ ASYMMETRICALLY. GitHub's `files(first: 100)` connection
+// truncates, and it truncates exactly the biggest pull requests — the ones this feature exists
+// for. When the flag is set, `codeLoc` is a FLOOR: over-threshold is safe to assert, but
+// under-threshold proves nothing and must not be presented as "this PR is fine".
+//
+// The three fields are TRAILING OPTIONAL on every type that carries them. That is not a style
+// choice: these are `packages/shared` WIRE types (not `ProContext`), and a trailing optional
+// field is the additive shape that keeps the plugin `apiVersion` at 21 — a required one would be
+// a breaking contract change. It also keeps IndexedDB-persisted responses written before this
+// feature existed type-honest.
+
+/** The product default when an account has stored no threshold of its own — lines of CODE churn
+ *  (additions + deletions) at or above which a PR is flagged. Mirrored, deliberately, by
+ *  `resolveLargePrThreshold` in the backend's `db/code-loc.ts`: `shared` is a TYPES-ONLY package
+ *  the backend may only `import type` from (see PACKAGING), so the backend cannot import this
+ *  value at runtime. Change both together. */
+export const LARGE_PR_CODE_LOC_DEFAULT = 1500;
+
+/** Body of POST /api/me/large-pr-threshold. `null` RESETS to the product default — it is the
+ *  "no opinion" state, not a sentinel. Anything else must be a positive integer. */
+export interface LargePrThresholdBody {
+  threshold: number | null;
+}
+
+/** Response of POST /api/me/large-pr-threshold — the same two fields `/api/me` echoes, so the
+ *  Settings panel can render the result without a refetch. */
+export interface LargePrThresholdResponse {
+  status: 'ok';
+  largePrCodeLocThreshold: number;
+  largePrCodeLocThresholdIsDefault: boolean;
+}
+
 export interface MeResponse {
   user: LocalUser | null;
   // (Claude Review is now the Pro `pro.claudeReview` capability — the old top-level
@@ -3461,6 +3509,19 @@ export interface MeResponse {
   // weekly review-bot stats to the cross-org benchmark network (opt-in, default false). Drives
   // the Settings consent toggle. Always false in local mode (local never contributes).
   benchmarkOptIn: boolean;
+  // The RESOLVED large-PR threshold for this account, in lines of CODE churn — the stored
+  // per-account value, or LARGE_PR_CODE_LOC_DEFAULT when the user has never set one. Always a
+  // positive integer, so every renderer compares against a number and never has to know about
+  // the null.
+  //
+  // TOP-LEVEL, and deliberately NOT inside `pro`: the large-PR flag is a FREE feature, and
+  // `entitledProCapabilities` zeroes that whole object for a cloud account on the free plan —
+  // which is exactly this feature's audience (the same argument as `mlSeverity` above).
+  largePrCodeLocThreshold: number;
+  // True when nothing is stored and the number above IS the product default. The one thing the
+  // resolved figure can't say on its own, and the Settings field needs it to show an empty input
+  // with a "Default (1,500)" placeholder rather than a value the user never typed.
+  largePrCodeLocThresholdIsDefault: boolean;
   // Orgs whose sync is currently BLOCKED because the sign-in token isn't authorized for their
   // SAML SSO (cloud). Populated by the sync when it hits the SAML wall; drives the global
   // "Reconnect GitHub for <org>" banner. Empty in the normal case + always empty in local mode.
@@ -3475,8 +3536,8 @@ export interface MeResponse {
 export type SlackDigestCadence = 'off' | 'daily' | 'twice_daily';
 export type IssueProvider = 'jira' | 'linear';
 
-// Read shape (GET /api/pro/settings). The Slack webhook URL is WRITE-ONLY — never returned;
-// `slack.configured` reflects only whether one is stored.
+// Read shape (GET /api/pro/settings). ⚠ The Slack config left this type in plugin migration 0030 —
+// it is per-WORKSPACE now; see `SlackTargetsResponse` below.
 // How the Insights flow-metrics + sprint report frame their comparison window:
 //  - 'rolling_7' / 'rolling_14': the trailing N days vs the immediately-preceding N days. No sprint
 //    needed; always a full window (no "day-1 cliff"), good for teams that don't run sprints.
@@ -3486,29 +3547,48 @@ export type IssueProvider = 'jira' | 'linear';
 export type SprintComparisonMode = 'rolling_7' | 'rolling_14' | 'sprint';
 
 export interface ProSettings {
-  // Sprint that defines the Insights metrics window. cadenceDays = sprint length; the current
-  // sprint auto-rolls (start + N whole cadence-lengths up to today). Open PRs always count.
-  // `comparisonMode` picks the window model (default 'rolling_14'); 'sprint' uses cadence+start.
+  // ⚠ NOTHING IN THIS SECTION IS AN ACCOUNT FACT ANY MORE. The sprint LENGTH and its phase anchor
+  // went per-WORKSPACE in plugin migration 0031; the COMPARISON MODE followed them in plugin
+  // migration 0032, and none of the three has an account-level default beneath it —
+  // `resolveSprintCadence` / `resolveComparisonMode` read the workspace row or answer the product
+  // default, two states, no chain. All three fields are RETAINED ONLY SO THE FIELD SET DOES NOT
+  // MOVE UNDER A STALE CLIENT (a client reading `settings.sprint.comparisonMode` off an absent
+  // `sprint` would throw) and are now ALWAYS null; the `pro_settings` columns behind them are
+  // dormant — never selected, never written. Edit the real values on `WorkspaceProSettings` via
+  // GET/PUT /api/pro/settings/workspace.
+  //
+  // ⚠ `comparisonMode: null` HERE IS NOT "rolling_14". Emitting the product default from a route
+  // that no longer stores the setting would tell a reader their account is on a mode that may not
+  // be what any of their workspaces resolves to — a dormant column read back onto the wire is how
+  // a retired grain keeps answering questions.
   sprint: {
+    /** @deprecated ALWAYS null — the cadence is per-workspace. See `WorkspaceProSettings`. */
     cadenceDays: number | null;
-    startDate: string | null; // ISO (date @ midnight); null = no sprint configured
-    comparisonMode: SprintComparisonMode;
+    /** @deprecated ALWAYS null — the phase anchor is per-workspace. See `WorkspaceProSettings`. */
+    startDate: string | null;
+    /** @deprecated ALWAYS null — the comparison mode is per-workspace as of plugin migration
+     *  0032. Read `WorkspaceProSettings.comparisonMode`. */
+    comparisonMode: SprintComparisonMode | null;
   };
-  slack: {
-    configured: boolean;
-    cadence: SlackDigestCadence;
-    hour1: number; // 0-23, local to `timezone`
-    hour2: number; // second daily send, used only for 'twice_daily'
-    timezone: string | null; // IANA tz; null = server tz
-  };
+  // (There is NO `slack` section here any more. The digest is a PER-WORKSPACE delivery as of
+  // plugin migration 0030 — see `WorkspaceSlackTargetResponse` below and
+  // GET/PUT/DELETE /api/pro/slack/target?workspace=<id>.
+  // It is a different GRAIN and cannot share this account patch's single Save button: one Save
+  // spanning both grains is where a per-team edit silently travels to every team.)
   // (There is NO `aiUpdate` policy any more. The per-repo Haiku digests and the sprint report
   // regenerate ONLY when a user clicks Refresh/Regenerate — the ticking cron that read a
   // manual|interval|on_change mode from `pro_settings` was deleted. The one remaining automated
   // caller is the SLACK DIGEST cron, which independently rebuilds both on the account's configured
   // cadence; an account with no Slack cadence is genuinely manual-only.)
-  // provider/baseUrl configure the deep-link target; projectKeys is an optional allowlist of
-  // project prefixes (e.g. ['ENG','PROJ']) — when non-empty, ONLY keys with a listed prefix are
-  // detected (near-zero false positives). Empty → heuristic detection.
+  /**
+   * @deprecated ALWAYS EMPTY — `{provider: null, baseUrl: null, projectKeys: []}`. The issue
+   * tracker moved to the WORKSPACE grain in plugin migration 0031 (`pro_workspace_settings`,
+   * GET/PUT /api/pro/settings/workspace → `WorkspaceProSettings.issue`), because the enricher's
+   * input is a PR and a PR's repo belongs to exactly one workspace. The `pro_settings.issue_*`
+   * columns are dormant — never selected, never written — so this block has nothing to read and
+   * emits the empty shape rather than a stale one. Retained ONLY so the field set does not move
+   * under a stale client; DELETE once no client reads it.
+   */
   issue: { provider: IssueProvider | null; baseUrl: string | null; projectKeys: string[] };
   // Bot-Triage Platform (WS8 control surface), now down to the Slack bot digest + two vestigial
   // fields.
@@ -3522,6 +3602,11 @@ export interface ProSettings {
   // the Bot-ROI "Limn · Claude" row. Their `pro_settings` COLUMNS stay dormant (like
   // `bot_auto_resolve*` below) — no migration, no data loss, nothing reads them.
   bots: {
+    /** @deprecated ALWAYS false. The "Review bots" Slack block is a property of the DELIVERY as of
+     *  plugin migration 0033 — `SlackTarget.botDigest`, one row per (account, workspace), edited on
+     *  GET/PUT /api/pro/slack/target?workspace=. `pro_settings.bot_slack_digest` is dormant and the
+     *  account PUT strips the field. Retained only so the shape does not move under a stale
+     *  client. */
     slackDigest: boolean;       // WS5
     autoResolve: boolean;       // WS6b master enable
     autoResolveDays: number;
@@ -3559,22 +3644,32 @@ export interface ProSettings {
 // Write shape (PUT /api/pro/settings) — a partial patch; only present sections/fields change.
 // `slack.webhookUrl` is write-only ('' clears it).
 export interface ProSettingsUpdate {
-  // Pass startDate:null + cadenceDays:null to CLEAR the sprint (disable sprints entirely → the
-  // metrics fall back to a rolling window). comparisonMode switches the window model.
+  // ⚠ NOTHING IN THIS SECTION IS WRITABLE ANY MORE. `cadenceDays` / `startDate` were dropped from
+  // the PUT body schema in plugin migration 0031 and `comparisonMode` in plugin migration 0032 —
+  // all three are per-WORKSPACE now, with no account default beneath any of them. A stale client
+  // still sending one is SILENTLY STRIPPED by `additionalProperties: false` + ajv
+  // `removeAdditional` and still gets a 200: nothing changes, which is the right outcome, but it
+  // is silent, hence written down (the standing failure mode for every field retired from this
+  // patch). The whole section is retained only so the shape does not move under a stale client.
   sprint?: {
+    /** @deprecated STRIPPED by the PUT schema. Write `WorkspaceProSettingsUpdate.sprint`. */
     cadenceDays?: number | null;
+    /** @deprecated STRIPPED by the PUT schema. Write `WorkspaceProSettingsUpdate.sprint`. */
     startDate?: string | null;
+    /** @deprecated STRIPPED by the PUT schema (plugin migration 0032). Write
+     *  `WorkspaceProSettingsUpdate.comparisonMode`. */
     comparisonMode?: SprintComparisonMode;
   };
-  slack?: {
-    webhookUrl?: string;
-    cadence?: SlackDigestCadence;
-    hour1?: number;
-    hour2?: number;
-    timezone?: string | null;
-  };
+  // (No `slack` section — see the read shape. A stale client still sending one is SILENTLY
+  // STRIPPED by the PUT body schema's `additionalProperties: false` + ajv `removeAdditional`, and
+  // the request still 200s. That is the right outcome, but it is silent, so it is written down.)
   // (No `aiUpdate` — the AI-summary update policy was removed; see the read shape above.)
-  // projectKeys: an allowlist of project prefixes; [] / null clears it (→ heuristic detection).
+  /**
+   * @deprecated STRIPPED by the PUT body schema (plugin migration 0031) — the issue tracker is a
+   * per-WORKSPACE setting now. Write `WorkspaceProSettingsUpdate.issue` on
+   * PUT /api/pro/settings/workspace instead. A stale client sending this still gets a 200 with
+   * nothing changed.
+   */
   issue?: { provider?: IssueProvider | null; baseUrl?: string | null; projectKeys?: string[] | null };
   // Bot-Triage settings patch (WS8). Only present fields change.
   //
@@ -3593,8 +3688,243 @@ export interface ProSettingsUpdate {
   // the right outcome (nothing changes, the request still succeeds) but it is silent, so it is
   // written down here.
   bots?: {
+    /** @deprecated STRIPPED by the PUT schema (plugin migration 0033). Write
+     *  `WorkspaceSlackTargetUpdate.botDigest` on PUT /api/pro/slack/target?workspace= instead. */
     slackDigest?: boolean; autoResolve?: boolean; autoResolveDays?: number;
   };
+}
+
+// ---- THE PER-WORKSPACE Pro CONFIG (GET/PUT /api/pro/settings/workspace?workspace=<id>) -------
+//
+// ONE table, ONE route, ONE grain. `pro_workspace_settings` is keyed (account_id, workspace_id)
+// and now carries BOTH per-workspace configs: the sprint cadence (plugin migration 0029) and the
+// Jira/Linear issue tracker (plugin migration 0031). The Slack delivery target is the third
+// per-workspace fact and keeps its own table only because a ROW THERE IS A DELIVERY TARGET —
+// its existence is the setting.
+//
+// ⚠ THERE IS NO ACCOUNT-LEVEL DEFAULT UNDER ANY OF THESE, AND THAT IS THE DESIGN. All three used
+// to fall back to `pro_settings` (the cadence through one resolver, the issue tracker and the
+// comparison mode as the only grain there was). Plugin migrations 0031 and 0032 retired every
+// fallback: two states, no chain — the workspace has a value, or it has none.
+// `ProSettings.sprint` and `ProSettings.issue` are deprecated husks that always read empty; the
+// columns behind them are dormant.
+//
+// ⚠ "NO CADENCE" IS THE PRODUCT DEFAULT AND IT IS NOT A NUMBER. A workspace with no stored
+// cadence has no sprint grid at all: `comparisonMode: 'sprint'` degrades to the rolling-14 window
+// and the Reports sprint grain refuses. That is exactly what an unconfigured account did before
+// this change — the fallback that was removed pointed at an account pair that was itself usually
+// null. Do not invent a default sprint length here; there has never been one.
+//
+// ⚠ `comparisonMode` IS HERE AS OF PLUGIN MIGRATION 0032, AND THE OLD JUSTIFICATION FOR KEEPING IT
+// ACCOUNT-WIDE WAS FALSE. It read "a reading preference with no per-team meaning" — but the mode
+// and the cadence COMPOSE: under `'sprint'` a workspace WITH a cadence gets a sprint-position
+// window while one WITHOUT silently gets rolling-14 (`resolveComparisonWindow`). One account
+// setting therefore produced two different window SHAPES across a reader's workspaces, with
+// nothing on screen saying so. The mode is a property of how a TEAM reads its own numbers, so it
+// sits on the same row as the cadence it composes with — and the same two-state rule applies: a
+// workspace has a stored mode, or it uses the PRODUCT DEFAULT `'rolling_14'`. There is no
+// inheritance chain and `pro_settings.comparison_mode` is dormant.
+
+// Where a configured project key is looked for. Both scopes ALWAYS scan the PR TITLE; the only
+// question is whether the HEAD BRANCH is scanned too.
+//
+// ⚠ NOTHING HAS EVER SCANNED COMMIT MESSAGES, in any scope. Detection reads the PR title and the
+// head branch name and nothing else.
+//
+// ⚠ THIS ONLY BITES IN ALLOWLIST MODE. With no project keys configured the branch is never
+// scanned anyway — a lowercase branch key (`eng-123`) is structurally indistinguishable from
+// `node-18` / `release-2` / a dependency bump, which is why branch scanning is allowlist-gated in
+// the first place. So `'title'` narrows an allowlisted setup and changes nothing otherwise.
+//
+// Default is `'title_branch'` — today's behaviour — so nobody's detection changes silently.
+export type IssueMatchScope = 'title' | 'title_branch';
+
+// The issue tracker, per workspace. provider/baseUrl configure the deep-link target; projectKeys
+// is an optional allowlist of project prefixes (e.g. ['ENG','PROJ']) — when non-empty, ONLY keys
+// with a listed prefix are detected (near-zero false positives). Empty → heuristic detection,
+// which is title-only and uppercase-only by construction.
+export interface WorkspaceIssueSettings {
+  provider: IssueProvider | null;
+  baseUrl: string | null;
+  projectKeys: string[];
+  matchScope: IssueMatchScope;
+}
+
+export interface WorkspaceProSettings {
+  workspaceId: number;
+  // The sprint pair — what every window on this workspace is framed by. Both null = no sprint.
+  cadenceDays: number | null;
+  startDate: string | null;      // ISO (date @ UTC midnight); null = no phase anchor set
+  issue: WorkspaceIssueSettings;
+  // How this workspace's Insights / flow-metrics comparison window is framed (plugin migration
+  // 0032). ALWAYS a value — an unset workspace reads the product default `'rolling_14'`, which is
+  // the ONLY default there is; nothing inherits from the account.
+  //
+  // ⚠ IT COMPOSES WITH `cadenceDays`, WHICH IS WHY THEY SHARE A ROW. `'sprint'` on a workspace
+  // with no cadence degrades to the rolling-14 window; on one with a cadence it is a
+  // sprint-position comparison. Reading the two off different grains is how one setting produced
+  // two window shapes with nothing on screen saying which you got.
+  comparisonMode: SprintComparisonMode;
+}
+
+/**
+ * @deprecated TRANSITIONAL NAME. Renamed to `WorkspaceProSettings` when the issue tracker joined
+ * the row; the three fields below are the RETIRED account-fallback disclosure and are now NEVER
+ * EMITTED (a reader gets `undefined`). DELETE this alias, and the frontend's reads of `source` /
+ * `accountCadenceDays` / `accountStartDate`, together.
+ */
+export interface WorkspaceSprintSettings extends WorkspaceProSettings {
+  /** @deprecated never emitted — there is no other source. */
+  source?: 'workspace' | 'account';
+  /** @deprecated never emitted — there is no account cadence. */
+  accountCadenceDays?: number | null;
+  /** @deprecated never emitted — there is no account cadence. */
+  accountStartDate?: string | null;
+}
+
+// Write shape (PUT /api/pro/settings/workspace?workspace=<id>). A PARTIAL patch over ONE
+// workspace's row: an omitted section is untouched, so the two Settings sections keep their own
+// Save buttons without either one clobbering the other's fields.
+//
+// ⚠ `sprint.cadenceDays: null` CLEARS the cadence — it NULLS THE PAIR, it does NOT delete the row.
+// The row also holds the issue tracker now, so a delete would take an unrelated setting with it.
+// A row whose cadence pair is null is exactly equivalent to no row: there is nothing left for it
+// to "follow", so the two states cannot disagree.
+export interface WorkspaceProSettingsUpdate {
+  sprint?: {
+    // Required WITHIN the section (not optional) precisely so "clear" is an explicit ask and never
+    // the accidental result of an omitted field.
+    cadenceDays: number | null;
+    // OMITTED keeps the stored phase anchor, so a cadence-only edit does not silently re-phase the
+    // grid; sent as null clears it.
+    startDate?: string | null;
+  };
+  issue?: {
+    provider?: IssueProvider | null;
+    baseUrl?: string | null;
+    // [] / null clears the allowlist (→ heuristic, title-only detection).
+    projectKeys?: string[] | null;
+    matchScope?: IssueMatchScope;
+  };
+  // The comparison-window mode for THIS workspace (plugin migration 0032). TOP-LEVEL, not inside
+  // `sprint`: that section declares `cadenceDays` REQUIRED so that clearing a cadence is always an
+  // explicit ask, which would make a mode-only patch impossible to express. Omitted = unchanged;
+  // there is no "clear" — the mode always has a value, and writing `'rolling_14'` IS the default.
+  comparisonMode?: SprintComparisonMode;
+}
+
+/**
+ * @deprecated The FLAT sprint patch. The PUT body now nests it under `sprint`, and this shape is
+ * `additionalProperties: false` against that schema — a client still sending `{cadenceDays, …}`
+ * at the top level has BOTH KEYS SILENTLY STRIPPED and gets a 200 with nothing saved. DELETE with
+ * the alias above.
+ */
+export interface WorkspaceSprintUpdate {
+  cadenceDays: number | null;
+  startDate?: string | null;
+}
+
+// ---- The PER-WORKSPACE Slack digest (GET/PUT/DELETE /api/pro/slack/target?workspace=<id>) ----
+//
+// The digest is delivered PER WORKSPACE. One row per (account, workspace) in the plugin's
+// `workspace_slack_targets` table; a row EXISTS ⇒ that workspace's report is generated on this
+// schedule and posted to this channel, and no row ⇒ that workspace gets nothing.
+//
+// ⚠ THE ROUTE EDITS EXACTLY ONE WORKSPACE — THE ONE IN `?workspace=`. There is no picker and no
+// "apply to all" fan-out: the Settings modal configures the workspace the reader is currently in,
+// like every other per-workspace control. `DELETE` is how a workspace stops being a target; that
+// is a VERB rather than "absent from a submitted list", so no save can drop a delivery by
+// omission.
+//
+// ⚠ THERE IS NO ACCOUNT-LEVEL WEBHOOK AND NO INHERITANCE. A nullable "inherit" column would be
+// the null-means-INHERIT bug class CLAUDE.md names — and inheriting a webhook is worse than
+// inheriting a number: it silently posts a new team's private figures into whichever channel the
+// account owner configured years ago. Two states: a channel, or none.
+//
+// ⚠ THE CAP IS NOW A SWEEP BOUND, AND IT IS STILL DISCLOSED. With no picker, the population the
+// cron bills for is "every workspace that HAS a target row" — so the cap moved onto the act of
+// ADDING one: configuring a target for a workspace when `configuredCount` already equals `cap` is
+// REFUSED (400) with the number in the message. Each target is its own sprint-report generation on
+// every send, so this is a spend bound, not a UI nicety. `cap` and `configuredCount` ride the GET
+// so the UI can warn BEFORE the Save rather than explaining a refusal after it.
+export const SLACK_TARGET_WORKSPACE_CAP = 12;
+
+// One workspace's delivery target as the API returns it.
+//
+// ⚠ THE WEBHOOK URL IS WRITE-ONLY — never returned by any route. `configured` is all a reader
+// gets, and it is always true for a row that exists (the column is NOT NULL): it is on the wire so
+// the SPA can render "•••••••• (unchanged)" from a field rather than from the row's mere presence.
+export interface SlackTarget {
+  workspaceId: number;
+  workspaceName: string;
+  configured: boolean;
+  cadence: SlackDigestCadence;
+  hour1: number; // 0-23, local to `timezone`
+  hour2: number; // second daily send, used only for 'twice_daily'
+  timezone: string | null; // IANA tz; null = server tz
+  lastSentAt: string | null; // ISO-8601; null = never delivered
+  // Whether this delivery carries the deterministic "Review bots" signal-to-noise block (plugin
+  // migration 0033). Defaults to false for a target row that has never set it.
+  //
+  // ⚠ IT LIVES ON THE TARGET ROW BECAUSE THE ROW IS THE DELIVERY. It used to be
+  // `pro_settings.bot_slack_digest`, one flag per account, under a comment claiming the block was
+  // "not a per-team fact" — a premise that died when the digest itself became per-workspace in
+  // plugin 0030: from that point one account flag decided the CONTENT of N independently-scheduled
+  // messages about N different teams' bots. The 0033 migration copies the account flag onto every
+  // existing target row, so nobody loses the block on upgrade.
+  botDigest: boolean;
+}
+
+// GET/PUT/DELETE /api/pro/slack/target?workspace=<id> all answer with this.
+export interface WorkspaceSlackTargetResponse {
+  // Echoed like every scoped response — `?workspace=` that is absent / unparseable / unknown /
+  // another tenant's degrades to the account's DEFAULT workspace, never a 404.
+  workspaceId: number;
+  workspaceName: string;
+  // null = this workspace has no channel and receives nothing.
+  target: SlackTarget | null;
+  // The sweep bound and how much of it is used, so the UI never hard-codes the number it discloses
+  // (the count it enforces and the sentence it prints would then be two spellings of one rule).
+  // `configuredCount` counts the ACCOUNT's target rows, this workspace included.
+  cap: number;
+  configuredCount: number;
+}
+
+// Write shape (PUT /api/pro/slack/target?workspace=<id>) — a partial patch over ONE row.
+//
+// `webhookUrl` is OPTIONAL and omitting it KEEPS the stored secret (the field is write-only, so a
+// form that re-submitted what it was shown would blank it). A workspace with NO stored row and no
+// `webhookUrl` is REFUSED — an undeliverable row would sit in the sweep being skipped forever.
+// To stop delivering, DELETE; `cadence: 'off'` pauses while keeping the channel.
+export interface WorkspaceSlackTargetUpdate {
+  webhookUrl?: string;
+  cadence?: SlackDigestCadence;
+  hour1?: number;
+  hour2?: number;
+  timezone?: string | null;
+  // Include the "Review bots" block in THIS workspace's digest (plugin migration 0033). Omitted =
+  // unchanged. It is a content switch on one delivery, not an account preference — see
+  // `SlackTarget.botDigest`.
+  botDigest?: boolean;
+}
+
+/** @deprecated The multi-select write shape. `PUT /api/pro/slack/targets` IS DELETED — settings
+ *  are for the current workspace only. Use `WorkspaceSlackTargetUpdate`. DELETE once no client
+ *  imports it. */
+export interface SlackTargetUpdate extends WorkspaceSlackTargetUpdate {
+  workspaceId: number;
+}
+
+/** @deprecated `GET /api/pro/slack/targets` IS DELETED. Use `WorkspaceSlackTargetResponse`. */
+export interface SlackTargetsResponse {
+  targets: SlackTarget[];
+  cap: number;
+  workspaces: { id: number; name: string }[];
+}
+
+/** @deprecated `PUT /api/pro/slack/targets` IS DELETED. Use `WorkspaceSlackTargetUpdate`. */
+export interface SlackTargetsUpdate {
+  targets: SlackTargetUpdate[];
 }
 
 // Lean PR shape for the timeline. No bodies, no diff hunks.
@@ -3636,6 +3966,13 @@ export interface TimelinePr {
   // null on closed/merged PRs (no "new" badges once a PR is done) and when
   // the PR has never been viewed.
   newSinceLastViewed: NewSinceLastViewed | null;
+  // ---- the LARGE-PR FLAG (see the block above LARGE_PR_CODE_LOC_DEFAULT) ----
+  // Code-only churn: additions + deletions over this PR's non-documentation, non-config files.
+  // ⚠ null = UNKNOWN (no stored file breakdown / never-observed size), NEVER "not large".
+  // ⚠ `codeLocIsLowerBound` means the file list was truncated: over-threshold is safe to assert,
+  // under-threshold is not. Trailing + optional so this stays an additive wire change.
+  codeLoc?: number | null;
+  codeLocIsLowerBound?: boolean;
 }
 
 export interface OpenPrsResponse {
@@ -4762,9 +5099,12 @@ export interface ClaudeReviewResponse {
   // Claude-auth availability for running a review.
   auth: ClaudeAuthStatus;
   authMessage?: string;
-  // Whether a user-supplied Anthropic API key is stored locally (local mode
-  // only). When true, that key overrides the ambient Claude auth at run time.
-  hasUserKey: boolean;
+  // ⚠ NO `hasUserKey`. The STORED Anthropic key is RETIRED: the SPA form is gone, the routes are
+  // gone, and nothing reads `~/.pierre-review/config.json`'s `anthropicApiKey` any more. Local
+  // Claude Review now has exactly TWO credential rungs — an ambient Claude session (preferred, so
+  // a subscription pays) and the environment's `ANTHROPIC_API_KEY` — both of which `auth` already
+  // reports. A field saying "a key is stored" would have described a value that no longer changes
+  // any run's behaviour.
   // The per-review USD budget cap a run will use (the user's local override, or the
   // operator default when unset) and the hard ceiling the user can set it to. Local
   // mode only; meaningless (and ignored) in cloud.
@@ -4776,21 +5116,16 @@ export interface ClaudeReviewResponse {
   history: ClaudeReviewSummary[];
 }
 
-// Set (non-empty) or clear (empty) the locally-stored Anthropic API key.
-export interface SetClaudeKeyBody {
-  key: string;
-}
-
-export interface ClaudeKeyResponse {
-  hasUserKey: boolean;
-  auth: ClaudeAuthStatus;
-}
-
-// GET /api/claude-review/key — a non-PR-scoped read of whether a local Anthropic key is
-// stored (for the Settings modal, which manages the key outside any PR).
-export interface ClaudeKeyStatusResponse {
-  hasUserKey: boolean;
-}
+// ⚠ `SetClaudeKeyBody` / `ClaudeKeyResponse` / `ClaudeKeyStatusResponse` ARE DELETED, along with
+// `GET`/`PUT /api/claude-review/key`. The BYO Anthropic key that lived in
+// `~/.pierre-review/config.json` is retired: local Claude Review resolves credentials from an
+// ambient Claude session first (so a subscription pays) and otherwise leaves the environment's
+// `ANTHROPIC_API_KEY` in place — two rungs, no stored secret, no form. Cloud never used any of
+// this (it runs on `SUMMARY_ANTHROPIC_API_KEY` and the section never rendered there).
+//
+// An already-stored `anthropicApiKey` is left on disk untouched and simply never read: the
+// decision was to stop reading it, not to destroy somebody's file. Do not re-add a route "just to
+// clear it" — that is a write path back.
 
 // Set (a positive number, clamped server-side to the max) or clear (null → operator
 // default) the local per-review budget cap.
@@ -5767,6 +6102,14 @@ export interface ConsolidatedFeedItem {
   // below as an "Also commented" block, INSTEAD of separate pr_comment rows. Chronological.
   // Empty for every other kind / an un-coalesced host.
   mergedComments: { commentId: number; content: string; occurredAt: string }[];
+  // ---- the LARGE-PR FLAG (see the block above LARGE_PR_CODE_LOC_DEFAULT) ----
+  // Code-only churn on this item's PR — the docs/config/lockfile-free companion to
+  // `changedFilesCount` above. Enriched for the PRs on the requested PAGE only, like
+  // `ciStatus`/`changedFilesCount`, so hidden items cost nothing.
+  // ⚠ null = UNKNOWN, never "not large". ⚠ A lower bound reads asymmetrically. Optional for the
+  // same stale-IndexedDB-cache reason as `failingChecks`.
+  codeLoc?: number | null;
+  codeLocIsLowerBound?: boolean;
 }
 
 // Server-computed facet counts over the WHOLE loadable stream (the post-cap `ordered` set
@@ -5877,6 +6220,16 @@ export interface InsightPrRef {
   /** The vendor family when one is recognised. ⚠ `null` WITH `authorIsBot: true` is a real and
    *  common state — an unbranded CI account — and renders as a generic "Bot", never as a person. */
   authorBotKind: AutomatedReviewerKind | null;
+  // ---- the LARGE-PR FLAG (see the block above LARGE_PR_CODE_LOC_DEFAULT) ----
+  // Code-only churn, beside the raw `additions`/`deletions`/`changedFiles` above — those three
+  // are the whole diff, this one has the docs/config/lockfile/generated churn removed.
+  // ⚠ null = UNKNOWN, never "not large". ⚠ A lower bound reads asymmetrically.
+  //
+  // Unlike `authorIsBot`/`authorBotKind` — which are REQUIRED here because an absent flag would
+  // render a bot as a person — an absent `codeLoc` renders NOTHING at all, which is exactly the
+  // right answer for "we don't know". So it can be, and is, trailing optional.
+  codeLoc?: number | null;
+  codeLocIsLowerBound?: boolean;
 }
 
 // A CORE suggested reviewer (used by BOTH the PR-detail "Suggested reviewers" row and the
@@ -6558,7 +6911,35 @@ export type PeriodRefusalReason =
   | 'cadence_changed'
   | 'partial_coverage'
   | 'insufficient_history'
-  | 'too_volatile';
+  | 'too_volatile'
+  // The periods in the series are NOT EQUALLY SPACED, so a trend line fitted through them would
+  // read their own uneven lengths as signal. This is the CALENDAR-MONTH refusal: `db/forecast.ts`
+  // fits Theil-Sen on x = the ARRAY INDEX, and calendar months run 28-31 days — a ±5.4% swing in
+  // every COUNT metric that the estimator cannot distinguish from a real move, which would make
+  // February a genuine-looking dip EVERY YEAR. See PeriodGrain.
+  | 'uneven_periods';
+
+/**
+ * The two period grains the Reports surface offers, and they COEXIST — sprint is the default.
+ *
+ *  • `'sprint'` — the ARITHMETIC grid: a configured length in days, phase-anchored to a start
+ *    day, so every period is exactly `cadenceDays` long. Keys are `sprint-<YYYY-MM-DD of the
+ *    period start, UTC>`.
+ *  • `'month'` — the CALENDAR grid: real months aligned to the 1st (UTC), 28-31 days long, with
+ *    NO configuration at all. Keys are `month-<YYYY-MM>`, because a `YYYY-MM-DD` start day does
+ *    not express a month — two grains writing one key space is how a reader forwards a document
+ *    without knowing what it measures.
+ *
+ * ⚠ THE GRAIN IS A READING CHOICE CARRIED ON THE REQUEST, NEVER A STORED SETTING. Folding it into
+ * the sprint-cadence row would silently move the free flow-metrics comparison window on another
+ * tab, which nobody asked for by picking a grain on Reports.
+ *
+ * ⚠ A MONTH ROW STILL CARRIES ITS REAL DAY COUNT in `cadenceDays` (28/29/30/31) — never a
+ * sentinel 30 or 0. It is a disclosure on a forwarded artifact and an input to the payload hash;
+ * a false day count there is a false claim in a document. What it must NOT be is a comparability
+ * test: see `cadence_changed`.
+ */
+export type PeriodGrain = 'sprint' | 'month';
 
 export interface PeriodCoverage {
   trackedRepos: number;     // repos in scope already tracked at period start
@@ -6593,9 +6974,18 @@ export interface PeriodReport {
   periodKey: string;
   periodStart: string;          // ISO-8601
   periodEnd: string;            // ISO-8601
-  grain: 'sprint';
-  // The configured sprint cadence, stored on EVERY row. A comparison between two rows with
-  // different cadences is REFUSED ('cadence_changed'), never silently subtracted.
+  // Which grid this period sits on (see PeriodGrain). It is READ FROM THE STORED ROW, never
+  // assumed: the column has existed since the table was created and four sites used to hard-code
+  // `'sprint'` here, which would have persisted a month row and served it as a sprint one.
+  grain: PeriodGrain;
+  // The period's length in DAYS. At `'sprint'` grain this is the configured cadence and is the
+  // same on every row; at `'month'` grain it is the real length of THAT calendar month (28-31)
+  // and legitimately differs between adjacent periods.
+  //
+  // ⚠ A COMPARISON REFUSES ON GRAIN FIRST, AND ON `cadenceDays` ONLY WITHIN THE SPRINT GRAIN.
+  // January is 31 days and February is 28: keying the refusal on the day count alone would make
+  // EVERY month-over-month comparison answer 'cadence_changed' — silently, and it is precisely
+  // the comparison the grain exists to provide.
   cadenceDays: number;
   coverage: PeriodCoverage;
   // Headline values over the workspace's FULL current membership — that is what the reader
@@ -6631,12 +7021,70 @@ export interface PeriodReport {
   // report someone may already have forwarded. A stored report is IMMUTABLE once generated: the
   // free GET only sets this flag and offers regeneration, it must NEVER silently regenerate.
   stale: boolean;
+  // Served from the ARCHIVE — this artifact was measured under a cadence the workspace no longer
+  // runs (or has aged past the look-back horizon), so the live grid cannot name its window.
+  // Optional and absent on every live report.
+  //
+  // ⚠ AN ARCHIVED REPORT IS FROZEN AND CARRIES `stale: false` BY CONSTRUCTION. `stale` exists to
+  // offer a REGENERATION, and an archived period cannot be regenerated at all — its window is not
+  // on the current grid. A stale badge here would name an action that does not exist. The UI must
+  // caption it "kept as generated", never invite a refresh.
+  archived?: true;
+  // MONTH-TO-DATE: this period is STILL OPEN. Live, computed on the request, and NEVER STORED —
+  // there is no row, no `payload_hash`, no narration, no model call and no billing.
+  //
+  // ⚠ DO NOT "IMPROVE" IT INTO A STORED ROW. Two mechanisms make an open period unstorable:
+  // (a) the free cached-read GET recomputes every stored row's data fingerprint, which folds
+  //     every metric VALUE — an open month's fingerprint moves on every merge, so the row would
+  //     read `stale` on essentially every load, forever, inviting a regenerate each time;
+  // (b) `payloadHashFor` folds nothing `Date.now()`-derived on purpose, or a dormant workspace
+  //     re-bills on a timer — and an open period's upper bound IS `Date.now()`.
+  // `stale` is therefore always false here and the SPA must render no staleness badge and no
+  // Generate button; "in progress" is the caption, not "not generated yet".
+  inProgress?: true;
+  // Whole days elapsed in an open period, for the in-progress caption. Present only with
+  // `inProgress`. ⚠ It is clock-derived, so it must never enter a payload hash or a fingerprint —
+  // which is structurally impossible here, because an in-progress period is never persisted.
+  elapsedDays?: number;
+}
+
+// One preserved artifact the CURRENT cadence grid cannot name. It is a POINTER, not the document:
+// `archivedKey` (`<periodKey>@cad<days>`) is what the one-report GET reads it back at.
+//
+// ⚠ NOTHING IS DELETED TO PRODUCE THIS LIST. A stored report stops being listed as a live period
+// when the cadence moves or it ages out, and it stops EXISTING only when the account is erased.
+export interface PeriodArchivedReport {
+  archivedKey: string;
+  periodKey: string;
+  // The grain it was measured at. Optional/additive — absent means `'sprint'`, which is what
+  // every row written before the calendar grain existed is.
+  grain?: PeriodGrain;
+  periodStart: string;
+  periodEnd: string;
+  // The cadence it was MEASURED under — not the workspace's current one. This is the number that
+  // makes the entry readable: "5 Aug – 19 Aug, 14-day sprint" beside a workspace now on 21 days.
+  cadenceDays: number;
+  hasNarrative: boolean;
+  model: string | null;
+  // Why the live grid cannot name it. Two different facts and the reader needs to know which:
+  // 'cadence_changed' is a setting somebody made (and can undo); 'outside_history' is age.
+  reason: 'cadence_changed' | 'outside_history';
 }
 
 export interface PeriodReportListItem {
   periodKey: string; periodStart: string; periodEnd: string;
   cadenceDays: number; hasNarrative: boolean; model: string | null;
   coverageComplete: boolean;
+  // ⚠ WHICH GRID THIS PERIOD IS ON. Optional/additive (absent ⇒ `'sprint'`), but the SPA must
+  // read it rather than infer one: two grains write the single `insightsReportKey` store field,
+  // and a picker whose only distinguishing mark is a date range lets a reader forward a document
+  // without knowing whether it measures a fortnight or a calendar month. It also decides the
+  // title formatter — a month rendered by the sprint formatter reads "1 Aug – 1 Sep", a
+  // 32-day span that does not exist.
+  grain?: PeriodGrain;
+  // An OPEN period (month-to-date). Live, never stored, never narrated: `hasNarrative` is always
+  // false and the detail read goes to the month-to-date route, not to a stored row.
+  inProgress?: true;
 }
 
 export interface PeriodReportsListResponse {
@@ -6649,6 +7097,25 @@ export interface PeriodReportsListResponse {
   // Optional so a plugin build that predates it still satisfies the type; present on every
   // response the current plugin serves. See PeriodReportModelInfo.
   modelInfo?: PeriodReportModelInfo;
+  // The cadence this list was gridded on. Optional/additive. The SPA uses it to say which sprint
+  // length these periods are, and to point at the right control when the reader wants to change it.
+  cadenceDays?: number | null;
+  /**
+   * @deprecated ALWAYS `'workspace'` since plugin migration 0031 removed the account-level
+   * fallback — every cadence is the workspace's own, so there is no longer another answer. Still
+   * emitted (rather than dropped) because the SPA's disclosure reads correctly on the surviving
+   * value; DELETE the field and that branch together.
+   */
+  cadenceSource?: 'workspace' | 'account';
+  // The grain this list was gridded on — it echoes the request's `?grain=`, so a client can tell
+  // "the server ignored my grain" from "there is nothing at this grain". Optional/additive;
+  // absent means `'sprint'`.
+  grain?: PeriodGrain;
+  // Stored artifacts the current grid cannot name (a retired cadence, or aged past the horizon).
+  // Optional and additive; an empty array and an absent field mean the same thing. Listing them
+  // separately is what stops a cadence change turning most of the history into clickable rows that
+  // open blank — see PeriodArchivedReport.
+  archived?: PeriodArchivedReport[];
 }
 
 // ---- The Reports "By workspace" axis (C4 — Compare workspaces folded into Reports) ----
@@ -6678,11 +7145,25 @@ export interface PeriodWorkspaceRow {
 
 export interface PeriodByWorkspace {
   // Rows for the viewed period, listWorkspaces order (Default first, then by name).
+  // EMPTY when `refusal` is set — a refused axis has no honest rows.
   current: PeriodWorkspaceRow[];
   // Rows for the period before it, same order. `null` = no prior period window exists on the
   // cadence grid — which must render as "no prior", never as a column of zeros.
   prior: PeriodWorkspaceRow[] | null;
   priorPeriodKey: string | null;
+  // ⚠ THE WHOLE AXIS REFUSES WHEN THE COMPARED WORKSPACES DO NOT SHARE THE VIEWED WORKSPACE'S
+  // SPRINT CADENCE. The axis hands ONE window to every workspace; a team on a 7-day sprint
+  // measured over a 14-day window contributes roughly double its per-sprint throughput to a
+  // column headed "this period". `cadence_changed` is reused rather than given a new member —
+  // it already means "measured over different-length windows, do not subtract".
+  //
+  // ⚠ IT REFUSES WHOLESALE RATHER THAN DROPPING THE MISMATCHED ROWS. Silently restricting the
+  // table's membership would make one team's Reports change shape because ANOTHER team edited
+  // their sprint length — a surface mutating for a reason its reader cannot see.
+  refusal?: PeriodRefusalReason;
+  // Which workspaces diverge, named so the reader can act without opening Settings for each one.
+  // Names and cadences only; there are no figures to give. Present only alongside `refusal`.
+  refusalWorkspaces?: { workspaceId: number; name: string; cadenceDays: number | null }[];
 }
 
 export interface PeriodReportResponse {
@@ -9493,6 +9974,26 @@ export type BotBenchmarkCostRefusalReason =
    *  number, and takes `seatPriceUnresolved`/`seatCountZero` off the screen with it. The block
    *  renders, every figure refuses, and the two counters say which of the two happened. */
   | 'price_unresolved'
+  /**
+   * ⚠ THE CHOSEN MONTH IS TOO THIN TO PRICE — a rollup-only reason, and the successor to the
+   * order statistic `span_unobserved` used to guard.
+   *
+   * The Workspace rollup's `$ per acted-on thread` divides a monthly price by the threads acted on
+   * inside ONE named calendar month (`COST_WINDOW_DAYS`). Under a floor of ten such threads the
+   * quotient is a price divided by a handful — noise wearing a dollar sign, and it MOVES BY TENS OF
+   * PER CENT on one thread landing either side of the window's edge. This is `below_min_units`'
+   * argument applied to money rather than to a rate, and it is stated as its own reason because the
+   * remedy is different: `below_min_units` is answered by pooling, this one only by time.
+   *
+   * ⚠ IT WITHHOLDS THE PER-THREAD MONEY AND NOTHING ELSE. The pooled counters, the acted-on rate
+   * and `unacted.unactedUsd` are over the whole read slice and are unaffected — a thin month is not
+   * a reason to stop reporting what the subscription buys.
+   *
+   * ⚠ AND IT IS A REFUSAL, NEVER A FALLBACK. A reviewer with months of history and an empty recent
+   * month is DORMANT; smearing its lifetime average over the current price would answer a question
+   * nobody asked with a number nothing measured.
+   */
+  | 'window_underpopulated'
   /** ⚠ THE ESTATE IS PARTIAL, SO EVERY WORKSPACE-GRAIN FIGURE WOULD BE A FALSE EXACT CLAIM — the
    *  rollup-only reason, and it OUTRANKS all nine above it. `BOT_BENCHMARK_MAX_PLACEMENT_REPOS`
    *  bounds the fold at twelve repositories, and past that the response carries `truncated: true`.
@@ -10022,10 +10523,12 @@ export interface BotBenchmarkWorkspaceCost {
    *  DENOMINATOR'S SIZE IS PART OF THE CLAIM: "$3.20 per acted-on thread" over one repository and
    *  over nine are different assertions and the card must be able to say which. */
   coveredRepos: number;
-  /** ⚠ A DISCLOSURE, NOT A FIGURE: live repositories whose observation span could not be read, and
-   *  which therefore contributed NOTHING to the per-month pace. Imputing a sibling's span onto them
-   *  would inflate the pace by counting their threads over time they were not observed working;
-   *  dropping them silently would understate it with no way for a reader to notice. Normally 0. */
+  /** ⚠ A DISCLOSURE ABOUT THE EVIDENCE TABLE, AND NO LONGER ABOUT THE MONEY. Live repositories
+   *  where this reviewer's own earliest-to-latest comment stretch could not be read, so
+   *  `contributions[].spanDays` is `null` for them. It USED to be load-bearing — that stretch was
+   *  the per-month pace's divisor, and a repository without one contributed nothing to it — and it
+   *  is not any more: the money divides by a chosen calendar month at both ends. Kept because the
+   *  column it explains is still published; normally 0. */
   spanUnobservedRepos: number;
   /** ⚠ A SECOND DISCLOSURE WITH A DIFFERENT CAUSE: live repositories the host has held for less than
    *  the activity window, whose merge count is a partial-window UNDERCOUNT. They are excluded from
@@ -10039,18 +10542,57 @@ export interface BotBenchmarkWorkspaceCost {
    *  TOTAL: dollars per merged pull request, which does not scale with the window, so a renderer
    *  must not suffix it "per 14 days" (that shipped, and reads as $/PR/fortnight). */
   perMergedPr: { status: 'value'; value: number; mergedPrs: number } | BotBenchmarkCostRefusal;
-  /** ⚠ WHAT THE PRICE CURRENTLY BUYS AND NOBODY ACTS ON, PER MONTH, POOLED. `actedOnRate` here is
-   *  `Σ acted ÷ Σ settled` over the whole live estate — the card's HEADLINE rate, and NOT the
-   *  fitted-subset rate the expectation compares against. Two populations, two fields, never one
-   *  row. It survives a rate of 0, which is the strongest finding this block can produce. */
+  /** ⚠ WHAT THE PRICE CURRENTLY BUYS AND NOBODY ACTS ON, PER MONTH, POOLED — AND OVER THE WHOLE
+   *  READ SLICE, NOT OVER `costWindowDays`. `actedOnRate` here is `Σ acted ÷ Σ settled` over every
+   *  thread the walk read in every live repository: the card's HEADLINE rate, and NOT the
+   *  fitted-subset rate the expectation compares against, and NOT the windowed rate `yours` now
+   *  carries. THREE populations, three fields, never one row — the renderer names each. It survives
+   *  a rate of 0, which is the strongest finding this block can produce. */
   unacted: BotBenchmarkCostUnacted | BotBenchmarkCostRefusal;
-  /** The customer's own pooled arithmetic. ⚠ `actedPerMonth` IS A SUM OF PER-REPOSITORY RATES —
-   *  `Σ(acted × 30.44 ÷ spanDays)` — and NOT the shared type's per-repository reading of
-   *  `actedThreads × 30.44 ÷ span.days`, because there is no one span across an estate. See the
-   *  section header on why unioning them understates the pace. */
+  /**
+   * The customer's own arithmetic OVER `costWindowDays` — one named calendar month at BOTH ends of
+   * the fraction.
+   *
+   * ⚠ ITS POPULATION IS NARROWER THAN `unacted`'S AND THAT IS THE POINT. `actedThreads` /
+   * `settledThreads` here count only the threads whose SETTLE POINT fell inside the window, so they
+   * are a subset of the pooled pair above and the two rates routinely differ. Both are on the wire
+   * so a renderer can label them apart and a test can assert that it did.
+   *
+   * ⚠ `actedPerMonth === actedThreads`, BY CONSTRUCTION AND NOT BY COINCIDENCE. The window IS a
+   * month (`COST_WINDOW_DAYS === 30.44`), so a count inside it already is a monthly pace: there is
+   * no annualising factor left to get wrong, and `perActedOnUsd` is exactly `monthlyUsd ÷
+   * actedThreads` — a division a reader can check against the two numbers printed beside it.
+   *
+   * ⚠ WHAT THIS REPLACED: `Σ(acted × 30.44 ÷ spanDays)`, where `spanDays` was the reviewer's own
+   * earliest-to-latest comment on the walked slice. That window was DATA-DERIVED (237 days on a
+   * real card, on a repository the app had held for 52), an ORDER STATISTIC with no robustness
+   * (one old comment on one long-lived pull request set the whole denominator) and NEVER RENDERED,
+   * so the figure could not be recomputed from anything on screen.
+   */
   yours: BotBenchmarkCostYours | BotBenchmarkCostRefusal;
-  /** ⚠ THE TIME BASE'S OWN CAVEAT, SERVED SO A RENDERER CANNOT DROP IT. */
-  spanNote: string;
+  /** ⚠ THE BASIS, SERVED SO A RENDERER CANNOT DROP IT — one sentence naming the two numbers the
+   *  per-thread figure divides and saying they cover the same month. It replaced a 106-word span
+   *  caveat, every clause of which was about a time base that no longer exists. */
+  basisNote: string;
+  /**
+   * ⚠ THE CHOSEN WINDOW, IN DAYS — `COST_WINDOW_DAYS`, one calendar month (30.44), the same length
+   * `monthlyUsd` is quoted for. SERVED rather than assumed: a renderer that inlined "30" would
+   * silently disagree with the server the day the constant moves, on a card whose whole claim is
+   * that both halves of a fraction cover the same month.
+   *
+   * ⚠ NOT `windowDays` — that is the cohort's 14-day banding window and `perMergedPr`'s basis
+   * ALONE. Two windows on one card, two fields, and neither may be read for the other's figure.
+   *
+   * Trailing and OPTIONAL: an older plugin sends no such key, and the panel must not print a
+   * window it was not told.
+   */
+  costWindowDays?: number;
+  /** ⚠ A THIRD DISCLOSURE, WITH THE THIRD CAUSE: live repositories the host has held for less than
+   *  `costWindowDays`. Their month of work is a known UNDERCOUNT while the price is whole, so the
+   *  per-acted-on figure would read too high — the same argument as `workspace_truncated`, one
+   *  grain down, and it refuses `yours` rather than being disclosed and carried. Trailing and
+   *  OPTIONAL. Normally 0. */
+  costWindowIncompleteRepos?: number;
 }
 
 /**

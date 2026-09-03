@@ -46,6 +46,22 @@ import {
 
 const ZOOM_MIN_MS = 1000 * 60 * 60;
 
+// The wheel-zoom floor on an ISOLATE (single-PR focus) tab only, and the absolute
+// floor on enterPrFocus's fit padding. Scoped to the isolate instance: the shared
+// board keeps ZOOM_MIN_MS, where an hour is the right floor for a multi-repo board.
+//
+// WHY SO SMALL: on this dataset a third of merged PRs live under an hour, a fifth
+// under fifteen minutes and 6% under a MINUTE — exactly the population focus mode
+// exists to make legible. vis widens a sub-zoomMin window SYMMETRICALLY about its
+// centre, so any floor above a PR's own span silently caps how much of the screen it
+// can fill (the shared board's 1h floor caps a 5-minute PR at 8%).
+//
+// ⚠ The two constants are a PAIR: `PAD >= ZOOM_MIN / 2` makes `span + 2·PAD ≥ ZOOM_MIN`
+// hold for every span down to zero, so the clamp NEVER engages and the fitted window is
+// exactly the one enterPrFocus computed. Change one and you must re-check the other.
+const ISOLATE_ZOOM_MIN_MS = 10_000;
+const ISOLATE_FIT_MIN_PAD_MS = 5_000;
+
 const VIS_OPTIONS: TimelineOptions = {
   // stack:false + stackSubgroups:true is the "subgroups as ordered single-line
   // bands" mode (vis `nostack`): every subgroup occupies its own horizontal line
@@ -1370,6 +1386,9 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   // click funnel through here so they reach a byte-for-byte identical end state.
   // Reads REFS (not the `data` closure) so it stays stable and never recreates the
   // vis-init effect. Centring + consumeTimelineFocus are left to the caller.
+  // Its ONE caller is the isolate tab's boot effect, so the fit below may rely on the
+  // isolate instance's lowered zoomMin (ISOLATE_ZOOM_MIN_MS). Anything that ever calls
+  // it from the SHARED board must re-check that pairing.
   const enterPrFocus = useCallback(
     (
       prId: number,
@@ -1415,11 +1434,32 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       }
       const keepGroupIds = [...contributors].map((uid) => `repo:${repoId}:user:${uid}`);
 
-      // Fit the window to the PR's activity span (+8% padding, min 12h). Horizontal
-      // only — the boot effect's deferred centerShowTarget owns the vertical scroll.
+      // Fit the window to the PR's activity span so the PR FILLS the viewport — the
+      // whole point of a focus tab, and what makes a short-lived PR's events legible
+      // instead of bunched into a few pixels. The pad is PROPORTIONAL (~8% of the span
+      // each side ⇒ the bar occupies ~86% of the width); the absolute floor exists only
+      // to keep a zero-span PR (opened and merged in the same instant) from producing a
+      // zero-width window, and is sized against ISOLATE_ZOOM_MIN_MS so vis never has to
+      // clamp (see that constant). A FIXED 12h floor here was the old defect: a
+      // 40-minute PR got a 24h window and ~3% of the screen. Horizontal only — the boot
+      // effect's deferred centerShowTarget owns the vertical scroll.
+      //
+      // animation:false is LOAD-BEARING, not a preference. Under an animated setWindow
+      // vis leaves getWindow() reporting the OLD range until the tween lands, and the
+      // next setRange cancels the animation outright — so the timelineFocusPr effect
+      // (which runs later in this same commit when a magnifier opened the tab) would
+      // read the PRE-fit width and re-set the window at it, silently undoing the fit.
+      // A keyed mount has nothing meaningful to animate from anyway.
       if (opts?.fitWindow !== false && Number.isFinite(minT) && Number.isFinite(maxT)) {
-        const pad = Math.max((maxT - minT) * 0.08, 12 * 60 * 60 * 1000);
-        tl.setWindow(minT - pad, maxT + pad, { animation: true });
+        const pad = Math.max((maxT - minT) * 0.08, ISOLATE_FIT_MIN_PAD_MS);
+        tl.setWindow(minT - pad, maxT + pad, { animation: false });
+        // fitLaneBars grew this bar's `item.end` toward MIN_BAR_PX at the zoom it last
+        // ran — the ~14-day boot window, i.e. hours of fake width — and the rangechanged
+        // re-fit path deliberately early-returns in focus mode. Left alone the subject
+        // bar renders far wider than its real span at this new zoom. Bump the rebuild's
+        // lane nonce so the bars re-fit against the fitted px↔ms scale; that is the
+        // existing supported path (the rebuild already re-asserts isolation + markers).
+        setLaneNonce((n) => n + 1);
       }
 
       prFocusActiveRef.current = true;
@@ -1751,7 +1791,16 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       containerRef.current,
       itemsRef.current,
       groupsRef.current,
-      { ...VIS_OPTIONS, start, end, zoomKey: zoomModifierKey() },
+      {
+        ...VIS_OPTIONS,
+        start,
+        end,
+        zoomKey: zoomModifierKey(),
+        // Isolate tabs zoom in far tighter than the shared board (see
+        // ISOLATE_ZOOM_MIN_MS). `embeddedPrId` is fixed for the life of this keyed
+        // mount, so this can't flip under a live instance.
+        ...(embeddedPrId != null ? { zoomMin: ISOLATE_ZOOM_MIN_MS } : {}),
+      },
     );
 
     timeline.on('click', (props: {
@@ -1993,6 +2042,7 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     scheduleConnectors,
     scheduleStickyHeader,
     verticalScrollEl,
+    embeddedPrId, // constant per keyed mount; listed only for dep completeness
   ]);
 
   // Per-row collapse caret (Item 6). vis re-parses / re-appends label HTML on every
@@ -2761,6 +2811,16 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     if (timelineFocusPr == null) return;
     const tl = timelineRef.current;
     if (!tl) return;
+    // An ISOLATE tab's payload is a by-id fetch of exactly this PR, and a freshly keyed
+    // mount has nothing cached — so on its FIRST render `data` is undefined and every
+    // recovery branch below misses, ending at the "fail gracefully" consume: the focus
+    // is thrown away before the tab has even booted, losing the event centring + glow
+    // the caller asked for. (Worse, the range-widening branch calls setCustomRange,
+    // which would mutate the SHARED board's date filter from inside an isolate tab, and
+    // force-showing is meaningless when the fetch is by id.) Wait one render for the
+    // payload — `data` resolves exactly once, so this cannot strand the focus; if the
+    // PR genuinely isn't in it, the graceful consume still runs on that pass.
+    if (embeddedPrId != null && data == null) return;
 
     const inWindow = data?.prs.find((p) => p.id === timelineFocusPr);
     if (inWindow) {
@@ -2795,7 +2855,20 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
           const c = Date.parse(timelineFocusAt);
           const win = tl.getWindow();
           const width = win.end.valueOf() - win.start.valueOf();
-          tl.setWindow(c - width / 2, c + width / 2, { animation: true });
+          // On an ISOLATE tab the boot fit has ALREADY framed the whole PR, and every
+          // event this path can target lies inside that span by construction (the fit
+          // spans the same events) — so recentring on one instant would only shove part
+          // of the PR back off-screen, undoing the fit that is the point of focus mode.
+          // Recentre on the shared board, or in the pathological case where the instant
+          // really did land outside the current window.
+          const alreadyVisible =
+            embeddedPrId != null &&
+            Number.isFinite(c) &&
+            c >= win.start.valueOf() &&
+            c <= win.end.valueOf();
+          if (!alreadyVisible) {
+            tl.setWindow(c - width / 2, c + width / 2, { animation: true });
+          }
         }
         tl.setSelection([`pr:${timelineFocusPr}`]);
         if (match != null) highlightEvent(match.id);
@@ -2897,6 +2970,7 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     searchOpenPrsData,
     centerShowTarget,
     highlightEvent,
+    embeddedPrId,
   ]);
 
   return (

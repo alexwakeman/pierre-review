@@ -4,7 +4,15 @@ import { db, schema } from '../db/client.js';
 import { config } from '../config.js';
 import { getAccessToken } from '../auth/account.js';
 import { syncRepo, type Logger } from './sync-repo.js';
-import { isDue, decideIncrementalWalk, recordFullWalk } from './adaptive.js';
+import {
+  backoffMsFor,
+  decideIncrementalWalk,
+  isDue,
+  noteAttempt,
+  noteWalkFailure,
+  noteWalkSuccess,
+  recordFullWalk,
+} from './adaptive.js';
 import { isSeverityApiConfigured } from '../ml/severity-client.js';
 import { runMlEnrichmentTick } from './ml-enrichment.js';
 import { deleteMlLabelsForRepo } from '../db/ml-labels.js';
@@ -304,6 +312,9 @@ export async function runSyncForRepo(
     owner: repo.owner,
     name: repo.name,
     accountId: repo.accountId,
+    // So a walk that dies BEFORE upsertRepo (404 / dead token / SAML wall) still records an
+    // error on sync_state — otherwise a repo that never once synced reads 'idle' forever.
+    knownRepoId: repoId,
     token,
     log,
     commitFileConcurrency: config.commitFileConcurrency,
@@ -364,6 +375,11 @@ export async function runSyncForRepo(
 
   const task = runWalk()
     .then(async (walk) => {
+      // A user-initiated walk that came back clean is proof the repo is readable again:
+      // clear the scheduler's health backoff so the normal cadence resumes at once instead
+      // of after the (up to 6h) window. Failures are deliberately NOT recorded here — the
+      // backoff paces the SCHEDULER's unattended attempts, not a person pressing Refresh.
+      if (!walk.cancelled) noteWalkSuccess(repoId, Date.now());
       // Deep re-sync is the user's explicit "re-fetch and re-derive everything" gesture:
       // purge this repo's ML labels so the enrichment worker re-scores the whole corpus
       // against the CURRENTLY served model (labels are model_version-stamped; a deep sync
@@ -549,13 +565,21 @@ export async function syncAllRepos(log: Logger): Promise<void> {
     // Skip repos mid-sync AND repos waiting in the API queue — the queue will run them,
     // and a scheduler-started incremental would reset their honest 'queued' row.
     if (running.has(r.id) || queuedRepos.has(r.id)) continue;
-    // Adaptive (config.syncAdaptive): skip repos not yet due for their activity bucket —
-    // cheap, no I/O — before reserving the slot or fetching a token. Off by default, so
-    // the loop below is unchanged for everyone who hasn't opted in.
+    // Adaptive (config.syncAdaptive, ON BY DEFAULT IN BOTH MODES — the tick is every
+    // MINUTE, so this due-check is the only thing between a repo and 60 walks an hour):
+    // skip repos not yet due for their activity bucket, widened by the health backoff after
+    // consecutive failures. Cheap, no I/O — before reserving the slot or fetching a token.
     if (config.syncAdaptive && !isDue(r.id, Date.now())) continue;
     // Reserve the slot synchronously before the now-async getRepoRow/planSync
     // awaits below so a concurrent tick doesn't double-start this repo.
     running.add(r.id);
+    // ⚠ STAMP THE ATTEMPT FOR EVERY SCHEDULED SYNC, WHATEVER THE MODE, BEFORE ANY AWAIT.
+    // decideIncrementalWalk stamps the incremental branch, and for a long time that was the
+    // ONLY writer — so a repo pinned in FULL mode (which is exactly what a repo whose first
+    // walk always fails is) was due on every single tick and re-walked once a minute
+    // forever. This is the floor that makes that structurally impossible; the backoff below
+    // is what makes the interval sane.
+    noteAttempt(r.id, Date.now());
     try {
       const repo = (await getRepoRow(r.id))!;
       const token = await getAccessToken(repo.accountId);
@@ -587,6 +611,10 @@ export async function syncAllRepos(log: Logger): Promise<void> {
         owner: repo.owner,
         name: repo.name,
         accountId: repo.accountId,
+        // So a walk that dies BEFORE upsertRepo still records an error on sync_state (see
+        // SyncRepoOptions.knownRepoId): without it a repo that has never once synced
+        // reports 'idle' with no error and the failure is invisible on every surface.
+        knownRepoId: r.id,
         token,
         ...plan,
         commitState: true,
@@ -597,9 +625,18 @@ export async function syncAllRepos(log: Logger): Promise<void> {
       });
       // Adaptive: reset the re-walk floor now that a full walk has completed.
       if (config.syncAdaptive) recordFullWalk(r.id, Date.now());
+      // ...and clear any health backoff: this repo is readable again.
+      noteWalkSuccess(r.id, Date.now());
     } catch (err) {
+      // Health backoff: a repo we cannot read must not be retried at the cadence of a
+      // healthy one. The count is the ONLY thing that widens the interval past its activity
+      // bucket (a first-sighted repo reads HOT, i.e. 120s), so this line is load-bearing —
+      // and the error itself is already on sync_state via knownRepoId, so the UI can say so.
+      const failures = noteWalkFailure(r.id, Date.now());
       log.error(
-        `scheduled sync of repo ${r.id} failed: ${err instanceof Error ? err.message : err}`,
+        `scheduled sync of repo ${r.id} failed (${failures} consecutive; next attempt in ` +
+          `≥${Math.round(backoffMsFor(r.id) / 60_000)} min): ` +
+          `${err instanceof Error ? err.message : err}`,
       );
     } finally {
       running.delete(r.id);

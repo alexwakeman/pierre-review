@@ -16,12 +16,22 @@ posts **one** GitHub review (inline + body + verdict).
   (`config.claudeReviewEnabled`) — it spends real money per run. **Force-disabled in cloud**
   (`!isCloud && …`): the routes aren't even registered (`app.ts`), so the gh-CLI/clone-manager
   dep stays unreachable on Railway. When off, the frontend hides the tab (via `/api/me`).
-- **Auth resolves from the ambient env** (`ANTHROPIC_API_KEY` → `CLAUDE_CODE_OAUTH_TOKEN`
-  → a logged-in Claude session); `review/auth.ts` detects it best-effort (the first real
-  SDK auth error is the authoritative gate). A **user-supplied key** (pasted in the tab,
-  `PUT /api/claude-review/key`, stored local-only via `review/local-settings.ts`) wins:
-  `agent.ts` overrides `process.env.ANTHROPIC_API_KEY` for the run (restored in `finally`,
-  gated on `reviewConcurrency===1` to avoid an env race).
+- **Auth is a TWO-RUNG ladder and there is no stored key** (`review/auth.ts`,
+  `applyClaudeReviewAuth`): an **ambient Claude session** (`CLAUDE_CODE_OAUTH_TOKEN` or a
+  logged-in `claude` on disk) is PREFERRED — the run STRIPS any `ANTHROPIC_API_KEY` for its
+  duration so the Agent SDK draws on the subscription instead of metering, restored in
+  `finally`, gated on `reviewConcurrency===1` to avoid an env race — and otherwise the
+  environment's `ANTHROPIC_API_KEY` is left exactly as it is for the SDK to pick up.
+  `detectClaudeAuth` is a best-effort pre-flight over the same two rungs (the first real SDK
+  auth error is the authoritative gate).
+  ⚠ **THE BYO KEY IS RETIRED.** The Settings form, `GET`/`PUT /api/claude-review/key`,
+  `ReviewSeam.setLocalKey` and every reader of `~/.pierre-review/config.json`'s
+  `anthropicApiKey` are gone; an already-stored value is left on disk **untouched and never
+  read** (stopping the read was the decision, destroying the file was not — which is also why
+  there is no "clear it" route). `review/local-settings.ts` survives for the still-live
+  per-review BUDGET. Pinned by `review/auth.test.ts`, whose two ⚠ cases are exactly "a stored
+  key never makes `detectClaudeAuth` say ok" and "a stored key is never written into the
+  environment".
 - **`src/review/`** mirrors the sync machinery: `review-manager.ts` (in-memory job
   manager, one review/PR, `config.reviewConcurrency` gate, startup reconcile of orphaned
   `running` rows), `agent.ts` (the SDK run: an in-process MCP `submit_review` tool —

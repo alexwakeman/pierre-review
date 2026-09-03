@@ -130,11 +130,14 @@ import {
   sharedComparisonRefusal,
   rollupTitle,
   stripGeometry,
+  workspaceCostActedOnDetail,
+  workspaceCostActedOnLabel,
   workspaceCostCoverageNote,
   workspaceCostHeadline,
   workspaceCostPartialWindowNote,
   workspaceCostPriceLine,
   workspaceCostSpanUnobservedNote,
+  workspaceCostWindowIncompleteNote,
 } from '../src/components/Activity/benchmarkModel.js';
 import { botBenchmarkPlacementQueryKey } from '../src/hooks/useBotBenchmark.js';
 import { BOTS_INNER_TABS } from '../src/store/filters.js';
@@ -231,16 +234,24 @@ function workspaceCost(over: Partial<BotBenchmarkWorkspaceCost> = {}): BotBenchm
       settledThreads: 100,
       unactedUsd: 88.8, // 120 × 0.74, a month
     },
+    // ⚠ THE COST WINDOW, SERVED. Two windows live on this block and neither may be read for the
+    // other's figure: `windowDays` is the cohort's fortnight (`perMergedPr`'s basis alone).
+    costWindowDays: 30.44,
+    costWindowIncompleteRepos: 0,
     yours: {
       status: 'value',
-      actedThreads: 26,
-      settledThreads: 100,
-      actedOnRate: 0.26,
-      // ⚠ A SUM OF PER-REPOSITORY PACES, never a count over a joined span.
-      actedPerMonth: 4.2,
-      perActedOnUsd: 28.571429, // 120 ÷ 4.2
+      // ⚠ THE WINDOW'S OWN PAIR — a SUBSET of `unacted`'s slice-wide 26 of 100, and different
+      // numbers under the same field names, which is why every sentence names its population.
+      actedThreads: 20,
+      settledThreads: 80,
+      actedOnRate: 0.25,
+      // ⚠ THE WINDOW IS A CALENDAR MONTH, so a count inside it already IS a monthly pace.
+      actedPerMonth: 20,
+      perActedOnUsd: 6, // 120 ÷ 20, a division the card prints both halves of
     },
-    spanNote: 'a rate at today’s price, summed across the repositories this reviewer is live in',
+    basisNote:
+      'US$120.00 a month divided by the 20 threads acted on in the last 30 days, summed across ' +
+      'the 4 repositories this reviewer is live in. Both halves cover the same month.',
     ...over,
   };
 }
@@ -1248,8 +1259,12 @@ describe('the retired per-repository cost model', () => {
       'cohort_rate_unfitted',
       'cohort_rate_zero',
       'workspace_truncated',
+      // ⚠ THE ELEVENTH, AND IT IS ALSO ROLLUP-ONLY. `window_underpopulated` says the chosen calendar
+      // month the money divides by holds too few acted-on threads to divide a price by — a claim
+      // about a WINDOW, which the per-repository block (a price over an observed span) cannot make.
+      'window_underpopulated',
     ];
-    expect(reasons).toHaveLength(10);
+    expect(reasons).toHaveLength(11);
     expect(Object.keys(COST_REFUSAL_HEADLINE).sort()).toEqual([...reasons].sort());
     for (const reason of reasons) {
       expect(COST_REFUSAL_HEADLINE[reason], reason).toBeTruthy();
@@ -1390,17 +1405,23 @@ describe('the Workspace cost block', () => {
     // figure is still an upper bound. Dropping the sentence because the big error was fixed would
     // leave the small one unstated.
     const note = workspaceCostCoverageNote(workspaceCost());
-    expect(note).toMatch(/Workspace price/);
-    expect(note).toContain('4 repositories');
-    expect(note).toMatch(/nothing here to add together/);
     expect(note).toMatch(/outside this Workspace/);
     expect(note).toMatch(/upper bound/);
     // ⚠ AND IT NO LONGER COUNTS CARDS OR TELLS ANYBODY NOT TO SUM THEM — there is one card, so that
     // instruction would describe a screen that does not exist.
     expect(note).not.toMatch(/cards/);
     expect(note).not.toBe(costSharedNote(costBlock()));
-    // Unconditional, and it agrees with itself about the estate's size.
-    expect(workspaceCostCoverageNote(workspaceCost({ coveredRepos: 1 }))).toContain('1 repository');
+    // ⚠⚠ AND ITS FIRST HALF WENT TOO, WHICH IS THE POINT OF THIS ASSERTION. It argued that the price
+    // and the work describe the same repositories "so there is nothing here to add together" — a
+    // rebuttal of `BotBenchmarkPlacementUnit.cost`, which was DELETED FROM THE WIRE before any of
+    // this shipped. A caveat answering a figure no response carries teaches a reader that these
+    // numbers were once worth distrusting and gives them nothing to do about it.
+    expect(note).not.toMatch(/nothing here to add together/);
+    expect(note).not.toMatch(/Workspace price/);
+    // ⚠ AND IT NO LONGER QUOTES THE ESTATE'S SIZE, because the clause that needed it is gone. The
+    // count still rides the wire and the figure rows still name it.
+    expect(note).not.toContain('4 repositories');
+    expect(workspaceCostCoverageNote(workspaceCost({ coveredRepos: 1 }))).toBe(note);
   });
 
   it('discloses the two dropped-row cases as two SENTENCES, and stays quiet otherwise', () => {
@@ -1415,10 +1436,16 @@ describe('the Workspace cost block', () => {
 
     const span = workspaceCostSpanUnobservedNote(workspaceCost({ spanUnobservedRepos: 1 }));
     expect(span).toContain('1 repository');
-    expect(span).toMatch(/per-month pace/);
-    // ⚠ AND IT SAYS NO SIBLING'S SPAN WAS BORROWED. Imputing one would inflate the pace by counting
-    // threads over time nobody observed the reviewer working.
-    expect(span).toMatch(/borrowed/);
+    // ⚠⚠ IT WAS REWORDED, NOT KEPT, AND THAT IS THIS ASSERTION'S WHOLE JOB. It used to say these
+    // repositories "contributed nothing to the per-month pace" and that no sibling's span was
+    // "borrowed" — TRUE while the pace divided by each repository's observed comment stretch, and
+    // FALSE the moment the money moved to a chosen calendar month. A caveat that no longer describes
+    // the arithmetic is worse than no caveat: it is a wrong account of how the number was made, in
+    // the voice of a disclosure. What is left is the smaller claim about the column it explains.
+    expect(span).not.toMatch(/per-month pace/);
+    expect(span).not.toMatch(/borrowed/);
+    expect(span).toMatch(/observation period/);
+    expect(span).toMatch(/fixed window at both ends/);
 
     const partial = workspaceCostPartialWindowNote(workspaceCost({ partialWindowRepos: 1 }));
     expect(partial).toMatch(/cost per merged pull request/);
@@ -2158,11 +2185,82 @@ describe('money lives on exactly one side of the grain split', () => {
     // sibling split: the comparison refuses on its own, so its money is its own field.
     expect(panel).toMatch(/figure=\{formatUsd\(expectation\.perActedOnUsd\)\}/);
     expect(panel).not.toMatch(/figure=\{`\$\{formatUsd\([^)]*\)\} \$\{window\}`\}/);
-    // ⚠ AND EACH PER-THREAD ROW NAMES THE PACE IT DIVIDED BY, which is what makes a rate at today's
-    // price checkable on screen. Without it the row is a dollar figure over a raw count and the
-    // reader has to know `30.44` to see where it came from.
-    expect(panel).toMatch(/formatThreadCount\(cost\.yours\.actedPerMonth\)\} a month/);
+    // ⚠ AND THE MEASURED ROW'S DETAIL COMES FROM THE MODEL, so the sentence a reader divides can be
+    // asserted without a renderer. It used to be built inline and ended "— about 32.7 a month",
+    // where the 32.7 came from a 237-day observed span that appeared NOWHERE on the card; the row
+    // now prints the two numbers the figure actually divides.
+    expect(panel).toMatch(/detail=\{workspaceCostActedOnDetail\(cost, cost\.yours\)\}/);
+    expect(panel).toMatch(/label=\{workspaceCostActedOnLabel\(cost\)\}/);
+    expect(panel).not.toMatch(/formatThreadCount\(cost\.yours\.actedPerMonth\)\} a month/);
+    // The counterfactual still names the counterfactual pace it divided by — its count is a swapped
+    // factor rather than a measured one, so it cannot be read off the row above it.
     expect(panel).toMatch(/formatThreadCount\(expectation\.actedPerMonthAtPeer\)\} a month/);
+  });
+
+  it('makes the per-acted-on division CHECKABLE from the row a reader is looking at', () => {
+    // ⚠ THE PROPERTY THE FIGURE THIS REPLACED DID NOT HAVE, and the reason the defect survived. The
+    // card printed "US$783.00 a month", "255 of 544 threads acted on" and "US$23.94", and no
+    // arithmetic over those three is consistent: the divisor was a 237-day comment span that no
+    // component rendered. `783 ÷ 243 = 3.22` is now a sum a reader can do on the row.
+    const cost = workspaceCost({ monthlyUsd: 783, coveredRepos: 1 });
+    const yours = {
+      status: 'value' as const,
+      actedThreads: 243,
+      settledThreads: 479,
+      actedOnRate: 0.507307,
+      actedPerMonth: 243,
+      perActedOnUsd: 3.222222,
+    };
+    expect(workspaceCostActedOnDetail(cost, yours)).toBe(
+      '243 of 479 threads acted on · US$783.00 a month',
+    );
+    // ⚠ "across 1 repository" IS DROPPED — that clause exists to make a POOLED figure legible and is
+    // noise on a single-repository Workspace, where it invites the reader to wonder what the other
+    // repositories were.
+    expect(workspaceCostActedOnDetail(cost, yours)).not.toContain('repository');
+    expect(workspaceCostActedOnDetail(workspaceCost({ monthlyUsd: 783 }), yours)).toContain(
+      'across 4 repositories',
+    );
+    // ⚠ THE WINDOW IS SERVED, NEVER INLINED. A hard-coded "30" would go on printing 30 the day the
+    // server's constant moves, on the one card whose claim is that both halves cover one month.
+    expect(workspaceCostActedOnLabel(cost)).toBe('Per acted-on thread (last 30 days)');
+    expect(
+      workspaceCostActedOnLabel({ ...cost, costWindowDays: undefined }),
+    ).toBe('Per acted-on thread');
+  });
+
+  it('gives the thin-month refusal its own words, not `nothing_acted_on`’s', () => {
+    // ⚠ TWO FACTS, TWO REMEDIES. A whole and EMPTY month is a dormant reviewer; a whole month with
+    // nine acted-on threads in it is a sample too thin to divide a price by, and the remedy is time.
+    // Collapsing them would tell a team whose bot went quiet that they merely need a bigger sample.
+    expect(COST_REFUSAL_HEADLINE.window_underpopulated).not.toBe(
+      COST_REFUSAL_HEADLINE.nothing_acted_on,
+    );
+    expect(COST_REFUSAL_HEADLINE.window_underpopulated).toMatch(/month/);
+  });
+
+  it('discloses a repository younger than the cost window, and explains a WITHHELD figure', () => {
+    // ⚠ THE THIRD DISCLOSURE, WITH THE THIRD CAUSE. A repository the host has held for less than the
+    // cost window contributes a PARTIAL month of work against a WHOLE price, so the per-thread
+    // figure would read too high — and excluding the repository would push it higher still, since
+    // the price does not shrink with it. So the figure refuses and this says why.
+    expect(workspaceCostWindowIncompleteNote(workspaceCost())).toBeNull();
+    const note = workspaceCostWindowIncompleteNote(
+      workspaceCost({ costWindowIncompleteRepos: 1 }),
+    );
+    expect(note).toContain('1 repository has been tracked');
+    expect(note).toContain('30 days'); // rendered from the SERVER's `costWindowDays`, rounded
+    expect(note).toMatch(/withheld rather than reported too high/);
+    // ⚠ AND IT IS NOT THE FOURTEEN-DAY ONE. Two thresholds, two figures, two sentences: that note is
+    // about a term LEFT OUT of `$ per merged PR`, this one about a figure that does not render.
+    expect(note).not.toBe(workspaceCostPartialWindowNote(workspaceCost({ partialWindowRepos: 1 })));
+    // ⚠ ASSERT THE VERB, NOT JUST THE NOUN. `countNoun` pluralises the noun; the verb beside it was
+    // hard-coded singular, so this rendered "2 repositories has been tracked" and the old
+    // assertion — `toContain('2 repositories')` — was GREEN over the broken sentence. A copy test
+    // that stops at the interpolated value cannot see the words around it.
+    expect(
+      workspaceCostWindowIncompleteNote(workspaceCost({ costWindowIncompleteRepos: 2 })),
+    ).toContain('2 repositories have been tracked');
   });
 
   it('puts the `fitted` chip on the counterfactual row and `counted` on the customer’s own', () => {
@@ -2194,8 +2292,13 @@ describe('money lives on exactly one side of the grain split', () => {
     expect(panel).toContain('data-testid="benchmark-workspace-cost-partial-window"');
     expect(panel).toContain('workspaceCostSpanUnobservedNote(cost)');
     expect(panel).toContain('workspaceCostPartialWindowNote(cost)');
-    // The server-authored time-base caveat is rendered verbatim rather than re-worded.
-    expect(panel).toContain('{cost.spanNote}');
+    // ⚠ THE SERVER-AUTHORED BASIS SENTENCE IS RENDERED VERBATIM, and it rides the MONEY rather than a
+    // span: its predecessor was gated on whether a span-anchored figure was on screen, and there are
+    // none left. The sentence a reader uses to check the arithmetic must be there whenever the
+    // arithmetic is.
+    expect(panel).toContain('{cost.basisNote}');
+    expect(panel).not.toContain('{cost.spanNote}');
+    expect(panel).not.toMatch(/const showsSpan/);
   });
 
   it('discloses what a truncated estate costs, and only where the remedy is one', () => {

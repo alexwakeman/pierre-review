@@ -1,15 +1,16 @@
 import type { ReactNode } from 'react';
-import type { ProSettings, ProSettingsUpdate } from '@pierre-review/shared';
 
 // Shared, READ-ONLY presentational helpers for the config-modal sections. Kept in one small
-// file so each section component stays self-contained (sections never edit this file → the four
+// file so each section component stays self-contained (sections never edit this file → the
 // features touch disjoint files).
-
-export interface SectionProps {
-  settings: ProSettings;
-  save: (patch: ProSettingsUpdate) => void;
-  saving: boolean;
-}
+//
+// ⚠ THERE IS NO `SectionProps` ANY MORE, AND THAT IS A GRAIN FACT, NOT A TIDY-UP. It was
+// `{settings, save, saving}` — the ACCOUNT's `ProSettings` plus the modal's one shared account
+// mutation, threaded down into whichever sections wrote at that grain. No section does: the last
+// account-grained control in this modal, the comparison-window mode, moved onto the workspace row
+// in plugin migration 0032, and the bot Slack-digest toggle onto the delivery row in 0033. Every
+// remaining section owns its OWN scoped query and mutation, which is what makes a Save's blast
+// radius a property of the section rather than of a prop somebody passed it.
 
 export function SectionShell({
   title,

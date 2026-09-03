@@ -8,9 +8,26 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { config } from '../config.js';
 
-// Local-only settings store for the Claude Review feature: the user's
-// Anthropic API key, persisted to ~/.pierre-review/config.json (mode 0600).
-// NEVER read or written in cloud mode — the file lives on the user's machine.
+// Local-only settings store for the Claude Review feature, persisted to
+// ~/.pierre-review/config.json (mode 0600). NEVER read or written in cloud mode
+// — the file lives on the user's machine.
+//
+// ⚠ IT NO LONGER HOLDS A CREDENTIAL. The BYO Anthropic key this file existed for is
+// RETIRED: local Claude Review resolves auth from an ambient Claude session first (so a
+// subscription pays rather than a meter) and otherwise leaves the environment's
+// ANTHROPIC_API_KEY in place — two rungs, in review/auth.ts. There is no reader, no
+// writer, no route and no form.
+//
+// ⚠ AN ALREADY-STORED `anthropicApiKey` IS LEFT ON DISK, UNTOUCHED. The decision was to
+// stop READING it, not to destroy somebody's file — and `write()` below rewrites the whole
+// object it read, so the field round-trips through a budget save rather than being dropped.
+// `LocalSettings` deliberately does NOT declare it: an undeclared field is never read and
+// never assigned, which is exactly what "retired" means here (the same treatment the plugin
+// gives a dormant column). Do not re-add a reader, and do not add an eraser — an eraser is a
+// write path back.
+//
+// What is still LIVE is `maxReviewBudgetUsd`, below: the per-review USD ceiling behind
+// ReviewBudgetPanel, PUT /api/claude-review/budget and getEffectiveReviewBudget().
 
 const FILE = join(homedir(), '.pierre-review', 'config.json');
 
@@ -21,7 +38,8 @@ export const MIN_REVIEW_BUDGET_USD = 0.5;
 export const MAX_REVIEW_BUDGET_USD = 5;
 
 interface LocalSettings {
-  anthropicApiKey?: string;
+  // (No `anthropicApiKey` — retired; see the header. The key may still be PRESENT in the
+  // file and simply passes through `read()` → `write()` untyped and unread.)
   // Per-review USD ceiling (maxBudgetUsd for the SDK run). Absent = fall back to the
   // operator default (config.reviewBudgetUsd). Clamped to [MIN, MAX] on write.
   maxReviewBudgetUsd?: number;
@@ -39,25 +57,6 @@ function read(): LocalSettings {
 function write(settings: LocalSettings): void {
   mkdirSync(dirname(FILE), { recursive: true });
   writeFileSync(FILE, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 });
-}
-
-export function getUserAnthropicKey(): string | null {
-  if (config.isCloud) return null;
-  const key = read().anthropicApiKey;
-  return key && key.length > 0 ? key : null;
-}
-
-export function hasUserAnthropicKey(): boolean {
-  return getUserAnthropicKey() != null;
-}
-
-// Set (non-empty) or clear (empty/null) the stored key.
-export function setUserAnthropicKey(key: string | null): void {
-  if (config.isCloud) return;
-  const settings = read();
-  if (key && key.trim().length > 0) settings.anthropicApiKey = key.trim();
-  else delete settings.anthropicApiKey;
-  write(settings);
 }
 
 const clampBudget = (n: number): number =>
@@ -91,6 +90,7 @@ export function setUserReviewBudget(usd: number | null): void {
   write(settings);
 }
 
-// NOTE: the per-run env override for Claude Review now lives in review/auth.ts as
+// NOTE: the per-run env handling for Claude Review lives in review/auth.ts as
 // `applyClaudeReviewAuth` (it implements the prefer-ambient policy and needs the
-// ambient-session probe). This module stays a pure key store.
+// ambient-session probe). With the stored key retired, that ladder is two rungs and this
+// module holds no credential at all — only the budget.

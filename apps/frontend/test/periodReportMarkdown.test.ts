@@ -200,4 +200,68 @@ describe('renderPeriodReportMarkdown', () => {
     );
     expect(md).toContain('**Biggest movers:** median time to first review hours ▼ −3');
   });
+
+  // ── CALENDAR-MONTH GRAIN ─────────────────────────────────────────────────────────────────
+  //
+  // ⚠ THE MONTH-WORD RULE IS GRAIN-CONDITIONAL, NOT DELETED. At sprint grain the title is the DATE
+  // RANGE and "monthly" / "month on month" appear nowhere (~2.17 fortnights per calendar month, so
+  // the label would be false). At month grain the period IS a calendar month — and the SPRINT
+  // formatter is actively wrong for it, because `periodEnd` is the EXCLUSIVE bound: August would
+  // title as "1 Aug – 1 Sep", a 32-day span that does not exist.
+  it('titles a calendar month by NAME, and a sprint by its date range', () => {
+    const sprint = renderPeriodReportMarkdown(baseReport());
+    // (The month abbreviation is the runtime's — "Sep" or "Sept" depending on ICU — so the
+    // assertion is on the SHAPE: two day-and-month endpoints, not a month name.)
+    expect(sprint.split('\n')[0]).toMatch(/^# 18 Aug – 1 Sept?$/);
+    expect(sprint).toContain('Sprint · 14 days');
+
+    const month = renderPeriodReportMarkdown(
+      baseReport({
+        periodKey: 'month-2026-08',
+        periodStart: '2026-08-01T00:00:00.000Z',
+        periodEnd: '2026-09-01T00:00:00.000Z',
+        grain: 'month',
+        cadenceDays: 31,
+      }),
+    );
+    expect(month.split('\n')[0]).toBe('# August 2026');
+    expect(month).not.toContain('1 Aug – 1 Sep');
+    expect(month).toContain('Calendar month · 31 days');
+  });
+
+  // An OPEN period is a snapshot of an unfinished month. Whoever it is forwarded to has to know
+  // that before they read a figure, so it is stated in the header line rather than a footnote.
+  it('marks a month-to-date export as in progress, with the days elapsed', () => {
+    const md = renderPeriodReportMarkdown(
+      baseReport({
+        periodKey: 'month-2026-08',
+        periodStart: '2026-08-01T00:00:00.000Z',
+        periodEnd: '2026-09-01T00:00:00.000Z',
+        grain: 'month',
+        cadenceDays: 31,
+        narrative: null,
+        model: null,
+        inProgress: true,
+        elapsedDays: 17,
+      }),
+    );
+    expect(md).toContain('IN PROGRESS — 17 days elapsed, not written up');
+    // ...and never a staleness claim: there is no stored row here to be stale against.
+    expect(md).not.toContain('STALE');
+  });
+
+  // ⚠ TRAP (a): the forecast estimator fits on the period's POSITION in the series, which assumes
+  // every period is the same length. Calendar months are 28-31 days. The refusal is NAMED and its
+  // sentence travels verbatim — a blank band and a confident band around an artifact are the same
+  // pixel to a reader.
+  it('carries the uneven-periods forecast refusal verbatim', () => {
+    const md = renderPeriodReportMarkdown(
+      baseReport({
+        grain: 'month',
+        forecasts: [{ available: false, key: 'merged_prs', reason: 'uneven_periods' }],
+      }),
+    );
+    expect(md).toContain(REFUSAL_TEXT.uneven_periods);
+    expect(REFUSAL_TEXT.uneven_periods).toContain('28–31 days');
+  });
 });

@@ -484,7 +484,12 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 Details: [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md). Non-negotiables: the agent's tools are
 read-only with **`Bash` denied outright**, and **no AI SDK ships in npm** — every AI module is
 reached only via dynamic `await import()`, and `build-release.mjs` asserts none leak into the
-release manifest.
+release manifest. ⚠ **Its credential ladder is TWO RUNGS and there is NO stored key**: an ambient
+Claude session (preferred — the run STRIPS `ANTHROPIC_API_KEY` so a subscription pays instead of a
+meter), else the environment's `ANTHROPIC_API_KEY`, untouched. The BYO key in
+`~/.pierre-review/config.json`, its Settings form, `GET`/`PUT /api/claude-review/key` and
+`ReviewSeam.setLocalKey` are RETIRED — an already-stored value is left on disk and never read, and
+`review/local-settings.ts` survives only for the still-live per-review BUDGET.
 
 **Pro plugin** (`@pierre/pro`): a PRIVATE git submodule at `packages/pro`
 (`git submodule update --init`); all premium logic lives there. The public repo holds only the
@@ -589,15 +594,32 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   WORKSPACE; the old block divided a whole subscription by one repository's work), and the guarantee
   is STRUCTURAL — a `?repoIds=`-NARROWED request builds no rollup, and it is the NARROWING that
   decides, never the resulting repo count. `BotRoiPanel`'s `$/acted-on` follows the same rule
-  (`showCost = botDepth && repoId == null` — do NOT simplify back to `botDepth`). Four fold rules
+  (`showCost = botDepth && repoId == null` — do NOT simplify back to `botDepth`). ⚠ **`$ per
+  acted-on thread` DIVIDES BY A CHOSEN CALENDAR MONTH — `COST_WINDOW_DAYS` = `DAYS_PER_MONTH`
+  (30.44) — AT BOTH ENDS**: `monthlyUsd ÷ (acted-on threads whose SETTLE POINT fell in
+  `[now − 30.44d, now)`)`, a division the card prints both halves of. It replaced `Σ_r (acted_r ×
+  30.44 ÷ spanDays_r)`, a window NOBODY CHOSE (237 days on a real card), an order statistic one old
+  comment could set, and a divisor no component ever rendered — US$23.94 against the ROI tab's
+  US$3.2 for the same bot at the same price. **30.44 and not 30 is load-bearing**: the ROI tab
+  annualises by `DAYS_PER_MONTH ÷ windowDays`, so the two tabs agree at exactly one window length
+  and `test/benchmark-roi-agreement.test.ts` fails if the constant moves. The window is FIXED, never
+  the ROI chip (a placement must not move because someone flipped a selector elsewhere), and it
+  **REFUSES rather than falling back** — `repo_window_incomplete` (a repo younger than the window:
+  partial work, whole price), `nothing_acted_on` (a dormant reviewer), `window_underpopulated`
+  (< 10 acted-on threads), each withholding the per-thread money ALONE. ⚠ The two tabs still differ
+  on real data (US$1.97 vs US$3.22) because the acted-on DEFINITIONS differ by design — do not
+  reconcile them. Five fold rules
   in [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md), each of which has already
-  cost a bug: rates are additive but **spans are NOT**; the pooled headline rate (over every live
-  repo) and the fitted-subset rate are TWO NUMBERS that must be labelled apart and **NEVER
-  SUBTRACTED** — both, plus both repo counts, ride the wire (PERIOD-REPORTING's headline-vs-subset
-  defect, one grain over); a cohort median of **`0` is NO median** — all three `qodo` bands in the
-  shipped corpus publish one; and **`workspace_truncated` OUTRANKS every other cost refusal**,
-  because a partial estate makes the exact claim false in the INFLATING direction — money refuses
-  on all three arms while counters and the spread, honest sums over a stated subset, still render.
+  cost a bug: rates are additive but **spans are NOT** (now VACUOUS — nothing divides by a span;
+  kept for its argument); `yours` carries the WINDOW's thread pair and `unacted` the whole SLICE's
+  under the same field names, so each sentence names its own population; the pooled headline rate
+  (over every live repo) and the fitted-subset rate are TWO NUMBERS that must be labelled apart and
+  **NEVER SUBTRACTED** — both, plus both repo counts, ride the wire (PERIOD-REPORTING's
+  headline-vs-subset defect, one grain over); a cohort median of **`0` is NO median** — all three
+  `qodo` bands in the shipped corpus publish one; and **`workspace_truncated` OUTRANKS every other
+  cost refusal**, because a partial estate makes the exact claim false in the INFLATING direction —
+  money refuses on all three arms while counters and the spread, honest sums over a stated subset,
+  still render.
 - **The work plan** (`workPlan` gates the NARRATION ONLY): "what should I work on today", folded
   into the **Pending** board as its ranked "Do next" head. **THE CODE RANKS, FREE; THE MODEL
   NARRATES, PAID** — the rank is CORE (`db/work-plan.ts`) and served free by `GET /api/attention`,
@@ -622,6 +644,15 @@ a refusable forecast. **Metrics are CORE** (`db/period-metrics.ts`, `db/forecast
 `db/actor-lanes.ts`, `db/person-period.ts`); storage, narration and routes are plugin-owned.
 **Full contract: [docs/PERIOD-REPORTING.md](docs/PERIOD-REPORTING.md)**. The invariants:
 
+- **EVERY Pro reading setting on this surface IS PER-WORKSPACE, with the product default beneath it
+  and NO inheritance chain** — the sprint cadence + phase anchor, the Jira/Linear tracker and, since
+  plugin migration 0032, the **comparison mode**, all on one `pro_workspace_settings` row.
+  ⚠ The mode moved because the claim keeping it account-wide was FALSE: it COMPOSES with the
+  cadence, so `'sprint'` is a sprint-position window on a workspace that has one and a rolling
+  fortnight on one that does not — one account setting, two window SHAPES, nothing on screen saying
+  which. `resolveComparisonWindow`/`resolveInsightsRange` take RESOLVED VALUES, never a settings
+  row, and `getComparisonWindow` reads both halves off ONE row so they cannot come from two grains.
+
 - **Every metric is WINDOW-PURE** — events timestamped in `[fromMs, toMs)`, TWO-SIDED predicate
   on every column. A stored period must stay reproducible, so no "as of now" snapshot enters the
   vector (no `openPrs`, no `ciFailingNow`).
@@ -636,6 +667,22 @@ a refusable forecast. **Metrics are CORE** (`db/period-metrics.ts`, `db/forecast
   RENAMED, never redefined in place, or a v1 and a v2 row become subtractable under one key.
 - ⚠ **A `_pct` metric MUST join `PCT_METRIC_KEYS`** in the plugin or its forecast projects an
   impossible number — a silent defect, not a compile error.
+- **TWO GRAINS COEXIST — the sprint cadence (default) and REAL CALENDAR MONTHS** (`PeriodGrain`),
+  plus a live **month to date**. The grain is a READING CHOICE on the request
+  (`?grain=` on the list; every other route derives it from the KEY, `sprint-YYYY-MM-DD` vs
+  `month-YYYY-MM`) and is NEVER a stored setting — folding it into the cadence row would move the
+  free flow-metrics window on another tab. ⚠ **The comparison refusal keys on GRAIN FIRST, and on
+  `cadenceDays` ONLY within the sprint grain**: Jan is 31 days and Feb is 28, so a bare day-count
+  test refuses EVERY month-over-month comparison, silently. ⚠ A month row keeps its REAL day count
+  (28-31), never a sentinel. ⚠ **`grain` is a column that four sites used to hard-code**, so a month
+  row persisted as `month` and served as `sprint`; read it. ⚠ **The forecast REFUSES at month grain**
+  (`uneven_periods`) — `db/forecast.ts` fits on the ARRAY INDEX, so 28-vs-31 days is a ±5.4% swing it
+  reads as signal and February dips every year. ⚠ **Month-to-date is LIVE, UN-STORED and UN-BILLED**
+  — an open period's fingerprint moves on every merge (permanent `stale`) and its upper bound is
+  `Date.now()` (which may never enter a payload hash); no Generate button, and its own `search` tier
+  on `GET /api/pro/insights/month-to-date`. ⚠ The month-word BAN is GRAIN-CONDITIONAL in five
+  places INCLUDING THE LLM SYSTEM PROMPT — forked, never deleted, or a 14-day report regains
+  permission to call itself monthly.
 - **Seven `ActorLane`s, and the vector's human-only figures come from the same resolver the
   lane panel does** — a blended figure is a number no PR resembles. Four more ⚠ rules have
   their own headings in the doc: the automation set is the lane resolver's **UNION**, never

@@ -37,7 +37,7 @@ import { usePrArmedIntent } from '../hooks/useAutoMerge.js';
 import { useSuggestedReviewers } from '../hooks/usePr.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
-import { BotIcon, CheckIcon, CloseIcon, WarningIcon } from './Icons.js';
+import { BotIcon, CheckIcon, CloseIcon, ExternalLinkIcon, WarningIcon } from './Icons.js';
 
 // Per-state styling for the "Reviewers" row badges (everyone who submitted a
 // review, not just approvers): the badge hue + leading mark hint at each
@@ -524,7 +524,33 @@ export function ChecksTab({
                   className="inline-block h-2.5 w-2.5 rounded-full"
                   style={{ backgroundColor: ci.color }}
                 />
-                {ci.label}
+                {/* The rollup label opens the PR's OWN Checks tab — ALWAYS that page, never a
+                    derived Actions run id. A PR that triggers several workflows has several
+                    simultaneously-latest runs, so deep-linking one presents an arbitrary pick as
+                    "the" answer; the Checks tab always exists, always shows this exact set, and
+                    works for third-party CI that has no Actions run at all. (Per-check deep links
+                    still live one row down, in CheckList's `checkHref`.)
+                    ⚠ Deliberately INSIDE the `{ci ? …}` branch: `CI_META['unknown']` is null, and
+                    "GitHub told us nothing" is not evidence a run exists — the "no checks" branch
+                    below must stay unlinked. Wrapping the label rather than the row also keeps the
+                    merge verdict and its `|` separator out of the anchor.
+                    `pr.githubUrl` is OUR value (built server-side from owner/name/number), not
+                    vendor-supplied, so it needs no safeExternalUrl — same as `${pr.githubUrl}/files`
+                    in ChangesTab. Styled like CheckList's in-row name anchor: inherited colour +
+                    hover underline, with the external-link mark carrying the affordance. */}
+                <a
+                  href={`${pr.githubUrl}/checks`}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  title="Open this pull request's Checks tab on GitHub"
+                  className="inline-flex items-center gap-1 hover:underline"
+                >
+                  {ci.label}
+                  <ExternalLinkIcon
+                    size={11}
+                    className="inline-block align-[-0.1em] text-gray-400"
+                  />
+                </a>
                 {checks.length > 0 && (
                   <span className="text-xs text-gray-400">
                     ·{' '}

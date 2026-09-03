@@ -7,6 +7,9 @@ import {
   SkipIcon,
   WarningIcon,
 } from '../components/Icons.js';
+// A VALUE import (not `import type`): the large-PR resolver below needs the product default at
+// runtime. `shared` is types-only for the BACKEND — the SPA bundles it from source.
+import { LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
 
 /** A check-state mark. A REFERENCE, so this `.ts` module can name it without holding JSX. */
 type IconComponent = (props: { size?: number; className?: string; title?: string }) => JSX.Element;
@@ -768,6 +771,102 @@ export function mergeVerdictWarning(pr: MergeVerdictInput): MergeVerdictInfo | n
   if (info.verdict !== 'draft') return null;
   const underneath = mergeVerdict({ ...pr, isDraft: false });
   return DRAFT_COMPACT_WARN_VERDICTS.has(underneath.verdict) ? underneath : null;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   The LARGE-PR FLAG — the ONE resolver
+   ─────────────────────────────────────────────────────────────────────────────────────────────
+
+   A pull request whose CODE churn is big enough that reviewing it well is unlikely. The backend
+   does the hard half (`db/code-loc.ts` decides what counts as code and sums it); the wire then
+   carries a NUMBER, never an `isLarge` boolean, so the comparison against the account's
+   threshold is a pure render-time operation — changing the threshold in Settings repaints every
+   surface with no cache invalidation anywhere.
+
+   ⚠ EVERY SURFACE COMPARES HERE AND NOWHERE ELSE. Feed cards, Pending cards, the PR-detail
+   header and the vis-timeline tooltip all call `largePrFlag`. A per-component `codeLoc >
+   threshold` is how the timeline and the board come to disagree about the same pull request.
+
+   The three data traps this function exists to get right — all three end in "render nothing",
+   which is why it returns `null` rather than a verdict object with a `false` in it:
+
+     1. `codeLoc == null` is UNKNOWN, never "not large". Roughly a fifth of synced PRs have no
+        stored per-file breakdown or no observed size at all. Nothing is drawn, and in
+        particular no "unknown" chrome — a reader who sees no flag on any PR must not be able to
+        tell the unmeasured ones from the small ones, because we cannot.
+     2. `codeLocIsLowerBound` reads ASYMMETRICALLY. GitHub's `files(first: 100)` truncates, and
+        it truncates exactly the biggest pull requests. Over the threshold is still safe to
+        assert (a missing file can only ADD lines); under it proves nothing.
+     3. Under the threshold we say nothing at all — no "small PR" affordance, on any surface.
+        That keeps trap 2 structurally impossible to get wrong: there is no under-threshold
+        rendering path for a truncated number to lie on. */
+
+/** The rendered form of an over-threshold pull request. `null` from `largePrFlag` means "draw
+ *  nothing", covering both "we don't know" and "not large" — deliberately the same answer. */
+export interface LargePrFlagInfo {
+  /** The measured code-only churn. A FLOOR when `isLowerBound`. */
+  codeLoc: number;
+  /** GitHub truncated the file list, so the real figure is higher than `codeLoc`. */
+  isLowerBound: boolean;
+  /** Full sentence for a `title=` / accessible label — carries the number AND the threshold,
+   *  because "large" without a magnitude is not reviewable information. */
+  label: string;
+  /** Compact visible text beside the icon, e.g. `2,340 code lines` / `2,340+ code lines`. */
+  short: string;
+}
+
+/**
+ * Should this pull request carry the large-PR flag, and what does it say?
+ *
+ * `pr` is deliberately structural (`codeLoc` + `codeLocIsLowerBound`) so the one function serves
+ * `TimelinePr`, `InsightPrRef` and `ConsolidatedFeedItem` — all three carry the pair as TRAILING
+ * OPTIONAL fields, so an IndexedDB-persisted response written before this feature existed simply
+ * reads as unknown.
+ */
+export function largePrFlag(
+  pr: { codeLoc?: number | null; codeLocIsLowerBound?: boolean },
+  threshold: number,
+): LargePrFlagInfo | null {
+  const codeLoc = pr.codeLoc;
+  // TRAP 1 — unknown. `== null` catches the undefined of a stale cached payload too.
+  if (codeLoc == null) return null;
+  // TRAP 3 (and, structurally, TRAP 2) — under the threshold we make no claim in either
+  // direction. Note this is the ONLY comparison; there is no `else` branch to get wrong.
+  if (codeLoc < threshold) return null;
+  const n = codeLoc.toLocaleString();
+  const t = threshold.toLocaleString();
+  // TRAP 2 — over the threshold a truncated count is still true, so the flag stands; the copy
+  // just stops claiming the number is exact.
+  const isLowerBound = pr.codeLocIsLowerBound === true;
+  return {
+    codeLoc,
+    isLowerBound,
+    label: isLowerBound
+      ? `At least ${n} code lines changed — above your ${t} threshold. GitHub truncated the file list, so the real figure is higher.`
+      : `${n} code lines changed — above your ${t} threshold.`,
+    short: isLowerBound ? `${n}+ code lines` : `${n} code lines`,
+  };
+}
+
+/* The account's threshold, mirrored into a module cell.
+ *
+ * Every React surface reads it through `useLargePrThreshold()` (hooks/useLargePr.ts) off
+ * `/api/me`. The vis-timeline tooltip CANNOT: `components/Timeline/prBar.ts` builds raw HTML
+ * strings for the library and is not a component, so it has no hook to call. Rather than give
+ * the timeline its own default — which is how one surface comes to flag a PR the other doesn't —
+ * it reads this cell.
+ *
+ * ⚠ ONE WRITER: `useMe()` in hooks/useTriage.ts, which App.tsx mounts at the root, so the cell
+ * is seeded before any board paints. Until /api/me lands it holds the product default, which is
+ * also what the server would have resolved for an account that never set one. */
+let largePrThresholdCell: number = LARGE_PR_CODE_LOC_DEFAULT;
+
+export function noteLargePrThreshold(n: number | undefined): void {
+  largePrThresholdCell = n != null && Number.isInteger(n) && n > 0 ? n : LARGE_PR_CODE_LOC_DEFAULT;
+}
+
+export function currentLargePrThreshold(): number {
+  return largePrThresholdCell;
 }
 
 // The verdicts the auto-merge watcher can WAIT OUT on its own: blocked/behind clear via CI,
