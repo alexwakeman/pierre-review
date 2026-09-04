@@ -1,5 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import type { Workspace, WorkspacesResponse } from '@pierre-review/shared';
+import type {
+  Workspace,
+  WorkspacePendingMuteUpdate,
+  WorkspacesResponse,
+} from '@pierre-review/shared';
 import {
   assignReposToWorkspace,
   createWorkspace,
@@ -8,6 +12,7 @@ import {
   rehomeReposToDefault,
   renameWorkspace,
 } from '../../db/queries.js';
+import { setWorkspacePendingMute } from '../../db/pending-mute.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 // Workspaces (CORE): the ONE scope this app has. A workspace groups an account's repos, and a repo
@@ -25,6 +30,18 @@ import { accountIdOf } from '../plugins/auth.js';
 // live — Feed, Activity, My Turn and Bots all cover it. `assignReposToWorkspace` therefore touches
 // only `workspace_repos`, and the drop path (`rehomeReposToDefault`) touches only `workspace_repos`
 // too. Do not reintroduce a per-repo visibility flag here: the workspace IS the scope.
+//
+// ⚠ THE PENDING MUTE IS NOT THAT FLAG, AND THE DISTINCTION IS EXACT. `PUT /:id/pending-mute`
+// (below) writes `workspaces.pending_muted` and `pending_muted_repos` — the two independently-owned
+// halves of "stop these Pending items claiming my turn". A muted repo stays FULLY LIVE on every
+// screen: Feed, Timeline, Activity, Bots and the Pending board all still cover it, and the broad
+// `myTurn` count is unchanged. What a mute moves is the OWNERSHIP CLAIM a row makes — `getMyTurn`
+// downgrades its `relevance` to 'none' — so the card relabels to the neutral "Review or reply",
+// the browser notification stops and the `myTurnPersonal` figures drop it. `inbox_watch` decided
+// whether work APPEARED (a second scope competing with membership, which is why it went); this
+// decides whether work may INTERRUPT. Membership is still the only visibility axis. It is also
+// deliberately NOT part of the PATCH above: a mute is not a rename and not a membership move, and
+// one Save that could do all three is one Save whose blast radius nobody can state.
 //
 // ⚠ THE DEFAULT WORKSPACE IS RENAMEABLE BUT NOT DELETABLE. DELETE returns **409
 // `{error:'DefaultWorkspace'}`** for it — a distinct, explained status, not a 500 out of the
@@ -56,6 +73,23 @@ const patchSchema = {
     properties: {
       name: { type: 'string', minLength: 1, maxLength: 120 },
       repoIds: { type: 'array', items: { type: 'integer' } },
+    },
+  },
+};
+
+// ⚠ BOTH KEYS OPTIONAL, AND `{}` IS A LEGAL NO-OP. The two halves are independently owned, so a
+// Save that touched only one must not carry an invented value for the other — `undefined` means
+// "leave this fact alone", which is what makes the union a union rather than a chain. Bounded
+// `repoIds` because the body is attacker-shaped; ids outside the workspace's membership are
+// IGNORED by the writer rather than rejected, so a stale client list degrades instead of 400ing.
+const pendingMuteSchema = {
+  ...idParamSchema,
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      muted: { type: 'boolean' },
+      mutedRepoIds: { type: 'array', items: { type: 'integer' }, maxItems: 2000 },
     },
   },
 };
@@ -213,6 +247,44 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     }
     return { workspace };
   });
+
+  // THE PENDING MUTE for this workspace — CORE and FREE on every tier, in both deployment modes.
+  //
+  // TWO INDEPENDENT FACTS, OR-ed, NEVER A CHAIN: `muted` is the whole workspace,
+  // `mutedRepoIds` is the exact muted set WITHIN this workspace's membership. Either may be sent
+  // alone. A repo is muted when either says so; clearing one neither reveals nor overwrites the
+  // other. (`null`-means-inherit is a named bug class here — the reviewer price, the Slack target,
+  // the sprint cadence all had it. There is no resolver, there is one union: db/pending-mute.ts.)
+  //
+  // ⚠ THE REPO LIST IS SCOPED TO THIS WORKSPACE'S MEMBERSHIP BY THE WRITER, and that is a
+  // correctness rule: without it, saving workspace A's settings screen would clear every mute the
+  // reader had set in workspaces B and C, because the stored row is repo-grained and carries no
+  // workspace id. Ids outside the membership are ignored, and rows for repos outside it are left
+  // alone. Tenancy is ALSO structural — `repo_id` arrives in this body and the composite FK
+  // `(repo_id, account_id) → repos(id, account_id)` makes a cross-account pair fail in the
+  // DATABASE, not in whichever handler remembered to check.
+  //
+  // Ownership → 404, like every other id-addressed route here. Echoes the refreshed workspace so
+  // the client re-seeds from the server's answer rather than from what it just sent.
+  app.put(
+    '/api/workspaces/:id/pending-mute',
+    { schema: pendingMuteSchema },
+    async (req, reply) => {
+      const accountId = accountIdOf(req);
+      const { id } = req.params as { id: number };
+      const patch = req.body as WorkspacePendingMuteUpdate;
+      if (!(await setWorkspacePendingMute(accountId, id, patch))) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Workspace ${id} not found` };
+      }
+      const workspace = await findWorkspace(accountId, id);
+      if (!workspace) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Workspace ${id} not found` };
+      }
+      return { workspace };
+    },
+  );
 
   // NOTE: there is deliberately NO `DELETE /api/workspaces/:id/repos/:repoId`. See the header
   // comment — "remove" is "move to Default", which the client expresses as

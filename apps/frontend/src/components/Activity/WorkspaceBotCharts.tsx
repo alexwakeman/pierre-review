@@ -46,7 +46,10 @@ import {
 // (Measure) branch of BotsView, gated on the `botDepth` capability (absent — not upsold —
 // without it). Per-BOT depth (the old BotCard stack + that bot's severity/category slices) lives
 // in the per-bot drill-down tab instead (BotDetailPanel, opened from the ROI table's "Depth →"
-// pill); the old workspace ML block's inflation charts became the ROI table's Inflation column.
+// pill); the old workspace ML block's inflation charts became the ROI table's Inflation column —
+// where the HISTORY has since regrown a readable card of its own (`InflationHistoryChart`, in
+// BotRoiPanel's chart row, off `/api/bot-analytics`). It is NOT here, and cannot be: this
+// section's `/api/pro/bot-behaviour` wire carries no weekly inflation at all.
 //
 // FETCH DISCIPLINE: nothing here fetches while the section is collapsed — `useBotBehaviour`
 // rides the section's open state, so the default Bots view issues no behaviour request at all.
@@ -379,8 +382,9 @@ function DensityTrendChart({
 // The workspace-grain ML block that used to live here (both severity mixes, the two inflation
 // charts, "Severity over time", "Categories per vendor", "Category activity over time") was CUT
 // by plan P1.2/C2: the inflation counts became the ROI table's Inflation column (its sparkline is
-// the `botDepth` history), and the per-bot severity-over-time slice + category mix live on the
-// per-bot depth tab (BotDetailPanel). What survives here is exactly what that tab still imports:
+// the `botDepth` history — and, since, an enlarged twin of that sparkline in the same panel's
+// chart row), and the per-bot severity-over-time slice + category mix live on the per-bot depth
+// tab (BotDetailPanel). What survives here is exactly what that tab still imports:
 // `MlBotView` (the per-bot join shape), `MlSeverityTrendChart` (rendered there over a
 // single-element views array) and `useBotSubset`/`BotSubsetLegend` behind it.
 
@@ -660,7 +664,7 @@ function BotRepoWorkChart({
           <svg width={w} height={height} className="block">
             {[0, maxV].map((v) => (
               <g key={v}>
-                <line x1={PAD_L} y1={y(v)} x2={w - PAD_R} y2={y(v)} className="text-gray-200 dark:text-gray-700" stroke="currentColor" strokeWidth={1} />
+                <line x1={PAD_L} y1={y(v)} x2={w - PAD_R} y2={y(v)} className="decorative-mark text-gray-200 dark:text-gray-700" stroke="currentColor" strokeWidth={1} />
                 <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-400 text-[8px]">
                   {fmtNum(v)}
                 </text>
@@ -989,7 +993,10 @@ export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.El
               {/* The workspace ML block that used to sit here was CUT by plan P1.2/C2: the
                   inflation counts live on the ROI table's Inflation column (its drill-down is
                   still the flagging tab's receipt, SeverityAgreementMatrix included), and the
-                  per-bot severity/category slices live on the per-bot depth tab. */}
+                  per-bot severity/category slices live on the per-bot depth tab. ⚠ THE HISTORY
+                  CAME BACK, BUT NOT HERE — `InflationHistoryChart` sits in BotRoiPanel's chart
+                  row, on the response that actually carries weekly inflation. Do not read this
+                  tombstone as "inflation charts were deleted" and cut that one too. */}
               {data?.overlap != null && (
                 <BotOverlapSection overlap={data.overlap} color={botColor({ login: null, kind: 'in_house' })} />
               )}

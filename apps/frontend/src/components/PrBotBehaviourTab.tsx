@@ -3,7 +3,7 @@ import type { PrBotBehaviour, PrDetail } from '@pierre-review/shared';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { useBotColors } from '../hooks/useBotColors.js';
 import { useRepos } from '../hooks/useTimeline.js';
-import { automatedReviewerMeta, relativeTime } from '../lib/ui.js';
+import { automatedReviewerMeta, relativeTime, vendorInk } from '../lib/ui.js';
 import { fmtDuration } from './charts/common.js';
 import { CommentIcon, ReviewIcon, WarningIcon } from './Icons.js';
 
@@ -57,7 +57,7 @@ function BotBlock({ bot, color }: { bot: PrBotBehaviour; color: string }): JSX.E
         </span>
         <span
           className="rounded px-1.5 py-0.5 text-[10px] font-medium"
-          style={{ color: meta.color, background: `${meta.color}1a` }}
+          style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
         >
           {meta.label}
         </span>

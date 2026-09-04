@@ -285,7 +285,7 @@ export function WorkspaceSelector(): JSX.Element {
           className="absolute left-0 top-full z-[60] mt-1 max-h-80 w-56 overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
         >
           {rows.length === 0 ? (
-            <div className="px-2 py-1.5 text-xs text-gray-500">Loading workspaces…</div>
+            <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400">Loading workspaces…</div>
           ) : (
             rows.map((w) => {
               const selected = w.id === workspaceId;
@@ -360,7 +360,7 @@ export function WorkspaceSelector(): JSX.Element {
                       // Not counted, NOT zero — see the note above the hook call.
                       <span
                         title="Not counted here — the cross-workspace roll-up covers only the first few Workspaces. Switch to it to see its own count."
-                        className="text-[10px] text-gray-300 dark:text-gray-600"
+                        className="text-[10px] decorative-mark text-gray-300 dark:text-gray-600"
                       >
                         —
                       </span>

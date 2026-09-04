@@ -657,7 +657,7 @@ export function BotFlaggingDetail(): JSX.Element {
                 <button
                   type="button"
                   onClick={clearRefine}
-                  className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 underline-offset-2 hover:underline"
+                  className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
                 >
                   Clear
                 </button>

@@ -9,7 +9,7 @@ import { useBranchStatus } from '../../hooks/useBranchStatus.js';
 import { useBranchTrends } from '../../hooks/useBranchTrends.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { trimTrailingPrRef } from '../../lib/prRef.js';
-import { CHECK_STATE_META, CI_META, relativeTime, safeExternalUrl } from '../../lib/ui.js';
+import { CHECK_STATE_META, CI_META, relativeTime, safeExternalUrl, vendorInk } from '../../lib/ui.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { ChartCard, PALETTE } from '../charts/common.js';
 import { DayStrip } from '../charts/DayStrip.js';
@@ -65,7 +65,7 @@ function FailingCheck({ check }: { check: BranchCheckRun }): JSX.Element {
   const label = checkLabel(check);
   const inner = (
     <span className="flex min-w-0 items-center gap-1">
-      <span aria-hidden="true" style={{ color: meta.color }} className="flex shrink-0 items-center">
+      <span aria-hidden="true" style={vendorInk(meta.color)} className="flex shrink-0 items-center">
         <meta.icon size={11} />
       </span>
       <span className="min-w-0 truncate" title={label}>
@@ -97,7 +97,7 @@ function FailingSummary({ checks }: { checks: BranchCheckRun[] }): JSX.Element |
   if (first == null) return null;
   return (
     <span className="flex min-w-0 shrink items-center gap-1 text-[11px]">
-      <span aria-hidden="true" className="shrink-0 text-gray-300 dark:text-gray-600">
+      <span aria-hidden="true" className="shrink-0 decorative-mark text-gray-300 dark:text-gray-600">
         ·
       </span>
       <FailingCheck check={first} />

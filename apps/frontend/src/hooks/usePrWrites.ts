@@ -85,6 +85,18 @@ export function useApprovePr(prId: number) {
       void qc.invalidateQueries({ queryKey: ['open-prs'] });
       void qc.invalidateQueries({ queryKey: ['my-turn'] });
       void qc.invalidateQueries({ queryKey: ['me'] });
+      // ⚠ THE BOARD, TOO. Approving is the single most common way a Pending "Review or reply"
+      // card stops being true, and until now the click left it sitting there — the route's
+      // server half now clears the viewer's `review_requests` row AND re-reads the PR from
+      // GitHub, so a refetch here is what turns the card into a `merge` card (or retires it).
+      // Both keys together: the brief strip counts these very cards and the cap disclosure
+      // divides one by the other, so they must come from ONE snapshot.
+      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
+      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
+      // The THIRD read of that same fold. All three move together or the plan's `stale` chip —
+      // whose whole job is to say "the list has moved on since this was written" — stays false
+      // for up to five minutes after the write that moved it.
+      void qc.invalidateQueries({ queryKey: ['work-plan'] });
     },
   });
 }
@@ -100,11 +112,27 @@ export function useMergeOptions(prId: number, enabled: boolean) {
   });
 }
 
+// ---- The two FORWARD writes' shared mutation keys -------------------------------------------
+//
+// ⚠ EXPLICIT KEYS, BECAUSE TWO COMPONENTS MUST SEE ONE IN-FLIGHT STATE. `MergeControl` owns the
+// mutation and lives inside the Pending card's merge row; the row ALSO wants to say "Merging…"
+// beside it, and PrDetail's own Actions row mounts a second `useMergePr(prId)` for the same PR.
+// A per-mount `isPending` is invisible to every other mount (the CiAnalysisCard lesson), so the
+// in-flight fact is read off the KEY via `useIsMutating` instead. One spelling, exported, so a
+// reader and a writer cannot address different rows.
+export function mergePrMutationKey(prId: number): unknown[] {
+  return ['merge-pr', prId];
+}
+export function updateBranchMutationKey(prId: number): unknown[] {
+  return ['update-pr-branch', prId];
+}
+
 // Merge the PR. Invalidates the PR + every surface that shows PR state (timeline, open-PRs,
 // triage queues, the feeds) — the backend optimistically stamps merged, so the refetch is fresh.
 export function useMergePr(prId: number) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: mergePrMutationKey(prId),
     mutationFn: (method: MergeMethod) => api.mergePr(prId, { method }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['pr', prId] });
@@ -121,6 +149,10 @@ export function useMergePr(prId: number) {
       // no business re-ranking it.
       void qc.invalidateQueries({ queryKey: ['attention-cards'] });
       void qc.invalidateQueries({ queryKey: ['daily-brief'] });
+      // The THIRD read of that same fold. All three move together or the plan's `stale` chip —
+      // whose whole job is to say "the list has moved on since this was written" — stays false
+      // for up to five minutes after the write that moved it.
+      void qc.invalidateQueries({ queryKey: ['work-plan'] });
       // The viewer's first merge in a repo grants them merge rights → refresh the shield.
       void qc.invalidateQueries({ queryKey: ['mergers'] });
     },
@@ -169,6 +201,15 @@ export function useClosePr(prId: number) {
       void qc.invalidateQueries({ queryKey: ['me'] });
       void qc.invalidateQueries({ queryKey: ['activity'] });
       void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
+      // `markPrClosedLocally` sets state='closed', which removes the PR from the openPrs fold
+      // every Pending card is built from — so the card IS gone server-side and only the client
+      // was still drawing it. Same pair, same reason, as the merge mutation above.
+      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
+      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
+      // The THIRD read of that same fold. All three move together or the plan's `stale` chip —
+      // whose whole job is to say "the list has moved on since this was written" — stays false
+      // for up to five minutes after the write that moved it.
+      void qc.invalidateQueries({ queryKey: ['work-plan'] });
     },
   });
 }
@@ -178,6 +219,10 @@ export function useClosePr(prId: number) {
 export function useUpdatePrBranch(prId: number) {
   const qc = useQueryClient();
   return useMutation({
+    // EXPLICIT AND SHARED PER PR (the two-mounts-share-the-mutation-key rule): the Pending card's
+    // merge row reads this key through `useIsMutating` to say "Updating the branch…" while the
+    // POST is open, and it is mounted separately from the `MergeControl` that fires it.
+    mutationKey: updateBranchMutationKey(prId),
     mutationFn: (body?: UpdateBranchBody) => api.updatePrBranch(prId, body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['pr', prId] });
@@ -189,6 +234,10 @@ export function useUpdatePrBranch(prId: number) {
       // don't-edit rule as the merge mutation above.
       void qc.invalidateQueries({ queryKey: ['attention-cards'] });
       void qc.invalidateQueries({ queryKey: ['daily-brief'] });
+      // The THIRD read of that same fold. All three move together or the plan's `stale` chip —
+      // whose whole job is to say "the list has moved on since this was written" — stays false
+      // for up to five minutes after the write that moved it.
+      void qc.invalidateQueries({ queryKey: ['work-plan'] });
     },
   });
 }

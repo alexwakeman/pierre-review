@@ -49,6 +49,7 @@ const {
   trunkCiStatusEvents,
   mlCommentLabels,
   prMentions,
+  pendingMutedRepos,
 } = schema;
 
 /**
@@ -122,6 +123,17 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // the composite FK cascades), but a workspace whose repos were all deleted, and any row the
     // repo loop above could not reach, still carries this account's id.
     await tx.delete(workspaceRepos).where(eq(workspaceRepos.accountId, accountId)).execute();
+    // The REPO half of the Pending mute (migration 0058 / pg 0045). Deleted BEFORE `workspaces`
+    // only for tidiness — it has no FK to a workspace at all (a repo belongs to exactly one
+    // workspace already, so copying that fact onto the mute row would give the account two
+    // answers to it). Its composite FK to `repos` cascades and the repo loop above has normally
+    // taken it; explicit for the same reason as every other entry here — the guarantee must not
+    // depend on which dialect enforces FKs, nor on the repo loop having succeeded. The row is a
+    // preference the user expressed by hand.
+    await tx
+      .delete(pendingMutedRepos)
+      .where(eq(pendingMutedRepos.accountId, accountId))
+      .execute();
     await tx.delete(workspaces).where(eq(workspaces.accountId, accountId)).execute();
 
     // The AI spend ledger (token/credit counts — no prompt text).
@@ -236,6 +248,10 @@ export function accountScopedTables(): {
     { name: 'mlCommentLabels', col: mlCommentLabels.accountId, table: mlCommentLabels },
     // "@you was mentioned on this PR" (migration 0056 / pg 0043).
     { name: 'prMentions', col: prMentions.accountId, table: prMentions },
+    // The REPO half of the Pending mute (migration 0058 / pg 0045). The WORKSPACE half is a
+    // COLUMN on `workspaces`, already on this checklist, so there is nothing separate to count
+    // for it — the row it lives on is deleted.
+    { name: 'pendingMutedRepos', col: pendingMutedRepos.accountId, table: pendingMutedRepos },
   ];
   return rows.map(({ name, col, table }) => ({
     name,

@@ -393,7 +393,7 @@ export function RepoAnalyticsModal({
 
         <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
           {isLoading && !data && (
-            <div className="py-12 text-center text-sm text-gray-500">Loading analytics…</div>
+            <div className="py-12 text-center text-sm text-gray-500 dark:text-gray-400">Loading analytics…</div>
           )}
           {error && (
             <div className="py-12 text-center text-sm text-red-500">Failed to load analytics.</div>

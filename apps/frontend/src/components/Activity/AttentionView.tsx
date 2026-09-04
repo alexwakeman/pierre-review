@@ -1,6 +1,10 @@
 import { useMemo } from 'react';
 import type { DailyBriefCounts, InsightCard } from '@pierre-review/shared';
-import { useAttentionCards } from '../../hooks/useAttentionCards.js';
+import {
+  ATTENTION_LIVENESS_MAX_IDS,
+  useAttentionCards,
+  useAttentionLiveness,
+} from '../../hooks/useAttentionCards.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useDailyBrief } from '../../hooks/useDailyBrief.js';
 import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
@@ -372,6 +376,49 @@ export function AttentionView(): JSX.Element {
     [head],
   );
 
+  // ── LIVENESS: ONE GITHUB QUESTION FOR THE WHOLE BOARD ─────────────────────────────────────
+  //
+  // Everything above is a read of already-synced rows, which is what lets fifty cards paint in one
+  // request. The price is staleness against GITHUB: a PR merged, closed or unblocked by somebody
+  // else keeps its card until the adaptive scheduler walks that repo (2-15 min). `useAttentionLiveness`
+  // hands the server these ids and gets them re-read in ONE batched `nodes(ids:)` call.
+  //
+  // ⚠ IT NEVER TOUCHES THIS LIST. On a change it invalidates `['attention-cards']` + `['daily-brief']`
+  // and the server re-ranks — see the partition warning above for what a local splice would cost.
+  //
+  // ⚠ RANKED, THEN SLICED — and the ranking is the honest half. The server caps one sweep at 90
+  // ids (400s an over-cap request rather than truncating it, so a silently-half-freshened board is
+  // unrepresentable), and a big board can carry more distinct PRs than that. So the FORWARD kinds
+  // go first: those are the rows offering a Merge / Update-branch button, where a stale merge state
+  // is a button that 405s, and where "it already merged" is the complaint this whole path exists to
+  // answer. The head follows, then everything else. Built off `all`, not `cards`: a card the reader
+  // has lensed away is still a card the next unfiltered render will show, and freshening it costs
+  // nothing extra inside a batch that is going out anyway.
+  const livenessPrIds = useMemo(() => {
+    // ⚠ `prId` IS NULLABLE ON SOME KINDS. A `ci_failing` 'trunk' card is about a repository's
+    // default branch and names a PR only when the red head's landing PR resolved; the aggregate
+    // bot cards carry none at all. Those rows have nothing for a PR probe to ask about, and a
+    // `-1` placeholder would be an id the server has to reject rather than one we never sent.
+    const prIdOf = (c: InsightCard): number | null =>
+      'prId' in c && typeof c.prId === 'number' ? c.prId : null;
+    const rank = (c: InsightCard): number => {
+      if (c.kind === 'merge' || c.kind === 'update_branch') return 0;
+      const id = prIdOf(c);
+      return id != null && promotedPrIds.has(id) ? 1 : 2;
+    };
+    const seen = new Set<number>();
+    const out: number[] = [];
+    for (const c of [...all].sort((a, b) => rank(a) - rank(b))) {
+      const id = prIdOf(c);
+      if (id == null || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+      if (out.length >= ATTENTION_LIVENESS_MAX_IDS) break;
+    }
+    return out;
+  }, [all, promotedPrIds]);
+  useAttentionLiveness(workspaceId, livenessPrIds, !isLoading && !isError);
+
   // ── THE PRO NARRATION (optional, additive) ────────────────────────────────────────────────
   //
   // ⚠ EVERYTHING ABOVE THIS LINE IS THE FREE PRODUCT AND MUST STAY THAT WAY. The board, the
@@ -631,7 +678,7 @@ export function AttentionView(): JSX.Element {
         </div>
       ) : cards.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] text-gray-300 dark:text-gray-600" />
+          <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-gray-300 dark:text-gray-600" />
           Nothing is pending in this Workspace right now.
           <div className="mt-1 text-[11px]">
             Everything waiting on you or your workspace shows up here, most actionable first. PRs
@@ -645,7 +692,7 @@ export function AttentionView(): JSX.Element {
               (self-hiding) daily-brief strip telling the same story. */}
           {onlyForward && (
             <div className="rounded-lg border border-dashed border-gray-300 px-3 py-2 text-[12px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] text-gray-300 dark:text-gray-600" />
+              <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-gray-300 dark:text-gray-600" />
               Nothing is waiting on you in this Workspace —{' '}
               <span className="font-medium text-gray-600 dark:text-gray-300">
                 {cards.length} ready to land

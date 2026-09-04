@@ -409,7 +409,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                   account's Default row before it answers, so the list is only ever empty while the
                   query is in flight. */}
               {workspaces == null && (
-                <div className="px-1 py-3 text-xs text-gray-500">Loading workspaces…</div>
+                <div className="px-1 py-3 text-xs text-gray-500 dark:text-gray-400">Loading workspaces…</div>
               )}
               {list.map((w) => {
                 const isSelected = selected?.id === w.id;
@@ -486,7 +486,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                         disabled
                         title="The default workspace can’t be deleted — new repos land here, and a deleted workspace’s repos and bot settings come back here. You can rename it."
                         aria-label={`${w.name} is the default workspace and can’t be deleted`}
-                        className="shrink-0 cursor-not-allowed rounded px-1 text-gray-300 opacity-0 focus:opacity-100 group-hover:opacity-100 dark:text-gray-600"
+                        className="shrink-0 cursor-not-allowed rounded px-1 decorative-mark text-gray-300 opacity-0 focus:opacity-100 group-hover:opacity-100 dark:text-gray-600"
                       >
                         <CloseIcon />
                       </button>
@@ -521,7 +521,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
 
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
               {sortedRepos.length === 0 ? (
-                <div className="px-1 py-3 text-xs text-gray-500">
+                <div className="px-1 py-3 text-xs text-gray-500 dark:text-gray-400">
                   No repos yet — search to add one above.
                 </div>
               ) : (
@@ -532,7 +532,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                         In “{selected.name}” · {inSelected.length}
                       </div>
                       {inSelected.length === 0 ? (
-                        <div className="px-1 pb-2 text-xs text-gray-500">
+                        <div className="px-1 pb-2 text-xs text-gray-500 dark:text-gray-400">
                           No repos in this workspace yet — move one in below, or add one above.
                         </div>
                       ) : (

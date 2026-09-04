@@ -32,6 +32,10 @@ import { ProBadge, ProLockPanel, useProGateState } from '../ProGate.js';
 //                      placement, which locks the same way. The `WorkspaceBotCharts` section below
 //                      the ROI table was already `botDepth` and stays silently absent (its own,
 //                      older posture).
+//   PAID (`activityDigest`)
+//                      the THEMES sub-tab — "What they're flagging", the qualitative AI read of the
+//                      bot comment stream. A DIFFERENT capability from the two above, on the
+//                      AI-summary tier, and it takes the ABSENT posture rather than the locked one.
 //   FREE (`botTriage`) everything else in the `roi` branch: the "only a bot reviewed N open PRs"
 //                      governance caution, the resolve backlog, the hoisted tuning suggestions and
 //                      the bot-only feed — plus the whole `Settings` sub-tab, which is the reason
@@ -39,9 +43,12 @@ import { ProBadge, ProLockPanel, useProGateState } from '../ProGate.js';
 //                      reviewer, and there is real free triage on this screen).
 //
 // The `ROI` and `Benchmark` sub-tabs therefore keep their place in the tab list for everyone and
-// wear a Pro badge: visible-but-locked, not absent. (`Advisor` keeps the opposite posture — it is
-// only LISTED when entitled — because it is workspace-grain and has no free half to sit beside.
-// Two postures in one tab strip is deliberate, not drift.)
+// wear a Pro badge: visible-but-locked, not absent. (`Advisor` and `Themes` keep the opposite
+// posture — only LISTED when entitled. For the advisor it is because it is workspace-grain with no
+// free half to sit beside; for Themes it is because `ProGate.tsx` holds the visible-but-locked set
+// at SIX named surfaces with a written argument that a seventh needs its own, and because the panel
+// renders `null` on OSS, where an always-listed tab would be a blank pane. Two postures in one tab
+// strip is deliberate, not drift.)
 //
 // ── SCOPE: ONE WORKSPACE, ALWAYS ─────────────────────────────────────────────────────────────
 // Every panel here is scoped by `filters.workspaceId` — the single scope this app has. A BOT IS A
@@ -84,8 +91,21 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
 
   // The Advisor is Pro (`botAdvisor`) and WORKSPACE-scoped with no repo narrowing —
   // cross-repo rail only. Same derived-effective-tab rule.
-  const { botAdvisor } = useProCapabilities();
+  const { botAdvisor, activityDigest } = useProCapabilities();
   const showAdvisor = repoId == null && botAdvisor;
+  // Themes is Pro (`activityDigest`, the AI-summary tier — NOT `botDepth`) and takes the ADVISOR's
+  // posture, not ROI's: LISTED only when entitled, absent otherwise. Two reasons, and both are
+  // load-bearing. `components/ProGate.tsx` keeps the visible-but-locked set at exactly SIX named
+  // surfaces with a written argument that a seventh needs its own; and `BotThemesPanel` returns
+  // `null` on the OSS build, so an always-listed tab would draw a blank pane there. This is the
+  // FEED's setup exactly (`Feed | Themes`, listed on `activityDigest`), which is the point — one
+  // report, one gate, two rails.
+  //
+  // ⚠ NOT GATED ON `repoId == null`. Unlike the advisor this report is genuinely per-repo: the
+  // panel takes `repoScope`, the client gives the narrowed report its own cache slot and the
+  // plugin's `scope_key` carries the matching `|r:` suffix, so the per-repo console's Bots tab
+  // gets that repo's own report rather than the workspace's.
+  const showThemes = activityDigest;
   // "Settings" ("who counts as a review bot in this Workspace") shows in BOTH views. It used to be
   // cross-repo ONLY because the judgement was keyed per TEAM and a repo tab could not express a
   // team key (team_repos was many-to-many, so one repo sat in several teams). A repo now belongs
@@ -97,14 +117,17 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // DERIVE the visible tab; never write a correction back to the store. `advisor` shares one
   // scalar with the per-repo console, so it can legitimately hold a key that isn't rendered
   // here — writing a "fix" would permanently forget the user's choice for the view that DOES
-  // render it. ('behaviour' and 'themes' left the union itself — the field is transient and
-  // URL-silent, so no stored value can resurrect them; a removed key needs no runtime mapping,
-  // only this derive-never-write-back rule for the capability-gated ones.)
+  // render it. ('behaviour' left the union itself — the field is transient and URL-silent, so no
+  // stored value can resurrect it; a removed key needs no runtime mapping, only this
+  // derive-never-write-back rule for the capability-gated ones. ⚠ 'themes' left with it and has
+  // since RETURNED as a real member — the panel below is now a tab of its own, not a card on
+  // Measure.)
   //
   // ⚠ THE RULE NOW LIVES IN `benchmarkModel.ts` so it can be tested without a renderer, and it
-  // degrades ONLY `'advisor'`. `'benchmark'` and `'roi'` are visible-but-locked and are never
-  // corrected: an unentitled `?botsTab=benchmark` must land on the tab it names and meet the lock.
-  const effectiveTab = effectiveBotsTab(innerTab, { showAdvisor });
+  // degrades ONLY the two members that are not LISTED without their capability, `'advisor'` and
+  // `'themes'`. `'benchmark'` and `'roi'` are visible-but-locked and are never corrected: an
+  // unentitled `?botsTab=benchmark` must land on the tab it names and meet the lock.
+  const effectiveTab = effectiveBotsTab(innerTab, { showAdvisor, showThemes });
 
   return (
     <div className="space-y-3" data-testid="bots-view">
@@ -122,6 +145,12 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
       <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
         {([
           { key: 'roi', label: 'ROI' },
+          // ⚠ SECOND, NOT LAST. The panel sat FIRST on the Measure surface until it moved here, so
+          // second in the strip is what preserves its prominence — a report demoted to the far end
+          // of the strip on the day it got its own tab would read as a downgrade.
+          // ⚠ LISTED ONLY WHEN ENTITLED — the Feed's Themes posture, mirrored deliberately. See
+          // `showThemes` above for why it is not the visible-but-locked one ROI and Benchmark use.
+          ...(showThemes ? [{ key: 'themes', label: 'Themes' } as const] : []),
           ...(showAdvisor ? [{ key: 'advisor', label: 'Advisor' } as const] : []),
           // ⚠ LISTED ON EVERY TIER, exactly like ROI. The tab is the only place an unentitled
           // reader learns the product can answer "is our bot normal?" at all, and a gated sub-tab
@@ -144,8 +173,8 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               }`}
             >
               {t.label}
-              {/* The three paid sub-tabs, badged from the ONE shared badge so six surfaces cannot
-                  drift into six slightly different chips. `Settings` carries none — it is free.
+              {/* The four paid sub-tabs, badged from the ONE shared badge so the paid surfaces
+                  cannot drift into slightly different chips. `Settings` carries none — it is free.
 
                   ⚠ THE ROI BADGE IS UNCONDITIONAL, not `!botDepth`. Advisor's has always shown to
                   the entitled (it is only listed for them at all), so a chip that appeared and
@@ -157,7 +186,10 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
                   The badge sits INSIDE the tab button so the accessible name composes as
                   "ROI, Pro feature"; it is a label with no click target of its own, because a link
                   inside a tab button is a nested interactive control. */}
-              {(t.key === 'advisor' || t.key === 'roi' || t.key === 'benchmark') && (
+              {(t.key === 'advisor' ||
+                t.key === 'themes' ||
+                t.key === 'roi' ||
+                t.key === 'benchmark') && (
                 <ProBadge
                   variant="tab"
                   title={
@@ -165,7 +197,9 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
                       ? 'The ROI table is part of Pro.'
                       : t.key === 'benchmark'
                         ? 'The peer benchmark is part of Pro.'
-                        : 'The Bot Tuning Advisor is part of Pro.'
+                        : t.key === 'themes'
+                          ? 'The themes summary is part of Pro.'
+                          : 'The Bot Tuning Advisor is part of Pro.'
                   }
                 />
               )}
@@ -181,6 +215,20 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
 
       {effectiveTab === 'advisor' ? (
         <BotAdvisorPanel />
+      ) : effectiveTab === 'themes' ? (
+        /* "What they're flagging" — the workspace-grain qualitative report: every deterministic
+           figure (per-bot volume + acted-on, area split, per-theme comment counts, coverage) is the
+           build fold's, the themes and narrative are the model's read (labelled approximate).
+           `repoScope` narrows the DATA (membership ∩ narrow, server-side), so the per-repo console
+           Bots tab measures that repo alone — the same repoScope the analytics ride.
+
+           ⚠ NO WINDOW PICKER HERE, AND THAT IS A CHOICE. The panel reads `botAnalyticsWindow`,
+           whose one writer is the picker INSIDE the paid ROI panel (which argues on the record
+           against being hoisted). A second window control on this tab would let the cached report
+           and the rest of the Bots console disagree about the population — one screen, two time
+           grains — and the Feed's twin already ships without one. If it ever proves painful, hoist
+           the picker to the STRIP so every sub-tab shares it; do not add a second field. */
+        <BotThemesPanel repoIds={repoScope} />
       ) : effectiveTab === 'benchmark' ? (
         <BenchmarkTabBody repoId={repoId} />
       ) : effectiveTab === 'settings' ? (
@@ -190,18 +238,6 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         <BotSettingsPanel repoId={repoId} />
       ) : (
         <>
-          {/* "What they're flagging" — the workspace-grain synthesis verdict RE-EXPANDED into the
-              merged Themes panel: the same `getBotReviewComments` population, every deterministic
-              figure (per-bot volume + acted-on, area split, per-theme comment counts, coverage)
-              computed by the build fold, the themes + narrative the model's read (labelled
-              approximate). `repoScope` narrows the DATA (membership ∩ narrow server-side), so the
-              per-repo console Bots tab measures that repo alone — same repoScope the analytics
-              ride. Free/OSS renders nothing, free cloud the Pro nudge (SynthesisCard's posture,
-              carried over); the deterministic Measure surface below never waits on it. The three
-              drill-down SynthesisCards (BotVolume/BotFlagging/BotThreads) and the synthesis seam
-              are unaffected — this swap is this mount only. */}
-          <BotThemesPanel repoIds={repoScope} />
-
           {/* Governance caution: PRs whose only review came from an automated reviewer — no human
               ever looked. Sourced from the CORE analytics totals; "Show list" opens the
               bot-only-PRs drill-down tab (same route/scope → count ≡ list). */}

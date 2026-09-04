@@ -148,7 +148,7 @@ function ApprovalCell({ pr }: { pr: TimelinePr }): JSX.Element {
     : pr.isChangesRequested
       ? { label: 'changes', color: '#ef4444' }
       : null;
-  if (standing == null) return <span className="text-[11px] text-gray-300 dark:text-gray-600">—</span>;
+  if (standing == null) return <span className="text-[11px] text-gray-500 dark:text-gray-400">—</span>;
   return (
     <span
       className="rounded px-1 text-[10px] font-semibold"
@@ -167,7 +167,7 @@ export function OpenPrsTable({
   onOpenPr,
   emptyLabel = (
     <>
-      <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] text-gray-300 dark:text-gray-600" />
+      <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-gray-300 dark:text-gray-600" />
       No open PRs here.
     </>
   ),

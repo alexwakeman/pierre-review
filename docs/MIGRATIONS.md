@@ -231,9 +231,16 @@ nothing).
   two can disagree by design).
 - ✅ **The pg chain is currently REPLAYED AND GREEN — see § Replaying the pg chain below.** Last
   re-run **2026-09-03** on the standing local Postgres (16.x): core through `db:migrate`
-  (**45 applied = 45 journal entries**) plus all **33** plugin pg twins, including the new
-  `0032_workspace_comparison_mode` and `0033_slack_target_bot_digest` — applied clean and
-  idempotent on a second pass.
+  (**46 applied = 46 journal entries**, the newest being `0045_pending_mute`) plus all **33**
+  plugin pg twins, including `0032_workspace_comparison_mode` and `0033_slack_target_bot_digest` —
+  applied clean and idempotent on a second pass.
+  ⚠ **`0045_pending_mute` was exercised WITH DATA, not just DDL**, because its whole tenancy claim
+  is a COMPOSITE FK and a DDL-only replay proves nothing about one. Two accounts, one repo each:
+  the legitimate `(900, repo 9000)` row inserted; the cross-account `(901, repo 9000)` pair was
+  REFUSED by `pending_muted_repos_repo_account_fk` ("Key (repo_id, account_id)=(9000, 901) is not
+  present in table repos"); a duplicate was refused by `pending_muted_repos_account_repo`; and
+  `DELETE FROM repos` cascaded the row away, which is what lets `deleteRepo`'s explicit delete be
+  belt-and-braces rather than the only bound.
   ⚠ **Both new twins were exercised WITH DATA, not just DDL**, since both carry a backfill and the
   standing warning is that an empty replay proves DDL only. Seeded three accounts: one with
   `comparison_mode='sprint'`, `bot_slack_digest=true`, THREE workspaces (one already holding a

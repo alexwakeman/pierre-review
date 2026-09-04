@@ -1320,3 +1320,60 @@ body {
     page-break-inside: avoid;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   `decorative-mark` — the text-contrast opt-out, and the ONLY one.
+
+   A reader reported a chip that was unreadable in dark mode. The pairing behind it,
+   `text-gray-300 dark:text-gray-600`, measures 2.66:1 on the dark page and 1.60:1 on the light
+   one, against WCAG AA's 4.5:1 — and it was at twenty-four sites, not one.
+   `test/textContrast.test.ts` now measures every muted pairing in the SPA from the source and
+   fails on anything below AA, so the twenty-fifth cannot land quietly.
+
+   Some of those sites are legitimately exempt: a "·" between two metadata items, an `aria-hidden`
+   glyph, a chart gridline. WCAG exempts them because they carry nothing the layout does not.
+   But "this one is decorative" has to be a decision somebody wrote down — inferring it from how
+   dim a colour is would exempt exactly the defect we are looking for. So it is written here, as a
+   class, and the test honours the class rather than a shade.
+
+   ⚠ IT MUST NOT BE USED ON TEXT A READER HAS TO READ. An em-dash meaning "no value", a "90d"
+   window, a "Not scored yet" marker — all of those SAY something, and all of them were on the
+   original list. They were made legible instead.
+
+   Deliberately no declarations: it is a marker, not a style. Adding one would give a reader a
+   reason to apply it for its looks.
+   ───────────────────────────────────────────────────────────────────────────────────────────── */
+.decorative-mark {
+  /* intentionally empty — see above */
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   `--ink` — a vendor brand colour, resolved to the legible variant for the current theme.
+
+   A reader reported the Cursor chip as unreadable in dark mode. Cursor's brand hex is #334155,
+   which renders at 1.94:1 against the dark page ground; it was not one vendor, it was 40 of 83.
+
+   It cannot be fixed by choosing better hexes. Clearing AA on white needs a relative luminance
+   ≤ 0.175 and clearing it on the near-black page needs ≥ 0.184 — the windows do not overlap, so
+   no single colour is legible as small text on both grounds. Two variants are forced.
+
+   `vendorInk()` in lib/ui.ts sets `--ink-light` and `--ink-dark` on the element and asks for
+   `color: var(--ink)`. The two rules below decide which one that is. Custom properties are
+   substituted where they are USED, so `--ink` inherits as the token `var(--ink-light)` and
+   re-resolves against each element's own pair — one rule, every chip, no component knows the
+   theme.
+
+   ⚠ THE RAW BRAND HEX IS STILL CORRECT FOR A CHART STROKE, where the component owns the ground.
+   This is for text.
+   ───────────────────────────────────────────────────────────────────────────────────────────── */
+/* ⚠ MATCHED BY ATTRIBUTE, NOT BY A CLASS, AND THAT IS THE POINT. Every element carrying the pair
+   gets its colour from these two rules, so `vendorInk()` is a one-line change at each of the ~20
+   call sites with no className to remember — and forgetting the class is exactly how half of them
+   would have kept the old behaviour. Inline `color` would beat these rules, so the helper sets the
+   variables ONLY. */
+[style*='--ink-light'] {
+  color: var(--ink-light);
+}
+.dark [style*='--ink-light'] {
+  color: var(--ink-dark);
+}

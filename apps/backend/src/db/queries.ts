@@ -184,6 +184,7 @@ import {
 } from './triage.js';
 import { getAccountById, getAccountUserId } from '../auth/account.js';
 import { viewerMentionedPrIds } from './pr-mentions.js';
+import { getMutedPendingRepoIds, repoGrainedPendingMutes } from './pending-mute.js';
 import { enrichReviewerSuggestions } from '../github/reviewer-suggest.js';
 import { ensureRoutingPrFiles } from '../sync/routing-files.js';
 import {
@@ -256,6 +257,9 @@ const {
   // parse and no "belongs to nothing" state.
   workspaces,
   workspaceRepos,
+  // The REPO half of the Pending mute (migration 0058 / pg 0045). Read through
+  // db/pending-mute.ts everywhere except `deleteRepo`, which deletes the row directly.
+  pendingMutedRepos,
   // THE BOT OBJECT: one row per (account, WORKSPACE, actor), carrying the judgement, the vendor
   // identity AND the price. It replaced the two-grain `repo_reviewers` / `account_reviewers` pair
   // — those existed only because judgement and identity sat at different grains, and with one
@@ -380,6 +384,13 @@ export async function getAddedRepoNodeIds(accountId: number): Promise<Set<string
 function mapWorkspace(
   w: typeof workspaces.$inferSelect,
   repoIds: number[],
+  // The account's muted repo ids — the REPO half of the Pending mute only. Intersected with this
+  // workspace's membership here, because the stored row carries no workspace id (a repo belongs
+  // to exactly one workspace already; copying that fact onto the mute row would give the account
+  // two answers to it). The WORKSPACE half is the column, and the two are OR-ed at the READ site
+  // (db/pending-mute.ts) — never folded together here, which would hand the settings screen one
+  // merged number it could not un-mix into the two switches it has to render.
+  mutedRepoIds: ReadonlySet<number>,
 ): Workspace {
   return {
     id: w.id,
@@ -388,6 +399,8 @@ function mapWorkspace(
     repoCount: repoIds.length,
     isDefault: w.isDefault,
     createdAt: w.createdAt.toISOString(),
+    pendingMuted: w.pendingMuted,
+    mutedRepoIds: repoIds.filter((id) => mutedRepoIds.has(id)),
   };
 }
 
@@ -495,7 +508,7 @@ export async function ensureRepoMemberships(accountId: number): Promise<void> {
 export async function listWorkspaces(accountId: number): Promise<Workspace[]> {
   await ensureDefaultWorkspace(accountId);
   await ensureRepoMemberships(accountId);
-  const [wsRows, memberRows] = await Promise.all([
+  const [wsRows, memberRows, mutedRepoIds] = await Promise.all([
     db.select().from(workspaces).where(eq(workspaces.accountId, accountId)).execute(),
     db
       .select({ workspaceId: workspaceRepos.workspaceId, repoId: workspaceRepos.repoId })
@@ -504,6 +517,10 @@ export async function listWorkspaces(accountId: number): Promise<Workspace[]> {
       .where(eq(workspaceRepos.accountId, accountId))
       .orderBy(asc(repos.owner), asc(repos.name))
       .execute(),
+    // The REPO half of the Pending mute (one indexed select over a table with one row per muted
+    // repo). The WORKSPACE half rides on `wsRows` as a column, so both switches the settings
+    // screen renders arrive on this one listing and neither needs a route of its own.
+    repoGrainedPendingMutes(accountId),
   ]);
   const byWorkspace = new Map<number, number[]>();
   for (const m of memberRows) {
@@ -516,7 +533,7 @@ export async function listWorkspaces(accountId: number): Promise<Workspace[]> {
     .sort(
       (a, b) => Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name),
     )
-    .map((w) => mapWorkspace(w, byWorkspace.get(w.id) ?? []));
+    .map((w) => mapWorkspace(w, byWorkspace.get(w.id) ?? [], mutedRepoIds));
 }
 
 // Create a workspace (unique per (accountId, name)). ALWAYS `isDefault: false` —
@@ -529,7 +546,8 @@ export async function createWorkspace(accountId: number, name: string): Promise<
     .values({ accountId, name, isDefault: false })
     .returning()
     .execute();
-  return mapWorkspace(row!, []);
+  // No repos yet, so no repo-grained mutes to intersect — and `pending_muted` defaults to false.
+  return mapWorkspace(row!, [], new Set());
 }
 
 // Rename a workspace (account-scoped → false/404 for one this account doesn't own). THE DEFAULT
@@ -4742,6 +4760,11 @@ export async function getWorkspaceInsights(
       /** `MyTurnCard.relevance` — read off the section row, never re-derived (see `relevanceOf`).
        *  The card's `personal` is FOLDED from this one field, so the two cannot drift. */
       relevance: MyTurnRelevance;
+      /** `MyTurnCard.muted` — DISPLAY ONLY, read off the section row like `relevance`. It is set
+       *  when this row's repo is muted for Pending, which is WHY `relevance` above is 'none'.
+       *  ⚠ Nothing below may count it, sort by it or filter on it: every figure on this board is
+       *  folded from `relevance`, which has already absorbed the mute. Undefined = not muted. */
+      muted?: true;
       /** actors to resolve for the client beyond the PR author (prRef's authorId) */
       extraActorIds: (number | null)[];
     };
@@ -4771,6 +4794,11 @@ export async function getWorkspaceInsights(
       personal?: boolean;
     }): MyTurnRelevance => i.relevance ?? ((i.personal ?? true) ? 'direct' : 'none');
 
+    // The PENDING-MUTE EXPLANATION, read the same way and for the same reason. It is carried, not
+    // recomputed: re-resolving the muted repo set here would be a second answer to a question
+    // `getMyTurn` has already answered on the very rows this block is folding.
+    const mutedOf = (i: { muted?: boolean }): true | undefined => (i.muted ? true : undefined);
+
     for (const i of mt.awaitingReview) {
       seeds.push({
         reason: 'review_request',
@@ -4784,6 +4812,7 @@ export async function getWorkspaceInsights(
         since: sinceOf(i),
         prId: i.prId,
         relevance: relevanceOf(i),
+        muted: mutedOf(i),
         extraActorIds: [],
       });
     }
@@ -4798,6 +4827,7 @@ export async function getWorkspaceInsights(
         since: at,
         prId: i.prId,
         relevance: relevanceOf(i),
+        muted: mutedOf(i),
         extraActorIds: [i.lastReplyAuthorId],
       });
     }
@@ -4813,6 +4843,7 @@ export async function getWorkspaceInsights(
         since: at,
         prId: i.prId,
         relevance: relevanceOf(i),
+        muted: mutedOf(i),
         extraActorIds: [],
       });
     }
@@ -4828,6 +4859,7 @@ export async function getWorkspaceInsights(
         since: sinceOf(i),
         prId: i.prId,
         relevance: relevanceOf(i),
+        muted: mutedOf(i),
         extraActorIds: [],
       });
     }
@@ -4845,6 +4877,7 @@ export async function getWorkspaceInsights(
         // viewer has write on or has landed a PR into, 'none' for a stranger's PR in a repo they
         // merely track. (A mention on it makes it 'direct' again, even in a read-only repo.)
         relevance: relevanceOf(i),
+        muted: mutedOf(i),
         extraActorIds: [i.authorId],
       });
     }
@@ -4859,6 +4892,7 @@ export async function getWorkspaceInsights(
         since: i.finishedAt != null ? new Date(Date.parse(i.finishedAt)) : null,
         prId: i.prId,
         relevance: relevanceOf(i),
+        muted: mutedOf(i),
         extraActorIds: [],
       });
     }
@@ -4952,6 +4986,10 @@ export async function getWorkspaceInsights(
           // board's label and the notification's count cannot disagree about the same card.
           personal: s.relevance !== 'none',
           relevance: s.relevance,
+          // DISPLAY ONLY — see `MyTurnCard.muted`. It explains the 'none' above; it is never an
+          // input to `personal`, to the five pre-cap totals, to the relevance lens or to the
+          // ranker, all of which read `relevance`.
+          muted: s.muted,
         };
         cards.push(card);
       }
@@ -5346,6 +5384,15 @@ export async function getWorkspaceInsights(
     // Only now is the maintained set worth resolving — and only once (see `maintainedRepoIds`).
     const maintained = candidates.length > 0 ? await maintainedRepoIds() : new Set<number>();
     for (const { p, kind } of candidates) {
+      // ⚠ THE PENDING MUTE DELIBERATELY DOES NOT REACH THE TWO FORWARD KINDS, and the reason is
+      // what `relevance` MEANS here. On a my_turn row it is an OWNERSHIP CLAIM that drives a
+      // card's label, the `myTurnPersonal` figures and the browser notification — the three things
+      // a mute exists to stop. Here it drives NOTHING a mute is about: these cards are exempt from
+      // the relevance lens by design, are counted by no brief line and fire no notification, and
+      // the value feeds only this block's cap ordering and the `severity` accent below. Muting
+      // them would therefore silently RE-COLOUR "you can land this now" cards and push the
+      // reader's own ready work out of a 15-row cap, in exchange for suppressing nothing. Muting
+      // is about interruption; a forward card does not interrupt.
       const relevance: MyTurnRelevance =
         viewerId != null && p.authorId === viewerId
           ? 'direct'
@@ -6762,8 +6809,18 @@ async function getActionableActivityIds(accountId: number): Promise<{
 // THE "my turn" FOLD — the six sections of what is on the viewer's plate, PR/thread-grained.
 //
 // `scope` is OPTIONAL and the two shapes are deliberately different questions:
-//   • omitted  → the ACCOUNT-WIDE inbox. `GET /api/my-turn` and the CLI status board take this,
-//                and its behaviour must stay byte-identical to the pre-scope version.
+//   • omitted  → the ACCOUNT-WIDE inbox. `GET /api/my-turn` and the CLI status board take this.
+//                Its POPULATION is still byte-identical to the pre-scope version — the scope
+//                parameter narrows the six sections' driving queries and nothing else.
+//                ⚠ THE PENDING MUTE IS THE ONE THING THAT REACHES THE UNSCOPED FORM TOO, and it
+//                had to: the browser-notification watcher reads exactly this call, deliberately
+//                with no `?workspace=` ("an OS notification is read outside the app entirely,
+//                where only-the-selected-workspace would be a silence bug"), so a mute applied
+//                only in the scoped form would leave the most interrupting surface in the product
+//                firing for a repo the user had just silenced. It needs no scope parameter to do
+//                it: a repo belongs to EXACTLY ONE workspace, so a workspace-grained mute is
+//                fully resolvable per repo id. It changes no row's PRESENCE — only `relevance`,
+//                `personal` and the advisory `muted` flag on rows that are returned either way.
 //   • passed   → the WORKSPACE inbox: every section's driving query is narrowed to
 //                `scope.repoIds`, and an EMPTY repo list is an ordinary, immediate empty answer
 //                (a freshly created workspace), never a widening to the whole account.
@@ -6809,6 +6866,38 @@ export async function getMyTurn(
   const open = await buildTimelinePrs(openRows, accountId);
   const repoNameById = new Map<number, string>();
   for (const r of await listRepos(accountId)) repoNameById.set(r.id, r.fullName);
+
+  // ── THE PENDING MUTE. One read, ACCOUNT-WIDE, unioning the two independently-owned facts
+  //    (`workspaces.pending_muted` OR a `pending_muted_repos` row) — see db/pending-mute.ts.
+  //    Resolved even in the scoped form: it is two small indexed selects, and gating it on the
+  //    scope would put a second predicate in front of a fold whose whole point is that there is
+  //    only one.
+  const mutedRepoIds = await getMutedPendingRepoIds(accountId);
+  // THE ONE FOLD. Every section routes its answer through here, so a mute cannot be applied to
+  // four sections and forgotten on the fifth, and `personal` stays derived from `relevance` in
+  // one place — which is what stops the board's label and the notification's count disagreeing.
+  //
+  // ⚠ A MUTE IS A DOWNGRADE TO `'none'`, NOT A NEW STATE. `'none'` already means exactly what the
+  // reader asked for — "a regular pending item, not flagged any more": the card keeps its place
+  // on the board and in the broad `myTurn` count, and only the OWNERSHIP CLAIM and the counts
+  // that claim feeds move. A second boolean AND-ed into the five notification surfaces would be
+  // five predicates that can drift from each other; this is one.
+  //
+  // ⚠ `muted` IS EXPLANATION, NEVER ARITHMETIC. It is set only when true and no counter, lens or
+  // ranker may read it — they all read `relevance`, which has already absorbed the mute. It
+  // exists so a screen can say why a card the reader last saw as theirs is now neutral.
+  //
+  // ⚠ A NULL repoId CANNOT BE MUTED and must not be treated as muted: over-notifying is the safe
+  // direction for a row we cannot classify (the same rule as an absent `personal`).
+  const relevanceFor = (
+    repoId: number | null | undefined,
+    base: MyTurnRelevance,
+  ): { relevance: MyTurnRelevance; personal: boolean; muted?: true } => {
+    if (repoId == null || !mutedRepoIds.has(repoId)) {
+      return { relevance: base, personal: base !== 'none' };
+    }
+    return { relevance: 'none', personal: false, muted: true };
+  };
 
   // Manual dismissals, honoured only until newer activity supersedes them.
   const dismissals = await db
@@ -6867,8 +6956,11 @@ export async function getMyTurn(
       // `personal` is DERIVED from `relevance` (`!== 'none'`) and written anyway: it is still the
       // field every notification surface reads, and keeping the server the one place that folds
       // the three values down to the boolean is what stops the two ever disagreeing.
-      relevance: 'direct' as const,
-      personal: true,
+      //
+      // ⚠ THROUGH `relevanceFor`, which is also where the PENDING MUTE lands: a muted repo turns
+      // this default into 'none' + personal:false + muted:true. "New PRs" overrides the pair
+      // below — through the same helper, so it cannot escape the mute.
+      ...relevanceFor(t.repoId, 'direct'),
     };
   };
 
@@ -7011,39 +7103,69 @@ export async function getMyTurn(
           : 'none';
       return {
         ...toMyTurnPr(t, meta(t.id).openedAt),
-        relevance,
         // DERIVED, and written here rather than left to the consumer so `personal` keeps meaning
         // exactly what it meant before this split existed: "may a notification surface interrupt
-        // the viewer about this row?" — direct ∪ maintained, unchanged.
-        personal: relevance !== 'none',
+        // the viewer about this row?" — direct ∪ maintained, unchanged. Through `relevanceFor`,
+        // so a muted repo collapses BOTH arms to 'none' here exactly as it does everywhere else.
+        ...relevanceFor(t.repoId, relevance),
       };
     })
     .sort((a, b) => b.openedAt.localeCompare(a.openedAt));
 
   // 3. Threads awaiting your response: you opened the thread, someone replied
   //    after you, and it isn't resolved. A dismissal sticks until a newer reply.
-  const threadsAwaiting = (
+  const threadRows = (
     await getThreadsAwaiting(localUserId, accountId, repoNameById, scopedRepoIds)
-  )
-    .filter((ta) => {
-      const d = threadDismissedAt.get(ta.threadId);
-      return !d || Date.parse(ta.lastReplyAt) > d.getTime();
-    })
-    // You opened the thread and someone replied to YOU — DIRECT by construction. Stamped rather
-    // than left absent so every section answers the relevance question in the same two fields.
-    .map((ta) => ({ ...ta, relevance: 'direct' as const, personal: true }));
+  ).filter((ta) => {
+    const d = threadDismissedAt.get(ta.threadId);
+    return !d || Date.parse(ta.lastReplyAt) > d.getTime();
+  });
+
+  // Completed-but-unactioned Claude reviews (local-only feature; empty otherwise).
+  // A manual "Done" hides the run until a newer run finishes (see claudeDismissedIds).
+  const claudeRows: ClaudeReviewToAction[] = getProCapabilities().claudeReview
+    ? (await getUnactionedClaudeReviews(accountId, scopedRepoIds)).filter(
+        (c) => !claudeDismissedIds.has(c.reviewId),
+      )
+    : [];
+
+  // ⚠ THESE TWO SECTIONS ARE THE ONLY ONES WITH NO `repoId` IN HAND. `ThreadAwaitingItem` and
+  // `ClaudeReviewToAction` carry `repoFullName` (a rendering field) and `prId`, not a repo id —
+  // and a thread's PR may be CLOSED, so it is not necessarily in `openRows` either. Resolving the
+  // mute by reversing `repoNameById` would work today and would be a trap tomorrow: the map's own
+  // `?? 'repo <id>'` fallback produces names that reverse to nothing, and two accounts' repos are
+  // only distinct by id. One narrow indexed select over the PR ids actually present is total by
+  // construction — and it is skipped entirely when nothing is muted, which is the overwhelmingly
+  // common case, so the unmuted account pays nothing for this.
+  const repoIdByPrId = new Map<number, number>();
+  if (mutedRepoIds.size > 0) {
+    const ids = [...new Set([...threadRows.map((t) => t.prId), ...claudeRows.map((c) => c.prId)])];
+    if (ids.length > 0) {
+      const rows = await db
+        .select({ id: pullRequests.id, repoId: pullRequests.repoId })
+        .from(pullRequests)
+        .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, ids)))
+        .execute();
+      for (const r of rows) repoIdByPrId.set(r.id, r.repoId);
+    }
+  }
+
+  // You opened the thread and someone replied to YOU — DIRECT by construction. Stamped rather
+  // than left absent so every section answers the relevance question in the same two fields, and
+  // through `relevanceFor` so a muted repo downgrades it like every other section.
+  const threadsAwaiting = threadRows.map((ta) => ({
+    ...ta,
+    ...relevanceFor(repoIdByPrId.get(ta.prId), 'direct'),
+  }));
   for (const ta of threadsAwaiting) {
     if (ta.lastReplyAuthorId != null) referencedUsers.add(ta.lastReplyAuthorId);
   }
 
-  // Completed-but-unactioned Claude reviews (local-only feature; empty otherwise).
-  // A manual "Done" hides the run until a newer run finishes (see claudeDismissedIds).
-  const claudeReviewsToAction: ClaudeReviewToAction[] = getProCapabilities().claudeReview
-    ? (await getUnactionedClaudeReviews(accountId, scopedRepoIds))
-        .filter((c) => !claudeDismissedIds.has(c.reviewId))
-        // You asked for the run — DIRECT by construction, same as the thread section.
-        .map((c) => ({ ...c, relevance: 'direct' as const, personal: true }))
-    : [];
+  // You asked for the run — DIRECT by construction, same as the thread section.
+  const claudeReviewsToAction: ClaudeReviewToAction[] = claudeRows.map((c) => ({
+    ...c,
+    ...relevanceFor(repoIdByPrId.get(c.prId), 'direct'),
+  }));
 
   const users =
     referencedUsers.size > 0
@@ -8021,6 +8143,18 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
     // reviewer that may still cover the workspace's other repos — and a stored row whose
     // footprint has gone must stay visible and editable (its counts simply read zero).
     await tx.delete(workspaceRepos).where(eq(workspaceRepos.repoId, id)).execute();
+    // The Pending-mute row for this repo (migration 0058 / pg 0045). Its composite FK
+    // `(repo_id, account_id) → repos(id, account_id)` DOES cascade, and it is deleted explicitly
+    // anyway for the same dialect-agnostic reason as the three above: SQLite enforces FKs only
+    // under `foreign_keys=ON` while Postgres enforces them immediately. UNLIKE
+    // `workspace_reviewers` — which this path deliberately leaves alone because it keys on
+    // (workspace, actor) and survives one repo's removal — this row keys on the REPO, so re-adding
+    // the same repository later must not silently resurrect a mute the user set on a previous
+    // incarnation of it.
+    await tx
+      .delete(pendingMutedRepos)
+      .where(and(eq(pendingMutedRepos.accountId, accountId), eq(pendingMutedRepos.repoId, id)))
+      .execute();
     await tx.delete(syncState).where(eq(syncState.repoId, id)).execute();
     await tx.delete(repos).where(eq(repos.id, id)).execute();
   });
@@ -8875,6 +9009,54 @@ export async function upsertLocalReview(
       .execute()
   )[0]!;
   return row.id;
+}
+
+/**
+ * The OTHER half of the approve stamp: GitHub DELETES the reviewer's outstanding review request
+ * the instant their review lands, and until now nothing local did.
+ *
+ * ⚠ THIS IS WHY APPROVING A PR LEFT ITS "Review or reply" CARD ON THE PENDING BOARD.
+ * `computeTriage.reviewRequestedFromMe` (db/triage.ts) is derived PURELY from `review_requests`
+ * rows — it never consults the viewer's own submitted reviews — so the card survived until the
+ * next `persistPr`, which reconciles the table by delete + reinsert. On a cold repo that is up to
+ * fifteen minutes of a board telling someone they owe a review they have just given.
+ *
+ * A DELETE rather than a new predicate in `computeTriage`, deliberately: the row is genuinely
+ * gone on GitHub, so removing it mirrors reality for EVERY consumer of the column at once
+ * (getMyTurn.awaitingReview, deriveReasonTag, the timeline board) instead of teaching one of them
+ * a second meaning. It is also idempotent and self-healing — the next sync re-derives the table
+ * from GitHub either way, so a delete that races a walk costs nothing.
+ *
+ * Account-scoped through `pullRequests` even though the route has already proved ownership: id-
+ * addressed writes carry their own isolation here rather than inheriting a caller's. Returns the
+ * number of rows cleared (0 is the ordinary case — an approval nobody asked for).
+ */
+export async function clearOwnReviewRequest(
+  prId: number,
+  accountId: number,
+  userId: number,
+): Promise<number> {
+  // The FK from review_requests is to pull_requests.id alone, so the tenancy predicate has to be
+  // a subquery rather than a join — drizzle's delete takes no join clause in either dialect.
+  const rows = await db
+    .delete(reviewRequests)
+    .where(
+      and(
+        eq(reviewRequests.prId, prId),
+        eq(reviewRequests.userId, userId),
+        exists(
+          db
+            .select({ x: sql`1` })
+            .from(pullRequests)
+            .where(
+              and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)),
+            ),
+        ),
+      ),
+    )
+    .returning({ id: reviewRequests.id })
+    .execute();
+  return rows.length;
 }
 
 // ════════════════════════════════════════════════════════════════════════════

@@ -356,7 +356,7 @@ export function CiRerunControl({
         Re-run all jobs
       </button>
       {outcome && !rerun.isPending && (
-        <span className="text-[11px] text-gray-500">
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">
           Re-run requested — CI updates on the next sync.
           {outcome.failed > 0 &&
             ` (${outcome.failed} run${

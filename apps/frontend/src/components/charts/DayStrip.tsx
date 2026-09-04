@@ -109,7 +109,7 @@ export function DayStrip({
                     height={cellH}
                     rx={1.5}
                     fill={on ? hue : 'currentColor'}
-                    className={on ? '' : 'text-gray-100 dark:text-gray-800'}
+                    className={on ? '' : 'decorative-mark text-gray-100 dark:text-gray-800'}
                     fillOpacity={on ? 0.2 + 0.8 * (c / max) : 1}
                     stroke={isHover ? hue : 'none'}
                     strokeWidth={isHover ? 1.5 : 0}

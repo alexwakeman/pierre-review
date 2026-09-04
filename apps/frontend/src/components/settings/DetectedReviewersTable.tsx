@@ -12,7 +12,7 @@ import {
   roleForVendorKind,
   vendorKindsForRole,
 } from '@pierre-review/shared';
-import { automatedReviewerMeta } from '../../lib/ui.js';
+import { automatedReviewerMeta, vendorInk } from '../../lib/ui.js';
 import {
   costEditOutcome,
   costStateOf,
@@ -599,7 +599,7 @@ function ReviewerCard({
         </span>
         <span
           className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-          style={{ color, backgroundColor: `${color}1a` }}
+          style={{ ...vendorInk(color), backgroundColor: `${color}1a` }}
         >
           <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
           {automatedReviewerMeta(serverKind).label}
@@ -615,7 +615,7 @@ function ReviewerCard({
           </span>
         ) : (
           <span
-            className="shrink-0 text-[9px] uppercase tracking-wide text-gray-300 dark:text-gray-600"
+            className="shrink-0 text-[9px] uppercase tracking-wide text-gray-500 dark:text-gray-400"
             title={r.reasons.join(' · ')}
           >
             {r.source.replace(/_/g, ' ')}
@@ -634,7 +634,7 @@ function ReviewerCard({
           title="Reviews / inline threads / PR comments across this Workspace over the last 90 days"
         >
           {f.reviews}r · {f.threads}t · {f.comments}c
-          <span className="ml-1 text-gray-300 dark:text-gray-600">90d</span>
+          <span className="ml-1 text-gray-500 dark:text-gray-400">90d</span>
         </span>
       </div>
 

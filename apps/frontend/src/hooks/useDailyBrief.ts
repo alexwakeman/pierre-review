@@ -26,5 +26,10 @@ export function useDailyBrief(workspaceId: number | null) {
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,
     staleTime: 60_000,
+    // In lockstep with `useAttentionCards` (see its note): the app-wide default is
+    // `refetchOnWindowFocus:false`, and this is one of the three keys that opt back IN together.
+    // The strip's `myTurn` IS the board's `shown` denominator, so a focus that refreshed one and
+    // not the other would put a stale count over a fresh list.
+    refetchOnWindowFocus: true,
   });
 }

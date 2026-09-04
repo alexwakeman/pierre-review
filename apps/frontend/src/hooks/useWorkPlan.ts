@@ -57,6 +57,10 @@ export function useWorkPlan(workspaceId: number | null, enabled = true) {
     // also in ACTIVITY_QUERY_KEYS, so a landing sync sweeps all three in phase; this interval
     // covers the quiet stretches between syncs.)
     refetchInterval: 5 * 60_000,
+    // The third of the three keys that opt OUT of the app-wide `refetchOnWindowFocus:false` — for
+    // the same reason the interval above is shared. A plan that still names a PR the board
+    // dropped on focus is the disagreement this hook's comment exists to prevent.
+    refetchOnWindowFocus: true,
   });
 }
 

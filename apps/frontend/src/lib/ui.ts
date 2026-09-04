@@ -22,6 +22,8 @@ import type {
   CiStatus,
   DerivedState,
   EventType,
+  MergeBlocker,
+  MergeBlockFacts,
   Mergeable,
   MergeStateStatus,
   MergeVerdict,
@@ -29,7 +31,6 @@ import type {
   MlCategory,
   MlSeverity,
   MyTurnReason,
-  PrReviewDecision,
   PrState,
   ReasonTag,
   ReviewBotKind,
@@ -323,6 +324,126 @@ export const BOT_VENDOR_META: Record<
 // Display meta for an automated-reviewer kind (vendor / in-house / Pierre). The one lookup
 // for "how do I render this AutomatedReviewerKind" — used wherever a classified kind is in
 // hand (bot-signal / bot-ROI cards, provenance badges, dedup rollups).
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   BRAND INK — a vendor's colour, made legible on whichever ground it lands on.
+   ───────────────────────────────────────────────────────────────────────────────────────── */
+
+/** THE PAGE GROUNDS. `bg-white` in light, `dark:bg-gray-950` in dark. */
+const INK_LIGHT_BG = '#ffffff';
+const INK_DARK_BG = '#030712';
+/** WCAG AA for body text. Vendor chips render at 10-11px, so the large-text 3:1 relaxation
+ *  does not apply to them. */
+const INK_TARGET = 4.5;
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  return [
+    parseInt(full.slice(0, 2), 16),
+    parseInt(full.slice(2, 4), 16),
+    parseInt(full.slice(4, 6), 16),
+  ];
+}
+function relLuminance(rgb: [number, number, number]): number {
+  const f = (v: number): number => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]);
+}
+/** WCAG contrast ratio between two hex colours. Exported so the guard test measures the same
+ *  arithmetic the renderer does, rather than a second implementation that can drift from it. */
+export function contrastRatio(a: string, b: string): number {
+  const la = relLuminance(hexToRgb(a));
+  const lb = relLuminance(hexToRgb(b));
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+function rgbToHsl([r, g, b]: [number, number, number]): [number, number, number] {
+  const rn = r / 255, gn = g / 255, bn = b / 255;
+  const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  const h =
+    max === rn ? ((gn - bn) / d + (gn < bn ? 6 : 0))
+    : max === gn ? (bn - rn) / d + 2
+    : (rn - gn) / d + 4;
+  return [h / 6, s, l];
+}
+function hslToHex(h: number, s: number, l: number): string {
+  const hue = (p: number, q: number, t0: number): number => {
+    let t = t0;
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  let r: number, g: number, b: number;
+  if (s === 0) { r = g = b = l; }
+  else {
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue(p, q, h + 1 / 3); g = hue(p, q, h); b = hue(p, q, h - 1 / 3);
+  }
+  const to = (v: number): string => Math.round(v * 255).toString(16).padStart(2, '0');
+  return `#${to(r)}${to(g)}${to(b)}`;
+}
+
+/**
+ * A brand colour adjusted along LIGHTNESS ONLY until it clears AA on `bg`, hue and saturation
+ * untouched. Returns the original when it already passes.
+ *
+ * ⚠ TWO VARIANTS ARE NOT A PREFERENCE, THEY ARE FORCED. Clearing 4.5:1 on white needs a relative
+ * luminance ≤ 0.175; clearing it on the near-black page needs ≥ 0.184. Those windows do not
+ * overlap, so NO single colour is legible as small text on both grounds — which is why every
+ * attempt to fix this by picking nicer hexes fails, and why the value is theme-selected in CSS
+ * rather than stored once.
+ *
+ * ⚠ AND IT IS WHY THE RAW BRAND HEX MUST NOT BE USED AS TEXT COLOUR. Measured at the time this
+ * was written: 40 of the 83 vendor colours failed AA on the dark ground and 43 failed on the
+ * light one. Cursor (#334155) rendered at 1.94:1 on dark — a reader reported it as unreadable,
+ * and CodeSandbox (#151515) was worse at 1.10:1. The raw value is still right for a chart stroke,
+ * where the component controls the ground.
+ */
+export function readableInk(color: string, bg: string): string {
+  if (contrastRatio(color, bg) >= INK_TARGET) return color;
+  const [h, s, l0] = rgbToHsl(hexToRgb(color));
+  const towardsLight = relLuminance(hexToRgb(bg)) < 0.5;
+  // 1% steps: fine enough that the shift is imperceptible next to the brand mark, coarse enough
+  // to terminate. Walks to pure white/black in the worst case, which is the correct answer for a
+  // near-black brand on a near-black ground.
+  for (let i = 1; i <= 100; i += 1) {
+    const l = towardsLight ? Math.min(1, l0 + i / 100) : Math.max(0, l0 - i / 100);
+    const candidate = hslToHex(h, s, l);
+    if (contrastRatio(candidate, bg) >= INK_TARGET) return candidate;
+    if (l === 0 || l === 1) break;
+  }
+  return towardsLight ? '#ffffff' : '#000000';
+}
+
+/**
+ * The two custom properties a brand colour is applied through. Spread into an element's `style`;
+ * index.css matches `[style*="--ink-light"]` and sets `color` from the right one per theme.
+ *
+ * ⚠ IT DELIBERATELY DOES NOT SET `color`. The first attempt returned `color: 'var(--ink)'` with
+ * `:root { --ink: var(--ink-light) }` / `.dark { --ink: var(--ink-dark) }`, on the assumption that
+ * `--ink` would re-resolve against each element's own pair. It does not: a custom property whose
+ * value contains `var()` is substituted at the element where it is DECLARED, so `--ink` resolved
+ * against `:root`'s (undefined) `--ink-light`, became invalid-at-computed-value-time, and every
+ * chip silently fell back to its inherited colour. It typechecked, it rendered, and it was wrong
+ * on screen — which is why this is spelled out rather than tidied away.
+ */
+export function vendorInk(color: string): Record<string, string> {
+  return {
+    '--ink-light': readableInk(color, INK_LIGHT_BG),
+    '--ink-dark': readableInk(color, INK_DARK_BG),
+  };
+}
+
 export function automatedReviewerMeta(kind: AutomatedReviewerKind): {
   label: string;
   color: string;
@@ -567,9 +688,10 @@ export interface MergeVerdictInput {
   // Draft-ness is its own stored boolean — GitHub's MergeStateStatus.DRAFT is deliberately
   // not modelled in the enum (see sync/upsert.ts), so it is passed separately.
   isDraft?: boolean;
-  // Names the review half of a `blocked` status when it's known (PrDetail carries it; the
-  // lean timeline PR does not). Absent → the blocked reason stays generic, never invented.
-  reviewDecision?: PrReviewDecision | null;
+  // Everything the BLOCKED-reason derivation reads, in one optional object — see
+  // `MergeBlockFacts` for why presence itself is the signal. Absent (every compact surface,
+  // which is fed a lean TimelinePr) → the blocked reason stays generic, never invented.
+  blockFacts?: MergeBlockFacts;
   // Out-of-band states only the live merge-options fetch knows about.
   inMergeQueue?: boolean;
   queuePosition?: number | null;
@@ -578,19 +700,119 @@ export interface MergeVerdictInput {
   behindBy?: number;
 }
 
-function blockedDetail(decision: PrReviewDecision | null | undefined): string {
-  switch (decision) {
-    case 'review_required':
-      return 'required reviews aren’t in yet';
-    case 'changes_requested':
-      return 'a reviewer requested changes';
-    // Approved but still blocked ⇒ the review requirement is satisfied, so the blocker is
-    // the other half of branch protection.
-    case 'approved':
-      return 'required checks aren’t passing';
-    default:
-      return 'required checks or reviews aren’t satisfied';
+// The sentence a blocked PR gets when the caller supplied no facts to reason from (every
+// compact surface: the timeline bar tooltip, the dense open-PR rows, the Pending cards). It
+// promises nothing beyond what `mergeStateStatus: 'blocked'` itself says.
+const BLOCKED_GENERIC_DETAIL = 'required checks or reviews aren’t satisfied';
+
+const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+
+/**
+ * THE ranked candidate causes of a `blocked` merge state, most certain first.
+ *
+ * ⚠ `certainty` ORDERS the list; it is NOT rendered, and there is no `note`. The pane states
+ * the facts and stops — see **Product voice** in CLAUDE.md.
+ *
+ * Pure, and exported for its unit test. See `MergeBlockerKind` in `shared` for the argument:
+ * GitHub collapses at least six protection failures into one word and the only field that
+ * would separate them is admin-gated, so this reasons from the data the app already syncs
+ * instead — and never asserts a cause it cannot check.
+ *
+ * WHAT COUNTS AS PROVEN. Only `reviewDecision`: it is GitHub's own answer to "does review still
+ * block this?", so 'review_required' / 'changes_requested' NAME an unmet requirement. Nothing
+ * else on the payload names a rule, so every other row is a fact of the PR offered as a
+ * possibility. That split is the whole feature — a confident wrong reason is worse than none.
+ *
+ * WHAT `reviewDecision === 'approved'` BUYS. It does not produce a row; it REMOVES one. The
+ * predecessor of this function returned a flat "required checks aren’t passing" for approved
+ * PRs, which was false on 10 measured PRs whose CI rollup was green — an assertion made from a
+ * field that says nothing at all about checks. Approval now only sharpens `unexplained`.
+ *
+ * THE ORDER is fixed and by evidence strength, not by which cause anyone expects: GitHub's own
+ * naming first, then a red rollup (a red NON-required check alone reads as 'unstable', not
+ * 'blocked' — the same inference `merge/auto-merge-runner.ts` already makes when it labels an
+ * armed intent's wait), then checks that have not reported, then unresolved threads (real, but
+ * conditional on a repo setting we cannot read). Only 89 of 572 blocked PRs in a real database
+ * have ANY unresolved thread, so threads must not lead.
+ *
+ * Never returns an empty array: `unexplained` is the terminal entry, and it exists so that a
+ * blocked PR can never fall back to a bare "blocked" with nothing underneath it.
+ */
+export function deriveMergeBlockers(facts: MergeBlockFacts): MergeBlocker[] {
+  const out: MergeBlocker[] = [];
+  const { reviewDecision, ciStatus, requestedReviewers } = facts;
+  const unresolved = facts.unresolvedThreads ?? 0;
+  const likely = Math.min(facts.likelyAddressedThreads ?? 0, unresolved);
+
+  // ---- proven: GitHub itself names the unmet requirement -------------------------------
+  if (reviewDecision === 'changes_requested') {
+    out.push({
+      kind: 'changes_requested',
+      certainty: 'proven',
+      text: 'a reviewer requested changes',
+    });
+  } else if (reviewDecision === 'review_required') {
+    out.push({
+      kind: 'review_required',
+      certainty: 'proven',
+      text: 'required reviews aren’t in yet',
+      // The outstanding-request count NAMES this proven blocker; it is never a blocker of its
+      // own (see MergeBlockFacts.requestedReviewers for why that would be a false cause).
+      ...(requestedReviewers != null && requestedReviewers > 0
+        ? {
+            count: requestedReviewers,
+          }
+        : {
+          }),
+    });
   }
+
+  // ---- inferred: true of this PR, but GitHub never says it is what "blocked" means ------
+  if (ciStatus === 'failure' || ciStatus === 'error') {
+    out.push({
+      kind: 'checks_red',
+      certainty: 'inferred',
+      text: ciStatus === 'error' ? 'a check errored on the head commit' : 'CI is red on the head commit',
+    });
+  } else if (ciStatus === 'pending' || ciStatus === 'expected') {
+    out.push({
+      kind: 'checks_pending',
+      certainty: 'inferred',
+      // 'expected' is GitHub's word for a required context that is REGISTERED and has never
+      // reported — a sharper fact than "still running", and worth its own sentence.
+      text:
+        ciStatus === 'expected'
+          ? 'a required check hasn’t reported yet'
+          : 'checks are still running',
+    });
+  }
+
+  if (unresolved > 0) {
+    out.push({
+      kind: 'unresolved_threads',
+      certainty: 'inferred',
+      count: unresolved,
+      text: `${unresolved} review ${plural(unresolved, 'thread isn’t', 'threads aren’t')} resolved on GitHub${
+        likely > 0 ? ` (${likely} of them look addressed)` : ''
+      }`,
+    });
+  }
+
+  if (out.length === 0) {
+    // Nothing we hold explains it. This is a real and common state — 17 PRs in a measured
+    // database are approved + blocked with no unresolved thread and a green rollup — and it is
+    // the case the old "required checks aren’t passing" sentence lied about.
+    const approved = reviewDecision === 'approved';
+    out.push({
+      kind: 'unexplained',
+      certainty: 'inferred',
+      text: approved
+        ? 'approved, and nothing we can see explains the block'
+        : 'nothing we can see explains it',
+    });
+  }
+
+  return out;
 }
 
 const MERGE_STATE_STATUSES: readonly MergeStateStatus[] = [
@@ -665,12 +887,19 @@ export function mergeVerdict(pr: MergeVerdictInput): MergeVerdictInfo {
     };
   }
   if (mss === 'blocked') {
+    // The ONE verdict GitHub refuses to explain, so it is the ONE that carries a list. When the
+    // caller has facts to reason from, the headline detail is the TOP-RANKED candidate rather
+    // than a fixed sentence — which is what stops it asserting a cause the evidence doesn't
+    // support (its predecessor claimed "required checks aren’t passing" for every approved PR,
+    // green rollup included).
+    const blockers = pr.blockFacts ? deriveMergeBlockers(pr.blockFacts) : null;
     return {
       verdict: 'blocked',
       label: 'blocked',
       tone: 'bad',
       canMerge: false,
-      detail: blockedDetail(pr.reviewDecision),
+      detail: blockers?.[0]?.text ?? BLOCKED_GENERIC_DETAIL,
+      ...(blockers ? { blockers } : {}),
     };
   }
   if (mss === 'behind') {

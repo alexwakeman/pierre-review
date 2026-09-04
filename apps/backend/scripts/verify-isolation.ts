@@ -1130,6 +1130,68 @@ check(
   (await getPrSyncTarget(A.prId, 2)) === null,
 );
 
+// ── The Pending board's liveness resolve (db/pr-liveness.ts) ────────────────────
+// The ONLY id-LIST-addressed read in the codebase whose ids arrive in a REQUEST BODY and are then
+// spent on GitHub quota: POST /api/attention/liveness hands it whatever PR ids the client claims
+// to be rendering, and every id that survives this resolve gets re-read from GitHub and written
+// back. So the resolve IS the isolation boundary — a missing predicate would let one tenant aim
+// another's token at a PR they can name, and (worse) UPDATE its row.
+//
+// TWO predicates, and each is checked separately because they fail differently:
+//   accountId — the tenancy boundary. Its absence is a cross-account leak.
+//   repoIds   — the resolved WORKSPACE's membership. Its absence is not a leak but is still a
+//               contract break: a caller could freshen their own PRs from a workspace they did
+//               not name, spending quota outside the board they claimed to be looking at.
+// Both directions are seeded non-vacuously: A's PR exists, so removing either predicate turns a
+// passing check into a failing one rather than into a quieter null.
+const { getPrLivenessTargets } = await import('../src/db/pr-liveness.js');
+const livenessOwn = await getPrLivenessTargets(1, [A.repoId], [A.prId]);
+check(
+  'getPrLivenessTargets(A, A’s repo, A’s PR) resolves it',
+  livenessOwn.length === 1 && livenessOwn[0]!.prId === A.prId,
+);
+check(
+  'getPrLivenessTargets(B, B’s repo, A’s PR id) returns nothing (IDOR blocked)',
+  (await getPrLivenessTargets(2, [B.repoId], [A.prId])).length === 0,
+);
+check(
+  'getPrLivenessTargets(B, A’s repo, A’s PR id) returns nothing — a named repo is not consent',
+  (await getPrLivenessTargets(2, [A.repoId], [A.prId])).length === 0,
+);
+check(
+  'getPrLivenessTargets(A, B’s repo, A’s PR id) returns nothing — the workspace scope binds too',
+  (await getPrLivenessTargets(1, [B.repoId], [A.prId])).length === 0,
+);
+check(
+  'getPrLivenessTargets(A, [], A’s PR id) resolves nothing — an empty scope never widens',
+  (await getPrLivenessTargets(1, [], [A.prId])).length === 0,
+);
+
+// ── The approve route's review-request stamp (clearOwnReviewRequest) ────────────
+// An id-addressed DELETE, which is why it is checked here rather than trusted: `review_requests`
+// has no `account_id` column of its own (it reaches its tenant through `pr_id`), so the predicate
+// is a subquery rather than something the schema enforces — exactly the shape that type-checks
+// perfectly while deleting another tenant's row. Seeded on A's PR so BOTH directions are
+// non-vacuous: remove the accountId predicate and the cross-account check FAILS.
+const { clearOwnReviewRequest } = await import('../src/db/queries.js');
+const [rrUser] = await db
+  .insert(schema.users)
+  .values({ githubLogin: 'iso-reviewer', githubNodeId: 'U_iso_reviewer' })
+  .returning()
+  .execute();
+await db
+  .insert(schema.reviewRequests)
+  .values({ prId: A.prId, userId: rrUser!.id })
+  .execute();
+check(
+  'clearOwnReviewRequest(B, A’s PR) deletes nothing (IDOR blocked)',
+  (await clearOwnReviewRequest(A.prId, 2, rrUser!.id)) === 0,
+);
+check(
+  'clearOwnReviewRequest(A, A’s PR) clears exactly the viewer’s own request',
+  (await clearOwnReviewRequest(A.prId, 1, rrUser!.id)) === 1,
+);
+
 // ── ML severity labels (db/ml-labels.ts) ───────────────────────────────────────
 // Two id-addressed reads that live OUTSIDE db/queries.ts, so — like findPostedReviewComment
 // above — this script cannot see them unless they are imported by name.
@@ -2353,6 +2415,75 @@ check(
       emptyOut.measuredPrs === 0 &&
       emptyOut.refusals.length === 2 &&
       emptyOut.coverage.prsScanned === 0,
+  );
+}
+
+// ── The PENDING MUTE (db/pending-mute.ts) ──────────────────────────────────────
+// TWO id-addressed writes and one account-wide read, none of which live in db/queries.ts, so this
+// script cannot see them unless they are imported by name.
+//
+// `setWorkspacePendingMute` takes a workspace id AND a list of repo ids, both from a REQUEST BODY
+// — the exact shape the composite FK exists for. Three separate leaks are possible and each is
+// checked in a direction that is NON-VACUOUS (the row it would have to touch really exists):
+//   1. writing into another tenant's WORKSPACE (the ownership pre-check);
+//   2. muting another tenant's REPO by naming its id (the membership intersection, backed by the
+//      composite FK `(repo_id, account_id) → repos(id, account_id)`);
+//   3. a Save on workspace A CLEARING mutes that belong to another workspace — not a cross-tenant
+//      leak but the same class of over-reach, and the reason the writer scopes its delete to the
+//      named workspace's membership rather than to the account.
+// `getMutedPendingRepoIds` is the read every My-Turn row is judged against: a leak there would let
+// one tenant's mute silence another tenant's notifications.
+{
+  const { getMutedPendingRepoIds, setWorkspacePendingMute } = await import(
+    '../src/db/pending-mute.js'
+  );
+  const wsA = await q.resolveWorkspaceScope(1, null);
+  const wsB = await q.resolveWorkspaceScope(2, null);
+
+  check(
+    'setWorkspacePendingMute(B, A’s workspace) refuses (IDOR blocked)',
+    (await setWorkspacePendingMute(2, wsA.workspaceId, { muted: true })) === false,
+  );
+  check(
+    'setWorkspacePendingMute(A, A’s workspace) accepts',
+    (await setWorkspacePendingMute(1, wsA.workspaceId, { muted: true })) === true,
+  );
+  check(
+    'getMutedPendingRepoIds(A) sees A’s workspace mute',
+    (await getMutedPendingRepoIds(1)).has(A.repoId),
+  );
+  check(
+    'getMutedPendingRepoIds(B) is unaffected by A’s workspace mute',
+    (await getMutedPendingRepoIds(2)).size === 0,
+  );
+  await setWorkspacePendingMute(1, wsA.workspaceId, { muted: false });
+
+  // The repo half. B names A's repo id in its OWN workspace's body: the membership intersection
+  // drops it, and the composite FK would refuse the pair even if it did not.
+  check(
+    'setWorkspacePendingMute(B, B’s workspace, [A’s repo]) writes nothing (IDOR blocked)',
+    (await setWorkspacePendingMute(2, wsB.workspaceId, { mutedRepoIds: [A.repoId] })) === true &&
+      (await getMutedPendingRepoIds(2)).size === 0 &&
+      (await getMutedPendingRepoIds(1)).size === 0,
+  );
+  check(
+    'setWorkspacePendingMute(A, A’s workspace, [A’s repo]) mutes exactly that repo',
+    (await setWorkspacePendingMute(1, wsA.workspaceId, { mutedRepoIds: [A.repoId] })) === true &&
+      (await getMutedPendingRepoIds(1)).has(A.repoId),
+  );
+  // A Save on a DIFFERENT workspace of the SAME account must not clear it — the writer's delete
+  // is scoped to the named workspace's membership, not to the account.
+  const otherWs = await q.createWorkspace(1, 'iso-mute-other');
+  await setWorkspacePendingMute(1, otherWs.id, { mutedRepoIds: [] });
+  check(
+    'a Save on another workspace does not clear this workspace’s repo mutes',
+    (await getMutedPendingRepoIds(1)).has(A.repoId),
+  );
+  // And the same-workspace Save DOES clear it — otherwise the check above would pass vacuously.
+  await setWorkspacePendingMute(1, wsA.workspaceId, { mutedRepoIds: [] });
+  check(
+    'a Save on the OWNING workspace clears its repo mutes',
+    (await getMutedPendingRepoIds(1)).size === 0,
   );
 }
 

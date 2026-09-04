@@ -1,5 +1,5 @@
 import type { DerivedState } from '@pierre-review/shared';
-import { DERIVED_STATE_META } from '../lib/ui.js';
+import { DERIVED_STATE_META, vendorInk } from '../lib/ui.js';
 
 export function StateBadge({
   state,
@@ -12,7 +12,7 @@ export function StateBadge({
   return (
     <span
       className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
-      style={{ backgroundColor: `${meta.color}22`, color: meta.color }}
+      style={{ backgroundColor: `${meta.color}22`, ...vendorInk(meta.color) }}
       title={meta.description}
     >
       <span

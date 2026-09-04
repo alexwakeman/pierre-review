@@ -143,7 +143,7 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
 
   if (!aiAnalysis && !aiFix) {
     return (
-      <div className="p-4 text-sm text-gray-500">
+      <div className="p-4 text-sm text-gray-500 dark:text-gray-400">
         AI Analysis and Fix is not enabled.
       </div>
     );
@@ -256,7 +256,7 @@ function FixerSection({
       <SectionTitle>AI Fix</SectionTitle>
       <div className="px-4">
         {data?.enabled === false ? (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             The agentic fixer is disabled.
           </p>
         ) : data?.auth === 'none' ? (
@@ -345,12 +345,12 @@ function FixerSection({
                   value={fixProgressPct(liveStatus)}
                   timeConstantSec={40}
                 />
-                <div className="mt-1 text-[11px] text-gray-500">
+                <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
                   {PHASE_LABEL[liveStatus?.progress?.phase ?? ''] ?? 'Working…'}
                 </div>
                 {liveStatus?.progress?.recentActivity &&
                   liveStatus.progress.recentActivity.length > 0 && (
-                    <pre className="mt-1 max-h-32 overflow-auto rounded bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-500 dark:bg-gray-900">
+                    <pre className="mt-1 max-h-32 overflow-auto rounded bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400 dark:bg-gray-900">
                       {liveStatus.progress.recentActivity.slice(-8).join('\n')}
                     </pre>
                   )}
@@ -404,7 +404,7 @@ function FixResult({
   }
   if (fix.status === 'cancelled') {
     return (
-      <p className="mt-3 text-xs text-gray-500">The fix run was cancelled.</p>
+      <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">The fix run was cancelled.</p>
     );
   }
   if (fix.status !== 'succeeded') return <></>;
@@ -423,14 +423,14 @@ function FixResult({
           no diff at all, and that is exactly the run whose report matters most. */}
       <CommentFixReport pr={pr} fix={fix} />
       {noChanges ? (
-        <p className="mt-2 text-xs text-gray-500">
+        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
           {fix.seed === 'comments'
             ? 'The agent changed no files — see the per-comment verdicts above for why.'
             : 'The agent made no changes.'}
         </p>
       ) : (
         <>
-          <div className="mb-1 mt-2 text-[11px] text-gray-500">
+          <div className="mb-1 mt-2 text-[11px] text-gray-500 dark:text-gray-400">
             {fix.filesChanged.length} file
             {fix.filesChanged.length === 1 ? '' : 's'} changed
           </div>
@@ -566,7 +566,7 @@ function TrunkStatus({
   }
   if (preview.behindBy > 0) {
     return (
-      <p className="text-[11px] text-gray-500">
+      <p className="text-[11px] text-gray-500 dark:text-gray-400">
         <span className="font-mono">{preview.trunk}</span> is {preview.behindBy}{' '}
         commit{preview.behindBy === 1 ? '' : 's'} ahead — the fix merges cleanly.
       </p>
@@ -615,7 +615,7 @@ function ResolvedReview({
           : ' No conflicts.'}{' '}
         Review the result below, then push.
       </div>
-      <div className="text-[11px] text-gray-500">
+      <div className="text-[11px] text-gray-500 dark:text-gray-400">
         {resolved.filesChanged.length} file
         {resolved.filesChanged.length === 1 ? '' : 's'} in the rebased result
       </div>
@@ -746,7 +746,7 @@ function PushControls({
     return pushed ? (
       <PushedCard fix={fix} />
     ) : (
-      <p className="mt-2 text-xs text-gray-500">
+      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
         You need write access to this repository to push this fix.
       </p>
     );
@@ -882,7 +882,7 @@ function PushControls({
             value={resolveProgressPct(activeStatus)}
             timeConstantSec={40}
           />
-          <div className="mt-1 flex items-center gap-2 text-[11px] text-gray-500">
+          <div className="mt-1 flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
             <span>
               {RESOLVE_PHASE_LABEL[activeStatus?.progress?.phase ?? ''] ??
                 'Working…'}
@@ -901,7 +901,7 @@ function PushControls({
           </div>
           {activeStatus?.progress?.recentActivity &&
             activeStatus.progress.recentActivity.length > 0 && (
-              <pre className="mt-1 max-h-32 overflow-auto rounded bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-500 dark:bg-gray-900">
+              <pre className="mt-1 max-h-32 overflow-auto rounded bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400 dark:bg-gray-900">
                 {activeStatus.progress.recentActivity.slice(-8).join('\n')}
               </pre>
             )}
@@ -916,14 +916,14 @@ function PushControls({
           onRedo={doRebase}
         />
       ) : nothingToReconcile ? (
-        <p className="mt-2 text-[11px] text-gray-500">
+        <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
           No trunk changes to reconcile — the pushed fix is up to date with{' '}
           <span className="font-mono">{preview?.trunk}</span>.
         </p>
       ) : (
         <div className="mt-2 space-y-2">
           {preview && preview.available && !preview.clean && (
-            <div className="text-[11px] text-gray-500">
+            <div className="text-[11px] text-gray-500 dark:text-gray-400">
               Recommended: rebase onto{' '}
               <span className="font-mono">{preview.trunk}</span> — Claude resolves
               the conflicts and you review the result before it pushes.

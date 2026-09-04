@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { MergeBlockFacts } from '@pierre-review/shared';
 import { useMergeOptions } from '../hooks/usePrWrites.js';
 import { useArmAutoMerge, useDisarmAutoMerge, usePrArmedIntent } from '../hooks/useAutoMerge.js';
 import { mergeVerdict, mergeWhenReadyEligible, toMergeStateStatus } from '../lib/ui.js';
@@ -32,8 +33,16 @@ import { TimerIcon } from './Icons.js';
 export function MergeWhenReadyControl({
   prId,
   eager = true,
+  blockFacts,
 }: {
   prId: number;
+  /**
+   * The PR facts that let a `blocked` verdict say WHY — supplied by PrDetail's Overview, absent
+   * on the Pending board (whose cards carry no review status by construction). This is the
+   * button that exists BECAUSE the PR is blocked, so it names what it will be waiting out;
+   * without the facts it says nothing rather than guessing.
+   */
+  blockFacts?: MergeBlockFacts;
   /** false ⇒ never fetch merge-options on mount; render a trigger and fetch on the click.
    *  The ARMED state still renders for free either way — it is a selector over the account-wide
    *  list the app already polls, and cancelling must always be possible. */
@@ -132,6 +141,30 @@ export function MergeWhenReadyControl({
     inMergeQueue: queue?.inQueue ?? false,
     queuePosition: queue?.position ?? null,
     behindBy: options.behindBy,
+    // Same composition as MergeControl's, and for the same reason — the two controls sit side
+    // by side in the Actions row and must not describe one PR two ways. Eligibility reads only
+    // `verdict.verdict`, which none of this moves; what it buys is the wait's NAME below.
+    //
+    // ⚠ THE STANDALONE TRIGGER IS `!= null`, NOT `!== undefined`, AND THE DIFFERENCE IS A FALSE
+    // SENTENCE. This route ALWAYS emits the key now, and GitHub answers `reviewDecision: null` for
+    // every repository that requires no review — so `!== undefined` was true of every PR, and on a
+    // facts-less surface (the Pending board mounts both controls WITHOUT `blockFacts`, deliberately:
+    // nothing on the board may fetch) it manufactured `{reviewDecision: null}` out of silence. With
+    // no ciStatus and no thread count to reason from, `deriveMergeBlockers` then fell through to
+    // "nothing we can see explains it" — on 261 of 573 open blocked PRs here that is simply untrue
+    // (172 have a red rollup, 89 an unresolved thread), and it contradicted the PR pane's own line
+    // for the same PR. `!= null` keeps the win where the answer is NAMED ('changes_requested',
+    // 'review_required' — each a PROVEN row) and falls back to the generic sentence otherwise.
+    ...(blockFacts || options.reviewDecision != null
+      ? {
+          blockFacts: {
+            ...blockFacts,
+            ...(options.reviewDecision !== undefined
+              ? { reviewDecision: options.reviewDecision }
+              : {}),
+          },
+        }
+      : {}),
   });
   const queueEnabled = queue?.enabled ?? false;
   const eligible = mergeWhenReadyEligible({
@@ -208,9 +241,13 @@ export function MergeWhenReadyControl({
       onClick={() => setConfirming(true)}
       className="inline-flex items-center gap-1 rounded border border-violet-400 px-2 py-0.5 text-sm font-medium text-violet-600 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30"
       title={
-        queueEnabled
+        (queueEnabled
           ? "Arm Limn's watcher: it updates from trunk if needed and adds the PR to the merge queue when required reviews are in — while the app is running"
-          : "Arm Limn's watcher: it updates from trunk if needed and merges when checks pass — while the app is running"
+          : "Arm Limn's watcher: it updates from trunk if needed and merges when checks pass — while the app is running") +
+        // What it will be waiting out, in the SAME words the Overview's Blocked row uses. Only
+        // for `blocked` — 'behind' and 'unknown' already say everything in their own label, and
+        // the verdict carries a blocker list for nothing else.
+        (verdict.blockers?.[0] ? `. Right now: ${verdict.blockers[0].text}` : '')
       }
     >
       <TimerIcon />

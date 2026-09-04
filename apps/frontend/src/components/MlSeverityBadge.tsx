@@ -1,5 +1,5 @@
 import type { MlCategory, MlLabel, MlSeverity, MlSeverityCounts } from '@pierre-review/shared';
-import { ML_CATEGORY_LABEL, ML_SEVERITY_META } from '../lib/ui.js';
+import { ML_CATEGORY_LABEL, ML_SEVERITY_META, vendorInk } from '../lib/ui.js';
 import { disagreeDirection } from '../lib/severityAgreement.js';
 import { ArrowIcon } from './Icons.js';
 
@@ -139,7 +139,7 @@ export function MlSeverityBadge({
         className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold${
           dim ? ' opacity-70' : ''
         }`}
-        style={{ backgroundColor: `${meta.color}1a`, color: meta.color }}
+        style={{ backgroundColor: `${meta.color}1a`, ...vendorInk(meta.color) }}
       >
         {/* The dot goes HOLLOW when calibration overrode the model's own pick — a different mark
             rather than a fainter one, because it is a different kind of statement. Drawn with an
@@ -172,7 +172,7 @@ export function MlSeverityBadge({
             <ArrowIcon dir={dir === 'over' ? 'up' : 'down'} size={10} />
           )}
           <span>bot said</span>
-          <span className="font-semibold" style={{ color: vendorMeta.color }}>
+          <span className="font-semibold" style={vendorInk(vendorMeta.color)}>
             {vendorMeta.label}
           </span>
           {vendorClaim && dir != null && (
@@ -246,7 +246,7 @@ export function MlSeverityDots({
           <span
             key={s}
             className="inline-flex items-center gap-0.5 text-[10px] font-semibold"
-            style={{ color: meta.color }}
+            style={vendorInk(meta.color)}
             title={`${meta.label}: ${counts[s]}`}
           >
             <span

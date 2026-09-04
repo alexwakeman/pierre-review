@@ -454,7 +454,7 @@ function TabChip({
       closeAria: 'Close search tab',
       body: (
         <>
-          <span aria-hidden="true" className="shrink-0 text-gray-500">
+          <span aria-hidden="true" className="shrink-0 text-gray-500 dark:text-gray-400">
             <MagnifierIcon size={13} />
           </span>
           <span className={chipLabelClass(active, 'sky')}>{q ? `“${q}”` : 'Search'}</span>
@@ -506,7 +506,7 @@ function TabChip({
             >
               <span className="text-gray-400">#{meta?.number}</span> {meta?.title}
             </span>
-            <span className="truncate text-[10px] text-gray-500">
+            <span className="truncate text-[10px] text-gray-500 dark:text-gray-400">
               {isFocus ? 'PR focus' : author}
             </span>
           </span>

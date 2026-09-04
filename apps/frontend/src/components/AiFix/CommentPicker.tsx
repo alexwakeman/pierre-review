@@ -229,7 +229,7 @@ function Grip({
           ? 'Drag into the fix scope (or press +)'
           : 'Drag out of the fix scope (or press −)'
       }
-      className="flex shrink-0 cursor-grab touch-none select-none items-center px-0.5 text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400"
+      className="flex shrink-0 cursor-grab touch-none select-none items-center px-0.5 decorative-mark text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400"
     >
       {/* An EXPLICIT 11px box. This used to be a braille glyph (⠿), whose advance width is
           whatever the platform's fallback font decided — and the 4px drag threshold below is

@@ -6,7 +6,7 @@ import type {
 } from '@pierre-review/shared';
 import { ML_SEVERITIES, ML_SEVERITY_ORD } from '@pierre-review/shared';
 import { matrixCell } from '../../lib/severityAgreement.js';
-import { ML_SEVERITY_META } from '../../lib/ui.js';
+import { ML_SEVERITY_META, vendorInk } from '../../lib/ui.js';
 
 // The ours-vs-vendor confusion matrix on the "what the bots are flagging" drill-down: for every
 // row in the selected population, what OUR model scored it against what the BOT badged it itself.
@@ -144,7 +144,7 @@ export function SeverityAgreementMatrixView({
                     key={ours}
                     scope="col"
                     className="px-3 py-1 text-center text-[11px] font-semibold"
-                    style={{ color: meta.color }}
+                    style={vendorInk(meta.color)}
                     title={`We scored these ${meta.label}. ${meta.description}`}
                   >
                     {meta.label}
@@ -164,7 +164,7 @@ export function SeverityAgreementMatrixView({
                     className={`px-2 py-1 text-left text-[11px] font-semibold${
                       undeclaredRow ? ' text-gray-400' : ''
                     }`}
-                    style={vendorMeta ? { color: vendorMeta.color } : undefined}
+                    style={vendorMeta ? vendorInk(vendorMeta.color) : undefined}
                     title={
                       vendorMeta
                         ? `The bot badged these ${vendorMeta.label} itself.`
@@ -251,7 +251,7 @@ export function SeverityAgreementMatrixView({
                                 : ''
                           } ${
                             count === 0
-                              ? 'text-gray-300 dark:text-gray-700'
+                              ? 'text-gray-500 dark:text-gray-400'
                               : 'font-medium text-gray-800 dark:text-gray-100'
                           }`}
                           style={

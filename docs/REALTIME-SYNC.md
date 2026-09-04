@@ -283,10 +283,18 @@ looking at RIGHT NOW any fresher than its repo's bucket. `sync/refresh-pr.ts` +
   in lean mode checkRuns render only from the hydration overlay, so a walk that didn't
   bust it would hand the client's refetch a ≤60s-old snapshot.
 - **`changed` is the client's only invalidation trigger**: `['pr', id]` + its cached
-  thread keys + `['ml-labels', id]` + `['timeline']` + `['open-prs']` on `changed:true`;
+  thread keys + `['ml-labels', id]` + `['timeline']` + `['open-prs']` + **`['attention-cards']`
+  + `['daily-brief']` + `['work-plan']`** on `changed:true`;
   NOTHING on false (a 5s timeline invalidation would churn the vis board). A probe-200
   walk whose `updated_at` didn't move is NOT changed (REST fields like `mergeable_state`
   churn ETags without real activity).
+  ⚠ **The last three were added because the walk this poll pays for was invisible to the
+  Pending board.** The walk writes fresh `state` / `mergeStateStatus` / `review_requests`, so a
+  PR that merged, closed or went behind while its pane was open was already stale in the DB's own
+  terms — and the board behind the pane kept the card for up to five minutes (its
+  `refetchInterval`). The three are ONE FOLD READ THREE TIMES (`getWorkspaceInsights`), and they
+  must be swept TOGETHER: `capFor` gates the board's "50 of 148" disclosure on
+  `shown === count`, where `shown` is counted off the cards and `count` comes from the brief.
 - **Never a 5xx on sync failure** — `{synced:false}` is a report (the SPA's Refresh icon
   turns amber: a stale note, not an error). A no-wait poll that stands down against an
   in-flight sync reports `synced:true` — that run's freshness IS the answer. The route
@@ -296,6 +304,64 @@ looking at RIGHT NOW any fresher than its repo's bucket. `sync/refresh-pr.ts` +
   `verify-isolation.ts`). Cloud stays enabled — probe-gated is quota-safe in both modes.
 - **Cost:** idle pane ≈ 720 free 304s/h; worst case ≈ 200–350 GraphQL pts/h per pane
   (floor walks + the client's re-hydrations) ≈ 4–7% of the 5,000/h budget.
+
+---
+
+## Pending-board liveness (POST /api/attention/liveness) ✅ BUILT
+
+The refresh above makes ONE pull request fresh, for as long as somebody is looking at it. The
+**Pending board** has the opposite shape: up to fifty PRs, none of them open in a pane, and its
+whole cheapness comes from being served out of already-synced rows (`GET /api/attention` is
+DB-only). So a PR merged, closed or unblocked **by somebody else** kept its card until the
+adaptive scheduler next walked that repo — 2 min hot, 15 min cold. `sync/pr-liveness-sweep.ts` +
+`useAttentionLiveness` close that with ONE batched question per board.
+
+- **The per-card alternative is rejected on cost, permanently.** `GET /api/prs/:id/merge-options`
+  is 4–5 upstream calls; fifty cards is 200–250 calls **to paint a screen**. That is the failure
+  the board's no-fetch-on-mount rule exists to prevent, and this route is the sanctioned
+  alternative to it, not an exception.
+- **`nodes(ids:)`, on the `REACTION_NODES_QUERY` template** — scalars only, no connection
+  arguments, so the whole query costs **1 GraphQL point** regardless of how many PRs it covers.
+- **TWO PASSES, AND THE SECOND ONE'S BATCH IS 25.** ⚠ MEASURED 2026-09-03 against real open PRs:
+  the scalar selection answers **90 ids in ~1.4 s**, but adding `mergeable` + `mergeStateStatus`
+  **HTTP 502s at 50 ids after ~11 s**. GitHub does not store mergeability — asking for it runs a
+  trial merge per PR — so the gateway times out long before the point cost matters. This is a
+  WALL-TIME cliff, not the `reactors(first:1)` POINT cliff, and it bites in the same file.
+  Expressed as one query with `@include(if: $withMergeState)` so the batch size and the selection
+  are chosen by the same flag. **Total: 2 points, ~5–7 s per sweep.**
+- **The expensive pass is a RANKED subset** (`rankForMergeStatePass`): PRs whose stored merge
+  state already puts a Merge / Update-branch button on the board come first — a stale merge state
+  there is a button that 405s — then everything still open, newest first. Anything already merged
+  or closed is excluded: GitHub is not recomputing mergeability for it.
+- ⚠ **AN OBSERVED `unknown` NEVER DEMOTES A KNOWN STORED VALUE**, a deliberate divergence from
+  `persistPr`. GitHub answers UNKNOWN while the trial merge runs; `persistPr` rarely catches that
+  window on a 2–15 min cadence, but a 60 s sweep sits in it — and clean→unknown→clean is a
+  `changed` on every tick, i.e. a board refetching on a fixed timer with a GitHub call in front of
+  it. Verified convergent on real data: sweeps reporting 8 then 14 changes settled to 0 and stayed
+  there across three consecutive runs.
+- **`changed` is BOARD movement, not "a row was written".** A `reviewDecision` GitHub merely
+  restates moves no card (and most open PRs carry a null decision it restates every time), so it
+  is written but not counted.
+- ⚠ **THE CLIENT REFETCHES; IT NEVER SPLICES.** The response carries counts, never cards —
+  structurally, so that "the probe proved this card is dead" cannot be implemented as a local
+  removal. The board is `head ∪ tail === cards`, disjoint, and every cap disclosure gates on
+  `shown === count` with `shown` off the cards and `count` off the brief, so dropping one card
+  locally deletes the "50 of 148" line silently. On `changed > 0` the SPA invalidates
+  `['attention-cards']` + `['daily-brief']` + `['work-plan']` together.
+- **One sweep per ACCOUNT at a time** (a synchronous in-flight claim released in `finally` on
+  every bail path, thrown lookups included). Two tabs, or an interval overlapping its own focus
+  refetch, report a no-op rather than paying twice.
+- **Rate limits are pre-empted**: `isLimited` before asking, `noteBudget` from the query's own
+  `rateLimit` block, `isRateLimitError` on failure → `noteLimited` + **degrade to empty**. An
+  exhausted window comes back as `paused:{resumeAt}`, which the SPA renders as nothing at all —
+  the board keeps its synced rows, exactly as before this route existed.
+- **Rate tier `prDetail`** (60/min, pinned in `rate-limit.test.ts`); a POST because it carries an
+  id LIST in a body (the `POST /api/reactions/lookup` shape) and so the cross-origin guard applies
+  in cloud. `?workspace=` scopes it and is echoed; the id resolve is `accountId` ∩ workspace
+  membership and is named in `verify-isolation.ts` — it is the only body-supplied id list in the
+  app that then spends GitHub quota.
+- **Cadence:** on mount, on window focus, and every 60 s while the board is visible ⇒ ~120
+  GraphQL points/hour per open board, ~2.4% of the 5,000/h budget.
 
 ---
 

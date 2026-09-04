@@ -120,11 +120,11 @@ export function RepoSelectPanel({
               // An EMPTY WORKSPACE — an ordinary state, not a broken one, and no longer the
               // account-wide "you have added nothing yet". This panel has no add affordance, so
               // it names the surface that does rather than inviting a search that isn't here.
-              <div className="px-1 py-2 text-xs text-gray-500">
+              <div className="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">
                 No repos in this workspace — move some in from Manage repos &amp; workspaces.
               </div>
             ) : rows.length === 0 ? (
-              <div className="px-1 py-2 text-xs text-gray-500">No repos match.</div>
+              <div className="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">No repos match.</div>
             ) : (
               rows.map((r) => {
                 // Don't let the user hide the only visible repo (would leave an

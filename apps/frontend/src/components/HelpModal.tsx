@@ -70,7 +70,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
 
           <Section title="Activity console (the default)">
             The left rail is your state of play: a cross-repo <strong>Feed</strong>,{' '}
-            <strong>Pending</strong>, <strong>Bots</strong> and <strong>Reports</strong>, then the
+            <strong>Bots</strong>, <strong>Pending</strong> and <strong>Reports</strong>, then the
             Workspace’s repos as a flat list. The Feed is one chronological stream of real activity
             — opens, merges, reviews, comments, and pushes that addressed a thread. Filter it with
             the pills: <strong>My Turn</strong> (things that concern you — you authored it, were
@@ -79,6 +79,27 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             → only). Click any card to open that PR; <strong>Back</strong> returns you to the exact
             card. To compare Workspaces, expand any metric row in <strong>Reports</strong> — the
             “By workspace” breakdown shows every Workspace side by side for that period.
+          </Section>
+
+          <Section title="Review-bot triage">
+            Third-party review bots (CodeRabbit, Greptile, Copilot, …) are a triaged signal,
+            not noise. A PR’s <strong>Bots</strong> chip filters its threads to that vendor;
+            you can <strong>bulk-resolve</strong> the ones a later commit likely addressed —
+            always a confirm-gated, one-click action that resolves the threads on GitHub, never
+            automatic. The rail&rsquo;s <strong>Bots</strong> console sits directly under the Feed
+            because it is where the Feed&rsquo;s own bot judgement is made: who counts as a review
+            bot <em>in this Workspace</em> (under <strong>Settings</strong>) is exactly what the
+            Feed and the Timeline hide by default. The rest of the strip measures them:
+            per-vendor keep / tune / noisy verdicts, cost and severity inflation
+            (<strong>ROI</strong>), what they keep flagging (<strong>Themes</strong>) and how your
+            bots compare with the same vendor elsewhere (<strong>Benchmark</strong>).
+            A bot is <em>one row per Workspace</em>, merged by GitHub handle however many repos it
+            runs in, and everything about it is edited there: whether it&rsquo;s automated, whether
+            it&rsquo;s a <strong>quality&nbsp;check</strong> (SonarCloud, Codecov &amp; co, kept out
+            of the ROI verdicts), its vendor name, and its <strong>price</strong>. All of those are
+            per Workspace — setting a price in one leaves the others untouched, and prices are
+            never added up across Workspaces. How we detect bots and how Limn attributes its own
+            reviews stay account-wide, in <strong>Settings → Review bots</strong>.
           </Section>
 
           <Section title="Pending">
@@ -101,24 +122,6 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             be pinned. <strong>Track&nbsp;usage</strong> shows your month-to-date AI credits.
             The attention cards are not here — they are free, and live on{' '}
             <strong>Pending</strong>.
-          </Section>
-
-          <Section title="Review-bot triage">
-            Third-party review bots (CodeRabbit, Greptile, Copilot, …) are a triaged signal,
-            not noise. A PR’s <strong>Bots</strong> chip filters its threads to that vendor;
-            you can <strong>bulk-resolve</strong> the ones a later commit likely addressed —
-            always a confirm-gated, one-click action that resolves the threads on GitHub, never
-            automatic. The rail&rsquo;s <strong>Bots</strong> console shows per-vendor keep /
-            tune / noisy verdicts (<strong>ROI</strong>), timing and coverage
-            (<strong>Behaviour</strong>), and — under <strong>Settings</strong> — who counts as
-            a review bot <em>in this Workspace</em>. A bot is <em>one row per Workspace</em>,
-            merged by GitHub handle however many repos it runs in, and everything about it is
-            edited there: whether it&rsquo;s automated, whether it&rsquo;s a{' '}
-            <strong>quality&nbsp;check</strong> (SonarCloud, Codecov &amp; co, kept out of the
-            ROI verdicts), its vendor name, and its <strong>price</strong>. All of those are
-            per Workspace — setting a price in one leaves the others untouched, and prices are
-            never added up across Workspaces. How we detect bots and how Limn attributes its own
-            reviews stay account-wide, in <strong>Settings → Review bots</strong>.
           </Section>
 
           <Section title="PR detail & threads">
@@ -147,7 +150,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
 
           <Section title="Keyboard">
             <Kbd>/</Kbd> focus search · <Kbd>j</Kbd>/<Kbd>k</Kbd> cycle PRs ·{' '}
-            <Kbd>i</Kbd> Insights · <Kbd>Esc</Kbd> leave a tab/overlay, else clear the
+            <Kbd>i</Kbd> Activity console · <Kbd>Esc</Kbd> leave a tab/overlay, else clear the
             selection.
           </Section>
         </div>

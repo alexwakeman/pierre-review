@@ -1,5 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Workspace, WorkspacesResponse } from '@pierre-review/shared';
+import type {
+  Workspace,
+  WorkspacePendingMuteUpdate,
+  WorkspacesResponse,
+} from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { ACTIVITY_QUERY_KEYS } from './useActivity.js';
 
@@ -98,12 +102,29 @@ export function useWorkspaceMutations() {
     onSettled: invalidate,
   });
 
+  // THE PENDING MUTE — two independently-owned facts (the workspace switch and the per-repo set),
+  // OR-ed, never a chain. It writes NO membership and moves NO repo.
+  //
+  // ⚠ IT SWEEPS THE SAME KEY SET AS A MEMBERSHIP MOVE, and every key in it is load-bearing here:
+  // 'my-turn' is the account-wide inbox the browser notification reads, and 'attention-cards' /
+  // 'daily-brief' / 'work-plan' are the three reads of the ONE `getWorkspaceInsights` fold whose
+  // whole contract is that they agree — the board's list, the strip's count and the ranked head.
+  // A mute changes which population every one of them puts a row in, so sweeping a subset would
+  // leave the strip saying "5 need your attention" over a board of 3 for up to a staleTime. The
+  // shared `invalidate` is reused rather than a narrower list precisely so that cannot drift.
+  const setWorkspacePendingMute = useMutation({
+    mutationFn: (v: { id: number; patch: WorkspacePendingMuteUpdate }) =>
+      api.setWorkspacePendingMute(v.id, v.patch),
+    onSettled: invalidate,
+  });
+
   return {
     createWorkspace,
     renameWorkspace,
     deleteWorkspace,
     assignRepoToWorkspace,
     setWorkspaceRepos,
+    setWorkspacePendingMute,
   };
 }
 

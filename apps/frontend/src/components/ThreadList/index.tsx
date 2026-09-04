@@ -21,6 +21,7 @@ import {
   BOT_VENDOR_META,
   DERIVED_STATE_META,
   ML_SEVERITY_META,
+  vendorInk,
 } from '../../lib/ui.js';
 import { useMlLabelIndex, useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { BotIcon } from '../Icons.js';
@@ -293,7 +294,7 @@ export function ThreadList({
               <button
                 type="button"
                 onClick={() => setThreadStateFilter(new Set())}
-                className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 underline-offset-2 hover:underline"
+                className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
               >
                 Clear
               </button>
@@ -340,7 +341,7 @@ export function ThreadList({
                 <button
                   type="button"
                   onClick={() => setThreadSeverityFilter(new Set())}
-                  className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 underline-offset-2 hover:underline"
+                  className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
                 >
                   Clear
                 </button>
@@ -352,18 +353,18 @@ export function ThreadList({
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span
                 className="inline-flex items-center gap-1 font-medium"
-                style={{ color: vendor.color }}
+                style={vendorInk(vendor.color)}
               >
                 <BotIcon size={12} />
                 {vendor.label}
               </span>
-              <span className="text-gray-500">
+              <span className="text-gray-500 dark:text-gray-400">
                 {shown.length} thread{shown.length === 1 ? '' : 's'}
               </span>
               <button
                 type="button"
                 onClick={() => setThreadBotFilter(null)}
-                className="rounded px-1.5 py-0.5 text-gray-500 underline-offset-2 hover:underline"
+                className="rounded px-1.5 py-0.5 text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
               >
                 Show all threads
               </button>
@@ -373,7 +374,7 @@ export function ThreadList({
                 <span className="ml-auto flex items-center gap-2">
               {confirming ? (
                 <>
-                  <span className="text-gray-500">
+                  <span className="text-gray-500 dark:text-gray-400">
                     Resolve {addressedBotThreadIds.length} likely-addressed thread
                     {addressedBotThreadIds.length === 1 ? '' : 's'} on GitHub?
                   </span>
@@ -389,7 +390,7 @@ export function ThreadList({
                     type="button"
                     disabled={resolveBotThreads.isPending}
                     onClick={() => setConfirming(false)}
-                    className="rounded px-2 py-0.5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                    className="rounded px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                   >
                     Cancel
                   </button>
@@ -399,7 +400,7 @@ export function ThreadList({
                   type="button"
                   onClick={() => setConfirming(true)}
                   className="rounded border px-2 py-0.5 font-medium hover:opacity-80"
-                  style={{ borderColor: vendor.color, color: vendor.color }}
+                  style={{ borderColor: vendor.color, ...vendorInk(vendor.color) }}
                   title="A later commit touched the file these threads flag — resolve them in one click (you approve each batch)."
                 >
                   Resolve {addressedBotThreadIds.length} addressed
@@ -413,7 +414,7 @@ export function ThreadList({
       )}
 
       {resolveBotThreads.data && (resolveBotThreads.data.resolved > 0 || resolveBotThreads.data.failed > 0) && (
-        <div className="px-3 py-1.5 text-xs text-gray-500">
+        <div className="px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400">
           Resolved {resolveBotThreads.data.resolved}
           {resolveBotThreads.data.failed > 0 && ` · ${resolveBotThreads.data.failed} failed`}.
         </div>
@@ -456,7 +457,7 @@ export function ThreadList({
                           type="button"
                           onClick={() => cycleToThread(clusterKey, m.userId, ids)}
                           className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium hover:opacity-80"
-                          style={{ color: meta.color, background: `${meta.color}1a` }}
+                          style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
                           title={
                             ids.length > 1
                               ? `${m.label} left ${ids.length} threads here — click to cycle through them`
@@ -497,7 +498,7 @@ export function ThreadList({
       )}
 
       {shown.length === 0 ? (
-        <div className="px-3 py-6 text-center text-sm text-gray-500">
+        <div className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
           {activeStates.size > 0
             ? 'No threads in the selected state(s).'
             : botFilter

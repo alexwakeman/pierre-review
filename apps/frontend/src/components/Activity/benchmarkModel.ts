@@ -66,11 +66,28 @@ import { BOT_VENDOR_META } from '../../lib/ui.js';
  * ⚠ `'benchmark'` IS CAPABILITY-GATED AND STILL RETURNS ITSELF. It is VISIBLE-BUT-LOCKED, so an
  * unentitled `?botsTab=benchmark` — which ships in bookmarks and in history entries Back replays —
  * must land on the tab the URL named and render the LOCKED pane there. Redirecting it to `roi`
- * would drop the reader on a screen that explains nothing. Only `'advisor'` degrades, because
- * that tab is not LISTED without its capability (two postures in one strip, both deliberate).
+ * would drop the reader on a screen that explains nothing. Only the members that are not LISTED
+ * without their capability degrade (two postures in one strip, both deliberate).
+ *
+ * ⚠ THE SECOND OPTION IS A SECOND CAPABILITY, NOT A SECOND READING OF THE FIRST. `'themes'` is
+ * gated on `activityDigest` (the AI-summary tier) while `'advisor'` is `botAdvisor`, and neither
+ * implies the other — an account can hold either alone. They share only the POSTURE: listed when
+ * entitled, absent otherwise, so a raw value naming an unlisted tab has no tab to land on and must
+ * degrade rather than leave the strip with nothing selected.
+ *
+ * ⚠ `'themes'` DOES NOT ALSO GATE ON THE MOUNT the way `'advisor'` does. The advisor is
+ * workspace-grain and is only offered on the cross-repo rail (`repoId == null`); the themes report
+ * is genuinely per-repo — the client keys the narrowed report into its own cache slot and the
+ * plugin's `scope_key` carries the same `|r:` suffix — so the per-repo console gets its own real
+ * report rather than the workspace's, and gating it on the rail would delete a working surface.
  */
-export function effectiveBotsTab(raw: BotsInnerTab, opts: { showAdvisor: boolean }): BotsInnerTab {
-  return raw === 'advisor' && !opts.showAdvisor ? 'roi' : raw;
+export function effectiveBotsTab(
+  raw: BotsInnerTab,
+  opts: { showAdvisor: boolean; showThemes: boolean },
+): BotsInnerTab {
+  if (raw === 'advisor' && !opts.showAdvisor) return 'roi';
+  if (raw === 'themes' && !opts.showThemes) return 'roi';
+  return raw;
 }
 
 /** What the Benchmark tab renders. */
@@ -102,25 +119,25 @@ export function benchmarkBodyFor(gate: ProGateState): BenchmarkBody {
  *  Three states, three sentences: this is what stops "peer benchmarking isn't in this build"
  *  reading as "there isn't enough peer data yet". */
 export const UNAVAILABLE_HEADLINE: Record<BotBenchmarkUnavailableReason, string> = {
-  artifact_missing: 'This build ships no peer corpus',
-  artifact_unreadable: 'The bundled peer corpus could not be read',
-  fit_version_unsupported: 'The bundled peer corpus is a newer format than this build reads',
+  artifact_missing: 'This build has no comparison data',
+  artifact_unreadable: 'The comparison data could not be read',
+  fit_version_unsupported: 'The comparison data is newer than this build understands',
 };
 
 /** NO COHORT EXISTS FOR THIS (vendor, activity) PAIR. Six facts, six remedies. */
 export const PLACEMENT_REFUSAL_HEADLINE: Record<BotBenchmarkPlacementRefusalReason, string> = {
   // The DeepSource case. The bot is real, it is working, we have simply never measured it.
-  vendor_not_in_corpus_vocabulary: 'We have never measured this reviewer',
-  vendor_unfittable: 'This reviewer resolves to no product',
-  vendor_unstratifiable: 'We have too little of this reviewer to stratify',
-  cell_not_in_corpus: 'No peer repository of this size runs this reviewer',
+  vendor_not_in_corpus_vocabulary: 'We have never measured this bot',
+  vendor_unfittable: 'We cannot tell which product this bot is',
+  vendor_unstratifiable: 'Too few teams run this bot to compare against',
+  cell_not_in_corpus: 'No team we measured runs this bot on a repo this size',
   // The TWO refusals that are about the customer rather than the corpus, and they are different
   // sentences: an INCOMPLETE window (we have not held the repo long enough to count its merges)
   // against a COMPLETE window the repository did not use (it merged nothing recently).
-  repo_window_incomplete: 'This repository is too new to place',
+  repo_window_incomplete: 'This repo is too new to compare',
   // ⚠ NOT A STATEMENT ABOUT ANY REVIEWER. With no merges in the window the fold reads zero pull
   // requests, so every bot would otherwise come back "said nothing here" however much it wrote.
-  repo_inactive_in_window: 'No recent merges to measure',
+  repo_inactive_in_window: 'Nothing merged here recently',
 };
 
 /** ONE METRIC WITHHELD FOR THIS UNIT — the corpus's own exclusion vocabulary plus the one
@@ -128,24 +145,24 @@ export const PLACEMENT_REFUSAL_HEADLINE: Record<BotBenchmarkPlacementRefusalReas
  *  path-scoped and category-suppressed are indistinguishable from here and all three differ from
  *  "it commented and was ignored". */
 export const EXCLUSION_HEADLINE: Record<BotBenchmarkUnitExclusionReason, string> = {
-  repo_not_walked: 'Repository not read',
+  repo_not_walked: 'This repo has not been read yet',
   // ⚠ A DIFFERENT SENTENCE FROM 'Said nothing here'. Nothing was read, so nothing here is a
   // statement about the reviewer at all.
-  no_prs_in_window: 'No pull requests in this window',
+  no_prs_in_window: 'No pull requests in this period',
   vendor_silent: 'Said nothing here',
-  vendor_absent_from_population: 'Nothing inside this population',
+  vendor_absent_from_population: 'It said nothing on the PRs this counts',
   denominator_empty: 'Nothing to measure against',
-  below_min_units: 'Too small a sample',
-  body_unobserved: 'A comment body was never stored',
+  below_min_units: 'Too little here to be worth a number',
+  body_unobserved: 'A comment was never stored',
 };
 
 /** FOUR KINDS, FOUR ACTIONS. The `action` sentence itself is the SERVER's (templated, never
  *  model-generated); these are the scan labels above it. */
 export const ANOMALY_HEADLINE: Record<BotBenchmarkAnomalyKind, string> = {
-  volume: 'Writing far more than its peers',
-  engagement: 'Your team acts on far less of it than its peers do',
-  latency: 'A person reaches it far later than in peer repositories',
-  overlap: 'Repeating another reviewer on the same lines',
+  volume: 'Comments far more than it does for other teams',
+  engagement: 'Your team uses far less of it than other teams do',
+  latency: 'Someone gets to it far later than on similar repos',
+  overlap: 'Repeats another bot on the same lines',
 };
 
 /** Reporting order — the plugin's `RULES` order, restated so the panel's grouping is stable and
@@ -160,10 +177,10 @@ export const ANOMALY_KIND_ORDER: readonly BotBenchmarkAnomalyKind[] = [
 /** How fresh the corpus is, recomputed server-side per request. Rendered beside the fit key so a
  *  reader can discount an old comparison rather than discovering later that they should have. */
 export const STALENESS_LABEL: Record<BotBenchmarkStaleness, string> = {
-  fresh: 'Corpus is current',
-  aging: 'Corpus is ageing',
-  stale: 'Corpus is stale',
-  expired: 'Corpus has expired',
+  fresh: 'Comparison data is current',
+  aging: 'Comparison data is getting old',
+  stale: 'Comparison data is out of date',
+  expired: 'Comparison data has expired',
 };
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -284,8 +301,18 @@ export function percentileSentence(p: {
   nRepos: number;
   bandLabel: string;
 }): string {
-  const band = p.bandLabel === '' ? '' : ` · activity band ${p.bandLabel}`;
-  return `${ordinal(p.percentile)} percentile of ${formatCount(p.nRepos)} peer repositories${band}`;
+  // ⚠ NO "PERCENTILE", NO "ACTIVITY BAND". Both are exact and both are jargon; the reader wants to
+  // know where they sit among comparable teams, which "higher than N% of" says in words anyone
+  // reads at a glance. The size group stays (it is what makes "comparable" mean something) but
+  // says what it is rather than naming an internal bucket index.
+  const band = p.bandLabel === '' ? '' : ` of similar size (group ${p.bandLabel})`;
+  // ⚠ ROUNDED. The percentile arrives as a float (94.6097), and `ordinal()` used to hide that by
+  // construction. Printing it raw claims four decimal places of precision about a 67-repository
+  // sample — a number that specific reads as authoritative and is noise past the units digit.
+  return (
+    `Higher than ${Math.round(p.percentile)}% of the ${formatCount(p.nRepos)} teams we measured` +
+    band
+  );
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -632,8 +659,8 @@ export type CostBasis = 'stored' | 'counted' | 'fitted';
 // that must be read with the number it qualifies.
 export const COST_BASIS_LABEL: Record<CostBasis, string> = {
   stored: 'Price you entered',
-  counted: 'Counted from yours',
-  fitted: 'Fitted peer median',
+  counted: 'From your own data',
+  fitted: 'Typical team',
 };
 
 /** TEN SENTENCES — and the eleventh state, "no price set", never reaches here because the block is
@@ -643,29 +670,32 @@ export const COST_REFUSAL_HEADLINE: Record<BotBenchmarkCostRefusalReason, string
   // ⚠ THE SAME WORDS THE PLACEMENT REFUSALS USE ONE CARD UP, for the two facts both refuse on. Two
   // different sentences for one cause on one card is how a reader stops believing either.
   repo_window_incomplete: PLACEMENT_REFUSAL_HEADLINE.repo_window_incomplete,
-  no_merges_in_window: 'No recent merges to measure',
+  no_merges_in_window: 'Nothing merged here recently',
   // ⚠ A SENTENCE ABOUT TIME, NOT ABOUT VOLUME, AND NOT ABOUT A BILLING PERIOD. "Said nothing here"
   // is a different fact one card up; this reviewer may have written plenty, all of it in one
   // instant or with no readable timestamp, which leaves no observed pace for a monthly rate to be
   // stated against.
-  span_unobserved: 'No measurable pace to state a rate against',
-  own_rate_withheld: 'Your acted-on rate was withheld',
-  nothing_acted_on: 'Nothing acted on to divide by',
+  span_unobserved: 'No timestamps to work out a rate from',
+  own_rate_withheld: 'Too little of your own data to use',
+  nothing_acted_on: 'Your team acted on none of it',
   // ⚠ A SENTENCE ABOUT THE LAST MONTH, NOT ABOUT THE REVIEWER. "Nothing acted on" one line up is a
   // whole and empty month; this is a whole month with too little in it to divide a price by. The
   // remedy is time, and the counters above are unaffected — which is why it does not borrow either
   // neighbour's words.
-  window_underpopulated: 'Too few acted-on threads this month to price',
+  window_underpopulated: 'Too few comments used this month to price',
   price_is_zero: 'Recorded as free',
   // ⚠ NOT "Recorded as free" AND NOT SILENCE. Somebody entered a price; it is per seat and the
   // seat count could not be multiplied out, so the figure is missing and the price is not.
-  price_unresolved: 'Price entered, monthly figure not statable',
-  cohort_rate_unfitted: 'No peer engagement rate in this cohort',
-  cohort_rate_zero: 'Peers act on none of it either',
+  price_unresolved: 'Price entered, but the seat count is missing',
+  // ⚠ THE SAME NOUN THE COUNTERFACTUAL ROW USES, because this sentence stands IN PLACE of it. The
+  // row is labelled "At the peer median rate"; a refusal calling the same quantity a "peer
+  // engagement rate" would give one fact two names on one card.
+  cohort_rate_unfitted: 'No typical team to compare this bot with here',
+  cohort_rate_zero: 'Other teams act on none of it either',
   // ⚠ THE ROLLUP-ONLY ONE, AND IT IS ABOUT THE ESTATE RATHER THAN THIS REVIEWER. The price is whole
   // and the work it would be divided by is not, so every figure would read too high — a fact about
   // how much was read, never a fact about the bot.
-  workspace_truncated: 'Too many repositories to price the Workspace',
+  workspace_truncated: 'Too many repos here to price the whole Workspace',
 };
 
 /**
@@ -719,7 +749,7 @@ export function formatSpanDays(days: number): string {
  * counterfactual's `settledThreads × cohortRate`.
  *
  * ⚠ IT MUST NOT ROUND A FRACTION TO A WHOLE NUMBER. A quiet repository can legitimately sit at 0.4
- * threads at peer engagement, and printing "0" beside a real cost-per-thread figure is a
+ * threads at the peer median rate, and printing "0" beside a real cost-per-thread figure is a
  * contradiction on one line — the reader is being shown a price per unit of something the same row
  * says there is none of. One decimal below ten, none above, and the trailing zero trimmed, so a
  * measured 3 still prints as "3".
@@ -968,10 +998,10 @@ export function costHeadline(cost: BotBenchmarkPlacementCost): CostHeadline | nu
   // this sentence is back to claiming a spend over the span.
   const measured = `measured over the ${formatSpanDays(span.days)} its comments span here`;
   const spend =
-    `${formatUsd(unacted.unactedUsd)} a month of this reviewer's ${formatUsd(cost.monthlyUsd)} ` +
-    `monthly price is buying feedback nobody acts on — you acted on ` +
-    `${formatMetricValue(unacted.actedOnRate, 'rate')} of the ` +
-    `${formatCount(unacted.settledThreads)} threads it settled here, ${measured}.`;
+    `Your team used ${formatMetricValue(unacted.actedOnRate, 'rate')} of the ` +
+    `${formatCount(unacted.settledThreads)} comments this bot finished here — so ` +
+    `${formatUsd(unacted.unactedUsd)} of its ${formatUsd(cost.monthlyUsd)} a month is paying for ` +
+    `comments nobody used, ${measured}.`;
 
   const peer = cost.atPeerEngagement;
   if (peer.status !== 'value') return { tone: 'measured', spend, comparison: null };
@@ -982,8 +1012,8 @@ export function costHeadline(cost: BotBenchmarkPlacementCost): CostHeadline | nu
       tone: 'behind',
       spend,
       comparison:
-        `At the cohort's median acted-on rate of ${median}, ${formatUsd(gap)} a month more of that ` +
-        'same price would be acted on — your threads and your price, their engagement.',
+        `Teams with similar repos use ${median} of what it says. Using it that much would put ` +
+        `another ${formatUsd(gap)} a month of the price you already pay to work.`,
     };
   }
   if (gap < 0) {
@@ -991,17 +1021,16 @@ export function costHeadline(cost: BotBenchmarkPlacementCost): CostHeadline | nu
       tone: 'ahead',
       spend,
       comparison:
-        `Your team acts on more of this reviewer than the cohort's median (${median}): ` +
-        `${formatUsd(-gap)} a month more of that price reaches something than it would at peer ` +
-        'engagement.',
+        `Your team uses more of this bot than teams with similar repos do (${median}), putting ` +
+        `${formatUsd(-gap)} a month more of the price to work than they manage.`,
     };
   }
   return {
     tone: 'even',
     spend,
     comparison:
-      `Your acted-on rate matches the cohort's median (${median}), so peer-level engagement would ` +
-      'convert none of that price differently.',
+      `Your team uses this bot exactly as much as teams with similar repos do (${median}), so ` +
+      'using it more or less would not change what the price buys.',
   };
 }
 
@@ -1062,10 +1091,12 @@ function joinList(parts: readonly string[]): string {
  * card rather than the edge case, and it must not read as a card that failed.
  */
 export const ROLLUP_REFUSAL_HEADLINE: Record<BotBenchmarkRollupRefusalReason, string> = {
-  single_repo: 'Live in one repository — no spread to describe',
-  no_placed_repos: 'No repository here could be placed',
-  no_fitted_cohort_rate: 'No peer engagement rate for these bands',
-  no_settled_threads: 'No settled threads to rate',
+  single_repo: 'Runs in one repo — nothing to spread across',
+  no_placed_repos: 'No repo here could be compared',
+  // ⚠ `COST_REFUSAL_HEADLINE.cohort_rate_unfitted`'s noun, one grain up — the counterfactual row's
+  // own words ("At the peer median rate"), because this is the sentence that stands in its place.
+  no_fitted_cohort_rate: 'No typical team to compare these repos with',
+  no_settled_threads: 'No finished comment threads to measure',
   // ⚠ THE SAME WORDS THE PLACEMENT REFUSAL USES ONE GRAIN DOWN, for the one fact both refuse on —
   // `COST_REFUSAL_HEADLINE`'s rule. Two sentences for one cause on one screen is how a reader stops
   // believing either.
@@ -1152,19 +1183,19 @@ export function rollupExpectationSentence(
   if (expectation.status !== 'value') return null;
   const fitted = countNoun(expectation.fittedRepos, 'repository', 'repositories');
   const base =
-    `Across the ${fitted} with a fitted peer median, your team acts on ` +
-    `${formatMetricValue(expectation.yoursRateOnFitted, 'rate')} of what this reviewer settles, ` +
-    `where an estate of this shape at its cohorts' medians acts on ` +
+    `In the ${fitted} we can compare, your team uses ` +
+    `${formatMetricValue(expectation.yoursRateOnFitted, 'rate')} of what this bot says, where ` +
+    `teams with repos like these use ` +
     `${formatMetricValue(expectation.expectedRate, 'rate')}.`;
   if (expectation.excludedRepos <= 0) return base;
   const excluded = countNoun(expectation.excludedRepos, 'repository', 'repositories');
   const agree =
     expectation.excludedRepos === 1
-      ? 'carries no fitted median and is'
-      : 'carry no fitted median and are';
+      ? 'has no team to compare it with and is'
+      : 'have no teams to compare them with and are';
   return (
-    `${base} The other ${excluded} this reviewer is live in ${agree} outside both figures — the ` +
-    'pooled rate above covers every one of them and is a different number.'
+    `${base} The other ${excluded} this bot runs in ${agree} outside both figures — the rate ` +
+    'above covers every one of them and is a different number.'
   );
 }
 
@@ -1214,8 +1245,11 @@ export function workspaceCostPriceLine(cost: BotBenchmarkWorkspaceCost): string 
  */
 export function workspaceCostActedOnLabel(cost: BotBenchmarkWorkspaceCost): string {
   const days = cost.costWindowDays;
-  if (days == null || !Number.isFinite(days) || days <= 0) return 'Per acted-on thread';
-  return `Per acted-on thread (last ${formatCount(Math.round(days))} days)`;
+  // ⚠ "COMMENT YOUR TEAM USED", NOT "ACTED-ON THREAD". Both name the same population — a thread
+  // somebody resolved or replied to after the bot's last word — but only one of them is a phrase a
+  // reader arrives already understanding. The scope stays in the label for the reason below.
+  if (days == null || !Number.isFinite(days) || days <= 0) return 'Per comment your team used';
+  return `Per comment your team used (last ${formatCount(Math.round(days))} days)`;
 }
 
 /**
@@ -1247,7 +1281,7 @@ export function workspaceCostActedOnDetail(
   const price = cost.monthlyUsd == null ? '' : ` · ${formatUsd(cost.monthlyUsd)} a month`;
   return (
     `${formatThreadCount(yours.actedThreads)} of ` +
-    `${formatCount(yours.settledThreads)} threads acted on${scope}${price}`
+    `${formatCount(yours.settledThreads)} comments used${scope}${price}`
   );
 }
 
@@ -1439,10 +1473,10 @@ export function workspaceCostHeadline(
   // disagree about whether the count was worth saying.
   const scopeClause = cost.coveredRepos === 1 ? '' : `across the ${scope} it is live in `;
   const spend =
-    `${formatUsd(unacted.unactedUsd)} a month of this reviewer's ${formatUsd(cost.monthlyUsd)} ` +
-    `monthly price is buying feedback nobody acts on — ${scopeClause}you acted on ` +
-    `${formatMetricValue(unacted.actedOnRate, 'rate')} of the ` +
-    `${formatCount(unacted.settledThreads)} threads it settled on every pull request read here.`;
+    `Your team used ${formatMetricValue(unacted.actedOnRate, 'rate')} of the ` +
+    `${formatCount(unacted.settledThreads)} comments this bot finished ${scopeClause}— so ` +
+    `${formatUsd(unacted.unactedUsd)} of its ${formatUsd(cost.monthlyUsd)} a month is paying for ` +
+    'comments nobody used.';
 
   if (expectation.status !== 'value' || expectation.conversionGapUsd == null) {
     return { tone: 'measured', spend, comparison: null };
@@ -1452,16 +1486,16 @@ export function workspaceCostHeadline(
   // ⚠ THE SUBSET IS NAMED BEFORE EITHER RATE IS. This clause is the only thing standing between the
   // reader and reading `yoursRateOnFitted` as the pooled figure sentence one just quoted.
   const against =
-    `Across the ${fitted} with a fitted peer median, your ` +
-    `${formatMetricValue(expectation.yoursRateOnFitted, 'rate')} against their ` +
-    `${formatMetricValue(expectation.expectedRate, 'rate')}`;
+    `In the ${fitted} we can compare, your team used ` +
+    `${formatMetricValue(expectation.yoursRateOnFitted, 'rate')} of what it said, where teams with ` +
+    `similar repos used ${formatMetricValue(expectation.expectedRate, 'rate')}`;
   if (gap > 0) {
     return {
       tone: 'behind',
       spend,
       comparison:
-        `${against}: ${formatUsd(gap)} a month more of that same price would be acted on — your ` +
-        'threads and your price, their engagement.',
+        `${against}. Using it as much as they do would put another ${formatUsd(gap)} a month of ` +
+        'the price you already pay to work.',
     };
   }
   if (gap < 0) {
@@ -1469,14 +1503,17 @@ export function workspaceCostHeadline(
       tone: 'ahead',
       spend,
       comparison:
-        `${against}: ${formatUsd(-gap)} a month more of that price reaches something than it would ` +
-        'at peer engagement.',
+        // ⚠ THE COUNTERFACTUAL ROW'S COMPARISON, IN THE SAME WORDS. This sentence and the "If your
+        // team used it as much" row sit on one card describing one swap, so they name it the same
+        // way — and neither may drift into claiming what another team PAYS.
+        `${against}. That puts ${formatUsd(-gap)} a month more of the price to work than a team ` +
+        'with similar repos would.',
     };
   }
   return {
     tone: 'even',
     spend,
-    comparison: `${against}: peer-level engagement would convert none of that price differently.`,
+    comparison: `${against} — the same. Using it more or less would not change what the price buys.`,
   };
 }
 

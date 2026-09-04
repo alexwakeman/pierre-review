@@ -270,13 +270,13 @@ function ActivityList({
                   repoId={pr.repoId}
                   className="font-medium"
                 />
-                <span className="text-gray-500">{r.label}</span>
+                <span className="text-gray-500 dark:text-gray-400">{r.label}</span>
                 <span className="text-xs text-gray-400" title={dateTime(r.time)}>
                   · {relativeTime(r.time)}
                 </span>
               </div>
               {r.detail && (
-                <div className="mt-0.5 truncate text-xs text-gray-500" title={r.detail}>
+                <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400" title={r.detail}>
                   {r.detail.split('\n')[0]}
                 </div>
               )}
@@ -331,8 +331,8 @@ const REVIEW_TAG: Record<ReviewState, { label: string; cls: string }> = {
     cls: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
   },
   commented: { label: 'review', cls: 'bg-sky-500/10 text-sky-700 dark:text-sky-400' },
-  dismissed: { label: 'dismissed', cls: 'bg-gray-500/10 text-gray-500' },
-  pending: { label: 'pending', cls: 'bg-gray-500/10 text-gray-500' },
+  dismissed: { label: 'dismissed', cls: 'bg-gray-500/10 text-gray-500 dark:text-gray-400' },
+  pending: { label: 'pending', cls: 'bg-gray-500/10 text-gray-500 dark:text-gray-400' },
 };
 
 function ReviewStateTag({ state }: { state: ReviewState }): JSX.Element {
@@ -445,7 +445,7 @@ function PrCommentsList({
 
   if (items.length === 0) {
     return (
-      <div className="px-3 py-6 text-center text-sm text-gray-500">
+      <div className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
         No PR comments on this PR.
       </div>
     );
@@ -495,7 +495,7 @@ function PrCommentsList({
                     : 'Show this review on the timeline'
                 }
               />
-              <span className="text-gray-300 dark:text-gray-600">·</span>
+              <span className="decorative-mark text-gray-300 dark:text-gray-600">·</span>
               <Avatar user={user} size={18} />
               <UserName
                 user={user}
@@ -1164,7 +1164,7 @@ export function PrDetail({
             ) : null;
           })()}
         </div>
-        <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
+        <div className="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
           <Avatar user={author} size={16} />
           <UserName user={author} fallbackId={pr.authorId} repoId={pr.repoId} />
           <span>·</span>
@@ -1180,7 +1180,7 @@ export function PrDetail({
                 className="inline-flex shrink-0 items-center gap-1 font-medium"
                 title="View the files changed by this PR"
               >
-                <span className="text-gray-500">
+                <span className="text-gray-500 dark:text-gray-400">
                   {pr.changedFilesCount} file{pr.changedFilesCount === 1 ? '' : 's'}
                 </span>
                 <span className="text-green-600 dark:text-green-400">
@@ -1230,7 +1230,7 @@ export function PrDetail({
               className={`-mb-px border-b-2 px-3 py-1.5 text-xs ${
                 effectiveTab === t
                   ? 'border-blue-500 text-blue-500'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700'
               }`}
             >
               {TAB_LABELS[t]}
@@ -1289,6 +1289,7 @@ export function PrDetail({
               pr={pr}
               usersById={usersById}
               onShowBotActivity={botTabVisible ? () => goToTab('bot_activity') : undefined}
+              onOpenThreads={() => goToTab('threads')}
             />
             <div className="border-t border-gray-200 dark:border-gray-800">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-1 pt-2">

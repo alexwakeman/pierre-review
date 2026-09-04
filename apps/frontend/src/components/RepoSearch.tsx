@@ -376,7 +376,7 @@ export function RepoSearch({
                   <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700 dark:bg-gray-900">
                     Suggested repos
                   </div>
-                  <div className="px-3 py-2 text-xs text-gray-500">
+                  <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
                     You&rsquo;ve already added all the suggestions.
                   </div>
                 </div>
@@ -419,12 +419,12 @@ export function RepoSearch({
                 : 'Search failed'}
             </div>
           ) : searching && results.length === 0 ? (
-            <div className="flex items-center justify-center gap-2 px-3 py-6 text-xs text-gray-500">
+            <div className="flex items-center justify-center gap-2 px-3 py-6 text-xs text-gray-500 dark:text-gray-400">
               <Spinner />
               <span>Searching…</span>
             </div>
           ) : results.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-gray-500">
+            <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
               No matching repositories.
             </div>
           ) : (

@@ -1,4 +1,5 @@
 import type { StateMeta } from '../lib/ui.js';
+import { vendorInk } from '../lib/ui.js';
 
 /**
  * The SURVEY-ROW density of a `StateMeta` pill — a derived state, an addressed confidence, an ML
@@ -38,7 +39,7 @@ export function MetaChip({
   return (
     <span
       className="shrink-0 rounded px-1 py-px text-[10px] font-medium tabular-nums"
-      style={{ color: meta.color, background: `${meta.color}1a` }}
+      style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
       title={meta.description}
     >
       {prefix}

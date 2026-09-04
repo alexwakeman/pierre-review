@@ -141,7 +141,7 @@ export function SearchResultsTab(): JSX.Element {
       )}
 
       {debounced.length >= 1 && !isLoading && hits.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-300 py-10 text-center text-sm text-gray-500 dark:border-gray-700">
+        <div className="rounded-lg border border-dashed border-gray-300 py-10 text-center text-sm text-gray-500 dark:text-gray-400 dark:border-gray-700">
           No matches for “{debounced}”{kinds.length > 0 ? ' with the selected filters' : ''}.
         </div>
       ) : (
@@ -185,7 +185,7 @@ function HitHeader({ hit }: { hit: SearchHit }): JSX.Element {
     <div className="flex items-center gap-1.5 text-[11px] text-gray-400">
       <KindIcon size={12} />
       <span className="font-medium text-gray-500 dark:text-gray-400">{KIND_LABEL[hit.kind]}</span>
-      <span aria-hidden className="text-gray-300 dark:text-gray-600">
+      <span aria-hidden className="decorative-mark text-gray-300 dark:text-gray-600">
         ·
       </span>
       <span
@@ -210,7 +210,7 @@ function HitHeader({ hit }: { hit: SearchHit }): JSX.Element {
       </span>
       {hit.authorLogin ? (
         <>
-          <span aria-hidden className="text-gray-300 dark:text-gray-600">
+          <span aria-hidden className="decorative-mark text-gray-300 dark:text-gray-600">
             ·
           </span>
           <span className="truncate">{hit.authorLogin}</span>

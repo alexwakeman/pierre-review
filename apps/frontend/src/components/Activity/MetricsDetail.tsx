@@ -246,7 +246,7 @@ function ValueCell({ m, pr }: { m: WorkspaceMetricKey; pr: MetricPr }): JSX.Elem
     case 'merge_ci': {
       const red = pr.ciStatus === 'failure' || pr.ciStatus === 'error';
       return (
-        <span className={`font-medium ${red ? 'text-red-500 dark:text-red-400' : 'text-gray-500'}`}>
+        <span className={`font-medium ${red ? 'text-red-500 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
           {pr.ciStatus ?? '—'}
         </span>
       );
@@ -514,7 +514,7 @@ export function MetricsDetail(): JSX.Element {
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
           {allRows.length === 0 ? (
             <>
-              <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] text-gray-300 dark:text-gray-600" />
+              <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-gray-300 dark:text-gray-600" />
               Nothing to show for this metric in the current sprint.
             </>
           ) : (

@@ -82,16 +82,28 @@ export type RepoConsoleTab = 'activity' | 'bots';
 export type InsightsInnerTab = 'overview' | 'bottlenecks';
 export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'bottlenecks'];
 // The Bots rail's sub-tab strip. ⚠ TWO POSTURES IN ONE UNION, both deliberate:
-//   • `'advisor'` is only LISTED when entitled (`botAdvisor`) and BotsView's `effectiveBotsTab`
-//     degrades it to `'roi'` when it is not — the older "absent, never upsold" posture.
+//   • `'advisor'` (`botAdvisor`) and `'themes'` (`activityDigest`) are only LISTED when entitled,
+//     and BotsView's `effectiveBotsTab` degrades either to `'roi'` when it is not — the older
+//     "absent, never upsold" posture, which is also the FEED's, whose Themes tab this one mirrors.
 //   • `'roi'` and `'benchmark'` are VISIBLE-BUT-LOCKED (`botDepth`): listed on every tier, badged,
 //     and their BODIES render `ProLockPanel`. They must NEVER be corrected away, or an unentitled
 //     `?botsTab=benchmark` from a bookmark lands somewhere else and explains nothing.
+//   • `'settings'` is free on every tier and is why the rail entry and this strip stay ungated.
+// ⚠ `'themes'` TOOK THE FIRST POSTURE ON PURPOSE. A locked Themes body would be a SEVENTH
+// visible-but-locked surface, and `components/ProGate.tsx` keeps that set at exactly six with a
+// written argument saying the next one needs its own; on the OSS build `BotThemesPanel` returns
+// `null`, so an always-listed tab would draw a blank pane there.
 // The visible member is DERIVED per render (`effectiveBotsTab` in `Activity/benchmarkModel.ts`);
 // a corrective `setBotsInnerTab()` permanently forgets the reader's choice for the OTHER mount
 // that shares this one scalar (the per-repo console's Bots tab).
-export type BotsInnerTab = 'roi' | 'advisor' | 'settings' | 'benchmark';
-export const BOTS_INNER_TABS: readonly BotsInnerTab[] = ['roi', 'advisor', 'settings', 'benchmark'];
+export type BotsInnerTab = 'roi' | 'themes' | 'advisor' | 'settings' | 'benchmark';
+export const BOTS_INNER_TABS: readonly BotsInnerTab[] = [
+  'roi',
+  'themes',
+  'advisor',
+  'settings',
+  'benchmark',
+];
 // PrDetail's inner tab strip. It lives HERE, not in PrDetail's local state, because it is
 // URL-ADDRESSABLE: `?view=pr:<id>&prTab=changes` names one screen, so browser Back/Forward can
 // move between "the PR's diff" and "the PR's threads" like every other view. Which member is
@@ -478,20 +490,25 @@ export interface FilterState {
   // (like feedBotLens) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
   // Which inner sub-tab the Bots view shows: 'roi' (the Measure surface — ROI panel + bot feed),
-  // 'advisor' (the Pro Bot Tuning Advisor — findings → config-PR/brief/issue outputs), or
-  // 'settings' (the "who counts as a review bot in this workspace" classification tab).
-  // ('behaviour' was REMOVED in plan P1.1/C1 and 'themes' in plan P2.3/C6 — per-bot depth is the
-  // bot-detail drill-down tab, the workspace charts a collapsed section under ROI, and the bot
-  // themes summary folded into the synthesis seam's "What they're flagging" card on Measure. The
-  // field is transient and URL-silent, so dropping a member is safe: no persisted blob can hold
-  // it.) A single scalar (both the cross-repo rail Bots view and the per-repo console Bots tab
+  // 'themes' (the Pro "What they're flagging" AI report, `activityDigest`), 'advisor' (the Pro Bot
+  // Tuning Advisor — findings → config-PR/brief/issue outputs), 'benchmark' (the peer-cohort
+  // placement) or 'settings' (the "who counts as a review bot in this workspace" classification
+  // tab).
+  // ('behaviour' was REMOVED in plan P1.1/C1: per-bot depth is the bot-detail drill-down tab and
+  // the workspace charts a collapsed section under ROI. ⚠ 'themes' WAS ALSO REMOVED THEN — folded
+  // into a synthesis-seam card on Measure — AND HAS SINCE COME BACK as a real member: the themes
+  // PANEL was revived first, mounted at the top of the `roi` branch, and then moved onto its own
+  // tab so the Bots console mirrors the Feed's `Feed | Themes` strip. The field is transient and
+  // URL-silent, so both the drop and the return are safe: no persisted blob can hold or resurrect
+  // a member.) A single scalar (both the cross-repo rail Bots view and the per-repo console Bots tab
   // share one BotsView) — so 'settings' can be selected while a PER-REPO Bots tab is showing,
   // where it is the same list narrowed to one repo's footprint rather than a different judgement
   // (the bot object is keyed per WORKSPACE now, and a repo belongs to exactly one). BotsView's
-  // effectiveTab fallback still owns any degradation ('advisor' is capability-gated — the
-  // derived-effective-tab rule). Transient, URL-silent.
+  // effectiveTab fallback still owns any degradation ('advisor' and 'themes' are capability-gated
+  // — the derived-effective-tab rule). Transient (never persisted) — but NOT URL-silent, unlike
+  // its neighbours here; see the next paragraph.
   //
-  // ⚠ URL-SERIALIZED (`?botsTab=advisor|settings|benchmark`, the 'roi' default omitted) and a
+  // ⚠ URL-SERIALIZED (`?botsTab=themes|advisor|settings|benchmark`, the 'roi' default omitted) and a
   // NAVIGATION key, but ONLY alongside `activityRepo=bots` — the cross-repo Bots rail, where the
   // strip is on screen. The per-repo console's Bots tab shares this scalar and does NOT emit it; a
   // sub-tab that is not visible is not a view. Still transient: URL-visible ≠ persisted.

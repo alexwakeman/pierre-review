@@ -159,7 +159,7 @@ export function CiAnalysisCard({
   if (analysis == null) {
     return (
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="text-xs text-gray-500">Why did CI fail?</span>
+        <span className="text-xs text-gray-500 dark:text-gray-400">Why did CI fail?</span>
         {analyzeBtn}
         {outOfCredits && (
           <span className="text-[11px] text-amber-600 dark:text-amber-400">
@@ -225,7 +225,7 @@ export function CiAnalysisCard({
               </button>
             )}
             {aiFix && showFix && data?.fixability === 'low' && (
-              <span className="text-[11px] text-gray-500">
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">
                 low confidence this is auto-fixable
               </span>
             )}

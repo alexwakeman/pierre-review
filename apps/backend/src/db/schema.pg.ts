@@ -830,6 +830,12 @@ export const workspaces = pgTable(
     // itself is what makes ensureDefaultWorkspace's "INSERT … ON CONFLICT DO NOTHING then
     // re-SELECT" race-safe. See the sqlite twin.
     isDefault: boolean('is_default').notNull().default(false),
+    // The WORKSPACE half of the Pending mute (migration 0058 / pg 0045) — the pg twin. TRUE ⇒
+    // every repo in this workspace stops claiming the reader's turn (`getMyTurn` forces
+    // `relevance: 'none'`), while its rows and the broad `myTurn` count stay exactly where they
+    // are. A UNION with `pending_muted_repos`, never a parent of it; and NOT the dropped
+    // `repos.inbox_watch` visibility axis. Full rationale in the sqlite twin.
+    pendingMuted: boolean('pending_muted').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),
@@ -889,6 +895,41 @@ export const workspaceRepos = pgTable(
     }).onDelete('cascade'),
     repoAccountFk: foreignKey({
       name: 'workspace_repos_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- The REPO half of the Pending mute (CORE, free) ---- the pg twin of schema.sqlite.ts
+// pendingMutedRepos. PRESENCE IS THE FACT (one row per muted (account, repo); no flag column,
+// no "considered" row). The effective answer is `workspaces.pending_muted OR a row here` — TWO
+// INDEPENDENT FACTS UNIONED, never an inheritance chain, and there is deliberately no
+// `workspace_id` column (a repo belongs to exactly one workspace; copying that fact here would
+// give the account two answers to the same question). Full rationale, including why this is NOT
+// the dropped `repos.inbox_watch` visibility axis, in the sqlite twin.
+export const pendingMutedRepos = pgTable(
+  'pending_muted_repos',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // No single-column FK: it is the COMPOSITE declaration below.
+    repoId: integer('repo_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountRepoUx: uniqueIndex('pending_muted_repos_account_repo').on(t.accountId, t.repoId),
+    // Tenancy as a constraint: `repoId` arrives in a REQUEST BODY. NAMED because Postgres quotes
+    // the name in the violation message and the hand-written migration spells the same
+    // `CONSTRAINT "pending_muted_repos_repo_account_fk"`; an unnamed declaration would be
+    // auto-named `pending_muted_repos_repo_id_account_id_fkey` and the name here would match
+    // nothing live.
+    repoAccountFk: foreignKey({
+      name: 'pending_muted_repos_repo_account_fk',
       columns: [t.repoId, t.accountId],
       foreignColumns: [repos.id, repos.accountId],
     }).onDelete('cascade'),

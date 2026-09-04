@@ -5,9 +5,15 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 
-// The workspace flow-metric header (DORA-ish tiles + trend charts) — CORE/free, rendered at the
-// top of the cross-repo Feed (it moved out of the Pro Insights pane). No capability gate; same
-// refetch cadence as useWorkspaceInsights below.
+// The workspace flow-metric header (DORA-ish tiles + trend charts) plus the per-repo "where is the
+// work happening?" breakdown under it — CORE/free, rendered in the "Flow metrics" section of the
+// REPORTS rail entry. (It moved out of the Pro Insights pane, then off the Feed, where a
+// workspace-wide survey sat on top of a chronological stream.) No capability gate; same refetch
+// cadence as useWorkspaceInsights below.
+//
+// ⚠ ONE FETCH FOR THE WHOLE SECTION. The tiles, the 12-week trends and the per-repo pair all ride
+// this ONE response, so they can never be a refresh apart — and the per-repo half costs no extra
+// round trip to paint.
 //
 // `workspaceId` is the WHOLE scope and it is in the cache key, so each workspace caches
 // independently. It is `number | null` because the store's id starts null and is filled once

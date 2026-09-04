@@ -164,14 +164,23 @@ export function FloatingTip({
 export function ChartCard({
   title,
   note,
+  className,
   children,
 }: {
   title: string;
   note?: string;
+  // Extra classes on the card's own box — for a card that has to place itself in its host's grid
+  // (e.g. a full-width `lg:col-span-3` card sharing a `lg:grid-cols-3` row with three narrow
+  // ones). Layout only: the chrome above is not overridable, so every card still reads the same.
+  className?: string;
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+    <div
+      className={`rounded-lg border border-gray-200 p-3 dark:border-gray-800${
+        className ? ` ${className}` : ''
+      }`}
+    >
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">{title}</h4>
         {note && <span className="text-[10px] text-gray-400">{note}</span>}

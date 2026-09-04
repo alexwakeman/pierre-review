@@ -87,7 +87,7 @@ export function MetricRepoFilter({
           <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
           <div className="max-h-72 overflow-y-auto">
             {total === 0 ? (
-              <div className="px-1 py-2 text-xs text-gray-500">No repos with data.</div>
+              <div className="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">No repos with data.</div>
             ) : (
               repos.map((r) => {
                 // "only" is a no-op / hidden when this repo is already the sole selection

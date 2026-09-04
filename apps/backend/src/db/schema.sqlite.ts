@@ -1013,6 +1013,23 @@ export const workspaces = sqliteTable(
     // the note under the table), so two concurrent ensureDefaultWorkspace() calls cannot both
     // insert.
     isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
+    // ── THE WORKSPACE HALF OF THE PENDING MUTE (migration 0058 / pg 0045) ────────────────────
+    // TRUE ⇒ every repo in this workspace stops claiming the reader's turn: `getMyTurn` forces
+    // `relevance: 'none'` (hence `personal: false`) on every one of its rows, so the Pending card
+    // relabels to the neutral "Review or reply", the browser notification stops firing and every
+    // `myTurnPersonal` figure drops it — while the row itself, and the broad `myTurn` count,
+    // are untouched. Muting routes work; it never deletes it.
+    //
+    // ⚠ IT IS NOT THE `repos.inbox_watch` AXIS THAT MIGRATION 0046 DROPPED. That column decided
+    // whether a repo's work was VISIBLE at all, which made "which of the two is this screen
+    // obeying — membership or watch?" a live question on every surface. This one changes no
+    // screen's population: Feed, Timeline, Activity, Bots and the Pending board all still cover
+    // a muted repo in full, and the ONE thing that moves is the OWNERSHIP CLAIM a card makes and
+    // the counts that claim feeds. There is still exactly one visibility axis, and it is
+    // membership.
+    //
+    // ⚠ A UNION WITH `pending_muted_repos`, NOT A PARENT OF IT. See that table.
+    pendingMuted: integer('pending_muted', { mode: 'boolean' }).notNull().default(false),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -1112,6 +1129,62 @@ export const workspaceRepos = sqliteTable(
     }).onDelete('cascade'),
     repoAccountFk: foreignKey({
       name: 'workspace_repos_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- The REPO half of the Pending mute (CORE, free) — migration 0058 / pg 0045 ----
+//
+// PRESENCE IS THE FACT: one row per (account, repo) the reader has muted for Pending, no
+// `muted` boolean and no "considered, not muted" row, so every reader is a single indexed
+// existence check. The effective answer for a repo is
+//
+//     muted  ==  its workspace's `workspaces.pending_muted`  OR  a row here
+//
+// ⚠ TWO INDEPENDENT FACTS, OR-ed — NOT AN INHERITANCE CHAIN, and the difference is the whole
+// design. `null`-means-inherit is a named bug class here (`workspace_reviewers.monthly_cents`,
+// the Slack target, the sprint cadence): it needs a resolver, and "which grain am I reading?"
+// becomes a question every call site answers separately. There is no resolver — there is one
+// union, computed once in db/pending-mute.ts. Un-muting a workspace does not un-mute a repo the
+// user muted by name, and muting a workspace does not overwrite (or silently adopt) the repo
+// rows underneath it.
+//
+// ⚠ NO `workspace_id` COLUMN, DELIBERATELY. A repo belongs to EXACTLY ONE workspace
+// (`workspace_repos`, UNIQUE (account_id, repo_id)); copying that fact onto this row would give
+// the account two answers to "which workspace is this repo in", and A FACT LIVES AT EXACTLY ONE
+// GRAIN. The consequence is intended: moving a repo to another workspace carries its mute with
+// it, which is the honest reading of "I muted that repository". The Settings screen scopes the
+// LIST it shows by membership; the stored fact stays repo-grained.
+//
+// ⚠ THIS IS NOT THE DROPPED `repos.inbox_watch` AXIS (migration 0046), and it is not a column on
+// `repos` for exactly that reason. `inbox_watch` decided whether a repo's work was VISIBLE, i.e.
+// a SECOND scope competing with membership. Nothing here changes any screen's population: a
+// muted repo is fully live on Feed, Timeline, Activity, Bots and the Pending board. What changes
+// is whether its rows may CLAIM THE READER'S TURN and interrupt them.
+export const pendingMutedRepos = sqliteTable(
+  'pending_muted_repos',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // No single-column FK: it is the COMPOSITE declaration below.
+    repoId: integer('repo_id').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    // One row per muted repo — and the upsert conflict target for the settings write.
+    accountRepoUx: uniqueIndex('pending_muted_repos_account_repo').on(t.accountId, t.repoId),
+    // Tenancy as a constraint, not a convention: `repoId` arrives in a REQUEST BODY, so a plain
+    // `REFERENCES repos(id)` would accept (account 2, repo 10) where repo 10 belongs to account
+    // 1 — both halves individually valid. NAMED, and the hand-written migrations spell the same
+    // name; Postgres quotes it in the violation message, SQLite stores it but never reports it.
+    repoAccountFk: foreignKey({
+      name: 'pending_muted_repos_repo_account_fk',
       columns: [t.repoId, t.accountId],
       foreignColumns: [repos.id, repos.accountId],
     }).onDelete('cascade'),

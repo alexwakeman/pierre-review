@@ -374,8 +374,8 @@ describe('the visible Bots sub-tab is DERIVED, never written back', () => {
   it('keeps `benchmark` selected on every tier — it is visible-but-locked, not absent', () => {
     // A capability is not even an input here. That is the assertion: the body locks, the TAB never
     // moves, so a bookmarked `?botsTab=benchmark` lands where it says it will.
-    expect(effectiveBotsTab('benchmark', { showAdvisor: false })).toBe('benchmark');
-    expect(effectiveBotsTab('benchmark', { showAdvisor: true })).toBe('benchmark');
+    expect(effectiveBotsTab('benchmark', { showAdvisor: false, showThemes: false })).toBe('benchmark');
+    expect(effectiveBotsTab('benchmark', { showAdvisor: true, showThemes: true })).toBe('benchmark');
   });
 
   // ⚠ AND THE MOUNT IS NOT AN INPUT EITHER — which matters MORE since the grain split, not less.
@@ -386,31 +386,67 @@ describe('the visible Bots sub-tab is DERIVED, never written back', () => {
   // rule is that WHICH BODY IS DRAWN is decided inside the pane, and the TAB never moves.
   it('takes no repoId, and cannot be made to degrade `benchmark` on the per-repo mount', () => {
     // Behavioural: an opts object that smuggles a mount in changes nothing, on either mount.
-    const withRepo = { showAdvisor: false, repoId: 7 } as { showAdvisor: boolean };
+    const withRepo = { showAdvisor: false, showThemes: false, repoId: 7 } as {
+      showAdvisor: boolean;
+      showThemes: boolean;
+    };
     expect(effectiveBotsTab('benchmark', withRepo)).toBe('benchmark');
-    expect(effectiveBotsTab('benchmark', { showAdvisor: false })).toBe('benchmark');
-    // Structural: two parameters, and the second's shape is the capability alone. A mount-aware
-    // signature would have to arrive here first.
+    expect(effectiveBotsTab('benchmark', { showAdvisor: false, showThemes: false })).toBe('benchmark');
+    // Structural: two parameters, and the second's shape is CAPABILITIES ALONE. It now holds two
+    // of them — `showThemes` joined when the themes report got its own tab — and that is the point
+    // of pinning the source text rather than the arity: both members are capability booleans, and a
+    // mount-aware signature would have to arrive here first.
     expect(effectiveBotsTab).toHaveLength(2);
     expect(sourceOf('components/Activity/benchmarkModel.ts')).toMatch(
-      /export function effectiveBotsTab\(\s*raw: BotsInnerTab,\s*opts: \{ showAdvisor: boolean \},?\s*\)/,
+      /export function effectiveBotsTab\(\s*raw: BotsInnerTab,\s*opts: \{ showAdvisor: boolean; showThemes: boolean \},?\s*\)/,
     );
   });
 
   it('keeps `roi` selected too — the same posture, older', () => {
-    expect(effectiveBotsTab('roi', { showAdvisor: false })).toBe('roi');
+    expect(effectiveBotsTab('roi', { showAdvisor: false, showThemes: false })).toBe('roi');
   });
 
-  it('degrades ONLY `advisor`, which is not listed without its capability', () => {
-    expect(effectiveBotsTab('advisor', { showAdvisor: false })).toBe('roi');
-    expect(effectiveBotsTab('advisor', { showAdvisor: true })).toBe('advisor');
+  it('degrades ONLY the members that are not LISTED without their capability', () => {
+    expect(effectiveBotsTab('advisor', { showAdvisor: false, showThemes: false })).toBe('roi');
+    expect(effectiveBotsTab('advisor', { showAdvisor: true, showThemes: true })).toBe('advisor');
+    // ⚠ `themes` TAKES THE ADVISOR'S POSTURE, NOT ROI'S. It is listed only when `activityDigest`
+    // holds, so an unentitled `?botsTab=themes` has no tab to land on and must degrade; a locked
+    // body instead would make it a SEVENTH visible-but-locked surface, which ProGate.tsx's header
+    // says needs its own written argument, and would draw a blank pane on OSS besides.
+    expect(effectiveBotsTab('themes', { showAdvisor: false, showThemes: false })).toBe('roi');
+    expect(effectiveBotsTab('themes', { showAdvisor: false, showThemes: true })).toBe('themes');
+  });
+
+  it('reads the two capabilities INDEPENDENTLY — neither implies the other', () => {
+    // ⚠ `botAdvisor` and `activityDigest` are different capabilities on different tiers, and an
+    // account can hold either alone. Collapsing them into one `showPro` flag would delete a working
+    // tab for half the accounts that paid for it.
+    expect(effectiveBotsTab('themes', { showAdvisor: true, showThemes: false })).toBe('roi');
+    expect(effectiveBotsTab('advisor', { showAdvisor: false, showThemes: true })).toBe('roi');
   });
 
   it('leaves every other member alone', () => {
     for (const tab of BOTS_INNER_TABS) {
-      if (tab === 'advisor') continue;
-      expect(effectiveBotsTab(tab, { showAdvisor: false })).toBe(tab);
+      if (tab === 'advisor' || tab === 'themes') continue;
+      expect(effectiveBotsTab(tab, { showAdvisor: false, showThemes: false })).toBe(tab);
     }
+  });
+
+  it('lists the themes tab only when entitled, and never locks it', () => {
+    // ⚠ THE FEED'S SETUP, MIRRORED — `Activity/index.tsx` builds its own tab list the same way.
+    // A conditional push, not a ProLockPanel body.
+    const view = sourceOf('components/Activity/BotsView.tsx');
+    expect(view).toMatch(/showThemes \? \[\{ key: 'themes', label: 'Themes' \} as const\] : \[\]/);
+    // ⚠ NOT MOUNT-GATED, unlike the advisor: the report is genuinely per-repo (repoScope narrows
+    // the data and the plugin keys the narrowed report separately), so gating it on the rail would
+    // silently delete a working surface on the per-repo Bots console.
+    expect(view).toMatch(/const showThemes = activityDigest;/);
+    expect(view).not.toMatch(/showThemes = repoId == null/);
+    // ⚠ ONE MOUNT, AND IT IS THE TAB'S. A panel left behind in the `roi` branch would render twice
+    // for an entitled reader and pay for the header space it no longer earns.
+    expect((view.match(/<BotThemesPanel/g) ?? []).length).toBe(1);
+    expect(view).toMatch(/effectiveTab === 'themes' \?/);
+    expect(view).not.toContain('ProLockPanel repoId');
   });
 
   it('is URL-parsed on every tier, so a bookmark can reach the locked tab', () => {
@@ -522,7 +558,12 @@ describe('refusal shapes', () => {
 describe('every percentile carries its cohort n and its band count', () => {
   it('renders the rank, the repository count and the band denominator', () => {
     const s = percentileSentence({ percentile: 73, nRepos: 41, bandLabel: '6 of 10' });
-    expect(s).toContain('73rd');
+    // ⚠ THE RANK IS NOW SPELLED "Higher than 73% of", NOT "73rd percentile". Same number, same
+    // three facts; a reader reported the statistical phrasing across this tab as the barrier, and
+    // "percentile" is the word they must translate before they can act. What this test guards is
+    // unchanged — the rank, the count it is out of, and the size group must ALL be on screen,
+    // because a rank without its denominator is not a comparison.
+    expect(s).toContain('73%');
     expect(s).toContain('41');
     // ⚠ "6 of 10", not "6": "upper fifth" is honest at 5 bands and a misrepresentation at 10.
     expect(s).toContain('6 of 10');
@@ -532,11 +573,13 @@ describe('every percentile carries its cohort n and its band count', () => {
     expect(percentileSentence({ percentile: 50, nRepos: 30, bandLabel: '' })).not.toContain('band');
   });
 
-  it('ordinalises the awkward ranks', () => {
-    expect(percentileSentence({ percentile: 1, nRepos: 30, bandLabel: '' })).toContain('1st');
-    expect(percentileSentence({ percentile: 11, nRepos: 30, bandLabel: '' })).toContain('11th');
-    expect(percentileSentence({ percentile: 22, nRepos: 30, bandLabel: '' })).toContain('22nd');
-    expect(percentileSentence({ percentile: 93, nRepos: 30, bandLabel: '' })).toContain('93rd');
+  it('states every rank as a plain percentage', () => {
+    // The ordinal forms these asserted ("1st", "22nd") went with "percentile" — a percentage needs
+    // no ordinal, which is one fewer thing to get wrong.
+    expect(percentileSentence({ percentile: 1, nRepos: 30, bandLabel: '' })).toContain('1%');
+    expect(percentileSentence({ percentile: 11, nRepos: 30, bandLabel: '' })).toContain('11%');
+    expect(percentileSentence({ percentile: 22, nRepos: 30, bandLabel: '' })).toContain('22%');
+    expect(percentileSentence({ percentile: 93, nRepos: 30, bandLabel: '' })).toContain('93%');
   });
 
   it('ranks an anomaly within the METRIC’s repositories, not the band-support count', () => {
@@ -1086,14 +1129,16 @@ describe('the retired per-repository cost model', () => {
     expect(head?.tone).toBe('behind');
     // Sentence one is the MEASURED figure, and it is the one the "nobody acts on" words sit on.
     expect(head?.spend).toContain('US$96.00');
-    expect(head?.spend).toMatch(/is buying feedback nobody acts on/);
+    expect(head?.spend).toMatch(/paying for comments nobody used/);
     // ⚠ A RATE AT THE MONTHLY PRICE, NEVER A SPEND OVER THE SPAN. The sentence shipped as
     // "US$189.22 of this reviewer's US$236.53 over the 8.6 weeks its comments span here bought
     // feedback nobody acted on" — a claim about money already spent, which today's price and a
     // recent throughput do not license. Both of those figures are named here so a revert is loud.
     expect(head?.spend).toContain('US$120.00');
-    expect(head?.spend).toMatch(/monthly price/);
     expect(head?.spend).toMatch(/a month/);
+    // (The sentence still names its MEASUREMENT window — "measured over the 8.6 weeks its
+    // comments span here" — which is the honest scope of the counts, not a spend over that span.
+    // The four assertions above are what separate the two.)
     expect(head?.spend).not.toContain('US$189.22');
     expect(head?.spend).not.toContain('US$236.53');
     expect(head?.spend).not.toMatch(/bought feedback/);
@@ -1101,7 +1146,7 @@ describe('the retired per-repository cost model', () => {
     // observed output, said in weeks, and never "per 14 days".
     expect(head?.spend).toMatch(/measured over the 8\.6 weeks its comments span here/);
     expect(head?.spend).not.toMatch(/14 days/);
-    expect(head?.spend).toMatch(/20 threads/);
+    expect(head?.spend).toMatch(/20 comments/);
     // ⚠ AND THE COUNTERFACTUAL'S NUMBER IS NOWHERE NEAR THOSE WORDS.
     expect(head?.spend).not.toContain('US$48.00');
     expect(head?.spend).not.toMatch(/cohort/i);
@@ -1110,12 +1155,16 @@ describe('the retired per-repository cost model', () => {
   it('puts the counterfactual in a SECOND sentence, worded as one, never as what a peer pays', () => {
     const head = costHeadline(costBlock());
     expect(head?.comparison).toContain('US$48.00');
-    expect(head?.comparison).toMatch(/cohort's median acted-on rate of 60%/);
+    // ⚠ THE COHORT RATE IS STATED, AND STATED AS SOMETHING TEAMS DO — never as something they pay.
+    expect(head?.comparison).toMatch(/teams with similar repos use 60%/i);
+    expect(head?.comparison).not.toMatch(/peers? (spend|pay)/i);
     // ⚠ PRESENT TENSE AND PER MONTH. "would have been acted on" is a claim about a period that has
     // already happened, which is the same history the spend sentence stopped making.
-    expect(head?.comparison).toMatch(/a month more of that same price would be acted on/);
+    expect(head?.comparison).toMatch(/a month of the price you already pay to work/);
     expect(head?.comparison).not.toMatch(/would have been/);
-    expect(head?.comparison).toMatch(/your threads and your price, their engagement/);
+    // ⚠ ONE FACTOR SWAPPED, AND THE SENTENCE HAS TO SAY SO. It is the customer's own price and
+    // own threads re-divided by THEIR rate; the second person is what keeps it a counterfactual.
+    expect(head?.comparison).toMatch(/the price you already pay/);
     // ⚠ IT MUST NOT CLAIM TO BE A PEER'S BILL. "What a peer pays" would be a figure built from two
     // cohort quantiles — the median of a product is not the product of the medians.
     expect(head?.comparison).not.toMatch(/peers? pays?|peer cost|a peer would pay/i);
@@ -1147,7 +1196,7 @@ describe('the retired per-repository cost model', () => {
       }),
     );
     expect(head?.tone).toBe('ahead');
-    expect(head?.comparison).toMatch(/acts on more of this reviewer/);
+    expect(head?.comparison).toMatch(/uses more of this bot than teams with similar repos/);
     expect(head?.comparison).toContain('US$33.60');
     // ⚠ No minus sign in the sentence and no "wasted": "-US$33.60 is buying feedback nobody acts
     // on" is a sentence that means nothing.
@@ -1357,9 +1406,12 @@ describe('the retired per-repository cost model', () => {
     // median is the one that must never read as an invoice.
     expect(Object.keys(COST_BASIS_LABEL).sort()).toEqual(['counted', 'fitted', 'stored']);
     expect(new Set(Object.values(COST_BASIS_LABEL)).size).toBe(3);
-    expect(COST_BASIS_LABEL.fitted).toMatch(/fitted/i);
-    expect(COST_BASIS_LABEL.fitted).toMatch(/peer/i);
-    expect(COST_BASIS_LABEL.counted).toMatch(/yours|your data/i);
+    // ⚠ THE RULE IS DISTINCTNESS AND PROVENANCE, NOT THE WORDS "fitted"/"peer" — both were jargon.
+    // What must survive is that the counterfactual chip names OTHER TEAMS, so it can never read as
+    // this customer's invoice, and the counted one names the customer's own data.
+    expect(COST_BASIS_LABEL.fitted).toMatch(/typical|other teams|similar/i);
+    expect(COST_BASIS_LABEL.fitted).not.toMatch(/you entered/i);
+    expect(COST_BASIS_LABEL.counted).toMatch(/yours|your (own )?data/i);
     expect(COST_BASIS_LABEL.stored).toMatch(/you entered/i);
     // The render-side half of this rule — which ROW wears which chip — moved to §12, because the
     // rows moved to the rollup card. The vocabulary itself is shared by both grains and stays here.
@@ -1537,10 +1589,10 @@ describe('the Workspace cost block', () => {
 
     // Sentence one: the POOLED rate, its own repository count, its own thread count, its own money.
     expect(head?.spend).toContain('US$88.80');
-    expect(head?.spend).toMatch(/is buying feedback nobody acts on/);
+    expect(head?.spend).toMatch(/paying for comments nobody used/);
     expect(head?.spend).toContain('4 repositories');
     expect(head?.spend).toContain('26%');
-    expect(head?.spend).toContain('100 threads');
+    expect(head?.spend).toContain('100 comments');
     expect(head?.spend).not.toContain('41%');
     expect(head?.spend).not.toContain('58%');
     expect(head?.spend).not.toContain('US$20.40');
@@ -1548,8 +1600,8 @@ describe('the Workspace cost block', () => {
     // Sentence two: the FITTED subset, named BEFORE either rate is stated — that clause is the only
     // thing standing between the reader and reading 41% as the figure sentence one just quoted.
     const cmp = head?.comparison ?? '';
-    expect(cmp).toContain('3 repositories with a fitted peer median');
-    expect(cmp.indexOf('fitted peer median')).toBeLessThan(cmp.indexOf('41%'));
+    expect(cmp).toContain('In the 3 repositories we can compare');
+    expect(cmp.indexOf('we can compare')).toBeLessThan(cmp.indexOf('41%'));
     expect(cmp).toContain('41%');
     expect(cmp).toContain('58%');
     expect(cmp).toContain('US$20.40');
@@ -1564,7 +1616,7 @@ describe('the Workspace cost block', () => {
     expect(cmp).not.toMatch(/points? (behind|ahead|below|above)/i);
     // ⚠ AND IT IS A COUNTERFACTUAL, NOT A PEER'S BILL — the median of a product is not the product
     // of the medians, so "what a peer pays" would be a figure nobody fitted.
-    expect(cmp).toMatch(/your threads and your price, their engagement/);
+    expect(cmp).toMatch(/the price you already pay/);
     expect(cmp).not.toMatch(/peers? pays?|peer cost|a peer would pay/i);
   });
 
@@ -1591,7 +1643,7 @@ describe('the Workspace cost block', () => {
     // so the even case gets its own words.
     const head = workspaceCostHeadline(workspaceCost(), expectation({ conversionGapUsd: 0 }));
     expect(head?.tone).toBe('even');
-    expect(head?.comparison).toMatch(/convert none of that price differently/);
+    expect(head?.comparison).toMatch(/would not change what the price buys/);
     expect(head?.comparison).not.toContain('US$0.00');
   });
 
@@ -1775,15 +1827,15 @@ describe('the spread sentence', () => {
 describe('the expectation sentence', () => {
   it('names its subset and BOTH rates, and never subtracts them', () => {
     const s = rollupExpectationSentence(expectation()) ?? '';
-    expect(s).toContain('3 repositories with a fitted peer median');
-    expect(s.indexOf('fitted peer median')).toBeLessThan(s.indexOf('41%'));
+    expect(s).toContain('In the 3 repositories we can compare');
+    expect(s.indexOf('we can compare')).toBeLessThan(s.indexOf('41%'));
     expect(s).toContain('41%');
     expect(s).toContain('58%');
     // ⚠ SIDE BY SIDE, NEVER A DIFFERENCE. 58 − 41 = 17 is a finding this panel did not earn.
     expect(s).not.toContain('17%');
     expect(s).not.toMatch(/points? (behind|ahead|below|above)/i);
     // ⚠ AND IT IS A COUNTERFACTUAL, NOT A PEER'S BILL.
-    expect(s).toMatch(/an estate of this shape at its cohorts' medians/);
+    expect(s).toMatch(/teams with repos like these use/);
     expect(s).not.toMatch(/peers? pays?|a peer would pay/i);
   });
 
@@ -1793,13 +1845,13 @@ describe('the expectation sentence', () => {
     // this clause can exist.
     const one = rollupExpectationSentence(expectation({ excludedRepos: 1 })) ?? '';
     expect(one).toContain('The other 1 repository');
-    expect(one).toContain('carries no fitted median and is');
-    expect(one).toMatch(/pooled rate above covers every one of them and is a different number/);
+    expect(one).toContain('has no team to compare it with and is');
+    expect(one).toMatch(/rate above covers every one of them and is a different number/);
     // Plural agreement — "the other 2 repository … carries" is the kind of line that makes a reader
     // stop trusting the arithmetic beside it.
     const two = rollupExpectationSentence(expectation({ excludedRepos: 2 })) ?? '';
     expect(two).toContain('The other 2 repositories');
-    expect(two).toContain('carry no fitted median and are');
+    expect(two).toContain('have no teams to compare them with and are');
     // …and when nothing is excluded there is no clause at all, rather than "the other 0".
     const none = rollupExpectationSentence(expectation({ excludedRepos: 0 })) ?? '';
     expect(none).not.toContain('The other');
@@ -2194,7 +2246,7 @@ describe('money lives on exactly one side of the grain split', () => {
     expect(panel).not.toMatch(/formatThreadCount\(cost\.yours\.actedPerMonth\)\} a month/);
     // The counterfactual still names the counterfactual pace it divided by — its count is a swapped
     // factor rather than a measured one, so it cannot be read off the row above it.
-    expect(panel).toMatch(/formatThreadCount\(expectation\.actedPerMonthAtPeer\)\} a month/);
+    expect(panel).toMatch(/formatThreadCount\(expectation\.actedPerMonthAtPeer\)\} comments a month/);
   });
 
   it('makes the per-acted-on division CHECKABLE from the row a reader is looking at', () => {
@@ -2212,7 +2264,7 @@ describe('money lives on exactly one side of the grain split', () => {
       perActedOnUsd: 3.222222,
     };
     expect(workspaceCostActedOnDetail(cost, yours)).toBe(
-      '243 of 479 threads acted on · US$783.00 a month',
+      '243 of 479 comments used · US$783.00 a month',
     );
     // ⚠ "across 1 repository" IS DROPPED — that clause exists to make a POOLED figure legible and is
     // noise on a single-repository Workspace, where it invites the reader to wonder what the other
@@ -2223,10 +2275,10 @@ describe('money lives on exactly one side of the grain split', () => {
     );
     // ⚠ THE WINDOW IS SERVED, NEVER INLINED. A hard-coded "30" would go on printing 30 the day the
     // server's constant moves, on the one card whose claim is that both halves cover one month.
-    expect(workspaceCostActedOnLabel(cost)).toBe('Per acted-on thread (last 30 days)');
+    expect(workspaceCostActedOnLabel(cost)).toBe('Per comment your team used (last 30 days)');
     expect(
       workspaceCostActedOnLabel({ ...cost, costWindowDays: undefined }),
-    ).toBe('Per acted-on thread');
+    ).toBe('Per comment your team used');
   });
 
   it('gives the thin-month refusal its own words, not `nothing_acted_on`’s', () => {
@@ -2276,6 +2328,52 @@ describe('money lives on exactly one side of the grain split', () => {
     expect(panel).toMatch(/testId="benchmark-workspace-cost-per-acted-on"[\s\S]{0,1600}basis="counted"/);
     expect(panel).not.toContain('testId="benchmark-cost-counterfactual"');
     expect(panel).not.toContain('testId="benchmark-cost-per-merged-pr"');
+  });
+
+  it('states the hypothetical in the row label, and uses that one noun everywhere', () => {
+    // ⚠ TWO EARLIER LABELS FAILED THE SAME READER. "At peer engagement" named a quantity nothing
+    // on the card points at; "At the peer median rate" named the statistic instead of the question.
+    // The label now states the CONDITION — "If your team used it as much" — because that is what
+    // the number answers.
+    //
+    // ⚠ AND IT MUST NEVER BECOME A CLAIM ABOUT WHAT OTHER TEAMS PAY. We do not know what anyone
+    // else pays; only the RATE is swapped, over this customer's own price and threads. A label in
+    // the third person ("peers spend…") would assert an invoice this feature cannot see, which is
+    // why the assertion below pins the second person rather than just pinning a string.
+    const panel = panelSource();
+    expect(panel).toContain("const label = 'If your team used it as much';");
+    expect(panel).not.toMatch(/label = '[^']*\bpeers? (spend|pay)\b/i);
+    // ⚠ THE ASSIGNMENT, NOT THE WORDS. The rename's own argument is written in a comment two lines
+    // above the label and quotes the string it replaced, so a bare substring search sees the dead
+    // label forever and would have to be deleted the moment somebody explains themselves.
+    expect(panel).not.toMatch(/label = 'At peer engagement'/);
+    expect(panel).not.toMatch(/label = 'At the peer median rate'/);
+    // ⚠ AND THE DETAIL SAYS WHOSE RATE WAS SUBSTITUTED, in words that do not require the reader to
+    // know what a cohort median is.
+    expect(panel).toContain('if it used this bot as much as teams with similar repos do');
+    // ⚠ ONE FACT, ONE NOUN, ACROSS THE THREE STRINGS THAT CAN STAND WHERE THIS ROW STANDS. The two
+    // refusals REPLACE this row outright and the headline's `ahead` branch sits inches below it;
+    // two wordings for one fact on one card is how a reader stops believing either.
+    // ⚠ THE SHARED NOUN IS "typical team" — the counterfactual row's own words, so the sentences
+    // that stand IN PLACE of that row name the same thing it does.
+    expect(COST_REFUSAL_HEADLINE.cohort_rate_unfitted).toMatch(/typical team/i);
+    expect(ROLLUP_REFUSAL_HEADLINE.no_fitted_cohort_rate).toMatch(/typical team/i);
+    // ⚠ STILL PAIRWISE DISTINCT, AND STILL NOT `cohort_rate_zero`'s CLAIM. "Other teams act on none
+    // of it either" is a measured cohort saying zero; these two have no comparison at all. Sharing
+    // a noun is required; sharing a SENTENCE would collapse three different facts into one.
+    expect(COST_REFUSAL_HEADLINE.cohort_rate_unfitted).not.toBe(
+      ROLLUP_REFUSAL_HEADLINE.no_fitted_cohort_rate,
+    );
+    expect(COST_REFUSAL_HEADLINE.cohort_rate_unfitted).not.toBe(
+      COST_REFUSAL_HEADLINE.cohort_rate_zero,
+    );
+    const ahead = workspaceCostHeadline(
+      workspaceCost({ monthlyUsd: 783 }),
+      expectation({ conversionGapUsd: -20.4 }),
+    );
+    expect(ahead?.tone).toBe('ahead');
+    expect(ahead?.comparison).toContain('than a team with similar repos would.');
+    expect(ahead?.comparison).not.toMatch(/peer engagement/);
   });
 
   it('gates the coverage caveat on there being a figure to point at, and renders both disclosures', () => {

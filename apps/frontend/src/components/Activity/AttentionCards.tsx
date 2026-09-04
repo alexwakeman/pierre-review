@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useIsMutating } from '@tanstack/react-query';
 import type {
   AutomatedReviewerKind,
   CiFailingCard,
@@ -19,7 +20,11 @@ import type {
 import type { MergeVerdictInfo } from '@pierre-review/shared';
 import { usePr, useThread } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
-import { useRequestReviewers } from '../../hooks/usePrWrites.js';
+import {
+  mergePrMutationKey,
+  updateBranchMutationKey,
+  useRequestReviewers,
+} from '../../hooks/usePrWrites.js';
 import { useDismissMyTurn } from '../../hooks/useAttentionCards.js';
 import { usePrArmedIntent } from '../../hooks/useAutoMerge.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
@@ -33,6 +38,7 @@ import {
   mergeVerdict,
   relativeTime,
   safeExternalUrl,
+  vendorInk,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { BotIcon, CheckIcon, ChevronIcon, ExternalLinkIcon, SparkleIcon } from '../Icons.js';
@@ -224,7 +230,7 @@ function BotVendorPill({
       className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium${
         meta == null ? ' bg-gray-500/10 text-gray-600 dark:text-gray-300' : ''
       }`}
-      style={meta != null ? { color: meta.color, background: `${meta.color}1a` } : undefined}
+      style={meta != null ? { ...vendorInk(meta.color), background: `${meta.color}1a` } : undefined}
       title={title ?? 'This thread was opened by an automated reviewer'}
     >
       <BotIcon size={12} />
@@ -405,7 +411,7 @@ function RoutingReviewers({
     s.kind === 'team' ? `team:${s.teamSlug}` : `user:${s.login ?? s.userId}`;
   return (
     <div className="mt-1.5 space-y-1.5">
-      <div className="flex items-center gap-2 text-[11px] text-gray-500">
+      <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
         <span className="font-medium">Suggested reviewers</span>
         <button
           type="button"
@@ -427,7 +433,7 @@ function RoutingReviewers({
       </div>
       <ul className="space-y-1">
         {suggestions.map((s) => (
-          <li key={keyOf(s)} className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
+          <li key={keyOf(s)} className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
             {s.kind === 'team' ? (
               <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium">
                 @{s.teamName}
@@ -598,6 +604,36 @@ export function pendingMergeGate(card: MergeReadyCard | UpdateBranchCard): Pendi
 function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard }): JSX.Element | null {
   const gate = pendingMergeGate(card);
   const armed = usePrArmedIntent(card.prId);
+  // ── "MID-MERGE" — WHERE THIS PR STANDS RIGHT NOW, IN THREE LAYERS ────────────────────────────
+  //
+  // The board used to say nothing at all between "Merge" and the card disappearing, which is the
+  // gap the request names ("if the PR is mid-merge, this should be indicated"). Three distinct
+  // things can be true, and they are checked most-immediate first:
+  //
+  //  1. A MANUAL merge or branch update the reader started, still in flight. Read off the SHARED
+  //     mutation key (`useIsMutating`) rather than a local `isPending`, because the mutation is
+  //     owned by `MergeControl` inside this row and PrDetail can mount a second `useMergePr` for
+  //     the same PR — a per-mount flag is invisible to the other mount, which is the
+  //     CiAnalysisCard lesson. Zero requests: `useIsMutating` reads the client's own mutation
+  //     cache.
+  //  2. An ARMED auto-merge intent, whose live phase is `armedPhaseHeadline` — THE one spelling,
+  //     shared with the global AutoMergeBanner so two surfaces cannot describe one intent two
+  //     ways. It covers all thirteen `ArmedMergePhase` members: pending_first_check /
+  //     waiting_conflicts / waiting_behind / updating_rebase / updating_merge / awaiting_checks /
+  //     awaiting_review / blocked_protection / enqueuing / queued (GitHub's merge queue) /
+  //     queued_local (⚠ Limn's OWN per-repo hold — a different queue, refined with "N of M on
+  //     this repo") / merging / retrying, plus a truthful "Waiting…" for a phase the watcher
+  //     could not characterise. Also zero requests: a selector over the armed list the app
+  //     already polls.
+  //  3. Neither — the synced merge verdict, as before.
+  //
+  // ⚠ STILL NOTHING FETCHES ON MOUNT. Both new reads are cache reads; GitHub's NATIVE merge-queue
+  // position is deliberately absent because it is not synced (PR_NODE_FIELDS excludes it as
+  // volatile) and the only way to it is the click-gated merge-options call — fifty cards making
+  // that call is the ~200-upstream-calls-to-paint-a-board failure this row is built to avoid.
+  const merging = useIsMutating({ mutationKey: mergePrMutationKey(card.prId) }) > 0;
+  const updating = useIsMutating({ mutationKey: updateBranchMutationKey(card.prId) }) > 0;
+  const inFlight = merging ? 'Merging…' : updating ? 'Updating the branch…' : null;
   if (!gate.show) return null;
   return (
     // ⚠ `data-noactivate` ON THE WHOLE ROW. `CardShell.onActivate` opens the PR unless the click
@@ -605,7 +641,13 @@ function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard
     // picker) is in none of those, so without this, choosing "Squash and merge" would navigate
     // away mid-choice.
     <div className="mt-2 flex flex-wrap items-center gap-2" data-noactivate>
-      {armed != null ? (
+      {inFlight != null ? (
+        // A write the reader started, still open. It OUTRANKS the armed headline: an armed intent
+        // describes what will happen later, a live POST describes what is happening now, and the
+        // card must not read "Waiting for the first check" while the merge call is in flight.
+        // Not a spinner — the row already has no other motion and the sentence is the signal.
+        <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">{inFlight}</span>
+      ) : armed != null ? (
         // ONE SPELLING of where a live intent stands, shared with the AutoMergeBanner stack. The
         // repo is not named because `PrLine` above already prints `owner/name #number`.
         <span className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -694,6 +736,19 @@ function CardShell({
             title="This pull request is already listed in “Do next” above — same PR, a different thing to do on it."
           >
             already in Do next
+          </span>
+        )}
+        {/* ⚠ EXPLANATION, NOT ARITHMETIC. `muted` says WHY this card carries the neutral label
+            instead of "Your turn" — the reader muted this repo (or its workspace) in Settings, and
+            a card that silently demoted itself is a smaller version of the "where did my work go"
+            failure the filtered empty state exists to prevent. Nothing counts it: every figure on
+            this board is folded from `relevance`, which has already absorbed the mute. */}
+        {card.kind === 'my_turn' && card.muted === true && (
+          <span
+            className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-gray-500 dark:text-gray-400"
+            title="Pending items from this repository are muted — they still appear here, but they don’t claim your turn and don’t notify you. Change it in Settings → Workspace."
+          >
+            muted
           </span>
         )}
         <span className="ml-auto text-gray-400">{right}</span>
@@ -1038,7 +1093,7 @@ export function AttentionCards({
           >
             <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
             <PrMetaRow pr={card} />
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
               <span>waiting on</span>
               {card.requestedReviewerIds.length > 0 || card.requestedTeamNames.length > 0 ? (
                 <>
@@ -1083,7 +1138,7 @@ export function AttentionCards({
             >
               <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
               <PrMetaRow pr={card} />
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
                 <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-mono">{card.path}</span>
                 <span>· no reply since</span>
                 {card.originalCommenterId != null && (

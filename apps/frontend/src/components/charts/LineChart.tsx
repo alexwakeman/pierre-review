@@ -221,7 +221,7 @@ export function LineChart({
                   y1={y(v)}
                   x2={w - PAD_R}
                   y2={y(v)}
-                  className="text-gray-200 dark:text-gray-700"
+                  className="decorative-mark text-gray-200 dark:text-gray-700"
                   stroke="currentColor"
                   strokeWidth={1}
                 />
@@ -244,7 +244,7 @@ export function LineChart({
                 y1={PAD_T}
                 x2={x(hover)}
                 y2={baseY}
-                className="text-gray-300 dark:text-gray-600"
+                className="decorative-mark text-gray-300 dark:text-gray-600"
                 stroke="currentColor"
                 strokeWidth={1}
               />

@@ -151,7 +151,7 @@ function DistributionStrip({
     <svg
       width={width}
       height={STRIP_HEIGHT}
-      className="text-gray-300 dark:text-gray-600"
+      className="decorative-mark text-gray-300 dark:text-gray-600"
       aria-hidden="true"
     >
       {/* The p10–p90 spread, then the p25–p75 box on top of it. */}
@@ -315,7 +315,7 @@ function RefusalNote({
 function BasisChip({ basis }: { basis: CostBasis }): JSX.Element {
   return (
     <span
-      className="rounded bg-gray-500/10 px-1 text-[9px] font-semibold uppercase tracking-wide text-gray-500"
+      className="rounded bg-gray-500/10 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300"
       data-testid={`benchmark-cost-basis-${basis}`}
     >
       {COST_BASIS_LABEL[basis]}
@@ -453,7 +453,7 @@ function FindingsSection({
               </span>
             </div>
             {/* The ACTION. Templated server-side — there is no model anywhere in this feature. */}
-            <p className="mt-1 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
+            <p className="mt-1 text-[12px] leading-relaxed text-amber-800 dark:text-amber-200">
               {anomaly.action}
             </p>
             {/* ⚠ BOTH GATES, SEPARATELY. The share and the magnitude are published as two numbers
@@ -461,7 +461,7 @@ function FindingsSection({
                 the threshold instead of the verdict. */}
             <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-[11px] sm:grid-cols-2">
               <div className="flex gap-1.5">
-                <dt className="text-amber-700/70 dark:text-amber-300/70">Rank</dt>
+                <dt className="text-amber-700/80 dark:text-amber-300/90">Rank</dt>
                 <dd className="tabular-nums text-amber-900 dark:text-amber-100">
                   {percentileSentence({
                     percentile: anomaly.share.percentile,
@@ -471,12 +471,17 @@ function FindingsSection({
                 </dd>
               </div>
               <div className="flex gap-1.5">
-                <dt className="text-amber-700/70 dark:text-amber-300/70">Gap</dt>
+                <dt className="text-amber-700/80 dark:text-amber-300/90">Gap</dt>
                 <dd className="tabular-nums text-amber-900 dark:text-amber-100">
-                  {row.metricLabel} {formatMetricValue(anomaly.magnitude.value, anomaly.magnitude.unit)}{' '}
-                  vs a peer median of{' '}
-                  {formatMetricValue(anomaly.magnitude.cohortMedian, anomaly.magnitude.unit)} (over{' '}
-                  {formatCount(anomaly.units)} of yours)
+                  {row.metricLabel}: yours {formatMetricValue(anomaly.magnitude.value, anomaly.magnitude.unit)},
+                  {' '}a typical team{' '}
+                  {formatMetricValue(anomaly.magnitude.cohortMedian, anomaly.magnitude.unit)}
+                  {/* ⚠ THE SAMPLE SIZE NAMES WHAT IT COUNTED, AND THE NOUN IS THE SERVER'S. It is
+                      not the same noun for every rule — one counts merged pull requests and three
+                      count threads — so a noun chosen here would be false on three cards in four.
+                      Absent (an older plugin), the clause drops the noun rather than guessing. */}
+                  {' '}(measured over {formatCount(anomaly.units)}
+                  {anomaly.unitsNoun != null ? ` of your ${anomaly.unitsNoun}` : ' of yours'})
                 </dd>
               </div>
             </dl>
@@ -539,7 +544,7 @@ function UnitCard({
         {/* The logins folded into this one unit — two accounts the workspace classifies as one
             vendor are ONE unit, which is the corpus's own semantics. */}
         {unit.reviewers.length > 0 && (
-          <span className="text-[10px] text-gray-400">
+          <span className="text-[11px] text-gray-500 dark:text-gray-400">
             {unit.reviewers.map((r) => r.login).join(', ')}
           </span>
         )}
@@ -549,11 +554,11 @@ function UnitCard({
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-400">
           {/* ⚠ THE BAND COUNT RIDES THE BAND. "Band 6" is meaningless; "band 6 of 10" is a rank. */}
           <span className="tabular-nums">
-            Activity band {placement.bandLabel} ({formatCount(placement.bandRange[0])}–
+            Size group {placement.bandLabel} ({formatCount(placement.bandRange[0])}–
             {formatCount(placement.bandRange[1])} merged PRs a fortnight)
           </span>
           <span className="tabular-nums">
-            {formatCount(placement.cohortRepos)} peer repositories defined this band
+            Compared with {formatCount(placement.cohortRepos)} other teams’ repos this size
           </span>
           <span className="tabular-nums">
             You: {formatCount(unit.activity.mergedPrsLast14d)} merged in 14 days
@@ -655,7 +660,7 @@ function UnitCard({
               <div className="flex flex-wrap items-baseline gap-x-2">
                 <span className="w-52 shrink-0 text-[11px] text-gray-600 dark:text-gray-300">
                   {row.label}
-                  <span className="ml-1 text-[10px] text-gray-400">
+                  <span className="ml-1 text-[11px] text-gray-500 dark:text-gray-400">
                     {DIRECTION_LABEL[m.cohort.direction]}
                   </span>
                 </span>
@@ -699,7 +704,7 @@ function UnitCard({
                 ) : (
                   // ⚠ NO STRIP RATHER THAN A PARTIAL ONE. A chart drawn from an incomplete grid is
                   // a picture of a distribution nobody fitted.
-                  <span className="text-[10px] text-gray-400">
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
                     {geom == null ? 'No readable distribution to draw' : ''}
                   </span>
                 )}
@@ -746,8 +751,8 @@ function UnitCard({
  * ⚠ IT TAKES THE EXPECTATION AS A SECOND ARGUMENT because at THIS grain the counterfactual is a
  * SIBLING of the cost rather than an arm inside it: a vendor the corpus has never measured — Sonar,
  * GHAS, `github-actions`, most of a real estate — still gets its money while only the comparison
- * refuses. The "At peer engagement" row and the headline's second sentence both read from it, and
- * both go quiet when it withheld its money halves.
+ * refuses. The "At the peer median rate" row and the headline's second sentence both read from it,
+ * and both go quiet when it withheld its money halves.
  */
 function WorkspaceCostBlock({
   cost,
@@ -888,7 +893,7 @@ function WorkspaceCostBlock({
           cannot reunite them by accident. */}
       {headline != null && (
         <div
-          className="mt-1.5 space-y-1 border-t border-gray-200 pt-1.5 text-[11px] leading-relaxed text-gray-700 dark:border-gray-800 dark:text-gray-200"
+          className="mt-1.5 space-y-1 border-t border-gray-200 pt-1.5 text-[12px] leading-relaxed text-gray-700 dark:border-gray-800 dark:text-gray-200"
           data-testid={`benchmark-workspace-cost-headline-${headline.tone}`}
         >
           <p data-testid="benchmark-workspace-cost-headline-spend">{headline.spend}</p>
@@ -971,7 +976,23 @@ function AtPeerEngagementRow({
 }: {
   expectation: BotBenchmarkRollupExpectation;
 }): JSX.Element | null {
-  const label = 'At peer engagement';
+  // ⚠ THE LABEL STATES THE HYPOTHETICAL, NOT THE STATISTIC. Two earlier attempts named the
+  // machinery — "At peer engagement", then "At the peer median rate" — and a reader reported that
+  // neither told them what was being compared. Both were accurate and both described a swap only
+  // someone who had read the fold could picture.
+  //
+  // ⚠ AND IT IS NOT "WHAT PEERS PAY". We do not know what any other team pays; nobody tells us.
+  // The only thing swapped is the RATE: your own price and your own thread counts, re-divided by
+  // how many of those comments your team WOULD have used at the rate similar teams manage. So the
+  // sentence has to be conditional and has to stay in the second person — "if your team used it as
+  // much" — because the moment it reads as "peers spend US$2.47" it is a claim about other
+  // people's invoices that this feature cannot make.
+  //
+  // ⚠ STILL THE CARD'S ONE NOUN FOR THIS FACT: the two refusals that stand IN PLACE of this row
+  // ("We have no typical team to compare with") and the headline's `ahead` branch describe the
+  // same comparison, because two wordings for one fact on one card is how a reader stops believing
+  // either.
+  const label = 'If your team used it as much';
   if (expectation.status !== 'value') return null;
   if (expectation.perActedOnUsd != null && expectation.actedPerMonthAtPeer != null) {
     return (
@@ -980,10 +1001,9 @@ function AtPeerEngagementRow({
         label={label}
         figure={formatUsd(expectation.perActedOnUsd)}
         detail={
-          `your threads and price with each repository's own cohort median — about ` +
-          `${formatThreadCount(expectation.actedPerMonthAtPeer)} a month across the ` +
-          `${formatCount(expectation.fittedRepos)} ` +
-          `${expectation.fittedRepos === 1 ? 'repository' : 'repositories'} with a fitted median`
+          `your price, divided by the roughly ` +
+          `${formatThreadCount(expectation.actedPerMonthAtPeer)} comments a month your team would ` +
+          `have used if it used this bot as much as teams with similar repos do`
         }
         basis="fitted"
       />
@@ -1086,7 +1106,7 @@ function PooledCounters({ counters }: { counters: BotBenchmarkPlacementCounters 
       >
         <ChevronIcon dir={open ? 'down' : 'right'} />
         <ThreadsIcon size={12} className="text-gray-400" />
-        Pooled counts behind every figure on this card
+        The raw counts behind every figure on this card
       </button>
       {/* ⚠ THE VALUE SITS AGAINST ITS OWN LABEL, NOT AT THE FAR EDGE OF THE CARD. The first cut was
           `justify-between` inside a half-width column, which on a wide rail put ~650px of empty
@@ -1102,7 +1122,7 @@ function PooledCounters({ counters }: { counters: BotBenchmarkPlacementCounters 
           const meta = COUNTER_GROUP_LABEL[group];
           return (
             <div key={group}>
-              <div className="text-[9px] font-semibold uppercase tracking-wide text-gray-400">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
                 {meta.label}{' '}
                 <span className="font-normal normal-case tracking-normal text-gray-400/80">
                   · {meta.population}
@@ -1162,12 +1182,12 @@ function EvidenceTable({
       <div className="mt-1 overflow-x-auto">
         <table className="w-full min-w-[32rem] border-collapse text-[11px]">
           <thead>
-            <tr className="border-b border-gray-200 text-left text-[9px] uppercase tracking-wide text-gray-400 dark:border-gray-800">
+            <tr className="border-b border-gray-200 text-left text-[10px] uppercase tracking-wide text-gray-400 dark:border-gray-800">
               <th scope="col" className="py-1 pr-3 font-semibold">
                 Repository
               </th>
               <th scope="col" className="py-1 pr-3 font-semibold">
-                Activity band
+                Size group
               </th>
               <th scope="col" className="py-1 pr-3 text-right font-semibold">
                 Merged PRs, 14 days
@@ -1176,7 +1196,7 @@ function EvidenceTable({
                 Acted on
               </th>
               <th scope="col" className="py-1 text-right font-semibold">
-                Rank in its band
+                Rank in its group
               </th>
             </tr>
           </thead>
@@ -1211,9 +1231,9 @@ function EvidenceTable({
         </table>
       </div>
       <p className="mt-1 text-[10px] leading-relaxed text-gray-400">
-        A dash is a figure this repository withheld, never a zero — its counts still pool into the
-        totals above, because pooling is the remedy for a thin sample. Each rank is read against
-        that repository’s own cohort band, so the ranks are not comparable with each other.
+        A dash means this repo had too little to measure — never that the answer was zero. Its
+        counts are still included in the totals above. Each rank is against other repos of that
+        repo’s own size, so the ranks in this column are not comparable with each other.
       </p>
     </div>
   );
@@ -1261,7 +1281,7 @@ function RollupCard({ row }: { row: RollupRow }): JSX.Element {
         {/* The logins folded into this one card — two accounts the workspace classifies as one
             vendor are ONE card, which is the corpus's own semantics. */}
         {rollup.reviewers.length > 0 && (
-          <span className="text-[10px] text-gray-400">
+          <span className="text-[11px] text-gray-500 dark:text-gray-400">
             {rollup.reviewers.map((r) => r.login).join(', ')}
           </span>
         )}
@@ -1280,7 +1300,7 @@ function RollupCard({ row }: { row: RollupRow }): JSX.Element {
           the rank of anything. */}
       {spread != null && (
         <div
-          className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-gray-600 dark:text-gray-300"
+          className="mt-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-gray-600 dark:text-gray-300"
           data-testid="benchmark-rollup-spread"
         >
           <ScalesIcon className="mt-0.5 shrink-0 text-gray-400" />
@@ -1319,7 +1339,7 @@ function RollupCard({ row }: { row: RollupRow }): JSX.Element {
           POPULATIONS", shipped three times in that feature before it was believed. */}
       {expectation != null && (
         <div
-          className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-gray-600 dark:text-gray-300"
+          className="mt-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-gray-600 dark:text-gray-300"
           data-testid="benchmark-rollup-expectation"
         >
           <ChartIcon size={13} className="mt-0.5 shrink-0 text-gray-400" />
@@ -1398,7 +1418,7 @@ function MeasuredDisclosure(): JSX.Element {
                       least {formatCount(s.minUnits)}
                     </span>
                   </dt>
-                  <dd className="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                  <dd className="text-[12px] leading-relaxed text-gray-500 dark:text-gray-400">
                     {s.definition}
                     <br />
                     <span className="text-gray-400">
@@ -1486,12 +1506,13 @@ function Body({
         headline={
           data.reason != null
             ? UNAVAILABLE_HEADLINE[data.reason]
-            : 'No peer corpus is being served'
+            : 'No comparison data is available'
         }
         message={
           data.message ??
-          'Peer benchmarking compares your review bots against the same products running in ' +
-            'comparable repositories. This build is not serving that corpus.'
+          'This tab compares each of your review bots against the same bot running in other ' +
+            'teams’ repositories of a similar size. That comparison data is not available in ' +
+            'this build.'
         }
       />
     );
@@ -1499,14 +1520,14 @@ function Body({
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-400">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-600 dark:text-gray-300">
         <span className="inline-flex items-center gap-1">
           <ChartIcon size={12} />
-          Each reviewer is compared with the SAME product running in repositories of comparable
-          activity.
+          Every bot here is compared with the same bot running in other teams’ repos of a similar
+          size.
         </span>
         {data.staleness != null && (
-          <span title={`The corpus's newest observation is ${Math.round(data.staleness.corpusAgeDays)} days old.`}>
+          <span title={`The newest measurement in the comparison data is ${Math.round(data.staleness.corpusAgeDays)} days old.`}>
             {STALENESS_LABEL[data.staleness.state]} ·{' '}
             {Math.round(data.staleness.corpusAgeDays)} days old
           </span>
@@ -1636,13 +1657,13 @@ function Body({
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-gray-600 dark:text-gray-300">
             <InfoIcon className="text-gray-400" />
             Not in this corpus yet
-            <span className="rounded bg-gray-500/10 px-1 text-[9px] font-semibold uppercase tracking-wide text-gray-500">
+            <span className="rounded bg-gray-500/10 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
               {DERIVATION_LABEL.model}
             </span>
           </div>
           <ul className="mt-1 space-y-1">
             {absent.map((m) => (
-              <li key={m.name} className="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+              <li key={m.name} className="text-[12px] leading-relaxed text-gray-500 dark:text-gray-400">
                 <span className="font-medium text-gray-600 dark:text-gray-300">{m.label}</span> —{' '}
                 {m.note}
                 {Object.entries(m.requires).length > 0 && (

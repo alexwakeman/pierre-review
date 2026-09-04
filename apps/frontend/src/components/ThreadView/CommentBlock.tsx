@@ -41,7 +41,7 @@ export function CommentBlock({
         {showLink && (
           <>
             {showLink}
-            <span className="text-gray-300 dark:text-gray-600">·</span>
+            <span className="decorative-mark text-gray-300 dark:text-gray-600">·</span>
           </>
         )}
         <Avatar user={user} size={18} />

@@ -34,6 +34,7 @@ import {
   ML_CATEGORY_LABEL,
   ML_SEVERITY_META,
   relativeTime,
+  vendorInk,
 } from '../../lib/ui.js';
 import { formatCostInput, resolveVendorCost } from '../../lib/botCost.js';
 import { formatAvg, volumeByKey } from '../../lib/botVolume.js';
@@ -45,6 +46,7 @@ import { SeverityBar } from '../MlSeverityBadge.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js';
+import { InflationHistoryChart } from './InflationHistoryChart.js';
 
 // Bot ROI / utilisation panel — PAID (`botDepth`), rendered in the Bots rail console. Still
 // deterministic and model-free: a per-bot signal-to-noise table + a 12-week thread-volume trend +
@@ -317,7 +319,7 @@ export function TuningSuggestions({
             >
               <span
                 className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium"
-                style={{ color: meta.color, background: `${meta.color}1a` }}
+                style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
               >
                 <BotIcon size={11} />
                 {meta.label}
@@ -717,7 +719,7 @@ function QualityCheckSection({
                       {/* A dormant gate is the interesting case here: it usually means the
                           integration broke, not that the bot got quieter. */}
                       {v.dormant && (
-                        <span className="rounded bg-gray-500/10 px-1 py-px text-[10px] text-gray-500">
+                        <span className="rounded bg-gray-500/10 px-1 py-px text-[10px] text-gray-500 dark:text-gray-400">
                           dormant
                         </span>
                       )}
@@ -784,7 +786,7 @@ function VolumeCell({
   if (!bot) {
     return (
       <span
-        className="text-gray-300 dark:text-gray-600"
+        className="text-gray-500 dark:text-gray-400"
         title="This bot commented on nothing that merged inside the window. (The thread columns can still be non-zero — they count threads OPENED in the window, on PRs that may not have merged yet.)"
       >
         —
@@ -824,10 +826,23 @@ function vendorKeyUserId(key: string): number | null {
 
 // ── The Inflation column (plan P1.2/C2) ───────────────────────────────────────────────────────
 // The severity-inflation index, folded into the ROI table: how often this bot's OWN badge
-// contradicted our label, over the same window as every other cell. It replaced the two
-// workspace-grain inflation ChartCards — the counts are the verdict (FREE, they ride the same
-// free ML fold as the severity columns); the weekly sparkline beside them is the history
-// (`botDepth`).
+// contradicted our label, over the same window as every other cell. The counts are the verdict;
+// the weekly sparkline beside them is the history.
+//
+// ⚠ THE WHOLE COLUMN IS PAID (`botDepth`), counts included. It used to be a split tier (counts
+// free, history paid), but the cell is a cell of the ROI table and that table went behind
+// `botDepth` in one piece, so an unentitled account receives no `vendors[]` to draw it in.
+// `weekly` keeps its own absent/present flag because it is an extra scan WIDTH in the getter, not
+// just a field to drop.
+//
+// ⚠ THIS IS NO LONGER THE ONLY INFLATION SURFACE, AND THE OLD "it replaced the two workspace-grain
+// inflation ChartCards" LINE IS RETIRED WITH THAT CLAIM. Plan P1.2/C2 cut two WORKSPACE-grain
+// inflation ChartCards from `WorkspaceBotCharts`, and nothing has returned there — that surface is
+// fed by `/api/pro/bot-behaviour`, whose weekly points carry severity and category only. What came
+// back is an enlargement of THIS cell's sparkline, in THIS panel's chart row, off THIS response's
+// `mlInflation.weekly`: `InflationHistoryChart`. The cell stays the numbers and the click-through;
+// the card is the same two series at a size that can carry a key, an axis and a hover. Deleting
+// one because the other exists would remove either the drill-down or the readable history.
 //
 // ⚠ COUNTS, NEVER SHARES — and the counts partition the bot's BADGED findings, never its scored
 // ones. A bot that badges nothing renders a DASH with the "no badge is silence, not agreement"
@@ -842,6 +857,11 @@ function vendorKeyUserId(key: string): number | null {
 // The tiny Pro sparkline: the two weekly disagreement series in the two directions' fixed colours
 // (amber = the bot called it worse, violet = we did — the removed charts' palette). Decorative
 // trend context only, so it is aria-hidden; the counts beside it carry the numbers.
+//
+// It stays decorative BECAUSE it now has a readable twin: `InflationHistoryChart`, in this panel's
+// chart row, draws the same `mlInflation.weekly` for every charted bot with a key, an axis and a
+// hover. Anything a reader has to be able to READ off inflation history belongs there — do not
+// grow this one a legend or a tooltip, it is 52×14 and lives inside a table cell.
 function InflationSparkline({ weekly }: { weekly: BotInflationWeekPoint[] }): JSX.Element | null {
   const W = 52;
   const H = 14;
@@ -878,7 +898,7 @@ function InflationCell({
     // Omitted-and-named, never a zero — no badge is silence, not agreement.
     return (
       <span
-        className="text-gray-300 dark:text-gray-600"
+        className="text-gray-500 dark:text-gray-400"
         title="badges nothing — no badge is silence, not agreement"
       >
         —
@@ -1213,7 +1233,7 @@ function VendorTable({
             // A DORMANT row (no window activity — the row survives on its 12-week trend):
             // zeros here would read as "active but useless", so dash the window metrics and
             // explain via a chip + last-active instead.
-            const dash = <span className="text-gray-300 dark:text-gray-600">—</span>;
+            const dash = <span className="text-gray-500 dark:text-gray-400">—</span>;
             return (
               <tr
                 key={v.key}
@@ -1225,7 +1245,7 @@ function VendorTable({
                     onClick={() => onOpenVendor(v.key)}
                     title="Open the bot drill-down — its comments (default) and the PRs it touched"
                     className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:underline"
-                    style={{ color, background: `${color}1a` }}
+                    style={{ ...vendorInk(color), background: `${color}1a` }}
                   >
                     <BotIcon size={11} />
                     {v.label}
@@ -1235,7 +1255,7 @@ function VendorTable({
                   )}
                   {v.dormant && (
                     <span
-                      className="ml-1.5 inline-block rounded border border-gray-300 px-1 py-px text-[10px] text-gray-400 dark:border-gray-700 dark:text-gray-500"
+                      className="ml-1.5 inline-block rounded border border-gray-300 px-1 py-px text-[10px] text-gray-500 dark:border-gray-700 dark:text-gray-400"
                       title="No activity in the selected window — the trend below still shows its earlier threads. Widen the window to see them counted."
                     >
                       dormant
@@ -1246,7 +1266,7 @@ function VendorTable({
                 <td className="px-2 py-1.5 text-right tabular-nums">
                   {v.dormant ? dash : v.threads}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
+                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400">
                   {v.dormant ? dash : v.comments}
                 </td>
                 {/* Comments per merged PR. NOT dashed on `dormant`: dormancy is judged on the
@@ -1331,19 +1351,19 @@ function VendorTable({
                     </span>
                   )}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
+                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400">
                   {v.dormant ? dash : dur(v.medianAddressedMs)}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
+                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400">
                   {v.oldestUntouchedDays != null ? `${v.oldestUntouchedDays}d` : '—'}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
+                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400">
                   {v.dormant ? dash : pct(v.noiseRatioPct)}
                 </td>
                 {/* Same-line overlap — advisory. `?? null` guards a stale cached response that
                     predates the field (the column then reads as blank, never NaN). */}
                 <td
-                  className="px-2 py-1.5 text-right tabular-nums text-gray-500"
+                  className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400"
                   title={
                     v.topOverlapPartner
                       ? `${v.overlapThreads} thread${v.overlapThreads === 1 ? '' : 's'} land on lines ${v.topOverlapPartner.label} also flagged (${v.topOverlapPartner.clusters} shared spot${v.topOverlapPartner.clusters === 1 ? '' : 's'})`
@@ -1422,7 +1442,7 @@ function VendorTable({
                     another one. */}
                 {showCost && (
                 <td
-                  className="px-2 py-1.5 text-right tabular-nums text-gray-500"
+                  className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400"
                   // Money is printed through the same formatter as the cost box in Bots →
                   // Settings, so "45.50" there can't read back as "45.5" here.
                   title={
@@ -1804,6 +1824,12 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
     );
   } else {
     const t = data.totals;
+    // The picker's own word for the window every windowed figure on this panel was measured over.
+    // Quoted by the inflation history card, whose span is a FIXED 12 weeks and therefore has to
+    // name the other grain rather than let a reader assume the two agree. `rolling_90` is a valid
+    // `BotWindowKind` with no button here (only the chat sets it), so the fallback is a word, not
+    // a fabricated day count.
+    const windowLabel = WINDOWS.find((wOpt) => wOpt.key === window)?.label ?? 'selected';
     body = (
       <div className="space-y-3">
         {/* The severity totals strip (the old BotSeverityPanel's survivor) — same response,
@@ -1898,8 +1924,10 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           onTune={advisorPillsOn ? (key) => focusAdvisor(key, 'tune') : null}
           onDrop={advisorPillsOn ? (key) => focusAdvisor(key, 'drop') : null}
         />
-        {/* Bot-effectiveness charts (per vendor) — all always visible: raw weekly volume, the
-            volume-independent effectiveness + verdict, and the acted-on vs untouched split. */}
+        {/* Bot-effectiveness charts (per vendor): raw weekly volume, the volume-independent
+            effectiveness + verdict, and the acted-on vs untouched split — those three always
+            visible. The fourth, severity inflation over time, is the only conditional one: it
+            enlarges the table's Inflation sparkline and rides the same ML gate that column does. */}
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           <ChartCard title="Thread volume" note="weekly · last 12">
             <VendorTrendChart vendors={vendors} value={threadsVal} botColor={botColor} />
@@ -1910,6 +1938,25 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           <ChartCard title="Acted-on vs untouched" note="by bot · current window">
             <ActedVsUntouchedChart vendors={vendors} />
           </ChartCard>
+          {/* The Inflation column's sparkline, enlarged — same response, same field
+              (`mlInflation.weekly`), same two direction hues, plus the key/axis/hover a 52×14px
+              cell-sized SVG has no room for. It sits in THIS row rather than in the "Workspace
+              charts" section because that section is fed by `/api/pro/bot-behaviour`, which
+              carries no weekly inflation at all; here it costs no request.
+
+              ⚠ GATED ON `showMlColumns`, THE SAME FLAG AS THE COLUMN IT ENLARGES — a deployment
+              with no scoring service, or a window with nothing scored, must show neither. It also
+              spans the full row (`lg:col-span-3` on the card itself): the three cards beside it
+              are one-metric-per-bot, this one is one PANEL per bot and would be unreadable in a
+              third of the width. It returns null when there is no badged bot to chart and none to
+              name, so no empty cell appears in the grid. */}
+          {showMlColumns && (
+            <InflationHistoryChart
+              vendors={vendors}
+              botColor={botColor}
+              windowLabel={windowLabel}
+            />
+          )}
         </div>
         {/* `TuningSuggestions` USED TO SIT HERE and now renders in BotsView, above this panel:
             it is a free `botTriage` surface and this panel is not, so leaving it inside would have

@@ -1,5 +1,5 @@
 import type { AddressedConfidence } from '@pierre-review/shared';
-import { CONFIDENCE_META } from '../lib/ui.js';
+import { CONFIDENCE_META, vendorInk } from '../lib/ui.js';
 
 // A compact "how sure are we it was addressed?" pill rendered beside a thread's StateBadge for
 // likely_addressed threads. DETERMINISTIC (free) — distinct from the Pro ✨ verdict marker. Hidden
@@ -17,7 +17,7 @@ export function ConfidenceBadge({
   return (
     <span
       className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-      style={{ backgroundColor: `${meta.color}1a`, color: meta.color }}
+      style={{ backgroundColor: `${meta.color}1a`, ...vendorInk(meta.color) }}
       title={title}
     >
       <span

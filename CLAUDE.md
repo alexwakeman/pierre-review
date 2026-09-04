@@ -305,6 +305,36 @@ before changing any route's shape.** Everywhere:
 
 ---
 
+## Product voice — PLAIN ENGLISH, AND AS LITTLE OF IT AS POSSIBLE
+
+**Every user-facing string in this product is written in plain English, and the shortest honest
+version wins.** This governs the SPA, the landing page, and the strings the plugin templates and
+sends over the wire — a sentence composed server-side lands on the same screen as one written in
+a component, and the reader cannot tell them apart.
+
+- **NAME THE THING.** "CodeRabbit", not "the same product". "Similar-sized repos", not "the
+  cohort". "Comments your team used", not "acted-on threads". If a term needs the reader to know
+  how the fold works, it is the wrong term — the Benchmark tab shipped with *corpus*, *fitted*,
+  *percentile*, *activity band* and *settled threads* on one screen and a reader reported that
+  they could not tell what was being compared.
+- **STATE THE FACT AND STOP.** Do not explain what you cannot know, do not label your own
+  confidence, do not pre-empt the reader's reasoning. The blocked-PR row shipped with a preamble
+  about what GitHub does and does not tell us, a PROVEN/INFERRED chip on every row, and a note
+  under each explaining the hedge — three layers of scaffolding around one short true sentence.
+  It now prints the facts. ⚠ The certainty is still COMPUTED and still ORDERS the list; what was
+  removed is the narration, not the rigour.
+- **A NUMBER IS NOT A DISCLOSURE.** Round it (`94.6097%` is noise past the units digit), and give
+  it a denominator a reader can check. But a caveat nobody asked for is verbiage: prefer a figure
+  that needs no caveat to a figure wearing one.
+- **THE HONESTY RULES ARE NOT NEGOTIABLE, AND ARE NOT AN EXCUSE FOR LENGTH.** Everything under
+  *Period reporting*, *Chronology* and *The peer benchmark* about labelling populations apart and
+  refusing rather than guessing still holds — those exist so the app does not assert what it
+  cannot back. Meet them in fewer words; never by adding a paragraph of hedging.
+- **SMALL TEXT IS NOT FREE.** 8-10px uppercase-with-tracking is the least legible setting there
+  is. 11px is the floor for a label, 12px for a sentence, and contrast is enforced from source by
+  `apps/frontend/test/textContrast.test.ts` + `vendorInk.test.ts` (see **Colour and contrast**
+  under *Conventions*).
+
 ## Frontend
 
 Four deliberately-separated state layers: **server state** in TanStack Query (PR/thread detail
@@ -346,6 +376,18 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   and the `roi` and `benchmark` BODIES lock. ⚠ **A gated sub-tab must still be SELECTABLE** — `effectiveInsightsTab`
   normalises an out-of-union value and nothing else, never a capability fallback, or an unentitled
   `?insightsTab=bottlenecks` from a bookmark silently lands on Overview explaining nothing.
+- **"Where the work is happening" is TWO CHARTS under Flow metrics, never one blended score**
+  (`WorkspaceRepoActivityCharts`, riding `repoActivity` on the SAME free `/api/workspace-metrics`
+  response): PRs opened per repo, STACKED people vs automation, beside lines changed, same order in
+  both. A normalised activity index is "a number no PR resembles" one more time; a GROUPED chart is
+  separately broken because `BarChart`'s `niceMax` gives both series ONE y-axis. ⚠ It mounts in
+  `WorkspaceFlowMetrics`, **never inside `WorkspaceMetricsPanel`** — that panel ALSO mounts per-repo
+  behind a Pro gate, where a per-repo breakdown is one bar for paying accounts only. ⚠ Its window is
+  a rolling 14 days (`INSIGHT_SPRINT_DAYS`) and CANNOT be the sprint cadence (plugin-owned, this is
+  free) — a THIRD window on that panel, so it says so. ⚠ **Unknown size is not zero size**
+  (`linesChanged: null`, never a fabricated 0 — and `BarChart` drops every `v <= 0`, so the unsized
+  COUNT must be disclosed in words); a repo added mid-window is MARKED, never pro-rated; the top-12
+  cap states what it cut on BOTH axes.
 - **Pending cards carry MERGE-RELATED ACTIONS, on the two FORWARD kinds only** (`merge`,
   `update_branch`) - Merge, Merge-when-ready, Cancel, Update branch. ⚠ **NOTHING ON THE BOARD
   MAY FETCH ON MOUNT**: `MergeWhenReadyControl` fetches merge-options EAGERLY (~3 GitHub calls per
@@ -353,7 +395,19 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   synced `mergeStateStatus`/`mergeable`/`viewerCanPush` through `mergeVerdict()`, and the live
   fetch is CLICK-GATED. `viewerCanPush` rides the card for the same reason; it is a VISIBILITY
   gate only - the merge route re-checks permission, head oid and live merge state. HIDE, never
-  disable.
+  disable. Mid-merge is THREE layers on one row: a live manual merge (read off the SHARED
+  `mergePrMutationKey`/`updateBranchMutationKey` via `useIsMutating`, never a per-mount
+  `isPending`), then the armed intent's `armedPhaseHeadline`, then the synced verdict.
+- **The board's freshness against GITHUB is ONE batched sweep, `POST /api/attention/liveness`** —
+  the sanctioned alternative to per-card fetching, not an exception to it. It sends the board's PR
+  ids and re-reads them in one `nodes(ids:)` call (2 GraphQL points, ~5-7s). ⚠ **MEASURED: 90 ids
+  answer in ~1.4s for scalars, but adding `mergeable`/`mergeStateStatus` 502s at 50 ids** - GitHub
+  computes mergeability on demand, so that half is a RANKED subset capped at 25 (forward cards
+  first). ⚠ An observed `unknown` never demotes a known merge state, or the sweep flip-flops
+  forever. ⚠ **IT RETURNS COUNTS, NEVER CARDS**: `changed > 0` means REFETCH `['attention-cards']`
+  + `['daily-brief']` (+ `['work-plan']`) together - a local splice kills `capFor`'s
+  `shown === count` guard and the "50 of 148" disclosure with it. Those same three keys are the
+  ONLY ones that opt out of the app-wide `refetchOnWindowFocus: false`, and they do it TOGETHER.
 - **`InsightPrRef.authorIsBot`/`authorBotKind` say who opened a PR**, built in the ONE `prRef`
   builder. WARN The resolution is NOT the login: a manual workspace judgement wins BOTH
   directions, then `users.isBot`, then the login seeds a vendor - the same resolution the
@@ -385,6 +439,23 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   invent an ownership claim on screen. ⚠ `?attnPersonal=1` is retired but still PARSED (as
   `'mine'`) — it shipped, so it is in bookmarks and in history entries Back replays; `?attnRel=` is
   the only key emitted.
+- **THE PENDING MUTE RIDES `relevance`, ONCE, SERVER-SIDE** (CORE/free, both modes; migration
+  `0058`/pg `0045` — `workspaces.pending_muted` + `pending_muted_repos`, read via
+  `db/pending-mute.ts`, written by `PUT /api/workspaces/:id/pending-mute`, edited in Settings →
+  Workspace). A muted repo's my_turn rows are forced to `relevance: 'none'` inside **`getMyTurn`**,
+  at the one fold where `personal` is derived — so the card relabels, the browser notification
+  stops, `myTurnPersonal` drops it and the broad `myTurn` population is UNTOUCHED, with no second
+  predicate anywhere. ⚠ **TWO INDEPENDENT FACTS, OR-ed, NEVER A CHAIN** (workspace switch ∪ named
+  repos); `pending_muted_repos` carries no `workspace_id`, so the write MUST scope its delete to
+  the named workspace's membership or a Save clears every other workspace's mutes. ⚠ It is **NOT**
+  the `repos.inbox_watch` axis `0046` dropped: no screen's population changes — a muted repo is
+  fully live everywhere — only whether a row may CLAIM YOUR TURN and interrupt you. ⚠ It applies in
+  the UNSCOPED `getMyTurn` too, because the notification watcher reads exactly that. ⚠ It reaches
+  `my_turn` ONLY — the two FORWARD kinds carry `relevance` for the ranker weight and the severity
+  accent, not as an ownership claim. ⚠ `muted` is DISPLAY ONLY: no counter, lens or ranker may read
+  it. ⚠ A muted item DOES rank lower in "Do next" (`RELEVANCE_WEIGHT`) — accepted and pinned, not
+  emergent. ⚠ It is also why the Settings **Workspace heading is no longer Pro-gated**: a free
+  workspace section must never sit below the `/api/pro/settings` gate, which 404s with no plugin.
 - **Visible sub-tabs are DERIVED, never written back** (`feedInnerTab`, `botsInnerTab`,
   `insightsTab` — Reports' Overview/Bottlenecks) —
   compute an `effectiveTab` for the render only; a corrective `set…` permanently forgets the
@@ -450,6 +521,17 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   field to lead with. ⚠ **`unstable` IS mergeable** (only non-required checks are red); `behind`
   is not (GitHub 405s). `db/triage.ts`'s `READY_MERGE_STATES` and `mergeVerdict`'s `canMerge`
   must agree, or the triage queue and the PR disagree.
+- **`blocked` is the ONE verdict GitHub refuses to explain, so it is the ONE that carries a
+  ranked `blockers[]`** (`deriveMergeBlockers`, PR-DETAIL ONLY — the Pending board's cards carry
+  no review status and must not fetch to find out). ⚠ **EVERY ENTRY IS MARKED `proven` OR
+  `inferred`, and only `reviewDecision` can be proven** — nothing else on GitHub's payload names
+  a rule, and `branchProtectionRule` is ADMIN-ONLY (its null is indistinguishable from "you may
+  not look", so it is deliberately NOT synced). ⚠ **NEVER ASSERT UNRESOLVED THREADS ARE THE
+  BLOCKER**: only 89 of 572 blocked PRs have any. ⚠ The blocker count is `!isResolved` and
+  INCLUDES `likely_addressed`, so it is a THIRD population next to the Bots chips' "need a look"
+  and triage's `untouched` — each names itself on screen. ⚠ `approved` REMOVES a row, never adds
+  one (the predecessor asserted "required checks aren’t passing" on green-CI PRs).
+  [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md) § Why a blocked PR is blocked.
 - The merge queue is GraphQL-only (presence is not inferable from REST) and nothing is synced —
   state rides the lazy `GET …/merge-options` fetch.
 - **Auto-merge ("merge when ready", `merge/auto-merge-runner.ts`) is consent-anchored.** It
@@ -773,7 +855,14 @@ microservice from **`packages/ml`**. Full detail: **[docs/ML-SEVERITY.md](docs/M
   extra scan WIDTH). The per-COMMENT severity badge is a different route and stays free.
   ⚠ It counts only the BADGED findings, so a bot that badges nothing is **OMITTED and NAMED**,
   never drawn as a zero. CRITICAL is under-recalled, so the product buckets **major+critical as
-  "high"** and nothing auto-acts on a label.
+  "high"** and nothing auto-acts on a label. ⚠ **The cell's sparkline now has an enlarged twin in
+  the same panel's chart row** (`InflationHistoryChart` — key, axis, hover; one small panel per bot,
+  amber/violet = direction, the bot's hue on the name dot only). It plots **counts, never a rate**
+  (no weekly denominator exists on the wire), its span is a FIXED 12 weeks beside window-scoped
+  table counts and it **says so on the card**, and its marks are deliberately NOT clickable (the
+  flagging route has no week narrowing, so a click would open a list contradicting the mark). It is
+  NOT a re-add of the two workspace-grain inflation ChartCards P1.2/C2 cut — those stay cut; see
+  docs/ML-SEVERITY.md § The enlarged inflation chart.
 
 ---
 
@@ -802,6 +891,23 @@ auth plumbing, or any AI route.** Two zero-dependency core plugins own the postu
 
 - **Relative imports carry an explicit `.js` EVERYWHERE — backend AND frontend.** The backend's
   NodeNext resolution REQUIRES it; the frontend's Bundler resolution merely allows it.
+- **Colour and contrast — MEASURED, NOT EYEBALLED.** ⚠ **A RAW BRAND HEX MAY NOT BE TEXT COLOUR.**
+  `BOT_VENDOR_META[kind].color` is right for a chart stroke, where the component owns the ground;
+  as text it must go through **`vendorInk()`** (`lib/ui.ts`), which emits `--ink-light`/`--ink-dark`
+  and lets `index.css` pick per theme. 40 of 83 vendor colours failed AA on the dark page and 43 on
+  the light one — Cursor's `#334155` rendered at 1.94:1. ⚠ **TWO VARIANTS ARE FORCED, NOT A
+  PREFERENCE**: clearing 4.5:1 on white needs luminance ≤ 0.175 and on the near-black page ≥ 0.184,
+  so NO single colour is legible as small text on both (`vendorInk.test.ts` proves it by sweep — do
+  not "simplify" this back to one stored colour). ⚠ `vendorInk()` sets the VARIABLES ONLY and no
+  `color`: the colour comes from `[style*='--ink-light']` in CSS, and an inline `color` would beat
+  it. An earlier cut put the pick at `:root` — a custom property containing `var()` is substituted
+  where it is DECLARED, so it resolved against root's undefined value, died there, and every chip
+  silently kept its inherited grey. It typechecked and rendered; only the screen showed it.
+  Two guards run from source (hand-run only, like all frontend tests): `textContrast.test.ts` fails
+  on a muted pairing below AA and on a theme-less colour measured failing, and **`decorative-mark`
+  is the ONLY opt-out** — a separator, an `aria-hidden` glyph, a gridline. ⚠ It may never be put on
+  text that says something: an em-dash meaning "no value", a "90d" window and a "Not scored yet"
+  marker were all on the original list and were made legible instead.
 - **`apps/backend/src/db/queries.ts` CONTAINS LITERAL NUL BYTES (~offset 132k)**, so search
   tools treat it as BINARY and quietly under-report: `rg` prints only the matches BEFORE the
   first NUL and then says `binary file matches`; a `grep` that skips binaries (`-I`, which

@@ -391,10 +391,18 @@ export function ActivityView(): JSX.Element {
             isFetching && data != null ? 'opacity-60 transition-opacity' : ''
           }`}
         >
-          {/* RAIL ORDER, top to bottom: Feed · Pending · Bots · Reports (store value still
-              'insights') — then the per-repo rows BENEATH the whole block. The two DAILY surfaces
-              lead: the Feed is the default landing, and Pending is the worklist that absorbed the
-              "Plan for today" panel. Reports sits last as the retrospective surface.
+          {/* RAIL ORDER, top to bottom: Feed · Bots · Pending · Reports (store value still
+              'insights') — then the per-repo rows BENEATH the whole block. The Feed leads because
+              it is the default landing. Bots sits DIRECTLY under it because the two are read
+              together: most of what scrolls past on the Feed is bot-authored, and the Bots console
+              owns the judgement that decides what the Feed shows — `hiddenBotUserIds` is the union
+              of `users.isBot` and this workspace's automated reviewers, and a manual "human"/"bot"
+              call made under Bots → Settings wins in both directions. The control that filters the
+              stream belongs next to the stream, not three entries away. Pending, the worklist,
+              follows them; Reports sits last as the retrospective surface.
+              (Pending was previously second, on the argument that the Feed and Pending are the two
+              DAILY surfaces. It is still a daily surface — what makes it one is that it absorbed
+              the "Plan for today" panel, not where it sits in this list.)
               ⚠ ALL FOUR ARE NOW UNGATED. Reports used to be first AND Pro-gated, from when it was
               nothing but the Pro period report; the FREE flow metrics moved into it off the Feed,
               so hiding the entry would have taken a free feature behind the Pro wall.
@@ -422,15 +430,47 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
+          {/* BOTS pseudo-row — "the calm layer above your review bots". CORE/free (reads the
+              deterministic bot routes), so it's ALWAYS shown, on every tier, no Pro gate. A bot is
+              one object per WORKSPACE: a vendor running in six of this workspace's repos is ONE
+              row here, and everything about it — automated, role, vendor name, price — is edited
+              at this level.
+              SECOND in the rail, directly under the Feed, because this is where the Feed's own
+              bot judgement is made: the "human"/"bot" call under Bots → Settings feeds
+              `hiddenBotUserIds`, which is what the Feed and the Timeline hide by default. A reader
+              who wants to know why a vendor is (or isn't) in the stream goes one row up or one row
+              down, not across the rail. */}
+          <button
+            type="button"
+            onClick={() => setActivityRepo('bots')}
+            aria-pressed={showingBots}
+            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+              showingBots
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            title="Detect, measure and triage this workspace's automated review bots — classification and triage are free; the ROI table is Pro"
+          >
+            <span className="shrink-0">
+              <BotIcon />
+            </span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+              Bots
+            </span>
+          </button>
+
           {/* PENDING pseudo-row — the worklist. Everything waiting on you or the workspace, in
               ONE list, led by the ranked "Do next" head (`doNextIds`, scored by db/work-plan.ts).
               CORE/free — the RANK is code, only its narration is Pro — so it's ALWAYS shown.
               ⚠ LABEL-ONLY rename from "Needs attention": the rail id stays `'attention'`, because
               an unknown `?activityRepo=` value falls into the parseInt branch, yields NaN and
               lands the reader on the Feed, breaking Back on same-session history entries.
-              Second in the rail, directly under the Feed: it absorbed the "Plan for today" panel
-              that used to sit on the Feed, so it is now a DAILY surface rather than an
-              occasional one. */}
+              THIRD in the rail, under Bots. It is a DAILY surface — it absorbed the "Plan for
+              today" panel that used to sit on the Feed — but that is a fact about its CONTENT, not
+              about this position: it read second for a while on the "the two daily surfaces lead"
+              argument, and moving it down one row costs it nothing, because it is reached from the
+              BriefStrip, the My-Turn banner and the Workspace badges far more often than from
+              this list. */}
           <button
             type="button"
             onClick={() => setActivityRepo('attention')}
@@ -455,30 +495,6 @@ export function ActivityView(): JSX.Element {
             </span>
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
               Pending
-            </span>
-          </button>
-
-          {/* BOTS pseudo-row — "the calm layer above your review bots". CORE/free (reads the
-              deterministic bot routes), so it's ALWAYS shown, on every tier, no Pro gate. A bot is
-              one object per WORKSPACE: a vendor running in six of this workspace's repos is ONE
-              row here, and everything about it — automated, role, vendor name, price — is edited
-              at this level. */}
-          <button
-            type="button"
-            onClick={() => setActivityRepo('bots')}
-            aria-pressed={showingBots}
-            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
-              showingBots
-                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
-                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
-            }`}
-            title="Detect, measure and triage this workspace's automated review bots — classification and triage are free; the ROI table is Pro"
-          >
-            <span className="shrink-0">
-              <BotIcon />
-            </span>
-            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
-              Bots
             </span>
           </button>
 

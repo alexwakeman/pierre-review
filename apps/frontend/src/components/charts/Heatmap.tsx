@@ -71,7 +71,7 @@ export function Heatmap({
                     height={cellH - 1}
                     rx={1.5}
                     fill={c > 0 ? hue : 'currentColor'}
-                    className={c > 0 ? '' : 'text-gray-100 dark:text-gray-800'}
+                    className={c > 0 ? '' : 'decorative-mark text-gray-100 dark:text-gray-800'}
                     fillOpacity={c > 0 ? 0.15 + 0.85 * (c / max) : 1}
                     stroke={isHover ? hue : 'none'}
                     strokeWidth={isHover ? 1.5 : 0}

@@ -50,6 +50,7 @@ import {
   getSuggestedReviewersBasis,
   type SuggestionBasis,
   getUsersByLogins,
+  clearOwnReviewRequest,
   markAllViewed,
   markPrClosedLocally,
   markPrMergedLocally,
@@ -88,8 +89,12 @@ import {
   updatePullRequestBranch,
 } from '../../github/mutations.js';
 import { hydratePrDetail } from '../../sync/hydrate-detail.js';
+import { reviewDecisionFrom } from '../../sync/upsert.js';
 import { refreshPrFromGitHub } from '../../sync/refresh-pr.js';
-import { confirmPostedReviewComment } from '../../sync/resync-after-write.js';
+import {
+  confirmPostedReviewComment,
+  resyncPrAfterWrite,
+} from '../../sync/resync-after-write.js';
 import { resolveThreadsOnGitHub } from '../../bot-triage/resolve.js';
 import { accountIdOf } from '../plugins/auth.js';
 
@@ -567,6 +572,32 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
           body,
         });
         const rowId = await upsertLocalReview(ctx.prId, viewerUserId, gh);
+        // ── The approval's SECOND and THIRD stamps — "an approved PR should drop off Pending,
+        //    and may become ready to merge" ────────────────────────────────────────────────────
+        //
+        // 1. CLEAR THE VIEWER'S REVIEW REQUEST. GitHub deletes it the moment the review lands;
+        //    `computeTriage.reviewRequestedFromMe` reads that table and nothing else, so without
+        //    this the board keeps asking for a review that has been given. Free, local, and
+        //    reconciled by the next `persistPr` either way.
+        await clearOwnReviewRequest(ctx.prId, accountId, viewerUserId);
+        // 2. RE-READ THE PR FROM GITHUB. This is the only half that can deliver the "…and it now
+        //    shows as Ready to merge" the request asked for: `mergeStateStatus` is GitHub's
+        //    protection-aware verdict and there is NO local derivation of it — an approval that
+        //    satisfies branch protection flips `blocked → clean` on GitHub's side, asynchronously,
+        //    and we can only observe it.
+        //
+        //    ⚠ THE EXISTING SINGLE-PR MACHINERY, NOT A SECOND PATH: `resyncPrAfterWrite` is the
+        //    same hydration-bust → `syncOnePr(waitForInFlight)` composition the review-comment
+        //    tail and the live refresh poll both descend from, and it never throws.
+        //
+        //    ⚠ IT IS A PER-ROUTE LATENCY DECISION, NOT A BLANKET RULE. One extra GitHub round
+        //    trip (~1 GraphQL point) is affordable HERE because an approval is a deliberate,
+        //    low-frequency human click — the same trip on a per-card poll is the 150-calls-to-
+        //    paint-a-board failure the Pending board is designed around. And it is best-effort:
+        //    GitHub often has not recomputed the merge state by the time we ask, in which case the
+        //    board's own focus/interval refetch picks the flip up later. Stamp 1 has already made
+        //    the card honest, so nothing here is load-bearing for correctness.
+        await resyncPrAfterWrite({ prId: ctx.prId, accountId, log: req.log });
         const result: ApprovePrResult = {
           id: rowId,
           authorId: viewerUserId,
@@ -654,6 +685,16 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
           allowedByRepo: canWrite && allowedMethods.length > 0,
           armed: armed ? withArmedQueueFields(armed, armedQueues) : null,
         },
+        // The live review decision the queue probe already carries. `blocked: true` above is a
+        // restatement of GitHub's word and explains nothing; this is the one field on the
+        // payload that can name WHICH HALF of branch protection is unmet, and it costs no extra
+        // call — fetchMergeQueueState selects it, and until now the route dropped it (and threw
+        // the whole probe away on any repo without a merge queue, which is most of them).
+        //
+        // ⚠ SPREAD, never assigned: `queue` is null when the probe FAILED, and "we never asked"
+        // must not arrive at the client wearing the same null GitHub uses for "this base branch
+        // requires no review". Absent → the merge control falls back to the synced PR row.
+        ...(queue ? { reviewDecision: reviewDecisionFrom(queue.reviewDecision) } : {}),
       };
       return result;
     } catch (err) {

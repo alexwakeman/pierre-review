@@ -61,7 +61,7 @@ function MetaFileRow({ file }: { file: PrFileChange }): JSX.Element {
         <span className="text-green-600 dark:text-green-400">+{file.additions}</span>{' '}
         <span className="text-red-500 dark:text-red-400">−{file.deletions}</span>
       </span>
-      <span className="shrink-0 text-gray-300 group-hover:text-blue-500 dark:text-gray-600">
+      <span className="shrink-0 decorative-mark text-gray-300 group-hover:text-blue-500 dark:text-gray-600">
         <ExternalLinkIcon size={12} />
       </span>
     </a>
@@ -219,7 +219,7 @@ export function ChangesTab({
   // No changes at all on this PR — same empty state as before.
   if (pr.files.length === 0 && pr.changedFilesCount === 0 && !isLoading) {
     return (
-      <div className="px-3 py-6 text-center text-sm text-gray-500">
+      <div className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
         No file changes on this PR.
       </div>
     );
@@ -229,7 +229,7 @@ export function ChangesTab({
     return (
       <div>
         <Header pr={pr} />
-        <div className="px-3 py-6 text-center text-sm text-gray-500">
+        <div className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
           Loading diff…
         </div>
       </div>

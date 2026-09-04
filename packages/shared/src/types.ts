@@ -2534,6 +2534,36 @@ export interface Workspace {
   // fallback in its copy.
   isDefault: boolean;
   createdAt: string; // ISO-8601
+  // ── PENDING MUTE: TWO INDEPENDENT FACTS, OR-ed. NEVER A CHAIN. ────────────────────────────
+  // A muted repo's "your turn"-shaped rows are downgraded to `relevance: 'none'` — they stay on
+  // the Pending board and in the broad `myTurn` count, they just stop claiming the reader's turn
+  // and stop reaching the notification surfaces. See `MyTurnRelevance` and `MyTurnPr.muted`.
+  //
+  // ⚠ THE TWO FIELDS ARE A UNION, NOT A FALLBACK. `pendingMuted` mutes every repo in the
+  // workspace; `mutedRepoIds` mutes named ones. A repo is muted when EITHER says so, and clearing
+  // one never "reveals" the other as an inherited default — `null`-means-inherit is a named bug
+  // class in this codebase (`workspace_reviewers.monthly_cents`, the Slack target, the sprint
+  // cadence). Workspace-only would make silencing one noisy repo impossible; repo-only would make
+  // silencing a 20-repo workspace twenty clicks.
+  //
+  // ⚠ `mutedRepoIds` IS ALWAYS A SUBSET OF `repoIds` — the mute row keys on (account, repo) alone
+  // (a repo belongs to exactly one workspace, so the workspace is not a second copy of that fact),
+  // and the listing intersects it with THIS workspace's membership. A repo moved to another
+  // workspace therefore carries its own mute with it, which is the honest reading of "I muted that
+  // repository".
+  //
+  // Trailing-optional for wire tolerance only; `listWorkspaces` always sets both.
+  pendingMuted?: boolean;
+  mutedRepoIds?: number[];
+}
+
+// What ONE Save on the Pending-mute settings section writes: either half, both, or neither.
+// Each key is sent only when it CHANGED (the `buildSprintPatch` rule), and `{}` is a legal no-op.
+// `mutedRepoIds` is the EXACT muted set within this workspace's membership — ids outside it are
+// ignored rather than written, so a Save here can never touch another workspace's repos.
+export interface WorkspacePendingMuteUpdate {
+  muted?: boolean;
+  mutedRepoIds?: number[];
 }
 
 export interface WorkspacesResponse {
@@ -3068,6 +3098,93 @@ export type MergeVerdict =
   | 'draft'
   | 'unknown';
 
+// ---- Why a BLOCKED pull request is blocked ----
+//
+// GitHub collapses at LEAST six different protection failures into the single
+// `mergeStateStatus: BLOCKED` and exposes nothing on the same payload that separates them:
+// required approvals not met, a standing CHANGES_REQUESTED, a required check that is red /
+// pending / never reported, unresolved review threads on a repo with "Require conversation
+// resolution before merging", required signed commits / linear history / deployments, and
+// repository rulesets. The only GitHub-side disambiguator is `branchProtectionRule`, which is
+// ADMIN-ONLY: it comes back null for the WRITE/MAINTAIN tokens most viewers hold, and
+// `graphqlTolerant` NULLs forbidden fields on a partial 200 — so "this repo has no such rule"
+// and "you may not see this repo's rules" are indistinguishable. Syncing it would make the
+// feature look authoritative on a handful of repos and be silently blank on the rest.
+//
+// So the app does the honest thing instead: it lists what it can actually check against its own
+// synced data, ranked, and MARKS EACH ENTRY as proven or inferred.
+//
+//   proven   — GitHub itself names this requirement as unmet. Only `reviewDecision` can do
+//              that; nothing else on the payload names a rule.
+//   inferred — the FACT is real and locally verified (CI is red, N threads are unresolved), but
+//              GitHub does not say it is what BLOCKED means here. Worded as a possibility.
+//
+// Measured on a real database (1,552 open PRs, 572 blocked): only 89 of the 572 have ANY
+// unresolved thread, so "unresolved threads are blocking this" is false for 84% of them and
+// must never be asserted; and 17 are approved + blocked with no unresolved thread at all,
+// which is what `unexplained` exists to answer without inventing a cause.
+export type MergeBlockerKind =
+  | 'changes_requested'
+  | 'review_required'
+  | 'checks_red'
+  | 'checks_pending'
+  | 'unresolved_threads'
+  // The terminal entry, emitted only when nothing above fired. GitHub says a rule is unmet and
+  // nothing we hold explains which — the honest answer for the approved-and-still-blocked case.
+  | 'unexplained';
+
+export interface MergeBlocker {
+  kind: MergeBlockerKind;
+  /** ⚠ ORDERS THE LIST, AND IS NOT SHOWN. `deriveMergeBlockers` emits proven entries first so the
+   *  most certain fact leads, but the screen states the facts and stops. The first cut labelled
+   *  every row PROVEN or INFERRED and explained the difference underneath; that is the reader's
+   *  call to make, and three layers of hedging around one short true sentence is not help. */
+  certainty: 'proven' | 'inferred';
+  /** The claim itself, short enough to render inline as the verdict's one-line detail. */
+  text: string;
+  /** The number `text` quotes, when it quotes one (so a caller can badge it). */
+  count?: number;
+}
+
+/**
+ * The PR facts the blocker derivation reads, as ONE optional object on `MergeVerdictInput`.
+ *
+ * It is an object rather than five sibling optionals so that "this caller looked" and "this
+ * caller has nothing to say" are DISTINGUISHABLE. The compact surfaces (the timeline bar
+ * tooltip, the dense open-PR rows) are fed a `TimelinePr`, which carries neither threads nor a
+ * review decision — handing them a list derived from silence would print "nothing we can see
+ * explains it" on every blocked row in the app, which is a claim about the PR rather than about
+ * what we bothered to fetch. Omit the object there and the verdict keeps its old generic
+ * sentence; supply it (PR detail, where a live walk has just refreshed the row) and the ranked
+ * list appears.
+ *
+ * ⚠ `unresolvedThreads` is `!thread.isResolved` — the ONLY population GitHub's conversation-
+ * resolution rule gates on. It therefore INCLUDES the threads the app's own heuristic calls
+ * `likely_addressed`: that heuristic says the code probably changed, and GitHub only cares about
+ * the resolve click. `likelyAddressedThreads` is the SUBSET of the same count, carried
+ * separately so one sentence can name both populations instead of two surfaces disagreeing.
+ */
+export interface MergeBlockFacts {
+  /** GitHub's own review decision. null = the repo requires no review; undefined = not looked up. */
+  reviewDecision?: PrReviewDecision | null;
+  /** The head commit's check ROLLUP (every check, not only the required ones). */
+  ciStatus?: CiStatus;
+  /** Threads not resolved ON GITHUB (`!isResolved`), including `likely_addressed` ones. */
+  unresolvedThreads?: number;
+  /** Of `unresolvedThreads`, how many our `likely_addressed` heuristic thinks were acted on. */
+  likelyAddressedThreads?: number;
+  /**
+   * Reviewers/teams still carrying an outstanding review request.
+   *
+   * ⚠ It NAMES a proven review blocker, it never becomes one on its own. An outstanding request
+   * on a PR whose `reviewDecision` is null would say "somebody was asked and hasn't answered" on
+   * a repo GitHub has just told us requires no review at all — a false cause, on the most common
+   * shape in the data (1,430 of 1,552 open PRs carry a null decision, and it is genuine: GitHub
+   * answers null when the base branch has no review requirement).
+   */
+  requestedReviewers?: number;
+}
+
 // The rendered form of a verdict: one label, one tone, one sentence of WHY, and whether a
 // merge button should be live. `detail` is user-facing prose ("2 approvals required", "3
 // commits behind main"), null when there's nothing more to say than the label.
@@ -3077,6 +3194,19 @@ export interface MergeVerdictInfo {
   tone: 'ok' | 'warn' | 'bad' | 'muted';
   canMerge: boolean;
   detail: string | null;
+  /**
+   * The ranked candidate causes, populated for the `blocked` verdict ONLY — and non-empty
+   * whenever it is populated at all.
+   *
+   * Deliberately not filled in for the other eight verdicts: each of those is already a
+   * complete sentence about itself ("resolve the conflicts", "3 commits behind"), and a
+   * one-row list under a self-explanatory verdict is noise. `blocked` is the ONE verdict
+   * where GitHub refuses to say what it means, which is the entire reason this field exists.
+   *
+   * Absent (rather than empty) unless the caller supplied `MergeBlockFacts` — see that type
+   * for why a surface holding no thread/CI data must not be handed a list built from silence.
+   */
+  blockers?: MergeBlocker[];
 }
 
 // ---- Auto-merge ("arm it and walk away") ----
@@ -3247,6 +3377,17 @@ export interface PrMergeOptions {
   // Pierre-side auto-merge: whether arming is offerable, and the live intent if any. Always
   // present (never null) — `allowedByRepo:false, armed:null` is the "not offerable" shape.
   autoMerge: PrAutoMergeInfo;
+  // GitHub's LIVE review decision, from the merge-queue probe this route already issues — the
+  // one field on this payload that can say WHICH HALF of branch protection a `blocked` status
+  // means. It was fetched and thrown away before: `fetchMergeQueueState` selects it (the
+  // auto-merge watcher waits on it by name) but the route only mapped the queue half, and only
+  // when the repo HAS a queue. Surfacing it costs zero additional GitHub calls.
+  //
+  // ⚠ THREE STATES, and the difference is load-bearing: a `PrReviewDecision` is GitHub's
+  // answer; `null` is GitHub positively saying the base requires no review; and ABSENT means
+  // the probe failed (it is best-effort, `.catch(() => null)`) so we never looked. Absent must
+  // never be read as "no review required" — the merge control falls back to the synced row.
+  reviewDecision?: PrReviewDecision | null;
 }
 
 export interface MergePrBody {
@@ -4423,6 +4564,15 @@ export interface AuthNotice {
  * ⚠ THIS NARROWS NOTHING, ANYWHERE. Every row and every card still ships; relevance decides how a
  * card is LABELLED and which count it lands in, never whether it exists. Narrowing the population
  * by it would delete work rather than route it.
+ *
+ * ⚠ IT IS ALSO THE CARRIER OF THE PENDING MUTE, and that is deliberate rather than an overload of
+ * convenience. Muting a workspace or a repo (`Workspace.pendingMuted` / `.mutedRepoIds`) forces
+ * every one of its rows to `'none'` inside `getMyTurn`, at the ONE place `personal` is folded from
+ * `relevance` — so the card relabels, the notification stops, the `myTurnPersonal` figures drop it
+ * and the broad `myTurn` population is untouched, all from one write. A second boolean AND-ed into
+ * five notification surfaces would have been five predicates that can disagree with each other,
+ * which is the drift this single fold exists to prevent. `muted` rides alongside as an
+ * EXPLANATION only (see `MyTurnPr.muted`): nothing counts it, nothing filters on it.
  */
 export type MyTurnRelevance = 'direct' | 'maintained' | 'none';
 
@@ -4473,6 +4623,15 @@ export interface MyTurnPr {
   // `personal` (`true` ⇒ 'direct', `false` ⇒ 'none'): a response predating this field cannot
   // distinguish 'maintained', and only the "New PRs" section can ever be that value.
   relevance?: MyTurnRelevance;
+  // ⚠ DISPLAY ONLY, AND NO COUNTER MAY EVER READ IT. This row's repo is muted for Pending
+  // (`Workspace.pendingMuted` or `.mutedRepoIds`), which is WHY its `relevance` is `'none'` —
+  // the downgrade has already happened upstream and every figure, lens and label follows from
+  // `relevance` alone. The flag exists so a screen can say "muted" instead of silently demoting a
+  // card the reader last saw as theirs; the moment something counts it, there are two answers to
+  // "is this personal?" and they can disagree.
+  //
+  // Absent ⇒ not muted. Set only when true, so a normal response carries nothing new.
+  muted?: boolean;
 }
 
 export interface AwaitingReviewItem extends MyTurnPr {
@@ -4529,8 +4688,12 @@ export interface ThreadAwaitingItem {
    *  personally addressed to you by construction. Carried anyway so a notification surface can
    *  read ONE field across every section instead of knowing which sections are exempt. */
   personal?: boolean;
-  /** See `MyTurnPr.relevance`. Always `'direct'` here, for the same by-construction reason. */
+  /** See `MyTurnPr.relevance`. Always `'direct'` here, for the same by-construction reason —
+   *  UNLESS the thread's repo is muted for Pending, which downgrades it to `'none'` like every
+   *  other section. */
   relevance?: MyTurnRelevance;
+  /** See `MyTurnPr.muted`. DISPLAY ONLY; no counter reads it. */
+  muted?: boolean;
 }
 
 // A completed Claude review that hasn't been actioned yet — no GitHub review/
@@ -4548,8 +4711,11 @@ export interface ClaudeReviewToAction {
   githubUrl: string;
   /** See `MyTurnPr.personal`. Always true here — you asked for the run. */
   personal?: boolean;
-  /** See `MyTurnPr.relevance`. Always `'direct'` here — you asked for the run. */
+  /** See `MyTurnPr.relevance`. Always `'direct'` here — you asked for the run — UNLESS the run's
+   *  repo is muted for Pending, which downgrades it to `'none'` like every other section. */
   relevance?: MyTurnRelevance;
+  /** See `MyTurnPr.muted`. DISPLAY ONLY; no counter reads it. */
+  muted?: boolean;
 }
 
 export interface MyTurnResponse {
@@ -6311,6 +6477,13 @@ export interface MyTurnCard extends InsightCardBase, InsightPrRef {
    *  Trailing-optional for wire tolerance only (an e2e mock, a response predating the field);
    *  `getWorkspaceInsights` always sets it. Absent ⇒ fall back to `personal`. */
   relevance?: MyTurnRelevance;
+  /** THIS CARD'S REPO IS MUTED FOR PENDING — see `MyTurnPr.muted`, which this is READ off (never
+   *  re-derived here, the `since`/`relevance` rule applied a third time).
+   *
+   *  ⚠ DISPLAY ONLY. It explains a `relevance` of `'none'` the reader deliberately caused; it is
+   *  not an input to `personal`, to any brief count, to the relevance lens or to the ranker, all
+   *  of which read `relevance`. Set only when true. */
+  muted?: boolean;
 }
 
 // Which relationship puts a red build on the viewer's plate. TWO ARMS, and they are two different
@@ -6684,6 +6857,57 @@ export interface AttentionCardsResponse {
   doNextIds?: string[];
 }
 
+// ---- POST /api/attention/liveness — the board's batched "is this still true?" probe ----------
+//
+// GET /api/attention is DB-only, which is what lets it render fifty cards for the price of one
+// query. The cost of that is staleness against GITHUB: a PR merged, closed or unblocked by
+// someone else keeps its card until the adaptive scheduler walks that repo (2-15 min). This route
+// closes the gap for a whole board in ONE call — see sync/pr-liveness-sweep.ts.
+//
+// ⚠ IT REFRESHES ROWS AND REPORTS A COUNT; IT RETURNS NO CARDS. The client's only permitted
+// response to `changed > 0` is to refetch `['attention-cards']` AND `['daily-brief']` together.
+// Dropping a card client-side would break `capFor`'s `shown === count` guard and silently delete
+// the "50 of 148" disclosure — the board is `head ∪ tail === cards`, disjoint, and every
+// disclosure divides one half of one snapshot by the other.
+export interface AttentionLivenessBody {
+  /**
+   * The local PR ids the board is currently rendering, deduplicated.
+   *
+   * ⚠ CAPPED SERVER-SIDE, AND AN OVER-CAP REQUEST IS A 400 RATHER THAN A TRUNCATION (the
+   * `?cells=` precedent on the peer benchmark): a silently-dropped tail is a board that thinks it
+   * was freshened and was not. The client ranks before it slices, so the ids that matter most —
+   * the rows offering a Merge button — are the ones that fit.
+   *
+   * Ids the caller does not own, or that belong to another workspace, are simply absent from the
+   * resolve; they are never an error and never an existence oracle.
+   */
+  prIds: number[];
+}
+
+export interface AttentionLivenessResponse {
+  /** The resolved workspace — echoed like every other scoped response. */
+  workspaceId: number;
+  /** How many of the supplied ids resolved to PRs the caller owns in this workspace. */
+  checked: number;
+  /** Of those, how many the (bounded, expensive) mergeability pass could also re-read. */
+  mergeStateChecked: number;
+  /**
+   * Rows whose BOARD-VISIBLE state moved (state / draft / merge state / mergeable / the PR's own
+   * clock). `> 0` is the client's signal to refetch the board — and it is deliberately narrower
+   * than "a row was written": a `reviewDecision` GitHub merely restated moves no card, and on
+   * real data most open PRs carry one it restates every time.
+   */
+  changed: number;
+  /** Of those, how many left the open set entirely — i.e. cards that are about to disappear. */
+  leftOpenSet: number;
+  /**
+   * The account's GitHub budget was exhausted, so nothing was re-read.
+   * ⚠ NOT AN ERROR — rate limits are pre-empted, never surfaced as failures; red is for
+   * unrecoverable faults. The board keeps its synced rows, exactly as before this route existed.
+   */
+  paused: { resumeAt: string | null } | null;
+}
+
 // The Insights flow-metric header (WorkspaceMetrics tiles + trend charts) computed for a SINGLE
 // repo — powers the per-repo console's "Insights-style" panel (getWorkspaceInsights narrowed to
 // that one repo, its workspace resolved from the repo itself). Metrics-only; the repo console
@@ -6764,10 +6988,96 @@ export interface WorkspaceMetricsDetailResponse {
   detail: WorkspaceMetricsDetail | null; // null when the workspace has no repos
 }
 
+// ---- "Where is the work happening?" — per-repo activity under Flow metrics ----
+//
+// The workspace's flow metrics answer HOW MUCH and HOW FAST; this answers WHERE. One row per
+// repository over a rolling 14-day window, rendered as TWO side-by-side bar charts in the same
+// repo order: PRs opened (split human vs automation) and lines changed.
+//
+// ⚠ TWO CHARTS, NEVER ONE BLENDED SCORE. A "0.5·z(PRs) + 0.5·z(lines)" activity index is the exact
+// shape this codebase rejects in five places — "a blended figure is a number no PR resembles"
+// (actor lanes), "a workspace-wide rate is a number no member of any cell resembles" (benchmark
+// placement), "the pooled headline rate and the fitted-subset rate ... must be labelled apart and
+// NEVER SUBTRACTED". Every figure below is a plain count over a stated window and population, so a
+// reader can check any of them against the repo itself; a fused scalar reconciles with nothing on
+// the panel above it. A grouped two-series chart is equally wrong here for a mechanical reason:
+// BarChart's `niceMax` gives every series ONE y-axis, and a PR count (≈5) beside a line count
+// (≈5000) draws the count sub-pixel.
+export interface WorkspaceRepoActivityRow {
+  repoId: number;
+  repoFullName: string; // "owner/name" — the chart's axis uses the trailing segment
+  /** PRs OPENED in the window, split by who opened them. The split is the whole point: on the dev
+   *  corpus Dependabot opened 97 of 758 PRs in a fortnight and topped one repository outright, so
+   *  a blended bar would crown a config repo as "where the work is happening" on dependency bumps.
+   *
+   *  "Automation" is `resolveActorLanes`' `automatedIds`, never `automatedReviewerUserIds` alone —
+   *  the duplicate-identity defence. ⚠ Its CANDIDATE set is (workspace verdict ∪ globally
+   *  `users.isBot`); a login vocabulary hit counts on its own for a candidate but admits nobody to
+   *  the set, so an unflagged, unclassified actor with a vendor login is counted as a PERSON here.
+   *  That is the same answer every other lane consumer gives, which is the point of routing through
+   *  the one resolver rather than re-deriving "is this a bot" per surface.
+   *  The seven lanes are DELIBERATELY folded into one series here: the dependency vs
+   *  code_agent split resists collapsing when the question is "what distorted this metric", but the
+   *  question this chart asks is "was a person doing it", where human-vs-not is the right grain. */
+  prsOpenedHuman: number;
+  prsOpenedAutomation: number;
+  /** Lines changed = raw `additions + deletions` over the window's PRs, summed over the SIZED ones
+   *  only (`sizedPrs`), or null when none of them was ever sized.
+   *
+   *  ⚠ RAW, NOT `codeLocFor`'s code-only measure. That one excludes docs/config/generated/binary
+   *  files and is a deliberate LOWER BOUND — `files(first: 100)` truncates, so its own rule is
+   *  "over-threshold is safe to assert, under-threshold is not". Correct for a per-PR "large PR"
+   *  badge; wrong for a cross-repo comparison, because the PRs it silently under-counts are exactly
+   *  the biggest ones, i.e. the repositories this chart exists to rank. */
+  linesChanged: number | null;
+  /** ⚠ UNKNOWN SIZE IS NOT ZERO SIZE. `additions`/`deletions`/`changedFiles` are NOT NULL DEFAULT
+   *  0, so "we never observed this PR's size" and "this PR changed nothing" are byte-identical
+   *  rows — 18.3% of the dev corpus over all history (though 0 of 758 inside a live 14-day window,
+   *  because the state is concentrated in old backfilled rows). A bar that quietly sums 80% of a
+   *  repository's PRs is not that repository's line count, and BarChart draws `null` and `0`
+   *  identically (both `v <= 0`), so the count has to be DISCLOSED in words rather than implied by
+   *  a missing bar. */
+  sizedPrs: number;
+  unsizedPrs: number;
+  /** True when `repos.createdAt >= windowStart` — this repository was added PART-WAY through the
+   *  window, so its bars cover less than 14 days of history.
+   *
+   *  ⚠ MARKED, NEVER PRO-RATED AND NEVER SILENT. Scaling a young repo up to a full window
+   *  fabricates pull requests nobody opened; leaving it unmarked draws a newly-onboarded team as
+   *  "quiet", which is the retroactive-coverage defect (39→570 merges over six months turned out
+   *  to be entirely repo onboarding). A partial bar is an honest count — it just has to say so. */
+  addedDuringWindow: boolean;
+}
+
+export interface WorkspaceRepoActivity {
+  windowDays: number; // always 14 — see `from`/`to`
+  from: string; // ISO-8601, inclusive
+  to: string; // ISO-8601, exclusive
+  /** The repositories that saw at least one PR opened in the window, DESC by `prsOpenedHuman +
+   *  prsOpenedAutomation` and capped. Both charts render this array in this order, so the lines
+   *  chart is ranked by the PR count too — which is why `omitted` exists. */
+  repos: WorkspaceRepoActivityRow[];
+  activeRepos: number; // repos with ≥1 PR opened in the window (the M in "N of M")
+  workspaceRepos: number; // the workspace's whole membership, active or not
+  /** What the cap cut, so the truncation is stated rather than inferred. NO SILENT CAPS: a chart
+   *  ranked by PRs opened can drop the repository that leads on lines changed, and a note that
+   *  says only "top 12" gives the reader no way to know that happened. */
+  omitted: { repos: number; prsOpened: number; linesChanged: number | null };
+}
+
 // The workspace flow-metric header (DORA-ish tiles + trend charts) as a standalone CORE/free
-// payload, served by /api/workspace-metrics — moved out of the Pro Insights bundle into the Feed.
+// payload, served by /api/workspace-metrics — moved out of the Pro Insights bundle onto Reports.
 export interface WorkspaceMetricsResponse {
   metrics: WorkspaceMetrics | null; // null = the workspace has no repos
+  /** The resolved scope. Every scoped response echoes it (docs/API.md) so the SPA can correct a
+   *  stale bookmark — `?workspace=` resolves an unknown/foreign id to the account's Default rather
+   *  than 404ing, and without the echo the client never learns which workspace it is looking at.
+   *  This route was the one scoped endpoint missing it. */
+  workspaceId: number;
+  /** "Where is the work happening?" — absent when the workspace has no repos. Trailing-optional
+   *  for the same reason the fields on `WorkspaceMetrics` are: SPA and server deploy
+   *  independently. */
+  repoActivity?: WorkspaceRepoActivity;
 }
 
 // (The "Compare workspaces" surface — `WorkspaceComparisonRow`/`WorkspaceComparisonResponse` and
@@ -9816,6 +10126,12 @@ export interface BotBenchmarkAnomaly {
   magnitude: { value: number; cohortMedian: number; gap: number; threshold: number; unit: string };
   /** The customer's own denominator — the sample this claim rests on. */
   units: number;
+  /** What `units` COUNTS, as a plain noun ("merged pull requests", "finished comment threads").
+   *  ⚠ IT VARIES BY METRIC and the SPA must not guess it: one rule counts merged PRs and three
+   *  count threads, so a single hard-coded noun renders a false sample size. Trailing-optional
+   *  because SPA and plugin deploy independently; absent, the clause drops the noun rather than
+   *  inventing one. */
+  unitsNoun?: string;
   /** The cohort it is a rank within, and how many bands that rank is out of. ⚠ "Upper fifth" is
    *  honest at 5 bands and a misrepresentation at 10. */
   cohortRepos: number;

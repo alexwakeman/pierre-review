@@ -658,6 +658,17 @@ describe('the Activity sub-tab strips', () => {
     expect(useFilters.getState().feedInnerTab).toBe('themes');
   });
 
+  // ⚠ THE BOTS TWIN, AND `themes` IS THE MEMBER THAT NEEDS IT MOST. It is listed only when
+  // `activityDigest` holds, so an unentitled bookmark names a tab that is not in the strip — and
+  // the store must still seat the raw value, leaving `effectiveBotsTab` to degrade it FOR THE
+  // RENDER. A corrective `setBotsInnerTab('roi')` here would forget the choice permanently, for
+  // this reader AND for the per-repo Bots console that shares the one scalar.
+  it('seats a Bots sub-tab the current tier may not render, rather than correcting it', () => {
+    seat('/app/?workspace=5&view=activity&activityRepo=bots&botsTab=themes');
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().botsInnerTab).toBe('themes');
+  });
+
   // The Reports pane's Overview | Bottlenecks strip, on the same three rules as its two siblings:
   // a switch is a NAVIGATION (it changes what the pane is, not how it is filtered), the DEFAULT
   // member stays out of the URL, and the key rides ONLY the rail entry that renders the strip.

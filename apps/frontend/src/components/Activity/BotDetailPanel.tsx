@@ -6,7 +6,7 @@ import { useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
-import { ML_CATEGORY_COLOR, ML_CATEGORY_LABEL, automatedReviewerMeta } from '../../lib/ui.js';
+import { ML_CATEGORY_COLOR, ML_CATEGORY_LABEL, automatedReviewerMeta, vendorInk } from '../../lib/ui.js';
 import { BotIcon } from '../Icons.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
@@ -141,7 +141,7 @@ function BotCard({
         </span>
         <span
           className="rounded px-1.5 py-0.5 text-[10px] font-medium"
-          style={{ color: meta.color, background: `${meta.color}1a` }}
+          style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
         >
           {meta.label}
         </span>

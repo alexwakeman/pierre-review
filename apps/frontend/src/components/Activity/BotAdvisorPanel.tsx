@@ -31,7 +31,7 @@ import {
   useAdvisorPreview,
   useAdvisorPutProfile,
 } from '../../hooks/useAdvisor.js';
-import { automatedReviewerMeta } from '../../lib/ui.js';
+import { automatedReviewerMeta, vendorInk } from '../../lib/ui.js';
 import { BotIcon } from '../Icons.js';
 
 const INTENT_LABEL: Record<string, string> = {
@@ -47,11 +47,11 @@ const INTENT_LABEL: Record<string, string> = {
 };
 
 const STATUS_META: Record<string, { label: string; className: string }> = {
-  dismissed: { label: 'Dismissed', className: 'bg-gray-500/10 text-gray-500 border border-gray-400/40' },
+  dismissed: { label: 'Dismissed', className: 'bg-gray-500/10 text-gray-500 dark:text-gray-400 border border-gray-400/40' },
   pr_opened: { label: 'PR open', className: 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/30' },
   pr_merged: { label: 'PR merged', className: 'bg-green-500/10 text-green-700 dark:text-green-300 border border-green-500/30' },
   issue_filed: { label: 'Issue filed', className: 'bg-ai-signal/10 text-ai-signal border border-ai-signal/30' },
-  superseded: { label: 'Superseded', className: 'bg-gray-500/10 text-gray-500 border border-gray-400/40' },
+  superseded: { label: 'Superseded', className: 'bg-gray-500/10 text-gray-500 dark:text-gray-400 border border-gray-400/40' },
 };
 
 function IntentCard({
@@ -210,7 +210,7 @@ function ProfileSection({
         “File issue” sends the brief.
       </div>
       <label className="block">
-        <span className="text-gray-500">Config file path (in your repo)</span>
+        <span className="text-gray-500 dark:text-gray-400">Config file path (in your repo)</span>
         <input
           value={configPath}
           onChange={(e) => setConfigPath(e.target.value)}
@@ -219,7 +219,7 @@ function ProfileSection({
         />
       </label>
       <label className="block">
-        <span className="text-gray-500">Bot's own repo (owner/name — the issue target)</span>
+        <span className="text-gray-500 dark:text-gray-400">Bot's own repo (owner/name — the issue target)</span>
         <input
           value={ownerRepo}
           onChange={(e) => setOwnerRepo(e.target.value)}
@@ -228,7 +228,7 @@ function ProfileSection({
         />
       </label>
       <label className="block">
-        <span className="text-gray-500">Notes</span>
+        <span className="text-gray-500 dark:text-gray-400">Notes</span>
         <input
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
@@ -324,7 +324,7 @@ function BotSection({
       <div className="flex flex-wrap items-center gap-2">
         <span
           className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px] font-medium"
-          style={{ color: meta.color, background: `${meta.color}1a` }}
+          style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
         >
           <BotIcon size={11} />
           {bot.label}
@@ -516,7 +516,7 @@ function BotSection({
                     ? 'bg-green-500/10 text-green-700 dark:text-green-300'
                     : a.status === 'degraded'
                       ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
-                      : 'bg-gray-500/10 text-gray-500'
+                      : 'bg-gray-500/10 text-gray-500 dark:text-gray-400'
                 }`}
               >
                 {INTENT_LABEL[a.intentKind] ?? a.intentKind} · {a.status}

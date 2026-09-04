@@ -117,14 +117,14 @@ export function SignInGate(): JSX.Element {
         </div>
 
         {both && (
-          <p className="mt-4 text-[11px] leading-relaxed text-gray-500">
+          <p className="mt-4 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
             <span className="text-gray-400">GitHub</span> = public repositories, instant,
             no install. <span className="text-gray-400">GitHub App</span> = also private
             repos, but only in orgs that have installed the app.
           </p>
         )}
 
-        <p className="mt-4 text-xs leading-relaxed text-gray-500">
+        <p className="mt-4 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
           Public repositories work either way, with no install. To watch{' '}
           <strong className="font-semibold text-gray-400">private</strong> org repos, sign
           in with the GitHub App and{' '}
@@ -150,7 +150,7 @@ export function SignInGate(): JSX.Element {
             notice linked — not buried in a footer the signed-out user never reaches. Plain
             <a> rather than a router link: these pages are served by the landing app at the
             origin root, which the SPA does not route. */}
-        <p className="mt-4 text-[11px] leading-relaxed text-gray-500">
+        <p className="mt-4 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
           By signing in you agree to the{' '}
           <a
             className="underline decoration-gray-600 underline-offset-2 hover:text-gray-300"

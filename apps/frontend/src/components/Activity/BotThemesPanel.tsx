@@ -1,5 +1,5 @@
 import type { BotThemesResult } from '@pierre-review/shared';
-import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
@@ -8,20 +8,29 @@ import { BotIcon, MagnifierIcon, RefreshIcon } from '../Icons.js';
 import { ThemesReportBody, ThemesSkeleton } from './ThemesReportView.js';
 import { prRefToMeta } from './ThemeThreadsDetail.js';
 
-// The Bots "What they're flagging" panel (Pro Haiku) — the QUALITATIVE layer of the Bots console,
-// REVIVED merged with the deterministic layer it briefly ceded to a SynthesisCard mount: what the
-// automated reviewers are actually flagging (nature + criticality + where), read from the deduped
-// comment stream. Every deterministic figure (per-bot volume, area split, coverage, the per-theme
-// comment counts) comes straight from the build fold; the themes, narrative AND the severity-strip
-// aggregates over them are the model's read (labelled approximate — the description sentence must
-// never claim those exact). STRICTLY Pro — gated on the activityDigest AI-summary capability, with
-// SynthesisCard's exact free-tier posture (OSS → nothing, free cloud → the one-line Pro nudge).
-// Scoped to the current WORKSPACE + window + `repoIds` narrowing: the per-repo Bots console tab
-// passes `[repoId]` so it measures that repo alone (the cached report is keyed with the same
-// narrowing on both sides — the client's repoKeySlot and the plugin's scope_key `|r:` suffix).
-// The report BODY is shared with the Feed "Discussion themes" panel (ThemesReportBody) and
-// scrolls inside a fixed-height region so the deterministic Measure surface below (caution
-// banners, ROI table, charts, bot feed) is never pushed off-screen.
+// The Bots "What they're flagging" panel (Pro Haiku) — the QUALITATIVE layer of the Bots console:
+// what the automated reviewers are actually flagging (nature + criticality + where), read from the
+// deduped comment stream. Every deterministic figure (per-bot volume, area split, coverage, the
+// per-theme comment counts) comes straight from the build fold; the themes, narrative AND the
+// severity-strip aggregates over them are the model's read (labelled approximate — the description
+// sentence must never claim those exact).
+//
+// ── IT OWNS THE `Bots → Themes` SUB-TAB ────────────────────────────────────────────────────────
+// It used to be a card at the TOP of the Measure (`roi`) surface, above the caution banners, the
+// ROI table, the charts and the bot feed. It is now the whole body of its own sub-tab, mirroring
+// the Feed rail's `Feed | Themes` strip — one report, one gate, two rails.
+//   • STRICTLY Pro, on `activityDigest` (the AI-summary capability, NOT `botDepth`), and the ONE
+//     gate is `return null`: the tab is LISTED only when entitled, so an unentitled reader never
+//     mounts this. `HumanThemesPanel`'s posture exactly. The free-cloud nudge this panel carried
+//     over from `SynthesisCard` is DELETED — see the gate below for why it may not come back.
+//   • Scoped to the current WORKSPACE + window + `repoIds` narrowing: the per-repo Bots console tab
+//     passes `[repoId]` so it measures that repo alone (the cached report is keyed with the same
+//     narrowing on both sides — the client's repoKeySlot and the plugin's scope_key `|r:` suffix).
+//   • ⚠ NO HEIGHT CAP ANY MORE. The body used to scroll inside a fixed `max-h-[32rem]` region for
+//     one reason: the deterministic Measure surface sat directly beneath it and must not be pushed
+//     off-screen. Nothing sits beneath it on its own tab, so the cap became a scrollbar around the
+//     only thing on the page. `HumanThemesPanel` has never had one.
+// The report BODY is shared with the Feed "Discussion themes" panel (`ThemesReportBody`).
 
 // The deterministic per-bot volume + acted-on rollup (from the read layer, not the model).
 function BotRollup({ result }: { result: BotThemesResult }): JSX.Element | null {
@@ -66,7 +75,6 @@ function BotCoverageLine({ result }: { result: BotThemesResult }): JSX.Element {
 
 export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
-  const isCloud = useMe().data?.deploymentMode === 'cloud';
   const window = useFilters((s) => s.botAnalyticsWindow);
   const workspaceId = useFilters((s) => s.workspaceId);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
@@ -79,24 +87,22 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
   const usage = useAiUsage(activityDigest);
   const outOfCredits = usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
 
-  // Capability off: OSS renders nothing (absence, never an error — nothing is fetched either
-  // way); cloud renders the one-line Pro nudge. SynthesisCard's posture, which this panel
-  // replaced on the Bots view.
-  if (!activityDigest) {
-    if (!isCloud) return null;
-    return (
-      <p className="text-[10px] text-gray-400">
-        <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[10px] font-semibold text-ai-signal">
-          Pro
-        </span>
-        A themed summary of what your review bots keep flagging is part of Pro — upgrade to get
-        the report above the measurements.
-      </p>
-    );
-  }
+  // Capability off: nothing, on EVERY deployment mode — absence, never an error, and nothing is
+  // fetched either way. `HumanThemesPanel`'s single `return null`, and the same reason: the tab
+  // that mounts this panel is LISTED ONLY when `activityDigest` holds, so an unentitled reader
+  // never reaches this component at all.
+  //
+  // ⚠ THE FREE-CLOUD NUDGE THAT USED TO SIT HERE IS DELETED, not disabled. It was
+  // `SynthesisCard`'s posture, carried over from the days this panel was a card at the TOP of the
+  // Measure surface, where a one-line upsell above the free measurements had somewhere to sit. On
+  // a tab of its own it had become unreachable code that, if the tab were ever listed
+  // unconditionally, would quietly turn Themes into a SEVENTH visible-but-locked surface —
+  // `components/ProGate.tsx` holds that set at six and says the next one needs its own argument.
+  if (!activityDigest) return null;
 
-  // The plugin tier is off server-side (enabled:false), or the read failed: nothing — the
-  // deterministic Measure surface below stays primary.
+  // The plugin tier is off server-side (enabled:false), or the read failed: nothing. An empty tab
+  // body rather than an error box — this is a cached READ, and the Generate button it would be
+  // hiding is the only thing a reader could do about it anyway.
   const resp = query.data;
   if (query.isError || (resp != null && !resp.enabled)) return null;
 
@@ -164,25 +170,24 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
       ) : query.isLoading ? (
         <div className="mt-3 h-24 animate-pulse rounded bg-ai-surface-2" />
       ) : result ? (
-        /* The scroll region holds the BODY only — header, button and notices above stay put, so
-           Regenerate is always reachable and the Measure surface below keeps its place. Fixed rem
-           cap (not vh): BotsView stacks the caution banners, ROI table, charts and bot feed
-           underneath, and the panel must not push them off-screen. */
-        <div className="mt-1 max-h-[32rem] overflow-y-auto overscroll-contain pr-1">
-          <div key={result.generatedAt} className="digest-fade-in">
-            <ThemesReportBody
-              narrative={result.narrative}
-              themes={result.themes}
-              bySeverity={result.bySeverity}
-              byArea={result.byArea}
-              ActorIcon={BotIcon}
-              emptyThemesLabel="No distinct themes surfaced from the bot comments in this window."
-              reviewerSection={<BotRollup result={result} />}
-              coverageLine={<BotCoverageLine result={result} />}
-              onOpenPr={(pr) => openPrDetailTab(prRefToMeta(pr), { fromActivity: true })}
-              onOpenTheme={(theme) => openThemeThreads(theme, 'bot')}
-            />
-          </div>
+        /* ⚠ NO SCROLL REGION. The `max-h-[32rem] overflow-y-auto` wrapper that used to sit here
+           existed to keep the deterministic Measure surface below — caution banners, ROI table,
+           charts, bot feed — from being pushed off-screen while this panel sat above it. On its own
+           sub-tab there is nothing below it, so the cap only added a scrollbar inside the page's
+           one piece of content. `HumanThemesPanel`, the Feed's twin, has never had one. */
+        <div key={result.generatedAt} className="digest-fade-in">
+          <ThemesReportBody
+            narrative={result.narrative}
+            themes={result.themes}
+            bySeverity={result.bySeverity}
+            byArea={result.byArea}
+            ActorIcon={BotIcon}
+            emptyThemesLabel="No distinct themes surfaced from the bot comments in this window."
+            reviewerSection={<BotRollup result={result} />}
+            coverageLine={<BotCoverageLine result={result} />}
+            onOpenPr={(pr) => openPrDetailTab(prRefToMeta(pr), { fromActivity: true })}
+            onOpenTheme={(theme) => openThemeThreads(theme, 'bot')}
+          />
         </div>
       ) : (
         <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-dashed border-ai-border p-3 text-[12px] text-gray-500 dark:text-gray-400">

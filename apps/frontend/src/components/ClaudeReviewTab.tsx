@@ -632,7 +632,7 @@ function FindingRow({
             {!finding.anchored &&
               (finding.fileInDiff ? (
                 <span
-                  className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] text-gray-500"
+                  className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] text-gray-500 dark:text-gray-400"
                   title="This line isn't in the PR diff — it posts inline on the file's first change (added preferred)"
                 >
                   off-diff line — posts on first change
@@ -647,7 +647,7 @@ function FindingRow({
               ))}
             {ignored && (
               <span
-                className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500"
+                className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400"
                 title="Set aside — excluded from the submitted review"
               >
                 ignored
@@ -782,7 +782,7 @@ function FindingRow({
                   <button
                     type="button"
                     onClick={clearReword}
-                    className={`${BTN_SECONDARY} text-gray-500`}
+                    className={`${BTN_SECONDARY} text-gray-500 dark:text-gray-400`}
                   >
                     Clear reword
                   </button>
@@ -955,7 +955,7 @@ function ClaudesReview({
         {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
         {review.reviewMode != null && (
           <span
-            className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs font-normal text-gray-500"
+            className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs font-normal text-gray-500 dark:text-gray-400"
             title={routeReasonText(review)}
           >
             {REVIEW_MODE_LABEL[review.reviewMode]} review
@@ -974,14 +974,14 @@ function ClaudesReview({
         )}
         {review.diffCapped && (
           <span
-            className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs font-normal text-gray-500"
+            className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs font-normal text-gray-500 dark:text-gray-400"
             title="The diff shown to Claude was truncated to a size budget to control cost. Routing and line-anchoring still used the full diff, and any omitted files were listed for the worktree to read."
           >
             diff capped
           </span>
         )}
       </div>
-      <div className="text-xs text-gray-500">{metaLine(review)}</div>
+      <div className="text-xs text-gray-500 dark:text-gray-400">{metaLine(review)}</div>
       <UsageBreakdown review={review} />
       {review.summary != null && review.summary !== '' && (
         <div className="text-sm">
@@ -1116,7 +1116,7 @@ function ReviewBudgetPanel({
               type="button"
               onClick={() => setBudget.mutate(null)}
               disabled={setBudget.isPending}
-              className="rounded border border-gray-300 px-2 py-1 text-sm text-gray-500 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+              className="rounded border border-gray-300 px-2 py-1 text-sm text-gray-500 dark:text-gray-400 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
             >
               Reset to default
             </button>
@@ -1196,7 +1196,7 @@ function ReviewActionRow({ action }: { action: ReviewAction }): JSX.Element {
     action.claudeVerdict !== action.userVerdict;
   return (
     <li className="py-1 text-[11px]">
-      <div className="flex flex-wrap items-center gap-1.5 text-gray-500">
+      <div className="flex flex-wrap items-center gap-1.5 text-gray-500 dark:text-gray-400">
         <span className="rounded bg-ai-signal/10 px-1 py-0.5 font-medium text-ai-signal">
           {label}
         </span>
@@ -1209,7 +1209,7 @@ function ReviewActionRow({ action }: { action: ReviewAction }): JSX.Element {
         </span>
       </div>
       {verdictChanged && (
-        <div className="mt-0.5 text-gray-500">
+        <div className="mt-0.5 text-gray-500 dark:text-gray-400">
           verdict: {action.claudeVerdict ?? '—'} →{' '}
           <span className="text-gray-700 dark:text-gray-200">{action.userVerdict ?? '—'}</span>
         </div>
@@ -1289,7 +1289,7 @@ function LearningMatchRow({ match }: { match: LearningMatch }): JSX.Element {
             <span className="truncate font-mono">{match.glob}</span>
             {match.category != null && (
               <>
-                <span className="text-gray-300 dark:text-gray-600">·</span>
+                <span className="decorative-mark text-gray-300 dark:text-gray-600">·</span>
                 <span>{match.category}</span>
               </>
             )}
@@ -1994,7 +1994,7 @@ export function ClaudeReviewTab({
               </button>
             ) : (
               <span className="inline-flex items-center gap-2">
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
                   Post as <strong>{VERDICT_LABEL[userVerdict]}</strong>?
                 </span>
                 <button
@@ -2028,7 +2028,7 @@ export function ClaudeReviewTab({
                 <strong>{VERDICT_LABEL[preview.event]}</strong>.
               </div>
               {preview.prComments.length > 0 && (
-                <div className="mt-1 text-xs text-gray-500">
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   Plus <strong>{preview.prComments.length}</strong> PR-level comment
                   {preview.prComments.length === 1 ? '' : 's'} for findings outside
                   the PR diff:{' '}

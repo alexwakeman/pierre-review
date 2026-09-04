@@ -6,6 +6,7 @@ import { SlackSection } from './SlackSection.js';
 import { IssueLinksSection } from './IssueLinksSection.js';
 import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
 import { LargePrThresholdSection } from './LargePrThresholdSection.js';
+import { PendingMuteSection } from './PendingMuteSection.js';
 import { GithubAppInstallSection } from './GithubAppInstallSection.js';
 import { YourDataSection } from './YourDataSection.js';
 import { useSettingsWorkspace } from './workspaceScope.js';
@@ -32,13 +33,27 @@ import { CloseIcon } from '../Icons.js';
 // ⚠ THE ORDER IS THE GRAIN, BUT THE GATES ARE UNCHANGED — a reorder that quietly widened one would
 // be a much worse bug than the confusion it fixed. Global half: GitHub App / benchmark consent /
 // your data stay CLOUD-ONLY; the large-PR threshold stays ungated in both modes on every tier.
-// Workspace half: `workspaceInsights` / `slackDigest` / `issueLinks`, exactly as before.
+// Workspace half: the Pending mute is CORE/free, then `workspaceInsights` / `slackDigest` /
+// `issueLinks` exactly as before.
 //
 // ⚠ THE GLOBAL HALF SITS ABOVE THE pro_settings LOADING GATE AND MUST STAY THERE. Every section in
 // it reads /api/me or /api/auth/providers, never `pro_settings` — which 404s with no plugin — so an
 // OSS install still gets its large-PR threshold, and a cloud account still gets export/delete, when
 // the Pro fetch fails outright. Anything moved above that gate must be independent of it; anything
 // moved below it waits on a request it does not need.
+//
+// ⚠ THE WORKSPACE HALF NOW HAS A FREE SECTION IN IT, AND SPLITTING ITS GATE WAS A CORRECTNESS FIX,
+// NOT A LAYOUT CHANGE. The half used to be ONE `hasWorkspaceSections` gate (three PAID caps) with
+// a `proReady` wait inside it, so a free per-workspace control literally could not be mounted
+// here: with no plugin the heading never rendered, and with a plugin present it would still have
+// waited on `/api/pro/settings` — a request it does not read and that 404s in OSS mode. That is
+// the same defect the global half was built to avoid, one grain over. So:
+//   • the HEADING renders whenever the SCOPE has resolved — there is always at least one free
+//     workspace section under it (the Pending mute), exactly as the large-PR threshold is what
+//     keeps the global half from ever being empty;
+//   • `proReady` now wraps ONLY the Pro sections, and its "unavailable" line speaks for them alone.
+// `scopeReady` still holds back the WHOLE half: nothing workspace-scoped may render OR be written
+// against an unresolved id.
 //
 // ── TWO SECTIONS WERE DELETED HERE, NEITHER SHOULD RETURN ────────────────────────────────────
 // "Anthropic API key" — the BYO key stored in `~/.pierre-review/config.json` is RETIRED. Local
@@ -57,9 +72,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
   // ⚠ THE FETCH IS STILL HERE, AND IT IS NOW PURELY A GATE. No section reads account
   // `ProSettings` any more — the comparison-window mode was the last one and moved to the
   // workspace row in plugin migration 0032. What it still buys is the CONNECTIVITY answer the
-  // Workspace half depends on: with no plugin (or a plugin that fails to bind) this 404s, and the
-  // half below renders one honest "Settings unavailable." instead of three sections each
-  // discovering it separately. Keep it enabled only when that half has something in it.
+  // Workspace half's PAID sections depend on: with no plugin (or a plugin that fails to bind) this
+  // 404s, and they render one honest "unavailable" line instead of three sections each
+  // discovering it separately. Keep it enabled only when there is a paid section to gate.
+  //
+  // ⚠ IT IS THE PRO INVENTORY ONLY, AND IT NO LONGER GATES THE HEADING. The free Pending-mute
+  // section lives under the same heading and must not wait on this request — see the note above.
   const hasWorkspaceSections = useHasProWorkspaceSettings();
   const proSettings = useProSettings(hasWorkspaceSections);
   // ⚠ `workspaceId === null` MEANS "NOT RESOLVED YET", NOT "NONE". Nothing scoped may render
@@ -134,60 +152,77 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
               global section (there is always at least one — the large-PR threshold), and a second
               line 16px below it reads as a rendering glitch rather than a boundary. The heading
               and its scope sentence are what mark the half. */}
-          {hasWorkspaceSections && (
-            <section className="pt-1">
-              <div className="mb-3">
-                <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                  Workspace
-                  {name != null && (
-                    <>
-                      {' · '}
-                      <span className="text-sky-600 dark:text-sky-400">{name}</span>
-                    </>
-                  )}
-                </h3>
-                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  Everything below applies to{' '}
-                  <span className="font-medium">{name ?? 'the selected workspace'}</span> alone —
-                  every other workspace keeps its own. Switch workspace in the rail to configure a
-                  different one.
-                </p>
-              </div>
+          {/* ⚠ THE HEADING IS NOT GATED ON A CAPABILITY. There is always at least one free
+              workspace-scoped section beneath it (the Pending mute), so a heading over nothing is
+              not reachable — the same guarantee `LargePrThresholdSection` gives the global half.
+              It IS gated on the scope resolving, below. */}
+          <section className="pt-1">
+            <div className="mb-3">
+              <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                Workspace
+                {name != null && (
+                  <>
+                    {' · '}
+                    <span className="text-sky-600 dark:text-sky-400">{name}</span>
+                  </>
+                )}
+              </h3>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                Everything below applies to{' '}
+                <span className="font-medium">{name ?? 'the selected workspace'}</span> alone —
+                every other workspace keeps its own. Switch workspace in the rail to configure a
+                different one.
+              </p>
+            </div>
 
-              {/* ⚠ THE WHOLE HALF WAITS, AS ONE. Either the scope hasn't resolved or the plugin
-                  hasn't answered; in both cases every section below would render its own pending
-                  shell, and three "Loading this workspace's settings…" boxes under a heading with
-                  no name reads as three broken sections rather than one unfinished request. */}
-              {!scopeReady || !proReady ? (
-                <p className="py-4 text-center text-xs text-gray-400">
-                  {proSettings.isError
-                    ? 'Workspace settings unavailable.'
-                    : 'Loading this workspace’s settings…'}
-                </p>
-              ) : (
-                <div className="space-y-4">
-                  {/* The sprint grid for THIS workspace: cadence, phase anchor, and — since
-                      plugin migration 0032 — the comparison-window mode that composes with them.
-                      One grain, one Save. */}
-                  {caps.workspaceInsights && <SprintSection />}
-                  {/* The Slack digest for THIS workspace (`/api/pro/slack/target?workspace=`),
-                      schedule and content together: the "Review bots" block is a field on the same
-                      row (plugin migration 0033). ⚠ IT USED TO EDIT THE ACCOUNT'S WHOLE SELECTION
-                      — a multi-select plus an "apply this webhook to all" button — so a Save could
-                      add, or by omission silently cancel, deliveries for teams the reader was not
-                      looking at. One row now. The cap disclosure stayed: with no picker there is no
-                      screen listing every delivery, and each one is a billed report on every
-                      send. */}
-                  {caps.slackDigest && <SlackSection />}
-                  {/* The Jira/Linear tracker for THIS workspace, on the same row as the cadence.
-                      It was an ACCOUNT setting until plugin migration 0031, which never matched the
-                      feature: the enricher's input is a PR, and a PR's repo belongs to exactly one
-                      workspace. */}
-                  {caps.issueLinks && <IssueLinksSection />}
-                </div>
-              )}
-            </section>
-          )}
+            {/* ⚠ THE SCOPE STILL HOLDS THE WHOLE HALF BACK, AS ONE. Nothing workspace-scoped
+                may render against an unresolved id, and every section below would otherwise
+                render its own pending shell — several "Loading this workspace's settings…"
+                boxes under a heading that cannot yet name anybody reads as several broken
+                sections rather than one unfinished request. */}
+            {!scopeReady ? (
+              <p className="py-4 text-center text-xs text-gray-400">
+                Loading this workspace’s settings…
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {/* Pending mute — CORE/free, both modes, every tier, and deliberately ABOVE the
+                    pro-settings gate for the same reason the large-PR threshold sits above it in
+                    the global half: it reads `/api/workspaces`, never `pro_settings`, so it must
+                    not wait on a request that 404s with no plugin. It is also what makes this
+                    heading non-empty on `npx pierre-review`. */}
+                <PendingMuteSection />
+                {/* ⚠ ONLY THE PAID SECTIONS WAIT ON THE PLUGIN, and this line speaks for them
+                    alone — it used to speak for the whole half, which is precisely why a free
+                    section could not live here. */}
+                {hasWorkspaceSections && !proReady && (
+                  <p className="py-2 text-center text-xs text-gray-400">
+                    {proSettings.isError
+                      ? 'Workspace settings unavailable.'
+                      : 'Loading this workspace’s settings…'}
+                  </p>
+                )}
+                {/* The sprint grid for THIS workspace: cadence, phase anchor, and — since
+                    plugin migration 0032 — the comparison-window mode that composes with them.
+                    One grain, one Save. */}
+                {proReady && caps.workspaceInsights && <SprintSection />}
+                {/* The Slack digest for THIS workspace (`/api/pro/slack/target?workspace=`),
+                    schedule and content together: the "Review bots" block is a field on the same
+                    row (plugin migration 0033). ⚠ IT USED TO EDIT THE ACCOUNT'S WHOLE SELECTION
+                    — a multi-select plus an "apply this webhook to all" button — so a Save could
+                    add, or by omission silently cancel, deliveries for teams the reader was not
+                    looking at. One row now. The cap disclosure stayed: with no picker there is no
+                    screen listing every delivery, and each one is a billed report on every
+                    send. */}
+                {proReady && caps.slackDigest && <SlackSection />}
+                {/* The Jira/Linear tracker for THIS workspace, on the same row as the cadence.
+                    It was an ACCOUNT setting until plugin migration 0031, which never matched the
+                    feature: the enricher's input is a PR, and a PR's repo belongs to exactly one
+                    workspace. */}
+                {proReady && caps.issueLinks && <IssueLinksSection />}
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </div>

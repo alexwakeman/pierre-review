@@ -20,6 +20,7 @@ export function BarChart({
   formatValue = formatY,
   height = 132,
   rotateLabels = false,
+  maxBarWidth,
   onSelectBar,
   barAriaLabel,
 }: {
@@ -34,6 +35,14 @@ export function BarChart({
   // footprint (`height`) is UNCHANGED: a larger bottom band is reserved for the labels,
   // so the plot area shrinks slightly rather than the card growing.
   rotateLabels?: boolean;
+  // Cap on a single bar's drawn width, in px. Absent (every pre-existing consumer): a bar is a
+  // fixed 70% of its band, which is right for the bin distributions this chart was built for —
+  // they always have enough bins to keep a band narrow. It is wrong for a CATEGORICAL chart whose
+  // category count is the reader's data: a workspace holding one repository renders that repository
+  // as a ~390px slab, which reads as a filled rectangle rather than a bar. Capping the width and
+  // CENTRING the bar in its band keeps a one-category chart legible as a chart. The band itself is
+  // unchanged, so the hover highlight and any hit target stay full-width.
+  maxBarWidth?: number;
   // ── OPTIONAL interactivity ────────────────────────────────────────────────────────────────
   // Absent (the default, and every pre-existing consumer): this chart is a picture. No pointer
   // cursor, no hit targets, nothing in the tab order, no accessible name — adding any of those
@@ -70,8 +79,8 @@ export function BarChart({
       : Math.max(1, ...series.flatMap((s) => s.values.map((v) => v ?? 0))),
   );
   const bandW = innerW / Math.max(n, 1);
-  const barAreaX = (i: number): number => PAD_L + i * bandW + bandW * 0.15;
-  const barAreaW = bandW * 0.7;
+  const barAreaW = Math.min(bandW * 0.7, maxBarWidth ?? Number.POSITIVE_INFINITY);
+  const barAreaX = (i: number): number => PAD_L + i * bandW + (bandW - barAreaW) / 2;
   const y = (v: number): number => PAD_T + innerH * (1 - v / maxV);
   const baseY = PAD_T + innerH;
 
@@ -105,7 +114,7 @@ export function BarChart({
                   y1={y(v)}
                   x2={w - PAD_R}
                   y2={y(v)}
-                  className="text-gray-200 dark:text-gray-700"
+                  className="decorative-mark text-gray-200 dark:text-gray-700"
                   stroke="currentColor"
                   strokeWidth={1}
                 />

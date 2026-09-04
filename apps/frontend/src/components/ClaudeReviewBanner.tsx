@@ -236,7 +236,7 @@ export function ClaudeReviewBanner(): JSX.Element | null {
                     {e.repoFullName} #{e.prNumber}
                   </span>
                 </div>
-                <div className="mt-0.5 truncate text-gray-500">{e.prTitle}</div>
+                <div className="mt-0.5 truncate text-gray-500 dark:text-gray-400">{e.prTitle}</div>
                 <div className="mt-0.5 text-gray-400">
                   {e.done
                     ? 'Ready — click to view'

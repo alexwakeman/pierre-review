@@ -413,10 +413,18 @@ Header carries **Show** + **Focus** links (drive the timeline). Tabs (Overview /
 Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claude Review / AI):
 - **Overview** — `ChecksTab.tsx`: CI/checks (each Actions check expands into the inline log
   viewer — see **Merge, CI logs & trunk status**), the **merge verdict** line (open PRs only,
-  from `mergeVerdict` — this row is where the old "mergeable" lie lived), **Reviewers** (all who
+  from `mergeVerdict` — this row is where the old "mergeable" lie lived), a **Blocked** row on a
+  `blocked` PR only (the ranked candidate causes from `deriveMergeBlockers`, each chipped `proven`
+  or `inferred` with the reasoning under it, and the `unresolved_threads` row clickable through to
+  the Threads tab via `onOpenThreads`; ⚠ its thread count is `!isResolved` and therefore INCLUDES
+  `likely_addressed`, which is why the Bots chips inches away say "N need a look" rather than "N
+  unresolved" — the full three-count table and the never-assert-a-cause rules are in
+  **docs/MERGE-CI-TRUNK.md § Why a blocked PR is blocked**), **Reviewers** (all who
   submitted a review, badged by latest state) above **Approvers** (latest decisive review =
   `approved`), then **Merged by**, **Requested** reviewers, labels, meta, an **Actions** row
-  (approve / `MergeControl` / `ClosePrControl`) — then the PR **Summary** (markdown,
+  (approve / `MergeControl` / `MergeWhenReadyControl` / `ClosePrControl` — the two merge controls
+  are handed the same `MergeBlockFacts` this tab built, so the merge button's own explanation stops
+  being the worst one on the screen) — then the PR **Summary** (markdown,
   clamped to 3 lines, tall images hidden when collapsed). **PR comments** (oldest first) round the
   tab off — each with a "Show" link, a per-comment "Check review", and its AI annotations **BELOW**
   the comment (a judgement read before the thing it judges is backwards; it also matches the
@@ -819,18 +827,29 @@ but broken deep links).
   legacy login-string classification PrDetail's bot chips still use; and every figure comes from
   the SAME folds the Threads tab uses (`rollupCounts`/`threadSeverities`/
   `resolvableBotThreadIds`) restricted to the bot subset, so card and tab cannot disagree.
-- **Bots view is `ROI ('roi' = Measure) | Advisor | Benchmark | Settings`** (`botsInnerTab` lost
-  `'behaviour'`/`'themes'` — transient + URL-silent, so member removal is safe — and gained
-  `'benchmark'`). ⚠ **THE `roi`
+- **Bots view is `ROI ('roi' = Measure) | Themes | Advisor | Benchmark | Settings`**
+  (`botsInnerTab` lost `'behaviour'` — transient + URL-silent, so member removal is safe — gained
+  `'benchmark'`, and has since REGAINED `'themes'`; see "The Bots Themes panel" below). ⚠ **TWO
+  GATING POSTURES SIT IN THIS ONE STRIP AND BOTH ARE DELIBERATE**: `'roi'` and `'benchmark'` are
+  visible-but-locked (`botDepth`) and are NEVER corrected away, while `'advisor'` (`botAdvisor`)
+  and `'themes'` (`activityDigest`) are LISTED only when entitled and degrade to `'roi'` in
+  `effectiveBotsTab`. `'settings'` is free, and is why the rail entry and the strip stay ungated.
+  ⚠ **THE `roi`
   SUB-TAB IS PAID (`botDepth`) AND THE WHOLE `BotRoiPanel` LOCKS IN PLACE** — the tab stays
-  selectable (no corrective `setBotsInnerTab`; only `'advisor'` is still corrected), wears an
+  selectable (no corrective `setBotsInnerTab`; only `'advisor'` and `'themes'` are corrected, and
+  only because neither is LISTED without its capability), wears an
   unconditional `ProBadge variant="tab"`, and the BODY renders `ProLockPanel`
   (`testId="bot-roi-locked"`, distinct from the entitled `bot-roi-panel` so the screenshot pipeline
   can never photograph the lock). Inside the panel and therefore paid: the vendor table, its
   keep/tune/noisy verdicts, the **Inflation column INCLUDING its current-window counts** (the
-  weekly sparkline stays separately conditional on `mlInflation.weekly`, an extra scan width), the
-  "What they're flagging" ML block with its `SynthesisCard` verdict, the volume column and every
-  drill-down. What stays FREE around it, in `BotsView`: the amber bot-only governance caution, the
+  weekly sparkline stays separately conditional on `mlInflation.weekly`, an extra scan width — as
+  does `InflationHistoryChart`, the enlarged twin of that sparkline in this panel's chart row, on
+  the same field and the same `showMlColumns` gate; contract in docs/ML-SEVERITY.md § The enlarged
+  inflation chart), the deterministic **"What the bots are flagging"** ML totals strip
+  (`MlTotalsStrip` — no AI, paid with the panel), the volume column and every drill-down.
+  ⚠ The AI report titled **"What they're flagging"** LEFT this panel and is the `Bots → Themes`
+  sub-tab (`activityDigest`, listed only when entitled) — which is also what pulled the two
+  near-identical headings apart: they used to sit on one screen, and now cannot. What stays FREE around it, in `BotsView`: the amber bot-only governance caution, the
   resolve backlog, the **hoisted `TuningSuggestions` box** (moved OUT of the panel so the narrowed
   `/api/bot-analytics` can keep feeding it — do not move it back, and note it now sits ABOVE the
   table for entitled readers), the bot feed, and the whole Settings tab. `WorkspaceBotCharts`
@@ -1080,10 +1099,21 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
     would let the per-seat multiply and the two dropped-row disclosures be worded differently
     depending on which card the reader is standing on.
   - **Three sources, three chips** (`COST_BASIS_LABEL`): a price a human TYPED, rates COUNTED from
-    this workspace, an engagement rate FITTED from the corpus. Same model-vs-code rule as the
+    this workspace, an acted-on rate FITTED from the corpus. Same model-vs-code rule as the
     absent-metrics block, with a third arm — and the fitted one is the one that must never read as
-    an invoice, so the counterfactual row is worded "your volume and price with the cohort's
-    median …", never "what a peer pays".
+    an invoice, so the counterfactual row is worded "your threads and price with each repository's
+    own cohort median acted-on rate …", never "what a peer pays".
+  - ⚠ **THE COUNTERFACTUAL ROW IS LABELLED `At the peer median rate`, AND THAT NOUN IS THE CARD'S
+    ONLY ONE FOR THIS FACT.** Its predecessor, "At peer engagement", named a quantity nothing on the
+    card points at — the row's whole claim is that ONE number was substituted, each repository's own
+    cohort's median acted-on rate, and the label now says which. The same words carry the two
+    refusals that stand IN PLACE of the row (`COST_REFUSAL_HEADLINE.cohort_rate_unfitted`,
+    `ROLLUP_REFUSAL_HEADLINE.no_fitted_cohort_rate`) and `workspaceCostHeadline`'s `ahead` branch,
+    because two wordings for one fact on one card is how a reader stops believing either. The label
+    is SPA copy on purpose: "the definitions are served" governs the corpus's fitter metrics via
+    `metricSpecs`, which is not on this response at all, and every word of this row — label, detail,
+    basis chip — is already SPA-authored exactly like `Per merged PR` beside it. ⚠ It is a
+    counterfactual PRICE, never a rank: the rollup carries no percentile of its own.
   - **`workspaceCostCoverageNote` states what the figure IS and keeps the ONE surviving caveat** —
     that a subscription may cover repositories outside this Workspace. Its predecessor
     `costSharedNote` shipped gated on `sharedWithUnits > 1`, which counted cards in THIS response,
@@ -1195,17 +1225,40 @@ Deleted outright with this wave: `BotBehaviourPanel`,
 URL-parsed — a legacy `?activityRepo=compare` link falls through to the `'feed'` default),
 `SprintReportCard` + `useSprintReport`, `lib/workspaceColors.ts`, and `InsightsSubTab`.
 (`BotThemesPanel` + `useBotThemes` were deleted here too and have since been RESTORED — see
-"The Bots Themes panel" below. `botsInnerTab` did NOT regain a `'themes'` member: the panel sits
-on the main ROI view.)
+"The Bots Themes panel" below. ⚠ `botsInnerTab` HAS since regained a `'themes'` member: the panel
+was first restored as a card at the top of the ROI view and then moved onto its own sub-tab.)
 
-### The Bots Themes panel (restored)
+### The Bots Themes panel — `Bots → Themes`
 
-`BotThemesPanel` replaces the `SynthesisCard` mount in `BotsView.tsx` **only**; the three
-drill-down `SynthesisCard` mounts (`BotVolumeDetail`, `BotFlaggingDetail`, `BotThreadsDetail`)
-are untouched and still serve slice-scoped Summarise. It copies `SynthesisCard`'s tier posture
-verbatim — OSS renders nothing, free cloud renders the one-line Pro nudge, paid renders the
-report — and its body is `max-h-[32rem] overflow-y-auto overscroll-contain` so a long report
-cannot push the deterministic Measure surface off screen.
+`BotThemesPanel` is the whole body of the `'themes'` sub-tab, mirroring the Feed rail's
+`Feed | Themes` strip. The three drill-down `SynthesisCard` mounts (`BotVolumeDetail`,
+`BotFlaggingDetail`, `BotThreadsDetail`) are untouched and still serve slice-scoped Summarise, and
+`MlTotalsStrip` — the deterministic "What the bots are flagging" severity totals, a different
+surface with a confusingly similar heading — stays INSIDE the paid `BotRoiPanel`, on the same
+windowed `/api/bot-analytics` response as the columns beside it.
+
+⚠ **THE TAB IS LISTED ONLY WHEN `activityDigest` HOLDS, and that posture is the whole point.** It
+is the Feed's, not ROI's. A listed-and-locked Themes body would be a SEVENTH visible-but-locked
+surface, and `components/ProGate.tsx` keeps that set at six with a written argument that the next
+one needs its own; and on the OSS build the panel returns `null`, so an always-listed tab would
+draw a blank pane. The panel's gate is therefore a single `if (!activityDigest) return null` —
+`HumanThemesPanel`'s exactly. The free-cloud Pro nudge it inherited from `SynthesisCard` is
+DELETED, not disabled: on a conditionally-listed tab it was unreachable, and reviving it would
+quietly re-open the seventh-surface argument.
+
+⚠ **NO WINDOW PICKER, AND NO HEIGHT CAP.** The panel reads `botAnalyticsWindow`, whose one writer
+is the picker inside `BotRoiPanel` (which argues on the record against being hoisted); a second
+window field would let the cached report and the rest of the Bots console disagree about the
+population. If the missing control ever proves painful, hoist the picker to the STRIP so every
+sub-tab shares one — never duplicate the field. The body's old `max-h-[32rem] overflow-y-auto`
+wrapper is gone with the move: it existed so a long report could not push the deterministic
+Measure surface off screen, and nothing sits beneath the panel on its own tab.
+
+⚠ **IT WORKS ON THE PER-REPO BOTS CONSOLE TOO**, unlike `'advisor'`. `BotsView` passes `repoScope`
+(`[repoId]` on the console, `null` on the rail), the client gives the narrowed report its own
+cache slot via `repoKeySlot`, and the plugin's `scope_key` carries the matching `|r:` suffix — so a
+repo's Bots tab gets its own real report rather than the workspace's. `showThemes` is therefore
+`activityDigest` alone, never `repoId == null && activityDigest`.
 
 ⚠ **The caption must distinguish the two figure classes**: per-theme comment counts, per-bot
 volume/acted-on and the area split are exact code folds; the themes themselves and the
@@ -1390,6 +1443,44 @@ convention this file has to remember.
   (unconditionally — the hook has one mount and the query POLLS, so a disabled query also stops the
   five-minute timer).
 
+### Reports → Overview → Flow metrics → "Where the work is happening"
+
+`WorkspaceFlowMetrics` renders `WorkspaceMetricsPanel` (tiles + the 12-week trend band) and, under
+it, `WorkspaceRepoActivityCharts` — a per-repository pair answering the question the workspace-wide
+tiles cannot: *which* repository. Both halves ride the ONE `/api/workspace-metrics` response, so
+they can never be a refresh apart.
+
+- ⚠ **IT MOUNTS IN `WorkspaceFlowMetrics`, NEVER INSIDE `WorkspaceMetricsPanel`.** That panel has
+  TWO mounts — this one, and `RepoInsightsPanel` for a SINGLE repo behind the Pro
+  `workspaceInsights` gate. A per-repository comparison there degenerates to one bar, and would
+  appear only for paying accounts, on the one screen where it answers nothing.
+- ⚠ **TWO CHARTS, NEVER ONE BLENDED SCORE.** "PRs opened" (stacked people vs automation) and "Lines
+  changed" (raw `additions + deletions`), same repo order in both. A normalised activity index is
+  the shape CLAUDE.md rejects in five places — "a number no PR resembles" — and reconciles with
+  nothing on the panel above it. A GROUPED two-series chart is separately broken: `BarChart`'s
+  `niceMax` gives every series ONE y-axis, so a PR count (≈5) beside a line count (≈5000) draws the
+  count sub-pixel. Two measures of different scale are two charts.
+- ⚠ **A THIRD WINDOW ON ONE PANEL.** The tiles compare a rolling 14 days against the prior 14; the
+  trend band is a fixed 12 weeks; this is 14 days with NO comparison. The section note says so in
+  words — "14 days" alone still lets a reader assume the tiles' comparison. It cannot follow the
+  team's SPRINT CADENCE: that setting is plugin-owned and this surface is free, so it uses
+  `INSIGHT_SPRINT_DAYS`, which is what the tiles beside it already use.
+- ⚠ **THREE DISCLOSURES, EACH STANDING IN FOR A FALSE CLAIM.** The cap ("N more repositories saw
+  …", because the lines chart is ranked by the PR count and the lines leader can be below the
+  fold); the unsized PRs (⚠ **`BarChart` drops every `v <= 0`, so `null` and `0` draw
+  IDENTICALLY** — the count has to be stated in words, never implied by a missing bar); and the
+  repositories added mid-window (MARKED, never pro-rated — scaling one up fabricates PRs nobody
+  opened).
+- ⚠ **THE AXIS LABEL IS BUDGETED AT 13 CHARACTERS, SHORTENED FROM THE HEAD.** `rotateLabels`
+  reserves a FIXED 40px band in `BarChart` and clips past it silently ("DEFRA/bng-metric-backend"
+  rendered as "…etric-backend"); `BarChart` is shared by fifteen call sites so the band is not ours
+  to widen. The TAIL survives because repositories in one workspace share a family prefix and
+  differ at the end (`bng-metric-backend` beside `bng-metric-frontend`). `BarChart` uses one string
+  for the tick AND the tooltip, so whenever anything is shortened the component prints the full
+  names in chart order beneath — otherwise the bar is unlabelled in both places.
+- **Not clickable.** `onSelectBar` is opt-in precisely so a decorative chart adds no unlabelled
+  keyboard stops, and `seriesKey` is meaningless on a two-series band.
+
 ### The Pending board's merge row (`PendingMergeActions`)
 
 The two FORWARD kinds (`merge`, `update_branch`) carry Merge · Merge-when-ready · Cancel · Update
@@ -1414,6 +1505,58 @@ branch. Nothing else does — a `my_turn` "review this" card gets no Merge butto
   every cap disclosure arithmetically true (`apps/frontend/test/pendingPartition.test.ts`).
 - `CardShell`'s `onActivate` skips `a`/`button`/`textarea`/`input`/`[data-noactivate]`, so the
   controls do not also open the PR.
+- **MID-MERGE IS THREE LAYERS, CHECKED MOST-IMMEDIATE FIRST.** (1) a MANUAL merge or branch update
+  the reader started, read off the SHARED mutation keys `mergePrMutationKey(prId)` /
+  `updateBranchMutationKey(prId)` via `useIsMutating` — ⚠ never a per-mount `isPending`, because
+  `MergeControl` owns the mutation inside this row while PrDetail mounts a second `useMergePr` for
+  the same PR, and a per-mount flag is invisible to the other mount (the CiAnalysisCard lesson);
+  (2) an ARMED intent, whose live phase is `armedPhaseHeadline` (all thirteen `ArmedMergePhase`
+  members, `queued` ≠ `queued_local`); (3) the synced verdict, as before. The manual line OUTRANKS
+  the armed one: an armed intent describes what will happen later, a live POST describes now.
+  ⚠ Both new reads are CACHE reads — GitHub's NATIVE merge-queue position stays off the card
+  because it is unsynced by design and reachable only through the click-gated merge-options call.
+
+### The Pending board's LIVENESS sweep (`useAttentionLiveness`)
+
+`GET /api/attention` is DB-only, which is the whole reason fifty cards paint in one request. Its
+cost is staleness against GITHUB: a PR merged, closed or unblocked BY SOMEBODY ELSE keeps its card
+until the adaptive walk (2-15 min). `AttentionView` mounts ONE batched sweep for the whole board —
+2 GraphQL points, ~5-7s — and the route contract is in [API.md](API.md) + [REALTIME-SYNC.md](REALTIME-SYNC.md).
+
+- ⚠ **IT IS NOT AN EXCEPTION TO THE NO-FETCH-ON-MOUNT RULE, IT IS THE ALTERNATIVE TO BREAKING IT.**
+  Per-card liveness is ~200 upstream calls to paint a screen. One board-level batch is one request.
+- ⚠ **ON `changed > 0` IT REFETCHES; IT NEVER SPLICES A CARD OUT.** The response carries counts,
+  never cards — deliberately, so a local removal is not even expressible. `capFor` gates the
+  "50 of 148" disclosure on `shown === count` with `shown` off these cards and `count` off
+  `useDailyBrief`, so `['attention-cards']`, `['daily-brief']` and `['work-plan']` are invalidated
+  TOGETHER and the server re-ranks.
+- ⚠ **THE QUERY KEY DOES NOT CARRY THE IDS** (`['attention-liveness', 'ws:<id>']`; the ids ride the
+  closure). Keying on them would refetch the sweep every time the board refetched — and a sweep can
+  CAUSE a board refetch, which is a loop with a GitHub call in it.
+- **The ids are RANKED, then sliced to `ATTENTION_LIVENESS_MAX_IDS` (90, mirroring the server's
+  enforcing cap, which 400s over-cap rather than truncating).** Forward kinds first — those rows
+  offer a Merge button, where a stale merge state is a button that 405s — then the ranked head,
+  then the rest. Built off `all`, not `cards`: a lensed-away card is still a card the next
+  unfiltered render shows. ⚠ `prId` is NULLABLE on some kinds (a `ci_failing` 'trunk' card names a
+  PR only when the red head's landing PR resolved), and those rows are simply not sent.
+- **Cadence: mount + window focus + 60s while visible.** Focus is what covers "I merged three PRs
+  on GitHub and came back"; `staleTime: 30_000` bounds a burst of tab-flipping to one sweep.
+- **A failed or `paused` sweep renders NOTHING** — `retry: false`, no error surface. The board keeps
+  its synced rows, which is what it had before this existed; rate limits are pre-empted, never red.
+
+### The three keys that opt OUT of `refetchOnWindowFocus: false`
+
+`main.tsx` turns focus-refetching off globally, which is right for a persisted PR-detail cache and
+a heavy vis board. It also left the ONE surface whose claim is "here is what is still outstanding"
+frozen at whatever it fetched before you switched to GitHub and retired half of it. `useAttentionCards`,
+`useDailyBrief` and `useWorkPlan` each set `refetchOnWindowFocus: true`.
+
+- ⚠ **ALL THREE OR NONE.** They are one fold (`getWorkspaceInsights`) read three times: the board,
+  the strip whose count is the board's cap denominator, and the plan beneath it. A focus policy on
+  one of them is two snapshots of one population — the "the strip says 5, the board lists 3" defect.
+  They already share one `refetchInterval` and sit together in `ACTIVITY_QUERY_KEYS` for this reason.
+- The shared `staleTime: 60_000` bounds it: rapid tab flipping refetches at most once a minute,
+  well inside `/api/attention`'s 60/min `search` tier.
 
 ### The per-repo landing queue on screen
 
@@ -1444,10 +1587,11 @@ that carried no suffix.
 | 2 | `BenchmarkConsentSection` | global | `isCloud` |
 | 3 | `LargePrThresholdSection` | global | none — both modes, every tier |
 | 4 | `YourDataSection` | global | `isCloud` |
-| — | **`Workspace · <name>`** | — | `useHasProWorkspaceSettings()` |
-| 5 | `SprintSection` (cadence + comparison window) | workspace | `caps.workspaceInsights` |
-| 6 | `SlackSection` (schedule + the bot block) | workspace | `caps.slackDigest` |
-| 7 | `IssueLinksSection` | workspace | `caps.issueLinks` |
+| — | **`Workspace · <name>`** | — | none — the scope resolving is the only gate |
+| 5 | `PendingMuteSection` | workspace | none — CORE/free, both modes, every tier |
+| 6 | `SprintSection` (cadence + comparison window) | workspace | `caps.workspaceInsights` + `proReady` |
+| 7 | `SlackSection` (schedule + the bot block) | workspace | `caps.slackDigest` + `proReady` |
+| 8 | `IssueLinksSection` | workspace | `caps.issueLinks` + `proReady` |
 
 - ⚠ **THE HEADING IS THE NAMING RULE NOW, AND IT IS STILL LOAD-BEARING.** There is no workspace
   picker in Settings — the rail's selection is the scope — so a screen that does not say which team
@@ -1471,10 +1615,53 @@ that carried no suffix.
   three broken sections rather than one unfinished request. Each section KEEPS its own guard — that
   one sits at the point of the WRITE, where a PUT with no `?workspace=` would be answered by the
   account's Default.
+- ⚠ **THE WORKSPACE HALF'S GATE IS SPLIT, AND THE SPLIT WAS A CORRECTNESS FIX RATHER THAN A LAYOUT
+  CHANGE.** It used to be ONE `useHasProWorkspaceSettings()` gate (three PAID caps) with a
+  `proReady` wait inside it, so a FREE per-workspace control could not be mounted here at all: with
+  no plugin the heading never rendered — which is the public `npx pierre-review` release — and with
+  a plugin present it would still have waited on `/api/pro/settings`, a request it does not read.
+  That is the same defect the global half is built to avoid, one grain over. Now the HEADING renders
+  on the scope alone (the free `PendingMuteSection` is what makes it never empty, exactly as
+  `LargePrThresholdSection` is for the global half), and `proReady` wraps ONLY the paid sections,
+  with the "Workspace settings unavailable." line speaking for them alone. **A free workspace-scoped
+  section must never be placed below `proReady`.**
 - ⚠ **TWO GATE FUNCTIONS, DELIBERATELY.** `useHasProSettings` stays wide (it gates the avatar-menu
-  entry and `BotRoiPanel`'s legacy-cost fetch); `useHasProWorkspaceSettings` is the SECTION
-  INVENTORY — the list where every cap must still own a section — and gates the heading. Narrowing
-  the first would take the Settings entry away from accounts that still have the global half.
+  entry and `BotRoiPanel`'s legacy-cost fetch); `useHasProWorkspaceSettings` is the PRO SECTION
+  INVENTORY — the list where every cap must still own a section — and gates the `/api/pro/settings`
+  FETCH plus the paid sections. It no longer gates the heading, and must not again. Narrowing the
+  first would take the Settings entry away from accounts that still have the global half.
+
+### `PendingMuteSection` — the Pending mute (CORE, free)
+
+One workspace switch plus a checkbox list of that workspace's repositories, one Save.
+`PUT /api/workspaces/:id/pending-mute`; current state is read off the `Workspace` row
+(`pendingMuted` + `mutedRepoIds`), so there is no GET and the existing `['workspaces']` query is
+the source.
+
+- ⚠ **IT MUTES NOTHING ON SCREEN, AND THE COPY LEADS WITH THAT.** A muted repo's items STAY on the
+  Pending board and in the broad `myTurn` count; what stops is the ownership claim — the server
+  downgrades those rows to `relevance: 'none'`, so `cardKindLabel` prints the neutral
+  "Review or reply", the browser notification stops firing and every `myTurnPersonal` figure drops
+  them into the "review or reply" line. A reader who thinks this HIDES work will not use it, and
+  hiding work would be the different, worse feature the board's broad-population rule forbids.
+- ⚠ **THE TWO CONTROLS ARE A UNION, NOT A PARENT AND A CHILD.** A repo is muted when the workspace
+  switch OR its own checkbox says so. The checkboxes therefore stay ENABLED and keep their values
+  while the workspace switch is on (a note says they are already covered) — disabling or clearing
+  them would be the inheritance chain this model refuses, and un-muting the workspace must reveal
+  the per-repo choices unchanged.
+- ⚠ **ONE SAVE, DIRTY HALVES ONLY** (`buildPendingMutePatch`, pinned by
+  `apps/frontend/test/pendingMutePatch.test.ts` — the `buildSprintPatch` pattern). A key that rides
+  along unchanged is an assertion the user never made and overwrites the other grain's stored value.
+  `mutedRepoIds: []` is a REAL answer ("nothing in this workspace is muted"), never `undefined`.
+- ⚠ **THE ROSTER COMES FROM `Repo.workspaceId`**, the client's only repo→workspace mapping — never
+  from the timeline's repo picker, which is a Timeline-only board control not mounted here.
+- The mutation reuses `useWorkspaceMutations`' shared invalidation set: `['my-turn']` (the
+  account-wide inbox the notification watcher reads) plus `['attention-cards']` / `['daily-brief']`
+  / `['work-plan']`, the three reads of the one fold whose whole contract is that they agree.
+- On the board, a muted `my_turn` card carries a `muted` chip beside its label
+  (`AttentionCards.tsx`). ⚠ **DISPLAY ONLY — no counter, lens or ranker reads it**; they all read
+  `relevance`, which has already absorbed the mute. It exists so a card the reader last saw as
+  theirs does not silently demote itself with no explanation.
 - **Deleted, and neither returns:** `AnthropicKeySection` (the stored BYO key is retired — local
   Claude Review is an ambient Claude session, else `ANTHROPIC_API_KEY`; the routes and the three
   `useClaudeReview` key hooks went with it) and `BotSection` (an explainer pointing at
@@ -1834,6 +2021,16 @@ that boolean un-collapsed: `'direct'` · `'maintained'` · `'none'`. Wire contra
   others prints two numbers that do not add up to the total beside them.
 - The dropdown badge keeps the summed figure and carries the split in its **tooltip only**, where
   it costs no layout.
+- ⚠ **`relevance` IS ALSO THE CARRIER OF THE PENDING MUTE.** Muting a workspace or a repo
+  (Settings → Workspace → Pending mute) forces every one of its my-turn rows to `'none'` inside
+  `getMyTurn`, so all of the above follows with no client change: the card relabels to the neutral
+  string, the row moves from the "need your attention" line to the "need review or reply" line, the
+  banner split and the dropdown badges drop it, and `useMyTurnNotifications` stops firing for it.
+  Nothing on the client tests for a mute. The one visible addition is a `muted` chip on the card —
+  **DISPLAY ONLY**, off `MyTurnCard.muted`, so a card the reader last saw as theirs does not demote
+  itself with no explanation. ⚠ **No counter, lens, cap disclosure or ranker may read that field**;
+  a second classifier beside `relevance` is exactly the drift the single server-side fold exists to
+  prevent.
 
 ## `ci_failing` — the red-build card, and the three SILENT lists a new InsightKind must reach
 

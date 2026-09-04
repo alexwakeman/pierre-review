@@ -1,5 +1,5 @@
 import type { DerivedState, MlLabel, MlSeverity, ThreadDetail } from '@pierre-review/shared';
-import { DERIVED_STATE_META } from '../../lib/ui.js';
+import { DERIVED_STATE_META, vendorInk } from '../../lib/ui.js';
 import { mlLabelKey } from '../../hooks/useMlLabels.js';
 
 const ORDER: DerivedState[] = [
@@ -74,7 +74,7 @@ export function ThreadCountChips({
           <span
             key={s}
             className="inline-flex items-center gap-0.5 text-[10px] font-semibold"
-            style={{ color: meta.color }}
+            style={vendorInk(meta.color)}
             title={`${meta.label}: ${counts[s]}`}
           >
             <span

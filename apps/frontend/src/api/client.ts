@@ -46,6 +46,8 @@ import type {
   ConsolidatedFeedResponse,
   WorkspaceInsightsResponse,
   AttentionCardsResponse,
+  AttentionLivenessBody,
+  AttentionLivenessResponse,
   DailyBriefResponse,
   FlowResponse,
   RepoWorkspaceMetricsResponse,
@@ -150,6 +152,7 @@ import type {
   SearchHitKind,
   SearchResponse,
   Workspace,
+  WorkspacePendingMuteUpdate,
   WorkspacesResponse,
   ReactionLookupBody,
   ReactionLookupResponse,
@@ -426,6 +429,26 @@ export const api = {
   // the 409.
   deleteWorkspace: (id: number) =>
     fetch(`/api/workspaces/${id}`, jsonBody('DELETE')).then((r) => handle<void>(r)),
+  // THE PENDING MUTE for one workspace — CORE and FREE on every tier, in both modes.
+  //
+  // ⚠ TWO INDEPENDENT FACTS, OR-ed, NEVER A CHAIN. `muted` silences the whole workspace;
+  // `mutedRepoIds` is the EXACT muted set within that workspace's membership. Send either alone
+  // or both; a key you omit is LEFT ALONE, which is what makes them independent rather than one
+  // inheriting from the other. A repo is muted when either says so.
+  //
+  // ⚠ IT MUTES NOTHING ON SCREEN. A muted repo stays fully live everywhere — Feed, Timeline,
+  // Activity, Bots, and the Pending board still lists its items in the broad "review or reply"
+  // population. What stops is the OWNERSHIP CLAIM: the server downgrades those rows'
+  // `relevance` to 'none', so the card reads "Review or reply" instead of "Your turn", the
+  // browser notification stops firing and the "N need your attention" figures drop it.
+  //
+  // ⚠ `mutedRepoIds` MUST BE THE WHOLE SET FOR THIS WORKSPACE, not a delta: the server replaces
+  // the muted set inside the named workspace's membership. Ids outside that membership are
+  // ignored, and mutes in OTHER workspaces are untouched — a Save here can never reach them.
+  setWorkspacePendingMute: (id: number, body: WorkspacePendingMuteUpdate) =>
+    fetch(`/api/workspaces/${id}/pending-mute`, jsonBody('PUT', body)).then((r) =>
+      handle<{ workspace: Workspace }>(r),
+    ),
   // MOVE one repo into this workspace. Membership is the only write (see `setWorkspaceRepos`) —
   // the repo was already fully live wherever it was, and it stays fully live here.
   // To take a repo OUT of a workspace, move it into the Default one — there is no delete route.
@@ -668,12 +691,26 @@ export const api = {
   // Reports "By workspace" axis (carried on `periodReport`).
   workspaceInsights: (workspaceId: number) =>
     get<WorkspaceInsightsResponse>(withQuery('/api/pro/insights', workspaceParam(workspaceId))),
-  // The workspace flow-metric header (DORA-ish tiles + trends) — CORE/free, rendered in the Feed.
+  // The workspace flow-metric header (DORA-ish tiles + trends) AND the per-repo "where is the work
+  // happening?" breakdown — CORE/free, both rendered in the "Flow metrics" section on Reports. One
+  // response, one scope, one window; it also echoes the resolved `workspaceId`.
   workspaceMetrics: (workspaceId: number) =>
     get<WorkspaceMetricsResponse>(withQuery('/api/workspace-metrics', workspaceParam(workspaceId))),
   // The attention cards (CORE/free) for the **Pending** rail entry.
   attentionCards: (workspaceId: number) =>
     get<AttentionCardsResponse>(withQuery('/api/attention', workspaceParam(workspaceId))),
+  // The board's batched liveness sweep — ONE GitHub question for the whole board (2 GraphQL
+  // points), so a PR merged by somebody else stops being a card within seconds rather than
+  // within an adaptive bucket. A POST because it carries an id LIST in its body (the
+  // `reactionLookup` shape); it returns COUNTS, never cards.
+  //
+  // ⚠ Never call it per card. Fifty cards resolving their own state is the ~200-upstream-calls
+  // failure the Pending board is designed around; this route exists so one board is one request.
+  attentionLiveness: (workspaceId: number, body: AttentionLivenessBody) =>
+    fetch(
+      withQuery('/api/attention/liveness', workspaceParam(workspaceId)),
+      jsonBody('POST', body),
+    ).then((r) => handle<AttentionLivenessResponse>(r)),
   // The daily brief (CORE/free, counts only — plan P3.1/P3.3). `rollup` adds the per-workspace
   // "Elsewhere" count lines; the Pro narration is a SEPARATE synthesis fetch, never this route.
   dailyBrief: (workspaceId: number, rollup: boolean) =>

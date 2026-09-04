@@ -22,8 +22,9 @@ and the one to lead with (`clean` / `blocked` / `unstable` / `behind` / `dirty` 
 `unknown`); `mergeable` survives only as the conflict corroborator. `mergeStateStatus` is
 **ACTOR-AGNOSTIC** — it does not model an admin's bypass power, which is precisely why it needs
 no branch-protection API call to be trustworthy, and why "blocked" may not be blocking *you*.
-`reviewDecision` (new PR column) names the review half of a `blocked` status so the verdict can
-say *why*; absent (the lean timeline PR doesn't carry it) the reason stays generic, never invented.
+`reviewDecision` (a PR column, and the only field GitHub gives that names an unmet rule) is the
+review half of a `blocked` status — see **Why a blocked PR is blocked** below for the whole
+answer; absent (the lean timeline PR doesn't carry it) the reason stays generic, never invented.
 
 - **`unstable` IS treated as mergeable** (`canMerge: true`, warn tone): it means only
   NON-required checks are red, and GitHub's own merge button merges it. Do not read "respects
@@ -47,6 +48,94 @@ say *why*; absent (the lean timeline PR doesn't carry it) the reason stays gener
 - `PrMergeOptions.mergeStateStatus` is GitHub's LIVE REST string (it can return values the enum
   doesn't model, `draft` among them), so the live path narrows through **`toMergeStateStatus()`**
   rather than casting — anything unrecognised becomes `unknown`.
+
+### Why a blocked PR is blocked (`deriveMergeBlockers`, PR detail only)
+
+`mergeStateStatus: 'blocked'` is the ONE verdict GitHub refuses to explain, and the PR pane used
+to pass the shrug straight through. GitHub collapses **at least six** protection failures into
+that one word — required approvals not met, a standing CHANGES_REQUESTED, a required check that
+is red / pending / never reported (`EXPECTED`), unresolved review threads on a repo with *Require
+conversation resolution before merging*, required signed commits / linear history / deployments,
+and repository rulesets — and puts **nothing on the same payload that separates them**.
+
+**Branch protection is NOT the answer, and this is a decision, not an omission.**
+`Ref.branchProtectionRule` (and REST `/branches/{b}/protection`, `/rulesets`) is **admin-only**:
+it returns `null`/403 for the WRITE/MAINTAIN tokens most viewers hold, and `graphqlTolerant`
+NULLs forbidden fields on a partial 200 — so *"this repo has no such rule"* and *"you may not see
+this repo's rules"* arrive identical, which is exactly the state
+[the partial-response rule](../CLAUDE.md) forbids acting on. Syncing it would make the feature
+authoritative on a handful of repos and silently blank on the rest. Nothing in
+`apps/backend/src` selects it; do not add it.
+
+So `deriveMergeBlockers(facts)` (pure, `lib/ui.ts`, unit-pinned by
+`apps/frontend/test/mergeBlockers.test.ts`) reasons from what the app already syncs and ranks the
+candidate causes by `certainty`:
+
+| certainty | means | which kinds |
+|---|---|---|
+| `proven` | GitHub itself names this requirement as unmet | `changes_requested`, `review_required` — both from `reviewDecision`, the ONLY field that names a rule |
+| `inferred` | the fact is real and locally verified, but GitHub never says it is what BLOCKED means | `checks_red`, `checks_pending`, `unresolved_threads`, and the terminal `unexplained` |
+
+⚠ **`certainty` ORDERS THE LIST AND IS NOT RENDERED, AND `MergeBlocker` CARRIES NO `note`.** The
+row shipped with a preamble about what GitHub does and does not tell us, a PROVEN/INFERRED chip on
+every entry, and a note under each explaining the hedge — three layers of scaffolding around one
+short true sentence. The pane now prints the facts, proven ones first, and nothing else: which of
+them GitHub is actually enforcing is the reader's call and they are better placed to make it. See
+**Product voice** in [CLAUDE.md](../CLAUDE.md). The rigour below is unchanged — it moved into what
+the sentences are ALLOWED TO SAY, which is where it belongs, rather than into commentary beside
+them.
+
+Rules, each of which the measured data forced:
+
+- ⚠ **NEVER ASSERT UNRESOLVED THREADS ARE THE BLOCKER.** Only **89 of 572** blocked PRs in a real
+  database have ANY unresolved thread — the claim is false for 84% of them — and the setting that
+  would prove it is the admin-only one above. The copy hedges causally and the row is `inferred`.
+- ⚠ **THE THREAD COUNT IS `!isResolved`, WHICH INCLUDES `likely_addressed`.** That heuristic says
+  the code probably changed; GitHub only cares about the resolve click, so those threads still
+  block. `likelyAddressedThreads` rides the same fact object so ONE sentence names both
+  populations — because there are now **three** unresolved-thread counts on or near this screen
+  and none may wear another's word:
+
+  | where | population | on-screen word |
+  |---|---|---|
+  | this blocker row | `!isResolved` (incl. `likely_addressed`) | "not resolved on GitHub", + "(N of them look addressed)" |
+  | `ChecksTab`'s Bots chips | `untouched \| replied_unresolved` | "N need a look" (was "N unresolved" — renamed for exactly this reason) |
+  | `db/triage.ts` `untouched_threads`, `db/work-plan.ts`, `mergeCardDetail` | `untouched` only | "N unanswered threads" |
+
+- ⚠ **`reviewDecision === 'approved'` REMOVES a row; it never adds one.** Its predecessor
+  `blockedDetail` returned a flat *"required checks aren’t passing"* for every approved+blocked
+  PR — **false on 10 measured PRs whose CI rollup was green**, asserted from a field that says
+  nothing about checks. Approval now only sharpens `unexplained`.
+- ⚠ **An outstanding review request is NEVER a blocker of its own.** GitHub answers
+  `reviewDecision: null` when the base branch requires no review — the shape 1,430 of 1,552 open
+  PRs are in, and it is genuine, not a sync gap (`PR_NODE_FIELDS` selects `reviewDecision` and
+  `persistPr` writes it in both arms of the upsert). `requestedReviewers` only ever NAMES a
+  proven `review_required` row.
+- **`unexplained` is the terminal entry and the list is never empty** — 17 real PRs are approved
+  + blocked with no unresolved thread, and a bare "blocked" with nothing under it is the
+  complaint this feature answers.
+- **The order is fixed and by evidence strength:** GitHub's own naming, then a red rollup (a red
+  NON-required check alone reads as `unstable`, not `blocked` — the same inference
+  `merge/auto-merge-runner.ts` already makes when it labels an armed intent's wait), then checks
+  that haven't reported, then threads.
+- **Populated for `blocked` ONLY.** Every other verdict is already a complete sentence about
+  itself; a one-row list under "resolve the conflicts with the base branch" is noise.
+
+**`MergeBlockFacts` is one OPTIONAL OBJECT on `MergeVerdictInput`, and its presence is the
+signal.** The compact surfaces (`Timeline/prBar`, `RepoOpenPrList`, the Pending cards) are fed a
+`TimelinePr` carrying neither threads nor a review decision; handing them a list derived from
+silence would print "nothing we can see explains it" on every blocked row in the app — a claim
+about the PR rather than about what we bothered to fetch. Omit it there and `detail` keeps its
+old generic sentence. **`ChecksTab` builds it once and threads it into `MergeControl` and
+`MergeWhenReadyControl`**, which previously built their verdict from the live merge state alone
+and so rendered a *worse* reason than the line directly above them.
+
+**`GET /api/prs/:id/merge-options` now returns `reviewDecision` at zero extra GitHub cost.**
+`fetchMergeQueueState` has always selected it (the auto-merge watcher waits on it by name) and
+the route always issues that probe — it just dropped the field, and threw the whole probe away on
+any repo without a merge queue. ⚠ It is SPREAD, never assigned: `queue` is null when the probe
+FAILED, and "we never asked" must not reach the client wearing the same `null` GitHub uses for
+"this base branch requires no review". Absent → the control falls back to the synced row.
 
 ### Merge queue (GitHub's native)
 

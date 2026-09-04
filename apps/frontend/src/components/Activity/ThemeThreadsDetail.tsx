@@ -13,7 +13,7 @@ import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { usePr, DETAIL_GC_TIME } from '../../hooks/usePr.js';
 import { prMlLabelsKey, useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
-import { DERIVED_STATE_META, ML_SEVERITY_META, indexUsers } from '../../lib/ui.js';
+import { DERIVED_STATE_META, ML_SEVERITY_META, indexUsers, vendorInk } from '../../lib/ui.js';
 import { MetaChip } from '../MetaChip.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { CommentCard } from '../CommentCard.js';
@@ -100,7 +100,7 @@ function ThemePrGroup({
           className="min-w-0 flex-1 cursor-pointer truncate text-sm hover:underline"
           title="Open this PR in its own detail tab"
         >
-          <span className="font-mono text-gray-500">{repoFullName}</span>{' '}
+          <span className="font-mono text-gray-500 dark:text-gray-400">{repoFullName}</span>{' '}
           <span className="font-semibold text-gray-800 dark:text-gray-100">#{prNumber}</span>
           {pr?.title ? <span className="text-gray-600 dark:text-gray-300"> — {pr.title}</span> : null}
         </span>
@@ -278,7 +278,7 @@ function MlSevChip({ label, color, count }: { label: string; color: string; coun
   return (
     <span
       className="rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
-      style={{ color, background: `${color}1a` }}
+      style={{ ...vendorInk(color), background: `${color}1a` }}
     >
       {label} · {count}
     </span>

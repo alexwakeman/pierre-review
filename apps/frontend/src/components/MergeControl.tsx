@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { MergeMethod } from '@pierre-review/shared';
+import type { MergeBlockFacts, MergeMethod } from '@pierre-review/shared';
 import {
   useDequeueMergeQueue,
   useEnqueueMergeQueue,
@@ -47,9 +47,17 @@ export function MergeControl({
   prId,
   githubUrl,
   label = 'Merge',
+  blockFacts,
 }: {
   prId: number;
   githubUrl: string;
+  /**
+   * The PR facts that let a `blocked` verdict say WHY (threads, CI rollup, outstanding review
+   * requests). Supplied by PrDetail's Overview, which holds the freshly-walked PR row; ABSENT
+   * on the Pending board, whose cards deliberately carry no review status and must not fetch to
+   * find out. Without it the verdict falls back to its generic sentence, exactly as before.
+   */
+  blockFacts?: MergeBlockFacts;
   /**
    * The COLLAPSED trigger's verb. Defaults to "Merge" (PrDetail's Actions row).
    *
@@ -144,6 +152,35 @@ export function MergeControl({
     inMergeQueue: queue?.inQueue ?? false,
     queuePosition: queue?.position ?? null,
     behindBy: options.behindBy,
+    // The blocked-reason facts. This panel used to build its verdict from the live merge state
+    // ALONE, so on a blocked PR it rendered the generic "required checks or reviews aren't
+    // satisfied" DIRECTLY BELOW the Overview line that already knew better — the merge button's
+    // own explanation was the worst one on the screen.
+    //
+    // The live decision from THIS fetch wins over the caller's synced one where the probe
+    // supplied it (the queue probe is issued on every merge-options call, queue or no queue),
+    // and `undefined` means the probe FAILED — it must not overwrite a known value with silence.
+    //
+    // ⚠ THE STANDALONE TRIGGER IS `!= null`, NOT `!== undefined`, AND THE DIFFERENCE IS A FALSE
+    // SENTENCE. This route ALWAYS emits the key now, and GitHub answers `reviewDecision: null` for
+    // every repository that requires no review — so `!== undefined` was true of every PR, and on a
+    // facts-less surface (the Pending board mounts both controls WITHOUT `blockFacts`, deliberately:
+    // nothing on the board may fetch) it manufactured `{reviewDecision: null}` out of silence. With
+    // no ciStatus and no thread count to reason from, `deriveMergeBlockers` then fell through to
+    // "nothing we can see explains it" — on 261 of 573 open blocked PRs here that is simply untrue
+    // (172 have a red rollup, 89 an unresolved thread), and it contradicted the PR pane's own line
+    // for the same PR. `!= null` keeps the win where the answer is NAMED ('changes_requested',
+    // 'review_required' — each a PROVEN row) and falls back to the generic sentence otherwise.
+    ...(blockFacts || options.reviewDecision != null
+      ? {
+          blockFacts: {
+            ...blockFacts,
+            ...(options.reviewDecision !== undefined
+              ? { reviewDecision: options.reviewDecision }
+              : {}),
+          },
+        }
+      : {}),
   });
 
   const hasMethods = options.allowedMethods.length > 0;

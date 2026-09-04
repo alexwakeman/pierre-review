@@ -89,7 +89,7 @@ export function PeriodMetricSpark({
       height={H}
       viewBox={`0 0 ${W} ${H}`}
       role="img"
-      className="overflow-visible text-gray-300 dark:text-gray-700"
+      className="overflow-visible decorative-mark text-gray-300 dark:text-gray-700"
       aria-label={
         `this period ${format(value)}` +
         (prior != null ? `, prior ${format(prior)}` : ', no prior period') +

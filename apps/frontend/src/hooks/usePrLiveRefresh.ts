@@ -91,6 +91,21 @@ export function usePrLiveRefresh(prId: number, enabled: boolean): PrLiveRefresh 
     void qc.invalidateQueries({ queryKey: prMlLabelsKey(prId) });
     void qc.invalidateQueries({ queryKey: ['timeline'] });
     void qc.invalidateQueries({ queryKey: ['open-prs'] });
+    // ⚠ AND THE PENDING BOARD, WHICH WAS THE ONE SURFACE THIS EFFECT DID NOT REACH. The walk
+    // that just landed wrote fresh `state` / `mergeStateStatus` / `review_requests` rows — so
+    // a PR that merged, closed or went behind while its pane was open is already stale in the
+    // DB's own terms, and the board behind the pane went on rendering the card for up to five
+    // minutes (its refetchInterval) with no GitHub call able to fix it. These three keys are ONE
+    // FOLD READ THREE TIMES (getWorkspaceInsights): the board, the brief strip whose count the
+    // board's cap disclosure divides by, and the ranked plan under it. Sweep them TOGETHER or
+    // `capFor`'s `shown === count` guard compares two snapshots and the "50 of 148" line
+    // silently vanishes — the same rule ACTIVITY_QUERY_KEYS keeps for a landing sync.
+    //
+    // Still gated on `changed`: an unconditional 5s sweep of a `search`-tier route is exactly
+    // the churn this effect's comment above forbids.
+    void qc.invalidateQueries({ queryKey: ['attention-cards'] });
+    void qc.invalidateQueries({ queryKey: ['daily-brief'] });
+    void qc.invalidateQueries({ queryKey: ['work-plan'] });
   }, [data, dataUpdatedAt, prId, qc]);
 
   const refreshNow = useCallback(() => {

@@ -770,7 +770,7 @@ function FileDiffBlock({
       {expanded && (
         <div className="border-b border-gray-100 dark:border-gray-800">
           {file.patch == null ? (
-            <div className="px-3 py-3 text-center text-xs text-gray-500">
+            <div className="px-3 py-3 text-center text-xs text-gray-500 dark:text-gray-400">
               {githubUrl ? (
                 <>
                   Diff is too large or binary —{' '}
@@ -810,7 +810,7 @@ function FileDiffBlock({
               )}
             </div>
           ) : rows.length === 0 ? (
-            <div className="px-3 py-3 text-center text-xs text-gray-500">
+            <div className="px-3 py-3 text-center text-xs text-gray-500 dark:text-gray-400">
               No textual diff for this file.
             </div>
           ) : (

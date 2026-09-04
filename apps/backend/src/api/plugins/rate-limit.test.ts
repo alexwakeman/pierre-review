@@ -231,6 +231,19 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('DELETE', '/api/me/account')).toEqual(['read']);
   });
 
+  // PUT /api/workspaces/:id/pending-mute — the Pending mute. One boolean UPDATE plus a bounded
+  // delete/insert over `pending_muted_repos`, all inside the workspace's own membership: no
+  // GitHub, no model. It takes `read` through the workspace-CRUD line, which is the DECIDED
+  // answer for that whole family rather than the bottom-of-function fall-through — pinned here so
+  // a later tightening of that prefix cannot silently drop this route somewhere else.
+  it('puts the Pending mute on the workspace-CRUD read tier', () => {
+    expect(tiers('PUT', '/api/workspaces/3/pending-mute')).toEqual(['read']);
+    expect(tiers('PUT', '/api/workspaces/3/pending-mute')).not.toContain('github_write');
+    // The sibling vocabulary a `startsWith('/api/workspace')` would have swallowed — the reason
+    // that line is written as an exact match plus a `/`-terminated prefix.
+    expect(tiers('GET', '/api/workspace-metrics')).toEqual(['read']);
+  });
+
   // The ML label surface spends NO GitHub quota and NO Anthropic credit — the model is called
   // only by the background worker, and the per-PR badge index is two indexed reads, so it stays
   // on `read`. (GET /api/bot-severity — the expensive rollup this test used to separate it
@@ -349,6 +362,17 @@ describe('tierFor — GitHub quota spenders', () => {
   it('puts the attention board on the expensive bucket after it absorbed the ranked head', () => {
     expect(tiers('GET', '/api/attention')).toEqual(['search', 'read']);
     expect(tiers('GET', '/api/attention')).not.toEqual(['read']);
+  });
+
+  // POST /api/attention/liveness — the board's batched GitHub sweep. Two `nodes(ids:)` GraphQL
+  // requests per call, so it belongs with the other client-driven GitHub-hydrating reads and NOT
+  // on the blanket bucket its sibling GET's URL family might suggest. The negative assertions are
+  // the point: `read` is the tier it would inherit by falling through, and `github_write` is the
+  // one a "it's a POST that touches GitHub" reading would reach for — it writes nothing upstream.
+  it('puts the pending-board liveness sweep on the pr_detail bucket, not read or github_write', () => {
+    expect(tiers('POST', '/api/attention/liveness')).toEqual(['pr_detail', 'read']);
+    expect(tiers('POST', '/api/attention/liveness')).not.toEqual(['read']);
+    expect(tiers('POST', '/api/attention/liveness')).not.toEqual(['github_write']);
   });
 
   // GET /api/flow-findings — the Chronology tab. PAID (`periodReports`) but deterministic, with no

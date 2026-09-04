@@ -106,12 +106,16 @@ function tierFor(method: string, path: string): readonly Tier[] {
 
   // ---- Workspace CRUD: `read`, RECORDED rather than inherited ----
   //
-  // The five surviving routes (list / create / rename+reassign / delete / move-one-repo-in) are
-  // pure local database work: a membership upsert on (account_id, repo_id), a rename, a re-home
-  // of repos and reviewer rows to Default. Nothing behind them calls GitHub and nothing behind
-  // them calls an LLM — assignment writes ONE membership row and nothing else (`repos.inbox_watch`
-  // is dropped; there is no second visibility column left to set), and the sync scheduler picks
-  // the repo up on its own cron rather than on this request. So `read` is the same
+  // The six surviving routes (list / create / rename+reassign / delete / move-one-repo-in /
+  // PUT :id/pending-mute) are pure local database work: a membership upsert on (account_id,
+  // repo_id), a rename, a re-home of repos and reviewer rows to Default, and — since the Pending
+  // mute — one boolean UPDATE on `workspaces` plus a bounded delete/insert over
+  // `pending_muted_repos` inside the workspace's own membership. Nothing behind any of them calls
+  // GitHub and nothing behind them calls an LLM — assignment still writes ONE membership row and
+  // nothing else (`repos.inbox_watch` is dropped; there is no second visibility column left to
+  // set, and the mute is not one: it changes no screen's population, only whether a row may claim
+  // the reader's turn), and the sync scheduler picks the repo up on its own cron rather than on
+  // this request. So `read` is the same
   // answer the fall-through at the bottom of this function would give, and it is spelled out
   // anyway: the two documented mistakes in this file were both a route whose tier was never
   // decided, only inherited. An explicit line makes the next reader's question "is this still
@@ -489,6 +493,21 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // moved into it, so the tier moves with it. The board mounts on navigation and refetches on a
   // 5-minute cadence, so request COUNT is genuinely bounded and 60/min is comfortable.
   if (!mutating && path === '/api/attention') return [TIERS.search, TIERS.read];
+  // POST /api/attention/liveness — the board's batched GitHub sweep. The sibling GET above is
+  // DB-only; this one is not, and the tier follows the TOKEN, not the URL family. One call is two
+  // `nodes(ids:)` GraphQL requests (measured 2 points, ~7s wall for a 90-PR board), so it is
+  // exactly the `POST /api/reactions/lookup` shape — a mutating VERB carrying a target LIST with a
+  // GET's cost — and takes the same 60/min `prDetail` bucket the other client-driven
+  // GitHub-hydrating reads do. The SPA sweeps on mount, on focus and on a 60s interval, which is
+  // ~2/min: 60 leaves room for several tabs while a script in a loop hits the wall in seconds.
+  //
+  // Spelled as an EXACT match, ABOVE the `if (mutating)` block, for the reason this file has now
+  // recorded four times: it would otherwise fall through to the 600/min blanket `read` bucket,
+  // and it is NOT in the `hitsGithub` alternation below because that regex is anchored to
+  // `/api/prs/\d+/` — adding `liveness` there would match nothing and merely look like coverage.
+  // (`githubWrite` would also be the wrong bucket regardless: this route writes nothing to
+  // GitHub, it reads.)
+  if (mutating && path === '/api/attention/liveness') return [TIERS.prDetail, TIERS.read];
   // GET /api/flow-findings — the Chronology tab (PAID `periodReports`, deterministic, no model and
   // no GitHub — the route 402s before it touches the DB). The TIER is unaffected by that gate and
   // must stay where it is: an entitled account still runs the whole fold, and the tier answers

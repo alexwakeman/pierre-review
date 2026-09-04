@@ -109,7 +109,7 @@ function CommentRow({
           {c.mlLabel ? (
             <MlSeverityBadge label={c.mlLabel} />
           ) : (
-            <span className="text-[11px] text-gray-300 dark:text-gray-600" title="Not scored yet">
+            <span className="text-[11px] text-gray-500 dark:text-gray-400" title="Not scored yet">
               —
             </span>
           )}
@@ -701,7 +701,7 @@ export function BotPrsDetail(): JSX.Element {
                 <button
                   type="button"
                   onClick={clearCommentFilters}
-                  className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 underline-offset-2 hover:underline"
+                  className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
                 >
                   Clear
                 </button>

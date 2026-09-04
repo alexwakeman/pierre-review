@@ -2982,7 +2982,7 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
         </div>
       )}
       {data && data.prs.length === 0 && data.events.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-500">
+        <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
           No activity in this window. Add a repo or widen the date range.
         </div>
       )}

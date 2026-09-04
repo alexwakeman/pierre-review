@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
   AutomatedReviewerKind,
+  MergeBlockFacts,
   PrDetail as PrDetailT,
   RequestReviewersBody,
   ReviewBotKind,
@@ -20,6 +21,7 @@ import {
   mergeVerdict,
   relativeTime,
   safeExternalUrl,
+  vendorInk,
 } from '../lib/ui.js';
 import { useFilters } from '../store/filters.js';
 import { Avatar } from './CommentCard.js';
@@ -121,7 +123,7 @@ function AutomatedReviewerBadge({
     <span
       data-testid="reviewer-provenance"
       className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium"
-      style={{ color: meta.color, background: `${meta.color}1a` }}
+      style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
       title={`Automated reviewer — ${meta.label}${prov}`}
     >
       <BotIcon size={10} />
@@ -362,12 +364,17 @@ export function ChecksTab({
   pr,
   usersById,
   onShowBotActivity,
+  onOpenThreads,
 }: {
   pr: PrDetailT;
   usersById: Map<number, User>;
   // Set (by PrDetail) only when this PR has automated-reviewer activity — enables the per-PR
   // bot-behaviour fetch + the "slower than typical" Overview badge that opens the Bot activity tab.
   onShowBotActivity?: () => void;
+  // Jump to the Threads tab — offered on the "N threads aren't resolved on GitHub" blocker so
+  // the reader can go and resolve them. Optional for the same reason onShowBotActivity is: the
+  // owner of the tab state is PrDetail, and a caller that has no tabs renders plain text.
+  onOpenThreads?: () => void;
 }): JSX.Element {
   // Suggested reviewers are a LIVE query (not part of the cached detail), so they stay fresh —
   // they empty the instant a reviewer is requested. Merge any CODEOWNERS-resolved users the
@@ -395,15 +402,45 @@ export function ChecksTab({
   // ITEM 9 — the bug this replaced: this row read `pr.mergeable === 'mergeable'` and rendered
   // a green "mergeable" for any PR without CONFLICTS, including the ~444 open PRs whose
   // required checks were failing (`mergeStateStatus: 'blocked'`). `mergeVerdict` leads with
-  // mergeStateStatus, and `reviewDecision` lets a blocked PR say WHICH half of protection is
-  // unmet. Only meaningful while the PR is open — a merged/closed PR has no merge verdict.
+  // mergeStateStatus. Only meaningful while the PR is open — a merged/closed PR has no merge
+  // verdict.
+  //
+  // `blockFacts` is what makes a `blocked` PR able to say WHY. It used to be `reviewDecision`
+  // alone, which is present on only ~8% of open PRs and made the verdict assert "required checks
+  // aren't passing" for every approved one — including the measured PRs that rendered that
+  // sentence inches to the right of a green "CI passing" on this very row. The ranked list of
+  // facts replaced it; see docs/MERGE-CI-TRUNK.md § Why a blocked PR is blocked.
+  //
+  // ⚠ THE THREAD COUNT IS `!isResolved`, AND IT IS NOT THE COUNT THE BOTS ROW BELOW SHOWS.
+  // GitHub's conversation-resolution rule gates on the resolve CLICK, so the merge-blocker
+  // population includes the threads our own heuristic calls `likely_addressed` — the Bots row
+  // deliberately excludes those (it is asking "what still needs a human?", not "what is GitHub
+  // still holding?"). Two populations, one screen, so each names itself: this one says "not
+  // resolved on GitHub" and carries the likely-addressed subset in the same sentence; the Bots
+  // chips say "need a look".
+  const unresolvedThreads = pr.threads.filter((t) => !t.isResolved).length;
+  const likelyAddressedThreads = pr.threads.filter(
+    (t) => !t.isResolved && t.derivedState === 'likely_addressed',
+  ).length;
+  // The facts the blocked-reason derivation reads, built ONCE and shared with the two merge
+  // controls in the Actions row below — before this they built their verdict from the live
+  // merge-options ALONE and so rendered a strictly worse reason than the line directly above
+  // them. They are fresh: usePrLiveRefresh forces a full walk of THIS PR on pane mount.
+  const blockFacts: MergeBlockFacts = {
+    reviewDecision: pr.reviewDecision,
+    ciStatus: pr.ciStatus,
+    unresolvedThreads,
+    likelyAddressedThreads,
+    requestedReviewers: pr.requestedReviewers.length,
+  };
   const verdict = mergeVerdict({
     mergeable: pr.mergeable,
     mergeStateStatus: pr.mergeStateStatus,
     isDraft: pr.isDraft,
-    reviewDecision: pr.reviewDecision,
+    blockFacts,
   });
   const showVerdict = pr.state === 'open';
+  const blockers = showVerdict ? (verdict.blockers ?? []) : [];
   const checks = pr.checkRuns;
   const counts = checks.reduce<Record<string, number>>((acc, c) => {
     acc[c.state] = (acc[c.state] ?? 0) + 1;
@@ -569,7 +606,7 @@ export function ChecksTab({
             )}
             {showVerdict && (
               <>
-                <span className="text-gray-300 dark:text-gray-600" aria-hidden>
+                <span className="decorative-mark text-gray-300 dark:text-gray-600" aria-hidden>
                   |
                 </span>
                 <span
@@ -588,6 +625,51 @@ export function ChecksTab({
             )}
           </div>
         </Row>
+
+        {/* WHY IT'S BLOCKED — the one verdict GitHub refuses to explain.
+            `mergeStateStatus: 'blocked'` collapses required approvals, a standing
+            changes-requested, a required check that is red / running / never reported,
+            unresolved review threads on a conversation-resolution repo, signed commits, linear
+            history and repository rulesets into ONE word, and puts nothing on the payload that
+            separates them. The only field that would is `branchProtectionRule`, which is
+            admin-only — for most tokens "no such rule" and "you may not look" are the same null,
+            so syncing it would make this authoritative on a few repos and silently blank on the
+            rest.
+
+            ⚠ SO THE ROW STATES THE FACTS AND STOPS. It shipped with a preamble explaining what
+            GitHub does and doesn't tell us, a PROVEN/INFERRED chip per row, and a note under each
+            saying what we cannot see — three layers of hedging around one short true sentence.
+            A reader looking at a blocked PR wants to know what is true of it; working out which
+            of those facts GitHub is actually enforcing is their job and they are better placed to
+            do it. The certainty is still computed and still ORDERS the list (proven first) — it
+            is just not narrated. Renders for `blocked` only: every other verdict is already a
+            complete sentence about itself. */}
+        {blockers.length > 0 && (
+          <Row label="Blocked">
+            <ul className="space-y-1">
+              {blockers.map((b) => {
+                const clickable = b.kind === 'unresolved_threads' && onOpenThreads != null;
+                return (
+                  <li key={b.kind} className="text-xs leading-relaxed">
+                    {clickable ? (
+                      <button
+                        type="button"
+                        onClick={onOpenThreads}
+                        className="font-medium text-gray-700 first-letter:uppercase hover:underline dark:text-gray-200"
+                      >
+                        {b.text}
+                      </button>
+                    ) : (
+                      <span className="font-medium text-gray-700 first-letter:uppercase dark:text-gray-200">
+                        {b.text}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </Row>
+        )}
 
         {/* Reviews = everyone who reviewed, with their latest-state badge (approvals already
             read as a green ✓), plus the "only bots reviewed" coverage chip. */}
@@ -640,14 +722,20 @@ export function ChecksTab({
                 title={`${g.label} opened ${g.threads} review thread${
                   g.threads === 1 ? '' : 's'
                 } on this PR${
-                  g.unresolved > 0 ? ` · ${g.unresolved} still need a look` : ' · all acted on'
+                  g.unresolved > 0
+                    ? ` · ${g.unresolved} still need a look (no reply and no follow-up commit, or replied but still open). Threads that LOOK addressed are excluded here — the Blocked row counts those, because GitHub still wants the resolve click`
+                    : ' · all acted on'
                 } — click to filter the Threads tab`}
               >
                 <BotIcon size={12} />
                 {g.label}
                 <span className="tabular-nums opacity-70">· {g.threads}</span>
+                {/* "need a look", NOT "unresolved" — this counts untouched|replied_unresolved
+                    and EXCLUDES likely_addressed, while the Blocked row's merge count is
+                    everything GitHub hasn't seen resolved. Two populations on one screen, so
+                    neither may wear the other's word. */}
                 {g.unresolved > 0 && (
-                  <span className="tabular-nums font-semibold">· {g.unresolved} unresolved</span>
+                  <span className="tabular-nums font-semibold">· {g.unresolved} need a look</span>
                 )}
               </button>
             ))}
@@ -694,8 +782,8 @@ export function ChecksTab({
             )}
             {pr.viewerCanPush && pr.state === 'open' && !pr.isDraft && (
               <>
-                <MergeControl prId={pr.id} githubUrl={pr.githubUrl} />
-                <MergeWhenReadyControl prId={pr.id} />
+                <MergeControl prId={pr.id} githubUrl={pr.githubUrl} blockFacts={blockFacts} />
+                <MergeWhenReadyControl prId={pr.id} blockFacts={blockFacts} />
               </>
             )}
             {pr.viewerCanClose && pr.state === 'open' && armedIntent == null && (
@@ -829,7 +917,7 @@ export function ChecksTab({
       )}
 
       <Row label="Meta">
-        <div className="space-y-0.5 text-xs text-gray-500">
+        <div className="space-y-0.5 text-xs text-gray-500 dark:text-gray-400">
           <div>{pr.repoFullName}</div>
           <div>opened {relativeTime(pr.openedAt)}</div>
           <div>updated {relativeTime(pr.updatedAt)}</div>

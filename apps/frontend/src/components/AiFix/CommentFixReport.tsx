@@ -332,7 +332,7 @@ export function CommentFixReport({
       <div className="text-xs font-semibold text-gray-600 dark:text-gray-300">
         Per-comment report
       </div>
-      <div className="mt-0.5 text-[11px] text-gray-500">
+      <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
         {commentVerdictRollup(summary)}
       </div>
       {summary.unmatched > 0 && (
@@ -412,12 +412,12 @@ function VerdictCard({
             {meta.chip}
           </Chip>
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] text-gray-500">
+            <div className="text-[11px] text-gray-500 dark:text-gray-400">
               <span className="font-mono text-gray-400">{verdict.ref}</span> — reported
               against an unknown reference; no matching comment in the selection.
             </div>
             {reasoning !== '' && (
-              <div className="mt-1 text-xs text-gray-500">
+              <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 <Markdown>{reasoning}</Markdown>
               </div>
             )}
@@ -446,11 +446,11 @@ function VerdictCard({
                 for a comment author, which is exactly why the server stamps it onto the
                 target. */}
             {target.isBot && (
-              <span className="rounded bg-gray-500/10 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">
+              <span className="rounded bg-gray-500/10 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 bot
               </span>
             )}
-            <span className="truncate font-mono text-gray-500" title={commentAnchorLabel(target)}>
+            <span className="truncate font-mono text-gray-500 dark:text-gray-400" title={commentAnchorLabel(target)}>
               {commentAnchorLabel(target)}
             </span>
             {url && (
@@ -473,7 +473,7 @@ function VerdictCard({
                 that as "not valid" published a verdict on a reviewer's comment that nobody had
                 reached — right above prose saying nothing is known about it. */}
             <span
-              className="rounded bg-gray-500/10 px-1 py-0.5 text-[10px] text-gray-500"
+              className="rounded bg-gray-500/10 px-1 py-0.5 text-[10px] text-gray-500 dark:text-gray-400"
               title={
                 verdict.valid == null
                   ? 'Nobody assessed this comment on this run — this is not a judgement about it.'
@@ -489,7 +489,7 @@ function VerdictCard({
           </div>
 
           {excerpt !== '' && (
-            <div className="mt-1 border-l-2 border-gray-200 pl-2 text-[11px] text-gray-500 dark:border-gray-700">
+            <div className="mt-1 border-l-2 border-gray-200 pl-2 text-[11px] text-gray-500 dark:text-gray-400 dark:border-gray-700">
               <span className="whitespace-pre-wrap">{excerpt}</span>
             </div>
           )}
@@ -506,7 +506,7 @@ function VerdictCard({
               title="The agent's own account of what it edited for this comment. The diff above is the authoritative changeset."
             >
               <span className="uppercase tracking-wide">Agent says it edited</span>{' '}
-              <span className="font-mono text-gray-500">{files.join(', ')}</span>
+              <span className="font-mono text-gray-500 dark:text-gray-400">{files.join(', ')}</span>
             </div>
           )}
 

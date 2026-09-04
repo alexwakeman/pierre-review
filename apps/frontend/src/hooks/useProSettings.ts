@@ -33,9 +33,17 @@ export function useHasProSettings(): boolean {
   );
 }
 
-// Whether the modal's "Workspace" half has anything in it — the ONE list where every cap must
-// still own a section, and the gate on the Workspace heading itself (a heading over nothing is
-// noise, and reads as a section that failed to load).
+// Which PAID sections the modal's "Workspace" half has — the ONE list where every cap listed must
+// still own a section.
+//
+// ⚠ IT IS NO LONGER THE GATE ON THE "Workspace" HEADING, AND MUST NOT BECOME ONE AGAIN. That half
+// now also holds a CORE/free section (the Pending mute), which is exactly what
+// `LargePrThresholdSection` is to the global half: the reason the heading can never stand over
+// nothing. Gating the heading on this list would have made a free per-workspace control
+// unmountable — with no plugin every cap below is false, which is the public `npx pierre-review`
+// release. What this still gates is the `/api/pro/settings` FETCH and the paid sections beneath
+// it; SettingsModal wraps only those in `proReady`, so the free section never waits on a request
+// it does not read.
 //
 // ⚠ THREE CAPS CAME OFF THIS LIST WITH THEIR SECTIONS, and none of them may drift back:
 //   • `botTriage` — the account-wide "Review bots" section is DELETED. Its explainer pointed at

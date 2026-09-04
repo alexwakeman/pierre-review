@@ -91,7 +91,7 @@ function Row({
               #{row.prNumber}
             </a>
           ) : (
-            <span className="font-mono text-[10px] text-gray-500">#{row.prNumber}</span>
+            <span className="font-mono text-[10px] text-gray-500 dark:text-gray-400">#{row.prNumber}</span>
           )}
           <button
             type="button"
@@ -127,7 +127,7 @@ function Row({
           null rather than fabricating a zero (which would also drop the PR into the smallest size
           bucket and manufacture a spectacular ratio). */}
       <td
-        className="px-2 py-1.5 text-right tabular-nums text-gray-500"
+        className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400"
         title={
           row.loc == null
             ? 'This PR’s size was never observed — under lean storage that is indistinguishable from an empty PR, so it is left blank rather than shown as 0.'
@@ -136,7 +136,7 @@ function Row({
       >
         {formatLoc(row.loc)}
       </td>
-      <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
+      <td className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400">
         {row.changedFiles == null ? '—' : row.changedFiles.toLocaleString()}
       </td>
       {/* ⚠ `expected` AND `baselinePrs` RIDE BESIDE THE MULTIPLIER, not behind the tooltip. A

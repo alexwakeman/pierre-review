@@ -15,6 +15,7 @@ import {
   ML_SEVERITY_META,
   relativeTime,
   safeExternalUrl,
+  vendorInk,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { BotIcon, ExternalLinkIcon } from '../Icons.js';
@@ -205,7 +206,7 @@ function BotCommentCardImpl({
         <Avatar user={user} size={18} />
         <span
           className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
-          style={{ color, background: `${color}1a` }}
+          style={{ ...vendorInk(color), background: `${color}1a` }}
           title={`${c.authorLabel} — an automated reviewer Limn triages`}
         >
           <BotIcon size={10} />
@@ -472,7 +473,7 @@ function BotClusterCardImpl({
               {i > 0 && <span className="text-gray-400">vs</span>}
               <span
                 className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium"
-                style={{ color, background: `${color}1a` }}
+                style={{ ...vendorInk(color), background: `${color}1a` }}
               >
                 {c?.authorLabel ?? 'a bot'}
               </span>

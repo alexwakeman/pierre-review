@@ -13,7 +13,7 @@ import {
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { type TabMeta } from '../../store/pinnedTabs.js';
-import { CI_META, CONFIDENCE_META, indexUsers, relativeTime, userLabel } from '../../lib/ui.js';
+import { CI_META, CONFIDENCE_META, indexUsers, relativeTime, userLabel, vendorInk } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { CheckCircleIcon, ChevronIcon, RefreshIcon, ResolveIcon } from '../Icons.js';
 import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
@@ -85,7 +85,7 @@ function ConfidenceMix({ counts }: { counts: AddressedConfidenceCounts }): JSX.E
             key={l}
             title={`${counts[l]} ${meta.label}-confidence thread${counts[l] === 1 ? '' : 's'} — ${meta.description}`}
             className="inline-flex items-center gap-0.5 rounded px-1.5 py-px text-[10px] font-semibold tabular-nums"
-            style={{ color: meta.color, background: `${meta.color}1f` }}
+            style={{ ...vendorInk(meta.color), background: `${meta.color}1f` }}
           >
             {counts[l]}
             <span className="tracking-wide">{meta.label[0]}</span>
@@ -395,7 +395,7 @@ export function BotThreadsDetail(): JSX.Element {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2 dark:border-gray-800 dark:bg-gray-900/40">
             {resolve.isPending && progress ? (
               <>
-                <span className="text-[12px] text-gray-500 tabular-nums">
+                <span className="text-[12px] text-gray-500 dark:text-gray-400 tabular-nums">
                   Resolving… {progress.done}/{progress.total} ({progress.resolved} resolved
                   {progress.failed > 0 ? `, ${progress.failed} failed` : ''})
                 </span>
@@ -429,7 +429,7 @@ export function BotThreadsDetail(): JSX.Element {
                   type="button"
                   disabled={resolve.isPending}
                   onClick={() => setConfirming(false)}
-                  className="rounded px-2 py-1 text-[12px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                  className="rounded px-2 py-1 text-[12px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                 >
                   Cancel
                 </button>
@@ -463,7 +463,7 @@ export function BotThreadsDetail(): JSX.Element {
                   // or high-only filter that hides every selected PR, Clear greys out in step with
                   // the "0 of 0 selected" summary instead of dangling enabled off a hidden ghost.
                   disabled={selectedPrIds.length === 0}
-                  className="rounded px-2 py-1 text-[12px] text-gray-500 hover:text-gray-700 disabled:opacity-40 dark:hover:text-gray-300"
+                  className="rounded px-2 py-1 text-[12px] text-gray-500 dark:text-gray-400 hover:text-gray-700 disabled:opacity-40 dark:hover:text-gray-300"
                 >
                   Clear
                 </button>
@@ -489,7 +489,7 @@ export function BotThreadsDetail(): JSX.Element {
             {!resolve.isPending &&
               resolve.data &&
               (resolve.data.resolved > 0 || resolve.data.failed > 0 || resolve.data.stopped) && (
-                <span className="text-[11px] text-gray-500">
+                <span className="text-[11px] text-gray-500 dark:text-gray-400">
                   Resolved {resolve.data.resolved}
                   {resolve.data.failed > 0 && ` · ${resolve.data.failed} failed`}
                   {resolve.data.stopped && ' · stopped'}.
@@ -629,7 +629,7 @@ export function BotThreadsDetail(): JSX.Element {
 
           {/* Client-side pager (selection + "Select all" span every page). */}
           {pageCount > 1 && (
-            <div className="flex items-center justify-center gap-3 text-[11px] text-gray-500">
+            <div className="flex items-center justify-center gap-3 text-[11px] text-gray-500 dark:text-gray-400">
               <button
                 type="button"
                 onClick={() => setPage(Math.max(0, safePage - 1))}

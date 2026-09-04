@@ -406,15 +406,44 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
     from another's cache entry). Nothing here corrects, seeds or breaks a tie for our severity;
     the vendor badge is the thing being MEASURED, never an input (0.474 vs 0.700 exact — see
     Accuracy).
+  - **§ The enlarged inflation chart** — `InflationHistoryChart`
+    (`components/Activity/InflationHistoryChart.tsx`), a fourth full-width `ChartCard` in
+    `BotRoiPanel`'s existing chart row, gated on the SAME `showMlColumns` flag as the column it
+    enlarges. The 52×14px cell sparkline is `aria-hidden` and stays that way; this card is the same
+    `mlInflation.weekly`, same two direction hues, at a size that can carry a **key**, an **axis**
+    and a **hover**. It costs no request — the panel already holds the rows. What it must keep:
+    ⚠ **it plots COUNTS, never a rate** (there is no weekly `badged`/`agree` on the wire — the
+    server buckets only disagreements — so a weekly share has no denominator to be computed from);
+    ⚠ **it is ONE SMALL PANEL PER BOT, two lines each**, because direction already owns the amber/
+    violet channel and 2N lines in two hues would leave vendor identity with nothing to ride on
+    (the bot's own hue appears on the panel's NAME DOT only); ⚠ **each panel keeps its own y-scale**
+    exactly as each row's sparkline did, which the axis now makes visible, so the caption says to
+    read heights within a bot and never across; ⚠ **it states its own span** — a fixed 12 weeks
+    (84 d, `trendFrom = min(from, now − 84d)`) beside a table whose Inflation counts follow the
+    7/14/30-day picker, two grains on one panel that the sparkline could hide only because it had
+    no axis; ⚠ **the marks are NOT clickable** — `/api/bot-analytics/flagging`'s `refine` has no
+    week narrowing, so a per-point click could only open the whole 84-day list under a caption
+    naming one week, breaking the "the number clicked IS the list's `filteredTotal`" identity the
+    cell's counts hold; and ⚠ **the three absences are three different sentences** — no
+    `mlInflation` at all (no in-window labels ⇒ absent and unnamed), `badged === 0` (⇒ **omitted and
+    NAMED**, never a flat zero line, the cell's dash rule one grain over), and a badged bot whose
+    `weekly` the server dropped for being all-zero (⇒ named as a MEASUREMENT: it made calls and we
+    agreed with every one). Pure fold + its rules: `apps/frontend/test/inflationHistory.test.ts`
+    (hand-run; the frontend suite is not in CI).
   - **The per-bot severity-over-time slice + category mix live on the per-bot DEPTH tab**
     (`BotDetailPanel`, the `bot-detail` pinned drill-down, Pro `botDepth`): `MlSeverityTrendChart`
     over a single-bot view — the nit(1)…critical(4) `yDomain` survives (the default 0→niceMax
     scale ticks at 0 and 5, two values a severity cannot take), and **a week with no findings is
     a GAP, never 0** — there is nothing below `nit`. `WorkspaceBotCharts` keeps exactly what that
     tab imports (`MlBotView`, `MlSeverityTrendChart`, `useBotSubset`).
-  - **CUT with no successor**: both "Severity mix per bot" chart twins, the two standalone
-    inflation ChartCards (the `inflationSummary` fold in `lib/botMlSeries.ts` survives, with its
-    tests), "Categories per vendor" and "Category activity over time".
+  - **CUT with no successor**: both "Severity mix per bot" chart twins, "Categories per vendor"
+    and "Category activity over time". ⚠ **The two standalone inflation ChartCards are NO LONGER on
+    this list**, and the sentence that used to put them here is retired with the claim. What P1.2/C2
+    cut was two *workspace-grain* cards on `WorkspaceBotCharts`, and nothing has returned there —
+    that surface is fed by `/api/pro/bot-behaviour`, whose weekly points carry severity and category
+    only. Inflation history came back one grain in, as **`InflationHistoryChart` in `BotRoiPanel`'s
+    own chart row** (§ The enlarged inflation chart, below). The `inflationSummary` fold in
+    `lib/botMlSeries.ts` still survives with its tests, unrelated and unused by that card.
   - ⚠ **The two exclusions still differ, deliberately**: severity counts are FINDINGS-ONLY
     (summaries and praise out, the phantom-gap rule) while CATEGORY counts cover every
     non-summary row, so `praise` is a category in its own right. Pinned by

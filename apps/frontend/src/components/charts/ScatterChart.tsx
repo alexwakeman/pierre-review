@@ -116,7 +116,7 @@ export function ScatterChart({
                   y1={Y(v)}
                   x2={w - PAD_R}
                   y2={Y(v)}
-                  className="text-gray-200 dark:text-gray-700"
+                  className="decorative-mark text-gray-200 dark:text-gray-700"
                   stroke="currentColor"
                   strokeWidth={1}
                 />

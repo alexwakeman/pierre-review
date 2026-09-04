@@ -1026,3 +1026,100 @@ export interface ReactionNodesGqlResponse {
   nodes: Array<GqlReactableNode | null> | null;
   rateLimit?: { remaining: number; resetAt: string; cost: number } | null;
 }
+
+// ---------------------------------------------------------------------------------------
+// Pending-board LIVENESS — the batched "is this PR still what we think it is?" probe
+// ---------------------------------------------------------------------------------------
+//
+// The Pending board is served entirely from already-synced rows, which is what keeps it cheap:
+// fifty cards resolving their own state on mount is ~200-250 upstream calls to PAINT A SCREEN.
+// But it also means a PR someone ELSE merged keeps a card until the adaptive walk comes round
+// (hot 120s / warm 300s / cold 900s, plus the cron tick). This query closes that gap for the
+// whole board in ONE call, on the REACTION_NODES_QUERY template: `nodes(ids:)`, scalars only, no
+// connection arguments — so it costs ONE GraphQL point regardless of how many PRs it covers.
+//
+// ⚠ MEASURED, 2026-09-03, against this account's real open PRs (`gh api graphql`, cost read off
+// each response's own `rateLimit` block):
+//
+//   ids   selection                                cost   wall     outcome
+//    90   scalars only (withMergeState: false)        1    1.3-1.8s  ok
+//    20   + mergeable/mergeStateStatus                1    4.9s      ok
+//    25   + mergeable/mergeStateStatus                1    3.9-5.5s  ok
+//    30   + mergeable/mergeStateStatus                1    6.1-7.3s  ok
+//    40   + mergeable/mergeStateStatus                1    5.8s      ok
+//    50   + mergeable/mergeStateStatus                —    10.8s     **HTTP 502**
+//    90   + mergeable/mergeStateStatus                —    11.2s     **HTTP 502**
+//
+// ⚠ THE COST CLIFF HERE IS WALL TIME, NOT POINTS — a different animal from the `reactors(first:1)`
+// 44× POINT cliff above, and it bites at the same place in the code. `mergeable` and
+// `mergeStateStatus` are not stored fields: GitHub computes mergeability per PR on demand (it
+// runs a trial merge), so asking for fifty at once times its own gateway out and returns a 502
+// with no partial data at all. That is why the two facts are split across TWO passes with two
+// different batch sizes rather than one query — and why the split is expressed as an `@include`
+// directive on ONE query rather than two constants: the caller cannot accidentally ask for the
+// expensive half at the cheap half's batch size, because the batch size is chosen from the same
+// flag. See github/pr-liveness.ts.
+//
+// Deliberately NOT selected: `headRefOid` (resolving the head ref is another per-PR lookup and
+// nothing on the board consents to a SHA — the merge route re-checks the head oid itself), and
+// merge-QUEUE state (`isInMergeQueue` / `mergeQueueEntry`), which PR_NODE_FIELDS excludes for its
+// own reason recorded above: volatile, and rendered only by the click-gated merge control.
+export const PR_LIVENESS_NODES_QUERY = /* GraphQL */ `
+  query PrLivenessByNode($ids: [ID!]!, $withMergeState: Boolean!) {
+    nodes(ids: $ids) {
+      __typename
+      id
+      ... on PullRequest {
+        number
+        state
+        isDraft
+        updatedAt
+        mergedAt
+        closedAt
+        reviewDecision
+        mergeable @include(if: $withMergeState)
+        mergeStateStatus @include(if: $withMergeState)
+      }
+    }
+    rateLimit {
+      remaining
+      resetAt
+      cost
+    }
+  }
+`;
+
+/**
+ * A node from PR_LIVENESS_NODES_QUERY.
+ *
+ * ⚠ EVERY FIELD PAST `id` IS OPTIONAL, for the reason `GqlReactableNode` records: an id can
+ * resolve to a non-PullRequest type, and `graphqlTolerant` hands back partial data with
+ * forbidden fields NULLED — so "GitHub says this PR is open" and "we never received the
+ * selection" are indistinguishable at the field level. `state` is the one the consumer gates on:
+ * it is non-null for every PullRequest GitHub will talk about, so its presence is the proof that
+ * the inline fragment landed. `mergeable`/`mergeStateStatus` are additionally absent by DESIGN on
+ * the cheap pass (`withMergeState: false`), which is not a failure and must not be read as one.
+ */
+export interface GqlPrLivenessNode {
+  __typename: string;
+  id: string;
+  number?: number | null;
+  /** OPEN | CLOSED | MERGED. */
+  state?: string | null;
+  isDraft?: boolean | null;
+  updatedAt?: string | null;
+  mergedAt?: string | null;
+  closedAt?: string | null;
+  /** APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED, or null when the repo requires no review. */
+  reviewDecision?: string | null;
+  /** MERGEABLE | CONFLICTING | UNKNOWN. Absent on the cheap pass. */
+  mergeable?: string | null;
+  /** CLEAN | DIRTY | UNSTABLE | BLOCKED | BEHIND | HAS_HOOKS | UNKNOWN. Absent on the cheap pass. */
+  mergeStateStatus?: string | null;
+}
+
+export interface PrLivenessNodesGqlResponse {
+  /** GitHub returns a null slot for any id the token cannot see (deleted, private, foreign). */
+  nodes: Array<GqlPrLivenessNode | null> | null;
+  rateLimit?: { remaining: number; resetAt: string; cost: number } | null;
+}

@@ -154,7 +154,7 @@ export function ThreadCard({
           event={{ type: 'review_comment', refId: thread.id }}
           title="Show this thread on the timeline"
         />
-        <span className="text-gray-300 dark:text-gray-600">·</span>
+        <span className="decorative-mark text-gray-300 dark:text-gray-600">·</span>
         <span
           className={
             onOpenInPr

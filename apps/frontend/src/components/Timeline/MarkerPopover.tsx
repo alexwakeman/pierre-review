@@ -60,7 +60,7 @@ function PrContext({
   const isForeign =
     ev.actorId != null && pr.authorId != null && ev.actorId !== pr.authorId;
   return (
-    <div className="flex items-baseline gap-1 text-[11px] text-gray-500">
+    <div className="flex items-baseline gap-1 text-[11px] text-gray-500 dark:text-gray-400">
       <span>on</span>
       {isForeign && (
         <span className="font-medium text-gray-600 dark:text-gray-300">
@@ -168,7 +168,7 @@ function SingleEvent({
           dangerouslySetInnerHTML={{ __html: vis.svg }}
         />
         <span className="font-semibold">{who}</span>
-        <span className="text-gray-500">· {vis.label}</span>
+        <span className="text-gray-500 dark:text-gray-400">· {vis.label}</span>
         <span className="ml-auto text-gray-400">{relativeTime(ev.occurredAt)}</span>
       </div>
 

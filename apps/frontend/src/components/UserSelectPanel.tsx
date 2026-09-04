@@ -99,9 +99,9 @@ export function MemberSectionList({
   return (
     <>
       {totalMembers === 0 ? (
-        <div className="px-1 py-2 text-xs text-gray-500">No members in range.</div>
+        <div className="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">No members in range.</div>
       ) : visibleSections.length === 0 ? (
-        <div className="px-1 py-2 text-xs text-gray-500">No members match.</div>
+        <div className="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">No members match.</div>
       ) : (
         visibleSections.map((sec) => {
           const ids = sec.members.map((u) => u.id);

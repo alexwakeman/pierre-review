@@ -148,7 +148,7 @@ export function SyncProgressPanel({
                 <span className="truncate font-medium" title={r.fullName}>
                   {r.fullName}
                 </span>
-                <span className="shrink-0 text-gray-500">
+                <span className="shrink-0 text-gray-500 dark:text-gray-400">
                   {errored ? (
                     <span className="text-red-500">error</span>
                   ) : paused?.reason === 'rate_limit' ? (
@@ -194,7 +194,7 @@ export function SyncProgressPanel({
             <span className="truncate font-medium" title="Local severity model — nothing billed">
               Scoring bot comments
             </span>
-            <span className="shrink-0 text-gray-500">
+            <span className="shrink-0 text-gray-500 dark:text-gray-400">
               {scoring ? (
                 `${scorePercent}%${ml && ml.pending > 0 ? ` · ${ml.pending.toLocaleString()} to go` : ''}`
               ) : (
@@ -227,7 +227,7 @@ export function SyncProgressPanel({
         </div>
       )}
 
-      <div className="mt-4 flex items-center justify-between gap-3 text-xs text-gray-500">
+      <div className="mt-4 flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
         <span>
           {completeCount} of {repos.length} repo{repos.length === 1 ? '' : 's'} complete
         </span>

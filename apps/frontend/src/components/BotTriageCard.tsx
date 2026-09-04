@@ -313,11 +313,11 @@ export function BotTriageCard({
               const excerpt = (t.comments[0]?.body ?? '').replace(/\s+/g, ' ').slice(0, 90);
               return (
                 <li key={t.id} className="flex items-baseline gap-1.5">
-                  <code className="shrink-0 font-mono text-[10px] text-gray-500">
+                  <code className="shrink-0 font-mono text-[10px] text-gray-500 dark:text-gray-400">
                     {t.path.split('/').pop() ?? t.path}
                     {t.line != null ? `:${t.line}` : ''}
                   </code>
-                  <span className="truncate text-gray-500" title={t.comments[0]?.body ?? ''}>
+                  <span className="truncate text-gray-500 dark:text-gray-400" title={t.comments[0]?.body ?? ''}>
                     {userLabel(author, authorId)}: {excerpt}
                   </span>
                 </li>
@@ -342,7 +342,7 @@ export function BotTriageCard({
               type="button"
               disabled={resolveBotThreads.isPending}
               onClick={() => setConfirming(false)}
-              className="rounded px-2 py-0.5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              className="rounded px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
             >
               Cancel
             </button>
@@ -352,7 +352,7 @@ export function BotTriageCard({
 
       {resolveBotThreads.data &&
         (resolveBotThreads.data.resolved > 0 || resolveBotThreads.data.failed > 0) && (
-          <div className="mt-1 text-gray-500">
+          <div className="mt-1 text-gray-500 dark:text-gray-400">
             Resolved {resolveBotThreads.data.resolved}
             {resolveBotThreads.data.failed > 0 && ` · ${resolveBotThreads.data.failed} failed`}.
           </div>

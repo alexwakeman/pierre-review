@@ -30,7 +30,7 @@ export function AiSummary({ pr }: { pr: PrDetail }): JSX.Element | null {
             <Markdown>{data.summary}</Markdown>
           </div>
         ) : (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             Generate a plain-language overview of what this PR does.
           </p>
         )}

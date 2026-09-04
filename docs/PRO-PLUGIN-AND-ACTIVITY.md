@@ -135,8 +135,8 @@ active workspace's repos**:
 
 ```
 ✦ Feed                always — THE default landing, BriefStrip on top
-⚠ Pending             always (CORE/free) — the worklist, led by the ranked "Do next" head
 🤖 Bots               always (CORE/free)
+⚠ Pending             always (CORE/free) — the worklist, led by the ranked "Do next" head
 ◈ Reports             always — FREE flow metrics above the PRO period report
 ── repos ──           flat: no grouping headers, no colour dots, no "Other" bucket
 ```
@@ -144,8 +144,12 @@ active workspace's repos**:
 ⚠ **ALL FOUR ARE UNGATED.** Reports used to be FIRST and wrapped in `{caps.workspaceInsights && …}`,
 from when it was nothing but the Pro period report. The FREE flow-metric header moved into it off
 the Feed, so gating the entry would have taken a free feature behind the Pro wall; the pane gates
-its own Pro halves internally instead. The two DAILY surfaces now lead — the Feed, and Pending,
-which absorbed the "Plan for today" panel and is no longer an occasional surface.
+its own Pro halves internally instead. ⚠ **BOTS SITS SECOND, DIRECTLY UNDER THE FEED** — the
+argument that once put Pending there ("the two DAILY surfaces lead") was retired: what makes
+Pending a daily surface is its CONTENT (it absorbed the "Plan for today" panel), not its row, and it
+is reached from the BriefStrip, the My-Turn banner and the Workspace badges far more often than from
+the rail. Bots earns the second slot because Bots → Settings is where the human/bot call that feeds
+`hiddenBotUserIds` is made — the control that filters the stream now sits next to the stream.
 ⚠ **"Pending" is a LABEL-ONLY rename of "Needs attention"** — the store/URL literal stays
 `'attention'`, because an unknown `?activityRepo=` value falls into the `parseInt` branch, yields
 NaN and lands the reader on the Feed, breaking Back on same-session history entries. (The "Compare workspaces" rail
@@ -207,18 +211,26 @@ tab exists only where it means something):
   migration.)
 - **Bots** (`BotsView`) — `ROI` (the Measure surface; the PANEL is Pro `botDepth` and shows a
   badge + locked pane, the caution / resolve backlog / tuning suggestions / bot feed around it stay
-  free — see § The Bots ROI panel is paid) | `Advisor` (Pro `botAdvisor`, LISTED only when
-  entitled) | **`Settings`** (CORE/free — the classification tab, see below; it shows in the
+  free — see § The Bots ROI panel is paid) | `Themes` (Pro **`activityDigest`**, LISTED only when
+  entitled — `BotThemesPanel`, see § The Bot Themes panel) | `Advisor` (Pro `botAdvisor`, LISTED
+  only when entitled) | `Benchmark` (Pro `botDepth`, visible-but-locked) | **`Settings`**
+  (CORE/free — the classification tab, see below; it shows in the
   per-repo Bots tab too, where it is the same WORKSPACE listing filtered CLIENT-SIDE to the actors
   with a footprint in that repo). ⚠ **The Bots RAIL ENTRY stays ungated on every tier**, exactly as
   the Reports one does, because the free Settings tab and the free triage flows live behind it.
-  `'behaviour'` and `'themes'` were REMOVED from `botsInnerTab` with their tabs:
+  `'behaviour'` and `'themes'` were both REMOVED from `botsInnerTab` with their tabs:
   per-bot depth is the `bot-detail` pinned drill-down, the workspace charts are a collapsed Pro
   section under ROI (`WorkspaceBotCharts`), and the bot-themes summary became the synthesis seam's
   "What they're flagging" card on Measure. The field is transient + URL-silent, so member removal
-  needed no migration. ⚠ **`'themes'` did NOT return to `botsInnerTab` when the themes PANEL
-  did** — `BotThemesPanel` replaced that SynthesisCard mount on the main ROI view; the union is
-  still `'roi' | 'advisor' | 'settings'`.
+  needed no migration. ⚠ **`'themes'` HAS SINCE RETURNED to `botsInnerTab`**, in two steps: the
+  themes PANEL came back first as a card at the top of the ROI branch, and was then moved onto a
+  sub-tab of its own so the Bots console mirrors the Feed's `Feed | Themes` strip. The union is
+  `'roi' | 'themes' | 'advisor' | 'settings' | 'benchmark'`. ⚠ Themes takes the ADVISOR's posture,
+  not ROI's — listed only when entitled — for two independent reasons: `ProGate.tsx` holds the
+  visible-but-locked set at exactly SIX named surfaces with a written argument that a seventh needs
+  its own, and `BotThemesPanel` renders `null` on the OSS build, where an always-listed tab would
+  be a blank pane. ⚠ Unlike `'advisor'` it is NOT rail-only: the report is genuinely per-repo, so
+  `showThemes` is `activityDigest` alone, never `repoId == null && activityDigest`.
 - **Insights** — the whole sub-tab apparatus is GONE (`InsightsSubTab`, `insightsSubTab`,
   `normalizeSubTab`, the guarded bar): the pane is Reports-FIRST — `PeriodReportsPanel` is its only
   body and the ad-hoc chat lives inside the report as "Ask about this period". Safe to delete
@@ -1810,7 +1822,7 @@ yourRate         = actedThreads ÷ settledThreads
 actedPerMonth    = actedThreads × 30.44 ÷ span.days          ← the COUNT, as a monthly pace
 
 $ per acted-on thread  = effectiveMonthlyUsd ÷ actedPerMonth
-at peer engagement     = effectiveMonthlyUsd ÷ (settledThreads × actedOnRate(COHORT p50) × 30.44 ÷ span.days)
+at the peer median rate= effectiveMonthlyUsd ÷ (settledThreads × actedOnRate(COHORT p50) × 30.44 ÷ span.days)
 SENTENCE 1, measured   = effectiveMonthlyUsd × (1 − yourRate)      ← what the price buys UNACTED, a month
 SENTENCE 2, what-if    = effectiveMonthlyUsd × (actedOnRate(COHORT p50) − yourRate) ← what CLOSING THE GAP is worth, a month
 ```
@@ -2113,13 +2125,17 @@ thousands separators stripped, the SPA formatters' roundings accepted, `fmtDurat
 `*_hours` keys only, payload-string numerals and array lengths allowed) — do not widen them by
 guesswork; `test/grounded-figures.test.ts` pins them.
 
-### The Bot Themes panel — revived, merged with the deterministic layer
+### The Bot Themes panel — revived, and now the `Bots → Themes` sub-tab
 
 `GET /api/pro/bot-themes` + `POST /api/pro/bot-themes/refresh` (`packages/pro/src/bot-themes/`)
 are back after the P2.3/C6 retirement, over the never-dropped `bot_theme_reports` table — **no
-migration**. `BotThemesPanel` replaces the `SynthesisCard` mount on the MAIN Bots view; the three
-drill-down SynthesisCards (`BotVolumeDetail`, `BotFlaggingDetail`, `BotThreadsDetail`) and the
-seam's `'workspace-bots'` kind are untouched and still serve slice-scoped Summarise.
+migration**. `BotThemesPanel` first replaced the `SynthesisCard` mount at the top of the Bots
+Measure surface and now owns the **`Bots → Themes` sub-tab** outright (listed only when
+`activityDigest` holds — the Feed's `Feed | Themes` posture, mirrored; details in
+docs/FRONTEND.md § The Bots Themes panel). The three drill-down SynthesisCards (`BotVolumeDetail`,
+`BotFlaggingDetail`, `BotThreadsDetail`) and the seam's `'workspace-bots'` kind are untouched and
+still serve slice-scoped Summarise. ⚠ The move is SPA-only: same routes, same tier, same
+`scope_key`, `apiVersion` stays 21.
 
 **⚠ The panel renders TWO CLASSES OF FIGURE and the caption must say which is which.** An early
 draft claimed the whole panel was exact.

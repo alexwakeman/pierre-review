@@ -259,7 +259,7 @@ function RowHeader({
           {repoFullName} #{prNumber}
         </span>
       </div>
-      <div className="mt-0.5 truncate text-gray-500">{prTitle}</div>
+      <div className="mt-0.5 truncate text-gray-500 dark:text-gray-400">{prTitle}</div>
     </button>
   );
 }
@@ -360,7 +360,7 @@ function OutcomeRow({
       />
       <div className="mt-0.5 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className={merged ? 'text-green-600 dark:text-green-400' : 'text-gray-500'}>
+          <div className={merged ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}>
             {merged ? (
               <CheckIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
             ) : (

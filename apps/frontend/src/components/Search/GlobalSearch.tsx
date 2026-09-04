@@ -76,7 +76,7 @@ export function GlobalSearch(): JSX.Element {
       {showPanel && (
         <div className="absolute left-0 top-full z-[60] mt-1 max-h-[70vh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
           {hits.length === 0 && people.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-gray-500">
+            <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
               {pending ? 'Searching…' : 'No matches.'}
             </div>
           ) : (

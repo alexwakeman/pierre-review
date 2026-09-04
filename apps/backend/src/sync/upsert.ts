@@ -333,7 +333,17 @@ const DRAFT_MERGE_STATE = 'draft';
 
 // GraphQL PullRequestReviewDecision → the stored lowercase enum. Null (the repo requires no
 // review at all) is preserved as null — distinct from 'approved'.
-function reviewDecisionFrom(
+/**
+ * GitHub's PullRequestReviewDecision → the stored enum. Exported because
+ * GET /api/prs/:id/merge-options surfaces the LIVE decision from its merge-queue probe and must
+ * map it exactly as the sync walk does — two spellings of one enum is how the merge control and
+ * the PR row start disagreeing about the same PR.
+ *
+ * ⚠ It cannot distinguish "GitHub said null" from "we were handed nothing": both return null.
+ * The caller owns that distinction (omit the key vs. write null) — see the partial-response rule
+ * in CLAUDE.md and sync/branch-status.ts.
+ */
+export function reviewDecisionFrom(
   decision: string | null | undefined,
 ): 'approved' | 'changes_requested' | 'review_required' | null {
   switch ((decision ?? '').toUpperCase()) {

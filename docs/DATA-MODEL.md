@@ -90,6 +90,39 @@ fixture tests (see Conventions).
     the workspace's repos AND its `workspace_reviewers` rows to Default *inside its transaction*
     before deleting the row, so the cascade finds nothing to do. Step two is not optional — see the
     landmine under **One bot object** below.
+- **`workspaces.pendingMuted`** + **`pendingMutedRepos`** — **THE PENDING MUTE** (CORE, free, both
+  modes; migration `0058` / pg `0045`). "Stop these Pending items claiming my turn." A muted repo's
+  my-turn rows are downgraded to `relevance: 'none'` (hence `personal: false`) inside `getMyTurn`,
+  at the ONE place `personal` is folded from `relevance` — so the Pending card relabels to the
+  neutral "Review or reply", the browser notification stops, and every `myTurnPersonal` figure drops
+  it into the broad "review or reply" population. Read through `db/pending-mute.ts`
+  (`getMutedPendingRepoIds`), written only by `PUT /api/workspaces/:id/pending-mute`.
+  - ⚠ **IT IS NOT THE `inbox_watch` AXIS DROPPED IN `0046`, and the next reader will assume it is.**
+    That column decided whether a repo's work was VISIBLE AT ALL — a second scope competing with
+    membership, which is exactly why it went. **Nothing here changes any screen's population**: a
+    muted repo is fully live on Feed, Timeline, Activity, Bots and the Pending board, and the broad
+    `myTurn` count is unchanged. What changes is whether a row may **CLAIM THE READER'S TURN and
+    interrupt them**. Membership is still the only visibility axis. (It is not the orphaned
+    `bot_mute_rules` table either — that one HID threads and auto-resolved them on a timer.)
+  - ⚠ **TWO INDEPENDENT FACTS, OR-ed. NEVER A CHAIN**:
+    `muted(repo) == its workspace's pending_muted OR a pending_muted_repos row`. Workspace grain
+    alone cannot silence one noisy repo; repo grain alone makes silencing a 20-repo workspace twenty
+    clicks. There is NO resolver and no `null`-means-inherit — clearing either half neither reveals
+    nor overwrites the other (the `hiddenBotUserIds` shape, not the `monthly_cents` one).
+  - ⚠ **`pending_muted_repos` HAS NO `workspace_id`, DELIBERATELY** — a repo belongs to exactly one
+    workspace already, and a fact lives at exactly one grain. The consequence is intended: a repo
+    moved between workspaces carries its mute with it. `listWorkspaces` intersects the rows with each
+    workspace's membership to build `Workspace.mutedRepoIds`, and the WRITER scopes its
+    delete/insert to the named workspace's membership — without that, saving one workspace's settings
+    screen would clear every mute set in every other workspace.
+  - PRESENCE IS THE FACT on the repo half (no `muted` column, no "considered" row). Tenancy is
+    STRUCTURAL: `repo_id` arrives in a request body, so the FK is the NAMED composite
+    `pending_muted_repos_repo_account_fk` against `repos (id, account_id)`.
+  - Scope: **`my_turn` rows only.** `ci_failing` has no `relevance` field at all, and the two FORWARD
+    kinds (`merge` / `update_branch`) carry `relevance` for the ranker weight and the severity accent
+    rather than as an ownership claim — they are exempt from the relevance lens, counted by no brief
+    line and fire no notification, so muting them would re-colour "you can land this now" cards and
+    suppress nothing. Pinned in `db/pending-mute.test.ts`.
 - **`users`** — GitHub actor metadata (`githubLogin` unique, `isBot`, `displayName`,
   `avatarUrl`, `githubType` — the GraphQL author `__typename`, fed to the bot classifier;
   `appSlug` — the `performed_via_github_app.slug` the app-attribution probe persists,
