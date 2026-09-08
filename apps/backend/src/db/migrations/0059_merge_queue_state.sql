@@ -1,0 +1,33 @@
+-- GitHub's native merge QUEUE becomes a SYNCED, STORED fact (CORE, free, no AI). Two additive
+-- nullable columns on `pull_requests`, no index and no backfill — a PR picks both up on the next
+-- walk that touches it. The Postgres twin is migrations-pg/0046_merge_queue_state.sql.
+--
+-- WHY STORE IT AT ALL, when GET /api/prs/:id/merge-options already fetches it live. GitHub's
+-- MergeStateStatus enum has NO QUEUED member (github/mutations.ts records the same fact where it
+-- explains why the queue verbs fork to GraphQL), so a PR sitting in the merge queue reports
+-- `merge_state_status = 'blocked'` — byte-identical to one held up by unmet branch protection.
+-- Every merge surface then reads "blocked" and offers a Merge button GitHub will refuse. That was
+-- survivable while the only reader was the click-gated merge control, which fetches live and pays
+-- ~3 GitHub calls for the answer. The Pending board is NOT allowed to fetch on mount — fifty cards
+-- resolving their own state is ~150 calls to paint one screen — so a card can only know a PR is
+-- queued if a column says so.
+--
+-- ⚠ NULL MEANS "NOT OBSERVED", NOT "NOT QUEUED", and that is why neither column takes a DEFAULT.
+-- A DEFAULT 0 here would assert about every already-synced PR in the database that GitHub had told
+-- us it is not in the queue, which it never did — and the merge surfaces would then render that
+-- fabrication as fact until the next walk. `false` is a positive statement from GitHub; null is the
+-- absence of one. sync/upsert.ts owns the three-state write (absent ⇒ omit the column, false/null ⇒
+-- clear it), and the two write routes in api/routes/prs.ts stamp their own result.
+--
+-- WHAT IS DELIBERATELY NOT HERE: the entry's `position` and `estimatedTimeToMerge`. Both are
+-- genuinely volatile — a position is wrong the moment it is written, because it changes every time
+-- another PR in the queue lands — and nothing but the merge control renders either. They stay
+-- live-only in merge-options. Membership and entry state are the halves that are stable enough to
+-- store and useless unless stored.
+ALTER TABLE `pull_requests` ADD `in_merge_queue` integer;--> statement-breakpoint
+-- GitHub's MergeQueueEntryState, lowercased like every other stored enum on this table
+-- (awaiting_checks | locked | mergeable | queued | unmergeable). `unmergeable` is the value that
+-- earns the column: GitHub EJECTS an entry whose checks failed, so without it a PR silently
+-- disappears from the queue and the reader is told nothing at all. Drizzle's `enum:` is a
+-- TYPE-level constraint only, so there is no CHECK to add here.
+ALTER TABLE `pull_requests` ADD `merge_queue_entry_state` text;

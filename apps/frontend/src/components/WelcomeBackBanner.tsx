@@ -41,6 +41,12 @@ import { CloseIcon } from './Icons.js';
 // of 50. There is consequently NO per-workspace "seen" state
 // and no schema change: a line disappears when you deal with the work, not when you glance at it.
 //
+// ⚠ AND IT IS THE SAME NUMBER THE WORKSPACE PICKER NOW SHOWS. That control's collapsed badge used
+// to carry the sum over the OTHER workspaces while sitting beside the ACTIVE one's name, so the
+// two surfaces disagreed by construction about what a number against a workspace meant. It carries
+// the active workspace's own figure now (`activeWorkspaceBadge`), which is this banner's chip for
+// that same workspace: one fold, one population, three places.
+//
 // ⚠ THE HEADLINE SPLITS THAT POPULATION IN TWO, the chips do not. "2 yours · 3 in your repos"
 // (`totalSplit`, off `MyTurnCard.relevance`) says which half is which without changing WHAT is
 // counted — the chips, the dropdown badges and the OS notification all still count the sum, and

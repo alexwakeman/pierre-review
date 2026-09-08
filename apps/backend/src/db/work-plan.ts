@@ -61,7 +61,7 @@ import type {
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { getWorkspaceInsights, mergeCardDetail, type BotScope } from './queries.js';
-import { computeApprovalInfoByPr } from './triage.js';
+import { approvalInfoFromStandings, computeReviewStandingsByPr } from './triage.js';
 
 const { pullRequests, reviewThreads } = schema;
 
@@ -366,7 +366,23 @@ export async function rankWorkPlan(
       : [];
   const openById = new Map(openRows.map((r) => [r.id, r]));
 
-  const approvalByPr = await computeApprovalInfoByPr(factPrIds);
+  // ⚠ THE SAME FOLD THE PENDING CARD'S REVIEWER CHIPS COME FROM, so the plan's `approvals` and
+  // the card's cannot disagree — the two used to be `computeApprovalInfoByPr` and nothing, and a
+  // second fold over `reviews` is exactly how they would drift.
+  //
+  // ⚠ `approvals` IS HASHED (`payloadHashFor`), and this rewrite deliberately does not move it.
+  // `approvalInfoFromStandings` is the projection `computeApprovalInfoByPr` already was: the two
+  // differ only in EMISSION — the old map had no entry for a PR whose reviews are all comments,
+  // where this one does, with `approvals: 0`. `sharedFacts` reads `?.approvals ?? 0`, so the value
+  // is identical either way. Nothing else from the standings enters `WorkPlanFacts`: a reviewer's
+  // `standingAt` is a Date that moves without the work moving, and a hashed field that drifts on
+  // its own re-bills every stored plan on the workspace.
+  const approvalByPr = new Map(
+    [...(await computeReviewStandingsByPr(factPrIds))].map(([prId, st]) => [
+      prId,
+      approvalInfoFromStandings(st),
+    ]),
+  );
   const untouchedByPr = new Map<number, number>();
   if (factPrIds.length > 0) {
     const threadRows = await db

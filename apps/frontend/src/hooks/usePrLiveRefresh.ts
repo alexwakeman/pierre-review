@@ -89,6 +89,21 @@ export function usePrLiveRefresh(prId: number, enabled: boolean): PrLiveRefresh 
       void qc.invalidateQueries({ queryKey: ['thread', t.id] });
     }
     void qc.invalidateQueries({ queryKey: prMlLabelsKey(prId) });
+    // ⚠ AND THE MERGE CONTROL'S KEY, which ['pr', prId] does NOT cover. `useMergeOptions`
+    // (usePrWrites.ts) holds the LIVE GitHub read — allowed merge methods, current mergeability,
+    // and merge-queue membership, position and entry state — none of which the sync persists, so
+    // no amount of refetching the PR detail can move it. It is staleTime:30s with no
+    // refetchInterval and the app-wide refetchOnWindowFocus is false, so until this line the ONLY
+    // thing that re-read it was a merge RETRY: a PR that GitHub had kicked out of the queue went
+    // on showing its old position until the user clicked Merge and watched it fail. Invalidation
+    // refetches ACTIVE queries only, and this one is enabled just while the control is open — a
+    // closed control is merely marked stale and costs nothing.
+    //
+    // ⚠ Inside the `changed` guard and nowhere else: that route is ~3 GitHub calls, so an
+    // unconditional version would put them on a 5-second timer — the churn this effect's own
+    // comment forbids. Bare literal because useMergeOptions spells the key that way too; a
+    // rename there fails silently here.
+    void qc.invalidateQueries({ queryKey: ['merge-options', prId] });
     void qc.invalidateQueries({ queryKey: ['timeline'] });
     void qc.invalidateQueries({ queryKey: ['open-prs'] });
     // ⚠ AND THE PENDING BOARD, WHICH WAS THE ONE SURFACE THIS EFFECT DID NOT REACH. The walk

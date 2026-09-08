@@ -14,7 +14,7 @@
 // in this batch: queries.ts is already 9k lines and carries literal NUL bytes that make `rg`/
 // `grep` under-report against it, so new folds go in a file a search can actually find.
 import { and, eq, inArray } from 'drizzle-orm';
-import type { MergeStateStatus } from '@pierre-review/shared';
+import type { MergeQueueEntryState, MergeStateStatus } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { READY_MERGE_STATES } from './triage.js';
 import type { PrLivenessObservation } from '../github/pr-liveness.js';
@@ -31,6 +31,9 @@ export interface PrLivenessTarget {
   mergeable: 'mergeable' | 'conflicting' | 'unknown' | null;
   mergeStateStatus: MergeStateStatus | null;
   reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
+  /** null = NOT OBSERVED, never "not queued". A false is a positive statement from GitHub. */
+  inMergeQueue: boolean | null;
+  mergeQueueEntryState: MergeQueueEntryState | null;
   updatedAt: Date;
 }
 
@@ -60,6 +63,8 @@ export async function getPrLivenessTargets(
       mergeable: pullRequests.mergeable,
       mergeStateStatus: pullRequests.mergeStateStatus,
       reviewDecision: pullRequests.reviewDecision,
+      inMergeQueue: pullRequests.inMergeQueue,
+      mergeQueueEntryState: pullRequests.mergeQueueEntryState,
       updatedAt: pullRequests.updatedAt,
     })
     .from(pullRequests)
@@ -80,6 +85,8 @@ export async function getPrLivenessTargets(
     mergeable: r.mergeable ?? null,
     mergeStateStatus: (r.mergeStateStatus as MergeStateStatus | null) ?? null,
     reviewDecision: r.reviewDecision ?? null,
+    inMergeQueue: r.inMergeQueue ?? null,
+    mergeQueueEntryState: (r.mergeQueueEntryState as MergeQueueEntryState | null) ?? null,
     updatedAt: r.updatedAt,
   }));
 }
@@ -126,13 +133,18 @@ export function rankForMergeStatePass(
 export interface PrLivenessDiff {
   prId: number;
   /**
-   * Did anything the BOARD reads move — state, draftness, merge state, or the PR's own clock?
+   * Did anything the BOARD reads move — state, draftness, merge state, review standing, merge-queue
+   * membership, or the PR's own clock?
    *
    * ⚠ This is what the route counts and what the SPA gates its board refetch on, and it is
-   * DELIBERATELY narrower than "the row was written". A `reviewDecision` GitHub simply restated
-   * changes no card, and on real data 92% of open PRs carry a null decision it restates on every
-   * single tick — counting that as movement would make the board refetch on a fixed timer while
-   * pretending the timer was evidence.
+   * DELIBERATELY narrower than "the row was written". The merged/closed CLOCKS ride along without
+   * counting: they arrive on the same tick the state change does and would double-count one event.
+   * Everything else here is rendered on a card, so a genuine move is a refetch.
+   *
+   * ⚠ AND EVERY TEST BELOW IS A DIFF. That is what keeps this honest at 60-second intervals: the
+   * common tick observes the same values it stored and reaches none of these branches, so a board
+   * with nothing happening on it refetches nothing. "Counts as movement" only ever decides what a
+   * REAL change does, never how often a quiet board asks.
    */
   movedOnBoard: boolean;
   /** The PR left the open set — its card is gone from the board's own fold on the next read. */
@@ -149,7 +161,8 @@ export interface PrLivenessDiff {
  * `mergeable`/`mergeStateStatus` UNSET rather than null when they were not asked for. So here,
  * `undefined` means omit the key and anything else is written — including `reviewDecision: null`,
  * which on this path is GitHub saying "this repo requires no review", the same value the fat sync
- * walk stores from the same field.
+ * walk stores from the same field, and including `inMergeQueue: false`, which is what a landing or
+ * an ejection from the merge queue looks like.
  *
  * ⚠ IT DOES NOT TOUCH `mergedById`. That is the maintainer-inference input and it is not in this
  * selection; inventing one (or clearing it) from a probe that never asked would corrupt a
@@ -201,10 +214,45 @@ export async function applyPrLiveness(
   }
   // Written whenever it DIFFERS, null included — on this path a null is GitHub saying "this repo
   // requires no review", the same value persistPr stores from the same field, and it reaches us
-  // only because `state` proved the fragment landed. Not board movement: no card renders it.
+  // only because `state` proved the fragment landed.
+  //
+  // ⚠ BOARD MOVEMENT, since the Pending card renders review standing. It was `change(false)` while
+  // no card showed the decision, on the argument that 92% of open PRs carry a null one restated
+  // every tick. That argument was always about the WRONG branch: the test above is a DIFF, so a
+  // restatement — null → null included — never gets here at all. What actually reaches this line is
+  // the approval that just landed, which is the single most useful thing the board can learn
+  // between walks and the reason someone leaves the tab open.
   if (obs.reviewDecision !== target.reviewDecision) {
     set.reviewDecision = obs.reviewDecision;
-    change(false);
+    change(true);
+  }
+  // ── Merge queue — membership and entry state, written as ONE fact ─────────────────────────
+  //
+  // `undefined` = GitHub said nothing (see PrLivenessObservation): omit both keys, learn nothing.
+  // An observed value is written whenever it differs, `false` INCLUDED — a false is GitHub saying
+  // the PR is not in the queue, which is what a landing or an EJECTION looks like, and refusing to
+  // write it would leave a card claiming a queue place the PR no longer holds.
+  //
+  // Board movement both ways: the card shows queue membership by default, and `unmergeable` is the
+  // state worth interrupting someone for — GitHub is dropping the PR out of the queue.
+  //
+  // ⚠ THE ENTRY STATE IS WRITTEN WHENEVER MEMBERSHIP WAS OBSERVED, even to null. Not queued ⇒ no
+  // entry; queued in a state this codebase does not model ⇒ also null (see mergeQueueEntryStateFrom
+  // for why an unmodelled state is not stored raw). That is exactly what persistPr does with the
+  // same GitHub answer, and the two writers must agree or one column flip-flops between the walk
+  // and this sweep every minute. The unknown-never-demotes-known guard above does NOT apply here:
+  // it exists because GitHub answers `mergeable` with UNKNOWN while it computes one, and there is
+  // no such in-progress value on the queue fields — they are stored state.
+  if (obs.inMergeQueue !== undefined) {
+    const nextState = obs.mergeQueueEntryState ?? null;
+    if (obs.inMergeQueue !== target.inMergeQueue) {
+      set.inMergeQueue = obs.inMergeQueue;
+      change(true);
+    }
+    if (nextState !== target.mergeQueueEntryState) {
+      set.mergeQueueEntryState = nextState;
+      change(true);
+    }
   }
   // ── The two computed fields, and the one rule that keeps this sweep CONVERGENT ────────────
   //

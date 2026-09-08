@@ -2975,6 +2975,23 @@ export interface Label {
 // null (not part of the union) means the repo requires no review at all.
 export type PrReviewDecision = 'approved' | 'changes_requested' | 'review_required';
 
+// A PR's state inside GitHub's native merge queue (GraphQL MergeQueueEntryState, lowercased
+// to match this codebase's stored-enum convention). SYNCED onto the PR row, unlike the rest of
+// the entry — see PrDetail.inMergeQueue for why.
+//   queued          — waiting its turn
+//   awaiting_checks — at the front, running the queue's own checks against the merged result
+//   mergeable       — those checks passed; it lands next
+//   locked          — held while an earlier entry in the same batch settles
+//   unmergeable     — GitHub is EJECTING it (its checks failed, or the merge no longer applies)
+// null means the PR has no entry, OR nothing has been observed yet — `inMergeQueue` is the
+// membership fact, and this is never the thing to test for "is it queued?".
+export type MergeQueueEntryState =
+  | 'awaiting_checks'
+  | 'locked'
+  | 'mergeable'
+  | 'queued'
+  | 'unmergeable';
+
 // A single CI check (CheckRun or legacy StatusContext) on the head commit,
 // normalised to one display state.
 export type CheckRunState =
@@ -4444,6 +4461,28 @@ export interface TicketRef {
   provider: IssueProvider;
 }
 
+// Where ONE reviewer stands on a pull request — the wire shape of the server's canonical fold
+// (`computeReviewStandingsByPr`, apps/backend/src/db/triage.ts): a reviewer's latest VERDICT
+// (approved / changes_requested) if they ever filed one, else their latest dismissal, else their
+// latest comment.
+//
+// ⚠ IT IS ONE TYPE BECAUSE THE ANSWER HAS TO BE ONE ANSWER. The Pending card's `InsightReviewer`
+// EXTENDS this (adding the board's bot resolution), and `PrDetail.reviewStandings` carries it
+// bare. Before this, the PR pane folded `PrDetail.reviews` itself with a different rule — latest
+// NON-PENDING review wins — so a reviewer who approved and later left a bare comment read
+// "approved" on the card and "commented" in the pane, one click apart. Measured: 59 disagreeing
+// reviewer-PR pairs on live open PRs.
+export interface PrReviewerRef {
+  /** Always resolves in the response's `users[]`. A review whose GitHub account is gone has no
+   *  id to give, so it is absent from the list and still counted — see `reviewerCount`. */
+  userId: number;
+  standing: ReviewStanding;
+  /** ISO-8601 timestamp of the review that SET this standing — NOT the reviewer's latest
+   *  activity. Dating an approval by a later drive-by comment prints "approved · 1h ago" over a
+   *  five-day-old approval, which is a false claim about a person. */
+  standingAt: string;
+}
+
 export interface PrDetail {
   id: number;
   repoId: number;
@@ -4483,6 +4522,41 @@ export interface PrDetail {
   // alone only says "protection unmet", while 'review_required' / 'changes_requested' names
   // the actual blocker. null = the repo has no review requirement, or it isn't synced yet.
   reviewDecision: PrReviewDecision | null;
+  // WHERE EACH REVIEWER STANDS — the SAME server fold the Pending card's chips read, so the pane
+  // and the board cannot describe one reviewer two ways. Not a per-review log: one entry per
+  // reviewer. `reviews` below is still the full log (bodies, provenance, timestamps) and stays
+  // the source for everything except "where do they stand".
+  //
+  // ⚠ UNCAPPED, unlike the card's five: a pane has the room, so it needs no "+N" and no cap
+  // disclosure. Order is the fold's own — newest standing first. The card RE-RANKS (blocking
+  // verdict, then approval, then comment, then dismissal, humans before bots) because it caps and
+  // must not drop the one human approval; that last tier needs the board's bot resolution, which
+  // does not exist on this route.
+  //
+  // ⚠ A REVIEWER WHOSE STANDING IS `approved` BUT WHOSE APPROVAL GITHUB HAS SINCE DISMISSED STILL
+  // READS `approved` HERE. That is a deliberate, measured divergence in the fold (2 pairs
+  // account-wide, 1 on a live open PR) kept so the hashed `approvals` count cannot move — the
+  // reasoning is at the fold, in db/triage.ts. The pane inherits it rather than re-deciding.
+  reviewStandings: PrReviewerRef[];
+  /** Every reviewer with a standing, INCLUDING any whose GitHub account is gone and so cannot
+   *  appear in `reviewStandings`. It is the fold's own total, never a length the client
+   *  subtracts its way to. */
+  reviewerCount: number;
+  // GitHub's native merge queue, SYNCED onto the PR row (the rest of the entry — position and
+  // estimated time to merge — is volatile and stays live-only on PrMergeOptions).
+  //
+  // ⚠ THREE STATES, and the difference is what the columns are for:
+  //   true  — GitHub says this PR is in its base branch's merge queue
+  //   false — GitHub says it is not (the repo may have no queue at all)
+  //   null  — nothing observed: synced before the field existed, or the walk never carried it.
+  // Null must never be rendered as "not queued". It is stored because a queued PR reports
+  // `mergeStateStatus: 'blocked'` — GitHub's enum has no QUEUED member — so without this every
+  // merge surface offers a Merge button GitHub will refuse.
+  inMergeQueue: boolean | null;
+  // The entry's state, or null when there is no entry / nothing observed. `unmergeable` is the
+  // one that earns the field: GitHub ejects an entry whose checks failed, and it is the only
+  // warning a reader gets that the PR has fallen out of the queue.
+  mergeQueueEntryState: MergeQueueEntryState | null;
   labels: Label[];
   checkRuns: CheckRun[];
   // Diff size summary (from GitHub's pullRequest.additions/deletions/changedFiles).
@@ -4656,17 +4730,50 @@ export interface ApprovedPrItem extends MyTurnPr {
   mergeStateStatus: MergeStateStatus;
 }
 
+// What you last did on a PR, newest-wins across your reviews, review comments, PR comments and
+// commits. ⚠ A bare `commented` review IS an action: the question is "have I engaged since", not
+// "did I engage well". `'reviewed'` covers every review state that is not an approval or a
+// changes-request (`commented`, `dismissed`, `pending`).
+export type MyLastAction =
+  | 'approved'
+  | 'changes_requested'
+  | 'reviewed'
+  | 'commented'
+  | 'pushed';
+
+// WHY the ball is in your court on a "New PRs" row — the two things that put it there, so the
+// card can say which. Without it the row reads "New PR from @alice · 11d ago" whether you have
+// never opened it or approved it and had two commits land since, and a card that cannot explain
+// itself is the complaint this field exists to answer.
+//
+// `'untouched'` — you have never acted on this PR (no review, no comment, no commit of yours).
+// `'commits_after'` — you acted, and then a PERSON pushed code, so your read of it is stale.
+//   ⚠ Only a person: a bot push, of any kind, never returns the ball.
+export interface NewPrBall {
+  kind: 'untouched' | 'commits_after';
+  /** what you last did — set only for `'commits_after'` (an untouched PR has no such action) */
+  yourLastAction?: MyLastAction | null;
+  /** how many human commits landed after your last action */
+  humanCommitsAfter?: number;
+  /** who pushed the newest of them; null when sync could not map the commit's author */
+  pusherId?: number | null;
+}
+
 // A new open PR (by someone other than you, non-draft) in one of the account's repos,
 // opened at or after that repo was ADDED (`Repo.createdAt` — see the note there for why the
-// cutoff exists). Surfaced so new work doesn't get missed. Dismissing one is sticky: it
-// acknowledges that specific PR and does not resurface on later activity.
+// cutoff exists), on which you still owe an action. Surfaced so new work doesn't get missed.
 //
 // The name is historical — it predates the removal of the per-repo "Watched" flag, which used
 // to be both the membership test and the clock. Nothing is opted into any more: every repo the
-// account has added qualifies. The identifier is kept because `MyTurnDismissKind`
-// ('watched_repo_pr') is a value STORED in `my_turn_dismissals.kind`, and renaming the type
-// without renaming that value would be worse than the stale word.
-export type WatchedRepoPrItem = MyTurnPr;
+// account has added qualifies. The word survived a second time because 'watched_repo_pr' used to
+// be a value STORED in `my_turn_dismissals.kind`; that table is gone, so the identifier is now
+// held only by the cost of renaming a string that appears in `MyTurnCardReason`, the card ids,
+// the ranker and four test files.
+export interface WatchedRepoPrItem extends MyTurnPr {
+  /** WHY this row is still yours — see `NewPrBall`. Trailing-optional for wire tolerance only;
+   *  `getMyTurn` always sets it. */
+  ball?: NewPrBall;
+}
 
 export interface ThreadAwaitingItem {
   threadId: number;
@@ -4684,6 +4791,20 @@ export interface ThreadAwaitingItem {
   lastReplyAt: string;
   lastReplyAuthorId: number | null;
   githubUrl: string;
+  /** WHICH of the two things put this thread on your plate — they are not the same event and
+   *  must not be worded the same way.
+   *
+   *  `'reply'` — somebody replied after you and the thread is unresolved. The `lastReply*`
+   *    fields above are THEIR comment; this is the long-standing case.
+   *  `'likely_addressed'` — nobody replied (the `lastReply*` fields are YOUR OWN comment) but a
+   *    later commit touched the thread's file, so it may already be answered in code.
+   *    ⚠ That is a HEURISTIC — an unrelated edit or a rename produces it too — so a row carrying
+   *    this value must never be worded as "addressed"; it says a commit touched the file and
+   *    leaves the judgement to the reader.
+   *
+   *  Trailing-optional for wire tolerance only; `getMyTurn` always sets it. Absent ⇒ `'reply'`,
+   *  which is what every response predating this field was. */
+  awaitingKind?: 'reply' | 'likely_addressed';
   /** See `MyTurnPr.personal`. Always true here — you opened the thread, so a reply on it is
    *  personally addressed to you by construction. Carried anyway so a notification surface can
    *  read ONE field across every section instead of knowing which sections are exempt. */
@@ -4731,75 +4852,6 @@ export interface MyTurnResponse {
   // Completed Claude reviews awaiting action (empty when Claude Review is disabled).
   claudeReviewsToAction: ClaudeReviewToAction[];
   // Users referenced by any row, for client-side lookup.
-  users: User[];
-}
-
-// ---- my turn: completed / dismissed (the "Done" tab) ----
-// Previously-dismissed entries, for the My Turn "Done" tab (past 90 days). Only the
-// dismissal-backed kinds appear here (review_request + thread + claude_review, from
-// myTurnDismissals) — "Your PRs" are cleared via mark-viewed, not a restorable
-// dismissal. Each carries when it was dismissed and can be moved back to the inbox
-// ("To do" = un-dismiss).
-// Whether un-dismissing ("To do") would actually return the entry to the inbox.
-// The inbox is derived live from GitHub state, so an entry whose PR has since been
-// merged/closed (or thread resolved, or Claude run superseded) can no longer be
-// actioned: restoring it would be a silent no-op. The UI shows a working "To do"
-// button only when `restorable`, else a static `reason` chip ("PR merged", …).
-interface Restorability {
-  restorable: boolean;
-  // Why it can't be restored; present only when `restorable` is false.
-  reason?: string;
-}
-
-export interface DismissedReviewItem extends MyTurnPr, Restorability {
-  kind: 'review_request';
-  dismissedAt: string;
-}
-
-export interface DismissedThreadItem extends ThreadAwaitingItem, Restorability {
-  kind: 'thread';
-  dismissedAt: string;
-}
-
-// A dismissed Claude review (local-only feature). Keyed by the run id; opening it
-// jumps to the PR's Claude Review tab, "To do" restores it to the inbox (only if it
-// is still that PR's most-recent unposted run).
-export interface DismissedClaudeReviewItem extends Restorability {
-  kind: 'claude_review';
-  reviewId: number;
-  prId: number;
-  repoFullName: string;
-  prNumber: number;
-  prTitle: string;
-  verdict: ClaudeReviewVerdict | null;
-  githubUrl: string;
-  dismissedAt: string;
-}
-
-// A dismissed new-PR entry. Opening it loads the PR; "To do" restores it to the inbox (only
-// if the PR is still open and its repo is still on the account).
-export interface DismissedWatchedRepoPrItem extends MyTurnPr, Restorability {
-  kind: 'watched_repo_pr';
-  dismissedAt: string;
-}
-
-// A dismissed "your PR was approved" entry. Opening it loads the PR; "To do" restores
-// it (only while the PR is still open and approved).
-export interface DismissedApprovedPrItem extends MyTurnPr, Restorability {
-  kind: 'pr_approved';
-  dismissedAt: string;
-}
-
-export type DismissedItem =
-  | DismissedReviewItem
-  | DismissedThreadItem
-  | DismissedWatchedRepoPrItem
-  | DismissedApprovedPrItem
-  | DismissedClaudeReviewItem;
-
-export interface DismissedMyTurnResponse {
-  items: DismissedItem[];
-  // Users referenced by any item, for client-side lookup.
   users: User[];
 }
 
@@ -4963,40 +5015,28 @@ export interface PrRefreshResponse {
   updatedAt: string; // ISO-8601, the row's updatedAt after the refresh
 }
 
-// Dismissing a "my turn" entry. Auto-resurfaces when newer activity arrives:
-// a review_request reappears when its PR is updated again; a thread reappears
-// on a newer reply; a claude_review reappears when a newer review run finishes
-// (the dismissal is keyed by the run's id, so a fresh run is a new entry); a
-// pr_approved reappears when a NEWER approval lands (compared against the latest
-// approving review's timestamp — not the PR's updatedAt, which any commit bumps).
-// A watched_repo_pr dismissal is sticky — it acknowledges that specific new PR and
-// does not resurface on activity (the PR leaves the inbox for good once dismissed,
-// or when it's merged/closed).
-export type MyTurnDismissKind =
-  | 'review_request'
-  | 'thread'
-  | 'watched_repo_pr'
-  | 'pr_approved'
-  | 'claude_review';
-
-export interface MyTurnDismissBody {
-  kind: MyTurnDismissKind;
-  // PR id for review_request, watched_repo_pr and pr_approved; thread id for thread;
-  // Claude-review run id for claude_review.
-  refId: number;
-}
-
 // WHY an item is on your plate — the six sections of GET /api/my-turn, one value each, carried by
-// `MyTurnCard.reason`. Five of them ARE `MyTurnDismissKind` verbatim (the section is dismissable,
-// and the value is what POST /api/my-turn/dismiss takes). `'your_pr'` is the sixth — "your PRs
-// with new activity since you last looked" — and it deliberately has NO dismissal kind: opening
-// the PR is its dismissal (the pr_views marker), so there is no row to write and nothing to restore.
+// `MyTurnCard.reason`.
+//
+// These used to be five dismissal kinds plus `'your_pr'`: five sections you could press "Done" on,
+// and one that cleared itself when you opened the PR. THE DISMISSAL SUBSYSTEM IS GONE — the table,
+// the routes and the button — because a card now leaves this board when you ACT on the PR, which
+// is what the reader meant by "done" in the first place. A stored dismissal was manual
+// compensation for a predicate the fold did not have; it never expired, so an item you pressed
+// once stayed pressed while the work came back. Nothing here is a wire value any more: these six
+// strings are only ever computed and rendered.
 //
 // ⚠ NOT `MyTurnReason`, which is a DIFFERENT, older union ('requested' | 'authored' | 'merged' |
 // 'reviewed' | 'commented'): that one says how you PARTICIPATE in a feed row, this one says which
 // My Turn SECTION an item came from. They are one `sed` away from each other and mean opposite
 // things — the `-Card-` infix is load-bearing.
-export type MyTurnCardReason = MyTurnDismissKind | 'your_pr';
+export type MyTurnCardReason =
+  | 'review_request'
+  | 'thread'
+  | 'watched_repo_pr'
+  | 'pr_approved'
+  | 'claude_review'
+  | 'your_pr';
 
 export interface UpdateUserBody {
   isBot: boolean;
@@ -6354,6 +6394,29 @@ interface InsightCardBase {
   severity: InsightSeverity; // drives the card's accent (info/warn/high)
 }
 
+// Where ONE reviewer currently stands on a PR: their latest VERDICT (approved /
+// changes_requested) if they ever filed one, else their latest dismissal, else their latest
+// comment. One value per reviewer, never a per-review log. This is the wire spelling of the
+// server's `ReviewerStanding` fold (apps/backend/src/db/triage.ts) and the two must stay in
+// lockstep — the fold is also where the approval COUNT comes from, so a member added on one
+// side only would put a reviewer on a card that no count knows about.
+export type ReviewStanding = 'approved' | 'changes_requested' | 'dismissed' | 'commented';
+
+// One NAMED reviewer on a Pending card. `userId` always resolves in the response's `users[]`.
+//
+// ⚠ A REVIEWER WITH NO GITHUB ACCOUNT (deleted) IS DROPPED FROM THIS LIST AND STILL COUNTED in
+// `reviewerCount` — it cannot be named, so a chip for it would say nothing, but pretending it
+// does not exist would understate the number of people who have looked.
+//
+// ⚠ `isBot` / `botKind` COME FROM THE SAME RESOLUTION AS `InsightPrRef.authorIsBot` — a manual
+// workspace judgement wins both directions, then `users.isBot`, then the login seeds a vendor —
+// never a second classifier. `isBot: true` with `botKind: null` is a real, common state (an
+// unbranded CI account) and renders a generic "Bot".
+export interface InsightReviewer extends PrReviewerRef {
+  isBot: boolean;
+  botKind: AutomatedReviewerKind | null;
+}
+
 // Shared PR context carried by every PR-bearing insight card — enough to render the
 // at-a-glance CI / size indicators and open the PR without a second fetch.
 export interface InsightPrRef {
@@ -6386,6 +6449,53 @@ export interface InsightPrRef {
   /** The vendor family when one is recognised. ⚠ `null` WITH `authorIsBot: true` is a real and
    *  common state — an unbranded CI account — and renders as a generic "Bot", never as a person. */
   authorBotKind: AutomatedReviewerKind | null;
+  // ── GitHub's native merge queue ────────────────────────────────────────────────────────────
+  //
+  // Carried on the card because the Pending board MAY NOT FETCH ON MOUNT, and a queued PR is
+  // indistinguishable from a protection-blocked one without it: GitHub's MergeStateStatus enum
+  // has no QUEUED member, so a queued PR reports `mergeStateStatus: 'blocked'`. Without these two
+  // the board offers a Merge button GitHub will refuse.
+  //
+  // ⚠ `inMergeQueue: null` IS "NOT OBSERVED", NEVER "NOT QUEUED" — the PR was synced before the
+  // columns existed, or the walk did not carry the selection. `false` is a positive statement
+  // from GitHub. Render the two apart or say nothing.
+  inMergeQueue: boolean | null;
+  /** The entry's state, or null when there is no entry / nothing was observed. `unmergeable` is
+   *  the one that earns the field: GitHub EJECTS an entry whose checks failed, and it is the only
+   *  warning a reader gets that the PR has fallen out of the queue. */
+  mergeQueueEntryState: MergeQueueEntryState | null;
+  // ── Where the review stands ────────────────────────────────────────────────────────────────
+  //
+  // ⚠ TWO ANSWERS, CARRIED APART, BECAUSE THEY ARE TWO CLAIMS. `reviewDecision` is GITHUB's
+  // verdict — what the repo's protection rule says about whether review still blocks the merge —
+  // and `reviewApprovals` / `reviewChangesRequested` / `reviewers` are OURS, folded from the
+  // review rows. They disagree on real data (ours counts an approval GitHub has since dismissed),
+  // and merging them into one field would pick a winner silently. Label them apart or lead with
+  // one and stop.
+  //
+  // ⚠ `reviewDecision: null` MEANS "THIS REPO REQUIRES NO REVIEW" — it is ~90% of open non-draft
+  // PRs and it MAY NEVER RENDER AS "nobody looked". Whether anyone looked is `reviewerCount`.
+  reviewDecision: PrReviewDecision | null;
+  /** How many distinct reviewers' standing is `approved`. Folded from the SAME rows as
+   *  `reviewers` below, so the chips and the count cannot disagree. */
+  reviewApprovals: number;
+  /** At least one reviewer's standing is `changes_requested` — blocking, and it outranks any
+   *  number of approvals on screen. */
+  reviewChangesRequested: boolean;
+  /** The named reviewers, RANKED (changes_requested → approved → commented → dismissed, humans
+   *  before bots inside each) and CAPPED. Measured: 39% of reviewer standings on open PRs are
+   *  bot-authored and 477 of 478 of those are merely `commented`, so an unranked list buries the
+   *  one human approval under a wall of vendor chips. */
+  reviewers: InsightReviewer[];
+  /** EVERY reviewer with a standing on this PR — including the ones the cap dropped and the
+   *  unnameable ones `reviewers` omits.
+   *
+   *  ⚠ THE "+N" IS `reviewerCount - reviewers.length` COMPUTED HERE-SIDE, and the disclosure
+   *  gates on `reviewers.length === reviewerCount` — the same rule every other cap in this app
+   *  follows. Never let the client subtract its way to a total it was not given: a subtracted
+   *  figure has no denominator of its own, so it silently reads 0 the moment the list is
+   *  filtered for any other reason. */
+  reviewerCount: number;
   // ---- the LARGE-PR FLAG (see the block above LARGE_PR_CODE_LOC_DEFAULT) ----
   // Code-only churn, beside the raw `additions`/`deletions`/`changedFiles` above — those three
   // are the whole diff, this one has the docs/config/lockfile/generated churn removed.
@@ -6442,15 +6552,22 @@ export interface SuggestedReviewersResponse {
 // cannot disagree. (It used to be a count of feed EVENTS in a rolling 14 days, which corresponded
 // to no clickable list at all — that is the defect this card kind exists to close.)
 //
-// `dismissRefId` is the `my_turn_dismissals` refId to POST to /api/my-turn/dismiss with `reason`
-// as the kind — a PR id, a thread id or a Claude-review run id depending on the reason. It is null
-// for exactly one reason, `'your_pr'`: opening the PR is that section's dismissal (the pr_views
-// marker), so there is no dismissal kind and no row to write.
+// ⚠ THERE IS NO `dismissRefId` AND NO "Done" CONTROL. Both went with the `my_turn_dismissals`
+// table: a card leaves this board when the viewer ACTS on the PR, never because they told the app
+// they had. The field's other job — disambiguating the card `id` when one PR carries two cards —
+// survives inside the server's card builder, which is where the id is minted; it was never
+// anything the client did with the number.
 export interface MyTurnCard extends InsightCardBase, InsightPrRef {
   kind: 'my_turn';
   reason: MyTurnCardReason;
-  /** the my_turn_dismissals refId; null for 'your_pr', which has no dismissal kind */
-  dismissRefId: number | null;
+  /** WHY the ball is in your court on a `watched_repo_pr` row — see `NewPrBall`. Set only for that
+   *  reason; absent everywhere else.
+   *  ⚠ THE CARD CARRIES THE FACT AND THE SPA CHOOSES THE WORDS. The section label was a static
+   *  string keyed on `reason` alone, so a row kept because somebody pushed after your review still
+   *  wore the chip "New PR" beside a detail reading "You approved · @x pushed 2 commits since" —
+   *  the card contradicting itself in two adjacent elements. `reason` names the SECTION that
+   *  emitted the row; only this names what the reader is being asked to do about it. */
+  ball?: NewPrBall;
   /** set only when reason === 'thread' */
   threadId: number | null;
   /** one-line "what happened", e.g. "3 new comments · 1 new commit" or "@alice replied 3d ago" */

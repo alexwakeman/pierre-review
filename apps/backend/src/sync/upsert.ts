@@ -382,6 +382,35 @@ function mergeStateStatusFrom(
     | 'unknown';
 }
 
+// GitHub's MergeQueueEntryState → the stored lowercase enum. Exported for the same reason
+// `reviewDecisionFrom` is: the two merge-queue WRITE routes in api/routes/prs.ts stamp this
+// column from a mutation response, and a second spelling of one enum is how the merge control
+// and the PR row start disagreeing about the same PR.
+//
+// ⚠ Returns null for anything unrecognised, INCLUDING a state GitHub adds later. That is the
+// safe direction here — an unknown string stored raw would leak straight onto the wire as a
+// display value nobody wrote copy for — but it does mean "no entry" and "an entry in a state we
+// do not model" are both null. The caller must therefore never infer membership from this
+// column; `inMergeQueue` is the membership fact.
+export function mergeQueueEntryStateFrom(
+  state: string | null | undefined,
+): 'awaiting_checks' | 'locked' | 'mergeable' | 'queued' | 'unmergeable' | null {
+  switch ((state ?? '').toUpperCase()) {
+    case 'AWAITING_CHECKS':
+      return 'awaiting_checks';
+    case 'LOCKED':
+      return 'locked';
+    case 'MERGEABLE':
+      return 'mergeable';
+    case 'QUEUED':
+      return 'queued';
+    case 'UNMERGEABLE':
+      return 'unmergeable';
+    default:
+      return null;
+  }
+}
+
 // Exported because sync/branch-status.ts maps the SAME contexts union for default-branch
 // commits. The CheckRun status/conclusion → CheckRunState table must not exist twice: if trunk
 // and PR surfaces disagreed about what "failing" means, the same check would render differently
@@ -601,6 +630,38 @@ export async function persistPr(
     const mergeable = mergeableFrom(pr.mergeable);
     const mergeStateStatus = mergeStateStatusFrom(pr.mergeStateStatus);
     const reviewDecision = reviewDecisionFrom(pr.reviewDecision);
+    // ---- merge queue: the THREE-STATE partial-response write --------------------------------
+    //
+    // `graphqlTolerant` hands back GitHub's partial data with a forbidden field NULLED — the key
+    // is PRESENT, not absent — so "GitHub says this PR is not queued" and "we never received the
+    // selection" look identical at the JSON level, and they demand opposite writes. Writing
+    // unconditionally would clear a real queue entry on every tick for a partially-forbidden
+    // token; writing only on non-null would leave a dequeued PR reading "queued" forever.
+    //
+    // The discriminator is free here and needs no `pagePartial` flag threaded down from
+    // sync-repo.ts (which is how `repos.description` resolves the same problem): GitHub types
+    // `isInMergeQueue` as `Boolean!`, so a real answer is only ever true or false. A null can
+    // ONLY be a nulled-by-partial-error field, and `undefined` can only be a response (or a
+    // hand-built fixture) that never carried the selection. Both mean "learn nothing".
+    //
+    // `false` IS a positive statement and MUST clear both columns — a repo with the merge queue
+    // switched off answers false with a null entry every walk, and so does a PR that just landed
+    // or was ejected. That is the case this whole column exists to make visible.
+    const queueObserved: {
+      inMergeQueue?: boolean;
+      mergeQueueEntryState?: ReturnType<typeof mergeQueueEntryStateFrom>;
+    } =
+      pr.isInMergeQueue == null
+        ? {}
+        : {
+            inMergeQueue: pr.isInMergeQueue,
+            // Not queued ⇒ no entry, whatever the (absent) object says. Queued ⇒ the entry's
+            // state, or null when GitHub gave us the membership but not a state we model — see
+            // mergeQueueEntryStateFrom on why an unmodelled state is not stored raw.
+            mergeQueueEntryState: pr.isInMergeQueue
+              ? mergeQueueEntryStateFrom(pr.mergeQueueEntry?.state)
+              : null,
+          };
     const labels = (pr.labels?.nodes ?? []).map((l) => ({
       name: l.name,
       color: l.color,
@@ -665,6 +726,10 @@ export async function persistPr(
         mergeable,
         mergeStateStatus,
         reviewDecision,
+        // Spread, never assigned: an omitted key leaves the column at its NULL default on
+        // INSERT and untouched on UPDATE, which is exactly what "we did not receive that
+        // selection" means. Same shape as branch-status.ts's `observed`.
+        ...queueObserved,
         labels,
         checkRuns: config.persistBodies ? checkRuns : null,
         additions,
@@ -694,6 +759,7 @@ export async function persistPr(
           mergeable,
           mergeStateStatus,
           reviewDecision,
+          ...queueObserved,
           labels,
           checkRuns: config.persistBodies ? checkRuns : null,
           additions,

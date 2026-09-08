@@ -1,4 +1,4 @@
-import { and, inArray, lt } from 'drizzle-orm';
+import { inArray, lt } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import { db, runTransaction, schema } from './client.js';
 import { config } from '../config.js';
@@ -29,7 +29,6 @@ const {
   commits,
   reviewRequests,
   prViews,
-  myTurnDismissals,
   claudeReviews,
   claudeReviewFindings,
   pullRequests,
@@ -75,18 +74,6 @@ async function deletePrSubtree(
   // parent-last by hand on both dialects and a mention row outliving its PR would go on claiming
   // a deleted PR is personally relevant.
   await tx.delete(prMentions).where(inArray(prMentions.prId, prIds)).execute();
-  // PR-keyed my-turn dismissals (review_request / watched_repo_pr) would be left as inert
-  // orphans. refId is a GLOBAL id (no accountId needed here — a maintenance sweep across
-  // all accounts), so scope by kind + refId only.
-  await tx
-    .delete(myTurnDismissals)
-    .where(
-      and(
-        inArray(myTurnDismissals.kind, ['review_request', 'watched_repo_pr']),
-        inArray(myTurnDismissals.refId, prIds),
-      ),
-    )
-    .execute();
   // Claude review runs + findings FK these PRs — clear findings (via reviewId) then runs.
   const reviewIdRows = await tx
     .select({ id: claudeReviews.id })

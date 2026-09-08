@@ -260,6 +260,130 @@ export const LENS_COPY: Record<
 };
 
 /**
+ * THE HEADER'S "My turn" PILL — the one gesture that narrows this board to the work that is on
+ * the reader, without their having to arrive from a notification.
+ *
+ * It seats the KIND isolation (`attentionIsolation = 'my_turn'`), which is what "just show me my
+ * turn" means: one kind of card, the personal worklist, no surveys of the workspace beside it. It
+ * is NOT the relevance lens — that splits the my_turn population by whether anyone named you, an
+ * orthogonal axis (see `passesRelevanceLens`).
+ *
+ * ⚠ IT CARRIES NO NUMBER, for the same reason its neighbour does not — and one more. The my_turn
+ * population is CAPPED (50 cards over a real 180), so a bare "50" on a pill would be a silent cap,
+ * and "50 of 180" is already printed six pixels away in the header the moment the pill is pressed
+ * (`myTurnCapPlacement` → 'inline'). One figure per screen, in the place that owns its denominator.
+ *
+ * ⚠ IT RETURNS THE VALUE A PRESS SEATS (`next`) rather than leaving the JSX to work it out. Seating
+ * is the half that can silently break — every entry point must seat its value, `null` included —
+ * and an `onClick` expression is the one thing the frontend's renderer-less tests cannot exercise.
+ *
+ * Returns null when the control would do nothing:
+ *  • the board holds no my_turn card at all — nothing to focus on;
+ *  • every card on it is already my_turn — a filter that hides nothing;
+ *  • another KIND is isolated — the board is somebody else's narrowing, and the isolation banner
+ *    above it owns the way out. (That case is implied by the fold below, since an isolated board
+ *    holds only its own kind, but it is stated so a future change to `cards` cannot quietly turn
+ *    this into a second isolation switcher.)
+ */
+export function myTurnPillToggle(
+  painted: InsightCard[],
+  isolation: InsightCard['kind'] | null,
+): { pressed: boolean; next: InsightCard['kind'] | null } | null {
+  if (isolation === 'my_turn') return { pressed: true, next: null };
+  if (isolation != null) return null;
+  if (!painted.some((c) => c.kind === 'my_turn')) return null;
+  if (painted.every((c) => c.kind === 'my_turn')) return null;
+  return { pressed: false, next: 'my_turn' };
+}
+
+/**
+ * IS THE RANKED "Do next" HEAD SUPPRESSED? One predicate, because it gates four things at once —
+ * the head itself, every Pro `why` line, the headline/`parked` narration and the Generate button.
+ *
+ * ⚠ `my_turn` IS A DELIBERATE EXEMPTION FROM "AN ISOLATED BOARD HAS NO HEAD", and the argument is
+ * the difference between the two ways a board gets isolated. The rule was written when the only
+ * entry points were the daily brief's lines, which name SURVEY kinds — "3 PRs stalled awaiting
+ * review", "15 untouched threads". Those are samples of the workspace, and a "do next" ordering
+ * over a single kind of survey row is an order nobody asked for and cannot act on in sequence.
+ *
+ * The "My turn" pill is the opposite gesture: the reader asking to see only the work that is on
+ * THEM, which is exactly the population `db/work-plan.ts` ranks. Blanking the head there answers a
+ * request to FOCUS by deleting the ordering, disabling "Plan my day" with a sentence telling them
+ * to undo the thing they just did. So the head survives — as a strict subset of `doNextIds`
+ * resolved against the my_turn cards, which keeps head ∪ tail === cards and every cap disclosure's
+ * `shown === count` guard exactly as true as it was.
+ *
+ * (CLAUDE.md states the broad suppression rule; this is the one narrow exemption to it.)
+ */
+export function headSuppressedFor(isolation: InsightCard['kind'] | null): boolean {
+  return isolation != null && isolation !== 'my_turn';
+}
+
+/**
+ * THE HEADER'S "ONLY YOURS" TOGGLE — what it shows, and whether it is worth showing at all.
+ *
+ * ⚠ IT EXISTS BECAUSE EVERY OTHER ENTRY POINT INTO THIS LENS ALSO SEATS AN ISOLATION.
+ * `openMyTurnInWorkspace` ends `setAttentionIsolation('my_turn')` + `setAttentionRelevance('mine')`,
+ * and every daily-brief line seats its own kind the same way. Both are right — a narrow count may
+ * only navigate through its own lens — but between them there was no gesture anywhere that
+ * narrowed the board to what involves you WITHOUT collapsing it to one kind, and an isolated board
+ * suppresses the ranked "Do next" head and hides the six other kinds. This control is that
+ * gesture, which is why it writes `attentionRelevance` and NOTHING ELSE.
+ *
+ * ⚠ IT CARRIES NO NUMBER, AND THAT IS THE WHOLE POINT — the two candidate figures mean different
+ * things and BOTH read as "this many are yours" beside the word "yours":
+ *
+ *  • the RESULT SIZE (`passesPersonalLens` over the painted array) is what a press paints, but it
+ *    counts every survey and forward row too, because this lens narrows `my_turn` AND NOTHING ELSE.
+ *    Measured on a real workspace: 115 painted, 50 my-turn rows, NONE of them personal — the fold
+ *    returns 65, so the control offered "Only yours 65" for a board on which nothing whatsoever
+ *    was the reader's. The number was not merely unhelpful, it was the exact claim the reader had
+ *    already reported not being able to make sense of.
+ *  • the OWNERSHIP COUNT (personal my-turn rows) is the population the reader means, but a press
+ *    paints the result size — so a "10" chip that yields 40 rows rebuilds the count-vs-list
+ *    mismatch every rule in this header exists to prevent.
+ *
+ * No fold satisfies both, so there is no number: the word says what the press does, the emphasis on
+ * the rows themselves says which ones are yours, and `myTurnPersonalCapDisclosure` — already in this
+ * header, already three-way, already narrow-paired — owns the figure.
+ *
+ * ⚠ AND THE OFFER GATES ON THE OWNERSHIP COUNT, NEVER THE RESULT SIZE. Its predecessor guarded
+ * `count === 0`, which cannot express "none of this board is yours": `passesPersonalLens` passes
+ * every non-`my_turn` card, so that count only reaches zero on an EMPTY board. This docblock always
+ * claimed the control was withheld when there was "nothing to show"; now it actually is.
+ *
+ * Returns null when the control would do nothing: a board with no personal my-turn row has nothing
+ * of yours to show, and one the lens would not narrow at all has nothing to hide.
+ *
+ * ⚠ …AND IT STANDS DOWN UNDER THE "My turn" PILL. Two pills side by side reading "My turn" and
+ * "Only yours" are near-synonyms in the reader's language whatever they mean in ours, six pixels
+ * apart, both pressable, with no way to tell from the header which of the two narrowings is
+ * actually on. Inside a my_turn isolation the KIND pill is the one the reader just pressed, so it
+ * keeps the header and this one goes; the relevance lens is not lost with it — every entry point
+ * that seats it (banner, badge, brief line) still does, `AttentionIsolationBanner` NAMES it
+ * directly above the board, and "Show everyone's" there is its way out. In the commonest case of
+ * all the banner already collapses the pair to one phrase ("Showing only Your turn"), which is the
+ * clearest evidence they are one sentence to a reader and two axes only to us.
+ */
+export function personalLensToggle(
+  painted: InsightCard[],
+  lens: AttentionRelevanceLens | null,
+  isolation: InsightCard['kind'] | null = null,
+): { pressed: boolean } | null {
+  if (isolation === 'my_turn') return null;
+  if (lens === 'mine') return { pressed: true };
+  if (lens === 'others') return { pressed: false };
+  // The rows a press would KEEP that actually make an ownership claim. `my_turn` is the only kind
+  // that carries one — the forward kinds hold `relevance` for the ranker's weight, and the surveys
+  // do not carry it at all — so this is the only fold that answers "is any of this mine".
+  const ownsSomething = painted.some((c) => c.kind === 'my_turn' && passesPersonalLens(c));
+  if (!ownsSomething) return null;
+  // ...and a lens that hides nothing is a control that does nothing.
+  if (painted.every(passesPersonalLens)) return null;
+  return { pressed: false };
+}
+
+/**
  * WHERE the disclosure goes on the board, which depends on what the header count is counting.
  *
  *   'inline' — isolated to my_turn: the header count IS the my_turn count, so it reads
@@ -336,6 +460,15 @@ export function AttentionView(): JSX.Element {
   // How many cards the lens is holding back — the number the empty state and the banner need to
   // say "they're filtered, not gone".
   const hiddenByLens = all.length - visible.length;
+  // The header's "Only yours" control — see `personalLensToggle` for why it carries no number and
+  // what it gates on. Folded off `cards`, the array the board paints: `ordered` below is a
+  // PERMUTATION of exactly this set (head ∪ tail === cards), so the control is offered on exactly
+  // the rows the reader can see — a head that FILTERED would break that quietly, as it would the
+  // cap disclosures above.
+  const personalToggle = personalLensToggle(cards, attentionRelevance, attentionIsolation);
+  // The "My turn" pill — folded off the SAME painted array, for the same reason. Under the pill
+  // `cards` is already the my_turn subset, which is what makes the pressed state self-evident.
+  const myTurnToggle = myTurnPillToggle(cards, attentionIsolation);
 
   // ── THE "DO NEXT" PARTITION ───────────────────────────────────────────────────────────────
   //
@@ -352,7 +485,10 @@ export function AttentionView(): JSX.Element {
   //
   // Building `byId` off the FINAL `cards` means the relevance lens narrows the head for free,
   // with no second predicate to keep in step.
-  const headSuppressed = attentionIsolation != null;
+  // ⚠ NOT `attentionIsolation != null` — see `headSuppressedFor` for the one exemption and why it
+  // is narrow. Under the "My turn" pill the head is `doNextIds` ∩ the my_turn cards, which is
+  // still a subset of `cards`, so the partition below and every cap disclosure above are untouched.
+  const headSuppressed = headSuppressedFor(attentionIsolation);
   const head = useMemo(() => {
     if (headSuppressed) return [];
     const byId = new Map(cards.map((c) => [c.id, c]));
@@ -465,10 +601,14 @@ export function AttentionView(): JSX.Element {
     return out;
   }, [headSuppressed, plan, head, wp.data?.evidence?.items]);
 
-  // ⚠ SUPPRESSED TOGETHER WITH THE HEAD. A `why` says "do this first"; on an isolated flat list
-  // there is no first, so the headline, every `why`, `parked` and the dropped-id note all go dark
-  // as one — and the generate button is DISABLED rather than hidden, because an enabled button
-  // whose output cannot render spends a credit for nothing and gets clicked twice.
+  // ⚠ SUPPRESSED TOGETHER WITH THE HEAD, and ONLY with it. A `why` says "do this first"; on a
+  // survey board flattened to one kind there is no first, so the headline, every `why`, `parked`
+  // and the dropped-id note all go dark as one — and the generate button is DISABLED rather than
+  // hidden, because an enabled button whose output cannot render spends a credit for nothing and
+  // gets clicked twice. Under the "My turn" pill there IS a first (see `headSuppressedFor`), so
+  // all of it stays. The headline describes the day rather than the filtered board — the isolation
+  // banner above says the board is narrowed, and `whyById` is already intersected with the head,
+  // so no sentence can land on a row the pill is hiding.
   const narration = headSuppressed ? null : plan;
 
   const notice = generate.data?.throttled
@@ -506,19 +646,97 @@ export function AttentionView(): JSX.Element {
           </span>
         )}
         {!isLoading && !isError && placement === 'aside' && cap != null && (
-          // ⚠ THE ASIDE NAMES THE POPULATION IT IS QUALIFYING. Under 'others' the my_turn cards on
-          // this board are precisely the ones NOT yours, so a hard-coded "your turn" would put the
-          // wrong label on the right number — a one-row, two-populations mislabel of the same
-          // family the cap rules exist to prevent.
+          // ⚠ THE ASIDE NAMES THE POPULATION IT IS QUALIFYING, AND `cap` IS THREE-WAY — so this
+          // label is three-way too. `cap` above is `myTurnPersonalCapDisclosure` under 'mine',
+          // `myTurnOtherCapDisclosure` under 'others' and the BROAD `myTurnCapDisclosure` under
+          // the default null lens. A two-way label therefore printed "your turn N of M" over the
+          // broad population on the screen most people look at — a one-row, two-populations
+          // mislabel of the same family the cap rules exist to prevent, and the reason the figure
+          // read as unexplained: the number was every item on the board, not the ones that are
+          // yours. Each arm reuses ITS OWN disclosure sentence's noun — "on your plate" is
+          // `myTurnCapDisclosure`'s own wording, "personally involve you" is the personal twin's,
+          // "need a review or reply from someone" is the other twin's — so the short label and the
+          // long title can never describe two different populations.
           <span className="text-[11px] text-gray-400" title={cap.title}>
-            · {attentionRelevance === 'others' ? 'review or reply' : 'your turn'} {cap.shown} of{' '}
-            {cap.total}
+            ·{' '}
+            {attentionRelevance === 'others'
+              ? 'review or reply'
+              : attentionRelevance === 'mine'
+                ? 'your turn'
+                : 'on your plate'}{' '}
+            {cap.shown} of {cap.total}
           </span>
         )}
         {!isLoading && !isError && ciCap != null && (
           <span className="text-[11px] text-gray-400" title={ciCap.title}>
             · {ciCap.shown} of {ciCap.total} red builds
           </span>
+        )}
+        {/* ── THE "My turn" PILL ─────────────────────────────────────────────────────────
+            The reader's own words: "a pill at the top to filter for My Turn only so I can focus
+            in on those at any point." It seats the KIND isolation and nothing else — the
+            relevance lens is an orthogonal axis and a press that silently widened or narrowed it
+            would change a population the reader set from a notification. No rail switch happens
+            here (this component only renders on the attention rail), so nothing clears behind us
+            and both values are seated explicitly: 'my_turn' on, `null` off.
+
+            ⚠ THE LABEL IS THE READER'S WORD, NOT `KIND_LABEL.my_turn`. That table reads "Review
+            or reply" because its entry is stamped on a CARD, where claiming a PR nobody named you
+            on is a false claim about a person; a filter names a population and claims nothing
+            about any one row in it. The title uses the header's own noun for that population —
+            "on your plate", `myTurnCapDisclosure`'s wording — so the pill and the "50 of 180
+            items" beside it cannot be read as two different things.
+
+            ⚠ `attn=my_turn` is a NAVIGATION key, so a press pushes a history entry and Back
+            leaves the filtered board. That is the same contract the daily brief's lines have; no
+            corrective write happens here, so nothing replaces the entry under it.
+
+            ⚠ The head SURVIVES this one isolation — see `headSuppressedFor`. */}
+        {!isLoading && !isError && myTurnToggle != null && (
+          <button
+            type="button"
+            onClick={() => setAttentionIsolation(myTurnToggle.next)}
+            aria-pressed={myTurnToggle.pressed}
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+              myTurnToggle.pressed
+                ? 'border-amber-500 bg-amber-50 text-amber-800 dark:border-amber-400/70 dark:bg-amber-900/30 dark:text-amber-200'
+                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+            }`}
+            title={
+              myTurnToggle.pressed
+                ? 'Showing only what is on your plate. Press again to show the whole board.'
+                : 'Show only what is on your plate — hide stalled reviews, untouched threads and the rest.'
+            }
+          >
+            My turn
+          </button>
+        )}
+        {/* ── THE PERSONAL LENS, AS A CONTROL ────────────────────────────────────────────
+            ⚠ `setAttentionRelevance` ALONE. The two existing ways into this lens each seat an
+            isolation as well (see `personalLensToggle`), so pressing this must not: an isolated
+            board loses the ranked head and every kind but one, which is the opposite of what a
+            reader asking "just show me mine" wants. And the value is SEATED both ways, `null`
+            included — nothing here relies on another action's clear. */}
+        {!isLoading && !isError && personalToggle != null && (
+          <button
+            type="button"
+            onClick={() => setAttentionRelevance(personalToggle.pressed ? null : 'mine')}
+            aria-pressed={personalToggle.pressed}
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+              personalToggle.pressed
+                ? 'border-gray-400 bg-gray-100 text-gray-800 dark:border-gray-500 dark:bg-gray-800 dark:text-gray-100'
+                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+            }`}
+            title={
+              // Both arms name the population in `LENS_COPY.mine`'s own words, so this control, the
+              // banner and the filtered empty state cannot describe one narrowing three ways.
+              personalToggle.pressed
+                ? `Showing ${LENS_COPY.mine.bare}. Press again to show everything.`
+                : `Show only ${LENS_COPY.mine.bare} — the items you’re named on, and the ones in repos you maintain.`
+            }
+          >
+            Only yours
+          </button>
         )}
         {/* ── the Pro narration's controls + honesty signals ──────────────────────────────
             ⚠ `stale` matters MORE here than it did in the standalone panel: the board
@@ -545,8 +763,12 @@ export function AttentionView(): JSX.Element {
               disabled={busy || outOfCredits || headSuppressed}
               className="rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
               title={
-                headSuppressed
-                  ? 'Clear the filter to plan your day — an ordered plan has nothing to order inside a single kind.'
+                // ⚠ NAMES THE KIND, and no longer claims "a single kind cannot be ordered" — the
+                // "My turn" pill is a single kind that IS ordered (see `headSuppressedFor`), so
+                // the old sentence would now be false on the one isolation a reader seats
+                // themselves. It is only ever seen on a survey board arrived at from a brief line.
+                headSuppressed && attentionIsolation != null
+                  ? `This board is filtered to ${KIND_LABEL[attentionIsolation]}. Clear the filter to plan your day.`
                   : outOfCredits
                     ? 'Out of AI credits — resets next month'
                     : 'Have the model say why the top items are worth doing now. The rows, figures and ranking are computed either way.'
@@ -557,7 +779,7 @@ export function AttentionView(): JSX.Element {
               ) : narration != null ? (
                 <span className="inline-flex items-center gap-1">
                   <RefreshIcon size={11} />
-                  Regenerate
+                  Re-plan my day
                 </span>
               ) : (
                 'Plan my day'

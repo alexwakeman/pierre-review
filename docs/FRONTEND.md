@@ -1486,6 +1486,11 @@ they can never be a refresh apart.
 The two FORWARD kinds (`merge`, `update_branch`) carry Merge · Merge-when-ready · Cancel · Update
 branch. Nothing else does — a `my_turn` "review this" card gets no Merge button.
 
+⚠ **A QUEUED CARD IS THE ONE EXCEPTION, AND IT SUBTRACTS.** When the card's synced `inMergeQueue`
+is `true`, GitHub owns the landing: Merge and Merge-when-ready are HIDDEN (pressing either is
+meaningless), `MergeControl` is relabelled "Merge queue" so **Remove-from-queue survives**, and the
+verdict line is suppressed — the header's queue chip already said it.
+
 - ⚠ **NOTHING ON THE BOARD FETCHES ON MOUNT.** `MergeWhenReadyControl` fetches merge-options
   EAGERLY (`useMergeOptions(prId, true)`, ~3 GitHub calls per PR); fifty cards mounting it is 150
   GitHub calls to paint a board. The board passes the eager-fetch opt-out and gates its buttons on
@@ -1513,8 +1518,50 @@ branch. Nothing else does — a `my_turn` "review this" card gets no Merge butto
   (2) an ARMED intent, whose live phase is `armedPhaseHeadline` (all thirteen `ArmedMergePhase`
   members, `queued` ≠ `queued_local`); (3) the synced verdict, as before. The manual line OUTRANKS
   the armed one: an armed intent describes what will happen later, a live POST describes now.
-  ⚠ Both new reads are CACHE reads — GitHub's NATIVE merge-queue position stays off the card
-  because it is unsynced by design and reachable only through the click-gated merge-options call.
+  ⚠ Both new reads are CACHE reads — GitHub's merge-queue POSITION and ETA stay off the card,
+  because those two are still unsynced by design (they change minute to minute) and reachable only
+  through the click-gated merge-options call. MEMBERSHIP and ENTRY STATE are a different matter:
+  see below.
+
+### What the card carries about the merge queue and the review
+
+Both were added because the board **may not fetch on mount** — a fact the reader needs on fifty
+rows has to arrive with the rows.
+
+- **`inMergeQueue` + `mergeQueueEntryState` are SYNCED columns** (`InsightPrRef`, and `PrDetail`
+  for the pane). Position and estimated-time-to-merge are NOT, and stay on the lazy
+  `…/merge-options` fetch. ⚠ **THREE STATES**: `true` / `false` are positive statements from
+  GitHub; `null` is NOT OBSERVED and renders NOTHING — never "not queued". They exist because
+  GitHub's `MergeStateStatus` enum has no QUEUED member, so a queued PR reports `blocked` and every
+  merge surface without these two offers a button GitHub will refuse.
+- ⚠ **`unmergeable` is the member that earns the state column**: GitHub is EJECTING the entry, the
+  thing a reader could previously only discover by pressing Merge and reading the failure.
+  `pendingQueueBadge()` (exported from `Activity/AttentionCards.tsx`) is the ONE place those five
+  sentences live — the PR pane's Overview row IMPORTS it. Two copies is how one screen calls an
+  ejection "in the merge queue".
+- **The card carries REVIEW STANDING**: `reviewDecision` (GitHub's verdict) beside our own
+  `reviewApprovals` / `reviewChangesRequested` / `reviewers` / `reviewerCount`, folded by
+  `computeReviewStandingsByPr`. ⚠ `reviewDecision: null` means THIS REPO REQUIRES NO REVIEW (~90%
+  of open non-draft PRs) and may never render as "nobody looked" — that question is
+  `reviewerCount`. ⚠ `reviewChangesRequested` COEXISTS with `reviewApprovals > 0`: lead with the
+  block, do not delete the approvals to say so. ⚠ Render "+N" as `reviewerCount - reviewers.length`
+  and gate any cap disclosure on `reviewers.length === reviewerCount` — never subtract your way to
+  a total you were not given.
+- **BOT REVIEWERS COLLAPSE INTO ONE CHIP.** Measured: 39% of reviewer standings on open PRs are
+  bot-authored and 477 of 478 of those are merely `commented`, so an unranked list buries the one
+  human approval under four bot rows. `InsightReviewer.isBot` comes from the SAME union the
+  Timeline's hide-bots lens uses — never a second classifier — and `isBot: true` with
+  `botKind: null` is real and common (an unbranded CI account) → a generic "Bot".
+- **The PR pane reads the SAME fold** (`PrDetail.reviewStandings` / `reviewerCount`), uncapped and
+  in the fold's own order. Before this, `ChecksTab` folded `pr.reviews` client-side with "latest
+  non-pending review wins", which demoted an approver who later left a bare comment: 59 disagreeing
+  reviewer-PR pairs on live open PRs. ⚠ **A reviewer whose approval GitHub later DISMISSED still
+  reads `approved`** on both surfaces — a deliberate, measured divergence kept so the hashed
+  `approvals` count cannot move; the argument is at the fold in `db/triage.ts`, and neither
+  surface re-decides it.
+- ⚠ `REVIEW_STATE_META` (`lib/ui.ts`) is the ONE table for a reviewer's mark, ink, chip and word,
+  shared by the card's chips and the pane's Reviews row. `icon` is a COMPONENT reference
+  (`lib/ui.ts` is `.ts` and holds no JSX) — render `<m.icon size={12} />`.
 
 ### The Pending board's LIVENESS sweep (`useAttentionLiveness`)
 

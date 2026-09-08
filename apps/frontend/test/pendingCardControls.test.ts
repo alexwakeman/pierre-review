@@ -18,6 +18,13 @@
 //   4. `viewerCanPush: false` HIDES, it does not disable — the ChecksTab rule. And it is a
 //      VISIBILITY gate only: the routes re-check permission before anything irreversible happens.
 //
+//   5. AND THE ARM DRAFT SURVIVES THE CARD ID. The board's card id ENCODES THE MERGE KIND
+//      (`wp:merge:<prId>` / `wp:update_branch:<prId>`), so a PR falling behind trunk re-keys its
+//      card and React remounts the row — which used to wipe the half-finished "Merge when ready"
+//      confirmation held in `useState` and drop the reader back to an unpressed button. The draft
+//      is keyed by prId, the half that does not change, and `armControlPhase` is the one resolver
+//      that decides what the control shows.
+//
 //   ⚠ AND THE WHOLE POINT OF THE GATE BEING PURE: it is fed the card's OWN synced fields and
 //   nothing else. Every one of these assertions runs with no React, no query client and no
 //   network, which is the same property that keeps fifty mounted cards from making ~150 GitHub
@@ -28,15 +35,47 @@
 import { describe, expect, it } from 'vitest';
 import type {
   AutomatedReviewerKind,
+  InsightReviewer,
+  MergeQueueEntryState,
   MergeReadyCard,
   MergeStateStatus,
   Mergeable,
+  MyTurnCard,
+  MyTurnRelevance,
+  PrReviewDecision,
+  ReviewStanding,
   UpdateBranchCard,
 } from '@pierre-review/shared';
-import { authorSourceLabel, pendingMergeGate } from '../src/components/Activity/AttentionCards.js';
+import {
+  authorSourceLabel,
+  pendingCardIsPersonal,
+  pendingMergeGate,
+  pendingQueueBadge,
+  pendingReviewerChips,
+  pendingReviewLead,
+  myTurnReasonLabel,
+} from '../src/components/Activity/AttentionCards.js';
+import {
+  armControlPhase,
+  armDraftFor,
+  armDraftReducer,
+  dispatchArmDraft,
+} from '../src/hooks/useAutoMerge.js';
 
 /** The `InsightPrRef` half every PR-bearing card carries, with the source pair varied per test. */
-function prRef(over: { authorIsBot?: boolean; authorBotKind?: AutomatedReviewerKind | null } = {}) {
+function prRef(
+  over: {
+    authorIsBot?: boolean;
+    authorBotKind?: AutomatedReviewerKind | null;
+    inMergeQueue?: boolean | null;
+    mergeQueueEntryState?: MergeQueueEntryState | null;
+    reviewDecision?: PrReviewDecision | null;
+    reviewApprovals?: number;
+    reviewChangesRequested?: boolean;
+    reviewers?: InsightReviewer[];
+    reviewerCount?: number;
+  } = {},
+) {
   return {
     prId: 101,
     repoId: 7,
@@ -52,6 +91,17 @@ function prRef(over: { authorIsBot?: boolean; authorBotKind?: AutomatedReviewerK
     openedAt: '2026-08-20T10:00:00.000Z',
     authorIsBot: false,
     authorBotKind: null,
+    // ⚠ `null` IS THE HONEST DEFAULT for the queue pair: a PR synced before the columns existed,
+    // or a walk that did not carry the selection. It is NOT "not queued".
+    inMergeQueue: null as boolean | null,
+    mergeQueueEntryState: null as MergeQueueEntryState | null,
+    // The review half. `reviewDecision: null` is ~90% of open non-draft PRs and means the repo
+    // requires no review — never "nobody looked", which is `reviewerCount`.
+    reviewDecision: null as PrReviewDecision | null,
+    reviewApprovals: 0,
+    reviewChangesRequested: false,
+    reviewers: [] as InsightReviewer[],
+    reviewerCount: 0,
     ...over,
   };
 }
@@ -60,12 +110,17 @@ function mergeCard(over: {
   mergeStateStatus?: MergeStateStatus;
   mergeable?: Mergeable | null;
   viewerCanPush?: boolean;
+  inMergeQueue?: boolean | null;
+  mergeQueueEntryState?: MergeQueueEntryState | null;
 } = {}): MergeReadyCard {
   return {
     id: 'wp:merge:101',
     kind: 'merge',
     severity: 'info',
-    ...prRef(),
+    ...prRef({
+      inMergeQueue: over.inMergeQueue ?? null,
+      mergeQueueEntryState: over.mergeQueueEntryState ?? null,
+    }),
     mergeStateStatus: over.mergeStateStatus ?? 'clean',
     mergeable: over.mergeable === undefined ? 'mergeable' : over.mergeable,
     lastCommitAt: '2026-08-27T09:00:00.000Z',
@@ -78,12 +133,13 @@ function mergeCard(over: {
 function updateBranchCard(over: {
   mergeable?: Mergeable | null;
   viewerCanPush?: boolean;
+  inMergeQueue?: boolean | null;
 } = {}): UpdateBranchCard {
   return {
     id: 'wp:update_branch:101',
     kind: 'update_branch',
     severity: 'info',
-    ...prRef(),
+    ...prRef({ inMergeQueue: over.inMergeQueue ?? null }),
     mergeStateStatus: 'behind',
     mergeable: over.mergeable === undefined ? 'mergeable' : over.mergeable,
     lastCommitAt: '2026-08-27T09:00:00.000Z',
@@ -209,5 +265,512 @@ describe('viewerCanPush', () => {
     const gate = pendingMergeGate(mergeCard({ mergeStateStatus: 'blocked', viewerCanPush: true }));
     expect(gate.show).toBe(true);
     expect(gate.action).toBeNull();
+  });
+});
+
+
+// ── THE MERGE QUEUE ──────────────────────────────────────────────────────────────────────────
+//
+// GitHub's MergeStateStatus enum has NO queued member, so a PR sitting in the merge queue reports
+// `mergeStateStatus: 'blocked'` and is indistinguishable from a protection-blocked one. The board
+// may not fetch to find out, so the membership rides the card — and everything below is what the
+// card is then allowed to say about it.
+
+/** The card fields the queue badge reads, and nothing else — the resolver takes a Partial so a
+ *  surface that never had them (a `ci_failing` card, whose subject can be a repo's trunk) answers
+ *  null instead of being forced to invent `inMergeQueue: false`. */
+const QUEUE_STATES: MergeQueueEntryState[] = [
+  'queued',
+  'awaiting_checks',
+  'mergeable',
+  'locked',
+  'unmergeable',
+];
+
+describe('the merge-queue badge', () => {
+  it('⚠ renders NOTHING when the queue was never observed', () => {
+    // `null` is "we never looked", and a card that said "not queued" on no evidence would be
+    // making a claim about GitHub that nobody made to us.
+    expect(pendingQueueBadge({ inMergeQueue: null, mergeQueueEntryState: null })).toBeNull();
+    expect(pendingQueueBadge({})).toBeNull();
+  });
+
+  it('⚠ renders nothing on a POSITIVE "not queued" either — the chip is positive-claim-only', () => {
+    // `false` IS a statement from GitHub, and it is one worth exactly zero pixels: "this pull
+    // request is not in a merge queue" is true of nearly every PR in the world.
+    expect(pendingQueueBadge({ inMergeQueue: false, mergeQueueEntryState: null })).toBeNull();
+  });
+
+  it('names the queue on a queued PR whose entry state was not observed', () => {
+    const badge = pendingQueueBadge({ inMergeQueue: true, mergeQueueEntryState: null });
+    expect(badge?.label).toBe('In the merge queue');
+    expect(badge?.tone).toBe('ok');
+  });
+
+  it('gives every entry state its own words, and none of them a raw enum', () => {
+    for (const state of QUEUE_STATES) {
+      const badge = pendingQueueBadge({ inMergeQueue: true, mergeQueueEntryState: state });
+      expect(badge, state).not.toBeNull();
+      expect(badge!.label, state).toBeTruthy();
+      expect(badge!.title, state).toBeTruthy();
+      // A label that still contains the wire spelling means somebody added a member and let the
+      // enum through to the screen.
+      expect(badge!.label, state).not.toContain('_');
+    }
+  });
+
+  it('⚠ gives `unmergeable` its OWN wording and its own tone — GitHub is EJECTING it', () => {
+    // This is the whole payload of the reported bug: a PR that silently falls out of the queue.
+    // A reader has to be able to see it WITHOUT pressing Merge, which is why it is a header chip
+    // and not a line in the merge row (that row is hidden outright without push access).
+    const badge = pendingQueueBadge({ inMergeQueue: true, mergeQueueEntryState: 'unmergeable' });
+    expect(badge?.tone).toBe('bad');
+    expect(badge?.label).toBe('Leaving the merge queue');
+    // Every OTHER state is calm — an ejection must not be one red chip among five.
+    for (const state of QUEUE_STATES.filter((q) => q !== 'unmergeable')) {
+      expect(pendingQueueBadge({ inMergeQueue: true, mergeQueueEntryState: state })?.tone).toBe('ok');
+    }
+  });
+});
+
+describe('a queued card keeps its cancel', () => {
+  it('⚠ hides Merge while GitHub owns the landing — on a PR that is otherwise perfectly clean', () => {
+    const gate = pendingMergeGate(mergeCard({ mergeStateStatus: 'clean', inMergeQueue: true }));
+    expect(gate.queued).toBe(true);
+    expect(gate.action).toBeNull();
+    // ⚠ AND THE ROW STILL SHOWS. `show` is what strips the block, and stripping it would take
+    // "Remove from queue" with it — the one thing still worth pressing.
+    expect(gate.show).toBe(true);
+    expect(gate.verdict.verdict).toBe('queued');
+    expect(gate.verdict.canMerge).toBe(false);
+  });
+
+  it('hides Update branch too — the queue lands it from wherever it is', () => {
+    const gate = pendingMergeGate(updateBranchCard({ inMergeQueue: true }));
+    expect(gate.queued).toBe(true);
+    expect(gate.action).toBeNull();
+  });
+
+  it('⚠ treats a NULL queue as not-observed, never as queued', () => {
+    // The same three-state rule `mergeable` follows one field over. A null must not silently
+    // remove a Merge button the reader can legitimately press.
+    const gate = pendingMergeGate(mergeCard({ mergeStateStatus: 'clean', inMergeQueue: null }));
+    expect(gate.queued).toBe(false);
+    expect(gate.action).toBe('merge');
+    expect(pendingMergeGate(mergeCard({ inMergeQueue: false })).queued).toBe(false);
+  });
+
+  it('⚠ never claims the queue for a reader who cannot push', () => {
+    // `show: false` hides the whole block, and the gate must not leave a live action or a stale
+    // queue claim behind it. The BADGE still renders — it lives in the header row for exactly
+    // this reader, who has no button either way.
+    const gate = pendingMergeGate(
+      mergeCard({ mergeStateStatus: 'clean', inMergeQueue: true, viewerCanPush: false }),
+    );
+    expect(gate.show).toBe(false);
+    expect(gate.action).toBeNull();
+    expect(gate.queued).toBe(true);
+  });
+});
+
+// ── RELEVANCE EMPHASIS ───────────────────────────────────────────────────────────────────────
+
+function myTurnCard(
+  over: { relevance?: MyTurnRelevance; muted?: boolean; reason?: MyTurnCard['reason']; ball?: MyTurnCard['ball'] } = {},
+): MyTurnCard {
+  return {
+    id: 'mt:review_request:101',
+    kind: 'my_turn',
+    severity: 'warn',
+    ...prRef(),
+    reason: 'review_request',
+    threadId: null,
+    detail: 'asked 2d ago',
+    since: '2026-08-25T10:00:00.000Z',
+    personal: over.relevance !== 'none',
+    ...over,
+  };
+}
+
+describe('the section chip names what you are being asked to do', () => {
+  it('⚠ says "Pushed since", not "New PR", once somebody pushed after you acted', () => {
+    // THE REGRESSION. Since the ball rule, `watched_repo_pr` holds two different facts, and the
+    // chip was a static map keyed on `reason` alone — so a PR the reader had approved three days
+    // earlier wore "New PR" directly beside the detail "You approved · @robin-dunn pushed 2
+    // commits since". Two adjacent elements on one card, contradicting each other.
+    const card = myTurnCard({
+      reason: 'watched_repo_pr',
+      ball: { kind: 'commits_after', yourLastAction: 'approved', humanCommitsAfter: 2 },
+    });
+    expect(myTurnReasonLabel(card)).toBe('Pushed since');
+  });
+
+  it('still says "New PR" for a PR nobody has touched — the one place that is true', () => {
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'watched_repo_pr', ball: { kind: 'untouched' } }))).toBe(
+      'New PR',
+    );
+  });
+
+  it('⚠ an ABSENT ball falls back to the section label, never to a guess', () => {
+    // `ball` is trailing-optional for wire tolerance. A response predating it must not have
+    // "Pushed since" invented over a PR nobody has touched — the safe direction is the vaguer word.
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'watched_repo_pr' }))).toBe('New PR');
+  });
+
+  it('leaves every other section alone', () => {
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'review_request' }))).toBe('Review requested');
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'thread' }))).toBe('Reply needed');
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review' }))).toBe('Claude review');
+  });
+});
+
+describe('which rows outrank the neutral ones', () => {
+  it('emphasises BOTH personal tiers — the pair every badge counts as one population', () => {
+    // `myTurnPersonal`, the Workspace badges, the "Elsewhere" rows and the browser notification
+    // all count `relevance !== 'none'`. Emphasising only 'direct' would put a different
+    // population on screen from the one the counts describe.
+    expect(pendingCardIsPersonal(myTurnCard({ relevance: 'direct' }))).toBe(true);
+    expect(pendingCardIsPersonal(myTurnCard({ relevance: 'maintained' }))).toBe(true);
+  });
+
+  it('leaves a "none" card neutral — including a MUTED one, which is how the mute lands', () => {
+    // The Pending mute forces `relevance: 'none'` server-side, at the one fold where it is
+    // derived. Nothing here knows the mute exists, and nothing here may re-introduce emphasis
+    // for it.
+    expect(pendingCardIsPersonal(myTurnCard({ relevance: 'none' }))).toBe(false);
+    expect(pendingCardIsPersonal(myTurnCard({ relevance: 'none', muted: true }))).toBe(false);
+  });
+
+  it('⚠ renders an ABSENT relevance as neutral even when `personal` is true', () => {
+    // The same rule `cardKindLabel` follows: a missing field may never invent an ownership claim
+    // on screen, in words OR in weight. The only way here is a server too old to send it.
+    const card = myTurnCard();
+    delete (card as { relevance?: MyTurnRelevance }).relevance;
+    card.personal = true;
+    expect(pendingCardIsPersonal(card)).toBe(false);
+  });
+
+  it('⚠ never emphasises a FORWARD card, even one marked "direct"', () => {
+    // The two forward kinds carry `relevance` for the RANKER's weight — it is explicitly not an
+    // ownership claim, the board's relevance lens does not filter on it, and, decisively, the
+    // Pending mute does NOT reach them. A muted repo's merge card still arrives 'direct', so
+    // emphasising it would light up exactly the row the reader asked to stop being summoned by.
+    expect(mergeCard().relevance).toBe('direct');
+    expect(pendingCardIsPersonal(mergeCard())).toBe(false);
+    expect(pendingCardIsPersonal(updateBranchCard())).toBe(false);
+  });
+});
+
+// ── WHERE THE REVIEW STANDS ──────────────────────────────────────────────────────────────────
+
+function reviewer(over: Partial<InsightReviewer> & { userId: number }): InsightReviewer {
+  return {
+    standing: 'commented' as ReviewStanding,
+    standingAt: '2026-08-26T09:00:00.000Z',
+    isBot: false,
+    botKind: null,
+    ...over,
+  };
+}
+
+describe('the review standing line', () => {
+  it('⚠ says NOTHING when nothing has happened and nothing is required', () => {
+    // ~90% of open non-draft PRs. A "No reviews · none required" line on ninety percent of a
+    // fifty-row board is the unrequested caveat the product voice bans.
+    expect(pendingReviewLead(prRef())).toBeNull();
+    expect(pendingReviewLead({})).toBeNull();
+  });
+
+  it('counts approvals in OUR words', () => {
+    expect(pendingReviewLead(prRef({ reviewApprovals: 1, reviewerCount: 1 }))?.ours).toBe(
+      '1 approval',
+    );
+    expect(pendingReviewLead(prRef({ reviewApprovals: 3, reviewerCount: 3 }))?.ours).toBe(
+      '3 approvals',
+    );
+  });
+
+  it('⚠ leads with the block AND KEEPS the approvals — they coexist on real PRs', () => {
+    const lead = pendingReviewLead(
+      prRef({ reviewChangesRequested: true, reviewApprovals: 1, reviewerCount: 2 }),
+    );
+    expect(lead?.standing).toBe('changes_requested');
+    expect(lead?.ours).toBe('Changes requested · 1 approval');
+    // Deleting the approval count to make the block louder would be losing a fact to make a
+    // point — the card would then disagree with the PR pane about the same PR.
+    expect(lead?.ours).toContain('1 approval');
+  });
+
+  it('⚠ distinguishes "nobody looked" from "no review required" — two fields, two clauses', () => {
+    // The single most dangerous conflation on this wire. `reviewDecision: null` is the REPO's
+    // rule; `reviewerCount: 0` is what people did.
+    const nobody = pendingReviewLead(prRef({ reviewerCount: 0, reviewDecision: 'review_required' }));
+    expect(nobody?.ours).toBe('No reviews yet');
+    expect(nobody?.github).toBe('GitHub: review required');
+
+    const looked = pendingReviewLead(prRef({ reviewerCount: 2, reviewDecision: null }));
+    // Somebody looked, nobody signed off — and GitHub is not asking anyone to.
+    expect(looked?.ours).toBe('No approval yet');
+    expect(looked?.github).toBe('GitHub: no review required');
+    // ⚠ AND THE TWO NEVER SHARE A CLAUSE.
+    expect(looked?.ours).not.toContain('required');
+  });
+
+  it('⚠ shows BOTH answers where our fold and GitHub disagree, labelled apart', () => {
+    // GitHub approved, our fold counted none (an approval GitHub itself dismissed, or one from a
+    // reviewer we cannot see). Merging them would pick a winner silently.
+    const a = pendingReviewLead(prRef({ reviewApprovals: 0, reviewerCount: 1, reviewDecision: 'approved' }));
+    expect(a?.ours).toBe('No approval yet');
+    expect(a?.github).toBe('GitHub: approved');
+
+    // GitHub blocks, our rows show nobody blocking.
+    const b = pendingReviewLead(
+      prRef({ reviewChangesRequested: false, reviewerCount: 1, reviewDecision: 'changes_requested' }),
+    );
+    expect(b?.github).toBe('GitHub: changes requested');
+    expect(b?.ours).not.toContain('Changes requested');
+  });
+
+  it('stays quiet where GitHub only repeats us', () => {
+    // Two chips saying "approved" is noise, and noise is what stops the disagreement above being
+    // noticed when it matters.
+    expect(
+      pendingReviewLead(prRef({ reviewApprovals: 2, reviewerCount: 2, reviewDecision: 'approved' }))
+        ?.github,
+    ).toBeNull();
+    expect(
+      pendingReviewLead(
+        prRef({ reviewChangesRequested: true, reviewerCount: 1, reviewDecision: 'changes_requested' }),
+      )?.github,
+    ).toBeNull();
+    // And "no review required" is never said beside an approval count, which implies no
+    // obligation on its own.
+    expect(
+      pendingReviewLead(prRef({ reviewApprovals: 1, reviewerCount: 1, reviewDecision: null }))?.github,
+    ).toBeNull();
+  });
+
+  it('⚠ says "review required" even over a healthy-looking approval count', () => {
+    // The one case where GitHub's field is worth more than ours: two approvals that do not
+    // satisfy a CODEOWNERS rule. Suppressing it as "redundant" hides the reason the PR will not
+    // merge.
+    const lead = pendingReviewLead(
+      prRef({ reviewApprovals: 2, reviewerCount: 2, reviewDecision: 'review_required' }),
+    );
+    expect(lead?.ours).toBe('2 approvals');
+    expect(lead?.github).toBe('GitHub: review required');
+  });
+});
+
+describe('the reviewer chips', () => {
+  const dana = reviewer({ userId: 1, standing: 'changes_requested' });
+  const sam = reviewer({ userId: 2, standing: 'approved' });
+  const rabbit = reviewer({ userId: 3, isBot: true, botKind: 'coderabbit' });
+  const copilot = reviewer({ userId: 4, isBot: true, botKind: 'copilot' });
+  const nameless = reviewer({ userId: 5, isBot: true, botKind: null });
+
+  it('names the humans in the order the server ranked them', () => {
+    // The wire ranks changes_requested → approved → commented → dismissed, humans before bots.
+    // The client must not re-sort: a second ranking is a second opinion.
+    const chips = pendingReviewerChips(prRef({ reviewers: [dana, sam], reviewerCount: 2 }));
+    expect(chips.humans.map((r) => r.userId)).toEqual([1, 2]);
+    expect(chips.bots).toBeNull();
+  });
+
+  it('⚠ collapses EVERY bot into one chip that says what they did', () => {
+    // Measured: 39% of reviewer standings on open PRs are bot-authored and 477 of 478 of those
+    // are merely `commented`. A flat list buries the one human approval under four vendor rows.
+    const chips = pendingReviewerChips(
+      prRef({ reviewers: [sam, rabbit, copilot, nameless], reviewerCount: 4 }),
+    );
+    expect(chips.humans.map((r) => r.userId)).toEqual([2]);
+    expect(chips.bots?.count).toBe(3);
+    expect(chips.bots?.label).toBe('3 bots commented');
+    expect(chips.bots?.standing).toBe('commented');
+    // ⚠ An unbranded CI account is a REAL, common state — it is named "Bot", never dropped and
+    // never given an invented brand.
+    expect(chips.bots?.title).toContain('CodeRabbit commented');
+    expect(chips.bots?.title).toContain('Bot commented');
+  });
+
+  it('⚠ draws the collapsed chip with the STRONGEST standing among the bots', () => {
+    // A bot that blocked the PR must not be drawn as a comment just because three others chatted.
+    const blocker = reviewer({ userId: 6, isBot: true, botKind: 'coderabbit', standing: 'changes_requested' });
+    const chips = pendingReviewerChips(prRef({ reviewers: [blocker, copilot], reviewerCount: 2 }));
+    expect(chips.bots?.standing).toBe('changes_requested');
+    // Mixed standings: the chip says the shorter true thing, and the breakdown moves to the
+    // tooltip rather than being flattened into a wrong verb.
+    expect(chips.bots?.label).toBe('2 bots reviewed');
+    expect(chips.bots?.title).toBe('CodeRabbit requested changes · Copilot commented');
+  });
+
+  it('collapses a single bot too, and keeps the count singular', () => {
+    const chips = pendingReviewerChips(prRef({ reviewers: [rabbit], reviewerCount: 1 }));
+    expect(chips.bots?.label).toBe('1 bot commented');
+  });
+
+  it('⚠ takes "+N" from the SERVER\'s total, never from a subtraction of its own lists', () => {
+    // The cap disclosure gates on `complete`, exactly as `capFor`'s `shown === count` does. A
+    // client that subtracted its way to a total would silently read 0 the moment the list were
+    // filtered for any other reason — and a reviewer with no GitHub account left is COUNTED and
+    // UNNAMEABLE, which is a gap no subtraction of the visible chips can find.
+    const chips = pendingReviewerChips(
+      prRef({ reviewers: [dana, sam, rabbit], reviewerCount: 9 }),
+    );
+    expect(chips.complete).toBe(false);
+    expect(chips.total).toBe(9);
+    expect(chips.moreCount).toBe(6);
+    // The bot chip counts ONE seat on screen but THREE would-be rows; the "+6" is over the named
+    // list, bots included, never over the chips drawn.
+    expect(chips.humans.length + (chips.bots ? 1 : 0)).toBe(3);
+  });
+
+  it('discloses nothing when every reviewer is named', () => {
+    const chips = pendingReviewerChips(prRef({ reviewers: [dana, sam], reviewerCount: 2 }));
+    expect(chips.complete).toBe(true);
+    expect(chips.moreCount).toBe(0);
+  });
+
+  it('degrades to an empty row on a surface that carries neither field', () => {
+    const chips = pendingReviewerChips({});
+    expect(chips.humans).toEqual([]);
+    expect(chips.bots).toBeNull();
+    expect(chips.complete).toBe(true);
+    expect(chips.moreCount).toBe(0);
+  });
+});
+
+// ── THE ARM DRAFT ────────────────────────────────────────────────────────────────────────────
+//
+// The bug this pins, in the words it was reported in: "'Merge when ready' after having armed 1 or
+// 2 other PRs this way does not display the arm confirmation inline — it reverts to the unpressed
+// button state."
+//
+// THE MECHANISM. The board keys every card on `card.id`, and the server builds the two forward
+// ids as `wp:merge:<prId>` and `wp:update_branch:<prId>` — the MERGE KIND is in the key. Arming a
+// PR hands it to the auto-merge runner, which lands it on its ~2-minute tick; trunk moves; the
+// 60-second liveness sweep reports `changed > 0` and re-fetches the board; every PR that just
+// fell behind comes back under a DIFFERENT card id. React unmounts that subtree and mounts a new
+// one, and a confirmation held in `useState` is gone. It reads as a dead button rather than a
+// remount because `useMergeOptions` is cached, so the fresh mount reads GitHub's answer straight
+// back and renders the full un-pressed button instead of the compact "ask GitHub" trigger.
+//
+// So the draft is keyed by prId — the half that does NOT change — and every assertion below is
+// about a PR id outliving a card id.
+//
+// ⚠ The store is module-level, so each test uses its own prIds rather than resetting it. That is
+// the same property the app relies on: one reader's clicks, never a shared bucket.
+
+/** The two card ids one pull request can be handed by the server, depending on its merge state. */
+const cardId = (kind: 'merge' | 'update_branch', prId: number): string => `wp:${kind}:${prId}`;
+
+describe('the arm draft reducer', () => {
+  it('makes "ask" one-way — the reader never pays for the same answer twice', () => {
+    expect(armDraftReducer('idle', { type: 'ask' })).toBe('asked');
+    // Already past it: a stray second click (or a re-render racing the fetch) must not knock a
+    // live confirmation back down to "asked", which would close the panel under the reader.
+    expect(armDraftReducer('confirming', { type: 'ask' })).toBe('confirming');
+  });
+
+  it('opens and closes the confirm step, dropping back to "asked" and never to "idle"', () => {
+    expect(armDraftReducer('asked', { type: 'confirm' })).toBe('confirming');
+    // ⚠ NOT 'idle'. The merge-options call is already bought and paid for; returning to idle
+    // would re-render the compact trigger and charge GitHub a second time for an answer we hold.
+    expect(armDraftReducer('confirming', { type: 'cancel' })).toBe('asked');
+    // Cancel is only meaningful against an open panel.
+    expect(armDraftReducer('asked', { type: 'cancel' })).toBe('asked');
+  });
+
+  it('"settled" clears the draft outright — the armed intent owns the row from there', () => {
+    for (const from of ['idle', 'asked', 'confirming'] as const) {
+      expect(armDraftReducer(from, { type: 'settled' })).toBe('idle');
+    }
+  });
+});
+
+describe('the draft outlives the card id', () => {
+  it('⚠ keeps a half-finished confirmation when the card is re-keyed under it', () => {
+    const prId = 5101;
+    dispatchArmDraft(prId, { type: 'ask' });
+    dispatchArmDraft(prId, { type: 'confirm' });
+
+    // The PR falls behind trunk. The board re-fetches and hands the SAME pull request back under
+    // a different card id, so React remounts the row — the exact moment the old `useState` died.
+    expect(cardId('merge', prId)).not.toBe(cardId('update_branch', prId));
+    expect(armDraftFor(prId)).toBe('confirming');
+    // And the control still renders the confirmation, not the unpressed button.
+    expect(armControlPhase({ draft: armDraftFor(prId), intentArmed: false, posting: false })).toBe(
+      'confirming',
+    );
+  });
+
+  it('⚠ arming one PR leaves every other PR’s draft alone', () => {
+    // The reported trigger is "after having armed 1 or 2 other PRs". Those arms move the world
+    // (trunk, the board, the card ids) but they must not reach into a third PR's draft.
+    const a = 5201;
+    const b = 5202;
+    const c = 5203;
+    dispatchArmDraft(c, { type: 'ask' });
+    dispatchArmDraft(c, { type: 'confirm' });
+    for (const other of [a, b]) {
+      dispatchArmDraft(other, { type: 'ask' });
+      dispatchArmDraft(other, { type: 'confirm' });
+      dispatchArmDraft(other, { type: 'settled' }); // its POST landed
+    }
+    expect(armDraftFor(a)).toBe('idle');
+    expect(armDraftFor(b)).toBe('idle');
+    expect(armDraftFor(c)).toBe('confirming');
+  });
+
+  it('an untouched PR has no entry at all — nothing on the board fetches on mount', () => {
+    // `idle` is the ABSENCE of an entry, and idle is what gates `useMergeOptions` off. Fifty
+    // cards nobody clicked hold fifty nothings and make zero GitHub calls.
+    expect(armDraftFor(5301)).toBe('idle');
+  });
+});
+
+describe('armControlPhase decides what the control shows', () => {
+  it('⚠ still reports "armed" for a PR whose card was re-keyed after arming', () => {
+    // The whole point: armed-ness lives in the server-backed intent, not in the mount. Arm PR A,
+    // let the card come back under a new id, and the row still says armed.
+    const prId = 5401;
+    dispatchArmDraft(prId, { type: 'ask' });
+    dispatchArmDraft(prId, { type: 'confirm' });
+    dispatchArmDraft(prId, { type: 'settled' }); // the hook-level onSuccess, after the seed
+    expect(armDraftFor(prId)).toBe('idle');
+    expect(armControlPhase({ draft: armDraftFor(prId), intentArmed: true, posting: false })).toBe(
+      'armed',
+    );
+  });
+
+  it('⚠ never reports "armed" from the draft alone', () => {
+    // A draft that remembered "armed" would keep claiming it after the watcher gave up — the one
+    // thing this control may not do, because the claim is about what GitHub is going to do next.
+    for (const draft of ['idle', 'asked', 'confirming'] as const) {
+      expect(armControlPhase({ draft, intentArmed: false, posting: false })).not.toBe('armed');
+    }
+  });
+
+  it('⚠ lets the confirmed intent OUTRANK the in-flight POST', () => {
+    // Not theoretical: TanStack runs a mutation's hook-level onSuccess (which seeds the armed
+    // list) BEFORE dispatching 'success', so for one render both are true. If `posting` won, the
+    // row would say "Arming…" about a PR that is already armed.
+    expect(armControlPhase({ draft: 'confirming', intentArmed: true, posting: true })).toBe('armed');
+  });
+
+  it('reports "arming" across the remount, so an in-flight POST is never invited twice', () => {
+    // Read off the shared mutation key, so it holds even on a mount that did not start the POST.
+    expect(armControlPhase({ draft: 'confirming', intentArmed: false, posting: true })).toBe(
+      'arming',
+    );
+    expect(armControlPhase({ draft: 'idle', intentArmed: false, posting: true })).toBe('arming');
+  });
+
+  it('⚠ shows the UNPRESSED button for exactly one input triple — which is why order matters', () => {
+    // `idle` is the reported failure state, and the only way to reach it is a cleared draft with
+    // no intent and no POST. That is why `useArmAutoMerge` seeds the armed list BEFORE it clears
+    // the draft: clearing first would put this triple on screen for a render, one frame after a
+    // successful arm.
+    expect(armControlPhase({ draft: 'idle', intentArmed: false, posting: false })).toBe('idle');
   });
 });

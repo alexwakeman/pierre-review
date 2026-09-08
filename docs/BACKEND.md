@@ -167,4 +167,93 @@ loop here uses. The in-code comments at `packages/pro/src/annotations/routes.ts`
 `packages/pro/src/activity-digest/routes.ts` restate the reasoning at the call site so a reader
 of either does not have to find this doc first.
 
+## My Turn — the ball rule
+
+**MY TURN = the reader owes an action on this PR, and nothing they have done since the last RELATED
+event discharges it.** Derived on every read from `reviews`, `review_comments`, `pr_comments` and
+`commits`. Nothing is stored: there is no dismissal table, no "done" state, no tombstone. A card
+appears when the state says so and vanishes when the state says so.
+
+### What the predecessor did, and why it was wrong
+
+`getAddedRepoActionablePrIds` tested exactly: *the repo has a `createdAt`, the PR opened at or after
+it, the author is a non-bot who is not you, and the PR is open and non-draft.* It joined `reviews`,
+`pr_comments`, `review_comments`, `commits`, `events` and `pr_views` **zero times**. The card was
+therefore a fact about the PR's **creation**, and creation never un-happens — so it could not
+self-clear while the PR stayed open. A PR the reader had approved eleven days earlier still rendered
+"New PR from @robin-dunn". The **Done** button existed to compensate manually, and on this one
+section the dismissal was **sticky forever** (no timestamp comparison, unlike the other four), whose
+undo was fully built in the backend and mounted nowhere in the SPA.
+
+⚠ **`repos.createdAt` was never the missing predicate.** It is an ONBOARDING FLOOR — its own comment
+says "adding a repo with 400 open PRs dumps all 400 into My Turn on day one". Per-repo, viewer-blind,
+evaluated once and monotonic. "Have I acted" is per-PR, per-viewer and time-ordered. They share only
+a `>=` operator.
+
+### The summons — what puts the ball in your court
+
+| # | Rule | Where |
+|---|---|---|
+| S1 | A review is outstanding from you (`review_requests` row with `user_id = me`) | pre-existing |
+| S2 | A PR in a repo you added that you have **never touched** (`mineLast == null`) | the reformed `watched_repo_pr` |
+| S3a | A human **reply** in a thread you opened, still unresolved | `getThreadsAwaiting` — the ONE place the rule already existed |
+| S3b | A thread you opened has gone **`likely_addressed`** | `awaitingKind: 'likely_addressed'` |
+| S3c | A human **commit** after your last action — new code makes your review stale | `NewPrBall.kind === 'commits_after'` |
+| S4 | A finished Claude review with an un-posted actionable finding | `getUnactionedClaudeReviews` |
+
+### What does NOT return the ball
+
+⚠ **RELATEDNESS, NOT RECENCY.** A human PR-level comment, or a comment on somebody else's thread,
+does **not** summon you back. This is the difference between the rule as specified and a naive
+"anything after me" rule, and it is what stops a teammate's side-comment re-summoning you.
+
+⚠ **NO BOT ACTION EVER RETURNS THE BALL — INCLUDING A PUSH.** This **deliberately diverges** from
+Chronology (`db/pr-intervals.ts`), which counts *every* commit regardless of author because a push is
+code arriving whoever's name is on it. That is right for an aggregate flow measure and wrong for a
+personal summons: a formatting bot's push is not a reason to re-read a PR. Both rules are correct for
+their own question — **do not "fix" one to match the other.**
+
+⚠ Bot-ness resolves through the **global `users.isBot` set**, never `hiddenBotUserIds`, which REQUIRES
+a `workspaceId` — and `getMyTurn` also runs **unscoped** for the notification watcher. A commit with a
+null author is *not* a human push (unproven must not summon).
+
+### Discharge
+
+Any action of yours at or after the summoning moment: a review of **any** state (a bare `commented`
+review counts), a review comment, a PR comment, or a commit. ⚠ `pr_views` is NOT an action —
+`markPrViewed` stamps on pane open, so reading it here would clear cards on hover.
+
+⚠ **`events` is NOT usable for this.** It looks free and is **lossy**: `sync/upsert.ts` emits
+`review_submitted` only when `isSubstantiveReview` passes, so bodiless `commented` reviews produce no
+row at all — precisely the actions this rule must see.
+
+### Where the test goes, and why it must go there
+
+⚠ **FILTER THE SEED LIST, NEVER THE BUILT ARRAY.** `myTurnTotal = ranked.length` is taken *after* seed
+assembly and *before* the 50-slice. Removing seeds moves numerator and denominator together and every
+cap disclosure stays arithmetically true; removing cards after the slice — or on the client — leaves
+`myTurnTotal` stale and over-claims "50 of 148".
+
+⚠ It belongs in the **helper**, which `getMyTurn` and `getActionableActivityIds` SHARE, so the board,
+the browser notification, the brief count and the activity list move together.
+
+### Two adjacent bugs the Done button was hiding
+
+⚠ **`getThreadsAwaiting` had no `state = 'open'` predicate.** With dismissals removed it returned 31
+threads, every one on a PR that had already merged or closed — each previously hand-dismissed.
+Deleting the button without this makes the board strictly worse.
+
+⚠ **`getUnactionedClaudeReviews` must count posted FINDINGS, not the parent run's `postedAt`.** The
+per-finding post route stamps `claude_review_findings.posted_at` and never the parent, so a run-only
+test makes the card immortal. Measured: 96 runs / 2 stamped, 287 findings / 62 stamped. Fixed
+CORE-side, because the plugin-side fix heals no already-unstamped run.
+
+### The card must explain itself
+
+"New PR from @x" is true only of S2. A row kept by S3c reads **"You approved · @robin-dunn pushed 2
+commits since"**, and its section chip says **"Pushed since"**. `MyTurnCard.ball` carries the FACT and
+the SPA picks the WORDS — a chip keyed on `reason` alone said "New PR" directly beside that detail,
+the card contradicting itself in two adjacent elements. ⚠ An **absent** `ball` falls back to the
+section label, never to a guess: the field is trailing-optional for wire tolerance, and an older
+response must not have "Pushed since" invented over a PR nobody has touched.
 

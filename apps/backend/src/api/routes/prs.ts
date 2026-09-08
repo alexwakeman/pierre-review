@@ -31,7 +31,9 @@ import type {
   UpdateBranchBody,
   UpdateBranchResult,
 } from '@pierre-review/shared';
+import { and, eq } from 'drizzle-orm';
 import { config } from '../../config.js';
+import { db, schema } from '../../db/client.js';
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
 import { fetchActionsJobLog } from '../../github/actions-logs.js';
 import {
@@ -89,7 +91,7 @@ import {
   updatePullRequestBranch,
 } from '../../github/mutations.js';
 import { hydratePrDetail } from '../../sync/hydrate-detail.js';
-import { reviewDecisionFrom } from '../../sync/upsert.js';
+import { mergeQueueEntryStateFrom, reviewDecisionFrom } from '../../sync/upsert.js';
 import { refreshPrFromGitHub } from '../../sync/refresh-pr.js';
 import {
   confirmPostedReviewComment,
@@ -102,6 +104,44 @@ import { accountIdOf } from '../plugins/auth.js';
 // path (matches db/queries.ts + hydrate-detail.ts's diffAnchorId).
 function diffAnchorId(path: string): string {
   return createHash('sha256').update(path, 'utf8').digest('hex');
+}
+
+/**
+ * Stamp a PR's synced merge-queue columns from a LIVE observation.
+ *
+ * A GitHub write is not done when GitHub 201s: the SPA re-reads from the local DB, so an
+ * enqueue nobody has stamped is invisible until the next adaptive walk — up to fifteen minutes
+ * on a cold repo — and the Pending board is forbidden from fetching to find out. Both queue
+ * verbs below therefore stamp what they just proved, exactly like `markPrMergedLocally` does
+ * after a merge. The next sync reconciles.
+ *
+ * It lives here rather than in db/queries.ts because these two routes are its only callers and
+ * the sync path writes the same columns through its own three-state fold (sync/upsert.ts) — a
+ * shared helper would invite that fold to be routed through an unconditional setter, which is
+ * precisely the write the partial-response rule forbids. Every caller here is holding a
+ * POSITIVE answer from GitHub, so an unconditional write is correct at these two call sites and
+ * only at these two.
+ */
+async function stampMergeQueueState(
+  prId: number,
+  accountId: number,
+  inQueue: boolean,
+  entryState: string | null,
+): Promise<void> {
+  await db
+    .update(schema.pullRequests)
+    .set({
+      inMergeQueue: inQueue,
+      // Out of the queue means no entry — never carry a stale `queued` past a dequeue.
+      mergeQueueEntryState: inQueue ? mergeQueueEntryStateFrom(entryState) : null,
+    })
+    .where(
+      and(
+        eq(schema.pullRequests.id, prId),
+        eq(schema.pullRequests.accountId, accountId),
+      ),
+    )
+    .execute();
 }
 
 // How long an armed auto-merge intent stays live before the watcher expires it. A hard stop
@@ -787,6 +827,11 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     try {
       const token = await getAccessToken(accountId);
       const queue = await fetchMergeQueueState(token, ctx.owner, ctx.name, ctx.number);
+      // A non-null probe is a positive answer about membership whichever branch we take next —
+      // including the "no queue configured" 400 below, where `inQueue:false` is exactly the
+      // fact that clears a stale `true` off the row. `null` means the PR could not be read at
+      // all, so it stamps nothing.
+      if (queue) await stampMergeQueueState(id, accountId, queue.inQueue, queue.state);
       if (!queue || !queue.enabled) {
         // 400, not a silent no-op: enqueuing where there is no queue would otherwise fail
         // deep inside GraphQL with an opaque message.
@@ -806,6 +851,10 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       }
       const info = await fetchPrHeadInfo(token, ctx.owner, ctx.name, ctx.number);
       const entry = await enqueuePullRequestOnQueue(token, ctx.prNodeId, info.headSha);
+      // GitHub has accepted the enqueue, so membership is true even when the mutation's
+      // nullable payload gave us no entry state (it can 200 with a null entry — see
+      // GqlEnqueueResponse). `null` there stores "queued, state unknown", never "not queued".
+      await stampMergeQueueState(id, accountId, true, entry.state);
       const result: MergeQueueResult = {
         inQueue: true,
         position: entry.position,
@@ -839,6 +888,10 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     try {
       const token = await getAccessToken(accountId);
       await dequeuePullRequestFromQueue(token, ctx.prNodeId);
+      // Stamped for the same reason the enqueue is, and it matters more here: without it the
+      // row keeps claiming `queued` until the next walk, so the SPA re-reads the PR it just
+      // removed and offers "Remove from queue" again.
+      await stampMergeQueueState(id, accountId, false, null);
       const result: MergeQueueResult = { inQueue: false, position: null, state: null };
       return result;
     } catch (err) {

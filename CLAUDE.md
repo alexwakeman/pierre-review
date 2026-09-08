@@ -95,7 +95,7 @@ against a PORTABLE async surface (mechanics: [docs/BACKEND.md](docs/BACKEND.md))
 
 **Multi-tenancy.** Every GitHub entity is owned by an `accounts` row. `accountId` is
 **denormalized** onto the anchor tables (`repos`, `pullRequests`, `events`, `claudeReviews`,
-`myTurnDismissals`, `workspaces`, `workspaceRepos`, `workspaceReviewers`, `mlCommentLabels`);
+`workspaces`, `workspaceRepos`, `workspaceReviewers`, `mlCommentLabels`);
 everything else reaches its account via `repoId`/`prId`, and `users` + `commitFiles` stay
 **global**. GitHub-node-id uniques are **composite** so two accounts can track the same repo
 (`(accountId, githubNodeId)`, `events (accountId, dedupeKey)`, child `(prId, githubNodeId)`).
@@ -439,6 +439,29 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   invent an ownership claim on screen. ⚠ `?attnPersonal=1` is retired but still PARSED (as
   `'mine'`) — it shipped, so it is in bookmarks and in history entries Back replays; `?attnRel=` is
   the only key emitted.
+- **MY TURN IS THE BALL RULE — STATE-DERIVED, NOTHING STORED.** A my_turn card exists only while
+  the reader owes an action and has not taken it since the last RELATED thing that happened.
+  Recomputed every read: no dismissal, no tombstone, no "done". Full contract:
+  [docs/BACKEND.md](docs/BACKEND.md) § My Turn — the ball rule. Without opening it:
+  ⚠ **`repos.createdAt` IS NOT THIS PREDICATE** — it is an ONBOARDING FLOOR (adding a repo with 400
+  open PRs must not dump all 400 on you): per-repo, viewer-blind, evaluated once. The ball is
+  per-PR, per-viewer, time-ordered. Its predecessor had NO activity join at all, so the card was a
+  fact about the PR's CREATION — and creation never un-happens.
+  ⚠ **RELATEDNESS, NOT RECENCY.** Only three things return the ball after you act: a human reply in
+  YOUR thread, YOUR thread going `likely_addressed`, or a human COMMIT after your last action. A
+  human comment elsewhere on the PR does not. ⚠ **NO BOT ACTION EVER RETURNS IT, INCLUDING A PUSH** —
+  deliberately DIVERGING from Chronology (`db/pr-intervals.ts`), which counts every commit whatever
+  the author. Both are right for their own question; never "fix" one to match the other. Bot-ness
+  resolves through the GLOBAL `users.isBot` set, NEVER `hiddenBotUserIds` (it REQUIRES a workspaceId,
+  and `getMyTurn` also runs UNSCOPED for the notification watcher).
+  ⚠ **FILTER THE SEED LIST, NEVER THE BUILT ARRAY** — `myTurnTotal = ranked.length` is taken after
+  seed assembly and before the 50-slice, so dropping seeds moves numerator and denominator together.
+  The test lives in the HELPER that `getMyTurn` and `getActionableActivityIds` SHARE.
+  ⚠ **A card must say WHY the ball is yours.** "New PR from @x" is true ONLY of a PR you never
+  touched; `MyTurnCard.ball` carries the fact and the SPA picks the words — a section chip keyed on
+  `reason` alone said "New PR" beside its own detail reading "You approved · @x pushed 2 commits
+  since".
+
 - **THE PENDING MUTE RIDES `relevance`, ONCE, SERVER-SIDE** (CORE/free, both modes; migration
   `0058`/pg `0045` — `workspaces.pending_muted` + `pending_muted_repos`, read via
   `db/pending-mute.ts`, written by `PUT /api/workspaces/:id/pending-mute`, edited in Settings →
@@ -522,8 +545,13 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   is not (GitHub 405s). `db/triage.ts`'s `READY_MERGE_STATES` and `mergeVerdict`'s `canMerge`
   must agree, or the triage queue and the PR disagree.
 - **`blocked` is the ONE verdict GitHub refuses to explain, so it is the ONE that carries a
-  ranked `blockers[]`** (`deriveMergeBlockers`, PR-DETAIL ONLY — the Pending board's cards carry
-  no review status and must not fetch to find out). ⚠ **EVERY ENTRY IS MARKED `proven` OR
+  ranked `blockers[]`** (`deriveMergeBlockers`, PR-DETAIL ONLY — a `blockers[]` needs the PR's
+  THREAD COUNTS, which the Pending board's cards do not carry and MUST NOT FETCH to find out. ⚠
+  The board's cards DO now carry review standing — `reviewDecision`, `reviewApprovals`,
+  `reviewChangesRequested`, `reviewers`, `reviewerCount` on `InsightPrRef`, plus
+  `inMergeQueue`/`mergeQueueEntryState`, all SYNCED columns folded server-side — so the old
+  shorthand "the cards carry no review status" is false. THE FETCH HALF IS ABSOLUTE AND
+  UNCHANGED). ⚠ **EVERY ENTRY IS MARKED `proven` OR
   `inferred`, and only `reviewDecision` can be proven** — nothing else on GitHub's payload names
   a rule, and `branchProtectionRule` is ADMIN-ONLY (its null is indistinguishable from "you may
   not look", so it is deliberately NOT synced). ⚠ **NEVER ASSERT UNRESOLVED THREADS ARE THE

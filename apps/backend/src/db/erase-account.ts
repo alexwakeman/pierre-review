@@ -38,7 +38,6 @@ const {
   accounts,
   repos,
   aiUsage,
-  myTurnDismissals,
   workspaces,
   workspaceRepos,
   workspaceReviewers,
@@ -138,13 +137,6 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
 
     // The AI spend ledger (token/credit counts — no prompt text).
     await tx.delete(aiUsage).where(eq(aiUsage.accountId, accountId)).execute();
-    // Dismissals of every kind. deleteRepo only clears the PR-keyed kinds for the repos it
-    // deletes; `thread` and `claude_review` dismissals key off other id spaces and would
-    // otherwise survive as orphans carrying this account's id.
-    await tx
-      .delete(myTurnDismissals)
-      .where(eq(myTurnDismissals.accountId, accountId))
-      .execute();
     // Any aggregate rows contributed to the cross-org benchmark. Consent was the basis for
     // these, so withdrawal-by-deletion must remove them too.
     await tx
@@ -210,7 +202,9 @@ export function accountScopedTables(): {
     { name: 'events', col: events.accountId, table: events },
     { name: 'claudeReviews', col: claudeReviews.accountId, table: claudeReviews },
     { name: 'aiUsage', col: aiUsage.accountId, table: aiUsage },
-    { name: 'myTurnDismissals', col: myTurnDismissals.accountId, table: myTurnDismissals },
+    // `myTurnDismissals` sat here until migration 0060 / pg 0047 DROPPED the table. It is named
+    // rather than silently absent because this list is a checklist, and a checklist that shortens
+    // with no explanation reads as an omission — the exact failure this function guards against.
     // THE WORKSPACE TRIO (migrations 0044/0045). FOUR entries left here when they arrived —
     // `repoReviewers`, `accountReviewers`, `teams`, `teamRepos` — and THREE replaced them. The net
     // drop of one is correct and intended: the two bot tables collapsed onto a single

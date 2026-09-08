@@ -556,7 +556,15 @@ export function ActivityView(): JSX.Element {
       </div>
 
       {/* RIGHT DETAIL */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      {/* ⚠ `relative` IS LOAD-BEARING: it makes this pane the containing block for its own
+          `absolute` descendants. Without it they resolve up to the nearest POSITIONED ancestor,
+          which is App.tsx's `absolute inset-0` activity-overlay — so a sticky header or popover
+          absolutely positioned deep in here stretched the OVERLAY's scroll height to the full
+          content run (measured: 18805px vs 586px with this class present). The overlay then owns
+          a phantom scroll range the user cannot scroll back, and any `scrollIntoView` in this
+          subtree (the Pending Back-restore flash) clamps into it and pushes the whole screen —
+          rail included — off the top. Scrolling belongs to THIS box; nothing above it scrolls. */}
+      <div className="relative min-h-0 flex-1 overflow-y-auto p-3">
         {noReposAtAll ? (
           // First-run: detect the viewer's recent repos + one-click add. Hoisted above the
           // rail-entry branches so a zero-repo account always lands here (a Pro account could

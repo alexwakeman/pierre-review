@@ -515,10 +515,8 @@ export async function installMockApi(page: Page): Promise<void> {
         return json(route, { enabled: false, model: 'claude-haiku-4-5', digests: [], digest: null, generatedAt: iso(0) });
       }
       if (prDetailMatch) return json(route, prDetailFor(Number(prDetailMatch[1])));
-      // mark-viewed, my-turn-done, insights, and anything else: a harmless empty 200.
-      if (path.includes('/api/my-turn-done') || path.includes('/dismiss-history')) {
-        return json(route, { reviews: [], threads: [], watchedRepoPrs: [], claudeReviews: [], users: [] });
-      }
+      // mark-viewed, insights, and anything else: a harmless empty 200. (The two dismissal stubs
+      // that used to sit here went with the `my_turn_dismissals` table and its routes.)
       return json(route, {});
     },
   );

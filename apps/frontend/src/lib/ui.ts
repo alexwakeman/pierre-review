@@ -1,6 +1,7 @@
 import {
   CheckIcon,
   CloseIcon,
+  CommentIcon,
   DotIcon,
   MinusIcon,
   QuestionIcon,
@@ -11,8 +12,13 @@ import {
 // runtime. `shared` is types-only for the BACKEND — the SPA bundles it from source.
 import { LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
 
-/** A check-state mark. A REFERENCE, so this `.ts` module can name it without holding JSX. */
-type IconComponent = (props: { size?: number; className?: string; title?: string }) => JSX.Element;
+/** A check-state mark. A REFERENCE, so this `.ts` module can name it without holding JSX.
+ *  EXPORTED so a consumer can type a meta table of its own the same way. */
+export type IconComponent = (props: {
+  size?: number;
+  className?: string;
+  title?: string;
+}) => JSX.Element;
 
 import type {
   AddressedConfidence,
@@ -34,6 +40,7 @@ import type {
   PrState,
   ReasonTag,
   ReviewBotKind,
+  ReviewState,
   ThreadStateCounts,
   TimelinePr,
   User,
@@ -659,6 +666,88 @@ export const CHECK_STATE_META: Record<
   skipped: { label: 'skipped', color: '#9ca3af', icon: SkipIcon },
   error: { label: 'error', color: '#ef4444', icon: WarningIcon },
   unknown: { label: 'unknown', color: '#9ca3af', icon: QuestionIcon },
+};
+
+// ---- Where ONE reviewer stands ------------------------------------------------------------
+//
+// The mark, the ink and the word for a reviewer's LATEST review state. It lives HERE, beside
+// CHECK_STATE_META and under the same rules, because TWO surfaces draw it: the PR pane's
+// "Reviews" row (ChecksTab) and the Pending board's reviewer chips. Two copies of "what does an
+// approval look like" is how one screen ends up calling a dismissed review grey and the other
+// green, on the same PR, one click apart.
+//
+// ⚠ `icon` IS A COMPONENT REFERENCE, for CHECK_STATE_META's first reason: this module is `.ts`
+// and cannot hold JSX at all. Consumers render it `<m.icon size={11} />`.
+//
+// ⚠ EVERY INK CLEARS AA ON BOTH PAGE GROUNDS (test/textContrast.test.ts measures it from source).
+// The predecessor drew `dismissed` and `pending` in a bare gray-400 — 2.54:1 on white — so
+// the one state whose whole point is "this no longer counts" was also the one nobody could read.
+// Dimness is not the channel that separates a dismissed review from a commented one; the MARK and
+// the WORD are, and colour is never the only channel.
+export interface ReviewStateMeta {
+  /** The state's name, as a reader would say it out loud. */
+  label: string;
+  /** The mark. Null only where there is nothing yet to mark. */
+  icon: IconComponent | null;
+  /** Ink alone — for a SENTENCE that carries no chip of its own. */
+  ink: string;
+  /** The full chip: a 10% tint plus the same ink. Always `${tint} ${ink}`, never a second ink. */
+  cls: string;
+  /** The tooltip, for a chip with room for the mark but not the word. */
+  title: string;
+}
+
+/** Built through one helper so `cls` cannot drift from `ink` — the drift this table exists to
+ *  stop, one level down. */
+function reviewStateMeta(
+  label: string,
+  icon: IconComponent | null,
+  tint: string,
+  ink: string,
+  title: string,
+): ReviewStateMeta {
+  return { label, icon, ink, cls: `${tint} ${ink}`, title };
+}
+
+export const REVIEW_STATE_META: Record<ReviewState, ReviewStateMeta> = {
+  approved: reviewStateMeta(
+    'Approved',
+    CheckIcon,
+    'bg-green-500/10',
+    'text-green-700 dark:text-green-400',
+    'Approved',
+  ),
+  changes_requested: reviewStateMeta(
+    'Changes requested',
+    CloseIcon,
+    'bg-red-500/10',
+    'text-red-700 dark:text-red-400',
+    'Requested changes',
+  ),
+  commented: reviewStateMeta(
+    'Commented',
+    CommentIcon,
+    'bg-gray-500/10',
+    'text-gray-600 dark:text-gray-300',
+    'Reviewed with comments — no verdict',
+  ),
+  // A dismissed review is quieter than a commented one, but still LEGIBLE — 4.83:1 on white and
+  // 7.93:1 on the near-black page, where its predecessor was 2.54:1 in light mode.
+  dismissed: reviewStateMeta(
+    'Dismissed',
+    MinusIcon,
+    'bg-gray-500/10',
+    'text-gray-500 dark:text-gray-400',
+    'Review dismissed',
+  ),
+  // Requested and not yet answered — nothing has happened, so there is no mark to draw.
+  pending: reviewStateMeta(
+    'Pending',
+    null,
+    'bg-gray-500/10',
+    'text-gray-500 dark:text-gray-400',
+    'Review pending',
+  ),
 };
 
 // ---- The ONE merge verdict --------------------------------------------------------------

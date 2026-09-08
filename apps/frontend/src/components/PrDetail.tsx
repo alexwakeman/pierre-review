@@ -916,7 +916,7 @@ export function PrDetail({
       // board until its 60s staleTime or the 5-min interval: the user opens the PR the card
       // pointed at, comes back, and the card is still there telling them to look at it.
       // Invalidated at the PREFIX (both keys are `[name, 'ws:<id>']` — see useAttentionCards /
-      // useDailyBrief) so every cached workspace refreshes, exactly like useDismissMyTurn.
+      // useDailyBrief) so every cached workspace refreshes.
       void qc.invalidateQueries({ queryKey: ['attention-cards'] });
       void qc.invalidateQueries({ queryKey: ['daily-brief'] });
     },

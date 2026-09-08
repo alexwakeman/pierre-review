@@ -1002,7 +1002,7 @@ addition, so **`apiVersion` stays 21** and an older plugin simply never reads th
   scanner is off) behaves identically. See [DATA-MODEL.md](DATA-MODEL.md) § `pr_mentions` and
   [SYNC.md](SYNC.md) § "@mention derivation".
 - ⚠ **NOTHING IS NARROWED BY IT.** `GET /api/my-turn` keeps returning every row (the CLI status
-  board and the Done tab's restorability contract both need the full set) and the "Needs
+  board needs the full set) and the "Needs
   attention" board keeps painting every card — a PR in a repo you only read does still need a
   review. The flag exists for the surfaces that INTERRUPT (welcome-back banner, Workspace-dropdown
   badges, browser notifications), which must not summon you for 425 strangers' PRs.

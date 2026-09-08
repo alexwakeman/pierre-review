@@ -65,7 +65,6 @@ const SEEDED_TABLES = [
   'pullRequests',
   'events',
   'aiUsage',
-  'myTurnDismissals',
   'workspaces',
   'workspaceRepos',
   'workspaceReviewers',
@@ -173,10 +172,6 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
       costUsd: 0.01,
       occurredAt: new Date(),
     })
-    .execute();
-  await db
-    .insert(s.myTurnDismissals)
-    .values({ accountId, kind: 'thread', refId: 900 + accountId, dismissedAt: new Date() })
     .execute();
 
   // ── THE WORKSPACE TRIO (migrations 0044/0045) ──────────────────────────────────────────────

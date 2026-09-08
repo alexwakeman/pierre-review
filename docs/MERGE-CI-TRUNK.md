@@ -143,8 +143,20 @@ FAILED, and "we never asked" must not reach the client wearing the same `null` G
 one place `github/mutations.ts` **forks from its REST house style**, and it has to:
 `enqueuePullRequest`/`dequeuePullRequest` are GraphQL-only with no REST equivalent, and queue
 presence is not inferable from REST at all — `MergeStateStatus` has no QUEUED value, so a queued
-PR looks like any other blocked one. Nothing is synced (a position changes minute to minute and
-only the merge control renders it): state rides the lazy `merge-options` fetch. When a queue
+PR looks like any other blocked one.
+
+**MEMBERSHIP AND ENTRY STATE ARE NOW SYNCED COLUMNS; POSITION AND ETA STAY LIVE-ONLY.**
+`pull_requests.in_merge_queue` + `merge_queue_entry_state` ride the normal walk (and the
+`/api/attention/liveness` sweep) onto `InsightPrRef` and `PrDetail`, because two surfaces that may
+NOT fetch — the Pending board and the PR pane's Overview row — otherwise offer a Merge button
+GitHub will refuse on a PR it is already landing. ⚠ **THREE STATES**: `true` / `false` (both
+positive statements from GitHub) and `null` = NOT OBSERVED, which may never render as "not
+queued". ⚠ `unmergeable` is the member that earns the state column — GitHub is EJECTING the entry,
+which is what a reader could previously only discover by pressing Merge and reading the failure;
+`pendingQueueBadge` (exported from `Activity/AttentionCards.tsx`) is the ONE place those five
+sentences are written, and the PR pane imports it rather than re-wording them. Position and
+`estimatedTimeToMerge` genuinely do change minute to minute and stay on the lazy `merge-options`
+fetch, which is why the queue chip states neither. When a queue
 exists the control REPLACES "Merge" with "Add to merge queue" — GitHub refuses a direct merge on
 a queued branch, so offering one only produces a confusing 405. `estimatedTimeToMerge` is SECONDS
 in GitHub's schema; the ×1000 lives in the single `SECONDS_TO_MS` constant, applied at the two

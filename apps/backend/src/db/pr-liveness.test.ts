@@ -264,7 +264,7 @@ describe('applyPrLiveness', () => {
     expect((await targetsFor(['unknown-state']))[0]!.mergeStateStatus).toBe('unknown');
   });
 
-  it('a merge-state flip is board movement; a restated review decision is not', async () => {
+  it('a merge-state flip is board movement; so is a review decision that lands', async () => {
     const t = (await targetsFor(['unknown-state']))[0]!;
     const flip = await mod.applyPrLiveness(
       1,
@@ -274,10 +274,12 @@ describe('applyPrLiveness', () => {
     expect(flip?.movedOnBoard).toBe(true);
     expect(flip?.leftOpenSet).toBe(false);
 
-    // Now only the review decision changes. The row IS written — the column is real and the next
-    // reader wants it — but nothing on the board renders it, so the SPA must not be told to
-    // refetch: `changed` counts `movedOnBoard`, and a board that refetched on this would be
-    // refetching on a timer with a GitHub call in front of it.
+    // Now only the review decision changes — and as of the Pending card carrying review standing,
+    // that IS board movement. The predecessor asserted the opposite for a reason that has since
+    // expired ("nothing on the board renders it"), which is why this flipped rather than being
+    // relaxed. It does not reopen the refetch-on-a-timer worry the old comment guarded against:
+    // the guard is a DIFF, so a restatement of the same decision — null → null included — still
+    // moves nothing, and only a genuine change costs the board a refetch.
     const t2 = (await targetsFor(['unknown-state']))[0]!;
     const rd = await mod.applyPrLiveness(
       1,
@@ -290,8 +292,27 @@ describe('applyPrLiveness', () => {
       }),
     );
     expect(rd).not.toBeNull();
-    expect(rd?.movedOnBoard).toBe(false);
+    expect(rd?.movedOnBoard).toBe(true);
     expect((await targetsFor(['unknown-state']))[0]!.reviewDecision).toBe('approved');
+
+    // ...and RESTATING that same decision moves nothing — it does not even dirty the row, so the
+    // function short-circuits to null. This is the half that keeps the flip above cheap, and it is
+    // pinned rather than assumed: without it, "a review decision is board movement" would be
+    // indistinguishable from "every sweep that observes a decision costs the board a refetch",
+    // which is the refetch-on-a-timer failure the predecessor's `change(false)` was guarding
+    // against. The guard is a DIFF, so null → null and approved → approved both cost nothing.
+    const t3 = (await targetsFor(['unknown-state']))[0]!;
+    const same = await mod.applyPrLiveness(
+      1,
+      t3,
+      obs({
+        nodeId: t3.githubNodeId,
+        reviewDecision: 'approved',
+        mergeStateStatus: 'clean',
+        mergeable: 'mergeable',
+      }),
+    );
+    expect(same).toBeNull();
   });
 });
 

@@ -90,11 +90,27 @@ export function AttentionIsolationBanner(): JSX.Element | null {
           <span className="font-medium">Your turn</span>
         ) : (
           <>
-            {attentionIsolation != null && (
-              <>
-                <span className="font-medium">{KIND_LABEL[attentionIsolation]}</span>
-                {attentionRelevance != null ? ' ' : ''}
-              </>
+            {/* ⚠ THE BANNER AND THE PILL MUST SPEAK WITH ONE VOICE. The header's control is
+                labelled "My turn"; confirming that press with "Showing only Review or reply" is
+                two names for one filter, six pixels and one row apart, with nothing on screen
+                saying they are the same narrowing. So the bare my_turn isolation echoes the pill.
+                ⚠ THIS DOES NOT LOOSEN THE CARD-LEVEL RULE ABOVE, AND THE TWO ARE DIFFERENT ACTS.
+                `KIND_LABEL.my_turn` stays "Review or reply" because a CARD may not claim a PR
+                nobody named you on — that is the conflation the three-valued relevance exists to
+                undo. NAMING THE FILTER YOU JUST PRESSED claims nothing about any individual row:
+                it repeats the reader's own word back to them, and the rail, the brief counts and
+                every figure in this product already call this population My turn. The 'mine' arm
+                above still collapses to "Your turn", because THAT narrowing really is the
+                personal subset. */}
+            {attentionIsolation === 'my_turn' && attentionRelevance == null ? (
+              <span className="font-medium">My turn</span>
+            ) : (
+              attentionIsolation != null && (
+                <>
+                  <span className="font-medium">{KIND_LABEL[attentionIsolation]}</span>
+                  {attentionRelevance != null ? ' ' : ''}
+                </>
+              )
             )}
             {attentionRelevance != null && (
               <span className="font-medium">

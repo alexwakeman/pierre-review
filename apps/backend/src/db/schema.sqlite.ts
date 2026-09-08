@@ -9,8 +9,8 @@
 // Multi-tenancy: every GitHub entity is owned by an `accounts` row. Locally
 // there is exactly ONE synthesized account (id 1, isLocal=true). `accountId` is
 // denormalized onto the tables that anchor list/feed isolation (repos,
-// pullRequests, events, claudeReviews, myTurnDismissals); everything else
-// reaches its account transitively via repoId/prId. `users` and `commitFiles`
+// pullRequests, events, claudeReviews); everything else reaches its account
+// transitively via repoId/prId. `users` and `commitFiles`
 // stay GLOBAL (non-sensitive actor metadata / content-addressed cache).
 import {
   sqliteTable,
@@ -255,6 +255,36 @@ export const pullRequests = sqliteTable(
     reviewDecision: text('review_decision', {
       enum: ['approved', 'changes_requested', 'review_required'],
     }),
+    // ---- GitHub's native merge QUEUE, as a SYNCED fact ----
+    //
+    // ⚠ NULL MEANS "NOT OBSERVED", NOT "NOT QUEUED". Both columns stay null on every PR
+    // synced before they landed, and on any walk whose response did not carry the selection.
+    // `false` is a positive statement from GitHub; null is the absence of one, and no surface
+    // may read the two as the same thing. sync/upsert.ts owns that three-state write.
+    //
+    // WHY THIS HAD TO BECOME STORED. GitHub's MergeStateStatus enum has NO QUEUED member
+    // (github/mutations.ts records the same fact where it explains why the queue verbs fork to
+    // GraphQL), so a queued PR reports `mergeStateStatus: 'blocked'` — byte-identical to one
+    // held up by unmet branch protection. That was survivable while the only reader was the
+    // click-gated merge control, which fetches live. The Pending board is NOT allowed to fetch
+    // on mount (fifty cards resolving their own state is ~150 GitHub calls to paint a screen),
+    // so a card can only know a PR is queued if a column says so.
+    inMergeQueue: integer('in_merge_queue', { mode: 'boolean' }),
+    // GitHub's MergeQueueEntryState, lowercased like every other stored enum on this table.
+    // Null when the PR has no entry (a positive `inMergeQueue: false` clears it) and null when
+    // nothing was observed — same rule as above.
+    //
+    // `unmergeable` is the value that earns this column: GitHub EJECTS an entry whose checks
+    // failed, so without it a PR silently disappears from the queue and the reader is told
+    // nothing. With it, "it was removed from the queue" is a sentence someone can act on.
+    //
+    // The volatile halves of the entry — position and estimatedTimeToMerge — are deliberately
+    // NOT here and stay live-only in GET /api/prs/:id/merge-options. A stored position is
+    // wrong the moment it is written (the queue reorders as other PRs land), and nothing but
+    // the merge control renders either one.
+    mergeQueueEntryState: text('merge_queue_entry_state', {
+      enum: ['awaiting_checks', 'locked', 'mergeable', 'queued', 'unmergeable'],
+    }),
     labels: text('labels', { mode: 'json' }).$type<Label[]>(),
     // Per-job CI checks on the head commit (CheckRuns + StatusContexts).
     checkRuns: text('check_runs', { mode: 'json' }).$type<CheckRun[]>(),
@@ -316,31 +346,6 @@ export const prViews = sqliteTable('pr_views', {
   lastViewedSha: text('last_viewed_sha'),
   lastViewedAt: integer('last_viewed_at', { mode: 'timestamp' }).notNull(),
 });
-
-// Manual dismissals of "my turn" entries. `refId` is a PR id (review_request),
-// a review-thread id (thread), or a Claude-review run id (claude_review). The
-// dismissal is honoured only while no newer activity has happened — getMyTurn
-// compares dismissedAt against the PR's updatedAt / the thread's last reply, and a
-// claude_review is keyed by run id so a fresh run is a new (undismissed) entry.
-// `accountId` scopes the dismissal set per tenant.
-export const myTurnDismissals = sqliteTable(
-  'my_turn_dismissals',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    accountId: integer('account_id')
-      .notNull()
-      .references(() => accounts.id),
-    kind: text('kind', {
-      enum: ['review_request', 'thread', 'watched_repo_pr', 'pr_approved', 'claude_review'],
-    }).notNull(),
-    refId: integer('ref_id').notNull(),
-    dismissedAt: integer('dismissed_at', { mode: 'timestamp' }).notNull(),
-  },
-  (t) => ({
-    kindRefUx: uniqueIndex('mtd_kind_ref_ux').on(t.kind, t.refId),
-    accountIdx: index('mtd_account_idx').on(t.accountId),
-  }),
-);
 
 export const reviewThreads = sqliteTable(
   'review_threads',

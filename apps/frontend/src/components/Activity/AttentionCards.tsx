@@ -5,13 +5,15 @@ import type {
   CiFailingCard,
   InsightCard,
   InsightPrRef,
+  InsightReviewer,
   InsightSeverity,
+  MergeQueueEntryState,
   MergeReadyCard,
   MergeStateStatus,
   MyTurnCard,
   MyTurnCardReason,
-  MyTurnDismissKind,
   ReviewerRoutingCard,
+  ReviewStanding,
   StalledReviewCard,
   UntouchedThreadCard,
   UpdateBranchCard,
@@ -25,7 +27,6 @@ import {
   updateBranchMutationKey,
   useRequestReviewers,
 } from '../../hooks/usePrWrites.js';
-import { useDismissMyTurn } from '../../hooks/useAttentionCards.js';
 import { usePrArmedIntent } from '../../hooks/useAutoMerge.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
@@ -37,11 +38,20 @@ import {
   MERGE_TONE_CLASS,
   mergeVerdict,
   relativeTime,
+  REVIEW_STATE_META,
   safeExternalUrl,
   vendorInk,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
-import { BotIcon, CheckIcon, ChevronIcon, ExternalLinkIcon, SparkleIcon } from '../Icons.js';
+import {
+  BotIcon,
+  CheckIcon,
+  ChevronIcon,
+  ExternalLinkIcon,
+  MergeIcon,
+  SparkleIcon,
+  WarningIcon,
+} from '../Icons.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
 import { AiSummary } from '../AiSummary.js';
@@ -109,6 +119,72 @@ const MERGE_STATE_LABEL: Record<MergeStateStatus, string | null> = {
   unknown: null,
 };
 
+/** The header chip for GitHub's own merge queue. */
+export interface PendingQueueBadge {
+  label: string;
+  title: string;
+  /** 'ok' — the queue holds it and is working through it. 'bad' — GitHub is taking it back out. */
+  tone: 'ok' | 'bad';
+}
+
+/** ONE label per entry state, so a new GitHub member forces a decision here rather than rendering
+ *  a raw enum. Each says what the QUEUE is doing, because that is the part the reader cannot see
+ *  from anything else on the card. */
+const QUEUE_STATE_LABEL: Record<MergeQueueEntryState, string> = {
+  queued: 'In the merge queue',
+  awaiting_checks: 'Merge queue · running checks',
+  mergeable: 'Merge queue · lands next',
+  locked: 'Merge queue · held',
+  // ⚠ THE ONE THAT EARNS THE FIELD. GitHub ejects an entry whose checks failed against the merged
+  // result, and this chip is the only warning a reader gets before the PR silently reappears
+  // un-queued. It is the whole payload of the reported bug — visible WITHOUT clicking Merge.
+  unmergeable: 'Leaving the merge queue',
+};
+
+const QUEUE_STATE_TITLE: Record<MergeQueueEntryState, string> = {
+  queued: 'This pull request is waiting its turn in GitHub’s merge queue.',
+  awaiting_checks:
+    'It is at the front of GitHub’s merge queue, running the queue’s checks against the merged result.',
+  mergeable: 'The queue’s checks passed. GitHub lands this pull request next.',
+  locked: 'GitHub is holding this entry while an earlier one in the same batch settles.',
+  unmergeable:
+    'GitHub is taking this pull request out of the merge queue — the queued merge failed its checks, or it no longer applies. Fix it and queue it again.',
+};
+
+/**
+ * THE QUEUE CHIP, decided from the card's OWN synced fields — pure, and never a fetch.
+ *
+ * ⚠ `inMergeQueue: null` IS "NOT OBSERVED" AND RENDERS NOTHING. A card that said "not queued" on
+ * no evidence would be a false claim, and `false` — a positive statement from GitHub — has nothing
+ * to say either: "this PR is not in a queue" is true of nearly every PR in the world. So the chip
+ * is POSITIVE-CLAIM-ONLY, exactly like `authorSourceLabel` above.
+ *
+ * ⚠ AND IT IS NOT PART OF THE MERGE-ACTIONS BLOCK. That block returns null for a reader without
+ * push access, and "GitHub is already landing this" is arguably the MORE useful fact for someone
+ * who has no button either way. It belongs to the card's identity, in the header row.
+ *
+ * The entry state is read only for the WORDING; membership is `inMergeQueue`, per the wire's own
+ * rule that the state is never the thing to test for "is it queued?".
+ */
+export function pendingQueueBadge(
+  pr: Partial<Pick<InsightPrRef, 'inMergeQueue' | 'mergeQueueEntryState'>>,
+): PendingQueueBadge | null {
+  if (pr.inMergeQueue !== true) return null;
+  const state = pr.mergeQueueEntryState ?? null;
+  if (state == null) {
+    return {
+      label: 'In the merge queue',
+      title: 'This pull request is in GitHub’s merge queue.',
+      tone: 'ok',
+    };
+  }
+  return {
+    label: QUEUE_STATE_LABEL[state],
+    title: QUEUE_STATE_TITLE[state],
+    tone: state === 'unmergeable' ? 'bad' : 'ok',
+  };
+}
+
 /**
  * What THIS card is called, as opposed to what its kind is called. THREE labels for `my_turn`,
  * off `MyTurnCard.relevance`, because the boolean it replaced conflated two different
@@ -146,6 +222,35 @@ export function cardKindLabel(card: InsightCard): string {
   return KIND_LABEL[card.kind];
 }
 
+/**
+ * DOES THIS ROW OUTRANK THE NEUTRAL ONES? The visual half of the same claim `cardKindLabel` makes
+ * in words — 'direct' ("Your turn") and 'maintained' ("In your repos") are drawn heavier and
+ * darker, everything else keeps the quiet kind label.
+ *
+ * ⚠ BOTH TIERS, TOGETHER. `myTurnPersonal`, the Workspace badges, the "Elsewhere" rows and the
+ * browser notification all count `relevance !== 'none'` — direct AND maintained as ONE population.
+ * Emphasising only 'direct' would put a different population on screen from the one every badge
+ * counts, which is the count-vs-list mismatch this whole feature family exists to prevent.
+ *
+ * ⚠ AN ABSENT `relevance` IS NEUTRAL, and so is an absent-but-`personal: true` card — the same
+ * rule `cardKindLabel` follows one line up. A missing field may never invent an ownership claim on
+ * screen, in words OR in weight.
+ *
+ * ⚠ A MUTED CARD IS NEUTRAL FOR FREE. The Pending mute forces `relevance: 'none'` server-side, at
+ * the one fold where it is derived, so nothing here has to know the mute exists — and nothing here
+ * may re-introduce emphasis for it.
+ *
+ * ⚠ `my_turn` ONLY, and that is not an oversight. The two FORWARD kinds carry `relevance` for the
+ * RANKER's weight, not as an ownership claim (see MergeReadyCard.relevance), the board's relevance
+ * lens deliberately does not filter on it, and — decisively — the mute does not reach them. A
+ * muted repo's `merge` card still arrives 'direct', so emphasising it would light up exactly the
+ * row the reader asked to stop being summoned by.
+ */
+export function pendingCardIsPersonal(card: InsightCard): boolean {
+  if (card.kind !== 'my_turn') return false;
+  return card.relevance === 'direct' || card.relevance === 'maintained';
+}
+
 // WHICH My Turn section put this card on your plate. ⚠ Keyed on `MyTurnCardReason` (the six
 // sections of GET /api/my-turn), NOT the older `MyTurnReason` participation union that
 // lib/ui.ts's MY_TURN_REASON_META covers — they are one `sed` apart and mean opposite things.
@@ -157,6 +262,29 @@ const MY_TURN_REASON_LABEL: Record<MyTurnCardReason, string> = {
   watched_repo_pr: 'New PR',
   claude_review: 'Claude review',
 };
+
+/**
+ * THE SECTION CHIP. `reason` names the SECTION that emitted the row, which is not always what the
+ * reader is being asked to do about it — and on one section those two came apart on screen.
+ *
+ * ⚠ `watched_repo_pr` NOW HOLDS TWO DIFFERENT FACTS. Since the ball rule, a row survives that
+ * section either because you have never touched the PR (`ball.kind === 'untouched'`) or because a
+ * person pushed after you last acted (`'commits_after'`). The static map calls both "New PR", so a
+ * PR you approved three days ago wore the chip "New PR" immediately beside the detail "You
+ * approved · @robin-dunn pushed 2 commits since" — the card contradicting itself in two adjacent
+ * elements, which is the same class of defect as the card that could not explain why it was there
+ * at all.
+ *
+ * ⚠ AN ABSENT `ball` FALLS BACK TO THE SECTION LABEL, never to a guess. The field is
+ * trailing-optional for wire tolerance, and a response predating it must not have "Pushed since"
+ * invented over a PR nobody has touched — the safe direction is the older, vaguer word.
+ */
+export function myTurnReasonLabel(card: MyTurnCard): string {
+  if (card.reason === 'watched_repo_pr' && card.ball?.kind === 'commits_after') {
+    return 'Pushed since';
+  }
+  return MY_TURN_REASON_LABEL[card.reason];
+}
 
 function ageLabel(hours: number): string {
   if (hours < 48) return `${hours}h`;
@@ -325,6 +453,290 @@ export function PrMetaRow({ pr }: { pr: PrMetaFields }): JSX.Element {
   );
 }
 
+// ── WHERE THE REVIEW STANDS ───────────────────────────────────────────────────────────────────
+//
+// Two lines under the meta row, and they answer two different questions: WHAT the review adds up
+// to, and WHO looked. Both come off the card's own payload — nothing here fetches, ever.
+
+/** The review half of `InsightPrRef`. Every field is OPTIONAL here and REQUIRED on the wire, so a
+ *  surface that never had them (the search card, which adapts a loaded PR detail) renders nothing
+ *  instead of being forced to invent a zero — `authorSourceLabel`'s rule, five fields on. */
+export type PrReviewFields = Partial<
+  Pick<
+    InsightPrRef,
+    'reviewDecision' | 'reviewApprovals' | 'reviewChangesRequested' | 'reviewers' | 'reviewerCount'
+  >
+>;
+
+/** The standing line: OUR fold, and GitHub's verdict beside it when it says something ours does
+ *  not. Two clauses, never one merged chip. */
+export interface PendingReviewLead {
+  /** Our fold, in as few words as it takes. */
+  ours: string;
+  /** The standing whose mark + ink draw `ours`, or null for a statement no standing backs. */
+  standing: ReviewStanding | null;
+  /** GitHub's own `reviewDecision`, NAMED as GitHub's — null when it would only repeat `ours`. */
+  github: string | null;
+}
+
+/**
+ * THE STANDING LINE.
+ *
+ * ⚠ TWO ANSWERS, CARRIED APART, BECAUSE THEY ARE TWO CLAIMS. `reviewApprovals` /
+ * `reviewChangesRequested` are OUR fold over the review rows; `reviewDecision` is GITHUB's verdict
+ * about whether review still blocks the merge. They disagree on real data (ours counts an approval
+ * GitHub has since dismissed), so merging them into one sentence would pick a winner silently.
+ * Ours leads; GitHub's is labelled with GitHub's name and rendered beside it.
+ *
+ * ⚠ `reviewDecision: null` MEANS "THIS REPO REQUIRES NO REVIEW" AND MAY NEVER READ AS "nobody
+ * looked". Who looked is `reviewerCount`, which is where "No reviews yet" comes from — a different
+ * field answering a different question, and the two never share a clause.
+ *
+ * ⚠ CHANGES-REQUESTED AND APPROVALS COEXIST. The block leads, and the approval count SURVIVES:
+ * dropping it to make the block louder would be losing a fact to make a point.
+ *
+ * Returns null where there is genuinely nothing to report — no reviewer, no approval, no block and
+ * no requirement. That is ~90% of open non-draft PRs, and a "No reviews · none required" line on
+ * ninety percent of the board is precisely the unrequested caveat the product voice bans.
+ */
+export function pendingReviewLead(pr: PrReviewFields): PendingReviewLead | null {
+  const blocked = pr.reviewChangesRequested === true;
+  const approvals = pr.reviewApprovals ?? 0;
+  const reviewers = pr.reviewerCount ?? 0;
+  const decision = pr.reviewDecision ?? null;
+  if (!blocked && approvals === 0 && reviewers === 0 && decision == null) return null;
+
+  const approvalWord = `${approvals} approval${approvals === 1 ? '' : 's'}`;
+  let ours: string;
+  let standing: ReviewStanding | null;
+  if (blocked) {
+    standing = 'changes_requested';
+    ours = approvals > 0 ? `Changes requested · ${approvalWord}` : 'Changes requested';
+  } else if (approvals > 0) {
+    standing = 'approved';
+    ours = approvalWord;
+  } else if (reviewers > 0) {
+    // Somebody looked and nobody signed off. Off `reviewerCount`, never off `reviewDecision`.
+    standing = 'commented';
+    ours = 'No approval yet';
+  } else {
+    standing = null;
+    ours = 'No reviews yet';
+  }
+
+  let github: string | null = null;
+  if (decision === 'review_required') {
+    // ALWAYS said. It is the only field that reports review still BLOCKING the merge, and it is
+    // most material exactly where it contradicts a healthy-looking count — "2 approvals · GitHub:
+    // review required" is a rule (CODEOWNERS, a required reviewer) nobody has satisfied yet.
+    github = 'GitHub: review required';
+  } else if (decision === 'approved' && approvals === 0) {
+    github = 'GitHub: approved';
+  } else if (decision === 'changes_requested' && !blocked) {
+    github = 'GitHub: changes requested';
+  } else if (decision == null && !blocked && approvals === 0) {
+    // Said ONLY where our own clause could otherwise be read as a missing obligation. Never beside
+    // an approval count, which implies no obligation on its own.
+    github = 'GitHub: no review required';
+  }
+  return { ours, standing, github };
+}
+
+/** The bots on a PR, as ONE chip. */
+export interface PendingBotReviewers {
+  count: number;
+  label: string;
+  title: string;
+  /** The STRONGEST standing among them, so a bot that blocked the PR is not drawn as a comment. */
+  standing: ReviewStanding;
+}
+
+export interface PendingReviewerChips {
+  /** Named individually, in the wire's ranked order. */
+  humans: InsightReviewer[];
+  /** All of the bots, collapsed. Null when none reviewed. */
+  bots: PendingBotReviewers | null;
+  /** EVERY reviewer with a standing — the number the server gave us, never one we derived. */
+  total: number;
+  /** Reviewers this list does not name: past the cap, or with no GitHub account left to name. */
+  moreCount: number;
+  /** Is every reviewer with a standing named above? The gate for any cap disclosure. */
+  complete: boolean;
+}
+
+/** changes_requested → approved → commented → dismissed: the wire's own ranking, re-used to pick
+ *  the collapsed bot chip's face. */
+const STANDING_RANK: Record<ReviewStanding, number> = {
+  changes_requested: 0,
+  approved: 1,
+  commented: 2,
+  dismissed: 3,
+};
+
+/** What one reviewer DID, as a verb phrase. `dismissed` is re-shaped because the review was
+ *  dismissed, not the reviewer. */
+function standingPhrase(standing: ReviewStanding): string {
+  if (standing === 'approved') return 'approved';
+  if (standing === 'changes_requested') return 'requested changes';
+  if (standing === 'commented') return 'commented';
+  return 'review dismissed';
+}
+
+/**
+ * THE REVIEWER CHIPS: humans named, bots collapsed into one.
+ *
+ * ⚠ THE COLLAPSE IS MEASURED, NOT AESTHETIC. 39% of reviewer standings on open PRs are
+ * bot-authored and 477 of 478 of those are merely `commented`, so a flat list buries the one human
+ * approval under four vendor rows. The bots keep their count and what they did; what they lose is
+ * five separate seats on a fifty-row board.
+ *
+ * ⚠ "+N" IS `reviewerCount - reviewers.length`, AND THE DISCLOSURE GATES ON `complete`. Never
+ * subtract your way to a total you were not given: a subtracted figure carries no denominator, so
+ * it silently reads 0 the moment the list is filtered for any other reason — the same guard
+ * `capFor`'s `shown === count` is.
+ */
+export function pendingReviewerChips(pr: PrReviewFields): PendingReviewerChips {
+  const reviewers = pr.reviewers ?? [];
+  const total = pr.reviewerCount ?? reviewers.length;
+  const humans = reviewers.filter((r) => !r.isBot);
+  const bots = reviewers.filter((r) => r.isBot);
+  let chip: PendingBotReviewers | null = null;
+  if (bots.length > 0) {
+    const standing = bots.reduce<ReviewStanding>(
+      (best, r) => (STANDING_RANK[r.standing] < STANDING_RANK[best] ? r.standing : best),
+      bots[0]!.standing,
+    );
+    const uniform = bots.every((r) => r.standing === standing);
+    const n = bots.length;
+    const plural = n === 1 ? '' : 's';
+    chip = {
+      count: n,
+      label: uniform
+        ? standing === 'dismissed'
+          ? `${n} bot review${plural} dismissed`
+          : `${n} bot${plural} ${standingPhrase(standing)}`
+        : // Mixed standings: say the true, shorter thing and put the breakdown in the tooltip.
+          `${n} bots reviewed`,
+      // ⚠ THE VENDOR NAMES LIVE HERE, not on the chip. `botKindLabel` is the ONE spelling, shared
+      // with the author pill, so a bot cannot be called CodeRabbit in one place and Bot in another.
+      title: bots.map((r) => `${botKindLabel(r.botKind)} ${standingPhrase(r.standing)}`).join(' · '),
+      standing,
+    };
+  }
+  return {
+    humans,
+    bots: chip,
+    total,
+    moreCount: Math.max(0, total - reviewers.length),
+    complete: reviewers.length === total,
+  };
+}
+
+/** One named reviewer, wearing their standing's mark and ink. `UserName` — never a second name
+ *  renderer — so the popover, the profile link and the maintainer shield behave as everywhere. */
+function ReviewerChip({
+  reviewer,
+  usersById,
+}: {
+  reviewer: InsightReviewer;
+  usersById: Map<number, User>;
+}): JSX.Element {
+  const meta = REVIEW_STATE_META[reviewer.standing];
+  const Mark = meta.icon;
+  const u = usersById.get(reviewer.userId);
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 ${meta.cls}`}
+      // `standingAt` is the review that SET the standing, NOT the reviewer's latest activity —
+      // dating an approval by a later drive-by comment is a false claim about a person.
+      title={`${meta.title} · ${relativeTime(reviewer.standingAt)}`}
+    >
+      {Mark != null && <Mark size={11} />}
+      <Avatar user={u} size={13} />
+      <UserName user={u} fallbackId={reviewer.userId} />
+    </span>
+  );
+}
+
+/**
+ * THE REVIEW ROW — the standing on one line, the reviewers on the next, and NOTHING when the PR
+ * has no review situation to report. Mounted on every PR-bearing card so a reader never has to
+ * wonder whether a card is silent because nobody reviewed or because this kind doesn't say.
+ *
+ * ⚠ A standing carries a MARK as well as ink. Colour is never the only channel: the red and the
+ * green are the same shape to about one reader in twelve.
+ */
+function PrReviewRow({
+  pr,
+  usersById,
+}: {
+  pr: PrReviewFields;
+  usersById: Map<number, User>;
+}): JSX.Element | null {
+  const lead = pendingReviewLead(pr);
+  const chips = pendingReviewerChips(pr);
+  const showMore = !chips.complete && chips.moreCount > 0;
+  const hasChips = chips.humans.length > 0 || chips.bots != null || showMore;
+  if (lead == null && !hasChips) return null;
+  const leadMeta = lead?.standing != null ? REVIEW_STATE_META[lead.standing] : null;
+  const LeadMark = leadMeta?.icon ?? null;
+  return (
+    <>
+      {lead != null && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+          <span
+            className={`inline-flex items-center gap-1 font-medium ${
+              leadMeta?.ink ?? 'text-gray-500 dark:text-gray-400'
+            }`}
+          >
+            {LeadMark != null && <LeadMark size={11} />}
+            {lead.ours}
+          </span>
+          {lead.github != null && (
+            <span
+              className="text-gray-500 dark:text-gray-400"
+              title="GitHub’s own review decision — what this repository’s rules say about the merge, which is a different question from who has reviewed."
+            >
+              {lead.github}
+            </span>
+          )}
+        </div>
+      )}
+      {hasChips && (
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+          {chips.humans.map((r) => (
+            <ReviewerChip key={r.userId} reviewer={r} usersById={usersById} />
+          ))}
+          {chips.bots != null && (
+            <span
+              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium ${
+                REVIEW_STATE_META[chips.bots.standing].cls
+              }`}
+              title={chips.bots.title}
+            >
+              <BotIcon size={11} />
+              {chips.bots.label}
+            </span>
+          )}
+          {showMore && (
+            <span
+              className="text-gray-500 dark:text-gray-400"
+              title={`${chips.total} reviewers have a standing on this pull request. The other ${chips.moreCount} are past the cap, or have no GitHub account left to name.`}
+            >
+              {/* "+N more" only reads as an overflow when something precedes it. With every
+                  reviewer unnameable (deleted accounts — counted, and rightly so) the same number
+                  has to stand on its own feet. */}
+              {chips.humans.length > 0 || chips.bots != null
+                ? `+${chips.moreCount} more`
+                : `${chips.moreCount} reviewer${chips.moreCount === 1 ? '' : 's'}`}
+            </span>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 // Collapsible PR summary: the plain description (markdown) + the Pro AI summary with its own inline
 // Generate/Regenerate action (AiSummary self-gates on the prSummary capability). Lazy: the PR detail
 // is fetched only when expanded.
@@ -458,71 +870,24 @@ function RoutingReviewers({
   );
 }
 
-// "Done" — the mark-as-seen control on a my_turn card. POSTs /api/my-turn/dismiss; the mutation
-// hook drops the card from the cached board immediately (optimistic) and re-fetches on settle, so
-// the click is never inert. The dismissal is honoured only until NEWER activity supersedes it —
-// a fresh reply on a dismissed thread brings the item back — which is why the copy is "Done" and
-// the tooltip says "seen", not "mute" or "dismiss forever".
-function MyTurnDoneButton({
-  kind,
-  refId,
-  cardId,
-}: {
-  kind: MyTurnDismissKind;
-  refId: number;
-  cardId: string;
-}): JSX.Element {
-  const dismiss = useDismissMyTurn();
-  return (
-    <span className="inline-flex items-center gap-2">
-      <button
-        type="button"
-        onClick={() => dismiss.mutate({ kind, refId, cardId })}
-        disabled={dismiss.isPending}
-        className="rounded border border-emerald-300 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
-        title="Mark this as seen. It comes back if there's newer activity."
-      >
-        {dismiss.isPending ? (
-          'Marking…'
-        ) : (
-          <>
-            <CheckIcon size={11} className="inline-block align-[-0.1em]" /> Done
-          </>
-        )}
-      </button>
-      {dismiss.isError && (
-        <span className="text-[11px] text-red-500">
-          {(dismiss.error as Error)?.message ?? 'Couldn’t mark it done.'}
-        </span>
-      )}
-    </span>
-  );
-}
-
-// The actions row of a my_turn card. Exactly one section — 'your_pr' — has NO dismissal kind:
-// opening the PR stamps `pr_views`, which is what drops it from the fold (PrDetail fires
-// `markPrViewed` on mount, unconditionally). So that reason gets an honest hint instead of a
-// button that would have nothing to POST.
+// The actions row of a my_turn card. It holds ONE thing now: a hint on 'your_pr', the one section
+// whose clearing rule is not "act on the PR". Every other reason renders nothing at all.
 //
-// The copy promises "as soon as you come back", not "on the next refresh", because
+// The "Done" button that used to live here is GONE, with the `my_turn_dismissals` table behind it.
+// It existed because the fold could not tell that you had already reviewed, replied or pushed, so
+// the card kept claiming your turn and the only way out was to tell the app you were finished.
+// The fold can tell now, and a stored acknowledgement that never expired was the wrong answer
+// anyway: it hid work that had come back.
+//
+// The 'your_pr' copy promises "as soon as you come back", not "on the next refresh", because
 // `markViewed.onSuccess` invalidates ['attention-cards'] + ['daily-brief'] at the prefix — the
 // board is already refetching while the user is still in the PR. If that invalidation is ever
 // dropped, this sentence becomes a lie with a 60s staleTime behind it.
 function MyTurnActions({ card }: { card: MyTurnCard }): JSX.Element | null {
-  if (card.reason === 'your_pr') {
-    return (
-      <div className="mt-2 text-[11px] italic text-gray-400">
-        Opening the PR marks it seen — this card clears as soon as you come back.
-      </div>
-    );
-  }
-  // Defensive: the other five reasons all carry a dismissRefId by contract (their `reason` IS
-  // the dismissal kind). If one ever arrives without, render no control — a Done button with
-  // nothing to POST is the inert card this whole surface exists to remove.
-  if (card.dismissRefId == null) return null;
+  if (card.reason !== 'your_pr') return null;
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2">
-      <MyTurnDoneButton kind={card.reason} refId={card.dismissRefId} cardId={card.id} />
+    <div className="mt-2 text-[11px] italic text-gray-400">
+      Opening the PR marks it seen — this card clears as soon as you come back.
     </div>
   );
 }
@@ -537,6 +902,16 @@ export interface PendingMergeGate {
   action: 'merge' | 'update_branch' | null;
   /** The ONE verdict, run over the card's synced fields — the copy behind an absent button. */
   verdict: MergeVerdictInfo;
+  /**
+   * GitHub'S MERGE QUEUE HOLDS THIS PR RIGHT NOW — a POSITIVE observation only (`inMergeQueue`
+   * null is "not observed" and false is GitHub's "no"; neither claims the queue).
+   *
+   * While it is true, GitHub owns the landing: Merge and Merge-when-ready are HIDDEN (pressing
+   * either is meaningless, and a direct merge on a queued branch is a 405), and the row keeps the
+   * one thing still worth doing — taking it back out. The verdict line is suppressed too, because
+   * the header's queue chip already says it, in better words.
+   */
+  queued: boolean;
 }
 
 /**
@@ -560,16 +935,25 @@ export interface PendingMergeGate {
  * without them — "update the branch first" simply loses its commit count.
  */
 export function pendingMergeGate(card: MergeReadyCard | UpdateBranchCard): PendingMergeGate {
+  // ⚠ ONLY A POSITIVE OBSERVATION REACHES THE VERDICT. `inMergeQueue` is three-state and
+  // `MergeVerdictInput.inMergeQueue` is two — `null` ("we never looked") and `false` ("GitHub says
+  // no") both mean *do not claim the queue owns this*, which is exactly what `false` means there.
+  const queued = card.inMergeQueue === true;
   const verdict = mergeVerdict({
     // ⚠ null is NOT OBSERVED, never "not conflicting" — the three-state rule. 'unknown' is what
     // `mergeVerdict` calls that, and it is the honest input.
     mergeable: card.mergeable ?? 'unknown',
     mergeStateStatus: card.mergeStateStatus,
+    // ⚠ THE QUEUE IS WHY THIS FIELD RIDES THE CARD. GitHub's MergeStateStatus enum has no QUEUED
+    // member, so a queued PR reports `blocked` — and a board reading the status alone would offer
+    // a Merge button GitHub refuses. `mergeVerdict`'s queue branch runs FIRST, which is what makes
+    // `canMerge` false and, through it, drops `action` to null on BOTH kinds below.
+    inMergeQueue: queued,
   });
   // HIDDEN, not disabled. `viewerCanPush` is the synced `repos.viewerPermission` and a VISIBILITY
   // gate only; every route re-checks permission, the head oid and the live merge state before
   // anything irreversible happens.
-  if (!card.viewerCanPush) return { show: false, action: null, verdict };
+  if (!card.viewerCanPush) return { show: false, action: null, verdict, queued };
   const action =
     card.kind === 'update_branch'
       ? // The whole point of this card is that GitHub is REFUSING the merge until the branch is
@@ -581,7 +965,7 @@ export function pendingMergeGate(card: MergeReadyCard | UpdateBranchCard): Pendi
       : verdict.canMerge
         ? 'merge'
         : null;
-  return { show: true, action, verdict };
+  return { show: true, action, verdict, queued };
 }
 
 /**
@@ -627,10 +1011,12 @@ function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard
   //     already polls.
   //  3. Neither — the synced merge verdict, as before.
   //
-  // ⚠ STILL NOTHING FETCHES ON MOUNT. Both new reads are cache reads; GitHub's NATIVE merge-queue
-  // position is deliberately absent because it is not synced (PR_NODE_FIELDS excludes it as
-  // volatile) and the only way to it is the click-gated merge-options call — fifty cards making
-  // that call is the ~200-upstream-calls-to-paint-a-board failure this row is built to avoid.
+  // ⚠ STILL NOTHING FETCHES ON MOUNT. Both reads are cache reads. GitHub's native merge-queue
+  // MEMBERSHIP and entry state now ride the card itself (`inMergeQueue` / `mergeQueueEntryState`,
+  // drawn by `pendingQueueBadge` in the header and read by the gate below); its POSITION still
+  // does not, because it is volatile and unsynced and the only route to it is the click-gated
+  // merge-options call — fifty cards making that call is the ~200-upstream-calls-to-paint-a-board
+  // failure this row is built to avoid.
   const merging = useIsMutating({ mutationKey: mergePrMutationKey(card.prId) }) > 0;
   const updating = useIsMutating({ mutationKey: updateBranchMutationKey(card.prId) }) > 0;
   const inFlight = merging ? 'Merging…' : updating ? 'Updating the branch…' : null;
@@ -653,6 +1039,11 @@ function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard
         <span className="text-[11px] text-gray-500 dark:text-gray-400">
           {armedPhaseHeadline(armed)}
         </span>
+      ) : gate.queued ? (
+        // NOTHING. The queue chip in the header row already said it — and said it better, with
+        // the entry's own state. A second "in merge queue" on the row below is the same fact
+        // twice, on the one board where every line has to earn its width.
+        null
       ) : gate.action == null ? (
         // No button, but never a silent row: the verdict IS the answer to "why can't I merge
         // this?", and it is the same sentence PrDetail leads its merge panel with.
@@ -666,15 +1057,28 @@ function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard
         </span>
       ) : null}
       {/* Collapsed = zero requests. Expanding buys the live merge state ONCE and unlocks the real
-          method picker, so the board can never promise a merge method the repo forbids. */}
-      {armed == null && gate.action != null && (
+          method picker, so the board can never promise a merge method the repo forbids.
+
+          ⚠ A QUEUED CARD STILL MOUNTS IT, UNDER A DIFFERENT VERB. `gate.action` is null while the
+          queue holds the PR — Merge and Update branch are both meaningless there — but this panel
+          is ALSO the only way to `Remove from queue`, and taking it away would leave a reader who
+          queued a PR by mistake with nothing to press. The trigger says "Merge queue", not
+          "Merge", so the verb never promises something GitHub would 405. */}
+      {armed == null && (gate.action != null || gate.queued) && (
         <MergeControl
           prId={card.prId}
           githubUrl={card.githubUrl}
-          label={gate.action === 'update_branch' ? 'Update branch' : 'Merge'}
+          label={
+            gate.queued ? 'Merge queue' : gate.action === 'update_branch' ? 'Update branch' : 'Merge'
+          }
         />
       )}
-      <MergeWhenReadyControl prId={card.prId} eager={false} />
+      {/* ⚠ HIDDEN WHILE QUEUED, AND ONLY THEN — except when something is already armed, because
+          cancelling must always be possible. "Merge when ready" arms a watcher to land the PR
+          once its blockers clear; while GitHub's queue owns the landing there is nothing for that
+          watcher to wait out, so the button would arm a race. An ARMED intent renders its own
+          chip and its Cancel (or Cancel & dequeue) from this same component. */}
+      {(!gate.queued || armed != null) && <MergeWhenReadyControl prId={card.prId} eager={false} />}
     </div>
   );
 }
@@ -711,6 +1115,12 @@ function CardShell({
   promoted?: boolean;
 }): JSX.Element {
   const sev = SEV[card.severity];
+  const personal = pendingCardIsPersonal(card);
+  // ⚠ PURE, AND OFF THE CARD'S OWN FIELDS. A `ci_failing` card does not extend `InsightPrRef` at
+  // all — its subject can be a repo's TRUNK, which is not a pull request and must never be
+  // described as one — and neither does `reviewer_load`. The `in` test is what keeps this a
+  // compiler-checked narrowing rather than a cast that would let one through.
+  const queue = 'inMergeQueue' in card ? pendingQueueBadge(card) : null;
   const onClick = onActivate
     ? (e: React.MouseEvent): void => {
         if ((e.target as HTMLElement).closest('a,button,textarea,input,[data-noactivate]')) return;
@@ -725,14 +1135,42 @@ function CardShell({
         flash ? ' ring-2 ring-sky-400/70' : ''
       }${onActivate ? ' cursor-pointer hover:bg-gray-50/70 dark:hover:bg-gray-900/60' : ''}`}
     >
-      <div className="mb-1.5 flex items-center gap-2 text-[11px]">
+      <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[11px]">
         <span className={`inline-block h-1.5 w-1.5 rounded-full ${sev.dot}`} aria-hidden />
-        <span className="font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {/* ⚠ THE OWNERSHIP CLAIM, IN WORDS AND IN WEIGHT. `cardKindLabel` writes "Your turn" /
+            "In your repos" / the neutral kind; `pendingCardIsPersonal` decides whether the row is
+            drawn to outrank its neighbours. ONE resolver behind both, so a heavy label and a
+            neutral word can never end up on the same card. */}
+        <span
+          className={`uppercase tracking-wide ${
+            personal
+              ? 'font-bold text-gray-700 dark:text-gray-200'
+              : 'font-semibold text-gray-500 dark:text-gray-400'
+          }`}
+        >
           {cardKindLabel(card)}
         </span>
+        {/* GitHub's merge queue — IDENTITY, not an action, which is why it sits here and not in
+            the merge row: that row is hidden outright for a reader without push access, and "it is
+            already landing" is if anything MORE useful to someone who has no button either way. */}
+        {queue != null && (
+          <span
+            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium normal-case tracking-normal ${
+              queue.tone === 'bad'
+                ? 'bg-red-500/10 text-red-700 dark:text-red-300'
+                : 'bg-gray-500/10 text-gray-600 dark:text-gray-300'
+            }`}
+            title={queue.title}
+          >
+            {queue.tone === 'bad' ? <WarningIcon size={11} /> : <MergeIcon size={11} />}
+            {queue.label}
+          </span>
+        )}
         {promoted && (
           <span
-            className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-gray-500 dark:text-gray-400"
+            // 11px, inherited from the row: the floor for a label, and now that three chips can
+            // share this row they have to be one size or the smallest reads as an afterthought.
+            className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium normal-case tracking-normal text-gray-500 dark:text-gray-400"
             title="This pull request is already listed in “Do next” above — same PR, a different thing to do on it."
           >
             already in Do next
@@ -745,7 +1183,7 @@ function CardShell({
             this board is folded from `relevance`, which has already absorbed the mute. */}
         {card.kind === 'my_turn' && card.muted === true && (
           <span
-            className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-gray-500 dark:text-gray-400"
+            className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium normal-case tracking-normal text-gray-500 dark:text-gray-400"
             title="Pending items from this repository are muted — they still appear here, but they don’t claim your turn and don’t notify you. Change it in Settings → Workspace."
           >
             muted
@@ -1006,7 +1444,8 @@ export function AttentionCards({
     switch (card.kind) {
       // The VIEWER'S OWN inbox as cards — the same population GET /api/my-turn serves, and the
       // list the daily brief's "N need your review or reply" line counts. Clicking opens the PR
-      // (or, for a thread, the thread on the PR's Threads tab); "Done" marks it seen.
+      // (or, for a thread, the thread on the PR's Threads tab); ACTING on the PR is what clears
+      // it — there is no "mark as seen" control and no dismissal table behind one.
       //
       // ⚠ Deliberately LEANER than the untouched-thread card: no embedded ThreadCard and no
       // InsightPrSummary. This kind carries its own much larger cap (MY_TURN_CARD_CAP = 50 vs 15
@@ -1030,9 +1469,10 @@ export function AttentionCards({
           >
             <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
             <PrMetaRow pr={card} />
+            <PrReviewRow pr={card} usersById={usersById} />
             <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
               <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
-                {MY_TURN_REASON_LABEL[card.reason]}
+                {myTurnReasonLabel(card)}
               </span>
               <span className="min-w-0">{card.detail}</span>
             </div>
@@ -1093,6 +1533,7 @@ export function AttentionCards({
           >
             <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
             <PrMetaRow pr={card} />
+            <PrReviewRow pr={card} usersById={usersById} />
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
               <span>waiting on</span>
               {card.requestedReviewerIds.length > 0 || card.requestedTeamNames.length > 0 ? (
@@ -1138,6 +1579,7 @@ export function AttentionCards({
             >
               <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
               <PrMetaRow pr={card} />
+              <PrReviewRow pr={card} usersById={usersById} />
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
                 <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-mono">{card.path}</span>
                 <span>· no reply since</span>
@@ -1166,6 +1608,7 @@ export function AttentionCards({
           >
             <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
             <PrMetaRow pr={card} />
+            <PrReviewRow pr={card} usersById={usersById} />
             {card.topPaths.length > 0 && (
               <div className="mt-1 truncate text-[11px] text-gray-400">
                 touches <span className="font-mono">{card.topPaths.slice(0, 3).join(', ')}</span>
@@ -1181,10 +1624,10 @@ export function AttentionCards({
       // missing case in silence — the card vanishes while the ranked head still names its id and
       // the board comes up a row short. That is exactly how `my_turn` shipped invisible.
       //
-      // ⚠ NO "Done" CONTROL, deliberately. These carry no `dismissRefId` because they are
-      // SELF-CLEARING: the card is gone the moment the PR merges or falls behind, unlike a
-      // "new PR" my_turn row that persists until someone acts on it. Dismissing a fact about
-      // GitHub's merge state would be dismissing the world, not an item.
+      // These two are SELF-CLEARING: the card is gone the moment the PR merges or falls behind.
+      // No card kind on this board carries a "mark as seen" control any more — the dismissal
+      // table is deleted — but these two never should have, for a second reason: hiding a fact
+      // about GitHub's merge state would be hiding the world, not an item.
       case 'merge':
       case 'update_branch': {
         const state = MERGE_STATE_LABEL[card.mergeStateStatus];
@@ -1205,6 +1648,7 @@ export function AttentionCards({
           >
             <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
             <PrMetaRow pr={card} />
+            <PrReviewRow pr={card} usersById={usersById} />
             <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
               {state != null && (
                 <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">

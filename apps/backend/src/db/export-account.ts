@@ -35,7 +35,6 @@ const {
   workspaceRepos,
   workspaceReviewers,
   aiUsage,
-  myTurnDismissals,
   benchmarkContributions,
   autoMergeRequests,
 } = schema;
@@ -73,7 +72,6 @@ export interface AccountExport {
   prComments: Record<string, unknown>[];
   events: Record<string, unknown>[];
   aiUsage: Record<string, unknown>[];
-  dismissals: Record<string, unknown>[];
   /**
    * THE BOT OBJECT — one row per (workspace, automated reviewer), replacing the old
    * `repoReviewers` + `accountReviewers` pair now that judgement, identity and price share a key.
@@ -157,7 +155,6 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     workspaceRows,
     workspaceRepoRows,
     usageRows,
-    dismissalRows,
     workspaceReviewerRows,
     benchmarkRows,
     autoMergeRows,
@@ -194,11 +191,6 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       .where(eq(workspaceRepos.accountId, accountId))
       .execute(),
     db.select().from(aiUsage).where(eq(aiUsage.accountId, accountId)).execute(),
-    db
-      .select()
-      .from(myTurnDismissals)
-      .where(eq(myTurnDismissals.accountId, accountId))
-      .execute(),
     // THE BOT OBJECT, one row per (workspace, reviewer). See the payload field's comment for why
     // it is Art. 15 material: classification decisions, a vendor name and a price the user typed.
     db
@@ -279,7 +271,6 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     prComments: capped('prComments', prCommentRows),
     events: capped('events', eventRows),
     aiUsage: usageRows,
-    dismissals: dismissalRows,
     workspaceReviewers: workspaceReviewerRows,
     benchmarkContributions: benchmarkRows,
     autoMergeRequests: autoMergeRows,

@@ -65,20 +65,100 @@ export interface ApprovalInfo {
   latestApprovalAt: Date | null;
 }
 
+/** Where a reviewer currently stands on a PR. One value per reviewer, never a per-review log. */
+export type ReviewerStanding = 'approved' | 'changes_requested' | 'dismissed' | 'commented';
+
+export interface PrReviewerStanding {
+  /** The reviewer's `users.id`, or null when GitHub gave us no author (a deleted account).
+   *
+   *  ⚠ NOTHING HERE RESOLVES BOT-NESS, ON PURPOSE. There is exactly ONE resolution in this app —
+   *  a manual workspace judgement wins both directions, then `users.isBot`, then the login seeds a
+   *  vendor — and the Pending board's payload builder already reuses it (the same union the
+   *  Timeline's "hide bots" lens hides by). A second classifier here would type-check, pass a
+   *  naive fixture, and put a vendor chip on someone the Timeline beside it calls a person. Ids
+   *  out; identity is the caller's job.
+   *
+   *  ⚠ A null id is UNNAMEABLE but still COUNTED — see `computeReviewStandingsByPr`. */
+  userId: number | null;
+  standing: ReviewerStanding;
+  /** When the review that SET this standing was filed — not the reviewer's latest activity.
+   *  Pairing "approved" with the clock of a later drive-by comment prints "approved · 1h ago"
+   *  over a five-day-old approval, which is a false claim about a person. A separate
+   *  last-activity clock would be a separate field; there is no caller for one yet. */
+  standingAt: Date;
+}
+
+export interface PrReviewStandings {
+  /** EVERY reviewer who has submitted a non-pending review, newest standing first. Uncapped and
+   *  un-collapsed: capping, bot-collapsing and ranking belong to the caller, because this fold is
+   *  the single source of truth two surfaces (the card's chips and its approval count) both read.
+   *  A cap applied here would silently move the count. */
+  reviewers: PrReviewerStanding[];
+  /** `reviewers.length`, carried so a caller that caps can still print "3 of 7" without having to
+   *  remember it held the full list a moment ago. */
+  total: number;
+}
+
+/** Tier of a review state for the standing pick — LOWER WINS, regardless of timestamp.
+ *
+ *  Tier 0 is the VERDICT tier and is the ONLY tier the approval count reads, which is what makes
+ *  this rule a strict superset of its predecessor (below). Tiers 1 and 2 exist so a reviewer who
+ *  never filed a verdict still appears on the card with an honest label instead of vanishing.
+ *  A dismissal outranks a bare comment: it is a verdict-shaped fact about the review, and a
+ *  reviewer who was dismissed and then commented has not gone back to saying nothing. */
+function standingTier(state: string): 0 | 1 | 2 | null {
+  if (state === 'approved' || state === 'changes_requested') return 0;
+  if (state === 'dismissed') return 1;
+  if (state === 'commented') return 2;
+  // 'pending' — a review draft that was never submitted. Not a review; it says nothing about
+  // where the reviewer stands, and showing it as one would name someone who has not spoken.
+  return null;
+}
+
 /**
- * Per-author latest review state → per-PR approval standing. A reviewer's standing
- * decision is their latest non-"commented" review (approved / changes_requested);
- * a PR is "approved" when at least one reviewer's standing decision is approved and
- * none is changes_requested. Used both for the `approved_ready` reason tag and the
- * "your PR was approved" My Turn section.
+ * Per-PR reviewer standings: ONE indexed read of `reviews` over the given PR ids, grouped per
+ * (pr, author) in memory.
+ *
+ * THE RULE — a reviewer's standing is their latest VERDICT (approved / changes_requested) if they
+ * ever filed one; failing that their latest dismissal; failing that their latest comment.
+ *
+ * ⚠ THIS IS A STRICT SUPERSET OF THE OLD APPROVAL FOLD, BY CONSTRUCTION, AND HAS TO STAY ONE.
+ * `approvals` is hashed into stored Pro work plans (`db/work-plan.ts` → `payloadHashFor`), so a
+ * count that moves flips every stored plan on an affected workspace permanently `stale` and
+ * re-bills it. The predecessor picked the latest row whose state was `approved` or
+ * `changes_requested` and ignored every other row; tier 0 is that pick, unchanged, and tiers 1-2
+ * can only add reviewers the old rule dropped entirely — reviewers who count for nothing. Pinned
+ * in `triage-reviewers.test.ts`.
+ *
+ * ⚠ KNOWN DIVERGENCE FROM THE STANDING A HUMAN WOULD READ, KEPT DELIBERATELY: a reviewer who
+ * approved and was LATER DISMISSED (a fresh review node whose state is DISMISSED, which is how
+ * GitHub records a revoked approval) still reads `approved`, because tier 0 outranks tier 1
+ * whatever the clock says. Demoting them would be the honest label — and would also drop the
+ * approval, moving the hashed count. MEASURED on this repo's real data: 2 reviewer-PR pairs
+ * account-wide, 1 of them on an open PR (sourcery-ai). So it is a decision to take with the hash
+ * consequence in hand, not a patch: change the tier of `dismissed` to 0 and every stored plan on
+ * an affected workspace re-bills.
+ *
+ * ⚠ A NULL `authorId` IS ONE PSEUDO-REVIEWER PER PR, AND IT COUNTS. `reviews.authorId` is
+ * nullable (a deleted GitHub account), the old key was the string `${prId}:${authorId}`, so every
+ * ghost review on a PR collapsed into one slot and its verdict counted toward `approvals`. Both
+ * are preserved exactly. Zero such rows exist today, which is precisely why dropping them here
+ * would look safe and would silently move a count the day one appears.
+ *
+ * COST: one indexed scan (`rv_pr_idx` on `pr_id`), the same query the predecessor ran with `id`
+ * added to the select list — no second query, no per-PR fetch. Measured on real data: the 50
+ * most-recently-updated open PRs carry 147 review rows and 45 reviewers (max 4 on one PR); the 50
+ * BUSIEST open PRs carry 1,362 rows and 233 reviewers (max 10). The rows were always read; what
+ * changed is that they are no longer thrown away.
  */
-export async function computeApprovalInfoByPr(
+export async function computeReviewStandingsByPr(
   prIds: number[],
-): Promise<Map<number, ApprovalInfo>> {
-  const out = new Map<number, ApprovalInfo>();
+): Promise<Map<number, PrReviewStandings>> {
+  const out = new Map<number, PrReviewStandings>();
   if (prIds.length === 0) return out;
   const rows = await db
     .select({
+      id: reviews.id,
       prId: reviews.prId,
       authorId: reviews.authorId,
       state: reviews.state,
@@ -88,41 +168,108 @@ export async function computeApprovalInfoByPr(
     .where(inArray(reviews.prId, prIds))
     .execute();
 
-  // latest review state per (pr, author), ignoring pure "commented" reviews.
-  const latest = new Map<string, { prId: number; state: string; at: Date }>();
+  // One winner per (pr, author). ⚠ The tiebreak is EXPLICIT — a later `submittedAt`, then the
+  // higher `id` — because rows arrive in heap order, which on Postgres flips after any UPDATE to
+  // the table. The predecessor's bare `>` handed a same-second tie to whichever row the heap
+  // offered first, so the same PR could resolve two ways between two identical reads. Measured:
+  // 35 (pr, author, submitted_at) ties exist in real data and NOT ONE disagrees on state, so
+  // making this deterministic moves no count today — it just stops the day one would.
+  const best = new Map<
+    string,
+    { prId: number; userId: number | null; tier: 0 | 1 | 2; state: string; at: Date; id: number }
+  >();
   for (const r of rows) {
-    if (r.state !== 'approved' && r.state !== 'changes_requested') continue;
+    const tier = standingTier(r.state);
+    if (tier == null) continue;
     const key = `${r.prId}:${r.authorId}`;
-    const prev = latest.get(key);
-    if (!prev || r.submittedAt.getTime() > prev.at.getTime()) {
-      latest.set(key, { prId: r.prId, state: r.state, at: r.submittedAt });
+    const prev = best.get(key);
+    if (prev != null) {
+      if (tier > prev.tier) continue;
+      if (tier === prev.tier) {
+        const dt = r.submittedAt.getTime() - prev.at.getTime();
+        if (dt < 0 || (dt === 0 && r.id <= prev.id)) continue;
+      }
     }
+    best.set(key, {
+      prId: r.prId,
+      userId: r.authorId,
+      tier,
+      state: r.state,
+      at: r.submittedAt,
+      id: r.id,
+    });
   }
 
-  const byPr = new Map<
-    number,
-    { approvals: number; blocks: number; latestApprovalAt: Date | null }
-  >();
-  for (const v of latest.values()) {
-    const entry =
-      byPr.get(v.prId) ?? { approvals: 0, blocks: 0, latestApprovalAt: null };
-    if (v.state === 'approved') {
-      entry.approvals += 1;
-      if (!entry.latestApprovalAt || v.at.getTime() > entry.latestApprovalAt.getTime()) {
-        entry.latestApprovalAt = v.at;
-      }
-    } else {
-      entry.blocks += 1;
-    }
-    byPr.set(v.prId, entry);
-  }
-  for (const [prId, e] of byPr) {
-    out.set(prId, {
-      approved: e.approvals > 0 && e.blocks === 0,
-      changesRequested: e.blocks > 0,
-      approvals: e.approvals,
-      latestApprovalAt: e.latestApprovalAt,
+  const byPr = new Map<number, PrReviewerStanding[]>();
+  for (const v of best.values()) {
+    const list = byPr.get(v.prId) ?? [];
+    list.push({
+      userId: v.userId,
+      standing: v.state as ReviewerStanding,
+      standingAt: v.at,
     });
+    byPr.set(v.prId, list);
+  }
+  for (const [prId, list] of byPr) {
+    // Deterministic for the same reason the tiebreak is: a card's chips must not reshuffle
+    // because Postgres handed back the same rows in a different order. Newest standing first is
+    // also the order a caller capping to three wants.
+    list.sort(
+      (a, b) => b.standingAt.getTime() - a.standingAt.getTime() || (a.userId ?? 0) - (b.userId ?? 0),
+    );
+    out.set(prId, { reviewers: list, total: list.length });
+  }
+  return out;
+}
+
+/**
+ * The approval standing of a PR, folded from its reviewer list — the ONE place the counts come
+ * from, so the chips on a card and the "approved by N" beside them cannot disagree. `dismissed`
+ * and `commented` count as nothing, exactly as the predecessor's skipped rows did.
+ */
+export function approvalInfoFromStandings(standings: PrReviewStandings): ApprovalInfo {
+  let approvals = 0;
+  let blocks = 0;
+  let latestApprovalAt: Date | null = null;
+  for (const r of standings.reviewers) {
+    if (r.standing === 'approved') {
+      approvals += 1;
+      if (!latestApprovalAt || r.standingAt.getTime() > latestApprovalAt.getTime()) {
+        latestApprovalAt = r.standingAt;
+      }
+    } else if (r.standing === 'changes_requested') {
+      blocks += 1;
+    }
+  }
+  return {
+    approved: approvals > 0 && blocks === 0,
+    changesRequested: blocks > 0,
+    approvals,
+    latestApprovalAt,
+  };
+}
+
+/**
+ * Per-PR approval standing: at least one reviewer's standing decision is approved and none is
+ * changes_requested. Drives the `approved_ready` reason tag, the green/red review outline on
+ * timeline bars, the "your PR was approved" My Turn section and the Pro work plan's `approvals`.
+ *
+ * Now a projection of `computeReviewStandingsByPr` rather than a second fold over the same rows —
+ * a caller wanting the reviewers as well should call that once and pass the result through
+ * `approvalInfoFromStandings`, not run both.
+ */
+export async function computeApprovalInfoByPr(
+  prIds: number[],
+): Promise<Map<number, ApprovalInfo>> {
+  const out = new Map<number, ApprovalInfo>();
+  for (const [prId, standings] of await computeReviewStandingsByPr(prIds)) {
+    const info = approvalInfoFromStandings(standings);
+    // ⚠ THE EMISSION SET IS PRESERVED, not just the values. The predecessor built its map from
+    // the decisive picks alone, so a PR whose only reviews are comments had NO ENTRY — not a
+    // zeroed one. Every caller today reads `.get(id)?.field ?? default` and cannot tell, but a
+    // future `.has()` could, and this fold is the one whose output is hashed.
+    if (info.approvals === 0 && !info.changesRequested) continue;
+    out.set(prId, info);
   }
   return out;
 }

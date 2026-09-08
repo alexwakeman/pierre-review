@@ -87,11 +87,36 @@ const PR_NODE_FIELDS = /* GraphQL */ `
   # review half of it, which is what lets the merge verdict render "review required" instead
   # of a shrug. A cheap scalar on a node already being fetched — no extra request.
   #
-  # Merge-QUEUE state (isMergeQueueEnabled / isInMergeQueue / mergeQueueEntry) is deliberately
-  # NOT here: it is volatile (a position changes minute to minute) and only ever rendered by
-  # the merge control, so it is fetched live in GET /api/prs/:id/merge-options instead of
-  # riding this per-page fat query. See fetchMergeQueueState in github/mutations.ts.
   reviewDecision
+  #
+  # Merge-QUEUE MEMBERSHIP and ENTRY STATE, which this query used to exclude for being volatile.
+  # The volatility argument was only ever true of HALF the entry, and it still is: \`position\` and
+  # \`estimatedTimeToMerge\` change every time another PR in the queue lands, so they remain
+  # excluded here and stay live-only in GET /api/prs/:id/merge-options (fetchMergeQueueState in
+  # github/mutations.ts). Membership and entry state are different animals and are now synced:
+  #   • A CARD CANNOT FETCH. The Pending board is served entirely from synced rows — fifty cards
+  #     resolving their own merge state on mount is ~150 GitHub calls to paint one screen — so
+  #     anything a card must render has to be a stored column.
+  #   • A QUEUED PR IS OTHERWISE INDISTINGUISHABLE FROM A BLOCKED ONE. GitHub's MergeStateStatus
+  #     enum has no QUEUED member, so \`mergeStateStatus\` above reports plain \`blocked\` for both,
+  #     and every merge surface offers a Merge button GitHub will refuse.
+  #   • A DEQUEUE IS OTHERWISE INVISIBLE. GitHub ejects an entry whose checks failed; with no
+  #     stored membership the PR just stops being queued and nothing ever says so.
+  #
+  # COST: neither field takes a \`first:\`/\`last:\` argument — \`isInMergeQueue\` is a scalar and
+  # \`mergeQueueEntry\` is a nullable OBJECT, not a connection — so by the cost model this file
+  # records at \`reviewThreads\` below (GitHub prices a query off its DECLARED connection
+  # arguments) they contribute no nodes to REPO_ACTIVITY_QUERY's per-page score. Same reasoning
+  # as PR_LIVENESS_NODES_QUERY's "scalars only, no connection arguments ⇒ one point". Both are
+  # GA and need no preview header: MERGE_QUEUE_STATE_QUERY in github/mutations.ts already
+  # selects exactly these fields through the same header-less GraphQL client.
+  #
+  # ⚠ \`isInMergeQueue\` is \`Boolean!\` in GitHub's schema, and sync/upsert.ts leans on that to tell
+  # a partial response apart from a real answer. Do not "harden" it into a nullable read here.
+  isInMergeQueue
+  mergeQueueEntry {
+    state
+  }
   # ---- end merge verdict ---------------------------------------------------------------
   author {
     login
@@ -796,6 +821,17 @@ export interface GqlPullRequest {
   // null when the repo requires no review. OPTIONAL on the interface so hand-built fixtures
   // predating the field still typecheck.
   reviewDecision?: string | null;
+  // Merge-queue MEMBERSHIP. `Boolean!` in GitHub's schema, so a real answer is only ever
+  // `true` or `false` — which is exactly what makes the three-state partial-response rule
+  // decidable here without a `pagePartial` flag being threaded down to persistPr:
+  //   undefined ⇒ the key never arrived (a hand-built fixture, an older query) ⇒ learn nothing;
+  //   null      ⇒ graphqlTolerant nulled a field it was forbidden ⇒ learn nothing;
+  //   false     ⇒ GitHub POSITIVELY says this PR is not queued ⇒ clear the stored columns.
+  // See sync/upsert.ts, which is the only place that fold lives.
+  isInMergeQueue?: boolean | null;
+  // The PR's entry, or null when it has none. Only `state` (MergeQueueEntryState) is selected:
+  // `position` and `estimatedTimeToMerge` are volatile and stay live-only in merge-options.
+  mergeQueueEntry?: { state?: string | null } | null;
   author: GqlActor | null;
   mergedBy: GqlActor | null;
   labels: { nodes: GqlLabel[] };
@@ -1050,6 +1086,24 @@ export interface ReactionNodesGqlResponse {
 //    50   + mergeable/mergeStateStatus                —    10.8s     **HTTP 502**
 //    90   + mergeable/mergeStateStatus                —    11.2s     **HTTP 502**
 //
+// ⚠ RE-MEASURED, 2026-09-07, when merge-queue membership was added to the CHEAP pass. Same
+// method and same account, but the two selections were run INTERLEAVED (base, queue, base, queue,
+// …) rather than in blocks — GitHub's latency drifts over minutes, and a block-ordered A/B
+// attributes that drift to whichever selection ran second:
+//
+//   ids   selection                                cost   wall     outcome
+//    90   scalars only (the 2026-09-03 row, re-run)   1    2.4-4.4s  ok
+//    90   + isInMergeQueue/mergeQueueEntry{state}     1    2.6-3.4s  ok
+//    25   + isInMergeQueue/mergeQueueEntry{state}     1    1.8-3.0s  ok
+//
+// The baseline itself measured SLOWER today than on 2026-09-03 (2.4-4.4s against 1.3-1.8s) and the
+// old row is kept rather than corrected: that spread is the network and GitHub's own day, which is
+// exactly why the comparison had to be interleaved. Against today's baseline the two queue fields
+// cost nothing measurable — same 1 point, and the queue variant's SLOWEST run (3.4s) beat the
+// baseline's slowest (4.4s). All 90 nodes carried a non-null `isInMergeQueue`, so it answers from
+// stored state like the rest of the cheap half and not on demand like `mergeable`. It therefore
+// rides the 90-id pass, not the ranked 25.
+//
 // ⚠ THE COST CLIFF HERE IS WALL TIME, NOT POINTS — a different animal from the `reactors(first:1)`
 // 44× POINT cliff above, and it bites at the same place in the code. `mergeable` and
 // `mergeStateStatus` are not stored fields: GitHub computes mergeability per PR on demand (it
@@ -1060,10 +1114,15 @@ export interface ReactionNodesGqlResponse {
 // expensive half at the cheap half's batch size, because the batch size is chosen from the same
 // flag. See github/pr-liveness.ts.
 //
-// Deliberately NOT selected: `headRefOid` (resolving the head ref is another per-PR lookup and
-// nothing on the board consents to a SHA — the merge route re-checks the head oid itself), and
-// merge-QUEUE state (`isInMergeQueue` / `mergeQueueEntry`), which PR_NODE_FIELDS excludes for its
-// own reason recorded above: volatile, and rendered only by the click-gated merge control.
+// Deliberately NOT selected: `headRefOid`. Resolving the head ref is another per-PR lookup and
+// nothing on the board consents to a SHA — the merge route re-checks the head oid itself.
+//
+// Merge-QUEUE state IS selected, on the measurement above and not on the inference. A queued PR
+// reports `mergeStateStatus: 'blocked'`, byte-identical to one held up by branch protection, so
+// the card can only say "queued" from the stored column — and the column moves without the PR's
+// `updatedAt` moving, which is the same gap that put `state` in this query. Ejection is the case
+// that earns it: GitHub drops an entry whose checks failed, and without this pass the card keeps
+// claiming a queue place until the adaptive walk comes round (2-15 min).
 export const PR_LIVENESS_NODES_QUERY = /* GraphQL */ `
   query PrLivenessByNode($ids: [ID!]!, $withMergeState: Boolean!) {
     nodes(ids: $ids) {
@@ -1079,6 +1138,10 @@ export const PR_LIVENESS_NODES_QUERY = /* GraphQL */ `
         reviewDecision
         mergeable @include(if: $withMergeState)
         mergeStateStatus @include(if: $withMergeState)
+        isInMergeQueue
+        mergeQueueEntry {
+          state
+        }
       }
     }
     rateLimit {
@@ -1116,6 +1179,16 @@ export interface GqlPrLivenessNode {
   mergeable?: string | null;
   /** CLEAN | DIRTY | UNSTABLE | BLOCKED | BEHIND | HAS_HOOKS | UNKNOWN. Absent on the cheap pass. */
   mergeStateStatus?: string | null;
+  /**
+   * Merge-queue MEMBERSHIP. `Boolean!` in GitHub's schema — which is the whole discriminator the
+   * consumer needs: a real answer is only ever true or false, so a null can ONLY be a field
+   * `graphqlTolerant` nulled after a partial error and `undefined` can only be a response (or a
+   * fixture) that never carried the selection. Both mean "learn nothing". Same rule as
+   * PR_NODE_FIELDS — do not "harden" this into a nullable read.
+   */
+  isInMergeQueue?: boolean | null;
+  /** AWAITING_CHECKS | LOCKED | MERGEABLE | QUEUED | UNMERGEABLE. Null when there is no entry. */
+  mergeQueueEntry?: { state?: string | null } | null;
 }
 
 export interface PrLivenessNodesGqlResponse {

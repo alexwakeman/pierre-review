@@ -1,7 +1,15 @@
-import { useState } from 'react';
+import { useIsMutating } from '@tanstack/react-query';
 import type { MergeBlockFacts } from '@pierre-review/shared';
 import { useMergeOptions } from '../hooks/usePrWrites.js';
-import { useArmAutoMerge, useDisarmAutoMerge, usePrArmedIntent } from '../hooks/useAutoMerge.js';
+import {
+  armAutoMergeMutationKey,
+  armControlPhase,
+  dispatchArmDraft,
+  useArmAutoMerge,
+  useArmDraft,
+  useDisarmAutoMerge,
+  usePrArmedIntent,
+} from '../hooks/useAutoMerge.js';
 import { mergeVerdict, mergeWhenReadyEligible, toMergeStateStatus } from '../lib/ui.js';
 import { ApiError } from '../api/client.js';
 import { TimerIcon } from './Icons.js';
@@ -30,6 +38,13 @@ import { TimerIcon } from './Icons.js';
 // click-gated instead: the control renders a compact trigger, and only a click asks GitHub.
 // Forking the component for the board was the alternative, and it would have put a second arm
 // path in the codebase.
+//
+// ⚠ AND BECAUSE IT MOUNTS ON THE BOARD, IT HOLDS NO PER-MOUNT STATE. A Pending card's React key is
+// its card id, and the server encodes the merge KIND in that id, so a PR falling behind trunk
+// re-keys the card and remounts this whole subtree. Both halves of the interaction therefore live
+// outside the mount: the ask/confirm draft in `useArmDraft` (keyed by prId) and the in-flight arm
+// on `armAutoMergeMutationKey`. Together they are the fix for "arming a second PR sends the third
+// one back to its unpressed button".
 export function MergeWhenReadyControl({
   prId,
   eager = true,
@@ -38,9 +53,10 @@ export function MergeWhenReadyControl({
   prId: number;
   /**
    * The PR facts that let a `blocked` verdict say WHY — supplied by PrDetail's Overview, absent
-   * on the Pending board (whose cards carry no review status by construction). This is the
-   * button that exists BECAUSE the PR is blocked, so it names what it will be waiting out;
-   * without the facts it says nothing rather than guessing.
+   * on the Pending board. ⚠ The board's cards DO carry review standing now; what they do not
+   * carry is this PR's unresolved-thread counts, and nothing on the board may fetch to find out.
+   * This is the button that exists BECAUSE the PR is blocked, so it names what it will be waiting
+   * out; without the facts it says nothing rather than guessing.
    */
   blockFacts?: MergeBlockFacts;
   /** false ⇒ never fetch merge-options on mount; render a trigger and fetch on the click.
@@ -48,14 +64,27 @@ export function MergeWhenReadyControl({
    *  list the app already polls, and cancelling must always be possible. */
   eager?: boolean;
 }): JSX.Element | null {
-  const [confirming, setConfirming] = useState(false);
-  // ⚠ THE ONLY GATE ON THE GITHUB CALL. `asked` is one-way (a click), so a board row that has
-  // been opened keeps its answer for the rest of the mount, exactly as MergeControl's `open` does.
-  const [asked, setAsked] = useState(false);
-  const { data: options } = useMergeOptions(prId, eager || asked);
+  // ⚠ NOT `useState`, AND NOT AN OPTIMISATION. This control's whole interaction — "I asked GitHub"
+  // then "I am confirming" — is transient state that MUST survive a remount, because on the
+  // Pending board a card's React key is its card id and the server puts the MERGE KIND in that id
+  // (`wp:merge:<prId>` vs `wp:update_branch:<prId>`). A PR falling behind trunk therefore
+  // re-keys the card, React throws the subtree away, and a per-mount confirmation goes with it —
+  // the reported "it reverts to the unpressed button". The draft is keyed by prId, which is the
+  // half that does NOT change. Full argument in useAutoMerge.ts.
+  const draft = useArmDraft(prId);
+  // ⚠ THE ONLY GATE ON THE GITHUB CALL, and still one-way: once the reader has bought the answer
+  // for this PR they keep it, exactly as MergeControl's `open` does — now for the PR's lifetime on
+  // screen rather than for a DOM lifetime the reader cannot see. Nothing they have NOT clicked
+  // ever fetches, which is the invariant that keeps fifty cards off GitHub.
+  const { data: options } = useMergeOptions(prId, eager || draft !== 'idle');
   const armedIntent = usePrArmedIntent(prId);
   const arm = useArmAutoMerge(prId);
   const disarm = useDisarmAutoMerge(prId);
+  // ⚠ THE SHARED MUTATION KEY, NEVER `arm.isPending`. The per-mount flag is destroyed by the
+  // remount above, so a POST still in flight would render as an untouched button and invite a
+  // second arm of the same PR. `useIsMutating` reads the client's global mutation cache — zero
+  // requests, and it cannot be unmounted out from under the reader.
+  const posting = useIsMutating({ mutationKey: armAutoMergeMutationKey(prId) }) > 0;
 
   const errText = (e: unknown, fallback: string): string | null =>
     e instanceof ApiError ? e.message : e ? fallback : null;
@@ -66,6 +95,10 @@ export function MergeWhenReadyControl({
   // list is the instant own-tab source; the lazily-fetched options cover a cross-tab arm the
   // 45s poll hasn't caught yet.
   const armed = armedIntent ?? (options?.autoMerge.armed?.state === 'armed' ? options.autoMerge.armed : null);
+  // ONE resolver for "what is this control showing", so the confirmation can never hand over to
+  // nothing: `armed` outranks `arming` outranks the draft. The branches below read `armed`/`phase`
+  // in that same order — `armed != null` rather than `phase === 'armed'` only so tsc narrows.
+  const phase = armControlPhase({ draft, intentArmed: armed != null, posting });
   if (armed != null) {
     // Three phases, not two: a queue intent that the watcher has already enqueued is past
     // "waiting for conditions" — the queue is landing it, and cancelling now also removes
@@ -112,11 +145,11 @@ export function MergeWhenReadyControl({
   // click — MergeControl shares the query key, so opening it warms this control for free.
   if (options == null) {
     if (eager) return null;
-    if (!asked) {
+    if (draft === 'idle') {
       return (
         <button
           type="button"
-          onClick={() => setAsked(true)}
+          onClick={() => dispatchArmDraft(prId, { type: 'ask' })}
           className="inline-flex items-center gap-1 rounded border border-violet-400 px-2 py-0.5 text-[11px] font-medium text-violet-600 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30"
           title="Check whether Limn's watcher can land this for you — it asks GitHub for the live merge state"
         >
@@ -178,7 +211,7 @@ export function MergeWhenReadyControl({
   // must SAY SO once the reader has clicked — a trigger that answers a question by vanishing reads
   // as a broken button, and gets clicked again on the next render.
   if (!eligible) {
-    if (eager || !asked) return null;
+    if (eager || draft === 'idle') return null;
     return (
       <span
         className="text-[11px] text-gray-400"
@@ -189,7 +222,9 @@ export function MergeWhenReadyControl({
     );
   }
 
-  if (confirming) {
+  // `arming` is the same panel with the POST in flight — one branch, so the confirmation cannot
+  // disappear between the click and the answer even if the card is re-keyed underneath it.
+  if (phase === 'confirming' || phase === 'arming') {
     return (
       <div className="flex flex-wrap items-center gap-2">
         {/* The honest contract in one line: what it does AND that it's this server's watcher,
@@ -202,30 +237,32 @@ export function MergeWhenReadyControl({
         </span>
         <button
           type="button"
+          // ⚠ NO `{ onSuccess }` HERE. A mutate-scoped callback is dropped when the observer has
+          // no listeners — precisely the remount this control is built to survive — and clearing
+          // the draft is now load-bearing rather than tidying: a missed clear strands the row in
+          // `confirming` behind the armed chip. The clear lives in `useArmAutoMerge`'s hook-level
+          // `onSuccess`, which runs whether or not this mount is still alive.
           onClick={() =>
-            arm.mutate(
-              {
-                mergeMethod: options.defaultMethod,
-                // ALWAYS a real strategy — 'none' left a PR that fell behind AFTER arming
-                // waiting forever on an up-to-date-required repo. Rebase is local-only
-                // (config.canRebaseUpdate); cloud falls back to a merge-in.
-                updateStrategy: options.canRebaseUpdate ? 'rebase' : 'merge',
-              },
-              { onSuccess: () => setConfirming(false) },
-            )
+            arm.mutate({
+              mergeMethod: options.defaultMethod,
+              // ALWAYS a real strategy — 'none' left a PR that fell behind AFTER arming
+              // waiting forever on an up-to-date-required repo. Rebase is local-only
+              // (config.canRebaseUpdate); cloud falls back to a merge-in.
+              updateStrategy: options.canRebaseUpdate ? 'rebase' : 'merge',
+            })
           }
-          disabled={arm.isPending}
+          disabled={phase === 'arming'}
           className="whitespace-nowrap rounded border border-violet-500 px-2 py-0.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
         >
-          {arm.isPending ? 'Arming…' : 'Arm auto-merge'}
+          {phase === 'arming' ? 'Arming…' : 'Arm auto-merge'}
         </button>
         <button
           type="button"
           onClick={() => {
-            setConfirming(false);
+            dispatchArmDraft(prId, { type: 'cancel' });
             arm.reset();
           }}
-          disabled={arm.isPending}
+          disabled={phase === 'arming'}
           className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         >
           Cancel
@@ -238,7 +275,7 @@ export function MergeWhenReadyControl({
   return (
     <button
       type="button"
-      onClick={() => setConfirming(true)}
+      onClick={() => dispatchArmDraft(prId, { type: 'confirm' })}
       className="inline-flex items-center gap-1 rounded border border-violet-400 px-2 py-0.5 text-sm font-medium text-violet-600 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30"
       title={
         (queueEnabled

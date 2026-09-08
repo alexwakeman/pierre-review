@@ -169,6 +169,18 @@ export interface WorkspaceMyTurnLine {
 export interface MyTurnByWorkspace {
   /** Every workspace we have a number for, INCLUDING zeros. Absent = not counted, not zero. */
   byWorkspace: Map<number, WorkspaceMyTurnLine>;
+  /** THE WORKSPACE THE READER IS STANDING IN — the line the collapsed Workspace badge renders.
+   *
+   *  ⚠ Its identity comes from `brief.workspaceId`, the id the SERVER folded, never the store's:
+   *  `?workspace=` degrades a foreign or dead id to the account's Default rather than 404ing, so
+   *  the echo is the only thing that says which workspace the counts describe. Reading the store
+   *  here would badge the active row with another workspace's number for the one render before
+   *  `useWorkspaceSync` repairs it.
+   *
+   *  Present even at ZERO, unlike `lines` — the caller renders nothing at zero, but "we counted,
+   *  and it is none" and "we have no count" are different states and only the first is knowable
+   *  about the workspace on screen. Null only while the brief has not landed. */
+  active: WorkspaceMyTurnLine | null;
   /** Only the non-zero lines, active workspace first, then alphabetical. */
   lines: WorkspaceMyTurnLine[];
   /** Sum over `lines`. Capped card counts, so `anyCapped` qualifies it. */
@@ -193,8 +205,36 @@ export interface MyTurnByWorkspace {
   uncounted: { id: number; name: string }[];
 }
 
+/**
+ * WHAT THE COLLAPSED WORKSPACE BADGE RENDERS — the ACTIVE workspace's own my-turn figure, or
+ * nothing.
+ *
+ * ⚠ IT REPLACED `elsewhereCount`, AND THAT WAS A BUG REPORT, NOT A PREFERENCE. The trigger badge
+ * beside the workspace NAME used to carry the sum over the OTHER workspaces, while the row badges
+ * inside the open menu carried each workspace's own — so standing in Default with 10 items waiting
+ * in BNG, the control read "Default 10" and the reader took the 10 for Default's. Two populations,
+ * one glyph apart, and the digit gives no hint which one you are looking at. A number rendered
+ * against a name has to be that name's number.
+ *
+ * ⚠ IT IS THE CAPPED CARD COUNT, LIKE EVERY OTHER MY-TURN FIGURE — the list a click opens, with a
+ * "+" when the fold is capped and the exact pair in the title. An uncapped total beside a capped
+ * board is the disclosure rule these surfaces exist to keep.
+ *
+ * ⚠ AND IT COUNTS THE PERSONAL SUBSET, because this badge NOTIFIES: it reaches for the reader from
+ * every screen, including the ones with no Pending board on them. (The board itself keeps the
+ * broad population — that work is real, it is just not a summons.) `WorkspaceMyTurnLine.count` is
+ * already that fold; nothing here re-derives it.
+ */
+export function activeWorkspaceBadge(
+  active: WorkspaceMyTurnLine | null,
+): { count: number; cappedTotal: number | null } | null {
+  if (active == null || active.count <= 0) return null;
+  return { count: active.count, cappedTotal: active.cap?.total ?? null };
+}
+
 const EMPTY: MyTurnByWorkspace = {
   byWorkspace: new Map(),
+  active: null,
   lines: [],
   total: 0,
   totalSplit: null,
@@ -267,6 +307,9 @@ export function useMyTurnByWorkspace(): MyTurnByWorkspace {
 
     return {
       byWorkspace,
+      // The line for the workspace the SERVER folded — see the field. `add(activeId, …)` always
+      // ran, so this is null only on a response shape that carried no counts at all.
+      active: byWorkspace.get(activeId) ?? null,
       lines,
       total,
       totalSplit,

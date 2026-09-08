@@ -11,9 +11,11 @@
 // (`clearDailyBriefCache` had no production caller), so the number was not "≤5 min stale", it was
 // wrong, and it self-corrected only when the window happened to lapse.
 //
-// The fixture drives the fold with the SAME write the product uses: `POST /api/my-turn/dismiss`
-// inserts a `my_turn_dismissals` row, and the `watched_repo_pr` kind is STICKY (no timestamp
-// comparison), so the population is 3 → 1 with no clock in the assertion. The second `it` walks
+// The fixture drives the fold with a real state change: THE BALL RULE keeps a "New PRs" row only
+// while you have never acted on it, so submitting a review as the viewer on two of the three
+// retires them and the population is 3 → 1 with no clock in the assertion. (It used to insert a
+// `my_turn_dismissals` row; `getMyTurn` no longer reads that table — a card leaves because you
+// acted on the PR, not because you told the app you had.) The second `it` walks
 // every counted kind rather than just `myTurn`: the count loop (db/daily-brief.ts) and the route's
 // bot-card filter (api/routes/insights.ts) are two hand-maintained spellings of "which kinds
 // count", and a kind added to one and not the other reproduces "header 5, list 3" with no cache
@@ -36,6 +38,7 @@ let closeDb: (() => Promise<void>) | undefined;
 let q: any;
 let brief: any;
 let scope: any;
+let viewerUserId = 0;
 
 const DAY = 24 * 60 * 60 * 1000;
 // Whole seconds: sqlite stores these as unix-epoch INTEGERS, so a sub-second component would be
@@ -94,7 +97,7 @@ beforeAll(async () => {
       .execute();
     return u.id;
   };
-  await insertUser(VIEWER_LOGIN);
+  const viewerId = await insertUser(VIEWER_LOGIN);
   const aliceId = await insertUser('alice-dev');
 
   const [repo] = await db
@@ -189,6 +192,7 @@ beforeAll(async () => {
   // Default workspace. Hand-build it and the repo belongs to no workspace, every count is 0, and
   // the fixture asserts nothing.
   scope = await q.resolveWorkspaceScope(1, null);
+  viewerUserId = viewerId;
 });
 
 afterAll(async () => {
@@ -197,24 +201,27 @@ afterAll(async () => {
 });
 
 describe('the daily brief counts what the click opens', () => {
-  it('tracks the my_turn population the moment a dismissal changes it — no cache clear', async () => {
+  it('tracks the my_turn population the moment an action of yours changes it — no cache clear', async () => {
     expect(scope.repoIds).toHaveLength(1); // the seeded repo really is in the workspace being read
 
     const before = await brief.getDailyBriefEntry(1, scope.workspaceId);
     expect(before.counts.myTurn).toBe(NEW_PR_KEYS.length);
     expect(before.counts.myTurn).toBe((await liveCardCounts()).my_turn);
 
-    // The write POST /api/my-turn/dismiss performs — nothing else. In particular NO
+    // What a sync would write after you reviewed those two PRs — nothing else. In particular NO
     // clearDailyBriefCache(): the route has never called it, and the brief must not need it.
-    const { myTurnDismissals } = schema;
+    // ⚠ A bare `commented` review, deliberately: under THE BALL RULE every review state counts as
+    // acting, and a fixture that only ever approved would not prove it.
+    const { reviews } = schema;
     for (const key of ['new-1', 'new-2']) {
       await db
-        .insert(myTurnDismissals)
+        .insert(reviews)
         .values({
-          accountId: 1,
-          kind: 'watched_repo_pr',
-          refId: prIdByKey.get(key)!,
-          dismissedAt: new Date(now),
+          githubNodeId: `RV_brief_${key}`,
+          prId: prIdByKey.get(key)!,
+          authorId: viewerUserId,
+          state: 'commented',
+          submittedAt: new Date(now),
         })
         .execute();
     }

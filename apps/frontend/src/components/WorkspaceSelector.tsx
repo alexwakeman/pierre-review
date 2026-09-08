@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Workspace } from '@pierre-review/shared';
 import { useClickOutside } from '../hooks/useClickOutside.js';
-import { useMyTurnByWorkspace } from '../hooks/useMyTurnByWorkspace.js';
+import { activeWorkspaceBadge, useMyTurnByWorkspace } from '../hooks/useMyTurnByWorkspace.js';
 import { consumeRestoredWorkspaceScope, markUrlCorrection } from '../hooks/useUrlState.js';
 import { useWorkspaces } from '../hooks/useWorkspaces.js';
 import { useFilters } from '../store/filters.js';
@@ -12,6 +12,11 @@ import { CaretIcon, DotIcon, GearIcon, WorkspaceIcon } from './Icons.js';
  * The My-Turn count badge, shared by the collapsed trigger and every menu row so the two can
  * never drift apart.
  *
+ * ⚠ AND THEY NOW CARRY THE SAME KIND OF NUMBER: each badge is ITS OWN workspace's personal my-turn
+ * count. The trigger used to carry the sum over the OTHER workspaces while sitting against the
+ * ACTIVE one's name, so the shared styling was the only thing the two had in common — the reader
+ * read "Default 10" and took the 10 for Default's.
+ *
  * OUTLINE, NOT FILL. A solid amber pill read as an alert blob next to the workspace name and
  * fought the rail's quiet grey-on-dark for attention — this control is a SCOPE PICKER that also
  * happens to carry a count, not a notification. A hairline ring with a transparent centre keeps
@@ -20,7 +25,7 @@ import { CaretIcon, DotIcon, GearIcon, WorkspaceIcon } from './Icons.js';
  * of rows does not ripple; `tabular-nums` stops the digits themselves jittering.
  */
 const MY_TURN_BADGE_CLASS =
-  'shrink-0 rounded-full border border-amber-500/60 px-1 text-center text-[9px] font-medium leading-[15px] tabular-nums text-amber-600 dark:border-amber-400/50 dark:text-amber-400';
+  'shrink-0 rounded-full border border-amber-500/60 px-1 text-center text-[11px] font-medium leading-[16px] tabular-nums text-amber-600 dark:border-amber-400/50 dark:text-amber-400';
 
 /**
  * Keep `workspaceId` resolved and `repoIds` HONEST — and note what it deliberately does NOT do.
@@ -223,7 +228,11 @@ export function WorkspaceSelector(): JSX.Element {
   // have NO number rather than a zero one — those rows render a dim "—" and the footer names how
   // many, because a badge that exists to say "you have unseen work" must not omit a workspace
   // silently. Nothing renders at all until the brief lands (`workspaceId === null` ⇒ idle).
-  const { byWorkspace, elsewhereCount, elsewhereCapped, uncounted } = useMyTurnByWorkspace();
+  const { active: activeMyTurn, byWorkspace, elsewhereCount, elsewhereCapped, uncounted } =
+    useMyTurnByWorkspace();
+  // The COLLAPSED trigger's badge — the ACTIVE workspace's own figure. See `activeWorkspaceBadge`
+  // for why it is no longer the "elsewhere" sum, which is the bug the reader hit.
+  const badge = activeWorkspaceBadge(activeMyTurn);
 
   // Switching workspace shows all of it — a subset the user picked in the workspace they are
   // leaving is not a narrowing of the one they are entering.
@@ -251,28 +260,47 @@ export function WorkspaceSelector(): JSX.Element {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="true"
         aria-expanded={open}
-        title="The active Workspace — the one scope every view is read through"
+        // ⚠ THE "ELSEWHERE" WORK MOVED INTO THIS TITLE, and it moved because it can no longer be
+        // a digit here: two workspaces' counts cannot share one badge (see the badge below). It is
+        // not lost — the menu rows carry each workspace's own number, and the Welcome-back banner
+        // lists them as chips on every screen outside the Activity console — but a reader standing
+        // on a quiet workspace still deserves the pointer, and a sentence can name the population
+        // a number cannot.
+        title={[
+          'The active Workspace — the one scope every view is read through',
+          elsewhereCount > 0
+            ? `${elsewhereCount}${elsewhereCapped ? ' or more' : ''} item${
+                elsewhereCount === 1 && !elsewhereCapped ? '' : 's'
+              } need you in other Workspaces — open this menu to see where`
+            : null,
+        ]
+          .filter((s): s is string => s != null)
+          .join('. ')}
         className="inline-flex max-w-[12rem] items-center gap-1 whitespace-nowrap rounded-full border border-gray-300 py-0.5 pl-2.5 pr-2 text-xs text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
       >
         <WorkspaceIcon className="shrink-0 text-sky-500" />
         <span className="truncate">{activeLabel}</span>
-        {/* The collapsed trigger carries the OTHER workspaces' total only — the active one's
-            count is already visible on the board behind this control, whereas this figure is
-            work the reader cannot see from where they are standing. Without it the yellow only
-            exists inside a menu nobody has a reason to open. */}
-        {elsewhereCount > 0 && (
+        {/* THE BADGE IS THIS WORKSPACE'S OWN COUNT — the name and the number beside it describe
+            the same thing, which is the whole fix. It is the PERSONAL fold, capped, with the "+"
+            and the exact pair in the title: the same figure as this workspace's row in the menu
+            below, the Welcome-back banner's chip for it, and the browser notification. */}
+        {badge != null && (
           <span
             title={
-              elsewhereCount === 1 && !elsewhereCapped
-                ? '1 item needs you in another Workspace — open this menu to see where'
-                : `${elsewhereCount}${
-                    elsewhereCapped ? ' or more' : ''
-                  } items need you in other Workspaces — open this menu to see where`
+              activeMyTurn?.cap?.title ??
+              (badge.count === 1
+                ? `1 item needs you in ${activeLabel} — it is on the Pending board`
+                : `${badge.count} items need you in ${activeLabel} — they are on the Pending board`)
             }
-            className={`${MY_TURN_BADGE_CLASS} min-w-[1.1rem]`}
+            className={`${MY_TURN_BADGE_CLASS} min-w-[1.35rem]`}
           >
-            {elsewhereCount}
-            {elsewhereCapped ? '+' : ''}
+            {badge.count}
+            {badge.cappedTotal != null && (
+              <>
+                <span aria-hidden>+</span>
+                <span className="sr-only"> of {badge.cappedTotal}</span>
+              </>
+            )}
           </span>
         )}
         <CaretIcon dir="down" className="shrink-0" />
@@ -365,11 +393,13 @@ export function WorkspaceSelector(): JSX.Element {
                         —
                       </span>
                     )}
-                    <span
-                      title="Repos in this Workspace"
-                      className="tabular-nums text-[10px] text-gray-400"
-                    >
-                      {w.repoCount}
+                    {/* ⚠ IT CARRIES ITS UNIT, and that is not decoration. This grey figure sits
+                        six pixels from the amber my-turn badge, and on a real account both read
+                        `8`: two populations, same digit, distinguished only by a colour a reader
+                        has no key for and a title they have to hover to find. Colour alone is not
+                        a label — the word is. */}
+                    <span className="tabular-nums text-[11px] text-gray-400">
+                      {w.repoCount} repo{w.repoCount === 1 ? '' : 's'}
                     </span>
                   </span>
                 </button>

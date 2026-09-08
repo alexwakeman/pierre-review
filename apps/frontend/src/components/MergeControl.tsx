@@ -54,8 +54,13 @@ export function MergeControl({
   /**
    * The PR facts that let a `blocked` verdict say WHY (threads, CI rollup, outstanding review
    * requests). Supplied by PrDetail's Overview, which holds the freshly-walked PR row; ABSENT
-   * on the Pending board, whose cards deliberately carry no review status and must not fetch to
-   * find out. Without it the verdict falls back to its generic sentence, exactly as before.
+   * on the Pending board.
+   *
+   * ⚠ THE REASON IS THE THREAD COUNTS, NOT REVIEW STATUS. A card now carries GitHub's
+   * `reviewDecision` and our own folded standing, so the old wording here ("cards carry no review
+   * status") is wrong; what a card still does not carry is this PR's unresolved-thread counts, and
+   * NOTHING ON THE BOARD MAY FETCH TO FIND OUT. Without the facts the verdict falls back to its
+   * generic sentence, exactly as before.
    */
   blockFacts?: MergeBlockFacts;
   /**

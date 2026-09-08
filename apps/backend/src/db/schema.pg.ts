@@ -208,6 +208,19 @@ export const pullRequests = pgTable(
     reviewDecision: text('review_decision', {
       enum: ['approved', 'changes_requested', 'review_required'],
     }),
+    // GitHub's native merge queue as a SYNCED fact — the pg twin of schema.sqlite.ts, which
+    // carries the full argument. In short: MergeStateStatus has no QUEUED member, so a queued
+    // PR is indistinguishable from a protection-blocked one, and the Pending board may not
+    // fetch on mount to find out. ⚠ NULL MEANS "NOT OBSERVED", NOT "NOT QUEUED" — `false` is a
+    // positive statement from GitHub and null is the absence of one. Position and
+    // estimatedTimeToMerge stay live-only (volatile, and only the merge control renders them).
+    inMergeQueue: boolean('in_merge_queue'),
+    // GitHub's MergeQueueEntryState, lowercased. `unmergeable` is the value that earns the
+    // column: GitHub ejects an entry whose checks failed, and without it the PR just vanishes
+    // from the queue with nothing to tell the reader.
+    mergeQueueEntryState: text('merge_queue_entry_state', {
+      enum: ['awaiting_checks', 'locked', 'mergeable', 'queued', 'unmergeable'],
+    }),
     labels: jsonb('labels').$type<Label[]>(),
     checkRuns: jsonb('check_runs').$type<CheckRun[]>(),
     // ---- Diff size (GraphQL additions/deletions/changedFiles + files connection) ----
@@ -263,28 +276,6 @@ export const prViews = pgTable('pr_views', {
     mode: 'date',
   }).notNull(),
 });
-
-export const myTurnDismissals = pgTable(
-  'my_turn_dismissals',
-  {
-    id: serial('id').primaryKey(),
-    accountId: integer('account_id')
-      .notNull()
-      .references(() => accounts.id),
-    kind: text('kind', {
-      enum: ['review_request', 'thread', 'watched_repo_pr', 'pr_approved', 'claude_review'],
-    }).notNull(),
-    refId: integer('ref_id').notNull(),
-    dismissedAt: timestamp('dismissed_at', {
-      withTimezone: true,
-      mode: 'date',
-    }).notNull(),
-  },
-  (t) => ({
-    kindRefUx: uniqueIndex('mtd_kind_ref_ux').on(t.kind, t.refId),
-    accountIdx: index('mtd_account_idx').on(t.accountId),
-  }),
-);
 
 export const reviewThreads = pgTable(
   'review_threads',

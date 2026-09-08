@@ -154,12 +154,16 @@ fixture tests (see Conventions).
 - **`reviewRequests`** — *ephemeral* pending requests (`userId` or `teamName`, surfaced as
   `requestedReviewers`); re-derived each sync (GitHub drops the request once a review lands).
 - **`prViews`** — last-viewed SHA + ts per PR ("new since you looked"); **`syncState`** —
-  per-repo sync bookkeeping; **`myTurnDismissals`** — dismissed "my turn" entries
-  (`accountId`, `review_request`|`thread`; auto-resurface on newer activity). ⚠ The stored `kind`
-  for a dismissed "New PRs" entry is the legacy string **`watched_repo_pr`** — a DB enum value kept
-  for the existing rows, not a surviving concept; the wire field is likewise still
-  `MyTurnResponse.watchedRepoPrs`. Renaming either would be a migration + a breaking wire change for
-  no behaviour.
+  per-repo sync bookkeeping.
+  ⚠ **`myTurnDismissals` IS GONE** (dropped in sqlite `0060` / pg `0047`, with the routes, the wire
+  types and the SPA's "Done" button). It was the manual compensation for a My Turn fold that had no
+  "have I acted" predicate; that predicate now exists — see
+  [docs/BACKEND.md](BACKEND.md) § My Turn — the ball rule — so a card clears itself and there is
+  nothing left for a dismissal to mean. ⚠ The identifier **`watched_repo_pr`** survives in
+  `MyTurnCardReason`, the card ids, the ranker and four test files; it is a legacy string, not a
+  surviving concept (nothing is "watched" — every repo the account has added qualifies), and the wire
+  field is likewise still `MyTurnResponse.watchedRepoPrs`. Renaming either is a breaking wire change
+  for no behaviour.
 - **`claudeReviews`** + **`claudeReviewFindings`** — the **Claude Review** feature (see
   below; carries `accountId`). One run per row (re-review = new row; history kept, keyed by
   `(prId, headSha)`); Claude's `summary`/`verdict` read-only, the user's
@@ -564,7 +568,6 @@ check every hit against its table's declared unique.**
 | `review_comments` / `pr_comments` / `reviews` | `[prId, githubNodeId]` | `sync/upsert.ts` + the post-write local stamps in `queries.ts` (~7897 / ~7931 / ~7979) |
 | `commit_files` | `sha` (immutable content — a single-column target) | `sync/commit-files.ts` |
 | `pr_views` | `prId` | `markPrViewed` (~5416), the bulk mark-all (~5447) |
-| `my_turn_dismissals` | `[kind, refId]` — **deliberately omits `accountId`** (`refId` is a global PK) | `dismissMyTurn` (~5512) |
 | `auto_merge_requests` | `[accountId, prId]` — current state, not a log; re-arm OVERWRITES, disarm DELETEs | `armAutoMerge` (~14009) |
 | `benchmark_contributions` | `[accountId, vendorKind, weekStart]` | the benchmark rollup (~13444) |
 | `ml_comment_labels` | `(account_id, target_kind, target_id)` (`mcl_account_target`) | `db/ml-labels.ts` (the enrichment worker's ONLY writer) |

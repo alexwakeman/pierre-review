@@ -1,0 +1,21 @@
+-- DROP `my_turn_dismissals` — the Postgres twin of sqlite 0060_drop_my_turn_dismissals.sql.
+-- HAND-WRITTEN ADDITIVE, like every pg migration since 0023: never regenerate the baseline with
+-- `pnpm db:generate:pg`, which squashes it.
+--
+-- ⚠ DESTRUCTIVE AND ONE-WAY. No down migration, no archive — the rows go when this runs. The
+-- table has already been inert for a release (the ball rule landed in `getMyTurn` first), so
+-- nothing breaks, but a restore is the only way back.
+--
+-- Read the sqlite twin for the full argument. In short: each row was a hand-written "I have seen
+-- this", needed only because My Turn had no predicate for "you already acted on this PR". The ball
+-- rule is that predicate — state-derived, recomputed on every read — so a card now leaves the
+-- board when the user does the work rather than when they tell the app they did. And a dismissal
+-- never expired, which made it a ticket queue kept true by grooming: exactly the thing this
+-- product claims not to be.
+--
+-- IF-EXISTS because a fresh cloud database may or may not have replayed the 0000 baseline that
+-- created it. The FK to `accounts` and both indexes (`mtd_kind_ref_ux`, `mtd_account_idx`) are
+-- dropped with the table; nothing else references it, so no CASCADE is needed and none is given —
+-- a CASCADE here could only ever mean something unexpected depends on this table, which is a
+-- failure worth seeing rather than swallowing.
+DROP TABLE IF EXISTS "my_turn_dismissals";

@@ -7,7 +7,6 @@ import type {
   ReviewBotKind,
   ReviewerSuggestion,
   ReviewProvenance,
-  ReviewState,
   User,
 } from '@pierre-review/shared';
 import {
@@ -20,9 +19,15 @@ import {
   MERGE_TONE_CLASS,
   mergeVerdict,
   relativeTime,
+  REVIEW_STATE_META,
   safeExternalUrl,
   vendorInk,
 } from '../lib/ui.js';
+// The queue chip's wording, IMPORTED from the Pending board rather than re-spelled here. The
+// board and this pane describe one PR's queue entry, and "Leaving the merge queue" is the whole
+// point of the field — a second copy of those five sentences is how one surface ends up calling
+// an ejection "in the merge queue".
+import { pendingQueueBadge } from './Activity/AttentionCards.js';
 import { useFilters } from '../store/filters.js';
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
@@ -39,48 +44,13 @@ import { usePrArmedIntent } from '../hooks/useAutoMerge.js';
 import { useSuggestedReviewers } from '../hooks/usePr.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
-import { BotIcon, CheckIcon, CloseIcon, ExternalLinkIcon, WarningIcon } from './Icons.js';
-
-// Per-state styling for the "Reviewers" row badges (everyone who submitted a
-// review, not just approvers): the badge hue + leading mark hint at each
-// reviewer's LATEST review state, so the row reads at a glance — green check for an
-// approval, red cross for changes-requested, neutral for a plain comment / dismissed
-// review. Mirrors the Approvers badge style (bg-…/10 + soft text) so the two rows
-// sit together visually.
-//
-// `icon` is an ELEMENT, not a character: the badge tints itself (text-green-700 /
-// text-red-700), and only an icon inheriting `currentColor` follows that tint. The
-// states with nothing to say carry null and render no mark at all.
-const REVIEWER_STATE_META: Record<
-  ReviewState,
-  { icon: JSX.Element | null; cls: string; title: string }
-> = {
-  approved: {
-    icon: <CheckIcon size={12} />,
-    cls: 'bg-green-500/10 text-green-700 dark:text-green-400',
-    title: 'Approved',
-  },
-  changes_requested: {
-    icon: <CloseIcon size={12} />,
-    cls: 'bg-red-500/10 text-red-700 dark:text-red-400',
-    title: 'Requested changes',
-  },
-  commented: {
-    icon: null,
-    cls: 'bg-gray-500/10 text-gray-600 dark:text-gray-300',
-    title: 'Reviewed (commented)',
-  },
-  dismissed: {
-    icon: null,
-    cls: 'bg-gray-500/10 text-gray-400',
-    title: 'Review dismissed',
-  },
-  pending: {
-    icon: null,
-    cls: 'bg-gray-500/10 text-gray-400',
-    title: 'Review pending',
-  },
-};
+import {
+  BotIcon,
+  CheckIcon,
+  ExternalLinkIcon,
+  MergeIcon,
+  WarningIcon,
+} from './Icons.js';
 
 function Row({
   label,
@@ -437,29 +407,51 @@ export function ChecksTab({
     mergeable: pr.mergeable,
     mergeStateStatus: pr.mergeStateStatus,
     isDraft: pr.isDraft,
+    // ⚠ THE QUEUE OUTRANKS EVERYTHING ELSE ON THIS LINE, and until now it never reached it.
+    // GitHub's MergeStateStatus enum has no QUEUED member, so a queued PR reports `blocked` —
+    // and this row, fed the synced status alone, answered "can this land?" with a list of
+    // protection reasons for a pull request GitHub was already landing. `inMergeQueue` collapses
+    // that to the `queued` verdict, which carries no blockers, so the Blocked row below empties
+    // itself for the same reason.
+    //
+    // ⚠ `=== true` IS THE WHOLE NULL POLICY. `null` is NOT OBSERVED, never "not queued": it
+    // becomes `false` here only in the sense that no claim is made, and the row falls back to
+    // exactly the verdict it printed before this field existed.
+    inMergeQueue: pr.inMergeQueue === true,
     blockFacts,
   });
   const showVerdict = pr.state === 'open';
   const blockers = showVerdict ? (verdict.blockers ?? []) : [];
+  // WHAT THE QUEUE IS DOING — the Pending board's own chip, imported, not re-worded. The verdict
+  // above can only say "in merge queue"; this says which of the five entry states GitHub has the
+  // PR in, and `unmergeable` — GitHub EJECTING the entry — is the one that earns the field. It was
+  // previously discoverable only by pressing Merge and reading the failure. So the chip REPLACES
+  // the verdict on this row whenever it renders: two ways of saying "queued", inches apart, is
+  // what the one-fact-one-place rule is for.
+  const queue = showVerdict ? pendingQueueBadge(pr) : null;
   const checks = pr.checkRuns;
   const counts = checks.reduce<Record<string, number>>((acc, c) => {
     acc[c.state] = (acc[c.state] ?? 0) + 1;
     return acc;
   }, {});
 
-  // Everyone who has SUBMITTED a review (any decisive OR commented state), with
-  // their latest review state — the Reviews row. An approval reads as a green ✓
-  // badge (REVIEWER_STATE_META.approved), so a separate Approvers row is redundant.
-  // pr.reviews is chronological (submittedAt asc), so the last entry per author
-  // wins. 'pending' reviews (an in-progress draft, never submitted) aren't a real
-  // review, so skip them; insertion order is preserved by the Map so reviewers stay
-  // first-seen.
-  const latestReviewState = new Map<number, ReviewState>();
-  for (const r of pr.reviews) {
-    if (r.authorId == null || r.state === 'pending') continue;
-    latestReviewState.set(r.authorId, r.state);
-  }
-  const reviewerIds = [...latestReviewState.keys()];
+  // Everyone who has SUBMITTED a review, and where they stand — the Reviews row. An approval
+  // reads as a green check (REVIEW_STATE_META.approved), so a separate Approvers row is redundant.
+  //
+  // ⚠ THE SERVER DECIDES THIS NOW. `pr.reviewStandings` is `computeReviewStandingsByPr`, the same
+  // fold the Pending card's reviewer chips and the approval COUNT come from. The rule it applies:
+  // a reviewer's latest VERDICT (approved / changes_requested) if they ever filed one, else their
+  // latest dismissal, else their latest comment.
+  //
+  // The fold that used to live here — "the last non-pending review per author wins" — read
+  // `pr.reviews` straight through, so a reviewer who approved and later left a bare comment was
+  // silently DEMOTED to `commented`. Measured against the server's rule: 59 disagreeing
+  // reviewer-PR pairs on this account's live open PRs, each one a screen saying "commented" one
+  // click away from a card saying "approved". There is no client rule left to disagree with.
+  const reviewerIds = pr.reviewStandings.map((r) => r.userId);
+  // Reviewers whose GitHub account is gone: counted by the server, unnameable here. Stated
+  // below rather than dropped — the row would otherwise understate how many people have looked.
+  const unnamedReviewers = pr.reviewerCount - pr.reviewStandings.length;
 
   // WS2 automated-reviewer provenance, folded per author. A ReviewDetail carries an
   // `automatedKind` when its author is classified automated (vendor / in_house), and 'pierre'
@@ -609,17 +601,54 @@ export function ChecksTab({
                 <span className="decorative-mark text-gray-300 dark:text-gray-600" aria-hidden>
                   |
                 </span>
-                <span
-                  className={`font-medium ${MERGE_TONE_CLASS[verdict.tone]}`}
-                  title={verdict.detail ?? undefined}
-                >
-                  {(verdict.tone === 'bad' || verdict.tone === 'warn') && (
-                    <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
-                  )}
-                  {verdict.label}
-                </span>
-                {verdict.detail && (
-                  <span className="text-xs text-gray-400">· {verdict.detail}</span>
+                {/* GitHub owns the landing, so the queue's own state IS the answer to "can this
+                    land?" — it replaces the verdict rather than sitting beside it. Red only for
+                    the ejection, which is a thing that HAPPENED and needs doing something about;
+                    the four healthy states are neutral, because waiting in a queue is not news.
+                    Position and ETA stay live-only (they move minute to minute, and this row is
+                    drawn from the synced PR row, which may not fetch). */}
+                {queue != null ? (
+                  <>
+                    <span
+                      className={`font-medium ${
+                        queue.tone === 'bad'
+                          ? 'text-red-700 dark:text-red-300'
+                          : 'text-gray-700 dark:text-gray-200'
+                      }`}
+                      title={queue.title}
+                    >
+                      {queue.tone === 'bad' ? (
+                        <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
+                      ) : (
+                        <MergeIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
+                      )}
+                      {queue.label}
+                    </span>
+                    {/* ⚠ THE ONE STATE THAT IS NEWS, SAID OUT LOUD RATHER THAN IN A TOOLTIP. An
+                        ejected entry was previously discoverable only by pressing Merge and
+                        reading the failure — the reported bug. The four healthy states keep
+                        their sentence in the chip's title: waiting in a queue explains itself. */}
+                    {queue.tone === 'bad' && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        · {queue.title}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span
+                      className={`font-medium ${MERGE_TONE_CLASS[verdict.tone]}`}
+                      title={verdict.detail ?? undefined}
+                    >
+                      {(verdict.tone === 'bad' || verdict.tone === 'warn') && (
+                        <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
+                      )}
+                      {verdict.label}
+                    </span>
+                    {verdict.detail && (
+                      <span className="text-xs text-gray-400">· {verdict.detail}</span>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -671,30 +700,49 @@ export function ChecksTab({
           </Row>
         )}
 
-        {/* Reviews = everyone who reviewed, with their latest-state badge (approvals already
-            read as a green ✓), plus the "only bots reviewed" coverage chip. */}
-      {reviewerIds.length > 0 && (
+        {/* Reviews = everyone who reviewed and where they stand, off the server's fold, plus the
+            "only bots reviewed" coverage chip. UNCAPPED — the pane has the room the card does
+            not, so there is no "+N" here and the only gap between the chips and `reviewerCount`
+            is the reviewers GitHub can no longer name. */}
+      {(pr.reviewStandings.length > 0 || unnamedReviewers > 0) && (
         <Row label="Reviews">
           <div className="flex flex-wrap gap-2 text-xs">
-            {reviewerIds.map((uid) => {
-              const u = usersById.get(uid);
-              const meta = REVIEWER_STATE_META[latestReviewState.get(uid)!];
-              const auto = automatedByAuthor.get(uid);
+            {pr.reviewStandings.map((r) => {
+              const u = usersById.get(r.userId);
+              // ⚠ ONE table, shared with the Pending board's chips (lib/ui.ts). It replaced a
+              // private copy here whose `dismissed` and `pending` inks were a bare gray-400 —
+              // 2.54:1 on white, so the one state that means "this no longer counts" was also
+              // the one nobody could read. `icon` is a COMPONENT reference, not an element.
+              const meta = REVIEW_STATE_META[r.standing];
+              const auto = automatedByAuthor.get(r.userId);
               return (
                 <span
-                  key={uid}
+                  key={r.userId}
                   className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 ${meta.cls}`}
-                  title={meta.title}
+                  title={`${meta.title} · ${dateTime(r.standingAt)}`}
                 >
-                  {meta.icon}
+                  {meta.icon && <meta.icon size={12} />}
                   <Avatar user={u} size={14} />
-                  <UserName user={u} fallbackId={uid} repoId={pr.repoId} />
+                  <UserName user={u} fallbackId={r.userId} repoId={pr.repoId} />
                   {auto && (
                     <AutomatedReviewerBadge kind={auto.kind} provenance={auto.provenance} />
                   )}
                 </span>
               );
             })}
+            {/* Counted by the server, unnameable here: GitHub gave the review no account. Never
+                seen on this account's data, and stating it is still cheaper than a row that
+                quietly says fewer people looked than did. */}
+            {unnamedReviewers > 0 && (
+              <span
+                className="inline-flex items-center rounded bg-gray-500/10 px-1.5 py-0.5 text-gray-500 dark:text-gray-400"
+                title="GitHub no longer has an account for these reviews, so they cannot be named here."
+              >
+                {unnamedReviewers === 1
+                  ? '1 review from a deleted account'
+                  : `${unnamedReviewers} reviews from deleted accounts`}
+              </span>
+            )}
             {onlyBotsReviewed && (
               <span
                 data-testid="only-bots-reviewed"

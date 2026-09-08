@@ -410,7 +410,15 @@ export default function App(): JSX.Element {
         {inboxActive && (
           <div
             data-testid="activity-overlay"
-            className="absolute inset-0 z-20 overflow-hidden bg-white dark:bg-gray-950"
+            // ⚠ `overflow-clip`, NOT `overflow-hidden`. `hidden` still creates a scroll
+            // CONTAINER — it only removes the scrollbar — so a descendant's `scrollIntoView`
+            // can write a scrollTop onto this box and the user has no gesture to undo it: the
+            // Pending board and the rail sit permanently pushed off the top. `clip` creates no
+            // scroll container at all, so that scrollTop is unwritable. The Activity pane owning
+            // its own containing block (see Activity/index.tsx) removes the phantom scroll range
+            // that made this reachable; this removes the mechanism itself, for every future
+            // descendant that scrolls something into view.
+            className="absolute inset-0 z-20 overflow-clip bg-white dark:bg-gray-950"
           >
             <ActivityView />
           </div>

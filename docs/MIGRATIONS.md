@@ -9,9 +9,10 @@
 
 `pnpm test` is SQLite-only. **No automated check ever executes a `migrations-pg/` file**, so a pg
 twin can be malformed, unregistered, or subtly divergent and every suite stays green. The single
-source of confidence is replaying it by hand into a throwaway database. Last done **2026-09-03** on
-**PostgreSQL 16.9**: core 45/45 + all **33** plugin twins, full table parity with SQLite (52 = 52),
-with `0030`–`0033` additionally exercised WITH DATA.
+source of confidence is replaying it by hand into a throwaway database. Last done **2026-09-07** on
+**PostgreSQL 16.9**: core 48/48 + all **33** plugin twins, full table parity with SQLite (the only
+absentee being `pro_migrations`, which the plugin's own runner creates rather than a `.sql` file),
+the newest core twins being `0046_merge_queue_state` and `0047_drop_my_turn_dismissals`.
 
 There is a **standing local Postgres** on `:5432` (the `bng-metric-backend-postgres-1` container,
 user/password `dev`/`dev`). Use a SEPARATE database inside it — never the app database that
@@ -230,10 +231,18 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is currently REPLAYED AND GREEN — see § Replaying the pg chain below.** Last
-  re-run **2026-09-03** on the standing local Postgres (16.x): core through `db:migrate`
-  (**46 applied = 46 journal entries**, the newest being `0045_pending_mute`) plus all **33**
-  plugin pg twins, including `0032_workspace_comparison_mode` and `0033_slack_target_bot_digest` —
-  applied clean and idempotent on a second pass.
+  re-run **2026-09-07** on the standing local Postgres (16.9): core through `db:migrate`
+  (**48 applied = 48 journal entries**, the newest being `0047_drop_my_turn_dismissals`) plus all
+  **33** plugin pg twins — applied clean, with `pull_requests` at 33 columns in BOTH dialects and
+  `my_turn_dismissals` confirmed ABSENT afterwards.
+  ⚠ **`0047_drop_my_turn_dismissals` is DESTRUCTIVE and ONE-WAY** — there is no down migration and no
+  archive step. It is safe only because the predicate that made the table necessary now exists
+  (docs/BACKEND.md § My Turn — the ball rule); a dismissal row has nothing left to mean.
+  ⚠ **`0046_merge_queue_state` is DDL-ONLY and was replayed as such, deliberately.** Unlike
+  `0045_pending_mute` it carries no FK, no backfill and no tenancy claim — two nullable columns with
+  NO DEFAULT — so there is nothing a WITH-DATA pass could prove that the column types do not. The
+  absent DEFAULT is the whole contract (null = "not observed", never "not queued") and is enforced
+  by `sync/upsert.ts`, not by the schema.
   ⚠ **`0045_pending_mute` was exercised WITH DATA, not just DDL**, because its whole tenancy claim
   is a COMPOSITE FK and a DDL-only replay proves nothing about one. Two accounts, one repo each:
   the legitimate `(900, repo 9000)` row inserted; the cross-account `(901, repo 9000)` pair was

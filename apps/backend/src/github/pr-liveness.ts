@@ -12,17 +12,29 @@
 // rather than throwing — a board that could not be freshened is a board rendering synced rows,
 // which is exactly what it rendered before this module existed.
 //
+// ⚠ MERGE-QUEUE MEMBERSHIP RIDES THE CHEAP PASS, ON A MEASUREMENT. `isInMergeQueue` is a stored
+// scalar and `mergeQueueEntry` a nullable object, not a connection, so the expectation was that
+// they behave like the rest of the cheap half — but that is inference, and this file measures. It
+// was A/B'd interleaved at 90 ids on 2026-09-07: 1 point either way, and the queue variant's
+// slowest run beat the baseline's slowest. The row is in PR_LIVENESS_NODES_QUERY's cost table.
+//
 // ⚠ TWO PASSES, TWO BATCH SIZES, AND THE REASON IS MEASURED WALL TIME, NOT POINTS. See the cost
 // table in the PR_LIVENESS_NODES_QUERY header: `mergeable`/`mergeStateStatus` are computed by
 // GitHub on demand (a trial merge per PR), so 50 ids asking for them 502s the gateway after ~11s
 // while 90 ids WITHOUT them answer in ~1.4s. Both cost exactly 1 point. The split is expressed as
 // one query with an `@include` directive rather than two constants precisely so the batch size
 // and the selection are chosen by the SAME flag and cannot drift apart.
+import type { MergeQueueEntryState } from '@pierre-review/shared';
 import {
   getGraphqlClientFor,
   graphqlTolerant,
   isRateLimitError,
 } from './client.js';
+// IMPORTED, never re-spelled. `mergeQueueEntryStateFrom` returns null for a state GitHub adds
+// later rather than storing the raw string, and both merge-queue write routes already stamp the
+// column through it — a second copy of that table here is how this sweep and the fat walk start
+// writing different values into one column from the same GitHub answer.
+import { mergeQueueEntryStateFrom } from '../sync/upsert.js';
 import { isLimited, noteBudget, noteLimited } from './rate-budget.js';
 import {
   PR_LIVENESS_NODES_QUERY,
@@ -68,6 +80,17 @@ export interface PrLivenessObservation {
     | 'behind'
     | 'has_hooks'
     | 'unknown';
+  /**
+   * Merge-queue membership, and the entry's state when there is one. THE TWO MOVE TOGETHER: both
+   * present, or both absent. `undefined` = GitHub told us nothing (the selection was nulled by a
+   * partial error, or a fixture predates it) — never conflated with a positive `false`, which is
+   * a repo with the queue switched off, a PR that just landed, or one GitHub ejected.
+   *
+   * A state of `null` alongside `inMergeQueue: true` is real: the entry exists in a state this
+   * codebase does not model. Membership is the fact to test; this is only ever the label.
+   */
+  inMergeQueue?: boolean;
+  mergeQueueEntryState?: MergeQueueEntryState | null;
 }
 
 export interface FetchPrLivenessOptions {
@@ -163,6 +186,18 @@ export function foldLivenessNode(
     ? MERGE_STATE_FROM[node.mergeStateStatus.toUpperCase()]
     : undefined;
   if (s) out.mergeStateStatus = s;
+  // Merge queue — the SAME three-state discriminator sync/upsert.ts uses, for the same reason.
+  // `isInMergeQueue` is `Boolean!` in GitHub's schema, so a null here can only be the field
+  // `graphqlTolerant` nulled after a partial error: nothing was said, so nothing is written. A
+  // positive `false` IS a statement and must reach the DB, or an ejected PR keeps claiming a
+  // queue place forever. Both fields are set together so the caller cannot write half an answer.
+  if (node.isInMergeQueue != null) {
+    out.inMergeQueue = node.isInMergeQueue;
+    // Not queued ⇒ no entry, whatever the (absent) object says.
+    out.mergeQueueEntryState = node.isInMergeQueue
+      ? mergeQueueEntryStateFrom(node.mergeQueueEntry?.state)
+      : null;
+  }
   return out;
 }
 

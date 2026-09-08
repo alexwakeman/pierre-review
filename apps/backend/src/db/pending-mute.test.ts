@@ -165,11 +165,14 @@ beforeAll(async () => {
     });
   }
 
-  // 3. threadsAwaiting on BETA, on a CLOSED PR. `ThreadAwaitingItem` carries no repo id and the
-  //    section does not filter on PR state, so this row is reachable ONLY through the
-  //    prId → repoId map — the exact case a "look it up among the open PRs" shortcut would miss.
-  const closedPr = await insertPr(repoId.beta!, 'thread-beta', {
-    state: 'closed',
+  // 3. threadsAwaiting on BETA. `ThreadAwaitingItem` carries no repo id, so this row's repo is
+  //    reachable ONLY through the prId → repoId map — the case a "reverse the repoFullName"
+  //    shortcut would get wrong (`repoNameById`'s own `repo <id>` fallback reverses to nothing).
+  //    ⚠ Its PR used to be CLOSED, back when this section did not filter on PR state. THE BALL
+  //    RULE added that filter (there is no action owed on a thread whose PR has landed), so a
+  //    closed PR here would make the fixture vacuous — the thread would simply not be returned.
+  const threadPr = await insertPr(repoId.beta!, 'thread-beta', {
+    state: 'open',
     isDraft: false,
     openedAt: new Date(now - 5 * DAY),
     updatedAt: new Date(now - 5 * DAY),
@@ -178,7 +181,7 @@ beforeAll(async () => {
     .insert(reviewThreads)
     .values({
       githubNodeId: 'RT_mute_beta',
-      prId: closedPr,
+      prId: threadPr,
       path: 'src/index.ts',
       isResolved: false,
       derivedState: 'replied_unresolved',
@@ -193,7 +196,7 @@ beforeAll(async () => {
     .values([
       {
         githubNodeId: 'RC_mute_beta_1',
-        prId: closedPr,
+        prId: threadPr,
         threadId: betaThreadId,
         authorId: viewerId,
         body: 'please take a look',
@@ -201,7 +204,7 @@ beforeAll(async () => {
       },
       {
         githubNodeId: 'RC_mute_beta_2',
-        prId: closedPr,
+        prId: threadPr,
         threadId: betaThreadId,
         authorId: aliceId,
         body: 'done',

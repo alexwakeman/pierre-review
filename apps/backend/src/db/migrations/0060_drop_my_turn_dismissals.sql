@@ -1,0 +1,33 @@
+-- DROP `my_turn_dismissals` — the "Done" button's table, and the whole dismissal subsystem with
+-- it. The Postgres twin is migrations-pg/0047_drop_my_turn_dismissals.sql.
+--
+-- ⚠ THIS IS DESTRUCTIVE AND ONE-WAY. There is no down migration and no archive: the rows are
+-- deleted when this runs (65 of them on the author's own database). Nothing reads them — the ball
+-- rule landed in `getMyTurn` first, so the table has already been inert for a release — but a
+-- restore from before this migration is the only way back.
+--
+-- WHY IT IS GOING. Each row said "I have seen this one", written by hand because the fold could
+-- not work it out: My Turn had no predicate for "you already acted on this PR", so a card the user
+-- had reviewed, replied to or pushed to went on claiming their turn, and the only way to clear it
+-- was to tell the app. That predicate now exists. THE BALL RULE — an action is owed only while
+-- nothing the viewer has done since the last related event discharges it — is state-derived and
+-- recomputed on every read, so a card leaves the board the moment the user does the work. The
+-- dismissal was compensation for a missing fold, and the fold is no longer missing.
+--
+-- AND IT WAS THE WRONG SHAPE ANYWAY. A dismissal never expired. Press "Done" on a review request
+-- and the request stayed dismissed while the work stayed real — the acknowledgement outlived the
+-- fact it acknowledged. That is ticket-queue behaviour: a list you maintain by hand, kept true by
+-- grooming it. This product's claim is the opposite one — the board is derived from GitHub, so it
+-- is right without being tended — and a button that let a user hide a fact from themselves was
+-- the one place the claim was false. Real evidence of this: on the author's account a PR whose
+-- ball was genuinely back in their court stayed invisible for weeks behind a stored dismissal.
+--
+-- WHAT WENT WITH IT, in the same change: POST /api/my-turn/dismiss, GET /api/my-turn/done,
+-- POST /api/my-turn/undismiss, `getCompletedDismissals`, `getActionableActivityIds` (which existed
+-- only to tell the "Done" tab whether restoring an entry would do anything), the SPA's Done button
+-- and the `dismissRefId` wire field. GET /api/my-turn is the only my-turn route left.
+--
+-- The two indexes go with the table; SQLite drops them automatically, and they are named here so
+-- a reader diffing this against 0002_famous_sersi.sql / 0008_multitenant_accounts.sql can see that
+-- nothing is left behind: `mtd_kind_ref_ux` (kind, ref_id) and `mtd_account_idx` (account_id).
+DROP TABLE `my_turn_dismissals`;

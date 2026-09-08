@@ -4,7 +4,6 @@ import type {
   LargePrThresholdBody,
   LargePrThresholdResponse,
   MeResponse,
-  MyTurnDismissBody,
 } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import {
@@ -24,27 +23,7 @@ import {
 } from '../../pro/contract.js';
 import { getAuthNotices } from '../../sync/auth-notices.js';
 import { isSeverityApiConfigured } from '../../ml/severity-client.js';
-import {
-  dismissMyTurn,
-  getCompletedDismissals,
-  getMyTurn,
-  undismissMyTurn,
-} from '../../db/queries.js';
-
-const dismissSchema = {
-  body: {
-    type: 'object',
-    required: ['kind', 'refId'],
-    additionalProperties: false,
-    properties: {
-      kind: {
-        type: 'string',
-        enum: ['review_request', 'thread', 'watched_repo_pr', 'pr_approved', 'claude_review'],
-      },
-      refId: { type: 'integer' },
-    },
-  },
-};
+import { getMyTurn } from '../../db/queries.js';
 
 const benchmarkConsentSchema = {
   body: {
@@ -282,24 +261,10 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // THE ONE my-turn ROUTE. Its three siblings — POST /dismiss, GET /done, POST /undismiss — are
+  // deleted along with the `my_turn_dismissals` table: an item leaves this inbox when the viewer
+  // ACTS on the PR, so there is nothing to mark seen, nothing to list as "done" and nothing to
+  // restore. Unscoped on purpose (see `getMyTurn`): the browser-notification watcher reads exactly
+  // this call.
   app.get('/api/my-turn', async (req) => getMyTurn(accountIdOf(req)));
-
-  app.post('/api/my-turn/dismiss', { schema: dismissSchema }, async (req) => {
-    const { kind, refId } = req.body as MyTurnDismissBody;
-    await dismissMyTurn(accountIdOf(req), kind, refId);
-    return { status: 'ok' };
-  });
-
-  // The "Done" tab: entries dismissed in the past 90 days (review_request + thread
-  // + claude_review).
-  app.get('/api/my-turn/done', async (req) =>
-    getCompletedDismissals(accountIdOf(req), 90),
-  );
-
-  // Un-dismiss: move a completed entry back to the inbox.
-  app.post('/api/my-turn/undismiss', { schema: dismissSchema }, async (req) => {
-    const { kind, refId } = req.body as MyTurnDismissBody;
-    await undismissMyTurn(accountIdOf(req), kind, refId);
-    return { status: 'ok' };
-  });
 }
