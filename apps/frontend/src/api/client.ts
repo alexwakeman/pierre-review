@@ -104,6 +104,7 @@ import type {
   PrMlLabelsResponse,
   MlEnrichmentStatus,
   ClosePrResult,
+  ReopenPrResult,
   PrMergeOptions,
   UpdateBranchBody,
   UpdateBranchResult,
@@ -588,6 +589,10 @@ export const api = {
   // Close a PR without merging (CORE / free tier). Reversible on GitHub.
   closePr: (prId: number) =>
     fetch(`/api/prs/${prId}/close`, jsonBody('POST', {})).then((r) => handle<ClosePrResult>(r)),
+  // Reopen a closed, unmerged PR (CORE / free tier). 409 when GitHub refuses — usually the head
+  // branch is gone; `handle` surfaces the server's message on the ApiError.
+  reopenPr: (prId: number) =>
+    fetch(`/api/prs/${prId}/reopen`, jsonBody('POST', {})).then((r) => handle<ReopenPrResult>(r)),
   updatePrBranch: (prId: number, body?: UpdateBranchBody) =>
     fetch(`/api/prs/${prId}/update-branch`, jsonBody('POST', body ?? {})).then((r) =>
       handle<UpdateBranchResult>(r),

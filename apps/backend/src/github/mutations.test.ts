@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { splitDiffByFile } from '../review/post-review.js';
-import { filesToUnifiedDiff } from './mutations.js';
+import { filesToUnifiedDiff, reopenPullRequest } from './mutations.js';
 
 // filesToUnifiedDiff is the fallback that rebuilds a unified diff from GitHub's per-file
 // /files endpoint when the whole-PR .diff media type 406s (>20,000 lines). The output must
@@ -65,5 +65,79 @@ describe('filesToUnifiedDiff', () => {
 
   it('is empty for no files (a genuinely empty change)', () => {
     expect(filesToUnifiedDiff([])).toBe('');
+  });
+});
+
+// ── reopenPullRequest ────────────────────────────────────────────────────────────────────────
+// The REST PATCH `{ state: 'open' }` behind `POST /api/prs/:id/reopen`. Only the ERROR MAPPING
+// earns a test, and one case earns it outright: GitHub refuses to reopen a PR whose head branch
+// was deleted — the ORDINARY aftermath of closing one — and the top-level `message` on that
+// refusal is the useless "Validation Failed" while the actual sentence is nested in `errors[]`.
+// The route prints whichever string arrives here verbatim (4xx bodies stay verbatim in cloud), so
+// taking the wrong one puts "Validation Failed" on the user's screen and nothing fails anywhere.
+//
+// `ghRestPatchStatus` goes straight to global `fetch`, so stubbing that is the whole harness.
+function stubFetch(status: number, body: unknown): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      status,
+      ok: status >= 200 && status < 300,
+      text: async () => (body == null ? '' : JSON.stringify(body)),
+    })),
+  );
+}
+
+describe('reopenPullRequest', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('PATCHes the pull request to state open', async () => {
+    stubFetch(200, { number: 7, state: 'open' });
+    await expect(reopenPullRequest('tok', 'acme', 'api', 7)).resolves.toEqual({ ok: true });
+    const call = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(call[0]).toBe('https://api.github.com/repos/acme/api/pulls/7');
+    expect(JSON.parse((call[1] as { body: string }).body)).toEqual({ state: 'open' });
+  });
+
+  it('⚠ takes GitHub’s NESTED sentence on a 422, not "Validation Failed"', async () => {
+    stubFetch(422, {
+      message: 'Validation Failed',
+      errors: [{ message: 'state cannot be changed. The foo branch was deleted.' }],
+    });
+    await expect(reopenPullRequest('tok', 'acme', 'api', 7)).resolves.toEqual({
+      ok: false,
+      // A 409 at the route: nothing is broken and no retry helps.
+      reason: 'not_reopenable',
+      message: 'state cannot be changed. The foo branch was deleted.',
+    });
+  });
+
+  it('reports a 403 as not_reopenable too (an archived repo), and a 404 as not_found', async () => {
+    stubFetch(403, { message: 'Repository was archived so is read-only.' });
+    await expect(reopenPullRequest('tok', 'acme', 'api', 7)).resolves.toMatchObject({
+      reason: 'not_reopenable',
+      message: 'Repository was archived so is read-only.',
+    });
+    vi.unstubAllGlobals();
+    stubFetch(404, { message: 'Not Found' });
+    await expect(reopenPullRequest('tok', 'acme', 'api', 7)).resolves.toMatchObject({
+      reason: 'not_found',
+    });
+  });
+
+  it('anything else is a plain error (the 502 arm)', async () => {
+    stubFetch(500, { message: 'Server Error' });
+    await expect(reopenPullRequest('tok', 'acme', 'api', 7)).resolves.toMatchObject({
+      reason: 'error',
+      message: 'Server Error',
+    });
+  });
+
+  it('falls back to the raw body when GitHub sends no JSON at all', async () => {
+    stubFetch(502, null);
+    const out = await reopenPullRequest('tok', 'acme', 'api', 7);
+    expect(out).toEqual({ ok: false, reason: 'error', message: '' });
   });
 });

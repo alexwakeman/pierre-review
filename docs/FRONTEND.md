@@ -413,18 +413,43 @@ Header carries **Show** + **Focus** links (drive the timeline). Tabs (Overview /
 Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claude Review / AI):
 - **Overview** — `ChecksTab.tsx`: CI/checks (each Actions check expands into the inline log
   viewer — see **Merge, CI logs & trunk status**), the **merge verdict** line (open PRs only,
-  from `mergeVerdict` — this row is where the old "mergeable" lie lived), a **Blocked** row on a
-  `blocked` PR only (the ranked candidate causes from `deriveMergeBlockers`, each chipped `proven`
-  or `inferred` with the reasoning under it, and the `unresolved_threads` row clickable through to
-  the Threads tab via `onOpenThreads`; ⚠ its thread count is `!isResolved` and therefore INCLUDES
+  from `mergeVerdict` — this row is where the old "mergeable" lie lived), a **Conflicts** row on
+  the `conflicts` verdict (open PRs only, gated by the pure `conflictsRowVisible(state, verdict)`
+  in `lib/ui.ts` — ⚠ **the gate is the RESOLVED verdict, never
+  `mergeStateStatus === 'dirty' || mergeable === 'conflicting'`**: `mergeVerdict` ranks the merge
+  QUEUE above its conflict test, so a raw-column gate would sprout a second answer to "can this
+  land?" directly under a Status row saying "in merge queue"; going through the verdict also
+  inherits the `state === 'open'` test, and a merged PR's stored merge state is stale. It renders
+  the **action, not the fact** — five words and a link out to the PR on GitHub — because the fact
+  is the red `conflicts` chip on the Status row directly above, whose `· detail` echo is
+  SUPPRESSED for this one verdict, the same replacement rule the queue chip uses; the sentence
+  survives on the chip's `title`. ⚠ It is **NOT** gated on `viewerCanPush`, unlike the Pending
+  `conflicts` CARD, which is writable-repos-only — a card is an ask, this row is a statement of
+  fact about a pane that is already open, and the Status chip states it to every reader anyway;
+  gating it would make the pane say less than its own first row. ⚠ It names **no branch**, because
+  it cannot without a fetch: `PrDetail` carries no base ref — `pull_requests.base_ref_name` is
+  synced but `getPrDetail` does not emit it — and `PrMergeOptions.baseRef` arrives only with the
+  click-gated merge-options call, which is why `MergeControl`'s expanded panel is where the branch
+  gets named. `mergeVerdict` itself needs and gets NO change), a **Blocked** row on a
+  `blocked` PR only (the ranked candidate causes from `deriveMergeBlockers`, ordered by a computed
+  certainty — proven first — that is deliberately NOT narrated: the PROVEN/INFERRED chip and the
+  note under each row were removed, and only the ordering survives; the `unresolved_threads` row is
+  clickable through to the Threads tab via `onOpenThreads`; ⚠ its thread count is `!isResolved` and therefore INCLUDES
   `likely_addressed`, which is why the Bots chips inches away say "N need a look" rather than "N
   unresolved" — the full three-count table and the never-assert-a-cause rules are in
   **docs/MERGE-CI-TRUNK.md § Why a blocked PR is blocked**), **Reviewers** (all who
   submitted a review, badged by latest state) above **Approvers** (latest decisive review =
   `approved`), then **Merged by**, **Requested** reviewers, labels, meta, an **Actions** row
-  (approve / `MergeControl` / `MergeWhenReadyControl` / `ClosePrControl` — the two merge controls
-  are handed the same `MergeBlockFacts` this tab built, so the merge button's own explanation stops
-  being the worst one on the screen) — then the PR **Summary** (markdown,
+  (approve / `MergeControl` / `MergeWhenReadyControl` / `ClosePrControl` / `ReopenPrControl` — the
+  two merge controls are handed the same `MergeBlockFacts` this tab built, so the merge button's own
+  explanation stops being the worst one on the screen. ⚠ **The Actions row is the ONE row that opens
+  on a CLOSED PR**, via `viewerCanReopen && state === 'closed'`: before `ReopenPrControl` its gate
+  was two `state === 'open'` disjuncts plus the un-state-gated `viewerCanApprove`, so a closed PR
+  you AUTHORED showed no actions at all while a closed PR somebody else authored showed one holding
+  just Approve. `ReopenPrControl` has **no confirm step**, unlike `ClosePrControl`: a reopen is the
+  undo of a close and is itself undone by the Close button beside it, so a two-click gate would be
+  ceremony around a reversible act. It prints GitHub's own refusal sentence when the 409 comes back
+  — normally the head branch was deleted after the close) — then the PR **Summary** (markdown,
   clamped to 3 lines, tall images hidden when collapsed). **PR comments** (oldest first) round the
   tab off — each with a "Show" link, a per-comment "Check review", and its AI annotations **BELOW**
   the comment (a judgement read before the thing it judges is backwards; it also matches the
@@ -1522,6 +1547,104 @@ verdict line is suppressed — the header's queue chip already said it.
   because those two are still unsynced by design (they change minute to minute) and reachable only
   through the click-gated merge-options call. MEMBERSHIP and ENTRY STATE are a different matter:
   see below.
+
+### The `conflicts` card — the third merge-state kind, and the one with no button
+
+GitHub cannot merge the PR: the head conflicts with its base. Not a summons like `my_turn`, not an
+opportunity like the two forward kinds — the only kind on this board with nothing to press, here or
+on GitHub. `KIND_LABEL.conflicts` is **"Merge conflicts"**, the spelling `REASON_META.merge_conflicts`
+already uses; do not mint a third.
+
+- ⚠ **THE POPULATION IS "REPOS YOU CAN PUSH TO", AND THAT IS THE WHOLE CARD.** The server mints it
+  only inside `writableRepoIds`. Measured: 474 open non-draft PRs conflict on a real account and 470
+  are in repos the viewer only READS. Without the gate the 15-row cap fills instantly with strangers'
+  stale branches and the reader's own conflicting PR is capped out — silently, because this kind
+  discloses no cap.
+- **No merge affordance, and that is the point.** `PendingConflictActions` is a SEPARATE component
+  from `PendingMergeActions`, never a widened one: `mergeVerdict` returns `canMerge: false` on both
+  mint predicates, GitHub 405s a merge on a conflicting branch, and "Update branch" cannot resolve a
+  conflict (`pendingMergeGate` already refuses it on an `update_branch` card whose
+  `mergeable === 'conflicting'`). It renders ONLY when an intent is already armed, and then only
+  `armedPhaseHeadline` + `MergeWhenReadyControl` with **`eager={false}`** — so the reader keeps the
+  Cancel for an intent parked at `waiting_conflicts`, at zero requests. It is never mounted un-armed:
+  that would offer to arm a watcher whose blocker only a human can clear.
+- **No `viewerCanPush` on the wire.** Write access IS the population, so the field would be a
+  constant `true` — and carrying it would invite a control on a card that has nothing to offer.
+- **`conflictsStateChip` is the one non-obvious display decision**, exported so a test can pin it.
+  The header already says "Merge conflicts", so `MERGE_STATE_LABEL.dirty` under it is one sentence
+  twice — suppressed. But the kind is minted on TWO predicates, and on the `mergeable === 'conflicting'`
+  arm GitHub's own state says something else (`blocked`), which the reader can get nowhere else on the
+  row — printed. `null`/`unknown` say nothing. ⚠ Do NOT route it through `mergeVerdict()` instead: its
+  queue branch runs first, so a queued conflicting PR would report `queued` and lose the conflict
+  statement — and the queue is already stated by `pendingQueueBadge` in the header.
+- ⚠ **It is NOT a forward kind.** Do not add it to `onlyForward` (`AttentionView`) — a conflicting PR
+  IS waiting on someone (its author), and the all-clear line would print "Nothing is waiting on you"
+  over a board of broken branches. Do not add it to `passesRelevanceLens` either: the lens narrows
+  `my_turn` and nothing else, and `pendingCardIsPersonal` must keep returning false for it — write
+  access to a repo is not ownership of a stranger's PR.
+- A conflicts card can share a `prId` with another kind. The tail sibling is **marked** by
+  `promotedPrIds` ("already in Do next"), never removed: `head ∪ tail === cards` is what keeps
+  "50 of 148" arithmetically true.
+- ⚠ **`INSIGHT_KINDS` in `useUrlState.ts` must carry `'conflicts'`** or `?attn=conflicts` is a
+  discarded parse — see the four touch points below.
+
+### "opened 3d" — the PR's own age on a Pending card
+
+`openedAgeLabel(iso)` (exported from `AttentionCards.tsx`) turns `InsightPrRef.openedAt` into
+"opened 3d". It is passed to `CardShell` as `openedAt` and **appended** to whatever `right` already
+holds; the "·" separator, the absolute `dateTime` tooltip and the null degradation live in the shell,
+once, so a kind that opts in cannot forget or double them.
+
+⚠ **AND `right` IS DROPPED WHEN IT SAYS THE SAME THING — `clockSaysMore(clockAt, openedAt)`.** A kind
+whose `right` IS a clock passes the instant it measures as `clockAt`; when that rounds to the same
+label as `openedAt`, the shell renders the NAMED age alone and drops the bare relative time. Nothing
+is lost — it was the same number — and the survivor says which clock it is.
+
+This is the one thing about this feature that no test could see, and it was found by opening the
+board: **ten of ten cards** on the reporting account's own workspace read "8 hours ago · opened 8h".
+Measured across the whole live database, **779 of 1,411 open non-draft PRs (55%) have no commit after
+the one they opened with** — a dependency bump is the common shape — so a forward card's
+`lastCommitAt` and its `openedAt` are the same instant; `my_turn` collapses identically whenever
+nobody has touched a PR since it appeared, because the ball arrived when it opened.
+
+- Two kinds pass `clockAt`: `my_turn` (`since`) and the shared `merge`/`update_branch` case
+  (`lastCommitAt`). `reviewer_routing` does NOT — its `right` is the string "unassigned", not a clock,
+  so it always renders and the age is simply appended. `conflicts` has no `right` at all.
+- ⚠ **TWO TESTS, AND-ed, because the two sides go through DIFFERENT FORMATTERS.** `right` renders
+  through `relativeTime` (hours→days at **24h**); the age renders through `ageLabel` (hours→days at
+  **48h**). The first cut compared two `ageLabel` strings and left a live 12-hour window — a head
+  commit 36–47h old on a PR opened 48–59h ago — printing "2 days ago · opened 2d", the exact
+  duplication it exists to remove. So the clock survives only when **the printed FIGURES differ**
+  (unit and number, each side through its own formatter) **and the LABELS differ**. The second half
+  is not redundant: 30.4h beside 30h prints "1 day ago · opened 30h", two different figures that
+  invite the reader to subtract a six-hour gap that is not there.
+- ⚠ Never compare the instants directly, and never compare one formatter's output against itself —
+  it is what the row PRINTS that the reader compares.
+- ⚠ An **unreadable `openedAt` keeps the clock** (`clockSaysMore` returns true): suppressing both
+  would leave the row with no time on it at all.
+
+- **It is a SIBLING of `ageLabel`, never a replacement.** `ageLabel` takes a SERVER-computed
+  `ageHours`; `openedAgeLabel` rounds here-side with the identical spelling
+  (`Math.round(ms / 3_600_000)`) so one PR can never read "waiting 47h" on one card and "opened 2d"
+  on another. ⚠ `ageLabel` does NOT round its argument — it interpolates it, so an unrounded float
+  lands on the card as "opened 3.7166666666666663h".
+- **Null, never "0h".** An unreadable or absent value renders no age at all; a future timestamp
+  (clock skew) clamps to "opened 0h".
+- **Four kinds carry it: `my_turn`, `reviewer_routing`, `merge`, `update_branch`** — plus `conflicts`,
+  which carries it as its ONLY clock (it has no `lastCommitAt` by design, and the shell's
+  `right != null` guard drops the separator so the row reads a bare "opened 3d").
+- ⚠ **FOUR OMISSIONS, EACH A DECISION.** `stalled_review` is the one where adding it would be
+  actively WRONG — its server `ageHours` is computed from `pull_requests.opened_at`, so "waiting 3d ·
+  opened 3d" is one number twice under two names. `untouched_thread`'s clock is the THREAD's
+  `created_at`, and the thread is that card's subject. `ci_failing` does not extend `InsightPrRef` and
+  carries no `openedAt`: on the `trunk` arm the subject is a REPOSITORY and the PR it names is the
+  MERGED landing PR of the red head. `reviewer_load`'s subject is a PERSON — `pendingPrs[]` is a list,
+  so there is no single PR to date.
+- ⚠ **It goes in `CardShell`'s right slot, NEVER in `PrMetaRow`.** `PrMetaRow` is exported and mounted
+  by a second surface (`Search/SearchResultsTab.tsx`) off a hand-adapted `PrMetaFields`; putting the
+  age there paints "opened 3d" on every cross-repo search result.
+- The `·` carries `decorative-mark` + `aria-hidden`. That is the ONLY sanctioned opt-out from
+  `test/textContrast.test.ts`, and a "·" between two metadata items is the case it exists for.
 
 ### What the card carries about the merge queue and the review
 

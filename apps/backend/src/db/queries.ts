@@ -25,6 +25,7 @@ import type {
   CiFailingCard,
   CiStatus,
   CommitDetail,
+  ConflictsCard,
   DerivedState,
   EventType,
   InsightCard,
@@ -4629,19 +4630,24 @@ export async function getWorkspaceInsights(
       // the hook for. It sits directly under my_turn for the same reason my_turn leads: a thing
       // you must do outranks a thing you might look at.
       ci_failing: 1,
-      bot_signal: 2, // the flagship "layer above your review bot" summary, next in its severity tier
-      bot_only_review: 3, // the governance "only a bot reviewed this" risk, right after
-      stalled_review: 4,
-      untouched_thread: 5,
-      reviewer_load: 6,
-      reviewer_routing: 7,
+      // A concrete, resolvable blocker on ONE pull request in a repo you can push to — nearer the
+      // two viewer-scoped kinds above than to the workspace surveys below. ⚠ The sort is severity
+      // FIRST and kindRank second, so a `high` conflicts card sits with my_turn/ci_failing and a
+      // `warn` one with the stalled reviews.
+      conflicts: 2,
+      bot_signal: 3, // the flagship "layer above your review bot" summary, next in its severity tier
+      bot_only_review: 4, // the governance "only a bot reviewed this" risk, right after
+      stalled_review: 5,
+      untouched_thread: 6,
+      reviewer_load: 7,
+      reviewer_routing: 8,
       // ⚠ THE TWO "FORWARD" KINDS RANK LAST WITHIN THEIR SEVERITY TIER, and that is not a
       // demotion — it is the board's severity sort staying honest. "You could merge this" is an
       // opportunity, and every kind above it is a problem; the RANKED HEAD is where these rows get
       // to lead, on proximity rather than severity. The two orderings answer different questions
       // and must not be made to agree.
-      merge: 8,
-      update_branch: 9,
+      merge: 9,
+      update_branch: 10,
     };
     const sevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
     cards.sort(
@@ -5302,6 +5308,9 @@ export async function getWorkspaceInsights(
       // NOT OBSERVED, never "fine".
       mergeable: pullRequests.mergeable,
       mergeStateStatus: pullRequests.mergeStateStatus,
+      // The conflicts card NAMES THE BRANCH ("Conflicts with main"). Nullable — a row synced
+      // before the column existed falls back to "the base branch" rather than inventing one.
+      baseRefName: pullRequests.baseRefName,
       // GitHub's own review verdict, carried beside OUR fold of the review rows (`prRef` reads
       // both and keeps them apart) — and the merge-queue pair, which is the only way a card can
       // know a PR is queued without fetching: `mergeStateStatus` reads 'blocked' either way.
@@ -5543,6 +5552,12 @@ export async function getWorkspaceInsights(
     for (const p of openPrs) {
       const state = p.mergeStateStatus as MergeStateStatus | null;
       if (state == null) continue;
+      // ⚠ CONFLICTS OUTRANK 'behind', the same precedence `mergeVerdict()` applies (lib/ui.ts,
+      // where the conflicts test runs before draft, blocked and behind). GitHub's own
+      // `canUpdateBranch` is "behind AND NOT conflicting" (PrMergeOptions), so an Update-branch
+      // button on a conflicting PR is a button GitHub refuses — and without this guard a
+      // hypothetical behind+conflicting row would be TWO cards for one PR.
+      if (state === 'dirty' || (p.mergeable as Mergeable | null) === 'conflicting') continue;
       if (state === 'behind') candidates.push({ p, kind: 'update_branch' });
       else if (
         READY_MERGE_STATES.has(state) &&
@@ -5632,6 +5647,72 @@ export async function getWorkspaceInsights(
     }
   }
 
+  // ── conflicts cards (CORE, deterministic, no AI) ──────────────────────────────
+  // GITHUB CANNOT MERGE THIS PR: the head conflicts with the base. The third shape on this board —
+  // not a summons like my_turn, not an opportunity like the two forward kinds — and the only one
+  // with NO action behind it: GitHub offers no resolve button either, so the card states the fact
+  // and stops. Before this it was legible ONLY as a chip on PR detail's Checks row.
+  //
+  // ⚠ WRITE ACCESS IS THE POPULATION, NOT A DECORATION. Measured on the reporting account: 474
+  // open non-draft PRs conflict and 470 are in repos the viewer only READS. The gate is
+  // `writableRepoIds` — the ONE WRITE_PERMISSIONS set — never `viewerMaintainedRepoIds`, whose
+  // union also counts "has landed a PR on the default branch" and would put 470 strangers'
+  // stuck branches on the board.
+  //
+  // ⚠ THE PREDICATE IS AN OR OVER TWO COLUMNS, AS A JS FOLD. `mergeStateStatus = 'dirty'` and
+  // `mergeable = 'conflicting'` agree on all 474 real rows, but NULL means NOT OBSERVED in both,
+  // and a SQL predicate would drop exactly the rows we have not asked about yet.
+  //
+  // ⚠ IT INHERITS `openPrs`' POPULATION, INCLUDING NON-DRAFT: 72 conflicting DRAFTS get no card,
+  // deliberately and like every other kind here.
+  {
+    const conflictSeeds: { card: ConflictsCard; sortAt: number }[] = [];
+    for (const p of openPrs) {
+      if (!writableRepoIds.has(p.repoId)) continue;
+      const state = p.mergeStateStatus as MergeStateStatus | null;
+      if (state !== 'dirty' && (p.mergeable as Mergeable | null) !== 'conflicting') continue;
+      // ⚠ NO `maintainedRepoIds()` CALL, AND THAT IS NOT AN OMISSION: `writableRepoIds` ⊆ that set
+      // by construction (viewerMaintainedRepoIds adds every WRITE_PERMISSIONS repo before it adds
+      // the merge-history proxy), so a card that exists at all is at LEAST 'maintained' and 'none'
+      // is unreachable. Resolving it here would buy the same answer for an account-wide `repos`
+      // select plus getMergers.
+      const relevance: MyTurnRelevance =
+        viewerId != null && p.authorId === viewerId ? 'direct' : 'maintained';
+      addUser(p.authorId);
+      conflictSeeds.push({
+        sortAt: (p.lastCommitAt ?? p.openedAt).getTime(),
+        card: {
+          ...prRef(p, standingsByPr.get(p.id)),
+          id: `conflicts:${p.id}`,
+          kind: 'conflicts',
+          // The ci_failing split, one object over: your own PR is 'high' (your code, your rebase);
+          // somebody else's in a repo you can push to is 'warn' — real, but not your turn.
+          severity: relevance === 'direct' ? 'high' : 'warn',
+          mergeStateStatus: state,
+          mergeable: (p.mergeable as Mergeable | null) ?? null,
+          relevance,
+          // NAME THE THING. Code-written, time-free, and it stops at the fact.
+          detail: `Conflicts with ${p.baseRefName ?? 'the base branch'}`,
+        },
+      });
+    }
+    // ⚠ RELEVANCE-FIRST, THEN NEWEST — the merge block's rule and for its reason: the cap below is
+    // applied before anything else sees these rows, so sorting by age alone would let fifteen
+    // strangers' stale branches bury the viewer's own conflicting PR.
+    const conflictRelRank: Record<MyTurnRelevance, number> = { direct: 0, maintained: 1, none: 2 };
+    conflictSeeds.sort(
+      (a, b) =>
+        conflictRelRank[a.card.relevance] - conflictRelRank[b.card.relevance] ||
+        b.sortAt - a.sortAt ||
+        a.card.repoFullName.localeCompare(b.card.repoFullName),
+    );
+    // ⚠ THE SLICE IS OURS TO CALL — there is no central cap in this function. Silent, like the
+    // survey kinds: no `conflictsTotal` ships, because the strip counts what is WAITING ON YOU and
+    // a stranger's conflicting branch in a repo you can push to is not that. Measured population
+    // after the write gate: 4.
+    for (const seed of conflictSeeds.slice(0, INSIGHT_CARD_CAP)) cards.push(seed.card);
+  }
+
   if (openPrIds.length === 0) return finish();
 
   // Pending review requests (GitHub drops the request once a review lands → still-pending).
@@ -5661,6 +5742,11 @@ export async function getWorkspaceInsights(
     // LOAD-BEARING: pendingByPr/pendingByReviewer stay USER-only — their values flow into
     // requestedReviewerIds: number[] on the wire and reviewer_load card ids (a null leaked
     // here mints a bogus 'load:null' card).
+    //
+    // ⚠ AND THEY DIVERGE DOWNSTREAM: `pendingByPr` is the stalled card's "who is on the hook"
+    // (every outstanding request, re-requests included); the reviewer_load card reads a NARROWED
+    // copy built at block (3) that drops pairs the reviewer has already reviewed. Do not fold the
+    // narrowing up into this loop — it would silently change the stalled card too.
     if (r.userId == null) continue;
     const a = pendingByPr.get(r.prId) ?? [];
     a.push(r.userId);
@@ -5670,14 +5756,28 @@ export async function getWorkspaceInsights(
     pendingByReviewer.set(r.userId, b);
   }
 
-  // PRs that already have a submitted review (used by the routing "orphan" test).
+  // PRs that already have a submitted review (used by the routing "orphan" test) AND the
+  // (reviewer, PR) pairs behind them (used by the reviewer_load narrowing below). ONE query:
+  // two extra COLUMNS on a select that already scans `reviews` over `openPrIds`, not a second
+  // round trip.
   const reviewedPrIds = new Set<number>();
+  /** `${prId}:${authorId}` — "this reviewer has already spoken on this PR". */
+  const reviewedPairs = new Set<string>();
   for (const r of await db
-    .select({ prId: reviews.prId })
+    .select({ prId: reviews.prId, authorId: reviews.authorId, state: reviews.state })
     .from(reviews)
     .where(inArray(reviews.prId, openPrIds))
-    .execute())
+    .execute()) {
+    // ⚠ UNCHANGED SEMANTICS. The orphan test asks "has ANYBODY looked at this PR", so every row
+    // counts whatever its state and whoever wrote it (a null author is a deleted GitHub account
+    // and still means somebody looked). Never narrow this set to match the pair set below.
     reviewedPrIds.add(r.prId);
+    // ⚠ …but a 'pending' row is a review DRAFT that was never submitted — it says nothing about
+    // where the reviewer stands (the same rule `computeReviewStandingsByPr` applies), so it must
+    // not discharge a review request. Zero 'pending' rows exist in the reporting account's 20,317
+    // reviews (sync persists only submitted ones), so this is a guard, not a filter.
+    if (r.authorId != null && r.state !== 'pending') reviewedPairs.add(`${r.prId}:${r.authorId}`);
+  }
 
   // Sprint review load per reviewer (reviews submitted on the workspace's PRs in the window).
   const reviewsThisSprint = new Map<number, number>();
@@ -5793,10 +5893,40 @@ export async function getWorkspaceInsights(
   }
 
   // (3) REVIEWER LOAD — ranked by pending-queue depth, with sprint load alongside.
-  const loadCards = [...pendingByReviewer.keys()]
+  //
+  // ⚠ ITS POPULATION IS NARROWER THAN `pendingByReviewer`, AND ONLY HERE. A (reviewer, PR) pair
+  // stops being review DEBT the moment that reviewer has spoken on the PR, or GitHub's own
+  // verdict on the PR is `approved`. These rows are LIVE, not stale — `sync/upsert.ts` reconciles
+  // `review_requests` by delete + reinsert on every walk, so the pair means GitHub is re-requesting
+  // somebody who already reviewed. MEASURED on the reporting account: 70 of 334 outstanding user
+  // pairs on open non-draft PRs, plus 6 more on `approved` PRs; one reviewer's card read
+  // "24 pending reviews" of which 16 were PRs they had already reviewed.
+  //
+  // ⚠ THE NARROWING STOPS AT THIS MAP. `pendingByPr`, `requestedPrIds` and `teamNamesByPr` are
+  // DELIBERATELY untouched: they answer "who is on the hook", which a re-request still is.
+  // Narrowing `pendingByPr` would print "waiting on — no reviewer requested" on 38 measured
+  // stalled_review cards whose PRs carry live outstanding requests (none of the 38 has a team
+  // fallback), and narrowing `requestedPrIds` would move PRs onto the orphan path and break the
+  // agreement with `getSuggestedReviewersBasis`' `wants` gate that the comment above pins.
+  const unreviewedByReviewer = new Map<number, number[]>();
+  for (const [rid, prIds] of pendingByReviewer) {
+    // The `new Set` is defensive: `review_requests` carries no unique index and
+    // `stampReviewRequests` is the only guard against a duplicate pair. Three duplicate pairs
+    // exist on the reporting account today, all on merged/closed PRs, so it cannot fire here —
+    // but a duplicate would inflate `pendingCount` AND repeat a `key={p.prId}` row in the card.
+    const open = [...new Set(prIds)].filter(
+      (prId) =>
+        !reviewedPairs.has(`${prId}:${rid}`) && prById.get(prId)?.reviewDecision !== 'approved',
+    );
+    if (open.length > 0) unreviewedByReviewer.set(rid, open);
+  }
+  // ⚠ ONE MAP FEEDS BOTH THE COUNT AND THE LIST — the FILTER-THE-SEED rule. `pendingCount` and
+  // `pendingPrs` are two reads of THIS map, never narrowed independently, and `pendingByReviewer`
+  // has NO reader below this line.
+  const loadCards = [...unreviewedByReviewer.keys()]
     .map((rid) => ({
       rid,
-      pending: pendingByReviewer.get(rid)?.length ?? 0,
+      pending: unreviewedByReviewer.get(rid)?.length ?? 0,
       sprint: reviewsThisSprint.get(rid) ?? 0,
     }))
     .filter((x) => x.pending >= 1)
@@ -5804,7 +5934,7 @@ export async function getWorkspaceInsights(
     .slice(0, 8);
   for (const x of loadCards) {
     addUser(x.rid);
-    const pendingPrs = (pendingByReviewer.get(x.rid) ?? [])
+    const pendingPrs = (unreviewedByReviewer.get(x.rid) ?? [])
       .map((id) => prById.get(id))
       .filter((p): p is NonNullable<typeof p> => p != null)
       .slice(0, 8)
@@ -7743,10 +7873,15 @@ export async function getPrDetail(
   const viewerCanPush = ['WRITE', 'MAINTAIN', 'ADMIN'].includes(
     repo.viewerPermission ?? '',
   );
-  // Whether the viewer may CLOSE this PR: WRITE+ on the repo OR they authored it (GitHub
-  // lets an author close their own PR without push access). The close route re-checks.
-  const viewerCanClose =
+  // Whether the viewer may CLOSE or REOPEN this PR: WRITE+ on the repo OR they authored it
+  // (GitHub lets an author do both to their own PR without push access). One expression, two
+  // named fields — the rules are the same TODAY and are asked at different moments, and the
+  // route re-checks each one server-side. Neither flag encodes the PR's state; the Overview
+  // gates Close on `state === 'open'` and Reopen on `state === 'closed'`.
+  const viewerIsAuthorOrWriter =
     viewerCanPush || (viewerUserId != null && viewerUserId === pr.authorId);
+  const viewerCanClose = viewerIsAuthorOrWriter;
+  const viewerCanReopen = viewerIsAuthorOrWriter;
 
   // The viewer's STANDING review: their LATEST decisive review (approved /
   // changes_requested / dismissed; 'commented'/'pending' don't count). reviewRows is
@@ -7826,6 +7961,7 @@ export async function getPrDetail(
     viewerCanApprove,
     viewerCanPush,
     viewerCanClose,
+    viewerCanReopen,
     viewerHasApprovedStanding,
     threads,
     reviews: reviewsOut,
@@ -8814,6 +8950,70 @@ export async function markPrClosedLocally(prId: number, accountId: number): Prom
     .set({ state: 'closed', closedAt: new Date(), mergeStateStatus: 'unknown' })
     .where(and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)))
     .execute();
+}
+
+/**
+ * Optimistic stamp for a reopen: state → 'open', closedAt → NULL, mergeStateStatus → 'unknown'.
+ * The inverse of markPrClosedLocally, and it is not a one-line mirror of it for two reasons.
+ *
+ * ⚠ `closedAt` MUST BE NULLED, not left behind. `db/automation-output.ts` counts
+ * `prs_closed_unmerged` as `mergedAt IS NULL` inside a `closedAt` window — it never reads
+ * `state` — so a reopened PR carrying its old close stamp is reported forever as abandoned
+ * churn. `persistPr` writes `closedAt` unconditionally from GitHub, so the next full walk
+ * agrees with this either way; the point is the fifteen minutes before it.
+ *
+ * ⚠ `mergeStateStatus` GOES TO 'unknown', NEVER TO A GUESS. GitHub recomputes mergeability
+ * asynchronously after a reopen and the stored value predates the close. Same write, same
+ * reason, as the close stamp.
+ *
+ * ⚠ AND THE EVENT, WHICH IS WHY THIS IS A TRANSACTION. `sync/upsert.ts`'s
+ * `lifecycleTransitions` emits `pr_reopened` only when the PRE-UPSERT row reads 'closed'. The
+ * moment this function writes 'open', every later sync sees prev==='open' and the transition is
+ * lost PERMANENTLY — a reopen through Pierre would never appear on the timeline or the feed,
+ * while a reopen done on github.com still would. So we emit it here, with the SAME dedupeKey
+ * shape upsert.ts uses (`pr_reopened:<prNodeId>`) and the same conflict target, so the two
+ * writers are idempotent against each other if a sync ever does reach the branch.
+ *
+ * Account-scoped in its own predicate (id-addressed writes carry their own isolation here
+ * rather than inheriting the caller's). `actorUserId` is the viewer's local user id, passed in
+ * by the route exactly as markPrMergedLocally takes `mergedById`.
+ */
+export async function markPrReopenedLocally(
+  prId: number,
+  accountId: number,
+  actorUserId: number | null,
+): Promise<void> {
+  await runTransaction(async (tx) => {
+    const rows = await tx
+      .update(pullRequests)
+      .set({ state: 'open', closedAt: null, mergeStateStatus: 'unknown' })
+      .where(and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)))
+      .returning({ repoId: pullRequests.repoId, nodeId: pullRequests.githubNodeId })
+      .execute();
+    const row = rows[0];
+    if (!row) return; // not ours / gone — nothing stamped, nothing to narrate
+    const occurredAt = new Date();
+    await tx
+      .insert(events)
+      .values({
+        accountId,
+        repoId: row.repoId,
+        actorId: actorUserId,
+        prId,
+        type: 'pr_reopened',
+        // `Date.now()` is the honest answer here — we ARE the event. The sync's version of this
+        // row uses pr.updatedAt because that is the closest signal it has after the fact.
+        occurredAt,
+        refTable: 'pull_requests',
+        refId: prId,
+        dedupeKey: `pr_reopened:${row.nodeId}`,
+      })
+      .onConflictDoUpdate({
+        target: [events.accountId, events.dedupeKey],
+        set: { actorId: actorUserId, occurredAt },
+      })
+      .execute();
+  });
 }
 
 // Resolve a set of user ids to their GitHub logins for a reviewer request. Bots are

@@ -585,7 +585,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   }
   if (mutating) {
     // Writes that reach GitHub: thread replies/resolves, PR and inline review comments,
-    // approvals, closes, CI re-runs, reviewer requests, merges, merge-queue
+    // approvals, closes and reopens, CI re-runs, reviewer requests, merges, merge-queue
     // enqueue/dequeue, auto-merge arm/disarm, branch updates, bulk bot-thread resolves.
     //
     // Every route is listed by its EXACT path segment, because the alternation is matched
@@ -601,7 +601,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
     // the first (the alternation has no trailing anchor): relying on that coincidence is how
     // a later tightening of the regex silently drops two GitHub-write routes onto the
     // 600/min read tier. `review-comment` is spelled out for the same reason rather than
-    // leaning on a `reviews?` prefix. Arming auto-merge is a DB write, but disarm/arm both
+    // leaning on a `reviews?` prefix. `reopen` is listed for the same reason and one more:
+    // `close` does NOT prefix-match it, so there is no coincidence to fall back on at all —
+    // omit it and the reopen route silently takes the 600/min `read` bucket while spending a
+    // GitHub REST write per call. Arming auto-merge is a DB write, but disarm/arm both
     // re-check mergeability against GitHub and the watcher merges on the account's quota, so
     // it belongs in the same bucket as an explicit merge.
     //
@@ -609,7 +612,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
     const hitsGithub =
       path.startsWith('/api/threads/') ||
       path.startsWith('/api/bot-threads/') ||
-      /^\/api\/prs\/\d+\/(review-comment|comments?|approve|close|ci\/rerun|request-reviewers|merge-queue|merge|auto-merge|update-branch|resolve-bot-threads|reviews)/.test(
+      /^\/api\/prs\/\d+\/(review-comment|comments?|approve|close|reopen|ci\/rerun|request-reviewers|merge-queue|merge|auto-merge|update-branch|resolve-bot-threads|reviews)/.test(
         path,
       );
     if (hitsGithub) return [TIERS.githubWrite];

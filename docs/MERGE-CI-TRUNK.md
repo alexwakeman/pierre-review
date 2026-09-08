@@ -36,7 +36,10 @@ answer; absent (the lean timeline PR doesn't carry it) the reason stays generic,
   `mergeStateStatus ∈ READY_MERGE_STATES {clean, has_hooks, unstable}` — **that set and
   `mergeVerdict`'s `canMerge` must agree**, or the triage queue and the PR disagree about the
   same PR.
-- Consumers: `ChecksTab` (Overview verdict row, open PRs only), `MergeControl`,
+- Consumers: `ChecksTab` at **TWO sites** — the Overview Status chip (open PRs only) and the
+  **Conflicts** row's gate, `conflictsRowVisible(state, verdict)`, which consumes the RESOLVED
+  verdict rather than re-reading `mergeStateStatus`/`mergeable` so the merge queue keeps outranking
+  the conflict test — then `MergeControl`,
   `Activity/RepoOpenPrList` + `Timeline/prBar` via **`mergeVerdictWarning()`**.
   **Landmine:** `mergeVerdict` returns `draft` before it looks at behind/blocked, and `draft`
   is not a compact warning — so a draft that was ALSO behind lost its ⚠ on the dense surfaces.
@@ -119,7 +122,15 @@ Rules, each of which the measured data forced:
   `merge/auto-merge-runner.ts` already makes when it labels an armed intent's wait), then checks
   that haven't reported, then threads.
 - **Populated for `blocked` ONLY.** Every other verdict is already a complete sentence about
-  itself; a one-row list under "resolve the conflicts with the base branch" is noise.
+  itself; a one-row list under "resolve the conflicts with the base branch" is noise. ⚠ **The rule
+  stands, and the Conflicts row does not bend it.** `conflicts` now has its own Overview Row — but
+  what that row carries is an **ACTION** (five words and a link out to the PR on GitHub), not a
+  ranked list of candidate causes. `blocked` needs `blockers[]` because GitHub refuses to say what
+  it is enforcing; a conflict names itself, so there is nothing to rank. That is also why the row
+  earns its place only in exchange for the Status chip's `· detail` echo being SUPPRESSED for this
+  one verdict — otherwise the same five words print twice an inch apart. **Do not give the conflicts
+  verdict a `blockers` array** to make the two rows look alike: `mergeBlockers.test.ts` asserts
+  `blockers` is `undefined` for `dirty` among five other statuses.
 
 **`MergeBlockFacts` is one OPTIONAL OBJECT on `MergeVerdictInput`, and its presence is the
 signal.** The compact surfaces (`Timeline/prBar`, `RepoOpenPrList`, the Pending cards) are fed a
@@ -404,7 +415,8 @@ queue disabled after arming falls back to the direct merge):
   fails; a human's own entry (`enqueuedAt` null) is never touched.
 
 **Client side — the ONE way to arm is `MergeWhenReadyControl`**, a dedicated button beside
-Merge/Close in the Overview Actions row (`MergeControl` keeps its richer armed panel + cancel,
+Merge/Close/Reopen in the Overview Actions row (Reopen renders only on a CLOSED PR, so it and the
+arm button are never on screen together — no fourth control competes for that row) (`MergeControl` keeps its richer armed panel + cancel,
 but no arm button — two arm entries meant two strategy defaults). It fetches merge-options
 EAGERLY on mount (SAME query key as MergeControl, 30s staleTime — one fetch serves both; the
 3-GitHub-call cost per viewed eligible PR is accepted because the user is looking at this PR),

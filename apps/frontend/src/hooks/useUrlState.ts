@@ -57,6 +57,7 @@ export const INSIGHT_KINDS: readonly InsightKind[] = [
   'reviewer_routing',
   'merge',
   'update_branch',
+  'conflicts',
   'bot_signal',
   'bot_only_review',
 ];

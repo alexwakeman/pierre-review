@@ -727,6 +727,42 @@ export async function closePullRequest(
   return { ok: false, reason: res.status === 404 ? 'not_found' : 'error', message };
 }
 
+export type ReopenPrOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'not_reopenable' | 'error'; message: string };
+
+// Reopen a closed, unmerged PR (REST PATCH `{ state: 'open' }`) — the exact inverse of
+// closePullRequest, same endpoint, same permission rule (author OR write+), re-checked by the
+// caller. No head-SHA pin: reopening asserts nothing about the code.
+//
+// ⚠ 422 IS A REAL, EXPECTED ANSWER AND ITS USEFUL TEXT IS NESTED. GitHub refuses to reopen a PR
+// whose HEAD BRANCH has been deleted (the ordinary aftermath of a close), and refuses on an
+// archived repo. The top-level `message` on those is "Validation Failed" — useless on screen —
+// while `errors[0].message` is the actual sentence ("state cannot be changed. …"). Prefer the
+// nested one so the UI can state the fact instead of narrating a shrug. Reported as
+// `not_reopenable` so the route can answer 409 rather than 502: nothing is broken, the reopen is
+// simply not available.
+export async function reopenPullRequest(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+): Promise<ReopenPrOutcome> {
+  const res = await ghRestPatchStatus(token, `/repos/${owner}/${name}/pulls/${number}`, {
+    state: 'open',
+  });
+  if (res.ok) return { ok: true };
+  const j = (res.json ?? {}) as { message?: string; errors?: { message?: string }[] };
+  const message = j.errors?.find((e) => e.message)?.message ?? j.message ?? res.text.slice(0, 300);
+  const reason =
+    res.status === 404
+      ? 'not_found'
+      : res.status === 422 || res.status === 403
+        ? 'not_reopenable'
+        : 'error';
+  return { ok: false, reason, message };
+}
+
 export type UpdateBranchOutcome =
   | { ok: true }
   | { ok: false; reason: 'head_moved' | 'conflicts' | 'error'; message: string };

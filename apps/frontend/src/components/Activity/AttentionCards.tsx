@@ -3,6 +3,7 @@ import { useIsMutating } from '@tanstack/react-query';
 import type {
   AutomatedReviewerKind,
   CiFailingCard,
+  ConflictsCard,
   InsightCard,
   InsightPrRef,
   InsightReviewer,
@@ -102,6 +103,11 @@ export const KIND_LABEL: Record<InsightCard['kind'], string> = {
   // because neither makes an ownership claim to soften.
   merge: 'Ready to merge',
   update_branch: 'Behind trunk',
+  // ⚠ ONE SPELLING. `REASON_META.merge_conflicts.label` in lib/ui.ts is already 'Merge conflicts';
+  // do not mint a third ('Conflicting', 'Needs a rebase'). And `cardKindLabel` is deliberately NOT
+  // extended for this kind — that function softens OWNERSHIP claims, and this one claims nothing
+  // about the reader.
+  conflicts: 'Merge conflicts',
 };
 
 /** GitHub's protection-aware merge state, as a short chip label. Transplanted from the deleted
@@ -118,6 +124,27 @@ const MERGE_STATE_LABEL: Record<MergeStateStatus, string | null> = {
   has_hooks: 'has hooks',
   unknown: null,
 };
+
+/**
+ * THE SECOND FACT ON A CONFLICTS CARD, or nothing.
+ *
+ * The header already says "Merge conflicts", so repeating `MERGE_STATE_LABEL.dirty` under it is the
+ * same sentence twice on the one board where every line has to earn its width. But the kind is
+ * minted on TWO predicates — `mergeStateStatus === 'dirty'` OR `mergeable === 'conflicting'` — and
+ * on the second arm GitHub's own state says something else ('blocked'), which the reader cannot get
+ * from anywhere else on the row. So: suppress it on the `dirty` arm, print it on the other.
+ *
+ * ⚠ `null` IS "NOT OBSERVED" AND SAYS NOTHING, exactly like 'unknown'. The card can be minted off
+ * `mergeable` alone, and a state GitHub has not computed is not a fact to print.
+ *
+ * ⚠ DO NOT ROUTE THIS THROUGH `mergeVerdict()` INSTEAD. Its queue branch runs first, so a
+ * conflicting PR sitting in GitHub's merge queue would report 'queued' and LOSE the conflict
+ * statement — and the queue is already stated by `pendingQueueBadge` in the header row.
+ */
+export function conflictsStateChip(card: Pick<ConflictsCard, 'mergeStateStatus'>): string | null {
+  if (card.mergeStateStatus == null || card.mergeStateStatus === 'dirty') return null;
+  return MERGE_STATE_LABEL[card.mergeStateStatus];
+}
 
 /** The header chip for GitHub's own merge queue. */
 export interface PendingQueueBadge {
@@ -289,6 +316,125 @@ export function myTurnReasonLabel(card: MyTurnCard): string {
 function ageLabel(hours: number): string {
   if (hours < 48) return `${hours}h`;
   return `${Math.round(hours / 24)}d`;
+}
+
+/**
+ * "opened 3d" — HOW OLD THE PULL REQUEST ITSELF IS, for the card kinds whose right-hand meta
+ * answers a different question (when the thing that needs you happened, when the head commit
+ * landed, "unassigned"). A reader triaging fifty rows asked for the one fact none of those carry:
+ * has this been sitting here two hours or two weeks.
+ *
+ * ⚠ ONE FORMATTER, TWO CLOCKS, AND THEY MUST NOT BE COLLAPSED. `ageLabel` above is fed a
+ * SERVER-computed `ageHours` on `stalled_review` and `untouched_thread`; those two keep saying
+ * "waiting 4d" / "6h old" because that IS the question they ask. This one turns the wire's absolute
+ * `openedAt` into hours here-side. The rounding matches the server's spelling
+ * (`Math.round(ms / 3_600_000)`) so one PR can never read "waiting 47h" on one card and "opened 2d"
+ * on another.
+ *
+ * ⚠ `ageLabel` DOES NOT ROUND ITS ARGUMENT — it interpolates it. A raw float lands on the card as
+ * "opened 3.7166666666666663h", so the rounding has to happen HERE.
+ *
+ * Returns null for anything we cannot read (a response predating the field, a malformed date); the
+ * card then renders no age at all, which is the honest answer for "we don't know" and is never
+ * "0h".
+ */
+export function openedAgeLabel(openedAt: string | null | undefined): string | null {
+  const l = ageLabelFrom(openedAt);
+  return l == null ? null : `opened ${l}`;
+}
+
+/** The bare "3d" for an absolute instant, or null when we cannot read one. */
+function ageLabelFrom(iso: string | null | undefined): string | null {
+  const ms = msSince(iso);
+  return ms == null ? null : ageLabel(Math.round(ms / 3_600_000));
+}
+
+/**
+ * Does this card's OWN clock still say something the open date does not?
+ *
+ * ⚠ MEASURED, AND IT IS THE MAJORITY CASE: 779 of 1,411 open non-draft PRs (55%) have no commit
+ * after the one they opened with — a dependency bump is the common shape — so a `merge` card's
+ * `lastCommitAt` and its `openedAt` round to the SAME label. `my_turn` collapses the same way
+ * whenever nobody has touched a PR since it appeared, because the ball arrived when it opened. On
+ * the reporting account's own workspace that was TEN OF TEN cards reading "8 hours ago · opened
+ * 8h": one figure, twice, under two names, with only one of the names saying what it measures.
+ *
+ * So when the two agree, the NAMED one wins and the bare relative time is dropped. The reader
+ * loses nothing — it was the same number — and gains the word that says which clock it is. When
+ * they disagree the card shows both, because then the second one is a fact: "2 hours ago · opened
+ * 3d" is a PR that has been open three days and was pushed to two hours ago.
+ *
+ * ⚠ IT COMPARES WHAT THE ROW PRINTS, THROUGH TWO DIFFERENT FORMATTERS, AND THAT IS THE WHOLE
+ * SUBTLETY. `right` is rendered by `relativeTime` (minutes, then hours to 24h, then days); the age
+ * is rendered by `ageLabel` (hours to 48h, then days). They switch units at DIFFERENT thresholds,
+ * so comparing either one's output against itself is wrong. The first cut compared two
+ * `ageLabel` strings and left a live 12-hour window — head commit 36-47h old on a PR opened
+ * 48-59h ago — where it reported "different" about a row printing "2 days ago · opened 2d", the
+ * exact duplication it exists to remove. Compare the FIGURES each side actually shows: same unit
+ * AND same number ⇒ the reader is looking at one fact twice.
+ *
+ * ⚠ THIS IS THE SAME RULE `stalled_review` AND `untouched_thread` ARE EXEMPT UNDER, applied at
+ * render time instead of by kind. Those two never pass `openedAt` at all: their server-computed
+ * `ageHours` IS the open age (stalled) or a different subject's age (the thread), so for them the
+ * question never arises.
+ */
+export function clockSaysMore(
+  clockAt: string | null | undefined,
+  openedAt: string | null | undefined,
+): boolean {
+  const shown = shownByRelativeTime(clockAt);
+  if (shown == null) return false;
+  const age = shownByAgeLabel(openedAt);
+  // An unreadable open date renders NO age, so the clock is the row's only time — keep it.
+  if (age == null) return true;
+  // ⚠ BOTH TESTS MUST SAY "DIFFERENT", AND THEY CATCH DIFFERENT THINGS. The FIGURES test kills
+  // "2 days ago · opened 2d" (a 40h commit on a 50h-old PR — same printed figure, two formatters).
+  // The LABEL test kills "1 day ago · opened 30h" (a 30.4h commit on a 30h-old PR — two different
+  // printed figures that invite the reader to infer a six-hour gap that is not there). Either
+  // alone leaves the other on screen.
+  const figuresDiffer = !(shown.unit === age.unit && shown.value === age.value);
+  const labelsDiffer = ageLabelFrom(clockAt) !== ageLabelFrom(openedAt);
+  return figuresDiffer && labelsDiffer;
+}
+
+/** A figure a reader compares: the number and the unit it is printed in. */
+interface ShownSpan {
+  unit: 'min' | 'hour' | 'day';
+  value: number;
+}
+
+/** What `lib/ui.ts`'s `relativeTime` PRINTS for an instant — the formatter `right` goes through on
+ *  every kind that passes `clockAt`. `just now` and the absolute date past 30 days carry no
+ *  comparable figure, so they return null and the clock always survives. */
+function shownByRelativeTime(iso: string | null | undefined): ShownSpan | null {
+  const ms = msSince(iso);
+  if (ms == null) return null;
+  const min = 60_000;
+  const hr = 60 * min;
+  const day = 24 * hr;
+  if (ms < min) return null; // "just now"
+  if (ms < hr) return { unit: 'min', value: Math.round(ms / min) };
+  if (ms < day) return { unit: 'hour', value: Math.round(ms / hr) };
+  if (ms < 30 * day) return { unit: 'day', value: Math.round(ms / day) };
+  return null; // an absolute date — never a duplicate of a relative age
+}
+
+/** What `openedAgeLabel` PRINTS for an instant, in the same comparable shape. */
+function shownByAgeLabel(iso: string | null | undefined): ShownSpan | null {
+  const ms = msSince(iso);
+  if (ms == null) return null;
+  const hours = Math.round(ms / 3_600_000);
+  return hours < 48
+    ? { unit: 'hour', value: hours }
+    : { unit: 'day', value: Math.round(hours / 24) };
+}
+
+/** Elapsed milliseconds, clamped at zero for clock skew; null when unreadable. */
+function msSince(iso: string | null | undefined): number | null {
+  if (iso == null) return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Date.now() - t);
 }
 
 /**
@@ -1083,9 +1229,46 @@ function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard
   );
 }
 
+/**
+ * WHAT A CONFLICTS CARD MAY OFFER: nothing to press, unless something is already armed.
+ *
+ * ⚠ NO MERGE AFFORDANCE, AND THAT IS THE POINT. `mergeVerdict` returns `canMerge: false` for both
+ * mint predicates, GitHub 405s a merge on a conflicting branch, and "Update branch" cannot resolve a
+ * conflict — `pendingMergeGate` above already refuses to offer it on an `update_branch` card whose
+ * `mergeable === 'conflicting'`. Resolving conflicts is a git operation this app does not perform,
+ * and GitHub offers no button for it either, so the card names the fact and stops.
+ *
+ * ⚠ NOTHING HERE FETCHES ON MOUNT. `usePrArmedIntent` is a SELECTOR over the account-wide armed list
+ * the app already polls — one query for the whole board. `MergeWhenReadyControl` is mounted ONLY
+ * when an intent is already armed AND with `eager={false}`, which leaves its
+ * `useMergeOptions(prId, eager || draft !== 'idle')` disabled: zero requests, and the reader keeps
+ * the Cancel for an intent parked at `waiting_conflicts` that will sit there until it expires. It is
+ * NEVER mounted un-armed — that would offer to arm a watcher whose blocker only a human can clear.
+ */
+function PendingConflictActions({ card }: { card: ConflictsCard }): JSX.Element | null {
+  const armed = usePrArmedIntent(card.prId);
+  // HIDE, never disable. ⚠ No `viewerCanPush` gate here because there is no such field: the kind is
+  // MINTED only for repos the viewer can push to (`writableRepoIds`), so the flag would be a
+  // constant `true` on the wire — see ConflictsCard's contract in packages/shared.
+  if (armed == null) return null;
+  return (
+    // `data-noactivate` for the same reason PendingMergeActions carries it: CardShell.onActivate
+    // opens the PR unless the click landed in a/button/textarea/input/[data-noactivate].
+    <div className="mt-2 flex flex-wrap items-center gap-2" data-noactivate>
+      {/* ONE SPELLING of where a live intent stands, shared with the AutoMergeBanner stack. */}
+      <span className="text-[11px] text-gray-500 dark:text-gray-400">
+        {armedPhaseHeadline(armed)}
+      </span>
+      <MergeWhenReadyControl prId={card.prId} eager={false} />
+    </div>
+  );
+}
+
 function CardShell({
   card,
   right,
+  openedAt,
+  clockAt,
   onActivate,
   children,
   innerRef,
@@ -1095,6 +1278,25 @@ function CardShell({
 }: {
   card: InsightCard;
   right?: React.ReactNode;
+  /**
+   * THE PR'S OWN AGE, appended to `right` as "opened 3d". OPT-IN, one line per kind, and the two
+   * omissions are decisions:
+   *   • `stalled_review` already says "waiting 4d", and its server `ageHours` is computed from
+   *     `pull_requests.opened_at` — the SAME number. Passing this would print one figure twice
+   *     under two names.
+   *   • `untouched_thread` says "6h old" about the THREAD, which is the subject of that card.
+   * Derived, not passed pre-formatted, so the null degradation and the tooltip live in one place.
+   */
+  openedAt?: string | null;
+  /**
+   * THE INSTANT `right` MEASURES, when `right` is a clock — a my_turn card's `since`, a forward
+   * card's `lastCommitAt`. Passed so this shell can drop `right` on the rows where it and the age
+   * are THE SAME NUMBER; see `clockSaysMore` for the measurement and the argument.
+   *
+   * Omit it when `right` is not a clock (`reviewer_routing`'s "unassigned") — then `right` always
+   * renders and the age is simply appended.
+   */
+  clockAt?: string | null;
   onActivate?: () => void;
   children: React.ReactNode;
   innerRef?: (el: HTMLLIElement | null) => void;
@@ -1121,6 +1323,14 @@ function CardShell({
   // described as one — and neither does `reviewer_load`. The `in` test is what keeps this a
   // compiler-checked narrowing rather than a cast that would let one through.
   const queue = 'inMergeQueue' in card ? pendingQueueBadge(card) : null;
+  // "opened 3d", or null when this kind has no single open PR to date (ci_failing's trunk arm,
+  // reviewer_load) or the value is unreadable. See `openedAgeLabel`.
+  const age = openedAgeLabel(openedAt);
+  // ⚠ A CLOCK THAT AGREES WITH THE AGE IS THE AGE, SAID WORSE. When the caller named the instant
+  // `right` measures and it rounds to the same label as `openedAt`, the bare relative time is
+  // dropped and the NAMED age stands alone. `clockAt` absent ⇒ `right` is not a clock and always
+  // renders. See `clockSaysMore`.
+  const showRight = age == null || clockAt === undefined || clockSaysMore(clockAt, openedAt);
   const onClick = onActivate
     ? (e: React.MouseEvent): void => {
         if ((e.target as HTMLElement).closest('a,button,textarea,input,[data-noactivate]')) return;
@@ -1189,7 +1399,27 @@ function CardShell({
             muted
           </span>
         )}
-        <span className="ml-auto text-gray-400">{right}</span>
+        {/* THE RIGHT-HAND META. `right` is the kind's OWN clock or status; the PR's age is
+            APPENDED after it, never in place of it. The separator lives HERE, not at the call
+            sites, so a kind that opts in cannot forget it and cannot double it. */}
+        <span className="ml-auto flex items-baseline gap-1.5 text-gray-400">
+          {showRight && right}
+          {age != null && (
+            <>
+              {showRight && right != null && (
+                <span aria-hidden className="decorative-mark text-gray-300 dark:text-gray-600">
+                  ·
+                </span>
+              )}
+              <span
+                className="whitespace-nowrap"
+                title={openedAt != null ? `Opened ${dateTime(openedAt)}` : undefined}
+              >
+                {age}
+              </span>
+            </>
+          )}
+        </span>
       </div>
       {children}
       {/* GENERATED. Its own line, never mixed with a chip — see the `why` prop's contract. */}
@@ -1213,7 +1443,11 @@ function PrLine({
     | UntouchedThreadCard
     | ReviewerRoutingCard
     | MergeReadyCard
-    | UpdateBranchCard;
+    | UpdateBranchCard
+    // ⚠ NARROW ON PURPOSE — do not "simplify" this to `InsightCard`. `ci_failing` and
+    // `reviewer_load` do not carry the four fields this reads, and the narrow union is what keeps
+    // that a compile error rather than a blank row.
+    | ConflictsCard;
   onOpen: () => void;
 }): JSX.Element {
   return (
@@ -1461,6 +1695,10 @@ export function AttentionCards({
             flash={flashId === card.id}
             promoted={promoted}
             right={<span title={dateTime(card.since)}>{relativeTime(card.since)}</span>}
+            openedAt={card.openedAt}
+            // The ball's clock. It IS the open date on a PR nobody has touched since it appeared,
+            // which is most new review requests — see `clockSaysMore`.
+            clockAt={card.since}
             onActivate={() =>
               card.reason === 'thread' && card.threadId != null
                 ? openThreadOn(card, card.threadId)
@@ -1491,6 +1729,11 @@ export function AttentionCards({
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
             promoted={promoted}
+            // ⚠ NO "opened Nd" HERE, AND IT IS NOT AN OVERSIGHT. `CiFailingCard` deliberately does
+            // NOT extend `InsightPrRef` and carries no `openedAt`: on the 'trunk' arm the subject
+            // is a REPOSITORY, and the PR it names is the MERGED landing PR of the red head — its
+            // open date answers nothing anyone can act on. `observedAt` is the honest clock for
+            // both arms and the type comment says so.
             right={
               card.observedAt != null ? (
                 <span title={dateTime(card.observedAt)}>{relativeTime(card.observedAt)}</span>
@@ -1528,6 +1771,10 @@ export function AttentionCards({
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
             promoted={promoted}
+            // ⚠ THIS IS ALREADY THE PR'S AGE. The server computes `ageHours` as
+            // `Math.round((now - pull_requests.opened_at) / 3_600_000)` (db/queries.ts, the
+            // stalled-review fold), so "waiting 3d" and "opened 3d" are the SAME number under two
+            // names. Adding the age here prints one figure twice.
             right={`waiting ${ageLabel(card.ageHours)}`}
             onActivate={() => open(metaFor(card, usersById), card.id)}
           >
@@ -1566,6 +1813,9 @@ export function AttentionCards({
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
             promoted={promoted}
+            // ⚠ A DIFFERENT CLOCK, AND THE RIGHT ONE. This card's `ageHours` is the THREAD's
+            // `created_at` age, not the PR's — the thread is the subject, and "6h old" is what the
+            // reader is being asked about. No PR age here.
             right={`${ageLabel(card.ageHours)} old`}
           >
             {/* Only this header chrome navigates (→ the thread on the PR's Threads tab). The
@@ -1604,6 +1854,7 @@ export function AttentionCards({
             flash={flashId === card.id}
             promoted={promoted}
             right="unassigned"
+            openedAt={card.openedAt}
             onActivate={() => open(metaFor(card, usersById), card.id)}
           >
             <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
@@ -1644,6 +1895,10 @@ export function AttentionCards({
                 <span title={dateTime(card.lastCommitAt)}>{relativeTime(card.lastCommitAt)}</span>
               ) : undefined
             }
+            openedAt={card.openedAt}
+            // The head commit's clock — the code that would land. 55% of open PRs have no commit
+            // after the one they opened with, so on those it IS the open date: see `clockSaysMore`.
+            clockAt={card.lastCommitAt}
             onActivate={() => open(metaFor(card, usersById), card.id)}
           >
             <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
@@ -1666,6 +1921,44 @@ export function AttentionCards({
           </CardShell>
         );
       }
+      // A branch GitHub says conflicts with its base. ⚠ NOT A FORWARD KIND: it is something that is
+      // WRONG, it carries no merge affordance (see `PendingConflictActions`), and it must NOT be
+      // added to `onlyForward` in AttentionView — a conflicting PR IS waiting on someone.
+      //
+      // ⚠ AND, LIKE THE CASE ABOVE, tsc DOES NOT DEMAND IT. `default: return null` swallows a
+      // missing case: the card vanishes while the server still counts it.
+      case 'conflicts': {
+        const state = conflictsStateChip(card);
+        return (
+          <CardShell
+            key={card.id}
+            card={card}
+            innerRef={(el) => setCardRef(card.id, el)}
+            flash={flashId === card.id}
+            promoted={promoted}
+            why={whyById?.get(card.id)}
+            // ⚠ NO `right` OF ITS OWN, AND THE AGE IS THE WHOLE CLOCK. There is no stored
+            // "conflicting since", and `lastCommitAt` — the forward cards' clock — is not on this
+            // kind precisely because rendering it here would read as one. The shell's `right !=
+            // null` guard drops the separator, so the row reads a bare "opened 3d".
+            openedAt={card.openedAt}
+            onActivate={() => open(metaFor(card, usersById), card.id)}
+          >
+            <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
+            <PrMetaRow pr={card} />
+            <PrReviewRow pr={card} usersById={usersById} />
+            <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+              {state != null && (
+                <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
+                  {state}
+                </span>
+              )}
+              <span className="min-w-0">{card.detail}</span>
+            </div>
+            <PendingConflictActions card={card} />
+          </CardShell>
+        );
+      }
       case 'reviewer_load':
         return (
           <CardShell
@@ -1674,6 +1967,8 @@ export function AttentionCards({
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
             promoted={promoted}
+            // ⚠ NO "opened Nd". `ReviewerLoadCard` does not extend `InsightPrRef`: the subject is a
+            // PERSON, and `pendingPrs[]` is a LIST. There is no single PR to date.
             right={`${card.reviewsThisSprint} review${card.reviewsThisSprint === 1 ? '' : 's'} this sprint`}
           >
             <div className="flex items-center gap-2 text-sm">

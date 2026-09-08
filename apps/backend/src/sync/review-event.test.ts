@@ -26,6 +26,14 @@ describe('isSubstantiveReview', () => {
 
 // draft→ready and reopened have no discrete GitHub event; sync derives them by
 // comparing the PR's prior persisted row against the incoming one.
+//
+// ⚠ AND THAT PRE-UPSERT COMPARISON IS WHY `POST /api/prs/:id/reopen` WRITES ITS OWN EVENT.
+// A reopen done through Pierre never reaches this fold: the route stamps `state: 'open'` locally
+// before any sync runs, so every later walk reads prev === 'open', the branch below never fires,
+// and the marker would be lost PERMANENTLY. `markPrReopenedLocally` therefore inserts the row
+// itself, under this fold's own `pr_reopened:<prNodeId>` dedupe key so the two writers are
+// idempotent against each other. This function still owns the reopens done on github.com, which
+// is the case these cases are about — and it needs no change for either.
 describe('lifecycleTransitions', () => {
   it('emits pr_ready_for_review on a draft → ready flip', () => {
     expect(

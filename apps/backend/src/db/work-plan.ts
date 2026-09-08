@@ -696,6 +696,16 @@ export async function rankWorkPlan(
     }
     // reviewer_load / bot_signal / bot_only_review are SURVEYS of the workspace, not things one
     // person does today. They are deliberately not worklist rows.
+    //
+    // ⚠ AND NEITHER IS `conflicts`, WHICH IS NOT A SURVEY — so its absence needs its own argument.
+    // Two reasons, and the second is why it stays out today. (1) It is the one job on this board
+    // with no in-app step to rank: the plan orders what you could do NEXT, and "go resolve a merge
+    // conflict in a checkout" has no next. (2) The kind vocabulary is a TWO-REPOSITORY contract —
+    // `WorkPlanKind` + BASE_PROXIMITY here, and the plugin's prompt, which enumerates the seven
+    // kinds as a STRING that nothing type-checks — so adding a member host-side alone hands the
+    // model a kind it was never told about. The head is an ORDERING, not a filter, so an un-named
+    // card renders in the tail and no cap disclosure is harmed. Including it later is a deliberate
+    // change in BOTH repositories, not a one-line addition here.
   }
 
   // ── dedup, rank, cap ──────────────────────────────────────────────────────────────────────

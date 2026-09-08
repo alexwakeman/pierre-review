@@ -107,6 +107,10 @@ beforeAll(async () => {
       owner: 'acme',
       name: 'api',
       githubNodeId: 'R_brief',
+      // ⚠ WRITE, so the conflicting PR below actually mints a `conflicts` card: that kind's whole
+      // population is `writableRepoIds`, and on a READ repo the pin underneath would assert the
+      // absence of a card that never existed.
+      viewerPermission: 'WRITE',
       // The "New PRs" cutoff. Explicit, because the default is "now" — which would put every
       // seeded PR before it and leave the brief counting nothing.
       createdAt: new Date(REPO_ADDED),
@@ -185,6 +189,43 @@ beforeAll(async () => {
     // `reviewer_routing` orphan path — which would otherwise reach for CODEOWNERS over the
     // network from a unit test.
     await db.insert(reviewRequests).values({ prId: readyPr.id, userId: bobId }).execute();
+
+    // ── one CONFLICTING PR, so the third "counted by nobody" pin is not vacuous either ───────
+    // Same shape and the same two reasons as the ready-to-land row above (an `events` row, and
+    // opened before the repo's "New PRs" cutoff so it does not move the my_turn count).
+    const [conflictPr] = await db
+      .insert(pullRequests)
+      .values({
+        githubNodeId: 'PR_brief_conflicting',
+        accountId: 1,
+        repoId: repo.id,
+        number: n++,
+        title: 'conflicting fixture',
+        state: 'open',
+        isDraft: false,
+        authorId: aliceId,
+        baseRefName: 'main',
+        openedAt,
+        updatedAt: openedAt,
+        lastCommitAt: new Date(now - 60 * 60 * 1000),
+        mergeable: 'conflicting',
+        mergeStateStatus: 'dirty',
+      })
+      .returning()
+      .execute();
+    await db
+      .insert(events)
+      .values({
+        accountId: 1,
+        repoId: repo.id,
+        prId: conflictPr.id,
+        actorId: aliceId,
+        type: 'commit_pushed',
+        occurredAt: new Date(now - 60 * 60 * 1000),
+        dedupeKey: 'brief_ev_conflicting',
+      })
+      .execute();
+    await db.insert(reviewRequests).values({ prId: conflictPr.id, userId: bobId }).execute();
   }
 
   // ⚠ Through the production resolver, never a hand-built {workspaceId, repoIds}: it is
@@ -283,5 +324,41 @@ describe('the daily brief counts what the click opens', () => {
       counts.needsReviewer;
     const board = Object.entries(live).reduce((n, [, v]) => n + v, 0);
     expect(board).toBeGreaterThan(total);
+  });
+
+  // ⚠ AND SO IS `conflicts` — THE THIRD UNCOUNTED KIND, for a DIFFERENT reason, which is why it
+  // gets its own pin beside the one above rather than being folded into it.
+  //
+  // `merge`/`update_branch` are uncounted because a PR that is ready to land is not waiting on
+  // anyone. A `conflicts` card is a genuine problem, but it is not necessarily YOURS: its
+  // population is every conflicting PR in a repo you can PUSH to, and 3 of the 4 such cards
+  // measured on the reporting account are somebody else's PR. Counting it would put a "waiting on
+  // you" number over other people's stuck branches, and — like the forward kinds — would stop the
+  // strip self-hiding on a clear workspace. There is no `conflictsTotal` on the wire for the same
+  // reason: the board reads every total it discloses from `DailyBriefCounts`.
+  //
+  // The fixture must actually PRODUCE the card for this to mean anything, hence the first line.
+  it('lets a CONFLICTING PR reach the board WITHOUT entering the brief', async () => {
+    const live = await liveCardCounts();
+    expect(live.conflicts ?? 0).toBeGreaterThan(0);
+    const { counts } = await brief.getDailyBriefEntry(1, scope.workspaceId);
+    // The equality is the assertion: every scalar the strip renders is the count of cards of the
+    // five COUNTED kinds, so a `conflicts` card folded into any one of them breaks the arithmetic
+    // rather than quietly inflating a number nobody checks.
+    expect(
+      counts.myTurn +
+        (counts.ciFailing ?? 0) +
+        counts.stalled +
+        counts.untouchedThreads +
+        counts.needsReviewer,
+    ).toBe(
+      (live.my_turn ?? 0) +
+        (live.ci_failing ?? 0) +
+        (live.stalled_review ?? 0) +
+        (live.untouched_thread ?? 0) +
+        (live.reviewer_routing ?? 0),
+    );
+    // …and no total for it travels either.
+    expect(counts).not.toHaveProperty('conflictsTotal');
   });
 });

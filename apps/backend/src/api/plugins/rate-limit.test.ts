@@ -511,6 +511,10 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/prs/42/review-comment')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/comment')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/close')).toEqual(['github_write']);
+    // ⚠ `close` does NOT prefix-match `reopen`, so unlike `comment`/`comments` there is no
+    // coincidence to fall back on: omit the segment and the reopen route silently takes the
+    // 600/min blanket `read` bucket while spending a GitHub REST write per call.
+    expect(tiers('POST', '/api/prs/42/reopen')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/ci/rerun')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/request-reviewers')).toEqual(['github_write']);
   });

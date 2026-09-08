@@ -1037,6 +1037,27 @@ export function mergeVerdict(pr: MergeVerdictInput): MergeVerdictInfo {
   };
 }
 
+/**
+ * Should the PR Overview open its dedicated "Conflicts" row?
+ *
+ * ⚠ IT TAKES THE RESOLVED VERDICT, NEVER THE RAW COLUMNS. `mergeVerdict` puts `inMergeQueue`
+ * ABOVE its `dirty || conflicting` test on purpose — GitHub owns the landing of a queued PR,
+ * and an EJECTED entry is already said out loud by `pendingQueueBadge` on the row above.
+ * Re-reading `mergeStateStatus === 'dirty' || mergeable === 'conflicting'` here would put a
+ * second, contradicting answer to "can this land?" directly under the queue chip. One resolver,
+ * one answer.
+ *
+ * ⚠ AND IT TAKES THE PR STATE. A merged or closed PR keeps whatever merge state was last synced;
+ * claiming conflicts on it would be a fact about a moment that has passed. (This is the same
+ * `pr.state === 'open'` that gates `showVerdict` in ChecksTab.)
+ *
+ * A conflicting DRAFT does open the row: `mergeVerdict` deliberately ranks conflicts above draft,
+ * because a conflicting draft still needs a human to resolve them.
+ */
+export function conflictsRowVisible(state: PrState, verdict: MergeVerdict): boolean {
+  return state === 'open' && verdict === 'conflicts';
+}
+
 // Tailwind classes per tone, so every compact surface tints a verdict identically.
 export const MERGE_TONE_CLASS: Record<MergeVerdictInfo['tone'], string> = {
   ok: 'text-green-600 dark:text-green-400',

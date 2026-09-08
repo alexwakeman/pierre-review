@@ -398,6 +398,9 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   disable. Mid-merge is THREE layers on one row: a live manual merge (read off the SHARED
   `mergePrMutationKey`/`updateBranchMutationKey` via `useIsMutating`, never a per-mount
   `isPending`), then the armed intent's `armedPhaseHeadline`, then the synced verdict.
+  ⚠ **`conflicts` is a THIRD merge-state-derived kind and it carries NO action** (GitHub offers no
+  resolve button either); it is minted ONLY in repos the viewer can PUSH to — `writableRepoIds`, or
+  470 of 474 real conflicting PRs are strangers' branches — and carries no `viewerCanPush` at all.
 - **The board's freshness against GITHUB is ONE batched sweep, `POST /api/attention/liveness`** —
   the sanctioned alternative to per-card fetching, not an exception to it. It sends the board's PR
   ids and re-reads them in one `nodes(ids:)` call (2 GraphQL points, ~5-7s). ⚠ **MEASURED: 90 ids

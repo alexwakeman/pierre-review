@@ -217,6 +217,10 @@ export function passesOtherLens(card: InsightCard): boolean {
  * about whose turn it is. Filtering them here would also stop the brief's two my-turn lines
  * partitioning the lensed board, which is the one job this predicate has.
  */
+// ⚠ `conflicts` IS NOT NARROWED BY THIS LENS EITHER, and its exemption is the forward kinds' one:
+// the kind carries `relevance`, but only for the board's cap ordering and its severity accent —
+// never as an ownership claim. Write access to a repo is not ownership of somebody else's PR, so a
+// conflicts card belongs to neither 'mine' nor 'others' and stays visible under both.
 export function passesRelevanceLens(card: InsightCard, lens: 'mine' | 'others' | null): boolean {
   if (lens == null) return true;
   return lens === 'mine' ? passesPersonalLens(card) : passesOtherLens(card);
@@ -538,7 +542,18 @@ export function AttentionView(): JSX.Element {
     const prIdOf = (c: InsightCard): number | null =>
       'prId' in c && typeof c.prId === 'number' ? c.prId : null;
     const rank = (c: InsightCard): number => {
-      if (c.kind === 'merge' || c.kind === 'update_branch') return 0;
+      // ⚠ `conflicts` JOINS THE FORWARD KINDS HERE, AND FOR A DIFFERENT REASON THAN THEY DO.
+      // They are ranked first because a stale merge state is a BUTTON THAT 405s; a conflicts card
+      // carries no button at all. It is first because its ENTIRE claim IS the field this sweep
+      // re-reads — `mergeStateStatus`/`mergeable` — so a stale one tells the reader to go resolve
+      // conflicts they resolved two hours ago, with nothing else on the row to contradict it.
+      //
+      // ⚠ AND THIS ONLY GUARANTEES THE ID IS IN THE SWEEP. The server ranks the mergeability half
+      // separately and caps it at 25 (`rankForMergeStatePass`), where `dirty` deliberately sits in
+      // the most-recently-updated ROTATION rather than the priority group — the cost of a stale
+      // conflicts card is a wasted row, not a refused merge. So do not promise freshness in this
+      // card's copy; this makes the question askable, not answered.
+      if (c.kind === 'merge' || c.kind === 'update_branch' || c.kind === 'conflicts') return 0;
       const id = prIdOf(c);
       return id != null && promotedPrIds.has(id) ? 1 : 2;
     };
@@ -625,6 +640,10 @@ export function AttentionView(): JSX.Element {
   // rows beside a hidden strip and "Nothing needs attention" would be unreachable on a workspace
   // where genuinely nothing is waiting on anyone. So when EVERY card is a forward kind, the board
   // says so — above the rows, which still render.
+  // ⚠ `conflicts` IS DELIBERATELY NOT A THIRD MEMBER HERE, even though it is the third kind built
+  // off a merge-state column. A forward card is work you MAY do; a conflicting PR is work somebody
+  // OWES, and printing "Nothing is waiting on you" above a list of them would be the all-clear over
+  // a broken board.
   const onlyForward = cards.length > 0 && cards.every((c) => c.kind === 'merge' || c.kind === 'update_branch');
 
   return (

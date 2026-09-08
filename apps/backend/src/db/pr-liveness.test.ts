@@ -128,6 +128,15 @@ beforeAll(async () => {
     updatedAt: new Date(now - 60_000),
   });
   await insertPr('unknown-state', repoId, { mergeStateStatus: null });
+  // ⚠ A CONFLICTING row, FRESHER than either forward row. `dirty` is deliberately NOT in group 1
+  // even though it now carries a board card of its own: a `conflicts` card offers no control, so
+  // a stale one costs a row rather than a button that 405s — and group 1 can already reach 30
+  // against a 25-id cap, so widening it would starve the rotation in group 2.
+  await insertPr('dirty-fresh', repoId, {
+    mergeStateStatus: 'dirty',
+    mergeable: 'conflicting',
+    updatedAt: new Date(now - 30_000),
+  });
   // Already gone: no slot for it, and no card either.
   await insertPr('merged', repoId, { state: 'merged', mergeStateStatus: 'clean' });
   // Another workspace's repo — the scope predicate's target.
@@ -193,6 +202,25 @@ describe('rankForMergeStatePass', () => {
     expect(mod.rankForMergeStatePass(targets, 10).map((t) => t.githubNodeId)).toEqual([
       'PR_live_clean',
     ]);
+  });
+
+  it('⚠ leaves `dirty` in the rotation — a conflicts card has no button to be wrong about', async () => {
+    // The `conflicts` card reads `mergeStateStatus` too, so the next reader will ask why it is not
+    // in the priority group. The criterion is not "the card reads merge state", it is "a stale
+    // value here is a BUTTON THAT 405s". A conflicts card carries no control, so a stale one is an
+    // ordinary stale row and joins group 2's most-recently-updated rotation.
+    //
+    // This row is the FRESHEST of the three, so an ordering that had promoted it would seat it
+    // FIRST — the assertion cannot pass by accident.
+    const targets = await targetsFor(['dirty-fresh', 'clean', 'behind']);
+    expect(mod.rankForMergeStatePass(targets, 2).map((t) => t.githubNodeId).sort()).toEqual([
+      'PR_live_behind',
+      'PR_live_clean',
+    ]);
+    // …and it is not excluded either: with room for all three it still gets a slot, last.
+    expect(mod.rankForMergeStatePass(targets, 3).map((t) => t.githubNodeId)).toContain(
+      'PR_live_dirty-fresh',
+    );
   });
 
   it('honours the cap — the whole reason this fold exists', async () => {

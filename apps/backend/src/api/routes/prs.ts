@@ -24,6 +24,7 @@ import type {
   PrMergeOptions,
   PrRefreshBody,
   PrRefreshResponse,
+  ReopenPrResult,
   RequestReviewersBody,
   RequestReviewersResult,
   ResolveBotThreadsBody,
@@ -56,6 +57,7 @@ import {
   markAllViewed,
   markPrClosedLocally,
   markPrMergedLocally,
+  markPrReopenedLocally,
   markPrViewed,
   stampReviewRequests,
   upsertLocalPrComment,
@@ -85,6 +87,7 @@ import {
   fetchRepoMergeConfig,
   mergePullRequest,
   postInlineComment,
+  reopenPullRequest,
   requestReviewers,
   rerunWorkflowRun,
   submitPrReview,
@@ -1088,6 +1091,73 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       }
       await markPrClosedLocally(id, accountId);
       const result: ClosePrResult = { closed: true, state: 'closed' };
+      return result;
+    } catch (err) {
+      reply.status(502);
+      return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Reopen a CLOSED PR (CORE / free tier) — the inverse of the close above and permitted by the
+  // same rule: WRITE+ OR the PR author, mirrored by viewerCanReopen on the detail payload and
+  // re-checked here. Only a CLOSED PR can be reopened; an open one and a MERGED one both 409
+  // (GitHub cannot un-merge). Optimistically stamps state='open' + closedAt=null AND writes the
+  // pr_reopened event, because that stamp is exactly what stops the next sync from writing it.
+  app.post('/api/prs/:id/reopen', { schema: idParamSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const accountId = accountIdOf(req);
+
+    const ctx = await getPrWriteContext(id, accountId);
+    if (!ctx) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    const viewerUserId = await getAccountUserId(accountId);
+    const canReopen =
+      ['WRITE', 'MAINTAIN', 'ADMIN'].includes(ctx.viewerPermission ?? '') ||
+      (viewerUserId != null && viewerUserId === ctx.authorId);
+    if (!canReopen) {
+      reply.status(403);
+      return {
+        error: 'NotPermitted',
+        message: 'You need write access or to be the PR author to reopen this PR.',
+      };
+    }
+    // ⚠ TWO 409s, NOT ONE — 'merged' and 'open' are different facts and the merged one is
+    // permanent, so they must not share a sentence.
+    if (ctx.state !== 'closed') {
+      reply.status(409);
+      return {
+        error: ctx.state === 'merged' ? 'AlreadyMerged' : 'NotClosed',
+        message:
+          ctx.state === 'merged'
+            ? 'This PR was merged. A merged PR can’t be reopened.'
+            : 'This PR is already open.',
+      };
+    }
+
+    try {
+      const token = await getAccessToken(accountId);
+      const out = await reopenPullRequest(token, ctx.owner, ctx.name, ctx.number);
+      if (!out.ok) {
+        // ⚠ `not_reopenable` is a 409, not a 502. GitHub's usual refusal is the deleted head
+        // branch — nothing is broken and no retry will help, so the answer is the conflict code
+        // plus GitHub's own sentence, which the SPA prints verbatim (4xx bodies stay verbatim in
+        // cloud; only 5xx are made generic — see docs/SECURITY.md).
+        reply.status(out.reason === 'not_found' ? 404 : out.reason === 'not_reopenable' ? 409 : 502);
+        return {
+          error:
+            out.reason === 'not_found'
+              ? 'NotFound'
+              : out.reason === 'not_reopenable'
+                ? 'NotReopenable'
+                : 'GitHubError',
+          message: out.message,
+        };
+      }
+      // ⚠ Takes the viewer id the permission check already resolved — no second lookup.
+      await markPrReopenedLocally(id, accountId, viewerUserId);
+      const result: ReopenPrResult = { reopened: true, state: 'open' };
       return result;
     } catch (err) {
       reply.status(502);

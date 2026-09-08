@@ -35,6 +35,7 @@
 import { describe, expect, it } from 'vitest';
 import type {
   AutomatedReviewerKind,
+  ConflictsCard,
   InsightReviewer,
   MergeQueueEntryState,
   MergeReadyCard,
@@ -48,6 +49,11 @@ import type {
 } from '@pierre-review/shared';
 import {
   authorSourceLabel,
+  cardKindLabel,
+  conflictsStateChip,
+  KIND_LABEL,
+  clockSaysMore,
+  openedAgeLabel,
   pendingCardIsPersonal,
   pendingMergeGate,
   pendingQueueBadge,
@@ -149,6 +155,47 @@ function updateBranchCard(over: {
   };
 }
 
+/**
+ * The `conflicts` card, as the server mints it (`conflicts:<prId>`).
+ *
+ * ⚠ THE TWO ARMS ARE KEPT DISTINCT ON PURPOSE. The kind is minted on an OR —
+ * `mergeStateStatus === 'dirty'` OR `mergeable === 'conflicting'` — and `conflictsStateChip`
+ * treats them differently, so a factory that always set 'dirty' would make half of the
+ * assertions below unreachable.
+ *
+ * ⚠ AND IT CARRIES NEITHER `viewerCanPush` NOR `lastCommitAt`, matching the wire type. Write
+ * access IS the population (`writableRepoIds`), so the flag would be a constant `true` and an
+ * invitation to a merge control; and `lastCommitAt` is the FORWARD cards' ranker clock, which on
+ * this kind would read as "conflicting since" — a fact nobody holds.
+ */
+function conflictsCard(
+  over: {
+    mergeStateStatus?: MergeStateStatus | null;
+    mergeable?: Mergeable | null;
+    relevance?: MyTurnRelevance;
+    inMergeQueue?: boolean | null;
+    mergeQueueEntryState?: MergeQueueEntryState | null;
+    detail?: string;
+  } = {},
+): ConflictsCard {
+  const relevance = over.relevance ?? 'maintained';
+  return {
+    id: 'conflicts:101',
+    kind: 'conflicts',
+    // The ci_failing split one object over: your own PR is 'high', somebody else's in a repo you
+    // can push to is 'warn'.
+    severity: relevance === 'direct' ? 'high' : 'warn',
+    ...prRef({
+      inMergeQueue: over.inMergeQueue ?? null,
+      mergeQueueEntryState: over.mergeQueueEntryState ?? null,
+    }),
+    mergeStateStatus: over.mergeStateStatus === undefined ? 'dirty' : over.mergeStateStatus,
+    mergeable: over.mergeable === undefined ? 'conflicting' : over.mergeable,
+    relevance,
+    detail: over.detail ?? 'Conflicts with main',
+  };
+}
+
 describe('the source chip', () => {
   it('names the vendor on a bot-authored card', () => {
     expect(authorSourceLabel(prRef({ authorIsBot: true, authorBotKind: 'dependabot' }))).toBe(
@@ -223,6 +270,11 @@ describe('the merge gate follows mergeVerdict', () => {
   });
 
   it('offers nothing on conflicts, on EITHER kind', () => {
+    // ⚠ AND THIS IS WHY THE `conflicts` KIND HAS NO BUTTON. It exists to say the thing these three
+    // assertions imply: GitHub 405s a merge on a conflicting branch, "Update branch" cannot
+    // resolve a conflict, and resolving one is a git operation this app does not perform. A
+    // future "let the conflicts card reuse PendingMergeActions" refactor lands here — there is no
+    // action to reuse, on any of the three shapes.
     expect(pendingMergeGate(mergeCard({ mergeStateStatus: 'dirty' })).action).toBeNull();
     expect(
       pendingMergeGate(mergeCard({ mergeStateStatus: 'clean', mergeable: 'conflicting' })).action,
@@ -458,6 +510,204 @@ describe('which rows outrank the neutral ones', () => {
     expect(mergeCard().relevance).toBe('direct');
     expect(pendingCardIsPersonal(mergeCard())).toBe(false);
     expect(pendingCardIsPersonal(updateBranchCard())).toBe(false);
+  });
+});
+
+// ── THE `conflicts` CARD ─────────────────────────────────────────────────────────────────────
+//
+// GitHub cannot merge this pull request: the head conflicts with the base. The third shape on the
+// board — not a summons like `my_turn`, not an opportunity like the two forward kinds — and the
+// ONLY one with no action behind it anywhere, GitHub's own UI included. So everything below is
+// about what the card is allowed to SAY, and the one thing it may never grow.
+//
+//   ⚠ THE HEADER ALREADY SAYS "Merge conflicts". That is why the second-fact chip suppresses
+//     itself on the `dirty` arm: `MERGE_STATE_LABEL.dirty` is the word "conflicts", and printing
+//     it under a label reading "Merge conflicts" is one sentence twice on the one board where
+//     every line has to earn its width.
+//   ⚠ AND THE CHIP DOES NOT GO THROUGH `mergeVerdict`. That resolver's queue branch runs FIRST,
+//     so a conflicting PR sitting in GitHub's merge queue would report 'queued' and lose the
+//     conflict statement entirely — while the queue is already stated, in better words, by
+//     `pendingQueueBadge` in the header row.
+
+describe('the conflicts card', () => {
+  it('⚠ says NOTHING under the header on the `dirty` arm — the header already said it', () => {
+    expect(conflictsStateChip(conflictsCard({ mergeStateStatus: 'dirty' }))).toBeNull();
+    // Spelled out: the suppressed word is the one already on the label above it.
+    expect(KIND_LABEL.conflicts).toBe('Merge conflicts');
+  });
+
+  it('keeps GitHub’s OTHER word on the `mergeable: conflicting` arm', () => {
+    // The row is minted off `mergeable` alone here, so GitHub's protection-aware state says
+    // something the reader cannot get from anywhere else on the row.
+    expect(
+      conflictsStateChip(conflictsCard({ mergeStateStatus: 'blocked', mergeable: 'conflicting' })),
+    ).toBe('blocked');
+    expect(
+      conflictsStateChip(conflictsCard({ mergeStateStatus: 'behind', mergeable: 'conflicting' })),
+    ).toBe('behind trunk');
+  });
+
+  it('⚠ says nothing for a state GitHub has not computed, and nothing for one never observed', () => {
+    // 'unknown' and null are the same fact one column apart — "we have not been told" — and
+    // neither is something to print.
+    expect(conflictsStateChip(conflictsCard({ mergeStateStatus: 'unknown' }))).toBeNull();
+    expect(conflictsStateChip(conflictsCard({ mergeStateStatus: null }))).toBeNull();
+  });
+
+  it('⚠ is NEVER emphasised as the reader’s own, even in a repo they can push to', () => {
+    // The kind is minted only for repos the viewer can WRITE to, and the card carries a
+    // `relevance` for the ranker weight and the severity accent. Neither is an ownership claim:
+    // write access to a repository is not ownership of a stranger's pull request, and
+    // `pendingCardIsPersonal` narrows `my_turn` and nothing else.
+    expect(pendingCardIsPersonal(conflictsCard())).toBe(false);
+    expect(pendingCardIsPersonal(conflictsCard({ relevance: 'direct' }))).toBe(false);
+    expect(pendingCardIsPersonal(conflictsCard({ relevance: 'maintained' }))).toBe(false);
+  });
+
+  it('wears the neutral kind label — it claims nothing about the reader to soften', () => {
+    // `cardKindLabel` exists to soften OWNERSHIP claims (my_turn's relevance, ci_failing's arms).
+    // This kind makes none, so it must pass straight through the label map.
+    expect(cardKindLabel(conflictsCard({ relevance: 'direct' }))).toBe('Merge conflicts');
+    expect(cardKindLabel(conflictsCard({ relevance: 'maintained' }))).toBe('Merge conflicts');
+  });
+
+  it('still carries the kind-blind queue badge — and a PR being EJECTED is where it matters', () => {
+    // A conflicting PR that GitHub is throwing out of its merge queue is exactly the row a reader
+    // has to be able to see without pressing anything.
+    const badge = pendingQueueBadge(
+      conflictsCard({ inMergeQueue: true, mergeQueueEntryState: 'unmergeable' }),
+    );
+    expect(badge?.label).toBe('Leaving the merge queue');
+    expect(badge?.tone).toBe('bad');
+    // …and the three-state rule holds here as everywhere: not observed says nothing.
+    expect(pendingQueueBadge(conflictsCard({ inMergeQueue: null }))).toBeNull();
+    expect(pendingQueueBadge(conflictsCard({ inMergeQueue: false }))).toBeNull();
+  });
+
+  it('⚠ IS NEVER HANDED A MERGE ACTION — there is no button, here or on GitHub', () => {
+    // THE GUARD. `pendingMergeGate` is typed to the two FORWARD kinds, so wiring a conflicts card
+    // into `PendingMergeActions` is a compile error today — but this directory is not typechecked
+    // (CLAUDE.md § Known gaps), so the runtime consequence is pinned instead, three ways:
+    //
+    //  1. The card carries no `viewerCanPush`, so the gate HIDES the row outright rather than
+    //     leaving a live action behind a false `show`.
+    const card = conflictsCard();
+    expect('viewerCanPush' in card).toBe(false);
+    const gate = pendingMergeGate(card as unknown as MergeReadyCard);
+    expect(gate.show).toBe(false);
+    expect(gate.action).toBeNull();
+
+    //  2. And even with write access invented, the card's OWN columns resolve to a verdict that
+    //     offers nothing — on BOTH mint arms. A merge here is a 405, and "Update branch" cannot
+    //     resolve a conflict.
+    for (const arm of [
+      conflictsCard({ mergeStateStatus: 'dirty', mergeable: 'unknown' }),
+      conflictsCard({ mergeStateStatus: 'blocked', mergeable: 'conflicting' }),
+    ]) {
+      const forced = pendingMergeGate({
+        ...arm,
+        viewerCanPush: true,
+      } as unknown as MergeReadyCard);
+      expect(forced.verdict.verdict, arm.mergeStateStatus ?? 'null').toBe('conflicts');
+      expect(forced.verdict.canMerge, arm.mergeStateStatus ?? 'null').toBe(false);
+      expect(forced.action, arm.mergeStateStatus ?? 'null').toBeNull();
+    }
+
+    //  3. And it carries no `lastCommitAt` either — the forward cards' ranker clock, which on this
+    //     kind would read as "conflicting since", a fact nobody holds. The card dates itself off
+    //     `openedAt` like every other PR-bearing kind.
+    expect('lastCommitAt' in card).toBe(false);
+    expect(card.openedAt).toBeTruthy();
+  });
+});
+
+// ── THE PR'S OWN AGE ON A PENDING CARD ───────────────────────────────────────────────────────
+//
+// "opened 3d", appended to the right-hand meta of the PR-bearing kinds whose own clock answers a
+// different question (my_turn's "when the thing that needs you happened", the forward kinds'
+// head-commit time, reviewer_routing's "unassigned", and the conflicts card, which has no clock
+// of its own at all).
+//
+//   ⚠ TWO CLOCKS, ONE FORMATTER, AND THEY MUST NOT BE COLLAPSED. `ageLabel` — not exported — is
+//     fed a SERVER-computed `ageHours` on `stalled_review` and `untouched_thread`; those two keep
+//     saying "waiting 4d" / "6h old" because that IS the question they ask. `openedAgeLabel`
+//     turns the wire's absolute `openedAt` into hours HERE-side, with the server's own rounding.
+//   ⚠ AND `ageLabel` DOES NOT ROUND ITS ARGUMENT — it interpolates it. Its two existing callers
+//     get a pre-rounded number off the wire, so nothing in the codebase would have caught a raw
+//     float landing on a card as "opened 3.7166666666666663h".
+
+/** The server's own spelling, restated because `ageLabel` is module-private: `stalled_review` is
+ *  served `ageHours = Math.round((now - pull_requests.opened_at) / 3_600_000)` and rendered as
+ *  `waiting ${ageLabel(ageHours)}`. */
+const serverAgeLabel = (hours: number): string =>
+  hours < 48 ? `${hours}h` : `${Math.round(hours / 24)}d`;
+
+/** An ISO instant exactly `hours` in the past, as the wire would carry it. */
+const agoIso = (hours: number): string => new Date(Date.now() - hours * 3_600_000).toISOString();
+
+describe('the PR age on a Pending card', () => {
+  it('reads in hours under two days', () => {
+    expect(openedAgeLabel(agoIso(6))).toBe('opened 6h');
+    expect(openedAgeLabel(agoIso(1))).toBe('opened 1h');
+  });
+
+  it('reads in days from two days out', () => {
+    expect(openedAgeLabel(agoIso(3 * 24))).toBe('opened 3d');
+    expect(openedAgeLabel(agoIso(21 * 24))).toBe('opened 21d');
+  });
+
+  it('⚠ ROUNDS — a raw float must never reach the card', () => {
+    // THE LANDMINE. `${hours}h` interpolates whatever it is given, so an unrounded elapsed time
+    // renders as "opened 3.7166666666666663h" on a live row.
+    const label = openedAgeLabel(agoIso(3 + 43 / 60));
+    expect(label).toMatch(/^opened \d+h$/);
+    expect(label).not.toContain('.');
+    expect(label).toBe('opened 4h'); // 3h43m rounds up, the server's own spelling
+  });
+
+  it('⚠ returns NULL for anything unreadable — never "0h"', () => {
+    // A response predating the field, or a malformed date. The card then renders no age at all,
+    // which is the honest answer for "we don't know"; a zero would be a claim.
+    expect(openedAgeLabel(null)).toBeNull();
+    expect(openedAgeLabel(undefined)).toBeNull();
+    expect(openedAgeLabel('not-a-date')).toBeNull();
+    expect(openedAgeLabel('')).toBeNull();
+  });
+
+  it('clamps clock skew to "opened 0h" rather than printing a negative age', () => {
+    // A PR whose `openedAt` is a few seconds in this browser's future. "opened -1h" is nonsense;
+    // "opened 0h" is a PR opened just now, which is what it is.
+    expect(openedAgeLabel(new Date(Date.now() + 90 * 60_000).toISOString())).toBe('opened 0h');
+  });
+
+  it('cuts hours→days on the ROUNDED hour count, at 48', () => {
+    // The boundary is `ageLabel`'s `< 48`, applied AFTER the rounding — so 47.5h is 48 hours is
+    // two days, and 47.4h is still forty-seven hours.
+    expect(openedAgeLabel(agoIso(47.5))).toBe('opened 2d');
+    expect(openedAgeLabel(agoIso(47.4))).toBe('opened 47h');
+  });
+
+  it('⚠ agrees with the SERVER’s figure — which is why stalled_review does not render both', () => {
+    // `stalled_review`'s `ageHours` IS the PR's age since `opened_at`, so "waiting 3d · opened 3d"
+    // would be one number printed twice under two names. This assertion is what a future "finish
+    // the migration" pass — adding `openedAt={card.openedAt}` to that case — lands on.
+    for (const hours of [1, 6, 23, 47, 48, 72, 24 * 30]) {
+      expect(openedAgeLabel(agoIso(hours)), `${hours}h`).toBe(`opened ${serverAgeLabel(hours)}`);
+    }
+  });
+
+  it('⚠ IS SUPPRESSED WHEN THE CARD’S OWN CLOCK SAYS THE SAME THING — see clockSaysMore', () => {
+    // FOUND BY RUNNING IT, not by a test: on the reporting account's own workspace, TEN OF TEN
+    // Pending cards read "8 hours ago · opened 8h". `clockSaysMore` is what stops that, and the
+    // rule lives in `CardShell` so no call site can forget it.
+    expect(clockSaysMore(agoIso(8), agoIso(8))).toBe(false);
+  });
+
+  it('dates a conflicts card, which has no clock of its own', () => {
+    // The kind carries no `lastCommitAt` by design, so this is its ENTIRE right-hand meta — the
+    // shell's `right != null` guard drops the separator and the row reads a bare "opened 3d".
+    const card = conflictsCard();
+    expect(openedAgeLabel(card.openedAt)).toMatch(/^opened \d+[hd]$/);
   });
 });
 
@@ -772,5 +1022,66 @@ describe('armControlPhase decides what the control shows', () => {
     // the draft: clearing first would put this triple on screen for a render, one frame after a
     // successful arm.
     expect(armControlPhase({ draft: 'idle', intentArmed: false, posting: false })).toBe('idle');
+  });
+});
+
+// ── WHICH CLOCK SURVIVES WHEN A CARD HAS TWO ────────────────────────────────────────────────────
+//
+// `CardShell` renders the kind's own `right` (a bare relative time) and then "opened 3d". On a PR
+// nobody has pushed to since it opened, those are THE SAME INSTANT, and the row printed one figure
+// twice under two names — with only one of the names saying which clock it was.
+//
+// ⚠ THIS WAS NOT VISIBLE TO ANY TEST. It was found by opening the board: 10 of 10 cards on the
+// reporting account's own workspace read "8 hours ago · opened 8h". Measured across the whole live
+// database, 779 of 1,411 open non-draft PRs (55%) have no commit after the one they opened with.
+//
+// The rule: when the two round to the same label, the NAMED one wins and the bare relative time is
+// dropped. Nothing is lost — it was the same number — and the survivor says what it measures.
+describe('clockSaysMore — does a card’s own clock still add a fact?', () => {
+  it('is FALSE when the two round to the same label, in hours and in days', () => {
+    expect(clockSaysMore(agoIso(8), agoIso(8))).toBe(false);
+    expect(clockSaysMore(agoIso(4 * 24), agoIso(4 * 24))).toBe(false);
+    // ⚠ AND WHEN THEY MERELY ROUND TOGETHER. 30h and 30.4h are different instants that print the
+    // same label, and it is the LABEL the reader compares — so a strict instant test would leave
+    // the duplication on screen for exactly the rows it was written to remove.
+    expect(clockSaysMore(agoIso(4 * 24 + 5), agoIso(4 * 24))).toBe(false);
+  });
+
+  it('is TRUE when the clock names a different span — the case the age exists for', () => {
+    // A PR open three days, pushed to two hours ago: "2 hours ago · opened 3d" is two facts.
+    expect(clockSaysMore(agoIso(2), agoIso(3 * 24))).toBe(true);
+    expect(clockSaysMore(agoIso(6), agoIso(20 * 24))).toBe(true); // "6 hours ago · opened 20d"
+  });
+
+  it('⚠ is FALSE across the 48h boundary, where the two FORMATTERS disagree', () => {
+    // FOUND BY REVIEW, after the first cut shipped. `right` renders through `relativeTime`, which
+    // switches hours→days at 24h; the age renders through `ageLabel`, which switches at 48h. So a
+    // head commit 40h old on a PR opened 50h ago gives DIFFERENT `ageLabel` strings ("40h" vs
+    // "2d") — the first version's only test — while the screen prints "2 days ago · opened 2d".
+    // A live 12-hour window, on the exact duplication this helper exists to remove.
+    expect(clockSaysMore(agoIso(40), agoIso(50))).toBe(false);
+    expect(clockSaysMore(agoIso(47), agoIso(48))).toBe(false);
+    expect(clockSaysMore(agoIso(36), agoIso(59))).toBe(false);
+  });
+
+  it('⚠ is FALSE when two different-looking figures would imply a gap that is not there', () => {
+    // The mirror case, and why the predicate ANDs two tests rather than replacing one with the
+    // other. A 30.4h commit on a 30h-old PR prints "1 day ago · opened 30h": different figures, so
+    // the figures test alone would keep both — and a reader subtracting them infers a six-hour gap
+    // between opening and pushing that does not exist. The label test catches it.
+    expect(clockSaysMore(agoIso(30.4), agoIso(30))).toBe(false);
+  });
+
+  it('is FALSE when there is no clock to compare — a null `right` is not a second number', () => {
+    expect(clockSaysMore(null, agoIso(8))).toBe(false);
+    expect(clockSaysMore(undefined, agoIso(8))).toBe(false);
+    expect(clockSaysMore('not-a-date', agoIso(8))).toBe(false);
+  });
+
+  it('⚠ is TRUE when the AGE is unreadable — the clock must not vanish with it', () => {
+    // A response predating `openedAt`, or a malformed one. The age renders nothing; suppressing
+    // the clock as well would leave the row with no time on it at all.
+    expect(clockSaysMore(agoIso(8), null)).toBe(true);
+    expect(clockSaysMore(agoIso(8), 'not-a-date')).toBe(true);
   });
 });

@@ -131,6 +131,7 @@ function pr(partial: Partial<PrDetail> = {}): PrDetail {
     viewerCanApprove: false,
     viewerCanPush: true,
     viewerCanClose: false,
+    viewerCanReopen: false,
     viewerHasApprovedStanding: false,
     threads: [],
     reviews: [],

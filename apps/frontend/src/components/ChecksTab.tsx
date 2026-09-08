@@ -15,6 +15,7 @@ import {
   botVendorMeta,
   checksRowVisible,
   CI_META,
+  conflictsRowVisible,
   dateTime,
   MERGE_TONE_CLASS,
   mergeVerdict,
@@ -36,6 +37,7 @@ import { ApproveControl } from './ApproveControl.js';
 import { MergeControl } from './MergeControl.js';
 import { MergeWhenReadyControl } from './MergeWhenReadyControl.js';
 import { ClosePrControl } from './ClosePrControl.js';
+import { ReopenPrControl } from './ReopenPrControl.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
 import { AiSummary } from './AiSummary.js';
 import { CiAnalysisCard } from './CiAnalysisCard.js';
@@ -645,7 +647,12 @@ export function ChecksTab({
                       )}
                       {verdict.label}
                     </span>
-                    {verdict.detail && (
+                    {/* ⚠ SUPPRESSED FOR `conflicts` ONLY: the dedicated Conflicts row below
+                        carries the action, and printing "resolve the conflicts with the base
+                        branch" here AND one row down is exactly the two-ways-of-saying-it the
+                        queue chip's replacement rule (above) already exists to prevent. The
+                        sentence survives on the chip's own `title`, which is untouched. */}
+                    {verdict.detail && verdict.verdict !== 'conflicts' && (
                       <span className="text-xs text-gray-400">· {verdict.detail}</span>
                     )}
                   </>
@@ -654,6 +661,50 @@ export function ChecksTab({
             )}
           </div>
         </Row>
+
+        {/* CONFLICTS — the one merge state a reader can act on right now, promoted out of the
+            Status row's wrapping chip line, where it was a red word between a CI count and a
+            `|` and was easy to miss entirely.
+
+            IT RENDERS THE ACTION, NOT THE FACT. The fact is the red "conflicts" chip directly
+            above, and that chip's `· detail` echo is suppressed for this verdict so the same
+            five words don't appear twice an inch apart.
+
+            ⚠ THE GATE IS THE RESOLVED VERDICT (see `conflictsRowVisible`), never
+            `mergeStateStatus === 'dirty' || mergeable === 'conflicting'`: the merge QUEUE
+            outranks conflicts in `mergeVerdict`, so a PR GitHub is already landing must not
+            sprout a second answer to "can this land?" underneath the queue chip. Going through
+            the verdict also inherits `pr.state === 'open'` — a merged PR's stored merge state is
+            stale and may not claim anything.
+
+            ⚠ NOT gated on `viewerCanPush`. The Pending CARD is minted only for repos the viewer
+            can write to (a card is an ask); this row is a statement of fact about a PR whose
+            pane is already open, and the Status chip states it to every reader regardless.
+            Gating here would make the pane say less than its own first row.
+
+            ⚠ IT NAMES NO BRANCH, because it cannot without a fetch. `PrDetail` carries no base
+            ref — `pull_requests.base_ref_name` is synced but `getPrDetail` does not emit it, and
+            `PrMergeOptions.baseRef` arrives only with the CLICK-GATED merge-options call.
+            "conflicts with `main`" is spelled in MergeControl's expanded panel, which has that
+            fetch. */}
+        {conflictsRowVisible(pr.state, verdict.verdict) && (
+          <Row label="Conflicts">
+            <div className="text-xs font-medium leading-relaxed text-gray-700 dark:text-gray-200">
+              Resolve the conflicts on{' '}
+              <a
+                href={pr.githubUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="underline underline-offset-2"
+                title="Open this pull request on GitHub"
+              >
+                GitHub
+                <ExternalLinkIcon size={11} className="ml-0.5 inline-block align-[-0.1em]" />
+              </a>
+              .
+            </div>
+          </Row>
+        )}
 
         {/* WHY IT'S BLOCKED — the one verdict GitHub refuses to explain.
             `mergeStateStatus: 'blocked'` collapses required approvals, a standing
@@ -819,10 +870,20 @@ export function ChecksTab({
           in the Reviews row above. The Pro "check addressed" run used to sit here too — it is
           now folded into the single "Check review" bar above the tabs, which covers the same
           threads and comments in one combined call per target, so leaving both would let a
-          user pay twice for one judgement. */}
+          user pay twice for one judgement.
+
+          …and REOPEN (same permission, `state === 'closed'` — the mirror gate, and the reason
+          this Row now opens at all on a closed PR: its other three disjuncts are two
+          `state === 'open'` gates plus `viewerCanApprove`, which is not state-gated, so a closed
+          PR the viewer AUTHORED rendered no Actions row whatsoever while a closed PR somebody
+          else authored rendered one holding only Approve). ⚠ No `armedIntent` condition on the
+          reopen branch: an armed auto-merge intent and a closed PR are not a live combination
+          (the runner resolves an intent whose PR closed), and the guard would hide the button
+          for the wrong reason. */}
       {(pr.viewerCanApprove ||
         (pr.viewerCanPush && pr.state === 'open' && !pr.isDraft) ||
-        (pr.viewerCanClose && pr.state === 'open' && armedIntent == null)) && (
+        (pr.viewerCanClose && pr.state === 'open' && armedIntent == null) ||
+        (pr.viewerCanReopen && pr.state === 'closed')) && (
         <Row label="Actions">
           <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
             {pr.viewerCanApprove && (
@@ -837,6 +898,7 @@ export function ChecksTab({
             {pr.viewerCanClose && pr.state === 'open' && armedIntent == null && (
               <ClosePrControl prId={pr.id} />
             )}
+            {pr.viewerCanReopen && pr.state === 'closed' && <ReopenPrControl prId={pr.id} />}
           </div>
         </Row>
       )}

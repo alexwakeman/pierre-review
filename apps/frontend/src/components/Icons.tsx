@@ -493,6 +493,18 @@ export function RefreshIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// A counter-clockwise arrow (Feather rotate-ccw) — "put this back": the PR-detail Reopen
+// control. NOT RefreshIcon, whose two chasing arrows mean "re-read this from GitHub" and which
+// sits a few pixels away in the same pane header.
+export function ReopenIcon({ size = 12, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </IconShell>
+  );
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
    People, bots & conversation
    ───────────────────────────────────────────────────────────────────────────────────────── */

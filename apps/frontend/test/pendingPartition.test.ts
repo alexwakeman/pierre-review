@@ -105,6 +105,28 @@ describe('head ∪ tail === cards', () => {
     expect(headCount).toBe(1);
     expect(ordered.map((c) => c.id)).toEqual(['wp:merge:7', 'my:7']);
   });
+
+  it('⚠ keeps a `conflicts` card whose PR is already in the head — GitHub reports both', () => {
+    // A PR can be `behind` AND `conflicting` at once, so one pull request legitimately mints an
+    // `update_branch` (or `merge`) card AND a `conflicts:<prId>` card. The tempting fix is to
+    // filter the duplicate out of `cards`; it is the wrong one. `capFor` gates every "50 of 148"
+    // disclosure on `shown === count`, where `shown` is folded off this array and `count` off the
+    // daily brief — so a dropped row makes the cap disclosure vanish WITH NO ERROR, on exactly
+    // the workspaces where the cap bites. The head seats the winner; the tail sibling is MARKED
+    // ("already in Do next"), never removed.
+    const both: Card[] = [
+      { id: 'wp:merge:7', prId: 7 },
+      { id: 'conflicts:7', prId: 7 },
+    ];
+    const { ordered, headCount } = partition(both, ['wp:merge:7']);
+    expect(headCount).toBe(1);
+    expect(ordered.map((c) => c.id)).toEqual(['wp:merge:7', 'conflicts:7']);
+    expect(ordered).toHaveLength(both.length);
+    // …and the other way round, when the ranker seats the conflicts row instead.
+    const flipped = partition(both, ['conflicts:7']);
+    expect(flipped.headCount).toBe(1);
+    expect(flipped.ordered.map((c) => c.id)).toEqual(['conflicts:7', 'wp:merge:7']);
+  });
 });
 
 describe('the divider', () => {
@@ -319,13 +341,42 @@ describe('the ranked head under an isolation', () => {
   });
 
   it('still suppresses it for every OTHER kind', () => {
-    for (const kind of ['stalled_review', 'untouched_thread', 'reviewer_routing', 'ci_failing', 'merge'] as const) {
-      expect(headSuppressedFor(kind)).toBe(true);
+    for (const kind of [
+      'stalled_review',
+      'untouched_thread',
+      'reviewer_routing',
+      'ci_failing',
+      'merge',
+      // A `conflicts` isolation is a single-kind narrowing like every brief-line kind: an ordering
+      // over one kind is not an ordering. `my_turn` remains the ONE exemption.
+      'conflicts',
+    ] as const) {
+      expect(headSuppressedFor(kind), kind).toBe(true);
     }
     const surveys: Card[] = [{ id: 'thr:7' }, { id: 'thr:8' }];
     const { ordered, headCount } = partition(surveys, ['thr:7'], headSuppressedFor('untouched_thread'));
     expect(headCount).toBe(0);
     expect(ordered).toEqual(surveys);
+  });
+
+  it('⚠ a `conflicts` isolation suppresses the head and leaves every row on the board', () => {
+    // The board narrowed by `?attn=conflicts` (the isolation banner's "Showing only Merge
+    // conflicts — N items"). The ranked head goes away; the LIST does not, and the partition is
+    // still a permutation — which is what keeps `capFor`'s `shown === count` guard intact.
+    const conflictsOnly: Card[] = [
+      { id: 'conflicts:11', prId: 11 },
+      { id: 'conflicts:12', prId: 12 },
+      { id: 'conflicts:13', prId: 13 },
+    ];
+    const { ordered, headCount } = partition(
+      conflictsOnly,
+      ['conflicts:12', 'conflicts:11'],
+      headSuppressedFor('conflicts'),
+    );
+    expect(headCount).toBe(0);
+    expect(ordered).toEqual(conflictsOnly);
+    // …and with no head there is no divider to draw above the first row.
+    expect(shouldShowDivider(headCount, ordered.length)).toBe(false);
   });
 
   it('leaves the un-isolated board exactly as it was', () => {

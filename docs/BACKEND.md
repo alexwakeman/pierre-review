@@ -109,6 +109,45 @@ every sync).
 
 ---
 
+## ⚠ A local write stamp can DELETE the event it exists to record (`markPrReopenedLocally`)
+
+**The rule.** A GitHub-write route stamps its row locally so the SPA's re-read from the local DB
+reflects the write immediately (CLAUDE.md § Conventions). But `sync/upsert.ts`'s
+`lifecycleTransitions` decides what to emit by comparing the **PRE-UPSERT** row against GitHub — so
+a stamp that writes the POST state can erase the transition the next walk would have narrated.
+Before stamping a state, check whether any event is derived from the state you are overwriting.
+
+**Where it bites.** `pr_reopened` is emitted only when the pre-upsert row reads `closed`. The moment
+`POST /api/prs/:id/reopen` stamps `state: 'open'`, every subsequent sync sees `prev.state === 'open'`
+and the branch never runs again — **permanently**. A reopen done through Pierre would be missing
+from the timeline and the feed forever, while the same reopen done on github.com still appears. So
+`markPrReopenedLocally` writes the `events` row **itself**, inside `runTransaction`, with the SAME
+`pr_reopened:<prNodeId>` dedupe key and `(accountId, dedupeKey)` conflict target the sync would have
+used — the two writers stay idempotent against each other if a walk ever does reach the branch.
+
+⚠ **The asymmetry is why this is easy to miss.** The CLOSE direction has no such problem: `pr_closed`
+comes off the state branch (`pr.state === 'CLOSED' && closedAt`), not off `prev`, so
+`markPrClosedLocally` is a one-line `.set()` and costs nothing. Writing the reopen stamp as its
+one-line inverse type-checks, passes every existing test, and silently deletes the event.
+
+Two more things the reopen stamp does that its mirror does not:
+
+- ⚠ **It NULLs `closedAt`.** `db/automation-output.ts` computes `prs_closed_unmerged` as
+  `mergedAt IS NULL` inside a `closedAt` WINDOW and never consults `state`, so a reopened PR that
+  keeps its old close stamp is reported as abandoned churn until a full walk rewrites the column.
+  `db/pr-liveness.ts` will not fix it either — that sweep only ever WRITES `closedAt`, never nulls it.
+- ⚠ **It sets `mergeStateStatus: 'unknown'`, never a guess.** GitHub recomputes mergeability
+  asynchronously after a reopen and the stored value predates the close; anything else lets
+  `mergeVerdict()`, the Merge button, the Pending card and `db/triage.ts`'s `READY_MERGE_STATES`
+  assert a landing verdict from a stale computation. Same write, same reason, as the close stamp.
+
+The update is account-scoped in its OWN predicate (`eq(pullRequests.accountId, accountId)`) rather
+than inheriting the route's check, and the events insert derives `repoId`/`nodeId` from that scoped
+UPDATE's `.returning()`, so it cannot reach another tenant's repo. Route contract, permission rule
+and failure codes: [API.md](API.md).
+
+---
+
 ## ⚠ `req.raw.on('close')` is NOT a client-disconnect signal on a POST — watch the REPLY socket
 
 **The rule.** On a POST, a client-disconnect abort must be wired to **`reply.raw`** (or the

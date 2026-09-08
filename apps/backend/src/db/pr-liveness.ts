@@ -108,6 +108,13 @@ export async function getPrLivenessTargets(
  *      at all. It is best-effort by construction: on a board with more than ~25 PRs the tail of
  *      this list simply waits for the next adaptive walk, which is exactly what it did before.
  *
+ * ⚠ `'dirty'` IS DELIBERATELY NOT IN GROUP 1, even though the `conflicts` card kind is built off
+ * exactly this column. Group 1 exists because a stale merge state there is a BUTTON THAT 405s; a
+ * conflicts card carries no button, so a stale one costs the reader a wasted row, not a refused
+ * merge. It rides the group-2 rotation with everything else, and the SPA's own ranking (which
+ * decides which ids reach this function at all) puts conflicts cards first — so the question gets
+ * asked; how often it is answered stays best-effort, by design.
+ *
  * Already-merged/closed targets are excluded outright: their card is leaving on this very refetch
  * and GitHub will not be recomputing mergeability for them.
  */

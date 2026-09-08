@@ -842,3 +842,64 @@ describe('subject — what a row is ABOUT', () => {
     expect(thread!.id).not.toBe(`wp:${thread!.kind}:${thread!.prId}`);
   });
 });
+
+describe('a conflicts card is a CARD, never a plan row', () => {
+  // ⚠ THE EXCLUSION IS A DECISION, SO IT GETS A PIN RATHER THAN AN ABSENCE. A `conflicts` card
+  // falls out of the card→job chain in db/work-plan.ts and produces nothing, deliberately: a plan
+  // row needs a `WorkPlanKind`, and that vocabulary spans TWO REPOSITORIES — the union and
+  // `BASE_PROXIMITY` here (compile-checked) and the plugin's prompt, which enumerates the seven
+  // kinds as a STRING that no compiler checks. Resolving conflicts is also the one job on this
+  // board with no in-app step to rank. Without this pin, a later "helpful" addition to the loop —
+  // or to the `cardPrIds` gate above it — is invisible.
+  //
+  // `m-conflicting` is the right fixture for it: a READY merge state with `mergeable:
+  // 'conflicting'`, in a repo the viewer ADMINs, with no request, no review and no thread — so
+  // the conflicts card is the ONLY card it produces and an absence in the plan is unambiguous.
+  it('reaches the board and produces no work-plan row, no total and no head slot', async () => {
+    const insights = await q.getWorkspaceInsights(1, undefined, planScope);
+    const cardId = `conflicts:${pr('m-conflicting')}`;
+    // Non-vacuity first: the assertions below are all absences.
+    expect(insights.cards.map((c: { id: string }) => c.id)).toContain(cardId);
+
+    const ev = await plan();
+    expect(ev.items.find((i) => i.prId === pr('m-conflicting'))).toBeUndefined();
+    // `totals` is `Partial<Record<WorkPlanKind, number>>` and `conflicts` is not a WorkPlanKind —
+    // a key here would mean the two vocabularies had been merged in the host alone.
+    expect(Object.keys(ev.totals)).not.toContain('conflicts');
+    // …and nothing the route would serve as the ranked head names one, so
+    // `GET /api/attention`'s `rendered`-set filter never has to drop a row.
+    expect(
+      (workPlan.doNextCardIds(ev) as string[]).some((id) => id.startsWith('conflicts:')),
+    ).toBe(false);
+  });
+
+  it('does not move a single counted scalar', async () => {
+    // The alignment assertion above compares the whole `counts` object against the brief; this one
+    // states the other half — that `foldCounts` ignores the kind entirely. Written as an equality
+    // between the counters and the cards of exactly the five COUNTED kinds, so a `conflicts` card
+    // folded into any of them breaks the arithmetic rather than merely inflating a number nobody
+    // is checking.
+    const insights = await q.getWorkspaceInsights(1, undefined, planScope);
+    const byKind = new Map<string, number>();
+    for (const c of insights.cards as { kind: string }[])
+      byKind.set(c.kind, (byKind.get(c.kind) ?? 0) + 1);
+    // Non-vacuity: there really are conflicts cards on this board.
+    expect(byKind.get('conflicts') ?? 0).toBeGreaterThan(0);
+
+    const ev = await plan();
+    const counted =
+      ev.counts.myTurn +
+      (ev.counts.ciFailing ?? 0) +
+      ev.counts.stalled +
+      ev.counts.untouchedThreads +
+      ev.counts.needsReviewer;
+    const countedKinds = [
+      'my_turn',
+      'ci_failing',
+      'stalled_review',
+      'untouched_thread',
+      'reviewer_routing',
+    ].reduce((n, k) => n + (byKind.get(k) ?? 0), 0);
+    expect(counted).toBe(countedKinds);
+  });
+});

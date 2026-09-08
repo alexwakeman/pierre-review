@@ -214,6 +214,33 @@ export function useClosePr(prId: number) {
   });
 }
 
+// Reopen a closed PR. The mirror image of useClosePr: it moves the PR back INTO the open set, so
+// every surface that shows open-PR state has to be re-read — the SAME nine keys, for the same
+// reasons, including the three that are ONE FOLD read three times.
+export function useReopenPr(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.reopenPr(prId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['pr', prId] });
+      void qc.invalidateQueries({ queryKey: ['timeline'] });
+      void qc.invalidateQueries({ queryKey: ['open-prs'] });
+      void qc.invalidateQueries({ queryKey: ['my-turn'] });
+      void qc.invalidateQueries({ queryKey: ['me'] });
+      void qc.invalidateQueries({ queryKey: ['activity'] });
+      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
+      // `markPrReopenedLocally` sets state='open', which puts the PR BACK into the openPrs fold
+      // every Pending card is built from — so a card may now exist that the client is not
+      // drawing. Same three keys, same rule, as the close mutation above: they are one fold read
+      // three times (board / brief count / ranked plan) and must move together or `capFor`'s
+      // `shown === count` guard compares two snapshots and drops the "50 of 148" disclosure.
+      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
+      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
+      void qc.invalidateQueries({ queryKey: ['work-plan'] });
+    },
+  });
+}
+
 // Update the PR branch from trunk (rebase/merge). Re-fetch mergeability afterwards so the merge
 // control reflects the now-up-to-date branch.
 export function useUpdatePrBranch(prId: number) {

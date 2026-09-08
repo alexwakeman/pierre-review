@@ -48,6 +48,15 @@ describe('a new InsightKind reaches every hand-written list', () => {
     expect(INSIGHT_KINDS).toContain('ci_failing');
     expect(KIND_LABEL.ci_failing).toBeTruthy();
   });
+
+  it('…and so is conflicts, so `?attn=conflicts` survives a parse', () => {
+    // Named here as well as caught by the set comparison above, so the failure message says WHICH
+    // kind went missing rather than printing two sorted arrays to diff by eye. The consequence of
+    // the omission is silent: the URL key is discarded at parse, the board opens UN-isolated, and
+    // a browser Back out of the narrowed view leaves the app.
+    expect(INSIGHT_KINDS).toContain('conflicts');
+    expect(KIND_LABEL.conflicts).toBe('Merge conflicts');
+  });
 });
 
 describe('ciFailingCapDisclosure', () => {

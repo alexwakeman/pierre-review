@@ -2776,6 +2776,32 @@ is dark on every notification entry point. That is the ruling, not an oversight.
 fold's **90-day ultra-stale gate** and its **15-per-kind cap**. A long-dormant-but-mergeable PR no
 longer appears — which is the point, since a ranked row with no card behind it breaks the partition.
 
+⚠ **`conflicts` IS A CARD, NOT A PLAN ROW — AND THE SEVEN `WorkPlanKind`s ARE UNCHANGED.** The
+Pending board's third merge-state kind falls out of `db/work-plan.ts`'s card→job chain and produces
+nothing, deliberately. A plan row needs a `WorkPlanKind`, and that vocabulary spans **two
+repositories**: the union and `BASE_PROXIMITY` in the host (compile-checked) and the plugin's prompt,
+which enumerates `merge|update_branch|unblock_ci|review|reply|thread|nudge` as a **STRING**
+(`packages/pro/src/work-plan/prompt.ts`) that no compiler checks — so a host-only addition hands the
+model a kind it was never told about. Excluding it costs the board nothing structurally: the head is
+an ORDERING, so an un-named card simply renders in the tail and `head ∪ tail === cards` still holds.
+Resolving conflicts is also the one job on that board with no in-app step to rank. Its `cardPrIds`
+gate and `foldCounts` stay untouched for the same reason — a kind that builds no row must not widen
+the reads that exist to build rows.
+
+⚠ **AND THE PLUGIN NEEDED A LINE FOR IT, WHICH NOTHING WOULD HAVE CAUGHT.**
+`packages/pro/src/insights/sprint-report.ts`'s card loop does `bump(repoFullName)` /
+`agg.cards += 1` / `agg.loc += additions + deletions` / `addRef(c)` **before** its if/else chain, so
+a kind matching no branch is not dropped — it is counted into that repo's `importance`
+(cards × 3 + LOC/50) and added to the linkable PR table while contributing zero action items.
+`ConflictsCard extends InsightPrRef`, so every field that code reads EXISTS: no compile error, no
+failing test, just a report that silently re-orders itself around work it never lists. It now has its
+own `continue` beside `ci_failing` and the two forward kinds, and
+`packages/pro/test/sprint-report-kind-coverage.test.ts` scans both source files and fails when an
+`InsightKind` is not named in that loop — the guard the two-repository split otherwise has no way to
+provide. `insightsHash`'s `default: return ''` is filtered out (an unmatched kind contributes
+nothing, not an empty slot), `chat.ts`'s if/else chain folds nothing before matching, and
+`preset-prompt.ts` uses per-kind type-guard filters — all three are safe as written.
+
 ⚠ **MERGE PROXIMITY IS APPROVAL-CONDITIONAL** (0.95 approved / 0.45 not, the latter deliberately
 below `review` 0.55 and `reply` 0.5). A clean PR nobody has reviewed is ready for GitHub, not ready
 for a human — and because the per-PR dedup survivor is chosen by proximity, the old flat 0.95 also

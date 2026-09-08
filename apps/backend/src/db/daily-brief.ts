@@ -283,6 +283,13 @@ async function computeBriefCounts(
   let stalled = 0;
   let untouchedThreads = 0;
   let needsReviewer = 0;
+  // ⚠ THREE KINDS REACH THIS LOOP AND ARE COUNTED BY NO LINE: `merge`, `update_branch` and now
+  // `conflicts`. The first two are opportunities and the strip counts what is WAITING ON YOU. The
+  // third is a genuine problem, but 3 of every 4 are somebody else's PR in a repo you can merely
+  // push to — a "waiting on you" number over that population would be a false claim, and it would
+  // stop the strip self-hiding on a workspace where nothing is actually owed. This allow-list and
+  // the route's deny-list are the two hand-maintained spellings of "which kinds count";
+  // daily-brief.test.ts compares them per kind, so an omission here is a CI failure, not a silence.
   for (const c of insights.cards) {
     if (c.kind === 'ci_failing') ciFailing += 1;
     else if (c.kind === 'my_turn') {

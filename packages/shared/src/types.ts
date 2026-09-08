@@ -3436,6 +3436,14 @@ export interface ClosePrResult {
   state: 'closed';
 }
 
+// Reopen a CLOSED, unmerged PR. No body; same author-or-write permission as the close above,
+// re-checked server-side. GitHub refuses when the head branch is gone — we do not sync branch
+// existence, so that arrives as a 409 with GitHub's own sentence rather than a client-side gate.
+export interface ReopenPrResult {
+  reopened: boolean;
+  state: 'open';
+}
+
 // Update the PR's branch from the base/trunk before merging. strategy 'rebase' is local-only
 // (clone-based); 'merge' works everywhere (native GitHub update-branch in cloud). No conflict
 // resolution in the free tier — a conflicting PR returns 409 with { conflicts: true }.
@@ -4584,6 +4592,13 @@ export interface PrDetail {
   // the repo OR they authored it (GitHub lets an author close their own PR). The close
   // route re-checks server-side. Gates the Overview "Close" action (open, non-merged PRs).
   viewerCanClose: boolean;
+  // Whether the viewer may REOPEN this PR: the SAME author-or-write rule as viewerCanClose,
+  // and it is its own field rather than a second read of that one because the two questions
+  // diverge on GitHub's side — a reopen additionally needs a live head branch, which we do not
+  // sync, and which is why the route can 409 on a PR this flag says yes to. STATE IS NOT IN IT
+  // (the client already holds `state`): the Overview gates the button on `state === 'closed'`,
+  // exactly as it gates Close on `state === 'open'`.
+  viewerCanReopen: boolean;
   // Whether the viewer's STANDING review on this PR (their latest decisive review:
   // approved / changes_requested / dismissed) is 'approved'. When true the Approve
   // control renders disabled ("Approved") — you've already approved and it still
@@ -6375,6 +6390,9 @@ export type InsightKind =
   | 'untouched_thread' // a review thread nobody has responded to
   | 'reviewer_load' // a reviewer's pending-queue depth (+ sprint load)
   | 'reviewer_routing' // a PR with no reviewer + who should review it
+  // GitHub CANNOT merge it — the head conflicts with the base. Neither a summons nor an
+  // opportunity: the one kind on this board with no button behind it, here or on GitHub.
+  | 'conflicts'
   // ⚠ THE TWO "FORWARD" KINDS. Every kind above is something that is WRONG; these two are
   // something that is READY, and they exist because the Pending board's ranked head has to be
   // able to say "the shortest path to a merged PR" and not only "here is what is broken". They
@@ -6681,7 +6699,11 @@ export interface UntouchedThreadCard extends InsightCardBase, InsightPrRef {
 export interface ReviewerLoadCard extends InsightCardBase {
   kind: 'reviewer_load';
   reviewerId: number;
-  pendingCount: number; // open PRs where they're requested & haven't reviewed
+  // Open PRs where they're requested AND still owe a review: a pair drops out once that reviewer
+  // has any submitted (non-draft) row in `reviews` for the PR, or GitHub's `reviewDecision` on the
+  // PR is 'approved'. GitHub re-requests reviewers who have already reviewed, so the raw
+  // `review_requests` count overstates this by ~23% on real data.
+  pendingCount: number;
   reviewsThisSprint: number; // reviews they submitted in the sprint window
   pendingPrs: {
     prId: number;
@@ -6783,6 +6805,38 @@ export interface UpdateBranchCard extends InsightCardBase, InsightPrRef {
   viewerCanPush: boolean;
 }
 
+/** GitHub cannot merge this pull request: it conflicts with its base branch. Somebody has to open
+ *  a checkout and resolve them — there is no button on this card, and GitHub offers none either.
+ *
+ *  ⚠ THE POPULATION IS "REPOS YOU CAN PUSH TO", AND THAT IS THE WHOLE CARD. Measured: 474 open
+ *  non-draft PRs on the reporting account conflict and 470 are in repos the viewer only READS —
+ *  other people's stuck work in other people's repositories. The gate is `writableRepoIds`
+ *  (WRITE/MAINTAIN/ADMIN), never the behavioural `viewerMaintainedRepoIds` proxy.
+ *
+ *  ⚠ TWO FIELDS ARE DELIBERATELY ABSENT AND EACH ABSENCE IS A DECISION. No `viewerCanPush`:
+ *  write access IS the population here, so the field would be a constant `true` — and the board's
+ *  merge controls ride the two FORWARD kinds only, so carrying it would invite a control on a card
+ *  that has nothing to offer. No `lastCommitAt`: it is the RANKER's clock on the forward cards and
+ *  this kind feeds no ranker, so rendering it would read as "conflicting since", which is not a
+ *  fact we hold. */
+export interface ConflictsCard extends InsightCardBase, InsightPrRef {
+  kind: 'conflicts';
+  /** GitHub's protection-aware state, verbatim — 'dirty' on every real row measured. ⚠ `null` is
+   *  NOT OBSERVED, never "fine": the card can be minted off `mergeable === 'conflicting'` alone. */
+  mergeStateStatus: MergeStateStatus | null;
+  /** ⚠ `null` = NOT OBSERVED, never "not conflicting" — the three-state rule for a column that may
+   *  only be cleared on a positive statement from GitHub. */
+  mergeable: Mergeable | null;
+  /** Carried for the SEVERITY accent and this block's cap ordering — exactly what the two forward
+   *  kinds carry it for, and NEVER as an ownership claim on screen (the relevance LENS narrows
+   *  `my_turn` and nothing else). ⚠ `'none'` cannot occur: `writableRepoIds` ⊆ the maintained set. */
+  relevance: MyTurnRelevance;
+  /** CODE-WRITTEN and TIME-FREE — "Conflicts with main". There is no stored "conflicting since",
+   *  so the card dates itself off `openedAt` like every other PR-bearing kind and claims no clock
+   *  of its own. */
+  detail: string;
+}
+
 export type InsightCard =
   | MyTurnCard
   | CiFailingCard
@@ -6792,6 +6846,7 @@ export type InsightCard =
   | ReviewerRoutingCard
   | MergeReadyCard
   | UpdateBranchCard
+  | ConflictsCard
   | BotSignalCard
   | BotOnlyReviewCard;
 
