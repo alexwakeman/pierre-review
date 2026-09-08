@@ -15417,6 +15417,17 @@ export async function armAutoMerge(
     // Whether the base branch had a merge queue at arm time (the caller checked live).
     viaMergeQueue: boolean;
     expectedHeadOid: string;
+    /**
+     * The base branch the SPA was showing when the user clicked — the SECOND consent anchor.
+     *
+     * ⚠ IT IS PINNED HERE, NOT READ AT RUN TIME. The watcher's retarget guard used to compare
+     * the live base against `pull_requests.base_ref_name`, a column the SYNC owns: any walk that
+     * corrected it between arming and a tick read as "the PR was retargeted" and disarmed an
+     * intent nobody had touched. Consent is a fact about the moment of the click, so it is
+     * recorded at the click. Null only when the caller could not determine it, in which case the
+     * guard falls back to the synced column exactly as before.
+     */
+    expectedBaseRef: string | null;
     expiresAt: Date;
   },
 ): Promise<ArmedMergeRequest> {
@@ -15431,6 +15442,9 @@ export async function armAutoMerge(
       viaMergeQueue: opts.viaMergeQueue,
       enqueuedAt: null,
       expectedHeadOid: opts.expectedHeadOid,
+      expectedBaseRef: opts.expectedBaseRef,
+      // No update is in flight on a brand-new intent.
+      updateIssuedAgainstOid: null,
       state: 'armed',
       armedAt: now,
       expiresAt: opts.expiresAt,
@@ -15451,6 +15465,10 @@ export async function armAutoMerge(
         // to a head/consent that no longer applies.
         enqueuedAt: null,
         expectedHeadOid: opts.expectedHeadOid,
+        // A re-arm re-establishes BOTH anchors against what the user is looking at now, and
+        // clears any in-flight update mark: it belonged to a consent that no longer applies.
+        expectedBaseRef: opts.expectedBaseRef,
+        updateIssuedAgainstOid: null,
         state: 'armed',
         armedAt: now,
         expiresAt: opts.expiresAt,
@@ -15594,6 +15612,16 @@ export interface ArmedMergeWork {
   // The watcher compares it to the live base so a retarget (which leaves head.sha untouched,
   // so the head pin can't see it) doesn't land the PR in a branch nobody consented to.
   syncedBaseRef: string | null;
+  /**
+   * The base branch pinned AT ARM TIME. Preferred over `syncedBaseRef` by the retarget guard;
+   * null on rows armed before the column existed, which fall back to the synced value.
+   */
+  expectedBaseRef: string | null;
+  /**
+   * The head SHA an in-flight update-branch was issued against, or null when none is. Durable
+   * so a restart mid-update cannot turn our OWN merge commit into an unexplained head move.
+   */
+  updateIssuedAgainstOid: string | null;
   // The head commit's CI status as last SYNCED. Used for ONE thing: GitHub collapses "required
   // checks still running" and "required reviews missing" into the same `mergeableState:
   // 'blocked'`, and this is what lets the watcher name which of the two it is without a second
@@ -15638,6 +15666,8 @@ export async function listArmedMergeRequestsForRunner(
       expiresAt: autoMergeRequests.expiresAt,
       armedAt: autoMergeRequests.armedAt,
       syncedBaseRef: pullRequests.baseRefName,
+      expectedBaseRef: autoMergeRequests.expectedBaseRef,
+      updateIssuedAgainstOid: autoMergeRequests.updateIssuedAgainstOid,
       syncedCiStatus: pullRequests.ciStatus,
     })
     .from(autoMergeRequests)
@@ -15681,6 +15711,13 @@ export async function updateAutoMergeState(
     // Stamp the watcher's own enqueue (merge-queue intents only). Never cleared while armed —
     // it is the attribution record for the eventual merge; a re-arm resets it.
     enqueuedAt?: Date;
+    /**
+     * Record (a SHA) or clear (null) the in-flight update-branch mark. Written in the SAME call
+     * that issues the update, and cleared the moment the resulting head move is adopted — so
+     * `isOurUpdateMerge` reads a durable fact rather than a process-local memory that a restart
+     * silently converts into "the branch moved for reasons unknown".
+     */
+    updateIssuedAgainstOid?: string | null;
   },
 ): Promise<void> {
   const now = new Date();
@@ -15696,6 +15733,9 @@ export async function updateAutoMergeState(
         ? { expectedHeadOid: opts.expectedHeadOid }
         : {}),
       ...(opts.enqueuedAt !== undefined ? { enqueuedAt: opts.enqueuedAt } : {}),
+      ...(opts.updateIssuedAgainstOid !== undefined
+        ? { updateIssuedAgainstOid: opts.updateIssuedAgainstOid }
+        : {}),
     })
     .where(eq(autoMergeRequests.id, id))
     .execute();

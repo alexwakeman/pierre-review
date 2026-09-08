@@ -58,6 +58,29 @@ export function usePrArmedIntent(prId: number | null): ArmedMergeRequest | null 
   return data?.requests.find((r) => r.prId === prId && r.state === 'armed') ?? null;
 }
 
+/**
+ * The intent for THIS PR that the watcher STOPPED — disarmed, expired or failed — and has not
+ * been re-armed since. Null when the PR is armed, when it merged, or when nothing is on record.
+ *
+ * ⚠ THIS EXISTS BECAUSE A STOPPED INTENT WAS INVISIBLE EVERYWHERE. `usePrArmedIntent` filters to
+ * `state === 'armed'`, so a card or pane whose only question was "is this armed?" simply lost its
+ * panel when the watcher gave up — and the global banner's outcome card is per-page-load and
+ * does not poll in a background tab. The reader was left with a PR that did not merge and
+ * nothing anywhere saying why. The row carries `lastReason`; this is what lets a surface show it.
+ *
+ * `merged` is deliberately EXCLUDED: that is a success, it is announced by the banner, and a
+ * standing "auto-merge finished" notice on a merged PR is clutter, not news. The list keeps
+ * resolved rows for 24h, so this self-clears without any dismissal.
+ */
+export function usePrStoppedIntent(prId: number | null): ArmedMergeRequest | null {
+  const { data } = useArmedMerges();
+  if (prId == null) return null;
+  const rows = data?.requests.filter((r) => r.prId === prId) ?? [];
+  // A re-arm supersedes its own history: if anything for this PR is live, nothing is stopped.
+  if (rows.some((r) => r.state === 'armed')) return null;
+  return rows.find((r) => r.state !== 'armed' && r.state !== 'merged') ?? null;
+}
+
 // ---- The ARM DRAFT — a half-finished confirmation, keyed by PULL REQUEST --------------------
 //
 // ⚠ WHY THIS IS NOT `useState` INSIDE THE CONTROL. A Pending card's React key IS its card id, and

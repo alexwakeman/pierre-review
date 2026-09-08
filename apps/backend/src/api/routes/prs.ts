@@ -974,6 +974,12 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         updateStrategy: updateStrategy ?? 'none',
         viaMergeQueue: queue?.enabled === true,
         expectedHeadOid: info.headSha,
+        // ⚠ THE LIVE REF, PINNED — not `syncedBaseRef`, even though the guard above has just
+        // proven the two equal. They are equal AT THIS INSTANT; the synced column belongs to the
+        // sync and may be rewritten at any moment, and the watcher used to re-read it every tick
+        // and disarm on any disagreement. Recording GitHub's own answer here makes the consent a
+        // fact about the click rather than a lookup that can change underneath it.
+        expectedBaseRef: info.baseRef,
         expiresAt: new Date(Date.now() + AUTO_MERGE_TTL_MS),
       });
       // The full row, identity and `phase: 'pending_first_check'` included — the SPA seeds its

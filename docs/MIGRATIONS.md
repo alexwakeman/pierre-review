@@ -634,3 +634,18 @@ cited at the write site). Facts that live at the DDL grain:
   while `pro_migrations` records the file as applied, with no way back except editing that table
   by hand). A raise is the honest outcome, and `IF NOT EXISTS` covers the one benign replay.
 - ⚠ The pg twin has not been replayed against a real Postgres (nor have `0025`/`0026`'s).
+
+### `0061_auto_merge_durable_anchors` (pg `0048`)
+
+Two nullable `text` columns on `auto_merge_requests`, no backfill and no default.
+
+- `expected_base_ref` — the base branch pinned AT ARM TIME. The retarget guard was re-reading the
+  synced `pull_requests.base_ref_name` on every tick, so any walk that corrected that column read
+  as "the PR was retargeted" and disarmed an intent nobody had touched. NULL on pre-existing rows,
+  which fall back to the synced value exactly as before.
+- `update_issued_against_oid` — the head SHA an in-flight `update-branch` was issued against. It
+  lived only in a process-local Map, so a restart (every `pnpm dev` file save; every cloud deploy)
+  turned the watcher's OWN merge commit into an unexplained head move and disarmed the intent.
+
+⚠ **NULL MEANS "NOT RECORDED", AND THAT IS WHY NEITHER TAKES A DEFAULT.** A default on
+`expected_base_ref` would assert the user consented to a branch nobody asked them about.

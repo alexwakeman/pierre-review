@@ -163,14 +163,25 @@ export function useMergePr(prId: number) {
 // When the base branch has a queue, enqueuing IS the merge action (GitHub won't take a direct
 // merge), so these invalidate the same surfaces as a merge would EXCEPT the PR-state ones —
 // the PR isn't merged yet, it's queued. merge-options carries the live queue position.
+// ⚠ THESE TWO AWAIT THEIR merge-options INVALIDATION, AND IT IS THE ONLY PLACE IN THIS FILE
+// THAT DOES. The button these mutations sit behind renders from `useMergeOptions`, whose
+// `inQueue` is the very fact the mutation just changed — and a fire-and-forget invalidation
+// leaves `isPending` false while the cache still holds the PRE-CLICK payload. The button
+// therefore snapped back to "Add to merge queue" and STAYED there for the whole refetch, which
+// is a live GitHub call: seconds, not a flicker, and clickable throughout, so a second click
+// could enqueue twice. React Query v5 keeps a mutation pending until an `onSuccess` promise
+// settles, so awaiting exactly this one query carries the spinner across the gap.
+//
+// The other invalidations stay `void`: nothing on this control reads them, and awaiting a
+// refetch nobody is looking at would just hold the spinner open for longer.
 export function useEnqueueMergeQueue(prId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (method?: MergeMethod) =>
       api.enqueueMergeQueue(prId, method ? { method } : undefined),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['merge-options', prId] });
+    onSuccess: async () => {
       void qc.invalidateQueries({ queryKey: ['pr', prId] });
+      await qc.invalidateQueries({ queryKey: ['merge-options', prId] });
     },
   });
 }
@@ -179,9 +190,9 @@ export function useDequeueMergeQueue(prId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.dequeueMergeQueue(prId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['merge-options', prId] });
+    onSuccess: async () => {
       void qc.invalidateQueries({ queryKey: ['pr', prId] });
+      await qc.invalidateQueries({ queryKey: ['merge-options', prId] });
     },
   });
 }

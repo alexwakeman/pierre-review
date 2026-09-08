@@ -428,6 +428,13 @@
       "when": 1788742800000,
       "tag": "0060_drop_my_turn_dismissals",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1788746400000,
+      "tag": "0061_auto_merge_durable_anchors",
+      "breakpoints": true
     }
   ]
 }

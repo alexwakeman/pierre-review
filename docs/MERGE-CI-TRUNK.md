@@ -208,14 +208,45 @@ calls/hour at 25 intents. The gates it feeds:
 3. **Async update-branch is never re-pinned optimistically** — GitHub's update returns **202
    ACCEPTED** and merges asynchronously with no handle to poll, so re-reading the head there
    would adopt a concurrent human push as consented-to code. The runner records what it ASKED
-   for (`pendingUpdates`, TTL 15 min) and lets a later tick prove the move via (2).
+   for and lets a later tick prove the move via (2).
+   ⚠ **The record is the `update_issued_against_oid` COLUMN, not the `pendingUpdates` Map.** The
+   Map was the only record until sqlite `0061`/pg `0048`, and losing it on a restart did not read
+   as "I forgot" — it read as an unexplained head move, whose safe answer is to disarm. Under
+   `pnpm dev` that is every file save and in cloud every deploy, so an unrelated code push could
+   kill an intent with a message blaming the user's branch. The Map survives only as a **freshness
+   hint** (TTL 15 min); when it is empty the column still proves the SHA and the three GitHub-side
+   proofs in (2) are what actually establish the commit is ours.
 4. **Retarget guard** — a `PATCH pulls/{n}` base change leaves `head.sha` alone, so the head pin
-   is blind to it; the runner compares the live base against the last SYNCED base ref and
-   disarms on a mismatch (waiting, not merging, when it can't tell). The exact fix is an
-   `expected_base_ref` column that does not exist yet.
+   is blind to it, so the runner compares the live base against the branch the user consented to
+   and disarms on a mismatch (waiting, not merging, when it can't tell).
+   ⚠ **That branch is `expected_base_ref`, PINNED AT ARM TIME** (same migration). It used to be
+   the SYNCED `pull_requests.base_ref_name`, re-read every tick — a column the sync owns and may
+   rewrite at any moment, so a walk that corrected it reported a retarget nobody performed. Rows
+   armed before the column existed fall back to the synced value, exactly as before. The arm route
+   already fetches the live base (it refuses to arm when the two disagree), so the pinned value is
+   GitHub's own answer at the moment of the click, not a lookup that can change underneath it.
 5. **COMPARE-AND-SET immediately before the merge** — everything above acts on a scan snapshot
    that can be minutes old; a user who hit Cancel mid-tick DELETED the row, and merging anyway
    would leave the UI saying "cancelled" for a PR that landed.
+5b. **A merge-queue refusal that names an unfinished check is a WAIT, not a failure**
+   (`isWaitableEnqueueRefusal`). `enqueueWhenReady` used to gate on `reviewDecision` alone, on the
+   belief that checks never gate entry ("AWAITING_CHECKS is a normal entry state; the queue runs
+   them itself"). That is true of a queue configured to run its own checks and **false of a branch
+   whose protection requires them first** — and on the reporting account it was false: **3 of 21
+   armed intents died**, two of them refused purely because CI was still running
+   ("Pull request 2 of 3 required status checks are in progress"). The throw reached the tick's
+   strike counter and three strikes at a two-minute tick killed the intent **~6 minutes after the
+   user armed it**. Now a refusal naming an unfinished or failing required status check parks the
+   intent at `awaiting_checks` and costs no strike.
+   ⚠ **The first attempt is ALWAYS made.** Refusing to ask when GitHub says `blocked` would
+   deadlock a repo whose queue runs the checks — `blocked` is exactly the state entering the queue
+   clears. Only after a refusal does the runner stop re-asking, and only while `mergeableState`
+   still says `blocked`.
+   ⚠ **`MAX_CONSECUTIVE_FAILURES` was not consecutive.** `failureCounts` was cleared only by
+   `forgetIntent`, i.e. only on a terminal state, so three unrelated transient errors over three
+   days killed an intent that succeeded on every tick between them. A clean pass now clears it,
+   and the budget is 8 (~16 min) rather than 3 (~6 min) — shorter than a CI run, a rate-limit
+   pause or a deploy blip.
 6. **Green light = `mergeableState ∈ {clean, has_hooks, unstable}`** — so, as everywhere else,
    **`unstable` merges** (CI red but not REQUIRED by branch protection), matching GitHub's own
    button. `blocked`/`conflicts` KEEP WAITING with a `lastReason` (unblocking on its own is the
@@ -440,7 +471,35 @@ an armed chip, and the Close
 button HIDES (opposite promises) — all via **`usePrArmedIntent`**, a selector over the polled
 armed list (zero new requests; predicate is `state === 'armed'`, NEVER row existence — the list
 carries 24h-resolved rows; cross-tab it can lag the 45s poll, own-tab arm/disarm is instant via
-the `ARMED_MERGES_KEY` invalidation). `useArmedMerges` polls `GET /api/auto-merge` foreground-only
+the `ARMED_MERGES_KEY` invalidation).
+
+⚠ **AND WHEN THE WATCHER GIVES UP, SOMETHING MUST SAY SO — `usePrStoppedIntent`.** Because every
+armed surface gates on `state === 'armed'`, a disarmed, expired or failed intent used to make the
+panel simply VANISH: the PR did not merge and nothing anywhere said why. That is the reported
+"the arming is disarmed for unknown reasons", and the reason was never unknown — the watcher
+writes it to `last_reason` on the way out. The selector returns the most recent non-`armed`,
+non-`merged` row for a PR (a re-arm supersedes its own history; `merged` is excluded because a
+success is announced, not posted), and it drives an **"Auto-merge" Row on the PR pane** (open PRs
+only — on a merged one the question has answered itself) and a line on the **Pending card**. Both
+read `TERMINAL_LABEL` from `AutoMergeBanner`, exported for exactly that reason: one outcome, one
+wording. Both self-clear when the server drops the row at 24h.
+
+⚠ **The banner's outcome card needed a DURABLE baseline for the same reason.** `foldArmedPoll`
+only reports a transition for a PR it previously observed `armed`, and `useArmedMerges` sets
+`refetchIntervalInBackground: false` — so an intent that resolved while the tab was backgrounded
+or between page loads had no prior observation to compare against and was silently discarded. The
+last-seen map is now seeded from `localStorage` (armed states only; a terminal state read back
+would let the fold believe it had already reported an outcome it never showed). An empty read
+degrades to the original silent-first-poll behaviour, which is what a genuinely first visit wants.
+
+⚠ **`useEnqueueMergeQueue`/`useDequeueMergeQueue` AWAIT their `merge-options` invalidation**, and
+they are the only mutations in `usePrWrites.ts` that await anything. The button renders from that
+query's `inQueue` — the very fact the mutation just changed — so a fire-and-forget invalidation
+dropped `isPending` while the cache still held the pre-click payload: the button snapped back to
+"Add to merge queue" and stayed there for the whole refetch, which is a live GitHub call. Seconds,
+not a flicker, and clickable throughout. React Query v5 keeps a mutation pending until an
+`onSuccess` promise settles, so awaiting exactly that one query carries the spinner across the gap;
+the other invalidations stay `void` because nothing on the control reads them. `useArmedMerges` polls `GET /api/auto-merge` foreground-only
 on an ADAPTIVE cadence — 8s while any row is `armed`, 45s otherwise, because an account with
 nothing armed must not pay a per-8s request for a card that renders nothing.
 

@@ -1114,6 +1114,42 @@ interface GqlDequeueResponse {
  *
  * `prNodeId` is the PR's GraphQL node id (pullRequests.githubNodeId), NOT its number.
  */
+/**
+ * Is this enqueue refusal GitHub saying "not yet" rather than "no"?
+ *
+ * ⚠ THIS EXISTS BECAUSE THE OPPOSITE ASSUMPTION KILLED REAL INTENTS. `enqueueWhenReady`'s
+ * comment asserted that checks do not gate entry ("AWAITING_CHECKS is a normal entry state; the
+ * queue runs them itself"), which is true of a queue configured to run its own checks and FALSE
+ * of a branch whose protection requires them before entry. On the reporting account 3 of 21
+ * armed intents died this way, and two of them were refused purely because CI had not finished:
+ *
+ *   "Pull request 2 of 3 required status checks are in progress."
+ *   "2 of 2 required status checks have not succeeded: 1 expected."
+ *
+ * A refusal like that is the exact condition arming exists to wait out. Treated as an error it
+ * burned a strike, and three strikes at a two-minute tick killed the intent about six minutes
+ * after the user armed it — with CI still running.
+ *
+ * ⚠ MATCHES THE CONDITION, NOT THE WORD "check". A refusal naming a rule the watcher can never
+ * satisfy on its own (a missing review, a draft, a protected-branch restriction) must still fail
+ * — waiting forever on those is its own bug. Failing statuses are deliberately INCLUDED as
+ * waitable: a red check is routinely re-run or fixed by a push, and a push disarms us anyway
+ * through the head pin, which is the honest exit.
+ */
+export function isWaitableEnqueueRefusal(message: string): boolean {
+  const m = message.toLowerCase();
+  if (!m.includes('status check') && !m.includes('required statuses')) return false;
+  return (
+    m.includes('in progress') ||
+    m.includes('have not succeeded') ||
+    m.includes('has not succeeded') ||
+    m.includes('expected') ||
+    m.includes('pending') ||
+    m.includes('queued') ||
+    m.includes('failing')
+  );
+}
+
 export async function enqueuePullRequestOnQueue(
   token: string,
   prNodeId: string,

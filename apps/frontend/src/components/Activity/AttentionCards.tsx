@@ -28,7 +28,7 @@ import {
   updateBranchMutationKey,
   useRequestReviewers,
 } from '../../hooks/usePrWrites.js';
-import { usePrArmedIntent } from '../../hooks/useAutoMerge.js';
+import { usePrArmedIntent, usePrStoppedIntent } from '../../hooks/useAutoMerge.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
 import {
@@ -57,7 +57,7 @@ import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
 import { AiSummary } from '../AiSummary.js';
 import { ThreadCard } from '../ThreadView/index.js';
-import { armedPhaseHeadline } from '../AutoMergeBanner.js';
+import { armedPhaseHeadline, TERMINAL_LABEL } from '../AutoMergeBanner.js';
 import { MergeControl } from '../MergeControl.js';
 import { MergeWhenReadyControl } from '../MergeWhenReadyControl.js';
 import { LargePrFlag } from './LargePrFlag.js';
@@ -1134,6 +1134,9 @@ export function pendingMergeGate(card: MergeReadyCard | UpdateBranchCard): Pendi
 function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard }): JSX.Element | null {
   const gate = pendingMergeGate(card);
   const armed = usePrArmedIntent(card.prId);
+  // …and the one the watcher gave up on. Both are selectors over the SAME account-wide poll the
+  // banner already keeps warm, so this costs the board nothing — the fetch-on-mount rule holds.
+  const stopped = usePrStoppedIntent(card.prId);
   // ── "MID-MERGE" — WHERE THIS PR STANDS RIGHT NOW, IN THREE LAYERS ────────────────────────────
   //
   // The board used to say nothing at all between "Merge" and the card disappearing, which is the
@@ -1184,6 +1187,18 @@ function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard
         // repo is not named because `PrLine` above already prints `owner/name #number`.
         <span className="text-[11px] text-gray-500 dark:text-gray-400">
           {armedPhaseHeadline(armed)}
+        </span>
+      ) : stopped != null ? (
+        // AN INTENT THE WATCHER GAVE UP ON. Ranked BELOW a live intent and a live write (both
+        // describe now; this describes something that already finished) and ABOVE the merge
+        // verdict, because "your auto-merge stopped" is the more specific answer to why this row
+        // is still here. Before this the card just lost its armed line and said nothing at all —
+        // the reported "disarmed for unknown reasons". It clears itself: the server drops the
+        // row after 24h, and a re-arm replaces it with the live headline above.
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+          <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+          {TERMINAL_LABEL[stopped.state] ?? 'Auto-merge stopped'}
+          {stopped.lastReason != null && <span className="ml-1">— {stopped.lastReason}</span>}
         </span>
       ) : gate.queued ? (
         // NOTHING. The queue chip in the header row already said it — and said it better, with

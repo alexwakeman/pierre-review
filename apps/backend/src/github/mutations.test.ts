@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { splitDiffByFile } from '../review/post-review.js';
-import { filesToUnifiedDiff, reopenPullRequest } from './mutations.js';
+import { filesToUnifiedDiff, reopenPullRequest, isWaitableEnqueueRefusal } from './mutations.js';
 
 // filesToUnifiedDiff is the fallback that rebuilds a unified diff from GitHub's per-file
 // /files endpoint when the whole-PR .diff media type 406s (>20,000 lines). The output must
@@ -139,5 +139,48 @@ describe('reopenPullRequest', () => {
     stubFetch(502, null);
     const out = await reopenPullRequest('tok', 'acme', 'api', 7);
     expect(out).toEqual({ ok: false, reason: 'error', message: '' });
+  });
+});
+
+// ── "not yet" is not a failure ────────────────────────────────────────────────────────────────
+//
+// The classifier that decides whether a merge-queue enqueue refusal costs the armed intent a
+// strike. Every WAITABLE string below is a verbatim GitHub response from the reporting account's
+// own `auto_merge_requests.last_reason` — each one killed a real intent about six minutes after
+// the user armed it, with CI still running.
+describe('isWaitableEnqueueRefusal', () => {
+  const WAITABLE = [
+    'Pull request 2 of 3 required status checks are in progress.',
+    'Pull request 2 of 2 required status checks have not succeeded: 1 expected.',
+    'Pull request has failing required statuses and Pull request Required status check "Run Pull Request Checks" is failing.',
+    'Request failed due to following response errors:\n - Pull request 1 of 4 required status checks are in progress.',
+  ];
+  const FATAL = [
+    // A rule the watcher can never satisfy on its own — waiting on these until the 72-hour
+    // expiry would be its own bug, so they must still end the intent.
+    'Resource not accessible by integration',
+    'Pull request is in draft state',
+    'At least 1 approving review is required by reviewers with write access.',
+    'Head branch was modified. Review and try the merge again.',
+    'Could not resolve to a node with the global id of \'PR_x\'',
+    '',
+  ];
+
+  it('waits out an unfinished or failing required status check', () => {
+    for (const m of WAITABLE) expect(isWaitableEnqueueRefusal(m), m).toBe(true);
+  });
+
+  it('⚠ still fails on a refusal it cannot wait out', () => {
+    for (const m of FATAL) expect(isWaitableEnqueueRefusal(m), m).toBe(false);
+  });
+
+  it('⚠ matches the CONDITION, not the word "check"', () => {
+    // "checks" appearing in an unrelated sentence must not buy an intent an infinite wait.
+    expect(isWaitableEnqueueRefusal('You do not have permission to view status checks')).toBe(false);
+    expect(isWaitableEnqueueRefusal('Required status check is expected.')).toBe(true);
+  });
+
+  it('is case-insensitive — GitHub is not consistent about capitalisation', () => {
+    expect(isWaitableEnqueueRefusal('PULL REQUEST 2 OF 3 REQUIRED STATUS CHECKS ARE IN PROGRESS.')).toBe(true);
   });
 });

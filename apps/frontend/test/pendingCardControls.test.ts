@@ -1085,3 +1085,53 @@ describe('clockSaysMore — does a card’s own clock still add a fact?', () => 
     expect(clockSaysMore(agoIso(8), 'not-a-date')).toBe(true);
   });
 });
+
+// ── AN INTENT THE WATCHER GAVE UP ON MUST BE VISIBLE SOMEWHERE ────────────────────────────────
+//
+// The reported bug: "the arming is disarmed for unknown reasons". It was not unknown to the
+// server — `auto_merge_requests.last_reason` names it — but nothing on screen read that column
+// once the intent stopped being `armed`. `usePrArmedIntent` filters to `state === 'armed'`, so
+// the PR pane's chip, the Pending card's headline and the merge panel all simply lost their row;
+// and the global banner's outcome card needs a prior in-tab observation, which a background tab
+// or a reload does not have. `usePrStoppedIntent` is the selector that closes it.
+//
+// Pure selector logic, restated here — the hook itself is a one-line filter over the polled list
+// and this pins the RULES, which is where the decisions are.
+type StubIntent = { prId: number; state: string; lastReason: string | null };
+
+function stoppedIntentOf(rows: StubIntent[], prId: number): StubIntent | null {
+  const mine = rows.filter((r) => r.prId === prId);
+  if (mine.some((r) => r.state === 'armed')) return null;
+  return mine.find((r) => r.state !== 'armed' && r.state !== 'merged') ?? null;
+}
+
+describe('which auto-merge intent a PR surface should show', () => {
+  const failed: StubIntent = { prId: 7, state: 'failed', lastReason: 'github: 2 of 3 checks' };
+
+  it('surfaces a failed intent — the case that had no surface at all', () => {
+    expect(stoppedIntentOf([failed], 7)?.state).toBe('failed');
+  });
+
+  it('surfaces every other giving-up state', () => {
+    for (const state of ['disarmed_head_moved', 'disarmed_blocked', 'expired']) {
+      expect(stoppedIntentOf([{ prId: 7, state, lastReason: null }], 7)?.state).toBe(state);
+    }
+  });
+
+  it('⚠ says NOTHING about a MERGED intent — a success is not a notice', () => {
+    // The banner announces the landing. A standing "auto-merge finished" line on a merged PR is
+    // clutter, and on the Pending card it would sit under a row that is about to disappear.
+    expect(stoppedIntentOf([{ prId: 7, state: 'merged', lastReason: null }], 7)).toBeNull();
+  });
+
+  it('⚠ a RE-ARM supersedes its own history', () => {
+    // The list keeps resolved rows for 24h. A user who re-armed after a disarm must see the LIVE
+    // state, not last night's obituary next to it.
+    const rows = [failed, { prId: 7, state: 'armed', lastReason: null }];
+    expect(stoppedIntentOf(rows, 7)).toBeNull();
+  });
+
+  it('never crosses PRs', () => {
+    expect(stoppedIntentOf([failed], 8)).toBeNull();
+  });
+});

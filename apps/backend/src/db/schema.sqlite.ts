@@ -659,6 +659,26 @@ export const autoMergeRequests = sqliteTable(
     }).notNull(),
     // The head SHA at arming time — the consent anchor (see above).
     expectedHeadOid: text('expected_head_oid').notNull(),
+    // ---- TWO CONSENT/BOOKKEEPING ANCHORS THAT USED TO LIVE IN PROCESS MEMORY ----------------
+    //
+    // Both were module-level Maps in `merge/auto-merge-runner.ts`. A Map is fine for a hint; it
+    // is NOT fine for a fact the watcher DISARMS on, because a restart turns "I know why this
+    // happened" into "something unexplained happened" — and the safe direction for an unexplained
+    // head move is to disarm. Under `pnpm dev` that is every file save; in cloud it is every
+    // deploy.
+    //
+    // The base branch the user was looking at when they armed. The head pin cannot see a
+    // retarget (PATCH pulls/{n} with a new `base` leaves head.sha alone), so the watcher needs a
+    // second anchor — and it was reading the SYNCED `pull_requests.base_ref_name` at RUN time,
+    // which is not what the user consented to: any sync that corrects that column between arming
+    // and a tick reads as a retarget and disarms. NULL on rows armed before this column existed;
+    // the guard falls back to the synced ref for those, exactly as before.
+    expectedBaseRef: text('expected_base_ref'),
+    // The head SHA an in-flight `update-branch` was issued AGAINST. GitHub's update-branch
+    // returns 202 with no handle to poll, so the resulting head move lands on a later tick and
+    // `isOurUpdateMerge` needs this to tell it apart from a human push. NULL means no update is
+    // in flight — which is also the honest answer after a restart that happened before one.
+    updateIssuedAgainstOid: text('update_issued_against_oid'),
     // Set at arm time when the base branch had a merge queue: the watcher's terminal action
     // is then "add to the queue", not a direct merge (GitHub refuses PUT .../merge on a
     // queue-protected branch). Re-checked live each tick — a queue disabled after arming

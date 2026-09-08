@@ -104,6 +104,7 @@ import {
 } from '../db/queries.js';
 import {
   enqueuePullRequestOnQueue,
+  isWaitableEnqueueRefusal,
   fetchCommitParents,
   fetchMergeQueueState,
   fetchPrHeadCheckRollup,
@@ -129,19 +130,54 @@ const MAX_INTENTS_PER_TICK = 25;
 // Consecutive GitHub failures before an intent is given up on. Kept in memory (process-local):
 // a restart resets the count, which errs towards retrying rather than towards a silently dead
 // intent — the right way round for something the user is waiting on.
-const MAX_CONSECUTIVE_FAILURES = 3;
+// Consecutive failures before an intent is given up on. RAISED from 3, which at a two-minute
+// tick gave a GitHub outage about six minutes to kill something the user is waiting on — and
+// six minutes is shorter than a CI run, a rate-limit pause or a routine deploy blip. Now that
+// a "not yet" refusal is not a failure at all (see `isWaitableEnqueueRefusal`), the strikes
+// count only genuinely unexpected errors, so the budget can afford to be patient.
+export const MAX_CONSECUTIVE_FAILURES = 8;
 const failureCounts = new Map<number, number>();
+
+/** GitHub's multi-line error bodies read badly in a one-line card; take the sentence. */
+function firstLine(message: string): string {
+  const line = message
+    .split('\n')
+    .map((l) => l.replace(/^\s*-\s*/, '').trim())
+    .filter((l) => l.length > 0 && !/^github:?$/i.test(l) && !/response errors:?$/i.test(l))
+    .pop();
+  return (line ?? message).slice(0, 200);
+}
 
 // Intents whose branch we asked GitHub to update from the base, keyed by intent id, holding the
 // head SHA the update was issued AGAINST. GitHub's update-branch returns 202 ACCEPTED and does
 // the merge asynchronously with no handle to poll, so the head move lands some time later — on
-// a later tick. Process-local like `failureCounts`: losing it on a restart just means the (by
-// then unexplained) head move disarms the intent, which is the safe direction.
+// a later tick.
+//
+// ⚠ THIS MAP IS NOW A CACHE, NOT THE RECORD. The record is `auto_merge_requests
+// .update_issued_against_oid`, written in the same call that issues the update. It used to be
+// process-local only, and the comment here called losing it on a restart "the safe direction" —
+// which it is, in the sense that an unexplained head move disarms. But the move was not
+// unexplained: WE caused it, and we simply forgot. Under `pnpm dev` that is every file save, and
+// in cloud every deploy, so an intent armed on a behind-trunk PR could be killed by an unrelated
+// code push. The map survives because it also carries the ISSUE TIME, which bounds how long the
+// explanation stays good and is not worth a second column; when it is empty (a restart) the
+// column still proves the SHA and the freshness test is skipped rather than failed.
 interface PendingUpdate {
   fromSha: string;
   at: number;
 }
 const pendingUpdates = new Map<number, PendingUpdate>();
+
+// Intents whose enqueue GitHub has REFUSED for an unfinished or failing required status check.
+//
+// ⚠ THE MARK EXISTS TO STOP RE-ASKING, NEVER TO STOP TRYING. The first attempt is always made:
+// a repository whose merge queue runs the checks ITSELF accepts a `blocked` PR happily, and
+// gating entry on "GitHub says blocked" without ever asking would deadlock those repos —
+// blocked is precisely the state the queue is supposed to clear. So we ask, and only if GitHub
+// says "not yet" do we stop asking, and only while its stated reason can still be true (see the
+// `mergeableState` release below). Process-local: losing it on a restart costs one extra
+// mutation, which is the harmless direction.
+const awaitingChecksForEnqueue = new Set<number>();
 
 // How long an issued update stays acceptable as the explanation for a head move. Past this the
 // move is treated as a human push. GitHub finishes an update-branch in seconds; a generous
@@ -203,6 +239,7 @@ function forgetIntent(id: number): void {
   yieldedForFailedChecks.delete(id);
   yieldedForConflicts.delete(id);
   queueDisabledIntents.delete(id);
+  awaitingChecksForEnqueue.delete(id);
 }
 
 /**
@@ -277,10 +314,15 @@ async function isOurUpdateMerge(
   snap: PrMergeSnapshot,
   pinnedOid: string,
 ): Promise<boolean> {
+  // ⚠ THE DURABLE COLUMN IS THE AUTHORITY; the in-memory mark only adds freshness. After a
+  // restart the map is empty but the column still says which SHA we issued an update against,
+  // and the three GitHub-side proofs below are what actually establish that this commit is ours
+  // — the TTL is a cheap extra guard, not the evidence. Failing closed on a missing map entry is
+  // what made a deploy mid-update look like a force-push.
+  const issuedAgainst = work.updateIssuedAgainstOid;
+  if (issuedAgainst == null || issuedAgainst !== pinnedOid) return false;
   const pending = pendingUpdates.get(work.id);
-  if (!pending) return false;
-  if (pending.fromSha !== pinnedOid) return false;
-  if (Date.now() - pending.at > PENDING_UPDATE_TTL_MS) return false;
+  if (pending != null && Date.now() - pending.at > PENDING_UPDATE_TTL_MS) return false;
 
   const parents = await fetchCommitParents(token, work.owner, work.name, snap.headSha);
   if (parents.length !== 2 || parents[0] !== pinnedOid) return false;
@@ -375,22 +417,37 @@ async function settleQueuedIntent(
 
 /**
  * Merge-queue intents, part 2: the PR is current and not queued — add it to the queue once
- * the review half of branch protection is satisfied. Checks do NOT gate entry
- * (AWAITING_CHECKS is a normal entry state; the queue runs them itself), so waiting on
- * `reviewDecision` by name is both the correct green light and more honest than hammering
- * the mutation for its error string.
+ * branch protection will actually let it in.
+ *
+ * ⚠ CHECKS DO GATE ENTRY ON SOME REPOSITORIES, AND ASSUMING OTHERWISE KILLED REAL INTENTS.
+ * This function used to wait on `reviewDecision` alone, on the belief that AWAITING_CHECKS is a
+ * normal entry state and the queue runs the checks itself. That is true of a queue configured to
+ * do so and FALSE of a branch whose protection requires the checks BEFORE entry — and on the
+ * reporting account it was false: 3 of 21 armed intents died, two of them refused purely because
+ * CI had not finished ("2 of 3 required status checks are in progress"). Six minutes after
+ * arming, with the checks still running, the intent was terminally `failed`.
+ *
+ * So there are now TWO defences, and the second is the one that matters:
+ *   • a cheap PRE-CHECK off the snapshot this tick already fetched (no extra GitHub call): when
+ *     reviews are satisfied and GitHub still calls the PR `blocked`, the remaining blocker is
+ *     the checks, so wait rather than spend a mutation finding out;
+ *   • the REFUSAL CLASSIFIER (`isWaitableEnqueueRefusal`). The pre-check is an inference about a
+ *     repository's configuration and will sometimes be wrong in both directions; the classifier
+ *     reads what GitHub actually said. A refusal that names an unfinished or failing status
+ *     check parks the intent at `awaiting_checks` and costs no strike, so a repo whose queue
+ *     DOES accept early loses nothing and one whose queue refuses no longer dies.
  *
  * The enqueue itself carries the SAME consent anchor as the direct merge: the head pin rides
  * into the mutation (`expectedHeadOid`), so GitHub rejects it if the branch moved after our
- * snapshot — and a rejection throws to the caller's strike counter, exactly like a failed
- * merge (transient errors retry; a persistent refusal fails the intent with GitHub's own
- * message).
+ * snapshot.
  */
 async function enqueueWhenReady(
   work: ArmedMergeWork,
   queue: MergeQueueState,
   token: string,
   pinnedOid: string,
+  /** GitHub's `mergeable_state` from the snapshot this tick already fetched — no extra call. */
+  mergeableState: string,
   log: FastifyBaseLogger,
 ): Promise<void> {
   if (queue.reviewDecision === 'REVIEW_REQUIRED' || queue.reviewDecision === 'CHANGES_REQUESTED') {
@@ -402,6 +459,22 @@ async function enqueueWhenReady(
       phase: 'awaiting_review',
     });
     return;
+  }
+
+  // ⚠ ONLY AFTER GITHUB HAS ALREADY SAID "not yet" ONCE. Re-asking every two minutes for the
+  // ten-plus minutes a CI run takes is pure waste, but refusing to ask at all would deadlock a
+  // repository whose queue runs the checks itself — for those, `blocked` is exactly the state
+  // entering the queue resolves. The mark is set by the refusal below and released the moment
+  // GitHub stops saying `blocked`, which is what finishing (or failing) the checks does.
+  if (awaitingChecksForEnqueue.has(work.id)) {
+    if (mergeableState === 'blocked') {
+      await updateAutoMergeState(work.id, {
+        lastReason: 'waiting: required checks haven’t finished — the merge queue won’t take it yet',
+        phase: 'awaiting_checks',
+      });
+      return;
+    }
+    awaitingChecksForEnqueue.delete(work.id);
   }
 
   // COMPARE-AND-SET immediately before the enqueue, exactly like the direct merge: a Cancel
@@ -426,7 +499,29 @@ async function enqueueWhenReady(
   // enqueueing is a lie the user acts on. `lastReason` is deliberately left alone — this is the
   // machine field only, and the prose belongs to the outcome.
   await updateAutoMergeState(work.id, { phase: 'enqueuing' });
-  const entry = await enqueuePullRequestOnQueue(token, work.prNodeId, pinnedOid);
+  let entry: Awaited<ReturnType<typeof enqueuePullRequestOnQueue>>;
+  try {
+    entry = await enqueuePullRequestOnQueue(token, work.prNodeId, pinnedOid);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // ⚠ "NOT YET" IS NOT A FAILURE, AND TREATING IT AS ONE IS WHAT KILLED THREE REAL INTENTS.
+    // A refusal naming an unfinished or failing required status check is the exact condition
+    // arming exists to wait out; letting it reach the caller's strike counter meant three
+    // refusals — about six minutes at a two-minute tick — terminally failed an intent whose CI
+    // was still running. Everything else still throws, so a genuine error is still a strike.
+    if (!isWaitableEnqueueRefusal(message)) throw err;
+    awaitingChecksForEnqueue.add(work.id);
+    await updateAutoMergeState(work.id, {
+      lastReason: `waiting: the merge queue won’t take it yet — ${firstLine(message)}`,
+      phase: 'awaiting_checks',
+    });
+    log.info(
+      { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number, message },
+      'auto-merge: the merge queue refused entry pending checks; staying armed',
+    );
+    return;
+  }
+  awaitingChecksForEnqueue.delete(work.id);
   await updateAutoMergeState(work.id, {
     enqueuedAt: new Date(),
     lastReason:
@@ -519,6 +614,9 @@ async function processOne(
     pinnedOid = m.headSha;
     await updateAutoMergeState(work.id, {
       expectedHeadOid: pinnedOid,
+      // The update we were waiting for has landed and been adopted — the mark has done its job.
+      // Left set, it would explain away the NEXT head move too, which is a human's push.
+      updateIssuedAgainstOid: null,
       lastReason: `merged ${m.baseRef} in — waiting for checks`,
       phase: 'awaiting_checks',
     });
@@ -530,7 +628,13 @@ async function processOne(
   // the PR in a branch the user never chose. Consent is established by the base the SPA was
   // showing when they armed, i.e. the last SYNCED base ref; see the report on
   // `expected_base_ref`, which is the column that would make this exact.
-  if (work.syncedBaseRef == null) {
+  //
+  // ⚠ THE PINNED REF WINS. `expectedBaseRef` is written at ARM time and is what the user
+  // consented to; `syncedBaseRef` is a column the SYNC owns and may correct at any moment, so
+  // comparing against it reported a retarget nobody performed. The fallback keeps intents armed
+  // before the column existed behaving exactly as they did.
+  const consentedBaseRef = work.expectedBaseRef ?? work.syncedBaseRef;
+  if (consentedBaseRef == null) {
     await updateAutoMergeState(work.id, {
       lastReason:
         'waiting: can’t confirm which branch this PR targets — re-sync the repository, then re-arm',
@@ -540,11 +644,11 @@ async function processOne(
     });
     return;
   }
-  if (work.syncedBaseRef !== m.baseRef) {
+  if (consentedBaseRef !== m.baseRef) {
     await resolve(
       work.id,
       'disarmed_blocked',
-      `the PR was retargeted (${work.syncedBaseRef} → ${m.baseRef}) — re-arm to merge into the new base`,
+      `the PR was retargeted (${consentedBaseRef} → ${m.baseRef}) — re-arm to merge into the new base`,
     );
     return;
   }
@@ -710,6 +814,10 @@ async function processOne(
       freshenedIntents.add(work.id);
       await updateAutoMergeState(work.id, {
         expectedHeadOid: out.headSha,
+        // The clone-based rebase is SYNCHRONOUS and returned the SHA it pushed, so there is no
+        // in-flight update to explain a later move. Cleared explicitly rather than left to a
+        // previous value: a rebase can follow a native update that never landed.
+        updateIssuedAgainstOid: null,
         lastReason: `rebased onto ${m.baseRef} — waiting for checks`,
         phase: 'awaiting_checks',
       });
@@ -738,6 +846,10 @@ async function processOne(
     pendingUpdates.set(work.id, { fromSha: pinnedOid, at: Date.now() });
     freshenedIntents.add(work.id);
     await updateAutoMergeState(work.id, {
+      // ⚠ THE SAME WRITE, DELIBERATELY. The mark and the prose describing it must land together
+      // or a crash between two writes leaves a row that says "merging main in" with nothing
+      // recording which SHA we said that about — and the next tick disarms it.
+      updateIssuedAgainstOid: pinnedOid,
       lastReason: `merging ${m.baseRef} in — waiting for GitHub to finish the update`,
       phase: 'updating_merge',
     });
@@ -750,7 +862,7 @@ async function processOne(
   // the green light is different too — the queue runs the checks itself, so only the REVIEW
   // half of branch protection gates entry.
   if (queue) {
-    await enqueueWhenReady(work, queue, token, pinnedOid, log);
+    await enqueueWhenReady(work, queue, token, pinnedOid, m.mergeableState, log);
     return;
   }
 
@@ -935,19 +1047,29 @@ export async function runAutoMergeTick(log: FastifyBaseLogger): Promise<void> {
       for (const intent of intents) {
         try {
           await processOne(intent, token, queues.byIntentId.get(intent.id), log);
+          // ⚠ THE COUNTER IS "CONSECUTIVE" AND UNTIL NOW IT WAS NOT. It was cleared only by
+          // `forgetIntent`, i.e. only when the intent reached a TERMINAL state — so three
+          // unrelated transient errors spread over three days killed an intent that had
+          // succeeded on every tick in between. The name said consecutive; the code counted
+          // lifetime. A clean pass is exactly the evidence that the last error was transient.
+          failureCounts.delete(intent.id);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           const strikes = (failureCounts.get(intent.id) ?? 0) + 1;
           failureCounts.set(intent.id, strikes);
           if (strikes >= MAX_CONSECUTIVE_FAILURES) {
-            await resolve(intent.id, 'failed', `github: ${message}`).catch(() => {});
+            // ⚠ `firstLine`, NOT the raw body. GitHub answers with a three-line envelope
+            // ("Request failed due to following response errors:\n - …") and this string is
+            // rendered verbatim on the PR pane and the Pending card. The sentence is the news;
+            // the envelope is noise on a row that has one line to say it in.
+            await resolve(intent.id, 'failed', `github: ${firstLine(message)}`).catch(() => {});
             log.warn(
               { err, prId: intent.prId, accountId },
               'auto-merge: giving up after repeated failures',
             );
           } else {
             await updateAutoMergeState(intent.id, {
-              lastReason: `retrying after an error: ${message}`,
+              lastReason: `retrying after an error: ${firstLine(message)}`,
               phase: 'retrying',
             }).catch(() => {});
           }

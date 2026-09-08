@@ -115,13 +115,55 @@ const STALLED_PHASES: ReadonlySet<ArmedMergePhase> = new Set<ArmedMergePhase>([
 // TERMINALS RENDER OFF `state`, NEVER off `lastReason` — the watcher NULLs the reason on a
 // successful merge, so a card whose body is the reason line goes blank at the exact moment it
 // should read "Merged".
-const TERMINAL_LABEL: Partial<Record<ArmedMergeState, string>> = {
+// EXPORTED so the PR pane's "Auto-merge" row uses the same headline the banner does — the
+// `armedPhaseHeadline` rule (one spelling per fact) applied to the terminal half.
+export const TERMINAL_LABEL: Partial<Record<ArmedMergeState, string>> = {
   merged: 'Merged automatically',
   disarmed_head_moved: 'Auto-merge disarmed — the branch moved',
   disarmed_blocked: 'Auto-merge stopped',
   expired: 'Auto-merge expired',
   failed: 'Auto-merge failed',
 };
+
+// WHERE THE BASELINE LIVES BETWEEN PAGE LOADS.
+//
+// Per-viewer, per-browser, and worth nothing to anyone else — which is exactly what
+// localStorage is for (CLAUDE.md's rule: a lightweight per-viewer convenience, wrapped in
+// try/catch, correct when it comes back empty). An empty read degrades to the old behaviour: a
+// silent first poll. It is deliberately NOT a server field: what this browser has already told
+// this reader is a fact about this browser.
+const SEEN_STATES_KEY = 'limn.autoMerge.seenStates.v1';
+
+function readSeenStates(): Map<number, ArmedMergeState> | null {
+  try {
+    const raw = localStorage.getItem(SEEN_STATES_KEY);
+    if (raw == null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const out = new Map<number, ArmedMergeState>();
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      const id = Number(k);
+      // ⚠ ONLY 'armed' IS SEEDED BACK. A terminal state read out of storage would let the fold
+      // believe it had already reported an outcome it never showed; the only thing this map has
+      // to remember across a reload is which PRs were still in flight when we looked away.
+      if (Number.isFinite(id) && v === 'armed') out.set(id, 'armed');
+    }
+    return out.size > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSeenStates(next: ReadonlyMap<number, ArmedMergeState>): void {
+  try {
+    const armed: Record<string, ArmedMergeState> = {};
+    for (const [prId, state] of next) if (state === 'armed') armed[String(prId)] = state;
+    localStorage.setItem(SEEN_STATES_KEY, JSON.stringify(armed));
+  } catch {
+    // A private window, blocked site data, or a thumbnail capture that throws on access. The
+    // baseline then behaves exactly as it did before this existed.
+  }
+}
 
 // One finished intent, snapshotted at the transition: the list row itself ages out after 24h
 // and we want the card to outlive that, not to re-derive from a row that may be gone.
@@ -387,9 +429,20 @@ function OutcomeRow({
 export function AutoMergeBanner(): JSX.Element | null {
   const { data } = useArmedMerges();
   const qc = useQueryClient();
-  // prId → last observed state. `null` until the first response, which is what makes the first
-  // poll a silent baseline rather than a burst of stale outcomes.
-  const seen = useRef<Map<number, ArmedMergeState> | null>(null);
+  // prId → last observed state, SEEDED FROM localStorage and written back on every poll.
+  //
+  // ⚠ IT USED TO START EMPTY ON EVERY PAGE LOAD, AND THAT IS WHY INTENTS DIED IN SILENCE. The
+  // fold only reports an outcome for a PR it previously saw ARMED, and this query does not poll
+  // in a background tab (`refetchIntervalInBackground: false`). So: arm a PR, switch tabs or
+  // reload, and the watcher's verdict — including `failed` — arrived with no prior observation
+  // to compare against and was discarded. The armed panel simply vanished, which is exactly the
+  // "disarmed for unknown reasons" the user reported.
+  //
+  // Persisting the baseline closes it: the map survives the reload, so the transition is still a
+  // transition. `null` on a genuinely first visit keeps the original silent-baseline behaviour —
+  // an account whose intents all resolved before this browser ever looked must not open to a
+  // stack of ancient news.
+  const seen = useRef<Map<number, ArmedMergeState> | null>(readSeenStates());
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
   const [dismissed, setDismissed] = useState<Record<string, true>>({});
 
@@ -403,11 +456,13 @@ export function AutoMergeBanner(): JSX.Element | null {
 
     if (prev == null) {
       seen.current = next;
+      writeSeenStates(next);
       return;
     }
 
     const { fresh, superseded, landed } = foldArmedPoll(prev, requests);
     seen.current = next;
+    writeSeenStates(next);
     setOutcomes((t) => {
       const kept = t.filter((o) => !superseded.has(o.prId));
       // Same array when nothing moved: this effect runs on EVERY poll (8s while anything is

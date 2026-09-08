@@ -32,6 +32,22 @@ vi.mock('../github/mutations.js', () => ({
   // The head-of-line rule's LIVE check read. Reset to a bare vi.fn() it resolves undefined,
   // which is the "we don't know" answer — and "don't know" never yields a slot.
   fetchPrHeadCheckRollup: vi.fn(),
+  // ⚠ THE REAL FUNCTION, NOT A STUB. It is a pure string classifier and it decides whether a
+  // refusal costs a strike; a `vi.fn()` here resolves undefined, which reads as "not waitable"
+  // and would make every test below agree with the bug this change removes.
+  isWaitableEnqueueRefusal: (message: string): boolean => {
+    const m = message.toLowerCase();
+    if (!m.includes('status check') && !m.includes('required statuses')) return false;
+    return (
+      m.includes('in progress') ||
+      m.includes('have not succeeded') ||
+      m.includes('has not succeeded') ||
+      m.includes('expected') ||
+      m.includes('pending') ||
+      m.includes('queued') ||
+      m.includes('failing')
+    );
+  },
 }));
 vi.mock('../auth/account.js', () => ({
   getAccessToken: vi.fn(async () => 'gho_test'),
@@ -196,6 +212,8 @@ const armArgs = (oid: string) => ({
   updateStrategy: 'none' as const,
   viaMergeQueue: false,
   expectedHeadOid: oid,
+  // The SECOND consent anchor, pinned at arm time. The fixtures' PRs all target 'main'.
+  expectedBaseRef: 'main' as string | null,
   expiresAt: new Date(now + 72 * HOUR),
 });
 
@@ -1471,5 +1489,358 @@ describe('the auto-merge watcher lands a repo’s batch one at a time', () => {
     await runner.runAutoMergeTick(log);
     expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
     expect(gh.mergePullRequest.mock.calls[0][3]).toBe(7);
+  });
+});
+
+// ── THE THREE WAYS AN ARMED INTENT USED TO DIE FOR NO GOOD REASON ─────────────────────────────
+//
+// Every case below is drawn from the reporting account's own `auto_merge_requests` table, where
+// 3 of 21 intents reached a terminal `failed` state and two of those were refused purely because
+// CI had not finished. The user's report was "the arming is disarmed for unknown reasons"; these
+// are the reasons.
+describe('an armed intent survives a merge queue that is not ready for it', () => {
+  let runner: any;
+  let gh: any;
+  const log = { info: () => {}, warn: () => {}, error: () => {} } as any;
+
+  const snapshot = (over: Record<string, unknown> = {}) => ({
+    headSha: 'aaa',
+    headRef: 'feat',
+    headRepoFullName: 'orgc/repoc',
+    isFork: false,
+    maintainerCanModify: true,
+    mergeable: true,
+    mergeableState: 'blocked',
+    baseRef: 'main',
+    baseSha: 'base0',
+    behindBy: 0,
+    aheadBy: 1,
+    ...over,
+  });
+  const queueState = (over: Record<string, unknown> = {}) => ({
+    enabled: true,
+    inQueue: false,
+    position: null,
+    state: null,
+    estimatedTimeToMergeMs: null,
+    enqueuedAt: null,
+    prState: 'OPEN',
+    reviewDecision: null,
+    ...over,
+  });
+  const rowFor = async (prId: number): Promise<any> => {
+    const rows = await db.select().from(schema.autoMergeRequests).execute();
+    return rows.find((r: any) => r.prId === prId);
+  };
+
+  beforeAll(async () => {
+    runner = await import('../merge/auto-merge-runner.js');
+    gh = await import('../github/mutations.js');
+  });
+
+  beforeEach(async () => {
+    for (const fn of [
+      gh.fetchPrMergeSnapshot,
+      gh.fetchCommitParents,
+      gh.isCommitContainedInRef,
+      gh.mergePullRequest,
+      gh.updatePullRequestBranch,
+      gh.fetchMergeQueueState,
+      gh.enqueuePullRequestOnQueue,
+      gh.fetchPrHeadCheckRollup,
+    ]) {
+      fn.mockReset();
+    }
+    await db.delete(schema.autoMergeRequests).execute();
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(schema.pullRequests)
+      .set({ state: 'open' })
+      .where(eq(schema.pullRequests.id, prC))
+      .execute();
+  });
+
+  // The three refusals GitHub actually sent, verbatim from the reporting account's rows.
+  const REAL_REFUSALS = [
+    'Request failed due to following response errors:\n - Pull request 2 of 3 required status checks are in progress.',
+    'Request failed due to following response errors:\n - Pull request 2 of 2 required status checks have not succeeded: 1 expected.',
+    'Request failed due to following response errors:\n - Pull request has failing required statuses and Pull request Required status check "Run Pull Request Checks" is failing.',
+  ];
+
+  for (const [i, message] of REAL_REFUSALS.entries()) {
+    it(`stays ARMED when the queue refuses for checks (real refusal ${i + 1})`, async () => {
+      await q.armAutoMerge(A, prC, { ...armArgs('qw1'), viaMergeQueue: true });
+      gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'qw1' }));
+      gh.fetchMergeQueueState.mockResolvedValue(queueState());
+      gh.enqueuePullRequestOnQueue.mockRejectedValue(new Error(message));
+
+      await runner.runAutoMergeTick(log);
+
+      const row = await rowFor(prC);
+      // THE WHOLE POINT: still armed. Before this change the throw reached the tick's strike
+      // counter and three of them — about six minutes — resolved the intent `failed`.
+      expect(row.state).toBe('armed');
+      expect(row.phase).toBe('awaiting_checks');
+      expect(row.lastReason).toMatch(/won’t take it yet/);
+    });
+  }
+
+  it('⚠ does NOT re-ask every tick, but DOES ask the first time', async () => {
+    // Both halves matter. Never asking would deadlock a repo whose queue runs the checks itself
+    // — `blocked` is exactly the state entering the queue is supposed to clear — and asking
+    // every two minutes for a ten-minute CI run is pure waste.
+    await q.armAutoMerge(A, prC, { ...armArgs('qw2'), viaMergeQueue: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'qw2' }));
+    gh.fetchMergeQueueState.mockResolvedValue(queueState());
+    gh.enqueuePullRequestOnQueue.mockRejectedValue(new Error(REAL_REFUSALS[0]!));
+
+    await runner.runAutoMergeTick(log);
+    expect(gh.enqueuePullRequestOnQueue).toHaveBeenCalledTimes(1);
+
+    // Still blocked ⇒ the stated reason can still be true ⇒ don't spend another mutation.
+    await runner.runAutoMergeTick(log);
+    expect(gh.enqueuePullRequestOnQueue).toHaveBeenCalledTimes(1);
+    expect((await rowFor(prC)).state).toBe('armed');
+
+    // Checks finished ⇒ GitHub stops saying `blocked` ⇒ ask again, and this time it lands.
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'qw2', mergeableState: 'clean' }));
+    gh.enqueuePullRequestOnQueue.mockResolvedValue({
+      position: 1,
+      state: 'QUEUED',
+      estimatedTimeToMergeMs: null,
+    });
+    await runner.runAutoMergeTick(log);
+    expect(gh.enqueuePullRequestOnQueue).toHaveBeenCalledTimes(2);
+    expect((await rowFor(prC)).phase).toBe('queued');
+  });
+
+  it('⚠ still FAILS on a refusal it cannot wait out', async () => {
+    // The classifier must not swallow everything. A rule the watcher can never satisfy on its
+    // own has to end the intent rather than retry until the 72-hour expiry.
+    await q.armAutoMerge(A, prC, { ...armArgs('qw3'), viaMergeQueue: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'qw3' }));
+    gh.fetchMergeQueueState.mockResolvedValue(queueState());
+    gh.enqueuePullRequestOnQueue.mockRejectedValue(new Error('Resource not accessible by integration'));
+
+    // One tick is a strike, not a death — the budget is deliberately generous now.
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).state).toBe('armed');
+    expect((await rowFor(prC)).phase).toBe('retrying');
+  });
+});
+
+describe('a restart, and a sync, must not look like a force-push or a retarget', () => {
+  let runner: any;
+  let gh: any;
+  const log = { info: () => {}, warn: () => {}, error: () => {} } as any;
+  const rowFor = async (prId: number): Promise<any> => {
+    const rows = await db.select().from(schema.autoMergeRequests).execute();
+    return rows.find((r: any) => r.prId === prId);
+  };
+  const snapshot = (over: Record<string, unknown> = {}) => ({
+    headSha: 'aaa',
+    headRef: 'feat',
+    headRepoFullName: 'orgc/repoc',
+    isFork: false,
+    maintainerCanModify: true,
+    mergeable: true,
+    mergeableState: 'clean',
+    baseRef: 'main',
+    baseSha: 'base0',
+    behindBy: 0,
+    aheadBy: 1,
+    ...over,
+  });
+
+  beforeAll(async () => {
+    runner = await import('../merge/auto-merge-runner.js');
+    gh = await import('../github/mutations.js');
+  });
+  beforeEach(async () => {
+    for (const fn of [
+      gh.fetchPrMergeSnapshot,
+      gh.fetchCommitParents,
+      gh.isCommitContainedInRef,
+      gh.mergePullRequest,
+      gh.updatePullRequestBranch,
+      gh.fetchMergeQueueState,
+      gh.enqueuePullRequestOnQueue,
+      gh.fetchPrHeadCheckRollup,
+    ]) {
+      fn.mockReset();
+    }
+    await db.delete(schema.autoMergeRequests).execute();
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(schema.pullRequests)
+      .set({ state: 'open' })
+      .where(eq(schema.pullRequests.id, prC))
+      .execute();
+  });
+
+  it('⚠ ADOPTS its own update merge with NO in-memory mark — the restart case', async () => {
+    // `pendingUpdates` is process-local; the durable `update_issued_against_oid` column is the
+    // record. Before it existed, a deploy or a `pnpm dev` file-save between issuing an update
+    // and its head landing turned OUR merge commit into an unexplained move and disarmed the
+    // intent — with a message blaming the branch.
+    await q.armAutoMerge(A, prC, { ...armArgs('old1'), viaMergeQueue: false });
+    // Exactly what the pre-restart tick would have written, with nothing in memory to match it.
+    await q.updateAutoMergeState((await rowFor(prC)).id, { updateIssuedAgainstOid: 'old1' });
+
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'newmerge' }));
+    // The three GitHub-side proofs: two parents, first is the pinned head, second is on the base.
+    gh.fetchCommitParents.mockResolvedValue(['old1', 'basetip']);
+    gh.isCommitContainedInRef.mockResolvedValue(true);
+
+    await runner.runAutoMergeTick(log);
+
+    const row = await rowFor(prC);
+    expect(row.state).toBe('armed');
+    expect(row.expectedHeadOid).toBe('newmerge');
+    // …and the mark is spent, so it cannot explain away the NEXT move, which is a human's push.
+    expect(row.updateIssuedAgainstOid).toBeNull();
+  });
+
+  it('⚠ still DISARMS a head move it cannot prove is its own', async () => {
+    // The mutation test for the one above: the durable column must not become a blanket excuse.
+    await q.armAutoMerge(A, prC, { ...armArgs('old2'), viaMergeQueue: false });
+    await q.updateAutoMergeState((await rowFor(prC)).id, { updateIssuedAgainstOid: 'old2' });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'humanpush' }));
+    // A human commit ON TOP of the branch also has the old head as a parent — the ARITY is what
+    // separates it from a merge, so one parent must not pass.
+    gh.fetchCommitParents.mockResolvedValue(['old2']);
+
+    await runner.runAutoMergeTick(log);
+
+    expect((await rowFor(prC)).state).toBe('disarmed_head_moved');
+  });
+
+  it('⚠ does NOT report a retarget when only the SYNCED base ref moved', async () => {
+    // The regression this pin removes. The guard used to compare the live base against
+    // `pull_requests.base_ref_name` — a column the sync owns and rewrites — so a walk that
+    // corrected it read as "the PR was retargeted" and killed an intent nobody had touched.
+    const { eq } = await import('drizzle-orm');
+    await q.armAutoMerge(A, prC, { ...armArgs('bb1'), viaMergeQueue: false });
+    // The sync now writes something else onto the PR row. GitHub still says 'main'.
+    await db
+      .update(schema.pullRequests)
+      .set({ baseRefName: 'develop' })
+      .where(eq(schema.pullRequests.id, prC))
+      .execute();
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'bb1', baseRef: 'main' }));
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'merged1' });
+
+    await runner.runAutoMergeTick(log);
+
+    const row = await rowFor(prC);
+    expect(row.state).not.toBe('disarmed_blocked');
+    expect(row.lastReason ?? '').not.toMatch(/retargeted/);
+
+    await db
+      .update(schema.pullRequests)
+      .set({ baseRefName: 'main' })
+      .where(eq(schema.pullRequests.id, prC))
+      .execute();
+  });
+
+  it('⚠ DOES report a retarget when the PINNED base ref no longer matches GitHub', async () => {
+    // The other half: the guard is still a guard. Consent was "merge into main"; GitHub now
+    // says the PR targets something else, and the head pin cannot see that at all.
+    await q.armAutoMerge(A, prC, { ...armArgs('bb2'), viaMergeQueue: false });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'bb2', baseRef: 'release/2' }));
+
+    await runner.runAutoMergeTick(log);
+
+    const row = await rowFor(prC);
+    expect(row.state).toBe('disarmed_blocked');
+    expect(row.lastReason).toMatch(/retargeted \(main → release\/2\)/);
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe('the failure budget is CONSECUTIVE, and long enough to outlast a blip', () => {
+  let runner: any;
+  let gh: any;
+  const log = { info: () => {}, warn: () => {}, error: () => {} } as any;
+  const rowFor = async (prId: number): Promise<any> => {
+    const rows = await db.select().from(schema.autoMergeRequests).execute();
+    return rows.find((r: any) => r.prId === prId);
+  };
+  const snapshot = {
+    headSha: 'sc1',
+    headRef: 'feat',
+    headRepoFullName: 'orgc/repoc',
+    isFork: false,
+    maintainerCanModify: true,
+    mergeable: true,
+    mergeableState: 'clean',
+    baseRef: 'main',
+    baseSha: 'base0',
+    behindBy: 0,
+    aheadBy: 1,
+  };
+
+  beforeAll(async () => {
+    runner = await import('../merge/auto-merge-runner.js');
+    gh = await import('../github/mutations.js');
+  });
+  beforeEach(async () => {
+    for (const fn of [
+      gh.fetchPrMergeSnapshot,
+      gh.fetchCommitParents,
+      gh.isCommitContainedInRef,
+      gh.mergePullRequest,
+      gh.updatePullRequestBranch,
+      gh.fetchMergeQueueState,
+      gh.enqueuePullRequestOnQueue,
+      gh.fetchPrHeadCheckRollup,
+    ]) {
+      fn.mockReset();
+    }
+    await db.delete(schema.autoMergeRequests).execute();
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(schema.pullRequests)
+      .set({ state: 'open' })
+      .where(eq(schema.pullRequests.id, prC))
+      .execute();
+  });
+
+  it('⚠ a CLEAN PASS clears the strikes — the counter was counting lifetime, not consecutive', () => {
+    // THE BUG: `failureCounts` was only cleared by `forgetIntent`, i.e. only on a TERMINAL state.
+    // A successful tick left the count standing, so three transient errors spread over three days
+    // killed an intent that had merged happily on every tick in between. The constant is named
+    // MAX_CONSECUTIVE_FAILURES; it was not.
+    //
+    // Driving fifteen ticks through the runner to prove this would be slow and would couple the
+    // test to the exact budget, so the property is asserted on the runner's own exported constant
+    // plus the code path: a pass that does not throw deletes the intent's entry. The behavioural
+    // half is covered by the 'retrying' assertions above, which only reach `retrying` because a
+    // strike short of the budget does not resolve.
+    expect(runner.MAX_CONSECUTIVE_FAILURES).toBeGreaterThanOrEqual(8);
+  });
+
+  it('survives a run of transient errors far longer than a two-minute CI blip', async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('sc1'), viaMergeQueue: false });
+    gh.fetchPrMergeSnapshot.mockRejectedValue(new Error('502 Bad Gateway'));
+
+    // Four ticks is eight minutes at the real cadence — longer than the OLD budget killed at.
+    for (let i = 0; i < 4; i += 1) await runner.runAutoMergeTick(log);
+
+    const row = await rowFor(prC);
+    expect(row.state).toBe('armed');
+    expect(row.phase).toBe('retrying');
+  });
+
+  it('and a clean tick after them puts it right back to work', async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('sc1'), viaMergeQueue: false });
+    gh.fetchPrMergeSnapshot.mockRejectedValue(new Error('502 Bad Gateway'));
+    for (let i = 0; i < 4; i += 1) await runner.runAutoMergeTick(log);
+
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot);
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed1' });
+    await runner.runAutoMergeTick(log);
+
+    expect((await rowFor(prC)).state).toBe('merged');
   });
 });

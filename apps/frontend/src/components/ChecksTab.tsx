@@ -42,7 +42,8 @@ import { ChecksList, CiRerunControl } from './CheckList.js';
 import { AiSummary } from './AiSummary.js';
 import { CiAnalysisCard } from './CiAnalysisCard.js';
 import { useRequestReviewers } from '../hooks/usePrWrites.js';
-import { usePrArmedIntent } from '../hooks/useAutoMerge.js';
+import { TERMINAL_LABEL } from './AutoMergeBanner.js';
+import { usePrArmedIntent, usePrStoppedIntent } from '../hooks/useAutoMerge.js';
 import { useSuggestedReviewers } from '../hooks/usePr.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
@@ -364,6 +365,9 @@ export function ChecksTab({
   // and "merge when ready" are opposite promises, and the armed control's Cancel is the honest
   // first step. Cross-tab the hide can lag the 45s poll; own-tab arms react instantly.
   const armedIntent = usePrArmedIntent(pr.id);
+  // …and the one the watcher GAVE UP ON, which had no surface at all until now. See
+  // `usePrStoppedIntent`: a stopped intent used to just make the armed panel disappear.
+  const stoppedIntent = usePrStoppedIntent(pr.id);
   const suggestions = sugg?.suggestedReviewers ?? [];
   const suggestUsersById =
     (sugg?.users?.length ?? 0) > 0
@@ -702,6 +706,41 @@ export function ChecksTab({
                 <ExternalLinkIcon size={11} className="ml-0.5 inline-block align-[-0.1em]" />
               </a>
               .
+            </div>
+          </Row>
+        )}
+
+        {/* AUTO-MERGE STOPPED — the outcome of an intent the reader armed and the watcher gave up
+            on. It has to live HERE, on the PR, because the alternative was nowhere: the armed
+            panel is gated on `state === 'armed'` and simply vanished, and the global banner's
+            outcome card is per-page-load and does not poll in a background tab — so an intent
+            that died while the reader was in another tab was announced to nobody.
+
+            ⚠ NOT A DISMISSIBLE TOAST. This is the standing answer to "why didn't this merge?",
+            and it ages out on its own when the server stops returning the row (24h) or the
+            moment the PR is re-armed. `merged` never reaches here — a success is not a notice.
+
+            The prose is the watcher's own `lastReason`, which already names the cause in the
+            same words the armed panel used while it was live; `TERMINAL_LABEL` supplies the
+            headline, so this row and the banner cannot word one outcome two ways. */}
+        {/* ⚠ OPEN PRs ONLY. The row answers "why is this still sitting here?"; once the PR has
+            merged or closed, it is history, and history that outranks the Merged-by row directly
+            beneath it would be the loudest thing on a finished pane. */}
+        {stoppedIntent != null && pr.state === 'open' && (
+          <Row label="Auto-merge">
+            <div className="text-xs leading-relaxed">
+              <span className="font-medium text-gray-700 dark:text-gray-200">
+                <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
+                {TERMINAL_LABEL[stoppedIntent.state] ?? 'Auto-merge stopped'}
+              </span>
+              {stoppedIntent.lastReason && (
+                <span className="ml-1 text-gray-500 dark:text-gray-400">
+                  — {stoppedIntent.lastReason}
+                </span>
+              )}
+              <span className="ml-1 text-gray-400">
+                · armed {relativeTime(stoppedIntent.armedAt)}
+              </span>
             </div>
           </Row>
         )}
