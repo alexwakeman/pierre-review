@@ -5,7 +5,8 @@ import {
   useAnnotationIndex,
   useRunAnnotations,
 } from '../../hooks/useAnnotations.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useBlastConfig, useSetBlastConfig } from '../../hooks/useBlastRadius.js';
+import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
 
 // ── THE IMPACT NOTE — blast radius's Pro half ────────────────────────────────────────────────
 //
@@ -49,10 +50,28 @@ export function BlastImpactNote({
   // otherwise the SPA polls a route that 402s. Server-enforced too; a client gate is not a
   // monetisation gate.
   const canAsk = useProCapabilities().prSummary;
-  const note = useImpactNote(prId, canAsk && hasBlast);
+  // The reader's own preference, account-grained beside the sensitivity dial. ⚠ ANDed into
+  // `enabled` for the same reason the capability is: hiding the note must stop the QUERY too, or
+  // "hidden" still costs a request on every PR open.
+  const config = useBlastConfig();
+  const wanted = config.showImpactNote;
+  const stored = useMe().data?.blastRadius ?? null;
+  const setConfig = useSetBlastConfig();
+  const note = useImpactNote(prId, canAsk && hasBlast && wanted);
   const { state, run } = useRunAnnotations(prId);
 
-  if (!canAsk || !hasBlast) return null;
+  if (!canAsk || !hasBlast || !wanted) return null;
+
+  // ⚠ WRITES THE WHOLE CONFIG, because the route REPLACES the blob rather than merging into it.
+  // Sending `{showImpactNote:false}` alone would silently reset the reader's sensitivity dial and
+  // surface opt-outs — the exact shape of a PUT that looks like a PATCH.
+  const hide = (): void =>
+    setConfig.mutate({
+      sensitivity: config.sensitivity,
+      surfacesOff: config.surfacesOff,
+      ...(stored?.overrides ? { overrides: stored.overrides } : {}),
+      showImpactNote: false,
+    });
 
   const concern = note?.verdict === 'concern';
 
@@ -89,6 +108,18 @@ export function BlastImpactNote({
             {/* Says who wrote it. Two sentences of prose beside a computed chip must not be
                 mistaken for another computed fact. */}
             <span>Written by {note.model}</span>
+            {/* Hide the whole affordance, from where the reader is actually looking at it. Writes
+                the SAME account setting the Settings section does — one field, two entry points,
+                so the two can never disagree about what "hidden" means. */}
+            <button
+              type="button"
+              onClick={hide}
+              disabled={setConfig.isPending}
+              className="underline hover:text-gray-600 disabled:opacity-60 dark:hover:text-gray-300"
+              title="Stop showing AI impact notes on pull requests. Turn them back on in Settings → Blast radius."
+            >
+              Hide these
+            </button>
             {note.stale && (
               // The pull request has changed since this was written. ⚠ The re-run is the SAME
               // billed path; it is offered, never taken automatically.

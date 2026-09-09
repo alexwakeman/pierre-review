@@ -309,6 +309,18 @@ export const pullRequests = sqliteTable(
     // Per-file breakdown (capped at 100 files by the sync query). Nullable; the
     // API resolves it to [] and computes each file's GitHub deep link on read.
     files: text('files', { mode: 'json' }).$type<StoredPrFile[]>(),
+    // ---- BLAST RADIUS: what the code churn CONSISTS of (migration 0064) ----
+    // 'comments' | 'formatting' | 'code', read from the DIFF — see db/change-shape.ts. Knowing
+    // this needs a GitHub call per PR, so it is fetched only for the narrow population where it
+    // could change the level (measured: 1.7% of open PRs). NULL is "we did not look" and is the
+    // common case BY DESIGN; it must never be read as 'code' or as trivial.
+    contentKind: text('content_kind', { enum: ['comments', 'formatting', 'code'] }),
+    // The head sha the classification was computed against. ⚠ LOAD-BEARING: a diff read is only
+    // true of the commit it read. A PR that has since been pushed to carries a `content_kind`
+    // describing code that is no longer there, so every reader compares this against `head_sha`
+    // and treats a mismatch as NULL. Storing the verdict without the sha is how a stale
+    // "comments only" survives a force-push that added a schema change.
+    contentKindSha: text('content_kind_sha'),
   },
   (t) => ({
     repoIdx: index('pr_repo_idx').on(t.repoId),

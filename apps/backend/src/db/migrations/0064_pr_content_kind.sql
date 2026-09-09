@@ -1,0 +1,21 @@
+-- BLAST RADIUS: what a pull request's code churn CONSISTS of (CORE, free, no AI).
+--
+-- Blast radius answers "how far can this reach" from the file PATHS, which is right about the
+-- FILE and can be wrong about the CHANGE. The case: golang/go#80721, "crypto/hpke: document
+-- sequence counter size" — one file, +4 −2, every changed line a `//` doc comment, flagged HIGH
+-- because `crypto/` is a contract surface. `content_kind` is read from the DIFF and caps that at
+-- medium (never at LOW — a comment in a crypto file is still a change to a file that matters).
+--
+-- ⚠ NULL IS "WE DID NOT LOOK", AND IT IS THE COMMON CASE BY DESIGN. Knowing this costs a REST
+-- call per pull request, so `sync/classify-change-shape.ts` fetches it only for the narrow
+-- population where it could change the level — measured at 26 of 1,566 open pull requests (1.7%).
+-- No backfill: every other row stays null forever, and no reader may treat null as 'code'.
+--
+-- ⚠ `content_kind_sha` IS NOT OPTIONAL BOOKKEEPING. A diff read is only true of the commit it
+-- read. Without it a "comments only" verdict survives a force-push that added a schema change,
+-- and the level stays capped on evidence that no longer exists. Every reader compares it against
+-- `head_sha` and treats a mismatch as null.
+-- The Postgres twin is migrations-pg/0051_pr_content_kind.sql.
+ALTER TABLE `pull_requests` ADD `content_kind` text;
+--> statement-breakpoint
+ALTER TABLE `pull_requests` ADD `content_kind_sha` text;

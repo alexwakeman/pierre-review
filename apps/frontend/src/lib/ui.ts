@@ -1295,6 +1295,9 @@ export function resolveBlastConfig(
     // Overrides land ON TOP of the dial rather than replacing it, so an account that pinned one
     // number still tracks the product defaults for the other five.
     thresholds: { ...base, ...(stored?.overrides ?? {}) },
+    // ⚠ ABSENT MEANS SHOWN. `?? true`, never `=== true` — an account that has never expressed an
+    // opinion must get the feature, not lose it.
+    showImpactNote: stored?.showImpactNote ?? true,
     isDefault: stored == null,
   };
 }
@@ -1395,6 +1398,37 @@ export function blastRadius(
   }
 
   if (reasons.length > 0) {
+    // ⚠ THE TRIVIAL-CHANGE CAP. A change whose every line is a comment, or which only moved
+    // whitespace around, is capped at MEDIUM however it earned HIGH.
+    //
+    // The case it exists for: golang/go#80721, "crypto/hpke: document sequence counter size" —
+    // one file, +4 −2, every changed line a `//` doc comment, HIGH because `crypto/` is a
+    // contract surface. The path was right about the FILE and wrong about the CHANGE.
+    //
+    // ⚠ IT CAPS AT MEDIUM, NEVER LOW, AND THAT IS THE POINT. A comment in a migration is still a
+    // change to a file that matters: the reader should look, they just should not have to review
+    // it like a schema change. Demoting to low would make the file's consequence disappear
+    // entirely, which is the opposite error.
+    //
+    // ⚠ IT ONLY EVER MOVES DOWNWARD, and only on a POSITIVE reading. `contentKind` is null for
+    // the ~98% of pull requests whose diff was never fetched, and null must never demote — see
+    // the field's doc for why that asymmetry is the safe one.
+    const trivial = signals.contentKind === 'comments' || signals.contentKind === 'formatting';
+    if (trivial) {
+      const what =
+        signals.contentKind === 'comments' ? 'Comments only' : 'Formatting only';
+      return {
+        level: 'medium',
+        // The capped-from reasons are KEPT, below the explanation. The file still matters and the
+        // reader is entitled to see what would have made this high.
+        reasons: [{ kind: 'contained', text: `${what} — no code behaviour changed` }, ...reasons],
+        short: 'Medium',
+        label: `${what}, in files that would otherwise read as high reach — ${reasons
+          .map((r) => r.text)
+          .join('; ')}.`,
+        volumeOnly: false,
+      };
+    }
     return {
       level: 'high',
       reasons,

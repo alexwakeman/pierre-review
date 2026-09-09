@@ -53,6 +53,9 @@ reasons rather than assert a bare verdict, and there is **exactly one place** a 
 files** (docs/config/tests/deps only) or **≤3 non-test code files, ≤100 code lines, one
 subsystem** — and the file list was **not truncated**.
 
+**CAPPED AT MEDIUM** — a change whose every line is a **comment**, or which only moved
+**whitespace**, however it earned high. See *The trivial-change cap* below.
+
 **MEDIUM** — everything else measurable. ⚠ **The medium row names the condition that actually kept
 it out of low** (too many files / too wide / too long / size unknown). An earlier cut folded them
 into one boolean and printed *"1 code file across 1 directory"* beside the word **Medium** — a
@@ -100,6 +103,45 @@ A test co-changes with its subject *by construction* — that is what a test is,
 reach. Measured: one repo's top "hubs" were four `*.test.js` files sitting above their own
 controllers. And a pull request touching more than `HUB_PR_FILE_CAP` (25) files creates a clique in
 one stroke; without the cap **one** such PR can lift a hundred unrelated paths over the bar.
+
+### ⚠ The trivial-change cap — comments and formatting
+
+The case: **`golang/go#80721`**, *"crypto/hpke: document sequence counter size"* — one file,
++4 −2, **every changed line a `//` doc comment**, flagged HIGH because `crypto/` is a contract
+surface. The path was right about the **file** and wrong about the **change**.
+
+`ChangeShape` is read from the diff and caps that at **MEDIUM**.
+
+⚠ **MEDIUM, NEVER LOW, AND THAT IS THE POINT.** A comment in a migration is still a change to a
+file that matters: the reader should look, they just should not have to review it like a schema
+change. Demoting to low would make the file's consequence disappear, which is the opposite error.
+
+⚠ **`contentKind: null` MEANS "WE DID NOT LOOK", AND IT IS THE COMMON CASE.** Knowing this needs
+the **diff** — a REST call per pull request — so it is fetched only where it could change the
+answer: currently HIGH on a **contract surface alone**, and small
+(`MAX_CANDIDATE_LOC` / `MAX_CANDIDATE_FILES`). Measured: **26 of 1,566 open pull requests, 1.7%**.
+Everything else carries null forever, and null must never demote.
+
+⚠ **`content_kind_sha` IS NOT BOOKKEEPING.** A diff read is only true of the commit it read.
+Without it a "comments only" verdict survives a force-push that added a schema change. The
+staleness test lives **once**, inside `blastSignalsFor`, so no surface has to remember it.
+
+⚠ **THE CLASSIFIER'S ASYMMETRY IS ITS WHOLE DESIGN.** An unknown extension, a patch GitHub did not
+give us, a block comment it cannot bound — all resolve to `code`/`null`, never to `comments`. A
+wrong `code` leaves a pull request HIGH and read carefully; a wrong `comments` waves a crypto
+change through. A failed fetch stores `'code'` against that sha, both as the safe answer and as
+the sentinel that stops it being retried on every walk.
+
+⚠ **IMPORTS WERE CONSIDERED AND LEFT OUT.** Reordering imports is trivial; *adding* one means the
+file now uses something it did not, which is a real change with real reach. They are one line
+apart in a diff. If it is ever added it belongs beside `deps` — carried for narration, never as a
+reason to lower a level.
+
+The Pro impact note is fed the same fact and told it **outranks the file paths** — otherwise a
+model shown "crypto/ touched" reaches for a security consequence a documentation change does not
+have. `promptLevelFor` mirrors the cap so the note never explains a verdict the reader is not
+looking at, and `contentKind` is folded into the payload hash so a note written *before* the diff
+was read is marked stale rather than frozen wrong.
 
 ### ⚠ The anti-double-count rule
 
@@ -158,6 +200,22 @@ cannot be **called** here:
 
 ---
 
+## Showing and hiding the impact note
+
+`BlastRadiusConfig.showImpactNote` — account-grained, beside the sensitivity dial. **Absent means
+SHOWN**, so an account that has never expressed an opinion gets the feature; only `false` is ever
+stored, for the same two-state reason nothing else in that blob stores a default.
+
+Hiding removes the **whole affordance**, button included — and it is ANDed into the annotation
+query's own `enabled`, because a "hidden" note that still costs a request on every PR open is not
+hidden. Two entry points write the one field: the Settings checkbox, and a **"Hide these"** link
+on the note itself. ⚠ The inline link sends the **whole config**, because the route REPLACES the
+blob rather than merging — sending `{showImpactNote:false}` alone would silently reset the
+reader's dial and surface opt-outs.
+
+The checkbox renders even for an account with no plugin: this is a **reading preference, not an
+entitlement**, so a reader who turns it off stays off if they later gain the capability.
+
 ## The impact note (Pro)
 
 **The code decides the level, free. The model explains the consequence, paid.** The same split the
@@ -209,6 +267,8 @@ measurement.
 | Surfaces seen | deps 222 · schema 55 · ci 43 · dts 2 · migration 2 · sql 2 |
 | Repos clearing the hub coverage floor | **6 of 23** |
 | PRs whose level the hub arm changes | **3.5%** |
+| PRs eligible for a change-shape diff read | **26 of 1,566 (1.7%)** — 363 are HIGH, 53 on a surface alone |
+| Cost of one repo's pass (golang/go, 4,000+ PRs) | **8 calls, 3.9s**, then 0 until a head moves |
 
 **Re-run it after any change to an arm.** The script is not committed (it reads the dev DB
 directly); rebuild it from `blastSignalsFor` + `codeLocFor` + `blastRadius` and check the

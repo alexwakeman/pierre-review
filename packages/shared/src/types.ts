@@ -3694,6 +3694,31 @@ export type BlastSurface =
   | 'ci' // a .github/workflows file — MEDIUM, see above
   | 'deps'; // a dependency manifest — carried for narration only, see above
 
+/**
+ * What a pull request's code churn actually CONSISTS of, read from the diff itself.
+ *
+ * Blast radius answers "how far can this reach" from the file PATHS, which is the right question
+ * and the wrong half of the evidence in one case: a change to the COMMENTS inside a
+ * high-consequence file. The real one this exists for is `golang/go#80721`, "crypto/hpke:
+ * document sequence counter size" — one file, +4 −2, every changed line a `//` doc comment, and
+ * HIGH because `crypto/` is a contract surface. The path was right about the file and wrong about
+ * the change.
+ *
+ *   'comments'   — every changed line in every code file is a comment or blank
+ *   'formatting' — the added and removed lines are the same lines modulo whitespace
+ *   'code'       — something else changed (the overwhelming majority)
+ *
+ * ⚠ ABSENT/NULL IS "WE DID NOT LOOK", AND IT IS THE COMMON CASE BY DESIGN. Knowing this requires
+ * the DIFF, which is a GitHub call per pull request; it is fetched only for the narrow population
+ * where it could change the answer (measured: 26 of 1,566 open pull requests — 1.7%). Every other
+ * pull request carries null forever, and null must never be read as "code" or as "trivial".
+ *
+ * ⚠ IT CAN ONLY EVER LOWER A LEVEL TO MEDIUM, NEVER TO LOW. See `blastRadius()` — a comment in a
+ * migration is still a change to a file that matters, which is exactly the reading the user of
+ * this feature asked for.
+ */
+export type ChangeShape = 'comments' | 'formatting' | 'code';
+
 /** The three levels, plus the honest fourth state. `unknown` is never rendered as a chip; it is
  *  what the resolver returns instead of guessing, and it exists as a NAMED value so the reason
  *  for silence is greppable rather than a bare `null` at every call site. */
@@ -3753,6 +3778,12 @@ export interface BlastSignals {
   /** The file whose degree is `hubDegree`, for the chip's sentence ("touches `x`, which usually
    *  changes alongside 417 others"). Null whenever `hubDegree` is. */
   hubPath: string | null;
+  /** What the code churn CONSISTS of, read from the diff — see `ChangeShape`.
+   *
+   *  ⚠ `null` MEANS "WE DID NOT LOOK", not "code". The diff is a GitHub call per pull request, so
+   *  it is fetched only where it could change the answer; null is the common case and must never
+   *  demote anything. Trailing optional so a payload cached before this existed reads as null. */
+  contentKind?: ChangeShape | null;
 }
 
 /** How aggressively to read the signals. A dial rather than six numbers because six numbers is a
@@ -3841,6 +3872,12 @@ export interface BlastRadiusConfig {
   surfacesOff: BlastSurface[];
   /** Per-threshold overrides on top of the dial. Stored and honoured; no UI in v1. */
   overrides?: Partial<BlastThresholds>;
+  /** Show the Pro AI impact note on the PR-detail pane. Absent = SHOWN, so the feature stays
+   *  visible for every account that has never expressed an opinion — the same two-state rule the
+   *  rest of this object follows, and the reason it is `hide`-shaped nowhere: an absent field
+   *  must mean the default, and the default is on. Hiding removes the whole affordance (button
+   *  included), not just a generated note. */
+  showImpactNote?: boolean;
 }
 
 /** What the SPA's `resolveBlastConfig()` hands every renderer — the dial applied and the
@@ -3850,6 +3887,8 @@ export interface ResolvedBlastConfig {
   sensitivity: BlastSensitivity;
   surfacesOff: BlastSurface[];
   thresholds: BlastThresholds;
+  /** Whether the Pro impact note's affordance appears at all. Defaults to true. */
+  showImpactNote: boolean;
   /** True when NOTHING is stored and the settings above are entirely the product default — the
    *  one thing the resolved values cannot say about themselves, and what lets the Settings panel
    *  show "Default" rather than a choice the user never made. */

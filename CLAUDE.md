@@ -497,6 +497,12 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   of 23 real repos carry a co-change index at all, and a `?? 0` turns every silence into a clean
   bill of health. ⚠ **The chip reads the SAME `codeLoc` the large-PR flag reads**, never a second
   count folded into `BlastSignals`, and `volumeOnly` stops the two saying "it's big" twice.
+  ⚠ **A COMMENTS-ONLY or FORMATTING-ONLY change is CAPPED AT MEDIUM, never lowered to Low** —
+  `contentKind`, read from the DIFF (`db/change-shape.ts`) by a TARGETED sync step that fetches
+  only where it could change the level (1.7% of open PRs). A comment in a migration is still a
+  change to a file that matters. ⚠ `contentKind: null` is "we did not look" — the case for ~98% of
+  PRs — and must NEVER demote; a stored verdict is ignored unless `content_kind_sha` still matches
+  `head_sha`, a comparison that lives ONCE inside `blastSignalsFor`.
   Full contract + the measured calibration: [docs/BLAST-RADIUS.md](docs/BLAST-RADIUS.md).
 - **Timeline vertical scroll is GATED.** Every programmatic scroll goes through
   `setVisScrollTop` and must claim the gate (`intentionalScrollRef` + `scrollLoopRef`) — never

@@ -23,6 +23,7 @@ import type {
   ApprovedPrItem,
   CheckRun,
   CiFailingCard,
+  ChangeShape,
   CiStatus,
   CommitDetail,
   ConflictsCard,
@@ -4774,6 +4775,13 @@ export async function getWorkspaceInsights(
       // `files` is — an omitted column is a compile error, not a card that quietly reports
       // "not queued" forever. ⚠ `inMergeQueue: null` is NOT OBSERVED and `reviewDecision: null`
       // is "this repo requires no review"; neither is a negative statement about the PR.
+      // The CHANGE SHAPE and the sha it was read at, plus that sha's current value. REQUIRED for
+      // the same reason `files` is: an omitted column is a compile error rather than a board that
+      // quietly never applies the comments-only cap. All three or none — `blastSignalsFor`
+      // compares them, so two of the three cannot answer the question.
+      contentKind: ChangeShape | null;
+      contentKindSha: string | null;
+      headSha: string | null;
       reviewDecision: PrReviewDecision | null;
       inMergeQueue: boolean | null;
       mergeQueueEntryState: MergeQueueEntryState | null;
@@ -5101,6 +5109,10 @@ export async function getWorkspaceInsights(
           // GitHub's own review verdict + merge-queue membership — required by `prRef`.
           reviewDecision: pullRequests.reviewDecision,
           inMergeQueue: pullRequests.inMergeQueue,
+          // Required by `prRef` — the comments-only cap needs all three or none.
+          contentKind: pullRequests.contentKind,
+          contentKindSha: pullRequests.contentKindSha,
+          headSha: pullRequests.headSha,
           mergeQueueEntryState: pullRequests.mergeQueueEntryState,
         })
         .from(pullRequests)
@@ -5339,6 +5351,12 @@ export async function getWorkspaceInsights(
       // know a PR is queued without fetching: `mergeStateStatus` reads 'blocked' either way.
       reviewDecision: pullRequests.reviewDecision,
       inMergeQueue: pullRequests.inMergeQueue,
+      // Required by `prRef` — the comments-only cap needs all three or none, because
+      // `blastSignalsFor` compares the stored sha against the current head to decide whether
+      // the verdict still describes this commit.
+      contentKind: pullRequests.contentKind,
+      contentKindSha: pullRequests.contentKindSha,
+      headSha: pullRequests.headSha,
       mergeQueueEntryState: pullRequests.mergeQueueEntryState,
     })
     .from(pullRequests)
@@ -5872,6 +5890,12 @@ export async function getWorkspaceInsights(
       // Required by `prRef`, same as above.
       reviewDecision: pullRequests.reviewDecision,
       inMergeQueue: pullRequests.inMergeQueue,
+      // Required by `prRef` — the comments-only cap needs all three or none, because
+      // `blastSignalsFor` compares the stored sha against the current head to decide whether
+      // the verdict still describes this commit.
+      contentKind: pullRequests.contentKind,
+      contentKindSha: pullRequests.contentKindSha,
+      headSha: pullRequests.headSha,
       mergeQueueEntryState: pullRequests.mergeQueueEntryState,
     })
     .from(reviewThreads)
@@ -6468,6 +6492,11 @@ export async function getConsolidatedFeed(
         additions: pullRequests.additions,
         deletions: pullRequests.deletions,
         files: pullRequests.files,
+        // The change shape + the sha it was read at. `blastSignalsFor` compares them against
+        // `headSha` itself, so all three travel together or the staleness test cannot run.
+        contentKind: pullRequests.contentKind,
+        contentKindSha: pullRequests.contentKindSha,
+        headSha: pullRequests.headSha,
       })
       .from(pullRequests)
       .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, prIdList)))

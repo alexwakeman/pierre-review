@@ -60,17 +60,19 @@ export function BlastRadiusSection(): JSX.Element {
 
   const [sensitivity, setSensitivity] = useState<BlastSensitivity>(resolved.sensitivity);
   const [off, setOff] = useState<BlastSurface[]>(resolved.surfacesOff);
+  const [showNote, setShowNote] = useState<boolean>(resolved.showImpactNote);
 
   // Re-seed when the server value changes (first load, and after a successful save).
-  const storedKey = `${resolved.sensitivity}|${[...resolved.surfacesOff].sort().join(',')}`;
+  const storedKey = `${resolved.sensitivity}|${[...resolved.surfacesOff].sort().join(',')}|${resolved.showImpactNote}`;
   useEffect(() => {
     setSensitivity(resolved.sensitivity);
     setOff(resolved.surfacesOff);
+    setShowNote(resolved.showImpactNote);
     // Keyed on the resolved values rather than the object, which is rebuilt on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedKey]);
 
-  const draftKey = `${sensitivity}|${[...off].sort().join(',')}`;
+  const draftKey = `${sensitivity}|${[...off].sort().join(',')}|${showNote}`;
   const dirty = draftKey !== storedKey;
 
   const toggle = (s: BlastSurface): void =>
@@ -131,15 +133,44 @@ export function BlastRadiusSection(): JSX.Element {
         </div>
       </Field>
 
+      {/* The Pro impact note's visibility. Rendered unconditionally — including for an account
+          with no plugin — because this is a READING PREFERENCE, not an entitlement: a reader who
+          turns it off should stay off if they later gain the capability, and the note itself
+          gates on `pro.prSummary` separately. The copy names what it controls rather than
+          assuming the reader knows the feature exists. */}
+      <Field
+        label="AI impact note"
+        htmlFor="blast-impact-note"
+        hint="A short AI-written note on the pull request pane saying what a change could break. It is never generated until you ask for it, and turning this off removes the button too."
+      >
+        <label className="flex cursor-pointer items-center gap-2 text-[12px]">
+          <input
+            id="blast-impact-note"
+            type="checkbox"
+            checked={showNote}
+            onChange={(e) => setShowNote(e.target.checked)}
+          />
+          <span className="text-gray-600 dark:text-gray-300">
+            Offer the impact note on pull requests
+          </span>
+        </label>
+      </Field>
+
       <SaveButton
         dirty={dirty}
         saving={save.isPending}
         onClick={() => {
           // ⚠ Save the DEFAULTS as null, not as a stored blob. A blob saying "balanced, nothing
-          // off" would freeze this account against any future change to the product defaults —
-          // the same two-state rule the large-PR threshold follows.
-          const isDefaults = sensitivity === 'balanced' && off.length === 0;
-          save.mutate(isDefaults ? null : { sensitivity, surfacesOff: off });
+          // off, note shown" would freeze this account against any future change to the product
+          // defaults — the same two-state rule the large-PR threshold follows.
+          const isDefaults = sensitivity === 'balanced' && off.length === 0 && showNote;
+          save.mutate(
+            isDefaults
+              ? null
+              : // ⚠ Only `false` is sent: the backend stores the field only when it is off, so
+                // sending `true` here would persist the product default as a choice.
+                { sensitivity, surfacesOff: off, ...(showNote ? {} : { showImpactNote: false }) },
+          );
         }}
       />
 

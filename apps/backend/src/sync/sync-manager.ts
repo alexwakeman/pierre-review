@@ -432,6 +432,32 @@ export async function runSyncForRepo(
           `co-change index ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
         );
       }
+
+      // BLAST RADIUS: the targeted diff read that tells a comments-only change from a real one.
+      // ⚠ AFTER the co-change index above, not before — its candidate test reads the hub signal,
+      // and a stale index would misjudge a hub-driven high as surface-driven and spend a call on
+      // it. Ordering, not preference.
+      //
+      // Unlike the index this DOES spend GitHub quota, which is why it is narrow: only pull
+      // requests that are currently high on a CONTRACT SURFACE ALONE and small enough for the
+      // answer to be plausible, once per head sha, capped per run. Measured at 1.7% of open pull
+      // requests. Strictly non-fatal.
+      try {
+        const { runChangeShapeClassification } = await import('./classify-change-shape.js');
+        await runChangeShapeClassification({
+          owner: repo.owner,
+          name: repo.name,
+          repoId,
+          accountId: repo.accountId,
+          token,
+          log,
+          shouldCancel: common.shouldCancel,
+        });
+      } catch (err) {
+        log.warn(
+          `change-shape ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
+      }
     })
     .catch((err) => {
       log.error(

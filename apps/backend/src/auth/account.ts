@@ -435,7 +435,16 @@ export function sanitizeBlastRadiusConfig(input: unknown): BlastRadiusConfig | n
     if (Object.keys(out).length > 0) overrides = out;
   }
 
-  return overrides ? { sensitivity, surfacesOff, overrides } : { sensitivity, surfacesOff };
+  // ⚠ ONLY STORED WHEN IT IS `false`. `showImpactNote` defaults to SHOWN, so writing `true`
+  // would persist the product default as a choice — the same two-state rule the whole config
+  // follows, one field down. A blob whose only content was `{showImpactNote: true}` would also
+  // stop `isDefault` reading true in Settings for a user who changed nothing that matters.
+  const hide = raw.showImpactNote === false;
+
+  const base: BlastRadiusConfig = { sensitivity, surfacesOff };
+  if (overrides) base.overrides = overrides;
+  if (hide) base.showImpactNote = false;
+  return base;
 }
 
 /**

@@ -42,14 +42,25 @@ vi.mock('../db/client.js', () => {
 });
 
 import { syncRepo } from './sync-repo.js';
-import { runSyncForRepo } from './sync-manager.js';
+import { isSyncRunning, runSyncForRepo } from './sync-manager.js';
 
 const mockSyncRepo = vi.mocked(syncRepo) as unknown as Mock;
 const makeLog = (): Logger => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() });
-// Let the fire-and-forget background task (its awaited phases + the finally that
-// clears the `running` set) drain before assertions.
+// Let the fire-and-forget background task (its awaited phases + the finally that clears the
+// `running` set) drain before assertions.
+//
+// ⚠ IT WAITS ON THE ACTUAL CONDITION, NOT ON A TICK COUNT. This was two `setTimeout` ticks — an
+// approximation of "long enough" that held only while the background chain stayed the length it
+// was on the day it was written. Adding one more `await` to that chain (the blast-radius
+// change-shape step did it) left the `running` set uncleared when the NEXT test ran, so that test
+// saw the repo still syncing and skipped its sync entirely — and failed on
+// `expect(mockSyncRepo).toHaveBeenCalledTimes(1)`, three tests away from the actual cause.
+// `isSyncRunning` is the very flag the guard reads, so waiting on it cannot drift again.
 const flush = async (): Promise<void> => {
-  await new Promise((r) => setTimeout(r));
+  for (let i = 0; i < 200 && isSyncRunning(1); i++) {
+    await new Promise((r) => setTimeout(r));
+  }
+  // One more, so a test asserting on work queued in the same `finally` sees it.
   await new Promise((r) => setTimeout(r));
 };
 

@@ -1,4 +1,4 @@
-import type { BlastSignals, BlastSurface, StoredPrFile } from '@pierre-review/shared';
+import type { BlastSignals, BlastSurface, ChangeShape, StoredPrFile } from '@pierre-review/shared';
 import { codeLocFor, isNonCodeFile, PR_FILES_PAGE_CAP } from './code-loc.js';
 
 // ============================================================================
@@ -133,6 +133,23 @@ function subsystemOf(path: string): string {
   return i === -1 ? path : path.slice(0, i);
 }
 
+/**
+ * The change shape, but only when it still describes the CURRENT head.
+ *
+ * ⚠ RETURNS null ON ANY MISMATCH OR ABSENCE, and null never demotes anything. Three separate
+ * things land here and all three are the same answer: never classified, classified at a head
+ * that has since moved, or classified with no sha recorded at all.
+ */
+function contentKindFor(pr: {
+  contentKind?: ChangeShape | null;
+  contentKindSha?: string | null;
+  headSha?: string | null;
+}): ChangeShape | null {
+  if (pr.contentKind == null) return null;
+  if (pr.contentKindSha == null || pr.headSha == null) return null;
+  return pr.contentKindSha === pr.headSha ? pr.contentKind : null;
+}
+
 /** What the hub index contributes for one pull request, when it has anything to say.
  *  P2 supplies this; P1 passes nothing and every field lands null. */
 export interface HubReading {
@@ -163,6 +180,12 @@ export function blastSignalsFor(
     additions: number;
     deletions: number;
     changedFiles: number;
+    // ---- the CHANGE SHAPE, read from the diff (see db/change-shape.ts) ----
+    // All three optional: most callers never fetched a diff, and the candidate test in
+    // sync/classify-change-shape.ts calls this fold precisely to DECIDE whether to fetch one.
+    contentKind?: ChangeShape | null;
+    contentKindSha?: string | null;
+    headSha?: string | null;
   },
   hub?: HubReading | null,
 ): BlastSignals | null {
@@ -219,6 +242,11 @@ export function blastSignalsFor(
     // governs a DIFFERENT rule here: over there it forbids asserting "small", here it forbids
     // asserting "low". Both come from the one page-cap test in `codeLocFor`.
     truncated: codeLocIsLowerBound,
+    // ⚠ THE STALENESS TEST LIVES HERE, ONCE. A diff read is only true of the commit it read, so a
+    // verdict stored against an older head describes code that may no longer be there — and a
+    // stale "comments only" would keep a level capped after a force-push added a schema change.
+    // Every surface reads the fold, so no surface has to remember this comparison.
+    contentKind: contentKindFor(pr),
   };
 }
 

@@ -236,6 +236,11 @@ export const pullRequests = pgTable(
     // Per-file breakdown (capped at 100 files by the sync query). Nullable; the
     // API resolves it to [] and computes each file's GitHub deep link on read.
     files: jsonb('files').$type<StoredPrFile[]>(),
+    // BLAST RADIUS: what the code churn consists of, plus the head sha it was read at (migration
+    // pg 0051). See the sqlite twin — NULL means "we did not look", and the sha is what stops a
+    // stale verdict outliving the commit it described. Kept in sync by hand.
+    contentKind: text('content_kind', { enum: ['comments', 'formatting', 'code'] }),
+    contentKindSha: text('content_kind_sha'),
   },
   (t) => ({
     repoIdx: index('pr_repo_idx').on(t.repoId),

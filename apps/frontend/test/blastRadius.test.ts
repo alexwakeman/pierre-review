@@ -34,6 +34,7 @@ const signals = (over: Partial<BlastSignals> = {}): BlastSignals => ({
   hubBar: null,
   hubPath: null,
   truncated: false,
+  contentKind: null,
   ...over,
 });
 
@@ -180,6 +181,55 @@ describe('blastRadius — the sensitivity dial', () => {
   it('reports isDefault only when nothing is stored', () => {
     expect(resolveBlastConfig(null).isDefault).toBe(true);
     expect(resolveBlastConfig({ sensitivity: 'balanced', surfacesOff: [] }).isDefault).toBe(false);
+  });
+});
+
+describe('blastRadius — the trivial-change cap', () => {
+  // The case: golang/go#80721, "crypto/hpke: document sequence counter size" — one file, +4 −2,
+  // every changed line a `//` doc comment, HIGH because `crypto/` is a contract surface. The path
+  // was right about the file and wrong about the change.
+  const cryptoDoc = (over: Partial<BlastSignals> = {}) =>
+    pr({ codeFiles: 1, surfaces: ['auth'], ...over }, 6);
+
+  it('caps a comments-only change at MEDIUM, not at low', () => {
+    // ⚠ MEDIUM IS THE POINT. A comment in a crypto file is still a change to a file that matters;
+    // demoting to low would make the file's consequence disappear, which is the opposite error.
+    expect(blastRadius(cryptoDoc(), DEFAULTS)?.level).toBe('high');
+    expect(blastRadius(cryptoDoc({ contentKind: 'comments' }), DEFAULTS)?.level).toBe('medium');
+  });
+
+  it('caps a formatting-only change the same way', () => {
+    expect(blastRadius(cryptoDoc({ contentKind: 'formatting' }), DEFAULTS)?.level).toBe('medium');
+  });
+
+  it('does NOT cap when the diff says the change is real code', () => {
+    expect(blastRadius(cryptoDoc({ contentKind: 'code' }), DEFAULTS)?.level).toBe('high');
+  });
+
+  it('does NOT cap on an absent reading — null is "we did not look", never trivial', () => {
+    // ~98% of pull requests never have their diff fetched. If null demoted, the cap would apply
+    // to almost everything.
+    expect(blastRadius(cryptoDoc({ contentKind: null }), DEFAULTS)?.level).toBe('high');
+    expect(blastRadius(cryptoDoc(), DEFAULTS)?.level).toBe('high');
+  });
+
+  it('caps a change that was high on SPREAD or VOLUME too, not just on a surface', () => {
+    expect(
+      blastRadius(pr({ codeFiles: 20, dirs: 9, contentKind: 'comments' }, 3000), DEFAULTS)?.level,
+    ).toBe('medium');
+  });
+
+  it('KEEPS the capped-from reasons, below the explanation', () => {
+    // The file still matters and the reader is entitled to see what would have made it high.
+    const v = blastRadius(cryptoDoc({ contentKind: 'comments' }), DEFAULTS);
+    expect(v?.reasons[0]?.text).toContain('Comments only');
+    expect(v?.reasons.some((r) => r.kind === 'surface')).toBe(true);
+  });
+
+  it('leaves an already-low pull request alone', () => {
+    // The cap only ever moves downward FROM high; it must not promote anything.
+    const v = blastRadius(pr({ codeFiles: 1, contentKind: 'comments' }, 6), DEFAULTS);
+    expect(v?.level).toBe('low');
   });
 });
 

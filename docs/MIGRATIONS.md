@@ -9,9 +9,10 @@
 
 `pnpm test` is SQLite-only. **No automated check ever executes a `migrations-pg/` file**, so a pg
 twin can be malformed, unregistered, or subtly divergent and every suite stays green. The single
-source of confidence is replaying it by hand into a throwaway database. Last done **2026-09-08** on
-**PostgreSQL 16.9**: core **51/51** through the real runner, the newest twins being
-`0049_blast_radius_config` and `0050_repo_file_coupling`. (The plugin twins were NOT re-run that
+source of confidence is replaying it by hand into a throwaway database. Last done **2026-09-09** on
+**PostgreSQL 16.9**: core **52/52** through the real runner, the newest twin being
+`0051_pr_content_kind` (two nullable text columns on `pull_requests`, DDL-only — nothing a
+with-data pass could prove that the column types do not). (The plugin twins were NOT re-run that
 day and did not need to be — blast radius adds no plugin migration, because the `impact`
 annotation fits the existing `pr_comment_annotations` unique index. Their last full replay is the
 2026-09-07 pass below: all **33**, full table parity with SQLite, the only absentee being
@@ -242,8 +243,8 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is currently REPLAYED AND GREEN — see § Replaying the pg chain below.** Last
-  re-run **2026-09-08** on the standing local Postgres (16.9): core through `db:migrate`
-  (**51 applied = 51 journal entries**, the newest being `0050_repo_file_coupling`), with
+  re-run **2026-09-09** on the standing local Postgres (16.9): core through `db:migrate`
+  (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
   `accounts.blast_radius_config` present as `jsonb` and `repo_file_coupling` carrying both FKs plus
   its `rfc_account_repo` unique index. Blast radius adds NO plugin migration, so the **33** plugin
   twins were not re-run; their last full replay is the 2026-09-07 pass, which also confirmed
