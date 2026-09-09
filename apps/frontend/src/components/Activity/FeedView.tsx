@@ -15,6 +15,7 @@ import type {
   DerivedState,
   EventType,
   FeedAffectedThread,
+  FeedPrEventChip,
   ReviewState,
   User,
   WorkspaceReviewer,
@@ -39,6 +40,8 @@ import {
   dateTime,
   DERIVED_STATE_META,
   EVENT_META,
+  FEED_PR_EVENT_CHIPS,
+  feedPrEventChip,
   MY_TURN_REASON_META,
   indexUsers,
   relativeTime,
@@ -74,6 +77,11 @@ import { UserName } from '../UserName.js';
 function isCiFailureKind(kind: string): boolean {
   return kind === 'ci_failed' || kind === 'trunk_ci_failed';
 }
+
+// The "no chips pressed" reading of the PR-event sub-selection, hoisted so it is REFERENTIALLY
+// STABLE: `activePrEventKinds` feeds catMatch's dep array, and a fresh `[]` per render would
+// rebuild the matcher — and with it `applyFeedPills` and the whole windowed list — every time.
+const NO_PR_EVENT_KINDS: FeedPrEventChip[] = [];
 
 // A coloured chip + label describing WHAT an item is (the event kind). The My-Turn reason is
 // a separate pill (see MY_TURN_REASON_META); Claude runs get their own AI-signal chip.
@@ -255,6 +263,8 @@ export function FeedView({
   const feedCatPrEvents = useFilters((s) => s.feedCatPrEvents);
   const toggleFeedCatComments = useFilters((s) => s.toggleFeedCatComments);
   const toggleFeedCatPrEvents = useFilters((s) => s.toggleFeedCatPrEvents);
+  const feedPrEventKinds = useFilters((s) => s.feedPrEventKinds);
+  const toggleFeedPrEventKind = useFilters((s) => s.toggleFeedPrEventKind);
   const feedNeedsReview = useFilters((s) => s.feedNeedsReview);
   const toggleFeedNeedsReview = useFilters((s) => s.toggleFeedNeedsReview);
   const feedShowCommits = useFilters((s) => s.feedShowCommits);
@@ -506,24 +516,30 @@ export function FeedView({
     () => counts?.bots ?? items.filter(isBotActor).length,
     [counts, items, isBotActor],
   );
+  // The sub-selection the render and the filter actually use. The store field is REMEMBERED
+  // across the parent pill going off (see feedPrEventKinds) — the row just stops rendering and
+  // this reads empty, exactly like BotPrsDetail's `activePills`. A corrective set() here would
+  // permanently forget the reader's choice. Empty = all four chips.
+  const activePrEventKinds = feedCatPrEvents ? feedPrEventKinds : NO_PR_EVENT_KINDS;
   // Event-category matcher for the Comments / PR-events pills. Both off = no category filter.
   // When either is on, keep only items in the enabled categories (commit, Claude and CI-failure
   // rows, which are in neither category, drop out while a category pill is active — deliberate:
   // adding a kind here would silently change what those two existing pills mean).
+  //
+  // The PR-events half additionally consults the dependent chip row, CLIENT-SIDE like its parent:
+  // an empty selection is the whole bucket, so a feed with no chip pressed narrows exactly as it
+  // did before the row existed.
   const catMatch = useCallback(
     (i: ConsolidatedFeedItem): boolean => {
       if (!feedCatComments && !feedCatPrEvents) return true;
       const isComment = i.kind === 'review_comment' || i.kind === 'pr_comment';
+      const chip = feedPrEventChip(i.kind);
       const isPrEvent =
-        i.kind === 'pr_opened' ||
-        i.kind === 'pr_merged' ||
-        i.kind === 'pr_closed' ||
-        i.kind === 'pr_reopened' ||
-        i.kind === 'pr_ready_for_review' ||
-        i.kind === 'review_submitted';
+        chip != null &&
+        (activePrEventKinds.length === 0 || activePrEventKinds.includes(chip));
       return (feedCatComments && isComment) || (feedCatPrEvents && isPrEvent);
     },
-    [feedCatComments, feedCatPrEvents],
+    [feedCatComments, feedCatPrEvents, activePrEventKinds],
   );
   const commentCount = useMemo(
     () =>
@@ -532,21 +548,62 @@ export function FeedView({
     [counts, items],
   );
   // PR-events pill badge — the server `prEvents` facet already ships (computeFeedCounts) but was
-  // never read, so the pill showed no count. Kinds kept in sync with catMatch's isPrEvent above.
+  // never read, so the pill showed no count. The WHOLE bucket, never the chip selection: the pill
+  // is the way back out of a narrowing, so its badge must not shrink as chips are pressed.
   const prEventsCount = useMemo(
-    () =>
-      counts?.prEvents ??
-      items.filter(
-        (i) =>
-          i.kind === 'pr_opened' ||
-          i.kind === 'pr_merged' ||
-          i.kind === 'pr_closed' ||
-          i.kind === 'pr_reopened' ||
-          i.kind === 'pr_ready_for_review' ||
-          i.kind === 'review_submitted',
-      ).length,
+    () => counts?.prEvents ?? items.filter((i) => feedPrEventChip(i.kind) != null).length,
     [counts, items],
   );
+  // Per-chip badges for the dependent row. Server facet first (the whole loadable stream, and
+  // independent of which chips are pressed, so a pressed chip never zeroes its siblings), falling
+  // back to the loaded page only for a stale IndexedDB response predating `byEventType` — the
+  // same two-source rule every other badge on this screen follows.
+  const prEventKindCounts = useMemo(() => {
+    const m = new Map<FeedPrEventChip, number>();
+    if (counts?.byEventType) {
+      for (const [chip, n] of Object.entries(counts.byEventType)) m.set(chip as FeedPrEventChip, n);
+      return m;
+    }
+    for (const i of items) {
+      const chip = feedPrEventChip(i.kind);
+      if (chip != null) m.set(chip, (m.get(chip) ?? 0) + 1);
+    }
+    return m;
+  }, [counts, items]);
+  // The pressed chips, named in the ROW'S display order for the empty-state sentence (click
+  // order would name them in an order the screen never shows). That sentence is the third
+  // channel making this row's effect legible, beside the pressed state and the count line —
+  // an include-only control whose only feedback is a count reads as broken.
+  const prEventKindPhrase = useMemo(() => {
+    const labels = FEED_PR_EVENT_CHIPS.filter((c) => activePrEventKinds.includes(c.id)).map(
+      (c) => c.label,
+    );
+    const last = labels.pop();
+    if (last === undefined) return '';
+    return labels.length === 0 ? last : `${labels.join(', ')} or ${last}`;
+  }, [activePrEventKinds]);
+  // Whether that sentence may be SAID — i.e. whether the chips are what actually narrowed the
+  // list. FOUR states pre-empt them, every one applied in applyFeedPills BEFORE catMatch ever
+  // runs: the CI lens' 'only' skips catMatch outright, Claude-only rows are in NO category,
+  // "Only mine" keeps just the rows where the reader owes something, and the bot lens' 'only'
+  // keeps just the bot rows. Naming chips in any of the four blames the wrong control — and the
+  // chip badges beside the sentence would flatly contradict it, because they come from the
+  // server's `byEventType` facet, computed over the whole loadable stream and deliberately blind
+  // to every client-side pill. ("Only mine" + "Merged", on a reader who owes nothing on a merged
+  // PR, said "No merged PR events in this window" under a Merged chip badging 533.)
+  //
+  // ⚠ THE BOT LENS IS TWO DIFFERENT MECHANISMS AND ONLY ONE OF THEM IS SAFE. 'hide' is SERVER-side
+  // (`excludeBots`, above), so the facet is computed over the same excluded stream and badge and
+  // list agree by construction — it needs no entry here. 'only' sends `excludeBots: false` and
+  // narrows on the CLIENT, so the facet still counts the human rows the list is hiding: on
+  // workspace 3 that is 36 merged events of which 0 are a bot's, i.e. an empty list under a
+  // Merged chip badging 36. Gate on the lens, never on "the bot lens is handled server-side".
+  const prEventKindsNarrowing =
+    activePrEventKinds.length > 0 &&
+    feedCiLens !== 'only' &&
+    !feedClaudeOnly &&
+    !feedMyTurnOnly &&
+    effectiveBotLens !== 'only';
   // "Needs review" matcher — a pr_opened / pr_ready_for_review card whose PR STILL awaits a
   // first review (the server-computed live snapshot). MUST mirror computeFeedCounts's
   // awaitingReview facet exactly, or the badge and the filtered list disagree.
@@ -720,7 +777,10 @@ export function FeedView({
         ? byLens.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState))
         : byLens;
     return feedNeedsReview ? byState.filter(matchesNeedsReview) : byState;
-  }, [botsMode, botStateFilter, botVendorFilter, feedMyTurnOnly, feedClaudeOnly, feedCiLens, effectiveBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor, feedNeedsReview, matchesNeedsReview]);
+    // `feedPrEventKinds` rides in through catMatch rather than being read here, but it is listed
+    // because this array is HAND-MAINTAINED and a narrowing missing from it is a stale filter
+    // with no error.
+  }, [botsMode, botStateFilter, botVendorFilter, feedMyTurnOnly, feedClaudeOnly, feedCiLens, effectiveBotLens, feedCatComments, feedCatPrEvents, feedPrEventKinds, catMatch, isBotActor, feedNeedsReview, matchesNeedsReview]);
   const visible = useMemo(() => applyFeedPills(items), [applyFeedPills, items]);
 
   // Honest count line: loaded-of-TOTAL (the server's post-cap stream length), never
@@ -1374,7 +1434,7 @@ export function FeedView({
         {botsMode ? (
           botVendors.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+              <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
                 Vendor
               </span>
               {botVendors.map((v) => {
@@ -1554,11 +1614,44 @@ export function FeedView({
           </button>
         )}
       </div>
+      {/* The "PR events" pill's dependent chip row — rendered ONLY while that pill is pressed,
+          and only here, inside the non-botsMode fragment (the Bots pane replaces row 1 wholesale
+          and has no category pill to depend on). Client-side like its parent: it narrows the
+          loaded pages, it does not re-key the feed request.
+
+          No chip pressed = all four = the pill's whole bucket, so this row starts inert. The
+          selection is REMEMBERED when the parent goes off: this block simply stops rendering. */}
+      {feedCatPrEvents && (
+        <div className="flex flex-wrap items-center gap-2 pl-3">
+          <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">Kind</span>
+          {FEED_PR_EVENT_CHIPS.map((chip) => {
+            const on = activePrEventKinds.includes(chip.id);
+            const count = prEventKindCounts.get(chip.id) ?? 0;
+            return (
+              <button
+                key={chip.id}
+                type="button"
+                onClick={() => toggleFeedPrEventKind(chip.id)}
+                aria-pressed={on}
+                className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                  on
+                    ? 'border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-indigo-500/60 dark:bg-indigo-950/30 dark:text-indigo-300'
+                    : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                }`}
+                title={chip.title}
+              >
+                {chip.label}
+                {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
       </>
         )}
         {/* Review-thread derived-STATE pills + the honest count line — every feed view. */}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+          <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
             State
           </span>
           {BOT_STATE_ORDER.map((st) => {
@@ -1591,7 +1684,7 @@ export function FeedView({
           {/* PR-level pill — its own labelled group so it doesn't read as a fifth thread
               state. Matches only pr_opened/ready cards whose PR still awaits a first review
               (a live snapshot — the same card can stop matching tomorrow). */}
-          <span className="ml-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+          <span className="ml-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400">
             PR
           </span>
           <button
@@ -1647,8 +1740,15 @@ export function FeedView({
             ? 'No PRs awaiting a first review in this window.'
             : botStateFilter.size > 0
             ? 'Nothing matches these state filters.'
+            : prEventKindsNarrowing
+            ? `No ${prEventKindPhrase} PR events in this window.`
             : feedClaudeOnly
             ? 'No Claude Reviews in this window.'
+            : // "Only mine" is the FIRST narrowing applyFeedPills applies, so it is the control
+              // to name — ahead of the bot lens, which under its default 'hide' would otherwise
+              // claim "only bot activity here" about a stream the server already stripped bots from.
+              feedMyTurnOnly
+            ? 'Nothing needs your attention right now.'
             : effectiveBotLens === 'only'
               ? 'No bot activity in this window.'
               : effectiveBotLens === 'hide'

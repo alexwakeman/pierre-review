@@ -377,18 +377,32 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   and the `roi` and `benchmark` BODIES lock. ⚠ **A gated sub-tab must still be SELECTABLE** — `effectiveInsightsTab`
   normalises an out-of-union value and nothing else, never a capability fallback, or an unentitled
   `?insightsTab=bottlenecks` from a bookmark silently lands on Overview explaining nothing.
-- **"Where the work is happening" is TWO CHARTS under Flow metrics, never one blended score**
-  (`WorkspaceRepoActivityCharts`, riding `repoActivity` on the SAME free `/api/workspace-metrics`
-  response): PRs opened per repo, STACKED people vs automation, beside lines changed, same order in
-  both. A normalised activity index is "a number no PR resembles" one more time; a GROUPED chart is
-  separately broken because `BarChart`'s `niceMax` gives both series ONE y-axis. ⚠ It mounts in
-  `WorkspaceFlowMetrics`, **never inside `WorkspaceMetricsPanel`** — that panel ALSO mounts per-repo
-  behind a Pro gate, where a per-repo breakdown is one bar for paying accounts only. ⚠ Its window is
-  a rolling 14 days (`INSIGHT_SPRINT_DAYS`) and CANNOT be the sprint cadence (plugin-owned, this is
-  free) — a THIRD window on that panel, so it says so. ⚠ **Unknown size is not zero size**
-  (`linesChanged: null`, never a fabricated 0 — and `BarChart` drops every `v <= 0`, so the unsized
-  COUNT must be disclosed in words); a repo added mid-window is MARKED, never pro-rated; the top-12
-  cap states what it cut on BOTH axes.
+- **"Where the work is happening" is TWO CARDS under Flow metrics, both horizontal ROW LISTS
+  (`charts/RepoRows`), neither carrying a blended score.** LEFT — `WorkspaceRepoActivityCharts`,
+  riding `repoActivity` on the SAME free `/api/workspace-metrics` response: PRs opened (STACKED
+  people vs automation) beside lines changed, ranked by PRs opened, rolling 14 days
+  (`INSIGHT_SPRINT_DAYS`; it CANNOT be the sprint cadence — plugin-owned, this is free). RIGHT —
+  `WorkspaceReachCard` + `useWorkspaceReach`: open PRs per repo at Low/Medium/High reach.
+  ⚠ **TWO COLUMNS, TWO SCALES, TWO ORIGINS** — `RepoRows` divides by ITS OWN column max, so a bar
+  length is a ratio WITHIN one column, never a cross-measure number and NOT the banned normalised
+  index (nothing is z-scored, weighted or summed across measures). A GROUPED `BarChart` was never
+  available either: `niceMax` gives both series ONE y-axis (50 vs 50k on real data).
+  ⚠ **The repo name is written out IN FULL and wraps** — the rotated 8px axis label it replaced was
+  truncated to 13 chars AND clipped, so 6 of 7 real repos read "…tric-backend";
+  `axisLabels()`/`MAX_LABEL_CHARS`/the "In order:" line are DELETED, and a `title=` tooltip may not
+  replace them (no touch, no keyboard). ⚠ **Unknown is never zero on either card**: `linesChanged:
+  null` prints "size unknown" in that repo's OWN row (the unsized-PR count is still disclosed in
+  words), and a null `blastRadius()` verdict is NOT a fourth segment — undrawn, so the reach bars do
+  NOT total the open-PR count the list is ranked by, and that count is stated in words + per repo.
+  A repo added mid-window is MARKED, never pro-rated; each top-12 cap states what it cut.
+  ⚠ The reach card is a CLIENT FOLD over `useWorkspaceOpenPrs` (never `useSearchOpenPrs` — Timeline
+  `repoIds`) through the ONE `blastRadius()` resolver, so the Settings dial repaints it with NO
+  cache invalidation; a per-repo level on the wire would be the first server-decided level.
+  ⚠ Its population is OPEN RIGHT NOW — a snapshot, the FOURTH framing on that panel, so it says so —
+  and includes DRAFTS, which the "Open PRs" tile excludes (210 vs 204 on real data), so the draft
+  count is disclosed. FREE on every tier, no ProGate. ⚠ Both mount in `WorkspaceFlowMetrics`,
+  **never inside `WorkspaceMetricsPanel`** — that panel ALSO mounts per-repo behind a Pro gate,
+  where a per-repo breakdown is one row for paying accounts only.
 - **Pending cards carry MERGE-RELATED ACTIONS, on the two FORWARD kinds only** (`merge`,
   `update_branch`) - Merge, Merge-when-ready, Cancel, Update branch. ⚠ **NOTHING ON THE BOARD
   MAY FETCH ON MOUNT**: `MergeWhenReadyControl` fetches merge-options EAGERLY (~3 GitHub calls per
@@ -565,6 +579,14 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   on a key persisted UNCONDITIONALLY needs a `FILTER_STORAGE_VERSION` bump.**
   ⚠ `migratePersistedFilters` steps CHAIN — a v2 blob must land at v4, and a per-step early
   return strands it where the version check discards the whole blob.
+- **The Feed's "PR events" pill opens a DEPENDENT chip row** (`Kind` — Opened / Reviewed / Merged
+  / Closed; `feedPrEventKinds`, transient, URL-silent): a PARTITION of the pill's six kinds, so
+  **empty means ALL FOUR** and an all-off feed is unreachable by clicking. ⚠ **NOT cleared when
+  the parent goes off** — the row unmounts, the choice survives (a corrective `set()` here is the
+  derived-sub-tab defect). ⚠ **CLIENT-side like its parent, never a wire param**: facets are
+  computed over the post-cap stream, so a server `types` filter would zero every OTHER pill's
+  badge, strand the CI/Claude client lenses over rows no longer sent, and re-key the infinite
+  query on every click. Badges ride the `counts.byEventType` facet, which sums to `prEvents`.
 
 ---
 

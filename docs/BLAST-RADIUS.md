@@ -216,6 +216,54 @@ below — the same fact twice on one card is the double-count the large-PR flag 
 ⚠ **None of this costs a GitHub call.** The signals ride `ConsolidatedFeedItem`/`InsightPrRef`/
 `TimelinePr`, folded server-side once per PR on the page.
 
+## The per-repository card (Reports → Flow metrics)
+
+**"Reach by repository"** — one row per repository, its currently-open pull requests split
+Low/Medium/High. It sits beside "Activity by repository" in the "Where the work is happening"
+section (`WorkspaceReachCard`, folded by `useWorkspaceReach` in `hooks/useBlastRadius.ts`), and it
+is the only AGGREGATE view of the level in the product.
+
+**It is a client-side fold, and that is the design.** `useWorkspaceOpenPrs()` already returns every
+open pull request in the workspace carrying `blast`, `codeLoc` and `codeLocIsLowerBound` — i.e.
+`BlastPrFields` plus `repoId` — and the card calls `blastRadius()` on each row with the account's
+resolved config. Three consequences, each of which is why it is not a server field:
+
+- **The level stays decided in exactly one place.** A per-repo `{low, medium, high}` on the wire
+  would be the product's first server-decided level, and the card could then disagree with the chip
+  on the same pull request, silently, per row.
+- **The dial stays a render-time comparison.** `useSetBlastConfig` invalidates `['me']` and nothing
+  else; moving the sensitivity dial re-runs a fold over rows already in memory. A server count
+  would have to invalidate `['workspace-metrics']` too, and a stale cached response would draw one
+  distribution while every chip on screen drew another.
+- **It costs no extra request on the ordinary path** — the app lands on the Feed, whose open-PR
+  panel holds that exact cache entry. A cold deep link to Reports pays one `/api/open-prs`.
+
+⚠ **IT READS `useWorkspaceOpenPrs`, NEVER `useSearchOpenPrs`.** The latter narrows by
+`filters.repoIds`, the TIMELINE board's picker, which is not mounted on Reports.
+
+⚠ **UNKNOWN IS NOT A FOURTH SEGMENT AND NOT A ZERO.** A `null` verdict — never measured, or
+truncated-and-not-high — is not drawn. A fourth band would make "we don't know" look like a level
+and would inflate the bar so it no longer means "pull requests with a reading". The consequence is
+that **the bars do not total the open-PR count the list is ranked by**, so the count is stated in
+words under the card and beside the name of any repository it applies to. (Measured 10.0% of open
+PRs before the file backfill; 1 of 1,562 after it — the disclosure exists for both.)
+
+⚠ **THE POPULATION IS OPEN RIGHT NOW** — a snapshot, not a window, and the fourth framing on that
+panel, so the card says so. It also includes DRAFTS, which the "Open PRs" flow tile above it
+excludes (`state === 'open' && !isDraft`); on a real workspace that is 210 against 204, so the
+draft count is disclosed rather than reconciled by dropping the drafts.
+
+⚠ **THE THREE FILL COLOURS ARE MEASURED, AND TWO OBVIOUS CHOICES FAILED.** A fill must clear 3:1
+against BOTH page grounds, which admits only luminance 0.107–0.300 — so a light-to-dark ramp of one
+hue is arithmetically impossible. The card uses three Okabe–Ito CVD-safe hues as a cool→warm ramp:
+`#0072B2` low (5.19:1 light · 3.88:1 dark), `#CC79A7` medium (3.06 · 6.58), `#D55E00` high (3.87 ·
+5.21), stacked in a FIXED low→high order so position encodes the level too, with all three named in
+a key. The chip's own palette cannot be reused as fills: its greens/greys/ambers are theme-forked
+text pairs, `PALETTE.green` is the success green the chip rejects by name (and 2.28:1 here),
+`PALETTE.gray` is 2.54:1 and the chip's amber 2.15:1.
+
+**Free on every tier**, like the level itself — no `ProGate`, no capability read, no 402.
+
 ## The expansion is free, because it is deterministic
 
 Every reason and every figure in the disclosure comes from `blastRadius()` and `blastSignalsFor()`.

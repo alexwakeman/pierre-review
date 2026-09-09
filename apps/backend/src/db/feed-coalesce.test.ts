@@ -167,6 +167,32 @@ describe('computeFeedCounts', () => {
     expect(counts.bots).toBe(1); // only e's actor 9 is in the global bot set
     expect(counts.byThreadState).toEqual({ untouched: 2 });
     expect(counts.byBotActor).toEqual({}); // not the bot-only feed
+    // The chip-row facet is a PARTITION of the same bucket `prEvents` counts, keyed by chip id.
+    expect(counts.byEventType).toEqual({ opened: 1, merged: 1 });
+  });
+
+  it('folds the three "opened" kinds onto ONE chip, and byEventType sums to prEvents', () => {
+    const items = [
+      item({ id: 'a', kind: 'pr_opened' }),
+      item({ id: 'b', kind: 'pr_ready_for_review' }),
+      item({ id: 'c', kind: 'pr_reopened' }),
+      item({ id: 'd', kind: 'review_submitted' }),
+      item({ id: 'e', kind: 'pr_merged' }),
+      item({ id: 'f', kind: 'pr_closed' }),
+      // Outside the bucket entirely — a comment, a commit and a synthesized kind must contribute
+      // to neither the pill's badge nor any chip's.
+      item({ id: 'g', kind: 'pr_comment' }),
+      item({ id: 'h', kind: 'commit_pushed' }),
+      item({ id: 'i', kind: 'claude_review' }),
+    ];
+    const counts = computeFeedCounts(items, new Set<number>(), false);
+    expect(counts.byEventType).toEqual({ opened: 3, reviewed: 1, merged: 1, closed: 1 });
+    // A chip badge is a SUBTOTAL of the pill's badge, never a second population.
+    // `?? {}` only because the field is a trailing OPTIONAL on the wire type (a stale
+    // IndexedDB-persisted response predates it); the assertion above already pins it present.
+    const summed = Object.values(counts.byEventType ?? {}).reduce((a, b) => a + b, 0);
+    expect(summed).toBe(counts.prEvents);
+    expect(counts.prEvents).toBe(6);
   });
 
   it('populates byBotActor only in the bot-only feed, grouped by actor', () => {
@@ -198,6 +224,7 @@ describe('computeFeedCounts', () => {
       bots: 0,
       byBotActor: {},
       byThreadState: {},
+      byEventType: {},
     });
   });
 
@@ -215,5 +242,6 @@ describe('computeFeedCounts', () => {
     const counts = computeFeedCounts(items, new Set<number>(), false);
     expect(counts.awaitingReview).toBe(2); // PR 10 (deduped) + PR 11
     expect(counts.prEvents).toBe(6); // the facet stays independent of the flag
+    expect(counts.byEventType).toEqual({ opened: 5, merged: 1 }); // and so does the chip split
   });
 });

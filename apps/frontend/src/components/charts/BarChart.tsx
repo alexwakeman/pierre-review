@@ -118,7 +118,7 @@ export function BarChart({
                   stroke="currentColor"
                   strokeWidth={1}
                 />
-                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-400 text-[8px]">
+                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[8px]">
                   {formatY(v)}
                 </text>
               </g>
@@ -184,7 +184,7 @@ export function BarChart({
                     y={ly}
                     textAnchor="end"
                     transform={`rotate(-35 ${cx} ${ly})`}
-                    className="fill-gray-400 text-[8px]"
+                    className="fill-gray-500 dark:fill-gray-400 text-[8px]"
                   >
                     {labelFor(i)}
                   </text>
@@ -196,7 +196,7 @@ export function BarChart({
                   x={cx}
                   y={height - 4}
                   textAnchor="middle"
-                  className="fill-gray-400 text-[8px]"
+                  className="fill-gray-500 dark:fill-gray-400 text-[8px]"
                 >
                   {labelFor(i)}
                 </text>

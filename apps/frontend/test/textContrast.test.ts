@@ -91,16 +91,21 @@ interface Violation {
   ratio: number;
 }
 
-/** Every `className`-ish string literal in the SPA, with its line number. */
+/** Every `className`-ish string literal in the SPA, with its line number.
+ *
+ *  ⚠ `fill-` COUNTS, NOT JUST `text-`. Every axis tick and every y-tick in the six SVG chart
+ *  primitives is an SVG `<text>` coloured by `fill-gray-*`, and the first cut of this scanner
+ *  matched `text-` alone — so sixteen labels sat outside the ratchet entirely, at `fill-gray-400`,
+ *  which is 2.54:1 on the light page. They read as fine only because the dev page is dark. */
 function classStrings(): { file: string; line: number; value: string }[] {
   const out: { file: string; line: number; value: string }[] = [];
   for (const file of walk(SRC)) {
     const src = readFileSync(file, 'utf8');
     const lines = src.split('\n');
     lines.forEach((text, i) => {
-      // Any quoted run containing a `text-` utility. Template literals included: a conditional
-      // className is exactly where a dim colour gets slipped in unnoticed.
-      for (const m of text.matchAll(/["'`]([^"'`]*\btext-[a-z]+-\d{2,3}\b[^"'`]*)["'`]/g)) {
+      // Any quoted run containing a `text-`/`fill-` utility. Template literals included: a
+      // conditional className is exactly where a dim colour gets slipped in unnoticed.
+      for (const m of text.matchAll(/["'`]([^"'`]*\b(?:text|fill)-[a-z]+-\d{2,3}\b[^"'`]*)["'`]/g)) {
         out.push({ file: file.slice(SRC.length + 1), line: i + 1, value: m[1]! });
       }
     });
@@ -113,8 +118,8 @@ function check(): Violation[] {
   for (const { file, line, value } of classStrings()) {
     // Decorative marks are exempt BY NAME, never by being dim — see the header.
     if (value.includes(DECORATIVE_MARK_TOKEN)) continue;
-    const light = value.match(/(?:^|\s)text-([a-z]+)-(\d{2,3})\b/);
-    const dark = value.match(/dark:text-([a-z]+)-(\d{2,3})\b/);
+    const light = value.match(/(?:^|\s)(?:text|fill)-([a-z]+)-(\d{2,3})\b/);
+    const dark = value.match(/dark:(?:text|fill)-([a-z]+)-(\d{2,3})\b/);
     if (!light || !dark) continue;
     const lightShade = Number(light[2]);
     const darkShade = Number(dark[2]);
@@ -153,8 +158,8 @@ function checkUnpaired(): Violation[] {
   const bad: Violation[] = [];
   for (const { file, line, value } of classStrings()) {
     if (value.includes(DECORATIVE_MARK_TOKEN)) continue;
-    if (/dark:text-[a-z]+-\d{2,3}/.test(value)) continue;
-    const m = value.match(/(?:^|\s)text-([a-z]+-\d{2,3})\b/);
+    if (/dark:(?:text|fill)-[a-z]+-\d{2,3}/.test(value)) continue;
+    const m = value.match(/(?:^|\s)(?:text|fill)-([a-z]+-\d{2,3})\b/);
     if (!m || !UNPAIRED_MEASURED_FAILING.includes(m[1]!)) continue;
     for (const [theme, bg] of [['light', LIGHT_BG], ['dark', DARK_BG]] as const) {
       const r = contrastRatio(TW[m[1]!]!, bg);
@@ -183,6 +188,27 @@ describe('text contrast', () => {
       .map((v) => `${v.file}:${v.line}  ${v.cls}  ${v.theme} ${v.ratio.toFixed(2)}:1`)
       .join('\n');
     expect(report).toBe('');
+  });
+
+  it('every axis label in the shared chart primitives carries a theme pairing', () => {
+    // ⚠ THE NARROW RATCHET FOR THE ONE PLACE THE WIDENED SCANNER STILL CANNOT MEASURE.
+    // `fill-gray-500 dark:fill-gray-400` is a 500/400 pairing, and the muted-pairing rule above is
+    // deliberately scoped to light ≤ 300 with dark ≥ 600 — so it skips this one, and `checkUnpaired`
+    // only fires on colours measured failing on a real screen (`gray-400` is NOT on that list, and
+    // putting it there wholesale is what produced the 756-false-positive first cut: plenty of
+    // `text-gray-400`s sit inside a dark panel).
+    //
+    // So the guard here is a SHAPE, not a measurement: inside `components/charts`, where every
+    // `fill-*` is an axis tick on the page ground and nothing else, a theme-less fill is a promise
+    // that one colour works on both grounds. It measured 2.54:1 on the light page and did not.
+    const bad: string[] = [];
+    for (const { file, line, value } of classStrings()) {
+      if (!file.startsWith('components/charts/')) continue;
+      if (!/(?:^|\s)fill-[a-z]+-\d{2,3}\b/.test(value)) continue;
+      if (/dark:fill-[a-z]+-\d{2,3}/.test(value)) continue;
+      bad.push(`${file}:${line}  ${value}`);
+    }
+    expect(bad.join('\n')).toBe('');
   });
 
   it('no informative text in the SPA falls below AA in either theme', () => {

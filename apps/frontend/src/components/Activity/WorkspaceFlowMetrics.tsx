@@ -25,9 +25,15 @@ import { WorkspaceRepoActivityCharts } from './WorkspaceRepoActivityCharts.js';
 // ⚠ THE PER-REPO BREAKDOWN IS MOUNTED HERE, NOT INSIDE `WorkspaceMetricsPanel`. That panel has TWO
 // mounts: this one (the whole workspace) and `RepoInsightsPanel`, which renders it for ONE repo
 // behind the Pro `workspaceInsights` gate. A per-repository comparison there degenerates to a
-// single bar — and would appear only for paying accounts, on the one screen where it answers
-// nothing. It rides the SAME `/api/workspace-metrics` response as the panel above it, so there is
-// no second request and the two halves can never be a refresh apart.
+// single row — and would appear only for paying accounts, on the one screen where it answers
+// nothing. Its activity half rides the SAME `/api/workspace-metrics` response as the panel above
+// it, so there is no second request and the two halves can never be a refresh apart.
+//
+// ⚠ `WorkspaceRepoActivityCharts` NOW OWNS A SECOND CARD BESIDE ITS OWN — `WorkspaceReachCard`,
+// which folds the workspace's open pull requests through the ONE `blastRadius()` resolver. That
+// one DOES fetch (`/api/open-prs`, the list the Feed has usually already loaded), because the
+// levels are decided client-side so the sensitivity dial stays a render-time comparison. It is
+// CORE/free like everything else here — no capability read anywhere in this subtree.
 export function WorkspaceFlowMetrics(): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
   const openMetricsDetail = useFilters((s) => s.openMetricsDetail);

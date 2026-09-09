@@ -81,7 +81,7 @@ export function StackedAreaChart({
                   stroke="currentColor"
                   strokeWidth={1}
                 />
-                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-400 text-[8px]">
+                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[8px]">
                   {fmtNum(v)}
                 </text>
               </g>
@@ -100,10 +100,10 @@ export function StackedAreaChart({
                 strokeWidth={1}
               />
             )}
-            <text x={PAD_L} y={height - 4} className="fill-gray-400 text-[8px]">
+            <text x={PAD_L} y={height - 4} className="fill-gray-500 dark:fill-gray-400 text-[8px]">
               {labels[0] ? fmtDate(labels[0]) : ''}
             </text>
-            <text x={w - PAD_R} y={height - 4} textAnchor="end" className="fill-gray-400 text-[8px]">
+            <text x={w - PAD_R} y={height - 4} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[8px]">
               {labels[n - 1] ? fmtDate(labels[n - 1]!) : ''}
             </text>
             <rect

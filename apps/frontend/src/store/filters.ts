@@ -14,6 +14,7 @@ import {
   type DerivedState,
   type EventCategory,
   type EventType,
+  type FeedPrEventChip,
   type InsightKind,
   type MlSeverity,
   type PeriodGrain,
@@ -387,6 +388,24 @@ export interface FilterState {
   // bot lens, ORTHOGONAL to feedMyTurnOnly/feedClaudeOnly. Transient, URL-silent (like feedBotLens).
   feedCatComments: boolean;
   feedCatPrEvents: boolean;
+  // The chip row DEPENDENT on the "PR events" pill: which kinds inside that bucket to keep (see
+  // FeedPrEventChip for the four chips and the partition they make). Client-side, exactly like
+  // the parent pill — it narrows the loaded pages, it does not change the request.
+  //
+  // ⚠ EMPTY (the default) MEANS ALL FOUR, not none. That is what makes a fresh feed
+  // byte-identical to the behaviour before this row existed, keeps the default stable if a fifth
+  // chip is ever added, and makes an all-off empty feed unreachable by clicking: turning the last
+  // pressed chip back off lands here.
+  //
+  // ⚠ NOT CLEARED WHEN THE PARENT PILL GOES OFF. The row stops rendering and the filter stops
+  // consulting it; the selection is REMEMBERED. A corrective set() here is the derived-sub-tab
+  // defect — it permanently forgets a choice the reader made (see BotPrsDetail's `activePills`,
+  // the same shape one surface over).
+  //
+  // Transient and URL-silent like feedCatPrEvents itself: NOT in FilterDefaults, NOT in
+  // pickFilterBarState, NOT in sanitizePersistedFilters, so no FILTER_STORAGE_VERSION bump and
+  // no useUrlState serializer entry is owed.
+  feedPrEventKinds: FeedPrEventChip[];
   // Activity "Feed" "Needs review" pill — narrow the stream to pr_opened/pr_ready_for_review
   // cards whose PR is STILL awaiting a first review (the server-computed prAwaitingReview
   // flag, a live snapshot). Client-side, composes like the category pills. Transient,
@@ -867,6 +886,10 @@ export interface FilterState {
   // Feed event-category pills (see feedCatComments/feedCatPrEvents) — independent toggles.
   toggleFeedCatComments: () => void;
   toggleFeedCatPrEvents: () => void;
+  // Feed PR-event chip row (see feedPrEventKinds) — adds/removes one chip. Removing the LAST
+  // pressed chip lands back on the empty array, i.e. all four, so clicking can never reach an
+  // all-off selection whose only honest rendering is an empty feed.
+  toggleFeedPrEventKind: (k: FeedPrEventChip) => void;
   // Feed "Needs review" pill (see feedNeedsReview) — independent toggle.
   toggleFeedNeedsReview: () => void;
   // Feed "show individual commits" toggle (see feedShowCommits).
@@ -1368,6 +1391,8 @@ function freshDefaults(): FilterData {
     feedBotLens: 'hide',
     feedCatComments: false,
     feedCatPrEvents: false,
+    // Empty = all four PR-event chips (see feedPrEventKinds) — the pill's whole bucket.
+    feedPrEventKinds: [],
     feedNeedsReview: false,
     feedShowCommits: false,
     feedIsolatedPrId: null,
@@ -1552,6 +1577,14 @@ export const useFilters = create<FilterState>((set, get) => ({
   setFeedBotLens: (v) => set({ feedBotLens: v }),
   toggleFeedCatComments: () => set((s) => ({ feedCatComments: !s.feedCatComments })),
   toggleFeedCatPrEvents: () => set((s) => ({ feedCatPrEvents: !s.feedCatPrEvents })),
+  // ⚠ Note what this does NOT do: it never touches feedCatPrEvents, and nothing anywhere clears
+  // this list when that pill goes off (see the field).
+  toggleFeedPrEventKind: (k) =>
+    set((s) => ({
+      feedPrEventKinds: s.feedPrEventKinds.includes(k)
+        ? s.feedPrEventKinds.filter((x) => x !== k)
+        : [...s.feedPrEventKinds, k],
+    })),
   toggleFeedNeedsReview: () => set((s) => ({ feedNeedsReview: !s.feedNeedsReview })),
   toggleFeedShowCommits: () => set((s) => ({ feedShowCommits: !s.feedShowCommits })),
   cycleFeedCiLens: () =>

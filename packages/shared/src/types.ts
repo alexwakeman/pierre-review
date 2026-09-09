@@ -6623,6 +6623,24 @@ export interface ConsolidatedFeedItem {
   blast?: BlastSignals | null;
 }
 
+// The Activity Feed's "PR events" pill has a dependent chip row, rendered only while that pill
+// is pressed, narrowing the bucket by KIND. FOUR chips PARTITION the parent's six event kinds —
+// each kind belongs to exactly one chip — so "all four pressed" and "none pressed" are the same
+// stream, which is what lets the empty selection mean "all four":
+//
+//   opened   = pr_opened + pr_ready_for_review + pr_reopened
+//   reviewed = review_submitted
+//   merged   = pr_merged
+//   closed   = pr_closed
+//
+// ⚠ `pr_ready_for_review` and `pr_reopened` deliberately get no chip of their own. Over 14 days
+// of real human activity they are 23 and 6 events — together 1.7% of the bucket — so either
+// chip would read 0 most days, advertising a filter that can only return nothing. All three of
+// Opened's kinds answer "this PR is (again) asking for review", which is the reading
+// `matchesNeedsReview` already takes when it pairs pr_opened with pr_ready_for_review. The CARD
+// RENDERER still labels them apart ("PR reopened"): the chip groups, it never relabels.
+export type FeedPrEventChip = 'opened' | 'reviewed' | 'merged' | 'closed';
+
 // Server-computed facet counts over the WHOLE loadable stream (the post-cap `ordered` set
 // the page is sliced from), so the SPA's pill badges reflect every matching item — not just
 // the loaded page of 50. Computed with the same coalescing / caps / capability-gating /
@@ -6645,6 +6663,14 @@ export interface ConsolidatedFeedCounts {
   bots: number; // actorId in the GLOBAL users.isBot set (matches FeedView's isBotActor)
   byBotActor: Record<string, number>; // actorId -> count; populated only in the bot-only feed
   byThreadState: Record<string, number>; // DerivedState -> count over items carrying a derivedState
+  // FeedPrEventChip -> count: the badges on the "PR events" pill's dependent chip row. Keyed by
+  // CHIP id rather than raw event kind so the client draws them without re-deriving the
+  // partition, and summing to `prEvents` by construction. Independent of the active pills like
+  // every other facet here, so a pressed chip never zeroes its siblings. TRAILING OPTIONAL only
+  // so a stale IndexedDB-persisted response (PersistQueryClientProvider) stays type-honest —
+  // the same rule `uncappedTotal` and `counts` follow above; the server ALWAYS sends it, and
+  // FeedView's per-chip badge memo has the loaded-page fallback that absence needs.
+  byEventType?: Record<string, number>;
 }
 
 export interface ConsolidatedFeedResponse {
@@ -7459,21 +7485,29 @@ export interface WorkspaceMetricsDetailResponse {
 // ---- "Where is the work happening?" — per-repo activity under Flow metrics ----
 //
 // The workspace's flow metrics answer HOW MUCH and HOW FAST; this answers WHERE. One row per
-// repository over a rolling 14-day window, rendered as TWO side-by-side bar charts in the same
-// repo order: PRs opened (split human vs automation) and lines changed.
+// repository over a rolling 14-day window, rendered as ONE horizontal row list whose two COLUMNS
+// are PRs opened (split human vs automation) and lines changed.
 //
-// ⚠ TWO CHARTS, NEVER ONE BLENDED SCORE. A "0.5·z(PRs) + 0.5·z(lines)" activity index is the exact
-// shape this codebase rejects in five places — "a blended figure is a number no PR resembles"
-// (actor lanes), "a workspace-wide rate is a number no member of any cell resembles" (benchmark
-// placement), "the pooled headline rate and the fitted-subset rate ... must be labelled apart and
-// NEVER SUBTRACTED". Every figure below is a plain count over a stated window and population, so a
-// reader can check any of them against the repo itself; a fused scalar reconciles with nothing on
-// the panel above it. A grouped two-series chart is equally wrong here for a mechanical reason:
-// BarChart's `niceMax` gives every series ONE y-axis, and a PR count (≈5) beside a line count
-// (≈5000) draws the count sub-pixel.
+// ⚠ TWO MEASURES, TWO SCALES, NEVER ONE BLENDED SCORE. A "0.5·z(PRs) + 0.5·z(lines)" activity
+// index is the exact shape this codebase rejects in five places — "a blended figure is a number no
+// PR resembles" (actor lanes), "a workspace-wide rate is a number no member of any cell resembles"
+// (benchmark placement), "the pooled headline rate and the fitted-subset rate ... must be labelled
+// apart and NEVER SUBTRACTED". Every figure below is a plain count over a stated window and
+// population, so a reader can check any of them against the repo itself; a fused scalar reconciles
+// with nothing on the panel above it.
+//
+// The merge into one list is a LAYOUT change and not a licence to fuse the measures: `RepoRows`
+// scales each column against ITS OWN maximum and prints its own origin, so a drawn bar length is a
+// ratio inside one column and is never a number the reader compares across the two. (A GROUPED bar
+// chart was never available either, for a mechanical reason: BarChart's `niceMax` gives every
+// series ONE y-axis, and a PR count (≈5) beside a line count (≈5000) draws the count sub-pixel.)
+// One repository is one ROW, so the two measures are in one order by construction rather than by a
+// claim printed under a pair of charts — and the repository's full `owner/name` is written out on
+// that row, which the rotated 8px axis label it replaced could not do (13-character budget, then
+// clipped by the svg viewport: 6 of 7 real repositories rendered as "…tric-backend").
 export interface WorkspaceRepoActivityRow {
   repoId: number;
-  repoFullName: string; // "owner/name" — the chart's axis uses the trailing segment
+  repoFullName: string; // "owner/name" — written out IN FULL as the row label, never shortened
   /** PRs OPENED in the window, split by who opened them. The split is the whole point: on the dev
    *  corpus Dependabot opened 97 of 758 PRs in a fortnight and topped one repository outright, so
    *  a blended bar would crown a config repo as "where the work is happening" on dependency bumps.
@@ -7502,9 +7536,9 @@ export interface WorkspaceRepoActivityRow {
    *  0, so "we never observed this PR's size" and "this PR changed nothing" are byte-identical
    *  rows — 18.3% of the dev corpus over all history (though 0 of 758 inside a live 14-day window,
    *  because the state is concentrated in old backfilled rows). A bar that quietly sums 80% of a
-   *  repository's PRs is not that repository's line count, and BarChart draws `null` and `0`
-   *  identically (both `v <= 0`), so the count has to be DISCLOSED in words rather than implied by
-   *  a missing bar. */
+   *  repository's PRs is not that repository's line count, and a zero-length bar is the same
+   *  pixels as an absent one — so `null` prints "size unknown" in that repository's OWN row AND
+   *  the count is disclosed in words. A missing bar is not a disclosure. */
   sizedPrs: number;
   unsizedPrs: number;
   /** True when `repos.createdAt >= windowStart` — this repository was added PART-WAY through the
@@ -7522,12 +7556,12 @@ export interface WorkspaceRepoActivity {
   from: string; // ISO-8601, inclusive
   to: string; // ISO-8601, exclusive
   /** The repositories that saw at least one PR opened in the window, DESC by `prsOpenedHuman +
-   *  prsOpenedAutomation` and capped. Both charts render this array in this order, so the lines
-   *  chart is ranked by the PR count too — which is why `omitted` exists. */
+   *  prsOpenedAutomation` and capped. The row list renders this array in this order, so the
+   *  lines column is ranked by the PR count too — which is why `omitted` exists. */
   repos: WorkspaceRepoActivityRow[];
   activeRepos: number; // repos with ≥1 PR opened in the window (the M in "N of M")
   workspaceRepos: number; // the workspace's whole membership, active or not
-  /** What the cap cut, so the truncation is stated rather than inferred. NO SILENT CAPS: a chart
+  /** What the cap cut, so the truncation is stated rather than inferred. NO SILENT CAPS: a list
    *  ranked by PRs opened can drop the repository that leads on lines changed, and a note that
    *  says only "top 12" gives the reader no way to know that happened. */
   omitted: { repos: number; prsOpened: number; linesChanged: number | null };

@@ -102,6 +102,7 @@ import type {
   ConsolidatedFeedItem,
   ConsolidatedFeedResponse,
   ConsolidatedFeedCounts,
+  FeedPrEventChip,
   FeedAffectedThread,
   MyTurnPr,
   MyTurnRelevance,
@@ -6086,17 +6087,50 @@ export async function getWorkspaceInsights(
   return finish();
 }
 
+// Which chip of the "PR events" pill's dependent row a feed kind belongs to, or null when the
+// kind is outside the bucket entirely (comments, commits, and the synthesized Claude/CI kinds).
+// The four chips PARTITION the six PR-event kinds, so this doubles as the bucket predicate —
+// `prEvents` is counted off it below rather than re-spelling the six literals, which is what
+// keeps the pill's badge and its chips' badges from ever describing different sets.
+//
+// ⚠ TWIN of `feedPrEventChip` in apps/frontend/src/lib/ui.ts. `@pierre-review/shared` is
+// types-only for the backend (import type only — the release build fails on a real import), so
+// the partition is spelled once per side. `FeedPrEventChip` is the shared TYPE they agree on;
+// the rationale for the four chips, including why pr_reopened / pr_ready_for_review have none
+// of their own, lives with the type in packages/shared/src/types.ts.
+function feedPrEventChip(kind: string): FeedPrEventChip | null {
+  switch (kind) {
+    case 'pr_opened':
+    case 'pr_ready_for_review':
+    case 'pr_reopened':
+      return 'opened';
+    case 'review_submitted':
+      return 'reviewed';
+    case 'pr_merged':
+      return 'merged';
+    case 'pr_closed':
+      return 'closed';
+    default:
+      return null;
+  }
+}
+
 // Facet counts over the post-cap `ordered` stream (see ConsolidatedFeedCounts). Pure, so it's
 // unit-testable and shares the exact set the page is sliced from — the badges reconcile with
 // the loadable feed by construction. `botIds` is the raw UNION bot id set (users.isBot ∪ the
 // workspace's automated reviewers, manualHuman removed — NOT the allow-list-subtracted
 // excludeBots set), matching the SPA's isBotActor. `byBotActor` is only built in the bot-only
-// feed; `byThreadState` groups items carrying a derivedState.
+// feed; `byThreadState` groups items carrying a derivedState; `byEventType` groups the PR-event
+// bucket by chip.
 export function computeFeedCounts(
   ordered: ConsolidatedFeedItem[],
   botIds: ReadonlySet<number>,
   botsOnly: boolean,
 ): ConsolidatedFeedCounts {
+  // `byEventType` is a TRAILING OPTIONAL on the wire type (only so a stale IndexedDB-persisted
+  // response stays type-honest) but the server ALWAYS sends it — bound to a local so the
+  // accumulator below writes through one non-optional reference.
+  const byEventType: Record<string, number> = {};
   const counts: ConsolidatedFeedCounts = {
     total: ordered.length,
     myTurn: 0,
@@ -6109,6 +6143,7 @@ export function computeFeedCounts(
     bots: 0,
     byBotActor: {},
     byThreadState: {},
+    byEventType,
   };
   const awaitingPrIds = new Set<number>();
   for (const it of ordered) {
@@ -6117,15 +6152,13 @@ export function computeFeedCounts(
     if (it.kind === 'review_comment' || it.kind === 'pr_comment') counts.comments += 1;
     if (it.kind === 'commit_pushed') counts.commits += 1;
     if (isCiFeedKind(it.kind)) counts.ciFailures += 1;
-    if (
-      it.kind === 'pr_opened' ||
-      it.kind === 'pr_merged' ||
-      it.kind === 'pr_closed' ||
-      it.kind === 'pr_reopened' ||
-      it.kind === 'pr_ready_for_review' ||
-      it.kind === 'review_submitted'
-    )
+    // The pill and its chip row are counted off ONE partition (see feedPrEventChip): a chip
+    // badge is a subtotal of the pill's badge, never a second population.
+    const prEventChip = feedPrEventChip(it.kind);
+    if (prEventChip != null) {
       counts.prEvents += 1;
+      byEventType[prEventChip] = (byEventType[prEventChip] ?? 0) + 1;
+    }
     // Mirrors FeedView's matchesNeedsReview — but counts DISTINCT PRs, not events: a PR opened
     // as a draft and later marked ready has BOTH kinds in the window, and "Needs review 2" for
     // one PR reads as two PRs. (FeedView's page-derived fallback dedupes the same way.)

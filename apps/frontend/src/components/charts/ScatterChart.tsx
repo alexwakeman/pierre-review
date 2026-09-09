@@ -120,7 +120,7 @@ export function ScatterChart({
                   stroke="currentColor"
                   strokeWidth={1}
                 />
-                <text x={PAD_L - 4} y={Y(v) + 3} textAnchor="end" className="fill-gray-400 text-[8px]">
+                <text x={PAD_L - 4} y={Y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[8px]">
                   {formatY(v)}
                 </text>
               </g>
@@ -131,7 +131,7 @@ export function ScatterChart({
                 x={X(v)}
                 y={height - 8}
                 textAnchor="middle"
-                className="fill-gray-400 text-[8px]"
+                className="fill-gray-500 dark:fill-gray-400 text-[8px]"
               >
                 {formatX(v)}
               </text>
@@ -166,7 +166,7 @@ export function ScatterChart({
                 ≈ {yLabel} ∝ {xLabel}^{fitLine.slope.toFixed(1)}
               </text>
             )}
-            <text x={PAD_L} y={height - 1} className="fill-gray-400 text-[8px]">
+            <text x={PAD_L} y={height - 1} className="fill-gray-500 dark:fill-gray-400 text-[8px]">
               {xLabel} →
             </text>
             <rect

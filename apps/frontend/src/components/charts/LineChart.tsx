@@ -229,7 +229,7 @@ export function LineChart({
                   x={PAD_L - 4}
                   y={y(v) + 3}
                   textAnchor="end"
-                  className="fill-gray-400 text-[8px]"
+                  className="fill-gray-500 dark:fill-gray-400 text-[8px]"
                 >
                   {formatY(v)}
                 </text>
@@ -283,14 +283,14 @@ export function LineChart({
             {/* dashed trend line(s) painted last so they sit above every data line + dot */}
             {series.filter((s) => s.dashed).map(renderPath)}
             {/* x ticks: first + last */}
-            <text x={PAD_L} y={height - 4} className="fill-gray-400 text-[8px]">
+            <text x={PAD_L} y={height - 4} className="fill-gray-500 dark:fill-gray-400 text-[8px]">
               {labels[0] ? fmtDate(labels[0]) : ''}
             </text>
             <text
               x={w - PAD_R}
               y={height - 4}
               textAnchor="end"
-              className="fill-gray-400 text-[8px]"
+              className="fill-gray-500 dark:fill-gray-400 text-[8px]"
             >
               {labels[n - 1] ? fmtDate(labels[n - 1]!) : ''}
             </text>

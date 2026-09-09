@@ -498,6 +498,31 @@ Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claud
   tab-label badge fires when a bot is slower-than-typical; `ChecksTab` gains an Overview "N bots
   slower than typical — view" caution that opens this tab. **Landmine:** `usePrBotBehaviour` is
   called at the top of PrDetail (before the loading/error early returns) — hooks-order rule.
+  - ⚠ **THE TOUCH ROW IS FOLDED, one chip per RUN of ADJACENT touches sharing a rendered time**
+    (`groupTouches`), showing that run's count (`×14`) beside a review and/or comment icon. The
+    wire is one touch per DB ROW and `relativeTime` rounds past a day to whole days, so the
+    unfolded row printed "9 days ago" fourteen times on a real PR — a resolution coarser than the
+    differences it existed to show. Adjacency is load-bearing: a global bucket would stop the row
+    being a timeline. The chip counts SUM to the `Touches` stat, and the overflow line is spelled
+    in TOUCHES so it shares that denominator. ⚠ **The icons say PRESENCE, so the run's
+    review/comment SPLIT is spelled in the hover title** ("2 reviews, 12 comments · 04/09/2026,
+    09:12 – 04/09/2026, 09:26" — both ends in full, through `dateTime()`; a one-touch group prints
+    the instant alone) — without it a run of 1 review + 13 comments and one of
+    13 reviews + 1 comment paint identically, which is exactly the decomposition the tab's intro
+    line teaches the reader to make. "A touch is one review or one comment" is said ONCE, in that
+    intro line, never per chip.
+  - ⚠ **The GROUP cap (`TOUCH_GROUP_CAP` = 40) is a safety rail, not a display budget** — measured
+    over all 4,525 (PR × bot) cards in the dev DB, the busiest (240 deepsource-io touches on
+    erxes/erxes#9178) folds to FOUR chips, the most any card produces is 21, and not one reaches
+    40, so the overflow line never appears. Cite that figure, not a second measurement: the code
+    comment above the constant carries the same one.
+  - ⚠ **ONE NUMBER, ONE PLACE.** The `<Stat>` owns the absolute TTFR; the vs-typical note owns the
+    BASELINE ("slower than typical — usually 19m"), never the absolute again. The anomaly badge
+    prints the delta over typical ONLY when `dur(delta) !== dur(ttfr)` — a comparison of the
+    RENDERED strings, because every review bot on this account has a typical TTFR under 25 minutes
+    while sigma is floored at 0.5h, so a day-scale anomaly renders the delta and the absolute as
+    the SAME string. When they match the badge reads "slower than usual" with no number and the
+    Stat carries the magnitude; when they differ the number stays.
 
 **There is no PR-wide "Check review" bar any more.** `ReviewCheckBar` (which sat above the tab
 content, spanning threads + PR comments) is DELETED: a whole-PR sweep on a bot-flooded PR is many
@@ -1471,40 +1496,104 @@ convention this file has to remember.
 ### Reports → Overview → Flow metrics → "Where the work is happening"
 
 `WorkspaceFlowMetrics` renders `WorkspaceMetricsPanel` (tiles + the 12-week trend band) and, under
-it, `WorkspaceRepoActivityCharts` — a per-repository pair answering the question the workspace-wide
-tiles cannot: *which* repository. Both halves ride the ONE `/api/workspace-metrics` response, so
-they can never be a refresh apart.
+it, `WorkspaceRepoActivityCharts` — which owns a section holding TWO CARDS side by side, both
+answering the question the workspace-wide tiles cannot: *which* repository.
 
-- ⚠ **IT MOUNTS IN `WorkspaceFlowMetrics`, NEVER INSIDE `WorkspaceMetricsPanel`.** That panel has
+| Card | Population | Source |
+|---|---|---|
+| **Activity by repository** | PRs opened in a rolling 14 days, and their lines changed | `repoActivity` on the ONE `/api/workspace-metrics` response — it can never be a refresh apart from the tiles above |
+| **Reach by repository** | every pull request OPEN RIGHT NOW, at Low/Medium/High blast radius | `WorkspaceReachCard` + `useWorkspaceReach`, a CLIENT fold over `useWorkspaceOpenPrs` |
+
+Both are horizontal ROW LISTS drawn by `components/charts/RepoRows.tsx` (a `<table>`, not SVG):
+repository name written out in full on the left, a stacked bar per measure, every figure printed.
+
+- ⚠ **THEY MOUNT IN `WorkspaceFlowMetrics`, NEVER INSIDE `WorkspaceMetricsPanel`.** That panel has
   TWO mounts — this one, and `RepoInsightsPanel` for a SINGLE repo behind the Pro
-  `workspaceInsights` gate. A per-repository comparison there degenerates to one bar, and would
+  `workspaceInsights` gate. A per-repository comparison there degenerates to one row, and would
   appear only for paying accounts, on the one screen where it answers nothing.
-- ⚠ **TWO CHARTS, NEVER ONE BLENDED SCORE.** "PRs opened" (stacked people vs automation) and "Lines
-  changed" (raw `additions + deletions`), same repo order in both. A normalised activity index is
-  the shape CLAUDE.md rejects in five places — "a number no PR resembles" — and reconciles with
-  nothing on the panel above it. A GROUPED two-series chart is separately broken: `BarChart`'s
-  `niceMax` gives every series ONE y-axis, so a PR count (≈5) beside a line count (≈5000) draws the
-  count sub-pixel. Two measures of different scale are two charts.
-- ⚠ **A THIRD WINDOW ON ONE PANEL.** The tiles compare a rolling 14 days against the prior 14; the
-  trend band is a fixed 12 weeks; this is 14 days with NO comparison. The section note says so in
-  words — "14 days" alone still lets a reader assume the tiles' comparison. It cannot follow the
-  team's SPRINT CADENCE: that setting is plugin-owned and this surface is free, so it uses
+- ⚠ **TWO COLUMNS, TWO SCALES, TWO ORIGINS — NEVER ONE BLENDED SCORE.** `RepoRows` computes one
+  maximum PER COLUMN and divides by it, so a drawn bar length is a ratio *inside* one column and
+  never a number the reader compares across the two. That division is NOT the banned normalised
+  index: nothing is z-scored, weighted, or summed across measures, and the printed figure beside
+  every bar is the fact. A normalised activity index is the shape CLAUDE.md rejects in five places
+  — "a number no PR resembles". A GROUPED `BarChart` was never available either: `niceMax` gives
+  every series ONE y-axis, so a PR count (≈5) beside a line count (≈5000) draws the count
+  sub-pixel (MEASURED at 50 vs 50k on real data).
+- ⚠ **THE REPOSITORY NAME IS WRITTEN OUT IN FULL, AND WRAPS.** This replaced a rotated 8px axis
+  label budgeted at 13 characters, which `BarChart`'s FIXED 40px `rotateLabels` band then clipped
+  silently — MEASURED, six of seven real repositories rendered as "…tric-backend", and the clipped
+  glyph was the leading "…" that said so. `axisLabels()`, `MAX_LABEL_CHARS` and the "In order:"
+  recovery line are all DELETED with it. ⚠ **A `title=` TOOLTIP IS NOT THE ALTERNATIVE** —
+  unavailable on touch and to a keyboard, and the deleted recovery line existed precisely because
+  a reader who cannot recover the name from either place is looking at an unlabelled bar.
+- ⚠ **THE KEY IS DRAWN DELIBERATELY.** `BarChart` used to render a `Legend` for free on a
+  multi-series chart, and that legend is the relief the automation orange's sub-3:1 surface
+  contrast obliges (2.80:1 on the light ground; the lines teal is 2.49:1). `RepoRows` renders the
+  same shared `Legend` from every column's segments, so dropping it is a colour regression, not a
+  tidy-up.
+- ⚠ **FOUR FRAMINGS ON ONE PANEL, SO EACH SAYS ITS OWN.** The tiles compare a rolling 14 days
+  against the prior 14; the trend band is a fixed 12 weeks; the activity card is 14 days with NO
+  comparison; the reach card is a SNAPSHOT with no window at all. The activity card cannot follow
+  the team's SPRINT CADENCE: that setting is plugin-owned and this surface is free, so it uses
   `INSIGHT_SPRINT_DAYS`, which is what the tiles beside it already use.
-- ⚠ **THREE DISCLOSURES, EACH STANDING IN FOR A FALSE CLAIM.** The cap ("N more repositories saw
-  …", because the lines chart is ranked by the PR count and the lines leader can be below the
-  fold); the unsized PRs (⚠ **`BarChart` drops every `v <= 0`, so `null` and `0` draw
-  IDENTICALLY** — the count has to be stated in words, never implied by a missing bar); and the
-  repositories added mid-window (MARKED, never pro-rated — scaling one up fabricates PRs nobody
-  opened).
-- ⚠ **THE AXIS LABEL IS BUDGETED AT 13 CHARACTERS, SHORTENED FROM THE HEAD.** `rotateLabels`
-  reserves a FIXED 40px band in `BarChart` and clips past it silently ("DEFRA/bng-metric-backend"
-  rendered as "…etric-backend"); `BarChart` is shared by fifteen call sites so the band is not ours
-  to widen. The TAIL survives because repositories in one workspace share a family prefix and
-  differ at the end (`bng-metric-backend` beside `bng-metric-frontend`). `BarChart` uses one string
-  for the tick AND the tooltip, so whenever anything is shortened the component prints the full
-  names in chart order beneath — otherwise the bar is unlabelled in both places.
-- **Not clickable.** `onSelectBar` is opt-in precisely so a decorative chart adds no unlabelled
-  keyboard stops, and `seriesKey` is meaningless on a two-series band.
+- ⚠ **UNKNOWN IS NEVER ZERO, ON EITHER CARD.** `linesChanged: null` prints the words "size unknown"
+  in that repository's OWN row — a zero-length bar and an absent one are the same pixels — and the
+  unsized PULL REQUEST count is still stated in words below, because the row marks repositories and
+  the sentence counts pull requests. On the reach card a null `blastRadius()` verdict (never
+  measured, or truncated-and-not-high) is NOT DRAWN and is NOT a fourth segment, so the bars do not
+  total the open-PR count the list is ranked by; that difference is disclosed in words and beside
+  the name of any repository it applies to.
+  - ⚠ **"SIZE UNKNOWN" IS THE ALL-UNSIZED CASE ONLY, SO A PARTIALLY-SIZED REPOSITORY MARKS ITSELF
+    TOO.** The fold nulls `linesChanged` when `sizedPrs === 0` and no sooner, so a repository with
+    SOME unsized pull requests draws a full-looking bar over its sized subset, identical to a fully
+    sized neighbour — MEASURED on workspace 1: `DEFRA/bng-metric-backend` opened 45 PRs of which 2
+    were never sized, beside six neighbours with none. `RepoRows`' `noteFor` prints **"lines cover
+    43 of 45 PRs"** under that repository's name. The aggregate sentence stays the COUNT ("2 pull
+    requests have no recorded size"); it never says where they are, which is what the row is for.
+- ⚠ **THE REACH CARD IS FREE, AND ITS LEVEL COMES FROM THE ONE RESOLVER.** No `ProGate`, no
+  capability read, no 402. `useWorkspaceReach` calls `blastRadius()` — the same function the chip
+  calls, on the same rows, with the same config — so a bar and a chip can never disagree, and the
+  Settings sensitivity dial repaints it with no cache invalidation (`['me']` only). ⚠ It reads
+  `useWorkspaceOpenPrs`, NEVER `useSearchOpenPrs`: that one carries the Timeline board's
+  `filters.repoIds`, whose picker is not mounted on Reports.
+- ⚠ **THE REACH CARD INCLUDES DRAFTS AND THE "OPEN PRS" TILE DOES NOT** (`state === 'open' &&
+  !isDraft`), so on a real workspace they read 210 and 204. The draft count is stated in words
+  rather than reconciled by dropping the drafts: a draft touching a migration is reach sitting in
+  the repository. ⚠ **THAT SENTENCE CARRIES ITS OWN DENOMINATOR AND ITS OWN NOUN** — "6 of the 210
+  open pull requests are drafts". It used to read "6 of them", which printed 210 NOWHERE whenever
+  the unread sentence above it was absent (it is, on a fully-read corpus), leaving the one
+  reconciliation this card exists to make missing half its arithmetic; and when that sentence WAS
+  present, "them" read as the unread subset, which drafts is not counted over.
+- ⚠ **EVERY PRINTED TOTAL ON THE REACH CARD IS FOLDED OVER THE SHOWN ROWS** (`useWorkspaceReach`).
+  `repos` is sliced to 12 while `openPrs`/`unread`/`drafts` used to fold over every repository in
+  the workspace, so past the cap the card printed an unread count and a draft count covering
+  repositories whose bars are not on screen, beside bars that are — the headline-vs-subset defect,
+  one surface over. What the cap cut rides `omitted`, is said in its own sentence, and is never
+  subtracted against them. `repoCount` and `workspaceRepos` are deliberately NOT the subset, and
+  each says so where it is printed.
+- ⚠ **EACH CAP DISCLOSES WHAT IT CUT, ON THE DRAWN MEASURE AS WELL AS THE RANKING ONE.** Both lists
+  are ranked by PRs (opened / open now) while the second column draws something else, so the leader
+  on that other measure can sit below the fold: the activity card names both ("N more repositories
+  saw … pull requests and … lines changed"), and the reach card names the repositories, their open
+  pull requests and **how many of those were high reach** ("…, 12 of them high reach, and are not
+  shown"; `none` when the cut held none). Repositories added mid-window are MARKED, never pro-rated
+  — scaling one up fabricates PRs nobody opened.
+- ⚠ **THE REACH CARD ACCOUNTS FOR THE REPOSITORIES HOLDING NOTHING OPEN**, or its repository count
+  silently disagrees with its neighbour's. MEASURED on workspace 1: 8 member repositories, 7 saw a
+  PR opened in the fortnight, 4 hold anything open right now — "Activity by repository · 7
+  repositories" beside "Reach by repository · 4 repositories". So it prints "4 of the 8 repositories
+  in this workspace have nothing open right now", the mirror of the neighbour's own sentence, with
+  the membership count folded from `useRepos()` narrowed by `Repo.workspaceId`.
+- ⚠ **THE NEIGHBOUR IS NAMED, NEVER POSITIONED, AND PROSE COUNTS ARE PRINTED IN FULL.** The grid is
+  two columns only at `lg` and above — below it the cards STACK and "the card beside it" is the card
+  ABOVE — so the reach card says "Activity by repository covers the last 14 days". And every
+  sentence under it is a fraction meant to be checked, so the counts go through `toLocaleString()`,
+  never `fmtNum`: "156 of the 1.6k open pull requests" is not an arithmetic a reader can perform.
+  `fmtNum` stays INSIDE the table, where a cell shares its formatter with the column maximum printed
+  under it.
+- **Not clickable.** No row is a button and no cell carries a handler, so a decorative table adds
+  no unlabelled keyboard stops. The bar itself is `aria-hidden`; a column that prints only a total
+  carries its split in an `sr-only` twin.
 
 ### The Pending board's merge row (`PendingMergeActions`)
 
@@ -1875,7 +1964,7 @@ migration".
 | `lib/ui.ts` event-category colours + `.ev-*` dots, `ML_CATEGORY_COLOR`, `BOT_VENDOR_META` vendor accents, `charts/common.tsx` `PALETTE`/`SERIES_COLORS` | DATA ENCODING — hues must stay identical across every chart |
 | `PeriodReportsPanel`'s `LANE_META` (`ai_review` violet, `release` indigo) | the 7-lane palette needs 7 stable distinct hues; vermilion collides with the red already in charts |
 | `BotRoiPanel`'s inflation under-call violet | direction encoding — the drill-down matrix keys on the same hues |
-| FeedView's "PR events" / "Needs review" indigo pills | feed category-pill palette |
+| FeedView's "PR events" / "Needs review" indigo pills, and the PR-event `Kind` sub-chips under the first | feed category-pill palette |
 | `ChecksTab` / `AttentionCards` "Assign" buttons | suggested reviewers are deterministic CORE (CODEOWNERS + inference) — no model, so not an AI marker |
 | `MetricsDetail` / `PinnedTabsBar`'s `violet` tone (Flow metrics) | core deterministic drill-down; a generic active accent |
 | `index.css` `.tl-repo-tint-1`, the cross-person chips | timeline layout encoding |
@@ -1899,6 +1988,67 @@ per-PR query (`['ml-labels', prId]`, `staleTime: Infinity`) — the badge never 
 target with no label renders nothing. Gated on `MeResponse.mlSeverity` (a TOP-LEVEL field, not a
 `pro` capability). `threadSeverityFilter` is a global store field and carries the same
 `selectedPrId === prId` guard as `threadStateFilter`. Detail: [ML-SEVERITY.md](ML-SEVERITY.md).
+
+## The Feed's "PR events" pill has a dependent chip row
+
+Pressing **PR events** opens a second row under it — `Kind`, then `Opened` / `Reviewed` /
+`Merged` / `Closed` — narrowing the bucket the pill isolates. With the pill off the row is not
+rendered. (`FeedView.tsx`, `FEED_PR_EVENT_CHIPS` + `feedPrEventChip` in `lib/ui.ts`, store field
+`feedPrEventKinds`.)
+
+- **THE FOUR CHIPS ARE A PARTITION of the pill's six event kinds** — `opened` covers `pr_opened`
+  + `pr_ready_for_review` + `pr_reopened`, the other three are one kind each. That equality is
+  what everything else rests on, so `test/feedPrEventChips.test.ts` pins it against the shared
+  `EVENT_TYPES` enum: a SEVENTH literal added later would fall through to `null` and silently
+  make the parent pill narrower than it was, with no error and no visible symptom.
+  ⚠ `pr_ready_for_review` (23) and `pr_reopened` (6) get no chip of their own — together 1.7% of
+  the human bucket over 14 days, so either would read 0 most days, advertising a filter that can
+  only return nothing. All three answer "this PR is (again) asking for review", the reading
+  `matchesNeedsReview` already takes. **The CARD RENDERER still labels them apart** ("PR
+  reopened"): the chip groups, it does not relabel.
+- **EMPTY MEANS ALL FOUR**, and that is the default — a fresh feed is byte-identical to the
+  behaviour before the row existed. It also makes an all-off selection unreachable by clicking:
+  turning the last pressed chip off lands back on empty. And it keeps the default stable if a
+  fifth chip is ever added.
+- ⚠ **THE SELECTION IS REMEMBERED WHEN THE PARENT GOES OFF, never cleared.** The row stops
+  rendering and `catMatch` reads a hoisted empty array instead of the field. A corrective `set()`
+  here is the derived-sub-tab defect one surface over — it permanently forgets a choice the
+  reader made (`BotPrsDetail`'s `activePills` is the same shape).
+- **CLIENT-SIDE, like its parent, and that is a constraint rather than an accident.** It narrows
+  through `catMatch` inside `applyFeedPills` — no `types` query param, no re-keyed request.
+  A server-side narrowing would break three things at once: `computeFeedCounts` runs over the
+  already-narrowed stream, so every other pill's badge would read 0 while the pill stayed
+  rendered; the CI lens' `'only'` state and `feedClaudeOnly` are CLIENT filters over rows the
+  server would no longer send (defeating the deliberate category-pill skip that exists to stop
+  those combinations yielding a provably empty feed); and the feed is an infinite query keyed on
+  `feedSearch`, so every chip click would discard pages the reader had already paged in.
+- **The badges are the server's `counts.byEventType` facet** — the whole loadable stream, keyed by
+  chip, independent of which chips are pressed, with the loaded-page fallback every other badge
+  here carries for a stale IndexedDB response. The subtotals sum to the parent's `prEvents` badge,
+  which stays the WHOLE bucket: the pill is the way back out of a narrowing, so its count must not
+  shrink as chips are pressed. A 0-count chip stays pressable, like every sibling pill in these
+  rows.
+- **The empty-state ladder names the pressed chips** ("No Opened or Merged PR events in this
+  window."), in the row's display order rather than click order. That is the third channel making
+  the row legible beside the pressed state and the count line — never ship an include-only toggle
+  whose only feedback is a count. ⚠ It is withheld under all FOUR narrowings `applyFeedPills`
+  runs BEFORE `catMatch`: the CI lens' `'only'` (which skips `catMatch` outright), `feedClaudeOnly`
+  (whose rows are in no category, so the parent pill alone already empties the list),
+  `feedMyTurnOnly`, and the BOT LENS' `'only'`. Naming chips under any of them blames the wrong
+  control — and the chip badges beside the sentence would contradict it outright, since
+  `byEventType` is computed server-side over the whole stream and is blind to every client-side
+  pill ("Only mine" + "Merged" said "No merged PR events in this window" under a Merged chip
+  badging 533). ⚠ **The bot lens is TWO mechanisms and only `hide` is safe**: `hide` sets
+  `excludeBots`, so the facet is computed over the same excluded stream and agrees by
+  construction, but `'only'` sends `excludeBots: false` and narrows on the CLIENT, so the facet
+  still counts the human rows the list is hiding — 36 merged events on workspace 3 of which 0 are
+  a bot's. Gate on the lens value, never on "the bot lens is server-side". With the chips
+  withheld, "Only mine" claims the empty state itself ("Nothing needs
+  your attention right now.") ahead of the bot-lens branches, whose default `hide` would otherwise
+  claim "only bot activity here" about a stream the server already stripped bots from.
+- The three group labels in this block (`Vendor`, `State`, `PR`) were 10px uppercase-with-tracking
+  and are now **11px, muted pairing** (`text-gray-500 dark:text-gray-400`), matching the new
+  `Kind` label rather than leaving one row correct and its neighbours not.
 
 ## The Activity Feed auto-inserts, and marks what's new (`feedNewCohorts`)
 

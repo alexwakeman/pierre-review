@@ -41,6 +41,7 @@ import type {
   CiStatus,
   DerivedState,
   EventType,
+  FeedPrEventChip,
   MergeBlocker,
   MergeBlockFacts,
   Mergeable,
@@ -217,6 +218,58 @@ export const EVENT_META: Record<
   pr_comment: { label: 'PR comment', color: '#a78bfa', shape: 'square' },
   commit_pushed: { label: 'Commit', color: '#6b7280', shape: 'diamond' },
 };
+
+// ── The Feed's "PR events" bucket, and the four chips that partition it ──────────────────────
+//
+// ONE resolver, like `blastRadius` / `mergeVerdict` below: the Feed's `catMatch`, its pill badge
+// fallback, its dependent chip row and the empty-state sentence all ask this the same question,
+// so the count, the filter and the affordance can never cover different sets. `null` means the
+// kind is outside the bucket — a comment, a commit, or one of the synthesized Claude / CI kinds,
+// which belong to no category pill by deliberate design (see FeedView's catMatch).
+//
+// The four chips are a PARTITION — every bucket kind has exactly one — which is what lets an
+// EMPTY selection mean "all four" rather than "none". Why `pr_reopened` and `pr_ready_for_review`
+// get no chip of their own is written where the type is, in packages/shared/src/types.ts.
+// ⚠ Twin of `feedPrEventChip` in apps/backend/src/db/queries.ts, which builds the
+// `counts.byEventType` facet these chips read; `shared` is types-only for the backend, so the
+// partition is spelled once per side and a change here is a change there.
+export function feedPrEventChip(kind: string): FeedPrEventChip | null {
+  switch (kind) {
+    case 'pr_opened':
+    case 'pr_ready_for_review':
+    case 'pr_reopened':
+      return 'opened';
+    case 'review_submitted':
+      return 'reviewed';
+    case 'pr_merged':
+      return 'merged';
+    case 'pr_closed':
+      return 'closed';
+    default:
+      return null;
+  }
+}
+
+/** The chip row's display order + copy. Also the canonical order the empty-state sentence and
+ *  the store's selection are read in, so a click order never reorders what the reader sees. */
+export const FEED_PR_EVENT_CHIPS: { id: FeedPrEventChip; label: string; title: string }[] = [
+  {
+    id: 'opened',
+    label: 'Opened',
+    // Named in full because the card renderer still labels these three apart.
+    title: 'PRs opened, marked ready for review, or reopened',
+  },
+  { id: 'reviewed', label: 'Reviewed', title: 'Reviews submitted — approvals, comments, changes requested' },
+  {
+    id: 'merged',
+    label: 'Merged',
+    // A comment posted alongside a merge is FOLDED INTO the merge card, which takes the host's
+    // kind — so it follows this chip, not Comments. True of the parent pill already; the chips
+    // make it visible enough to be worth saying.
+    title: 'PRs merged, including any comments folded into them',
+  },
+  { id: 'closed', label: 'Closed', title: 'PRs closed without merging, including any comments folded into them' },
+];
 
 // Reason tags: short label + colour + whether it's a "you" reason (gets the
 // pulsing ring + my-turn grouping).
