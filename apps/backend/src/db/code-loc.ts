@@ -10,9 +10,9 @@ import type { StoredPrFile } from '@pierre-review/shared';
 // dropping everything `isNonCodeFile` classifies as prose, structured config,
 // generated/vendored output or binary payload.
 //
-// ---- RELATIONSHIP TO THE TWO CLASSIFIERS THAT ALREADY EXIST -----------------
+// ---- RELATIONSHIP TO THE THREE OTHER CLASSIFIERS ----------------------------
 //
-// There are now THREE path classifiers in this repo and they answer three
+// There are now FOUR path classifiers in this repo and they answer four
 // different questions. They are NOT meant to agree, and none may be folded into
 // another:
 //
@@ -35,6 +35,15 @@ import type { StoredPrFile } from '@pierre-review/shared';
 //      structured config. Case-INSENSITIVE (a `Readme.MD` is still prose), and
 //      the only one whose answer is a number a user compares against a threshold
 //      they configured.
+//
+//   4. `BLAST_SURFACES` + `isTestFile` — apps/backend/src/db/blast-radius.ts
+//      "Do this file's CONSUMERS LIVE OUTSIDE THE DIFF?" The only one asking
+//      about REACH rather than volume or presentation, which is why it is a list
+//      of contract shapes (migrations, IDL, `.d.ts`, OpenAPI, IaC) rather than a
+//      list of things to ignore. It sits ON TOP of this file rather than beside
+//      it: `isNonCodeFile` is reused verbatim to split code from prose/config,
+//      and blast-radius.ts adds only the two judgements this file has no opinion
+//      about — is it a test, and is it a contract.
 //
 // ---- THE THREE DATA TRAPS (all measured on the real corpus) -----------------
 //

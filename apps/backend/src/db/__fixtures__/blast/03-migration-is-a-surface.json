@@ -1,0 +1,30 @@
+{
+  "name": "four-line change inside a migrations directory",
+  "why": "THE case the feature exists for: tiny by every size measure, and the one change nobody rolls back casually. If `db_migration` stops matching, this reads as LOW. Also pins that a `.sql` file counts as CODE \u2014 code-loc deliberately keeps .sql out of CONFIG_EXTENSIONS.",
+  "pr": {
+    "additions": 4,
+    "deletions": 0,
+    "changedFiles": 2,
+    "files": [
+      {
+        "path": "apps/backend/src/db/migrations/0062_add_column.sql",
+        "additions": 1,
+        "deletions": 0
+      },
+      {
+        "path": "apps/backend/src/db/schema.sqlite.ts",
+        "additions": 3,
+        "deletions": 0
+      }
+    ]
+  },
+  "expected": {
+    "codeFiles": 2,
+    "testFiles": 0,
+    "surfaces": [
+      "db_migration",
+      "sql"
+    ],
+    "truncated": false
+  }
+}

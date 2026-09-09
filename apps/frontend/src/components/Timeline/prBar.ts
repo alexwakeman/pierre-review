@@ -2,6 +2,8 @@ import type { DerivedState, TimelinePr } from '@pierre-review/shared';
 import {
   CI_META,
   DERIVED_STATE_META,
+  blastRadius,
+  currentBlastConfig,
   currentLargePrThreshold,
   escapeHtml,
   largePrFlag,
@@ -30,6 +32,19 @@ const STATE_LABEL: Record<TimelinePr['state'], string> = {
 // It is a DIRECT child of `.pr-tt-row` (like `.pr-tt-dot`), so the row's `align-items: center`
 // centres it. The old `.pr-tt-warn-icon` wrapper only set `font-weight`, which means nothing to
 // an SVG, so it is gone — the rule left behind in index.css is now unused.
+// The blast-radius mark, inline. The React twin is `BlastRadiusIcon` in components/Icons.tsx and
+// the two must stay the same shape — a centre dot plus one MORE concentric ring per level. This
+// file cannot import the component (it builds raw HTML strings for vis-timeline), which is the
+// same reason WARNING_SVG below exists as a string. ⚠ If the icon changes there, change it here:
+// a timeline whose mark differs from the boards' is a reader noticing an inconsistency, not a bug
+// anything will report.
+const blastSvg = (rings: number): string =>
+  `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+  `<circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/>` +
+  (rings >= 2 ? `<circle cx="12" cy="12" r="6.4" opacity="0.75"/>` : '') +
+  (rings >= 3 ? `<circle cx="12" cy="12" r="10.1" opacity="0.5"/>` : '') +
+  `</svg>`;
+
 const WARNING_SVG =
   `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
   `<path d="M10.7 3.9 2.4 18.6a1.5 1.5 0 0 0 1.3 2.2h16.6a1.5 1.5 0 0 0 1.3-2.2L13.3 3.9a1.5 1.5 0 0 0-2.6 0z"/>` +
@@ -149,6 +164,24 @@ export function prTooltip(pr: TimelinePr, meta: PrBarMeta = {}): string {
   if (large) {
     rows.push(
       `<div class="pr-tt-row pr-tt-warn">${WARNING_SVG}<span>${escapeHtml(large.label)}</span></div>`,
+    );
+  }
+
+  // BLAST RADIUS — the same `blastRadius` resolver every React surface calls, reading the same
+  // module cell for the same reason as the threshold above. A tooltip is the one place the FULL
+  // label belongs (it has the room), so this prints the level and every reason rather than the
+  // board's one-line summary.
+  //
+  // ⚠ `low` gets a row here too. Unlike the large-PR flag, which says nothing below its
+  // threshold, "you can eyeball this one" is the sentence this feature exists to say — and the
+  // resolver refuses to say it on a truncated or unmeasured pull request, so the row cannot
+  // appear where it would be a guess.
+  const blast = blastRadius(pr, currentBlastConfig());
+  if (blast) {
+    const cls = blast.level === 'high' ? 'pr-tt-warn' : 'pr-tt-quiet';
+    const rings = blast.level === 'low' ? 1 : blast.level === 'medium' ? 2 : 3;
+    rows.push(
+      `<div class="pr-tt-row ${cls}">${blastSvg(rings)}<span>${escapeHtml(`Blast radius ${blast.short.toLowerCase()} — ${blast.label}`)}</span></div>`,
     );
   }
 

@@ -65,6 +65,7 @@ import { StateBadge } from '../StateBadge.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { FeedOpenPrsPanel } from './FeedOpenPrsPanel.js';
 import { LargePrFlag } from './LargePrFlag.js';
+import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { UserName } from '../UserName.js';
 
 // The two SYNTHESIZED CI kinds (`db/queries.ts` isCiFeedKind's client twin). One predicate so
@@ -2285,6 +2286,10 @@ function FeedRowImpl({
               Icon-only here: this line already truncates the title, so the count rides the
               accessible label and the hover title instead of taking horizontal space. */}
           <LargePrFlag pr={item} iconOnly className="self-center" />
+          {/* Blast radius, on the same terms and for the same reason — a fact about the pull
+              request, beside its number, icon-only because this line already truncates. The level
+              and every reason ride the accessible label and the hover title. */}
+          <BlastRadiusChip pr={item} iconOnly className="self-center" />
           {item.path != null && (
             <span className="shrink-0 text-gray-400">· {item.path.split('/').pop()}</span>
           )}

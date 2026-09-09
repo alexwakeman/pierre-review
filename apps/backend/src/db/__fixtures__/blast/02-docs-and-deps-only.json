@@ -1,0 +1,24 @@
+{
+  "name": "dependency bump with a changelog entry — no code at all",
+  "why": "94 real open PRs have zero code files. `deps` MUST appear as a surface (so the chip can say what it is) and MUST NOT be a high arm — a dependency bump is the archetypal low-blast change.",
+  "pr": {
+    "additions": 2140,
+    "deletions": 1980,
+    "changedFiles": 3,
+    "files": [
+      { "path": "package.json", "additions": 2, "deletions": 2 },
+      { "path": "pnpm-lock.yaml", "additions": 2130, "deletions": 1975 },
+      { "path": "CHANGELOG.md", "additions": 8, "deletions": 3 }
+    ]
+  },
+  "expected": {
+    "codeFiles": 0,
+    "testFiles": 0,
+    "nonCodeFiles": 3,
+    "dirs": 0,
+    "subsystems": 0,
+    "surfaces": ["deps"],
+    "allNew": false,
+    "truncated": false
+  }
+}

@@ -23,6 +23,7 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import type {
+  BlastRadiusConfig,
   BranchCheckRun,
   CheckRun,
   Label,
@@ -87,6 +88,17 @@ export const accounts = sqliteTable('accounts', {
   // a positive integer the user typed (the route rejects anything else), so a reader that sees
   // null knows the user never expressed an opinion, rather than guessing at a sentinel.
   largePrCodeLocThreshold: integer('large_pr_code_loc_threshold'),
+  // BLAST RADIUS reading settings: `{sensitivity, surfacesOff[], overrides?}` — the dial, the
+  // per-account surface opt-out, and (stored, honoured, no UI in v1) numeric overrides. Same
+  // ACCOUNT grain and same two-state rule as the threshold above: NULL means the user has never
+  // expressed an opinion, and the SPA applies the product defaults. JSON rather than six columns
+  // because the shape is a settings blob with one writer (PUT /api/me/blast-radius-config, which
+  // validates it) and nothing joins or filters on any field inside it.
+  //
+  // ⚠ THE DEFAULTS ARE NOT MIRRORED HERE. `packages/shared`'s BLAST_THRESHOLDS is an 18-number
+  // table across three dial positions and `shared` is types-only on this side (PACKAGING), so
+  // the SPA resolves — `/api/me` echoes this column RAW, nulls and all.
+  blastRadiusConfig: text('blast_radius_config', { mode: 'json' }).$type<BlastRadiusConfig>(),
 });
 
 export const repos = sqliteTable(
@@ -496,6 +508,51 @@ export const commits = sqliteTable(
 
 // SHA -> string[] of changed paths. Cached forever (SHAs are immutable). Stays
 // GLOBAL — content-addressed, identical across tenants.
+// ---- BLAST RADIUS: the per-repo CO-CHANGE index (P2) ----
+//
+// "Which files in this repository does everything else change with?" — the cross-file dependency
+// reading the blast-radius fold uses, derived ENTIRELY from data already stored (`pull_requests.
+// files` on MERGED pull requests). A real import graph would need file CONTENTS, i.e. a GitHub
+// fetch per file, and no board is allowed to do that.
+//
+// One row per (account, repo). ⚠ Denormalized `accountId` even though it is reachable via
+// repoId, like every other anchor table — and it MUST therefore be in `accountScopedTables()`.
+// The row is derived, so erasing it loses nothing but a rebuild.
+//
+// ⚠ IT STORES ONLY THE HUBS, not every path. A path missing from `hubs` is below the bar by
+// construction, so the map stays small (measured: 84 paths across 7 real repositories) and no
+// consumer has to hold a 50,000-entry object to ask one question.
+export const repoFileCoupling = sqliteTable(
+  'repo_file_coupling',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id),
+    // The degree a path had to reach to be stored: max(this repo's p90, HUB_MIN_DEGREE).
+    // ⚠ BOTH HALVES ARE LOAD-BEARING. A p90 alone is exceeded by a tenth of paths BY
+    // CONSTRUCTION, so a repository with no coupling at all still manufactures "hubs" — measured,
+    // a config repo published 77 of them, eight per-environment copies of one service's .env. The
+    // absolute floor took that repo to zero while leaving `redis.go` and `bevy_render/src/lib.rs`
+    // standing. Stored per row because it is what the number on screen is compared against.
+    hubBar: integer('hub_bar').notNull(),
+    // Merged pull requests that CONTRIBUTED (after the per-PR file cap). Below the coverage
+    // floor no row is written at all — the index stays silent rather than guessing.
+    prCount: integer('pr_count').notNull(),
+    // path -> co-change degree, for paths at or above `hubBar` only.
+    hubs: text('hubs', { mode: 'json' }).$type<Record<string, number>>().notNull(),
+    builtAt: integer('built_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountRepoUx: uniqueIndex('rfc_account_repo').on(t.accountId, t.repoId),
+  }),
+);
+
 export const commitFiles = sqliteTable('commit_files', {
   sha: text('sha').primaryKey(),
   paths: text('paths', { mode: 'json' }).$type<string[]>().notNull(),

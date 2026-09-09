@@ -385,6 +385,31 @@ export function PartialCircleIcon({ size = 11, ...rest }: IconProps): JSX.Elemen
   );
 }
 
+// BLAST RADIUS — a centre with concentric rings around it, one MORE ring per level (a dot, a
+// dot in a ring, a dot in two rings). Literally a radius, which
+// is why it is a purpose-built mark rather than a reuse: every candidate already in this file
+// carries a meaning that would collide. `RingIcon`/`PartialCircleIcon`/`DotIcon` would read as a
+// fill ramp (and `PartialCircleIcon` already means "partial coverage" on the period reports), and
+// `WarningIcon` is the large-PR flag's mark sitting inches away on the same row — two amber
+// warnings saying different things is how a reader learns to ignore both.
+//
+// ⚠ THE RINGS ARE THE MAGNITUDE, so the three levels must stay visually ORDERED (1 → 2 → 3). The
+// COLOUR carries the same information a second time on purpose: colour alone fails for a reader
+// who cannot distinguish it, and shape alone is easy to miss at 11px.
+export function BlastRadiusIcon({
+  rings = 1,
+  size = 12,
+  ...rest
+}: IconProps & { rings?: 1 | 2 | 3 }): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none" />
+      {rings >= 2 && <circle cx="12" cy="12" r="6.4" opacity="0.75" />}
+      {rings >= 3 && <circle cx="12" cy="12" r="10.1" opacity="0.5" />}
+    </IconShell>
+  );
+}
+
 // A small hollow triangle — THIN SAMPLE. "The figure is real but rests on few items."
 export function ThinSampleIcon({ size = 10, ...rest }: IconProps): JSX.Element {
   return (

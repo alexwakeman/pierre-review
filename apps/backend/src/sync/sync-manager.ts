@@ -411,6 +411,27 @@ export async function runSyncForRepo(
           shouldCancel: common.shouldCancel,
         });
       }
+
+      // The BLAST-RADIUS co-change index for this repo. Purely LOCAL — one indexed read of the
+      // repo's merged pull requests, an in-memory fold and one upsert; it makes NO GitHub call
+      // and spends no rate-limit budget, so unlike the backfill above it needs no gate and no
+      // cancellation check beyond finishing quickly.
+      //
+      // Rebuilt after every walk rather than once: the index is a function of the repo's merged
+      // history, which every walk can extend. It is also self-correcting — a repo that has
+      // dropped below the coverage floor has its row DELETED rather than left stale, which is
+      // why this is a rebuild and not an append.
+      //
+      // ⚠ STRICTLY NON-FATAL, like the branch snapshot. This is a nice-to-have arm on one
+      // indicator; it must never be the reason a sync reports failure.
+      try {
+        const { rebuildRepoCoupling } = await import('../db/file-coupling.js');
+        await rebuildRepoCoupling(repo.accountId, repoId);
+      } catch (err) {
+        log.warn(
+          `co-change index ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
+      }
     })
     .catch((err) => {
       log.error(

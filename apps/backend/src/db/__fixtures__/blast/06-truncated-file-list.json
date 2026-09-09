@@ -1,0 +1,7 @@
+{
+  "name": "a file list at GitHub's 100-file page cap",
+  "why": "THE SAFETY RULE. files(first:100) truncates exactly the biggest PRs, so every count here is a FLOOR. `truncated` must be set, and the resolver must refuse to say LOW on it — over-threshold asserts, under-threshold proves nothing.",
+  "generate": { "codeFiles": 100, "eachAdditions": 5, "eachDeletions": 5 },
+  "pr": { "additions": 9000, "deletions": 200, "changedFiles": 412 },
+  "expected": { "codeFiles": 100, "truncated": true }
+}

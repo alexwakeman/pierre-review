@@ -68,6 +68,14 @@ const KIND_META: Record<AnnotationKind, { label: string; title: string }> = {
     label: 'Addressed check',
     title: 'Whether later changes actually dealt with this concern, and what is still open.',
   },
+  // ⚠ PRESENT FOR EXHAUSTIVENESS, NOT BECAUSE THIS FILE RENDERS IT. `impact` hangs off the PULL
+  // REQUEST, and every component here is a COMMENT surface — its chips are drawn by
+  // `BlastImpactNote` beside the blast-radius chip in the PR-detail header instead. The record is
+  // keyed by `AnnotationKind`, so leaving it out is a compile error rather than a missing label.
+  impact: {
+    label: 'Impact',
+    title: 'What this pull request could break, and what to look at first.',
+  },
 };
 
 function verdictChip(a: CommentAnnotation): { label: string; color: string } | null {

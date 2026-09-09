@@ -231,6 +231,15 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('DELETE', '/api/me/account')).toEqual(['read']);
   });
 
+  // PUT /api/me/blast-radius-config — the blast-radius reading settings. Same shape and same
+  // answer as its neighbour above: one validated UPDATE of one column, no GitHub and no model.
+  // Recorded rather than inherited, and pinned here so a future reader can see it was DECIDED.
+  it('keeps the blast-radius settings write on read', () => {
+    expect(tiers('PUT', '/api/me/blast-radius-config')).toEqual(['read']);
+    expect(tiers('PUT', '/api/me/blast-radius-config')).not.toContain('github_write');
+    expect(tiers('PUT', '/api/me/blast-radius-config')).not.toContain('ai');
+  });
+
   // PUT /api/workspaces/:id/pending-mute — the Pending mute. One boolean UPDATE plus a bounded
   // delete/insert over `pending_muted_repos`, all inside the workspace's own membership: no
   // GitHub, no model. It takes `read` through the workspace-CRUD line, which is the DECIDED

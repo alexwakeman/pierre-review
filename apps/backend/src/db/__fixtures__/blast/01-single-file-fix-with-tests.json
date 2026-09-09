@@ -1,0 +1,24 @@
+{
+  "name": "one-file fix that brings its own test",
+  "why": "The archetypal LOW. Tests are counted APART from code, so a fix + its test is still one code file — if isTestFile stops matching, codeFiles becomes 2 and this stops being low.",
+  "pr": {
+    "additions": 41,
+    "deletions": 17,
+    "changedFiles": 2,
+    "files": [
+      { "path": "drizzle-orm/src/pg-core/columns/common.ts", "additions": 30, "deletions": 11 },
+      { "path": "integration-tests/tests/pg/common.test.ts", "additions": 11, "deletions": 6 }
+    ]
+  },
+  "expected": {
+    "codeFiles": 1,
+    "testFiles": 1,
+    "nonCodeFiles": 0,
+    "dirs": 1,
+    "subsystems": 1,
+    "surfaces": [],
+    "allNew": false,
+    "truncated": false,
+    "hubDegree": null
+  }
+}

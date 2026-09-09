@@ -435,6 +435,20 @@
       "when": 1788746400000,
       "tag": "0061_auto_merge_durable_anchors",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1789351200000,
+      "tag": "0062_blast_radius_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1789351200001,
+      "tag": "0063_repo_file_coupling",
+      "breakpoints": true
     }
   ]
 }

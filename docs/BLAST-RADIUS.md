@@ -1,0 +1,231 @@
+# Blast radius — how far a pull request can reach
+
+**Read this before touching `db/blast-radius.ts`, `db/file-coupling.ts`, `lib/ui.ts`'s
+`blastRadius()`, or the `impact` annotation kind.**
+
+A maintainer looking at the Pending board cannot tell, without opening each pull request, which
+ones deserve a real review and which can be pushed through on a glance. The board already carries
+diff size (`+/−`, files changed) and the **large-PR flag** (`codeLoc`), but **size is a weak proxy
+for risk**: a 2,000-line lockfile bump is trivial, and a four-line change to a database migration
+is not.
+
+Blast radius is the second, **orthogonal** reading — *how far can this change reach* — rendered as
+`Low` / `Medium` / `High` beside the size numbers, with the reasons visible so a reader can audit
+and disagree with the verdict.
+
+**The product promise is the LOW chip.** High and medium are useful; the reason the feature exists
+is to let someone merge a third of their queue after a glance instead of a review.
+
+Tiering: the **level is CORE and free** in both deployment modes, with no AI and no GitHub calls.
+Only the **impact note** — two sentences explaining what could break — is Pro, on the existing
+`prSummary` capability.
+
+---
+
+## The three parts
+
+| Part | Where | Tier |
+|---|---|---|
+| The signal vector, folded from stored `files[]` | `db/blast-radius.ts` | CORE, free |
+| The co-change ("hub file") index | `db/file-coupling.ts` + `repo_file_coupling` | CORE, free |
+| The level + the reasons | `lib/ui.ts` → `blastRadius()` | CORE, free |
+| The impact note | `packages/pro/src/annotations/` — kind `impact` | **Pro** (`prSummary`) |
+
+**The wire carries SIGNALS, never a level.** Exactly the rule `codeLoc` follows, for the same three
+payoffs: the sensitivity dial becomes a pure render-time comparison (change it in Settings and
+every surface repaints with **no query-cache invalidation anywhere**), the chip can name its
+reasons rather than assert a bare verdict, and there is **exactly one place** a level is decided.
+
+---
+
+## The definitions
+
+**HIGH — "read it properly."** Any one of:
+
+- **A contract surface is touched** — DB migration or schema, `.sql`, `.d.ts`,
+  `.proto`/`.graphql`/`.thrift`, OpenAPI, IaC, auth/security paths. The shapes whose *consumers
+  live outside the diff*.
+- **Hub** — a touched file whose historical co-change degree clears its repo's bar.
+- **Spread** — ≥3 subsystems, or ≥6 directories, or ≥15 non-test code files.
+- **Volume** — ≥1,000 code lines.
+
+**LOW — "a quick eyeball is enough."** All of: no contract surface, and either **zero non-test code
+files** (docs/config/tests/deps only) or **≤3 non-test code files, ≤100 code lines, one
+subsystem** — and the file list was **not truncated**.
+
+**MEDIUM** — everything else measurable. ⚠ **The medium row names the condition that actually kept
+it out of low** (too many files / too wide / too long / size unknown). An earlier cut folded them
+into one boolean and printed *"1 code file across 1 directory"* beside the word **Medium** — a
+sentence arguing for the opposite verdict, on a real pull request whose discriminator was its 300
+lines.
+
+**UNKNOWN → render nothing.** No stored breakdown, a never-observed size, or truncated-and-not-high.
+
+---
+
+## The rules that have already cost something
+
+### ⚠ Truncation reads asymmetrically — the safety rule of the whole feature
+
+GitHub's `files(first: 100)` truncates, and it truncates **exactly the biggest pull requests** —
+precisely the ones that must never be labelled "just eyeball it". So **HIGH may be asserted on a
+truncated list** (a missing file can only add reach) and **LOW may not**. A truncated pull request
+firing no high arm degrades to **unknown**, not to low.
+
+Enforced **once**, in the resolver, below the high arms and above the low branch — not by
+convention at four call sites. `BlastSignals.truncated` is the same page-cap fact as
+`codeLocIsLowerBound`, one level up.
+
+### ⚠ `hubDegree: null` is "no reading", never 0
+
+Two cases are deliberately fused: the repo has no index (**measured: only 6–7 of 22 real
+repositories clear the coverage floor**), or no touched file is a hub. Nothing in the product ever
+says "this is *not* a hub", so no screen can show the difference. A `hubDegree ?? 0` in the
+resolver would convert every silence into a clean bill of health.
+
+### ⚠ `hub_bar` is `max(repo p90, HUB_MIN_DEGREE)` — relative **and** absolute
+
+This took the longest to get right. **A p90 alone is exceeded by a tenth of paths by
+construction**, so a repository with no coupling whatsoever still publishes "hubs". Measured: a
+config repo produced **77 of them**, which were eight per-environment copies of one service's
+`.env` file. An absolute floor alone fails the other way — degree scales are not comparable
+between a 2,800-path monorepo and a 130-path library.
+
+Together they took that config repo to **zero** while leaving `redis.go` (73),
+`src/renderers/WebGLRenderer.js` (65) and `crates/bevy_render/src/lib.rs` (70) standing.
+
+### ⚠ The index excludes tests, and skips huge pull requests
+
+A test co-changes with its subject *by construction* — that is what a test is, not evidence of
+reach. Measured: one repo's top "hubs" were four `*.test.js` files sitting above their own
+controllers. And a pull request touching more than `HUB_PR_FILE_CAP` (25) files creates a clique in
+one stroke; without the cap **one** such PR can lift a hundred unrelated paths over the bar.
+
+### ⚠ The anti-double-count rule
+
+A 2,000-line PR would otherwise carry an amber *"2,000 code lines"* from `largePrFlag` **and** a
+High chip whose only reason is those same 2,000 lines. `BlastVerdict.volumeOnly` marks that case:
+the flag keeps the number, the chip keeps the level, and the chip leads on the non-obvious reasons
+— surfaces, spread, hubs — which nothing else on the row reports.
+
+⚠ The resolver reads **the same `codeLoc` the flag reads**. It is deliberately *not* duplicated
+into `BlastSignals`: one fact, one grain, or the two chips quote different line counts.
+
+### ⚠ `deps` and `ci` are carried but are not high arms
+
+`deps` is the most common surface on real data (**222 of 1,405 open PRs**) and a dependency bump is
+the archetypal *low*-blast change; it is carried so the chip can say "dependencies" rather than
+stay silent. `ci` does not ship to users, so it is not high — but it can break everyone's build, so
+it is not free either. It lands medium.
+
+### ⚠ The known false positive, shipped visible rather than hidden
+
+`db_schema` matches `schema/` and `models/` trees. In a repo whose **product** is an ORM, its own
+`src/**/schema/**` source tree trips a rule that means "this changes the database" — measured, 55
+hits, almost all one such repo. This is why the chip always **names** the surface, and why
+`surfacesOff` exists in Settings. It is deliberately *not* special-cased in the matcher, which
+would make the behaviour invisible to the reader.
+
+---
+
+## The fourth path classifier
+
+`db/code-loc.ts`'s header documents three. This is the fourth, and none may be folded into another:
+
+1. `NOISE_GLOBS` (`review/prepare.ts`) — "strip this from the diff the paid **agent** reads?"
+2. `isLockFile` (frontend `lib/diff`) — "start this file's diff **collapsed**?"
+3. `isNonCodeFile` (`db/code-loc.ts`) — "does this churn count as **code** a human must read?"
+4. `BLAST_SURFACES` + `isTestFile` (`db/blast-radius.ts`) — "do this file's **consumers live
+   outside the diff**?"
+
+⚠ **It must not import `NOISE_GLOBS` or `API_PATH_PATTERNS`.** Both are tuned for a paid agent's
+diff budget, where over-matching is *safe*. Over-matching here is a false claim on screen, and
+editing either to suit this feature would silently change what Claude Review reviews with no test
+to catch it.
+
+### Why this is not `decideReviewMode`
+
+The Claude Review depth router asks a genuinely similar question and its *shape* is this feature's
+ancestor (file/line/directory/subsystem ceilings, a contract-touch signal, `allFilesNew`). It
+cannot be **called** here:
+
+1. It runs on the **diff body**, fetched through the `gh` CLI — a GitHub call per PR, and
+   **nothing on the Pending board may fetch on mount**.
+2. Claude Review is **local-only** and force-disabled in cloud; blast radius works in both.
+3. Its gate is deliberately over-conservative (*any ambiguity → worktree*) because over-routing
+   there only costs money. Over-routing here marks everything high and the feature stops meaning
+   anything.
+
+---
+
+## The impact note (Pro)
+
+**The code decides the level, free. The model explains the consequence, paid.** The same split the
+work plan and Chronology live by.
+
+- Rides **`prSummary`** — the cheap Haiku tier `review-assess`, `resolution-check` and
+  `annotations` already reuse. **No new capability; `apiVersion` stays 21.**
+- Lands as `kind: 'impact'`, `targetKind: 'pull_request'`, `targetId = prId` on the **existing**
+  `pr_comment_annotations` table — whose unique index is already
+  `(accountId, kind, targetKind, targetId)`, so **no plugin migration**.
+- Inherits the whole cost machinery: the payload-hash cache ($0 on unchanged), the pure cached GET
+  (opening a PR costs nothing), the one billing path, the per-account in-flight slot, the
+  min-interval, `shouldStop` on socket close.
+- **One target per PR**, so it never chunks.
+
+⚠ **It may never LOWER the level.** Its only verdicts are `concern` (raise a separately-labelled
+flag *beside* the chip) and `none`. A model that can say "actually this is fine" is a model that
+can talk a maintainer out of reviewing a migration. Escalation is safe because its only effect is
+making someone look harder. `FALLBACK_VERDICT.impact` is `none` for the same reason — an
+unparseable response must not raise an alarm the model never raised.
+
+⚠ **PR detail only, click-gated.** Never on a Pending card or the timeline: the board may not fetch
+on mount, and a board that *billed* on mount would be worse.
+
+⚠ **`DEFAULT_ANCHOR_KINDS` deliberately excludes `pull_request`.** That is a billing guarantee: the
+combined `'review'` run is what the per-thread "Check review" button sends, and if impact were
+reachable from there, every click on a comment would also bill a whole-PR call.
+
+⚠ **The payload hash folds only stored facts** — head sha, the file list, title, body, and the
+signal vector including the hub fields. Nothing hydrated, nothing `Date.now()`-derived. The free
+cached GET recomputes it on every PR open on a path that hydrates nothing; a hydrated or
+clock-derived input would make GET and run disagree forever — every note permanently `stale`,
+re-billed on every click. That defect has already cost this codebase two bugs.
+
+---
+
+## Calibration (measured, not invented)
+
+Against the dev DB: **1,559 open pull requests across 22 repositories**, 1,405 with a usable
+measurement.
+
+| | |
+|---|---|
+| Measurable | **90.1%** — the other 9.9% render nothing |
+| Distribution (shipped code, defaults) | low **36.8%** · medium **26.7%** · high **26.6%** · silent **10.0%** |
+| `codeLoc` | p50 106 · p75 385 · p90 1,122 · p95 2,046 · max 19,481 |
+| Non-test code files | p50 3 · p75 7 · p90 17 |
+| Directories · subsystems | p50 2 / p75 4 · p50 1 / p75 2 |
+| Surfaces seen | deps 222 · schema 55 · ci 43 · dts 2 · migration 2 · sql 2 |
+| Repos clearing the hub coverage floor | **6 of 23** |
+| PRs whose level the hub arm changes | **3.5%** |
+
+**Re-run it after any change to an arm.** The script is not committed (it reads the dev DB
+directly); rebuild it from `blastSignalsFor` + `codeLocFor` + `blastRadius` and check the
+distribution has not drifted. A large drift means an arm changed meaning.
+
+---
+
+## Verifying
+
+```bash
+pnpm typecheck && pnpm test                                    # includes the fixture suite
+./apps/backend/node_modules/.bin/vitest run --root apps/frontend   # the LEVEL rules — hand-run
+./apps/backend/node_modules/.bin/vitest run --root packages/pro    # hand-run
+pnpm --filter @pierre-review/backend verify:isolation           # both new id-addressed getters
+```
+
+⚠ **`apps/frontend/test/` is neither run in CI nor typechecked** (its tsconfig includes only
+`src`). That bit during this feature's own build: renaming `hubP90` → `hubBar` left a stale key in
+a test factory, which no compiler saw, and the hub arm silently stopped firing in every test using
+it. Run the frontend suite by hand after any wire-field rename.

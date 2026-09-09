@@ -1,0 +1,11 @@
+{
+  "name": "a hand-written script named `build`",
+  "why": "isNonCodeFile's documented trap, re-pinned from this side: `build` as a DIRECTORY is output, `build` as a FILENAME is a shell entrypoint. Testing the basename against the directory list is how a hand-written script gets silently uncounted — and an uncounted file lowers the blast radius.",
+  "pr": {
+    "additions": 40,
+    "deletions": 5,
+    "changedFiles": 1,
+    "files": [{ "path": "scripts/build", "additions": 40, "deletions": 5 }]
+  },
+  "expected": { "codeFiles": 1, "nonCodeFiles": 0, "surfaces": [], "truncated": false }
+}

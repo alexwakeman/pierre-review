@@ -1,6 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { eq } from 'drizzle-orm';
-import type { LocalUser } from '@pierre-review/shared';
+import type {
+  BlastRadiusConfig,
+  BlastSensitivity,
+  BlastSurface,
+  BlastThresholds,
+  LocalUser,
+} from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { getGithubTokenAsync } from '../github/auth.js';
 import { decryptToken } from './crypto.js';
@@ -30,6 +36,11 @@ export interface Account {
   // one (→ the 1,500-line product default; resolve through `resolveLargePrThreshold`). ONE
   // per-account setting — no workspace or repo grain, so nothing here needs a resolver.
   largePrCodeLocThreshold: number | null;
+  // The BLAST-RADIUS reading settings, or null when the user has never set any (→ the product
+  // defaults, applied SPA-side — see the column comment in schema.sqlite.ts for why the defaults
+  // are not mirrored on this side). Same account grain and same two-state rule as the threshold
+  // above.
+  blastRadiusConfig: BlastRadiusConfig | null;
 }
 
 export type AccountPlan = 'free' | 'pro';
@@ -76,6 +87,7 @@ function rowToAccount(row: typeof schema.accounts.$inferSelect): Account {
     aiCreditAllowance: row.aiCreditAllowance ?? null,
     benchmarkOptIn: row.benchmarkOptIn ?? false,
     largePrCodeLocThreshold: row.largePrCodeLocThreshold ?? null,
+    blastRadiusConfig: row.blastRadiusConfig ?? null,
   };
 }
 
@@ -184,6 +196,26 @@ async function resolveLocalAccount(): Promise<Account | null> {
 /** The local account from the module cache (no network / no DB). */
 export function getLocalAccountCached(): Account | null {
   return cachedLocalAccount;
+}
+
+/**
+ * Re-read the LOCAL account's row into the module cache after a column write.
+ *
+ * ⚠ WITHOUT THIS, A PER-ACCOUNT SETTING SILENTLY DOES NOT SAVE IN LOCAL MODE. The cache is
+ * populated once at startup by `ensureLocalAccount` and the per-request hook serves `req.account`
+ * straight out of it, so `/api/me` keeps echoing the value the process booted with. The write
+ * route's own response is correct, so the SPA paints the new setting — and is then told the old
+ * one by the `['me']` refetch its mutation triggers, which reverts the control the user just used.
+ * Measured on the shipping large-PR threshold before this existed: POST 900 → 200 OK with
+ * `{threshold: 900}`, then `/api/me` → `{threshold: 1500, isDefault: true}`.
+ *
+ * A no-op in cloud (there is no cache: `registerAccountContext` reads the row per request) and a
+ * no-op for any account that is not the cached one.
+ */
+export async function refreshLocalAccountCache(accountId: number): Promise<void> {
+  if (cachedLocalAccount == null || cachedLocalAccount.id !== accountId) return;
+  const fresh = await getAccountById(accountId);
+  if (fresh) cachedLocalAccount = fresh;
 }
 
 /**
@@ -337,6 +369,97 @@ export async function setLargePrCodeLocThreshold(
     .set({ largePrCodeLocThreshold: value })
     .where(eq(accounts.id, accountId))
     .execute();
+  // ⚠ REQUIRED, not tidiness — see refreshLocalAccountCache. Without it this setting appears not
+  // to save in local mode: the route 200s with the new number and the SPA's own `['me']` refetch
+  // immediately reports the old one.
+  await refreshLocalAccountCache(accountId);
+}
+
+// The runtime spellings of two `packages/shared` unions. ⚠ MIRRORED ON PURPOSE, and this is the
+// small mirror the design chose over the big one: `shared` is types-only on this side
+// (PACKAGING), so a route that validates a stored enum needs the members as VALUES. Ten strings
+// and three, versus the 18-number BLAST_THRESHOLDS table the SPA resolves instead. If a member is
+// added to either union in shared, add it here — `blast-radius-config.test.ts` pins the count so
+// the omission fails rather than silently rejecting a valid write.
+const BLAST_SURFACE_VALUES: readonly BlastSurface[] = [
+  'db_migration',
+  'db_schema',
+  'sql',
+  'public_types',
+  'idl',
+  'openapi',
+  'infra',
+  'auth',
+  'ci',
+  'deps',
+];
+const BLAST_SENSITIVITY_VALUES: readonly BlastSensitivity[] = ['cautious', 'balanced', 'relaxed'];
+const BLAST_THRESHOLD_KEYS: readonly (keyof BlastThresholds)[] = [
+  'highCodeLoc',
+  'highCodeFiles',
+  'highDirs',
+  'highSubsystems',
+  'lowCodeLoc',
+  'lowCodeFiles',
+];
+
+/**
+ * Validate an untrusted blast-radius config into the shape the column may hold, or `null`.
+ *
+ * ⚠ RETURNS null FOR ANYTHING IT CANNOT FULLY VALIDATE, which is the same "no opinion" state a
+ * cleared setting has — never a partially-applied blob. An unknown surface string is DROPPED
+ * rather than failing the whole write, so an older backend reading a newer client's payload
+ * degrades to ignoring one opt-out instead of discarding the user's dial.
+ */
+export function sanitizeBlastRadiusConfig(input: unknown): BlastRadiusConfig | null {
+  if (input == null || typeof input !== 'object' || Array.isArray(input)) return null;
+  const raw = input as Record<string, unknown>;
+
+  const sensitivity = BLAST_SENSITIVITY_VALUES.find((v) => v === raw.sensitivity);
+  if (sensitivity == null) return null;
+
+  const surfacesOff = Array.isArray(raw.surfacesOff)
+    ? BLAST_SURFACE_VALUES.filter((v) => (raw.surfacesOff as unknown[]).includes(v))
+    : [];
+
+  let overrides: Partial<BlastThresholds> | undefined;
+  if (raw.overrides != null && typeof raw.overrides === 'object' && !Array.isArray(raw.overrides)) {
+    const src = raw.overrides as Record<string, unknown>;
+    const out: Partial<BlastThresholds> = {};
+    for (const k of BLAST_THRESHOLD_KEYS) {
+      const v = src[k];
+      // Same rule as the large-PR threshold: a 0 or a fraction would bucket everything or
+      // nothing, silently. Only a positive integer is an opinion.
+      if (typeof v === 'number' && Number.isInteger(v) && v > 0) out[k] = v;
+    }
+    if (Object.keys(out).length > 0) overrides = out;
+  }
+
+  return overrides ? { sensitivity, surfacesOff, overrides } : { sensitivity, surfacesOff };
+}
+
+/**
+ * Set (or clear) an account's BLAST-RADIUS reading settings.
+ *
+ * `null` — and any payload that fails validation — CLEARS the column, back to the two-state
+ * "no opinion → product defaults". Exactly the rule `setLargePrCodeLocThreshold` follows, and for
+ * the same reason: a stored blob would freeze this account against a later change to those
+ * defaults.
+ */
+export async function setBlastRadiusConfig(
+  accountId: number,
+  config: BlastRadiusConfig | null,
+): Promise<BlastRadiusConfig | null> {
+  const { accounts } = schema;
+  const value = sanitizeBlastRadiusConfig(config);
+  await db
+    .update(accounts)
+    .set({ blastRadiusConfig: value })
+    .where(eq(accounts.id, accountId))
+    .execute();
+  // ⚠ Same rule as the threshold above, and the same failure without it.
+  await refreshLocalAccountCache(accountId);
+  return value;
 }
 
 /** Resolve an account by its Stripe customer id (subscription webhooks). */

@@ -9,10 +9,21 @@
 
 `pnpm test` is SQLite-only. **No automated check ever executes a `migrations-pg/` file**, so a pg
 twin can be malformed, unregistered, or subtly divergent and every suite stays green. The single
-source of confidence is replaying it by hand into a throwaway database. Last done **2026-09-07** on
-**PostgreSQL 16.9**: core 48/48 + all **33** plugin twins, full table parity with SQLite (the only
-absentee being `pro_migrations`, which the plugin's own runner creates rather than a `.sql` file),
-the newest core twins being `0046_merge_queue_state` and `0047_drop_my_turn_dismissals`.
+source of confidence is replaying it by hand into a throwaway database. Last done **2026-09-08** on
+**PostgreSQL 16.9**: core **51/51** through the real runner, the newest twins being
+`0049_blast_radius_config` and `0050_repo_file_coupling`. (The plugin twins were NOT re-run that
+day and did not need to be — blast radius adds no plugin migration, because the `impact`
+annotation fits the existing `pr_comment_annotations` unique index. Their last full replay is the
+2026-09-07 pass below: all **33**, full table parity with SQLite, the only absentee being
+`pro_migrations`, which the plugin's own runner creates rather than a `.sql` file.)
+
+⚠ **`0050_repo_file_coupling` WAS REPLAYED *WITH DATA*, deliberately** — unlike a DDL-only twin
+there is something a schema dump cannot prove. The table's whole write path is an
+`onConflictDoUpdate` on `(account_id, repo_id)`, and CLAUDE.md's standing rule is that a stale
+conflict target **type-checks perfectly and raises only at RUNTIME, in both dialects, when a row is
+actually written**. So the replay ran the exact `ON CONFLICT (account_id, repo_id) DO UPDATE` the
+builder emits, twice: one row survived, carrying the second write's values. `0049`'s `jsonb`
+column was round-tripped in the same pass.
 
 There is a **standing local Postgres** on `:5432` (the `bng-metric-backend-postgres-1` container,
 user/password `dev`/`dev`). Use a SEPARATE database inside it — never the app database that
@@ -231,10 +242,12 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is currently REPLAYED AND GREEN — see § Replaying the pg chain below.** Last
-  re-run **2026-09-07** on the standing local Postgres (16.9): core through `db:migrate`
-  (**48 applied = 48 journal entries**, the newest being `0047_drop_my_turn_dismissals`) plus all
-  **33** plugin pg twins — applied clean, with `pull_requests` at 33 columns in BOTH dialects and
-  `my_turn_dismissals` confirmed ABSENT afterwards.
+  re-run **2026-09-08** on the standing local Postgres (16.9): core through `db:migrate`
+  (**51 applied = 51 journal entries**, the newest being `0050_repo_file_coupling`), with
+  `accounts.blast_radius_config` present as `jsonb` and `repo_file_coupling` carrying both FKs plus
+  its `rfc_account_repo` unique index. Blast radius adds NO plugin migration, so the **33** plugin
+  twins were not re-run; their last full replay is the 2026-09-07 pass, which also confirmed
+  `pull_requests` at 33 columns in BOTH dialects and `my_turn_dismissals` ABSENT.
   ⚠ **`0047_drop_my_turn_dismissals` is DESTRUCTIVE and ONE-WAY** — there is no down migration and no
   archive step. It is safe only because the predicate that made the table necessary now exists
   (docs/BACKEND.md § My Turn — the ball rule); a dismissal row has nothing left to mean.

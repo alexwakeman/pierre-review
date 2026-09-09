@@ -3642,6 +3642,234 @@ export interface AuthProvidersResponse {
  *  value at runtime. Change both together. */
 export const LARGE_PR_CODE_LOC_DEFAULT = 1500;
 
+// ---- BLAST RADIUS (CORE, free, no AI) ----------------------------------------------------
+//
+// "How far can this change reach?" — the second, ORTHOGONAL reading beside the large-PR flag.
+// Size is a weak proxy for risk: a 2,000-line lockfile bump is trivial and a four-line change to
+// a database migration is not. The product promise is the LOW bucket — telling a maintainer that
+// a pull request can be pushed through on a quick eyeball rather than a real review.
+//
+// ⚠ THE WIRE CARRIES SIGNALS, NEVER A LEVEL. Exactly the rule `codeLoc` follows one block up, and
+// for the same three payoffs: the sensitivity dial is then a pure RENDER-TIME comparison (change
+// it in Settings and every surface repaints with no query-cache invalidation anywhere), the chip
+// can name the REASONS rather than assert a bare verdict, and there is exactly one place — the
+// `blastRadius()` resolver in the SPA's `lib/ui.ts` — where a level is decided.
+//
+// ⚠ `blast: null` IS UNKNOWN, NEVER "low". It is the same population `codeLoc: null` describes
+// (no stored per-file breakdown, or a never-observed size) — measured at 9.9% of open pull
+// requests on a real corpus. Render nothing: a reader must not be able to tell an unmeasured pull
+// request from a small one, because we cannot.
+//
+// ⚠ `truncated` READS ASYMMETRICALLY, AND IT IS THE SAFETY RULE OF THE WHOLE FEATURE.
+// GitHub's `files(first: 100)` connection truncates, and it truncates exactly the BIGGEST pull
+// requests — precisely the ones that must never be labelled "just eyeball it". So HIGH may be
+// asserted on a truncated list (a missing file can only ADD reach) and LOW may not: a truncated
+// pull request that fires no high arm degrades to UNKNOWN, not to low. This is
+// `codeLocIsLowerBound`'s rule one level up, and it is enforced in the resolver, not by
+// convention at each call site.
+//
+// The field is TRAILING OPTIONAL on every type that carries it — a `packages/shared` WIRE type,
+// not `ProContext`, so this is the additive shape that keeps the plugin `apiVersion` at 21, and
+// it keeps IndexedDB-persisted responses written before this feature existed type-honest.
+
+/** A contract-ish path shape a pull request touched — a file whose CONSUMERS LIVE OUTSIDE THE
+ *  DIFF, which is the thing size cannot see.
+ *
+ *  ⚠ `deps` and `ci` are deliberately NOT high-blast arms, and each has its own argument:
+ *   · `deps` is by far the most common surface on real data (222 of 1,405 open pull requests) and
+ *     a dependency bump is the ARCHETYPAL low-blast change. It is carried so the chip can SAY
+ *     "dependencies" rather than stay silent, never to raise a level.
+ *   · `ci` (a workflow file) does not ship to users, so it is not `high` — but it can break
+ *     everyone's build, so it is not free either. It lands MEDIUM. Stated here so nobody
+ *     "finishes" the list later by promoting it. */
+export type BlastSurface =
+  | 'db_migration' // a migrations/ directory — the schema change nobody can roll back casually
+  | 'db_schema' // a schema/ or models/ tree, or a `schema.*` module
+  | 'sql' // a hand-written .sql file
+  | 'public_types' // a .d.ts — the published type surface of a package
+  | 'idl' // .proto / .graphql / .thrift — a cross-service contract
+  | 'openapi' // an OpenAPI / Swagger document
+  | 'infra' // Terraform, Helm, k8s manifests
+  | 'auth' // an auth / authz / security / crypto path
+  | 'ci' // a .github/workflows file — MEDIUM, see above
+  | 'deps'; // a dependency manifest — carried for narration only, see above
+
+/** The three levels, plus the honest fourth state. `unknown` is never rendered as a chip; it is
+ *  what the resolver returns instead of guessing, and it exists as a NAMED value so the reason
+ *  for silence is greppable rather than a bare `null` at every call site. */
+export type BlastLevel = 'low' | 'medium' | 'high' | 'unknown';
+
+/**
+ * The evidence vector for one pull request, folded server-side from the stored `files[]` (which
+ * itself never reaches the client). Everything the resolver needs and nothing it does not.
+ *
+ * ⚠ Every COUNT here is a floor when `truncated` is set. Read the block above before using one.
+ */
+export interface BlastSignals {
+  /** Code files that are NOT tests. The count a reviewer actually has to read. */
+  codeFiles: number;
+  /** Code files that ARE tests. Carried apart because a change that brings its own tests is a
+   *  different proposition from one that does not — and because "all of the code files are
+   *  tests" is one of the two ways to earn LOW. */
+  testFiles: number;
+  /** Documentation, structured config, lockfiles, generated and binary payloads — everything
+   *  `isNonCodeFile` excludes. Carried so the chip can explain a docs-only pull request. */
+  nonCodeFiles: number;
+  /** Distinct directories over the non-test code files. */
+  dirs: number;
+  /** Distinct top-level path segments over the non-test code files. On a single-package repo
+   *  this is 1 for almost everything, which is why it is one arm among several and never the
+   *  only one — the same reason the retired path-bucket feature was wrong to lead with it. */
+  subsystems: number;
+  /** The contract shapes actually touched. Order is the declaration order of `BlastSurface`, so
+   *  a rendered list reads most-consequential first without the SPA re-sorting it. */
+  surfaces: BlastSurface[];
+  /** Every code file in this pull request is NEWLY ADDED, so nothing existing can break by
+   *  construction. Ported from the Claude Review router's `allFilesNew`. */
+  allNew: boolean;
+  /** The highest historical CO-CHANGE DEGREE among the touched files: how many distinct other
+   *  files have landed in the same pull request as this one, over the repo's merged history.
+   *  The "cross-file dependency" reading, computed from data already stored (a real import graph
+   *  would need file CONTENTS, i.e. a GitHub fetch per file, which no board may do).
+   *
+   *  ⚠ `null` MEANS "NO READING", NEVER 0 — which would read as "measured, not a hub". It covers
+   *  two cases deliberately fused into one: this repo has no index (measured: only 7 of 22 real
+   *  repositories clear the coverage floor), or none of the touched files is a hub. Nothing in
+   *  the product ever says "this is not a hub", so no screen can show the difference. */
+  hubDegree: number | null;
+  /** The bar `hubDegree` cleared: `max(this repo's p90 co-change degree, an absolute floor)`.
+   *
+   *  ⚠ BOTH HALVES ARE LOAD-BEARING, and it is NOT a p90 — that was the first cut and it was
+   *  wrong. A p90 alone is exceeded by a tenth of paths BY CONSTRUCTION, so a repository with no
+   *  coupling at all still publishes "hubs" (measured: a config repo produced 77, which were
+   *  eight per-environment copies of one service's `.env`). An absolute floor alone is wrong the
+   *  other way — degree scales are not comparable between a 2,800-path monorepo and a 130-path
+   *  library. It rides the wire so the comparison on screen is auditable rather than a magic
+   *  number in the resolver. Null exactly when `hubDegree` is. */
+  hubBar: number | null;
+  /** The stored file list hit GitHub's 100-file page cap, so EVERY count above is a floor.
+   *  See the asymmetry warning in the block above — this is what enforces it. */
+  truncated: boolean;
+  /** The file whose degree is `hubDegree`, for the chip's sentence ("touches `x`, which usually
+   *  changes alongside 417 others"). Null whenever `hubDegree` is. */
+  hubPath: string | null;
+}
+
+/** How aggressively to read the signals. A dial rather than six numbers because six numbers is a
+ *  settings screen nobody fills in; the numeric thresholds it scales live in `BLAST_THRESHOLDS`
+ *  and can still be overridden one at a time by an account that wants to. */
+export type BlastSensitivity = 'cautious' | 'balanced' | 'relaxed';
+
+/** The numeric thresholds a sensitivity resolves to. Every field is an inclusive bound. */
+export interface BlastThresholds {
+  /** HIGH at or above this many code lines. ⚠ Deliberately NOT `LARGE_PR_CODE_LOC_DEFAULT`:
+   *  that one answers "is reviewing this well unlikely" (1,500) and this one answers "is this
+   *  more than a quick eyeball" (1,000). Two questions, two numbers, allowed to differ. */
+  highCodeLoc: number;
+  /** HIGH at or above this many non-test code files. */
+  highCodeFiles: number;
+  /** HIGH at or above this many directories. */
+  highDirs: number;
+  /** HIGH at or above this many subsystems. */
+  highSubsystems: number;
+  /** LOW requires code churn at or below this. */
+  lowCodeLoc: number;
+  /** LOW requires non-test code files at or below this. */
+  lowCodeFiles: number;
+}
+
+/** The product defaults, per dial position. `balanced` is the calibrated set — measured over
+ *  1,405 real open pull requests it yields low 34.3% / medium 35.1% / high 29.7%, which is the
+ *  distribution the feature was designed against. The other two shift the same shape rather than
+ *  changing which arms exist. */
+export const BLAST_THRESHOLDS: Record<BlastSensitivity, BlastThresholds> = {
+  cautious: {
+    highCodeLoc: 600,
+    highCodeFiles: 10,
+    highDirs: 4,
+    highSubsystems: 2,
+    lowCodeLoc: 50,
+    lowCodeFiles: 2,
+  },
+  balanced: {
+    highCodeLoc: 1000,
+    highCodeFiles: 15,
+    highDirs: 6,
+    highSubsystems: 3,
+    lowCodeLoc: 100,
+    lowCodeFiles: 3,
+  },
+  relaxed: {
+    highCodeLoc: 2000,
+    highCodeFiles: 25,
+    highDirs: 10,
+    highSubsystems: 4,
+    lowCodeLoc: 200,
+    lowCodeFiles: 5,
+  },
+};
+
+/** The dial position an account gets when it has never chosen one. */
+export const BLAST_SENSITIVITY_DEFAULT: BlastSensitivity = 'balanced';
+
+/** The surfaces that, when touched, force HIGH on their own — before `surfacesOff` is applied.
+ *  `ci` and `deps` are absent by design; see the `BlastSurface` doc for each one's argument. */
+export const BLAST_HIGH_SURFACES: readonly BlastSurface[] = [
+  'db_migration',
+  'db_schema',
+  'sql',
+  'public_types',
+  'idl',
+  'openapi',
+  'infra',
+  'auth',
+];
+
+/**
+ * An account's reading settings for the blast-radius indicator.
+ *
+ * ACCOUNT-GRAINED, like `largePrCodeLocThreshold` and for the same reason: the comparison is
+ * render-time, so it rides `/api/me` (its query key carries no `ws:<id>` segment) and the
+ * vis-timeline tooltip — raw HTML strings, no hooks — can read it off a module cell. A
+ * per-workspace value would put a new `workspaceId === null` null-state on four surfaces.
+ */
+export interface BlastRadiusConfig {
+  sensitivity: BlastSensitivity;
+  /** Surfaces to IGNORE when judging this account's pull requests — the escape hatch for a repo
+   *  whose DOMAIN is one of them. Real case: a repo whose product is an ORM trips `db_schema` on
+   *  its own `src/**​/schema/**` source tree, where the rule means "this changes the database". */
+  surfacesOff: BlastSurface[];
+  /** Per-threshold overrides on top of the dial. Stored and honoured; no UI in v1. */
+  overrides?: Partial<BlastThresholds>;
+}
+
+/** What the SPA's `resolveBlastConfig()` hands every renderer — the dial applied and the
+ *  overrides merged, so no consumer has to know about either. Produced CLIENT-SIDE from the
+ *  nullable `MeResponse.blastRadius`; see that field for why the server does not resolve it. */
+export interface ResolvedBlastConfig {
+  sensitivity: BlastSensitivity;
+  surfacesOff: BlastSurface[];
+  thresholds: BlastThresholds;
+  /** True when NOTHING is stored and the settings above are entirely the product default — the
+   *  one thing the resolved values cannot say about themselves, and what lets the Settings panel
+   *  show "Default" rather than a choice the user never made. */
+  isDefault: boolean;
+}
+
+/** Body of PUT /api/me/blast-radius-config. `null` RESETS to the product default — the "no
+ *  opinion" state, not a sentinel, exactly like `LargePrThresholdBody.threshold`. */
+export interface BlastRadiusConfigBody {
+  config: BlastRadiusConfig | null;
+}
+
+/** Response of PUT /api/me/blast-radius-config — the same nullable field `/api/me` echoes, so
+ *  Settings can render the result without a refetch (and so the two can never disagree about
+ *  what "unset" looks like). */
+export interface BlastRadiusConfigResponse {
+  status: 'ok';
+  blastRadius: BlastRadiusConfig | null;
+}
+
 /** Body of POST /api/me/large-pr-threshold. `null` RESETS to the product default — it is the
  *  "no opinion" state, not a sentinel. Anything else must be a positive integer. */
 export interface LargePrThresholdBody {
@@ -3688,6 +3916,21 @@ export interface MeResponse {
   // resolved figure can't say on its own, and the Settings field needs it to show an empty input
   // with a "Default (1,500)" placeholder rather than a value the user never typed.
   largePrCodeLocThresholdIsDefault: boolean;
+  // The RESOLVED blast-radius reading settings for this account — the dial applied and the
+  // thresholds it selects, so no renderer has to know about the null-config or the override
+  // merge. TOP-LEVEL and deliberately NOT inside `pro`, for the same reason as the two fields
+  // above and `mlSeverity`: blast radius is a FREE feature, and `entitledProCapabilities` zeroes
+  // the whole `pro` object for a cloud account on the free plan — exactly this feature's
+  // audience. (The Pro half is only the Haiku impact NOTE, which gates on `pro.prSummary`.)
+  //
+  // ⚠ THE RAW STORED CONFIG, NOT A RESOLVED ONE, and `null` means "this account has never
+  // chosen". Unlike `largePrCodeLocThreshold` — which the server resolves because its default is
+  // ONE number cheap to mirror — the defaults here are an 18-number table across three dial
+  // positions, and `shared` is a TYPES-ONLY package the backend may only `import type` from (see
+  // PACKAGING). Resolving server-side would mean hand-mirroring that table in `db/blast-radius.ts`
+  // and keeping the two in sync forever. Instead the SPA's ONE `resolveBlastConfig()` applies
+  // `BLAST_THRESHOLDS` — which it can import as a real value — and nothing is duplicated.
+  blastRadius: BlastRadiusConfig | null;
   // Orgs whose sync is currently BLOCKED because the sign-in token isn't authorized for their
   // SAML SSO (cloud). Populated by the sync when it hits the SAML wall; drives the global
   // "Reconnect GitHub for <org>" banner. Empty in the normal case + always empty in local mode.
@@ -4139,6 +4382,10 @@ export interface TimelinePr {
   // under-threshold is not. Trailing + optional so this stays an additive wire change.
   codeLoc?: number | null;
   codeLocIsLowerBound?: boolean;
+  // ---- BLAST RADIUS (see the block above `BlastSurface`) ----
+  // How far this change can REACH — orthogonal to how big it is. ⚠ null/absent = UNKNOWN, never
+  // "low". The level itself is decided by the ONE `blastRadius()` resolver, never here.
+  blast?: BlastSignals | null;
 }
 
 export interface OpenPrsResponse {
@@ -6331,6 +6578,10 @@ export interface ConsolidatedFeedItem {
   // same stale-IndexedDB-cache reason as `failingChecks`.
   codeLoc?: number | null;
   codeLocIsLowerBound?: boolean;
+  // ---- BLAST RADIUS (see the block above `BlastSurface`) ----
+  // Folded once per PR on the requested PAGE, like `codeLoc` beside it — a busy PR contributes
+  // many rows and must not be re-folded per row. ⚠ null/absent = UNKNOWN, never "low".
+  blast?: BlastSignals | null;
 }
 
 // Server-computed facet counts over the WHOLE loadable stream (the post-cap `ordered` set
@@ -6524,6 +6775,12 @@ export interface InsightPrRef {
   // right answer for "we don't know". So it can be, and is, trailing optional.
   codeLoc?: number | null;
   codeLocIsLowerBound?: boolean;
+  // ---- BLAST RADIUS (see the block above `BlastSurface`) ----
+  // The Pending board's whole reason for carrying this: a maintainer must be able to see which
+  // cards are a quick eyeball WITHOUT opening them, and the board MAY NOT FETCH ON MOUNT — so
+  // the signals ride the card, folded server-side from columns already on the row.
+  // ⚠ Absent = UNKNOWN, never "low". Trailing optional for the same reason as `codeLoc` above.
+  blast?: BlastSignals | null;
 }
 
 // A CORE suggested reviewer (used by BOTH the PR-detail "Suggested reviewers" row and the
@@ -8067,13 +8324,22 @@ export interface BranchTrendsResponse {
 //   validity  — is the comment itself well-founded, given the thread + diff? (the old
 //               comment_assessments; its rows are backfilled into this table)
 //   simplify  — could the change this comment asks for be made simpler / smaller?
-export type AnnotationKind = 'addressed' | 'validity' | 'simplify';
+//   impact    — what could this pull request BREAK, and what should a reviewer look at first?
+//               The Pro half of BLAST RADIUS, and the one kind whose target is the PULL REQUEST
+//               rather than a comment. See the warning under `AnnotationTargetKind` below.
+export type AnnotationKind = 'addressed' | 'validity' | 'simplify' | 'impact';
 
 // What an annotation hangs off. `targetId` is that entity's own primary key:
 //   thread         → reviewThreads.id
 //   review_comment → reviewComments.id
 //   pr_comment     → prComments.id
-export type AnnotationTargetKind = 'thread' | 'review_comment' | 'pr_comment';
+//   pull_request   → pullRequests.id
+//
+// ⚠ `pull_request` IS THE ONE NON-COMMENT TARGET, added for the `impact` kind. It fits the stored
+// table with NO schema change — the unique index is already `(accountId, kind, targetKind,
+// targetId)` — and both members here are additive union members on a `packages/shared` WIRE type,
+// not `ProContext`, so the plugin `apiVersion` STAYS 21.
+export type AnnotationTargetKind = 'thread' | 'review_comment' | 'pr_comment' | 'pull_request';
 
 // A RUN kind — deliberately NOT an `AnnotationKind`, and the distinction is load-bearing.
 //

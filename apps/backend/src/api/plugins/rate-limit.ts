@@ -144,6 +144,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // sibling vocabulary. That is this file's recorded near-miss failure, one character away.
   if (path === '/api/me/large-pr-threshold') return [TIERS.read];
 
+  // PUT /api/me/blast-radius-config — the blast-radius reading settings. Same shape and same
+  // answer as the threshold above: one schema-validated UPDATE of one column on one row, no
+  // GitHub call and no model call. Recorded rather than inherited for the same reason, and with
+  // the same EXACT `===` for the same near-miss.
+  if (path === '/api/me/blast-radius-config') return [TIERS.read];
+
   // ---- Bot Tuning Advisor (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
   // "Follow the token": most advisor routes are DB-only reads/writes, but the generic
   // /api/pro/ branch below puts every mutating POST on the 20/min AI bucket — which would

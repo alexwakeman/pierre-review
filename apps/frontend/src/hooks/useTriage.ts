@@ -9,7 +9,7 @@ import type {
   RepoAnalytics,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
-import { noteLargePrThreshold } from '../lib/ui.js';
+import { noteBlastConfig, noteLargePrThreshold } from '../lib/ui.js';
 import { buildOpenPrsSearch, useFilters } from '../store/filters.js';
 import { workspaceKey } from './useActivity.js';
 
@@ -133,6 +133,13 @@ export function useMe() {
   useEffect(() => {
     noteLargePrThreshold(threshold);
   }, [threshold]);
+  // ⚠ THE ONE WRITER of the blast-radius config cell, for exactly the same reason one line up:
+  // the vis-timeline tooltip is a raw HTML string builder with no hook to call, and giving it
+  // its own defaults is how one surface comes to badge a pull request the other doesn't.
+  const blast = q.data?.blastRadius;
+  useEffect(() => {
+    noteBlastConfig(blast);
+  }, [blast]);
   return q;
 }
 

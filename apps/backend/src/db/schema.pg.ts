@@ -27,6 +27,7 @@ import {
   foreignKey,
 } from 'drizzle-orm/pg-core';
 import type {
+  BlastRadiusConfig,
   BranchCheckRun,
   CheckRun,
   Label,
@@ -71,6 +72,9 @@ export const accounts = pgTable('accounts', {
   // The LARGE-PR FLAG's per-account code-churn threshold; NULL = the 1,500-line product default.
   // See the sqlite twin. Kept in sync by hand (schema-parity.test.ts).
   largePrCodeLocThreshold: integer('large_pr_code_loc_threshold'),
+  // BLAST RADIUS reading settings ({sensitivity, surfacesOff[], overrides?}); NULL = the product
+  // defaults, applied SPA-side. See the sqlite twin. Kept in sync by hand (schema-parity.test.ts).
+  blastRadiusConfig: jsonb('blast_radius_config').$type<BlastRadiusConfig>(),
 });
 
 export const repos = pgTable(
@@ -416,6 +420,29 @@ export const commits = pgTable(
   (t) => ({
     prIdx: index('commit_pr_idx').on(t.prId),
     shaPrUx: uniqueIndex('commit_sha_pr_ux').on(t.sha, t.prId),
+  }),
+);
+
+// BLAST RADIUS: the per-repo CO-CHANGE index (P2). One row per (account, repo), storing only
+// the HUB paths — those at or above max(repo p90, HUB_MIN_DEGREE). See the sqlite twin for why
+// both halves of that bar are load-bearing. Kept in sync by hand (schema-parity.test.ts).
+export const repoFileCoupling = pgTable(
+  'repo_file_coupling',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id),
+    hubBar: integer('hub_bar').notNull(),
+    prCount: integer('pr_count').notNull(),
+    hubs: jsonb('hubs').$type<Record<string, number>>().notNull(),
+    builtAt: timestamp('built_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    accountRepoUx: uniqueIndex('rfc_account_repo').on(t.accountId, t.repoId),
   }),
 );
 

@@ -1,0 +1,6 @@
+{
+  "name": "a real-sized PR with no per-file breakdown stored",
+  "why": "18.5% of the real corpus (files IS NULL). We know it is big and know nothing about its reach — UNKNOWN, not high and not low. Inherited from codeLocFor rather than re-derived, so this also pins that the fold delegates.",
+  "pr": { "additions": 900, "deletions": 100, "changedFiles": 12, "files": null },
+  "expected": null
+}

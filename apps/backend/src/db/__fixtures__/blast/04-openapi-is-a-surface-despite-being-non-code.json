@@ -1,0 +1,16 @@
+{
+  "name": "an OpenAPI document and nothing else",
+  "why": "Guards the one non-obvious line in the fold: surfaces are collected over EVERY file, code or not. `.yaml` is isNonCodeFile (correctly — it is not LINES a reviewer reads), so scanning only code files would make `openapi` and half of `infra` unreachable.",
+  "pr": {
+    "additions": 60,
+    "deletions": 12,
+    "changedFiles": 1,
+    "files": [{ "path": "api/openapi.yaml", "additions": 60, "deletions": 12 }]
+  },
+  "expected": {
+    "codeFiles": 0,
+    "nonCodeFiles": 1,
+    "surfaces": ["openapi"],
+    "truncated": false
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "a 27-file change across ten directories",
+  "why": "The HIGH spread arm. `dirs` is the strongest arm on real data (230 of 1,405), and it must count over NON-TEST code files only — a refactor whose breadth is all test files is a different proposition.",
+  "pr": {
+    "additions": 3400,
+    "deletions": 176,
+    "changedFiles": 12,
+    "files": [
+      { "path": "src/a/one.ts", "additions": 300, "deletions": 10 },
+      { "path": "src/b/two.ts", "additions": 300, "deletions": 10 },
+      { "path": "src/c/three.ts", "additions": 300, "deletions": 10 },
+      { "path": "src/d/four.ts", "additions": 300, "deletions": 10 },
+      { "path": "src/e/five.ts", "additions": 300, "deletions": 10 },
+      { "path": "src/f/six.ts", "additions": 300, "deletions": 10 },
+      { "path": "src/g/seven.ts", "additions": 300, "deletions": 10 },
+      { "path": "src/h/eight.ts", "additions": 300, "deletions": 10 },
+      { "path": "src/i/nine.ts", "additions": 300, "deletions": 10 },
+      { "path": "src/j/ten.ts", "additions": 300, "deletions": 10 },
+      { "path": "src/j/__tests__/ten.test.ts", "additions": 200, "deletions": 76 },
+      { "path": "docs/refactor.md", "additions": 100, "deletions": 0 }
+    ]
+  },
+  "expected": {
+    "codeFiles": 10,
+    "testFiles": 1,
+    "nonCodeFiles": 1,
+    "dirs": 10,
+    "subsystems": 1,
+    "surfaces": [],
+    "allNew": false,
+    "truncated": false
+  }
+}

@@ -111,6 +111,9 @@ import type {
   MyTurnResponse,
   ActivityResponse,
   InsightsResponse,
+  BlastRadiusConfig,
+  BlastRadiusConfigBody,
+  BlastRadiusConfigResponse,
   LargePrThresholdBody,
   LargePrThresholdResponse,
   RepoAnalytics,
@@ -688,6 +691,17 @@ export const api = {
     fetch('/api/me/large-pr-threshold', jsonBody('POST', { threshold } as LargePrThresholdBody)).then(
       (r) => handle<LargePrThresholdResponse>(r),
     ),
+  // The BLAST-RADIUS reading settings. ACCOUNT-GRAINED like the threshold above and unscoped for
+  // the same reason. A PUT because the body is the WHOLE settings object — it replaces the stored
+  // blob rather than merging into it. `null` RESETS to the product defaults.
+  // ⚠ The response echoes WHAT WAS STORED, not what was sent: the server drops unknown surfaces
+  // and out-of-range overrides, so rendering the request body would show a choice the database
+  // does not hold.
+  setBlastRadiusConfig: (config: BlastRadiusConfig | null) =>
+    fetch(
+      '/api/me/blast-radius-config',
+      jsonBody('PUT', { config } as BlastRadiusConfigBody),
+    ).then((r) => handle<BlastRadiusConfigResponse>(r)),
   // Workspace review-intelligence "Insights" (Pro; workspaceInsights capability) — the attention
   // CARDS (+ the sprint report). The flow-metric HEADER moved OUT to the free
   // /api/workspace-metrics, the Retro panel was deleted, and cross-workspace comparison is the

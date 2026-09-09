@@ -220,6 +220,8 @@ import {
 } from './ml-labels.js';
 import { clusterThreadsByLine } from './line-overlap.js';
 import { codeLocFor } from './code-loc.js';
+import { blastSignalsFor } from './blast-radius.js';
+import { hubReadingFor, loadRepoCoupling, type RepoCoupling } from './file-coupling.js';
 import { DAYS_PER_MONTH, botWindowMs } from './bot-window.js';
 import { detectChangepoints } from './changepoint.js';
 import { dormantBotUserIds } from './bot-dormancy.js';
@@ -1364,10 +1366,14 @@ async function buildTimelinePrs(
     }),
     accountId,
   );
+  // The blast-radius CO-CHANGE index for the repos on this page, in ONE query. ⚠ A repo absent
+  // from the map has NO reading — never an empty one; `hubReadingFor` passes that through as null
+  // so the arm stays silent rather than reporting a measured zero.
+  const coupling = await loadRepoCoupling(accountId, [...new Set(prRows.map((p) => p.repoId))]);
   return prRows.map((p) => {
     const c = counts.get(p.id) ?? emptyCounts();
     const tr = triage.get(p.id);
-    return mapTimelinePr(p, c, tr);
+    return mapTimelinePr(p, c, tr, coupling.get(p.repoId));
   });
 }
 
@@ -1375,6 +1381,7 @@ function mapTimelinePr(
   p: PrRow,
   counts: ThreadStateCounts,
   tr: TriageResult | undefined,
+  coupling?: RepoCoupling,
 ): TimelinePr {
   return {
     id: p.id,
@@ -1408,6 +1415,10 @@ function mapTimelinePr(
     // per-file breakdown itself NEVER rides the timeline (see "keep /api/timeline lean"): the
     // client gets the number and the honest null, not `files[]`.
     ...codeLocFor(p),
+    // BLAST RADIUS, folded from the SAME row and the same `files[]`, which still never rides the
+    // timeline. A compact evidence vector, not a level — the level is decided once, in the SPA's
+    // `blastRadius()` resolver, so the sensitivity dial needs no cache invalidation.
+    blast: blastSignalsFor(p, hubReadingFor(p.files, coupling)),
   };
 }
 
@@ -4734,6 +4745,13 @@ export async function getWorkspaceInsights(
     dismissed: 3,
   };
 
+  // The blast-radius CO-CHANGE index for this workspace's repos, loaded ONCE for the whole fold
+  // and read by `prRef` below off `p.repoId`. One query for the board rather than one per card —
+  // and no card fetches anything, which is the rule the Pending board lives by.
+  // ⚠ A repo absent here has NO reading (most of them: measured, 7 of 22 real repositories carry
+  // an index at all). `hubReadingFor` passes that through as null rather than a measured zero.
+  const insightsCoupling = await loadRepoCoupling(accountId, scope.repoIds);
+
   // THE ONE BUILDER OF AN `InsightPrRef`. Every PR-bearing card kind (stalled_review,
   // untouched_thread, reviewer_routing, my_turn, merge, update_branch) fills its shared PR context
   // through this, so a new kind cannot quietly invent a different shape — or a different null
@@ -4846,6 +4864,11 @@ export async function getWorkspaceInsights(
       // "not large"; `codeLocIsLowerBound` marks a truncated file list, which the renderer must
       // read asymmetrically (over-threshold asserts, under-threshold does not).
       ...codeLocFor(p),
+      // BLAST RADIUS — how far this change can REACH, beside how big it is. This is the field
+      // that lets the Pending board say "quick eyeball" without opening anything, and it is
+      // folded from columns already on the row precisely because THE BOARD MAY NOT FETCH ON
+      // MOUNT. ⚠ null is UNKNOWN, never "low".
+      blast: blastSignalsFor(p, hubReadingFor(p.files, insightsCoupling.get(p.repoId))),
     };
   };
 
@@ -6422,14 +6445,21 @@ export async function getConsolidatedFeed(
   // THE LARGE-PR FLAG, folded once per PR on the page (never per item — a busy PR contributes
   // many rows). Stores the whole result, so `codeLocIsLowerBound` travels with its number.
   const codeLocByPr = new Map<number, ReturnType<typeof codeLocFor>>();
+  // BLAST RADIUS, folded on the SAME pass and for the same reason — one fold per PR on the page,
+  // never one per item.
+  const blastByPr = new Map<number, ReturnType<typeof blastSignalsFor>>();
   const reviewersByPr = new Map<number, { userId: number; state: ReviewState }[]>();
   if (prIdsForCtx.size > 0) {
     const prIdList = [...prIdsForCtx];
     // mergedById + CI rollup + changed-file count — account-scoped via
     // pullRequests.accountId. CI/files surface on pr_opened cards (item 2).
-    for (const row of await db
+    const ctxRows = await db
       .select({
         id: pullRequests.id,
+        // Carried for the blast-radius co-change lookup below. Selecting it here rather than
+        // issuing a second id→repo query is the whole reason the rows are materialised into an
+        // array before the fold.
+        repoId: pullRequests.repoId,
         mergedById: pullRequests.mergedById,
         ciStatus: pullRequests.ciStatus,
         changedFiles: pullRequests.changedFiles,
@@ -6441,11 +6471,22 @@ export async function getConsolidatedFeed(
       })
       .from(pullRequests)
       .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, prIdList)))
-      .execute()) {
+      .execute();
+    // The blast-radius co-change index for the repos on this PAGE, in one query.
+    // ⚠ A repo absent from the map has NO reading — never an empty one; `hubReadingFor` passes
+    // that through as null so the arm stays silent rather than reporting a measured zero.
+    const feedCoupling = await loadRepoCoupling(accountId, [
+      ...new Set(ctxRows.map((r) => r.repoId)),
+    ]);
+    for (const row of ctxRows) {
       mergedByPr.set(row.id, row.mergedById);
       ciByPr.set(row.id, (row.ciStatus ?? 'unknown') as CiStatus);
       filesByPr.set(row.id, row.changedFiles);
       codeLocByPr.set(row.id, codeLocFor(row));
+      blastByPr.set(
+        row.id,
+        blastSignalsFor(row, hubReadingFor(row.files, feedCoupling.get(row.repoId))),
+      );
     }
 
     // reviewers — `reviews` has NO accountId, so isolation MUST come from the join to
@@ -6493,6 +6534,9 @@ export async function getConsolidatedFeed(
     const cl = codeLocByPr.get(it.prId);
     it.codeLoc = cl?.codeLoc ?? null;
     it.codeLocIsLowerBound = cl?.codeLocIsLowerBound ?? false;
+    // ⚠ Same rule: a PR missing from the map is UNKNOWN, and so is one whose fold returned null.
+    // Both land as `null`, which every renderer draws as nothing.
+    it.blast = blastByPr.get(it.prId) ?? null;
   }
 
   // Backfill any referenced users on the page not already loaded by getMyTurn / getFeed —
@@ -8235,6 +8279,12 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
     // would keep claiming a deleted PR is personally relevant, and the row is keyed by repo, so
     // this is one indexed predicate rather than a dependency on the prIds list being non-empty.
     await tx.delete(prMentions).where(eq(prMentions.repoId, id)).execute();
+    // The blast-radius CO-CHANGE INDEX (migration 0063 / pg 0050). One row per (account, repo),
+    // FK'd to `repos` with NO cascade in the core schema — so this delete is not belt-and-braces,
+    // it is the only thing that removes it. Purely derived: dropping it costs a rebuild and
+    // nothing else, but a surviving row would keep this repo's file paths after the repo is gone
+    // AND, on Postgres, block the `repos` delete outright.
+    await tx.delete(schema.repoFileCoupling).where(eq(schema.repoFileCoupling.repoId, id)).execute();
     if (prIds.length > 0) {
       await tx.delete(reviewComments).where(inArray(reviewComments.prId, prIds)).execute();
       await tx.delete(reviewThreads).where(inArray(reviewThreads.prId, prIds)).execute();

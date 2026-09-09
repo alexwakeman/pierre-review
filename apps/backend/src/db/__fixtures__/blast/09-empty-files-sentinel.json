@@ -1,0 +1,6 @@
+{
+  "name": "the routing-files 'we tried and failed' sentinel",
+  "why": "sync/routing-files.ts persists [] on failure, byte-identical to a PR that touched nothing. With a non-zero changedFiles it is the sentinel, and treating it as zero code lines would mark real PRs as trivially small — i.e. LOW.",
+  "pr": { "additions": 1200, "deletions": 400, "changedFiles": 37, "files": [] },
+  "expected": null
+}

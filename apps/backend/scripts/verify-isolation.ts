@@ -2487,6 +2487,63 @@ check(
   );
 }
 
+// ── BLAST RADIUS (db/file-coupling.ts + db/blast-radius-query.ts) ─────────────
+// Two id-addressed getters that live OUTSIDE db/queries.ts, so this script cannot see them
+// unless they are imported by name.
+//
+// `getBlastSignalsForPr` is the one that matters most: it takes a PR ID and is reached through
+// the Pro plugin's `ctx.queries.getBlastSignals`, i.e. ultimately from a route whose id arrives
+// in a URL. A leak there would let one tenant spend their own AI credits having a model describe
+// another tenant's diff — and store the result where their own cached GET serves it back.
+//
+// `loadRepoCoupling` takes REPO ids and returns file PATHS. Its predicate must be on account_id,
+// not repo_id alone; a repo id is guessable.
+//
+// ⚠ BOTH CHECKS ARE WRITTEN NON-VACUOUSLY: the positive direction is asserted first, so a getter
+// that returned null for EVERYTHING would fail rather than pass the cross-tenant half by accident.
+{
+  const { getBlastSignalsForPr } = await import('../src/db/blast-radius-query.js');
+  const { loadRepoCoupling, rebuildRepoCoupling } = await import('../src/db/file-coupling.js');
+
+  // The fixture PRs carry no `files`, so signals are null for both tenants — which would make a
+  // bare "B sees null" check vacuous. Give A's PR a file list first.
+  await db
+    .update(schema.pullRequests)
+    .set({
+      files: [{ path: 'src/app.ts', additions: 10, deletions: 4 }],
+      additions: 10,
+      deletions: 4,
+      changedFiles: 1,
+    })
+    .where(eq(schema.pullRequests.id, A.prId))
+    .execute();
+
+  check(
+    'getBlastSignalsForPr(A, A’s PR) MEASURES it — the positive direction, so the next check is not vacuous',
+    (await getBlastSignalsForPr(1, A.prId))?.codeFiles === 1,
+  );
+  check(
+    'getBlastSignalsForPr(B, A’s PR) returns null (IDOR blocked)',
+    (await getBlastSignalsForPr(2, A.prId)) === null,
+  );
+  check(
+    'getBlastSignalsForPr(A, B’s PR) returns null (IDOR blocked, both directions)',
+    (await getBlastSignalsForPr(1, B.prId)) === null,
+  );
+
+  // The coupling index. The fixture is far below the coverage floor, so no row is written for
+  // either tenant — assert that FIRST (a refusal is the correct answer), then that naming a
+  // foreign repo id returns nothing regardless.
+  check(
+    'rebuildRepoCoupling refuses below the coverage floor rather than writing an empty index',
+    (await rebuildRepoCoupling(1, A.repoId)) === null,
+  );
+  check(
+    'loadRepoCoupling(B, A’s repo) returns nothing (IDOR blocked)',
+    (await loadRepoCoupling(2, [A.repoId])).size === 0,
+  );
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

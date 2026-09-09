@@ -1,0 +1,21 @@
+-- BLAST RADIUS reading settings (CORE, free, no AI). How aggressively to read a pull request's
+-- REACH — the orthogonal companion to the large-PR flag's `large_pr_code_loc_threshold` (0057),
+-- which reads its SIZE.
+--
+-- ONE PER-ACCOUNT SETTING, for the same reason as that one: the comparison is render-time, it
+-- rides /api/me, and a per-workspace value would put a new "workspace not resolved yet"
+-- null-state on four surfaces (including the vis-timeline tooltip, which is raw HTML with no
+-- hook to read a workspace from).
+--
+-- ONE JSON COLUMN rather than six integer ones: the shape is `{sensitivity, surfacesOff[],
+-- overrides?}` — a settings blob with exactly one writer (PUT /api/me/blast-radius-config, which
+-- validates it), and nothing joins, filters or orders on any field inside it.
+--
+-- NULLABLE with NO default and NO backfill, exactly like 0057: NULL means "the user has never
+-- expressed an opinion" and the SPA resolves the product defaults. Two states, so a future change
+-- to those defaults reaches every account that never overrode them — which a backfilled blob
+-- would freeze. ⚠ The defaults are NOT mirrored backend-side: packages/shared's BLAST_THRESHOLDS
+-- is an 18-number table and `shared` is types-only on that side (PACKAGING), so /api/me echoes
+-- this column RAW and the SPA's one resolver applies it.
+-- The Postgres twin is migrations-pg/0049_blast_radius_config.sql.
+ALTER TABLE `accounts` ADD `blast_radius_config` text;

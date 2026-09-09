@@ -49,6 +49,7 @@ const {
   mlCommentLabels,
   prMentions,
   pendingMutedRepos,
+  repoFileCoupling,
 } = schema;
 
 /**
@@ -246,6 +247,11 @@ export function accountScopedTables(): {
     // COLUMN on `workspaces`, already on this checklist, so there is nothing separate to count
     // for it — the row it lives on is deleted.
     { name: 'pendingMutedRepos', col: pendingMutedRepos.accountId, table: pendingMutedRepos },
+    // The blast-radius co-change index (migration 0063 / pg 0050). Purely DERIVED — erasing it
+    // loses nothing but a rebuild — and it is on the checklist anyway, because the rule is "does
+    // the table carry an accountId", not "is the data precious". A derived table left behind
+    // still holds this account's file PATHS.
+    { name: 'repoFileCoupling', col: repoFileCoupling.accountId, table: repoFileCoupling },
   ];
   return rows.map(({ name, col, table }) => ({
     name,

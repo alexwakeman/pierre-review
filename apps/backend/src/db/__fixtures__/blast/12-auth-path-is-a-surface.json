@@ -1,0 +1,11 @@
+{
+  "name": "a small change under an auth/ directory",
+  "why": "Small, local, one subsystem — LOW by every size arm, and a security surface. The surface arm must outrank the size arms, which is what makes blast radius orthogonal to the large-PR flag rather than a restatement of it.",
+  "pr": {
+    "additions": 12,
+    "deletions": 4,
+    "changedFiles": 1,
+    "files": [{ "path": "apps/backend/src/auth/account.ts", "additions": 12, "deletions": 4 }]
+  },
+  "expected": { "codeFiles": 1, "surfaces": ["auth"], "truncated": false }
+}

@@ -29,6 +29,7 @@ import { getPersonPeriod } from '../db/person-period.js';
 // the feature, and the alignment contract (it folds the SAME /api/attention cards the brief
 // counts) only survives if both live where the next reader can see them together.
 import { getWorkPlan } from '../db/work-plan.js';
+import { getBlastSignalsForPr } from '../db/blast-radius-query.js';
 import { dormantBotUserIds } from '../db/bot-dormancy.js';
 import { forecastNext } from '../db/forecast.js';
 import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
@@ -230,6 +231,8 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       // The seam member is OPTIONAL (see contract.ts) so an older host degrades this ONE feature
       // rather than the plugin; THIS host implements it, so it is always present here.
       getWorkPlan: (accountId, scope) => getWorkPlan(accountId, scope),
+      // Blast radius for one PR — the deterministic evidence the `impact` annotation narrates.
+      getBlastSignals: (accountId, prId) => getBlastSignalsForPr(accountId, prId),
       // The workspace's derived human seat count — the ONE multiplier a `per_seat` price is read
       // through, shared with `effectiveMonthlyUsd` and the ROI table's effective `costMonthlyUsd`
       // so the Benchmark tab cannot quote a different monthly figure for the same bot than the

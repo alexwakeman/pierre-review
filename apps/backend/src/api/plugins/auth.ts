@@ -51,6 +51,7 @@ export function registerAccountContext(app: FastifyInstance): void {
           aiCreditAllowance: null,
           benchmarkOptIn: false,
           largePrCodeLocThreshold: null,
+          blastRadiusConfig: null,
         };
     }
   });

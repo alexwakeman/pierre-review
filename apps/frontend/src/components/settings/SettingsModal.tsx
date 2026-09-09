@@ -6,6 +6,7 @@ import { SlackSection } from './SlackSection.js';
 import { IssueLinksSection } from './IssueLinksSection.js';
 import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
 import { LargePrThresholdSection } from './LargePrThresholdSection.js';
+import { BlastRadiusSection } from './BlastRadiusSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
 import { GithubAppInstallSection } from './GithubAppInstallSection.js';
 import { YourDataSection } from './YourDataSection.js';
@@ -141,6 +142,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
               this modal is never empty on any tier, which is what lets the Pro half be gated
               without gating the modal itself. */}
           <LargePrThresholdSection />
+          {/* Blast radius — free and /api/me-backed like the section above it, so it belongs on
+              this side of the pro-settings loading gate. */}
+          <BlastRadiusSection />
           {/* Data-subject rights (export / delete / cookie choice) — CORE/free, cloud-only. This
               is the self-service machinery the privacy policy at /privacy §9 points at; a local
               install has no hosted account to erase (the data is the user's own SQLite file), so

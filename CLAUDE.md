@@ -29,6 +29,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [MERGE-CI-TRUNK](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, auto-merge runner, CI logs, trunk status |
 | [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) | the agentic PR-review feature |
 | [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports -> "Chronology" |
+| [BLAST-RADIUS](docs/BLAST-RADIUS.md) | how far a PR can REACH — the Low/Medium/High chip, the co-change index, the Pro impact note |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) | ML severity/category of bot comments (`packages/ml`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
 | [PRO-PLUGIN-AND-ACTIVITY](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity, Feed, the bot platform, annotations, digests, the work plan |
@@ -486,6 +487,17 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   `insightsTab` — Reports' Overview/Bottlenecks) —
   compute an `effectiveTab` for the render only; a corrective `set…` permanently forgets the
   choice.
+- **BLAST RADIUS is ONE resolver, `blastRadius()` in `lib/ui.ts`** — Pending cards, the Feed's
+  PR-ref line, the PR-detail header and the vis-timeline tooltip all call it, exactly like
+  `largePrFlag` beside it. The wire carries SIGNALS (`blast?: BlastSignals`), never a level, so the
+  Settings sensitivity dial is a render-time comparison with NO cache invalidation.
+  ⚠ **`truncated` FORBIDS "low" AND "medium", not just "low"** — `files(first:100)` truncates
+  exactly the biggest PRs, so every count is a floor; HIGH is still assertable, everything else
+  degrades to UNKNOWN (render nothing). ⚠ **`hubDegree: null` is "no reading", NEVER 0** — only 6
+  of 23 real repos carry a co-change index at all, and a `?? 0` turns every silence into a clean
+  bill of health. ⚠ **The chip reads the SAME `codeLoc` the large-PR flag reads**, never a second
+  count folded into `BlastSignals`, and `volumeOnly` stops the two saying "it's big" twice.
+  Full contract + the measured calibration: [docs/BLAST-RADIUS.md](docs/BLAST-RADIUS.md).
 - **Timeline vertical scroll is GATED.** Every programmatic scroll goes through
   `setVisScrollTop` and must claim the gate (`intentionalScrollRef` + `scrollLoopRef`) — never
   write `scrollTop` / call `focus()` from a new path; copy `centerShowTarget`.
@@ -939,6 +951,13 @@ auth plumbing, or any AI route.** Two zero-dependency core plugins own the postu
   is the ONLY opt-out** — a separator, an `aria-hidden` glyph, a gridline. ⚠ It may never be put on
   text that says something: an em-dash meaning "no value", a "90d" window and a "Not scored yet"
   marker were all on the original list and were made legible instead.
+- **FOUR PATH CLASSIFIERS EXIST AND NONE MAY BE FOLDED INTO ANOTHER** — `NOISE_GLOBS`
+  (the paid agent's diff budget), `isLockFile` (start a diff collapsed?), `isNonCodeFile` (does
+  this churn count as CODE?) and `BLAST_SURFACES` + `isTestFile` (do this file's CONSUMERS LIVE
+  OUTSIDE THE DIFF?). `db/code-loc.ts`'s header names all four. ⚠ Blast radius must NOT import
+  `NOISE_GLOBS` or `API_PATH_PATTERNS`: over-matching is SAFE for the agent router and is a false
+  claim on screen here, and editing either to suit this feature silently changes what Claude
+  Review reviews with no test to catch it.
 - **`apps/backend/src/db/queries.ts` CONTAINS LITERAL NUL BYTES (~offset 132k)**, so search
   tools treat it as BINARY and quietly under-report: `rg` prints only the matches BEFORE the
   first NUL and then says `binary file matches`; a `grep` that skips binaries (`-I`, which

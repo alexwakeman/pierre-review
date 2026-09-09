@@ -1,0 +1,6 @@
+{
+  "name": "a PR whose size was never observed",
+  "why": "18.8% of the real corpus. The three size columns are NOT NULL with a 0 default, so 'never synced' and 'changed nothing' are the same row. Must be UNKNOWN — rendering 'low' about a PR nobody measured is a false claim.",
+  "pr": { "additions": 0, "deletions": 0, "changedFiles": 0, "files": [] },
+  "expected": null
+}

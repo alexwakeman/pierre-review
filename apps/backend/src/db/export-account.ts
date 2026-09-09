@@ -117,6 +117,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       aiCreditAllowance: accounts.aiCreditAllowance,
       benchmarkOptIn: accounts.benchmarkOptIn,
       largePrCodeLocThreshold: accounts.largePrCodeLocThreshold,
+      blastRadiusConfig: accounts.blastRadiusConfig,
       lastLoginAt: accounts.lastLoginAt,
       lastActiveAt: accounts.lastActiveAt,
       createdAt: accounts.createdAt,

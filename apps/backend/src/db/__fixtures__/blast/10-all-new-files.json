@@ -1,0 +1,27 @@
+{
+  "name": "a new module \u2014 every code file is newly added",
+  "why": "Ported from the Claude Review router's allFilesNew. Nothing existing can break by construction, which is real evidence even at size. A file with deletions must clear the flag.",
+  "pr": {
+    "additions": 260,
+    "deletions": 0,
+    "changedFiles": 2,
+    "files": [
+      {
+        "path": "src/feature/new-thing.ts",
+        "additions": 200,
+        "deletions": 0
+      },
+      {
+        "path": "src/feature/new-thing.test.ts",
+        "additions": 60,
+        "deletions": 0
+      }
+    ]
+  },
+  "expected": {
+    "codeFiles": 1,
+    "testFiles": 1,
+    "allNew": true,
+    "truncated": false
+  }
+}

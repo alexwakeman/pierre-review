@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import type {
   AiUsageResponse,
+  BlastRadiusConfigBody,
+  BlastRadiusConfigResponse,
   LargePrThresholdBody,
   LargePrThresholdResponse,
   MeResponse,
@@ -9,6 +11,7 @@ import { config } from '../../config.js';
 import {
   accountToLocalUser,
   setBenchmarkConsent,
+  setBlastRadiusConfig,
   setLargePrCodeLocThreshold,
 } from '../../auth/account.js';
 import { resolveLargePrThreshold } from '../../db/code-loc.js';
@@ -52,6 +55,51 @@ const largePrThresholdSchema = {
         minimum: 1,
         maximum: 1_000_000,
         multipleOf: 1,
+      },
+    },
+  },
+};
+
+// The BLAST-RADIUS reading settings. `config: null` RESETS to the product defaults, the same
+// first-class "no opinion" value `threshold: null` is above — a union, not an optional key, so
+// "clear it" and "leave it alone" stay different requests.
+//
+// The schema is deliberately LOOSE where the sanitizer is strict: `surfacesOff` is a bounded
+// array of short strings here, and `sanitizeBlastRadiusConfig` is what decides which strings are
+// real surfaces (dropping the rest rather than 400-ing the whole write, so an older backend
+// reading a newer client degrades to ignoring one opt-out instead of discarding the dial). The
+// bounds that ARE here are the ones a validator must own: an enum for the dial, and caps so the
+// body cannot be used to push a large payload into a JSON column.
+const blastRadiusConfigSchema = {
+  body: {
+    type: 'object',
+    required: ['config'],
+    additionalProperties: false,
+    properties: {
+      config: {
+        type: ['object', 'null'],
+        additionalProperties: false,
+        required: ['sensitivity'],
+        properties: {
+          sensitivity: { type: 'string', enum: ['cautious', 'balanced', 'relaxed'] },
+          surfacesOff: {
+            type: 'array',
+            maxItems: 32,
+            items: { type: 'string', maxLength: 32 },
+          },
+          overrides: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              highCodeLoc: { type: 'integer', minimum: 1, maximum: 1_000_000 },
+              highCodeFiles: { type: 'integer', minimum: 1, maximum: 100_000 },
+              highDirs: { type: 'integer', minimum: 1, maximum: 100_000 },
+              highSubsystems: { type: 'integer', minimum: 1, maximum: 100_000 },
+              lowCodeLoc: { type: 'integer', minimum: 1, maximum: 1_000_000 },
+              lowCodeFiles: { type: 'integer', minimum: 1, maximum: 100_000 },
+            },
+          },
+        },
       },
     },
   },
@@ -121,6 +169,14 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
         req.account?.largePrCodeLocThreshold ?? null,
       ),
       largePrCodeLocThresholdIsDefault: req.account?.largePrCodeLocThreshold == null,
+      // The BLAST-RADIUS reading settings, RAW and nullable — the one place this response does
+      // NOT resolve a default, and deliberately. The defaults are an 18-number table across
+      // three dial positions living in `packages/shared`, which is types-only on this side
+      // (PACKAGING); resolving here would mean hand-mirroring it forever. The SPA's one
+      // `resolveBlastConfig()` imports that table as a real value instead, so `null` travels and
+      // nothing is duplicated. Free feature → top-level, not inside `pro` (the `mlSeverity`
+      // argument again).
+      blastRadius: req.account?.blastRadiusConfig ?? null,
       // Orgs currently SAML-blocked for this account (empty in the normal case + in local).
       authNotices: getAuthNotices(accountId),
       aiUsage,
@@ -183,6 +239,30 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       return body;
     },
   );
+
+  // The BLAST-RADIUS reading settings — the second ONE-PER-ACCOUNT setting on this route, and
+  // account-grained for the same reasons as the threshold above plus one of its own: the
+  // comparison it feeds is RENDER-TIME, so it rides /api/me and the vis-timeline tooltip (raw
+  // HTML strings, no hooks) can read it off a module cell. A per-workspace value would put a new
+  // "workspace not resolved yet" null-state on four surfaces.
+  //
+  // A PUT rather than a POST because the body is the WHOLE settings object — this replaces the
+  // stored blob, it does not merge into it, and the verb should say so.
+  //
+  // Available in BOTH modes and on every tier: blast radius is free, so its setting must be too.
+  // Rate tier: one schema-validated single-column UPDATE, no GitHub and no model — the blanket
+  // `read` bucket, DECIDED and pinned in rate-limit.test.ts rather than inherited.
+  app.put('/api/me/blast-radius-config', { schema: blastRadiusConfigSchema }, async (req) => {
+    const accountId = accountIdOf(req);
+    const { config: incoming } = req.body as BlastRadiusConfigBody;
+    // ⚠ ECHO WHAT WAS STORED, NOT WHAT WAS SENT. The sanitizer drops unknown surfaces and
+    // out-of-range overrides, so returning the request body would let Settings render a choice
+    // the database does not hold — the same disagreement `largePrCodeLocThresholdIsDefault`
+    // exists to prevent one field over.
+    const stored = await setBlastRadiusConfig(accountId, incoming);
+    const body: BlastRadiusConfigResponse = { status: 'ok', blastRadius: stored };
+    return body;
+  });
 
   // ---- Data-subject rights (UK/EU GDPR Arts. 15, 17, 20; CCPA/CPRA) ----
   //

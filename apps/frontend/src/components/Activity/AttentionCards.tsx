@@ -61,6 +61,7 @@ import { armedPhaseHeadline, TERMINAL_LABEL } from '../AutoMergeBanner.js';
 import { MergeControl } from '../MergeControl.js';
 import { MergeWhenReadyControl } from '../MergeWhenReadyControl.js';
 import { LargePrFlag } from './LargePrFlag.js';
+import { BlastRadiusChip } from './BlastRadiusChip.js';
 
 // The attention-card list — the stalled-review / untouched-thread / reviewer-load / needs-a-reviewer
 // cards, with the full drill-down behaviour (click a card to open the PR / thread, inline thread
@@ -549,8 +550,15 @@ export type PrMetaFields = Pick<
   InsightPrRef,
   // ⚠ `codeLoc`/`codeLocIsLowerBound` are OPTIONAL on InsightPrRef, so Pick keeps them optional
   // here — a caller that has no measurement (or a payload cached before this feature existed)
-  // simply renders no flag, which is the correct answer for "unknown".
-  'ciStatus' | 'changedFiles' | 'additions' | 'deletions' | 'codeLoc' | 'codeLocIsLowerBound'
+  // simply renders no flag, which is the correct answer for "unknown". `blast` rides along on
+  // exactly the same terms.
+  | 'ciStatus'
+  | 'changedFiles'
+  | 'additions'
+  | 'deletions'
+  | 'codeLoc'
+  | 'codeLocIsLowerBound'
+  | 'blast'
 > &
   Partial<PrSourceRef>;
 
@@ -585,6 +593,12 @@ export function PrMetaRow({ pr }: { pr: PrMetaFields }): JSX.Element {
           removed — the comparison is the information. Renders nothing at all when the PR is
           under the threshold OR was never measured (see lib/ui.ts's `largePrFlag`). */}
       <LargePrFlag pr={pr} />
+      {/* BLAST RADIUS — how far the change can REACH, beside how big it is. The reason the board
+          carries it at all: a maintainer must be able to see which cards are a quick eyeball
+          WITHOUT opening them, and this row MAY NOT FETCH — the signals ride the card.
+          ⚠ NOT `expandable` here: the card is a link to the pull request, and a second
+          interactive target inside it competes with that. The reasons are in the title. */}
+      <BlastRadiusChip pr={pr} />
       {authorSourceLabel(pr) != null && (
         <BotVendorPill
           kind={pr.authorBotKind ?? null}

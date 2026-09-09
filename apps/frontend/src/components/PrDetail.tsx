@@ -11,6 +11,7 @@ import type {
 } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
 import { usePrCodeLoc } from '../hooks/useLargePr.js';
+import { usePrBlast } from '../hooks/useBlastRadius.js';
 import { usePrLiveRefresh } from '../hooks/usePrLiveRefresh.js';
 import { usePrArmedIntent } from '../hooks/useAutoMerge.js';
 import { useMe, useProCapabilities } from '../hooks/useTriage.js';
@@ -47,6 +48,8 @@ import {
 import { ThreadList } from './ThreadList/index.js';
 import { BotTriageCard } from './BotTriageCard.js';
 import { LargePrFlag } from './Activity/LargePrFlag.js';
+import { BlastRadiusChip } from './Activity/BlastRadiusChip.js';
+import { BlastImpactNote } from './Activity/BlastImpactNote.js';
 import { ChecksTab } from './ChecksTab.js';
 import { CommentAnnotations, ReviewCheckButton } from './CommentAnnotations.js';
 import type { MlSeverity } from '@pierre-review/shared';
@@ -652,6 +655,10 @@ export function PrDetail({
   // the header borrows the measurement the timeline/open-PR caches already hold; a PR in neither
   // resolves to "no measurement" and therefore no flag, exactly like an unmeasured PR.
   const codeLocFields = usePrCodeLoc(prId);
+  // ⚠ A CACHE READ, NOT A LOCAL CLASSIFICATION. This pane HAS `pr.files` and could classify them
+  // itself — which would put a SECOND path classifier in the SPA, one that disagrees silently
+  // with `db/blast-radius.ts` on any file the two lists do not share. See usePrBlast's header.
+  const blastFields = usePrBlast(prId);
   const { data: repos } = useRepos();
   const { aiAnalysis, aiFix, claudeReview: claudeReviewEnabled } = useProCapabilities();
   const aiFixTabEnabled = aiAnalysis || aiFix;
@@ -1197,7 +1204,24 @@ export function PrDetail({
               PR. Placed right after the raw +/− delta so the two readings sit together — that
               total includes docs, config, lockfiles and generated files; this one does not. */}
           <LargePrFlag pr={codeLocFields} className="ml-0.5" />
+          {/* BLAST RADIUS, beside the two size readings. This is the ONE surface that gets the
+              EXPANDABLE chip: there is room for the reason list here, and this is where a reader
+              who disagrees with a verdict needs to see what decided it (the known false positive
+              — a repo whose product IS a database schema — is only correctable by someone who
+              can see "a database schema" named, then switch that surface off in Settings).
+              ⚠ It reads the SAME `codeLoc` the flag beside it reads, so the two can never quote
+              different line counts for one pull request. */}
+          <BlastRadiusChip
+            pr={{ ...blastFields, ...codeLocFields }}
+            className="ml-0.5"
+            expandable
+          />
         </div>
+        {/* The Pro half of blast radius, on its own line under the metadata row — two sentences
+            need the width, and a click-gated button does not belong inline among the counts.
+            ⚠ `hasBlast` gates it on the CHIP having something to explain: with no measurement
+            there is no chip and no button, which is the same silence the free half keeps. */}
+        <BlastImpactNote prId={prId} hasBlast={blastFields.blast != null} />
       </div>
 
       <div className="flex gap-1 border-b border-gray-200 px-3 dark:border-gray-800">
