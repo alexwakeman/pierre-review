@@ -200,13 +200,69 @@ cannot be **called** here:
 
 ---
 
+## Where the chip appears
+
+| Surface | Form |
+|---|---|
+| Pending board (`PrMetaRow`) | labelled, not expandable — the card is itself a link |
+| Feed, **PR-opened** cards | labelled, on the card's own metadata row |
+| Feed, every other card kind | icon-only on the PR-ref line (no card body to put it on) |
+| PR detail | labelled and **expandable** |
+| vis-timeline | a tooltip row, via the same resolver |
+
+⚠ **A PR-opened Feed card suppresses the ref-line icon**, because it carries the labelled chip
+below — the same fact twice on one card is the double-count the large-PR flag rule already names.
+
+⚠ **None of this costs a GitHub call.** The signals ride `ConsolidatedFeedItem`/`InsightPrRef`/
+`TimelinePr`, folded server-side once per PR on the page.
+
+## The expansion is free, because it is deterministic
+
+Every reason and every figure in the disclosure comes from `blastRadius()` and `blastSignalsFor()`.
+**No model is in that call path** — so it is open to every user on every tier. (The Pro half of
+blast radius is the impact *note*, a different component.)
+
+⚠ **EVERY pull request expands, not only multi-reason ones — and that is only defensible because
+the panel shows the EVIDENCE, not just the reasons.** An earlier cut opened onto `reasons[]` alone,
+which on a single-reason pull request meant reading its own summary back verbatim. The signal
+vector underneath (files, tests, directories, areas, code lines, and the change shape *when it was
+read*) is what makes the click worth making.
+
+⚠ **The panel carries `self-start`.** It sits in PR detail's `items-center` metadata row, so
+without it an expanded panel makes the row tall and vertically centres the author line against it —
+the line visibly drifts as the reader opens the disclosure.
+
 ## Showing and hiding the impact note
 
 `BlastRadiusConfig.showImpactNote` — account-grained, beside the sensitivity dial. **Absent means
 SHOWN**, so an account that has never expressed an opinion gets the feature; only `false` is ever
 stored, for the same two-state reason nothing else in that blob stores a default.
 
-Hiding removes the **whole affordance**, button included — and it is ANDed into the annotation
+**There are TWO controls and they answer different questions.**
+
+| Control | Where | Means | Stored |
+|---|---|---|---|
+| **Collapse** (`⌄ Impact note`) | on the note | "folded right now" — one click unfolds it | `localStorage`, per viewer |
+| **Offer the impact note** | Settings | "never offer this at all" — removes the button, stops the query | `showImpactNote`, server |
+
+⚠ **Collapsing used to write the SERVER field, which made one click a one-way trip.** The reader
+could only get the note back through Settings — reported as "when I 'Hide' the summary, it is gone
+for good". The caret is now the reversible control and the server field is only the permanent
+switch.
+
+⚠ **The collapse is `localStorage`, per this codebase's stated rule** for a lightweight per-viewer
+convenience: whether this browser currently shows a panel folded is a fact about this browser.
+Wrapped in try/catch, correct when it comes back empty (empty = expanded). It is deliberately not
+the Zustand filter store, which persists and resets from one shared list — "Clear filters" would
+silently unfold every note.
+
+⚠ **The collapsed stub still shows a `· flagged` marker** when the model escalated. Hiding the
+fact that something was flagged is the one thing a fold may not do.
+
+⚠ **Collapsing never hides the "What could this break?" button** — only a generated note. A reader
+who folded one must still be able to ask for another.
+
+Hiding via Settings removes the **whole affordance**, button included — and it is ANDed into the annotation
 query's own `enabled`, because a "hidden" note that still costs a request on every PR open is not
 hidden. Two entry points write the one field: the Settings checkbox, and a **"Hide these"** link
 on the note itself. ⚠ The inline link sends the **whole config**, because the route REPLACES the
@@ -265,6 +321,7 @@ measurement.
 | Non-test code files | p50 3 · p75 7 · p90 17 |
 | Directories · subsystems | p50 2 / p75 4 · p50 1 / p75 2 |
 | Surfaces seen | deps 222 · schema 55 · ci 43 · dts 2 · migration 2 · sql 2 |
+| Chip coverage on open PRs, after the file backfill | **100%** (was 90.2%) |
 | Repos clearing the hub coverage floor | **6 of 23** |
 | PRs whose level the hub arm changes | **3.5%** |
 | PRs eligible for a change-shape diff read | **26 of 1,566 (1.7%)** — 363 are HIGH, 53 on a surface alone |
@@ -275,6 +332,45 @@ directly); rebuild it from `blastSignalsFor` + `codeLocFor` + `blastRadius` and 
 distribution has not drifted. A large drift means an arm changed meaning.
 
 ---
+
+## Why the classification stays narrow — measured, not assumed
+
+The obvious "just classify everything on sync" was tested and rejected on the numbers:
+
+| | |
+|---|---|
+| Cost of `contentKind` for every open PR | **1,410 calls** up front, ~213/day steady state |
+| …for every PR ever synced | **7,567 calls** |
+| Of those, PRs a cap **could not possibly change** | **1,048** — a cap only ever lowers a HIGH |
+| Sampled from the highs today's gate SKIPS | **0 of 40** were trivial |
+| Hit rate inside the gate | **3 of 25 (12%)** |
+
+So widening spends hundreds of calls for a measured zero. **The narrow gate stays.**
+
+⚠ **THE LEVEL ITSELF WAS NEVER THE EXPENSIVE PART, AND IS ALREADY UNIVERSAL AND LIVE.** It is
+folded from synced columns on every read, so a commit that adds files or directories moves the band
+on the next sync with no extra work at all. What needed fixing for "every PR has a chip" was not a
+diff read but a missing FILE LIST — see below.
+
+## The two backfills, and why they are not the same thing
+
+| | `backfillMissingPrFiles` | `runChangeShapeClassification` |
+|---|---|---|
+| Fetches | the file list (`/pulls/:n/files`) | the same call, read for its **patches** |
+| Buys | a level **existing at all** | a level being **refined** (the cap) |
+| Population | open PRs with `files IS NULL` | high-on-a-surface, small |
+| Measured | 142 PRs → coverage 90.2% → **100%** | 25 PRs → 3 capped |
+
+⚠ **The first cannot be replaced by the second.** With no `files` there is nothing for a diff to
+refine — `codeLocFor` returns null and every surface correctly renders nothing.
+
+⚠ **The file backfill alone was not enough, and the reason is worth knowing.** After it ran, all
+1,564 open PRs had a real file list and coverage had *not moved*. The blocker was `codeLocFor`'s
+**trap 2**: `additions`/`deletions`/`changedFiles` all 0 reads as "never observed", and 154 PRs had
+exactly that alongside a perfectly good file list. The trap was narrowed to fire only when the file
+list **agrees** (sums to zero too) — a stored `files[]` with real per-file numbers is a positive
+observation of size, from the same GitHub payload the columns should have carried. A genuinely
+empty PR still refuses.
 
 ## Verifying
 

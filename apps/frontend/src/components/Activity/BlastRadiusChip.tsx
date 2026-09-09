@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BlastRadiusIcon } from '../Icons.js';
-import { blastRadius, type BlastPrFields, type BlastVerdict } from '../../lib/ui.js';
+import { blastRadius, count, type BlastPrFields, type BlastVerdict } from '../../lib/ui.js';
 import { useBlastConfig } from '../../hooks/useBlastRadius.js';
 
 // THE BLAST-RADIUS CHIP, as rendered on every React surface: the Pending board's `PrMetaRow`, the
@@ -39,6 +39,46 @@ const LEVEL_META: Record<
   medium: { rings: 2, className: 'text-gray-500 dark:text-gray-400', word: 'Medium' },
   high: { rings: 3, className: 'text-amber-600 dark:text-amber-500', word: 'High' },
 };
+
+/** The signal vector, in words. Every figure here is computed — see the note in `BlastRadiusChip`
+ *  about why the whole disclosure is free. */
+function BlastEvidence({ pr }: { pr: BlastPrFields }): JSX.Element | null {
+  const b = pr.blast;
+  if (b == null) return null;
+  const parts: string[] = [
+    count(b.codeFiles, 'code file', 'code files'),
+    count(b.testFiles, 'test file', 'test files'),
+    `${b.nonCodeFiles} docs/config`,
+  ];
+  const spread = `${count(b.dirs, 'directory', 'directories')} · ${count(b.subsystems, 'top-level area', 'top-level areas')}`;
+  return (
+    <div className="border-t border-gray-200 pt-1 text-gray-500 dark:border-gray-700 dark:text-gray-400">
+      <div>{parts.join(', ')}</div>
+      <div>{spread}</div>
+      {/* ⚠ The line count comes from the SAME `codeLoc` the large-PR flag reads. A lower bound
+          keeps its "+", because a truncated file list makes every figure above a floor too. */}
+      {pr.codeLoc != null && (
+        <div>
+          {pr.codeLoc.toLocaleString()}
+          {pr.codeLocIsLowerBound ? '+' : ''} code lines
+          {b.truncated ? ' · GitHub truncated the file list, so these are minimums' : ''}
+        </div>
+      )}
+      {/* ⚠ SAID ONLY WHEN WE LOOKED. `contentKind: null` is the case for most pull requests and
+          means the diff was never read — printing "code" for it would assert something nobody
+          checked. */}
+      {b.contentKind != null && (
+        <div>
+          {b.contentKind === 'comments'
+            ? 'Read from the diff: comments only'
+            : b.contentKind === 'formatting'
+              ? 'Read from the diff: formatting only'
+              : 'Read from the diff: real code changes'}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function BlastRadiusChip({
   pr,
@@ -81,14 +121,18 @@ export function BlastRadiusChip({
 
   const shell = `inline-flex shrink-0 items-center gap-1 text-[11px] ${meta.className} ${className}`;
 
-  // ⚠ EXPANDING A SINGLE REASON SAYS IT TWICE. The summary above already IS that reason, so an
-  // expander would open onto "1 code file in one area, with tests" under a chip reading "Low · 1
-  // code file in one area, with tests". Low and medium always have exactly one reason; the
-  // disclosure exists for the HIGH case, where a pull request can trip a surface, a hub, spread
-  // and volume at once and the summary can only show the first.
-  const worthExpanding = expandable && verdict.reasons.length > 1;
-
-  if (!worthExpanding) {
+  // EVERY pull request expands, not only the multi-reason ones.
+  //
+  // ⚠ THAT IS ONLY TRUE BECAUSE THE DISCLOSURE SHOWS THE EVIDENCE, NOT JUST THE REASONS. An
+  // earlier cut opened onto `reasons[]` alone, which on a single-reason pull request meant
+  // reading "1 code file in one area, with tests" under a chip already saying "Low · 1 code file
+  // in one area, with tests" — the same sentence twice. The signal vector underneath is what
+  // makes the click worth making on every pull request.
+  //
+  // ⚠ FREE FOR EVERY USER, AND THAT IS A FACT ABOUT THE DATA, NOT A PRICING CHOICE: every line
+  // below is computed by `blastRadius()` and `blastSignalsFor()`. No model is in this call path.
+  // The Pro half of blast radius is the impact NOTE, which is a different component.
+  if (!expandable) {
     return (
       <span className={shell} title={verdict.label}>
         {body}
@@ -97,7 +141,10 @@ export function BlastRadiusChip({
   }
 
   return (
-    <span className="inline-flex flex-col items-start gap-0.5">
+    // ⚠ `self-start`. This sits inside PR-detail's `items-center` metadata row, so without it an
+    // expanded panel makes the row tall and vertically CENTRES the author line against it — the
+    // line visibly drifts down the moment the reader opens the disclosure.
+    <span className="inline-flex flex-col items-start gap-0.5 self-start">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -108,15 +155,22 @@ export function BlastRadiusChip({
         {body}
       </button>
       {open && (
-        <ul className="ml-4 list-disc space-y-0.5 text-[11px] text-gray-600 dark:text-gray-300">
-          {/* EVERY reason, not just the headline one. This list is what makes the verdict
-              AUDITABLE — the known false positive (a repo whose product IS a database schema)
-              is only correctable by a reader who can see that "a database schema" is what
-              decided it, and then switch that surface off in Settings. */}
-          {verdict.reasons.map((r) => (
-            <li key={`${r.kind}:${r.text}`}>{r.text}</li>
-          ))}
-        </ul>
+        <div className="ml-4 flex flex-col gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+          <ul className="list-disc space-y-0.5">
+            {/* EVERY reason, not just the headline one. This list is what makes the verdict
+                AUDITABLE — the known false positive (a repo whose product IS a database schema)
+                is only correctable by a reader who can see that "a database schema" is what
+                decided it, and then switch that surface off in Settings. */}
+            {verdict.reasons.map((r) => (
+              <li key={`${r.kind}:${r.text}`}>{r.text}</li>
+            ))}
+          </ul>
+          {/* THE EVIDENCE the verdict was computed from. Deliberately the raw counts rather than
+              a restatement of the reasons: this is the half a reader checks the verdict AGAINST,
+              and it is what makes the disclosure worth opening on a pull request whose reason
+              list is one line long. */}
+          <BlastEvidence pr={pr} />
+        </div>
       )}
     </span>
   );

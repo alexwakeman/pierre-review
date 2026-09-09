@@ -1891,6 +1891,12 @@ function PrOpenedExtras({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
               {files} {files === 1 ? 'file' : 'files'} changed
             </span>
           )}
+          {/* BLAST RADIUS, LABELLED, on the pr_opened card's own metadata row — the one place on
+              a Feed card with room for the words. It costs nothing: the signals already ride
+              `ConsolidatedFeedItem`, folded server-side once per PR on the page.
+              ⚠ The PR-ref line above suppresses its icon-only chip for exactly this card kind,
+              so the same fact is never stated twice on one card. */}
+          <BlastRadiusChip pr={item} />
         </div>
       )}
       {prId != null && (
@@ -2286,10 +2292,14 @@ function FeedRowImpl({
               Icon-only here: this line already truncates the title, so the count rides the
               accessible label and the hover title instead of taking horizontal space. */}
           <LargePrFlag pr={item} iconOnly className="self-center" />
-          {/* Blast radius, on the same terms and for the same reason — a fact about the pull
-              request, beside its number, icon-only because this line already truncates. The level
-              and every reason ride the accessible label and the hover title. */}
-          <BlastRadiusChip pr={item} iconOnly className="self-center" />
+          {/* Blast radius, on the same terms — a fact about the pull request, beside its number,
+              icon-only because this line already truncates.
+              ⚠ SUPPRESSED ON pr_opened CARDS, which carry the LABELLED chip on their own metadata
+              row below (`PrOpenedExtras`). Every other kind — a comment, a review, a merge — has
+              no such row, so this is the only place their reader can see it. Rendering both would
+              state the same fact twice on one card, the double-count the large-PR flag rule above
+              already names. */}
+          {!isPrOpened && <BlastRadiusChip pr={item} iconOnly className="self-center" />}
           {item.path != null && (
             <span className="shrink-0 text-gray-400">· {item.path.split('/').pop()}</span>
           )}

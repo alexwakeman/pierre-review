@@ -206,7 +206,7 @@ describe('codeLocFor', () => {
   // ---- TRAP 2: a never-observed size (18.8%) ------------------------------
   it('TRAP 2 — additions/deletions/changedFiles all 0 is UNOBSERVED, never "not large"', () => {
     // The columns are NOT NULL with a 0 default, so an unhydrated PR and an empty one are the
-    // same row. Even with a files array present, the size was never observed.
+    // same row — WHEN the file list cannot settle it either.
     expect(codeLocFor({ files: [], additions: 0, deletions: 0, changedFiles: 0 })).toEqual({
       codeLoc: null,
       codeLocIsLowerBound: false,
@@ -215,6 +215,39 @@ describe('codeLocFor', () => {
       codeLoc: null,
       codeLocIsLowerBound: false,
     });
+  });
+
+  it('TRAP 2, NARROWED — a real file list SETTLES the ambiguity the zero columns create', () => {
+    // ⚠ The refusal exists because "never observed" and "changed nothing" are the same row. A
+    // stored `files[]` carrying real per-file numbers is a POSITIVE observation of size, from the
+    // same GitHub payload the columns should have held — so refusing on the columns alone throws
+    // away evidence we have. Measured: 154 of 1,564 open pull requests (9.8%) were reported
+    // UNKNOWN for exactly this reason, showing no large-PR flag and no blast-radius chip.
+    expect(
+      codeLocFor({
+        files: [
+          { path: 'src/utils.ts', additions: 4, deletions: 2 },
+          { path: 'tests/x.test.ts', additions: 130, deletions: 0 },
+        ],
+        additions: 0,
+        deletions: 0,
+        changedFiles: 0,
+      }),
+    ).toEqual({ codeLoc: 136, codeLocIsLowerBound: false });
+  });
+
+  it('TRAP 2 STILL REFUSES when the files AGREE with the zero columns', () => {
+    // A genuinely empty pull request must never acquire a fabricated size. Both halves say zero,
+    // so the answer stays unknown — this is what stops the narrowing above from becoming a
+    // "0 code lines" claim about a PR nobody measured.
+    expect(
+      codeLocFor({
+        files: [{ path: 'src/a.ts', additions: 0, deletions: 0 }],
+        additions: 0,
+        deletions: 0,
+        changedFiles: 0,
+      }),
+    ).toEqual({ codeLoc: null, codeLocIsLowerBound: false });
   });
 
   // ---- TRAP 3: files = [] is OVERLOADED ------------------------------------

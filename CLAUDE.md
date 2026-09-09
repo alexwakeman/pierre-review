@@ -503,6 +503,18 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   change to a file that matters. ⚠ `contentKind: null` is "we did not look" — the case for ~98% of
   PRs — and must NEVER demote; a stored verdict is ignored unless `content_kind_sha` still matches
   `head_sha`, a comparison that lives ONCE inside `blastSignalsFor`.
+  ⚠ **THE LEVEL IS ALREADY UNIVERSAL AND FREE — do not "optimise" it onto sync.** It is folded from
+  synced columns on every read, so a push moves the band with no extra work. MEASURED: classifying
+  `contentKind` for every open PR costs 1,410 calls (~213/day) and **0 of 40** sampled outside the
+  narrow gate were trivial, vs 12% inside it. Two SEPARATE backfills exist and are not
+  interchangeable: `backfillMissingPrFiles` (a level EXISTS AT ALL — took chip coverage 90.2% →
+  100%) and `runChangeShapeClassification` (a level is REFINED). With no `files` there is nothing
+  for a diff to refine.
+  ⚠ **THE EXPANSION IS DETERMINISTIC, SO IT IS FREE FOR EVERY TIER** — `reasons[]` + the signal
+  vector, no model in that call path. The Pro half is the impact NOTE only. ⚠ **TWO CONTROLS, TWO
+  QUESTIONS**: the note's caret is a REVERSIBLE per-viewer collapse (localStorage), while Settings'
+  `showImpactNote` is the permanent "never offer it" switch. Collapsing used to write the server
+  field, which made hiding a one-way trip.
   Full contract + the measured calibration: [docs/BLAST-RADIUS.md](docs/BLAST-RADIUS.md).
 - **Timeline vertical scroll is GATED.** Every programmatic scroll goes through
   `setVisScrollTop` and must claim the gate (`intentionalScrollRef` + `scrollLoopRef`) — never

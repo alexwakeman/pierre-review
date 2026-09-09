@@ -1323,7 +1323,8 @@ function joinWords(parts: string[]): string {
 
 /** `3 code files` / `1 code file`. Builds on this module's existing `plural`, which returns the
  *  WORD alone — one helper, two shapes, rather than two helpers with one name. */
-const count = (n: number, one: string, many: string): string => `${n} ${plural(n, one, many)}`;
+export const count = (n: number, one: string, many: string): string =>
+  `${n} ${plural(n, one, many)}`;
 
 /** The three wire fields the resolver reads. Structural, exactly like `largePrFlag`'s argument
  *  and for the same reason: the ONE function then serves `TimelinePr`, `InsightPrRef` and

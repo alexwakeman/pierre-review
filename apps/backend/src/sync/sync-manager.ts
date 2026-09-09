@@ -412,6 +412,23 @@ export async function runSyncForRepo(
         });
       }
 
+      // BLAST RADIUS, step 1 of 3: give every open pull request a FILE LIST.
+      //
+      // ⚠ FIRST, because the two steps below both read `files` — the co-change index folds it and
+      // the change-shape candidate test needs a level to narrow from. Ordering, not preference.
+      //
+      // A pull request with no stored `files` has no blast radius at all (measured: 9.8% of open
+      // pull requests), and no diff read can fix that — there is nothing for a diff to refine.
+      // Bounded per run, once per pull request, strictly non-fatal.
+      try {
+        const { backfillMissingPrFiles } = await import('./routing-files.js');
+        await backfillMissingPrFiles(repo.accountId, repoId, log);
+      } catch (err) {
+        log.warn(
+          `files backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
+      }
+
       // The BLAST-RADIUS co-change index for this repo. Purely LOCAL — one indexed read of the
       // repo's merged pull requests, an in-memory fold and one upsert; it makes NO GitHub call
       // and spends no rate-limit budget, so unlike the backfill above it needs no gate and no

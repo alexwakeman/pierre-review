@@ -346,6 +346,9 @@ const UNKNOWN: CodeLocResult = { codeLoc: null, codeLocIsLowerBound: false };
  *    for this PR. Nothing to fold → `null`.
  *
  * 2. **A never-observed size** (18.8%) — `additions`, `deletions` and `changedFiles` are all 0.
+ *    ⚠ NARROWED: this now refuses only when the FILE LIST agrees (sums to zero too). See the
+ *    inline note — a stored `files[]` carrying real per-file numbers is a positive observation of
+ *    size, and refusing on the columns alone was discarding it for 9.8% of open pull requests.
  *    Those columns are NOT NULL with a 0 default, so "we never saw this PR's size" and "this PR
  *    genuinely changed nothing" are the SAME row. `lib/botVolume.ts` states the rule for the
  *    total-LoC label and it holds identically here: send null, never a fabricated 0, because
@@ -368,11 +371,30 @@ export function codeLocFor(pr: {
   deletions: number;
   changedFiles: number;
 }): CodeLocResult {
-  // Trap 2 first: it subsumes the "genuinely empty PR" reading of trap 3, and it is true
-  // regardless of what `files` holds.
-  if (pr.additions === 0 && pr.deletions === 0 && pr.changedFiles === 0) return UNKNOWN;
   // Trap 1.
   if (pr.files == null) return UNKNOWN;
+  // ⚠ TRAP 2, NARROWED — read this before widening it back.
+  //
+  // The ambiguity is real: `additions`/`deletions`/`changedFiles` are NOT NULL with a 0 default,
+  // so "we never saw this pull request's size" and "it genuinely changed nothing" are the same
+  // row. But that is only unresolvable when the FILE LIST cannot answer it either. A non-empty
+  // `files[]` whose per-file numbers sum above zero IS a positive observation of size, from the
+  // same GitHub payload the columns should have carried — so refusing on the columns alone
+  // discards evidence we hold.
+  //
+  // Measured after `backfillMissingPrFiles` landed: 154 of 1,564 open pull requests (9.8%) had a
+  // real file list and three zeroed columns, and were reported UNKNOWN — no large-PR flag and no
+  // blast-radius chip — purely because this test ran first and read only the columns.
+  //
+  // ⚠ THE REFUSAL STILL STANDS WHEN THE FILES AGREE. All-zero columns AND a file list that sums
+  // to zero is still UNKNOWN, so a genuinely empty pull request never acquires a fabricated size.
+  const filesSum = pr.files.reduce(
+    (n, f) => n + ((f?.additions ?? 0) + (f?.deletions ?? 0)),
+    0,
+  );
+  if (pr.additions === 0 && pr.deletions === 0 && pr.changedFiles === 0 && filesSum === 0) {
+    return UNKNOWN;
+  }
   // Trap 3: an empty array with a non-zero size is the routing-files sentinel (or a partial
   // write); either way we hold no per-file breakdown to classify.
   if (pr.files.length === 0) return UNKNOWN;
