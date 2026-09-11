@@ -1573,7 +1573,13 @@ export function PeriodReportsPanel(): JSX.Element | null {
                   type="button"
                   onClick={() => setSelectedKey(p.periodKey)}
                   aria-pressed={on}
-                  className={`rounded border px-1.5 py-0.5 text-[11px] ${
+                  /* ⚠ ONE HEIGHT DOWN THE WHOLE ROW, AND IT IS SET RATHER THAN INHERITED.
+                     `inline-flex items-center` puts the partial-coverage mark on the text's own
+                     line instead of below its baseline — an inline SVG grows the line box, so the
+                     one chip carrying the mark used to stand taller than every chip beside it.
+                     The explicit `h-[22px]` then matches the `Earlier…` select below, which a
+                     browser renders taller than a bare button whatever the padding says. */
+                  className={`inline-flex h-[22px] items-center gap-1 rounded border px-1.5 text-[11px] leading-none ${
                     on
                       ? 'border-ai-signal/50 bg-ai-signal/10 text-ai-signal'
                       : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
@@ -1584,9 +1590,12 @@ export function PeriodReportsPanel(): JSX.Element | null {
                       : `${p.periodKey} · figures only, not written up`
                   }
                 >
-                  {shortPeriodLabel(p)}
+                  <span className="truncate">{shortPeriodLabel(p)}</span>
                   {!p.coverageComplete && (
-                    <span className="ml-1 text-amber-600 dark:text-amber-400" title="Partial repo coverage">
+                    <span
+                      className="flex shrink-0 items-center text-amber-600 dark:text-amber-400"
+                      title="Partial repo coverage"
+                    >
                       <PartialCircleIcon />
                     </span>
                   )}
@@ -1597,7 +1606,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
               <select
                 value={periods.slice(0, 8).some((p) => p.periodKey === selectedKey) ? '' : (selectedKey ?? '')}
                 onChange={(e) => e.target.value && setSelectedKey(e.target.value)}
-                className="rounded border border-gray-300 bg-white px-1 py-0.5 text-[11px] dark:border-gray-700 dark:bg-gray-950"
+                className="h-[22px] rounded border border-gray-300 bg-white px-1 text-[11px] leading-none dark:border-gray-700 dark:bg-gray-950"
               >
                 <option value="">Earlier…</option>
                 {periods.slice(8).map((p) => (

@@ -153,11 +153,19 @@ export function WorkspaceRepoActivityCharts({
       </h4>
       {/* Two columns on a wide screen, stacked below `lg`. It stays two columns even when only ONE
           card renders: a lone card stretched to 1,350px puts its numbers a screen-width away from
-          the name they belong to, which is the reading problem this whole section exists to fix. */}
-      <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+          the name they belong to, which is the reading problem this whole section exists to fix.
+          ⚠ THE CELLS STRETCH, AND EACH CARD IS `h-full` INSIDE ITS CELL — so the two boxes end on
+          one line whatever their contents weigh. Their disclosures live INSIDE the cards for the
+          same reason: while they hung below, each card was its own height and the two sentence
+          blocks started at different y, which made a two-card row read as two unrelated things.
+          The slack goes to the shorter card's BOTTOM as blank space; nothing is spread to fill. */}
+      <div className="grid grid-cols-1 items-stretch gap-3 lg:grid-cols-2">
         {showActivity && (
-          <div className="space-y-2">
-            <ChartCard title="Activity by repository" note={`${activity.windowDays} days · ${capNote}`}>
+          <ChartCard
+            title="Activity by repository"
+            note={`${activity.windowDays} days · ${capNote}`}
+            className="h-full"
+          >
               <RepoRows
                 labels={labels}
                 columns={columns}
@@ -177,11 +185,10 @@ export function WorkspaceRepoActivityCharts({
                 Each column has its own scale, so a bar compares repositories within its column and
                 never across the two.
               </p>
-            </ChartCard>
 
             {/* The disclosures. Each one exists because the alternative is a list that quietly
                 asserts something false; none of them is decoration. */}
-            <div className="space-y-1 text-[12px] text-gray-500 dark:text-gray-400">
+            <div className="mt-2 space-y-1 text-[12px] text-gray-500 dark:text-gray-400">
               {/* The window, stated once. It differs from BOTH windows above it — the tiles compare
                   against a prior fortnight and the trend band spans 12 weeks — so saying "rolling
                   14 days" alone would still leave a reader assuming a comparison that is not
@@ -241,7 +248,7 @@ export function WorkspaceRepoActivityCharts({
                 </p>
               )}
             </div>
-          </div>
+          </ChartCard>
         )}
         {reach != null && (
           <WorkspaceReachCard

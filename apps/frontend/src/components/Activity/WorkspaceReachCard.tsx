@@ -130,8 +130,10 @@ export function WorkspaceReachCard({
   ];
 
   return (
-    <div className="space-y-2">
-      <ChartCard title="Reach by repository" note={`open now · ${capNote}`}>
+    /* ⚠ `h-full`, AND THE DISCLOSURES ARE INSIDE THE CARD — see the grid comment in
+       `WorkspaceRepoActivityCharts`. The two cards on that row end on one line, and the slack goes
+       to the shorter one's bottom as blank space rather than being spread through its rows. */
+    <ChartCard title="Reach by repository" note={`open now · ${capNote}`} className="h-full">
         <RepoRows
           labels={reach.repos.map((r) => r.repoFullName)}
           columns={columns}
@@ -141,8 +143,7 @@ export function WorkspaceReachCard({
             return r != null && r.unread > 0 ? `${fmtNum(r.unread)} with no reading` : null;
           }}
         />
-      </ChartCard>
-      <div className="space-y-1 text-[12px] text-gray-500 dark:text-gray-400">
+      <div className="mt-2 space-y-1 text-[12px] text-gray-500 dark:text-gray-400">
         <p>
           Every pull request open right now, by how far it could reach — a snapshot, not a window.
           {/* ⚠ THE NEIGHBOUR IS NAMED, NEVER POSITIONED. The grid is two columns only at `lg` and
@@ -210,6 +211,6 @@ export function WorkspaceReachCard({
           </p>
         )}
       </div>
-    </div>
+    </ChartCard>
   );
 }

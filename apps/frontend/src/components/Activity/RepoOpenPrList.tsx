@@ -84,50 +84,66 @@ export function OpenPrRow({
           <span className="text-gray-400">#{pr.number}</span>{' '}
           <span className="font-medium text-gray-700 dark:text-gray-200">{pr.title}</span>
         </span>
-        {/* PR author — to the right of the title. */}
-        <Avatar user={author} size={16} />
-        <span
-          className="max-w-[7rem] shrink-0 truncate text-gray-500 dark:text-gray-400"
-          title={userLabel(author, pr.authorId)}
-        >
-          {userLabel(author, pr.authorId)}
-        </span>
-
-        {pr.isDraft && (
-          <span className="shrink-0 rounded bg-gray-500/15 px-1 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-            draft
-          </span>
-        )}
-        {standing != null && (
+        {/* ── THE TRAILING CELLS ARE FIXED-WIDTH COLUMNS, NOT AN INLINE RUN ──────────────
+            Every cell below is `shrink-0` at a pinned width, so author, status, bar and time
+            each land on ONE vertical line down the list. They used to be inline siblings of a
+            flexible title, which meant a row's avatar sat wherever that row's chips happened to
+            end: on a real list "Jason Grout" started 130px right of "Benedict Chacko", and the
+            status chips never lined up with each other at all. Ten rows of that reads as noise.
+            A cell renders EMPTY rather than collapsing (the status column especially, which most
+            rows do not fill) — that is what holds the columns still. */}
+        <span className="flex w-36 shrink-0 items-center gap-1.5 overflow-hidden">
+          <Avatar user={author} size={16} />
           <span
-            className="shrink-0 rounded px-1 text-[10px] font-semibold"
-            style={{ color: standing.color, background: standing.color + '1a' }}
-          >
-            {standing.label}
-          </span>
-        )}
-        {warn != null && (
-          <span
-            className={`shrink-0 rounded px-1 text-[10px] font-medium ${MERGE_TONE_CHIP[warn.tone]}`}
-            title={warn.detail ?? warn.label}
-          >
-            {warn.label}
-          </span>
-        )}
-        <ThreadStateBar counts={pr.threadCounts} compact />
-        {reason.myTurn ? (
-          <span
-            className="hidden shrink-0 rounded px-1 text-[10px] font-medium sm:inline"
-            style={{ color: reason.color, background: reason.color + '1a' }}
+            className="truncate text-gray-500 dark:text-gray-400"
             title={userLabel(author, pr.authorId)}
           >
-            {reason.label}
+            {userLabel(author, pr.authorId)}
           </span>
-        ) : (
-          <span className="hidden shrink-0 text-[10px] text-gray-400 sm:inline">
-            {relativeTime(pr.updatedAt)}
-          </span>
-        )}
+        </span>
+
+        {/* Status: draft / approval standing / merge warning. Right-aligned so whatever a row
+            carries sits against the bar, and all three can co-occur. */}
+        <span className="flex w-28 shrink-0 items-center justify-end gap-1 overflow-hidden">
+          {pr.isDraft && (
+            <span className="shrink-0 rounded bg-gray-500/15 px-1 text-[10px] font-medium text-gray-500 dark:text-gray-400">
+              draft
+            </span>
+          )}
+          {standing != null && (
+            <span
+              className="shrink-0 rounded px-1 text-[10px] font-semibold"
+              style={{ color: standing.color, background: standing.color + '1a' }}
+            >
+              {standing.label}
+            </span>
+          )}
+          {warn != null && (
+            <span
+              className={`shrink-0 truncate rounded px-1 text-[10px] font-medium ${MERGE_TONE_CHIP[warn.tone]}`}
+              title={warn.detail ?? warn.label}
+            >
+              {warn.label}
+            </span>
+          )}
+        </span>
+        <ThreadStateBar counts={pr.threadCounts} compact />
+        {/* My-turn reason, else the updated time — one column, right-aligned, always present. */}
+        <span className="hidden w-20 shrink-0 justify-end text-right sm:flex">
+          {reason.myTurn ? (
+            <span
+              className="truncate rounded px-1 text-[10px] font-medium"
+              style={{ color: reason.color, background: reason.color + '1a' }}
+              title={userLabel(author, pr.authorId)}
+            >
+              {reason.label}
+            </span>
+          ) : (
+            <span className="truncate text-[10px] text-gray-400">
+              {relativeTime(pr.updatedAt)}
+            </span>
+          )}
+        </span>
       </button>
     </li>
   );
