@@ -3,7 +3,13 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { applyPatchToWorktree, captureWorktreeDiff, commitAll } from './git.js';
+import {
+  applyPatchToWorktree,
+  assertPushTarget,
+  captureWorktreeDiff,
+  commitAll,
+  pushRef,
+} from './git.js';
 
 // Exercises the AI-Fix git helpers against a REAL throwaway git repo (fast, local).
 // The load-bearing property: `captureWorktreeDiff` must round-trip NEWLY-CREATED files
@@ -99,5 +105,72 @@ describe('commitAll', () => {
     });
     expect(files).toContain('a.txt');
     expect(files).toContain('b.txt');
+  });
+});
+
+describe('assertPushTarget', () => {
+  // ⚠ The authority is `git check-ref-format`, not a regex. Every name here is one a real
+  // GitHub head ref can carry, and `pushRef` is already called with real head refs — the
+  // stricter regex in git-ops.ts governs branch names the advisor INVENTS and must stay there.
+  it('accepts the branch names GitHub actually allows', async () => {
+    for (const branch of [
+      'main',
+      'feature/#123',
+      "user's-branch",
+      'a+b',
+      'ünicode/x',
+      'release/v1.2.3',
+      'limn/advisor/config-20260909',
+    ]) {
+      await expect(assertPushTarget(branch, []), branch).resolves.toBeUndefined();
+    }
+  });
+
+  it('refuses malformed and reserved ref names', async () => {
+    for (const branch of [
+      'a..b',
+      'foo bar',
+      'a.lock',
+      'x@{1}',
+      '',
+      'a//b',
+      'trailing/',
+      '/leading',
+      '-evil',
+      'HEAD',
+    ]) {
+      await expect(assertPushTarget(branch, []), branch).rejects.toMatchObject({
+        code: 'PUSH_DENIED',
+      });
+    }
+  });
+
+  it('compares the protected list case-INSENSITIVELY', async () => {
+    await expect(assertPushTarget('Main', ['main'])).rejects.toMatchObject({
+      code: 'PUSH_DENIED',
+    });
+    await expect(assertPushTarget('main', ['MAIN'])).rejects.toMatchObject({
+      code: 'PUSH_DENIED',
+    });
+    await expect(assertPushTarget('my-branch', ['main'])).resolves.toBeUndefined();
+  });
+});
+
+describe('pushRef', () => {
+  it('refuses BEFORE spawning a push', async () => {
+    // The token is bogus and the repo does not exist: if the guard ran after the push, the
+    // failure would read "git push failed (write access / protected branch?)" and send the
+    // reader looking at permissions instead of at the branch name they typed.
+    await expect(
+      pushRef({
+        worktree: dir,
+        owner: 'octocat',
+        name: 'hello',
+        token: 'not-a-token',
+        committish: 'HEAD',
+        remoteBranch: 'main',
+        protect: ['main'],
+      }),
+    ).rejects.toThrow(/protected branch for this pull request/);
   });
 });

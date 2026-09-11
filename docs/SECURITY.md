@@ -105,6 +105,60 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
   shell that is RCE on the developer's machine via a stranger's PR. The old
   `Bash(rm *)`-style blocklist was never a boundary. Both review prompts + the AI-Fix prompt
   gained explicit **untrusted-input / prompt-injection** instructions.
+
+**The local clone cache (`~/.pierre-review/clones`) — five fixes, and the standing invariant.**
+The AI-Fix agent, Claude Review and now the merge-conflict resolver all work inside this cache, so
+it went from a corner to a hot path and was hardened before the resolver was allowed to multiply the
+clone count. **The invariant: a GitHub token never reaches disk.**
+
+- ⚠ **TOKENS ARE NEVER WRITTEN TO `origin`** (`review/clone-hygiene.ts`). `ensureClone` used to
+  clone a tokenized URL and strip it in a `.catch(() => {})`; the reuse path returned before any
+  check. **Measured: 4 of 7 clones on the dev machine carried a live `gho_` token in
+  `remote.origin.url`, mode 0644.** The clone now uses the PLAIN URL with a process-scoped
+  `-c url.<tokenized>.insteadOf=https://github.com/`. ⚠ **POSITION IS LOAD-BEARING**: `-c` BEFORE
+  the subcommand is process-scoped (passed to children via `GIT_CONFIG_PARAMETERS`, never written
+  into the new repo); `git clone -c …` AFTER the subcommand is `--config` and WOULD persist it.
+  `clone-manager.test.ts` asserts the flag's index is less than `argv.indexOf('clone')`, which is
+  the assertion that catches someone moving it.
+- **A startup repair, because clones that already carry one exist.** `assertCleanOrigin` runs on
+  BOTH the fresh and the reuse path and is FAIL-CLOSED: repair, re-check, and DELETE the clone if
+  the token cannot be removed — it is a rebuildable cache. ⚠ Deleting a clone does not reach the
+  backups the token is already in, so the boot log says so and names `gh auth refresh`. Permissions
+  are tightened to `0700` on `config.cloneDir` and its parent and `0600` on `.git/config`
+  (`mkdirSync`'s `mode` applies only on create), each `chmodSync` swallowed individually.
+- **`assertPushTarget` (`coding/git.ts`) validates every push target.** ⚠ **The authority is
+  `git check-ref-format refs/heads/<b>`, not a regex** — plus explicit clauses for a leading `-`,
+  a leading/trailing `/`, `//` and `RESERVED_REF_NAMES` (check-ref-format accepts `-evil` and
+  `HEAD`), and a **case-insensitive** `protect` comparison. `pushRef` takes a `PushTarget` options
+  object whose `protect` is REQUIRED, never optional, so a new call site must type `[]`
+  deliberately; `pushForceWithLease` MOVED here from `merge.ts` — it is the dangerous half and it
+  used to bypass everything. The refusal fires BEFORE any push is spawned. ⚠ **`git-ops.ts`'s
+  branch-name regex stays exactly where it is** and must not be "de-duplicated" into `pushRef`: it
+  is a stricter convention on names the advisor INVENTS, while `pushRef` is called with real head
+  refs — `feature/#123`, `user's-branch`, `a+b`, `ünicode/x` are all valid GitHub branches.
+- **A bounded startup sweep + an age-paired LRU** (`sweepCloneCache`, awaited in `index.ts` between
+  the event cleanup and `ensureLocalAccount` — the credential repair must finish before
+  `bindProPlugin` can start a fix that reuses a clone). Per clone: clean origin → tighten perms →
+  `git worktree prune` → remove `.worktrees/` entries that are neither live nor within
+  `worktreeTtlMs` → prune again → delete every `refs/pierre/conflict/*` (no job survives a restart,
+  so at boot they are orphans by definition). ⚠ **BOUNDED**: `Promise.race` against
+  `cloneSweepMaxMs`, log and continue — a sweep that cannot finish must not be the reason the
+  server never listens. `hasActiveWorktrees` became `hasFreshWorktrees(repoDir, now)`, **identity
+  first** (`liveWorktrees.has`) then mtime within the TTL, so a stale `.worktrees` entry no longer
+  exempts a repo from eviction forever. Worktree paths gained `-<pid>-<seq>` and the
+  `existsSync → removeWorktree` pre-clear was DELETED: it was the line that destroyed a concurrent
+  run's tree.
+- ⚠ **`resolveContainedTargetPath` REFUSES AN IN-TREE SYMLINK; it does not follow one**
+  (`coding/safe-path.ts`). `assertSafeTargetPath` is LEXICAL — repo-relative, no traversal, no drive
+  letter, no `.git` segment at any depth, case-folded — and it runs before any side effect, but it
+  is not sufficient: **a COMMITTED symlink is a real directory entry**, so `link/evil.txt` is
+  traversal-free text that writes wherever `link` points. Containment resolves every EXISTING
+  component of `<root>/<path>` and asserts it stays inside, git records the LINK rather than the
+  target so a link is refused outright, and ⚠ **the ROOT is realpath'd too** (`/tmp` is a symlink to
+  `/private/tmp` on macOS). Called AFTER checkout, immediately before the mkdir/write. Its test
+  builds a real repo with a committed symlink and asserts both that the call throws AND that the
+  outside file does not exist — the non-vacuous half.
+
 - **Cross-tenant in-memory state (plugin)**: `getReviewStatus`, `listActiveReviews(accountId)`,
   `requestReviewCancel(prId, accountId)` and `getFixStatus` all key on prId in PROCESS-GLOBAL
   maps — they now verify the entry's own `accountId`, and the claude-review SSE stream checks PR

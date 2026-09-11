@@ -4,6 +4,7 @@ import { buildApp } from './app.js';
 import { assertCloudConfig, config } from './config.js';
 import { cleanupRedundantReviewEvents } from './db/cleanup.js';
 import { runMigrations } from './db/run-migrations.js';
+import { sweepCloneCache } from './review/clone-hygiene.js';
 
 // Boot the server: migrate → cache the local user → build the Fastify app →
 // start the scheduler → listen. Returns the listening Fastify instance and the
@@ -18,6 +19,28 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   // Drop redundant empty-review-wrapper timeline events left by older syncs.
   const removed = await cleanupRedundantReviewEvents();
   if (removed > 0) console.log(`cleanup: removed ${removed} redundant review_submitted events`);
+
+  // Repair the clone cache before anything can hand a clone out: strip credentials an older
+  // build left in `.git/config`, tighten permissions, and collect orphaned worktrees. AWAITED
+  // — bindProPlugin can start a fix that reuses a clone — but BOUNDED: a sweep that cannot
+  // finish must not be the reason the server never listens.
+  await Promise.race([
+    sweepCloneCache().then((r) => {
+      if (r.credentialsRepaired > 0 || r.clonesRemoved > 0) {
+        console.log(
+          `clones: repaired ${r.credentialsRepaired} and deleted ${r.clonesRemoved} of ${r.scanned} — a GitHub token was stored on disk. Run \`gh auth refresh\`: deleting the clone does not reach a backup the token is already in.`,
+        );
+      }
+      if (r.worktreeDirsRemoved > 0 || r.worktreeRecordsPruned > 0) {
+        console.log(
+          `clones: removed ${r.worktreeDirsRemoved} stale worktrees and ${r.worktreeRecordsPruned} dead records`,
+        );
+      }
+    }),
+    new Promise<void>((resolve) => setTimeout(resolve, config.cloneSweepMaxMs).unref?.()),
+  ]).catch(() => {
+    /* the sweep is repair, not a precondition — never block the boot on it */
+  });
 
   // Local mode only: synthesize/refresh the single local account from `gh api
   // user` so triage ("my turn") knows who "you" are. Non-fatal if gh is missing.

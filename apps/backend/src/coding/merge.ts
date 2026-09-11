@@ -32,7 +32,14 @@ import type {
   RebaseResolveArgs,
   RebaseResolveResult,
 } from '../pro/contract.js';
-import { applyPatchToWorktree, codedError, commitAll, pushRef } from './git.js';
+import {
+  applyPatchToWorktree,
+  codedError,
+  commitAll,
+  pushForceWithLease,
+  pushRef,
+} from './git.js';
+import { protectedRefsFor } from './git-ops.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -450,34 +457,6 @@ async function amMbox(worktree: string, mbox: string, ident: Ident): Promise<voi
   }
 }
 
-async function pushForceWithLease(
-  worktree: string,
-  owner: string,
-  name: string,
-  token: string,
-  committish: string,
-  remoteBranch: string,
-  leaseSha: string,
-): Promise<void> {
-  const url = tokenizedUrl(owner, name, token);
-  const res = await gitTry(
-    [
-      'push',
-      `--force-with-lease=refs/heads/${remoteBranch}:${leaseSha}`,
-      url,
-      `${committish}:refs/heads/${remoteBranch}`,
-    ],
-    worktree,
-  );
-  if (!res.ok) {
-    throw codedError(
-      'PUSH_DENIED',
-      `force-with-lease push failed (branch moved since / protected / no write): ${
-        res.stderr || res.stdout
-      }`,
-    );
-  }
-}
 
 // ================= the four CodingSeam methods =================
 
@@ -683,8 +662,16 @@ export async function mergeResolveAndPush(
 
     onProgress({ phase: 'pushing' });
     const commitSha = (await git(['rev-parse', 'HEAD'], worktreePath)).stdout.trim();
+    const push = {
+      worktree: worktreePath,
+      owner,
+      name,
+      token,
+      committish: 'HEAD',
+      protect: await protectedRefsFor(accountId, owner, name, prNumber, owner, name),
+    };
     if (target.kind === 'existing') {
-      await pushRef(worktreePath, owner, name, token, 'HEAD', target.headRef);
+      await pushRef({ ...push, remoteBranch: target.headRef });
       return {
         pushedBranch: target.headRef,
         commitSha,
@@ -694,7 +681,7 @@ export async function mergeResolveAndPush(
         forcePushed: false,
       };
     }
-    await pushRef(worktreePath, owner, name, token, 'HEAD', target.branch);
+    await pushRef({ ...push, remoteBranch: target.branch });
     const pr = await createPullRequest(token, {
       owner,
       name,
@@ -769,6 +756,18 @@ export async function updatePrBranchFromTrunk(args: {
     onProgress: () => {},
   };
 
+  // The push lands in the HEAD repo, which for a fork PR is not the watched one — then there
+  // is nothing of ours to protect there (see protectedRefsFor).
+  const push = {
+    worktree: '',
+    owner: headOwner,
+    name: headName,
+    token,
+    committish: 'HEAD',
+    remoteBranch: headRef,
+    protect: await protectedRefsFor(accountId, owner, name, prNumber, headOwner, headName),
+  };
+
   let repoCloneDir: string | null = null;
   let worktreePath: string | null = null;
   try {
@@ -781,7 +780,7 @@ export async function updatePrBranchFromTrunk(args: {
       const newSha = (await git(['rev-parse', 'HEAD'], worktreePath)).stdout.trim();
       // Rewriting history requires a force push; the lease pins to the sha we cloned so a
       // concurrent push aborts it (never blows away someone else's work).
-      await pushForceWithLease(worktreePath, headOwner, headName, token, 'HEAD', headRef, headSha);
+      await pushForceWithLease({ ...push, worktree: worktreePath, leaseSha: headSha });
       return { headSha: newSha, strategy };
     }
 
@@ -790,7 +789,7 @@ export async function updatePrBranchFromTrunk(args: {
     // A merge only adds a commit (the old head is its ancestor) → a plain push. Already
     // up-to-date (runMerge no-op) leaves HEAD unchanged → nothing to push.
     if (newSha !== headSha) {
-      await pushRef(worktreePath, headOwner, headName, token, 'HEAD', headRef);
+      await pushRef({ ...push, worktree: worktreePath });
     }
     return { headSha: newSha, strategy };
   } finally {
@@ -834,16 +833,20 @@ export async function pushResolved(
 
     onProgress?.({ phase: 'pushing' });
     const commitSha = (await git(['rev-parse', 'HEAD'], worktreePath)).stdout.trim();
+    const push = {
+      worktree: worktreePath,
+      owner,
+      name,
+      token,
+      committish: 'HEAD',
+      protect: await protectedRefsFor(accountId, owner, name, prNumber, owner, name),
+    };
     if (target.kind === 'existing') {
-      await pushForceWithLease(
-        worktreePath,
-        owner,
-        name,
-        token,
-        'HEAD',
-        target.headRef,
-        leaseSha as string,
-      );
+      await pushForceWithLease({
+        ...push,
+        remoteBranch: target.headRef,
+        leaseSha: leaseSha as string,
+      });
       return {
         pushedBranch: target.headRef,
         commitSha,
@@ -853,7 +856,7 @@ export async function pushResolved(
         forcePushed: true,
       };
     }
-    await pushRef(worktreePath, owner, name, token, 'HEAD', target.branch);
+    await pushRef({ ...push, remoteBranch: target.branch });
     const pr = await createPullRequest(token, {
       owner,
       name,

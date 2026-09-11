@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import { getAccessToken, getAccountById } from '../auth/account.js';
 import {
@@ -28,6 +28,45 @@ import {
   commitAll,
   pushRef,
 } from './git.js';
+import { assertSafeTargetPath, resolveContainedTargetPath } from './safe-path.js';
+
+/**
+ * The names a push for this PR must never land on: the repo's default branch and the PR's
+ * base ref, read from the LOCAL DB (no GitHub call).
+ *
+ * Returns [] when the push target repo is NOT the watched repo — a fork PR pushes to the
+ * FORK, where `main` is the contributor's own branch and protecting it would refuse a
+ * legitimate push.
+ */
+export async function protectedRefsFor(
+  accountId: number,
+  owner: string,
+  name: string,
+  prNumber: number,
+  pushOwner: string,
+  pushName: string,
+): Promise<string[]> {
+  if (
+    pushOwner.toLowerCase() !== owner.toLowerCase() ||
+    pushName.toLowerCase() !== name.toLowerCase()
+  ) {
+    return [];
+  }
+  const { repos, pullRequests } = schema;
+  const [repoRow] = await db
+    .select({ id: repos.id, defaultBranch: repos.defaultBranch })
+    .from(repos)
+    .where(and(eq(repos.accountId, accountId), eq(repos.owner, owner), eq(repos.name, name)))
+    .execute();
+  if (!repoRow) return [];
+  const [prRow] = await db
+    .select({ baseRefName: pullRequests.baseRefName })
+    .from(pullRequests)
+    .where(and(eq(pullRequests.repoId, repoRow.id), eq(pullRequests.number, prNumber)))
+    .execute();
+  const names = [repoRow.defaultBranch, prRow?.baseRefName];
+  return [...new Set(names.filter((n): n is string => Boolean(n)))];
+}
 
 // The implementation behind ctx.coding.applyAndPush. STATELESS: it re-preps a fresh
 // worktree at the patch's exact base commit and `git apply`s the stored patch, so a
@@ -63,7 +102,23 @@ export async function applyAndPush(
         'the PR head is a fork this account cannot push to — push to a new branch instead',
       );
     }
+  } else {
+    // NEW branch, never force: a live ref under this name means someone (an earlier fix run,
+    // a person) already owns it — refuse rather than clobber. commitFilesAndOpenPr has always
+    // done this; this path used to discover the collision as a push rejection instead.
+    const existing = await ghRestGetText(
+      token,
+      `/repos/${owner}/${name}/git/ref/heads/${target.branch}`,
+    );
+    if (existing.ok) {
+      throw codedError(
+        'BRANCH_EXISTS',
+        `branch ${target.branch} already exists on ${owner}/${name}`,
+      );
+    }
   }
+
+  const protect = await protectedRefsFor(accountId, owner, name, prNumber, owner, name);
 
   let repoCloneDir: string | null = null;
   let worktreePath: string | null = null;
@@ -82,13 +137,14 @@ export async function applyAndPush(
       authorEmail,
     });
 
+    const push = { worktree: worktreePath, owner, name, token, committish: 'HEAD', protect };
     if (target.kind === 'existing') {
-      await pushRef(worktreePath, owner, name, token, 'HEAD', target.headRef);
+      await pushRef({ ...push, remoteBranch: target.headRef });
       return { pushedBranch: target.headRef, commitSha };
     }
 
     // New branch → push then open a PR against the base.
-    await pushRef(worktreePath, owner, name, token, 'HEAD', target.branch);
+    await pushRef({ ...push, remoteBranch: target.branch });
     const pr = await createPullRequest(token, {
       owner,
       name,
@@ -130,24 +186,11 @@ export async function applyAndPush(
 // confirming sync is `visible: false`, and the caller's copy contract ("it'll show up here
 // shortly", never a retry) does the rest.
 
-// Repo-relative, no traversal, no .git internals — file paths reach this seam from adapter
-// plans whose config locations can be influenced by REPO CONTENT (a T3 manifest proposes a
-// configPath), i.e. attacker-suppliable in cloud.
-function assertSafeTargetPath(path: string): void {
+// The OAuth token has no `workflow` scope, so a push touching .github/workflows/* is rejected
+// by GitHub AFTER the branch exists — refuse outright instead of half-failing. (The general
+// path rules live in safe-path.ts; this one is about a token, not a filesystem.)
+function assertNotWorkflowPath(path: string): void {
   const norm = path.replace(/\\/g, '/');
-  const segments = norm.split('/');
-  if (
-    !norm ||
-    norm.startsWith('/') ||
-    /^[A-Za-z]:/.test(norm) ||
-    segments.some((s) => s === '' || s === '.' || s === '..') ||
-    norm === '.git' ||
-    norm.startsWith('.git/')
-  ) {
-    throw codedError('APPLY_FAILED', `invalid target path: ${path}`);
-  }
-  // The OAuth token has no `workflow` scope, so a push touching .github/workflows/* is
-  // rejected by GitHub AFTER the branch exists — refuse outright instead of half-failing.
   if (norm === '.github/workflows' || norm.startsWith('.github/workflows/')) {
     throw codedError(
       'PUSH_DENIED',
@@ -167,7 +210,13 @@ export async function commitFilesAndOpenPr(
 ): Promise<CommitFilesAndOpenPrResult> {
   const { accountId, owner, name, files, branch, title, body } = args;
   if (files.length === 0) throw codedError('APPLY_FAILED', 'no files to commit');
-  for (const f of files) assertSafeTargetPath(f.path);
+  for (const f of files) {
+    assertSafeTargetPath(f.path);
+    assertNotWorkflowPath(f.path);
+  }
+  // ⚠ STAYS HERE. This is a naming convention on a branch the ADVISOR INVENTS, not a push
+  // guard — hoisting it into pushRef would refuse real GitHub head refs (`feature/#123`,
+  // `user's-branch`, `a+b`, `ünicode/x`). The push guard is assertPushTarget in git.ts.
   if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) || branch.includes('..')) {
     throw codedError('APPLY_FAILED', `invalid branch name: ${branch}`);
   }
@@ -202,12 +251,23 @@ export async function commitFilesAndOpenPr(
   try {
     ({ repoCloneDir, worktreePath } = await prepWorktreeAtRef(owner, name, base, token));
     for (const f of files) {
-      const target = join(worktreePath, f.path);
+      // Containment is re-checked HERE, against the real checkout: a committed symlink is a
+      // real directory entry and the lexical pass above cannot see one.
+      const target = resolveContainedTargetPath(worktreePath, f.path);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, f.content, 'utf8');
     }
     await commitAll(worktreePath, { message: title, authorName, authorEmail });
-    await pushRef(worktreePath, owner, name, token, 'HEAD', branch);
+    // The base here is the repo's DEFAULT branch, so it is exactly what must be protected.
+    await pushRef({
+      worktree: worktreePath,
+      owner,
+      name,
+      token,
+      committish: 'HEAD',
+      remoteBranch: branch,
+      protect: [base],
+    });
     const pr = await createPullRequest(token, { owner, name, head: branch, base, title, body });
 
     // ── After this point the PR EXISTS on GitHub: nothing below may throw. ──────────────

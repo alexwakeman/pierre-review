@@ -10,6 +10,18 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { config } from '../config.js';
 import { getGithubToken } from '../github/auth.js';
+import {
+  assertCleanOrigin,
+  cloneArgv,
+  hasFreshWorktrees,
+  liveWorktrees,
+  tightenCloneRoot,
+  tightenClonePerms,
+} from './clone-hygiene.js';
+
+// Re-exported so consumers see ONE clone API. The map itself lives in clone-hygiene.ts
+// because the startup sweep needs it and this module imports that one, not the reverse.
+export { liveWorktrees };
 
 const execFileAsync = promisify(execFile);
 
@@ -32,7 +44,7 @@ async function git(args: string[], cwd?: string): Promise<void> {
 // > 1. A simple promise-chain mutex keyed by `owner/name`; only this short prep
 // phase serialises — the agent runs themselves (each in its own worktree) overlap.
 const repoLocks = new Map<string, Promise<unknown>>();
-async function withRepoLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+export async function withRepoLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const prev = repoLocks.get(key) ?? Promise.resolve();
   let release!: () => void;
   const next = new Promise<void>((r) => {
@@ -58,11 +70,6 @@ function tokenizedUrl(owner: string, name: string, token: string): string {
   return `https://x-access-token:${token}@github.com/${owner}/${name}.git`;
 }
 
-/** The token-less https URL a clone's `origin` remote is set to on disk. */
-function plainUrl(owner: string, name: string): string {
-  return `https://github.com/${owner}/${name}.git`;
-}
-
 /**
  * Ensure a long-lived partial clone for `owner/name` exists and return its
  * absolute path. Reused across runs — only the first call actually clones.
@@ -71,37 +78,85 @@ function plainUrl(owner: string, name: string): string {
  * (`--no-checkout`); ephemeral per-run worktrees provide the actual checkouts.
  *
  * The clone cache is keyed `owner__name` and SHARED across accounts (in cloud two
- * tenants can watch the same repo). So the account token is used ONLY for the clone
- * fetch itself, then the on-disk `origin` remote is rewritten to a token-LESS URL —
- * no credential is left in `.git/config` for another account to reuse. Every later
- * fetch/push passes the caller's own tokenized URL explicitly (see fetchPrHead /
- * git-write.pushBranch). `token` defaults to the local gh token (the Claude Review
- * path); the Pro fixer passes a per-account token.
+ * tenants can watch the same repo), so no credential may ever reach `.git/config`.
+ * ⚠ THAT IS STRUCTURAL, NOT A CLEAN-UP: the clone runs with a process-scoped
+ * `-c url.<tokenized>.insteadOf=` (see cloneArgv) and the POSITIONAL url is the plain
+ * one, so there is nothing to strip afterwards. The predecessor cloned the tokenized
+ * URL and rewrote `origin` in a `.catch(() => {})`; four clones on the author's machine
+ * still carried a live `gho_` token. Every later fetch/push passes the caller's own
+ * tokenized URL explicitly (see fetchPrHead / pushRef).
+ *
+ * The reuse path re-checks — a clone made by an older build, or by a crashed run, is
+ * repaired or deleted before it is handed out. `token` defaults to the local gh token
+ * (the Claude Review path); the Pro fixer passes a per-account token.
  */
 export async function ensureClone(
   owner: string,
   name: string,
   token: string = getGithubToken(),
 ): Promise<string> {
-  mkdirSync(config.cloneDir, { recursive: true });
+  mkdirSync(config.cloneDir, { recursive: true, mode: 0o700 });
+  tightenCloneRoot();
   const dir = repoCloneDir(owner, name);
 
-  // Reuse an existing clone (presence of .git is our "already cloned" marker).
-  if (existsSync(join(dir, '.git'))) return dir;
+  // Reuse an existing clone (presence of .git is our "already cloned" marker), but never
+  // hand out one carrying a credential: repair it, and if the credential survives, drop the
+  // clone and fall through to a fresh one.
+  if (existsSync(join(dir, '.git'))) {
+    const outcome = await assertCleanOrigin(dir, owner, name).catch(() => 'clean' as const);
+    if (outcome !== 'removed') {
+      tightenClonePerms(dir);
+      return dir;
+    }
+  }
 
-  await git([
-    'clone',
-    '--filter=blob:none',
-    '--no-checkout',
-    tokenizedUrl(owner, name, token),
-    dir,
-  ]);
-  // Strip the token from the persisted remote so a different account reusing this
-  // shared clone can't fetch with it.
-  await git(['-C', dir, 'remote', 'set-url', 'origin', plainUrl(owner, name)]).catch(
-    () => {},
-  );
+  await git(cloneArgv(owner, name, token, dir));
+  // Fail closed: if a git version or a stray global `insteadOf` somehow persisted the
+  // credential anyway, assertCleanOrigin deletes the clone — and then there is nothing to
+  // return. Better a hard failure here than a token on disk.
+  const outcome = await assertCleanOrigin(dir, owner, name);
+  if (outcome === 'removed') {
+    throw new Error(
+      `refusing to use the clone of ${owner}/${name}: a credential survived in .git/config`,
+    );
+  }
+  tightenClonePerms(dir);
   return dir;
+}
+
+/**
+ * Fetch one remote ref into the clone under a CALLER-SUPPLIED local ref, and return the sha
+ * it resolved to. Uses an explicit tokenized URL, never the token-less `origin`.
+ *
+ * ⚠ `destRef` is never optional and must never be FETCH_HEAD: the clone cache is shared
+ * across accounts and jobs, and FETCH_HEAD is ONE FILE per repository — two concurrent
+ * fetches and the second job checks out the first job's commit. Namespace it
+ * (`refs/pierre/conflict/<sessionId>/…`); the startup sweep deletes that namespace, because
+ * no job survives a restart.
+ */
+export async function fetchRefIntoClone(args: {
+  cloneDir: string;
+  owner: string;
+  name: string;
+  token: string;
+  remoteRef: string;
+  destRef: string;
+}): Promise<string> {
+  const { cloneDir, owner, name, token, remoteRef, destRef } = args;
+  await git([
+    '-C',
+    cloneDir,
+    'fetch',
+    '--no-tags',
+    '--force',
+    tokenizedUrl(owner, name, token),
+    `${remoteRef}:${destRef}`,
+  ]);
+  const { stdout } = await execFileAsync('git', ['-C', cloneDir, 'rev-parse', destRef], {
+    timeout: 10_000,
+    maxBuffer: 1024 * 1024,
+  });
+  return stdout.trim();
 }
 
 /**
@@ -150,20 +205,29 @@ async function hasCommit(repoCloneDir: string, sha: string): Promise<boolean> {
   }
 }
 
+// Monotonic within the process; paired with the pid it makes a worktree path unique across
+// every run on the machine, which is what stops one run's cleanup landing on another's tree.
+let worktreeSeq = 0;
+
 /**
- * Create an ephemeral detached worktree at `<clone>/.worktrees/<sha>` checked
- * out at `sha`, and return its absolute path. If a stale worktree at that path
- * already exists it's removed first (best-effort) so the add can't collide.
+ * Create an ephemeral detached worktree at `<clone>/.worktrees/<sha>-<pid>-<n>` checked out
+ * at `sha`, and return its absolute path.
+ *
+ * ⚠ THE PATH IS PER-RUN, NOT PER-SHA, AND NOTHING IS PRE-CLEARED. Keying on the sha alone
+ * meant two runs on the same head shared one directory, and the `existsSync → removeWorktree`
+ * pre-clear that made that "work" DESTROYED the tree a concurrent run was reading from. A
+ * leftover from a crashed run is not this function's problem: the startup sweep and
+ * `git worktree prune` collect it.
  */
 export async function addWorktree(
   repoCloneDir: string,
   sha: string,
 ): Promise<string> {
-  const worktreePath = join(repoCloneDir, '.worktrees', sha);
-  if (existsSync(worktreePath)) {
-    // Clear a leftover from a crashed/aborted prior run; ignore failures.
-    await removeWorktree(repoCloneDir, worktreePath);
-  }
+  const worktreePath = join(
+    repoCloneDir,
+    '.worktrees',
+    `${sha}-${process.pid}-${++worktreeSeq}`,
+  );
   await git([
     '-C',
     repoCloneDir,
@@ -174,6 +238,7 @@ export async function addWorktree(
     worktreePath,
     sha,
   ]);
+  liveWorktrees.set(worktreePath, Date.now());
   return worktreePath;
 }
 
@@ -186,6 +251,7 @@ export async function removeWorktree(
   repoCloneDir: string,
   worktreePath: string,
 ): Promise<void> {
+  liveWorktrees.delete(worktreePath);
   try {
     await git([
       '-C',
@@ -203,6 +269,9 @@ export async function removeWorktree(
   } catch {
     /* best-effort */
   }
+  // The rmSync fallback deletes the directory but leaves git's registry entry behind, and a
+  // stale entry keeps the repo looking busy. Prune here so the fallback path self-heals.
+  await git(['-C', repoCloneDir, 'worktree', 'prune']).catch(() => {});
 }
 
 /**
@@ -302,22 +371,17 @@ function walkSize(dir: string): { bytes: number; mtimeMs: number } {
   return { bytes, mtimeMs };
 }
 
-/** True if `repoDir` has a non-empty `.worktrees/` (a run may be in flight). */
-function hasActiveWorktrees(repoDir: string): boolean {
-  try {
-    return readdirSync(join(repoDir, '.worktrees')).length > 0;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Best-effort LRU eviction of the clone cache. Synchronous and never throws.
  * If the total size of all repo clones exceeds config.cloneCacheMaxBytes,
- * delete whole repo dirs oldest-mtime-first until back under the cap. Repo dirs
- * with live worktrees are treated as in-use and skipped.
+ * delete whole repo dirs oldest-mtime-first until back under the cap.
+ *
+ * ⚠ "In use" is `hasFreshWorktrees`, NOT "`.worktrees/` is non-empty". Under the old test a
+ * SINGLE orphan left by a crashed run exempted its repo from eviction permanently, so the
+ * cache grew past the cap with nothing to show for it. `now` is a parameter so a test can
+ * age a worktree without touching the clock.
  */
-export function cleanupCloneCache(): void {
+export function cleanupCloneCache(now: number = Date.now()): void {
   try {
     if (!existsSync(config.cloneDir)) return;
 
@@ -342,7 +406,7 @@ export function cleanupCloneCache(): void {
     repos.sort((a, b) => a.mtimeMs - b.mtimeMs);
     for (const repo of repos) {
       if (totalBytes <= config.cloneCacheMaxBytes) break;
-      if (hasActiveWorktrees(repo.dir)) continue;
+      if (hasFreshWorktrees(repo.dir, now)) continue;
       try {
         rmSync(repo.dir, { recursive: true, force: true });
         totalBytes -= repo.bytes;
