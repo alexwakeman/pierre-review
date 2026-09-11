@@ -3938,6 +3938,16 @@ export interface MeResponse {
   // True iff the backend has a reachable severity-api configured (SEVERITY_API_URL); false
   // under `npx pierre-review`, which ships no model. Gates every ML query the SPA makes.
   mlSeverity: boolean;
+  // Can this deployment resolve merge conflicts in-app? True in local mode; false in cloud,
+  // where the routes are not registered at all. FREE/CORE, so TOP-LEVEL and NOT inside `pro`
+  // — `entitledProCapabilities` zeroes that object for a free cloud account (the same
+  // argument as `mlSeverity` above, verbatim).
+  //
+  // ⚠ IT IS NOT A GIT-VERSION PROBE. `merge-tree --write-tree` needs git 2.38+, which
+  // /api/me will not shell out to learn on every SPA boot; a too-old git is refused by the
+  // OPEN route with `git_too_old` and the overlay prints it once.
+  // ⚠ Gate the SPA on THIS, never on `deploymentMode === 'cloud'`.
+  conflictResolver: boolean;
   // CLOUD-ONLY: whether this account has consented to contribute aggregate, de-identified
   // weekly review-bot stats to the cross-org benchmark network (opt-in, default false). Drives
   // the Settings consent toggle. Always false in local mode (local never contributes).
@@ -7127,8 +7137,10 @@ export interface UpdateBranchCard extends InsightCardBase, InsightPrRef {
   viewerCanPush: boolean;
 }
 
-/** GitHub cannot merge this pull request: it conflicts with its base branch. Somebody has to open
- *  a checkout and resolve them — there is no button on this card, and GitHub offers none either.
+/** GitHub cannot merge this pull request: it conflicts with its base branch. The card carries the
+ *  in-app resolver's entry button (CORE / free, LOCAL ONLY — the routes are not registered in
+ *  cloud) and a link out to GitHub; it never carries a Merge, because GitHub 405s a merge on a
+ *  conflicting branch and "Update branch" cannot resolve a conflict.
  *
  *  ⚠ THE POPULATION IS "REPOS YOU CAN PUSH TO", AND THAT IS THE WHOLE CARD. Measured: 474 open
  *  non-draft PRs on the reporting account conflict and 470 are in repos the viewer only READS —
@@ -7136,11 +7148,11 @@ export interface UpdateBranchCard extends InsightCardBase, InsightPrRef {
  *  (WRITE/MAINTAIN/ADMIN), never the behavioural `viewerMaintainedRepoIds` proxy.
  *
  *  ⚠ TWO FIELDS ARE DELIBERATELY ABSENT AND EACH ABSENCE IS A DECISION. No `viewerCanPush`:
- *  write access IS the population here, so the field would be a constant `true` — and the board's
- *  merge controls ride the two FORWARD kinds only, so carrying it would invite a control on a card
- *  that has nothing to offer. No `lastCommitAt`: it is the RANKER's clock on the forward cards and
- *  this kind feeds no ranker, so rendering it would read as "conflicting since", which is not a
- *  fact we hold. */
+ *  write access IS the population here, so the field would be a constant `true` — which is exactly
+ *  what the resolver button is passed on this card, and it must stay a literal at that call site
+ *  rather than becoming a field that says the same thing twice and can come to disagree. No
+ *  `lastCommitAt`: it is the RANKER's clock on the forward cards and this kind feeds no ranker, so
+ *  rendering it would read as "conflicting since", which is not a fact we hold. */
 export interface ConflictsCard extends InsightCardBase, InsightPrRef {
   kind: 'conflicts';
   /** GitHub's protection-aware state, verbatim — 'dirty' on every real row measured. ⚠ `null` is

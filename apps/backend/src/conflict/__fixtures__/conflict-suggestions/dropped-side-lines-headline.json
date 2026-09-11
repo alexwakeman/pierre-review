@@ -1,0 +1,42 @@
+{
+  "name": "check 8 - ours adds five lines, theirs reindents one, the model emits theirs alone",
+  "expected": "dropped_side_lines",
+  "hunk": {
+    "base": [
+      "function total(x) {",
+      "  return x;",
+      "}"
+    ],
+    "ours": [
+      "function total(x) {",
+      "  const y = x * 2;",
+      "  const z = y + 1;",
+      "  log(z);",
+      "  check(z);",
+      "  return z;",
+      "}"
+    ],
+    "theirs": [
+      "function total(x) {",
+      "    return x;",
+      "}"
+    ],
+    "contextBefore": [
+      "import { log } from './log.js';",
+      "",
+      "// totals"
+    ],
+    "contextAfter": [
+      "",
+      "export { total };",
+      "// end"
+    ]
+  },
+  "answer": [
+    "<<BEGIN>>",
+    "function total(x) {",
+    "    return x;",
+    "}",
+    "<<END>>"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "check 4 - the answer echoed our own fence tag back inside the block",
+  "expected": "unparseable",
+  "hunk": {
+    "base": [
+      "const a = 1;",
+      "const b = 2;"
+    ],
+    "ours": [
+      "const a = 1;",
+      "const b = 2;",
+      "const c = 3;"
+    ],
+    "theirs": [
+      "const a = 1;",
+      "const b = 2;",
+      "const d = 4;"
+    ],
+    "contextBefore": [
+      "function f() {",
+      "  // setup",
+      "  init();"
+    ],
+    "contextAfter": [
+      "  return a;",
+      "}",
+      "// end"
+    ]
+  },
+  "answer": [
+    "<<BEGIN>>",
+    "const a = 1;",
+    "// tagged <<NONCE>>",
+    "const b = 2;",
+    "const c = 3;",
+    "const d = 4;",
+    "<<END>>"
+  ]
+}

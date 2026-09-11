@@ -8,13 +8,16 @@ import type {
 import { ApiError } from '../api/client.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import {
+  aiFixStartMutationKey,
   useCiAnalysis,
   useRefreshCiAnalysis,
   useStartFix,
 } from '../hooks/useAiFix.js';
+import { useFilters } from '../store/filters.js';
+import { ciAnalysisStale } from '../lib/aiFixProgress.js';
 import { jobIdOf } from './CheckList.js';
 import { Markdown } from './Markdown.js';
-import { ChevronIcon } from './Icons.js';
+import { ArrowIcon, ChevronIcon } from './Icons.js';
 
 // The CI-failure diagnosis ("why did CI fail?"), extracted out of the AI-Fix tab so it can
 // sit INLINE on the PR detail pane next to the red checks — which is where the question is
@@ -29,18 +32,27 @@ import { ChevronIcon } from './Icons.js';
 // "Analyze", inviting a second BILLED POST. That is why in-flight is read from the shared
 // mutation key (`useIsMutating`) rather than from this mount's own mutation object.
 //
-// The Overview mount passes `showFix={false}`: the agentic "Fix it →" run has no progress UI
-// outside the AI Fix tab (RegenProgressBar / phase / activity all live in its FixerSection),
-// so a Fix button on Overview would start a paid agent run and look like nothing happened.
+// BOTH mounts carry the agentic "Fix it" button. They did not always: the Overview mount used
+// to hide it, because the run's only progress UI lived in the AI Fix tab's FixerSection, so a
+// fix started from Overview looked like nothing had happened. The bottom-right AiFixBanner is
+// that missing half — it follows the run wherever the reader goes, and clicking its row lands
+// on the AI Fix tab. The START mutation key (`['ai-fix-start', prId]`) is shared for the same
+// reason the refresh key is: two mounts, one paid run.
 //
 // TIER: this is the cheap, read-only SUMMARY tier (`prSummary` — the same gate as the AI
 // summary and the digest, on in paid cloud and credit-metered), NOT the "pro+" advanced-AI
-// tier. The agentic "Fix it →" button is a different thing entirely and stays gated on
+// tier. The agentic "Fix it" button is a different thing entirely and stays gated on
 // `aiFix`, so a summary-tier cloud user gets the diagnosis without the fixer.
 //
 // STALENESS: when a stored analysis predates the current head SHA we show the OLD analysis
 // with an "out of date" chip and a manual Re-analyze. We deliberately never regenerate
 // automatically — that would be one paid generation per push, per red PR.
+//
+// ⚠ THE SAME `stale` GATES "Fix it", AND IT REFUSES IN WORDS RATHER THAN HIDING. Seeding an
+// agent with a diagnosis of code that is gone spends a paid agent turn on the wrong commit.
+// Hide-never-disable is the rule for MERGE actions, where the reader cannot act on the cause;
+// here the remedy — Re-analyze — is the button next to it. The server refuses the same start
+// independently (409 StaleCiAnalysis), because this gate is a screen and a POST is a POST.
 
 const CONFIDENCE_STYLE: Record<AiConfidence, string> = {
   high: 'bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300',
@@ -81,24 +93,20 @@ const BTN_PRIMARY =
 const BTN_SECONDARY =
   'whitespace-nowrap rounded border border-gray-300 px-2.5 py-1 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
 
-export function CiAnalysisCard({
-  pr,
-  // The agentic "Fix it →" button (pro+ / `aiFix`). Off on the Overview mount — see the
-  // header note: its progress UI only exists on the AI Fix tab.
-  showFix = true,
-}: {
-  pr: PrDetail;
-  showFix?: boolean;
-}): JSX.Element | null {
+export function CiAnalysisCard({ pr }: { pr: PrDetail }): JSX.Element | null {
   const { prSummary, aiFix } = useProCapabilities();
   const { data } = useCiAnalysis(pr.id, prSummary);
   const refresh = useRefreshCiAnalysis(pr.id);
   const startFix = useStartFix(pr.id);
+  const noteAiFixRun = useFilters((s) => s.noteAiFixRun);
   const [openOverride, setOpenOverride] = useState<boolean | null>(null);
   // In-flight read off the SHARED mutation key, not this mount's `refresh.isPending` — so a
   // run started on one tab keeps the button truthfully "Analyzing…" and disabled on the other
   // (and after a remount), instead of offering a second paid generation.
   const running = useIsMutating({ mutationKey: ['ai-fix-ci', pr.id] }) > 0;
+  // Same rule for the far more expensive agent start — see aiFixStartMutationKey.
+  const fixStarting =
+    useIsMutating({ mutationKey: aiFixStartMutationKey(pr.id) }) > 0;
 
   // ALL failing checks (name + optional Actions jobId), not just Actions jobs — so an
   // external gate (SonarCloud etc.) with no jobId is still analyzed.
@@ -116,8 +124,9 @@ export function CiAnalysisCard({
   );
 
   const analysis = data?.analysis ?? null;
-  const stale =
-    analysis != null && data?.headSha != null && data.headSha !== pr.headSha;
+  // ONE predicate, read by the "out of date" chip AND by the "Fix it" gate below — see
+  // ciAnalysisStale for why the two must not be computed separately.
+  const stale = ciAnalysisStale(analysis, data?.headSha, pr.headSha);
   const outOfCredits = data?.creditsExhausted === true;
   // `pr.ciStatus` is included deliberately, and it is the SAME predicate the server computes
   // (`prHasFailures` reads pullRequests.ciStatus). Without it the card is blank whenever the
@@ -209,25 +218,43 @@ export function CiAnalysisCard({
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {analyzeBtn}
-            {/* The agentic fixer is the pro+ tier — never offered to summary-tier users, and
-                never on the Overview mount, whose tab has nowhere to show the run. */}
-            {aiFix && showFix && (
-              <button
-                type="button"
-                className={BTN_PRIMARY}
-                disabled={startFix.isPending}
-                onClick={() =>
-                  startFix.mutate({ model: 'claude-sonnet-5', seed: 'ci_analysis' })
-                }
-                title="Launch an agent to fix the CI failure"
-              >
-                Fix it →
-              </button>
-            )}
-            {aiFix && showFix && data?.fixability === 'low' && (
+            {/* The agentic fixer is the pro+ tier — never offered to summary-tier users. On a
+                STALE analysis the button is replaced by the refusal, not disabled: the fix
+                would be seeded with a diagnosis of code that is gone. */}
+            {aiFix &&
+              (stale ? (
+                <span className="text-[11px] text-amber-600 dark:text-amber-400">
+                  New commits since this analysis. Re-analyze first.
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className={`${BTN_PRIMARY} inline-flex items-center gap-1`}
+                  disabled={fixStarting}
+                  onClick={() => {
+                    // Register BEFORE the POST so the toast row exists even if the reader
+                    // navigates away in the same breath; the row's own SSE takes it from here.
+                    noteAiFixRun({
+                      prId: pr.id,
+                      repoFullName: pr.repoFullName,
+                      prNumber: pr.number,
+                      prTitle: pr.title,
+                    });
+                    startFix.mutate({ model: 'claude-sonnet-5', seed: 'ci_analysis' });
+                  }}
+                  title="Launch an agent to fix the CI failure"
+                >
+                  Fix it
+                  <ArrowIcon dir="right" size={11} />
+                </button>
+              ))}
+            {aiFix && !stale && data?.fixability === 'low' && (
               <span className="text-[11px] text-gray-500 dark:text-gray-400">
                 low confidence this is auto-fixable
               </span>
+            )}
+            {startFix.isError && (
+              <span className="text-[11px] text-red-500">{errText(startFix.error)}</span>
             )}
             {outOfCredits && (
               <span className="text-[11px] text-amber-600 dark:text-amber-400">

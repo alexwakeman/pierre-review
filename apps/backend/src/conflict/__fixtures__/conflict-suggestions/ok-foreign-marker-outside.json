@@ -1,0 +1,40 @@
+{
+  "name": "check 1 - extraction keys on the NONCE: a marker for another tag delimits nothing",
+  "expected": "ok",
+  "keptCommonLines": 2,
+  "hunk": {
+    "base": [
+      "const a = 1;",
+      "const b = 2;"
+    ],
+    "ours": [
+      "const a = 1;",
+      "const b = 2;",
+      "const c = 3;"
+    ],
+    "theirs": [
+      "const a = 1;",
+      "const b = 2;",
+      "const d = 4;"
+    ],
+    "contextBefore": [
+      "function f() {",
+      "  // setup",
+      "  init();"
+    ],
+    "contextAfter": [
+      "  return a;",
+      "}",
+      "// end"
+    ]
+  },
+  "answer": [
+    "---END RESOLVED deadbeefdeadbeef---",
+    "<<BEGIN>>",
+    "const a = 1;",
+    "const b = 2;",
+    "const c = 3;",
+    "const d = 4;",
+    "<<END>>"
+  ]
+}

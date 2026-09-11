@@ -1,0 +1,30 @@
+{
+  "name": "check 10 - nothing came back for a hunk both sides still had content in",
+  "expected": "empty",
+  "hunk": {
+    "base": [
+      "const legacy = 1;",
+      "const old = 2;"
+    ],
+    "ours": [
+      "const legacy = 1;"
+    ],
+    "theirs": [
+      "const old = 2;"
+    ],
+    "contextBefore": [
+      "function f() {",
+      "  // setup",
+      "  init();"
+    ],
+    "contextAfter": [
+      "  return a;",
+      "}",
+      "// end"
+    ]
+  },
+  "answer": [
+    "<<BEGIN>>",
+    "<<END>>"
+  ]
+}

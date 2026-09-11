@@ -68,9 +68,20 @@ export function useRefreshCiAnalysis(prId: number) {
   });
 }
 
+// The agentic fixer is now STARTED from two places for the same PR: the AI Fix tab's
+// FixerSection and the CI-analysis card's "Fix it" shortcut, which is mounted on the Overview's
+// Checks row as well. Same trap the CI-analysis mutation above closed — click Fix on Overview,
+// switch tabs before the invalidation lands, and the other mount's per-mount `isPending` is
+// false, offering a second BILLED agent run. Read in-flight off this key with
+// `useIsMutating({ mutationKey: aiFixStartMutationKey(prId) })`, never off a mutation object.
+export function aiFixStartMutationKey(prId: number): [string, number] {
+  return ['ai-fix-start', prId];
+}
+
 export function useStartFix(prId: number) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: aiFixStartMutationKey(prId),
     mutationFn: (body: GenerateFixBody) => api.startAiFix(prId, body),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
   });

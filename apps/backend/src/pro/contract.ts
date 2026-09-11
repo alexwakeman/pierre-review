@@ -24,6 +24,7 @@ import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
 import type { PrDetailEnricher } from '../pr/detail-enricher.js';
 import type { AiUsageRecord } from '../db/usage.js';
 import type { AiCreditStatus } from '../db/credits.js';
+import type { ConflictSeam } from '../conflict/seam.js';
 
 // The typed boundary between OSS core and the optional, dynamically-imported
 // @pierre/pro plugin. This file has NO dependency on @pierre/pro — it only
@@ -1138,6 +1139,20 @@ export interface ProContext {
   coding: CodingSeam;
   // Claude Review infra (the SDK run + diff prep + GitHub post). Inert in OSS.
   review: ReviewSeam;
+  // The merge-conflict resolver's per-hunk suggestion seam (`conflict/seam.ts`). The plugin runs
+  // the model; the HOST owns the hunk, the validators and the suggestion store.
+  //
+  // ⚠ OPTIONAL, SO apiVersion STAYS 21 — a new optional MEMBER on `ProContext`, the narrow
+  // "additive" test the `appWebUrl` / `registerAccountErasure` / `getWorkPlan` precedents already
+  // ride. A plugin built against an older host finds it `undefined` and registers no
+  // conflict-assist route at all; nothing else degrades. A REQUIRED member here would be the case
+  // that demands a bump, and a bump is four literals across TWO REPOS whose half-application
+  // degrades the ENTIRE plugin to OSS mode with nothing thrown.
+  //
+  // ⚠ IT IS ALSO `undefined` IN CLOUD, and that is the same fact one level up: the six resolver
+  // routes are registered only when `!config.isCloud`, so a hunk seam there would address
+  // sessions that cannot exist.
+  conflicts?: ConflictSeam;
 }
 
 export interface ProPlugin {

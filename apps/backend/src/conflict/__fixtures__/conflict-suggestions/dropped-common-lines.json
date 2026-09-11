@@ -1,0 +1,37 @@
+{
+  "name": "check 7 - a line BOTH versions kept is gone",
+  "expected": "dropped_common_lines",
+  "hunk": {
+    "base": [
+      "const a = 1;",
+      "const b = 2;"
+    ],
+    "ours": [
+      "const a = 1;",
+      "const b = 2;",
+      "const c = 3;"
+    ],
+    "theirs": [
+      "const a = 1;",
+      "const b = 2;",
+      "const d = 4;"
+    ],
+    "contextBefore": [
+      "function f() {",
+      "  // setup",
+      "  init();"
+    ],
+    "contextAfter": [
+      "  return a;",
+      "}",
+      "// end"
+    ]
+  },
+  "answer": [
+    "<<BEGIN>>",
+    "const a = 1;",
+    "const c = 3;",
+    "const d = 4;",
+    "<<END>>"
+  ]
+}

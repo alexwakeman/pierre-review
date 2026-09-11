@@ -999,8 +999,9 @@ export function toMergeStateStatus(raw: string | null | undefined): MergeStateSt
 export function mergeVerdict(pr: MergeVerdictInput): MergeVerdictInfo {
   const mss = pr.mergeStateStatus;
 
-  // Out-of-band first — being in the queue or armed is the truest answer to "what happens
-  // next", and both outrank the raw status they're waiting on.
+  // The merge queue first — once GitHub's queue holds a pull request, the queue is the truest
+  // answer to "what happens next" and it outranks the raw status it is waiting on. (The other
+  // out-of-band state, an armed intent, sits BELOW the conflict test — see the ⚠ there.)
   if (pr.inMergeQueue) {
     return {
       verdict: 'queued',
@@ -1008,6 +1009,31 @@ export function mergeVerdict(pr: MergeVerdictInput): MergeVerdictInfo {
       tone: 'ok',
       canMerge: false,
       detail: pr.queuePosition != null ? `position ${pr.queuePosition}` : null,
+    };
+  }
+
+  // ⚠ CONFLICTS OUTRANK AN ARMED INTENT, AND THE ORDER IS THE WHOLE POINT.
+  //
+  // This branch used to sit BELOW `autoMergeArmed`, so an armed conflicting PR resolved to
+  // 'armed' — "it lands by itself once the blockers clear" — which is false: rule 1 of
+  // `merge/auto-merge-runner.ts` disarms an armed intent the moment the PR conflicts, because a
+  // conflict is not a blocker that clears on its own. The board and the pane then gave two
+  // answers to "can this land?": the Pending `conflicts` card is minted from the raw columns in
+  // SQL and showed the PR, while `conflictsRowVisible` — which reads THIS verdict — shut the
+  // pane's Conflicts row. One resolver, one answer (see `conflictsRowVisible` below).
+  //
+  // The QUEUE branch deliberately stays above this one: a queued PR really is GitHub's problem,
+  // and GitHub ejects a conflicting entry itself.
+  //
+  // Conflicts also outrank draft: a conflicting draft still needs a human to resolve them, and
+  // that is more actionable than "it's a draft".
+  if (mss === 'dirty' || pr.mergeable === 'conflicting') {
+    return {
+      verdict: 'conflicts',
+      label: 'conflicts',
+      tone: 'bad',
+      canMerge: false,
+      detail: 'resolve the conflicts with the base branch',
     };
   }
   if (pr.autoMergeArmed) {
@@ -1021,17 +1047,6 @@ export function mergeVerdict(pr: MergeVerdictInput): MergeVerdictInfo {
     };
   }
 
-  // Conflicts outrank draft: a conflicting draft still needs a human to resolve them, and
-  // that is more actionable than "it's a draft".
-  if (mss === 'dirty' || pr.mergeable === 'conflicting') {
-    return {
-      verdict: 'conflicts',
-      label: 'conflicts',
-      tone: 'bad',
-      canMerge: false,
-      detail: 'resolve the conflicts with the base branch',
-    };
-  }
   if (pr.isDraft) {
     return {
       verdict: 'draft',
@@ -1122,6 +1137,41 @@ export function mergeVerdict(pr: MergeVerdictInput): MergeVerdictInfo {
  */
 export function conflictsRowVisible(state: PrState, verdict: MergeVerdict): boolean {
   return state === 'open' && verdict === 'conflicts';
+}
+
+/** What the "Resolve conflicts" button needs to know. Every field is a SYNCED column already on
+ *  the payload that mounted it, or the App-root `['me']` cache — nothing here is fetched. */
+export interface ConflictResolverEntry {
+  state: PrState;
+  /** The RESOLVED verdict, never the raw columns — see `conflictsRowVisible` directly above. */
+  verdict: MergeVerdict;
+  /** `repos.viewerPermission`, synced. A VISIBILITY gate only: the routes re-check permission,
+   *  the head oid and the live merge state before anything irreversible happens. */
+  viewerCanPush: boolean;
+  /** `MeResponse.conflictResolver` — `!config.isCloud`. In cloud the routes are not registered
+   *  at all, so an offered button would 404 on the first click. */
+  resolverAvailable: boolean;
+}
+
+/**
+ * May this surface offer to resolve the conflicts in the app?
+ *
+ * FOUR GATES, AND EVERY ONE IS LOAD-BEARING. Three of them ride `conflictsRowVisible` (the PR is
+ * open, and the ONE resolver says the answer to "can this land?" is `conflicts`); the fourth is
+ * write access, because the resolver ends in a `git push`. Drop that arm and the button appears
+ * on the 470-of-474 conflicting pull requests measured to live in repos this account only READS —
+ * offering an action that cannot succeed, to a reader who is not the person stuck.
+ *
+ * ⚠ HIDE, NEVER DISABLE — the merge-action rule. A reader without push access sees the row's
+ * sentence and the GitHub link, exactly as before this button existed.
+ *
+ * ⚠ NOTHING HERE MAY BECOME A FETCH. In particular do NOT gate on `PrMergeOptions.conflicts`:
+ * that rides the CLICK-GATED `GET /api/prs/:id/merge-options` (up to five live GitHub calls), and
+ * the Pending board forbids fetch-on-mount outright — fifty cards would be hundreds of calls to
+ * paint a board.
+ */
+export function conflictResolverEntryVisible(e: ConflictResolverEntry): boolean {
+  return conflictsRowVisible(e.state, e.verdict) && e.viewerCanPush && e.resolverAvailable;
 }
 
 // Tailwind classes per tone, so every compact surface tints a verdict identically.

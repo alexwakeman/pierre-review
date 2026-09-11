@@ -589,6 +589,35 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (mutating && (path === '/api/repos' || /^\/api\/repos\/\d+\/sync$/.test(path))) {
     return [TIERS.sync];
   }
+  // ---- The merge-conflict resolver (LOCAL ONLY; the routes do not exist in cloud) ----
+  // FIVE paths under one prefix with FOUR different costs, which is the exact shape this file
+  // gets wrong when it guesses. Each is anchored at BOTH ends: the segment is `conflicts`
+  // (PLURAL — `conflict` matches nothing, the `comments`/`/comment` trap one vocabulary over),
+  // and `/conflicts` is a PREFIX of `/conflicts/commit`, so an unanchored match would hand the
+  // open, the commit, the file read and the stream one bucket — right for one of the four.
+  // ⚠ Do NOT add `conflicts` to the `hitsGithub` alternation below: that regex is unanchored
+  // and would swallow all five.
+  //
+  //   POST …/conflicts          starts a CLONE (ensureClone + two fetches + merge-tree):
+  //                             disk, CPU and GitHub bandwidth, minutes cold. Same shape as
+  //                             POST /api/repos, so the same 20/min `sync` bucket — NOT
+  //                             githubWrite (it writes nothing upstream), emphatically not
+  //                             the 600/min blanket.
+  //   POST …/conflicts/commit   a real `git push`. githubWrite, like every other write here.
+  //   GET  …/conflicts/files/N  an in-memory read whose RESPONSE BODY IS THE WORK — a
+  //                             three-pane model of one source file. The bot-benchmark
+  //                             argument verbatim, so the same 60/min bucket.
+  //   GET  …/conflicts          the manifest: a Map lookup. `read`, RECORDED not inherited.
+  //   GET  …/conflicts/stream   an SSE subscribe onto an already-started job — a read.
+  //   DELETE …/conflicts        a Map.delete. `read` — DECIDED, not inherited from the POST
+  //                             line, which it would otherwise match.
+  if (method === 'POST' && /^\/api\/prs\/\d+\/conflicts$/.test(path)) return [TIERS.sync];
+  if (method === 'DELETE' && /^\/api\/prs\/\d+\/conflicts$/.test(path)) return [TIERS.read];
+  if (mutating && /^\/api\/prs\/\d+\/conflicts\/commit$/.test(path)) return [TIERS.githubWrite];
+  if (!mutating && /^\/api\/prs\/\d+\/conflicts\/files\/\d+$/.test(path)) {
+    return [TIERS.search, TIERS.read];
+  }
+  if (!mutating && /^\/api\/prs\/\d+\/conflicts(\/stream)?$/.test(path)) return [TIERS.read];
   if (mutating) {
     // Writes that reach GitHub: thread replies/resolves, PR and inline review comments,
     // approvals, closes and reopens, CI re-runs, reviewer requests, merges, merge-queue

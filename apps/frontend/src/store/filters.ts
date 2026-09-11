@@ -8,6 +8,7 @@ import {
   EVENT_CATEGORY_BY_TYPE,
   PR_STATUSES,
   REVIEW_FILTER_STATES,
+  type AiFixStatus,
   type BotFlaggingSelector,
   type BotTheme,
   type BotWindowKind,
@@ -293,6 +294,27 @@ export interface FeedNewCohorts {
 // otherwise accumulate one entry per poll for as long as the tab lives; past this many batches
 // "what's new" has stopped being a useful answer anyway, so the oldest fall off.
 const FEED_NEW_COHORT_LIMIT = 8;
+
+// One agentic AI-Fix run this session started, so the bottom-right AiFixBanner can carry it after
+// the reader leaves the pane it was started from. Keyed by prId — one PR runs one fix at a time
+// (the server's `claimed` set makes that a fact, not a hope).
+//
+// ⚠ SEEDED ONLY BY A START THIS SESSION PERFORMED. There is no account-scoped "active fixes"
+// route and we are not adding one, so a reload legitimately loses the row while the run itself
+// carries on; the AI Fix tab remains the place a run is recoverable from.
+//
+// TRANSIENT: freshDefaults() only, never persisted, never URL-serialized, not in FilterDefaults —
+// the syncRound / managerOpen class. No FILTER_STORAGE_VERSION bump is owed for it.
+export interface AiFixRunEntry {
+  prId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  /** ms. Orders the live-stream allocation: oldest runs get the streams. */
+  startedAt: number;
+  /** 'idle' until the row's own SSE reports. Terminal states keep the row until dismissed. */
+  status: AiFixStatus | 'idle';
+}
 
 /** The actions SyncStatus registers so other surfaces (the manager) can drive the round. */
 export interface SyncRoundActions {
@@ -839,6 +861,9 @@ export interface FilterState {
   // review, so the global progress banner knows a run is in flight and begins
   // polling (and stops once the active list drains). Store-only / transient.
   claudeReviewKickoff: number;
+  // Agentic AI-Fix runs started this session, keyed by prId — what the bottom-right
+  // AiFixBanner renders. See AiFixRunEntry for why it is seeded from starts only.
+  aiFixRuns: Record<number, AiFixRunEntry>;
 
   setRepoIds: (ids: number[] | null) => void;
   // Switch the active WORKSPACE and set the resolved repo visibility together. The caller
@@ -1064,7 +1089,21 @@ export interface FilterState {
   // Open a PR's AI Fix tab, optionally seeded with a review to fix. PrDetail consumes
   // it once it has switched tabs.
   openAiFixFromReview: (prId: number, reviewText?: string) => void;
+  // Open a PR's AI Fix tab from OUTSIDE a mounted PrDetail (the bottom-right AiFixBanner).
+  // Mounts the pr-detail tab first — see openClaudeReview for why openAiFixFromReview's
+  // signal-only shape is not reusable here.
+  openAiFix: (meta: TabMeta) => void;
   consumeAiFixTabFocus: () => void;
+  // Record a fix run this session started, so the AiFixBanner can follow it off the pane it
+  // was started from. Idempotent per prId: a re-run keeps the row and resets it to running.
+  noteAiFixRun: (entry: {
+    prId: number;
+    repoFullName: string;
+    prNumber: number;
+    prTitle: string;
+  }) => void;
+  setAiFixRunStatus: (prId: number, status: AiFixStatus | 'idle') => void;
+  dismissAiFixRun: (prId: number) => void;
   // Open (or re-focus) the flow-metric drill-down tab on a specific metric. Sets the
   // metricsFocus signal + opens the singleton metrics tab; MetricsDetail consumes it.
   openMetricsDetail: (metric: WorkspaceMetricKey) => void;
@@ -1461,6 +1500,7 @@ function freshDefaults(): FilterData {
     },
     managerOpen: false,
     claudeReviewKickoff: 0,
+    aiFixRuns: {},
   };
 }
 
@@ -1805,7 +1845,41 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedCommentId: null,
       aiFixTabFocus: { prId, reviewText },
     }),
+  // ⚠ The pr-detail TAB is mounted FIRST, exactly like openClaudeReview and NOT like
+  // openAiFixFromReview above: `aiFixTabFocus` is consumed by an effect inside a MOUNTED
+  // PrDetail, and the banner fires from wherever the reader happens to be — over the Feed, the
+  // Pending board, a full-screen overlay. openAiFixFromReview survives without this only
+  // because its one caller is already inside a mounted PrDetail.
+  openAiFix: (meta) => {
+    usePinnedTabs.getState().openPrDetailTab(meta);
+    set({
+      selectedPrId: meta.id,
+      selectedThreadId: null,
+      selectedCommentId: null,
+      aiFixTabFocus: { prId: meta.id },
+    });
+  },
   consumeAiFixTabFocus: () => set({ aiFixTabFocus: null }),
+  noteAiFixRun: (entry) =>
+    set((s) => ({
+      aiFixRuns: {
+        ...s.aiFixRuns,
+        [entry.prId]: { ...entry, startedAt: Date.now(), status: 'queued' },
+      },
+    })),
+  setAiFixRunStatus: (prId, status) =>
+    set((s) => {
+      const row = s.aiFixRuns[prId];
+      if (!row || row.status === status) return {};
+      return { aiFixRuns: { ...s.aiFixRuns, [prId]: { ...row, status } } };
+    }),
+  dismissAiFixRun: (prId) =>
+    set((s) => {
+      if (!(prId in s.aiFixRuns)) return {};
+      const next = { ...s.aiFixRuns };
+      delete next[prId];
+      return { aiFixRuns: next };
+    }),
   openMetricsDetail: (metric) => {
     set({ metricsFocus: metric });
     usePinnedTabs.getState().openMetricsTab({ fromActivity: true });

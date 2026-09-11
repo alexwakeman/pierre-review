@@ -5691,9 +5691,15 @@ export async function getWorkspaceInsights(
 
   // ── conflicts cards (CORE, deterministic, no AI) ──────────────────────────────
   // GITHUB CANNOT MERGE THIS PR: the head conflicts with the base. The third shape on this board —
-  // not a summons like my_turn, not an opportunity like the two forward kinds — and the only one
-  // with NO action behind it: GitHub offers no resolve button either, so the card states the fact
-  // and stops. Before this it was legible ONLY as a chip on PR detail's Checks row.
+  // not a summons like my_turn, not an opportunity like the two forward kinds. It carries ONE
+  // action, the in-app resolver's entry button (CORE / free, LOCAL ONLY), and never a Merge:
+  // GitHub 405s a merge on a conflicting branch and "Update branch" cannot resolve a conflict.
+  // Before this card existed it was legible ONLY as a chip on PR detail's Checks row.
+  //
+  // ⚠ THE BUTTON IS DECIDED ON THE CLIENT, FROM THIS CARD'S OWN COLUMNS PLUS `/api/me`. Nothing
+  // here may grow a `canResolve` field: the resolver's availability is a property of the
+  // DEPLOYMENT, not of a pull request, and `MeResponse.conflictResolver` already answers it once
+  // for the whole app. A per-card copy would be the same fact at two grains.
   //
   // ⚠ WRITE ACCESS IS THE POPULATION, NOT A DECORATION. Measured on the reporting account: 474
   // open non-draft PRs conflict and 470 are in repos the viewer only READS. The gate is

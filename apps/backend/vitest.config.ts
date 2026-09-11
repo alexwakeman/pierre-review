@@ -47,7 +47,30 @@ const HOOK_TIMEOUT_MS = 30_000;
 // Same argument, applied to test bodies (see above) — the git-shelling suites are the
 // ones that need it, and they are core-only, but keeping it shared is what stops the
 // two branches drifting the way hookTimeout/testTimeout already did.
-const TEST_TIMEOUT_MS = 20_000;
+//
+// ⚠ RAISED 20s → 90s FOR `src/conflict/`, AND THE REASON IS MEASURED, NOT A GUESS.
+// `land.test.ts` and `model.test.ts` prove claims about what git does with a tree nobody
+// checked out, so they shell out ~30 times per test (a model build is merge-base +
+// 3×diff-tree + batch-check + merge-tree + rev-list + per-blob cat-file + the merge-file
+// oracle, and a land REBUILDS the model before it commits, so the whole sequence runs
+// twice) on top of the fixture repo each test builds with real `git init`/`commit`.
+//
+// The cost per spawn is the variable, and it is NOT ours. Measured on the author's macOS
+// machine, same binary, same moment:
+//   • `git --version` from the shell ............................  8 ms
+//   • `git --version` via node's execFile, standalone ...........  25 ms
+//   • `git --version` via node's execFile, inside a vitest worker . 425 ms
+// with `syspolicyd` (Gatekeeper's assessment daemon) pegged at ~87% of a core throughout.
+// Forking a vitest worker's large heap and re-assessing the binary is a per-exec tax, so a
+// suite's runtime here is a function of how many processes the whole run is starting — the
+// same contention argument as above, two orders of magnitude louder. Idle, `land.test.ts`
+// runs its 27 tests in ~112s (~4s each); during a full `pnpm test` the same tests take
+// 24–34s and six of them failed on the 20s ceiling, each with a green assertion behind it.
+//
+// 90s is slack for that tax and nothing else. `conflict/git.ts` kills any git command at
+// 120s, so a genuinely hung or lock-waiting git still fails the run rather than sitting
+// there, and — as above — raising a ceiling cannot turn a failing assertion green.
+const TEST_TIMEOUT_MS = 90_000;
 
 export default defineConfig(
   proRun

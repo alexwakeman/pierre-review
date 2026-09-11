@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useIsMutating } from '@tanstack/react-query';
 import {
   CLAUDE_REVIEW_MODELS,
   CLAUDE_REVIEW_MODEL_LABELS,
@@ -10,15 +11,18 @@ import {
   type AiFixResolveStatusResponse,
   type AiFixSeed,
   type AiFixStatus,
-  type AiFixStatusResponse,
   type AiFixSummary,
   type PrDetail,
   type PrHeadInfo,
 } from '@pierre-review/shared';
 import { relativeTime, safeExternalUrl } from '../lib/ui.js';
+// The fix run's phase ladder lives in lib/ so this tab and the bottom-right AiFixBanner cannot
+// print two different percentages for one run.
+import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import { useFilters } from '../store/filters.js';
 import {
+  aiFixStartMutationKey,
   useAiFix,
   useAiFixJobStream,
   useAiFixStream,
@@ -49,36 +53,6 @@ const BTN_PRIMARY =
   'whitespace-nowrap rounded border border-blue-400 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
 const BTN_SECONDARY =
   'whitespace-nowrap rounded border border-gray-300 px-2.5 py-1 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
-
-const PHASE_LABEL: Record<string, string> = {
-  fetching_diff: 'Reading the PR',
-  cloning: 'Checking out the code',
-  fixing: 'Applying the fix',
-  capturing: 'Capturing changes',
-  persisting: 'Saving',
-};
-
-// Map the live phase (+ activity depth) to a determinate 0–100 reading.
-function fixProgressPct(status: AiFixStatusResponse | null): number | null {
-  if (!status || status.status === 'idle') return null;
-  if (status.status === 'queued') return 6;
-  const p = status.progress;
-  if (!p) return 10;
-  switch (p.phase) {
-    case 'fetching_diff':
-      return 12;
-    case 'cloning':
-      return 28;
-    case 'fixing':
-      return Math.min(90, 45 + (p.recentActivity?.length ?? 0) * 3);
-    case 'capturing':
-      return 92;
-    case 'persisting':
-      return 96;
-    default:
-      return 20;
-  }
-}
 
 const RESOLVE_PHASE_LABEL: Record<string, string> = {
   cloning: 'Checking out the code',
@@ -195,9 +169,10 @@ function CiStatusSection({ pr }: { pr: PrDetail }): JSX.Element | null {
             Checks row (ChecksTab) — that is its primary home, since "why did CI fail?" is
             asked on the default tab. Both mounts share the `['ai-fix-ci', prId]` query key
             AND the refresh mutation key, and PrDetail renders one tab body at a time, so
-            there is no double fetch and no way to start two paid runs. This copy KEEPS the
-            "Fix it →" button (Overview passes showFix={false}) because the fixer's progress
-            UI is right below it, in FixerSection. */}
+            there is no double fetch and no way to start two paid runs. BOTH mounts now carry
+            the "Fix it" button: the run is watchable from the bottom-right AiFixBanner
+            wherever it was started, and the start mutation key (`['ai-fix-start', prId]`) is
+            shared, so a tab switch mid-run cannot offer a second billed run. */}
         <CiAnalysisCard pr={pr} />
       </div>
     </div>
@@ -220,9 +195,15 @@ function FixerSection({
   const startFix = useStartFix(pr.id);
   const cancelFix = useCancelFix(pr.id);
 
+  const noteAiFixRun = useFilters((s) => s.noteAiFixRun);
+  // In-flight read off the SHARED start key, not this mount's `startFix.isPending` — the
+  // CI-analysis card starts the same run from the Overview tab, and a per-mount flag resets to
+  // "Generate fix" on a tab switch mid-run, inviting a second BILLED agent turn.
+  const fixStarting =
+    useIsMutating({ mutationKey: aiFixStartMutationKey(pr.id) }) > 0;
+
   const dbStatus = data?.fix?.status ?? null;
-  const active =
-    dbStatus === 'running' || dbStatus === 'queued' || startFix.isPending;
+  const active = dbStatus === 'running' || dbStatus === 'queued' || fixStarting;
   const { status: liveStatus } = useAiFixStream(pr.id, active);
   const displayStatus: AiFixStatus | 'idle' =
     liveStatus?.status ?? dbStatus ?? 'idle';
@@ -238,6 +219,13 @@ function FixerSection({
     selection.length > 0 ? 'comments' : seedReviewText ? 'review' : 'plain';
 
   const start = (): void => {
+    // The bottom-right AiFixBanner follows the run once the reader leaves this tab.
+    noteAiFixRun({
+      prId: pr.id,
+      repoFullName: pr.repoFullName,
+      prNumber: pr.number,
+      prTitle: pr.title,
+    });
     startFix.mutate(
       {
         model,
@@ -303,7 +291,7 @@ function FixerSection({
                 <button
                   type="button"
                   className={BTN_PRIMARY}
-                  disabled={startFix.isPending}
+                  disabled={fixStarting}
                   onClick={start}
                   title={
                     seed === 'comments'

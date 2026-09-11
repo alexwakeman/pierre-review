@@ -161,6 +161,11 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // account on the free plan, which would hide this from exactly the users it is for.
       // True iff a severity-api is reachable for this deployment; false under `npx`.
       mlSeverity: isSeverityApiConfigured(),
+      // The in-app merge conflict resolver. LOCAL ONLY — in cloud the routes are not
+      // registered at all, so this is the SPA's one gate. ⚠ NOT a git-version probe:
+      // /api/me does not shell out on every SPA boot. A git too old for
+      // `merge-tree --write-tree` is refused by the OPEN route with `git_too_old`.
+      conflictResolver: !config.isCloud,
       // Cross-org benchmark consent (cloud-only; always false in local). Drives the Settings toggle.
       benchmarkOptIn: config.isCloud ? req.account?.benchmarkOptIn ?? false : false,
       // The LARGE-PR FLAG's threshold, RESOLVED (stored value, else the product default) so no

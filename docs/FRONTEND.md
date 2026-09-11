@@ -420,13 +420,19 @@ Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claud
   QUEUE above its conflict test, so a raw-column gate would sprout a second answer to "can this
   land?" directly under a Status row saying "in merge queue"; going through the verdict also
   inherits the `state === 'open'` test, and a merged PR's stored merge state is stale. It renders
-  the **action, not the fact** — five words and a link out to the PR on GitHub — because the fact
+  the **action, not the fact** — the **Resolve conflicts** button plus a link out to the PR on
+  GitHub — because the fact
   is the red `conflicts` chip on the Status row directly above, whose `· detail` echo is
   SUPPRESSED for this one verdict, the same replacement rule the queue chip uses; the sentence
-  survives on the chip's `title`. ⚠ It is **NOT** gated on `viewerCanPush`, unlike the Pending
-  `conflicts` CARD, which is writable-repos-only — a card is an ask, this row is a statement of
+  survives on the chip's `title`. ⚠ **THE ROW IS NOT GATED ON `viewerCanPush`; THE BUTTON INSIDE IT
+  IS.** Unlike the Pending `conflicts` CARD, which is writable-repos-only, this row is a statement of
   fact about a pane that is already open, and the Status chip states it to every reader anyway;
-  gating it would make the pane say less than its own first row. ⚠ It names **no branch**, because
+  gating it would make the pane say less than its own first row. A reader without push access — or
+  anyone in cloud, where the resolver's routes are not registered — sees the link alone, which is
+  exactly what this row was before the button existed. ⚠ **The link carries its own verb**, so the
+  row reads correctly with the button present AND absent: its predecessor was the sentence "Resolve
+  the conflicts on GitHub.", which, once a button offering to do it here sits beside it, sends the
+  reader somewhere else for the thing in front of them. ⚠ It names **no branch**, because
   it cannot without a fetch: `PrDetail` carries no base ref — `pull_requests.base_ref_name` is
   synced but `getPrDetail` does not emit it — and `PrMergeOptions.baseRef` arrives only with the
   click-gated merge-options call, which is why `MergeControl`'s expanded panel is where the branch
@@ -1637,28 +1643,38 @@ verdict line is suppressed — the header's queue chip already said it.
   through the click-gated merge-options call. MEMBERSHIP and ENTRY STATE are a different matter:
   see below.
 
-### The `conflicts` card — the third merge-state kind, and the one with no button
+### The `conflicts` card — the third merge-state kind, and the one with exactly one button
 
 GitHub cannot merge the PR: the head conflicts with its base. Not a summons like `my_turn`, not an
-opportunity like the two forward kinds — the only kind on this board with nothing to press, here or
-on GitHub. `KIND_LABEL.conflicts` is **"Merge conflicts"**, the spelling `REASON_META.merge_conflicts`
-already uses; do not mint a third.
+opportunity like the two forward kinds. `KIND_LABEL.conflicts` is **"Merge conflicts"**, the spelling
+`REASON_META.merge_conflicts` already uses; do not mint a third.
+
+⚠ **THIS SECTION USED TO SAY THE CARD HAD NOTHING TO PRESS.** That was true until the in-app
+resolver landed: the card now carries `ResolveConflictsButton`, and it is the ONLY thing it carries
+besides an armed intent's Cancel.
 
 - ⚠ **THE POPULATION IS "REPOS YOU CAN PUSH TO", AND THAT IS THE WHOLE CARD.** The server mints it
   only inside `writableRepoIds`. Measured: 474 open non-draft PRs conflict on a real account and 470
   are in repos the viewer only READS. Without the gate the 15-row cap fills instantly with strangers'
   stale branches and the reader's own conflicting PR is capped out — silently, because this kind
   discloses no cap.
-- **No merge affordance, and that is the point.** `PendingConflictActions` is a SEPARATE component
-  from `PendingMergeActions`, never a widened one: `mergeVerdict` returns `canMerge: false` on both
-  mint predicates, GitHub 405s a merge on a conflicting branch, and "Update branch" cannot resolve a
-  conflict (`pendingMergeGate` already refuses it on an `update_branch` card whose
-  `mergeable === 'conflicting'`). It renders ONLY when an intent is already armed, and then only
-  `armedPhaseHeadline` + `MergeWhenReadyControl` with **`eager={false}`** — so the reader keeps the
-  Cancel for an intent parked at `waiting_conflicts`, at zero requests. It is never mounted un-armed:
-  that would offer to arm a watcher whose blocker only a human can clear.
-- **No `viewerCanPush` on the wire.** Write access IS the population, so the field would be a
-  constant `true` — and carrying it would invite a control on a card that has nothing to offer.
+- **STILL no merge affordance, and that is still the point.** `PendingConflictActions` is a SEPARATE
+  component from `PendingMergeActions`, never a widened one: `mergeVerdict` returns `canMerge: false`
+  on both mint predicates, GitHub 405s a merge on a conflicting branch, and "Update branch" cannot
+  resolve a conflict (`pendingMergeGate` already refuses it on an `update_branch` card whose
+  `mergeable === 'conflicting'`). `MergeWhenReadyControl` renders ONLY when an intent is already
+  armed, and then with **`eager={false}`** — so the reader keeps the Cancel for an intent parked at
+  `waiting_conflicts`, at zero requests. It is never mounted un-armed: that would offer to arm a
+  watcher whose blocker only a human can clear.
+- ⚠ **THE `armed == null` EARLY RETURN IS GONE, AND ITS REMOVAL IS THE WHOLE FIX.** It used to be
+  right — with nothing armed there was nothing to press — and it is exactly the shape of defect that
+  leaves a feature built, gated and unreachable: the resolver button would have been mounted on a row
+  that returns `null` for the overwhelming majority of cards. The row now drops out only when BOTH
+  halves are absent, and it asks the SAME `useConflictResolverEntry` the button asks rather than
+  growing a second, disagreeing copy of the rule.
+- **No `viewerCanPush` on the wire, and it must not become a field.** Write access IS the population
+  (`writableRepoIds`), so the flag would be a constant `true` — which is why `ResolveConflictsButton`
+  is handed a literal here.
 - **`conflictsStateChip` is the one non-obvious display decision**, exported so a test can pin it.
   The header already says "Merge conflicts", so `MERGE_STATE_LABEL.dirty` under it is one sentence
   twice — suppressed. But the kind is minted on TWO predicates, and on the `mergeable === 'conflicting'`
@@ -1831,6 +1847,98 @@ phrase it two ways.
   prose stays ON THE WIRE — it is the fallback for a client that does not know the phase — and is
   simply not drawn beneath its own restatement.
 
+## The merge-conflict resolver (`components/conflicts/`, CORE/free, LOCAL ONLY)
+
+The three-pane overlay behind **Resolve conflicts**. What it is, what the wand does and how it
+lands: [docs/MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Resolving conflicts in the app. The SPA
+landmines:
+
+- **`ResolveConflictsButton` is the ONE entry, and three surfaces mount it** (the PR pane's
+  Conflicts row, `MergeControl`'s expanded conflict box, the Pending `conflicts` card). None
+  re-implements the gate; a caller that needs to know whether it will render anything asks the same
+  `useConflictResolverEntry`. ⚠ **It fetches nothing** — the gate is four synced facts plus the
+  App-root `['me']` cache, so fifty cards on a board issue zero requests, and `?? false` while
+  `['me']` loads (an undefined capability must not render a button that 404s on the first click).
+  ⚠ **HIDE, never disable.**
+- **The overlay mounts in `App.tsx`, not inside `PrDetail`** — it opens from three places and must
+  not unmount when the pane behind it closes. It is OPAQUE (`z-[60]`, above the one toast column's
+  `z-50`), not a scrim: a translucent backdrop over a live timeline is unreadable at 12px.
+- ⚠ **THERE IS NO URL KEY, NO HISTORY ENTRY AND NO `PrDetailTab` MEMBER, DELIBERATELY.** A
+  `?prTab=conflicts` would make Back a way to lose work — a `popstate` cannot be cancelled and the
+  only guard available is `useUrlState.ts`'s documented permanent-no-op trap — and it would make the
+  resolver deep-linkable, so every address-bar visit would spend a clone. `popstate` CLOSES and
+  pushes nothing; `ClosedResolverToast` is the way back, and it is filed `null` after a commit
+  (the pins have moved, so the offer would be a lie).
+- ⚠ **THE FIVE WAYS OUT ARE NOT ONE RULE.** Close closes outright; `Escape` raises the confirm bar
+  once there is work to lose; `popstate` closes because it cannot be cancelled; a click on the
+  overlay's own chrome is ignored; a reload is caught by `beforeunload`, the one gesture the store
+  cannot survive.
+- ⚠ **ONE SCROLLER, ONE GRID, FIVE TRACKS.** `minmax(0,1fr) 1.75rem minmax(0,1fr) 1.75rem
+  minmax(0,1fr)`, every region emitting its five cells straight into it via `display: contents`. A
+  row's height is its tallest cell and the browser stretches the rest, so the panes line up with no
+  spacer, no measurement and **no scroll-sync driver** — three scrollers kept in step by handlers is
+  the design this replaces, and it drifts on every wrapped line. `min-h-0` on the scroller is
+  load-bearing: without it the flex child refuses to shrink and the grid overflows the viewport.
+  Below `NARROW_PX` (1100, measured live) the columns stack.
+- ⚠ **KEYBOARD SCOPE: only `Escape` is on `window`.** Everything else is `onKeyDown` on the panes'
+  `tabIndex={-1}` container, so `←`/`→`/`b`/`x`/`u` cannot fight a text caret in the branch-name
+  field or the file list's own `↑↓`. That is the `HelpModal` precedent — one key globally, never a
+  scheme.
+- ⚠ **ROVING TAB STOPS.** Only the ACTIVE region's buttons are in the tab order; every other
+  `SlotStrip`'s are `tabIndex={-1}`. Four hundred regions is four hundred strips, and without this
+  Tab walks two thousand buttons before it reaches the toolbar. `role="group"` + `aria-label` live
+  on the STRIP, not the row: the row wrapper is `display: contents`, which removes it from the
+  accessibility tree entirely, so the grouping and the "Conflict 2 of 5 in src/…" position have
+  nowhere else to go. The in-pane buttons are a hover-revealed DUPLICATE for mouse speed — nothing
+  here is reachable only by hovering.
+- **The store (`store/conflictResolver.ts`) holds CHOICES ONLY** — no file text, no regions, no
+  suggestion lines — and it is deliberately NOT a slice of `store/filters.ts`, which is persisted
+  and URL-mirrored. ⚠ **The pins are part of the key** (`${prId}:${headSha}:${baseSha}:${modelHash}`):
+  a pushed branch or a moved base mints a different key and the old decisions are simply not found,
+  never migrated onto a merge the reader did not see. Same reasoning as the auto-merge intent's
+  `expectedHeadOid`.
+- ⚠ **AN ACCEPTED "Ask Claude" SUGGESTION'S LINES MUST OUTLIVE THE PANES' MOUNT.** `ResolverPanes`
+  unmounts the moment the reader presses Continue, so component state alone loses them on `Back` —
+  `slotFor` would then render an ACCEPTED suggestion as undecided while the commit still carried its
+  `suggestionId`: the counter says decided, the pane says "Needs a decision", and the push lands
+  Claude's text. They live in a module map keyed by SERVER SESSION, pruned to the live one on every
+  mount. The STORE keeps the opaque handle and deliberately not the text.
+- ⚠ **"Ask Claude" is ABSENT, not locked, when unentitled.** The six visible-but-locked surfaces are
+  an ENUMERATED exception in `components/ProGate.tsx` and a seventh needs its own written argument
+  there. This is one paid control inside a screen already doing its whole job for a free reader; a
+  lock would advertise into a working feature.
+- ⚠ **AN UNSUPPORTED FILE IS LISTED AND DISABLED, NEVER HIDDEN** (`FileMenu`) — it is exactly why
+  the PR stays conflicted after a commit, and hiding it leaves nothing on screen to explain that.
+  No "partly decided" ring either: a part-decided file says `1 of 3 decided` in words, which is also
+  the only form carrying its denominator.
+- **The wand's sentence names its own population.** It runs per FILE while the header counts
+  conflicts across the whole PR, so a bare "Nothing left to decide." sat beside "1 of 3 conflicts
+  decided" and the two flatly contradicted each other on screen. It says "…in this file".
+- **`ClosedResolverToast` is a plain card in the ONE bottom-right toast column**, never its own
+  `fixed bottom-4 right-4` element.
+- The `--mr-*` / `--mr-hl-*` colour tokens and their hand-run guards: see **The AI-surface palette**
+  above.
+
+### Two defects that only running it found — and both will come back
+
+⚠ **A SWALLOWED PER-FILE FETCH FAILURE PLUS AN EFFECT KEYED ON "NO REGIONS YET" IS AN UNBOUNDED
+RETRY LOOP.** `loadFile` caught its error and returned; the selection effect's condition was "this
+file has no regions", which the swallow left true, so it re-fired the instant `loadingFiles` cleared.
+**MEASURED at 655 requests against one 429'd endpoint**, with nothing on screen but "Reading …". A
+failed read is now REMEMBERED in `useConflictSession`'s `fileErrors`, and **only an explicit retry
+clears an entry** (`retryFile`). The general rule: an effect that keys on the ABSENCE of data must
+have a third state for "we asked and it failed", or the absence is a spin.
+
+⚠ **THE SERVER RE-ATTACHES AN EXISTING SESSION ON OPEN, SO A NAIVE UNMOUNT CLEANUP DELETES THE
+SESSION THE NEW MOUNT IS HOLDING.** `POST …/conflicts` without `restart` returns the LIVE session
+(`claimSession`), so a remount does not get a new one — and the OLD mount's cleanup then `DELETE`d
+it out from under the new one, which sat on "Reading …" forever. React 18 StrictMode remounts every
+effect in dev, so this fired on the FIRST open of every resolver; in production it is a fast
+close-and-reopen. The close is now **refcounted per PR and DEFERRED** in
+`apps/frontend/src/hooks/useConflictSession.ts`: the last detach schedules it, an attach inside
+`CLOSE_GRACE_MS` (400ms) cancels it. The grace only has to outlive a synchronous remount, and the
+server's 30-minute TTL is still the backstop.
+
 ## The Settings modal is TWO HALVES, split by GRAIN, and the split IS the layout
 
 `components/settings/SettingsModal.tsx`. Every GLOBAL section first, then ONE `Workspace · <name>`
@@ -1973,6 +2081,24 @@ migration".
 The documented split is **controls join the family, data keeps the chart palette**: the Inflation
 column's under-call COUNTS stay violet while the chip the click opens is vermilion, and the
 `ai_review` LANE stays violet in lane charts.
+
+**⚠ THE RESOLVER'S `--mr-*` TOKENS LIVE IN THE SAME FILE AND ARE NOT PART OF THIS FAMILY.**
+`--mr-change` · `--mr-conflict` · `--mr-applied` · `--mr-ignored` (four semantic STATES, not
+decorations: a side changed these lines and nothing is decided · both sides changed them differently
+· a decision puts a change into the result · a decision keeps the ancestor), plus seven scoped
+`--mr-hl-*` syntax colours for the code cells. Same space-separated-channel rule, same silent
+failure if it is broken.
+- ⚠ **`--mr-conflict` IS NOT `--ai-signal`.** Vermilion is the AI surface's accent and the Pro badge
+  draws in it; a merge conflict is not an AI marker, and borrowing that hue would make every
+  contested hunk look like something a model produced.
+- ⚠ **`test/textContrast.test.ts` CANNOT SEE ANY OF THEM.** That scanner resolves Tailwind utilities
+  with a numeric shade (`text-gray-400`); a custom property matches nothing it looks for. The guard
+  is **`apps/frontend/test/resolverTokens.test.ts`**, which parses the declarations back out of
+  `index.css`, composites each wash at ITS OWN declared alpha over the page ground and asserts AA in
+  both directions in both themes. Both suites are HAND-RUN
+  (`./apps/backend/node_modules/.bin/vitest run --root apps/frontend`). The measured ratios are
+  tabulated in `index.css`'s own header; if you change a channel, re-run that test rather than
+  eyeballing it.
 
 ⚠ **A hex a component DERIVES a wash from cannot become a var.** `FeedView`'s `itemGlyph`
 returns `{color}` and the chip paints `background: glyph.color + '1a'`. The `claude_review` kind

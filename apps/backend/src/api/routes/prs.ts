@@ -766,15 +766,21 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       const token = await getAccessToken(accountId);
-      // Live conflict pre-check — never attempt a merge on a conflicting PR (no free-tier
-      // resolution). GitHub would 405 anyway; a 409 here is clearer.
+      // Live conflict pre-check — never attempt a merge on a conflicting PR. GitHub would 405
+      // anyway; a 409 here is clearer.
+      //
+      // ⚠ THE SENTENCE NAMES NO TIER AND POINTS NOWHERE, for the same reason as the two on the
+      // update-branch route below: conflict resolution is CORE, free and in-app in local mode,
+      // and its button sits on the pane this error lands on. Telling the reader to go to GitHub
+      // is now false. The error CODE and the `conflicts: true` flag are unchanged; the SPA reads
+      // those, never the prose.
       const m = await fetchMergeability(token, ctx.owner, ctx.name, ctx.number);
       if (m.mergeable === false || m.mergeableState === 'dirty') {
         reply.status(409);
         return {
           error: 'Conflicts',
           conflicts: true,
-          message: 'This PR conflicts with the base branch — resolve the conflicts on GitHub.',
+          message: 'This PR conflicts with the base branch. Resolve the conflicts first.',
         };
       }
       const info = await fetchPrHeadInfo(token, ctx.owner, ctx.name, ctx.number);
@@ -1191,15 +1197,20 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       const token = await getAccessToken(accountId);
-      // Never attempt an update on a conflicting PR — conflict resolution is a Pro feature.
+      // Never attempt an update on a conflicting PR.
+      //
+      // ⚠ THE SENTENCE NAMES NO TIER AND POINTS NOWHERE. Conflict resolution is CORE and free,
+      // in-app in local mode, and its button is on this same pane — a sentence telling the
+      // reader to click a visible button is verbiage, and one telling them to go to GitHub is
+      // now false. The error CODE and the `conflicts: true` flag are unchanged; the SPA reads
+      // those, never the prose.
       const m = await fetchMergeability(token, ctx.owner, ctx.name, ctx.number);
       if (m.mergeable === false || m.mergeableState === 'dirty') {
         reply.status(409);
         return {
           error: 'Conflicts',
           conflicts: true,
-          message:
-            'This PR conflicts with the base branch. Resolving conflicts isn’t available on the free tier — resolve them on GitHub.',
+          message: 'This PR conflicts with the base branch. Resolve the conflicts first.',
         };
       }
       const info = await fetchPrHeadInfo(token, ctx.owner, ctx.name, ctx.number);
@@ -1246,8 +1257,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         return {
           error: 'Conflicts',
           conflicts: true,
-          message:
-            'This PR conflicts with the base branch. Resolving conflicts isn’t available on the free tier — resolve them on GitHub.',
+          message: 'Updating from the base branch hit conflicts. Resolve them first, then update.',
         };
       }
       if (code === 'HEAD_MOVED') {

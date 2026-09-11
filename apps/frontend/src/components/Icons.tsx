@@ -42,6 +42,15 @@ import type { ReactNode } from 'react';
 //    CodeRabbit and friends write into their own comment bodies. Changing them silently breaks
 //    bot classification, and no test of ours would fail in an obvious way.
 //  • The landing arcade's ← → key legend, which names physical keys.
+//
+// ── TWO MARKS THAT MUST NEVER BE SWAPPED FOR EACH OTHER ──────────────────────────────────────
+//  • `SparkleIcon` means A MODEL PRODUCED THIS, and somebody is paying for it. `WandIcon` is the
+//    merge resolver's deterministic "take the obvious ones" — free, on every tier, no model in
+//    the call path. Drawing them alike would make the free button look billable and the billable
+//    one look free, which is a pricing claim rather than a style choice.
+//  • `PartialCircleIcon` is pinned by its own comment to PERIOD-REPORT COVERAGE. A part-decided
+//    file in the resolver says `1 of 3 decided` in words instead — the same collision
+//    `BlastRadiusIcon`'s header records as the reason marks get purpose-built.
 
 interface IconProps {
   size?: number;
@@ -794,6 +803,163 @@ export function LockIcon({ size = 13, ...rest }: IconProps): JSX.Element {
     <IconShell size={size} strokeWidth={1.9} {...rest}>
       <rect x="4.6" y="10.4" width="14.8" height="9.8" rx="2.1" />
       <path d="M8.2 10.4V7.6a3.8 3.8 0 0 1 7.6 0v2.8" />
+    </IconShell>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   Merge resolution
+   ───────────────────────────────────────────────────────────────────────────────────────── */
+
+// Two branch lines meeting head-on with a bar across the join — a merge conflict: two edits
+// arriving at the same lines from opposite directions, with nothing deciding between them.
+//
+// ⚠ NOT `MergeIcon`, and not a warning triangle. `MergeIcon` draws a merge that WORKED and is on
+// every merge button in the app; a ⚠ is the generic "something is wrong" mark this row already
+// carries one of. This is the specific state, so it gets the specific mark.
+export function ConflictIcon({ size = 12, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M6 3.4v5.2c0 1.7 1.4 3.1 3.1 3.1h1.5" />
+      <path d="M18 20.6v-5.2c0-1.7-1.4-3.1-3.1-3.1h-1.5" />
+      <circle cx="6" cy="3.4" r="1.9" />
+      <circle cx="18" cy="20.6" r="1.9" />
+      <line x1="9.4" y1="15.2" x2="14.6" y2="8.8" />
+    </IconShell>
+  );
+}
+
+// ── THE RESOLVER'S ACTION MARKS ──────────────────────────────────────────────────────────────
+//
+// ⚠ THE TWO "TAKE BOTH" ORDERINGS ARE ONE MARK PLUS A SWAP, NOT TWO MARKS. The obvious drawing
+// is two arrows that differ only in which side's arrow is drawn first — and at 14px those two
+// pictures are the same picture. "The `title` carries the real distinction" is hover-only and
+// unavailable to touch, which is reasons 2 and 3 in this file's header. So `AcceptBothIcon`
+// says "take both" and `SwapOrderIcon` sits beside it naming the CURRENT order in words.
+//
+// ⚠ `WandIcon` IS NOT `SparkleIcon`, and the two must never be swapped for each other. A sparkle
+// means a model produced this and somebody is paying for it; the wand is deterministic, free, and
+// available on every tier. Drawing them alike would make the free button look billable and the
+// billable one look free.
+
+// A rod with a hilt band and two ticks at the tip. Deliberately asymmetric — a symmetric
+// four-point burst IS `SparkleIcon`, which means something else (see above).
+export function WandIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.8} {...rest}>
+      <line x1="4.2" y1="19.8" x2="14.6" y2="9.4" />
+      <line x1="11.2" y1="8.4" x2="15.6" y2="12.8" />
+      <path d="M17.2 4.4v3.2" />
+      <path d="M20.6 8.6h-3.2" />
+      <path d="M18.6 6.2 16.2 8.6" />
+    </IconShell>
+  );
+}
+
+// An arrow crossing INTO the result from the left pane — "bring your version across".
+export function AcceptLeftIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2} {...rest}>
+      <line x1="3.4" y1="4.4" x2="3.4" y2="19.6" />
+      <line x1="6.6" y1="12" x2="19.4" y2="12" />
+      <path d="m14.6 7.2 5.2 4.8-5.2 4.8" />
+    </IconShell>
+  );
+}
+
+// The mirror: an arrow crossing into the result from the base branch's pane.
+export function AcceptRightIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2} {...rest}>
+      <line x1="20.6" y1="4.4" x2="20.6" y2="19.6" />
+      <line x1="17.4" y1="12" x2="4.6" y2="12" />
+      <path d="m9.4 7.2-5.2 4.8 5.2 4.8" />
+    </IconShell>
+  );
+}
+
+// Both sides arriving at the same result. Which one lands FIRST is `SwapOrderIcon`'s job.
+export function AcceptBothIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2} {...rest}>
+      <line x1="3.6" y1="7.4" x2="14.4" y2="7.4" />
+      <path d="m10.6 4.2 4 3.2-4 3.2" />
+      <line x1="20.4" y1="16.6" x2="9.6" y2="16.6" />
+      <path d="m13.4 13.4-4 3.2 4 3.2" />
+    </IconShell>
+  );
+}
+
+// Two arcs trading places — the ordering control beside "take both".
+export function SwapOrderIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M4.4 8.4h11.4a3.2 3.2 0 0 1 0 6.4H14" />
+      <path d="m7.6 5.2-3.2 3.2 3.2 3.2" />
+      <path d="m16.4 11.6 3.2 3.2-3.2 3.2" />
+    </IconShell>
+  );
+}
+
+// A barred circle: this change is not going in, and that is a DECISION rather than an omission.
+// Not `CloseIcon` — closing dismisses something; this records an answer.
+export function IgnoreHunkIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="12" cy="12" r="8.4" />
+      <line x1="6.4" y1="17.6" x2="17.6" y2="6.4" />
+    </IconShell>
+  );
+}
+
+// An arrow turning back on itself. `ReopenIcon` already draws a full loop and means "this pull
+// request lives again"; this one is a single step backwards.
+export function UndoIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M4.4 10.4h10.2a4.8 4.8 0 1 1 0 9.6H8.6" />
+      <path d="m8.2 5.6-3.8 4.8 3.8 4.8" />
+    </IconShell>
+  );
+}
+
+// The merge base: one commit with two branches leaving it. The picture IS the sentence the
+// popover header carries — the last commit both branches shared.
+export function CompareBaseIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="12" cy="19.2" r="2.4" />
+      <circle cx="5.6" cy="5.2" r="2.4" />
+      <circle cx="18.4" cy="5.2" r="2.4" />
+      <path d="M12 16.8V13c0-2 -1.6-3.6-3.6-3.6H7.6" />
+      <path d="M12 16.8V13c0-2 1.6-3.6 3.6-3.6h.8" />
+    </IconShell>
+  );
+}
+
+// A commit lifted off one line and set down on another — a replay, not a merge.
+export function RebaseIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <line x1="5.4" y1="3.6" x2="5.4" y2="20.4" />
+      <circle cx="5.4" cy="16.4" r="2.2" />
+      <circle cx="18.4" cy="8" r="2.2" />
+      <path d="M8 14.4c2.6-3.4 5-5.2 8-6.2" />
+      <path d="m13.4 5.6-.6 2.6 2.6.4" />
+    </IconShell>
+  );
+}
+
+// The octicon git-branch shape: a branch leaving a line. Used for the new-branch target, where
+// the noun is the branch itself rather than the act of merging.
+export function BranchIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="6.4" cy="4.8" r="2.3" />
+      <circle cx="6.4" cy="19.2" r="2.3" />
+      <circle cx="17.6" cy="6.8" r="2.3" />
+      <line x1="6.4" y1="7.1" x2="6.4" y2="16.9" />
+      <path d="M17.6 9.1c0 3.4-2.8 4.6-6.2 5.2-2.6.5-5 1.4-5 2.6" />
     </IconShell>
   );
 }

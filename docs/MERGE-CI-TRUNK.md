@@ -124,7 +124,8 @@ Rules, each of which the measured data forced:
 - **Populated for `blocked` ONLY.** Every other verdict is already a complete sentence about
   itself; a one-row list under "resolve the conflicts with the base branch" is noise. ⚠ **The rule
   stands, and the Conflicts row does not bend it.** `conflicts` now has its own Overview Row — but
-  what that row carries is an **ACTION** (five words and a link out to the PR on GitHub), not a
+  what that row carries is an **ACTION** (the **Resolve conflicts** button, and a link out to the PR
+  on GitHub for readers the button is hidden from), not a
   ranked list of candidate causes. `blocked` needs `blockers[]` because GitHub refuses to say what
   it is enforcing; a conflict names itself, so there is nothing to rank. That is also why the row
   earns its place only in exchange for the Status chip's `· detail` echo being SUPPRESSED for this
@@ -147,6 +148,112 @@ the route always issues that probe — it just dropped the field, and threw the 
 any repo without a merge queue. ⚠ It is SPREAD, never assigned: `queue` is null when the probe
 FAILED, and "we never asked" must not reach the client wearing the same `null` GitHub uses for
 "this base branch requires no review". Absent → the control falls back to the synced row.
+
+### Resolving conflicts in the app (`src/conflict/`, CORE/free, LOCAL ONLY)
+
+**This retracts an old claim.** Until this shipped, several places in this repo said some version
+of *"resolving conflicts is a git operation this app does not perform, and GitHub offers no button
+for it either"*. It does now. What has NOT changed: `mergeVerdict` still returns `canMerge: false`
+for a conflicting PR, GitHub still 405s a merge on one, "Update branch" still cannot clear a
+conflict, and the `conflicts` Pending card still carries **no merge affordance**. The one thing it
+gained is the resolver entry.
+
+**Where it exists.** `!config.isCloud`, full stop. `app.ts` registers `conflictRoutes` only in local
+mode, so in cloud the six paths fall to the not-found handler exactly like a typo'd URL rather than
+each handler carrying its own refusal; `MeResponse.conflictResolver` (`!config.isCloud`, no git
+probe) is what the SPA gates on. ⚠ **There is no `CONFLICT_RESOLVER_ENABLED` and there must not
+be** — a per-handler env check looks like a gate and is one Railway variable away from not being
+one. There is no cloud upsell either: `conflictResolver: false` means the button is absent, and the
+GitHub link-out is exactly what it was.
+
+**The entry is click-gated and fetches nothing.** `ResolveConflictsButton` is the ONE entry, mounted
+on three surfaces (the PR pane's Conflicts row, `MergeControl`'s expanded conflict box, the Pending
+`conflicts` card) and re-implemented by none of them. Its gate is `conflictResolverEntryVisible` over
+four already-synced facts — the PR is open, the resolved `mergeVerdict` says `conflicts`, the viewer
+can push, and `/api/me` says the resolver exists here — plus the App-root `['me']` cache, so fifty
+cards on a board issue zero requests. ⚠ **HIDE, never disable**: a reader without push access sees
+the surrounding sentence and its GitHub link, which is what the row was before the button existed.
+Everything expensive happens on the click.
+
+**Three panes, and the merge base is not one of them.** LEFT is the PR branch ("Your version"),
+RIGHT is the base branch ("Changes from `<base>`"), CENTRE is the result — seeded from the merge base
+and changed only by per-region decisions. The ancestor is a popover (`BasePopover`), because it is
+the thing the other two are both changes TO rather than a fourth option.
+
+**Hunk-level accept/ignore only. There is no typing anywhere.** `ConflictDecision` is a closed enum
+— `base` · `ours` · `theirs` · `both_ours_first` · `both_theirs_first` · `disjoint_merge` ·
+`suggestion` — and ⚠ **there is no `custom` member and there must never be one.** That is a property
+of the PROTOCOL, not a UI convention: nothing on the conflict wire accepts file content from the
+client, every request field is an index, an id or an enum member, and an accepted Pro suggestion
+travels back as an opaque `suggestionId` addressing text the SERVER holds.
+
+**The wand NEVER picks a side.** `ConflictWandReason` has exactly four members — `only_ours`,
+`only_theirs`, `both_same`, `disjoint_words` — and ⚠ **there is deliberately no member meaning "we
+picked the better one"**, because it never does. It settles a region only when one side changed it,
+or both made the identical edit, or the two edits are provably disjoint at word level; a genuine
+contest is left alone. The reason rides every region it touches so it can say exactly what it did,
+and ⚠ a decision the reader already took is never overwritten — it is an accelerator, not a reset.
+⚠ The disjoint merge's LINES ride the wire (`ConflictRegion.mergedLines`), because a client that
+recomputed them computed something else: cross-checked over 4,000 generated three-way regions, the
+SPA's second implementation dropped every pure insertion and rendered the ancestor for a region the
+commit landed merged. `packages/shared/src/conflict-fold.ts` is the ONE fold, called by the centre
+pane and by the land route, which is what makes "what you saw is what lands" structural.
+
+**The per-file workflow.** The session is a MANIFEST — files, counts, pins, landing options — and
+carries no regions: a thirty-file conflict with regions inline is a multi-megabyte payload on every
+progress frame. One file's regions arrive on selection. A file the model cannot represent (binary,
+submodule, symlink, file/directory, rename/rename, rename/delete, modify/delete, mode-change,
+non-UTF-8, too big, too many conflicts, no shared history, engine disagreement, budget exhausted) is
+⚠ **listed and DISABLED, never hidden** — an unlisted file is why the PR stays conflicted after a
+commit with nothing on screen to explain it. Each carries a NOUN PHRASE naming the reason, and the
+panel states the instruction once above the list. A commit may be partial; `stillConflicting` says
+so and the PR stays conflicted.
+
+**Landing: merge or rebase, and rebase is single-commit only.** `merge` builds a two-parent commit
+when every conflicted file was resolved and a one-parent commit when it was partial — ⚠ **a partial
+resolution is NOT a merge commit**, because saying "the base branch landed here" in the commit graph
+is a lie the next merge acts on. `rebase` is offered only when `commitsAboveBase === 1` and every
+conflicted file is resolvable here, and it is built with `commit-tree -p <base>`: ⚠ **no `git rebase`
+process ever runs**, there is no multi-stop path and no `RebaseStalled`. Above one commit the server
+withholds it and says why in one sentence the SPA renders verbatim. The target is the PR's own branch
+or a new one; ⚠ **a fork PR whose author did not allow maintainer edits has no PR-branch option at
+all** — `ConflictSession.prBranchPushable` (one live `fetchPrHeadInfo` at session build, non-fatal,
+defaulting TRUE) hides it and pre-selects the new branch. It is an affordance, never the
+authorisation: the land route re-reads the same two fields milliseconds before the push and answers
+`PushDenied`.
+
+**The pins are what make a stale commit refuse.** Three of them ride the session and are echoed on
+the commit body: `headSha`, `baseSha`, and `modelHash` — a sha256 over the canonical model
+serialisation with ⚠ **`CONFLICT_MODEL_VERSION` folded in**, so any change to the fold or the chunker
+that alters output for a given input MUST bump it in the same commit (the same self-executing
+discipline as `PERIOD_METRICS_SCHEMA_VERSION`; the failure is silent — a stale session lands bytes
+the reader did not choose). A moved head is `HeadMoved`, a moved base `BaseMoved`, a differing hash
+`ModelStale`, and nothing is written in any of the three. The land path re-derives the model behind
+the lock and re-checks ownership, `WRITE_PERMISSIONS`, PR state and head sha immediately before the
+push, so the window between the checks and the irreversible half is milliseconds — the
+`auto-merge-runner.ts` land-time pattern. ⚠ **An armed "merge when ready" intent is DISARMED first,
+and not for tidiness**: a merge-strategy resolution commit has exactly the two-parent shape
+`isOurUpdateMerge` proves against, so a live intent would ADOPT it, re-pin to it, and land code the
+reader never consented to merge.
+
+**Nothing is stored.** No table, no migration, no journal entry, no `accountScopedTables()` entry,
+nothing in `localStorage`. The server session is a module-level `Map` with a 30-minute TTL; the
+client keeps decisions in `store/conflictResolver.ts` under a key pinned to
+`(prId, headSha, baseSha, modelHash)`, so a moved head simply does not find them. ⚠ The reflex in
+this repo is to add a table; here it is wrong — the model is source code, it is pinned to two SHAs,
+and it is worthless the instant either moves.
+
+**No worktree, at any phase.** `merge-tree --write-tree` performs a full three-way merge with no
+index and no working tree; the oracle cross-check runs `merge-file` over three loose files in
+`os.tmpdir()`. That makes the resolver immune to the worktree defect classes rather than dependent
+on their fix, and it is why a session costs nothing to hold open. ⚠ **No git 2.40+ flags** either —
+no `merge-tree --merge-base=`, no `-X ours|theirs`, no `merge-file --object-id`; the cloud image is
+on 2.39.5 where all three exit 129, and v1 being local-only must not make a later port a rewrite.
+The one floor is 2.38 for `--write-tree`, probed once and refused as `git_too_old` at the open route.
+
+Routes and tiers: [docs/API.md](API.md). The SPA's landmines, the `--mr-*` palette and the two
+defects found by running it: [docs/FRONTEND.md](FRONTEND.md) § The merge-conflict resolver. The
+clone-cache hardening it rests on: [docs/SECURITY.md](SECURITY.md).
 
 ### Merge queue (GitHub's native)
 

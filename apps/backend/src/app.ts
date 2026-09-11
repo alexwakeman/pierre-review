@@ -30,6 +30,7 @@ import { workspaceRoutes } from './api/routes/workspaces.js';
 import { userRoutes } from './api/routes/users.js';
 import { timelineRoutes } from './api/routes/timeline.js';
 import { prRoutes } from './api/routes/prs.js';
+import { conflictRoutes } from './api/routes/conflicts.js';
 import { threadRoutes } from './api/routes/threads.js';
 import { meRoutes } from './api/routes/me.js';
 import { openPrsRoutes } from './api/routes/open-prs.js';
@@ -225,6 +226,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(userRoutes);
   await app.register(timelineRoutes);
   await app.register(prRoutes);
+  // Merge-conflict resolver (CORE / free, LOCAL ONLY). Registered ONLY in local mode — the paths
+  // do not exist in cloud, so they fall to the not-found handler exactly like a typo'd URL,
+  // rather than each handler carrying its own refusal. There is no clone directory and no git
+  // guarantee in the cloud image; a per-handler env check would look like a gate and be one
+  // Railway variable away from not being one. There is no CONFLICT_RESOLVER_ENABLED and there
+  // must not be one — `MeResponse.conflictResolver` (`!config.isCloud`) is what the SPA gates on.
+  if (!config.isCloud) await app.register(conflictRoutes);
   await app.register(threadRoutes);
   await app.register(meRoutes);
   await app.register(openPrsRoutes);

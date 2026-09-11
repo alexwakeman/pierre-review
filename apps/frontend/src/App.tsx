@@ -18,12 +18,15 @@ import { PeopleReportDetail } from './components/Activity/PeopleReportDetail.js'
 import { SearchResultsTab } from './components/Search/SearchResultsTab.js';
 import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
+import { AiFixBanner } from './components/AiFixBanner.js';
 import { AutoMergeBanner } from './components/AutoMergeBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
 import { GlobalLoadingBar } from './components/GlobalLoadingBar.js';
 import { WelcomeBackBanner } from './components/WelcomeBackBanner.js';
 import { HelpModal } from './components/HelpModal.js';
 import { SettingsModal } from './components/settings/SettingsModal.js';
+import { ConflictResolverOverlay } from './components/conflicts/ConflictResolverOverlay.js';
+import { ClosedResolverToast } from './components/conflicts/ClosedResolverToast.js';
 import { SignInGate } from './components/SignInGate.js';
 import { AuthNoticeBanner } from './components/AuthNoticeBanner.js';
 import { UserMenu } from './components/UserMenu.js';
@@ -344,6 +347,11 @@ export default function App(): JSX.Element {
 
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {/* The merge-conflict resolver, mounted HERE and not inside PrDetail: it opens from three
+          places (the pane's Conflicts row, the expanded merge panel, the Pending board) and must
+          not unmount when the pane behind it closes. It renders null until something opens it —
+          `store/conflictResolver.ts` holds the target — so this costs one selector read. */}
+      <ConflictResolverOverlay />
 
       <WelcomeBackBanner />
       <FilterBar />
@@ -552,6 +560,14 @@ export default function App(): JSX.Element {
           pointer-events-none; interactive cards re-enable their own. */}
       <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
         <ClaudeReviewBanner />
+        {/* Agentic AI-Fix runs started this session — the progress UI for the CI-analysis
+            card's "Fix it" shortcut, which is why that button can now be offered outside the
+            AI Fix tab. */}
+        <AiFixBanner />
+        {/* The way back into a conflict resolver the reader closed with decisions still in the
+            store. The resolver has no URL and no history entry, so this card is the ONLY route
+            back; it files nothing after a commit, when the pins have already moved. */}
+        <ClosedResolverToast />
         <AutoMergeBanner />
         {/* Ambient heavy-work indicator (full-mode backfills + ML bot-comment scoring).
             An indicator, not a dialog: non-dismissible, no click target. */}

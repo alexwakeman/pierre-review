@@ -35,6 +35,7 @@ import { UserName } from './UserName.js';
 import { Markdown } from './Markdown.js';
 import { ApproveControl } from './ApproveControl.js';
 import { MergeControl } from './MergeControl.js';
+import { ResolveConflictsButton } from './conflicts/ResolveConflictsButton.js';
 import { MergeWhenReadyControl } from './MergeWhenReadyControl.js';
 import { ClosePrControl } from './ClosePrControl.js';
 import { ReopenPrControl } from './ReopenPrControl.js';
@@ -693,8 +694,30 @@ export function ChecksTab({
             fetch. */}
         {conflictsRowVisible(pr.state, verdict.verdict) && (
           <Row label="Conflicts">
-            <div className="text-xs font-medium leading-relaxed text-gray-700 dark:text-gray-200">
-              Resolve the conflicts on{' '}
+            <div className="flex flex-wrap items-center gap-2 text-xs font-medium leading-relaxed text-gray-700 dark:text-gray-200">
+              {/* ⚠ THE BUTTON IS GATED, THE ROW IS NOT (see the ⚠ two paragraphs up). A reader
+                  without push access — or in cloud, where the resolver's routes are not registered
+                  at all — sees the GitHub link alone, which is exactly what this row was before
+                  the button existed. HIDE, never disable. And nothing here fetches:
+                  `ResolveConflictsButton` decides from the resolved verdict, the synced
+                  `viewerCanPush` and the App-root ['me'] cache. */}
+              <ResolveConflictsButton
+                state={pr.state}
+                verdict={verdict.verdict}
+                viewerCanPush={pr.viewerCanPush}
+                target={{
+                  prId: pr.id,
+                  repoId: pr.repoId,
+                  repoFullName: pr.repoFullName,
+                  prNumber: pr.number,
+                  prTitle: pr.title,
+                  githubUrl: pr.githubUrl,
+                }}
+              />
+              {/* ⚠ THE LINK CARRIES ITS OWN VERB, so the row reads correctly with the button
+                  present AND absent. Its predecessor was the sentence "Resolve the conflicts on
+                  GitHub." — which, once a button offering to do it here sits beside it, tells the
+                  reader to go somewhere else for the thing they can do in front of them. */}
               <a
                 href={pr.githubUrl}
                 target="_blank"
@@ -702,10 +725,9 @@ export function ChecksTab({
                 className="underline underline-offset-2"
                 title="Open this pull request on GitHub"
               >
-                GitHub
+                Resolve on GitHub
                 <ExternalLinkIcon size={11} className="ml-0.5 inline-block align-[-0.1em]" />
               </a>
-              .
             </div>
           </Row>
         )}
@@ -930,7 +952,19 @@ export function ChecksTab({
             )}
             {pr.viewerCanPush && pr.state === 'open' && !pr.isDraft && (
               <>
-                <MergeControl prId={pr.id} githubUrl={pr.githubUrl} blockFacts={blockFacts} />
+                <MergeControl
+                  prId={pr.id}
+                  githubUrl={pr.githubUrl}
+                  blockFacts={blockFacts}
+                  resolverTarget={{
+                    prId: pr.id,
+                    repoId: pr.repoId,
+                    repoFullName: pr.repoFullName,
+                    prNumber: pr.number,
+                    prTitle: pr.title,
+                    githubUrl: pr.githubUrl,
+                  }}
+                />
                 <MergeWhenReadyControl prId={pr.id} blockFacts={blockFacts} />
               </>
             )}
@@ -997,7 +1031,9 @@ export function ChecksTab({
           under the checks list + re-run control — the same ordering the AI Fix tab's CI-status
           section uses. The card self-gates (prSummary capability) and presence-gates (renders
           NOTHING unless something is red or an analysis is already stored), so a green PR is
-          unchanged. `showFix={false}`: the agentic fixer's progress UI lives on the AI Fix tab.
+          unchanged. It carries the agentic "Fix it" button too: the run is watchable from the
+          bottom-right AiFixBanner without leaving this tab, and clicking that row lands on the
+          AI Fix tab with the result.
 
           The row gate is widened past `checks.length > 0` so a PR whose ciStatus is red but
           whose checkRuns did not hydrate (the lean-storage / SAML-SSO case handled at the
@@ -1017,7 +1053,7 @@ export function ChecksTab({
               />
             </>
           )}
-          <CiAnalysisCard pr={pr} showFix={false} />
+          <CiAnalysisCard pr={pr} />
         </Row>
       )}
 

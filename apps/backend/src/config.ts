@@ -412,6 +412,31 @@ export const config = {
   cloneDir: process.env.CLONE_DIR ?? resolve(homedir(), '.pierre-review', 'clones'),
   // Soft cap on the clone cache before LRU cleanup evicts idle repos (default 2 GiB).
   cloneCacheMaxBytes: intFromEnv('CLONE_CACHE_MAX_BYTES', 2 * 1024 * 1024 * 1024),
+
+  // ---- Merge conflict resolver (CORE / free, LOCAL ONLY) ----
+  // Bounds on ONE resolver session. Every one of these is a REFUSAL boundary, not a
+  // truncation: past the cap the file is listed as unsupported with a reason, never
+  // silently shortened. A shortened file would commit bytes nobody saw.
+  conflictMaxFiles: intFromEnv('CONFLICT_MAX_FILES', 40),
+  conflictMaxFileBytes: intFromEnv('CONFLICT_MAX_FILE_BYTES', 512 * 1024),
+  // ⚠ Must stay < 127: `git merge-file` reports the conflict count in its EXIT STATUS,
+  // which saturates there.
+  conflictMaxRegions: intFromEnv('CONFLICT_MAX_REGIONS', 120),
+  conflictMaxTotalBytes: intFromEnv('CONFLICT_MAX_TOTAL_BYTES', 8 * 1024 * 1024),
+  // Myers diff `d` ceilings. Past these the diff degrades to a single whole-file conflict
+  // region rather than running quadratically on a pathological pair.
+  conflictDiffMaxD: intFromEnv('CONFLICT_DIFF_MAX_D', 4000),
+  conflictWordDiffMaxD: intFromEnv('CONFLICT_WORD_DIFF_MAX_D', 2000),
+  conflictWordTokenCap: intFromEnv('CONFLICT_WORD_TOKEN_CAP', 20_000),
+  conflictPrefetchMaxBlobs: intFromEnv('CONFLICT_PREFETCH_MAX_BLOBS', 2000),
+  conflictModelTimeoutMs: intFromEnv('CONFLICT_MODEL_TIMEOUT_MS', 45_000),
+  conflictSessionTtlMs: intFromEnv('CONFLICT_SESSION_TTL_MIN', 30) * 60_000,
+  conflictSuggestMaxChars: intFromEnv('CONFLICT_SUGGEST_MAX_CHARS', 4000),
+  // A worktree older than this is an ORPHAN — its run died without its `finally`. The
+  // startup sweep prunes it, and the LRU may evict its repo despite `.worktrees/` being
+  // non-empty. Without this one crashed run pins a repo in the cache permanently.
+  worktreeTtlMs: intFromEnv('WORKTREE_TTL_HOURS', 6) * 3_600_000,
+  cloneSweepMaxMs: intFromEnv('CLONE_SWEEP_MAX_MS', 30_000),
   // Per-run caps (cost/disk/time runaway guards). The diff is inlined in full, so
   // reviews need far fewer turns than the old default; 30 is still generous.
   reviewMaxTurns: intFromEnv('REVIEW_MAX_TURNS', 30),

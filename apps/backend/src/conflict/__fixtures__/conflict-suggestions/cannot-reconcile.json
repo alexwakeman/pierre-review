@@ -1,0 +1,35 @@
+{
+  "name": "check 2 - the DESIGNED refusal, with the trailing whitespace a model tends to add",
+  "expected": "cannot_reconcile",
+  "hunk": {
+    "base": [
+      "const a = 1;",
+      "const b = 2;"
+    ],
+    "ours": [
+      "const a = 1;",
+      "const b = 2;",
+      "const c = 3;"
+    ],
+    "theirs": [
+      "const a = 1;",
+      "const b = 2;",
+      "const d = 4;"
+    ],
+    "contextBefore": [
+      "function f() {",
+      "  // setup",
+      "  init();"
+    ],
+    "contextAfter": [
+      "  return a;",
+      "}",
+      "// end"
+    ]
+  },
+  "answer": [
+    "<<BEGIN>>",
+    "CANNOT RECONCILE   ",
+    "<<END>>"
+  ]
+}

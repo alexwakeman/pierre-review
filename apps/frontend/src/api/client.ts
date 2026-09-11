@@ -43,6 +43,10 @@ import type {
   CreatePrCommentBody,
   CreatePrCommentResult,
   CreateRepoBody,
+  ConflictCommitBody,
+  ConflictFileContent,
+  ConflictOpenBody,
+  ConflictSession,
   ConsolidatedFeedResponse,
   WorkspaceInsightsResponse,
   AttentionCardsResponse,
@@ -600,6 +604,51 @@ export const api = {
     fetch(`/api/prs/${prId}/update-branch`, jsonBody('POST', body ?? {})).then((r) =>
       handle<UpdateBranchResult>(r),
     ),
+
+  // ---- The merge-conflict resolver (CORE / free, LOCAL ONLY) ----
+  //
+  // ⚠ THESE ROUTES DO NOT EXIST IN CLOUD. They are registered only when `!config.isCloud`, so a
+  // cloud call falls to the not-found handler exactly like a typo'd URL. `MeResponse
+  // .conflictResolver` is the ONE thing that decides whether a caller may reach for them, and it
+  // gates every entry button — nothing here probes.
+  //
+  // ⚠ NOTHING ON THIS WIRE SENDS FILE CONTENT. Every request field is an index, an id or an enum
+  // member; an accepted model suggestion travels back as an opaque `suggestionId` addressing text
+  // the SERVER holds. That is what makes "no free typing" a property of the protocol.
+  //
+  // Open and commit are ASYNCHRONOUS: both validate everything cheap synchronously and refuse
+  // with a real status code, then answer 202 and run. Progress arrives on the ONE session SSE
+  // stream (`hooks/useConflictSession.ts` via `sseStream`) — a cold clone on a large repository
+  // blows past Fastify's 60s request timeout, so neither may be a long-held request.
+  openConflictSession: (prId: number, body?: ConflictOpenBody) =>
+    fetch(`/api/prs/${prId}/conflicts`, jsonBody('POST', body ?? {})).then((r) =>
+      handle<ConflictSession>(r),
+    ),
+  // The manifest — files, counts, pins, landing strategies. A Map lookup on the server; the
+  // regions are NOT in it (a 30-file conflict carrying them inline is a multi-megabyte payload).
+  conflictSession: (prId: number, sessionId: string) =>
+    get<ConflictSession>(
+      `/api/prs/${prId}/conflicts?session=${encodeURIComponent(sessionId)}`,
+    ),
+  // ONE file's regions, fetched on selection. Files are addressed by INDEX — a path never travels
+  // in a URL.
+  conflictFile: (prId: number, sessionId: string, fileIndex: number) =>
+    get<ConflictFileContent>(
+      `/api/prs/${prId}/conflicts/files/${fileIndex}?session=${encodeURIComponent(sessionId)}`,
+    ),
+  // The push. The body echoes the pins (`expectedHeadSha`, `expectedBaseSha`, `modelHash`); a
+  // mismatch is refused and nothing is written.
+  commitConflictResolution: (prId: number, body: ConflictCommitBody) =>
+    fetch(`/api/prs/${prId}/conflicts/commit`, jsonBody('POST', body)).then((r) =>
+      handle<ConflictSession>(r),
+    ),
+  // Drop the server's session. Nothing is stored, so this frees memory and releases the PR's job
+  // slot — there is no worktree to prune and no row to delete.
+  closeConflictSession: (prId: number, sessionId: string) =>
+    fetch(
+      `/api/prs/${prId}/conflicts?session=${encodeURIComponent(sessionId)}`,
+      jsonBody('DELETE'),
+    ).then((r) => handle<void>(r)),
 
   // ---- Merge queue (GitHub-native) ----
   // Enqueue / dequeue this PR on the repo's merge queue. Only offerable when

@@ -60,6 +60,10 @@ import { ThreadCard } from '../ThreadView/index.js';
 import { armedPhaseHeadline, TERMINAL_LABEL } from '../AutoMergeBanner.js';
 import { MergeControl } from '../MergeControl.js';
 import { MergeWhenReadyControl } from '../MergeWhenReadyControl.js';
+import {
+  ResolveConflictsButton,
+  useConflictResolverEntry,
+} from '../conflicts/ResolveConflictsButton.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 
@@ -1259,36 +1263,78 @@ function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard
 }
 
 /**
- * WHAT A CONFLICTS CARD MAY OFFER: nothing to press, unless something is already armed.
+ * WHAT A CONFLICTS CARD MAY OFFER: resolving them, and cancelling an armed intent. Never a merge.
  *
- * ⚠ NO MERGE AFFORDANCE, AND THAT IS THE POINT. `mergeVerdict` returns `canMerge: false` for both
- * mint predicates, GitHub 405s a merge on a conflicting branch, and "Update branch" cannot resolve a
- * conflict — `pendingMergeGate` above already refuses to offer it on an `update_branch` card whose
- * `mergeable === 'conflicting'`. Resolving conflicts is a git operation this app does not perform,
- * and GitHub offers no button for it either, so the card names the fact and stops.
+ * ⚠ STILL NO MERGE AFFORDANCE, AND THAT IS STILL THE POINT. `mergeVerdict` returns
+ * `canMerge: false` for both mint predicates, GitHub 405s a merge on a conflicting branch, and
+ * "Update branch" cannot resolve a conflict — `pendingMergeGate` above already refuses to offer it
+ * on an `update_branch` card whose `mergeable === 'conflicting'`.
  *
- * ⚠ NOTHING HERE FETCHES ON MOUNT. `usePrArmedIntent` is a SELECTOR over the account-wide armed list
- * the app already polls — one query for the whole board. `MergeWhenReadyControl` is mounted ONLY
- * when an intent is already armed AND with `eager={false}`, which leaves its
+ * ⚠ WHAT CHANGED IS THAT RESOLVING IS NOW SOMETHING THIS APP DOES. The old sentence here —
+ * "resolving conflicts is a git operation this app does not perform, and GitHub offers no button
+ * for it either, so the card names the fact and stops" — was true until the in-app resolver landed.
+ * `ResolveConflictsButton` is the one entry into it, and it is HIDDEN rather than disabled wherever
+ * it cannot work (cloud, no write access, a PR that is no longer open).
+ *
+ * ⚠ NOTHING HERE FETCHES ON MOUNT, AND THE BUTTON DOES NOT CHANGE THAT. Its gate is four synced
+ * facts plus the App-root `['me']` cache — see `conflictResolverEntryVisible`; the clone happens on
+ * the CLICK. `usePrArmedIntent` is a SELECTOR over the account-wide armed list the app already
+ * polls — one query for the whole board. `MergeWhenReadyControl` is mounted ONLY when an intent is
+ * already armed AND with `eager={false}`, which leaves its
  * `useMergeOptions(prId, eager || draft !== 'idle')` disabled: zero requests, and the reader keeps
  * the Cancel for an intent parked at `waiting_conflicts` that will sit there until it expires. It is
  * NEVER mounted un-armed — that would offer to arm a watcher whose blocker only a human can clear.
  */
 function PendingConflictActions({ card }: { card: ConflictsCard }): JSX.Element | null {
   const armed = usePrArmedIntent(card.prId);
+  // ⚠ THE `armed == null` EARLY RETURN IS GONE. It used to be right — with nothing armed there was
+  // nothing to press — and it is exactly the shape of defect that leaves a feature built, gated and
+  // unreachable: the resolver button would have been mounted on a row that returns null for the
+  // overwhelming majority of cards.
+  //
   // HIDE, never disable. ⚠ No `viewerCanPush` gate here because there is no such field: the kind is
   // MINTED only for repos the viewer can push to (`writableRepoIds`), so the flag would be a
-  // constant `true` on the wire — see ConflictsCard's contract in packages/shared.
-  if (armed == null) return null;
+  // constant `true` on the wire — see ConflictsCard's contract in packages/shared. That is why
+  // `viewerCanPush` below is a literal, and why it must NOT become a new field on the card.
+  //
+  // The row asks the SAME resolver the button asks, so it can drop out entirely rather than
+  // render an empty strip of padding under every conflicts card in cloud (where the resolver's
+  // routes do not exist) with nothing armed. One rule, one answer.
+  const canResolve = useConflictResolverEntry({
+    state: 'open',
+    verdict: 'conflicts',
+    viewerCanPush: true,
+  });
+  if (!canResolve && armed == null) return null;
   return (
     // `data-noactivate` for the same reason PendingMergeActions carries it: CardShell.onActivate
     // opens the PR unless the click landed in a/button/textarea/input/[data-noactivate].
     <div className="mt-2 flex flex-wrap items-center gap-2" data-noactivate>
-      {/* ONE SPELLING of where a live intent stands, shared with the AutoMergeBanner stack. */}
-      <span className="text-[11px] text-gray-500 dark:text-gray-400">
-        {armedPhaseHeadline(armed)}
-      </span>
-      <MergeWhenReadyControl prId={card.prId} eager={false} />
+      <ResolveConflictsButton
+        // A card only ever describes an OPEN pull request, and its kind is minted from the same
+        // two columns `mergeVerdict` reads — so the verdict is a literal here rather than a second
+        // reading of the enum. `pendingMergeGate` states the same rule for the forward kinds.
+        state="open"
+        verdict="conflicts"
+        viewerCanPush
+        target={{
+          prId: card.prId,
+          repoId: card.repoId,
+          repoFullName: card.repoFullName,
+          prNumber: card.prNumber,
+          prTitle: card.prTitle,
+          githubUrl: card.githubUrl,
+        }}
+      />
+      {armed != null && (
+        <>
+          {/* ONE SPELLING of where a live intent stands, shared with the AutoMergeBanner stack. */}
+          <span className="text-[11px] text-gray-500 dark:text-gray-400">
+            {armedPhaseHeadline(armed)}
+          </span>
+          <MergeWhenReadyControl prId={card.prId} eager={false} />
+        </>
+      )}
     </div>
   );
 }

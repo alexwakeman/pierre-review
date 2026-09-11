@@ -1,0 +1,41 @@
+{
+  "name": "check 8 - a punctuation-only line one side added is dropped; check 7 never sees it",
+  "expected": "dropped_side_lines",
+  "hunk": {
+    "base": [
+      "if (a) {",
+      "  go();",
+      "  more();"
+    ],
+    "ours": [
+      "if (a) {",
+      "  go();",
+      "  more();",
+      "}"
+    ],
+    "theirs": [
+      "if (a) {",
+      "  go();",
+      "  extra();",
+      "  more();"
+    ],
+    "contextBefore": [
+      "function g() {",
+      "  const a = 1;",
+      "  // check"
+    ],
+    "contextAfter": [
+      "console.log(1);",
+      "done();",
+      "// tail"
+    ]
+  },
+  "answer": [
+    "<<BEGIN>>",
+    "if (a) {",
+    "  go();",
+    "  extra();",
+    "  more();",
+    "<<END>>"
+  ]
+}

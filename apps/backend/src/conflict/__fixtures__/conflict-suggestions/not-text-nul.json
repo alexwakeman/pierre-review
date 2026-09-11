@@ -1,0 +1,38 @@
+{
+  "name": "check 3 - a NUL byte in the answer",
+  "expected": "not_text",
+  "hunk": {
+    "base": [
+      "const a = 1;",
+      "const b = 2;"
+    ],
+    "ours": [
+      "const a = 1;",
+      "const b = 2;",
+      "const c = 3;"
+    ],
+    "theirs": [
+      "const a = 1;",
+      "const b = 2;",
+      "const d = 4;"
+    ],
+    "contextBefore": [
+      "function f() {",
+      "  // setup",
+      "  init();"
+    ],
+    "contextAfter": [
+      "  return a;",
+      "}",
+      "// end"
+    ]
+  },
+  "answer": [
+    "<<BEGIN>>",
+    "const a = 1;",
+    "const b = 2;<<NUL>>",
+    "const c = 3;",
+    "const d = 4;",
+    "<<END>>"
+  ]
+}

@@ -34,6 +34,7 @@ import { dormantBotUserIds } from '../db/bot-dormancy.js';
 import { forecastNext } from '../db/forecast.js';
 import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
 import { aiCreditStatus } from '../db/credits.js';
+import { makeConflictSeam } from '../conflict/seam.js';
 import { reviewEvents, registerLearningsProvider } from '../review/events.js';
 import { registerScheduledJob } from '../sync/scheduled-jobs.js';
 import { registerPrDetailEnricher } from '../pr/detail-enricher.js';
@@ -363,6 +364,11 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         return { reviewBudgetUsd: getEffectiveReviewBudget() };
       },
     },
+    // The merge-conflict resolver's per-hunk seam. ⚠ LOCAL ONLY, matching the six core resolver
+    // routes (`app.ts` registers those behind `!config.isCloud`): with no session to address, a
+    // seam in cloud would be a route that can only ever refuse. `undefined` there means the
+    // plugin registers no conflict-assist route at all, which is the same shape as OSS mode.
+    conflicts: config.isCloud ? undefined : makeConflictSeam(),
   };
 
   try {

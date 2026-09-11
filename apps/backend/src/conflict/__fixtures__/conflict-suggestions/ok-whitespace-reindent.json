@@ -1,0 +1,37 @@
+{
+  "name": "check 7 passes - an agreed line reindented is not a dropped line",
+  "expected": "ok",
+  "keptCommonLines": 2,
+  "hunk": {
+    "base": [
+      "const a = 1;",
+      "  const b = 2;"
+    ],
+    "ours": [
+      "const a = 1;",
+      "  const b = 2;",
+      "  const c = 3;"
+    ],
+    "theirs": [
+      "const a = 1;",
+      "    const b = 2;"
+    ],
+    "contextBefore": [
+      "function f() {",
+      "  // setup",
+      "  init();"
+    ],
+    "contextAfter": [
+      "  return a;",
+      "}",
+      "// end"
+    ]
+  },
+  "answer": [
+    "<<BEGIN>>",
+    "const a = 1;",
+    "      const b = 2;",
+    "  const c = 3;",
+    "<<END>>"
+  ]
+}

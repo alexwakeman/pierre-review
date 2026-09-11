@@ -1,0 +1,428 @@
+import { useEffect, useMemo, useState } from 'react';
+import type {
+  ConflictCommitBody,
+  ConflictCommitTarget,
+  ConflictDecision,
+  ConflictFileContent,
+  ConflictLandStrategy,
+  ConflictSession,
+} from '@pierre-review/shared';
+import {
+  buildCommitBody,
+  commitPlan,
+  landingTargets,
+  type LandingFileRow,
+} from '../../lib/conflictCommit.js';
+import { checkBranchName, branchNameMessage } from '../../lib/branchName.js';
+import { useResolverSession } from '../../store/conflictResolver.js';
+import { BranchIcon, MergeIcon, RebaseIcon, WarningIcon } from '../Icons.js';
+import {
+  AUTO_MERGE_ARMED,
+  CLOSE_RESOLVER,
+  COMMIT_AND_PUSH,
+  COMMIT_SENTENCE,
+  HEAD_MOVED,
+  HOW_TO_LAND,
+  LANDING_BACK,
+  NEW_BRANCH,
+  NEW_BRANCH_FIELD,
+  NOTHING_DECIDED_YET,
+  NOTHING_PUSHED,
+  OPEN_PR_FOR_BRANCH,
+  PARTIAL_COMMIT_NOTE,
+  REBASE_AND_FORCE_PUSH,
+  START_AGAIN,
+  STAYS_CONFLICTED,
+  STILL_CONFLICTED,
+  STRATEGY_MERGE,
+  STRATEGY_MERGE_FULL,
+  STRATEGY_MERGE_PARTIAL,
+  STRATEGY_REBASE,
+  WHAT_GOES_IN,
+  WHERE_TO_PUT_IT,
+  filesResolved,
+  pinnedOn,
+  pushToBranch,
+  strategyRebaseDetail,
+} from './copy.js';
+
+// ── THE LANDING STEP ─────────────────────────────────────────────────────────────────────────
+//
+// The second view inside the SAME overlay, not a nested modal: `Back` returns to the panes with
+// every decision intact, because the decisions live in the store and this component holds none of
+// them.
+//
+// ⚠ IT BRINGS ITS OWN SCROLLER. The overlay body is `flex min-h-0 flex-1 flex-col` and is NOT one
+// — the panes nest theirs inside it, and so does this. A second scroller wrapped around either is
+// what unsticks the pane headers.
+//
+// Three questions in the order a reader asks them: what is going in, how it lands, where it goes.
+// Everything the server will refuse is refused here first, so nobody spends a clone finding out.
+
+export function LandingStep({
+  session,
+  sessionKey,
+  files,
+  headMoved,
+  autoMergeArmed,
+  commitError,
+  onBack,
+  onCommit,
+  onRestart,
+  onClose,
+}: {
+  session: ConflictSession;
+  sessionKey: string;
+  files: Record<number, ConflictFileContent>;
+  /** The PR's head moved on GitHub since the model was pinned. Disables the commit. */
+  headMoved: boolean;
+  /** `usePrArmedIntent(prId) != null` — a live "merge when ready" row, not a local flag. */
+  autoMergeArmed: boolean;
+  /** The commit route refused SYNCHRONOUSLY — a real status code, before the 202. Its own sentence,
+   *  rendered verbatim. ⚠ Without this the button sticks: a synchronous refusal never reaches
+   *  `session.commit`, so the stream has nothing to say and the progress row would sit there. */
+  commitError: string | null;
+  onBack: () => void;
+  onCommit: (body: ConflictCommitBody) => void;
+  onRestart: () => void;
+  onClose: () => void;
+}): JSX.Element {
+  const stored = useResolverSession(sessionKey);
+  const decisions = stored?.decisions ?? EMPTY_DECISIONS;
+  const suggestionIds = stored?.suggestionIds ?? EMPTY_SUGGESTIONS;
+
+  const rebaseOffered = session.strategies.includes('rebase');
+  const [strategy, setStrategy] = useState<ConflictLandStrategy>('merge');
+  // ⚠ THE RADIO'S STATE IS THE READER'S CHOICE; `targets.toNewBranch` IS WHERE THE COMMIT GOES.
+  // A fork pull request without maintainer edits has no PR-branch option on screen at all, so the
+  // choice is made for them — see `landingTargets`, which is the one fold, and which is where the
+  // "hide, never disable" rule lives.
+  const [newBranchChosen, setNewBranchChosen] = useState(false);
+  const targets = landingTargets(session, newBranchChosen);
+  const toNewBranch = targets.toNewBranch;
+  const [branch, setBranch] = useState('');
+  const [openPr, setOpenPr] = useState(true);
+  // ⚠ LOCAL, AND CLEARED BY THE STREAM. The commit route answers 202 and the push runs behind the
+  // session stream, so the mutation resolving is NOT the push landing: without this the button
+  // flashes back for the gap between the 202 and the first `commit_progress` frame, and a second
+  // press in that gap is a second push.
+  const [submitted, setSubmitted] = useState(false);
+
+  // The 202 handshake is over the moment the route refuses, whichever way it refused.
+  useEffect(() => {
+    if (commitError != null) setSubmitted(false);
+  }, [commitError]);
+
+  const plan = useMemo(() => commitPlan(session, files, decisions), [session, files, decisions]);
+  const commit = session.commit;
+  const failed = commit?.status === 'failed' || commitError != null;
+  const running = !failed && (submitted || commit?.status === 'running');
+
+  const refusal = toNewBranch
+    ? checkBranchName(branch, {
+        headRef: session.headRef,
+        baseRef: session.baseRef,
+        reserved: session.reservedBranchNames,
+      })
+    : null;
+  const branchProblem =
+    refusal == null
+      ? null
+      : branchNameMessage(refusal, {
+          headRef: session.headRef,
+          baseRef: session.baseRef,
+          reserved: session.reservedBranchNames,
+        });
+
+  const nothingToCommit = plan.resolved.length === 0;
+  const blocked = headMoved || nothingToCommit || branchProblem != null || running;
+
+  function submit(): void {
+    if (blocked) return;
+    const target: ConflictCommitTarget = toNewBranch
+      ? { kind: 'new_branch', branch: branch.trim(), openPr }
+      : { kind: 'pr_branch' };
+    setSubmitted(true);
+    onCommit(
+      buildCommitBody({ session, loaded: files, decisions, suggestionIds, strategy, target }),
+    );
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
+        {headMoved && (
+          <p className="flex items-start gap-1.5 text-[12px] text-gray-800 dark:text-gray-100">
+            <WarningIcon size={13} className="mt-px shrink-0" />
+            <span>{HEAD_MOVED}</span>
+          </p>
+        )}
+
+        <section>
+          <SectionHeading>{WHAT_GOES_IN}</SectionHeading>
+          <p className="text-[12px] text-gray-800 dark:text-gray-100">
+            {filesResolved(plan.resolved.length, plan.totalFiles)}
+          </p>
+          <PathList rows={plan.resolved} />
+          {plan.stillConflicted.length > 0 && (
+            <>
+              <p className="mt-2 text-[12px] text-gray-800 dark:text-gray-100">
+                {STILL_CONFLICTED}
+              </p>
+              <PathList rows={plan.stillConflicted} withLabel />
+              <p className="mt-1 text-[12px] text-gray-700 dark:text-gray-200">
+                {STAYS_CONFLICTED}
+              </p>
+              {/* The one sentence that needs more words, not fewer — see copy.ts. */}
+              <p className="mt-2 text-[12px] text-gray-700 dark:text-gray-200">
+                {PARTIAL_COMMIT_NOTE}
+              </p>
+            </>
+          )}
+        </section>
+
+        <section>
+          <SectionHeading>{HOW_TO_LAND}</SectionHeading>
+          <div className="flex flex-col gap-2">
+            <RadioCard
+              name="conflict-strategy"
+              checked={strategy === 'merge'}
+              onSelect={() => setStrategy('merge')}
+              icon={<MergeIcon size={13} />}
+              title={STRATEGY_MERGE}
+              /* ⚠ CONDITIONAL. A partial commit is not a merge commit, and the default card must
+                 not promise one the common path does not produce. */
+              detail={session.fullyResolvable ? STRATEGY_MERGE_FULL : STRATEGY_MERGE_PARTIAL}
+            />
+            <RadioCard
+              name="conflict-strategy"
+              checked={strategy === 'rebase'}
+              onSelect={() => setStrategy('rebase')}
+              disabled={!rebaseOffered}
+              icon={<RebaseIcon size={13} />}
+              title={STRATEGY_REBASE}
+              detail={
+                rebaseOffered
+                  ? strategyRebaseDetail(session.baseRef)
+                  : // The server's own sentence, verbatim: it knows why (commit count, a fork, a
+                    // merge already in the history) and this screen does not.
+                    (session.rebaseUnavailableReason ?? strategyRebaseDetail(session.baseRef))
+              }
+            />
+          </div>
+        </section>
+
+        <section>
+          <SectionHeading>{WHERE_TO_PUT_IT}</SectionHeading>
+          {/* The server's sentence, verbatim and once. It names the fact; the missing option is
+              the consequence, and a second sentence from us restating it is verbiage. */}
+          {targets.prBranchNote != null && (
+            <p className="mb-1.5 text-[12px] text-gray-800 dark:text-gray-100">
+              {targets.prBranchNote}
+            </p>
+          )}
+          <div className="flex flex-col gap-2">
+            {targets.offerPrBranch && (
+              <RadioCard
+                name="conflict-target"
+                checked={!toNewBranch}
+                onSelect={() => setNewBranchChosen(false)}
+                icon={<BranchIcon size={13} />}
+                title={pushToBranch(session.headRef)}
+              />
+            )}
+            <RadioCard
+              name="conflict-target"
+              checked={toNewBranch}
+              onSelect={() => setNewBranchChosen(true)}
+              icon={<BranchIcon size={13} />}
+              title={NEW_BRANCH}
+            />
+          </div>
+          {toNewBranch && (
+            <div className="mt-2">
+              <label
+                htmlFor="conflict-branch-name"
+                className="block text-[11px] text-gray-600 dark:text-gray-300"
+              >
+                {NEW_BRANCH_FIELD}
+              </label>
+              {/* ⚠ NO WINDOW KEY LISTENER IS NEEDED FOR THIS FIELD. Only `Escape` lives on
+                  `window`; every other binding is `onKeyDown` on the panes' container, which is
+                  not mounted while this view is. */}
+              <input
+                id="conflict-branch-name"
+                type="text"
+                value={branch}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(e) => setBranch(e.target.value)}
+                className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 font-mono text-xs text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+              />
+              {branchProblem != null && branch.trim() !== '' && (
+                <p className="mt-1 text-[12px] text-gray-800 dark:text-gray-100">{branchProblem}</p>
+              )}
+              <label className="mt-1.5 flex items-center gap-1.5 text-[12px] text-gray-700 dark:text-gray-200">
+                <input
+                  type="checkbox"
+                  checked={openPr}
+                  onChange={(e) => setOpenPr(e.target.checked)}
+                />
+                {OPEN_PR_FOR_BRANCH}
+              </label>
+            </div>
+          )}
+        </section>
+
+        <section className="flex flex-col gap-2 border-t border-gray-200 pt-3 dark:border-gray-800">
+          <p className="text-[11px] text-gray-600 dark:text-gray-300">
+            {pinnedOn(session.headSha, session.baseSha)}
+          </p>
+          {autoMergeArmed && (
+            <p className="text-[12px] text-gray-800 dark:text-gray-100">{AUTO_MERGE_ARMED}</p>
+          )}
+          {nothingToCommit && (
+            <p className="text-[12px] text-gray-800 dark:text-gray-100">{NOTHING_DECIDED_YET}</p>
+          )}
+
+          {failed ? (
+            // ⚠ THE DECISIONS ARE UNTOUCHED. A refusal is the server declining to write anything,
+            // so `Back` still returns to the panes with every choice in place. The server's own
+            // sentence renders verbatim beside ours — it names the fact (`ModelStale`, `HeadMoved`,
+            // `BranchExists`) and this screen cannot.
+            <div className="flex flex-col gap-2">
+              <p className="text-[12px] text-gray-800 dark:text-gray-100">
+                {NOTHING_PUSHED} {commit?.error?.message ?? commitError ?? ''}
+              </p>
+              <div className="flex items-center gap-2">
+                <SecondaryButton onClick={onBack}>{LANDING_BACK}</SecondaryButton>
+                <SecondaryButton onClick={onRestart}>{START_AGAIN}</SecondaryButton>
+                <SecondaryButton onClick={onClose}>{CLOSE_RESOLVER}</SecondaryButton>
+              </div>
+            </div>
+          ) : running ? (
+            <div
+              className="text-[12px] text-gray-700 dark:text-gray-200"
+              aria-live="polite"
+              role="status"
+            >
+              {commit?.phase != null ? COMMIT_SENTENCE[commit.phase] : 'Starting…'}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <SecondaryButton onClick={onBack}>{LANDING_BACK}</SecondaryButton>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={blocked}
+                title={headMoved ? HEAD_MOVED : undefined}
+                className="rounded bg-gray-900 px-3 py-1 text-xs font-medium text-white disabled:opacity-40 dark:bg-gray-100 dark:text-gray-900"
+              >
+                {strategy === 'rebase' ? REBASE_AND_FORCE_PUSH : COMMIT_AND_PUSH}
+              </button>
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeading({ children }: { children: React.ReactNode }): JSX.Element {
+  return (
+    <h2 className="mb-1 text-[11px] font-medium text-gray-600 dark:text-gray-300">{children}</h2>
+  );
+}
+
+/** The paths, one per line, monospace. `withLabel` is the "Still conflicted" list, where each row
+ *  carries WHY — the server's noun phrase for an unsupported file, ours for a half-decided one. */
+function PathList({
+  rows,
+  withLabel = false,
+}: {
+  rows: readonly LandingFileRow[];
+  withLabel?: boolean;
+}): JSX.Element | null {
+  if (rows.length === 0) return null;
+  return (
+    <ul className="mt-0.5">
+      {rows.map((row) => (
+        <li key={row.index} className="flex flex-wrap items-baseline gap-x-2 text-[12px]">
+          <span className="font-mono text-gray-800 dark:text-gray-100">{row.path}</span>
+          {withLabel && <span className="text-gray-600 dark:text-gray-300">{row.label}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** A radio and its two lines. A disabled card still renders its reason — an option that vanished
+ *  and an option that is refused are different facts, and only one of them needs explaining. */
+function RadioCard({
+  name,
+  checked,
+  onSelect,
+  disabled = false,
+  icon,
+  title,
+  detail,
+}: {
+  name: string;
+  checked: boolean;
+  onSelect: () => void;
+  disabled?: boolean;
+  icon: JSX.Element;
+  title: string;
+  detail?: string;
+}): JSX.Element {
+  return (
+    <label
+      className={`flex items-start gap-2 rounded border px-2.5 py-1.5 ${
+        checked
+          ? 'border-gray-400 dark:border-gray-500'
+          : 'border-gray-200 dark:border-gray-800'
+      } ${disabled ? 'opacity-50' : 'cursor-pointer'}`}
+    >
+      <input
+        type="radio"
+        name={name}
+        checked={checked}
+        disabled={disabled}
+        onChange={onSelect}
+        className="mt-0.5"
+      />
+      <span className="min-w-0">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-gray-900 dark:text-gray-100">
+          {icon}
+          {title}
+        </span>
+        {detail != null && (
+          <span className="mt-0.5 block text-[12px] text-gray-600 dark:text-gray-300">
+            {detail}
+          </span>
+        )}
+      </span>
+    </label>
+  );
+}
+
+function SecondaryButton({
+  onClick,
+  children,
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded border border-gray-300 px-2.5 py-1 text-xs text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+    >
+      {children}
+    </button>
+  );
+}
+
+const EMPTY_DECISIONS: Readonly<Record<string, ConflictDecision>> = Object.freeze({});
+const EMPTY_SUGGESTIONS: Readonly<Record<string, string>> = Object.freeze({});

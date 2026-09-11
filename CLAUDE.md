@@ -26,7 +26,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [DATA-MODEL](docs/DATA-MODEL.md) | any schema/table change; per-table contracts; the bot vocabulary |
 | [API](docs/API.md) | any route — the per-route contract reference |
 | [FRONTEND](docs/FRONTEND.md) | stores, tabs/overlays, FilterBar scoping, timeline internals, PrDetail |
-| [MERGE-CI-TRUNK](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, auto-merge runner, CI logs, trunk status |
+| [MERGE-CI-TRUNK](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, auto-merge runner, the in-app conflict resolver, CI logs, trunk status |
 | [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) | the agentic PR-review feature |
 | [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports -> "Chronology" |
 | [BLAST-RADIUS](docs/BLAST-RADIUS.md) | how far a PR can REACH — the Low/Medium/High chip, the co-change index, the Pro impact note |
@@ -413,9 +413,11 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   disable. Mid-merge is THREE layers on one row: a live manual merge (read off the SHARED
   `mergePrMutationKey`/`updateBranchMutationKey` via `useIsMutating`, never a per-mount
   `isPending`), then the armed intent's `armedPhaseHeadline`, then the synced verdict.
-  ⚠ **`conflicts` is a THIRD merge-state-derived kind and it carries NO action** (GitHub offers no
-  resolve button either); it is minted ONLY in repos the viewer can PUSH to — `writableRepoIds`, or
-  470 of 474 real conflicting PRs are strangers' branches — and carries no `viewerCanPush` at all.
+  ⚠ **`conflicts` is a THIRD merge-state-derived kind carrying EXACTLY ONE action, the resolver
+  entry** — `ResolveConflictsButton`, never a merge (the old "it carries no action, GitHub offers no
+  resolve button either" is retired). It is minted ONLY in repos the viewer can PUSH to —
+  `writableRepoIds`, or 470 of 474 real conflicting PRs are strangers' branches — so it carries no
+  `viewerCanPush` at all and must not grow one.
 - **The board's freshness against GITHUB is ONE batched sweep, `POST /api/attention/liveness`** —
   the sanctioned alternative to per-card fetching, not an exception to it. It sends the board's PR
   ids and re-reads them in one `nodes(ids:)` call (2 GraphQL points, ~5-7s). ⚠ **MEASURED: 90 ids
@@ -634,6 +636,19 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   `viaMergeQueue` intents are excluded from the local queue entirely. ⚠ **`freshenedIntents` is
   once per TURN, not per lifetime** — a landing clears its repo-siblings' marks, or a batch
   strands itself at "behind" until the 72h expiry.
+- **Conflicts are RESOLVED IN THE APP now** (`src/conflict/`, `components/conflicts/`) — CORE/free
+  and **LOCAL ONLY** (`app.ts` registers the six routes on `!config.isCloud`, and
+  `MeResponse.conflictResolver` is the SPA's gate; there is no `CONFLICT_RESOLVER_ENABLED` and no
+  cloud upsell).
+  Three panes, hunk-level accept/ignore, **no free typing anywhere** — `ConflictDecision` is closed,
+  there is no `custom` member, and nothing on the wire accepts file content, which is a property of
+  the PROTOCOL, not a UI convention. ⚠ **The wand NEVER picks a side** (one-sided, identical, or
+  provably disjoint at word level — nothing else). ⚠ **No worktree at any phase**, nothing stored
+  (no table, no migration), and a session is pinned to `(headSha, baseSha, modelHash)` with
+  `CONFLICT_MODEL_VERSION` folded into the hash — bump it in the same commit as any fold change, or
+  a stale session lands bytes nobody chose. Rebase is single-commit-only and never runs `git rebase`.
+  Read [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md) § Resolving conflicts in the app before
+  touching any of it.
 - CI logs are live ranged reads of the signed Actions blob URL — server-side only, **NEVER
   returned to a client** (it is unauthenticated).
 - Trunk status (`/api/branch-status`) is **informational only** — no attention counts, badges

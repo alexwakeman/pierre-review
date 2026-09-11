@@ -11,6 +11,8 @@ import { useDisarmAutoMerge } from '../hooks/useAutoMerge.js';
 import { dateTime, MERGE_TONE_CLASS, mergeVerdict, relativeTime, toMergeStateStatus } from '../lib/ui.js';
 import { ApiError } from '../api/client.js';
 import { CaretIcon, ExternalLinkIcon, MergeIcon, WarningIcon } from './Icons.js';
+import { ResolveConflictsButton } from './conflicts/ResolveConflictsButton.js';
+import type { ResolverTarget } from '../store/conflictResolver.js';
 
 // Merge control for the Overview tab (CORE / free tier), rendered next to Approve when the
 // viewer has push access and the PR is open + not a draft. Collapsed it's a single "Merge ▾"
@@ -48,6 +50,7 @@ export function MergeControl({
   githubUrl,
   label = 'Merge',
   blockFacts,
+  resolverTarget,
 }: {
   prId: number;
   githubUrl: string;
@@ -73,6 +76,13 @@ export function MergeControl({
    * before the fetch that would have said so.
    */
   label?: string;
+  /**
+   * The pull request this control is about, for the "Resolve conflicts" button in the conflict
+   * box below. OPTIONAL, and absent on the Pending board — a conflicts card never mounts this
+   * control at all (it has nothing to merge), so plumbing the fields there would be a prop that
+   * can never be read.
+   */
+  resolverTarget?: ResolverTarget;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const { data: options, isLoading, isError } = useMergeOptions(prId, open);
@@ -207,21 +217,46 @@ export function MergeControl({
         )}
       </div>
 
-      {/* Conflicts — info only. Conflict resolution is a Pro feature; free tier links out. */}
+      {/* Conflicts. THIS PANEL IS THE ONE SURFACE THAT CAN NAME THE BRANCH, because it is the one
+          that already paid for the live merge-options fetch — the pane's Conflicts row says the
+          same thing without it.
+
+          ⚠ THE BOX IS GATED ON `options.conflicts`; THE BUTTON IS NOT. `ResolveConflictsButton`
+          decides from the RESOLVED verdict, `viewerCanPush` and `/api/me` — never from this
+          payload, because the same button also mounts on the Pending board, where nothing may
+          fetch. Two gates on one screen is fine here: this box exists because the fetch happened,
+          and the button exists because the four synced facts say so. */}
       {options.conflicts && (
         <div className="rounded border border-amber-300 bg-amber-50/60 px-2 py-1.5 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200">
           <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
-          This PR conflicts with <span className="font-mono">{options.baseRef}</span>. Resolve the
-          conflicts on{' '}
-          <a
-            href={githubUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="font-medium underline"
-          >
-            GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
-          </a>
-          .
+          This PR conflicts with <span className="font-mono">{options.baseRef}</span>.
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            {resolverTarget != null && (
+              <ResolveConflictsButton
+                // ⚠ `state` IS A LITERAL HERE BECAUSE THE MOUNT ALREADY DECIDED IT. Both call
+                // sites gate on `pr.state === 'open'` before this control exists at all, and the
+                // panel offers merge buttons — which would be nonsense on a landed PR. The prop
+                // stays on the button so the OTHER two mounts must state it rather than assume.
+                state="open"
+                verdict={verdict.verdict}
+                // ⚠ A LITERAL FOR THE SAME REASON `state` IS. This control is mounted only behind
+                // `pr.viewerCanPush` (PrDetail's Actions row) — it offers merge buttons, which
+                // nobody without write access may press. `PrMergeOptions` carries no such field,
+                // and it must not grow one: `repos.viewerPermission` is the synced fact and this
+                // fetch is not where it lives.
+                viewerCanPush
+                target={resolverTarget}
+              />
+            )}
+            <a
+              href={githubUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="font-medium underline"
+            >
+              Resolve on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
+            </a>
+          </div>
         </div>
       )}
 

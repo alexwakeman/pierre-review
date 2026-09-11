@@ -562,6 +562,60 @@ describe('tierFor — GitHub quota spenders', () => {
   });
 });
 
+// FIVE paths under one prefix with FOUR different costs — the exact shape this file gets wrong
+// when it guesses, and the reason every line is anchored at BOTH ends. `/conflicts` is a PREFIX
+// of `/conflicts/commit`, so an unanchored match would hand the open, the commit, the file read
+// and the stream one bucket, which is right for exactly one of them — and the one it would be
+// wrong about most expensively runs `git push`.
+describe('tierFor — merge-conflict resolver', () => {
+  it('puts the open on the sync bucket — it starts a clone, it writes nothing upstream', () => {
+    expect(tiers('POST', '/api/prs/12/conflicts')).toEqual(['sync']);
+    expect(tiers('POST', '/api/prs/12/conflicts')).not.toEqual(['read']);
+    expect(tiers('POST', '/api/prs/12/conflicts')).not.toContain('github_write');
+  });
+
+  it('puts the commit on github_write — it is a real push', () => {
+    expect(tiers('POST', '/api/prs/12/conflicts/commit')).toEqual(['github_write']);
+    // ⚠ THE NEAR MISS THIS BLOCK EXISTS FOR. The open's line is anchored, so the commit cannot
+    // fall into the 20/min sync bucket — and, far worse, an unanchored open line would have put
+    // the push there instead of on the write bucket.
+    expect(tiers('POST', '/api/prs/12/conflicts/commit')).not.toEqual(
+      tiers('POST', '/api/prs/12/conflicts'),
+    );
+  });
+
+  it('puts one file’s regions on search — the response body IS the work', () => {
+    expect(tiers('GET', '/api/prs/12/conflicts/files/0')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/prs/12/conflicts/files/37')).toEqual(['search', 'read']);
+  });
+
+  it('leaves the manifest, the stream and the close on read — DECIDED, not inherited', () => {
+    expect(tiers('GET', '/api/prs/12/conflicts')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/12/conflicts/stream')).toEqual(['read']);
+    // The DELETE would otherwise match the POST line's path and take the 20/min sync bucket for
+    // a `Map.delete`.
+    expect(tiers('DELETE', '/api/prs/12/conflicts')).toEqual(['read']);
+  });
+
+  it('does not match the SINGULAR spelling (the `comments`/`/comment` trap, one family over)', () => {
+    expect(tiers('POST', '/api/prs/12/conflict')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/12/conflict')).toEqual(['read']);
+  });
+
+  it('leaves the neighbouring PR writes where they were', () => {
+    expect(tiers('POST', '/api/prs/12/merge')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/prs/12/update-branch')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/prs/12/refresh')).toEqual(['pr_detail', 'read']);
+  });
+
+  // The Pro per-hunk suggestion needs no line of its own — `/api/pro/` + mutating already
+  // returns [ai, ai_hourly] — but it is pinned HERE so a future `isSettingsWrite`-style
+  // exemption on that prefix cannot silently un-bill a Haiku call.
+  it('bills the Pro per-hunk suggestion as generation', () => {
+    expect(tiers('POST', '/api/pro/prs/12/conflict-hunk/suggest')).toEqual(['ai', 'ai_hourly']);
+  });
+});
+
 describe('tierFor — unauthenticated surface', () => {
   it('buckets sign-in by itself (it is reachable without a session)', () => {
     expect(tiers('GET', '/api/auth/login')).toEqual(['auth']);

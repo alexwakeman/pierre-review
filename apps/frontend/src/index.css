@@ -1377,3 +1377,189 @@ body {
 .dark [style*='--ink-light'] {
   color: var(--ink-dark);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   MERGE-CONFLICT RESOLVER — the four semantic colours, and the code cell's ground
+
+   Four roles, and every one of them is a STATE the reader acts on, not a decoration:
+
+     change    a side changed these lines and nothing has been decided about it yet
+     conflict  both sides changed these lines, differently
+     applied   a decision was taken and it puts a change into the result
+     ignored   a decision was taken and it keeps the ancestor's lines
+
+   ⚠ `--mr-conflict` IS NOT `--ai-signal`. Vermilion is the AI surface's accent and the Pro badge
+   draws in it; a merge conflict is not an AI marker, and borrowing that hue would make every
+   contested hunk look like something a model produced.
+
+   ⚠ SPACE-SEPARATED CHANNELS. `rgb(var(--mr-change) / 0.12)` only composites when the variable
+   holds `29 78 216`. A comma-separated triplet, or one wrapped in `rgb(...)`, silently paints
+   nothing — the same trap the `--ai-*` tokens carry.
+
+   ⚠ THE AUTOMATED SCANNER CANNOT SEE THESE. `test/textContrast.test.ts` resolves Tailwind
+   utilities with a numeric shade (`text-gray-400`); a custom property is invisible to it. The
+   guard is `test/resolverTokens.test.ts`, which parses these declarations back out of this file,
+   composites each wash at its declared alpha and asserts AA both directions in both themes.
+   Measured with `textContrast.test.ts`'s own formula against #ffffff and #030712 — ink on its own
+   wash, then ink on the bare page:
+
+     role      light wash   ink/wash   ink/page      dark wash   ink/wash   ink/page
+     change    #e4eafa      5.57       6.70          #141e2e     9.28       11.17
+     conflict  #f5e0df      5.20       6.57          #261920     7.35       8.76
+     applied   #e3ede7      5.95       7.13          #132324     11.56      14.34
+     ignored   #efefef      5.97       6.87          #12161f     6.40       7.12
+   ───────────────────────────────────────────────────────────────────────────────────────────── */
+:root {
+  --mr-change: 29 78 216;
+  --mr-conflict: 180 35 24;
+  --mr-applied: 22 101 52;
+  --mr-ignored: 90 90 94;
+}
+.dark {
+  --mr-change: 147 197 253;
+  --mr-conflict: 255 138 115;
+  --mr-applied: 134 239 172;
+  --mr-ignored: 154 154 148;
+}
+
+/* The washes. Alphas are per role, not one number: the same alpha on a red and on a grey does not
+   read as the same weight, and these four were chosen so no wash shouts over its neighbour. */
+.mr-wash-change {
+  background: rgb(var(--mr-change) / 0.12);
+}
+.mr-wash-conflict {
+  background: rgb(var(--mr-conflict) / 0.14);
+}
+.mr-wash-applied {
+  background: rgb(var(--mr-applied) / 0.12);
+}
+.mr-wash-ignored {
+  background: rgb(var(--mr-ignored) / 0.1);
+}
+
+/* The ink. Used for the strip's state word and the centre cell's 2px rule — three encodings per
+   region (wash, rule, word) so the state survives a reader who cannot separate these hues. */
+.mr-ink-change {
+  color: rgb(var(--mr-change));
+}
+.mr-ink-conflict {
+  color: rgb(var(--mr-conflict));
+}
+.mr-ink-applied {
+  color: rgb(var(--mr-applied));
+}
+.mr-ink-ignored {
+  color: rgb(var(--mr-ignored));
+}
+.mr-rule-change {
+  border-left-color: rgb(var(--mr-change));
+}
+.mr-rule-conflict {
+  border-left-color: rgb(var(--mr-conflict));
+}
+.mr-rule-applied {
+  border-left-color: rgb(var(--mr-applied));
+}
+.mr-rule-ignored {
+  border-left-color: rgb(var(--mr-ignored));
+}
+
+/* The empty area under the SHORTER side of a row. A 45° hatch at very low alpha: it says "this
+   pane has nothing here" without reading as content, and it is the only thing distinguishing a
+   region one side did not touch from a region whose lines happen to be blank. */
+.mr-filler {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgb(var(--mr-ignored) / 0.14) 0 1px,
+    transparent 1px 7px
+  );
+}
+
+/* ── SYNTAX COLOURS, SCOPED TO THE RESOLVER ──────────────────────────────────────────────────
+   `highlight.js/styles/github-dark.css` is imported globally (main.tsx) and every other consumer
+   of it in this app paints onto `.md-body pre`'s fixed #0d1117 ground, in BOTH themes. The
+   resolver cannot do that: its code cells sit on the washes above, which are near-white in light
+   mode, and github-dark's #a5d6ff strings measure 1.3:1 there. So the resolver declares its own
+   seven token colours and wins on specificity inside `.mr-code`.
+
+   Measured against the worst of {page, the four washes} in each theme, same formula as above:
+   light 4.69–10.13, dark 6.42–10.57. `resolverTokens.test.ts` re-measures every one of them.
+
+   Seven colours, not thirty: github's own themes group hljs's ~40 classes into about this many,
+   and a token nobody can name the colour of is a decoration. */
+.mr-code {
+  --mr-hl-keyword: #b31d28;
+  --mr-hl-string: #0a3069;
+  --mr-hl-comment: #5b6570;
+  --mr-hl-number: #0550ae;
+  --mr-hl-title: #6639ba;
+  --mr-hl-type: #8a3800;
+  --mr-hl-meta: #0f5323;
+}
+.dark .mr-code {
+  --mr-hl-keyword: #ff9a94;
+  --mr-hl-string: #a5d6ff;
+  --mr-hl-comment: #9aa4b0;
+  --mr-hl-number: #79c0ff;
+  --mr-hl-title: #d2a8ff;
+  --mr-hl-type: #ffa657;
+  --mr-hl-meta: #7ee787;
+}
+.mr-code .hljs-keyword,
+.mr-code .hljs-selector-tag,
+.mr-code .hljs-literal,
+.mr-code .hljs-doctag,
+.mr-code .hljs-operator {
+  color: var(--mr-hl-keyword);
+}
+.mr-code .hljs-string,
+.mr-code .hljs-regexp,
+.mr-code .hljs-template-tag,
+.mr-code .hljs-selector-attr,
+.mr-code .hljs-selector-pseudo,
+.mr-code .hljs-addition {
+  color: var(--mr-hl-string);
+}
+.mr-code .hljs-comment,
+.mr-code .hljs-quote,
+.mr-code .hljs-deletion {
+  color: var(--mr-hl-comment);
+}
+.mr-code .hljs-number,
+.mr-code .hljs-variable,
+.mr-code .hljs-template-variable,
+.mr-code .hljs-attr,
+.mr-code .hljs-attribute,
+.mr-code .hljs-symbol,
+.mr-code .hljs-bullet {
+  color: var(--mr-hl-number);
+}
+.mr-code .hljs-title,
+.mr-code .hljs-title.class_,
+.mr-code .hljs-title.function_,
+.mr-code .hljs-section,
+.mr-code .hljs-name,
+.mr-code .hljs-selector-id,
+.mr-code .hljs-selector-class {
+  color: var(--mr-hl-title);
+}
+.mr-code .hljs-type,
+.mr-code .hljs-built_in,
+.mr-code .hljs-class .hljs-title,
+.mr-code .hljs-params {
+  color: var(--mr-hl-type);
+}
+.mr-code .hljs-meta,
+.mr-code .hljs-meta .hljs-keyword,
+.mr-code .hljs-meta .hljs-string,
+.mr-code .hljs-tag,
+.mr-code .hljs-link {
+  color: var(--mr-hl-meta);
+}
+/* github-dark sets a background on `.hljs` itself. Inside the resolver the cell's wash IS the
+   ground — the state it encodes must not be painted over by a syntax theme. */
+.mr-code .hljs,
+.mr-code code.hljs {
+  background: transparent;
+  padding: 0;
+}

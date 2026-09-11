@@ -1,0 +1,41 @@
+{
+  "name": "check 6 - the answer re-emitted the lines it sits before",
+  "expected": "context_duplicated",
+  "hunk": {
+    "base": [
+      "const a = 1;",
+      "const b = 2;"
+    ],
+    "ours": [
+      "const a = 1;",
+      "const b = 2;",
+      "const c = 3;"
+    ],
+    "theirs": [
+      "const a = 1;",
+      "const b = 2;",
+      "const d = 4;"
+    ],
+    "contextBefore": [
+      "function f() {",
+      "  // setup",
+      "  init();"
+    ],
+    "contextAfter": [
+      "  return a;",
+      "}",
+      "// end"
+    ]
+  },
+  "answer": [
+    "<<BEGIN>>",
+    "const a = 1;",
+    "const b = 2;",
+    "const c = 3;",
+    "const d = 4;",
+    "  return a;",
+    "}",
+    "// end",
+    "<<END>>"
+  ]
+}
