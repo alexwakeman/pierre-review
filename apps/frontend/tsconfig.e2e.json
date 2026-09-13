@@ -1,0 +1,16 @@
+{
+  // The Playwright specs and, the point of this file, their API FIXTURES.
+  //
+  // ⚠ `mock-api.ts` claims the real wire types (`PrDetail`, `DailyBriefResponse`, …) but sat
+  // OUTSIDE every tsconfig, so the claim was never checked. `PrDetail` grew nine required fields
+  // — review standing, merge-queue state, the viewer's push/close/reopen rights — and the fixture
+  // kept compiling because nothing compiled it. The suite then failed in CI as a blank page:
+  // ChecksTab mapped over an absent `reviewStandings`, and with no error boundary the throw
+  // unmounted the whole SPA. A separate config rather than an `include` on the main one keeps
+  // `tsc --noEmit && vite build` reading only what ships.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["e2e"]
+}

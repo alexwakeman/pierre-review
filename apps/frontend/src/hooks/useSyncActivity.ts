@@ -18,8 +18,10 @@ export function useSyncActivity(mlScoring: boolean) {
     // one (`mlScoring` is the caller's isMlScoring(...) read; a data change there
     // re-renders the caller, so this closure is rebuilt with the fresh value) — and
     // lazy otherwise.
+    // `backfills` is optional-chained for the same reason as useAutoMerge's `requests`: a
+    // throw in this closure escapes into React's commit phase and unmounts the whole tree.
     refetchInterval: (q) =>
-      (q.state.data?.backfills.length ?? 0) > 0 || mlScoring ? 4_000 : 20_000,
+      (q.state.data?.backfills?.length ?? 0) > 0 || mlScoring ? 4_000 : 20_000,
     refetchIntervalInBackground: false,
   });
 }

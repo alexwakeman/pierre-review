@@ -19,7 +19,12 @@ import type {
   Workspace,
   WorkspacesResponse,
   DetectedReviewersResponse,
+  ArmedMergeListResponse,
+  SyncActivityResponse,
+  DailyBriefResponse,
 } from '@pierre-review/shared';
+// A VALUE, not a type — the fixture quotes the shipped default rather than re-typing 1500.
+import { LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
 
 // Deterministic, self-contained API fixtures for the My Turn / Feed / Focus-mode
 // regression tests. Every /api/** request is intercepted in the browser (page.route)
@@ -89,6 +94,13 @@ function pr(
     id,
     repoId: REPO.id,
     number,
+    // Size and review standing ride the lean timeline row (the large-PR flag and the reach chip
+    // read the first three; the board's approval marks read the last two).
+    additions: 12,
+    deletions: 3,
+    changedFiles: 2,
+    isApproved: false,
+    isChangesRequested: false,
     title,
     authorId,
     state: 'open',
@@ -185,12 +197,25 @@ const ME_RESPONSE: MeResponse = {
     displayName: null,
   },
   deploymentMode: 'local',
+  // CORE/free surfaces that gate on their own top-level flag, all dark in these fixtures: the
+  // severity badges need a severity-api, and the conflict resolver's six routes are local-only
+  // and not exercised here. `blastRadius: null` = no account override, so the reach chip falls
+  // back to its shipped thresholds.
+  mlSeverity: false,
+  conflictResolver: false,
+  largePrCodeLocThreshold: LARGE_PR_CODE_LOC_DEFAULT,
+  largePrCodeLocThresholdIsDefault: true,
+  blastRadius: null,
   // Pro tier for e2e: all AI features (digests, Claude Review, AI Fix) stay off so the console
   // renders without the AI panels/tabs. "My Turn" is CORE / free now (not a Pro capability), so
   // the Feed's isMyTurn cards/toggle render regardless of these flags. `workspaceInsights` (the
   // former `teamInsights`) off keeps the Insights rail line hidden.
   pro: {
     activityDigest: false,
+    botAdvisor: false,
+    periodReports: false,
+    botDepth: false,
+    workPlan: false,
     reviewMemory: false,
     aiAnalysis: false,
     prSummary: false,
@@ -216,8 +241,39 @@ const DETECTED_REVIEWERS: DetectedReviewersResponse = {
   workspaceId: WORKSPACE.id,
   reviewers: [],
   repoIds: [REPO.id],
+  workspaceSeatCount: 0,
   generatedAt: iso(0),
 };
+
+// ---- Three account-wide reads App.tsx mounts UNCONDITIONALLY ---------------------------------
+//
+// The counts strip + Workspace badge (daily-brief), the auto-merge banner's armed intents, and
+// the global loading bar's full-mode walk feed. Every spec in this suite pays for all three, and
+// ⚠ NONE of them may fall through to the catch-all `{}`: each consumer reads a field off the
+// response that an empty object does not have — `counts.myTurnPersonal`, `requests.some`,
+// `backfills.length` — and two of those live in a `refetchInterval`, which runs inside React's
+// passive-effect commit. With no error boundary in the SPA the throw unmounts the WHOLE tree, so
+// the symptom is not an error message: the Activity overlay paints, then the page goes blank a
+// beat later and every locator times out.
+//
+// The brief is all zeros — these fixtures exercise the FEED, and a zero strip leaves the
+// overlay's only `<ul>` the feed list the specs count.
+const DAILY_BRIEF: DailyBriefResponse = {
+  workspaceId: WORKSPACE.id,
+  counts: {
+    myTurn: 0,
+    stalled: 0,
+    untouchedThreads: 0,
+    needsReviewer: 0,
+    resolveBacklog: 0,
+    botAnomalies: [],
+    trunkRed: [],
+  },
+  generatedAt: iso(0),
+};
+
+const ARMED_MERGES: ArmedMergeListResponse = { requests: [] };
+const SYNC_ACTIVITY: SyncActivityResponse = { backfills: [], generatedAt: iso(0) };
 
 function myTurnPr(id: number): MyTurnPr {
   const p = PRS.find((x) => x.id === id)!;
@@ -260,6 +316,8 @@ const ACTIVITY: ActivityResponse = {
         draftPrs: 0,
         mergedLast7d: 0,
         stalledPrs: 0,
+        botThreads: 0,
+        botThreadsActedOn: 0,
         medianHoursToFirstReview: null,
         oldestUnreviewed: null,
       },
@@ -444,7 +502,19 @@ function prDetailFor(id: number): PrDetail {
     changedFilesCount: 1,
     files: [],
     requestedReviewers: [],
+    // Review standing rides the detail payload (and the Pending cards) — `reviewStandings` and
+    // `tickets` are mapped over unguarded, so an omission here blanks the whole SPA rather than
+    // one tab.
+    reviewDecision: null,
+    reviewStandings: [],
+    reviewerCount: 0,
+    tickets: [],
+    inMergeQueue: null,
+    mergeQueueEntryState: null,
     viewerCanApprove: false,
+    viewerCanPush: false,
+    viewerCanClose: false,
+    viewerCanReopen: false,
     viewerHasApprovedStanding: false,
     threads: [],
     reviews: [],
@@ -502,6 +572,9 @@ export async function installMockApi(page: Page): Promise<void> {
       // The workspace's bot listing. Shape matters even while empty: consumers read `.reviewers`
       // and `.repoIds` off it.
       if (path.endsWith('/api/bot-reviewers')) return json(route, DETECTED_REVIEWERS);
+      if (path.endsWith('/api/daily-brief')) return json(route, DAILY_BRIEF);
+      if (path.endsWith('/api/auto-merge')) return json(route, ARMED_MERGES);
+      if (path.endsWith('/api/sync-activity')) return json(route, SYNC_ACTIVITY);
       if (path.endsWith('/api/my-turn')) return json(route, MY_TURN);
       if (path.endsWith('/api/activity/feed')) return json(route, CONSOLIDATED_FEED);
       if (path.endsWith('/api/activity')) return json(route, ACTIVITY);

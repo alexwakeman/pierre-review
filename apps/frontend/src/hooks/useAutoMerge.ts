@@ -34,8 +34,12 @@ export function useArmedMerges(enabled = true) {
     queryKey: ARMED_MERGES_KEY,
     queryFn: () => api.armedMerges(),
     enabled,
+    // ⚠ A THROW HERE UNMOUNTS THE WHOLE SPA. This runs inside React Query's passive-effect
+    // commit and the app has no error boundary, so reading a field off an unexpected body
+    // blanks the page rather than degrading one banner — `requests` is optional-chained for
+    // that reason alone, not because the route may omit it.
     refetchInterval: (q) =>
-      q.state.data?.requests.some((r) => r.state === 'armed')
+      q.state.data?.requests?.some((r) => r.state === 'armed')
         ? ARMED_LIVE_POLL_MS
         : ARMED_IDLE_POLL_MS,
     // The list is only interesting when the user is looking; a background tab polling for a
