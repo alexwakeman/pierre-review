@@ -1140,8 +1140,16 @@ artifacts only. Publishing is CI-only — **never run `npm publish`/`npm login` 
 Details: [docs/PACKAGING.md](docs/PACKAGING.md) + [docs/RELEASE.md](docs/RELEASE.md).
 The traps:
 
-- **`@pierre-review/shared` is types-only and NOT a published dep** — backend imports must
-  be `import type` only; the release build greps `release/dist` and fails on a real one.
+- **`@pierre-review/shared` is STILL NOT a published dep, and is NO LONGER types-only.** The
+  conflict resolver ended that: `foldFile`/`foldToText`/`CONFLICT_MODEL_VERSION` are real code
+  the SPA's centre pane and the server's land path must agree on to the byte, so duplicating
+  them is the one outcome that feature cannot survive. `build-release.mjs` therefore compiles
+  the package, VENDORS it at `release/dist/shared` (inside `dist`, so the manifest's `files`
+  already carries it) and rewrites every emitted `@pierre-review/shared` specifier — backend
+  AND `release/pro` — to a relative path. ⚠ **The guardrail survives INVERTED**: it now fails
+  on a specifier the rewrite MISSED, not on a value import, so "shared imports must be
+  `import type`" is retired. Never add the package to the curated manifest (it resolves by
+  path, never by name), and never fork a shared fold to dodge this.
 - **pnpm is PINNED** (`packageManager: pnpm@9.15.9`); bumping it means regenerating
   `pnpm-lock.yaml` or native builds fail (`ERR_PNPM_IGNORED_BUILDS`).
 - **No AI ships in npm**: the AI SDKs are never curated runtime deps; a guardrail assert
@@ -1187,9 +1195,23 @@ how you work:
 - ⚠ **AI Fix's conflict-resolver paths (`rebaseResolve` / `mergeResolveAndPush`) GATE on credits
   but never CHARGE them** — only `saveFixSuccess` calls `recordAiUsage`, so a fix ending in a
   rebase-resolve under-bills. (Recorded only here; no topic doc carries it.)
+- **The E2E API FIXTURES ARE A WIRE CONTRACT, AND THEY ARE NOW TYPECHECKED.**
+  `apps/frontend/e2e/mock-api.ts` answers every `/api/**` call the suite makes, annotated with
+  the real shared types — but it sat outside every tsconfig, so the annotations were never
+  checked and the shapes rotted: `PrDetail` alone grew NINE required fields. ⚠ **A fixture gap
+  does not fail as a missing field, it fails as a BLANK PAGE** — the SPA has no error boundary,
+  so an unguarded `.map`/`.some` over an absent array (in a render OR in a `refetchInterval`,
+  which runs in React's commit phase) unmounts the whole tree, and five specs then time out
+  looking for elements with no error to explain it. `apps/frontend/tsconfig.e2e.json` is wired
+  into the frontend's `typecheck` script so `pnpm typecheck` catches the drift. ⚠ It cannot
+  catch the OTHER half: a route with no `if` in `installMockApi` falls through to an UNTYPED
+  catch-all `{}`. When a boot-time route is added, add its fixture — and if the suite ever
+  blanks, enumerate what the app actually calls (`page.route` + `route.fallback()`) rather than
+  chasing one crash at a time.
 - **`packages/pro/test/` and `apps/frontend/test/` do not run in CI** (`pnpm test` is
   recursive vitest and the frontend's `test` script is `echo "no tests"`), and neither
-  directory is typechecked (both tsconfigs include only `src`). Run them by hand:
+  directory is typechecked (`apps/frontend/tsconfig.e2e.json` covers `e2e`, not `test`). Run
+  them by hand:
 
   ```
   ./apps/backend/node_modules/.bin/vitest run --root packages/pro
