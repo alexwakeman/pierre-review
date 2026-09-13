@@ -34,12 +34,16 @@ export type RouteSeo = {
 /**
  * Canonical, indexable routes. Order is the order they appear in the sitemap.
  *
- * THE SITE IS THREE CONTENT PAGES plus the three legal ones. /features, /bots,
+ * THE SITE IS FOUR CONTENT PAGES plus the three legal ones. /features, /bots,
  * /pro, /pricing, /how-it-works and /arcade were removed together: the product
  * pages were organised by FEATURE AREA, which meant a developer and a manager
  * read the same five pages and neither found the half addressed to them. The
  * content now sits on one page per reader, each of which carries the free tier
  * in full first, then Pro, then the comparison table and the sign-up.
+ *
+ * /contact is the fourth, and it is load-bearing rather than courtesy: until
+ * Stripe exists it IS the purchase path, so every Pro call-to-action on the site
+ * points at it. See src/pages/Contact.tsx.
  *
  * Legacy aliases for the removed routes are handled in App.tsx and by the
  * prerenderer, which copies the nearest surviving page's HTML so an old inbound
@@ -59,6 +63,10 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/for-managers': {
     title: 'For engineering managers — see the whole review loop, people and bots',
     description: `Throughput, lead time and where the waiting happens across every repository you own, with people counted apart from automation — free. Then a forwardable report per sprint, an hour-by-hour account of who was holding each pull request, and a keep / tune / noisy verdict on every review bot you pay for.`,
+  },
+  '/contact': {
+    title: `Contact — a free month of Pro, for asking`,
+    description: `Card payments are not switched on yet, so Pro is free for a month to anyone who asks for it: every paid surface, no card, nothing to cancel. Send a message and it is enabled on your account. The free tier needs none of this — it works today.`,
   },
   '/how-we-measure': {
     title: 'How we measure — the two models, in plain English',

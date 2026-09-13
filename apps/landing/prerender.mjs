@@ -167,18 +167,18 @@ for (const path of PRERENDER_PATHS) {
 // over-eager tidy — which the first assertion cannot see, because the list it
 // checks against would shrink with it. That is what the hard-coded floor is
 // for, and it is the reason this number must be changed by hand whenever the
-// route list does. It was 10; the restructure took the site to six, and
-// /how-we-measure took it to seven (home, the two role pages, the models page,
-// and the three legal ones).
+// route list does. It was 10; the restructure took the site to six,
+// /how-we-measure took it to seven, and /contact to eight (home, the two role
+// pages, the models page, contact, and the three legal ones).
 if (written.length !== PRERENDER_PATHS.length) {
   throw new Error(
     `prerendered ${written.length} routes but PRERENDER_PATHS has ${PRERENDER_PATHS.length} — ` +
       `a route was skipped: ${PRERENDER_PATHS.filter((p) => !written.includes(p)).join(', ')}`,
   );
 }
-if (written.length < 7) {
+if (written.length < 8) {
   throw new Error(
-    `only ${written.length} routes prerendered — expected at least 7. ` +
+    `only ${written.length} routes prerendered — expected at least 8. ` +
       `If you deliberately removed a route, lower this floor in the same change.`,
   );
 }
@@ -203,7 +203,10 @@ const ALIASES = {
   'how-it-works': 'how-we-measure',
   bots: 'for-managers',
   pro: 'for-managers',
-  pricing: 'for-managers',
+  // ⚠ /pricing goes to CONTACT, not to for-managers like its five siblings. Somebody
+  // arriving on /pricing is asking how to buy it; until Stripe exists the answer is the
+  // contact form, so that is what the URL resolves to. Mirrors the alias table in App.tsx.
+  pricing: 'contact',
   insights: 'for-managers',
   reviews: 'for-managers',
 };

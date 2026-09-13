@@ -51,6 +51,9 @@ export default function Footer(): JSX.Element {
           <Link to="/how-we-measure" className={LINK}>
             How we measure
           </Link>
+          <Link to="/contact" className={LINK}>
+            Contact
+          </Link>
           <a
             href={REPO_URL}
             target="_blank"

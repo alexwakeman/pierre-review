@@ -38,10 +38,48 @@ and helmet's default CSP is wrong for this app three ways over.
 - **`registerHostGuard`** (local, loopback binds only) — 421s a non-loopback `Host`, the
   DNS-rebinding case that survives every origin check. `ALLOWED_HOSTS` opts a named host back in.
 
+**The public contact form** (`api/routes/contact.ts`, cloud in practice — local never serves the
+landing) is the ONE anonymous, human-facing write surface, so its controls are worth stating
+together. It is exempt from the cloud auth gate BY DESIGN (`/api/contact`, `/api/contact/ticket`):
+somebody asking for a trial has no account, and somebody reporting that sign-in is broken cannot
+sign in to say so. What stands in for authentication:
+
+- **A honeypot field.** `website` is declared in the body schema and dropped when non-empty, with a
+  200 rather than a 400 — an error tells the bot's author which field gave them away.
+  ⚠ **IT MUST STAY DECLARED IN THE SCHEMA.** Fastify configures ajv with `removeAdditional: true`,
+  so an UNdeclared property is silently stripped from `req.body` before the handler runs: the whole
+  layer would read `undefined` forever and every bot would pass, with nothing failing.
+- **A signed minimum fill time.** `GET /api/contact/ticket` returns `<issuedAtMs>.<hmac>`; the POST
+  verifies the signature and requires an age in [3s, 6h]. The timestamp is signed HERE, which is
+  the point — a client-sent "elapsed" field would be the submitter's to choose. Stateless (no
+  replay table), so the rate limit is what bounds reuse. The key is derived from `SESSION_SECRET`
+  via a labelled HMAC so it shares no material with the session cookie; with no secret set it is a
+  per-process random, and a restart invalidates outstanding tickets.
+- **The `contact` rate tier, 5 per HOUR, keyed by IP** — the strictest bucket in the file. Following
+  the token gives an unusual answer here: the route spends no GitHub quota, no model dollars and
+  barely any database, and still belongs at the bottom, because what it actually spends is a
+  PERSON READING A MESSAGE. Both paths share the bucket, the mint deliberately included: a bot must
+  fetch a ticket before it can post one.
+- **No third party, and therefore no CSP change.** A Turnstile/reCAPTCHA widget would need
+  `script-src` AND `frame-src` (currently `'none'`) widened on the landing CSP plus a privacy-policy
+  line. That remains available if the layers above stop being enough; it is a decision to take
+  deliberately, not a side effect of adding a form.
+- **Delivery is a Slack webhook, and the URL is re-validated at the sink** —
+  `normalizeContactWebhookUrl`, a deliberate small copy of the plugin's allowlist (core cannot
+  import from `packages/pro`). Exact host, `https` only, `/services/` prefix, query and fragment
+  dropped, `redirect: 'error'`, response body never surfaced. Keep the two in step.
+- **Every visitor string is Slack-escaped before the payload is assembled** (`&`, `<`, `>` — the
+  only three characters special in Slack message text), so a submission cannot forge a link, a
+  channel reference or an `@`-mention in the notification it produces.
+- **Nothing is written to the database** — the message is passed straight through. A FAILED delivery
+  is logged in full so it is not lost, which is the one place a message persists; the privacy policy
+  says so. ⚠ The log field is `from:`, never `name:` — pino treats `name` as the LOGGER's name and
+  swallows it into the line prefix.
+
 **`api/plugins/rate-limit.ts`** — fixed-window buckets keyed by **accountId** (the thing that
 spends money), IP fallback for unauthenticated routes. Registered AFTER `registerAccountContext`.
 Tiers: `ai` 20/min **+ `ai_hourly` 120/h**, `pr_detail` 60/min, `github_write` 60/min, `sync`
-20/min, `search` 60/min, `auth` 30/min, `webhook` 600/min, `read` 600/min. **Landmine: Claude
+20/min, `search` 60/min, `auth` 30/min, `webhook` 600/min, `read` 600/min, **`contact` 5/HOUR**. **Landmine: Claude
 Review kept its PRE-plugin paths** (`/api/prs/:id/claude-review*`, `/api/claude-reviews/*`,
 `/api/claude-findings/*`), so `tierFor` matches those EXPLICITLY — a `/api/pro/` prefix test
 would leave the most expensive routes on the 600/min read tier. `RATE_LIMIT_DISABLED=true` is the

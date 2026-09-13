@@ -91,7 +91,8 @@ export async function registerSession(app: FastifyInstance): Promise<void> {
 
 // Cloud only: 401 any unauthenticated /api data route. Skips /api/health,
 // /api/auth/* (sign-in itself), /api/billing/webhook (Stripe posts
-// unauthenticated — verified by signature instead) and all non-/api requests
+// unauthenticated — verified by signature instead), /api/contact* (the public
+// contact form, whose visitors have no account by definition) and all non-/api requests
 // (the SPA + landing are served openly; the frontend gate handles the signed-out
 // UI). MUST be registered AFTER registerAccountContext so req.account is already
 // resolved. Also the cloud-only ENTITLEMENT gate: an authenticated free-plan
@@ -111,6 +112,12 @@ export function registerAuthGate(app: FastifyInstance): void {
     // landing; the route itself bounces anonymous visitors to sign-in instead of
     // dead-ending them on a JSON 401.
     if (path === '/api/billing/checkout') return;
+    // The public contact form. It exists FOR people who are not signed in — someone
+    // asking for a Pro trial does not have an account yet, and someone reporting that
+    // sign-in is broken cannot sign in to say so. Spam control is the honeypot, the
+    // signed fill-time ticket and the IP-keyed `contact` rate-limit tier, all in
+    // api/routes/contact.ts; authentication was never the control here.
+    if (path === '/api/contact' || path === '/api/contact/ticket') return;
     if (!req.account) {
       await reply.code(401).send({
         error: 'Unauthorized',

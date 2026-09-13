@@ -12,6 +12,7 @@ import Home from './pages/Home';
 import ForDevelopers from './pages/ForDevelopers';
 import ForManagers from './pages/ForManagers';
 import HowWeMeasure from './pages/HowWeMeasure';
+import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
 import Cookies from './pages/Cookies';
 import Terms from './pages/Terms';
@@ -21,6 +22,10 @@ const ROUTES: Record<string, () => JSX.Element> = {
   '/for-developers': ForDevelopers,
   '/for-managers': ForManagers,
   '/how-we-measure': HowWeMeasure,
+  // Contact. Until Stripe exists this is also the PURCHASE path — every Pro
+  // call-to-action on the site points here, which is why /pricing aliases to it
+  // below rather than to the manager page it used to land on.
+  '/contact': Contact,
   // Legal. Required before the site can lawfully collect anything in the EU/UK, and
   // linked from the footer on every page + from the consent banner.
   '/privacy': Privacy,
@@ -35,7 +40,9 @@ const ROUTES: Record<string, () => JSX.Element> = {
   '/how-it-works': HowWeMeasure,
   '/bots': ForManagers,
   '/pro': ForManagers,
-  '/pricing': ForManagers,
+  // /pricing goes to CONTACT, not to a page describing a price nobody can pay yet.
+  // Somebody typing /pricing is asking how to buy it, and the answer is "ask us".
+  '/pricing': Contact,
   '/insights': ForManagers,
   '/reviews': ForManagers,
 };

@@ -42,6 +42,7 @@ import { searchRoutes } from './api/routes/search.js';
 import { dailyBriefRoutes } from './api/routes/daily-brief.js';
 import { flowRoutes } from './api/routes/flow.js';
 import { billingRoutes } from './api/routes/billing.js';
+import { contactRoutes } from './api/routes/contact.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
 import { mlLabelRoutes } from './api/routes/ml-labels.js';
 import { reactionRoutes } from './api/routes/reactions.js';
@@ -268,6 +269,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Stripe billing seam (checkout redirect + webhook). Registered in both modes;
   // inert until the STRIPE_* env vars are set (webhook 501s unconfigured).
   await app.register(billingRoutes);
+  // The public contact form (POST /api/contact + its ticket mint). Registered in both
+  // modes for symmetry, but it is a CLOUD feature: local mode never serves the landing
+  // page at all (`/` 302s to /app). Inert until CONTACT_SLACK_WEBHOOK_URL is set — both
+  // routes 503 unconfigured, which is what the form reads to decide whether to render.
+  // ⚠ It is ANONYMOUS by design, so it is exempted from the cloud auth gate
+  // (api/plugins/auth.ts) and its rate-limit tier keys on IP rather than an account.
+  await app.register(contactRoutes);
   // GitHub App webhook receiver (real-time sync Phase 1). Registered in both modes;
   // inert until GITHUB_APP_WEBHOOK_SECRET is set (501s unconfigured). Additive on top of
   // the periodic poll — see docs/REALTIME-SYNC.md.

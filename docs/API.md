@@ -121,11 +121,14 @@ is no parser, no canonicalisation and no sentinel.
 | `POST /api/claude-reviews/:reviewId/post {userVerdict}` (+ `?dryRun`) | post one GitHub review (inline + body + verdict); `409` if head moved |
 | ~~`GET`/`PUT /api/claude-review/key`~~ | **DELETED — do not reintroduce.** The BYO Anthropic key is retired: local Claude Review authenticates from an ambient Claude session (preferred, so a subscription pays) else the environment's `ANTHROPIC_API_KEY`. Two rungs, no stored secret, no form. `PUT /api/claude-review/budget` is unaffected and still live |
 | `GET /api/health` | unauthenticated health check |
+| `GET /api/contact/ticket` | **Public, no auth.** Mints the contact form's signed fill-time ticket (`<issuedAtMs>.<hmac>`) AND doubles as the form's readiness probe — `503 {error:'contact_unavailable'}` with no `CONTACT_SLACK_WEBHOOK_URL`, which is what makes the page say so BEFORE somebody writes two hundred words into a form with nowhere to send them. `cache-control: no-store` (a cached ticket would hand every visitor one issue time). Tier `contact` |
+| `POST /api/contact {name,email,topic?,message,ticket,website?}` | **Public, no auth.** The contact form → a Slack incoming webhook; nothing is written to the database. `200 {ok:true}` on delivery — **and also when the `website` honeypot is non-empty**, deliberately, because a 400 tells the bot's author which field gave them away. `400 ticket_expired`\|`ticket_invalid`, `502 delivery_failed` (the message is then in the server log and nowhere else), `503 contact_unavailable`. ⚠ `website` MUST stay declared in the body schema: Fastify's ajv runs `removeAdditional: true`, so an undeclared property is stripped before the handler and the honeypot silently reads `undefined` forever. Tier `contact` — 5/HOUR, keyed by IP, the strictest in the app, because what an accepted request spends is a person's attention. See SECURITY.md § the public contact form |
 
 The `claude-review` routes are **only registered when enabled** (local-only;
 `config.claudeReviewEnabled` is force-`false` in cloud → they don't exist there). **Cloud
-auth gate:** every `/api/*` data route 401s unauthenticated except `/api/health` +
-`/api/auth/*` (`registerAuthGate`); local always has an account so nothing 401s. Reads are
+auth gate:** every `/api/*` data route 401s unauthenticated except `/api/health`,
+`/api/auth/*` and the two `/api/contact*` routes above (`registerAuthGate`); local always has
+an account so nothing 401s. Reads are
 accountId-scoped; id-addressed routes verify ownership (→ 404).
 
 

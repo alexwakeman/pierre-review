@@ -6,11 +6,10 @@ import { ShotFrame } from './ShotFrame';
 // The free-vs-Pro comparison and the sign-up block — ONE component, rendered at
 // the bottom of every page on the site.
 //
-// WHY IT REPEATS. The site is three pages and two of them are addressed to
+// WHY IT REPEATS. The site is four pages and two of them are addressed to
 // different readers. Each one has to be able to answer "so what do I pay for?"
-// at the point the reader finishes reading, without a fourth page and without a
-// nav hop — a reader who has just decided they want it should not have to go
-// looking for the price.
+// at the point the reader finishes reading, without a nav hop — a reader who has
+// just decided they want it should not have to go looking for the price.
 //
 // WHY THE ROWS ARE ORGANISED BY QUESTION, not by feature. A feature list invites
 // counting; what actually separates the tiers is a change of GRAIN. Free answers
@@ -19,10 +18,17 @@ import { ShotFrame } from './ShotFrame';
 // free answer and the paid one side by side, so the line reads as one rule
 // rather than as forty items somebody chose to withhold.
 //
-// ⚠ CHECKOUT IS NOT WIRED. There is no Stripe integration yet, and the note
-// under the buttons says so in plain words. Do not quietly remove that note to
-// make the page look more finished — a button that takes money it cannot take is
-// the one thing on this page that would be a lie.
+// ⚠ CHECKOUT IS NOT WIRED, AND THE PAID BUTTON GOES TO /contact. There is no
+// Stripe integration, so the offer on the page is the true one: ask, and Pro is
+// switched on free for a month. That is not a placeholder for a missing checkout
+// — it is deliberately how Pro is obtained right now, because what is wanted at
+// this stage is people running it and saying what is wrong, which a form gets
+// and a silent card payment does not.
+//
+// Do not quietly repoint this at a checkout URL, and do not remove the sentence
+// explaining the month. A button that takes money it cannot take is the one
+// thing on this page that would be a lie, and an offer whose terms are not
+// stated is the second.
 // ---------------------------------------------------------------------------
 
 interface Row {
@@ -112,7 +118,7 @@ export function TierTable(): JSX.Element {
               <div className="hidden gap-grid-gutter border-b border-rule-strong py-3 rail:grid rail:grid-cols-[1.1fr_1.3fr_1.3fr]">
                 <MonoLabel className="text-secondary">Question</MonoLabel>
                 <MonoLabel className="text-secondary">Free · open core</MonoLabel>
-                <MonoLabel className="text-signal-text">Pro · $25 per user</MonoLabel>
+                <MonoLabel className="text-signal-text">Pro · free for a month</MonoLabel>
               </div>
 
               {ROWS.map((r) => (
@@ -134,8 +140,9 @@ export function TierTable(): JSX.Element {
             </div>
 
             <p className="mt-6 max-w-[62ch] font-mono text-mono-caption text-secondary">
-              A user is someone who signs in. Bots never count, and there is no per-repository
-              charge.
+              Pro lists at $25 per user, and is free for a month to anyone who asks for it.
+              A user is someone who signs in — bots never count, and there is no
+              per-repository charge.
             </p>
 
             <ShotFrame
@@ -160,17 +167,18 @@ export function TierTable(): JSX.Element {
             <p className="mb-9 max-w-[56ch] text-pretty text-lede text-ink-soft">
               Sign in with GitHub and the first repositories are on screen in a couple of
               minutes, or run the whole free tier on your own machine and keep the data
-              there.
+              there. For Pro, send a message — it is free for a month, for asking.
             </p>
 
             <div className="mb-5 flex flex-wrap items-center gap-3.5">
               <InkButton to="/api/auth/login">Sign in with GitHub</InkButton>
-              <SignalButton to="/api/auth/login">Get Pro — $25 per user</SignalButton>
+              <SignalButton to="/contact?topic=pro">Ask for a free month of Pro</SignalButton>
             </div>
 
             <p className="max-w-reassure font-mono text-mono-nav text-secondary">
-              Checkout is not live yet — Pro is rolling out, and both buttons sign you into
-              the free tier today. Or run it locally: <span className="text-ink">{INSTALL_COMMAND}</span>
+              Card payments are not switched on yet, so Pro is not sold from this page — it
+              is given, a month at a time, to anyone who asks. No card, nothing to cancel.
+              Or run the free tier locally: <span className="text-ink">{INSTALL_COMMAND}</span>
             </p>
           </div>
         </RailGrid>

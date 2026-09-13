@@ -160,7 +160,12 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   // handle anonymous visitors itself: bounce them to sign-in rather than a 401.
   app.get('/api/billing/checkout', async (req, reply) => {
     if (!config.stripePaymentLinkUrl) {
-      return reply.redirect('/pricing?checkout=unavailable', 302);
+      // No Payment Link configured — which is the state today. Send the visitor to
+      // the contact form rather than back to a marketing page with an error flag on
+      // it: Pro is currently GIVEN, free for a month, to anyone who asks, so there is
+      // a real next step here and "unavailable" would be the wrong word for it.
+      // `?topic=pro` preselects the right subject in the form.
+      return reply.redirect('/contact?topic=pro', 302);
     }
     if (!req.account) {
       return reply.redirect('/api/auth/login', 302);

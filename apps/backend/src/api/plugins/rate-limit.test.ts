@@ -629,6 +629,26 @@ describe('tierFor — unauthenticated surface', () => {
     expect(tiers('POST', '/api/billing/webhook')).toEqual(['webhook']);
     expect(TIERS.webhook.limit).toBeGreaterThan(TIERS.ai.limit);
   });
+
+  // The contact form is the one anonymous route whose cost is somebody's attention, so it
+  // takes the strictest bucket in the file — and the ticket mint shares it, because minting
+  // is the step a bot has to complete before it can post.
+  it('puts both contact paths in the contact tier', () => {
+    expect(tiers('POST', '/api/contact')).toEqual(['contact']);
+    expect(tiers('GET', '/api/contact/ticket')).toEqual(['contact']);
+  });
+
+  it('rations contact more tightly than anything else, over an HOUR not a minute', () => {
+    expect(TIERS.contact.limit).toBeLessThan(TIERS.ai.limit);
+    expect(TIERS.contact.windowMs).toBeGreaterThan(60_000);
+  });
+
+  // The near-miss this file records over and over: a loose prefix swallowing a sibling
+  // vocabulary. `/api/contact` must not capture a path that merely starts with it.
+  it('does not swallow a sibling path', () => {
+    expect(tiers('GET', '/api/contacts')).toEqual(['read']);
+    expect(tiers('GET', '/api/contact-something')).toEqual(['read']);
+  });
 });
 
 describe('tier limits are ordered sensibly', () => {

@@ -2,7 +2,7 @@ import { Link, useRoute } from '../router';
 import { Wordmark } from './feint/Wordmark';
 
 // ---------------------------------------------------------------------------
-// The header: a wordmark, four mono links, and "Sign in". No button, no icon,
+// The header: a wordmark, four mono links plus "Sign in". No button, no icon,
 // no logo, no sticky backdrop-blur — just a rule under it.
 //
 // The active page is marked by a 2px vermilion underline on its link, which is
@@ -19,12 +19,31 @@ const NAV_LINKS = [
   { to: '/for-developers', label: 'For developers' },
   { to: '/for-managers', label: 'For managers' },
   { to: '/how-we-measure', label: 'How we measure' },
+  // Contact is in the header, not only the footer, because it is currently the way
+  // Pro is obtained — a purchase path in a footer is a purchase path nobody takes.
+  { to: '/contact', label: 'Contact' },
 ];
 
+// The legacy aliases render a surviving page (App.tsx), so the header has to light up
+// the link that page belongs to — otherwise a visitor on /pricing sees a page with no
+// nav item marked and the underline falls through to "Sign in", which is the wrong
+// claim about where they are.
+//
+// ⚠ THIS TABLE MUST TRACK THE ALIASES IN App.tsx. It previously mapped /insights and
+// /reviews onto a `/pro` nav link that no longer exists, so it had been inert since the
+// restructure — a mapping is only alive while its `to` is in NAV_LINKS.
+const ALIAS_OF: Record<string, string> = {
+  '/features': '/for-developers',
+  '/how-it-works': '/how-we-measure',
+  '/bots': '/for-managers',
+  '/pro': '/for-managers',
+  '/insights': '/for-managers',
+  '/reviews': '/for-managers',
+  '/pricing': '/contact',
+};
+
 function isActive(path: string, to: string): boolean {
-  // Legacy /insights and /reviews render the Pro page — light the Pro link up.
-  if (to === '/pro' && (path === '/insights' || path === '/reviews')) return true;
-  return path === to;
+  return path === to || ALIAS_OF[path] === to;
 }
 
 const ACTIVE = 'border-b-2 border-signal-fill pb-0.5 text-ink';

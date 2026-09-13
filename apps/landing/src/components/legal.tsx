@@ -11,8 +11,15 @@ import type { ReactNode } from 'react';
 // rule — the signal colour means "a human is still needed" and a privacy note is
 // not that.
 
-/** Single source of truth for the "last updated" line on every legal page. */
-export const LEGAL_LAST_UPDATED = '26 July 2026';
+/** Single source of truth for the "last updated" line on every legal page.
+ *
+ * ONE DATE FOR ALL THREE, by design — which means a change to any one of them
+ * re-dates the other two. That is the accepted trade: a stale date on a document
+ * that HAS changed is a compliance problem, and three separately-maintained dates
+ * is the shape in which one of them gets forgotten.
+ *
+ * Last moved for the contact form (Privacy §2, §5 and §6). */
+export const LEGAL_LAST_UPDATED = '13 September 2026';
 
 /** The controller's contact point, referenced from all three documents. */
 export const LEGAL_CONTACT_EMAIL = 'wakemana@gmail.com';

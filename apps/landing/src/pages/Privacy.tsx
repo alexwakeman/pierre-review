@@ -93,13 +93,23 @@ export default function Privacy(): JSX.Element {
             loading a page discloses nothing to a third party.
           </li>
           <li>
+            <T>The contact form</T> — if you send one, the name, email address, subject and
+            message you type are delivered to a private Slack channel that one person
+            reads. Nothing else is collected with it: no fingerprint, no tracking
+            identifier, and no third-party anti-spam service (the form is protected by a
+            hidden field, a signed minimum fill time and a rate limit, all of which run on
+            our own server). Your email address is used to reply to you and for nothing
+            else — it is not added to any mailing list. See §5 and §6.
+          </li>
+          <li>
             <T>Server logs</T> — the hosting provider records request metadata including
             your IP address, for security and debugging. See §6.
           </li>
         </UL>
         <P>
           <T>Legal basis:</T> consent (UK/EU GDPR Art. 6(1)(a)) for analytics; legitimate
-          interests (Art. 6(1)(f)) for keeping the service secure and available.
+          interests (Art. 6(1)(f)) for keeping the service secure and available, and for
+          answering a message you chose to send us.
         </P>
       </LegalSection>
 
@@ -246,6 +256,17 @@ export default function Privacy(): JSX.Element {
               'USA',
               'Only if you set up a Slack digest webhook yourself, and only for the workspaces you select',
             ],
+            [
+              'Slack (contact form)',
+              // A SEPARATE ROW, NOT A WIDENING OF THE ONE ABOVE. Same recipient company,
+              // but a different trigger (you submit a form vs you configure a digest), a
+              // different channel (ours vs yours) and a different payload (what you typed vs
+              // your workspace's figures). Folding them together would make each sentence
+              // untrue of half the traffic it described.
+              'The name, email address, subject and message you typed into the contact form. It is delivered to a private channel belonging to us, which one person reads.',
+              'USA',
+              'Only when you submit the contact form',
+            ],
           ]}
         />
         <P>
@@ -267,6 +288,14 @@ export default function Privacy(): JSX.Element {
             <T>Your account</T> — kept until you delete it. Deleting removes the account
             row, your encrypted token, every repository you added and all the activity
             synced for them.
+          </li>
+          <li>
+            <T>Contact-form messages</T> — kept in the Slack channel they are delivered to
+            for as long as the conversation is useful, and deleted on request. The
+            application stores no copy of its own: the message is passed straight through
+            to Slack and never written to our database. The one exception is a failed
+            delivery, which is written to the server log so the message is not simply lost
+            — those logs are short-lived, as above.
           </li>
           <li>
             <T>Server logs</T> — retained by the hosting provider for a short operational

@@ -29,6 +29,7 @@ const PAGES = [
   ['For developers', '/for-developers', 'for-developers/index.html'],
   ['For engineering managers', '/for-managers', 'for-managers/index.html'],
   ['How we measure', '/how-we-measure', 'how-we-measure/index.html'],
+  ['Contact', '/contact', 'contact/index.html'],
 ];
 
 const ENT = (s) =>

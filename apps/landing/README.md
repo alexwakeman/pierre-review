@@ -7,7 +7,7 @@ in cloud mode for anonymous visitors. The primary call to action is **Sign in wi
 
 ## Structure
 
-A small, dependency-free multi-page site (React + Vite + Tailwind). **Four content routes**
+A small, dependency-free multi-page site (React + Vite + Tailwind). **Five content routes**
 plus the three legal ones:
 
 | Route | Page | Focus |
@@ -16,6 +16,7 @@ plus the three legal ones:
 | `/for-developers` | `pages/ForDevelopers.tsx` | The free tier in full, then what Pro adds for an IC |
 | `/for-managers` | `pages/ForManagers.tsx` | The free metrics, then the paid scoreboard and reports |
 | `/how-we-measure` | `pages/HowWeMeasure.tsx` | The two ML models in plain English — what each is for, how it was built, how we know it works |
+| `/contact` | `pages/Contact.tsx` | **Also the purchase path.** Checkout is unwired, so Pro is given free for a month to anyone who asks — every Pro call-to-action on the site points here, and `/pricing` resolves to it. The only page that talks to the backend (`POST /api/contact` → a Slack webhook) |
 | `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer and the consent banner |
 
 **THE SITE WAS FIVE FEATURE-AREA PAGES** (`/features`, `/bots`, `/pro`, `/pricing`,
@@ -23,10 +24,18 @@ plus the three legal ones:
 area meant a developer and an engineering manager read the same five pages and neither found
 the half addressed to them. One page per reader, each of which leads with the free tier in
 full, then Pro, then the shared comparison table and sign-up block
-(`components/feint/TierTable.tsx` — rendered at the bottom of all three).
+(`components/feint/TierTable.tsx` — rendered at the bottom of every content page, `/contact`
+included, because `/pricing` now lands there and a visitor asking what it costs must find an
+answer rather than only a form).
 
-⚠ **The old URLs are aliased, not deleted.** `App.tsx` maps each of them to whichever role
-page now carries its content, and `prerender.mjs` writes the same mapping to disk so an old
+⚠ **`pnpm dev` here needs the backend for the contact form.** Vite proxies `/api` to
+`http://127.0.0.1:4000` (`LANDING_API_TARGET` overrides it). Without the proxy a bare
+`fetch('/api/contact/ticket')` hits Vite's SPA fallback — 200, with HTML — and the form reads
+that as "not configured" and renders its unavailable state, which looks exactly like a working
+failure path rather than a missing backend.
+
+⚠ **The old URLs are aliased, not deleted.** `App.tsx` maps each of them to whichever page
+now carries its content — `/pricing` to `/contact`, the rest to a role page — and `prerender.mjs` writes the same mapping to disk so an old
 inbound link gets real HTML with a canonical pointing at the surviving page. Change both
 tables together.
 

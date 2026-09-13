@@ -85,6 +85,13 @@ const TIERS = {
   read: tier('read', 600, MINUTE),
   // Sign-in. Unauthenticated, so keyed by IP; the callback makes two GitHub calls.
   auth: tier('auth', 30, MINUTE),
+  // The public contact form. Unauthenticated, so keyed by IP — and the tightest bucket
+  // in the file, because this is the ONE route whose cost is a HUMAN's attention: every
+  // accepted request puts a message in front of somebody. Five an hour is more messages
+  // than any real visitor sends and few enough that a bot which gets past the honeypot
+  // and the signed fill-time ticket still cannot fill a channel. The ticket mint shares
+  // it: minting is what a bot has to do first, so limiting it limits the attempts.
+  contact: tier('contact', 5, HOUR),
   // Signed webhooks. Legitimately bursty (a busy org pushing), so high — but not
   // unbounded, since each delivery can enqueue a sync.
   webhook: tier('webhook', 600, MINUTE),
@@ -103,6 +110,23 @@ function tierFor(method: string, path: string): readonly Tier[] {
     return [TIERS.webhook];
   }
   if (path.startsWith('/api/auth/')) return [TIERS.auth];
+
+  // ---- The public contact form ----
+  // ANONYMOUS in the only mode it runs in, so `keyFor` falls through to the IP — which is
+  // the whole reason this tier exists as its own bucket rather than inheriting anything: every other unauthenticated
+  // surface here is either signature-verified (the two webhooks) or bounded by GitHub's
+  // own sign-in flow. FOLLOWING THE TOKEN gives an unusual answer: the route spends no
+  // GitHub quota, no model dollars and barely any database — one outbound webhook POST —
+  // and yet it belongs in the strictest bucket in the file, because what it actually
+  // spends is a PERSON READING A MESSAGE. The blanket 600/min `read` fall-through would
+  // be 600 notifications a minute.
+  //
+  // BOTH paths, and the mint deliberately shares the submit bucket: a bot must fetch a
+  // ticket before it can post one, so rationing the mint rations the attempts. Written as
+  // an exact match plus the one child, never `startsWith('/api/contact')` — that is one
+  // sibling vocabulary away from swallowing a future `/api/contacts`, which is this
+  // file's recorded near-miss failure.
+  if (path === '/api/contact' || path === '/api/contact/ticket') return [TIERS.contact];
 
   // ---- Workspace CRUD: `read`, RECORDED rather than inherited ----
   //
@@ -767,12 +791,18 @@ export function registerRateLimit(app: FastifyInstance): void {
           'rate limit exceeded',
         );
         reply.header('Retry-After', String(retryAfter));
+        // ⚠ THE UNIT COMES FROM THE TIER, NOT FROM A LITERAL. The generic arm used to be
+        // hard-coded `${t.limit}/min`, which was true of every tier at the time and stopped
+        // being true the moment one took an hour window: the `contact` bucket is 5 an HOUR
+        // and the message said "limit 5/min … try again in 3597s", which is a self-
+        // contradicting sentence in front of a member of the public.
+        const per = t.windowMs >= HOUR ? 'hour' : 'minute';
         await reply.code(429).send({
           error: 'TooManyRequests',
           message:
             t.name === 'ai' || t.name === 'ai_hourly'
-              ? `Too many AI requests (limit ${t.limit} per ${t.windowMs >= HOUR ? 'hour' : 'minute'}). Try again in ${retryAfter}s.`
-              : `Too many requests (limit ${t.limit}/min). Try again in ${retryAfter}s.`,
+              ? `Too many AI requests (limit ${t.limit} per ${per}). Try again in ${retryAfter}s.`
+              : `Too many requests (limit ${t.limit} per ${per}). Try again in ${retryAfter}s.`,
           retryAfter,
         });
         return;

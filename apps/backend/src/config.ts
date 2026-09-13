@@ -362,6 +362,15 @@ export const config = {
   // webhook replies 501 and no billing state ever changes.
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
 
+  // ---- The public contact form (cloud only in practice; the landing is never served
+  // in local mode) ----
+  // A Slack incoming-webhook URL. Empty = GET /api/contact/ticket and POST /api/contact
+  // both 503, and the form on the landing page says so instead of accepting a message
+  // it cannot deliver. Validated at the point of use (api/routes/contact.ts) rather
+  // than here, so a bad value is a failed request with a log line rather than a boot
+  // failure on an otherwise healthy deploy.
+  contactSlackWebhookUrl: process.env.CONTACT_SLACK_WEBHOOK_URL ?? '',
+
   // Pro plugin master gate. bind.ts skips the dynamic import entirely when false.
   // PRO_DISABLED=true forces pure-OSS mode even when the submodule is checked out (used to
   // exercise/capture the free tier). Local defaults ON. In CLOUD it stays OFF unless

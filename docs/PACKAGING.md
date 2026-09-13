@@ -48,7 +48,7 @@ title/description/**canonical** baked in. Load-bearing details:
   `/insights`, `/reviews`) each get a copy of whichever role page now carries their
   content, whose canonical already points there.
 - **Guardrails, because the failure is SILENT** (a broken prerender still looks perfect in a
-  browser): `prerender.mjs` asserts every route in `PRERENDER_PATHS` plus a hard floor (6 since the site went to three content pages + three legal ones) and a per-page byte floor, `build-release.mjs` asserts
+  browser): `prerender.mjs` asserts every route in `PRERENDER_PATHS` plus a hard floor (8: home, the two role pages, the models page, contact, and three legal ones) and a per-page byte floor, `build-release.mjs` asserts
   each `public-landing/<route>/index.html` exists and contains real content, and
   `api/plugins/landing-routes.test.ts` covers the routing + traversal.
 
