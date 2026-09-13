@@ -44,9 +44,11 @@ title/description/**canonical** baked in. Load-bearing details:
   directory-index scan; **`/pricing` (the canonical form) falls through to the not-found
   handler**, which resolves it against a Set of routes scanned **once at boot** — so a URL can
   only ever select an entry found on disk and no request path is ever joined onto a filesystem
-  root. Legacy `/insights` + `/reviews` get a copy of `/pro`'s HTML (canonical → `/pro`).
+  root. The seven legacy routes (`/features`, `/how-it-works`, `/bots`, `/pro`, `/pricing`,
+  `/insights`, `/reviews`) each get a copy of whichever role page now carries their
+  content, whose canonical already points there.
 - **Guardrails, because the failure is SILENT** (a broken prerender still looks perfect in a
-  browser): `prerender.mjs` asserts 8 routes and a per-page floor, `build-release.mjs` asserts
+  browser): `prerender.mjs` asserts every route in `PRERENDER_PATHS` plus a hard floor (6 since the site went to three content pages + three legal ones) and a per-page byte floor, `build-release.mjs` asserts
   each `public-landing/<route>/index.html` exists and contains real content, and
   `api/plugins/landing-routes.test.ts` covers the routing + traversal.
 

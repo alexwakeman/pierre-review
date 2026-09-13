@@ -133,7 +133,12 @@ export function WorkspaceReachCard({
     /* ⚠ `h-full`, AND THE DISCLOSURES ARE INSIDE THE CARD — see the grid comment in
        `WorkspaceRepoActivityCharts`. The two cards on that row end on one line, and the slack goes
        to the shorter one's bottom as blank space rather than being spread through its rows. */
-    <ChartCard title="Reach by repository" note={`open now · ${capNote}`} className="h-full">
+    <ChartCard
+      title="Reach by repository"
+      note={`open now · ${capNote}`}
+      className="h-full"
+      testId="workspace-reach"
+    >
         <RepoRows
           labels={reach.repos.map((r) => r.repoFullName)}
           columns={columns}

@@ -374,7 +374,7 @@ export function PeriodPeopleSection(): JSX.Element | null {
 
   return (
     // Screen affordance, not part of the forwardable/printed artifact.
-    <section aria-label="People" className="print:hidden" ref={rootRef}>
+    <section aria-label="People" data-testid="people-picker" className="print:hidden" ref={rootRef}>
       <div className="mb-1 flex flex-wrap items-baseline gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
           People

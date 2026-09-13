@@ -1975,6 +1975,30 @@ await db
   .execute();
 
 // ===========================================================================
+// THE ESTATE — five more repositories, six more people, seven more bots and a
+// few hundred more pull requests (scripts/seed-estate.ts). Everything above this
+// line is hand-curated and addressed by id from the screenshot scripts; this is
+// the SCALE around it, without which the multi-repo rollups and the bot-volume
+// surfaces have nothing to roll up.
+// ===========================================================================
+const { seedEstate } = await import('./seed-estate.js');
+const estate = await seedEstate({
+  db,
+  schema,
+  now,
+  day,
+  platformWs: PLATFORM_WS,
+  webWs: WEB_WS,
+  coderabbit: CODERABBIT,
+  copilot: COPILOT,
+  acmeCi: ACME_CI,
+  dependabot: 7,
+});
+console.log(
+  `  estate: ${estate.repoIds.length} repos, ${estate.prIds.length} pull requests`,
+);
+
+// ===========================================================================
 // PRO-TABLE SEEDING (only when the PRIVATE @pierre/pro submodule is checked out).
 // Applies the plugin's own migrations EXACTLY the way the backend boot does
 // (src/pro/migrate.ts, incl. the pro_migrations bookkeeping — so the boot-time
@@ -2317,5 +2341,23 @@ console.log(
   `+ the ${SPIKE.length}-comment CodeRabbit spike on #105/#111) · ${labelSeeds.length} ml_comment_labels`,
   `(review_comment/pr_comment/review; CodeRabbit badges w/ over-call lean, Copilot & Acme CI badge nothing)`,
 );
+
+// Period reports need the PLUGIN's tables, so this runs AFTER the pro-migration
+// block above — on a fresh database those tables do not exist until it has run.
+if (proSeeded) {
+  // Period reports — the Reports pane's stored artifact. Computed from the real
+  // core fold over the seeded estate (scripts/seed-periods.ts), so the figures on
+  // the report agree with the figures on every other screen.
+  const { seedPeriodReports } = await import('./seed-periods.js');
+  const periodRows = await seedPeriodReports({
+    db,
+    now,
+    workspaces: [
+      { id: PLATFORM_WS, name: 'Platform', repoIds: [API, INFRA, 6, 7, 8], narrate: true },
+      { id: WEB_WS, name: 'Web', repoIds: [WEB, 4, 5], narrate: false },
+    ],
+  });
+  console.log(`  period reports: ${periodRows} rows (14-day cadence, newest narrated)`);
+}
 
 await closeDb();

@@ -403,6 +403,7 @@ export function BriefStrip(): JSX.Element | null {
 
   return (
     <section
+      data-testid="brief-strip"
       aria-label="Daily brief"
       className="rounded-lg border border-gray-200 bg-white p-2.5 text-xs dark:border-gray-800 dark:bg-gray-950"
     >

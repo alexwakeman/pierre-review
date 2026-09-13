@@ -41,7 +41,7 @@ export function WorkspaceFlowMetrics(): JSX.Element | null {
   const { data } = useWorkspaceMetrics(workspaceId);
   if (!data?.metrics) return null;
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-testid="workspace-flow-metrics">
       <WorkspaceMetricsPanel
         metrics={data.metrics}
         onOpenMetric={openMetricsDetail}

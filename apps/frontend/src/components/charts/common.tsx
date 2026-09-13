@@ -165,10 +165,13 @@ export function ChartCard({
   title,
   note,
   className,
+  testId,
   children,
 }: {
   title: string;
   note?: string;
+  /** Optional hook for the landing-screenshot capture, which crops one card at a time. */
+  testId?: string;
   // Extra classes on the card's own box — for a card that has to place itself in its host's grid
   // (e.g. a full-width `lg:col-span-3` card sharing a `lg:grid-cols-3` row with three narrow
   // ones). Layout only: the chrome above is not overridable, so every card still reads the same.
@@ -177,6 +180,7 @@ export function ChartCard({
 }): JSX.Element {
   return (
     <div
+      data-testid={testId}
       className={`rounded-lg border border-gray-200 p-3 dark:border-gray-800${
         className ? ` ${className}` : ''
       }`}

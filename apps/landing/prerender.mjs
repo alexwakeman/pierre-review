@@ -166,17 +166,19 @@ for (const path of PRERENDER_PATHS) {
 // The second is a route DISAPPEARING FROM ROUTE_SEO — a bad merge, an
 // over-eager tidy — which the first assertion cannot see, because the list it
 // checks against would shrink with it. That is what the hard-coded floor is
-// for, and it is the reason this number must be raised by hand whenever a route
-// is added. It was left at 9 when /bots landed and the site went to 10.
+// for, and it is the reason this number must be changed by hand whenever the
+// route list does. It was 10; the restructure took the site to six, and
+// /how-we-measure took it to seven (home, the two role pages, the models page,
+// and the three legal ones).
 if (written.length !== PRERENDER_PATHS.length) {
   throw new Error(
     `prerendered ${written.length} routes but PRERENDER_PATHS has ${PRERENDER_PATHS.length} — ` +
       `a route was skipped: ${PRERENDER_PATHS.filter((p) => !written.includes(p)).join(', ')}`,
   );
 }
-if (written.length < 10) {
+if (written.length < 7) {
   throw new Error(
-    `only ${written.length} routes prerendered — expected at least 10. ` +
+    `only ${written.length} routes prerendered — expected at least 7. ` +
       `If you deliberately removed a route, lower this floor in the same change.`,
   );
 }
@@ -188,16 +190,28 @@ if (smallest < 12000) {
   throw new Error(`smallest page is ${smallest} bytes — prerendered content is missing`);
 }
 
-// Legacy inbound links (/insights, /reviews) predate the Pro page. They are not in
-// ROUTE_SEO (they would be duplicate content in the sitemap), but they should still
-// answer with something readable rather than the bare shell, so they get a copy of
-// /pro's prerendered HTML — whose canonical already points at /pro, which is exactly
-// the signal a search engine needs to collapse the duplicate.
-for (const alias of ['insights', 'reviews']) {
+// Legacy inbound links. The five feature-area pages and the arcade were folded into
+// the two role pages, and every one of those URLs is in somebody's bookmarks, in a
+// search index, and in the sitemap Google fetched last week. They are deliberately
+// NOT in ROUTE_SEO — they would be duplicate content there — but each still writes
+// real HTML: a copy of whichever surviving page now carries its content, whose
+// canonical already points at that page, which is exactly the signal a search engine
+// needs to collapse the duplicate. This mirrors the alias table in App.tsx; change
+// both together.
+const ALIASES = {
+  features: 'for-developers',
+  'how-it-works': 'how-we-measure',
+  bots: 'for-managers',
+  pro: 'for-managers',
+  pricing: 'for-managers',
+  insights: 'for-managers',
+  reviews: 'for-managers',
+};
+for (const [alias, target] of Object.entries(ALIASES)) {
   mkdirSync(join(dist, alias), { recursive: true });
-  cpSync(join(dist, 'pro', 'index.html'), join(dist, alias, 'index.html'));
+  cpSync(join(dist, target, 'index.html'), join(dist, alias, 'index.html'));
 }
-log('aliased /insights + /reviews → /pro');
+log(`aliased ${Object.keys(ALIASES).length} legacy routes → the surviving pages`);
 
 rmSync(ssrDir, { recursive: true, force: true });
-log(`done — ${written.length} routes + 2 aliases`);
+log(`done — ${written.length} routes + ${Object.keys(ALIASES).length} aliases`);

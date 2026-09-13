@@ -34,43 +34,35 @@ export type RouteSeo = {
 /**
  * Canonical, indexable routes. Order is the order they appear in the sitemap.
  *
- * Legacy aliases (/insights, /reviews → Pro) are deliberately ABSENT: they still
- * resolve client-side for old inbound links, but they are duplicates of /pro and
- * should neither be prerendered nor advertised in the sitemap.
+ * THE SITE IS THREE CONTENT PAGES plus the three legal ones. /features, /bots,
+ * /pro, /pricing, /how-it-works and /arcade were removed together: the product
+ * pages were organised by FEATURE AREA, which meant a developer and a manager
+ * read the same five pages and neither found the half addressed to them. The
+ * content now sits on one page per reader, each of which carries the free tier
+ * in full first, then Pro, then the comparison table and the sign-up.
+ *
+ * Legacy aliases for the removed routes are handled in App.tsx and by the
+ * prerenderer, which copies the nearest surviving page's HTML so an old inbound
+ * link lands on something readable with a canonical pointing at the new page.
+ * They are deliberately ABSENT here — they would be duplicate content in the
+ * sitemap.
  */
 export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
-    title: `${SITE_NAME} — the calm layer above your review bot`,
-    description: `Bring your own reviewer. ${SITE_NAME} is the cross-repo layer above CodeRabbit, Greptile and Copilot — what’s stalled, whose turn it is, and what every bot comment is actually worth: graded independently, on your own repos.`,
+    title: `${SITE_NAME} — shine a light on your software projects`,
+    description: `Your work spans repositories, people and a growing stack of review automation. ${SITE_NAME} lights all of it on one board — whose turn it is, what is stalled, what is ready to land — and measures what the AI review bots on top are actually worth. Free and open core.`,
   },
-  '/features': {
-    title: 'Open Core — the free multi-repo GitHub dashboard',
-    description:
-      'The free, open-core tier in full: the cross-repo Activity feed, derived thread states, the repo→contributor timeline, per-repo consoles, PR detail with real write actions, per-comment bot grading with the per-PR triage grade, and cross-repo search. Free, forever.',
+  '/for-developers': {
+    title: 'For developers — what to do next, across every repository',
+    description: `A red build on one branch, two reviews waiting on another, six bot comments on the one you thought was done, and a conflict that appeared overnight. All of it is yours and none of it is ordered. ${SITE_NAME} ranks the lot into one list and lets you finish the top of it in place — reply, approve, merge, resolve the conflict. Free, with no repository limit.`,
   },
-  '/bots': {
-    title: 'The receipt — independent grading of your AI review bots',
-    description: `Every bot comment on your repos, graded by ${SITE_NAME}’s own ML model — severity, category and a keep/tune/noisy verdict per bot. On adjudicated ground truth the model agrees 0.700 exactly; the vendor’s own badge manages 0.474. Per-comment grading and the per-PR triage grade are free in the hosted service; the per-bot verdict table, depth, overlap and history are Pro.`,
+  '/for-managers': {
+    title: 'For engineering managers — see the whole review loop, people and bots',
+    description: `Throughput, lead time and where the waiting happens across every repository you own, with people counted apart from automation — free. Then a forwardable report per sprint, an hour-by-hour account of who was holding each pull request, and a keep / tune / noisy verdict on every review bot you pay for.`,
   },
-  '/pro': {
-    title: `${SITE_NAME} Pro & Pro+ — the measurement depth, and the full loop`,
-    description:
-      'Pro is the scoreboard over the free grades: the per-bot keep/tune/noisy ROI table, behaviour and inflation history, per-seat ROI, synthesised verdicts on every drill-down, Chronology, period reports with 1:1 prep, narrated daily briefs, thread validity and CI diagnosis. Pro+ closes the loop — Claude reviews that learn, and fixes you approve, pushed to GitHub.',
-  },
-  '/pricing': {
-    title: `Pricing — ${SITE_NAME} is open-core and free. Pro from $15 a seat`,
-    description: `The ${SITE_NAME} dashboard — including independent grading on every bot comment and the per-PR triage grade — is free forever. Pro is $15 a seat for the per-bot verdict table, the history, depth and reports; Pro+ is $29 a seat for Claude reviews and fixes on your own key.`,
-  },
-  '/how-it-works': {
-    title: 'How it works — sync, architecture & roadmap',
-    description: `The engineering behind ${SITE_NAME}: an idempotent five-minute sync pipeline with two-phase backfill and lean storage, a dual-dialect SQLite/Postgres data layer, the local-vs-cloud split, the security model — and what’s next (metered advanced AI, BYO endpoints, deeper Jira/Linear, email digests).`,
-  },
-  '/arcade': {
-    title: 'Inbox Invaders — the notification firehose as an arcade game',
-    description:
-      `A free browser game about the thing ${SITE_NAME} takes off your desk: ` +
-      'twelve kinds of notification descend, you clear what you can, and the ' +
-      'inbox wins. No sign-up.',
+  '/how-we-measure': {
+    title: 'How we measure — the two models, in plain English',
+    description: `Almost everything ${SITE_NAME} shows you is counted, not predicted. Two questions resist counting and have a model each: how serious a review-bot comment is, and whether your bots are doing well compared with the same bots in comparable repositories. What each one is for, how it was built, and how we know it works.`,
   },
   '/privacy': {
     title: `Privacy policy — ${SITE_NAME}`,

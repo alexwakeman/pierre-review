@@ -16,11 +16,9 @@ import { Wordmark } from './feint/Wordmark';
 // ---------------------------------------------------------------------------
 
 const NAV_LINKS = [
-  { to: '/features', label: 'Open Core' },
-  { to: '/bots', label: 'Bots' },
-  { to: '/pro', label: 'Pro' },
-  { to: '/pricing', label: 'Pricing' },
-  { to: '/how-it-works', label: 'How it works' },
+  { to: '/for-developers', label: 'For developers' },
+  { to: '/for-managers', label: 'For managers' },
+  { to: '/how-we-measure', label: 'How we measure' },
 ];
 
 function isActive(path: string, to: string): boolean {

@@ -46,35 +46,7 @@ export const INSTALL_COMMAND = `npx ${NPM_PACKAGE}`;
 /** The public source repository. */
 export const REPO_URL = 'https://github.com/alexwakeman/pierre-review';
 
-/**
- * The arcade game ("Inbox Invaders") entry points — the hero's game bar and the
- * footer link.
- *
- * ON: the game exists. /arcade is a real, prerendered marketing route (it is in
- * ROUTE_SEO, and therefore in PRERENDER_PATHS and the sitemap), so the "Play →"
- * link under the primary CTA resolves to a page rather than a 404.
- *
- * This stays a flag rather than being inlined because the game is deliberately
- * subordinate: it is the one piece of the site that can be pulled from the
- * marketing surface — hero bar and footer link both — without touching layout,
- * copy or the route itself. The route keeps working when this is false; only the
- * invitations to it disappear.
- */
-export const ARCADE_ENABLED = true;
-
-/** Where the game lives. */
-export const ARCADE_PATH = '/arcade';
-
-/**
- * Which H1 the homepage hero runs.
- *
- *   'calm'   — "Calm above the noise." The slogan form: what the product gives
- *              you, above the churn of multi-repo, multi-bot GitHub work.
- *   'signal' — "Your review bot flags 40 things. Limn shows you the 3 that
- *              matter." The proven concrete form, with the vermilion numeral.
- *
- * Both variants live in Home.tsx; this flag is the only switch. It is manual
- * and deliberate — a static, prerendered site has no A/B machinery, and the
- * two H1s make the same argument at different altitudes. Flip, rebuild, ship.
- */
-export const HERO_VARIANT: 'calm' | 'signal' = 'calm';
+// The arcade game ("Inbox Invaders") was removed with the site restructure — the
+// route, the page, src/game/ and the hero game bar all went together. It was the
+// one surface that spoke to neither of the site's two readers, and a three-page
+// site cannot afford a fourth page about something that is not the product.

@@ -9,32 +9,35 @@ import CookieBanner from './components/CookieBanner';
 import { LightboxProvider } from './components/Lightbox';
 import { InkButton, Section } from './components/feint/primitives';
 import Home from './pages/Home';
-import Features from './pages/Features';
-import Bots from './pages/Bots';
-import Pro from './pages/Pro';
-import Pricing from './pages/Pricing';
-import HowItWorks from './pages/HowItWorks';
-import Arcade from './pages/Arcade';
+import ForDevelopers from './pages/ForDevelopers';
+import ForManagers from './pages/ForManagers';
+import HowWeMeasure from './pages/HowWeMeasure';
 import Privacy from './pages/Privacy';
 import Cookies from './pages/Cookies';
 import Terms from './pages/Terms';
 
 const ROUTES: Record<string, () => JSX.Element> = {
   '/': Home,
-  '/features': Features,
-  '/bots': Bots,
-  '/pro': Pro,
-  '/pricing': Pricing,
-  '/how-it-works': HowItWorks,
-  '/arcade': Arcade,
+  '/for-developers': ForDevelopers,
+  '/for-managers': ForManagers,
+  '/how-we-measure': HowWeMeasure,
   // Legal. Required before the site can lawfully collect anything in the EU/UK, and
   // linked from the footer on every page + from the consent banner.
   '/privacy': Privacy,
   '/cookies': Cookies,
   '/terms': Terms,
-  // Legacy routes from the pre-Pro site — same page, old links keep working.
-  '/insights': Pro,
-  '/reviews': Pro,
+  // Legacy inbound links. The five feature-area pages and the arcade were folded into
+  // the two role pages; each old URL resolves to whichever of them now carries its
+  // content, so a bookmark or a search result lands on something rather than a 404.
+  // The prerenderer writes the same mapping to disk (see prerender.mjs), and the
+  // canonical in that HTML points at the surviving page.
+  '/features': ForDevelopers,
+  '/how-it-works': HowWeMeasure,
+  '/bots': ForManagers,
+  '/pro': ForManagers,
+  '/pricing': ForManagers,
+  '/insights': ForManagers,
+  '/reviews': ForManagers,
 };
 
 function NotFound(): JSX.Element {

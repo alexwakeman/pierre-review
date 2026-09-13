@@ -7,16 +7,34 @@ in cloud mode for anonymous visitors. The primary call to action is **Sign in wi
 
 ## Structure
 
-A small, dependency-free multi-page site (React + Vite + Tailwind). Five routes with real,
-clean URLs:
+A small, dependency-free multi-page site (React + Vite + Tailwind). **Four content routes**
+plus the three legal ones:
 
 | Route | Page | Focus |
 |---|---|---|
-| `/` | `pages/Home.tsx` | The pitch + the *why* (GitHub overwhelm → one calm board) |
-| `/features` | `pages/Features.tsx` | Timeline, Focus, My Turn, Feed, threads, PR detail, filters |
-| `/insights` | `pages/Insights.tsx` | The 12 analytics charts, each explained |
-| `/reviews` | `pages/Reviews.tsx` | Claude Review — persistence + deep/quick routing |
-| `/how-it-works` | `pages/HowItWorks.tsx` | Sync pipeline, architecture, security + roadmap |
+| `/` | `pages/Home.tsx` | The pitch, the numbers, and the split to the two role pages |
+| `/for-developers` | `pages/ForDevelopers.tsx` | The free tier in full, then what Pro adds for an IC |
+| `/for-managers` | `pages/ForManagers.tsx` | The free metrics, then the paid scoreboard and reports |
+| `/how-we-measure` | `pages/HowWeMeasure.tsx` | The two ML models in plain English — what each is for, how it was built, how we know it works |
+| `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer and the consent banner |
+
+**THE SITE WAS FIVE FEATURE-AREA PAGES** (`/features`, `/bots`, `/pro`, `/pricing`,
+`/how-it-works`) plus an arcade game, and they were removed together. Organising by feature
+area meant a developer and an engineering manager read the same five pages and neither found
+the half addressed to them. One page per reader, each of which leads with the free tier in
+full, then Pro, then the shared comparison table and sign-up block
+(`components/feint/TierTable.tsx` — rendered at the bottom of all three).
+
+⚠ **The old URLs are aliased, not deleted.** `App.tsx` maps each of them to whichever role
+page now carries its content, and `prerender.mjs` writes the same mapping to disk so an old
+inbound link gets real HTML with a canonical pointing at the surviving page. Change both
+tables together.
+
+⚠ **`components/feint/FeatureShot.tsx` exists because a screenshot in the two-column rail
+renders at roughly half size.** Captures are taken at a 1180px viewport; in a ~500px column
+that puts 12px interface text at 6px. Anything with a table, a chart row or more than one
+panel goes through `FeatureShot` (full canvas width, ~1:1); only genuinely narrow crops keep
+the two-column `ShotFrame`.
 
 - **Routing** (`src/router.tsx`): a ~80-line client router (`useRoute`, `navigate`, `Link`)
   — no router dependency. The Fastify not-found handler serves the landing `index.html` for
@@ -60,21 +78,21 @@ for s in 16 32 48 180 192 512; do sips -z $s $s /tmp/sq.png --out public/icon-$s
 
 The shots in `public/shots/` come from a **throwaway seeded demo DB** (fictional `acme/*`
 team — no real GitHub data, no PII), captured by `scripts/capture-shots.mjs` from the repo
-root. The Pro shots (Insights, flow metrics, sprint report, digests, AI Analysis & Fix,
-Settings) need the **private `packages/pro` submodule checked out**
+root. The Pro shots (flow metrics, the period report, Chronology, the bot ROI table and the
+benchmark) need the **private `packages/pro` submodule checked out**
 (`git submodule update --init`) — the seeder then also populates the plugin tables
 (`repo_digests`, `sprint_reports`, `pro_settings`, AI analyses/fixes).
 
 Capture is **TWO PASSES against the same seeded DB**, selected by `SHOT_SET` (default
 `pro`). The FREE pass restarts the backend with **`PRO_DISABLED=true`** — which forces
-pure-OSS mode even with the pro submodule present — so the plain (no-FYI) feed and the
-digest-less repo console can be captured.
+pure-OSS mode even with the pro submodule present — so the LOCKED Reports pane a free
+account actually sees can be captured rather than faked.
 
 **The one-command way** (`scripts/demo-stack.mjs` — from the repo root):
 
 ```sh
 pnpm shots        # seed → boot Pro stack → all PRO shots → restart OSS → FREE shots → teardown
-pnpm shots claude-review.png   # one shot only (pro set)
+pnpm shots bot-roi.png   # one shot only (pro set)
 
 pnpm demo         # seed + boot the Pro demo stack and LEAVE IT RUNNING for browsing
 pnpm demo --free  #   … in pure-OSS mode        (backend :4100, frontend :5273)
@@ -98,7 +116,7 @@ pnpm --filter @pierre-review/backend seed:demo
   PRO_DIGEST_ENABLED=true PRO_ADVANCED_AI_ENABLED=true ANTHROPIC_API_KEY=dummy \
   node_modules/.bin/tsx src/index.ts & )
 ( cd apps/frontend && BACKEND_PORT=4100 node_modules/.bin/vite --port 5273 & )
-# 3. capture the Pro shots (all, or one: `node scripts/capture-shots.mjs insights.png`)
+# 3. capture the Pro shots (all, or one: `node scripts/capture-shots.mjs bot-roi.png`)
 node scripts/capture-shots.mjs
 
 # ---- FREE pass (SHOT_SET=free) --------------------------------------------
@@ -108,22 +126,49 @@ node scripts/capture-shots.mjs
   DATABASE_URL=/tmp/pierre-demo.sqlite PORT=4100 DISABLE_SCHEDULER=true \
   PRO_DISABLED=true ANTHROPIC_API_KEY=dummy \
   node_modules/.bin/tsx src/index.ts & )
-# 5. capture the free shots (the capture asserts no "My Turn" surface is present)
+# 5. capture the free shot (the locked Reports pane)
 SHOT_SET=free node scripts/capture-shots.mjs
 ```
 
-Shot lists (→ `public/shots/`, plus `og-image.png` at the public root):
+Shot lists (→ `public/shots/`, plus `og-image.png` at the public root). **Every shot is a
+CROP OF ONE ELEMENT**, not a browser window: the previous set photographed whole 1600px
+windows, and at the width a marketing column renders them the feature being described was
+forty pixels tall somewhere in the middle. `crop()` in the capture script clips to a
+locator's bounding box with a little padding.
 
-- **PRO pass** (`SHOT_SET=pro`): `timeline.png` (30-day board), `activity-feed-pro.png`
-  (feed with the yellow FYI/My-Turn cards), `repo-console.png` (with the AI digest),
-  `insights.png`, `flow-metrics.png`, `sprint-report.png`, `pr-detail.png`,
-  `claude-review.png`, `ai-fix.png`, `settings.png`, `open-pr-strip.png` (30-day preset
-  so the stalled count shows), `og-image.png` — plus the **walkthrough step crops** used
-  by the Pro page's step-by-step demos (captured at a narrow viewport for legibility):
-  `flow-review-{1-run,2-memory,3-findings,4-post}.png` (#113) and
-  `flow-fix-{1-ci,2-analysis,3-diff,4-push}.png` (#114).
-- **FREE pass** (`SHOT_SET=free`): `activity-feed.png` (the PLAIN feed — no FYI cards or
-  toggle) and `repo-console-free.png` (repo console without the digest card).
+- **PRO pass** (`SHOT_SET=pro`): `pending-board.png`, `pending-card.png`, `feed.png`,
+  `flow-metrics.png`, `repo-rows.png`, `reach.png`, `period-report.png`, `chronology.png`,
+  `bot-roi.png`, `bot-settings.png`, `benchmark.png`, `pr-detail.png`, `pr-threads.png`,
+  `bot-severity.png`, `og-image.png`.
+- **FREE pass** (`SHOT_SET=free`): `free-reports.png` — the Reports pane on a free account,
+  which is the one piece of evidence for the visible-but-locked posture the tier table
+  claims. It has to be a real free-tier capture; cropping the paid one would not show the
+  lock.
+
+⚠ **There is deliberately no `pr-changes` shot.** The Changes tab hydrates its patches from
+GitHub on demand and the demo's repositories do not exist there, so against this database it
+correctly renders "inline diffs aren't available for this PR". That is the honest output and
+it is not a picture of the feature — do not re-add the shot without first giving the demo a
+real diff to render.
+
+⚠ **The demo data is TWO seeders.** `scripts/seed-demo.ts` is the hand-curated fixture whose
+rows are addressed by id from this capture script (#113's threads, #114's red build).
+`scripts/seed-estate.ts` adds the SCALE around it — five more repositories, six more people,
+seven more bots and a few hundred more pull requests — without which the multi-repo rollups
+and the bot-volume surfaces have nothing to roll up. `scripts/seed-periods.ts` then computes
+the stored period reports from the real core fold, so the figures on the report agree with
+the figures on every other screen.
+
+## Reading the copy
+
+`node scripts/dump-copy.mjs [out.md]` writes every word the site renders — in page
+order, with the per-route `<title>` and meta description — to one markdown file, for
+proofreading. It reads `apps/landing/dist`, so **build first**; what comes out is what a
+reader actually gets rather than a hand transcription that drifts from it.
+
+The comparison table is the one thing it does not walk: it is a CSS grid whose
+mobile-only "Free" / "Pro" markers interleave with the cells, so its rows are read
+straight from `TierTable.tsx` and rendered as a real table.
 
 `scripts/capture-landing.mjs` screenshots the built landing pages at desktop + mobile widths
 (into `scripts/.ui-artifacts/landing/`) and reports horizontal-overflow — handy for checking

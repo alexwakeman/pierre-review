@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { Link } from '../router';
 import { resetConsent } from '../lib/consent';
 import { analyticsConfigured, revokeAnalytics } from '../lib/analytics';
-import { ARCADE_ENABLED, ARCADE_PATH, REPO_URL, SITE_NAME } from '../lib/site';
+import { REPO_URL, SITE_NAME } from '../lib/site';
 
 // ---------------------------------------------------------------------------
 // The footer, condensed to two mono lines — a © line with a link row, and the
@@ -42,11 +42,15 @@ export default function Footer(): JSX.Element {
         <span>© 2026 {SITE_NAME}. Built for sprint situational awareness.</span>
 
         <span className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
-          {ARCADE_ENABLED && (
-            <Link to={ARCADE_PATH} className={LINK}>
-              Inbox Invaders
-            </Link>
-          )}
+          <Link to="/for-developers" className={LINK}>
+            For developers
+          </Link>
+          <Link to="/for-managers" className={LINK}>
+            For managers
+          </Link>
+          <Link to="/how-we-measure" className={LINK}>
+            How we measure
+          </Link>
           <a
             href={REPO_URL}
             target="_blank"
@@ -72,15 +76,11 @@ export default function Footer(): JSX.Element {
         </span>
       </div>
 
+      {/* The roadmap link went with /how-it-works. The fact it carried is still worth
+          stating — a phone visitor should know before they sign in — so it stays as
+          plain text rather than pointing at a page that no longer exists. */}
       <p className="mt-4 max-w-caption">
-        {SITE_NAME} is a desktop experience today — a phone-friendly build is on the{' '}
-        <Link
-          to="/how-it-works#roadmap"
-          className={`border-b border-rule-strong text-nav-idle ${LINK}`}
-        >
-          roadmap
-        </Link>
-        .
+        {SITE_NAME} is a desktop experience today. A phone-friendly build is planned.
       </p>
     </footer>
   );
