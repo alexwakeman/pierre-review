@@ -4,7 +4,8 @@
 // Builds the frontend + backend, copies the compiled backend JS, the drizzle
 // migration .sql files + meta journal, and the built SPA into ./release/, then
 // writes a generated package.json (curated deps: drops the types-only workspace
-// `@pierre-review/shared`, adds `@fastify/static`).
+// `@pierre-review/shared` — which is instead VENDORED at dist/shared and reached by relative
+// path — and adds `@fastify/static`).
 //
 // This script NEVER publishes. Publishing is the user's job (`cd release &&
 // npm publish`). It does build, assemble, and verify only.
@@ -20,7 +21,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,8 @@ const landingDir = join(repoRoot, 'apps', 'landing');
 const backendDist = join(backendDir, 'dist');
 const frontendDist = join(frontendDir, 'dist');
 const landingDist = join(landingDir, 'dist');
+const sharedDir = join(repoRoot, 'packages', 'shared');
+const sharedDist = join(sharedDir, 'dist');
 const migrationsSrc = join(backendDir, 'src', 'db', 'migrations');
 const migrationsPgSrc = join(backendDir, 'src', 'db', 'migrations-pg');
 const releaseDir = join(repoRoot, 'release');
@@ -68,7 +71,23 @@ run('pnpm', ['--filter', '@pierre-review/landing', 'build']);
 // 3. Build backend (tsc → apps/backend/dist; picks up cli.ts via tsconfig.build).
 run('pnpm', ['--filter', '@pierre-review/backend', 'build']);
 
+// 3b. Build @pierre-review/shared to JS. THE PACKAGE IS STILL NOT A PUBLISHED DEPENDENCY — it is
+// VENDORED into release/dist/shared and every bare `@pierre-review/shared` specifier in the
+// emitted JS is rewritten to a relative path (near the end of this file), so nothing resolves it
+// by name at runtime and the curated manifest stays as it was.
+//
+// WHY, given "shared is types-only": that rule is mechanical, not architectural — an unshipped
+// package cannot be imported by name from npm. It held for as long as shared carried only types,
+// and the in-app conflict resolver ended that: `foldFile`/`foldToText`/`CONFLICT_MODEL_VERSION`
+// are REAL CODE that the SPA's centre pane and the server's land path must agree on to the byte,
+// because one previews what the other pushes. Duplicating them so the emitted backend would stop
+// referencing shared is the one outcome that feature cannot survive (see the header of
+// apps/frontend/src/lib/mergeResolver.ts). Vendoring keeps the single implementation and still
+// ships a package that requires nothing it does not carry.
+run('pnpm', ['--filter', '@pierre-review/shared', 'build']);
+
 if (!existsSync(backendDist)) fail('backend dist/ missing after build');
+if (!existsSync(sharedDist)) fail('shared dist/ missing after build');
 if (!existsSync(frontendDist)) fail('frontend dist/ missing after build');
 if (!existsSync(landingDist)) fail('landing dist/ missing after build');
 
@@ -88,6 +107,16 @@ function pruneDist(dir) {
     }
   }
 }
+
+// 4b. Vendor the compiled shared package → release/dist/shared. It lives UNDER `dist`, which is
+//     already in the manifest's `files`, so it ships with the npm package and lands at
+//     /app/dist/shared in the cloud image without either list having to learn about it.
+log('vendoring shared → release/dist/shared');
+const sharedReleaseDir = join(releaseDist, 'shared');
+cpSync(sharedDist, sharedReleaseDir, { recursive: true });
+pruneDist(sharedReleaseDir);
+const sharedEntry = join(sharedReleaseDir, 'index.js');
+if (!existsSync(sharedEntry)) fail('release/dist/shared/index.js missing after vendoring');
 
 // 5. Copy migrations (.sql + meta/*.json only) → release/dist/db/migrations.
 log('copying migrations → release/dist/db/migrations');
@@ -312,9 +341,50 @@ function walk(dir) {
 }
 walk(releaseDir);
 
-// No real runtime reference to the unshipped shared package (catches a regression
-// where a value import sneaks back in). Comments mentioning the name are fine; we
-// match actual import/require statements only.
+// Point every emitted `@pierre-review/shared` specifier at the vendored copy. The package name
+// never survives into the shipped JS, so the release resolves nothing by a name its manifest does
+// not carry — which is what the guardrail below now proves, rather than forbidding the import in
+// the first place.
+//
+// ⚠ ONLY A SPECIFIER POSITION IS TOUCHED — `from '…'`, `import('…')`, `require('…')`. The name
+// also appears in comments and in a couple of error strings, and rewriting those would turn the
+// guardrail's own explanation into a path.
+const SHARED_SPECIFIER = /(\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)(['"])@pierre-review\/shared\2/g;
+
+function rewriteSharedSpecifiers(dir) {
+  let rewritten = 0;
+  const scan = (d) => {
+    for (const entry of readdirSync(d)) {
+      const full = join(d, entry);
+      if (statSync(full).isDirectory()) {
+        scan(full);
+        continue;
+      }
+      if (!entry.endsWith('.js')) continue;
+      const text = readFileSync(full, 'utf8');
+      if (!text.includes('@pierre-review/shared')) continue;
+      // POSIX separators, and always explicitly relative — Node reads a bare `shared/index.js`
+      // as a package name, not a sibling directory.
+      let rel = relative(dirname(full), sharedEntry).split(sep).join('/');
+      if (!rel.startsWith('.')) rel = `./${rel}`;
+      const next = text.replace(SHARED_SPECIFIER, (_m, lead, q) => `${lead}${q}${rel}${q}`);
+      if (next === text) continue;
+      writeFileSync(full, next);
+      rewritten += 1;
+    }
+  };
+  scan(dir);
+  return rewritten;
+}
+
+log('rewriting @pierre-review/shared imports → ./dist/shared');
+let rewrittenFiles = rewriteSharedSpecifiers(releaseDist);
+if (withPro) rewrittenFiles += rewriteSharedSpecifiers(join(releaseDir, 'pro'));
+log(`  ${rewrittenFiles} file(s) repointed at the vendored shared`);
+
+// Nothing may still reach the shared package BY NAME — every specifier should have been
+// repointed above, and one that was not would resolve against a manifest that does not list it.
+// Comments mentioning the name are fine; we match actual import/require statements only.
 function grepSharedImports(dir) {
   const hits = [];
   const importRe =
@@ -335,13 +405,13 @@ function grepSharedImports(dir) {
   return hits;
 }
 const sharedHits = grepSharedImports(join(releaseDir, 'dist'));
-// The plugin imports @pierre-review/shared as `import type` only (stripped at emit), but guard
-// the copied-in plugin too so a future value-import can't ship a broken runtime require.
+// The copied-in plugin gets the same treatment and the same check — it has its own value
+// imports of shared, and its relative path back to dist/shared is a longer one.
 if (withPro) sharedHits.push(...grepSharedImports(join(releaseDir, 'pro')));
 if (sharedHits.length > 0) {
-  console.error('Runtime import of @pierre-review/shared found in release/dist:');
+  console.error('Unrewritten @pierre-review/shared import left in the release:');
   for (const h of sharedHits) console.error(`  ${h}`);
-  fail('shared package would be required at runtime but is not shipped');
+  fail('shared is vendored at dist/shared and resolved relatively — these would resolve by name');
 }
 
 // No AI runtime dep in the OSS manifest. The npm package must ship zero Anthropic/MCP SDK
