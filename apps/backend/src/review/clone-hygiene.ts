@@ -82,11 +82,37 @@ export function urlHasUserinfo(url: string): boolean {
 export type CleanOriginOutcome = 'clean' | 'repaired' | 'removed';
 
 /**
+ * Every value `config --local --list` holds for one key. The `--list` read below has to
+ * happen anyway, and it already contains every key, so pulling `origin` out of its text
+ * costs nothing and saves a spawn — and a git spawn costs ~120ms from Node regardless of
+ * the subcommand, which is the whole reason this reads the config once instead of twice.
+ * ⚠ MULTIVAR: a key can legally appear more than once, and `config --get` prints only the
+ * LAST value (exit 0, no warning) — so a tokenized FIRST value is invisible to it. Testing
+ * every value is strictly wider than the read it replaces, never narrower. It does not make
+ * such a clone repairable — `remote set-url` refuses a multivar outright — which is why the
+ * unconditional whole-config check below, not the repair, is what keeps this fail-closed.
+ */
+function configValues(list: string, key: string): string[] {
+  const out: string[] = [];
+  for (const line of list.split('\n')) {
+    const eq = line.indexOf('=');
+    if (eq > 0 && line.slice(0, eq) === key) out.push(line.slice(eq + 1));
+  }
+  return out;
+}
+
+/**
  * Fail-closed credential check for one clone: repair a tokenized `origin`, then re-read the
  * WHOLE local config and DELETE the clone if any credential survived. A clone is a
  * rebuildable cache — losing one costs a fetch; leaving a live token on disk costs the token.
  * `origin` is not the only hiding place (an `insteadOf` written by an old `clone --config`,
- * a second remote left by a crashed run), which is why the second read is unconditional.
+ * a second remote left by a crashed run), which is why the read after a repair is
+ * unconditional.
+ *
+ * ⚠ THE ORDER IS THE GUARANTEE, NOT THE NUMBER OF READS. The clean path reads the config
+ * ONCE and tests that same text for credentials; a repair re-reads it afterwards, so the
+ * deciding read is always taken AFTER the last write. Collapsing it to a single read that
+ * predates the repair would report a clone clean on the strength of the config it just fixed.
  */
 export async function assertCleanOrigin(
   dir: string,
@@ -94,21 +120,14 @@ export async function assertCleanOrigin(
   name: string,
 ): Promise<CleanOriginOutcome> {
   let repaired = false;
-  const origin = await gitOut([
-    '-C',
-    dir,
-    'config',
-    '--local',
-    '--get',
-    'remote.origin.url',
-  ]).catch(() => '');
-  if (urlHasUserinfo(origin.trim())) {
+  let local = await gitOut(['-C', dir, 'config', '--local', '--list']).catch(() => '');
+  if (configValues(local, 'remote.origin.url').some((u) => urlHasUserinfo(u.trim()))) {
     await gitOut(['-C', dir, 'remote', 'set-url', 'origin', plainUrl(owner, name)]).catch(
       () => {},
     );
     repaired = true;
+    local = await gitOut(['-C', dir, 'config', '--local', '--list']).catch(() => '');
   }
-  const local = await gitOut(['-C', dir, 'config', '--local', '--list']).catch(() => '');
   if (/https:\/\/[^\/\s]*@github\.com/i.test(local)) {
     try {
       rmSync(dir, { recursive: true, force: true });
@@ -200,8 +219,19 @@ export interface CloneHygieneReport {
 /**
  * `git worktree prune -v` prints one "Removing …" line per dropped record —
  * ⚠ on STDERR, not stdout (verified on git 2.54), so counting stdout reports zero forever.
+ *
+ * ⚠ The records ARE `.git/worktrees/<name>/`, so an absent or empty directory means prune has
+ * nothing to iterate and the spawn is provably wasted — which is the common case for a clone
+ * that has never had a fix or a resolver run on it. Reading a directory costs microseconds;
+ * starting git costs ~120ms. Should git ever move that directory, the cost of this gate is a
+ * stale RECORD surviving to the next boot — disk, never a credential.
  */
 async function pruneWorktreeRecords(dir: string): Promise<number> {
+  try {
+    if (readdirSync(join(dir, '.git', 'worktrees')).length === 0) return 0;
+  } catch {
+    return 0; // no records directory at all
+  }
   const { stderr, stdout } = await execFileAsync(
     'git',
     ['-C', dir, 'worktree', 'prune', '--verbose'],
@@ -251,26 +281,99 @@ async function deleteConflictRefs(dir: string): Promise<void> {
   }
 }
 
+const EMPTY_REPORT: CloneHygieneReport = {
+  scanned: 0,
+  credentialsRepaired: 0,
+  clonesRemoved: 0,
+  permissionsTightened: 0,
+  worktreeRecordsPruned: 0,
+  worktreeDirsRemoved: 0,
+};
+
+/**
+ * The whole sweep for ONE clone. Every step is individually try/caught: one unreadable clone
+ * must not stop the sweep, and the sweep must never be the reason the server does not start.
+ */
+async function sweepOneClone(
+  dir: string,
+  owner: string,
+  name: string,
+  now: number,
+): Promise<CloneHygieneReport> {
+  const report: CloneHygieneReport = { ...EMPTY_REPORT, scanned: 1 };
+
+  try {
+    const outcome = await assertCleanOrigin(dir, owner, name);
+    if (outcome === 'repaired') report.credentialsRepaired++;
+    if (outcome === 'removed') {
+      report.clonesRemoved++;
+      return report;
+    }
+  } catch {
+    /* couldn't read this clone's config — leave the rest of the sweep to the next boot */
+    return report;
+  }
+
+  try {
+    if (tightenClonePerms(dir)) report.permissionsTightened++;
+  } catch {
+    /* best-effort */
+  }
+  try {
+    report.worktreeRecordsPruned += await pruneWorktreeRecords(dir);
+  } catch {
+    /* best-effort */
+  }
+  let removedDirs = 0;
+  try {
+    removedDirs = removeStaleWorktreeDirs(dir, now);
+    report.worktreeDirsRemoved += removedDirs;
+  } catch {
+    /* best-effort */
+  }
+  // The second prune exists to collect the records the deletes above just orphaned. With no
+  // deletes there are no new orphans, so it is provably a no-op — and a no-op git spawn still
+  // costs ~120ms per clone. ⚠ Keep it gated on the COUNT, not on `.worktrees/` existing.
+  if (removedDirs > 0) {
+    try {
+      report.worktreeRecordsPruned += await pruneWorktreeRecords(dir);
+    } catch {
+      /* best-effort */
+    }
+  }
+  try {
+    await deleteConflictRefs(dir);
+  } catch {
+    /* best-effort */
+  }
+  return report;
+}
+
 /**
  * Walk every clone in the cache once: repair credentials, tighten permissions, prune dead
- * worktree records, delete worktree directories past the TTL, prune again (the deletes above
- * just orphaned their records), and drop the resolver's fetch refs.
+ * worktree records, delete worktree directories past the TTL, prune again IF that deleted
+ * anything (those deletes are the only thing that could have orphaned a fresh record), and
+ * drop the resolver's fetch refs.
  *
- * Every step is individually try/caught: one unreadable clone must not stop the sweep, and
- * the sweep must never be the reason the server does not start. `now` is a parameter so a
- * test can age a worktree without touching the clock.
+ * `now` is a parameter so a test can age a worktree without touching the clock.
+ *
+ * ⚠ THIS RUNS BEFORE `app.listen()` AND IS AWAITED ON PURPOSE — `bindProPlugin` can hand a
+ * clone to a fix, and no clone may carry a token in `.git/config` when it does. So the cost
+ * here is paid down by SPAWNING LESS, never by deferring the sweep off the boot path: that
+ * would trade startup time for the guarantee itself. Every git call below has to justify
+ * itself, because one costs ~120ms whatever it does.
+ *
+ * ⚠ DO NOT PARALLELISE THIS LOOP — it was tried and reverted. `git` does not scale with
+ * concurrency here the way an ordinary process does: MEASURED, 16 concurrent `git config`
+ * calls took 1,779ms against 131ms for one (dead linear), while 10 concurrent `/bin/echo`
+ * spawns took 13ms total. A worker pool over the same 7-clone cache came out at 2,409ms
+ * against 2,509ms serial — inside the noise, for a shared cursor and a concurrency limit in
+ * a file whose value is that it can be read straight through.
  */
 export async function sweepCloneCache(
   now: number = Date.now(),
 ): Promise<CloneHygieneReport> {
-  const report: CloneHygieneReport = {
-    scanned: 0,
-    credentialsRepaired: 0,
-    clonesRemoved: 0,
-    permissionsTightened: 0,
-    worktreeRecordsPruned: 0,
-    worktreeDirsRemoved: 0,
-  };
+  const report: CloneHygieneReport = { ...EMPTY_REPORT };
   tightenCloneRoot();
 
   let entries: string[];
@@ -292,47 +395,15 @@ export async function sweepCloneCache(
     // cannot contain an underscore, a repository name can.
     const split = entry.indexOf('__');
     if (split <= 0) continue;
-    const owner = entry.slice(0, split);
-    const name = entry.slice(split + 2);
-    report.scanned++;
 
-    try {
-      const outcome = await assertCleanOrigin(dir, owner, name);
-      if (outcome === 'repaired') report.credentialsRepaired++;
-      if (outcome === 'removed') {
-        report.clonesRemoved++;
-        continue;
-      }
-    } catch {
-      /* couldn't read this clone's config — leave the rest of the sweep to the next boot */
-      continue;
-    }
-
-    try {
-      if (tightenClonePerms(dir)) report.permissionsTightened++;
-    } catch {
-      /* best-effort */
-    }
-    try {
-      report.worktreeRecordsPruned += await pruneWorktreeRecords(dir);
-    } catch {
-      /* best-effort */
-    }
-    try {
-      report.worktreeDirsRemoved += removeStaleWorktreeDirs(dir, now);
-    } catch {
-      /* best-effort */
-    }
-    try {
-      report.worktreeRecordsPruned += await pruneWorktreeRecords(dir);
-    } catch {
-      /* best-effort */
-    }
-    try {
-      await deleteConflictRefs(dir);
-    } catch {
-      /* best-effort */
-    }
+    const one = await sweepOneClone(dir, entry.slice(0, split), entry.slice(split + 2), now);
+    report.scanned += one.scanned;
+    report.credentialsRepaired += one.credentialsRepaired;
+    report.clonesRemoved += one.clonesRemoved;
+    report.permissionsTightened += one.permissionsTightened;
+    report.worktreeRecordsPruned += one.worktreeRecordsPruned;
+    report.worktreeDirsRemoved += one.worktreeDirsRemoved;
   }
+
   return report;
 }

@@ -133,7 +133,11 @@ describe('ensureClone', () => {
     await ensureClone('octocat', 'hello');
     // The reuse path used to return before reading anything. It must now read the local
     // config — that is what repairs a clone an older build left a token in.
-    expect(anyGitCallWith('config', '--local', '--get', 'remote.origin.url')).toBe(true);
+    // ⚠ `--list`, not `--get remote.origin.url`: assertCleanOrigin reads the WHOLE config
+    // once and pulls origin out of that text, because a second git spawn costs ~120ms and
+    // `--get` cannot see a tokenized FIRST value of a multivar anyway. The property under
+    // test is that the reuse path reads the config at all, not which flag it reads it with.
+    expect(anyGitCallWith('config', '--local', '--list')).toBe(true);
     expect(anyGitCallWith('clone')).toBe(false);
   });
 });

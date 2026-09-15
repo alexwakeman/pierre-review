@@ -146,6 +146,20 @@ describe('sweepCloneCache — credentials', () => {
     expect(existsSync(repo)).toBe(false);
   });
 
+  it('DELETES a clone whose token hides in a multivar origin', async () => {
+    // ⚠ A MULTIVAR ORIGIN CANNOT BE REPAIRED, so the whole-config check is the only thing
+    // standing between this clone and a live token on disk. Verified on git 2.54:
+    // `remote set-url` refuses outright ("fatal: could not set 'remote.origin.url'") and
+    // `config --get` prints only the LAST value with exit 0 — so a tokenized FIRST value is
+    // invisible to a `--get` read and survives every repair. Deletion is the guarantee here.
+    const repo = makeClone('octocat__hello', TOKENIZED);
+    git(['config', '--local', '--add', 'remote.origin.url', PLAIN], repo);
+
+    const report = await hygiene.sweepCloneCache();
+    expect(report.clonesRemoved).toBe(1);
+    expect(existsSync(repo)).toBe(false);
+  });
+
   it('tightens permissions on the clone tree and its .git/config', async () => {
     const repo = makeClone('octocat__hello', PLAIN);
     await hygiene.sweepCloneCache();
@@ -176,6 +190,13 @@ describe('sweepCloneCache — worktrees', () => {
     expect(report.worktreeDirsRemoved).toBe(1);
     expect(existsSync(stale)).toBe(false);
     expect(existsSync(fresh)).toBe(true);
+    // ⚠ The SECOND prune is what collects the record the delete above just orphaned, and it
+    // is gated on the delete COUNT so a sweep that deletes nothing skips a no-op git spawn.
+    // Delete that call, or widen the gate to something that is not the count, and the stale
+    // record survives here while `worktreeDirsRemoved` still reads 1.
+    const listed = git(['worktree', 'list', '--porcelain'], repo);
+    expect(listed).not.toContain('stale');
+    expect(listed).toContain('fresh');
   });
 
   it('keeps a backdated worktree THIS process owns', async () => {
