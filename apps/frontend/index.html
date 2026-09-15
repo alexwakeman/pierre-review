@@ -11,6 +11,12 @@
          Root-absolute public-asset paths — Vite
          base-prefixes them to '/app/...' in dev and in the production build, so they
          load whether the SPA is served locally or behind the cloud auth gate. -->
+    <!-- ⚠ THE SVG MUST STAY FIRST AND KEEP ITS `type`. A tab slot is 16 CSS px — 32 device px
+         at DPR 2 — and Chrome picks ONE of these and scales it, so any pick but an exact 1:1
+         raster resamples a grid whose features are one pixel wide and reads as blur. Declared
+         this way Chrome takes the SVG and `shape-rendering: crispEdges` snaps it to the device
+         grid at every DPR. The PNGs remain for Safari < 16.4 and the big-raster surfaces. -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />

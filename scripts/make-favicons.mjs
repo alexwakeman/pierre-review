@@ -106,15 +106,72 @@ function encodePng(size, pixels) {
 }
 
 // ---------------------------------------------------------------------------
+// SVG — the one Chrome actually uses
+// ---------------------------------------------------------------------------
+
+/**
+ * ⚠ THIS IS THE FIX FOR A BLURRY TAB ICON, AND THE PNGs WERE NEVER THE PROBLEM — each one is
+ * exactly three colours with no anti-aliasing. The blur is RESAMPLING: a tab slot is 16 CSS px,
+ * which is 32 device px at DPR 2 and 48 at DPR 3, and Chrome picks ONE `rel="icon"` and scales
+ * it to whatever it needs. Any pick but an exact 1:1 match smears a grid whose features are one
+ * pixel wide — favicon-16 upscaled 2x, or favicon-48 downscaled to 0.67x, both read as fuzz.
+ *
+ * An SVG sidesteps the choice: declared with `type="image/svg+xml"` Chrome prefers it, and
+ * `shape-rendering: crispEdges` snaps every edge to the device grid at whatever size it lands,
+ * so there is no filtering to blur. The PNGs stay as the fallback for Safari < 16.4 and for the
+ * surfaces that want a big raster (bookmarks, shortcuts, the manifest).
+ *
+ * The viewBox is 16x16 with the grid at 1:1 — deliberately the same geometry favicon-16.png
+ * has — so every whole-number DPR lands the mark on whole device pixels (2x is exactly
+ * favicon-32, 3x exactly favicon-48) and the vector and raster versions cannot look like two
+ * different marks.
+ */
+function renderSvg(rows) {
+  const gw = rows[0].length;
+  const gh = rows.length;
+  const size = 16;
+  const [ox, oy] = BASE_ORIGIN;
+
+  const ink = [];
+  const accent = [];
+  for (let y = 0; y < gh; y++) {
+    let x = 0;
+    while (x < gw) {
+      const ch = rows[y][x];
+      if (ch !== 'x' && ch !== 'a') {
+        x += 1;
+        continue;
+      }
+      let w = 1;
+      while (x + w < gw && rows[y][x + w] === ch) w += 1;
+      const rect = `<rect x="${ox + x}" y="${oy + y}" width="${w}" height="1"/>`;
+      (ch === 'a' ? accent : ink).push(rect);
+      x += w;
+    }
+  }
+  const hex = (c) => '#' + c.map((n) => n.toString(16).padStart(2, '0')).join('');
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges">`,
+    `<rect width="${size}" height="${size}" fill="${hex(GROUND)}"/>`,
+    `<g fill="${hex(INK)}">${ink.join('')}</g>`,
+    `<g fill="${hex(ACCENT)}">${accent.join('')}</g>`,
+    `</svg>`,
+    '',
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Render
 // ---------------------------------------------------------------------------
 
 /** Nearest-neighbour by construction — the mark is pixel art and every edge stays hard. */
-function render(rows, size, scale) {
+function render(rows, size, scale, origin) {
   const gw = rows[0].length;
   const gh = rows.length;
-  const originX = Math.floor((size - gw * scale) / 2);
-  const originY = Math.floor((size - gh * scale) / 2);
+  const [originX, originY] =
+    origin === 'base'
+      ? [BASE_ORIGIN[0] * scale, BASE_ORIGIN[1] * scale]
+      : [Math.floor((size - gw * scale) / 2), Math.floor((size - gh * scale) / 2)];
 
   const px = Buffer.alloc(size * size * 4);
   for (let i = 0; i < size * size; i++) {
@@ -145,6 +202,9 @@ function render(rows, size, scale) {
   return encodePng(size, px);
 }
 
+// The 16px design, which the whole small trio is built from. See BASE_ORIGIN's note below.
+const BASE_ORIGIN = [2, 3];
+
 // `scale` is chosen per size, never derived, so every icon lands on whole pixels.
 //
 // ⚠ icon-512 IS DECLARED `purpose: "any maskable"` in site.webmanifest, and a maskable icon is
@@ -157,19 +217,39 @@ const LANDING = join(repoRoot, 'apps', 'landing', 'public');
 // Both public dirs carry the small icons because BOTH get served at a root: locally the SPA's
 // own `public` is the static root, while in cloud `/` is the landing and `/app` is the SPA, so
 // a root-absolute `/favicon-32.png` resolves into a different directory in each mode.
+//
+// ⚠ `origin: 'base'` IS WHAT KEEPS A DOWNSCALE CRISP, AND IT IS NOT COSMETIC. A tab slot is 16
+// CSS px — 16 DEVICE px at DPR 1, which is the common case on a desktop monitor — and MEASURED,
+// Chrome fetches favicon-32.png and halves it even then. A 2:1 reduction is lossless only if the
+// grid lands on even boundaries: centring the 32 put its origin at (5,7), so every 2x2 block the
+// downscaler averaged straddled two grid cells and each 1-pixel stroke came out a 50% blend.
+// That was the blurry tab icon, and no amount of care in the SOURCE image could have fixed it.
+//
+// So the small trio are exact integer multiples of ONE 16px design: origin = BASE_ORIGIN * scale,
+// which makes 32 exactly 2x and 48 exactly 3x the 16. Halving or thirding either reproduces
+// favicon-16 pixel for pixel. ⚠ Do not "centre" them — centring is what broke it.
+//
+// The big three are centred because nothing ever reduces them to a tab slot, and at 180-512 the
+// off-centre bias of a base-multiple origin would be visible (at 512 it is 28px of it).
 const TARGETS = [
-  { file: 'favicon-16.png', size: 16, scale: 1, dirs: [SPA, LANDING] },
-  { file: 'favicon-32.png', size: 32, scale: 2, dirs: [SPA, LANDING] },
-  { file: 'favicon-48.png', size: 48, scale: 3, dirs: [SPA, LANDING] },
-  { file: 'apple-touch-icon.png', size: 180, scale: 11, dirs: [SPA, LANDING] },
-  { file: 'icon-192.png', size: 192, scale: 12, dirs: [LANDING] },
-  { file: 'icon-512.png', size: 512, scale: 28, dirs: [LANDING] },
+  { file: 'favicon-16.png', size: 16, scale: 1, origin: 'base', dirs: [SPA, LANDING] },
+  { file: 'favicon-32.png', size: 32, scale: 2, origin: 'base', dirs: [SPA, LANDING] },
+  { file: 'favicon-48.png', size: 48, scale: 3, origin: 'base', dirs: [SPA, LANDING] },
+  { file: 'apple-touch-icon.png', size: 180, scale: 11, origin: 'centre', dirs: [SPA, LANDING] },
+  { file: 'icon-192.png', size: 192, scale: 12, origin: 'centre', dirs: [LANDING] },
+  { file: 'icon-512.png', size: 512, scale: 28, origin: 'centre', dirs: [LANDING] },
 ];
 
 const rows = readGroupSprite();
 console.log(`mark: ${rows[0].length}x${rows.length} from apps/landing/src/lib/sprites.ts`);
-for (const { file, size, scale, dirs } of TARGETS) {
-  const png = render(rows, size, scale);
+
+const svg = renderSvg(rows);
+for (const dir of [SPA, LANDING]) {
+  writeFileSync(join(dir, 'favicon.svg'), svg);
+  console.log(`  ${relative(repoRoot, join(dir, 'favicon.svg'))}  vector  ${svg.length}B`);
+}
+for (const { file, size, scale, origin, dirs } of TARGETS) {
+  const png = render(rows, size, scale, origin);
   for (const dir of dirs) {
     writeFileSync(join(dir, file), png);
     console.log(`  ${relative(repoRoot, join(dir, file))}  ${size}px @${scale}x  ${png.length}B`);
