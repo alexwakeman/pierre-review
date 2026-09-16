@@ -27,6 +27,11 @@
 // pro_settings, ai_pr_analyses + ai_fixes. Without the submodule those steps
 // are skipped cleanly.
 //
+// It also seeds ONE stored "Check review" result — an `addressed` verdict on a
+// real estate thread, written by hand but hashed by the plugin's own reader, so
+// the Haiku-backed feature is filmable on a stack with no API key. See
+// scripts/seed-addressed-check.ts; it says so at length.
+//
 // Run against a throwaway DB (NEVER the real one):
 //   pnpm --filter @pierre-review/backend seed:demo
 //   (≡ DATABASE_URL=/tmp/pierre-demo.sqlite DISABLE_SCHEDULER=true tsx scripts/seed-demo.ts)
@@ -2358,6 +2363,16 @@ if (proSeeded) {
     ],
   });
   console.log(`  period reports: ${periodRows} rows (14-day cadence, newest narrated)`);
+
+  // ONE SEEDED "Check review" result — a stored `addressed` verdict (plus the
+  // `validity` row that button always writes with it) on a real estate thread, so
+  // the demo can film a feature whose only other path is a live Haiku call the
+  // demo stack cannot make (ANTHROPIC_API_KEY=dummy). Read back through the REAL
+  // cached GET; nothing is stubbed. The words are hand-written, the payload hash
+  // is not — it comes from the plugin's own reader. See the file's header.
+  const { seedAddressedCheck } = await import('./seed-addressed-check.js');
+  const addressed = await seedAddressedCheck({ db, schema, now });
+  console.log(`  ${addressed.note}`);
 }
 
 await closeDb();
