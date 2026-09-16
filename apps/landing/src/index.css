@@ -107,20 +107,35 @@ details > summary::-webkit-details-marker {
    buttons; under reduced motion the rule below kills both and the caret renders
    solid.
 
-   THE EXCEPTION is the hero rain (components/feint/Rain.tsx) — notification
-   sprites falling behind the home page's headline and fading out as they go. It
-   is an argument rather than a decoration (the storm keeps arriving and goes
-   quiet before it reaches you), it is confined to the hero <header>, and it is
-   deliberately faint: 0.16 alpha at the top, superlinear fade, no vermilion.
+   THERE ARE NOW TWO EXCEPTIONS, and NEITHER IS COVERED BY THE RULE BELOW.
 
-   IT IS NOT COVERED BY THE RULE BELOW. The rain is a requestAnimationFrame loop
-   painting to a canvas, and `animation: none` / `transition: none` reach neither
-   — a rAF loop is script, not a CSS animation, and a canvas paint is not a
-   property transition. So Rain.tsx checks
-   `matchMedia('(prefers-reduced-motion: reduce)')` itself, subscribes to its
-   `change` event, and under reduced motion paints ONE static frame of the same
-   seeded arrangement and starts no loop. Any future JS-driven motion on this
-   site inherits that obligation: this rule is a floor, not a guarantee.
+   ONE — the hero rain (components/feint/Rain.tsx): notification sprites falling
+   behind the home page's headline and fading out as they go. It is an argument
+   rather than a decoration (the storm keeps arriving and goes quiet before it
+   reaches you), it is confined to the hero <header>, and it is deliberately
+   faint: 0.16 alpha at the top, superlinear fade, no vermilion. It is a
+   requestAnimationFrame loop painting to a canvas, and `animation: none` /
+   `transition: none` reach neither — a rAF loop is script, not a CSS animation,
+   and a canvas paint is not a property transition.
+
+   TWO — the hero demo clip (components/feint/VideoFrame.tsx with `autoplay`): a
+   silent, looping eight-second screen recording of the Pending board, under the
+   headline. A playing <video> is not an animation or a transition either, and no
+   `Permissions-Policy` header stops one: MEASURED in Chromium, a script-initiated
+   `play()` on a MUTED video succeeds under `autoplay=()` just as it does with no
+   policy at all. Server headers are the wrong layer for this question anyway —
+   they say what is ALLOWED, never what the reader asked for.
+
+   BOTH check `matchMedia('(prefers-reduced-motion: reduce)')` themselves and
+   subscribe to its `change` event. Under reduced motion the rain paints ONE
+   static frame of the same seeded arrangement and starts no loop; the clip
+   renders its poster still and mounts no <video> at all. Any future JS-driven
+   motion on this site inherits that obligation: this rule is a floor, not a
+   guarantee.
+
+   ⚠ THE CLICK-TO-PLAY WALKTHROUGH IS NOT AN EXCEPTION AND NEEDS NO CHECK. A
+   reader who presses Play has asked for motion. Reduced motion means "do not
+   move unless I ask"; it does not mean "never move".
 
    The arcade cabinet at /arcade is not an exception — it is the game, it only
    runs while its field has focus, and it makes the same matchMedia check. */

@@ -7,6 +7,10 @@
 //                           for manual browsing / ad-hoc captures. Ctrl-C stops.
 //   pnpm demo --free        same, but boot in pure-OSS mode (PRO_DISABLED=true)
 //   pnpm demo --no-seed     reuse the existing demo DB (skip reseeding)
+//   pnpm demo:video         seed → boot Pro → film BOTH demo clips → teardown.
+//                           Masters land in $HOME; add --publish to also write
+//                           the copies under apps/landing/public/demo/.
+//                           `--scenario <name>` films just one.
 //   pnpm shots              the WHOLE screenshot pipeline: seed → boot Pro →
 //                           capture-shots.mjs (pro set) → restart backend in
 //                           OSS mode → capture-shots.mjs (free set) → teardown.
@@ -32,10 +36,15 @@ const BACKEND_PORT = 4100;
 const FRONTEND_PORT = 5273;
 
 const args = process.argv.slice(2);
-const MODE = args.includes('--shots') ? 'shots' : 'serve';
+const MODE = args.includes('--shots') ? 'shots' : args.includes('--video') ? 'video' : 'serve';
 const FREE = args.includes('--free');
 const RESEED = !args.includes('--no-seed');
 const ONLY_SHOT = args.find((a) => a.endsWith('.png'));
+// This wrapper's OWN flags, and nothing else. Everything left over is forwarded
+// verbatim to capture-demo-video.mjs (`--out`, `--publish`, `--scenario`,
+// `--keep-frames`), so the wrapper never grows a second copy of its flag list.
+const WRAPPER_FLAGS = new Set(['--video', '--shots', '--free', '--no-seed']);
+const VIDEO_ARGS = args.filter((a) => !WRAPPER_FLAGS.has(a) && !a.endsWith('.png'));
 
 // --- a gh-free PATH the children can still find node on -----------------------
 const shimDir = mkdtempSync(join(tmpdir(), 'pierre-demo-bin-'));
@@ -165,6 +174,16 @@ function capture(set, only) {
   if (r.status !== 0) throw new Error(`capture (${set}) failed`);
 }
 
+function film(extra) {
+  console.log(`\n▸ filming demo video${extra.length ? ` (${extra.join(' ')})` : ''}`);
+  const r = spawnSync(process.execPath, ['scripts/capture-demo-video.mjs', ...extra], {
+    cwd: ROOT,
+    stdio: 'inherit',
+    env: process.env,
+  });
+  if (r.status !== 0) throw new Error('capture-demo-video failed');
+}
+
 // --- go ------------------------------------------------------------------------
 freePort(BACKEND_PORT);
 freePort(FRONTEND_PORT);
@@ -186,6 +205,23 @@ if (MODE === 'serve') {
 `);
   // keep the process alive while the children run
   await new Promise(() => {});
+} else if (MODE === 'video') {
+  // ⚠ PRO TIER ONLY, and there is no free pass here. The two clips film screens
+  // that are free on every tier (the feed, flow metrics, the Pending board, a
+  // pull request) — but the app around them is the Pro build, which is what a
+  // visitor evaluating the product sees. A second OSS pass would produce two
+  // clips of the same four screens differing only in which tabs carry a lock.
+  await startBackend('pro');
+  await startFrontend();
+  const named = VIDEO_ARGS.includes('--scenario');
+  if (named) film(VIDEO_ARGS);
+  else {
+    film(['--scenario', 'walkthrough', ...VIDEO_ARGS]);
+    film(['--scenario', 'hero', ...VIDEO_ARGS]);
+  }
+  teardown();
+  console.log('\n✅ demo video(s) filmed');
+  process.exit(0);
 } else {
   let backend = await startBackend('pro');
   await startFrontend();

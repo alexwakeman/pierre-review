@@ -168,6 +168,150 @@ and the bot-volume surfaces have nothing to roll up. `scripts/seed-periods.ts` t
 the stored period reports from the real core fold, so the figures on the report agree with
 the figures on every other screen.
 
+## Demo video
+
+Two clips, from the **same seeded demo stack the screenshots come from** — fictional `acme/*`
+data, no real GitHub data, no PII. Both are silent, both carry a poster still, and neither has
+an audio track at all.
+
+| File | What it is | Where it renders |
+|---|---|---|
+| `public/demo/limn-hero.mp4` | 8.05s, 119 kB, one slow pass down the Pending board, **loops, plays by itself** | Home, under the headline |
+| `public/demo/limn-walkthrough.mp4` | 29.66s, 954 kB, four screens with burned-in captions, **click to play** | Home, `02 · The tour` |
+
+Each ships with a `-poster.jpg` beside it (86 kB and 89 kB), which is **frame 0 of its own clip** —
+so pressing play does not make the picture jump, and the reduced-motion reader sees the same
+first frame everyone else does.
+
+```sh
+pnpm demo:video                 # seed → boot the Pro stack → film both → teardown
+pnpm demo:video --publish       #   … and also write the copies under apps/landing/public/demo/
+pnpm demo:video --scenario hero # just one
+
+# or, against a stack you already have up (`pnpm demo --no-seed`):
+node scripts/capture-demo-video.mjs --scenario walkthrough --out ~/ --publish
+node scripts/capture-demo-video.mjs --keep-frames   # leave phase 1's PNGs on disk to inspect
+```
+
+`--out` defaults to your home directory. `--publish` additionally writes
+`apps/landing/public/demo/`, which is what the site serves.
+
+### Adding a scene, or a whole new scenario
+
+**A scenario is data, and a different tour is a different FILE** —
+`scripts/demo-video/scenario.<name>.mjs`, picked with `--scenario <name>`. Never fork the
+capture script. A scene looks like this:
+
+```js
+{
+  id: 'pending',
+  caption: 'Pending — one ranked queue',      // burned BELOW the app's pixels; null for none
+  url: '?view=activity&activityRepo=attention',
+  ready: '[data-testid="attention-view"]',    // the selector that means "this screen painted"
+  settleMs: 3400,
+  scale: 1,                                   // deviceScaleFactor; 2 if the scene zooms
+  pane: 430,                                  // optional: the PR detail pane's height
+  steps: [
+    { hold: 2600 },
+    { scroll: { selector: '…', to: 1000, ms: 3000 } },
+    { zoom: { selector: '…', ms: 1500, maxWidth: 620, anchor: 'left', offset: [0, 138] } },
+    { zoomOut: { ms: 1000 } },
+  ],
+}
+```
+
+Four things the script will refuse rather than film quietly, each of which has already cost a
+run:
+
+- **a scene that produced no frames** — `pnpm shots <name>` silently no-ops on an unmatched
+  name, and a scenario that films nothing is the same defect one medium over;
+- **a `scroll` over an element that does not scroll** — it would film a still;
+- **a `zoom` whose target ends up wider than 92% of the frame.** Every panel in this app is
+  full-width at a 1180px viewport, so a bare selector almost always lands there; cap it with
+  `maxWidth` and shift the framing with `offset`. A zoom to the whole frame is not a zoom, and
+  it fails by simply holding still;
+- **a timeline over the scenario's `budgetMs`** (30s for the walkthrough, 10s for the hero).
+
+⚠ **Anchor a zoom on the pane's own chrome, not on its content.** `reviewer-provenance` and
+`bot-triage-card` each cost a failed run: they are present on most loads and absent when the
+query behind them 502s against a demo stack that has no GitHub behind it.
+
+⚠ **There is no `changes` scene**, for the same reason there is no `pr-changes.png` still: the
+Changes tab hydrates its patches from GitHub on demand, and against this database it correctly
+renders "inline diffs aren't available for this PR".
+
+### How it is made, and why it is this shape
+
+`scripts/capture-demo-video.mjs`, in two phases.
+
+1. **Capture** — open each scene, let it settle, and photograph it frame by frame with
+   `page.screenshot()`. A scroll is driven by EASING `element.scrollTop` between frames rather
+   than by the browser's smooth-scroll, which is wall-clock-dependent and would pan differently
+   every run. A zoom costs **no extra screenshots at all**: it is the same photograph drawn from
+   a shrinking source rectangle.
+2. **Replay and record** — a second page paints those frames into a canvas on a rAF clock and
+   records it with `MediaRecorder` (`video/mp4;codecs=avc1.42E01E`). This phase is realtime by
+   construction: a 30-second clip takes 30 seconds.
+
+The viewport, theme, reduced-motion setting and onboarding localStorage seed all come from
+`scripts/lib/demo-browser.mjs`, which `capture-shots.mjs` imports too — so the stills and the
+clips can never drift into being pictures of two different products.
+
+**Measured, so nobody re-derives it:**
+
+| | 30s clip |
+|---|---|
+| H.264 via MediaRecorder | **954 kB** (what ships) |
+| VP8 via Playwright's bundled ffmpeg | 1,280 kB |
+| Animated WebP | 165 kB held-only, but **7,919 kB** for a pan (48×) |
+
+Motion costs roughly **5.1× the bitrate of a held frame whatever the codec**, so the size of
+these files is decided by how much of them MOVES, not by encoder settings. That is why the
+scenarios hold more than they pan, why the hero drifts 700px over 4.2s instead of 1,300px over
+3.2s, and why every cut between scenes is hard — a cross-fade changes every pixel in the frame
+for its whole duration, which is the most expensive thing you can ask of an inter-frame codec.
+One further measurement, stated as what was actually run rather than per-lever: the walkthrough
+at 25 fps / 1.1 Mbps / three 4-second scrolls came out at **1,640 kB**; at 12 fps / 0.7 Mbps /
+three 3-second scrolls it is **954 kB**, for a picture that looks the same held still. Those
+three moved together, so none of them owns the 42% on its own.
+
+**⚠ `canvas.captureStream(fps)` IS A TRAP, and it fails silently.** Asked for a frame rate,
+Chromium only hands the encoder a frame when the canvas content actually CHANGES — and these
+clips are mostly held frames, so a 29.55-second timeline recorded as **8.37 seconds of video
+playing 3.5× too fast**, with no error anywhere and a poster that still looked right. The fix,
+and the assertion that now guards it, is `captureStream(0)` plus one explicit `requestFrame()`
+per slot.
+
+**⚠ Playwright's bundled ffmpeg cannot help with any of this.** It is built
+`--disable-everything`: its entire filter set is crop / format / hflip / null / pad / scale /
+transpose / trim / vflip. No `drawtext`, no `overlay`, no `fade`, no `zoompan`. So the captions,
+the zoom and the frame timing all happen on the canvas before the encoder sees a pixel — and
+there is no transcoding step anywhere in this repo. **The master and the published copy are the
+same encode**; the tuning lives in the scenario file, not in a post-pass.
+
+**⚠ These are fragmented MP4s straight out of MediaRecorder, so they carry no total duration in
+the header** — a player discovers the length as it downloads. That is why the walkthrough mounts
+no `<video>` until the Play button is pressed: the scrub bar then fills in during the first
+second of playback rather than sitting visibly wrong on a page nobody has clicked.
+
+### The motion policy
+
+The site's standing rule is that it does not move, and the CSS blanket in `src/index.css`
+enforces it by killing `animation` and `transition`. **A playing `<video>` is neither**, exactly
+like the hero rain's rAF canvas loop. So `components/feint/VideoFrame.tsx` checks
+`matchMedia('(prefers-reduced-motion: reduce)')` itself, subscribes to its `change` event, and
+under reduced motion renders the poster still and mounts no `<video>` at all.
+
+⚠ **Do not reach for a header instead.** MEASURED in Chromium: a script-initiated `play()` on a
+muted video succeeds under `Permissions-Policy: autoplay=()` exactly as it does with no policy —
+and a header says what is ALLOWED, never what the reader asked for. (For the same reason nothing
+in `apps/backend/src/api/plugins/security.ts` needed changing for these clips: the landing CSP
+has no `media-src`, so it inherits `default-src 'self'`, which a same-origin `/demo/*.mp4`
+already satisfies.)
+
+⚠ **The click-to-play walkthrough deliberately plays under reduced motion too.** A reader who
+presses Play has asked. Reduced motion means "do not move unless I ask", not "never move".
+
 ## Reading the copy
 
 `node scripts/dump-copy.mjs [out.md]` writes every word the site renders — in page

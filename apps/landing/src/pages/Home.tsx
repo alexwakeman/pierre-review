@@ -11,6 +11,7 @@ import {
   UnderlineLink,
 } from '../components/feint/primitives';
 import { FeatureShot } from '../components/feint/FeatureShot';
+import { VideoFrame } from '../components/feint/VideoFrame';
 import { Sprite } from '../components/feint/Sprite';
 import { Rain } from '../components/feint/Rain';
 import { TierTable } from '../components/feint/TierTable';
@@ -85,7 +86,10 @@ export default function Home(): JSX.Element {
           </h1>
 
           <p className="mb-[34px] max-w-lede text-pretty text-lede text-ink-soft">
-            Your work spans repositories, people and a growing stack of review automation.
+            {/* ⚠ The space before {SITE_NAME} is explicit. JSX strips whitespace at the
+                start and end of a line, so a bare newline between the full stop and the
+                expression renders as "automation.Limn". */}
+            Your work spans repositories, people and a growing stack of review automation.{' '}
             {SITE_NAME} lights all of it on one board — whose turn it is, what is stalled,
             what is ready to land — and measures what the AI review bots on top are actually
             worth. Free, open core, and it runs on your machine.
@@ -125,6 +129,30 @@ export default function Home(): JSX.Element {
           </div>
         </div>
       </header>
+
+      {/* ---------- the hero loop ---------- */}
+      {/* ⚠ THE ONE PIECE OF THE SITE THAT PLAYS BY ITSELF, and the reason
+          `VideoFrame` carries a reduced-motion check of its own: the CSS blanket
+          in index.css reaches neither a canvas nor a <video>. Silent, looping,
+          poster-backed, and it renders as the poster for anyone who has asked
+          their system for less motion. Same obligation the hero rain carries.
+
+          It sits UNDER the headline rather than inside the header grid: the
+          header is a two-column rail whose right column is the vendor list, and
+          a clip in either column would render at half width — the same defect
+          `FeatureShot` exists to fix for the stills. */}
+      <Section pad="none" className="pb-14 pt-4">
+        <VideoFrame
+          src="/demo/limn-hero.mp4"
+          poster="/demo/limn-hero-poster.jpg"
+          alt="The Pending board scrolling: ready-to-merge and your-turn cards across five repositories, each with its CI state, review standing and merge actions"
+          caption={`${SITE_NAME.toLowerCase()} · pending`}
+          meta="8 seconds · no sound"
+          width={1180}
+          height={664}
+          autoplay
+        />
+      </Section>
 
       {/* ---------- the numbers ---------- */}
       <Section divider="ink" pad="none" className="py-14">
@@ -225,9 +253,39 @@ export default function Home(): JSX.Element {
         </RailGrid>
       </Section>
 
-      {/* ---------- 02 · the board (human work) ---------- */}
+      {/* ---------- 02 · the tour ---------- */}
+      {/* Click to play, and it loads nothing until clicked. It sits here because
+          the reader has just been handed to one of the two role pages and this is
+          the last chance to show the whole thing moving before they go. */}
+      <Section divider="ink">
+        <RailGrid rail={{ n: '02', word: 'The tour' }} cols="one">
+          <div>
+            <h2 className="mb-6 max-w-[30ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
+              Thirty seconds of the real thing.
+            </h2>
+            <p className="max-w-[62ch] text-pretty">
+              Four screens against a seeded five-repository workspace: the feed of everything
+              that happened, the week&rsquo;s numbers, the ranked queue of what is still owed,
+              and one pull request opened up. No narration and no sound &mdash; the data is
+              invented, the software is not.
+            </p>
+          </div>
+        </RailGrid>
+        <VideoFrame
+          src="/demo/limn-walkthrough.mp4"
+          poster="/demo/limn-walkthrough-poster.jpg"
+          alt="A screen recording moving through four screens: the activity feed, the workspace flow metrics, the Pending board, and a single pull request with its review standing and bot comments"
+          caption={`${SITE_NAME.toLowerCase()} · the walkthrough`}
+          meta="30 seconds · no sound"
+          width={1180}
+          height={710}
+          className="mt-10"
+        />
+      </Section>
+
+      {/* ---------- 03 · the board (human work) ---------- */}
       <FeatureShot
-        rail={{ n: '02', word: 'The board' }}
+        rail={{ n: '03', word: 'The board' }}
         heading="Everything waiting, in one list."
         src="/shots/pending-board.png"
         alt="The Pending board across four repositories: ready-to-merge, your-turn and in-your-repos cards with their CI state, reach chips and merge actions"
@@ -245,9 +303,9 @@ export default function Home(): JSX.Element {
         </p>
       </FeatureShot>
 
-      {/* ---------- 03 · the week (human work, one grain up) ---------- */}
+      {/* ---------- 04 · the week (human work, one grain up) ---------- */}
       <FeatureShot
-        rail={{ n: '03', word: 'The week' }}
+        rail={{ n: '04', word: 'The week' }}
         tone="alt"
         heading="How the work actually moved."
         src="/shots/flow-metrics.png"
@@ -267,9 +325,9 @@ export default function Home(): JSX.Element {
         </p>
       </FeatureShot>
 
-      {/* ---------- 04 · the bots (the peer section, not the climax) ---------- */}
+      {/* ---------- 05 · the bots (the peer section, not the climax) ---------- */}
       <FeatureShot
-        rail={{ n: '04', word: 'The bots' }}
+        rail={{ n: '05', word: 'The bots' }}
         heading="And the automation stacked on top of it."
         src="/shots/bot-roi.png"
         alt="The bot ROI panel: six review vendors with volume, acted-on rate, overdue threads and keep or tune verdicts, above charts of weekly volume, effectiveness and severity inflation"
@@ -290,9 +348,9 @@ export default function Home(): JSX.Element {
         </p>
       </FeatureShot>
 
-      {/* ---------- 05 · local ---------- */}
+      {/* ---------- 06 · local ---------- */}
       <Section tone="alt">
-        <RailGrid rail={{ n: '05', word: 'Local' }} cols="one">
+        <RailGrid rail={{ n: '06', word: 'Local' }} cols="one">
           <div>
             <h2 className="mb-6 max-w-[28ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
               Or run the whole thing on your own machine.

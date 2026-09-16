@@ -20,62 +20,31 @@
 // Run:  node scripts/capture-shots.mjs                 (all PRO shots)
 //       SHOT_SET=free node scripts/capture-shots.mjs   (all FREE shots)
 //       node scripts/capture-shots.mjs pending-board.png   (one shot)
-import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// ⚠ The viewport, the theme, the reduced-motion setting and the localStorage seed
+// live in ONE place so the stills and the demo video can never drift apart.
+// See scripts/lib/demo-browser.mjs.
+import { ctx as demoCtx, launch, open as demoOpen } from './lib/demo-browser.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(HERE, '..', 'apps', 'landing', 'public');
 const SHOTS = join(PUBLIC, 'shots');
 mkdirSync(SHOTS, { recursive: true });
-const BASE = process.env.DEMO_BASE ?? 'http://localhost:5273/app/';
 const SHOT_SET = (process.env.SHOT_SET ?? 'pro').toLowerCase();
 const ONLY = process.argv[2];
 const out = (n) => join(SHOTS, n);
 const results = [];
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launch();
 
-// A narrow viewport is the whole trick. The SPA is responsive, so at 1180px the
-// rail collapses to a chip strip and every panel takes the full width — which
-// means one panel fills the frame and its 12px body text lands at a readable
-// size once the crop is scaled into a marketing column.
-async function ctx({ width = 1180, height = 900, scale = 2, pane } = {}) {
-  const c = await browser.newContext({
-    viewport: { width, height },
-    deviceScaleFactor: scale,
-    colorScheme: 'dark',
-    reducedMotion: 'reduce',
-  });
-  await c.addInitScript((h) => {
-    // Never show the first-run tour or the welcome-back banner in a shot.
-    localStorage.setItem('pierre:onboarded', '1');
-    localStorage.setItem('pierre:cookieConsent', 'granted');
-    if (h) localStorage.setItem('pierre:detailPaneHeight', String(h));
-  }, pane);
-  return c;
-}
-
-// `ready` is the selector that means "this screen has painted". It defaults to the
-// timeline canvas, which is warm under every overlay — but the Feed is heavy enough
-// with a real estate behind it that the board can still be building when the feed
-// itself is on screen, so feed shots wait on their own container instead.
-async function open(page, query = '', ready = '.vis-timeline') {
-  await page.goto(`${BASE}${query}`, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector(ready, { timeout: 40_000 });
-  await page
-    .getByRole('button', { name: /dismiss|close|got it/i })
-    .first()
-    .click({ timeout: 700 })
-    .catch(() => {});
-  // ⚠ NO BLANKET `Escape` HERE. It closes the PR detail pane that `?pr=<id>` just
-  // opened, and every pull-request shot then times out waiting for a pane the
-  // script itself dismissed. The stray-popover problem this was reaching for is
-  // fixed at its source instead: tab clicks are scoped INSIDE the pane, so they
-  // cannot land on the board's own filter controls behind it.
-  await page.waitForTimeout(1800);
-}
+// ⚠ `ctx()` and `open()` MOVED to scripts/lib/demo-browser.mjs — the video capture
+// needs exactly the same four decisions (1180px viewport, dark, reduced motion,
+// the onboarding localStorage seed) and a second copy of them would silently let
+// the stills and the clip become pictures of two different products.
+const ctx = (opts) => demoCtx(browser, opts);
+const open = (page, query, ready) => demoOpen(page, query, ready);
 
 /**
  * Crop one element, with a little breathing room so the shot does not look
