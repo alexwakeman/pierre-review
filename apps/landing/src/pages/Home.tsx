@@ -11,7 +11,11 @@ import {
   UnderlineLink,
 } from '../components/feint/primitives';
 import { FeatureShot } from '../components/feint/FeatureShot';
-import { VideoFrame } from '../components/feint/VideoFrame';
+import { VideoFrame, type VideoCue } from '../components/feint/VideoFrame';
+// The clip's chapters, imported from the capture pipeline's own output rather than
+// retyped here — the file beside the .mp4 IS the source, so the words on the page
+// cannot drift out of step with the frames they describe. It is ~1.2 kB.
+import walkthroughCues from '../../public/demo/limn-walkthrough.cues.json';
 import { Sprite } from '../components/feint/Sprite';
 import { Rain } from '../components/feint/Rain';
 import { TierTable } from '../components/feint/TierTable';
@@ -40,6 +44,8 @@ import { TierTable } from '../components/feint/TierTable';
 // ---------------------------------------------------------------------------
 
 const WORKS_WITH = ['CodeRabbit', 'Greptile', 'Copilot', 'Cursor', 'Qodo', 'Devin'];
+
+const CUES: readonly VideoCue[] = walkthroughCues;
 
 // Measured, sourced, and ordered so the HUMAN cost leads: more pull requests,
 // waiting longer. The bot numbers follow rather than open. Everything here traces
@@ -130,28 +136,35 @@ export default function Home(): JSX.Element {
         </div>
       </header>
 
-      {/* ---------- the hero loop ---------- */}
+      {/* ---------- the walkthrough ---------- */}
       {/* ⚠ THE ONE PIECE OF THE SITE THAT PLAYS BY ITSELF, and the reason
           `VideoFrame` carries a reduced-motion check of its own: the CSS blanket
-          in index.css reaches neither a canvas nor a <video>. Silent, looping,
-          poster-backed, and it renders as the poster for anyone who has asked
-          their system for less motion. Same obligation the hero rain carries.
+          in index.css reaches neither a canvas nor a <video>. Silent, once
+          through, poster-backed, and it renders as the poster plus every chapter
+          in words for anyone who has asked their system for less motion. Same
+          obligation the hero rain carries.
 
-          It sits UNDER the headline rather than inside the header grid: the
-          header is a two-column rail whose right column is the vendor list, and
-          a clip in either column would render at half width — the same defect
+          It LEADS, because it is the strongest thing on the page: six real
+          screens in under half a minute, which no amount of copy replaces. It
+          sits UNDER the headline rather than inside the header grid — the header
+          is a two-column rail whose right column is the vendor list, and a clip
+          in either column would render at half width, the same defect
           `FeatureShot` exists to fix for the stills. */}
       <Section pad="none" className="pb-14 pt-4">
         <VideoFrame
-          src="/demo/limn-hero.mp4"
-          poster="/demo/limn-hero-poster.jpg"
-          alt="The Pending board scrolling: ready-to-merge and your-turn cards across five repositories, each with its CI state, review standing and merge actions"
-          caption={`${SITE_NAME.toLowerCase()} · pending`}
-          meta="8 seconds · no sound"
-          width={1180}
-          height={664}
-          autoplay
+          src="/demo/limn-walkthrough.mp4"
+          poster="/demo/limn-walkthrough-poster.jpg"
+          alt="A screen recording moving through six screens: the activity feed, the timeline, one pull request, the addressed check on a bot thread, the bot ROI table, and the period report"
+          caption={`${SITE_NAME.toLowerCase()} · the walkthrough`}
+          meta="28 seconds · no sound"
+          width={1770}
+          height={996}
+          cues={CUES}
         />
+        <p className="mt-[18px] max-w-caption text-list text-muted">
+          A seeded eight-repository workspace, so the names and the numbers are invented. The
+          software is not.
+        </p>
       </Section>
 
       {/* ---------- the numbers ---------- */}
@@ -253,39 +266,15 @@ export default function Home(): JSX.Element {
         </RailGrid>
       </Section>
 
-      {/* ---------- 02 · the tour ---------- */}
-      {/* Click to play, and it loads nothing until clicked. It sits here because
-          the reader has just been handed to one of the two role pages and this is
-          the last chance to show the whole thing moving before they go. */}
-      <Section divider="ink">
-        <RailGrid rail={{ n: '02', word: 'The tour' }} cols="one">
-          <div>
-            <h2 className="mb-6 max-w-[30ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
-              Thirty seconds of the real thing.
-            </h2>
-            <p className="max-w-[62ch] text-pretty">
-              Four screens against a seeded five-repository workspace: the feed of everything
-              that happened, the week&rsquo;s numbers, the ranked queue of what is still owed,
-              and one pull request opened up. No narration and no sound &mdash; the data is
-              invented, the software is not.
-            </p>
-          </div>
-        </RailGrid>
-        <VideoFrame
-          src="/demo/limn-walkthrough.mp4"
-          poster="/demo/limn-walkthrough-poster.jpg"
-          alt="A screen recording moving through four screens: the activity feed, the workspace flow metrics, the Pending board, and a single pull request with its review standing and bot comments"
-          caption={`${SITE_NAME.toLowerCase()} · the walkthrough`}
-          meta="30 seconds · no sound"
-          width={1180}
-          height={710}
-          className="mt-10"
-        />
-      </Section>
-
-      {/* ---------- 03 · the board (human work) ---------- */}
+      {/* ---------- 02 · the board (human work) ---------- */}
+      {/* ⚠ THE RANKING RULES ARE THE COPY HERE, AND THAT IS DELIBERATE. Pending was
+          cut from the walkthrough because a still board is an unremarkable list of
+          rows; what makes it worth having is WHY the rows are in that order. So the
+          arithmetic is stated here in words, and every figure in it is real — see
+          `apps/backend/src/db/work-plan.ts`. If a future edit softens this into
+          "intelligently ranked", it has thrown away the only part a reader can check. */}
       <FeatureShot
-        rail={{ n: '03', word: 'The board' }}
+        rail={{ n: '02', word: 'The board' }}
         heading="Everything waiting, in one list."
         src="/shots/pending-board.png"
         alt="The Pending board across four repositories: ready-to-merge, your-turn and in-your-repos cards with their CI state, reach chips and merge actions"
@@ -297,15 +286,31 @@ export default function Home(): JSX.Element {
           across every repository in the workspace, ranked, with the actions on the same row.
           A card exists only while you still owe something; there is nothing to dismiss.
         </p>
+        <p className="mb-6">
+          The order is arithmetic, and you can check it. Three numbers are added up for every
+          job: how few steps it is from landing (half the weight), how long it has sat (three
+          tenths &mdash; four days scores that part in full, one day scores a fraction of it),
+          and whether your name is on it, you maintain the repository, or neither (the last
+          fifth). Conflicts and three or more unanswered threads push a job down; a
+          change of three files or fewer pulls it up. Equal scores break on age, so the same data always
+          comes back in the same order.
+        </p>
+        <p className="mb-6">
+          An approved pull request that can land sits at the top. The same one with nobody&rsquo;s
+          approval on it ranks <em>below</em> an ordinary review request &mdash; deliberately,
+          and after measuring: ranked the other way round, the head of the board filled with
+          unreviewed dependency bumps.
+        </p>
         <p>
-          Free on every tier, the ranking included. Only the written reason on each row is
-          Pro.
+          No model decides any of that, nothing is learned, and nothing about how you work is
+          stored. Free on every tier, the ranking included &mdash; only the written reason on
+          each row is Pro.
         </p>
       </FeatureShot>
 
-      {/* ---------- 04 · the week (human work, one grain up) ---------- */}
+      {/* ---------- 03 · the week (human work, one grain up) ---------- */}
       <FeatureShot
-        rail={{ n: '04', word: 'The week' }}
+        rail={{ n: '03', word: 'The week' }}
         tone="alt"
         heading="How the work actually moved."
         src="/shots/flow-metrics.png"
@@ -325,9 +330,9 @@ export default function Home(): JSX.Element {
         </p>
       </FeatureShot>
 
-      {/* ---------- 05 · the bots (the peer section, not the climax) ---------- */}
+      {/* ---------- 04 · the bots (the peer section, not the climax) ---------- */}
       <FeatureShot
-        rail={{ n: '05', word: 'The bots' }}
+        rail={{ n: '04', word: 'The bots' }}
         heading="And the automation stacked on top of it."
         src="/shots/bot-roi.png"
         alt="The bot ROI panel: six review vendors with volume, acted-on rate, overdue threads and keep or tune verdicts, above charts of weekly volume, effectiveness and severity inflation"
@@ -348,9 +353,9 @@ export default function Home(): JSX.Element {
         </p>
       </FeatureShot>
 
-      {/* ---------- 06 · local ---------- */}
+      {/* ---------- 05 · local ---------- */}
       <Section tone="alt">
-        <RailGrid rail={{ n: '06', word: 'Local' }} cols="one">
+        <RailGrid rail={{ n: '05', word: 'Local' }} cols="one">
           <div>
             <h2 className="mb-6 max-w-[28ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
               Or run the whole thing on your own machine.

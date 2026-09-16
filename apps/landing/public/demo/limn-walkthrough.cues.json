@@ -1,0 +1,44 @@
+[
+  {
+    "id": "feed",
+    "startMs": 0,
+    "endMs": 4375,
+    "title": "Feed",
+    "text": "Every repository in one stream: pull requests, reviews, comments and builds."
+  },
+  {
+    "id": "timeline",
+    "startMs": 4375,
+    "endMs": 8875,
+    "title": "Timeline",
+    "text": "The same work on a clock. Who opened what, when a review landed, what has been sitting."
+  },
+  {
+    "id": "pr-detail",
+    "startMs": 8875,
+    "endMs": 13374,
+    "title": "One pull request",
+    "text": "Review standing, every bot that has looked at it, and whether it can land."
+  },
+  {
+    "id": "addressed",
+    "startMs": 13374,
+    "endMs": 18208,
+    "title": "Was it dealt with?",
+    "text": "A bot raised a concern and the branch moved on. This reads the diff since, and says what is still open."
+  },
+  {
+    "id": "bots",
+    "startMs": 18208,
+    "endMs": 23625,
+    "title": "Bots",
+    "text": "Every review bot: how much it says, how much your team acts on, and how often it overstated a finding."
+  },
+  {
+    "id": "reports",
+    "startMs": 23625,
+    "endMs": 28123,
+    "title": "Reports",
+    "text": "Throughput, lead time and review load, with people counted apart from automation."
+  }
+]

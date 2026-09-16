@@ -170,31 +170,78 @@ the figures on every other screen.
 
 ## Demo video
 
-Two clips, from the **same seeded demo stack the screenshots come from** — fictional `acme/*`
-data, no real GitHub data, no PII. Both are silent, both carry a poster still, and neither has
-an audio track at all.
+**ONE clip**, filmed against the **same seeded demo stack the screenshots come from** —
+fictional `acme/*` data across eight repositories, no real GitHub data, no PII. It is
+silent, it has no audio track at all, and it **plays once**: nothing on this site loops.
 
-| File | What it is | Where it renders |
+| File | Bytes | What it is |
 |---|---|---|
-| `public/demo/limn-hero.mp4` | 8.05s, 119 kB, one slow pass down the Pending board, **loops, plays by itself** | Home, under the headline |
-| `public/demo/limn-walkthrough.mp4` | 29.66s, 954 kB, four screens with burned-in captions, **click to play** | Home, `02 · The tour` |
+| `public/demo/limn-walkthrough.mp4` | 2,186,482 | 28.013 s, 1770×996. Six screens, hard cuts, hold → short push-in → hold. No scrolls |
+| `public/demo/limn-walkthrough-poster.jpg` | 210,099 | **Frame 0 of the clip itself**, so pressing play does not make the picture jump and the reduced-motion reader sees the same first frame everyone else does |
+| `public/demo/limn-walkthrough.cues.json` | 1,198 | The six chapters — `{ id, startMs, endMs, title, text }`, integer milliseconds, contiguous, `startMs[0] === 0` |
 
-Each ships with a `-poster.jpg` beside it (86 kB and 89 kB), which is **frame 0 of its own clip** —
-so pressing play does not make the picture jump, and the reduced-motion reader sees the same
-first frame everyone else does.
+It renders under the home-page headline (`pages/Home.tsx`, `components/feint/VideoFrame.tsx`),
+autoplaying, with the chapters beside it as a list.
 
-```sh
-pnpm demo:video                 # seed → boot the Pro stack → film both → teardown
-pnpm demo:video --publish       #   … and also write the copies under apps/landing/public/demo/
-pnpm demo:video --scenario hero # just one
+**It is a FRAGMENTED MP4, and that is the fact the player is built around.** Straight out of
+MediaRecorder: 6 `moof`/`mdat` fragment pairs, **no `sidx`**, and `mvhd`'s duration field is
+literally `0`. Verify it in twenty lines of `node` — walk the top-level boxes — because ffmpeg
+and ffprobe are not installed in this repo and nothing here transcodes. See § The chapters for
+what that costs a player.
 
-# or, against a stack you already have up (`pnpm demo --no-seed`):
-node scripts/capture-demo-video.mjs --scenario walkthrough --out ~/ --publish
-node scripts/capture-demo-video.mjs --keep-frames   # leave phase 1's PNGs on disk to inspect
-```
+⚠ **THE DEMO'S AI OUTPUT IS SEEDED, NOT COMPUTED, AND A FUTURE READER MUST NOT MISTAKE IT FOR
+LIVE MODEL OUTPUT.** The demo stack runs with `ANTHROPIC_API_KEY=dummy`, so no model call in it
+can succeed and none is made. Two things on screen would otherwise look like model output:
 
-`--out` defaults to your home directory. `--publish` additionally writes
-`apps/landing/public/demo/`, which is what the site serves.
+- the **addressed check** in the "Was it dealt with?" chapter — one hand-written row seeded by
+  `apps/backend/scripts/seed-addressed-check.ts` into the plugin's `pr_comment_annotations`,
+  read back through the ordinary cached-read route;
+- the **ML severity labels** on bot comments — 2,945 `ml_comment_labels` rows seeded by
+  `seed-demo.ts` / `seed-estate.ts`, which no `severity-api` ever scored.
+
+Nothing is stubbed, intercepted or special-cased to achieve either: the rows are real rows and
+the app reads them by its real route. What is seeded is the *content*, not the mechanism.
+
+### The chapters
+
+**Captions are no longer burned into the pixels.** They used to be `fillText` into a strip below
+the app, which is why the frame used to be 1180×710 rather than 1180×664. Burned text cannot be
+selected, translated, searched, read by a screen reader or restyled, and it pins the clip to one
+language and one column width forever. So phase 2 now writes `limn-walkthrough.cues.json` beside
+the video and `VideoFrame.tsx` renders it as a chapter list.
+
+`Home.tsx` **imports that JSON file directly** (`../../public/demo/limn-walkthrough.cues.json`)
+rather than retyping the strings — the capture pipeline's output IS the source, so the words on
+the page cannot drift out of step with the frames they describe. It costs ~1.2 kB in the bundle.
+The same file is also served at `/demo/limn-walkthrough.cues.json`.
+
+Four things the player has to get right, each with a reason:
+
+- **`loop` is never set, and the clip is never rewound on `ended`.** It stops on its last frame
+  and an obvious **Replay** button appears over it. Returning to the poster instead would throw
+  the reader back to the first screen the instant the last one finished, and un-light the chapter
+  they were reading; the last frame is the thing the last chapter is about, so it stays up.
+- ⚠ **Nothing may read `video.duration`.** This is a fragmented MP4 straight out of MediaRecorder
+  with no `sidx` and no total duration in its header, so `duration` reads `Infinity`/`NaN` until
+  enough has buffered. Every position in the player is an absolute `currentTime` compared against
+  an absolute cue `startMs`. No fractions of a duration, no progress bar of our own.
+- ⚠ **The last cue's `endMs` overshoots the file** — 28,123 ms of cues against 28,013 ms of video,
+  one frame plus container rounding. So `endMs` is never consulted at all: the active chapter is
+  the last one whose `startMs` has been passed, which makes the final cue "until the end" by
+  construction and means nothing can seek to an `endMs`.
+- ⚠ **Seeking needs HTTP Range, and `seekable.length === 0` is NOT the tell.** Through
+  `@fastify/static` (what `app.ts` serves this site with) the file answers `accept-ranges: bytes`
+  and a ranged GET returns `206` with a correct `content-range`, so the chapter list seeks —
+  MEASURED. Behind a server that ignores Range, MEASURED in Chromium: `seekable.length` is **1**,
+  not 0; it simply ends at 8.32 s of a 28 s clip, `duration` reports that same wrong 8.32 s, no
+  error is raised anywhere, and clicking a later chapter moves the playhead *backwards*. So the
+  player VERIFIES after the fact that the playhead landed where it was sent, and a control that
+  did not move it stops rendering as a `<button>`. A dead control that still looks clickable is
+  worse than no control.
+
+The chapter list is in the **prerendered HTML**, so it is readable with JavaScript off, before
+play, and by a crawler. The `<video>` is not: it is mounted by an effect, which is also what
+keeps a `<video>` out of the static output — see § The motion policy.
 
 ### Adding a scene, or a whole new scenario
 
@@ -204,33 +251,38 @@ capture script. A scene looks like this:
 
 ```js
 {
-  id: 'pending',
-  caption: 'Pending — one ranked queue',      // burned BELOW the app's pixels; null for none
-  url: '?view=activity&activityRepo=attention',
-  ready: '[data-testid="attention-view"]',    // the selector that means "this screen painted"
+  id: 'bots',
+  title: 'Bots',                              // the chapter heading
+  text: 'Every review bot: how much it says…', // the chapter sentence
+  url: '?view=activity&activityRepo=bots',
+  ready: '[data-testid="bot-roi-panel"]',      // the selector that means "this screen painted"
   settleMs: 3400,
-  scale: 1,                                   // deviceScaleFactor; 2 if the scene zooms
-  pane: 430,                                  // optional: the PR detail pane's height
+  scale: 1,                                    // deviceScaleFactor; higher if the scene zooms
+  before: async (page) => { /* position a scroller for free, emits no frames */ },
+  expect: { selector: '…', min: 4 },           // refuse to film a screen with no data on it
   steps: [
-    { hold: 2600 },
-    { scroll: { selector: '…', to: 1000, ms: 3000 } },
-    { zoom: { selector: '…', ms: 1500, maxWidth: 620, anchor: 'left', offset: [0, 138] } },
-    { zoomOut: { ms: 1000 } },
+    { hold: 1900 },
+    { zoom: { selector: '…', ms: 480, width: 900, anchor: 'left', offset: [-245, 60] } },
+    { hold: 2000 },
   ],
 }
 ```
 
-Four things the script will refuse rather than film quietly, each of which has already cost a
-run:
+`title` + `text` become that scene's cue, so **a new scene is a new chapter on the landing page
+for free** — and they are product voice like any other string on the site: plain English,
+shortest honest version, name the thing.
 
-- **a scene that produced no frames** — `pnpm shots <name>` silently no-ops on an unmatched
-  name, and a scenario that films nothing is the same defect one medium over;
-- **a `scroll` over an element that does not scroll** — it would film a still;
+Things the script will refuse rather than film quietly, each of which has already cost a run:
+
+- **a scene that produced no frames**, and a scene whose `expect` count is not met — a screen
+  that films itself empty is the defect that matters most here;
 - **a `zoom` whose target ends up wider than 92% of the frame.** Every panel in this app is
   full-width at a 1180px viewport, so a bare selector almost always lands there; cap it with
-  `maxWidth` and shift the framing with `offset`. A zoom to the whole frame is not a zoom, and
-  it fails by simply holding still;
-- **a timeline over the scenario's `budgetMs`** (30s for the walkthrough, 10s for the hero).
+  `width`/`maxWidth` and shift the framing with `offset`. A zoom to the whole frame is not a
+  zoom, and it fails by simply holding still;
+- **a `zoom` that would upscale** — at `scale` 1 the no-upscale floor is 1770 CSS px in a 1180px
+  frame, so a zooming scene needs `scale: 2` or more;
+- **a timeline over the scenario's `budgetMs`** (45 s), and odd encode dimensions.
 
 ⚠ **Anchor a zoom on the pane's own chrome, not on its content.** `reviewer-provenance` and
 `bot-triage-card` each cost a failed run: they are present on most loads and absent when the
@@ -240,59 +292,103 @@ query behind them 502s against a demo stack that has no GitHub behind it.
 Changes tab hydrates its patches from GitHub on demand, and against this database it correctly
 renders "inline diffs aren't available for this PR".
 
+⚠ **There is no `pending` scene either, and that was deliberate.** A ranked queue reads as a
+plain list of rows until you know what ranked it, and a clip cannot explain a scoring function.
+Its argument moved to the landing copy — `Home.tsx` § `02 · The board` — where the weights,
+the buckets and the approval rule are stated in words. If Pending ever comes back to the clip,
+that copy is what has to earn its place beside it.
+
+### Re-recording it
+
+```sh
+pnpm demo:video                 # seed → boot the Pro stack → film → teardown
+pnpm demo:video --publish       #   … and also write the copies under apps/landing/public/demo/
+
+# or, against a stack you already have up (`pnpm demo --no-seed`):
+node scripts/capture-demo-video.mjs --out ~/ --publish
+node scripts/capture-demo-video.mjs --scenario ./my-scenario.mjs
+node scripts/capture-demo-video.mjs --keep-frames   # leave phase 1's PNGs on disk to inspect
+node scripts/capture-demo-video.mjs --bpp 0.13      # the ONE size knob (see below)
+```
+
+`--out` defaults to your home directory (the masters). `--publish` additionally writes
+`apps/landing/public/demo/`, which is what the site serves — all three files, video, poster and
+cues. **Publishing all three together is the point:** a cue file that does not match the video
+beside it lights the wrong chapter with no error anywhere.
+
 ### How it is made, and why it is this shape
 
 `scripts/capture-demo-video.mjs`, in two phases.
 
 1. **Capture** — open each scene, let it settle, and photograph it frame by frame with
-   `page.screenshot()`. A scroll is driven by EASING `element.scrollTop` between frames rather
-   than by the browser's smooth-scroll, which is wall-clock-dependent and would pan differently
-   every run. A zoom costs **no extra screenshots at all**: it is the same photograph drawn from
-   a shrinking source rectangle.
+   `page.screenshot()`. A zoom costs **no extra screenshots at all**: it is the same photograph
+   drawn from a shrinking source rectangle. A `before` hook repositions a scroller for free.
 2. **Replay and record** — a second page paints those frames into a canvas on a rAF clock and
-   records it with `MediaRecorder` (`video/mp4;codecs=avc1.42E01E`). This phase is realtime by
-   construction: a 30-second clip takes 30 seconds.
+   records it with `MediaRecorder` (`video/mp4;codecs=avc1.42E01E`), stamping each scene's real
+   start and end into the cue file as it goes. This phase is realtime by construction: a
+   28-second clip takes 28 seconds.
 
 The viewport, theme, reduced-motion setting and onboarding localStorage seed all come from
 `scripts/lib/demo-browser.mjs`, which `capture-shots.mjs` imports too — so the stills and the
-clips can never drift into being pictures of two different products.
+clip can never drift into being pictures of two different products.
 
-**Measured, so nobody re-derives it:**
+⚠ **CRISPNESS CAME FROM RESOLUTION, NOT BITRATE, AND THE ENCODER IS WHY.** MEASURED on this
+scenario, same six scenes, three target bitrates:
 
-| | 30s clip |
-|---|---|
-| H.264 via MediaRecorder | **954 kB** (what ships) |
-| VP8 via Playwright's bundled ffmpeg | 1,280 kB |
-| Animated WebP | 165 kB held-only, but **7,919 kB** for a pan (48×) |
+| target | keyframe | motion | held frame | file |
+|---|---|---|---|---|
+| 0.050 bpp | 0.148 bpp | 0.125 bpp | 0.8 kB | 1,129 kB |
+| 0.133 bpp | 0.182 bpp | 0.237 bpp | 1.9 kB | 2,707 kB |
+| 0.150 bpp | 0.188 bpp | 0.230 bpp | 1.9 kB | 3,250 kB |
 
-Motion costs roughly **5.1× the bitrate of a held frame whatever the codec**, so the size of
-these files is decided by how much of them MOVES, not by encoder settings. That is why the
-scenarios hold more than they pan, why the hero drifts 700px over 4.2s instead of 1,300px over
-3.2s, and why every cut between scenes is hard — a cross-fade changes every pixel in the frame
-for its whole duration, which is the most expensive thing you can ask of an inter-frame codec.
-One further measurement, stated as what was actually run rather than per-lever: the walkthrough
-at 25 fps / 1.1 Mbps / three 4-second scrolls came out at **1,640 kB**; at 12 fps / 0.7 Mbps /
-three 3-second scrolls it is **954 kB**, for a picture that looks the same held still. Those
-three moved together, so none of them owns the 42% on its own.
+**Chromium's MediaRecorder H.264 encoder saturates at about 0.133 target bits-per-pixel.** Above
+it the per-frame sizes stop responding — 0.133 and 0.150 produce *identical* per-frame sizes and
+differ only in wasted bytes. "Keyframes near 0.5 bpp" is **not reachable through this encoder at
+any setting**. The achieved figures in the shipped file are keyframes **0.193 bpp**, motion
+**0.127 bpp**, held frames **0.015 bpp**.
+
+So the picture was fixed by pixels instead:
+
+```
+capture   1180 CSS px @ deviceScaleFactor 3   =  3540 device px
+encode    1180 × OUT_SCALE (1.5)              =  1770 × 996
+display   up to 885 CSS px @ 2 dppx           =  1770 device px      ← 1:1
+```
+
+⚠ **And a held screen is not as cheap as its per-frame number suggests.** H.264 keeps spending
+~3 kB/frame on a frame that has not changed, refining the *same* picture — so a 2.4-second hold
+is roughly **0.45 bpp on what the reader is actually looking at**. Only genuinely moving frames
+sit at the low figure. This is the thing that makes 0.127 bpp of motion look alarming and not be.
+
+**Motion is the budget.** MEASURED at the shipped 1770×996 / 12 fps / 0.133 bpp:
+
+| | cost | share of the file |
+|---|---|---|
+| one keyframe (6 of them) | ~40 kB | 12% |
+| one second of zoom | ~333 kB | 46%, from 2.9 s |
+| one second held | ~36 kB | 42%, from 24.7 s |
+
+⚠ **A zoom costs roughly 9× a held second**, and 2.9 seconds of it is nearly half the clip. That
+is why six scenes fit in 2.5 MB only as hard cuts and short push-ins — which is the edit that was
+wanted anyway, so the budget and the taste agree here rather than fighting. A cross-fade changes
+every pixel in the frame for its whole duration, which is the most expensive thing you can ask of
+an inter-frame codec: five dissolves would cost more than every zoom here. A **scroll** costs the
+same bitrate as a zoom AND ~28 MB of decoded bitmap per frame in phase 1, which is why there are
+none.
 
 **⚠ `canvas.captureStream(fps)` IS A TRAP, and it fails silently.** Asked for a frame rate,
 Chromium only hands the encoder a frame when the canvas content actually CHANGES — and these
-clips are mostly held frames, so a 29.55-second timeline recorded as **8.37 seconds of video
-playing 3.5× too fast**, with no error anywhere and a poster that still looked right. The fix,
-and the assertion that now guards it, is `captureStream(0)` plus one explicit `requestFrame()`
-per slot.
+clips are mostly held frames, so a 29.55-second timeline once recorded as **8.37 seconds of video
+playing 3.5× too fast**, with no error anywhere and a poster that still looked right. The fix, and
+the assertion that now guards it, is `captureStream(0)` plus one explicit `requestFrame()` per
+slot.
 
 **⚠ Playwright's bundled ffmpeg cannot help with any of this.** It is built
 `--disable-everything`: its entire filter set is crop / format / hflip / null / pad / scale /
-transpose / trim / vflip. No `drawtext`, no `overlay`, no `fade`, no `zoompan`. So the captions,
-the zoom and the frame timing all happen on the canvas before the encoder sees a pixel — and
-there is no transcoding step anywhere in this repo. **The master and the published copy are the
-same encode**; the tuning lives in the scenario file, not in a post-pass.
-
-**⚠ These are fragmented MP4s straight out of MediaRecorder, so they carry no total duration in
-the header** — a player discovers the length as it downloads. That is why the walkthrough mounts
-no `<video>` until the Play button is pressed: the scrub bar then fills in during the first
-second of playback rather than sitting visibly wrong on a page nobody has clicked.
+transpose / trim / vflip. No `drawtext`, no `overlay`, no `fade`, no `zoompan`. So the zoom and
+the frame timing happen on the canvas before the encoder sees a pixel, and there is no transcoding
+step anywhere in this repo. **The master and the published copy are the same encode**; the tuning
+lives in the scenario file, not in a post-pass.
 
 ### The motion policy
 
@@ -300,7 +396,14 @@ The site's standing rule is that it does not move, and the CSS blanket in `src/i
 enforces it by killing `animation` and `transition`. **A playing `<video>` is neither**, exactly
 like the hero rain's rAF canvas loop. So `components/feint/VideoFrame.tsx` checks
 `matchMedia('(prefers-reduced-motion: reduce)')` itself, subscribes to its `change` event, and
-under reduced motion renders the poster still and mounts no `<video>` at all.
+under reduced motion mounts **no `<video>` at all** — no element, no 2.1 MB fetch, nothing
+playing.
+
+**That fallback is now a good one rather than a concession**, and it is the whole argument for
+moving the captions out of the pixels: a reader on reduced motion gets the poster still plus
+every word the clip would have shown them, as real text. A **Play** button is offered beside it,
+because reduced motion means "do not move unless I ask", not "never move" — a reader who presses
+Play has asked.
 
 ⚠ **Do not reach for a header instead.** MEASURED in Chromium: a script-initiated `play()` on a
 muted video succeeds under `Permissions-Policy: autoplay=()` exactly as it does with no policy —
@@ -308,9 +411,6 @@ and a header says what is ALLOWED, never what the reader asked for. (For the sam
 in `apps/backend/src/api/plugins/security.ts` needed changing for these clips: the landing CSP
 has no `media-src`, so it inherits `default-src 'self'`, which a same-origin `/demo/*.mp4`
 already satisfies.)
-
-⚠ **The click-to-play walkthrough deliberately plays under reduced motion too.** A reader who
-presses Play has asked. Reduced motion means "do not move unless I ask", not "never move".
 
 ## Reading the copy
 

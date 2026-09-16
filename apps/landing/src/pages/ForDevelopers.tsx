@@ -149,12 +149,18 @@ export default function ForDevelopers(): JSX.Element {
           of job, from every repository, in one list with the most actionable at the top.
         </p>
         <p className="mb-6">
-          The ordering is the point, and it is code rather than a model. It weighs how close a
-          job is to <em>finished</em> — an approved pull request outranks one still waiting on
-          a review, a two-file change outranks a forty-file one, and a conflict or a wall of
-          unanswered threads pushes a job down rather than up — then how long it has been
-          sitting, then how directly it is tied to you. The rank is free on every tier; only
-          the sentence explaining each row is Pro.
+          The ordering is the point, and it is code rather than a model: three numbers, added
+          up. Half the weight is how close the job is to <em>finished</em> — a two-file change
+          outranks a forty-file one, and a conflict or three unanswered threads pushes a job
+          down rather than up. Three tenths is how long it has been sitting, in fixed steps at
+          one, two and four days. The last fifth is how directly it is tied to you: your name
+          on it, a repository you maintain, or neither.
+        </p>
+        <p className="mb-6">
+          An approved pull request that can land comes out top. The same one with nobody&rsquo;s
+          approval on it ranks below a plain review request, deliberately: ranked the other way,
+          the head of the board filled with unreviewed dependency bumps. The rank is free on
+          every tier; only the sentence explaining each row is Pro.
         </p>
         <p className="mb-6">
           A card exists only while you genuinely owe an action and have not taken it. There

@@ -7,10 +7,11 @@
 //                           for manual browsing / ad-hoc captures. Ctrl-C stops.
 //   pnpm demo --free        same, but boot in pure-OSS mode (PRO_DISABLED=true)
 //   pnpm demo --no-seed     reuse the existing demo DB (skip reseeding)
-//   pnpm demo:video         seed → boot Pro → film BOTH demo clips → teardown.
-//                           Masters land in $HOME; add --publish to also write
-//                           the copies under apps/landing/public/demo/.
-//                           `--scenario <name>` films just one.
+//   pnpm demo:video         seed → boot Pro → film the walkthrough → teardown.
+//                           Masters land in $HOME (mp4 + poster + cues.json);
+//                           add --publish to also write the copies under
+//                           apps/landing/public/demo/. `--scenario <name>`
+//                           films a different scenario file instead.
 //   pnpm shots              the WHOLE screenshot pipeline: seed → boot Pro →
 //                           capture-shots.mjs (pro set) → restart backend in
 //                           OSS mode → capture-shots.mjs (free set) → teardown.
@@ -206,21 +207,21 @@ if (MODE === 'serve') {
   // keep the process alive while the children run
   await new Promise(() => {});
 } else if (MODE === 'video') {
-  // ⚠ PRO TIER ONLY, and there is no free pass here. The two clips film screens
-  // that are free on every tier (the feed, flow metrics, the Pending board, a
-  // pull request) — but the app around them is the Pro build, which is what a
-  // visitor evaluating the product sees. A second OSS pass would produce two
-  // clips of the same four screens differing only in which tabs carry a lock.
+  // ⚠ PRO TIER ONLY, and there is no free pass here. Most of what the clip films
+  // is free on every tier (the feed, the timeline, a pull request, flow metrics)
+  // — but the app around them is the Pro build, which is what a visitor
+  // evaluating the product sees, and two of the six scenes (the Bots ROI vendor
+  // table, the addressed check) exist only there.
+  //
+  // ⚠ ONE CLIP, NOT TWO. The hero loop is gone: it autoplayed an eight-second
+  // pass down the Pending board, which is the one screen that says nothing
+  // without context. The walkthrough IS the hero now — it autoplays once and
+  // does not repeat.
   await startBackend('pro');
   await startFrontend();
-  const named = VIDEO_ARGS.includes('--scenario');
-  if (named) film(VIDEO_ARGS);
-  else {
-    film(['--scenario', 'walkthrough', ...VIDEO_ARGS]);
-    film(['--scenario', 'hero', ...VIDEO_ARGS]);
-  }
+  film(VIDEO_ARGS.includes('--scenario') ? VIDEO_ARGS : ['--scenario', 'walkthrough', ...VIDEO_ARGS]);
   teardown();
-  console.log('\n✅ demo video(s) filmed');
+  console.log('\n✅ demo video filmed');
   process.exit(0);
 } else {
   let backend = await startBackend('pro');

@@ -118,22 +118,28 @@ details > summary::-webkit-details-marker {
    `transition: none` reach neither — a rAF loop is script, not a CSS animation,
    and a canvas paint is not a property transition.
 
-   TWO — the hero demo clip (components/feint/VideoFrame.tsx with `autoplay`): a
-   silent, looping eight-second screen recording of the Pending board, under the
-   headline. A playing <video> is not an animation or a transition either, and no
+   TWO — the walkthrough (components/feint/VideoFrame.tsx): a silent 28-second
+   screen recording of six screens, under the headline, which plays ONCE. A
+   playing <video> is not an animation or a transition either, and no
    `Permissions-Policy` header stops one: MEASURED in Chromium, a script-initiated
    `play()` on a MUTED video succeeds under `autoplay=()` just as it does with no
    policy at all. Server headers are the wrong layer for this question anyway —
    they say what is ALLOWED, never what the reader asked for.
 
+   ⚠ IT NEVER LOOPS. `loop` is not set and `ended` does not rewind it: repeating
+   is a button the reader presses. A screen recording that restarts itself is
+   motion nobody asked to have again, which is the thing a reduced-motion setting
+   is most obviously about.
+
    BOTH check `matchMedia('(prefers-reduced-motion: reduce)')` themselves and
    subscribe to its `change` event. Under reduced motion the rain paints ONE
-   static frame of the same seeded arrangement and starts no loop; the clip
-   renders its poster still and mounts no <video> at all. Any future JS-driven
-   motion on this site inherits that obligation: this rule is a floor, not a
-   guarantee.
+   static frame of the same seeded arrangement and starts no loop; the clip mounts
+   no <video> at all and renders its poster still beside the six chapters AS REAL
+   TEXT — which is why the captions were taken out of the pixels. Any future
+   JS-driven motion on this site inherits that obligation: this rule is a floor,
+   not a guarantee.
 
-   ⚠ THE CLICK-TO-PLAY WALKTHROUGH IS NOT AN EXCEPTION AND NEEDS NO CHECK. A
+   ⚠ PRESSING PLAY UNDER REDUCED MOTION IS FINE, AND THE BUTTON IS OFFERED. A
    reader who presses Play has asked for motion. Reduced motion means "do not
    move unless I ask"; it does not mean "never move".
 

@@ -19,8 +19,30 @@ export const DEMO_BASE = process.env.DEMO_BASE ?? 'http://localhost:5273/app/';
 /** The width every capture is taken at. Changing it changes the layout, not the zoom. */
 export const DEMO_WIDTH = 1180;
 
+/**
+ * The launch flags every capture browser gets.
+ *
+ * ⚠ THESE ARE NOT AN OPTIMISATION — THEY ARE WHAT MAKES THE TIMELINE PAINT.
+ * vis-timeline positions its ITEMS (the PR bars) inside `requestAnimationFrame`,
+ * and a renderer Chromium considers backgrounded coalesces rAF to 1 Hz or stops
+ * it altogether. The failure is silent and it has already been paid for once in
+ * this repo: 47 correct group rows, every bar at x=0, no error anywhere. The
+ * demo video's recorder browser has carried these flags since it was written;
+ * the APP browser did not, which is the half that films the timeline.
+ *
+ * (The OTHER half of that landmine is `document.hidden`, which
+ * `components/Timeline/index.tsx` checks before rebuilding groups+bars+markers.
+ * A headless page is not hidden, so it does not bite here — but a scene that
+ * films the board should still assert its bars exist rather than trust that.)
+ */
+export const CAPTURE_LAUNCH_ARGS = [
+  '--disable-background-timer-throttling',
+  '--disable-renderer-backgrounding',
+  '--disable-backgrounding-occluded-windows',
+];
+
 export async function launch() {
-  return chromium.launch({ headless: true });
+  return chromium.launch({ headless: true, args: CAPTURE_LAUNCH_ARGS });
 }
 
 /**
@@ -42,13 +64,55 @@ export async function ctx(
     reducedMotion: 'reduce',
   });
   await c.addInitScript((h) => {
-    // Never show the first-run tour or the welcome-back banner in a capture.
+    // Never show the first-run tour in a capture.
     localStorage.setItem('pierre:onboarded', '1');
     localStorage.setItem('pierre:cookieConsent', 'granted');
     if (h) localStorage.setItem('pierre:detailPaneHeight', String(h));
   }, pane);
+  // ⚠ AN INIT SCRIPT, NOT `page.addStyleTag`. A style tag has to be added AFTER
+  // a navigation and would have to be re-added per page; this runs before the
+  // SPA's first paint on every document in the context, including a reload.
+  // (`BrowserContext` has no `addStyleTag` at all.)
+  await c.addInitScript((css) => {
+    const install = () => {
+      const s = document.createElement('style');
+      s.textContent = css;
+      document.head.appendChild(s);
+    };
+    if (document.head) install();
+    else document.addEventListener('DOMContentLoaded', install, { once: true });
+  }, CAPTURE_CSS);
   return c;
 }
+
+/**
+ * TWO THINGS THAT APPEAR ON A WALL CLOCK, NOT ON THE SCREEN'S OWN STATE. Both
+ * are hidden for the duration of a capture, and neither is a picture of the
+ * product:
+ *
+ *  • THE BACKGROUND-LOADING TOAST. `GlobalLoadingBar` shows while
+ *    `isMlScoring()` is true, which on the demo stack is FOREVER: the seeder
+ *    ships 2,945 `ml_comment_labels` rows and leaves 20 comments unscored, and
+ *    `pnpm demo` sets `DISABLE_SCHEDULER=true`, so there is a permanent backlog
+ *    with nothing draining it. "Classifying bot comments · 0 of 20 · 0%" then
+ *    sits in the bottom-right corner of every frame.
+ *
+ *  • THE WELCOME-BACK BANNER. It renders only outside the Activity console and
+ *    only once `useMyTurnByWorkspace` has resolved, which lands SEVERAL SECONDS
+ *    after the screen does — so it appeared in one probe run and not the next,
+ *    and it shifts the whole page down 28px when it arrives. A 28px jump
+ *    mid-scene is exactly the non-determinism this module exists to remove.
+ *
+ * ⚠ SELECT ON WHAT THE COMPONENT PROMISES, and fail OPEN. The toast's
+ * `role="status"` + `aria-label` are part of its accessibility contract. The
+ * banner has no test id, so this keys on its class list; if that changes the
+ * rule simply stops matching and the banner comes back, which is visible in the
+ * next capture rather than silent.
+ */
+const CAPTURE_CSS = `
+  [role="status"][aria-label="Background loading"] { display: none !important; }
+  div.h-7.border-amber-200.bg-amber-50 { display: none !important; }
+`;
 
 /**
  * Collect console errors and uncaught exceptions off a page, deduplicated.
