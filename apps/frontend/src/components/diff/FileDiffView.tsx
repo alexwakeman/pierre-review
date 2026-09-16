@@ -23,7 +23,7 @@ import { CheckIcon, ChevronIcon, ExternalLinkIcon } from '../Icons.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { ThreadCountChips, rollupCounts } from '../ThreadList/ThreadCountChips.js';
-import { STATUS_META } from './status.js';
+import { SELECTED_BORDER, STATUS_META, UNSELECTED_BORDER } from './status.js';
 
 // The shared per-file diff renderer used by BOTH the Changes tab (with inline
 // commenting) and the AI Fix tab (read-only, pre-push). Per-file collapsible blocks
@@ -719,7 +719,14 @@ function FileDiffBlock({
   const githubUrl = file.githubUrl ?? null;
 
   return (
-    <div ref={blockRef}>
+    // The same 2px sky line the rail's selected row carries, so a click marks the file in the
+    // code view too. Fires whenever this file is the focus target — including a reveal from
+    // outside the tab that carries no line to flash. `border-l-2` is unconditional and only
+    // the colour changes, so no block moves when the selection does.
+    <div
+      ref={blockRef}
+      className={`border-l-2 ${focus != null ? SELECTED_BORDER : UNSELECTED_BORDER}`}
+    >
       {/* Sticky per-file header (mirrors the Changes-tab behaviour): the name stays
           pinned as you scroll and is pushed up by the next file's header. Needs an
           opaque background + a z-index above the diff table. */}

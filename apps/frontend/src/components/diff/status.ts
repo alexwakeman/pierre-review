@@ -16,3 +16,10 @@ export const STATUS_META: Record<
   changed: { icon: 'M', label: 'changed', cls: 'text-amber-600 dark:text-amber-400' },
   unchanged: { icon: '·', label: 'unchanged', cls: 'text-gray-400' },
 };
+
+// The selected treatment, shared by the Changes-tab rail row (FileTree) and the file's own
+// diff block (FileDiffView) so clicking a file marks BOTH with the same 2px sky line. Both
+// sides carry `border-l-2` unconditionally and only switch the colour, so selecting a file
+// shifts nothing.
+export const SELECTED_BORDER = 'border-sky-500';
+export const UNSELECTED_BORDER = 'border-transparent';

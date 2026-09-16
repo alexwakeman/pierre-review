@@ -126,8 +126,9 @@ export function ChangesTab({
   };
 
   // The focus target is STICKY (never cleared once shown): it doubles as the rail's selected
-  // row, and the highlight fades on its own timer inside FileDiffView. `nonce` is what makes
-  // clicking the same file twice re-scroll.
+  // row AND marks the file's block in the diff with the same sky border, both for as long as
+  // the file stays selected. Only the line-grained flash inside FileDiffView fades on a timer.
+  // `nonce` is what makes clicking the same file twice re-scroll.
   const [focus, setFocus] = useState<DiffFocusTarget | null>(externalFocus ?? null);
   useEffect(() => {
     if (externalFocus != null) setFocus(externalFocus);
