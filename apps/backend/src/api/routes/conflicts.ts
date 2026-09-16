@@ -29,13 +29,18 @@ import { getPrWriteContext, WRITE_PERMISSIONS } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 /**
- * THE MERGE-CONFLICT RESOLVER'S SIX ROUTES (CORE / free, LOCAL ONLY).
+ * THE MERGE-CONFLICT RESOLVER'S SIX ROUTES (CORE / free, BOTH MODES).
  *
- * ⚠ REGISTERED ONLY WHEN `!config.isCloud` (app.ts, the `authRoutes` precedent). In cloud these
- * paths do not exist and the not-found handler answers, exactly like a typo'd URL — there is no
- * per-handler env check, because a per-handler check LOOKS like a gate while being one Railway
- * variable away from not being one. There is no `CONFLICT_RESOLVER_ENABLED` and there must not
- * be one; `MeResponse.conflictResolver` is what the SPA gates on.
+ * ⚠ REGISTERED UNCONDITIONALLY. These were local-only; they are not any more. There is still no
+ * `CONFLICT_RESOLVER_ENABLED` and there must not be one, because a per-handler env check LOOKS
+ * like a gate while being one Railway variable away from not being one.
+ *
+ * ⚠ WHAT MAKES THEM SAFE IN A MULTI-TENANT PROCESS is not anything in this file's cloud story —
+ * it is that nothing here was ever single-tenant. Ownership is `getPrWriteContext(id, accountId)`
+ * on every route, and every git fetch goes out under the CALLER'S OWN token
+ * (`fetchRefIntoClone`), into a ref namespaced by session id. The clone cache is shared across
+ * accounts and holds OBJECTS, never permission: a tenant who cannot read a private repository
+ * cannot fetch from it, whoever else has cloned it.
  *
  *   POST   /api/prs/:id/conflicts               open  → 202 + a `preparing` session
  *   GET    /api/prs/:id/conflicts?session=      the manifest (no regions)
@@ -209,8 +214,49 @@ async function requireWritablePr(
   return { ok: true };
 }
 
+/**
+ * FOUR REFUSALS, FOUR FACTS. A claim can fail for four different reasons and they are NOT
+ * interchangeable sentences — nor one sentence with a variable in it.
+ *
+ * ⚠ THE READER IS ONLY EVER TOLD ABOUT THEIR OWN WORK. "You already have one open" is a fact
+ * about this account; "the service is busy" is a fact about the service. Neither names a count,
+ * an account or a pull request belonging to anyone else. The predecessor collapsed the last two
+ * into "Two pull requests are already being prepared", which in cloud was both false about the
+ * reader's work and a disclosure about somebody else's.
+ */
 const BUSY_PR = 'This pull request is already being worked on. Give it a moment.';
-const BUSY_MACHINE = 'Two pull requests are already being prepared. Try again in a moment.';
+const BUSY_ACCOUNT = 'You’re already resolving another pull request. Finish that one first.';
+const BUSY_SERVICE = 'The service is busy. Try again in a moment.';
+const RESTARTING = 'This server is restarting. Try again in a moment.';
+/** A fact about the reader's own windows, like `BUSY_ACCOUNT` — never about the service. */
+const TOO_MANY_STREAMS = 'This resolver is open in too many windows. Close one and try again.';
+
+/** Live streams one session may hold. Two or three tabs is the real ceiling; past that it is
+ *  not a reader. */
+const MAX_STREAM_SUBSCRIBERS = 4;
+/** How long the server holds one hijacked socket before ending it itself. Inside Railway's
+ *  15-minute request ceiling on purpose, so the close is OURS and the client's recovery path is
+ *  the one that runs. */
+const STREAM_MAX_MS = 10 * 60_000;
+
+/** One mapper, so the six routes cannot disagree about what a claim refusal means. */
+function refuseBusy(
+  reply: FastifyReply,
+  reason: 'pr' | 'account' | 'capacity' | 'shutdown',
+): ErrorBody {
+  switch (reason) {
+    case 'pr':
+      return refuse(reply, 409, 'Busy', BUSY_PR);
+    case 'account':
+      return refuse(reply, 409, 'Busy', BUSY_ACCOUNT);
+    case 'capacity':
+      // 503, not 409: nothing about THIS request conflicts with anything — the service has no
+      // room, and the honest status for that is "try later".
+      return refuse(reply, 503, 'Busy', BUSY_SERVICE);
+    case 'shutdown':
+      return refuse(reply, 503, 'Restarting', RESTARTING);
+  }
+}
 
 export async function conflictRoutes(app: FastifyInstance): Promise<void> {
   // ---- 1. Open ----------------------------------------------------------------------------
@@ -237,9 +283,7 @@ export async function conflictRoutes(app: FastifyInstance): Promise<void> {
       restart: body.restart === true,
       autoApply: body.autoApply !== false,
     });
-    if (claim.kind === 'busy') {
-      return refuse(reply, 409, 'Busy', claim.reason === 'pr' ? BUSY_PR : BUSY_MACHINE);
-    }
+    if (claim.kind === 'busy') return refuseBusy(reply, claim.reason);
     if (claim.kind === 'reused') {
       // Re-attaching to the live session is the whole answer to a second tab: no second clone,
       // no second model, and the stream the client is about to subscribe to is already running.
@@ -285,6 +329,14 @@ export async function conflictRoutes(app: FastifyInstance): Promise<void> {
 
     const rec = getSession(accountId, id, session);
     if (!rec) return refuse(reply, 409, 'SessionExpired', SESSION_EXPIRED);
+    // ⚠ ALSO BEFORE `reply.hijack()`. A hijacked socket is held until the client drops it or the
+    // session ends, and nothing else bounds how many of them one caller may hold: this route is
+    // on the 600/min `read` bucket, so a client that opens streams and never reads them
+    // accumulates sockets and 15-second heartbeat timers until the proxy's own request ceiling
+    // reaps them — about 9,000 of each in cloud. A real reader has one per open tab.
+    if (rec.subscribers.size >= MAX_STREAM_SUBSCRIBERS) {
+      return refuse(reply, 409, 'Busy', TOO_MANY_STREAMS);
+    }
 
     reply.hijack();
     const raw = reply.raw;
@@ -301,10 +353,18 @@ export async function conflictRoutes(app: FastifyInstance): Promise<void> {
     const hb = setInterval(() => {
       if (!raw.writableEnded) raw.write(': hb\n\n');
     }, 15_000);
+    // ⚠ THE SERVER ENDS IT FIRST, DELIBERATELY. A stream is otherwise held for as long as the
+    // client keeps the socket open, and the session outliving the stream is the design — so the
+    // SPA already recovers from a stream that ends (`useConflictSession` falls through to the
+    // manifest poll, which carries the whole commit state). Ending it ourselves, well inside the
+    // proxy's 15-minute request ceiling, costs the reader nothing and is what stops a held socket
+    // being unbounded in a process every tenant shares.
+    const lifetime = setTimeout(() => cleanup(), STREAM_MAX_MS);
     const cleanup = (): void => {
       if (closed) return;
       closed = true;
       clearInterval(hb);
+      clearTimeout(lifetime);
       unsub();
       if (!raw.writableEnded) raw.end();
     };
@@ -418,9 +478,7 @@ export async function conflictRoutes(app: FastifyInstance): Promise<void> {
     // ⚠ CLAIMED SYNCHRONOUSLY, with no `await` between the check and the write: two clicks a
     // tick apart must not become two pushes.
     const slot = claimCommitSlot(rec);
-    if (!slot.ok) {
-      return refuse(reply, 409, 'Busy', slot.reason === 'pr' ? BUSY_PR : BUSY_MACHINE);
-    }
+    if (!slot.ok) return refuseBusy(reply, slot.reason);
 
     reply.status(202);
     void runCommit(rec, body, slot.signal, req.log);

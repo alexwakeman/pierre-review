@@ -28,7 +28,13 @@ import { ResolverPanes } from './ResolverPanes.js';
 import { LandingStep } from './LandingStep.js';
 import { CommitResultPanel } from './CommitResultPanel.js';
 import { CloseResolverConfirm } from './CloseResolverConfirm.js';
-import { BRANCH_MOVED_RESTART, DECISIONS_KEPT, conflictsDecided } from './copy.js';
+import {
+  BRANCH_MOVED_RESTART,
+  DECISIONS_KEPT,
+  SESSION_GONE,
+  START_AGAIN,
+  conflictsDecided,
+} from './copy.js';
 
 // ── THE RESOLVER SHELL ───────────────────────────────────────────────────────────────────────
 //
@@ -75,10 +81,21 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
   const confirming = useConflictResolverStore((s) => s.confirming);
   const setConfirming = useConflictResolverStore((s) => s.setConfirming);
   const sessions = useConflictResolverStore((s) => s.sessions);
-  const { session, openError, files, loadingFiles, fileErrors, loadFile, retryFile, restart } =
-    useConflictSession(
-    target.prId,
-  );
+  const {
+    session,
+    connection,
+    openError,
+    files,
+    loadingFiles,
+    fileErrors,
+    loadFile,
+    retryFile,
+    restart,
+  } = useConflictSession(target.prId);
+  // The server no longer has this session, so nothing more about it will ever be learned HERE.
+  // ⚠ NOT "it failed" — see `COMMIT_UNCONFIRMED`. The one thing it changes on screen is the words
+  // used for a commit already in flight, and the one thing it must never do is offer a retry.
+  const connectionLost = connection === 'lost';
   const [view, setView] = useState<'panes' | 'landing'>('panes');
 
   const key =
@@ -260,6 +277,7 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
         <ResolverBody
           openError={openError}
           session={session}
+          connectionLost={connectionLost}
           sessionKey={key}
           files={files}
           decisions={decisions}
@@ -337,6 +355,7 @@ function useHeadMoved(sessionHead: string | null, localHead: string | null | und
 function ResolverBody({
   openError,
   session,
+  connectionLost,
   sessionKey,
   files,
   decisions,
@@ -356,6 +375,9 @@ function ResolverBody({
 }: {
   openError: string | null;
   session: ConflictSession | null;
+  /** The server no longer has this session. ⚠ NOT a failure — it only changes the WORDS used for
+   *  a commit whose outcome can no longer be read back. */
+  connectionLost: boolean;
   sessionKey: string | null;
   files: Record<number, ConflictFileContent>;
   /** The pinned model's decisions, handed down rather than re-read: the shell already subscribes
@@ -390,6 +412,11 @@ function ResolverBody({
     );
   }
   if (session.status === 'preparing') {
+    // ⚠ NOTHING HAS BEEN PUSHED AT THIS STAGE, so "start again" is the whole answer and offering
+    // it is safe. Without this branch a session lost mid-build (a restart, a redeploy) leaves the
+    // overlay reading "Reading the conflicting files…" for as long as the reader is willing to
+    // watch it.
+    if (connectionLost) return <Notice text={SESSION_GONE} onRetry={onRestart} />;
     return <Notice text={session.phase != null ? PREPARE_SENTENCE[session.phase] : 'Starting…'} />;
   }
   if (session.status === 'clean') {
@@ -420,6 +447,7 @@ function ResolverBody({
         headMoved={headMoved}
         autoMergeArmed={autoMergeArmed}
         commitError={commitError}
+        connectionLost={connectionLost}
         onBack={() => {
           onResetCommit();
           onView('panes');
@@ -429,7 +457,15 @@ function ResolverBody({
           onResetCommit();
           onRestart();
         }}
-        onClose={() => onClose(false)}
+        // ⚠ THE FLAG IS "THE OUTCOME IS UNKNOWN", AND ONLY THE LANDING STEP KNOWS THAT. `true`
+        // suppresses the reopen toast, whose sentence ends "nothing pushed" — a claim nobody can
+        // make while a commit is in flight on a session we have lost. But a LOST SESSION IS NOT A
+        // COMMIT: on the landing step with nothing submitted, or after a refusal that said
+        // "Nothing was pushed" in so many words, the outcome is known, the toast is true, and it
+        // is the only route back to the reader's decisions. So the flag is decided in the branch
+        // that knows — LandingStep's own `running && connectionLost` arm passes `true` and its
+        // `failed` arm passes `false` — never guessed here from `connectionLost` alone.
+        onClose={onClose}
       />
     );
   }
@@ -460,7 +496,10 @@ function Notice({ text, onRetry }: { text: string; onRetry?: () => void }): JSX.
           onClick={onRetry}
           className="rounded border border-gray-300 px-1.5 py-0.5 font-medium text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200"
         >
-          Try again
+          {/* Every `onRetry` here is `onRestart` — it opens a new session, it does not re-send
+              anything — so the button says what it does, in the same words the landing step uses
+              for the same action. The sentences beside it no longer repeat it. */}
+          {START_AGAIN}
         </button>
       )}
     </div>

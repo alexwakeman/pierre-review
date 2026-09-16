@@ -16,11 +16,14 @@ process.env.DISABLE_SCHEDULER = 'true';
 
 import type { ConflictSessionEvent } from '@pierre-review/shared';
 import {
+  beginShutdown,
   claimCommitSlot,
   claimSession,
   dropSession,
   getSession,
+  liveSessionIds,
   peekSession,
+  runningJobCount,
   sessionView,
   settleFailed,
   settleReady,
@@ -127,11 +130,59 @@ describe('claiming the open slot', () => {
     expect(getSession(ACCOUNT, PR, first.session.sessionId)).toBeNull();
   });
 
-  it('caps the machine at two concurrent git jobs', () => {
+  it('holds ONE account to ONE running job, and says so as a fact about that account', () => {
     expect(claimSession(ACCOUNT, 1, { restart: false, autoApply: true }).kind).toBe('created');
-    expect(claimSession(ACCOUNT, 2, { restart: false, autoApply: true }).kind).toBe('created');
-    const third = claimSession(ACCOUNT, 3, { restart: false, autoApply: true });
-    expect(third).toEqual({ kind: 'busy', session: null, reason: 'capacity' });
+    // A different PR, same account: not this PR's slot ('pr'), not the machine's ('capacity') —
+    // the reader's OWN other resolver, which is the only one they can do anything about.
+    const second = claimSession(ACCOUNT, 2, { restart: false, autoApply: true });
+    expect(second).toEqual({ kind: 'busy', session: null, reason: 'account' });
+  });
+
+  it('caps the MACHINE across accounts, and never reports it as the caller’s own work', () => {
+    // One job each, up to the global ceiling. Each is inside its own account's cap, so the only
+    // thing that can refuse the next one is the machine.
+    for (let account = 1; account <= __testing.MAX_CONCURRENT_JOBS; account++) {
+      expect(claimSession(account, 1, { restart: false, autoApply: true }).kind).toBe('created');
+    }
+    const oneTooMany = claimSession(__testing.MAX_CONCURRENT_JOBS + 1, 1, {
+      restart: false,
+      autoApply: true,
+    });
+    // ⚠ 'capacity', NOT 'account'. The two map to two different sentences, and telling this
+    // account it already has one open would be false — it has none. The predecessor was a single
+    // process-global cap whose sentence said "Two pull requests are already being prepared",
+    // which in cloud was a disclosure about somebody else's work.
+    expect(oneTooMany).toEqual({ kind: 'busy', session: null, reason: 'capacity' });
+  });
+
+  it('refuses every new claim once shutdown has begun, and leaves the running one alone', () => {
+    const live = claimSession(ACCOUNT, 1, { restart: false, autoApply: true });
+    expect(live.kind).toBe('created');
+    beginShutdown();
+    // A fresh open, and a commit on a DIFFERENT account's session, both refuse for the same
+    // reason — the process is going away, which is not a fact about either account.
+    expect(claimSession(2, 5, { restart: false, autoApply: true })).toEqual({
+      kind: 'busy',
+      session: null,
+      reason: 'shutdown',
+    });
+    // The job already running still counts as running: SIGTERM waits for it rather than
+    // abandoning a push GitHub may already have taken.
+    expect(runningJobCount()).toBe(1);
+  });
+
+  it('lists every session as live for the janitor, SETTLED ones included', () => {
+    const building = claimSession(ACCOUNT, 1, { restart: false, autoApply: true });
+    const settled = claimSession(2, 2, { restart: false, autoApply: true });
+    if (building.kind !== 'created' || settled.kind !== 'created') throw new Error('expected two');
+    settleReady(settled.session, model(), 'hash-a', false);
+
+    // ⚠ LIVE IS "IN THE MAP", NOT "RUNNING". A session sitting at `ready` for twenty minutes still
+    // owns `refs/pierre/conflict/<id>/{head,base}` and its commit re-reads them; a janitor that
+    // only kept RUNNING sessions would delete the refs out from under a resolution in progress.
+    expect(liveSessionIds()).toEqual(
+      new Set([building.session.sessionId, settled.session.sessionId]),
+    );
   });
 
   it('keeps one account out of another account’s session', () => {
@@ -146,7 +197,11 @@ describe('claiming the open slot', () => {
 
 describe('the TTL', () => {
   it('drops an idle session and keeps one that is still being used', () => {
-    const t0 = 1_000_000;
+    // ⚠ THE REAL CLOCK, NOT A ROUND FAKE ONE. `settleReady` and the rest of the settle family
+    // touch with `Date.now()`, and a record now carries an ABSOLUTE LIFETIME measured from its
+    // own `createdAt` — so a session minted at epoch+1000s and touched at the real now is a
+    // session four hours dead, whatever the injected times below say.
+    const t0 = Date.now();
     const first = open({}, t0);
     if (first.kind !== 'created') throw new Error('expected a fresh session');
     settleReady(first.session, model(), 'hash-a', false);
@@ -168,6 +223,74 @@ describe('the TTL', () => {
     expect(peekSession(ACCOUNT, PR, Date.now() + 86_400_000)).not.toBeNull();
     settleReady(first.session, model(), 'hash-a', false);
     expect(peekSession(ACCOUNT, PR, Date.now() + 86_400_000)).toBeNull();
+  });
+
+  it('⚠ bounds a session that is READ forever — the TTL alone bounds nothing', () => {
+    const t0 = Date.now();
+    const first = open({}, t0);
+    if (first.kind !== 'created') throw new Error('expected a fresh session');
+    settleReady(first.session, model(), 'hash-a', false);
+    // The overlay's recovery poll reads the manifest every few seconds for as long as the tab is
+    // open, and every read touches. Walk eight hours of that.
+    let now = t0;
+    for (let i = 0; i < 48; i++) {
+      now += 10 * 60_000;
+      getSession(ACCOUNT, PR, first.session.sessionId, now);
+    }
+    // Gone — and gone means the janitor may finally collect the two refs it owns. Losing it
+    // costs the reader a rebuild, never their decisions (those live in the SPA's own store).
+    expect(peekSession(ACCOUNT, PR, now)).toBeNull();
+  });
+
+  it('⚠ expires records for the JANITOR too, which no request-driven sweep would reach', () => {
+    const t0 = Date.now();
+    const first = open({}, t0);
+    if (first.kind !== 'created') throw new Error('expected a fresh session');
+    settleReady(first.session, model(), 'hash-a', false);
+    // The abandoned tab: nothing calls a conflict route again, so nothing else ever sweeps.
+    // `liveSessionIds` is the janitor's keep-list; an expired session in it pins two refs
+    // against every repack, forever.
+    expect(liveSessionIds(t0)).toContain(first.session.sessionId);
+    expect(liveSessionIds(t0 + 86_400_000).size).toBe(0);
+    expect(__testing.sessions.size).toBe(0);
+  });
+});
+
+describe('how many sessions may be RETAINED', () => {
+  it('⚠ evicts this account’s least-recently-read settled session past the cap', () => {
+    const now = Date.now();
+    const ids: string[] = [];
+    for (let pr = 1; pr <= __testing.MAX_SESSIONS_PER_ACCOUNT; pr++) {
+      const claim = claimSession(ACCOUNT, pr, { restart: false, autoApply: true }, now + pr);
+      if (claim.kind !== 'created') throw new Error('expected a fresh session');
+      // Settle each one: a record with a job in flight owns itself and is never evicted.
+      settleReady(claim.session, model(), `hash-${pr}`, false);
+      ids.push(claim.session.sessionId);
+    }
+    expect(__testing.sessions.size).toBe(__testing.MAX_SESSIONS_PER_ACCOUNT);
+
+    // One more. The JOB caps did not refuse it (nothing is running), and a record holds a whole
+    // model — so the ceiling has to be on the records, not just the jobs.
+    const extra = claimSession(ACCOUNT, 99, { restart: false, autoApply: true });
+    expect(extra.kind).toBe('created');
+    expect(__testing.sessions.size).toBe(__testing.MAX_SESSIONS_PER_ACCOUNT);
+    // The one read longest ago is the one that went.
+    expect(peekSession(ACCOUNT, 1)).toBeNull();
+    expect(peekSession(ACCOUNT, 2)).not.toBeNull();
+  });
+
+  it('⚠ never evicts another account to make room for this one’s', () => {
+    const now = Date.now();
+    const other = claimSession(2, 7, { restart: false, autoApply: true }, now);
+    if (other.kind !== 'created') throw new Error('expected a fresh session');
+    settleReady(other.session, model(), 'hash-other', false);
+    for (let pr = 1; pr <= __testing.MAX_SESSIONS_PER_ACCOUNT + 1; pr++) {
+      const claim = claimSession(ACCOUNT, pr, { restart: false, autoApply: true }, now + pr);
+      if (claim.kind !== 'created') throw new Error('expected a fresh session');
+      settleReady(claim.session, model(), `hash-${pr}`, false);
+    }
+    // This account traded its own oldest record away; the other account's is untouched.
+    expect(peekSession(2, 7)).not.toBeNull();
   });
 });
 

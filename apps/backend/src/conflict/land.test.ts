@@ -582,6 +582,16 @@ describe('landConflictResolution — full vs partial', () => {
     expect(message).not.toContain('Merge');
   });
 
+  // ⚠ THIS ONE TEST IS TWO OF EVERYTHING — two fixtures, two model builds, two lands — because
+  // the asymmetry it pins only exists as a comparison, so both halves have to be built and
+  // landed for real. That makes it roughly double the git spawns of every other test in this
+  // file, and the file-wide 90s ceiling (vitest.config.ts, which measures the per-spawn tax and
+  // explains where the number came from) is a budget for ONE land. Measured at 113s during a
+  // full `pnpm test` with a green assertion behind it, while its single-land neighbours in the
+  // same run came in at 62-71s. So: the same 90s budget, twice. Not a licence to be slow —
+  // `conflict/git.ts` still kills any single git command at 120s, so a hung or lock-waiting git
+  // fails the run rather than sitting here.
+  const TWO_LANDS_TIMEOUT_MS = 180_000;
   it('⚠ a kept-`ours` region RE-CONFLICTS; a region left at `base` merges silently', async () => {
     // The asymmetry the UI copy is about. Both directions, because a future change to the
     // partial shape has to re-read this and decide again.
@@ -635,7 +645,7 @@ describe('landConflictResolution — full vs partial', () => {
     expect(ignored.repo.bytes(['show', `${mergedTree}:a.txt`]).toString('utf8')).toBe(
       'alpha\none-theirs\nbeta\ntwo-theirs\ngamma\n',
     );
-  });
+  }, TWO_LANDS_TIMEOUT_MS);
 
   it('an all-`ours` partial writes nothing and pushes nothing', async () => {
     const f = twoFileFixture();

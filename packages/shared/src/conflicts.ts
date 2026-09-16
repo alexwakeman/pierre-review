@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════════════════
-   MERGE-CONFLICT RESOLVER — the wire (CORE / free, LOCAL ONLY).
+   MERGE-CONFLICT RESOLVER — the wire (CORE / free, BOTH MODES).
 
    LEFT is the PR branch ("Your version"), RIGHT is the base branch ("Changes from <base>"),
    CENTRE is the result, seeded from the merge base and changed only by per-region decisions.

@@ -67,7 +67,10 @@ export interface ConflictSessionRecord {
    * protocol rather than a UI convention.
    */
   suggestions: Map<SuggestionId, StoredSuggestion>;
-  /** Wall-clock expiry, pushed out on every touch. */
+  /** When the record was minted. ⚠ THE ONE CLOCK `touch()` CANNOT MOVE — see
+   *  `MAX_SESSION_LIFETIME_MS`. */
+  createdAt: number;
+  /** Wall-clock expiry, pushed out on every touch and capped by the absolute lifetime. */
   expiresAt: number;
   /** A build is running for this PR. One at a time, per PR. */
   openRunning: boolean;
@@ -101,23 +104,192 @@ function sweep(now: number): void {
   }
 }
 
+/**
+ * How long a record may live NO MATTER HOW OFTEN IT IS READ.
+ *
+ * ⚠ `touch()` ALONE BOUNDS NOTHING. Every manifest read touches, and the SPA polls the manifest
+ * for as long as the overlay is mounted (`useConflictSession` — the poll is the recovery channel
+ * after a proxy cuts the stream, so it cannot simply stop at `ready`). A tab left open overnight
+ * therefore pushed `expiresAt` out forever: the record stayed resident, `liveSessionIds()` kept
+ * reporting it to the janitor, and its two fetch refs pinned objects against every repack.
+ *
+ * So the TTL measures IDLENESS and this measures AGE, and a session hits whichever comes first.
+ * Losing one is cheap by construction (the header): the model is rebuilt against the shas as they
+ * are now, and the reader's decisions are in the SPA's own store under the pinned key.
+ */
+const MAX_SESSION_LIFETIME_MS = 4 * 60 * 60_000;
+
 /** Push the expiry out. Called on every successful lookup: an open resolver in use is not idle. */
 function touch(rec: ConflictSessionRecord, now: number): void {
-  rec.expiresAt = now + config.conflictSessionTtlMs;
+  rec.expiresAt = Math.min(
+    now + config.conflictSessionTtlMs,
+    rec.createdAt + MAX_SESSION_LIFETIME_MS,
+  );
+}
+
+/* ═════════════════════ how many jobs may run ═════════════════════ */
+
+/**
+ * ⚠ TWO CAPS, BECAUSE THEY ANSWER TWO DIFFERENT QUESTIONS — and they refuse in two different
+ * sentences, because they are two different facts about the world.
+ *
+ *   PER ACCOUNT — one at a time. A resolver is a clone, two fetches and a merge-tree; a person
+ *   resolves one pull request at a time, and a second one from the same account is a second tab
+ *   or a second click, not a second job. The reader is told about THEIR OWN work: "you're already
+ *   resolving one".
+ *
+ *   GLOBAL — the machine's ceiling. It protects disk and CPU, and it is the ONLY thing the
+ *   per-account cap cannot bound once there are many accounts.
+ *
+ * ⚠ A TENANT IS NEVER TOLD ABOUT ANOTHER TENANT'S LOAD. The global refusal says the service is
+ * busy and stops; it names no count, no account and no pull request. The predecessor was a single
+ * process-global cap of 2 whose own comment reasoned from "the LOCAL mode's single account", so
+ * in cloud one tenant opening two resolvers told every other tenant that two pull requests were
+ * already being prepared — false about their work, and a disclosure about somebody else's.
+ */
+const MAX_JOBS_PER_ACCOUNT = 1;
+const MAX_CONCURRENT_JOBS = 4;
+
+/**
+ * ⚠ AND TWO MORE CAPS ON THE RECORDS THEMSELVES, WHICH ARE NOT THE SAME THING AS THE JOB CAPS
+ * ABOVE. A job ends in seconds; the RECORD it leaves behind holds a whole `ConflictModel` — the
+ * base/ours/theirs text of every region, up to `config.conflictMaxTotalBytes` (8 MiB) of it — and
+ * lives until the TTL or the lifetime ceiling reaps it. `MAX_JOBS_PER_ACCOUNT` serialises the
+ * builds and refuses NONE of them, so one account scripting an open per conflicted pull request
+ * retained one model per PR: hundreds of megabytes of string data in a process every other tenant
+ * shares, bounded by nothing. This is the bound.
+ *
+ * The arithmetic is deliberately conservative and the worst case is the one to read: 24 × 8 MiB.
+ * Real models are orders of magnitude smaller (a conflict is a few hunks of a few files), so the
+ * ceiling is reached by an adversary long before it is reached by readers.
+ *
+ * ⚠ EVICTION, NOT REFUSAL, AND ONLY OF A SETTLED RECORD. A running job owns its record (the same
+ * rule `sweep` follows). What an evicted reader loses is what a restart loses — the model, never
+ * the decisions — so refusing the open instead would protect nothing and block the work.
+ */
+const MAX_SESSIONS_PER_ACCOUNT = 3;
+const MAX_TOTAL_SESSIONS = 24;
+
+/** Running jobs, split into this account's and everyone's, in ONE pass over the map. */
+function jobCounts(accountId: number): { mine: number; total: number } {
+  let mine = 0;
+  let total = 0;
+  for (const rec of sessions.values()) {
+    if (!rec.openRunning && !rec.commitRunning) continue;
+    total += 1;
+    if (rec.accountId === accountId) mine += 1;
+  }
+  return { mine, total };
 }
 
 /**
- * How many git jobs are running across the whole process.
+ * Make room for one more record: drop a SETTLED session — unwatched before watched, and within
+ * each the one read longest ago — from this account's own share first and then the process's,
+ * until both ceilings have room.
  *
- * ⚠ A GLOBAL CAP, not a per-account one. This is the LOCAL mode's single account; the thing
- * being protected is the machine — each job is a clone, two fetches and a merge-tree.
+ * ⚠ SYNCHRONOUS, like everything else in the claim window. `expiresAt` is the touch order (every
+ * touch sets it from the same TTL), so the smallest is the one read longest ago.
  */
-const MAX_CONCURRENT_JOBS = 2;
+function evictForNewSession(accountId: number): void {
+  // ⚠ AN UNWATCHED RECORD GOES FIRST. A live subscriber is a tab with the overlay open on
+  // screen; an abandoned one is exactly what this cap exists to collect. Both are survivable
+  // (the client falls through to the poll, gets "no longer open" and offers Start again), but
+  // one of them interrupts somebody mid-resolution and the other does not.
+  const rank = (rec: ConflictSessionRecord): [number, number] => [
+    rec.subscribers.size > 0 ? 1 : 0,
+    rec.expiresAt,
+  ];
+  const evictOldest = (of: readonly ConflictSessionRecord[]): boolean => {
+    let oldest: ConflictSessionRecord | null = null;
+    for (const rec of of) {
+      if (rec.openRunning || rec.commitRunning) continue;
+      if (oldest == null) {
+        oldest = rec;
+        continue;
+      }
+      const [w, e] = rank(rec);
+      const [ow, oe] = rank(oldest);
+      if (w < ow || (w === ow && e < oe)) oldest = rec;
+    }
+    if (oldest == null) return false;
+    endStream(oldest);
+    sessions.delete(keyOf(oldest.accountId, oldest.prId));
+    return true;
+  };
+  // This account's share first — a hoarder must never evict somebody else's work to make room
+  // for its own fourth session.
+  for (;;) {
+    const mine = [...sessions.values()].filter((r) => r.accountId === accountId);
+    if (mine.length < MAX_SESSIONS_PER_ACCOUNT) break;
+    if (!evictOldest(mine)) break;
+  }
+  for (;;) {
+    if (sessions.size < MAX_TOTAL_SESSIONS) break;
+    if (!evictOldest([...sessions.values()])) break;
+  }
+}
 
-function runningJobs(): number {
+/**
+ * Why this account may not start a job right now, or null.
+ *
+ * ⚠ CALLED INSIDE THE SYNCHRONOUS CLAIM WINDOW and it must stay synchronous: an `await` between
+ * this and the `openRunning = true` / `commitRunning = true` write is the gap in which two
+ * requests both pass the check (the AI in-flight-slot defect, one feature over).
+ */
+function capacityRefusal(accountId: number): 'shutdown' | 'account' | 'capacity' | null {
+  if (shuttingDown) return 'shutdown';
+  const { mine, total } = jobCounts(accountId);
+  if (mine >= MAX_JOBS_PER_ACCOUNT) return 'account';
+  if (total >= MAX_CONCURRENT_JOBS) return 'capacity';
+  return null;
+}
+
+/* ═════════════════════ shutdown ═════════════════════ */
+
+/**
+ * Set by the SIGTERM handler (index.ts). From here on no NEW job may be claimed, while the ones
+ * already running are left alone to finish — a commit mid-push is a `git push` GitHub may
+ * already have accepted, and killing it is how a reader ends up with a landed commit and a
+ * screen that says it failed.
+ *
+ * ⚠ IT DOES NOT PRESERVE SESSIONS, AND MUST NOT GROW INTO SOMETHING THAT DOES. A restart loses
+ * every session, deliberately and correctly (see the header): the model is pinned to
+ * `(headSha, baseSha, modelHash)` and the reader's decisions live in the SPA's own store. What
+ * this buys is the IN-FLIGHT PUSH, nothing else.
+ */
+let shuttingDown = false;
+
+export function beginShutdown(): void {
+  shuttingDown = true;
+}
+
+/** Jobs still running anywhere in the process — the SIGTERM handler's wait condition. */
+export function runningJobCount(): number {
   let n = 0;
   for (const rec of sessions.values()) if (rec.openRunning || rec.commitRunning) n += 1;
   return n;
+}
+
+/**
+ * The session ids the janitor must NOT collect refs for.
+ *
+ * ⚠ LIVE MEANS PRESENT IN THIS MAP, not "running". A settled session sitting at `ready` still
+ * owns `refs/pierre/conflict/<id>/{head,base}`, and its commit re-reads those refs minutes
+ * later — deleting them mid-resolution is how a commit lands against objects that are no longer
+ * reachable.
+ *
+ * ⚠ IT SWEEPS FIRST, AND THAT IS NOT AN OPTIMISATION. Every other sweep is request-driven
+ * (claim/peek/get/drop), and the case the janitor exists for — a reader who opens the resolver
+ * and closes the TAB, so the deferred DELETE never lands — is by definition the case where no
+ * further request arrives. Without this the expired record sat in the map, reported itself live
+ * on every tick, and its two refs were counted in `refsKept` and kept forever: the janitor
+ * scanned, repacked, and collected exactly the leak it was written to collect.
+ */
+export function liveSessionIds(now: number = Date.now()): Set<string> {
+  sweep(now);
+  const ids = new Set<string>();
+  for (const rec of sessions.values()) ids.add(rec.sessionId);
+  return ids;
 }
 
 export type ClaimResult =
@@ -125,8 +297,12 @@ export type ClaimResult =
   | { kind: 'created'; session: ConflictSessionRecord }
   /** The live session for this PR, untouched — re-attach, do not build again. */
   | { kind: 'reused'; session: ConflictSessionRecord }
-  /** A job already holds this PR (or the machine). Nothing was claimed. */
-  | { kind: 'busy'; session: ConflictSessionRecord | null; reason: 'pr' | 'capacity' };
+  /** Nothing was claimed. `reason` picks the sentence, and the four are not interchangeable. */
+  | {
+      kind: 'busy';
+      session: ConflictSessionRecord | null;
+      reason: 'pr' | 'account' | 'capacity' | 'shutdown';
+    };
 
 /**
  * Claim the open slot for one PR.
@@ -167,9 +343,10 @@ export function claimSession(
     endStream(live);
     sessions.delete(key);
   }
-  if (runningJobs() >= MAX_CONCURRENT_JOBS) {
-    return { kind: 'busy', session: null, reason: 'capacity' };
-  }
+  const refusal = capacityRefusal(accountId);
+  if (refusal) return { kind: 'busy', session: null, reason: refusal };
+  // AFTER the refusal, so a claim that is going to be refused never costs somebody their model.
+  evictForNewSession(accountId);
 
   const rec: ConflictSessionRecord = {
     sessionId: randomUUID(),
@@ -183,6 +360,7 @@ export function claimSession(
     modelHash: '',
     commit: null,
     suggestions: new Map(),
+    createdAt: now,
     expiresAt: now + config.conflictSessionTtlMs,
     openRunning: true,
     commitRunning: false,
@@ -249,9 +427,14 @@ export function dropSession(
 export function claimCommitSlot(
   rec: ConflictSessionRecord,
   now: number = Date.now(),
-): { ok: true; signal: AbortSignal } | { ok: false; reason: 'pr' | 'capacity' } {
+):
+  | { ok: true; signal: AbortSignal }
+  | { ok: false; reason: 'pr' | 'account' | 'capacity' | 'shutdown' } {
   if (rec.openRunning || rec.commitRunning) return { ok: false, reason: 'pr' };
-  if (runningJobs() >= MAX_CONCURRENT_JOBS) return { ok: false, reason: 'capacity' };
+  // `rec` holds no job (the line above proved it), so it contributes nothing to either count
+  // and needs no exclusion.
+  const refusal = capacityRefusal(rec.accountId);
+  if (refusal) return { ok: false, reason: refusal };
   const ac = new AbortController();
   rec.commitRunning = true;
   rec.commitAbort = ac;
@@ -432,8 +615,12 @@ export function sessionView(rec: ConflictSessionRecord): ConflictSession {
 export const __testing = {
   sessions,
   MAX_CONCURRENT_JOBS,
+  MAX_JOBS_PER_ACCOUNT,
+  MAX_SESSIONS_PER_ACCOUNT,
+  MAX_TOTAL_SESSIONS,
   reset: (): void => {
     for (const rec of sessions.values()) rec.subscribers.clear();
     sessions.clear();
+    shuttingDown = false;
   },
 };

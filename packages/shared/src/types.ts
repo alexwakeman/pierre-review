@@ -7167,8 +7167,8 @@ export interface UpdateBranchCard extends InsightCardBase, InsightPrRef {
 }
 
 /** GitHub cannot merge this pull request: it conflicts with its base branch. The card carries the
- *  in-app resolver's entry button (CORE / free, LOCAL ONLY — the routes are not registered in
- *  cloud) and a link out to GitHub; it never carries a Merge, because GitHub 405s a merge on a
+ *  in-app resolver's entry button (CORE / free, BOTH MODES — the routes are registered
+ *  unconditionally) and a link out to GitHub; it never carries a Merge, because GitHub 405s a merge on a
  *  conflicting branch and "Update branch" cannot resolve a conflict.
  *
  *  ⚠ THE POPULATION IS "REPOS YOU CAN PUSH TO", AND THAT IS THE WHOLE CARD. Measured: 474 open

@@ -230,6 +230,40 @@ export const AUTO_MERGE_DISARMED = 'Merge when ready was disarmed. Arm it again 
  *  failure and must NEVER offer a retry — a retry double-pushes. */
 export const NOT_YET_VISIBLE = 'It’ll show up here shortly.';
 
+/** The server no longer has this session and nothing had been pushed yet. Safe to start again —
+ *  and this is the only lost-session case where offering that is safe.
+ *
+ *  ⚠ IT STATES THE FACT AND STOPS; THE BUTTON CARRIES THE ACTION. It used to end "Start again."
+ *  beside a control labelled "Try again" — two verbs for one button. The control is now labelled
+ *  with `START_AGAIN` and the sentence says only what happened. */
+export const SESSION_GONE = 'This session is no longer open.';
+
+/**
+ * The commit's outcome after this browser lost the session: the server took it and answered 202,
+ * then the stream was cut and the manifest poll came back "no longer open".
+ *
+ * ⚠ IT MUST NOT SAY IT FAILED AND MUST NOT OFFER A RETRY. A retry is a SECOND PUSH.
+ *
+ * ⚠ IT MUST NOT PROMISE THE PUSH LANDED EITHER, WHICH IS NOT THE SAME RULE. It used to borrow
+ * `NOT_YET_VISIBLE`'s "it'll show up here shortly" — a sentence that is honest ONLY where GitHub
+ * has already 201'd and local visibility is the sole doubt. Here the 202 is all we have: the land
+ * path may have refused (a head that moved under it), or the process may have died mid-push. So
+ * it names where the answer is — the pull request — and asserts nothing about what the answer is.
+ */
+export const COMMIT_UNCONFIRMED =
+  'Your resolution was sent, but this session ended before the result came back. Check the pull request on GitHub.';
+
+/**
+ * The SAME contract, one cause over: the server took the commit and answered 202, and then this
+ * browser lost the session — the stream was cut and the manifest poll came back "no longer open".
+ * The push may well have landed on GitHub; we simply cannot see the answer from here.
+ *
+ * ⚠ IT MUST NOT SAY IT FAILED AND MUST NOT OFFER A RETRY. A retry is a SECOND PUSH. The only
+ * honest thing left to do is name where the answer is, which is the pull request itself.
+ */
+export const COMMIT_UNCONFIRMED =
+  'Your resolution was sent. Check the pull request on GitHub — it’ll show up here shortly.';
+
 export const NOTHING_PUSHED = 'Nothing was pushed.';
 export const START_AGAIN = 'Start again';
 export const CLOSE_RESOLVER = 'Close';

@@ -637,14 +637,18 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   once per TURN, not per lifetime** — a landing clears its repo-siblings' marks, or a batch
   strands itself at "behind" until the 72h expiry.
 - **Conflicts are RESOLVED IN THE APP now** (`src/conflict/`, `components/conflicts/`) — CORE/free
-  and **LOCAL ONLY** (`app.ts` registers the six routes on `!config.isCloud`, and
-  `MeResponse.conflictResolver` is the SPA's gate; there is no `CONFLICT_RESOLVER_ENABLED` and no
+  and **IN BOTH MODES** (`app.ts` registers the six routes unconditionally and
+  `MeResponse.conflictResolver` is `true` in both; there is no `CONFLICT_RESOLVER_ENABLED` and no
   cloud upsell).
   Three panes, hunk-level accept/ignore, **no free typing anywhere** — `ConflictDecision` is closed,
   there is no `custom` member, and nothing on the wire accepts file content, which is a property of
   the PROTOCOL, not a UI convention. ⚠ **The wand NEVER picks a side** (one-sided, identical, or
-  provably disjoint at word level — nothing else). ⚠ **No worktree at any phase**, nothing stored
-  (no table, no migration), and a session is pinned to `(headSha, baseSha, modelHash)` with
+  provably disjoint at word level — nothing else). ⚠ **No worktree at any phase** and nothing stored in the
+  DB (no table, no migration) — but it DOES keep a shared blobless CLONE CACHE on disk
+  (`config.cloneDir`; the container's ephemeral `/tmp` in cloud), swept by `conflict/janitor.ts`'s
+  own cron. ⚠ **FOUR CAPS, AND THE JOB CAPS ARE NOT THE RECORD CAPS** — 1 build per account / 4 per
+  process, claimed in a SYNCHRONOUS window; 3 retained records per account / 24 per process, freed
+  by EVICTING a settled one. A session is pinned to `(headSha, baseSha, modelHash)` with
   `CONFLICT_MODEL_VERSION` folded into the hash — bump it in the same commit as any fold change, or
   a stale session lands bytes nobody chose. Rebase is single-commit-only and never runs `git rebase`.
   Read [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md) § Resolving conflicts in the app before

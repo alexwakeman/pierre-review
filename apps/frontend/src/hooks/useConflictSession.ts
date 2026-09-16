@@ -11,7 +11,8 @@ import { sseStream } from '../api/sse.js';
 //
 // The overlay mounts, this opens a session, and everything after that arrives on the ONE SSE
 // stream: prepare progress, `ready`, `failed`, and later the commit's own phases. There is no
-// second channel and no poller.
+// second channel — the manifest poll below is the SAME channel after the stream has been cut, not
+// a second one running beside it.
 //
 // ⚠ THE OPEN IS CLICK-GATED BY CONSTRUCTION. This hook runs only inside the overlay, and the
 // overlay mounts only when the reader presses "Resolve conflicts" — `App.tsx` renders it on
@@ -28,6 +29,23 @@ import { sseStream } from '../api/sse.js';
 // ⚠ REGIONS ARRIVE PER FILE. The session payload is a MANIFEST — counts and pins, no regions —
 // and `loadFile` fetches one file's regions on selection. A manifest carrying them inline is
 // multiple megabytes on a thirty-file conflict.
+//
+// ── WHEN THE STREAM DIES ─────────────────────────────────────────────────────────────────────
+//
+// ⚠ A PROXY WILL CUT IT, AND THE SESSION OUTLIVES THE CUT. Railway ends every HTTP request at 15
+// minutes; a resolver session lives 30, pushed out on every touch. So a reader who takes their
+// time gets: the stream cut at minute 15, "Commit" pressed at minute 16, the server answers 202
+// and PUSHES, and not one phase frame comes back. The overlay sat on "Starting…" forever while
+// the commit may well have LANDED — the exact state this repo's `visible` copy contract exists to
+// prevent.
+//
+// So the stream ending is not the end of the session. The manifest GET already returns the whole
+// commit state (`sessionView`'s `commit`), it is a Map lookup on the `read` tier, and reading it
+// `touch()`es the session — so polling it is both the cheapest recovery available and the one that
+// keeps an in-use session alive. No new route, no new field, no wire change.
+//
+// ⚠ IT IS NOT A RECONNECT. Re-running the OPEN would spend another clone; re-subscribing to the
+// stream would be cut again at the same 15 minutes. The poll is the channel from then on.
 
 // ── WHO CLOSES THE SESSION ───────────────────────────────────────────────────────────────────
 //
@@ -79,9 +97,30 @@ function detachSession(prId: number): void {
   ATTACHMENTS.set(prId, rec);
 }
 
+/**
+ * How this session's updates are arriving.
+ *
+ *   `live`    — the SSE stream is open. The normal case.
+ *   `polling` — the stream ended (a proxy's request cap, a dropped socket) and the manifest GET
+ *               is standing in. Everything still works; nothing on screen needs to say so.
+ *   `lost`    — the server no longer has this session, so nothing more will ever be known about
+ *               it HERE. ⚠ That is not the same as the work failing, and the copy must not say it
+ *               is: a commit may have pushed.
+ */
+export type ConflictConnection = 'live' | 'polling' | 'lost';
+
+/** Poll cadences. Fast while something is actually running, slow while the reader reads. */
+const POLL_BUSY_MS = 2_000;
+const POLL_IDLE_MS = 8_000;
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 /** What the overlay renders from. `session` is null until the open route answers. */
 export interface ConflictSessionState {
   session: ConflictSession | null;
+  /** See `ConflictConnection`. The overlay reads it ONLY to pick honest words for a commit whose
+   *  outcome it can no longer learn; nothing else on screen changes. */
+  connection: ConflictConnection;
   /** The open itself was refused — a real status code, not a session `error`. Its message is the
    *  server's own sentence and is rendered verbatim. */
   openError: string | null;
@@ -105,6 +144,7 @@ export interface ConflictSessionState {
 
 export function useConflictSession(prId: number | null): ConflictSessionState {
   const [session, setSession] = useState<ConflictSession | null>(null);
+  const [connection, setConnection] = useState<ConflictConnection>('live');
   const [openError, setOpenError] = useState<string | null>(null);
   const [files, setFiles] = useState<Record<number, ConflictFileContent>>({});
   const [loadingFiles, setLoadingFiles] = useState<ReadonlySet<number>>(() => new Set());
@@ -121,6 +161,7 @@ export function useConflictSession(prId: number | null): ConflictSessionState {
     const ac = new AbortController();
     const attachment = attachSession(prId);
     setSession(null);
+    setConnection('live');
     setOpenError(null);
     filesRef.current = {};
     setFiles({});
@@ -166,9 +207,38 @@ export function useConflictSession(prId: number | null): ConflictSessionState {
           },
         },
       ).catch(() => {
-        /* aborted, or the stream dropped. The session state already on screen stays put — a
-           reconnect that re-opened would spend another clone. */
+        /* the stream dropped, or the overlay closed. Either way the poll below decides — the
+           session state already on screen stays put. */
       });
+
+      // The overlay is gone: nothing to recover for.
+      if (ac.signal.aborted) return;
+      // The stream is over and the reader is still here. See the header: the session outlives it.
+      setConnection('polling');
+      let wait = POLL_BUSY_MS;
+      while (!ac.signal.aborted) {
+        await sleep(wait);
+        if (ac.signal.aborted) return;
+        try {
+          const latest = await api.conflictSession(prId, opened.sessionId);
+          setSession(latest);
+          wait =
+            latest.status === 'preparing' || latest.commit?.status === 'running'
+              ? POLL_BUSY_MS
+              : POLL_IDLE_MS;
+        } catch (e) {
+          // ⚠ ONLY A DEFINITIVE REFUSAL IS TERMINAL — 409 (this session is no longer open), 404
+          // (the pull request is no longer this account's) and 403 (push access is gone). Every
+          // other failure is a blip: offline, a 429, a 502 from the same proxy that cut the
+          // stream. Treating one of those as terminal tells a reader their work is unknowable
+          // because their wifi hiccuped.
+          if (e instanceof ApiError && [409, 404, 403].includes(e.status)) {
+            setConnection('lost');
+            return;
+          }
+          wait = POLL_IDLE_MS;
+        }
+      }
     })();
 
     return () => {
@@ -233,5 +303,15 @@ export function useConflictSession(prId: number | null): ConflictSessionState {
 
   const restart = useCallback(() => setAttempt((a) => a + 1), []);
 
-  return { session, openError, files, loadingFiles, fileErrors, loadFile, retryFile, restart };
+  return {
+    session,
+    connection,
+    openError,
+    files,
+    loadingFiles,
+    fileErrors,
+    loadFile,
+    retryFile,
+    restart,
+  };
 }

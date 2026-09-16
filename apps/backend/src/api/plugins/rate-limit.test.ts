@@ -562,7 +562,7 @@ describe('tierFor — GitHub quota spenders', () => {
   });
 });
 
-// FIVE paths under one prefix with FOUR different costs — the exact shape this file gets wrong
+// SIX paths under one prefix with FOUR different costs — the exact shape this file gets wrong
 // when it guesses, and the reason every line is anchored at BOTH ends. `/conflicts` is a PREFIX
 // of `/conflicts/commit`, so an unanchored match would hand the open, the commit, the file read
 // and the stream one bucket, which is right for exactly one of them — and the one it would be
@@ -590,6 +590,10 @@ describe('tierFor — merge-conflict resolver', () => {
   });
 
   it('leaves the manifest, the stream and the close on read — DECIDED, not inherited', () => {
+    // ⚠ THE MANIFEST IS THE RECOVERY CHANNEL. A proxy cuts the SSE stream at its request cap and
+    // the SPA polls this instead, every 2s while a commit runs. On the 600/min `read` bucket that
+    // is 30 of 600 for one open overlay; on anything tighter a reader's push outcome becomes
+    // unknowable, which is the failure this whole bucket assignment exists to avoid.
     expect(tiers('GET', '/api/prs/12/conflicts')).toEqual(['read']);
     expect(tiers('GET', '/api/prs/12/conflicts/stream')).toEqual(['read']);
     // The DELETE would otherwise match the POST line's path and take the 20/min sync bucket for

@@ -9,6 +9,7 @@ import { AUTO_MERGE_CRON, runAutoMergeTick } from '../merge/auto-merge-runner.js
 import { runMlEnrichmentTick } from './ml-enrichment.js';
 import { MENTION_SCAN_CRON, runMentionScanTick } from './mention-scan.js';
 import { isSeverityApiConfigured } from '../ml/severity-client.js';
+import { runConflictJanitorTick } from '../conflict/janitor.js';
 import type { Logger } from './sync-repo.js';
 
 let task: ScheduledTask | null = null;
@@ -17,6 +18,7 @@ let benchmarkTask: ScheduledTask | null = null;
 let autoMergeTask: ScheduledTask | null = null;
 let mlEnrichmentTask: ScheduledTask | null = null;
 let mentionScanTask: ScheduledTask | null = null;
+let conflictJanitorTask: ScheduledTask | null = null;
 // node-cron handles for plugin-registered background jobs (Slack digest cron, AI update policy).
 let proJobTasks: ScheduledTask[] = [];
 
@@ -114,6 +116,31 @@ export function startScheduler(log: FastifyBaseLogger): void {
     log.info(`mention scan started (cron "${MENTION_SCAN_CRON}")`);
   }
 
+  // The merge-conflict resolver's clone-cache janitor (CORE, free, BOTH modes). Its own tick
+  // because its worklist is the filesystem, not the database: every resolver anyone opens leaves
+  // two fetch refs in the shared clone and only the COMMIT path deletes them, so a reader who
+  // opens the resolver and closes the tab leaks two refs and the objects they pin. The boot sweep
+  // collects them once; this is the same work on a clock, and it is what makes the feature safe to
+  // leave running for weeks. Unconditional — the leak is identical in local mode, where the only
+  // thing that ever collected it was the next restart. Wall-clock bounded, never throws, and
+  // refuses to overlap itself. Rides the same disableScheduler gate as sync.
+  if (cron.validate(config.conflictJanitorCron)) {
+    conflictJanitorTask = cron.schedule(config.conflictJanitorCron, () => {
+      void runConflictJanitorTick(log).then((r) => {
+        if (r.refsDeleted > 0 || r.reposGarbageCollected > 0) {
+          log.info(
+            `clone janitor: dropped ${r.refsDeleted} dead resolver refs and repacked ${r.reposGarbageCollected} of ${r.clonesScanned} clones`,
+          );
+        }
+      });
+    });
+    log.info(`clone janitor started (cron "${config.conflictJanitorCron}")`);
+  } else {
+    log.warn(
+      `invalid CONFLICT_JANITOR_CRON "${config.conflictJanitorCron}"; clone janitor disabled`,
+    );
+  }
+
   // Plugin-registered background jobs (the @pierre/pro Slack digest cron + AI update policy).
   // Registered during bindProPlugin (which runs BEFORE startScheduler), so the registry is
   // populated here. Each rides the same disableScheduler gate as sync/retention and is torn
@@ -147,6 +174,8 @@ export function stopScheduler(): void {
   mlEnrichmentTask = null;
   mentionScanTask?.stop();
   mentionScanTask = null;
+  conflictJanitorTask?.stop();
+  conflictJanitorTask = null;
   for (const t of proJobTasks) t.stop();
   proJobTasks = [];
 }

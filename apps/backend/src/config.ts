@@ -102,6 +102,30 @@ const syncAdaptive = process.env.SYNC_ADAPTIVE
 // against a hand-written relative path is exactly the "TWO SPELLINGS MUST AGREE" hazard, and the
 // failure mode if they ever drifted is silent — a deep link that 404s, or a static root that
 // never registers.
+// ---- Where git clones live ----
+//
+// ⚠ TWO DEFAULTS, ONE CODE PATH. The clone cache is the same shared, LRU-evicted,
+// credential-free cache in both modes (review/clone-manager.ts); only its ROOT differs.
+//
+//   local  — under the user's home, so a clone survives a restart and a cold re-clone of a
+//            large repository (measured 3.6s to 13.7s) is paid once.
+//   cloud  — the container's EPHEMERAL filesystem. Deliberately NOT a mounted volume: a
+//            volume buys only that cold clone, and costs replicas (a Railway volume attaches
+//            to exactly one), downtime on every unattended deploy, and running as root, which
+//            reverses the Dockerfile's drop-root hardening. A clone is a rebuildable cache —
+//            losing one on a redeploy costs seconds, so it is the right thing to lose.
+//
+// CLONE_DIR overrides either. The janitor (conflict/janitor.ts) is what keeps the cloud disk
+// bounded between deploys; nothing here assumes the directory survives one.
+function defaultCloneDir(): string {
+  // ⚠ TWO LEVELS, NOT ONE. `tightenCloneRoot()` chmods the clone root AND ITS PARENT to 0700, so a
+  // bare `/tmp/pierre-clones` would aim that at `/tmp` itself — a chmod this process does not own,
+  // which fails silently and leaves the root un-tightened. `/tmp/pierre-review` is ours, created by
+  // the same `mkdirSync(..., {recursive: true})`, and mirrors the local `~/.pierre-review/clones`.
+  if (isCloud) return '/tmp/pierre-review/clones';
+  return resolve(homedir(), '.pierre-review', 'clones');
+}
+
 export const spaPublicDir = resolve(backendRoot, 'public');
 export const spaLandingDir = resolve(backendRoot, 'public-landing');
 export const serverServesSpa = existsSync(resolve(spaPublicDir, 'index.html'));
@@ -417,12 +441,22 @@ export const config = {
   // `claudeReview` capability (PRO_CLAUDE_REVIEW_ENABLED); the routing thresholds,
   // concurrency + queue caps, and the default-model picker moved to PRO_REVIEW_* env.
   // Partial clones + ephemeral worktrees live here (a user-writable home path,
-  // never the read-only install dir). CLONE_DIR overrides.
-  cloneDir: process.env.CLONE_DIR ?? resolve(homedir(), '.pierre-review', 'clones'),
-  // Soft cap on the clone cache before LRU cleanup evicts idle repos (default 2 GiB).
-  cloneCacheMaxBytes: intFromEnv('CLONE_CACHE_MAX_BYTES', 2 * 1024 * 1024 * 1024),
+  // never the read-only install dir). CLONE_DIR overrides. See `defaultCloneDir`
+  // above for why cloud puts them somewhere else.
+  cloneDir: process.env.CLONE_DIR ?? defaultCloneDir(),
+  // Soft cap on the clone cache before LRU cleanup evicts idle repos.
+  //
+  // 2 GiB locally, where the disk is the developer's own and a clone kept warm saves a cold
+  // re-clone. 1 GiB in cloud: that disk is the container's ephemeral filesystem, shared with
+  // everything else the process writes, and the measured worst case for one clone of a large
+  // repository is 111 MB — so 1 GiB still holds roughly nine of the worst ones at once, and
+  // the janitor evicts by least-recently-used before it is reached.
+  cloneCacheMaxBytes: intFromEnv(
+    'CLONE_CACHE_MAX_BYTES',
+    (isCloud ? 1 : 2) * 1024 * 1024 * 1024,
+  ),
 
-  // ---- Merge conflict resolver (CORE / free, LOCAL ONLY) ----
+  // ---- Merge conflict resolver (CORE / free, BOTH MODES) ----
   // Bounds on ONE resolver session. Every one of these is a REFUSAL boundary, not a
   // truncation: past the cap the file is listed as unsupported with a reason, never
   // silently shortened. A shortened file would commit bytes nobody saw.
@@ -446,6 +480,19 @@ export const config = {
   // non-empty. Without this one crashed run pins a repo in the cache permanently.
   worktreeTtlMs: intFromEnv('WORKTREE_TTL_HOURS', 6) * 3_600_000,
   cloneSweepMaxMs: intFromEnv('CLONE_SWEEP_MAX_MS', 30_000),
+  // ---- The clone-cache janitor (conflict/janitor.ts, scheduled in sync/scheduler.ts) ----
+  // The boot sweep runs ONCE; a long-lived process accumulates a session's two fetch refs per
+  // resolver opened and never closed, and each ref pins objects the repack cannot drop. This is
+  // the same work on a clock. Quarter-hourly is well inside the 30-minute session TTL, so a ref
+  // is collected in the same order of time as the session that made it.
+  conflictJanitorCron: process.env.CONFLICT_JANITOR_CRON ?? '*/15 * * * *',
+  // Loose objects in one clone past which the janitor runs `git gc --prune=now`. Below it, gc
+  // is a ~120ms spawn that repacks nothing. 5,000 is git's own `gc.auto` default.
+  cloneGcLooseObjects: intFromEnv('CLONE_GC_LOOSE_OBJECTS', 5_000),
+  // How long SIGTERM waits for in-flight resolver jobs before closing the server anyway.
+  // Matched to the 120s timeout on a single git subprocess (review/clone-manager.ts), which is
+  // the longest single step a job can be inside.
+  shutdownGraceMs: intFromEnv('SHUTDOWN_GRACE_MS', 120_000),
   // Per-run caps (cost/disk/time runaway guards). The diff is inlined in full, so
   // reviews need far fewer turns than the old default; 30 is still generous.
   reviewMaxTurns: intFromEnv('REVIEW_MAX_TURNS', 30),

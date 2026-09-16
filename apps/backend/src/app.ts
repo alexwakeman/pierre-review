@@ -227,13 +227,19 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(userRoutes);
   await app.register(timelineRoutes);
   await app.register(prRoutes);
-  // Merge-conflict resolver (CORE / free, LOCAL ONLY). Registered ONLY in local mode — the paths
-  // do not exist in cloud, so they fall to the not-found handler exactly like a typo'd URL,
-  // rather than each handler carrying its own refusal. There is no clone directory and no git
-  // guarantee in the cloud image; a per-handler env check would look like a gate and be one
-  // Railway variable away from not being one. There is no CONFLICT_RESOLVER_ENABLED and there
-  // must not be one — `MeResponse.conflictResolver` (`!config.isCloud`) is what the SPA gates on.
-  if (!config.isCloud) await app.register(conflictRoutes);
+  // Merge-conflict resolver (CORE / free, BOTH MODES). Registered UNCONDITIONALLY — it used to be
+  // local-only, on the argument that the cloud image has no clone directory and no git. Both are
+  // now false: the image ships git, and `config.cloneDir` resolves to the container's ephemeral
+  // filesystem in cloud (config.ts `defaultCloneDir`), swept by the same janitor that runs
+  // locally. There is still no CONFLICT_RESOLVER_ENABLED and there must not be one: a per-handler
+  // env check looks like a gate while being one Railway variable away from not being one.
+  //
+  // Nothing about the routes changed for multi-tenancy, because nothing about them was ever
+  // single-tenant: `getPrWriteContext(id, accountId)` answers 404 for another tenant's id and
+  // every git fetch carries the CALLER'S OWN token (review/clone-manager.ts `fetchRefIntoClone`),
+  // so the shared clone cache holds objects, never permission. `conflicts-cloud.test.ts` is the
+  // proof and asserts all three.
+  await app.register(conflictRoutes);
   await app.register(threadRoutes);
   await app.register(meRoutes);
   await app.register(openPrsRoutes);

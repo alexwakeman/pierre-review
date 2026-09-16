@@ -364,10 +364,14 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         return { reviewBudgetUsd: getEffectiveReviewBudget() };
       },
     },
-    // The merge-conflict resolver's per-hunk seam. ⚠ LOCAL ONLY, matching the six core resolver
-    // routes (`app.ts` registers those behind `!config.isCloud`): with no session to address, a
-    // seam in cloud would be a route that can only ever refuse. `undefined` there means the
-    // plugin registers no conflict-assist route at all, which is the same shape as OSS mode.
+    // The merge-conflict resolver's per-hunk seam — still LOCAL ONLY, but ⚠ NO LONGER FOR THE
+    // REASON IT WAS. The original argument was that cloud had no session to address, because the
+    // six core resolver routes were registered behind `!config.isCloud`. They are now registered
+    // UNCONDITIONALLY and cloud sessions are real, so that argument is retired: this is now an
+    // OPEN PRODUCT DECISION about a paid AI route, not a structural impossibility. Enabling it in
+    // cloud means a per-hunk LLM call billed per tenant, so it wants the same deliberate gating
+    // the other advanced-AI surfaces get — decide it there, not by deleting this line.
+    // `undefined` means the plugin registers no conflict-assist route at all, the OSS shape.
     conflicts: config.isCloud ? undefined : makeConflictSeam(),
   };
 

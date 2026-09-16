@@ -227,6 +227,86 @@ AI Fix) off in cloud.
 
 ---
 
+## The in-app conflict resolver on Railway
+
+The merge-conflict resolver (`src/conflict/`, CORE and free) runs in cloud. It is the one feature
+here that **writes to disk and shells out to git**, so it is the one with an operational picture.
+Product detail: [MERGE-CI-TRUNK.md](./MERGE-CI-TRUNK.md) § Resolving conflicts in the app.
+
+**What it puts on disk.** A blobless, checkout-less clone per repository under
+`/tmp/pierre-review/clones/<owner>__<name>`, plus two fetch refs per open session. Measured worst case for
+one clone is **111 MB**; a cold clone is 3.6s (bevy) to 13.7s (golang/go). The cache is capped at
+**1 GiB in cloud** (`CLONE_CACHE_MAX_BYTES`, 2 GiB locally) and evicted least-recently-used.
+
+**It is the container's EPHEMERAL filesystem, and that is a decision, not an oversight.**
+
+> ⚠ **Do not attach a Railway volume for this.** A volume buys exactly one thing — the 3.6–13.7s
+> cold clone after a deploy — and costs three: a Railway volume attaches to **one** replica, so the
+> service can never scale out; it adds downtime to **every** unattended deploy, because the volume
+> must detach before the new container can mount it; and it forces `RAILWAY_RUN_UID=0`, reversing
+> the `Dockerfile`'s deliberate drop-root hardening. A clone is a rebuildable cache. Losing one on a
+> redeploy costs seconds, which makes it exactly the right thing to lose.
+
+This also keeps the janitor honest: its keep-list is **this process's** in-memory session map, which
+is only exact because no other process shares the disk.
+
+**The janitor.** Every opened resolver fetches two refs into the shared clone, and ⚠ **only the
+COMMIT path deletes them** — so a reader who opens the resolver, looks, and closes the tab leaves
+two refs pinning objects. Before this existed the only thing that collected them was a restart, so
+on a long-lived server the disk grew with every session anyone ever opened. `conflict/janitor.ts`
+runs quarter-hourly: per clone, sequentially, under the same per-repo lock a resolver takes, it
+deletes the refs of sessions that no longer exist, runs `git gc --prune=now` past a loose-object
+threshold, then applies the LRU cap. Log line when it does anything: `clone janitor: dropped N dead
+resolver refs …`.
+
+**A tenant's fetch always carries that tenant's own token.** The clone cache is keyed `owner__name`
+and **shared across accounts** — two tenants watching the same repository share one clone — so the
+cache holds OBJECTS, never permission. Nothing credential-shaped ever reaches `.git/config` (the
+clone runs with a process-scoped `-c url.<tokenized>.insteadOf=` and a plain positional URL), and
+every fetch passes the caller's own tokenized URL explicitly (`fetchRefIntoClone`). ⚠ **Under a
+shared cache that property is load-bearing rather than incidental**: a tenant who cannot read a
+private repository cannot fetch from it, whoever else has already cloned it.
+
+**Deploys.**
+
+| Setting | Value | Why |
+|---|---|---|
+| `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` | `150` | The window between SIGTERM and SIGKILL. The app's handler waits up to **120s** for a resolver job to finish before closing, so the platform must be willing to wait at least that long plus the close itself. Below ~130 the drain is cut short and a push can be killed mid-flight. |
+
+The app installs one `SIGTERM` handler: it refuses new resolver claims immediately, waits for
+running jobs to reach zero (or 120s, `SHUTDOWN_GRACE_MS`), then closes Fastify. ⚠ **It exists for
+an in-flight `git push` and nothing else** — a redeploy still loses every resolver session, which is
+correct: the model is pinned to the two SHAs it was built against, and the reader's decisions live
+in their own browser under that pin. What must not happen is a push being killed after GitHub has
+taken the ref, which would leave a reader with a landed commit and a screen that never said so.
+
+> The `Dockerfile`'s `CMD` is `node dist/index.js`, not a package-manager script. That is required
+> for any of this to work: started through `npm`/`pnpm`, the package manager is PID 1, it swallows
+> SIGTERM, and the handler never runs — Railway then reports the drain as a crash.
+
+**The 15-minute request cap.** Railway ends every HTTP request at 15 minutes; a resolver session
+lives 30. The SPA handles this itself — when the event stream is cut it polls the session manifest
+instead (2s while a job runs, 8s otherwise), so a commit taken after minute 15 still reports its
+outcome. Nothing needs configuring; it is recorded here because "the stream just stops" looks like a
+platform fault in the logs and is not one.
+
+**Concurrency.** One running resolver job per ACCOUNT, plus a small global ceiling. A second job
+from the same account is refused with *"You're already resolving another pull request"*; the global
+ceiling is refused with *"The service is busy"* — ⚠ **a tenant is never told about another tenant's
+load**.
+
+**Knobs.**
+
+| Var | Default | Notes |
+|---|---|---|
+| `CLONE_DIR` | `/tmp/pierre-review/clones` (cloud) | Clone cache root. `$HOME/.pierre-review/clones` locally. |
+| `CLONE_CACHE_MAX_BYTES` | 1 GiB (cloud) | LRU cap across all clones. 2 GiB locally. |
+| `CONFLICT_JANITOR_CRON` | `*/15 * * * *` | An invalid value **disables the janitor with a warning** rather than crashing the boot — and a disabled janitor is a disk that grows. |
+| `CONFLICT_SESSION_TTL_MIN` | `30` | Session lifetime, pushed out on every touch. |
+| `SHUTDOWN_GRACE_MS` | `120000` | How long SIGTERM waits for in-flight jobs. Keep it below the platform's draining seconds. |
+
+---
+
 ## Operational notes
 
 - **No SQLite→Postgres data migration.** Cloud starts empty; synced data is

@@ -1847,7 +1847,7 @@ phrase it two ways.
   prose stays ON THE WIRE — it is the fallback for a client that does not know the phase — and is
   simply not drawn beneath its own restatement.
 
-## The merge-conflict resolver (`components/conflicts/`, CORE/free, LOCAL ONLY)
+## The merge-conflict resolver (`components/conflicts/`, CORE/free, BOTH MODES)
 
 The three-pane overlay behind **Resolve conflicts**. What it is, what the wand does and how it
 lands: [docs/MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Resolving conflicts in the app. The SPA

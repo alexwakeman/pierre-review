@@ -21,6 +21,7 @@ import {
   CLOSE_RESOLVER,
   COMMIT_AND_PUSH,
   COMMIT_SENTENCE,
+  COMMIT_UNCONFIRMED,
   HEAD_MOVED,
   HOW_TO_LAND,
   LANDING_BACK,
@@ -66,6 +67,7 @@ export function LandingStep({
   headMoved,
   autoMergeArmed,
   commitError,
+  connectionLost,
   onBack,
   onCommit,
   onRestart,
@@ -82,10 +84,21 @@ export function LandingStep({
    *  rendered verbatim. ⚠ Without this the button sticks: a synchronous refusal never reaches
    *  `session.commit`, so the stream has nothing to say and the progress row would sit there. */
   commitError: string | null;
+  /** The server no longer has this session, so the commit's outcome can no longer be read back.
+   *  ⚠ NOT a failure — see the `running` branch below and `COMMIT_UNCONFIRMED`. */
+  connectionLost: boolean;
   onBack: () => void;
   onCommit: (body: ConflictCommitBody) => void;
   onRestart: () => void;
-  onClose: () => void;
+  /**
+   * ⚠ THE ARGUMENT IS "WAS A COMMIT IN FLIGHT WHEN WE LOST THE SESSION" — NOT "IS THE SESSION
+   * GONE". `true` files the close as `committed`, which SUPPRESSES the reopen toast; that is
+   * right only where the outcome is genuinely unknowable, which is the `running && connectionLost`
+   * branch and nothing else. Every other close from here — the refusal that said "Nothing was
+   * pushed", or simply leaving the landing step — must file as `user`, or the toast offering the
+   * reader their kept decisions back never appears and there is no other route to them.
+   */
+  onClose: (outcomeUnknown: boolean) => void;
 }): JSX.Element {
   const stored = useResolverSession(sessionKey);
   const decisions = stored?.decisions ?? EMPTY_DECISIONS;
@@ -297,7 +310,31 @@ export function LandingStep({
               <div className="flex items-center gap-2">
                 <SecondaryButton onClick={onBack}>{LANDING_BACK}</SecondaryButton>
                 <SecondaryButton onClick={onRestart}>{START_AGAIN}</SecondaryButton>
-                <SecondaryButton onClick={onClose}>{CLOSE_RESOLVER}</SecondaryButton>
+                {/* The server refused and said so: nothing was pushed, so the reopen toast is
+                    true and must still be offered. */}
+                <SecondaryButton onClick={() => onClose(false)}>{CLOSE_RESOLVER}</SecondaryButton>
+              </div>
+            </div>
+          ) : running && connectionLost ? (
+            // ⚠ THE PUSH MAY HAVE LANDED. The route answered 202 and ran; what we lost is the
+            // channel that would have said how it went — the SSE stream cut at the proxy's
+            // fifteen-minute request cap, and the manifest poll behind it came back "no longer
+            // open". So: state that it was sent, name where the answer is, and stop. NO retry
+            // button, on any path from here, because a retry is a SECOND PUSH. Close is the only
+            // control, and it closes as "committed" so the reopen toast cannot say "nothing
+            // pushed".
+            <div className="flex flex-col gap-2">
+              <p
+                className="text-[12px] text-gray-800 dark:text-gray-100"
+                aria-live="polite"
+                role="status"
+              >
+                {COMMIT_UNCONFIRMED}
+              </p>
+              <div className="flex items-center gap-2">
+                {/* THE ONE CLOSE THAT FILES AS "COMMITTED" — a push is in flight on a session we
+                    can no longer read, so "nothing pushed" is the one sentence nobody may say. */}
+                <SecondaryButton onClick={() => onClose(true)}>{CLOSE_RESOLVER}</SecondaryButton>
               </div>
             </div>
           ) : running ? (

@@ -149,7 +149,7 @@ any repo without a merge queue. ⚠ It is SPREAD, never assigned: `queue` is nul
 FAILED, and "we never asked" must not reach the client wearing the same `null` GitHub uses for
 "this base branch requires no review". Absent → the control falls back to the synced row.
 
-### Resolving conflicts in the app (`src/conflict/`, CORE/free, LOCAL ONLY)
+### Resolving conflicts in the app (`src/conflict/`, CORE/free, BOTH MODES)
 
 **This retracts an old claim.** Until this shipped, several places in this repo said some version
 of *"resolving conflicts is a git operation this app does not perform, and GitHub offers no button
@@ -158,13 +158,36 @@ for a conflicting PR, GitHub still 405s a merge on one, "Update branch" still ca
 conflict, and the `conflicts` Pending card still carries **no merge affordance**. The one thing it
 gained is the resolver entry.
 
-**Where it exists.** `!config.isCloud`, full stop. `app.ts` registers `conflictRoutes` only in local
-mode, so in cloud the six paths fall to the not-found handler exactly like a typo'd URL rather than
-each handler carrying its own refusal; `MeResponse.conflictResolver` (`!config.isCloud`, no git
-probe) is what the SPA gates on. ⚠ **There is no `CONFLICT_RESOLVER_ENABLED` and there must not
-be** — a per-handler env check looks like a gate and is one Railway variable away from not being
-one. There is no cloud upsell either: `conflictResolver: false` means the button is absent, and the
-GitHub link-out is exactly what it was.
+**Where it exists: everywhere.** `app.ts` registers `conflictRoutes` unconditionally and
+`MeResponse.conflictResolver` is `true` in both modes. ⚠ **This RETRACTS "LOCAL ONLY"**, which rested
+on two claims that are no longer true — that the cloud image has no git, and that it has no clone
+directory. It ships git, and `config.cloneDir` resolves to the container's ephemeral filesystem in
+cloud (`/tmp/pierre-review/clones`), swept by the same janitor that runs locally. ⚠ **There is still no
+`CONFLICT_RESOLVER_ENABLED` and there must not be** — a per-handler env check looks like a gate and
+is one Railway variable away from not being one. The field stays on the wire as a constant because
+the SPA's entry gate reads it and a field that disappears is a field every caller has to re-learn.
+It is CORE and free in both modes: no `ProGate`, no upsell, no seventh visible-but-locked surface.
+
+**Nothing about the routes changed for multi-tenancy, because nothing about them was ever
+single-tenant.** Ownership is `getPrWriteContext(id, accountId)` on all six (→ 404, so the family is
+not an existence oracle), write permission is re-checked on all six (→ 403), and ⚠ **every git fetch
+goes out under the CALLER'S OWN token**, into a ref namespaced by session id
+(`fetchRefIntoClone`, review/clone-manager.ts). That last property was incidental under one account
+and is now LOAD-BEARING: the clone cache is keyed `owner__name` and shared across tenants, so it
+holds OBJECTS, never permission — a tenant who cannot read a private repository cannot fetch from
+it, whoever else has already cloned it. `conflicts-cloud.test.ts` pins all of it; it used to assert
+the six paths 404 in cloud and was INVERTED rather than deleted, because this is the moment that
+proof has to get stronger.
+
+**Two caps, two sentences, and neither names another tenant.** A resolver job is a clone, two
+fetches and a merge-tree. ONE running job per ACCOUNT ("you're already resolving another pull
+request"), and a small global ceiling on top ("the service is busy") — computed inside the same
+SYNCHRONOUS claim window as the per-PR slot, with ⚠ **no `await` between the check and the write**,
+or two POSTs a tick apart both claim. ⚠ **The two refusals are not one sentence with a variable in
+it.** The predecessor was a single process-global cap of 2 whose own comment reasoned from "the
+LOCAL mode's single account", so in cloud one tenant opening two resolvers told every other tenant
+that *"Two pull requests are already being prepared"* — false about their work, and a disclosure
+about somebody else's.
 
 **The entry is click-gated and fetches nothing.** `ResolveConflictsButton` is the ONE entry, mounted
 on three surfaces (the PR pane's Conflicts row, `MergeControl`'s expanded conflict box, the Pending
@@ -237,18 +260,64 @@ and not for tidiness**: a merge-strategy resolution commit has exactly the two-p
 reader never consented to merge.
 
 **Nothing is stored.** No table, no migration, no journal entry, no `accountScopedTables()` entry,
-nothing in `localStorage`. The server session is a module-level `Map` with a 30-minute TTL; the
+nothing in `localStorage`. The server session is a module-level `Map`, bounded four ways —
+a 30-minute idle TTL, a **4-hour absolute lifetime `touch()` cannot extend**, and retained-record
+caps of **3 per account / 24 per process** (LRU eviction of a SETTLED record, this account's share
+first). ⚠ **The TTL alone bounds nothing**: every manifest read touches, the SPA polls the manifest
+for as long as the overlay is mounted, and each retained record holds a whole `ConflictModel` — up
+to `CONFLICT_MAX_TOTAL_BYTES` (8 MiB) of file text — in a process every tenant shares. The
 client keeps decisions in `store/conflictResolver.ts` under a key pinned to
 `(prId, headSha, baseSha, modelHash)`, so a moved head simply does not find them. ⚠ The reflex in
 this repo is to add a table; here it is wrong — the model is source code, it is pinned to two SHAs,
-and it is worthless the instant either moves.
+and it is worthless the instant either moves. ⚠ **Shipping in cloud does NOT change this.** A
+redeploy loses every session and that is correct, not a gap to close: a row that survived a restart
+would survive into a world where the push it describes may be wrong, and the reader's decisions are
+in the SPA's own store under the pinned key already.
+
+**A cut stream is not a lost session, and that took a fix.** ⚠ **Railway ends every HTTP request at
+15 minutes; a session lives 30.** So a reader who took their time got the SSE stream cut at minute
+15, pressed Commit at minute 16, the route answered 202 and PUSHED, and not one phase frame came
+back — the overlay sat on "Starting…" forever while **the push may well have landed**. The recovery
+channel already existed: the manifest GET returns the whole commit state, is a Map lookup on the
+`read` tier, and `touch()`es the session. So when the stream ends and the overlay is still open the
+SPA POLLS it (2s while a job runs, 8s otherwise) — no new route, no wire change, and ⚠ **not a
+reconnect**: re-running the open would spend another clone and a new stream would be cut at the same
+15 minutes. Only a 409 is terminal; a 502 from the same proxy is a blip. ⚠ **When the session IS
+gone mid-commit the copy follows the `visible` contract to the letter**: it says the resolution was
+sent and names where the answer is, it NEVER says it failed, and it offers **no retry, because a
+retry is a second push**. Closing from that state closes as *committed*, so the reopen toast cannot
+say "nothing pushed".
+
+**A redeploy must not kill a push in flight.** The process's one `SIGTERM` handler (`index.ts`)
+refuses new claims, waits for running jobs to reach zero or 120s (the timeout on a single git
+subprocess), then closes. ⚠ **It exists for the in-flight push and nothing else** — it does not
+preserve sessions and must not grow into something that does. It cannot hang: the drain is bounded,
+and `app.close()` gets its own short deadline because the resolver's SSE sockets are HIJACKED and
+Fastify's close does not force those shut. A second SIGTERM is logged and ignored rather than
+escalating, because escalating would kill the push the handler exists to protect.
+
+**The clones are swept on a clock now.** Every opened resolver fetches two refs into the shared
+clone and ⚠ **only the COMMIT path deletes them** — so a reader who opens the resolver, looks, and
+closes the tab leaves two refs pinning objects, and until now the only thing that collected them was
+the next restart. `conflict/janitor.ts` runs quarter-hourly (`CONFLICT_JANITOR_CRON`, in
+`sync/scheduler.ts` beside `retentionCron`): per clone, SEQUENTIALLY and under the SAME
+`withRepoLock` a resolver takes, it deletes every `refs/pierre/conflict/<id>/…` whose session is not
+in the live map, runs `git gc --prune=now` past a loose-object threshold, then the existing LRU. ⚠
+**It must exclude live sessions** — at boot every conflict ref is an orphan by definition, but a
+running process has sessions sitting at `ready` whose commit re-reads those refs. ⚠ **Do not
+parallelise the loop**: MEASURED, 16 concurrent `git config` calls took 1,779ms against 131ms for
+one. The cloud operational picture — the ephemeral disk, why there is no Railway volume, and the
+drain window — is in [docs/DEPLOY-RAILWAY.md](DEPLOY-RAILWAY.md).
 
 **No worktree, at any phase.** `merge-tree --write-tree` performs a full three-way merge with no
 index and no working tree; the oracle cross-check runs `merge-file` over three loose files in
 `os.tmpdir()`. That makes the resolver immune to the worktree defect classes rather than dependent
 on their fix, and it is why a session costs nothing to hold open. ⚠ **No git 2.40+ flags** either —
 no `merge-tree --merge-base=`, no `-X ours|theirs`, no `merge-file --object-id`; the cloud image is
-on 2.39.5 where all three exit 129, and v1 being local-only must not make a later port a rewrite.
+on 2.39.5 where all three exit 129 — which is now a live constraint rather than a hedge against a
+later port. ⚠ **"No worktree" is about WORKTREES, not clones.** It does clone: `buildConflictModel`
+and the land path both go through the shared `ensureClone`, blobless and checkout-less. Measured
+worst case for one clone is 111 MB; a cold clone is 3.6s (bevy) to 13.7s (golang/go).
 The one floor is 2.38 for `--write-tree`, probed once and refused as `git_too_old` at the open route.
 
 Routes and tiers: [docs/API.md](API.md). The SPA's landmines, the `--mr-*` palette and the two

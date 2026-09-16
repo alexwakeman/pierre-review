@@ -605,7 +605,7 @@ export const api = {
       handle<UpdateBranchResult>(r),
     ),
 
-  // ---- The merge-conflict resolver (CORE / free, LOCAL ONLY) ----
+  // ---- The merge-conflict resolver (CORE / free, BOTH MODES) ----
   //
   // ⚠ THESE ROUTES DO NOT EXIST IN CLOUD. They are registered only when `!config.isCloud`, so a
   // cloud call falls to the not-found handler exactly like a typo'd URL. `MeResponse

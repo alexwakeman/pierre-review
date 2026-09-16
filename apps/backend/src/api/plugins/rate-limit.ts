@@ -613,8 +613,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (mutating && (path === '/api/repos' || /^\/api\/repos\/\d+\/sync$/.test(path))) {
     return [TIERS.sync];
   }
-  // ---- The merge-conflict resolver (LOCAL ONLY; the routes do not exist in cloud) ----
-  // FIVE paths under one prefix with FOUR different costs, which is the exact shape this file
+  // ---- The merge-conflict resolver (CORE / free, BOTH MODES) ----
+  // SIX paths under one prefix with FOUR different costs, which is the exact shape this file
   // gets wrong when it guesses. Each is anchored at BOTH ends: the segment is `conflicts`
   // (PLURAL — `conflict` matches nothing, the `comments`/`/comment` trap one vocabulary over),
   // and `/conflicts` is a PREFIX of `/conflicts/commit`, so an unanchored match would hand the
@@ -632,6 +632,13 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //                             three-pane model of one source file. The bot-benchmark
   //                             argument verbatim, so the same 60/min bucket.
   //   GET  …/conflicts          the manifest: a Map lookup. `read`, RECORDED not inherited.
+  //                             ⚠ IT IS ALSO THE RECOVERY CHANNEL. When a proxy cuts the SSE
+  //                             stream at its request cap, the SPA polls this instead
+  //                             (hooks/useConflictSession.ts), every 2s while a job runs and
+  //                             every 8s otherwise — 30/min worst case against 600, for one
+  //                             overlay a reader has open. Do NOT tighten this bucket to fit the
+  //                             Map lookup it looks like: it is what stops a commit's outcome
+  //                             becoming unknowable.
   //   GET  …/conflicts/stream   an SSE subscribe onto an already-started job — a read.
   //   DELETE …/conflicts        a Map.delete. `read` — DECIDED, not inherited from the POST
   //                             line, which it would otherwise match.
