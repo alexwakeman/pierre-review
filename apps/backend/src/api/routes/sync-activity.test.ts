@@ -4,9 +4,11 @@
 // they track would need live GitHub).
 //
 // The contract under test is what the global loading bar rests on: full-mode walks (running
-// AND queued-for-full) come back with the joined fullName + percent/prsProcessed/paused
-// passthrough; incremental walks NEVER appear (the bar must not flicker on the 5-minute
-// cron); and the repos join IS the tenancy isolation — the progress map is process-wide
+// AND queued-for-full) come back in `backfills` with the joined fullName +
+// percent/prsProcessed/paused passthrough; a ROUTINE incremental walk appears in NEITHER array
+// (the bar must not flicker on the 5-minute cron); the ONE incremental that is reported is a
+// COLD-RETURN CATCH-UP, in its own `catchups` array, and only when its `sinceMs` is more than
+// 24h old; and the repos join IS the tenancy isolation — the progress map is process-wide
 // across tenants in cloud, so a foreign repoId in it must not leak.
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -92,6 +94,7 @@ describe('GET /api/sync-activity', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.backfills).toEqual([]);
+    expect(body.catchups).toEqual([]);
     expect(new Date(body.generatedAt).getTime()).not.toBeNaN();
   });
 
@@ -205,6 +208,169 @@ describe('GET /api/sync-activity', () => {
     const body = (await get()).json();
     expect(body.backfills).toEqual([
       { repoId: ownRepoId, fullName: 'acme/api', percent: 0.7, prsProcessed: 30 },
+    ]);
+  });
+
+  // ── the catch-up half ───────────────────────────────────────────────────────────────────
+  //
+  // `catchups` is the ONE incremental walk the bar reports, and the whole feature rests on the
+  // threshold separating it from a routine tick. That margin is three orders of magnitude, not
+  // a tuned number: a HEALTHY repo's `since` never exceeds ~50 minutes (cold activity bucket
+  // 15 min + the 30-min forced re-walk floor + the 20-min overlap), and a cold return is days.
+  // These pin both ends of it.
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  it('an incremental walk BEHIND BY DAYS lands in `catchups`, carrying its cutoff — never in `backfills`', async () => {
+    const eighteenDaysAgo = Date.now() - 18 * DAY_MS;
+    progress.rows = [
+      {
+        repoId: ownRepoId,
+        progress: {
+          percent: 0.3,
+          prsProcessed: 40,
+          pages: 2,
+          mode: 'incremental',
+          sinceMs: eighteenDaysAgo,
+        },
+      },
+    ];
+    const body = (await get()).json();
+    expect(body.backfills).toEqual([]);
+    expect(body.catchups).toEqual([
+      {
+        repoId: ownRepoId,
+        fullName: 'acme/api',
+        percent: 0.3,
+        prsProcessed: 40,
+        sinceMs: eighteenDaysAgo,
+      },
+    ]);
+    // ⚠ The wire carries a TIMESTAMP, not a pre-computed "18 days": the SPA renders the span at
+    // read time, so a response sitting in cache cannot go on claiming yesterday's number.
+    expect(typeof body.catchups[0].sinceMs).toBe('number');
+  });
+
+  it('a ROUTINE tick appears in NEITHER array — the bar must not flicker on the cron', async () => {
+    // ~50 minutes: the widest a healthy repo's cutoff can be. The bar must stay silent.
+    progress.rows = [
+      {
+        repoId: ownRepoId,
+        progress: {
+          percent: 0.5,
+          prsProcessed: 3,
+          pages: 1,
+          mode: 'incremental',
+          sinceMs: Date.now() - 50 * 60_000,
+        },
+      },
+    ];
+    const body = (await get()).json();
+    expect(body.backfills).toEqual([]);
+    expect(body.catchups).toEqual([]);
+  });
+
+  it('an ABSENT `sinceMs` is "not recorded", never "old" — it cannot invent a catch-up', async () => {
+    // An older server, or a progress row seeded before the field existed. Silence is not
+    // evidence of staleness, and reading it as one would report a permanent catch-up.
+    progress.rows = [
+      {
+        repoId: ownRepoId,
+        progress: { percent: 0.5, prsProcessed: 3, pages: 1, mode: 'incremental' },
+      },
+    ];
+    const body = (await get()).json();
+    expect(body.backfills).toEqual([]);
+    expect(body.catchups).toEqual([]);
+  });
+
+  it('suppresses a zero-progress CATCH-UP retry of an ERRORED repo — the suppression is mode-blind', async () => {
+    // ⚠ The sharper half of the errored-retry rule. `lastIncrementalSyncAt` is stamped only on
+    // a SUCCESSFUL walk, so a repo that fails every attempt ages its own cutoff forever: left
+    // unsuppressed it reports "18 days behind", then 19, on a repo nothing can fetch.
+    await db
+      .insert(schema.syncState)
+      .values({ repoId: ownRepoId, lastSyncStatus: 'error', lastSyncError: 'boom' })
+      .execute();
+    const walk = (extra: Record<string, unknown>) => ({
+      repoId: ownRepoId,
+      progress: {
+        percent: 0,
+        prsProcessed: 0,
+        pages: 0,
+        mode: 'incremental' as const,
+        sinceMs: Date.now() - 18 * DAY_MS,
+        ...extra,
+      },
+    });
+    try {
+      progress.rows = [walk({})];
+      expect((await get()).json().catchups).toEqual([]);
+
+      // An explicit user-queued re-sync still shows — somebody asked for this one.
+      progress.rows = [walk({ paused: { reason: 'queued' } })];
+      expect((await get()).json().catchups).toHaveLength(1);
+
+      // And a retry that IS making progress is real work, not a flapping retry.
+      progress.rows = [walk({ percent: 0.2, prsProcessed: 4 })];
+      expect((await get()).json().catchups).toHaveLength(1);
+    } finally {
+      await db
+        .delete(schema.syncState)
+        .where(eq(schema.syncState.repoId, ownRepoId))
+        .execute();
+    }
+  });
+
+  it("drops ANOTHER TENANT's catch-up — the join is the isolation on this array too", async () => {
+    // The progress map is process-wide across tenants in cloud, so the accountId predicate is
+    // what keeps a neighbour's repo name off this account's loading bar.
+    progress.rows = [
+      {
+        repoId: foreignRepoId,
+        progress: {
+          percent: 0.5,
+          prsProcessed: 9,
+          pages: 2,
+          mode: 'incremental',
+          sinceMs: Date.now() - 18 * DAY_MS,
+        },
+      },
+    ];
+    const body = (await get()).json();
+    expect(body.catchups).toEqual([]);
+    expect(body.backfills).toEqual([]);
+  });
+
+  it('reports a backfill and a catch-up SIDE BY SIDE, each in its own array', async () => {
+    const since = Date.now() - 9 * DAY_MS;
+    progress.rows = [
+      {
+        repoId: ownRepoId,
+        progress: { percent: 0.4, prsProcessed: 12, pages: 3, mode: 'full' },
+      },
+      {
+        repoId: ownSecondRepoId,
+        progress: {
+          percent: 0.6,
+          prsProcessed: 30,
+          pages: 2,
+          mode: 'incremental',
+          sinceMs: since,
+        },
+      },
+    ];
+    const body = (await get()).json();
+    expect(body.backfills).toEqual([
+      { repoId: ownRepoId, fullName: 'acme/api', percent: 0.4, prsProcessed: 12 },
+    ]);
+    expect(body.catchups).toEqual([
+      {
+        repoId: ownSecondRepoId,
+        fullName: 'acme/web',
+        percent: 0.6,
+        prsProcessed: 30,
+        sinceMs: since,
+      },
     ]);
   });
 });

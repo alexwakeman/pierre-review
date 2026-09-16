@@ -30,7 +30,7 @@ import { useDetectedReviewers, useSetWorkspaceReviewer } from '../../hooks/useBo
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
-import { useUsers } from '../../hooks/useTimeline.js';
+import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useFilters, type FeedBotLens } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
@@ -49,6 +49,7 @@ import {
   userLabel,
 } from '../../lib/ui.js';
 import { nearestScrollParent } from '../../lib/scrollParent.js';
+import { formatBehind } from '../GlobalLoadingBar.js';
 import { Avatar } from '../CommentCard.js';
 import { CommentAnnotations, ReviewCheckButton } from '../CommentAnnotations.js';
 import {
@@ -236,6 +237,22 @@ const BOT_STATE_ORDER: DerivedState[] = [
   'resolved',
 ];
 
+// When an empty feed is worth pairing with the age of the data. Same 24h the server uses to
+// call a walk a catch-up (CATCHUP_MIN_AGE_MS in api/routes/repos.ts).
+//
+// ⚠ IT DOES NOT MEAN STALENESS EXPLAINS THE EMPTY LIST, AND THE SENTENCE MUST NOT SAY IT DOES.
+// A day is two orders of magnitude inside a 14-day window: data 30 hours old still covers
+// 12.7 of those days, so a quiet fortnight is genuinely "nothing happened" and a reader sent
+// looking for a sync failure finds none. So the notice STATES BOTH FACTS — the list is empty,
+// the data is this old — and lets the reader draw the conclusion. Its predecessor asserted the
+// cause with an em-dash, and at 25 hours the arithmetic did not support it.
+const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+
+// The cross-repo feed's server window (FEED_WINDOW_DAYS, db/queries.ts). The Bots pane's
+// bot-only feed overrides it with the analytics window selector — see `botWindowDays` below,
+// which is what the sentence must print, because that selector is on the same screen.
+const FEED_WINDOW_DAYS = 14;
+
 export function FeedView({
   repoId,
   botsMode = false,
@@ -372,6 +389,63 @@ export function FeedView({
   // `repoId` prop above IS that narrowing, and it comes with an obvious, reversible control.
   const effectiveRepoIds = repoId != null ? [repoId] : null;
 
+  // ---- "Why is this feed empty?" — the staleness fact -----------------------------------
+  // The feed covers a rolling window, so being away longer than that empties it completely,
+  // and "Nothing to show yet" alone then leaves out the fact that explains it: there is plenty
+  // to show, it just hasn't been fetched. This is the newest successful walk across the repos
+  // in scope; the empty branch below prints it beside the empty-list sentence.
+  //
+  // `useRepos()` is already polled every 30s by SyncStatus, so reading it here is free. On
+  // `lastIncrementalSyncAt`: a full walk stamps it too (sync-repo.ts), so it means "last
+  // successful walk of any kind", and it is written ONLY on success — a repo whose walks keep
+  // failing keeps an ever-older value, which is exactly the truth this sentence reports.
+  const { data: reposData } = useRepos();
+  const lastSyncedMs = useMemo(() => {
+    if (!reposData || workspaceId == null) return null;
+    let newest: number | null = null;
+    for (const r of reposData) {
+      // Scope to what the feed is actually showing: one rail repo, else the whole workspace.
+      if (repoId != null ? r.id !== repoId : r.workspaceId !== workspaceId) continue;
+      if (!r.lastIncrementalSyncAt) continue; // never synced — no claim to make
+      const t = new Date(r.lastIncrementalSyncAt).getTime();
+      if (Number.isNaN(t)) continue;
+      if (newest == null || t > newest) newest = t;
+    }
+    return newest;
+  }, [reposData, workspaceId, repoId]);
+  // Bots pane: the feed window follows the analytics window selector (shared store field),
+  // using the SAME window→days mapping as getBotAnalytics (rolling_7=7, rolling_30=30, else —
+  // incl. sprint — 14). Null outside botsMode so normal feeds keep their default window.
+  // ⚠ READ BEFORE THE STALENESS SENTENCE BELOW, WHICH HAS TO PRINT THIS NUMBER. The sentence
+  // used to say "14 days" whatever the selector beside it said; on "Last 30 days" both numbers
+  // were on screen and the one the app printed was the false one.
+  const botAnalyticsWindow = useFilters((s) => s.botAnalyticsWindow);
+  const botWindowDays = botsMode
+    ? botAnalyticsWindow === 'rolling_7'
+      ? 7
+      : botAnalyticsWindow === 'rolling_30'
+        ? 30
+        : 14
+    : null;
+
+  // Computed at render from the timestamp, never stored: a cached "18 days" would go stale in
+  // place. ⚠ It states two facts a reader can check — the list is empty over THIS feed's own
+  // window, and the data is this old — AND STOPS. It claims no cause (staleness need not be the
+  // reason) and promises no catch-up: whether work is running is the corner toast's sentence,
+  // and a repo with a dead token would make the promise false.
+  // ⚠ SILENT UNDER SINGLE-PR ISOLATION: that feed has NO window at all (the server scopes to
+  // the PR and reads from the epoch), so any window sentence there would be invented.
+  const feedWindowDays = botWindowDays ?? FEED_WINDOW_DAYS;
+  const staleMs = lastSyncedMs != null ? Date.now() - lastSyncedMs : null;
+  const staleNotice =
+    feedIsolatedPrId == null && staleMs != null && staleMs > STALE_AFTER_MS
+      ? `${
+          botsMode
+            ? `No bot activity in the last ${feedWindowDays} days`
+            : `Nothing in the last ${feedWindowDays} days`
+        }. Last synced ${formatBehind(staleMs)} ago.`
+      : null;
+
   // Single-PR isolation applies to BOTH the cross-repo feed (the repo-grouped "open PRs"
   // panel) and a per-repo console (its RepoOpenPrList rows) — clicking a PR in either filters
   // the feed to that PR. `setActivityRepo` clears it when switching rails, so it never leaks
@@ -415,18 +489,6 @@ export function FeedView({
       markFeedSeen.mutate();
     }
   }, [isCrossRepoFeed, markFeedSeen]);
-
-  // Bots pane: the feed window follows the analytics window selector (shared store field),
-  // using the SAME window→days mapping as getBotAnalytics (rolling_7=7, rolling_30=30, else —
-  // incl. sprint — 14). Null outside botsMode so normal feeds keep their default window.
-  const botAnalyticsWindow = useFilters((s) => s.botAnalyticsWindow);
-  const botWindowDays = botsMode
-    ? botAnalyticsWindow === 'rolling_7'
-      ? 7
-      : botAnalyticsWindow === 'rolling_30'
-        ? 30
-        : 14
-    : null;
 
   // Per-contributor exemption: a BOT contributor's own activity tab must not be emptied by
   // the hidden-by-default lens, so when EVERY viewed actor is a bot under the union
@@ -1714,11 +1776,30 @@ export function FeedView({
       </div>
 
       {items.length === 0 ? (
-        <div className="flex h-32 items-center justify-center text-sm text-gray-400">
-          {botsMode
-            ? 'No bot activity yet — automated-reviewer activity across your repos will appear here.'
-            : 'Nothing to show yet — activity across your repos will appear here.'}
-        </div>
+        // THREE WAYS TO BE EMPTY, AND THEY ARE NOT THE SAME CLAIM.
+        //  1. No workspace resolved yet — nothing workspace-scoped may render at all.
+        //  2. The first page is still in flight — a skeleton, not a verdict.
+        //  3. Nothing in the window — said plainly, and when the last successful walk is more
+        //     than a day old the age of the data is stated beside it rather than instead of it.
+        //     That was the blank screen on a cold return: a 14-day window with 18-day-old data.
+        workspaceId == null || isLoading ? (
+          <div
+            role="status"
+            aria-label="Loading activity"
+            className="flex h-32 flex-col justify-center gap-2 px-1"
+          >
+            <div className="h-3 w-1/3 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+            <div className="h-3 w-2/3 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+            <div className="h-3 w-1/2 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+          </div>
+        ) : (
+          <div className="flex h-32 items-center justify-center px-4 text-center text-sm text-gray-400">
+            {staleNotice ??
+              (botsMode
+                ? 'No bot activity yet — automated-reviewer activity across your repos will appear here.'
+                : 'Nothing to show yet — activity across your repos will appear here.')}
+          </div>
+        )
       ) : visible.length === 0 && isPlaceholderData ? (
         // Placeholder pages belong to the PREVIOUS query key. The one transition where that
         // matters here: lens hide→only re-keys the query (excludeBots leaves the search), and

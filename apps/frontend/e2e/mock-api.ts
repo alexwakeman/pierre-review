@@ -251,7 +251,7 @@ const DETECTED_REVIEWERS: DetectedReviewersResponse = {
 // the global loading bar's full-mode walk feed. Every spec in this suite pays for all three, and
 // ⚠ NONE of them may fall through to the catch-all `{}`: each consumer reads a field off the
 // response that an empty object does not have — `counts.myTurnPersonal`, `requests.some`,
-// `backfills.length` — and two of those live in a `refetchInterval`, which runs inside React's
+// `backfills.length`/`catchups.length` — and two of those live in a `refetchInterval`, which runs inside React's
 // passive-effect commit. With no error boundary in the SPA the throw unmounts the WHOLE tree, so
 // the symptom is not an error message: the Activity overlay paints, then the page goes blank a
 // beat later and every locator times out.
@@ -273,7 +273,13 @@ const DAILY_BRIEF: DailyBriefResponse = {
 };
 
 const ARMED_MERGES: ArmedMergeListResponse = { requests: [] };
-const SYNC_ACTIVITY: SyncActivityResponse = { backfills: [], generatedAt: iso(0) };
+// ⚠ BOTH ARRAYS, ALWAYS. GlobalLoadingBar reads `backfills.length` AND `catchups.length` (and
+// spreads both), and it polls on a `refetchInterval` — see the blank-page note above.
+const SYNC_ACTIVITY: SyncActivityResponse = {
+  backfills: [],
+  catchups: [],
+  generatedAt: iso(0),
+};
 
 function myTurnPr(id: number): MyTurnPr {
   const p = PRS.find((x) => x.id === id)!;

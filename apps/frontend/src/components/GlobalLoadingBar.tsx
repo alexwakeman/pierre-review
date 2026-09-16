@@ -1,12 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
-import type { SyncActivityRepo } from '@pierre-review/shared';
+import type { SyncActivityRepo, SyncCatchupRepo } from '@pierre-review/shared';
 import { isMlScoring, useMlEnrichmentStatus } from '../hooks/useMlLabels.js';
 import { useSyncActivity } from '../hooks/useSyncActivity.js';
 
 // The global ambient loading bar — fixed bottom-right, YELLOW, non-dismissible, visible
 // whenever heavy background work is running: any FULL-MODE sync walk (first-sync
-// backfill / deep re-sync / queued-for-full, via GET /api/sync-activity) or the ML
-// bot-comment scoring pass that follows a walk (via the shared ['ml-status'] poll).
+// backfill / deep re-sync / queued-for-full, via GET /api/sync-activity), a CATCH-UP walk
+// (the same endpoint's `catchups`: an established repo more than 24h behind, which is what a
+// cold return looks like), or the ML bot-comment scoring pass that follows a walk (via the
+// shared ['ml-status'] poll).
+//
+// THE TWO WALK LINES SAY DIFFERENT THINGS AND EACH KEEPS ITS OWN VERB. "Backfilling" is a
+// repo's first 90 days; "Catching up" is a repo whose board is simply behind. They share the
+// bar's percent — it is one blended estimate of everything in flight — but never the sentence.
+// ⚠ The catch-up line leads with a SPAN, not a percent: scheduler passes overlap (nothing
+// guards `syncAllRepos` against its own next tick), so the set of walking repos GROWS during a
+// catch-up and any mean percent honestly dips as repos join at 0%. A repo count appears only
+// when there is more than one, and then the span says "oldest" — it is a maximum, and a
+// maximum printed beside a count reads as a claim about every repo in it. The Feed's own
+// staleness sentence is what a returning user reads for "why is this empty"; this card only
+// says work is happening.
 //
 // Why it exists: a user added redis/go-redis; the walk finished fine and then ~733 bot
 // comments (~735k chars) ground the CPU-bound ONNX classifier for minutes with no
@@ -126,9 +139,47 @@ export function formatEta(seconds: number): string {
   return `~${Math.round(seconds / 3600)} hr left`;
 }
 
-/** Mean walk progress across the full-mode rows, 0..100. Queued rows carry percent 0
+/** Either walk row the endpoint reports — both carry the percent/paused fields this file's
+ * progress math reads, and nothing here cares which population a row came from. */
+export type WalkRow = SyncActivityRepo | SyncCatchupRepo;
+
+/** How far behind a catch-up is, in words: "30 hours", "18 days". Takes a SPAN in ms,
+ * computed at render from the wire's `sinceMs` TIMESTAMP — a pre-formatted age would go
+ * stale sitting in the query cache. */
+export function formatBehind(ms: number): string {
+  const hours = Math.max(1, Math.round(ms / 3_600_000));
+  if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'}`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'}`;
+}
+
+/**
+ * The catch-up line, or null when there is no catch-up at all.
+ *
+ * ⚠ TWO POPULATIONS IN ONE ARRAY, AND ONLY ONE OF THEM IS HAPPENING. A repo the API queue has
+ * seeded rides `paused: { reason: 'queued' }` with a real `sinceMs`, so it arrives in `catchups`
+ * while nothing is being fetched for it — exactly the split the backfill line makes, and for the
+ * same reason.
+ *
+ * ⚠ THE SPAN IS A MAXIMUM, SO A COUNT BESIDE IT HAS TO NAME THE REDUCTION. One repo 18 days
+ * behind and two 26 hours behind is not "3 repos · 18 days behind"; a reader takes that as a
+ * claim about all three. With a single repo the count carries nothing and the span is exact, so
+ * the sentence drops the count entirely.
+ */
+export function catchupLine(rows: readonly SyncCatchupRepo[], now: number): string | null {
+  if (rows.length === 0) return null;
+  const walking = rows.filter((c) => c.paused == null);
+  const queued = rows.length - walking.length;
+  const waiting = queued > 0 ? ` · ${queued} waiting` : '';
+  if (walking.length === 0) return `Catch-up queued · ${queued} waiting`;
+  const behind = formatBehind(now - Math.min(...walking.map((c) => c.sinceMs)));
+  const lead = walking.length > 1 ? `${walking.length} repos · oldest ` : '';
+  return `Catching up · ${lead}${behind} behind${waiting}`;
+}
+
+/** Mean walk progress across the rows, 0..100. Queued rows carry percent 0
  * (the server's contract), so they weigh the mean down honestly. */
-export function meanBackfillPercent(rows: readonly SyncActivityRepo[]): number {
+export function meanBackfillPercent(rows: readonly WalkRow[]): number {
   if (rows.length === 0) return 0;
   const sum = rows.reduce((a, r) => a + Math.min(1, Math.max(0, r.percent)), 0);
   return (sum / rows.length) * 100;
@@ -137,7 +188,7 @@ export function meanBackfillPercent(rows: readonly SyncActivityRepo[]): number {
 /** Summed remaining fraction — the backfill stage's "remaining work" number. Robust to
  * set churn: a finished walk leaves the list at ~1.0 (residual ~0, no jump), a newly
  * queued repo joins at 0 (remaining grows, clamped to a 0-drain sample). */
-export function backfillRemaining(rows: readonly SyncActivityRepo[]): number {
+export function backfillRemaining(rows: readonly WalkRow[]): number {
   return rows.reduce((a, r) => a + (1 - Math.min(1, Math.max(0, r.percent))), 0);
 }
 
@@ -164,10 +215,17 @@ export function GlobalLoadingBar(): JSX.Element | null {
   const scoring = isMlScoring(ml);
   const activityQ = useSyncActivity(scoring);
   const backfills = activityQ.data?.backfills ?? [];
+  // Optional-chained for the same reason as `backfills`: a response from a server that
+  // predates the catch-up half simply has no array here.
+  const catchups = activityQ.data?.catchups ?? [];
+  // Every walk in flight, whichever population it came from — this is what the percent, the
+  // ETA and the paused headline are computed over. The per-line counts below stay separate.
+  const walks: WalkRow[] = [...backfills, ...catchups];
   const backfillActive = backfills.length > 0;
-  backfillsActiveRef.current = backfillActive;
+  const walkActive = walks.length > 0;
+  backfillsActiveRef.current = walkActive;
 
-  const active = backfillActive || scoring;
+  const active = walkActive || scoring;
 
   // ---- Burst state. Refs mutated during render — the established pattern for
   // poll-derived accumulators (SyncProgressPanel's peakPendingRef): every input change
@@ -203,18 +261,18 @@ export function GlobalLoadingBar(): JSX.Element | null {
   }
   prevActiveRef.current = active;
 
-  const allBackfillsPaused = backfillActive && backfills.every((b) => b.paused != null);
-  const remaining = backfillRemaining(backfills);
+  const allBackfillsPaused = walkActive && walks.every((b) => b.paused != null);
+  const remaining = backfillRemaining(walks);
   // Rows still listed but every walk at ~100%: the post-walk tails (ML-label purge,
   // CI-history backfill) are running. No drain is left to estimate — a "~5 sec left"
   // countdown here would sit frozen for minutes.
-  const backfillFinishing = backfillActive && remaining <= 0.01;
+  const backfillFinishing = walkActive && remaining <= 0.01;
 
   const stages: Stage[] = [];
   let mlDone = 0;
   let mlTotal = 0;
   if (active) {
-    const stageSet = `${backfillActive ? 'b' : ''}${scoring ? 'm' : ''}`;
+    const stageSet = `${walkActive ? 'b' : ''}${scoring ? 'm' : ''}`;
     let clampReset = false;
     if (stageSet !== stageSetRef.current) {
       stageSetRef.current = stageSet;
@@ -225,7 +283,7 @@ export function GlobalLoadingBar(): JSX.Element | null {
     // the clamp (idempotent across data-less re-renders — same map, no drops).
     const prevPercents = prevRepoPercentsRef.current;
     const nextPercents = new Map<number, number>();
-    for (const b of backfills) {
+    for (const b of walks) {
       const p = Math.min(1, Math.max(0, b.percent));
       const old = prevPercents.get(b.repoId);
       if (old == null || p < old - 0.02) clampReset = true;
@@ -234,7 +292,7 @@ export function GlobalLoadingBar(): JSX.Element | null {
     if (nextPercents.size < prevPercents.size) clampReset = true;
     prevRepoPercentsRef.current = nextPercents;
 
-    if (backfillActive) {
+    if (walkActive) {
       // Sampled on dataUpdatedAt, not wall clock, so a render without fresh data
       // re-anchors instead of sampling. A pause is anchored too: rate-limit minutes must
       // not decay the learned rate into a nonsense post-resume ETA.
@@ -242,7 +300,7 @@ export function GlobalLoadingBar(): JSX.Element | null {
         ? anchorDrain(backfillRateRef.current, remaining, activityQ.dataUpdatedAt)
         : observeDrain(backfillRateRef.current, remaining, activityQ.dataUpdatedAt);
       stages.push({
-        percent: meanBackfillPercent(backfills),
+        percent: meanBackfillPercent(walks),
         etaSeconds:
           allBackfillsPaused || backfillFinishing
             ? null
@@ -305,16 +363,21 @@ export function GlobalLoadingBar(): JSX.Element | null {
   // "Every active stage is paused": ML can't be active-and-paused (isMlScoring excludes
   // pausedUntil), so this reduces to "walks are the only stage and all of them are held".
   const pausedHeadline = active && !scoring && allBackfillsPaused;
-  const rateLimited = backfills.find((b) => b.paused?.reason === 'rate_limit');
+  const rateLimited = walks.find((b) => b.paused?.reason === 'rate_limit');
 
   const queuedCount = backfills.filter((b) => b.paused?.reason === 'queued').length;
   const walkingCount = backfills.length - queuedCount;
   const backfillPercent = Math.round(meanBackfillPercent(backfills));
 
+  // The whole sentence, folded above so it can be tested: which repos are actually being
+  // walked, how far behind the oldest of those is, and how many are only waiting. Computed at
+  // render from the wire's timestamps, never cached — a stored "18 days" goes stale in place.
+  const catchupSentence = catchupLine(catchups, Date.now());
+
   // Backlog with nothing draining it, while the walk keeps the card up: a STATIC note —
   // never an animated bar or a running ETA for work nothing is doing.
   const mlWaiting =
-    backfillActive && !scoring && Boolean(ml?.enabled) && (ml?.pending ?? 0) > 0;
+    walkActive && !scoring && Boolean(ml?.enabled) && (ml?.pending ?? 0) > 0;
 
   return (
     <div
@@ -368,6 +431,11 @@ export function GlobalLoadingBar(): JSX.Element | null {
                 queuedCount > 0 ? ` · ${queuedCount} waiting` : ''
               }`
             : `Backfill queued · ${queuedCount} waiting`}
+        </div>
+      )}
+      {catchupSentence != null && (
+        <div className="mt-0.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+          {catchupSentence}
         </div>
       )}
       {scoring && ml && (

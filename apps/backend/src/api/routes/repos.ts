@@ -8,6 +8,8 @@ import type {
   SuggestedReposResponse,
   SyncActivityRepo,
   SyncActivityResponse,
+  SyncCatchupRepo,
+  SyncProgress,
 } from '@pierre-review/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { db, schema } from '../../db/client.js';
@@ -539,11 +541,23 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // The account's HEAVY sync work only: one row per repo whose CURRENT walk is full-mode —
-  // a first-sync backfill, a forced deep re-sync, or a repo QUEUED for one (its seeded
-  // progress row rides `paused: { reason: 'queued' }` and is included only when the seeded
-  // mode is 'full'). Routine incremental ticks are deliberately EXCLUDED: this feeds the
-  // SPA's global bottom-right loading bar, which must not flicker on every 5-minute cron.
+  // A cold return's catch-up: an incremental walk whose cutoff is older than this is fetching
+  // a delta measured in DAYS, not the ~50 minutes a routine tick covers (cold activity bucket
+  // 15 min + the 30-min forced re-walk floor + the 20-min overlap). Three orders of magnitude
+  // between the two populations, so nothing here needs tuning.
+  const CATCHUP_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+
+  // The account's HEAVY sync work, in TWO disjoint arrays:
+  //  • `backfills` — repos whose CURRENT walk is full-mode: a first-sync backfill, a forced
+  //    deep re-sync, or a repo QUEUED for one (its seeded progress row rides
+  //    `paused: { reason: 'queued' }` and counts only when the seeded mode is 'full').
+  //  • `catchups` — the ONE kind of incremental walk that is reported: one whose `since` is
+  //    more than 24h old, i.e. somebody came back to the app after days away and the board is
+  //    that far behind. Routine incremental ticks stay EXCLUDED: this feeds the SPA's global
+  //    bottom-right loading bar, which must not flicker on every cron tick.
+  // They are separate arrays rather than a flag because they are separate populations and the
+  // bar says a different sentence about each ("Backfilling" is a repo's first 90 days;
+  // "Catching up" is an established repo that is behind).
   //
   // Cost: an in-memory snapshot (`listActiveSyncProgress`) + ONE account-scoped `repos`
   // SELECT. The join is not just for `fullName` — the progress maps are process-wide across
@@ -552,9 +566,19 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
   // DB read + memory, default `read` rate tier.
   app.get('/api/sync-activity', async (req): Promise<SyncActivityResponse> => {
     const accountId = accountIdOf(req);
-    const generatedAt = new Date().toISOString();
-    const full = listActiveSyncProgress().filter((e) => e.progress.mode === 'full');
-    if (full.length === 0) return { backfills: [], generatedAt };
+    const now = Date.now();
+    const generatedAt = new Date(now).toISOString();
+    // Returns the cutoff when this walk is a catch-up, else null — one predicate, used for
+    // both the filter and the row, so a row can never be classified one way and read another.
+    // An absent `sinceMs` is "not recorded", never "old": it must not invent a catch-up.
+    const catchupSinceMs = (p: SyncProgress): number | null =>
+      p.mode === 'incremental' && p.sinceMs != null && now - p.sinceMs > CATCHUP_MIN_AGE_MS
+        ? p.sinceMs
+        : null;
+    const heavy = listActiveSyncProgress().filter(
+      (e) => e.progress.mode === 'full' || catchupSinceMs(e.progress) != null,
+    );
+    if (heavy.length === 0) return { backfills: [], catchups: [], generatedAt };
     const { repos, syncState } = schema;
     const rows = await db
       .select({
@@ -570,7 +594,7 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
           eq(repos.accountId, accountId),
           inArray(
             repos.id,
-            full.map((e) => e.repoId),
+            heavy.map((e) => e.repoId),
           ),
         ),
       )
@@ -580,7 +604,8 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       rows.filter((r) => r.lastSyncStatus === 'error').map((r) => r.id),
     );
     const backfills: SyncActivityRepo[] = [];
-    for (const { repoId, progress } of full) {
+    const catchups: SyncCatchupRepo[] = [];
+    for (const { repoId, progress } of heavy) {
       const fullName = nameById.get(repoId);
       if (fullName === undefined) continue; // not this account's repo (or deleted mid-walk)
       // A permanently failing first backfill (revoked token, SAML-walled org) is retried
@@ -588,6 +613,11 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       // would flash the ambient loading bar on an idle board forever. Suppress the
       // zero-progress retries of a repo already marked errored; a walk that is actually
       // making progress (percent > 0) or an explicit user-queued re-sync still shows.
+      //
+      // ⚠ THIS COVERS CATCH-UPS TOO, AND FOR A SHARPER REASON: a repo whose walk fails every
+      // time never stamps lastIncrementalSyncAt, so its `since` gets older every attempt and
+      // it would read as a catch-up FOREVER — a permanent "18 days behind" on a repo nothing
+      // can fetch. The predicate is mode-blind on purpose; do not narrow it to full-mode.
       if (
         erroredIds.has(repoId) &&
         progress.percent === 0 &&
@@ -595,15 +625,18 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       ) {
         continue;
       }
-      backfills.push({
+      const row = {
         repoId,
         fullName,
         percent: progress.percent,
         prsProcessed: progress.prsProcessed,
         ...(progress.paused ? { paused: progress.paused } : {}),
-      });
+      };
+      const sinceMs = catchupSinceMs(progress);
+      if (sinceMs != null) catchups.push({ ...row, sinceMs });
+      else backfills.push(row);
     }
-    return { backfills, generatedAt };
+    return { backfills, catchups, generatedAt };
   });
 
   // Cancel an in-flight sync. Signals the sync loop to stop, waits for it to

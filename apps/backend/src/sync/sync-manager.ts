@@ -294,7 +294,13 @@ export async function runSyncForRepo(
     return false;
   }
 
-  setSyncProgress(repoId, { percent: 0, prsProcessed: 0, pages: 0, mode: plan.mode });
+  setSyncProgress(repoId, {
+    percent: 0,
+    prsProcessed: 0,
+    pages: 0,
+    mode: plan.mode,
+    sinceMs: plan.since.getTime(),
+  });
   let token: string;
   try {
     token = await getAccessToken(repo.accountId);
@@ -335,7 +341,8 @@ export async function runSyncForRepo(
         mode: plan.mode,
         since: plan.since,
         commitState: true,
-        onProgress: (p) => setSyncProgress(repoId, { ...p, mode: plan.mode }),
+        onProgress: (p) =>
+          setSyncProgress(repoId, { ...p, mode: plan.mode, sinceMs: plan.since.getTime() }),
       });
       return { cancelled: r.cancelled };
     }
@@ -349,7 +356,14 @@ export async function runSyncForRepo(
       since: foregroundSince,
       commitState: false,
       onProgress: (p) =>
-        setSyncProgress(repoId, { ...p, mode: 'full', foregroundComplete: false }),
+        setSyncProgress(repoId, {
+          ...p,
+          mode: 'full',
+          foregroundComplete: false,
+          // Phase 1 walks the FOREGROUND window, not plan.since — `sinceMs` names the cutoff
+          // this percent is measured against, so it must be the same one syncRepo was given.
+          sinceMs: foregroundSince.getTime(),
+        }),
     });
     if (p1.cancelled) return { cancelled: true };
     // Foreground done — flip the flag so the UI drops the user into the recent
@@ -360,6 +374,9 @@ export async function runSyncForRepo(
       pages: p1.pages,
       mode: 'full',
       foregroundComplete: true,
+      // Still the foreground window: this percent is phase 1's completed one. Phase 2's own
+      // first update below re-stamps it with the backfill window.
+      sinceMs: foregroundSince.getTime(),
     });
     const p2 = await syncRepo({
       ...common,
@@ -368,7 +385,12 @@ export async function runSyncForRepo(
       startCursor: p1.endCursor,
       commitState: true,
       onProgress: (p) =>
-        setSyncProgress(repoId, { ...p, mode: 'full', foregroundComplete: true }),
+        setSyncProgress(repoId, {
+          ...p,
+          mode: 'full',
+          foregroundComplete: true,
+          sinceMs: plan.since.getTime(),
+        }),
     });
     return { cancelled: p2.cancelled };
   };
@@ -536,9 +558,12 @@ export async function enqueueSyncForRepo(
       return false;
     }
     repo = row;
-    // Mode is display-only here (the honest waiting row); runSyncForRepo re-plans when the
-    // walk actually starts.
-    const mode = opts.forceFull ? ('full' as const) : (await planSync(repoId)).mode;
+    // The plan is display-only here (the honest waiting row); runSyncForRepo re-plans when
+    // the walk actually starts. `since` rides it so a repo QUEUED for a cold-return catch-up
+    // is reported as one from the moment it is queued, not only once it starts walking.
+    const plan = opts.forceFull
+      ? { mode: 'full' as const, since: new Date(Date.now() - config.backfillDays * DAY_MS) }
+      : await planSync(repoId);
     // A cancel may have raced the awaits above (requestSyncCancel drops queued repos and
     // clears their progress synchronously) — don't resurrect the row it already cleared.
     if (!queuedRepos.has(repoId)) return false;
@@ -546,7 +571,8 @@ export async function enqueueSyncForRepo(
       percent: 0,
       prsProcessed: 0,
       pages: 0,
-      mode,
+      mode: plan.mode,
+      sinceMs: plan.since.getTime(),
       paused: { reason: 'queued' },
     });
   } catch (err) {
@@ -670,7 +696,13 @@ export async function syncAllRepos(log: Logger): Promise<void> {
           continue;
         }
       }
-      setSyncProgress(r.id, { percent: 0, prsProcessed: 0, pages: 0, mode: plan.mode });
+      setSyncProgress(r.id, {
+        percent: 0,
+        prsProcessed: 0,
+        pages: 0,
+        mode: plan.mode,
+        sinceMs: plan.since.getTime(),
+      });
       await syncRepo({
         owner: repo.owner,
         name: repo.name,
@@ -684,7 +716,8 @@ export async function syncAllRepos(log: Logger): Promise<void> {
         commitState: true,
         commitFileConcurrency: config.commitFileConcurrency,
         log,
-        onProgress: (p) => setSyncProgress(r.id, { ...p, mode: plan.mode }),
+        onProgress: (p) =>
+          setSyncProgress(r.id, { ...p, mode: plan.mode, sinceMs: plan.since.getTime() }),
         shouldCancel: () => cancelRequested.has(r.id),
       });
       // Adaptive: reset the re-walk floor now that a full walk has completed.

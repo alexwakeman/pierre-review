@@ -2832,6 +2832,17 @@ export interface SyncProgress {
   // status stays 'running' and the red error path is reserved for unrecoverable
   // failures. Cleared (undefined) the moment the walk is moving again.
   paused?: { reason: 'rate_limit' | 'queued'; resumeAt?: string };
+  // The cutoff this walk is measured against, as a unix-ms TIMESTAMP — the same `since` the
+  // percent above divides by, so a row always reports the window its own percent belongs to
+  // (a two-phase first sync reports the foreground window during phase 1, the backfill window
+  // during phase 2). Absent means "not recorded" (an older row, a caller that never set it) —
+  // never assume a value, and never send a pre-computed age: a cached "18 days" goes stale in
+  // place, a timestamp does not.
+  //
+  // WHY IT IS ON THE WIRE. It is the one fact that separates a routine incremental tick (a
+  // `since` at most ~50 minutes old) from a COLD RETURN (days), which is what
+  // `GET /api/sync-activity` reports as a catch-up.
+  sinceMs?: number;
 }
 
 export interface SyncStatus {
@@ -2843,10 +2854,11 @@ export interface SyncStatus {
   lastSyncError: string | null;
 }
 
-// One row of `GET /api/sync-activity` — the account's HEAVY sync work only (full-mode
-// walks: first-sync backfills, deep re-syncs, and repos queued for one). Routine
-// incremental ticks are deliberately excluded so the global loading bar doesn't
-// flicker every few minutes.
+// One row of the `backfills` half of `GET /api/sync-activity` — full-mode walks only
+// (first-sync backfills, deep re-syncs, and repos queued for one). Routine incremental ticks
+// are deliberately excluded so the global loading bar doesn't flicker every few minutes; the
+// ONE incremental walk that does get reported — a cold return's catch-up — rides the separate
+// `catchups` array below.
 export interface SyncActivityRepo {
   repoId: number;
   fullName: string;
@@ -2856,8 +2868,25 @@ export interface SyncActivityRepo {
   paused?: SyncProgress['paused'];
 }
 
+// One row of the `catchups` half of `GET /api/sync-activity` — an INCREMENTAL walk whose
+// cutoff is more than 24 hours old, i.e. the delta of a cold return rather than the ~50-minute
+// delta of a routine tick. A separate array from `backfills` because they are separate
+// populations and each surface says its own thing: a backfill is a repo's first 90 days, a
+// catch-up is an established repo whose board is simply behind.
+export interface SyncCatchupRepo {
+  repoId: number;
+  fullName: string;
+  /** 0..1 walk progress (SyncProgress.percent); 0 while queued. */
+  percent: number;
+  prsProcessed: number;
+  /** The walk's cutoff, unix ms. How far behind the repo is = now − this. */
+  sinceMs: number;
+  paused?: SyncProgress['paused'];
+}
+
 export interface SyncActivityResponse {
   backfills: SyncActivityRepo[];
+  catchups: SyncCatchupRepo[];
   generatedAt: string;
 }
 
