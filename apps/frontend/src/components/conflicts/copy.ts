@@ -253,17 +253,6 @@ export const SESSION_GONE = 'This session is no longer open.';
 export const COMMIT_UNCONFIRMED =
   'Your resolution was sent, but this session ended before the result came back. Check the pull request on GitHub.';
 
-/**
- * The SAME contract, one cause over: the server took the commit and answered 202, and then this
- * browser lost the session — the stream was cut and the manifest poll came back "no longer open".
- * The push may well have landed on GitHub; we simply cannot see the answer from here.
- *
- * ⚠ IT MUST NOT SAY IT FAILED AND MUST NOT OFFER A RETRY. A retry is a SECOND PUSH. The only
- * honest thing left to do is name where the answer is, which is the pull request itself.
- */
-export const COMMIT_UNCONFIRMED =
-  'Your resolution was sent. Check the pull request on GitHub — it’ll show up here shortly.';
-
 export const NOTHING_PUSHED = 'Nothing was pushed.';
 export const START_AGAIN = 'Start again';
 export const CLOSE_RESOLVER = 'Close';
