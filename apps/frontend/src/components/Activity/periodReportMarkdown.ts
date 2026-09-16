@@ -41,6 +41,9 @@ export type Fmt = (n: number) => string;
 export const countFmt: Fmt = (n) => String(Math.round(n));
 export const pctFmt: Fmt = (n) => `${Math.round(n)}%`;
 export const linesFmt: Fmt = (n) => `${Math.round(n)}`;
+// The same figure with its measure attached, for the sites that have no table note beside them to
+// say what is being counted (see `standaloneFormat`).
+export const linesUnitFmt: Fmt = (n) => `${Math.round(n)} lines`;
 export const ratioFmt: Fmt = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 // The CHANGE in a percentage metric is measured in POINTS, not percent. Without this the CI
 // success row reads "▲ +5% (+8%)" — two different quantities wearing the same suffix, which is
@@ -65,6 +68,19 @@ export interface MetricMeta {
   // their team merged 47 fewer PRs or wrote PRs 47 lines smaller, which are opposite kinds of
   // news. Set this wherever `label` leans on its neighbour to make sense.
   standaloneLabel?: string;
+  // ⚠ THE UNIT FOR ANYWHERE OUTSIDE THE TABLE ROW — the same argument as `standaloneLabel`, one
+  // column over.
+  //
+  // In the table, the unit is already on screen: the note under the label says "median lines added
+  // + deleted". On a pill there is no note, so "PR size ▼ −47" is a number with no measure, and
+  // the two lines metrics are the most common pill there is. Of the fifteen metrics, seven name
+  // their unit in the label ("Merged PRs") and six get one from their formatter (%, pts, h) — only
+  // the two lines metrics are naked, and only they set this.
+  //
+  // It is deliberately NOT used in the table or the forecast cells: the note makes it redundant in
+  // the row, and the forecast composes the formatter three times, which would read
+  // "≈ 142 lines (120 lines–164 lines)".
+  standaloneFormat?: Fmt;
 }
 
 /** The label to use where the metric appears on its own — a pill, a tooltip, a chat prompt —
@@ -95,6 +111,13 @@ export function metaFor(key: string): MetricMeta {
 
 export function changeFmtFor(meta: MetricMeta): Fmt {
   return meta.changeFormat ?? meta.format;
+}
+
+/** How a CHANGE reads where the metric appears on its own — a pill, a chip, the movers line —
+ *  with no table note beside it to supply the unit. Falls back to the table's change format, so a
+ *  metric whose formatter already carries a unit (%, pts, h) needs nothing extra. */
+export function standaloneChangeFmtFor(meta: MetricMeta): Fmt {
+  return meta.standaloneFormat ?? changeFmtFor(meta);
 }
 
 export const METRIC_META: Record<PeriodMetricKey, MetricMeta> = {
@@ -142,12 +165,14 @@ export const METRIC_META: Record<PeriodMetricKey, MetricMeta> = {
   median_pr_size_lines: {
     label: 'PR size',
     format: linesFmt,
+    standaloneFormat: linesUnitFmt,
     note: 'median lines added + deleted',
   },
   median_human_pr_size_lines: {
     label: '…by people',
     standaloneLabel: 'PR size, people only',
     format: linesFmt,
+    standaloneFormat: linesUnitFmt,
     // The measured case: Dependabot's 14-line bumps and the humans' 142 blended to a reported 68,
     // a number no pull request in the workspace resembled.
     note: 'the blended figure above understated this by 2.1× on the workspace this was built for',
@@ -506,12 +531,14 @@ export function renderPeriodReportMarkdown(
   }
 
   // ── Biggest movers — significant only, figures computed with the same formatters as the pills.
-  const movers = report.movements.slice(0, 5);
+  // A STANDALONE site: there is no table note here to say what "−47" counts, so the change carries
+  // its own unit.
+  const movers = (report.movements ?? []).slice(0, 5);
   if (movers.length > 0) {
     const parts = movers.map((m) => {
       const meta = metaFor(m.key); // report array — a stale row's movements can carry old keys
       const pct = m.percentChange != null ? ` (${signed(m.percentChange, pctFmt)})` : '';
-      return `${standaloneLabelFor(meta)} ${m.absoluteChange > 0 ? '▲' : '▼'} ${signed(m.absoluteChange, changeFmtFor(meta))}${pct}`;
+      return `${standaloneLabelFor(meta)} ${m.absoluteChange > 0 ? '▲' : '▼'} ${signed(m.absoluteChange, standaloneChangeFmtFor(meta))}${pct}`;
     });
     lines.push(`**Biggest movers:** ${parts.join(' · ')}`);
     lines.push('');

@@ -61,6 +61,7 @@ import {
   renderPeriodReportMarkdown,
   rowFigures,
   signed,
+  standaloneChangeFmtFor,
   standaloneLabelFor,
 } from './periodReportMarkdown.js';
 import { PALETTE, fmtDuration } from '../charts/common.js';
@@ -905,7 +906,9 @@ function Movements({
   movements: PeriodMovement[];
   deltas: PeriodMetricDelta[];
 }): JSX.Element | null {
-  const top = movements.slice(0, 5);
+  // `?? []`: a row stored before `movements` existed serves the field absent, and an unguarded
+  // `.slice` on it blanks the whole pane (there is no error boundary above this).
+  const top = (movements ?? []).slice(0, 5);
   if (top.length === 0) return null;
   const directionOf = new Map(deltas.map((d) => [d.key, d.direction]));
   return (
@@ -937,7 +940,8 @@ function Movements({
               dir={m.absoluteChange > 0 ? 'up' : 'down'}
               className="inline-block align-[-0.1em]"
             />{' '}
-            {signed(m.absoluteChange, changeFmtFor(meta))}
+            {/* A chip stands alone — no table note beside it — so the change carries its unit. */}
+            {signed(m.absoluteChange, standaloneChangeFmtFor(meta))}
             {m.percentChange != null && ` (${signed(m.percentChange, pctFmt)})`}
           </span>
         );
@@ -1012,27 +1016,38 @@ function AskAboutPeriod({ report }: { report: PeriodReport }): JSX.Element | nul
   );
 }
 
-// The chat's suggested pills, derived from the viewed report's SIGNIFICANT deltas and templated
-// client-side: "Why did Merged PRs by people fall −33 (−22%)?". Allowed under D4 because every
-// number here is computed — the label, verb and figures come from the same METRIC_META
-// formatters the table rows use (`standaloneLabelFor`, because a pill has no neighbouring row to
-// lean on). Biggest absolute movers first, capped like the Movements strip.
+// The chat's suggested pills: "Why did PR size, people only rise +47 lines (+33%)?". Allowed under
+// D4 because every number here is computed — the label, verb and figures come from the same
+// METRIC_META formatters the Movements chips render (`standaloneLabelFor` and
+// `standaloneChangeFmtFor`, because a pill has no neighbouring table row or note to lean on for
+// either the name or the unit).
+//
+// ⚠ THE RANKING IS THE SERVER'S, READ OFF `movements` — not a second sort here. `rankMovements`
+// orders by |percentChange| and has already dropped the insignificant and the null-change rows;
+// the Movements strip two sections up renders exactly that list. The predecessor re-sorted
+// `comparison.deltas` by raw |absoluteChange| ACROSS MIXED UNITS, ranking "+47 lines" above
+// "+18 hours" on the size of the digits alone: measured on 12 real reports, the two orders
+// disagreed on 11, and on 11 the pills offered a metric absent from the visible top five.
+// `median_time_to_first_human_review_hours` is the biggest mover on real reports (once at +536%)
+// and had never once become a pill.
+//
+// Capped at four. The Movements strip shows five.
 function suggestedDeltaQuestions(report: PeriodReport): { label: string; question: string }[] {
-  return report.comparison.deltas
-    .filter((d) => d.significant && d.absoluteChange != null && d.absoluteChange !== 0)
-    .sort((a, b) => Math.abs(b.absoluteChange!) - Math.abs(a.absoluteChange!))
-    .slice(0, 4)
-    .map((d) => {
-      const meta = metaFor(d.key); // report array — old-vocabulary keys possible on stale rows
-      const verb = d.absoluteChange! > 0 ? 'rise' : 'fall';
-      const change = signed(d.absoluteChange!, changeFmtFor(meta));
-      const pct = d.percentChange != null ? ` (${signed(d.percentChange, pctFmt)})` : '';
-      const name = standaloneLabelFor(meta);
-      return {
-        label: `Why did ${name} ${verb} ${change}?`,
-        question: `Why did ${name} ${verb} ${change}${pct} over this period? Point to the PRs, repos or people in the data that explain the movement.`,
-      };
-    });
+  // `?? []`: a row stored before `movements` existed serves the field absent, and there is no
+  // error boundary above this.
+  return (report.movements ?? []).slice(0, 4).map((m) => {
+    const meta = metaFor(m.key); // report array — old-vocabulary keys possible on stale rows
+    const verb = m.absoluteChange > 0 ? 'rise' : 'fall';
+    const change = signed(m.absoluteChange, standaloneChangeFmtFor(meta));
+    const pct = m.percentChange != null ? ` (${signed(m.percentChange, pctFmt)})` : '';
+    const name = standaloneLabelFor(meta);
+    return {
+      // The percentage is ON THE FACE, not in a tooltip: it is the figure the ranking is made of,
+      // and the chip above the chat already prints it.
+      label: `Why did ${name} ${verb} ${change}${pct}?`,
+      question: `Why did ${name} ${verb} ${change}${pct} over this period? Point to the PRs, repos or people in the data that explain the movement.`,
+    };
+  });
 }
 
 // ── The report body ──────────────────────────────────────────────────────────────────────────

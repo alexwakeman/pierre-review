@@ -15,9 +15,13 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { describe, expect, it } from 'vitest';
 import type { PeriodReport } from '@pierre-review/shared';
+import { PERIOD_METRIC_KEYS } from '@pierre-review/shared';
 import {
   renderPeriodReportMarkdown,
+  METRIC_META,
   REFUSAL_TEXT,
+  standaloneChangeFmtFor,
+  standaloneLabelFor,
 } from '../src/components/Activity/periodReportMarkdown.js';
 
 function baseReport(over: Partial<PeriodReport> = {}): PeriodReport {
@@ -118,6 +122,67 @@ describe('renderPeriodReportMarkdown', () => {
     const row = md.split('\n').find((l) => l.startsWith('| Opened PRs'))!;
     expect(row).toContain('+2 · not significant');
     expect(row).not.toContain('%');
+  });
+
+  // ── UNITS OUTSIDE THE TABLE ────────────────────────────────────────────────────────────────
+  //
+  // In a table row the unit is already on screen — the note under "PR size" says "median lines
+  // added + deleted". A movers line, a chip and a chat pill have no note, so "PR size ▲ +47" is a
+  // number with no measure. Two of the fifteen metrics are naked without this (both lines
+  // metrics), and they are the most common pill there is.
+  it('names the unit where a figure stands alone, and leaves the table row bare', () => {
+    const base = baseReport();
+    const md = renderPeriodReportMarkdown(
+      baseReport({
+        comparison: {
+          ...base.comparison,
+          deltas: [
+            ...base.comparison.deltas,
+            {
+              key: 'median_pr_size_lines',
+              value: 189,
+              prior: 142,
+              absoluteChange: 47,
+              percentChange: 33,
+              significant: true,
+              direction: 'down_good',
+            },
+          ],
+        },
+        movements: [
+          { key: 'median_pr_size_lines', absoluteChange: 47, percentChange: 33, rank: 0, favourable: false },
+          { key: 'merged_prs', absoluteChange: -33, percentChange: -22.6, rank: 1, favourable: false },
+        ],
+      }),
+    );
+    expect(md).toContain('**Biggest movers:** PR size ▲ +47 lines (+33%)');
+    // The metric whose LABEL already names its unit gains nothing and stays as it was.
+    expect(md).toContain('Merged PRs ▼ −33 (−23%)');
+    const row = md.split('\n').find((l) => l.startsWith('| PR size'))!;
+    expect(row).toContain('median lines added + deleted');
+    expect(row).toContain('▲ +47 (+33%)');
+    expect(row).not.toContain('47 lines');
+  });
+
+  // ⚠ A FUTURE METRIC MUST NOT BE ABLE TO GO NAKED ON A PILL, silently. Outside the table the
+  // figure has to carry its own measure — from the label ("Merged PRs"), from the formatter (%,
+  // pts, h) or from `standaloneFormat`. Nothing else is left.
+  it('leaves no metric printing a bare number where it stands alone', () => {
+    // The labels that already name what is being counted. ⚠ PLURAL AND CASE-SENSITIVE, on
+    // purpose: "PR size" names the SUBJECT, not the measure, and a looser `/PRs?/i` passed it —
+    // the exact hole this test exists to keep shut. A label naming its unit some other way
+    // ("Merged pull requests") fails here rather than slipping through, which is the safe
+    // direction: the fix is one word in the regex, made deliberately.
+    const LABEL_CARRIES_UNIT = /\b(PRs|threads|comments)\b/;
+    for (const key of PERIOD_METRIC_KEYS) {
+      const meta = METRIC_META[key];
+      const printed = standaloneChangeFmtFor(meta)(42);
+      if (!/^\d+(\.\d+)?$/.test(printed)) continue; // the formatter names the unit
+      expect(
+        LABEL_CARRIES_UNIT.test(standaloneLabelFor(meta)),
+        `${key} prints "${printed}" on a pill, with nothing beside it naming the unit — give it a standaloneFormat`,
+      ).toBe(true);
+    }
   });
 
   it('renders null as "—", never 0', () => {
