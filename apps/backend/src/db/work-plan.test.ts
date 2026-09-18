@@ -736,12 +736,10 @@ describe('the head spreads across kinds AND repos', () => {
 });
 
 describe('every row joins back to a card', () => {
-  // ⚠ THE PENDING BOARD'S PARTITION DEPENDS ON THIS. `GET /api/attention` hands the SPA
-  // `doNextIds` — card ids in rank order — and the board renders ONE list split into head and
-  // tail where `head ∪ tail === cards`. A ranked row whose `cardId` names no rendered card would
-  // silently cost the head a slot: no error, no empty state, just a shorter head than the rank
-  // asked for. Asserted over the whole fixture so a NEW signal that forgets to pass `cardId`
-  // fails here rather than in the browser.
+  // ⚠ THE PRO PLAN'S LINES DEPEND ON THIS. The SPA lands each narration step on its card through
+  // `WorkPlanItem.cardId`; a ranked row whose `cardId` names no card would lose its line with no
+  // error. Asserted over the whole fixture so a NEW signal that forgets to pass `cardId` fails
+  // here rather than in the browser.
   it('carries a cardId that exists in the fold it was ranked from', async () => {
     const insights = await q.getWorkspaceInsights(1, undefined, planScope);
     const ev = await workPlan.rankWorkPlan(1, planScope, insights);
@@ -901,5 +899,145 @@ describe('a conflicts card is a CARD, never a plan row', () => {
       'reviewer_routing',
     ].reduce((n, k) => n + (byKind.get(k) ?? 0), 0);
     expect(counted).toBe(countedKinds);
+  });
+});
+
+describe('the Pending tabs', () => {
+  // `GET /api/attention` now serves five tabs, each a PURELY SCORED list with its UNCAPPED count
+  // (db/pending-tabs.ts). These pin what the board and the daily brief lean on: every card in
+  // exactly one tab, each tab in score order, and each tab's count the same number as the brief
+  // line that opens it. Reuses this file's fixture because it already holds every kind.
+  const board = async (s: any) => {
+    const insights = await q.getWorkspaceInsights(1, undefined, s, { uncapped: true });
+    const tabs = await import('./pending-tabs.js');
+    return { insights, ...(await tabs.rankPendingTabs(1, s, insights)) };
+  };
+
+  it('gives every non-bot card kind exactly one tab', async () => {
+    const { PENDING_TABS } = await import('@pierre-review/shared');
+    // A `Record` over the union, so a NEW InsightKind fails to compile here until someone decides
+    // its tab — the allow-list's one way to make "folded but never listed" impossible to miss.
+    const ALL: Record<import('@pierre-review/shared').InsightKind, true> = {
+      my_turn: true, ci_failing: true, stalled_review: true, untouched_thread: true,
+      reviewer_load: true, reviewer_routing: true, conflicts: true, merge: true,
+      update_branch: true, bot_signal: true, bot_only_review: true,
+    };
+    const kinds = Object.keys(ALL);
+    const seen = PENDING_TABS.flatMap((t) => [...t.kinds]);
+    expect(new Set(seen).size).toBe(seen.length); // no kind in two tabs
+    for (const k of kinds) {
+      const bot = k === 'bot_signal' || k === 'bot_only_review';
+      expect([k, seen.includes(k as never)]).toEqual([k, !bot]);
+    }
+  });
+
+  it('lists each card once, in exactly the tab its kind belongs to', async () => {
+    const { pendingTabOf } = await import('@pierre-review/shared');
+    for (const s of [planScope, fillerScope]) {
+      const { tabs, cards } = await board(s);
+      const kindOf = new Map(cards.map((c: { id: string; kind: string }) => [c.id, c.kind]));
+      const all = tabs.flatMap((t: { cardIds: string[] }) => t.cardIds);
+      expect(new Set(all).size).toBe(all.length);
+      for (const t of tabs) {
+        for (const id of t.cardIds) expect([id, pendingTabOf(kindOf.get(id) as never)]).toEqual([id, t.key]);
+      }
+    }
+  });
+
+  it('orders every tab by score, highest first', async () => {
+    for (const s of [planScope, fillerScope]) {
+      const { tabs, scores } = await board(s);
+      let checked = 0;
+      for (const t of tabs) {
+        const list = t.cardIds.map((id: string) => scores[id]!);
+        for (let i = 1; i < list.length; i++) {
+          expect(list[i - 1]!.score).toBeGreaterThanOrEqual(list[i]!.score);
+          checked += 1;
+        }
+      }
+      expect(checked).toBeGreaterThan(0);
+    }
+  });
+
+  it('counts each tab as the sum of its kinds’ uncapped totals, which match the listed cards here', async () => {
+    const { PENDING_LIMITS } = await import('@pierre-review/shared');
+    for (const s of [planScope, fillerScope]) {
+      const { tabs, cards } = await board(s);
+      for (const t of tabs) {
+        const sum = Object.values(t.kindTotals as Record<string, number>).reduce((n, v) => n + v, 0);
+        expect(t.total).toBe(sum);
+        for (const [kind, total] of Object.entries(t.kindTotals as Record<string, number>)) {
+          const listed = t.cardIds.filter(
+            (id: string) => cards.find((c: { id: string }) => c.id === id)?.kind === kind,
+          ).length;
+          expect([kind, listed]).toEqual([kind, Math.min(total, PENDING_LIMITS.boardListCap)]);
+        }
+      }
+    }
+  });
+
+  it('keeps kindTotals identical in the capped and the uncapped fold', async () => {
+    for (const s of [planScope, fillerScope]) {
+      const capped = await q.getWorkspaceInsights(1, undefined, s);
+      const uncapped = await q.getWorkspaceInsights(1, undefined, s, { uncapped: true });
+      expect(capped.kindTotals).toEqual(uncapped.kindTotals);
+    }
+  });
+
+  it('gives the daily brief’s three survey lines the same number as the chip they open', async () => {
+    for (const s of [planScope, fillerScope]) {
+      const { tabs } = await board(s);
+      const review = tabs.find((t: { key: string }) => t.key === 'review')!;
+      const threads = tabs.find((t: { key: string }) => t.key === 'threads')!;
+      const { counts } = await brief.getDailyBriefEntry(1, s.workspaceId);
+      expect(counts.stalled).toBe(review.kindTotals.stalled_review);
+      expect(counts.needsReviewer).toBe(review.kindTotals.reviewer_routing);
+      expect(counts.untouchedThreads).toBe(threads.kindTotals.untouched_thread);
+    }
+    // Non-vacuity: the Plan workspace really has stalled reviews and untouched threads.
+    const { tabs } = await board(planScope);
+    expect(tabs.find((t: { key: string }) => t.key === 'review')!.kindTotals.stalled_review).toBeGreaterThan(0);
+    expect(tabs.find((t: { key: string }) => t.key === 'threads')!.total).toBeGreaterThan(0);
+  });
+
+  it('scores a conflicts card from its own base, without penalising the conflict twice', async () => {
+    const { tabs, scores } = await board(planScope);
+    const fixing = tabs.find((t: { key: string }) => t.key === 'fixing')!;
+    const id = `conflicts:${pr('m-conflicting')}`;
+    expect(fixing.cardIds).toContain(id);
+    expect(scores[id]!.proximityBase).toBe('conflicts');
+    expect(scores[id]!.adjustments).not.toContain('conflicts');
+  });
+
+  it('shows working that adds up to the score it reports', async () => {
+    const { DO_NEXT_RULES } = await import('@pierre-review/shared');
+    const round4 = (n: number): number => Math.round(n * 10_000) / 10_000;
+    const clamp01 = (n: number): number => Math.min(1, Math.max(0, n));
+    for (const s of [planScope, fillerScope]) {
+      const { scores } = await board(s);
+      for (const p of Object.values(scores) as any[]) {
+        let prox: number = (DO_NEXT_RULES.proximity as Record<string, number>)[p.proximityBase]!;
+        for (const a of p.adjustments) prox += (DO_NEXT_RULES.adjustments as Record<string, number>)[a]!;
+        expect(p.proximity).toBe(round4(clamp01(prox)));
+        const w = DO_NEXT_RULES.weights;
+        expect(p.score).toBe(
+          round4(
+            w.proximity * p.proximity +
+              w.stall * p.stallRisk +
+              w.relevance * (DO_NEXT_RULES.relevanceWeight as Record<string, number>)[p.relevance]!,
+          ),
+        );
+      }
+    }
+  });
+
+  it('keeps review load out of the ranking and the count, as the tab’s people strip', async () => {
+    const { tabs, cards } = await board(planScope);
+    const review = tabs.find((t: { key: string }) => t.key === 'review')!;
+    const load = cards.filter((c: { kind: string }) => c.kind === 'reviewer_load');
+    expect(load.length).toBeGreaterThan(0);
+    expect(review.peopleCardIds).toEqual(load.map((c: { id: string }) => c.id));
+    for (const c of load) expect(review.cardIds).not.toContain(c.id);
+    expect(review.kindTotals.reviewer_load).toBeUndefined();
   });
 });

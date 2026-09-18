@@ -44,13 +44,18 @@
 // data, and `reason` is deliberately written WITHOUT relative-time phrasing ("3d ago") so that it
 // stays hashable.
 import { and, count, eq, inArray } from 'drizzle-orm';
+import { DO_NEXT_RULES, PENDING_LIMITS } from '@pierre-review/shared';
 import type {
   CiFailingCard,
+  ConflictsCard,
+  DoNextAdjustment,
+  DoNextProximityBase,
   InsightCard,
   MergeStateStatus,
   MyTurnCard,
   MyTurnCardReason,
   MyTurnRelevance,
+  PendingCardScore,
   ReviewerRoutingCard,
   StalledReviewCard,
   UntouchedThreadCard,
@@ -65,17 +70,18 @@ import { approvalInfoFromStandings, computeReviewStandingsByPr } from './triage.
 
 const { pullRequests, reviewThreads } = schema;
 
+// ⚠ EVERY NUMBER BELOW IS READ FROM `DO_NEXT_RULES` (packages/shared/src/pending-rules.ts), which
+// the Pending board's info popovers also print. Retune the ranker THERE, never with a local
+// literal, or the app will explain an order it no longer produces.
+
 /** How many rows the panel paints. `totals` carries the UNCAPPED population per kind, so a capped
  *  list can always disclose what it left out — a truncation nobody is told about is a lie about
  *  the size of the day. */
-export const WORK_PLAN_ITEM_CAP = 12;
+export const WORK_PLAN_ITEM_CAP = DO_NEXT_RULES.cap;
 
 /**
- * THE ONE SPELLING OF THE "DO NEXT" HEAD — the ranked evidence as `InsightCard` ids, for
- * `GET /api/attention` to hand the board.
- *
- * ⚠ IT IS AN ORDERING, NOT A FILTER. The board renders every card either side of the divider;
- * these ids only say which come first and in what order. See `AttentionCardsResponse.doNextIds`.
+ * The plan's ranked rows as `InsightCard` ids, in rank order — the join the SPA makes from a
+ * narration step to the card it describes (`WorkPlanItem.cardId`).
  */
 export function doNextCardIds(evidence: WorkPlanEvidence): string[] {
   return evidence.items.map((i) => i.cardId).filter((id): id is string => id != null);
@@ -84,25 +90,13 @@ export function doNextCardIds(evidence: WorkPlanEvidence): string[] {
 const HOUR_MS = 3_600_000;
 
 // ── PROXIMITY: how few steps from landing, 0..1 ─────────────────────────────────────────────
-// Base by kind. A merge is one click; a nudge is a message to someone else, whose reply is then
-// the actual step. Everything in between is ordered by how much work stands between the item and
-// a merged PR.
-const BASE_PROXIMITY: Record<WorkPlanKind, number> = {
-  // ⚠ NOT the merge base — see MERGE_APPROVED_PROXIMITY below, which overrides it. This entry
-  // exists only to keep the record total over WorkPlanKind.
-  merge: 0.95,
-  update_branch: 0.7,
-  unblock_ci: 0.6,
-  review: 0.55,
-  reply: 0.5,
-  thread: 0.4,
-  nudge: 0.25,
-};
-
-/** A red TRUNK is not a normal `unblock_ci`: it invalidates every open PR in the repo at once, so
- *  it sits above the per-PR arm rather than beside it. */
-const TRUNK_CI_PROXIMITY = 0.65;
-
+// Base by the row's next step (`DO_NEXT_RULES.proximity`). A merge is one click; a nudge is a
+// message to someone else, whose reply is then the actual step. Everything in between is ordered by
+// how much work stands between the item and a merged PR.
+//
+// A red TRUNK is not a normal `unblock_ci`: it invalidates every open PR in the repo at once, so
+// its base (`red_trunk`) sits above the per-PR arm rather than beside it.
+//
 // ── MERGE PROXIMITY IS APPROVAL-CONDITIONAL, AND THE ORDERING IS THE POINT ──────────────────
 // A `clean` PR that NOBODY HAS REVIEWED is ready for GitHub, not ready for a human. Scoring it
 // like an approved one had two visible consequences, both measured on real data:
@@ -112,45 +106,20 @@ const TRUNK_CI_PROXIMITY = 0.65;
 //   2. because the per-PR dedup survivor is chosen by PROXIMITY, the merge row also BEAT that same
 //      PR's own `review` row — so the head said "nothing is blocking this" while the board below
 //      said "your turn" about one pull request.
-// Dropping the unapproved case BELOW `review` (0.55) and `reply` (0.5) fixes both at once: the
-// review claim wins the dedup, and the merge row only leads once someone has actually approved.
+// Dropping the unapproved case (`merge_unapproved`) BELOW `review` and `reply` fixes both at once:
+// the review claim wins the dedup, and the merge row only leads once someone has actually approved.
 // ⚠ On repos WITH required-review protection this changes almost nothing — those PRs are
 // `blocked`, not `clean`. It bites exactly the unprotected repos, which is where it should.
-/** Approved: there is nothing left to wait for, only the click. */
-const MERGE_APPROVED_PROXIMITY = 0.95;
-/** Ready for GitHub, not ready for a human. Deliberately below `review` and `reply`. */
-const MERGE_UNAPPROVED_PROXIMITY = 0.45;
-/** Conflicts — further out than the merge state alone makes it look. */
-const DIRTY_PENALTY = -0.15;
-/** A wall of unanswered feedback is not one step from landing. */
-const THREAD_WALL_PENALTY = -0.1;
-const THREAD_WALL_MIN = 3;
-/** A small change lands fast. */
-const SMALL_DIFF_BONUS = 0.05;
-const SMALL_DIFF_MAX_FILES = 3;
-
+//
+// The three ADJUSTMENTS: conflicts are further out than the merge state alone makes it look; a
+// wall of unanswered feedback is not one step from landing; a small change lands fast.
+//
 // ── STALL RISK: how likely this sits untouched, 0..1 ────────────────────────────────────────
 // ⚠ MEASURED AGAINST THE ITEM'S OWN CLOCK (`facts.clock`), never a blanket "since opened". The
 // seven signals age against different instants and saying WHICH is the difference between a fact
-// and a plausible number.
-const STALL_BUCKETS: readonly { minHours: number; risk: number }[] = [
-  { minHours: 96, risk: 1.0 },
-  { minHours: 48, risk: 0.7 },
-  { minHours: 24, risk: 0.4 },
-];
-/** Fresh, or no clock at all. An unknown age is NOT treated as urgent. */
-const STALL_BASE = 0.15;
-
+// and a plausible number. Fresh, or no clock at all, is `stallBase`: an unknown age is NOT urgent.
+//
 // ── RELEVANCE: the same three tiers My Turn and the attention board use ─────────────────────
-const RELEVANCE_WEIGHT: Record<MyTurnRelevance, number> = {
-  direct: 1.0,
-  maintained: 0.6,
-  none: 0.25,
-};
-
-const W_PROXIMITY = 0.5;
-const W_STALL = 0.3;
-const W_RELEVANCE = 0.2;
 
 /** Trim float noise so the wire (and any hash over it) is byte-stable for unchanged inputs. */
 function round4(n: number): number {
@@ -159,31 +128,62 @@ function round4(n: number): number {
 
 const clamp01 = (n: number): number => (n < 0 ? 0 : n > 1 ? 1 : n);
 
-/** THE ONE PROXIMITY RESOLVER. `base` overrides the per-kind default (the trunk CI arm). */
-function proximityFor(kind: WorkPlanKind, facts: WorkPlanFacts, base?: number): number {
-  let p = base ?? BASE_PROXIMITY[kind];
-  // The merge base is CONDITIONAL, not a bonus on top of a high base — see the constants.
-  if (kind === 'merge') {
-    p = (facts.approvals ?? 0) > 0 ? MERGE_APPROVED_PROXIMITY : MERGE_UNAPPROVED_PROXIMITY;
+/** How a row's proximity was reached — the base it started from and the adjustments applied. */
+interface ProximityWorking {
+  base: DoNextProximityBase;
+  adjustments: DoNextAdjustment[];
+  value: number;
+}
+
+/**
+ * THE ONE PROXIMITY RESOLVER. `baseOverride` replaces the per-kind default (the trunk CI arm).
+ *
+ * It returns its WORKING, not just the number, because the Pending board explains each card's
+ * score to the reader — and a second function re-deriving "which adjustments applied" for the
+ * explanation would be a second answer to a question this one already answered.
+ */
+function proximityWorking(
+  kind: WorkPlanKind,
+  facts: WorkPlanFacts,
+  baseOverride?: DoNextProximityBase,
+): ProximityWorking {
+  // The merge base is CONDITIONAL, not a bonus on top of a high base — see the note above.
+  const base: DoNextProximityBase =
+    baseOverride ??
+    (kind === 'merge'
+      ? (facts.approvals ?? 0) > 0
+        ? 'merge_approved'
+        : 'merge_unapproved'
+      : kind);
+  const adjustments: DoNextAdjustment[] = [];
+  // The `conflicts` BASE already is the conflict; penalising it again would count it twice.
+  if (facts.mergeStateStatus === 'dirty' && base !== 'conflicts') adjustments.push('conflicts');
+  if ((facts.untouchedThreads ?? 0) >= DO_NEXT_RULES.manyUntouchedThreadsMin) {
+    adjustments.push('many_untouched_threads');
   }
-  // Each adjustment is applied ONCE, then the sum is clamped — not clamped between steps, which
-  // would make the order of the four matter.
-  if (facts.mergeStateStatus === 'dirty') p += DIRTY_PENALTY;
-  if ((facts.untouchedThreads ?? 0) >= THREAD_WALL_MIN) p += THREAD_WALL_PENALTY;
-  if (facts.changedFiles != null && facts.changedFiles <= SMALL_DIFF_MAX_FILES) p += SMALL_DIFF_BONUS;
-  return round4(clamp01(p));
+  if (facts.changedFiles != null && facts.changedFiles <= DO_NEXT_RULES.smallChangeMaxFiles) {
+    adjustments.push('small_change');
+  }
+  // Each adjustment is applied ONCE, in this fixed order, then the sum is clamped — not clamped
+  // between steps, which would make the order of the three matter.
+  let p: number = DO_NEXT_RULES.proximity[base];
+  for (const a of adjustments) p += DO_NEXT_RULES.adjustments[a];
+  return { base, adjustments, value: round4(clamp01(p)) };
 }
 
 /** THE ONE STALL RESOLVER. A null/absent age is the base risk, never the top bucket. */
 function stallRiskFor(ageHours: number | null | undefined): number {
-  if (ageHours == null || !Number.isFinite(ageHours)) return STALL_BASE;
-  for (const b of STALL_BUCKETS) if (ageHours >= b.minHours) return b.risk;
-  return STALL_BASE;
+  if (ageHours == null || !Number.isFinite(ageHours)) return DO_NEXT_RULES.stallBase;
+  for (const b of DO_NEXT_RULES.stallBuckets) if (ageHours >= b.minHours) return b.risk;
+  return DO_NEXT_RULES.stallBase;
 }
 
 function scoreFor(proximity: number, stallRisk: number, relevance: MyTurnRelevance): number {
+  const w = DO_NEXT_RULES.weights;
   return round4(
-    W_PROXIMITY * proximity + W_STALL * stallRisk + W_RELEVANCE * RELEVANCE_WEIGHT[relevance],
+    w.proximity * proximity +
+      w.stall * stallRisk +
+      w.relevance * DO_NEXT_RULES.relevanceWeight[relevance],
   );
 }
 
@@ -211,7 +211,7 @@ const SEVERITY_RANK: Record<'high' | 'warn' | 'info', number> = { high: 0, warn:
 
 /** One candidate row, before dedup + ranking. `tieRank` is the time-free dedup key (see
  *  REASON_RANK); `sortAgeHours` is the ranking tie-break and IS time-derived. */
-interface Candidate {
+export interface Candidate {
   item: WorkPlanItem;
   tieRank: number;
   /** True when this row IS an action on its PR, so at most one of them may survive per PR. False
@@ -219,6 +219,9 @@ interface Candidate {
    *  and for a thread-grained one (two threads on a PR are two jobs). Derived from the id — see
    *  `push` — so the flag and the id can never disagree. */
   prGrained: boolean;
+  /** How `item.proximity` was reached. Kept OFF the item on purpose: `WorkPlanItem` is the Pro
+   *  seam's evidence and its hash allow-list, and this is explanation for the board, not evidence. */
+  working: ProximityWorking;
 }
 
 function hoursSince(iso: string | null | undefined, now: number): number | undefined {
@@ -238,7 +241,10 @@ const plural = (n: number, one: string, many = `${one}s`): string => (n === 1 ? 
  *  it off `relevance` here would be a third derivation of the same fact. (The ITEM's `relevance`
  *  below deliberately treats an ABSENT field as 'none' instead — a missing field may never invent
  *  an ownership claim in card copy. The two rules answer different questions and both are right.) */
-function foldCounts(cards: InsightCard[]): WorkPlanEvidence['counts'] {
+function foldCounts(
+  insights: Awaited<ReturnType<typeof getWorkspaceInsights>>,
+): WorkPlanEvidence['counts'] {
+  const cards = insights.cards;
   let myTurn = 0;
   let myTurnPersonal = 0;
   let ciFailing = 0;
@@ -254,7 +260,21 @@ function foldCounts(cards: InsightCard[]): WorkPlanEvidence['counts'] {
     else if (c.kind === 'untouched_thread') untouchedThreads += 1;
     else if (c.kind === 'reviewer_routing') needsReviewer += 1;
   }
-  return { myTurn, myTurnPersonal, ciFailing, stalled, untouchedThreads, needsReviewer };
+  // The three survey counts are the UNCAPPED populations, exactly as the brief now reports them —
+  // see `computeBriefCounts`. (The Pro plan hash leaves `counts` out, so this moves no stored plan.)
+  const t = insights.kindTotals;
+  // …and the my_turn / ci figures are what the Pending board LISTS, min(total, boardListCap) — the
+  // brief's rule too (see `computeBriefCounts`), so the two stay equal field for field.
+  const listed = (total: number | undefined, fallback: number): number =>
+    total == null ? fallback : Math.min(total, PENDING_LIMITS.boardListCap);
+  return {
+    myTurn: listed(insights.myTurnTotal, myTurn),
+    myTurnPersonal: listed(insights.myTurnPersonalTotal, myTurnPersonal),
+    ciFailing: listed(insights.ciFailingTotal, ciFailing),
+    stalled: t?.stalled_review ?? stalled,
+    untouchedThreads: t?.untouched_thread ?? untouchedThreads,
+    needsReviewer: t?.reviewer_routing ?? needsReviewer,
+  };
 }
 
 function emptyEvidence(workspaceId: number, generatedAt: Date): WorkPlanEvidence {
@@ -319,21 +339,44 @@ export async function rankWorkPlan(
   const now = Date.now();
   const generatedAt = new Date(now);
   if (scope.repoIds.length === 0) return emptyEvidence(scope.workspaceId, generatedAt);
+  const counts = foldCounts(insights);
+  const { candidates } = await scoreCards(accountId, insights.cards, now);
+  return rankCandidates(scope, generatedAt, counts, candidates);
+}
 
-  const counts = foldCounts(insights.cards);
+/** One card's Do next score and its working, as the Pending board lists it. */
+export interface ScoredCard extends PendingCardScore {
+  cardId: string;
+  prId: number | null;
+}
 
+/**
+ * EVERY CARD'S DO NEXT SCORE — the one scorer behind both the Pro work plan's ranked rows and the
+ * Pending board's tabs, so the two can never score one card two ways.
+ *
+ * Returns the work-plan `candidates` (the seven signals, with ids / reasons / dedup ranks) and
+ * `scored` — the same score for EVERY scorable card, plus `conflicts`, which the board ranks and the
+ * work plan never names. Review load and the bot cards get no score.
+ */
+export async function scoreCards(
+  accountId: number,
+  cards: InsightCard[],
+  now: number,
+): Promise<{ candidates: Candidate[]; scored: ScoredCard[] }> {
+  const conflicts: ScoredCard[] = [];
   // ── the shared per-PR facts every PR-grained row wants ────────────────────────────────────
   // Batched over the UNION of PR ids the plan could name, so every row gets the same
   // merge/approval/thread facts for free.
   const cardPrIds = new Set<number>();
-  for (const c of insights.cards) {
+  for (const c of cards) {
     if (
       c.kind === 'my_turn' ||
       c.kind === 'stalled_review' ||
       c.kind === 'untouched_thread' ||
       c.kind === 'reviewer_routing' ||
       c.kind === 'merge' ||
-      c.kind === 'update_branch'
+      c.kind === 'update_branch' ||
+      c.kind === 'conflicts'
     ) {
       cardPrIds.add(c.prId);
     } else if (c.kind === 'ci_failing' && c.prId != null) cardPrIds.add(c.prId);
@@ -434,14 +477,16 @@ export async function rankWorkPlan(
       relevance: MyTurnRelevance;
       facts: WorkPlanFacts;
       reason: string;
-      proximityBase?: number;
+      /** Replaces the per-kind proximity base — only the red-trunk arm passes one. */
+      proximityBase?: DoNextProximityBase;
       /** ⚠ NOT derivable from `prGrained` below — see the field's comment on the wire type. A
        *  thread row is NOT the PR's one job (so it is not prGrained) but IS about a pull request.
        *  Defaults to 'pr'; only the red-trunk arm passes 'repo'. */
       subject?: 'pr' | 'repo';
     },
   ): void => {
-    const proximity = proximityFor(kind, parts.facts, parts.proximityBase);
+    const working = proximityWorking(kind, parts.facts, parts.proximityBase);
+    const proximity = working.value;
     const stallRisk = stallRiskFor(parts.facts.ageHours);
     // THE ID ENCODES THE GRAIN, so the flag is read back off it rather than passed: a PR-grained
     // row is ADDRESSED by its PR (`wp:merge:<prId>`), while a repo- or thread-grained one is
@@ -452,6 +497,7 @@ export async function rankWorkPlan(
     candidates.push({
       tieRank,
       prGrained,
+      working,
       item: {
         id,
         kind,
@@ -475,7 +521,7 @@ export async function rankWorkPlan(
   };
 
   // ── the seven card-derived signals ────────────────────────────────────────────────────────
-  for (const card of insights.cards) {
+  for (const card of cards) {
     // ── merge + update_branch ───────────────────────────────────────────────────────────────
     // Folded off the cards like everything else. The card already carries relevance, the repo
     // name and the url; this arm adds only the facts the ranker scores on.
@@ -604,7 +650,7 @@ export async function rankWorkPlan(
             : 'Your open PR — its head commit is red',
           // A red trunk invalidates every open PR in the repo at once, so it outranks the per-PR
           // arm rather than sitting beside it.
-          proximityBase: trunk ? TRUNK_CI_PROXIMITY : undefined,
+          proximityBase: trunk ? 'red_trunk' : undefined,
         },
       );
       continue;
@@ -694,6 +740,36 @@ export async function rankWorkPlan(
       });
       continue;
     }
+    // ── conflicts: SCORED FOR THE BOARD, NEVER A PLAN ROW ──────────────────────────────────
+    // A conflicts card competes inside the Pending board's "Needs fixing" tab, so it needs a score
+    // on the same scale as the red builds beside it. It still never becomes a work-plan ROW — see
+    // the note below — so it is scored straight into `conflicts` and never pushed.
+    if (card.kind === 'conflicts') {
+      const c = card as ConflictsCard;
+      const facts: WorkPlanFacts = {
+        ...sharedFacts(c.prId),
+        ciStatus: c.ciStatus,
+        changedFiles: c.changedFiles,
+        // The card carries no head-commit time, so it ages from when the PR was opened — and says so.
+        ageHours: hoursSince(c.openedAt, now),
+        clock: 'opened',
+      };
+      const working = proximityWorking('merge', facts, 'conflicts');
+      const stallRisk = stallRiskFor(facts.ageHours);
+      conflicts.push({
+        cardId: c.id,
+        prId: c.prId,
+        score: scoreFor(working.value, stallRisk, c.relevance),
+        proximity: working.value,
+        proximityBase: working.base,
+        adjustments: working.adjustments,
+        stallRisk,
+        relevance: c.relevance,
+        ageHours: roundAge(facts.ageHours),
+        clock: facts.clock ?? null,
+      });
+      continue;
+    }
     // reviewer_load / bot_signal / bot_only_review are SURVEYS of the workspace, not things one
     // person does today. They are deliberately not worklist rows.
     //
@@ -708,6 +784,37 @@ export async function rankWorkPlan(
     // change in BOTH repositories, not a one-line addition here.
   }
 
+
+  const scored: ScoredCard[] = [
+    ...candidates.map((c) => ({
+      cardId: c.item.cardId!,
+      prId: c.item.prId,
+      score: c.item.score,
+      proximity: c.item.proximity,
+      proximityBase: c.working.base,
+      adjustments: c.working.adjustments,
+      stallRisk: c.item.stallRisk,
+      relevance: c.item.relevance,
+      ageHours: roundAge(c.item.facts.ageHours),
+      clock: c.item.facts.clock ?? null,
+    })),
+    ...conflicts,
+  ];
+  return { candidates, scored };
+}
+
+/** One decimal is plenty for "3 days" and keeps float noise off the wire. */
+function roundAge(hours: number | undefined): number | null {
+  return hours == null ? null : Math.round(hours * 10) / 10;
+}
+
+/** The work plan's dedup → rank → cap over already-scored candidates. */
+function rankCandidates(
+  scope: BotScope,
+  generatedAt: Date,
+  counts: WorkPlanEvidence['counts'],
+  candidates: Candidate[],
+): WorkPlanEvidence {
   // ── dedup, rank, cap ──────────────────────────────────────────────────────────────────────
   // ⚠ THE ID IS THE MODEL'S JOIN KEY, so it must be unique. Several signals collapse onto one id
   // (a PR that is both "review requested" and "approved, waiting on you"); the survivor is chosen

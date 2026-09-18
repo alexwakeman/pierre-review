@@ -25,14 +25,11 @@ import type { DailyBriefCounts } from '@pierre-review/shared';
 import type { InsightCard } from '@pierre-review/shared';
 import {
   myTurnCapDisclosure,
-  myTurnCapPlacement,
   myTurnOtherCapDisclosure,
   myTurnPersonalCapDisclosure,
-  passesOtherLens,
-  passesPersonalLens,
-  passesRelevanceLens,
   personalMyTurnCount,
 } from '../src/components/Activity/AttentionView.js';
+import { passesLens } from '../src/components/Activity/pendingTabs.js';
 import { cardKindLabel, KIND_LABEL } from '../src/components/Activity/AttentionCards.js';
 import {
   relevanceSplit,
@@ -342,9 +339,10 @@ describe('myTurnOtherCapDisclosure', () => {
   });
 
   // ── the invariant the two lines rest on ───────────────────────────────────────────────────
-  it('the two lines are DISJOINT and EXHAUSTIVE over the same cards', () => {
-    // Pinned server-side too; pinned here because the strip renders both figures side by side and
-    // a reader can add them. If these ever stop summing, one of the two lines is a lie.
+  it('the two lines are DISJOINT and EXHAUSTIVE over the same population', () => {
+    // The TOTALS always partition the population. The displayed figures are each line's own list
+    // size — min(total, the board's list cap) — so they sum to `myTurn` only while nothing is
+    // capped, which is this fixture; past the cap each line carries its own "of N" instead.
     expect((split.myTurnPersonal as number) + (split.myTurnOther as number)).toBe(split.myTurn);
     expect((split.myTurnPersonalTotal as number) + (split.myTurnOtherTotal as number)).toBe(
       split.myTurnTotal,
@@ -413,41 +411,41 @@ describe('sumRelevanceSplit (the banner headline)', () => {
   });
 });
 
-describe('passesPersonalLens (the "mine" half)', () => {
+describe('passesLens — the "mine" half (My turn’s “Only yours”)', () => {
   const card = (over: Partial<InsightCard>): InsightCard =>
     ({ kind: 'my_turn', personal: true, ...over }) as InsightCard;
 
   it('keeps personal my_turn cards and drops the rest', () => {
-    expect(passesPersonalLens(card({ personal: true }))).toBe(true);
-    expect(passesPersonalLens(card({ personal: false }))).toBe(false);
+    expect(passesLens(card({ personal: true }), 'mine')).toBe(true);
+    expect(passesLens(card({ personal: false }), 'mine')).toBe(false);
   });
 
   it('keeps a my_turn card whose flag is ABSENT — advisory, and absence means personal', () => {
-    expect(passesPersonalLens(card({ personal: undefined }))).toBe(true);
+    expect(passesLens(card({ personal: undefined }), 'mine')).toBe(true);
   });
 
   it('reads `personal`, NOT `relevance` — it must survive a pre-split response', () => {
     // `personal` IS `relevance !== 'none'` and the server writes it on every row. Deriving this
     // predicate from `relevance` instead would hide EVERY card on a response that predates the
     // three-way split.
-    expect(passesPersonalLens(card({ personal: true, relevance: undefined }))).toBe(true);
-    expect(passesPersonalLens(card({ personal: true, relevance: 'maintained' }))).toBe(true);
+    expect(passesLens(card({ personal: true, relevance: undefined }), 'mine')).toBe(true);
+    expect(passesLens(card({ personal: true, relevance: 'maintained' }), 'mine')).toBe(true);
   });
 
   it('never touches another kind — no other card carries the flag at all', () => {
-    expect(passesPersonalLens(card({ kind: 'stalled_review', personal: undefined }))).toBe(true);
-    expect(passesPersonalLens(card({ kind: 'untouched_thread', personal: undefined }))).toBe(true);
+    expect(passesLens(card({ kind: 'stalled_review', personal: undefined }), 'mine')).toBe(true);
+    expect(passesLens(card({ kind: 'untouched_thread', personal: undefined }), 'mine')).toBe(true);
   });
 });
 
-describe('passesOtherLens (the "review or reply" half)', () => {
+describe('passesLens — the "others" half (review or reply, not tied to you)', () => {
   const card = (over: Partial<InsightCard>): InsightCard =>
     ({ kind: 'my_turn', ...over }) as InsightCard;
 
   it('keeps ONLY relevance:none my_turn cards', () => {
-    expect(passesOtherLens(card({ relevance: 'none' }))).toBe(true);
-    expect(passesOtherLens(card({ relevance: 'direct' }))).toBe(false);
-    expect(passesOtherLens(card({ relevance: 'maintained' }))).toBe(false);
+    expect(passesLens(card({ relevance: 'none' }), 'others')).toBe(true);
+    expect(passesLens(card({ relevance: 'direct' }), 'others')).toBe(false);
+    expect(passesLens(card({ relevance: 'maintained' }), 'others')).toBe(false);
   });
 
   it('⚠ an ABSENT relevance is NOT in this half', () => {
@@ -455,32 +453,32 @@ describe('passesOtherLens (the "review or reply" half)', () => {
     // keeps an unknown card (over-showing beats hiding work) and 'others' simply never claims it.
     // A pre-split response therefore paints an EMPTY 'others' board rather than a mislabelled
     // full one — and the brief does not offer the line on such a response, so nobody lands there.
-    expect(passesOtherLens(card({ relevance: undefined, personal: false }))).toBe(false);
+    expect(passesLens(card({ relevance: undefined, personal: false }), 'others')).toBe(false);
   });
 
   it('never touches another kind', () => {
-    expect(passesOtherLens(card({ kind: 'stalled_review' }))).toBe(true);
+    expect(passesLens(card({ kind: 'stalled_review' }), 'others')).toBe(true);
     // ⚠ `ci_failing` is personal BY CONSTRUCTION (your own red PRs + trunk in repos you maintain),
     // so hiding it under 'others' would hide work that IS yours from a reader who asked only to
     // see the backlog. The lens narrows `my_turn` and nothing else, in BOTH directions.
-    expect(passesOtherLens(card({ kind: 'ci_failing' }))).toBe(true);
+    expect(passesLens(card({ kind: 'ci_failing' }), 'others')).toBe(true);
   });
 });
 
-describe('passesRelevanceLens (the one predicate the board and the banner share)', () => {
+describe('passesLens (the one predicate the tabs, the server cap and the brief share)', () => {
   const card = (over: Partial<InsightCard>): InsightCard =>
     ({ kind: 'my_turn', ...over }) as InsightCard;
 
   it('null keeps everything', () => {
-    expect(passesRelevanceLens(card({ relevance: 'none', personal: false }), null)).toBe(true);
-    expect(passesRelevanceLens(card({ relevance: 'direct', personal: true }), null)).toBe(true);
+    expect(passesLens(card({ relevance: 'none', personal: false }), null)).toBe(true);
+    expect(passesLens(card({ relevance: 'direct', personal: true }), null)).toBe(true);
   });
 
   it('the two halves PARTITION the classified cards', () => {
     for (const rel of ['direct', 'maintained', 'none'] as const) {
       const c = card({ relevance: rel, personal: rel !== 'none' });
-      const mine = passesRelevanceLens(c, 'mine');
-      const others = passesRelevanceLens(c, 'others');
+      const mine = passesLens(c, 'mine');
+      const others = passesLens(c, 'others');
       // Exactly one half claims each card — which is what makes the brief's two lines mutually
       // exclusive on the board as well as in the strip.
       expect(mine !== others).toBe(true);
@@ -535,28 +533,3 @@ describe('cardKindLabel (my_turn)', () => {
   });
 });
 
-describe('myTurnCapPlacement (the board header)', () => {
-  const cap = myTurnCapDisclosure(50, counts({ myTurn: 50, myTurnTotal: 148 }));
-
-  it('goes INLINE when the board is isolated to my_turn — the header count is that count', () => {
-    expect(myTurnCapPlacement(cap, 'my_turn')).toBe('inline');
-  });
-
-  it('goes ASIDE on the un-isolated board — the header counts five kinds', () => {
-    // "95 of 148" would put a mixed-kind numerator and a my_turn-only denominator in one row.
-    // The un-isolated board is the DEFAULT, so this is where the silent cap actually bit.
-    expect(myTurnCapPlacement(cap, null)).toBe('aside');
-  });
-
-  it('says NOTHING when the board is isolated to some other kind', () => {
-    // Not one my_turn card is on screen; a clause about 148 of them qualifies nothing visible.
-    expect(myTurnCapPlacement(cap, 'stalled_review')).toBe('none');
-    expect(myTurnCapPlacement(cap, 'untouched_thread')).toBe('none');
-    expect(myTurnCapPlacement(cap, 'reviewer_routing')).toBe('none');
-  });
-
-  it('says NOTHING when there is no cap to disclose, whatever the board shows', () => {
-    expect(myTurnCapPlacement(null, 'my_turn')).toBe('none');
-    expect(myTurnCapPlacement(null, null)).toBe('none');
-  });
-});

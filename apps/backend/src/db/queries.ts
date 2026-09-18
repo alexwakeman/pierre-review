@@ -38,6 +38,7 @@ import type {
   MyTurnCard,
   MyTurnCardReason,
   ReviewerSuggestion,
+  ReviewerRoutingCard,
   UpdateBranchCard,
   WorkspaceInsightsResponse,
   WorkspaceMetrics,
@@ -161,6 +162,15 @@ import type {
   ArmedMergePhase,
   ArmedMergeState,
   MergeMethod,
+} from '@pierre-review/shared';
+// THE PENDING BOARD'S NUMBERS — admission floors, caps, colour thresholds and the kind order. Read
+// from `shared` (not typed here) because the board's info popovers print the same values; a local
+// literal would let the app explain an order it no longer produces. See pending-rules.ts.
+import {
+  MY_TURN_SEVERITY,
+  PENDING_KIND_RANK,
+  PENDING_LIMITS,
+  PENDING_SEVERITY,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -300,7 +310,7 @@ function diffAnchorId(path: string): string {
   return createHash('sha256').update(path, 'utf8').digest('hex');
 }
 
-function mapUser(u: typeof users.$inferSelect): User {
+export function mapUser(u: typeof users.$inferSelect): User {
   return {
     id: u.id,
     githubLogin: u.githubLogin,
@@ -3692,16 +3702,16 @@ export async function markFeedSeen(accountId: number): Promise<Date> {
 
 // ---- Workspace review-intelligence "Insights" (Pro; workspaceInsights) ----
 
-const INSIGHT_STALLED_REVIEW_HOURS = 24;
-const INSIGHT_UNTOUCHED_THREAD_HOURS = 24; // "> 1 day"
+const INSIGHT_STALLED_REVIEW_HOURS = PENDING_LIMITS.stalledReviewMinHours;
+const INSIGHT_UNTOUCHED_THREAD_HOURS = PENDING_LIMITS.untouchedThreadMinHours; // "> 1 day"
 const INSIGHT_SPRINT_DAYS = 14; // trailing 2 weeks
-const INSIGHT_ROUTING_MIN_AGE_HOURS = 4; // ignore brand-new PRs
+const INSIGHT_ROUTING_MIN_AGE_HOURS = PENDING_LIMITS.routingMinAgeHours; // ignore brand-new PRs
 // A PR with NO activity (GitHub updatedAt) in this many days is "ultra-stale": effectively
 // abandoned-but-unclosed, no longer being looked at. Insight cards (and, downstream, the AI
 // sprint report) exclude them so they don't clutter "what needs attention". 90d = the board's
 // max range — beyond it, a PR is off everyone's radar.
-const INSIGHT_MAX_STALE_DAYS = 90;
-const INSIGHT_CARD_CAP = 15; // per-kind cap so the board stays digestible
+const INSIGHT_MAX_STALE_DAYS = PENDING_LIMITS.maxQuietDays;
+const INSIGHT_CARD_CAP = PENDING_LIMITS.cardCap; // per-kind cap so the board stays digestible
 
 /**
  * THE ONE SPELLING of a merge / update_branch card's one-line detail — used by the card emitter
@@ -3741,7 +3751,7 @@ export function mergeCardDetail(
 // LIE — the daily brief reports the number of cards emitted, so capping at 15 would silently
 // restate "you have 54 things" as "you have 15". 50 keeps the board bounded while sitting above
 // any realistic personal inbox; the tail beyond it is disclosed by /api/my-turn's own listing.
-const MY_TURN_CARD_CAP = 50;
+const MY_TURN_CARD_CAP = PENDING_LIMITS.myTurnCardCap;
 
 /**
  * IS THIS BUILD RED? — and RED IS ALWAYS THE PAIR `failure` | `error`, never one of them.
@@ -4560,7 +4570,15 @@ export async function getWorkspaceInsights(
   accountId: number,
   window: MetricsWindow | undefined,
   scope: BotScope,
+  // ⚠ `uncapped` IS THE PENDING BOARD'S FOLD AND NOBODY ELSE'S. The board ranks every card by its
+  // Do next score and THEN lists the top `boardListCap` of each kind, so it needs the whole
+  // population here — a per-kind cap applied first (in severity / newest order) would hand the
+  // ranker the wrong 15. Every other consumer (the daily brief, the Pro insights pane, chat, the
+  // sprint report, Slack) keeps the default caps: their inputs, prompt sizes and payload hashes
+  // must not grow because the board changed. `kindTotals` is identical either way.
+  opts: { uncapped?: boolean } = {},
 ): Promise<WorkspaceInsightsResponse> {
+  const uncapped = opts.uncapped === true;
   const now = Date.now();
   const generatedAt = new Date(now);
   // The Insights window: the configured SPRINT when provided (its `to` may be in the future for
@@ -4597,6 +4615,12 @@ export async function getWorkspaceInsights(
   // where a silent cap is the same lie my_turn's was. Written inside the block below, so an empty
   // workspace leaves it undefined = nothing to disclose.
   let ciFailingTotal: number | undefined;
+  // Every kind's pre-cap population — see `WorkspaceInsightsResponse.kindTotals`. Written by each
+  // builder BEFORE it slices, so it is the same number in the capped and the uncapped fold.
+  const kindTotals: Partial<Record<InsightKind, number>> = {};
+  // The per-kind list cap for this fold: none for the board (it caps after ranking), the survey
+  // cap for everyone else.
+  const kindCap = uncapped ? Number.POSITIVE_INFINITY : INSIGHT_CARD_CAP;
   const userIdSet = new Set<number>();
   const addUser = (id: number | null): void => {
     if (id != null) userIdSet.add(id);
@@ -4634,34 +4658,23 @@ export async function getWorkspaceInsights(
     `https://github.com/${repoName.get(repoId)}/pull/${number}`;
 
   const finish = async (): Promise<WorkspaceInsightsResponse> => {
-    const kindRank: Record<InsightKind, number> = {
-      // my_turn leads every severity tier: it is the ONLY kind that is about the VIEWER
-      // personally ("someone is waiting on you"), where every other kind is a survey of the
-      // workspace. A thing you must do outranks a thing you might look at.
-      my_turn: 0,
-      // The OTHER kind that is about the VIEWER rather than the workspace — a red build you are on
-      // the hook for. It sits directly under my_turn for the same reason my_turn leads: a thing
-      // you must do outranks a thing you might look at.
-      ci_failing: 1,
-      // A concrete, resolvable blocker on ONE pull request in a repo you can push to — nearer the
-      // two viewer-scoped kinds above than to the workspace surveys below. ⚠ The sort is severity
-      // FIRST and kindRank second, so a `high` conflicts card sits with my_turn/ci_failing and a
-      // `warn` one with the stalled reviews.
-      conflicts: 2,
-      bot_signal: 3, // the flagship "layer above your review bot" summary, next in its severity tier
-      bot_only_review: 4, // the governance "only a bot reviewed this" risk, right after
-      stalled_review: 5,
-      untouched_thread: 6,
-      reviewer_load: 7,
-      reviewer_routing: 8,
-      // ⚠ THE TWO "FORWARD" KINDS RANK LAST WITHIN THEIR SEVERITY TIER, and that is not a
-      // demotion — it is the board's severity sort staying honest. "You could merge this" is an
-      // opportunity, and every kind above it is a problem; the RANKED HEAD is where these rows get
-      // to lead, on proximity rather than severity. The two orderings answer different questions
-      // and must not be made to agree.
-      merge: 9,
-      update_branch: 10,
-    };
+    // The ORDER WITHIN ONE COLOUR, read from `shared` (PENDING_KIND_RANK) because the board's
+    // "How Pending works" copy prints it. The rationale, kept here beside the sort it governs:
+    //   • my_turn leads every severity tier: it is the ONLY kind that is about the VIEWER
+    //     personally ("someone is waiting on you"), where every other kind is a survey of the
+    //     workspace. A thing you must do outranks a thing you might look at.
+    //   • ci_failing is the OTHER kind about the viewer — a red build you are on the hook for.
+    //   • conflicts is a concrete, resolvable blocker on ONE pull request in a repo you can push to,
+    //     nearer the two viewer-scoped kinds than the workspace surveys. ⚠ The sort is severity
+    //     FIRST and kind second, so a `high` conflicts card sits with my_turn/ci_failing and a
+    //     `warn` one with the stalled reviews.
+    //   • bot_signal, then bot_only_review — the flagship bot summary and the governance risk.
+    //   • ⚠ THE TWO "FORWARD" KINDS (merge, update_branch) RANK LAST WITHIN THEIR TIER, and that is
+    //     not a demotion — it is the severity sort staying honest. "You could merge this" is an
+    //     opportunity, and every kind above it is a problem; the RANKED HEAD is where these rows
+    //     get to lead, on proximity rather than severity. The two orderings answer different
+    //     questions and must not be made to agree.
+    const kindRank = PENDING_KIND_RANK;
     const sevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
     cards.sort(
       (a, b) => sevRank[a.severity] - sevRank[b.severity] || kindRank[a.kind] - kindRank[b.kind],
@@ -4686,6 +4699,7 @@ export async function getWorkspaceInsights(
       myTurnMaintainedTotal,
       myTurnOtherTotal,
       ciFailingTotal,
+      kindTotals,
     };
   };
   if (repoIds.length === 0) return finish();
@@ -4968,7 +4982,7 @@ export async function getWorkspaceInsights(
         reason: 'review_request',
         refId: i.prId,
         threadId: null,
-        severity: 'high',
+        severity: MY_TURN_SEVERITY.review_request,
         detail:
           i.alsoRequested > 0
             ? `Review requested from you · ${i.alsoRequested} other reviewer${i.alsoRequested === 1 ? '' : 's'} also requested`
@@ -4992,7 +5006,7 @@ export async function getWorkspaceInsights(
         reason: 'thread',
         refId: i.threadId,
         threadId: i.threadId,
-        severity: 'high',
+        severity: MY_TURN_SEVERITY.thread,
         detail: addressed
           ? `A later commit touched ${i.path} — check it answers your comment`
           : `${handle(i.lastReplyAuthorId)} replied ${agoLabel(at.getTime(), now)}`,
@@ -5011,7 +5025,7 @@ export async function getWorkspaceInsights(
         reason: 'pr_approved',
         refId: i.prId,
         threadId: null,
-        severity: 'warn',
+        severity: MY_TURN_SEVERITY.pr_approved,
         detail: `Approved by ${i.approvals} reviewer${i.approvals === 1 ? '' : 's'} · ${agoLabel(at.getTime(), now)}${conflicts}`,
         since: at,
         prId: i.prId,
@@ -5026,7 +5040,7 @@ export async function getWorkspaceInsights(
         // One card per PR here by construction, so the PR id alone keys it.
         refId: null,
         threadId: null,
-        severity: 'warn',
+        severity: MY_TURN_SEVERITY.your_pr,
         detail: i.summary,
         since: sinceOf(i),
         prId: i.prId,
@@ -5054,7 +5068,7 @@ export async function getWorkspaceInsights(
         ball,
         refId: i.prId,
         threadId: null,
-        severity: 'info',
+        severity: MY_TURN_SEVERITY.watched_repo_pr,
         detail:
           ball?.kind === 'commits_after'
             ? `${YOUR_LAST_ACTION_LABEL[ball.yourLastAction ?? 'reviewed']} · ${handle(ball.pusherId ?? null)} pushed ${pushed} since`
@@ -5076,7 +5090,7 @@ export async function getWorkspaceInsights(
         reason: 'claude_review',
         refId: i.reviewId,
         threadId: null,
-        severity: 'warn',
+        severity: MY_TURN_SEVERITY.claude_review,
         detail: `Claude review ready${i.verdict ? ` · ${i.verdict}` : ''}${i.headStale ? ' · head moved since' : ''}`,
         // finishedAt is nullable on the wire; null falls back to the PR row's openedAt.
         since: i.finishedAt != null ? new Date(Date.parse(i.finishedAt)) : null,
@@ -5166,7 +5180,8 @@ export async function getWorkspaceInsights(
       myTurnDirectTotal = ranked.filter((r) => r.s.relevance === 'direct').length;
       myTurnMaintainedTotal = ranked.filter((r) => r.s.relevance === 'maintained').length;
       myTurnOtherTotal = ranked.filter((r) => r.s.relevance === 'none').length;
-      const built = ranked.slice(0, MY_TURN_CARD_CAP);
+      kindTotals.my_turn = ranked.length;
+      const built = uncapped ? ranked : ranked.slice(0, MY_TURN_CARD_CAP);
 
       for (const { s, p, since } of built) {
         addUser(p.authorId);
@@ -5565,9 +5580,10 @@ export async function getWorkspaceInsights(
     // ⚠ MEASURED BEFORE THE SLICE, exactly as `myTurnTotal` is — counted after it, the "total"
     // would be bounded by the cap and would stop being one.
     ciFailingTotal = ciSeeds.length;
+    kindTotals.ci_failing = ciSeeds.length;
     // ⚠ AND THE SLICE IS OURS TO CALL. There is no central cap in this function: every builder
     // slices itself, so a block that forgets ships an uncapped card kind.
-    for (const seed of ciSeeds.slice(0, INSIGHT_CARD_CAP)) cards.push(seed.card);
+    for (const seed of ciSeeds.slice(0, kindCap)) cards.push(seed.card);
   }
 
   // ── merge / update_branch cards (CORE, deterministic, no AI) ──────────────────────
@@ -5675,14 +5691,16 @@ export async function getWorkspaceInsights(
     );
     // Each kind gets its OWN cap, like every other builder here — a shared one would let a
     // hundred ready PRs delete the behind-trunk signal entirely.
+    kindTotals.merge = mergeSeeds.filter((m) => m.card.kind === 'merge').length;
+    kindTotals.update_branch = mergeSeeds.length - kindTotals.merge;
     let merged = 0;
     let behind = 0;
     for (const seed of mergeSeeds) {
       if (seed.card.kind === 'merge') {
-        if (merged >= INSIGHT_CARD_CAP) continue;
+        if (merged >= kindCap) continue;
         merged += 1;
       } else {
-        if (behind >= INSIGHT_CARD_CAP) continue;
+        if (behind >= kindCap) continue;
         behind += 1;
       }
       cards.push(seed.card);
@@ -5758,7 +5776,8 @@ export async function getWorkspaceInsights(
     // survey kinds: no `conflictsTotal` ships, because the strip counts what is WAITING ON YOU and
     // a stranger's conflicting branch in a repo you can push to is not that. Measured population
     // after the write gate: 4.
-    for (const seed of conflictSeeds.slice(0, INSIGHT_CARD_CAP)) cards.push(seed.card);
+    kindTotals.conflicts = conflictSeeds.length;
+    for (const seed of conflictSeeds.slice(0, kindCap)) cards.push(seed.card);
   }
 
   if (openPrIds.length === 0) return finish();
@@ -5848,7 +5867,7 @@ export async function getWorkspaceInsights(
 
   // (1) STALLED REVIEWS — open PRs with a still-pending reviewer (user OR team), open past
   // the threshold.
-  const stalled = openPrs
+  const stalledAll = openPrs
     .filter(
       (p) =>
         requestedPrIds.has(p.id) &&
@@ -5856,8 +5875,9 @@ export async function getWorkspaceInsights(
         (now - p.openedAt.getTime()) / 3_600_000 > INSIGHT_STALLED_REVIEW_HOURS,
     )
     .map((p) => ({ p, ageHours: Math.round((now - p.openedAt!.getTime()) / 3_600_000) }))
-    .sort((a, b) => b.ageHours - a.ageHours)
-    .slice(0, INSIGHT_CARD_CAP);
+    .sort((a, b) => b.ageHours - a.ageHours);
+  kindTotals.stalled_review = stalledAll.length;
+  const stalled = stalledAll.slice(0, kindCap);
   for (const { p, ageHours } of stalled) {
     const reviewers = pendingByPr.get(p.id) ?? [];
     addUser(p.authorId);
@@ -5865,7 +5885,12 @@ export async function getWorkspaceInsights(
     cards.push({
       id: `stalled:${p.id}`,
       kind: 'stalled_review',
-      severity: ageHours >= 72 ? 'high' : ageHours >= 48 ? 'warn' : 'info',
+      severity:
+        ageHours >= PENDING_SEVERITY.stalledReviewHours.high
+          ? 'high'
+          : ageHours >= PENDING_SEVERITY.stalledReviewHours.warn
+            ? 'warn'
+            : 'info',
       ...prRef(p, standingsByPr.get(p.id)),
       ageHours,
       requestedReviewerIds: reviewers,
@@ -5915,10 +5940,11 @@ export async function getWorkspaceInsights(
       ),
     )
     .execute();
+  kindTotals.untouched_thread = threadRows.length;
   const threads = threadRows
     .map((t) => ({ t, ageHours: Math.round((now - t.createdAt.getTime()) / 3_600_000) }))
     .sort((a, b) => b.ageHours - a.ageHours)
-    .slice(0, INSIGHT_CARD_CAP);
+    .slice(0, kindCap);
   // Item 5 — tag an untouched thread whose originating commenter is an automated reviewer so the
   // card can show a vendor pill (the thread came from a bot, not a human). Resolved once here.
   // Same workspace as the bot_signal card above — these cards are drawn from that workspace's
@@ -5932,7 +5958,12 @@ export async function getWorkspaceInsights(
     cards.push({
       id: `thread:${t.threadId}`,
       kind: 'untouched_thread',
-      severity: ageHours >= 96 ? 'high' : ageHours >= 48 ? 'warn' : 'info',
+      severity:
+        ageHours >= PENDING_SEVERITY.untouchedThreadHours.high
+          ? 'high'
+          : ageHours >= PENDING_SEVERITY.untouchedThreadHours.warn
+            ? 'warn'
+            : 'info',
       ...prRef(
         { ...t, id: t.prId, number: t.prNumber, title: t.prTitle },
         standingsByPr.get(t.prId),
@@ -5977,6 +6008,7 @@ export async function getWorkspaceInsights(
   // ⚠ ONE MAP FEEDS BOTH THE COUNT AND THE LIST — the FILTER-THE-SEED rule. `pendingCount` and
   // `pendingPrs` are two reads of THIS map, never narrowed independently, and `pendingByReviewer`
   // has NO reader below this line.
+  kindTotals.reviewer_load = unreviewedByReviewer.size;
   const loadCards = [...unreviewedByReviewer.keys()]
     .map((rid) => ({
       rid,
@@ -5985,7 +6017,7 @@ export async function getWorkspaceInsights(
     }))
     .filter((x) => x.pending >= 1)
     .sort((a, b) => b.pending - a.pending || b.sprint - a.sprint)
-    .slice(0, 8);
+    .slice(0, PENDING_LIMITS.reviewerLoadCap);
   for (const x of loadCards) {
     addUser(x.rid);
     const pendingPrs = (unreviewedByReviewer.get(x.rid) ?? [])
@@ -6001,7 +6033,12 @@ export async function getWorkspaceInsights(
     cards.push({
       id: `load:${x.rid}`,
       kind: 'reviewer_load',
-      severity: x.pending >= 4 ? 'high' : x.pending >= 2 ? 'warn' : 'info',
+      severity:
+        x.pending >= PENDING_SEVERITY.reviewerLoadPending.high
+          ? 'high'
+          : x.pending >= PENDING_SEVERITY.reviewerLoadPending.warn
+            ? 'warn'
+            : 'info',
       reviewerId: x.rid,
       pendingCount: x.pending,
       reviewsThisSprint: x.sprint,
@@ -6011,69 +6048,37 @@ export async function getWorkspaceInsights(
 
   // (4) REVIEWER ROUTING — orphan PRs (nobody requested, nobody reviewed) + who should review.
   // `requestedPrIds`, not `pendingByPr`: a TEAM request already has a reviewer on the hook.
-  const orphans = openPrs
-    .filter(
-      (p) =>
-        !requestedPrIds.has(p.id) &&
-        !reviewedPrIds.has(p.id) &&
-        p.openedAt != null &&
-        (now - p.openedAt.getTime()) / 3_600_000 > INSIGHT_ROUTING_MIN_AGE_HOURS,
-    )
-    .slice(0, INSIGHT_CARD_CAP);
+  const orphanPool = openPrs.filter(
+    (p) =>
+      !requestedPrIds.has(p.id) &&
+      !reviewedPrIds.has(p.id) &&
+      p.openedAt != null &&
+      (now - p.openedAt.getTime()) / 3_600_000 > INSIGHT_ROUTING_MIN_AGE_HOURS,
+  );
+  // ⚠ THE POPULATION IS EVERY ORPHAN, whether or not a reviewer can be suggested for it. The
+  // capped fold below still drops orphans with no suggestion (its consumers are unchanged), but
+  // "N PRs need a reviewer" is a fact about the PRs, not about our ability to name someone.
+  kindTotals.reviewer_routing = orphanPool.length;
+  if (uncapped) {
+    // THE BOARD'S FOLD: every orphan gets a card with no suggestions yet. Suggesting is
+    // network-backed (CODEOWNERS) and only worth doing for the cards the board will rank highest,
+    // which is decided downstream — `suggestRoutingReviewers` fills them in after ranking.
+    for (const p of orphanPool) {
+      addUser(p.authorId);
+      cards.push({
+        id: `route:${p.id}`,
+        kind: 'reviewer_routing',
+        severity: 'info',
+        ...prRef(p, standingsByPr.get(p.id)),
+        topPaths: (p.files ?? []).map((f) => f.path).slice(0, 5),
+        suggestedReviewers: [],
+      });
+    }
+    return finish();
+  }
+  const orphans = orphanPool.slice(0, INSIGHT_CARD_CAP);
   if (orphans.length > 0) {
-    // Orphan PRs' changed paths come from the always-synced pull_requests.files. A few
-    // stale orphans (old PRs predating the files column) are backfilled once via a
-    // bounded GitHub fetch (cached onto the row), so routing works without depending on
-    // the sparse per-commit commit_files cache.
-    const orphanFiles = new Map<number, string[]>(
-      orphans.map((p) => [p.id, (p.files ?? []).map((f) => f.path)]),
-    );
-    const missing = orphans.filter((p) => p.files == null).map((p) => p.id);
-    if (missing.length > 0)
-      for (const [prId, paths] of await ensureRoutingPrFiles(accountId, missing))
-        orphanFiles.set(prId, paths);
-
-    // Author logins (to drop the author from CODEOWNERS user suggestions — no self-review).
-    const authorIds = [
-      ...new Set(orphans.map((p) => p.authorId).filter((x): x is number => x != null)),
-    ];
-    const authorLoginById = new Map<number, string>();
-    if (authorIds.length > 0)
-      for (const u of await db
-        .select({ id: users.id, login: users.githubLogin })
-        .from(users)
-        .where(inArray(users.id, authorIds))
-        .execute())
-        authorLoginById.set(u.id, u.login);
-
-    // Per orphan: the SAME suggested-reviewer pipeline as the PR-detail "Suggested reviewers" row.
-    // suggestReviewersFromHistory resolves candidates through getReviewerLogins (drops bots + null
-    // logins) → so BOTS ARE STRUCTURALLY IMPOSSIBLE here; enrichReviewerSuggestions then layers
-    // CODEOWNERS owners + CODEOWNERS teams + inferred team history on top (TEAMS are first-class,
-    // exactly like the PR detail). Best-effort network per orphan (per-repo cached), parallelised;
-    // any failure degrades to just the bot-filtered history users.
-    const built = await Promise.all(
-      orphans.map(async (p) => {
-        const paths = orphanFiles.get(p.id) ?? [];
-        const full = repoName.get(p.repoId) ?? '';
-        const slash = full.indexOf('/');
-        const owner = slash > 0 ? full.slice(0, slash) : '';
-        const name = slash > 0 ? full.slice(slash + 1) : '';
-        const base = await suggestReviewersFromHistory(accountId, p.repoId, p.authorId, paths);
-        const { suggestions, extraUsers } = await enrichReviewerSuggestions({
-          accountId,
-          owner,
-          name,
-          authorLogin: p.authorId != null ? authorLoginById.get(p.authorId) ?? null : null,
-          paths,
-          userSuggestions: base,
-          knownUserIds: new Set<number>(),
-          resolveUsers: getUsersByLogins,
-        });
-        return { p, paths, suggestions, extraUsers };
-      }),
-    );
-
+    const built = await routingSuggestionsFor(accountId, orphans, repoName);
     for (const { p, paths, suggestions, extraUsers } of built) {
       if (suggestions.length === 0) continue; // nothing useful to suggest (users or teams)
       addUser(p.authorId);
@@ -6091,6 +6096,123 @@ export async function getWorkspaceInsights(
   }
 
   return finish();
+}
+
+/** The PR fields the reviewer suggester needs. */
+type RoutingOrphan = {
+  id: number;
+  repoId: number;
+  authorId: number | null;
+  files: { path: string }[] | null;
+};
+
+/**
+ * WHO SHOULD REVIEW THESE ORPHANS — the SAME suggested-reviewer pipeline as the PR-detail
+ * "Suggested reviewers" row. suggestReviewersFromHistory resolves candidates through
+ * getReviewerLogins (drops bots + null logins) → so BOTS ARE STRUCTURALLY IMPOSSIBLE here;
+ * enrichReviewerSuggestions then layers CODEOWNERS owners + CODEOWNERS teams + inferred team
+ * history on top (TEAMS are first-class, exactly like the PR detail). Best-effort network per orphan
+ * (per-repo cached), parallelised; any failure degrades to just the bot-filtered history users.
+ *
+ * Orphan PRs' changed paths come from the always-synced pull_requests.files. A few stale orphans
+ * (old PRs predating the files column) are backfilled once via a bounded GitHub fetch (cached onto
+ * the row), so routing works without depending on the sparse per-commit commit_files cache.
+ */
+async function routingSuggestionsFor<P extends RoutingOrphan>(
+  accountId: number,
+  orphans: P[],
+  repoName: Map<number, string>,
+): Promise<{ p: P; paths: string[]; suggestions: ReviewerSuggestion[]; extraUsers: User[] }[]> {
+  const orphanFiles = new Map<number, string[]>(
+    orphans.map((p) => [p.id, (p.files ?? []).map((f) => f.path)]),
+  );
+  const missing = orphans.filter((p) => p.files == null).map((p) => p.id);
+  if (missing.length > 0)
+    for (const [prId, paths] of await ensureRoutingPrFiles(accountId, missing))
+      orphanFiles.set(prId, paths);
+
+  // Author logins (to drop the author from CODEOWNERS user suggestions — no self-review).
+  const authorIds = [
+    ...new Set(orphans.map((p) => p.authorId).filter((x): x is number => x != null)),
+  ];
+  const authorLoginById = new Map<number, string>();
+  if (authorIds.length > 0)
+    for (const u of await db
+      .select({ id: users.id, login: users.githubLogin })
+      .from(users)
+      .where(inArray(users.id, authorIds))
+      .execute())
+      authorLoginById.set(u.id, u.login);
+
+  return Promise.all(
+    orphans.map(async (p) => {
+      const paths = orphanFiles.get(p.id) ?? [];
+      const full = repoName.get(p.repoId) ?? '';
+      const slash = full.indexOf('/');
+      const owner = slash > 0 ? full.slice(0, slash) : '';
+      const name = slash > 0 ? full.slice(slash + 1) : '';
+      const base = await suggestReviewersFromHistory(accountId, p.repoId, p.authorId, paths);
+      const { suggestions, extraUsers } = await enrichReviewerSuggestions({
+        accountId,
+        owner,
+        name,
+        authorLogin: p.authorId != null ? authorLoginById.get(p.authorId) ?? null : null,
+        paths,
+        userSuggestions: base,
+        knownUserIds: new Set<number>(),
+        resolveUsers: getUsersByLogins,
+      });
+      return { p, paths, suggestions, extraUsers };
+    }),
+  );
+}
+
+/**
+ * THE PENDING BOARD'S SUGGESTION PASS — fills `suggestedReviewers` (and the full `topPaths`) on
+ * the "Needs a reviewer" cards the board ranked highest. The uncapped fold emits every orphan with
+ * no suggestions because the lookup costs network per PR; the board calls this for its top
+ * `routingSuggestCap` only. Mutates the cards in place and returns the user ids the suggestions
+ * name, so the caller can resolve them for the client.
+ */
+export async function suggestRoutingReviewers(
+  accountId: number,
+  cards: ReviewerRoutingCard[],
+): Promise<number[]> {
+  if (cards.length === 0) return [];
+  const rows = await db
+    .select({
+      id: pullRequests.id,
+      repoId: pullRequests.repoId,
+      authorId: pullRequests.authorId,
+      files: pullRequests.files,
+    })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(
+          pullRequests.id,
+          cards.map((c) => c.prId),
+        ),
+      ),
+    )
+    .execute();
+  const repoName = new Map(cards.map((c) => [c.repoId, c.repoFullName]));
+  const byPr = new Map(cards.map((c) => [c.prId, c]));
+  const userIds = new Set<number>();
+  for (const { p, paths, suggestions, extraUsers } of await routingSuggestionsFor(
+    accountId,
+    rows,
+    repoName,
+  )) {
+    const card = byPr.get(p.id);
+    if (card == null) continue;
+    card.topPaths = paths.slice(0, 5);
+    card.suggestedReviewers = suggestions;
+    for (const s of suggestions) if (s.userId != null) userIds.add(s.userId);
+    for (const u of extraUsers) userIds.add(u.id);
+  }
+  return [...userIds];
 }
 
 // Which chip of the "PR events" pill's dependent row a feed kind belongs to, or null when the

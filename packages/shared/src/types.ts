@@ -1,6 +1,8 @@
 // API types shared between frontend and backend.
 // All timestamps are ISO-8601 strings over the wire.
 
+import type { DoNextAdjustment, DoNextProximityBase, PendingTabKey } from './pending-rules.js';
+
 export type DerivedState =
   | 'resolved'
   | 'likely_addressed'
@@ -7359,6 +7361,16 @@ export interface WorkspaceInsightsResponse {
    *  exactly the way my_turn's was. Absent when the fold didn't run (an empty workspace) —
    *  `undefined` and "not capped" are both non-disclosures, so consumers gate on `total > shown`. */
   ciFailingTotal?: number;
+  /**
+   * EVERY KIND'S UNCAPPED POPULATION — the count before any per-kind cap, identical whichever caps
+   * the fold was asked to apply. The daily brief's stalled / untouched / needs-a-reviewer lines and
+   * the Pending tabs' counts both read it, so the number a reader clicks and the count on the tab
+   * they land on are one figure. `reviewer_routing`'s population is every PR with nobody asked and
+   * nobody reviewing — whether or not a reviewer could be suggested for it.
+   *
+   * Trailing optional (independent deploys).
+   */
+  kindTotals?: Partial<Record<InsightKind, number>>;
 }
 
 // The attention cards (your turn / red builds / stalled reviews / untouched threads / reviewer
@@ -7370,26 +7382,54 @@ export interface AttentionCardsResponse {
   cards: InsightCard[];
   users: User[];
   /**
-   * THE "DO NEXT" HEAD — card ids in the deterministic rank order of `db/work-plan.ts`
-   * (`score = 0.50·proximity + 0.30·stallRisk + 0.20·relevanceWeight`), capped at
-   * WORK_PLAN_ITEM_CAP with one row seated per non-empty kind.
+   * THE FIVE TABS (`PENDING_TABS`), each with its UNCAPPED count and its cards in score order.
    *
-   * ⚠ IT IS AN ORDERING, NOT A FILTER. The board renders ONE list partitioned into head and
-   * tail where `head ∪ tail === cards` and the two are disjoint. That is what keeps every cap
-   * disclosure ("50 of 148") arithmetically true and keeps the brief strip and the board one
-   * population. A future "improvement" that instead FILTERED `cards` down to the head would
-   * break `capFor`'s `shown === count` guard with no error, on exactly the workspaces where the
-   * disclosure matters.
+   * ⚠ THE ORDER IS THE SERVER'S. Every PR card is scored by `db/work-plan.ts`'s Do next formula and
+   * each tab lists its cards highest score first — no severity-first sort and no cross-kind spread
+   * rule. The first `PENDING_DO_NEXT_SIZE` of whatever the reader is looking at are "Do next".
    *
-   * ⚠ FREE ON EVERY TIER — this is code-derived rank, not narration. The Pro layer only
-   * decorates these rows (see WorkPlanItem.cardId).
+   * `cards` carries only what the tabs list (the top `boardListCap` of each kind, plus the
+   * review-load strip), so a tab's `total` may exceed its listed cards — the tab says so.
    *
-   * TRAILING OPTIONAL, and the reason is NOT persistence (`shouldDehydrateQuery` persists only
-   * pr | thread | pr-files, so this response never reaches IndexedDB): the SPA and the server
-   * deploy independently and `useAttentionCards` serves a 60s-stale cached body, so a response
-   * predating this field must render a HEADLESS board rather than throw.
+   * Trailing optional: the SPA and the server deploy independently, and a response predating this
+   * field must still render (as one unsplit list).
    */
-  doNextIds?: string[];
+  tabs?: PendingTab[];
+  /** Each listed PR card's Do next score and its working, keyed by card id — for the cards' info
+   *  popovers. Explanation only: nothing on the client may sort or filter by it. */
+  scores?: Record<string, PendingCardScore>;
+}
+
+export interface PendingTab {
+  key: PendingTabKey;
+  /** The tab's PR cards, uncapped (review load is people, and is not counted). */
+  total: number;
+  /** Uncapped count per card kind in the tab — the kind chips' figures. */
+  kindTotals: Partial<Record<InsightKind, number>>;
+  /** Listed card ids, highest score first (ties: longer waiting, then PR id, then card id). At most
+   *  `boardListCap` of EACH kind, so the first `boardListCap` of the whole list are the tab's true
+   *  top cards, and a kind filter still shows that kind's top ones. */
+  cardIds: string[];
+  /** My turn only: the uncapped split by whether the item names you ('mine' = direct + maintained)
+   *  or not — the "Only yours" view's own denominator. */
+  relevanceTotals?: { mine: number; others: number };
+  /** Review-load card ids for the "who has reviews waiting" strip ('review' tab only). */
+  peopleCardIds?: string[];
+}
+
+/** One card's Do next score and how it was reached. */
+export interface PendingCardScore {
+  /** 0..1 — `DO_NEXT_RULES.weights` over the three parts below. */
+  score: number;
+  /** 0..1 after clamping; the base plus each applied adjustment. */
+  proximity: number;
+  proximityBase: DoNextProximityBase;
+  adjustments: DoNextAdjustment[];
+  stallRisk: number;
+  relevance: MyTurnRelevance;
+  /** Hours on `clock` when this response was built, or null when the card has no clock. */
+  ageHours: number | null;
+  clock: NonNullable<WorkPlanFacts['clock']> | null;
 }
 
 // ---- POST /api/attention/liveness — the board's batched "is this still true?" probe ----------
@@ -9705,12 +9745,18 @@ export interface DailyBriefCounts {
    *  narrow line. Pair narrow with narrow; consumers gate on
    *  `myTurnPersonalTotal > myTurnPersonal`. */
   myTurnPersonalTotal?: number;
-  /** THE THREE-WAY SPLIT of the same `myTurn` cards, by `MyTurnCard.relevance`. Each is counted
-   *  off the CARDS the board paints (exactly like `myTurn` and `myTurnPersonal`), each is paired
-   *  with its OWN uncapped total, and the three are MUTUALLY EXCLUSIVE and EXHAUSTIVE:
+  /** THE THREE-WAY SPLIT of the `myTurn` population, by `MyTurnCard.relevance`, each paired with
+   *  its OWN uncapped total. The TOTALS partition the population:
    *
-   *      myTurnDirect + myTurnMaintained + myTurnOther === myTurn
-   *      myTurnDirect + myTurnMaintained             === myTurnPersonal
+   *      myTurnDirectTotal + myTurnMaintainedTotal + myTurnOtherTotal === myTurnTotal
+   *      myTurnDirectTotal + myTurnMaintainedTotal                    === myTurnPersonalTotal
+   *
+   *  The displayed figures are what the Pending board LISTS for each view — min(total, the board's
+   *  list cap) — because the board ranks every item by score and lists each view's own top. So
+   *  `myTurnOther` is the "review or reply" list's size and `myTurnPersonal` the "Only yours" list's.
+   *  `myTurnDirect`/`myTurnMaintained` (the badge split, "2 yours · 3 in your repos") are sent ONLY
+   *  when every personal item fits on the list, so they always add up to `myTurnPersonal`; past the
+   *  cap they are absent and the badge shows the total alone.
    *
    *  The brief renders TWO lines off this — "N need your attention" (`myTurnPersonal`, the
    *  interrupting population, unchanged) and "M need review or reply" (`myTurnOther`) — and each
@@ -10120,7 +10166,7 @@ export interface WorkPlanItem {
    * `workPlanPayloadHash`: it is redundant with `id` + `prId`, and folding it in would move every
    * stored hash for no change in meaning.
    *
-   * Trailing optional for the same independent-deploy reason as `AttentionCardsResponse.doNextIds`.
+   * Trailing optional (the SPA and the server deploy independently).
    */
   cardId?: string;
 }

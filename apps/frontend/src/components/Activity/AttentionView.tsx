@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import type { DailyBriefCounts, InsightCard } from '@pierre-review/shared';
+import { useCallback, useMemo, useState } from 'react';
+import type { DailyBriefCounts, InsightCard, PendingTabKey } from '@pierre-review/shared';
 import {
   ATTENTION_LIVENESS_MAX_IDS,
   useAttentionCards,
@@ -14,9 +14,17 @@ import {
   useWorkPlanGenerating,
 } from '../../hooks/useWorkPlan.js';
 import { useFilters, type AttentionRelevanceLens } from '../../store/filters.js';
+import {
+  buildPendingView,
+  effectivePendingTab,
+  offerOnlyYours,
+  tabsOf,
+  TAB_LABEL,
+} from './pendingTabs.js';
 import { relativeTime } from '../../lib/ui.js';
 import { CheckCircleIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { AttentionCards, KIND_LABEL } from './AttentionCards.js';
+import { PendingGuideModal, PendingOrderInfo } from './PendingInfo.js';
 
 // The **Pending** rail entry (CORE/free) — the attention cards (your turn / stalled reviews
 // / untouched threads / reviewer load / needs-a-reviewer) that used to sit under the Pro Insights
@@ -64,7 +72,7 @@ export function myTurnCapDisclosure(
     counts.myTurn,
     counts.myTurnTotal,
     (total, n) =>
-      `${total} items are on your plate in this Workspace. The board keeps the most urgent ${n} — chosen by severity, newest first within it — and backfills as you clear them.`,
+      `${total} items are on your plate in this Workspace. The My turn tab lists the ${n} with the highest scores.`,
   );
 }
 
@@ -96,7 +104,7 @@ export function myTurnPersonalCapDisclosure(
     (total, n) =>
       // Keeps the literal "in this Workspace" — `workspaceCapDisclosure` swaps that phrase for the
       // row's own workspace name, and a reword here would silently make that a no-op.
-      `${total} items on your plate in this Workspace personally involve you. The board keeps the most urgent ${n} — chosen by severity, newest first within it — and backfills as you clear them.`,
+      `${total} items on your plate in this Workspace personally involve you. The My turn tab lists the ${n} with the highest scores.`,
   );
 }
 
@@ -127,7 +135,7 @@ export function myTurnOtherCapDisclosure(
     (total, n) =>
       // Keeps the literal "in this Workspace" for the same reason the personal twin does — see
       // `workspaceCapDisclosure`'s place-name substitution.
-      `${total} items in this Workspace need a review or reply from someone, but nobody has named you on them. The board keeps the most urgent ${n} — chosen by severity, newest first within it — and backfills as you clear them.`,
+      `${total} items in this Workspace need a review or reply from someone, but nobody has named you on them. The My turn tab lists the ${n} with the highest scores.`,
   );
 }
 
@@ -150,7 +158,7 @@ export function ciFailingCapDisclosure(
     counts.ciFailing,
     counts.ciFailingTotal,
     (total, n) =>
-      `${total} red builds in this Workspace are yours — your own open PRs, and trunk in repos you maintain. The board shows the most urgent ${n}.`,
+      `${total} red builds in this Workspace are yours — your own open PRs, and trunk in repos you maintain. The Needs fixing tab lists the ${n} with the highest scores.`,
   );
 }
 
@@ -176,60 +184,9 @@ export function personalMyTurnCount(counts: DailyBriefCounts): number {
   return counts.myTurnPersonal ?? counts.myTurn;
 }
 
-/** Does this card survive the board's PERSONAL ('mine') lens?
- *
- *  ⚠ Only an EXPLICIT `false` hides a card. `personal` is advisory and every other kind lacks it
- *  entirely, so an unclassifiable card stays on the board — the same "absent ⇒ personal" rule the
- *  wire type states, and the safe direction for a lens that hides work.
- *
- *  ⚠ It reads `personal`, not `relevance`, on purpose: `personal` IS `relevance !== 'none'`, the
- *  server writes it on every row, and it survives a response that predates the three-way split.
- *  Deriving it from `relevance` here would hide every card on such a response. */
-export function passesPersonalLens(card: InsightCard): boolean {
-  return !(card.kind === 'my_turn' && card.personal === false);
-}
-
-/** The 'others' half: the review-or-reply backlog nobody named the viewer on.
- *
- *  ⚠ `relevance === 'none'`, NOT `personal === false`. A card that carries neither field is NOT
- *  in this half — the two lenses are deliberately not exact complements over unclassifiable rows,
- *  because the safe direction differs: 'mine' keeps an unknown card (over-showing beats hiding
- *  work), and so does 'others' by simply never claiming it. An old response therefore paints an
- *  empty 'others' board rather than a mislabelled full one — and the brief does not offer the
- *  line at all on such a response, so nothing routes a reader there. */
-export function passesOtherLens(card: InsightCard): boolean {
-  return !(card.kind === 'my_turn' && card.relevance !== 'none');
-}
-
 /**
- * THE ONE LENS PREDICATE the board, the banner and their counts all go through.
- *
- * ⚠ IT NARROWS `my_turn` AND NOTHING ELSE, in BOTH directions. Relevance is a property of the
- * my-turn fold — no other kind carries the field, and a stalled review or a red build is a survey
- * of the workspace rather than a claim about who it belongs to. Filtering those by a field they do
- * not have would empty the board the moment a lens was seated (`ci_failing` in particular is
- * personal BY CONSTRUCTION — the server only emits your own red PRs and trunk in repos you
- * maintain — so hiding it under 'others' would hide work that IS yours from a reader who only
- * asked to see the backlog).
- *
- * ⚠ `merge` AND `update_branch` ARE EXEMPT TOO, even though they DO carry `relevance`. They carry
- * it for the RANKER's weight, not as an ownership claim: a PR being ready to land says nothing
- * about whose turn it is. Filtering them here would also stop the brief's two my-turn lines
- * partitioning the lensed board, which is the one job this predicate has.
- */
-// ⚠ `conflicts` IS NOT NARROWED BY THIS LENS EITHER, and its exemption is the forward kinds' one:
-// the kind carries `relevance`, but only for the board's cap ordering and its severity accent —
-// never as an ownership claim. Write access to a repo is not ownership of somebody else's PR, so a
-// conflicts card belongs to neither 'mine' nor 'others' and stays visible under both.
-export function passesRelevanceLens(card: InsightCard, lens: 'mine' | 'others' | null): boolean {
-  if (lens == null) return true;
-  return lens === 'mine' ? passesPersonalLens(card) : passesOtherLens(card);
-}
-
-/**
- * HOW EACH LENS IS NAMED IN PROSE — one table, read by the board's filtered empty state AND by
- * `AttentionIsolationBanner`, so the two surfaces that describe the same narrowing cannot phrase
- * it two ways (the rule `myTurnCapDisclosure` enforces for the cap, applied to the lens).
+ * HOW EACH LENS IS NAMED IN PROSE — one table, read by My turn's "Only yours" control and its
+ * filtered empty state, so the two cannot phrase the same narrowing two ways.
  *
  * ⚠ 'others' IS NOT "not yours". It is "nobody has named you on it" — a PR in a repo you only
  * read, or one in a repo you maintain that you have already been counted for elsewhere. The copy
@@ -263,303 +220,65 @@ export const LENS_COPY: Record<
   },
 };
 
-/**
- * THE HEADER'S "My turn" PILL — the one gesture that narrows this board to the work that is on
- * the reader, without their having to arrive from a notification.
- *
- * It seats the KIND isolation (`attentionIsolation = 'my_turn'`), which is what "just show me my
- * turn" means: one kind of card, the personal worklist, no surveys of the workspace beside it. It
- * is NOT the relevance lens — that splits the my_turn population by whether anyone named you, an
- * orthogonal axis (see `passesRelevanceLens`).
- *
- * ⚠ IT CARRIES NO NUMBER, for the same reason its neighbour does not — and one more. The my_turn
- * population is CAPPED (50 cards over a real 180), so a bare "50" on a pill would be a silent cap,
- * and "50 of 180" is already printed six pixels away in the header the moment the pill is pressed
- * (`myTurnCapPlacement` → 'inline'). One figure per screen, in the place that owns its denominator.
- *
- * ⚠ IT RETURNS THE VALUE A PRESS SEATS (`next`) rather than leaving the JSX to work it out. Seating
- * is the half that can silently break — every entry point must seat its value, `null` included —
- * and an `onClick` expression is the one thing the frontend's renderer-less tests cannot exercise.
- *
- * Returns null when the control would do nothing:
- *  • the board holds no my_turn card at all — nothing to focus on;
- *  • every card on it is already my_turn — a filter that hides nothing;
- *  • another KIND is isolated — the board is somebody else's narrowing, and the isolation banner
- *    above it owns the way out. (That case is implied by the fold below, since an isolated board
- *    holds only its own kind, but it is stated so a future change to `cards` cannot quietly turn
- *    this into a second isolation switcher.)
- */
-export function myTurnPillToggle(
-  painted: InsightCard[],
-  isolation: InsightCard['kind'] | null,
-): { pressed: boolean; next: InsightCard['kind'] | null } | null {
-  if (isolation === 'my_turn') return { pressed: true, next: null };
-  if (isolation != null) return null;
-  if (!painted.some((c) => c.kind === 'my_turn')) return null;
-  if (painted.every((c) => c.kind === 'my_turn')) return null;
-  return { pressed: false, next: 'my_turn' };
-}
-
-/**
- * IS THE RANKED "Do next" HEAD SUPPRESSED? One predicate, because it gates four things at once —
- * the head itself, every Pro `why` line, the headline/`parked` narration and the Generate button.
- *
- * ⚠ `my_turn` IS A DELIBERATE EXEMPTION FROM "AN ISOLATED BOARD HAS NO HEAD", and the argument is
- * the difference between the two ways a board gets isolated. The rule was written when the only
- * entry points were the daily brief's lines, which name SURVEY kinds — "3 PRs stalled awaiting
- * review", "15 untouched threads". Those are samples of the workspace, and a "do next" ordering
- * over a single kind of survey row is an order nobody asked for and cannot act on in sequence.
- *
- * The "My turn" pill is the opposite gesture: the reader asking to see only the work that is on
- * THEM, which is exactly the population `db/work-plan.ts` ranks. Blanking the head there answers a
- * request to FOCUS by deleting the ordering, disabling "Plan my day" with a sentence telling them
- * to undo the thing they just did. So the head survives — as a strict subset of `doNextIds`
- * resolved against the my_turn cards, which keeps head ∪ tail === cards and every cap disclosure's
- * `shown === count` guard exactly as true as it was.
- *
- * (CLAUDE.md states the broad suppression rule; this is the one narrow exemption to it.)
- */
-export function headSuppressedFor(isolation: InsightCard['kind'] | null): boolean {
-  return isolation != null && isolation !== 'my_turn';
-}
-
-/**
- * THE HEADER'S "ONLY YOURS" TOGGLE — what it shows, and whether it is worth showing at all.
- *
- * ⚠ IT EXISTS BECAUSE EVERY OTHER ENTRY POINT INTO THIS LENS ALSO SEATS AN ISOLATION.
- * `openMyTurnInWorkspace` ends `setAttentionIsolation('my_turn')` + `setAttentionRelevance('mine')`,
- * and every daily-brief line seats its own kind the same way. Both are right — a narrow count may
- * only navigate through its own lens — but between them there was no gesture anywhere that
- * narrowed the board to what involves you WITHOUT collapsing it to one kind, and an isolated board
- * suppresses the ranked "Do next" head and hides the six other kinds. This control is that
- * gesture, which is why it writes `attentionRelevance` and NOTHING ELSE.
- *
- * ⚠ IT CARRIES NO NUMBER, AND THAT IS THE WHOLE POINT — the two candidate figures mean different
- * things and BOTH read as "this many are yours" beside the word "yours":
- *
- *  • the RESULT SIZE (`passesPersonalLens` over the painted array) is what a press paints, but it
- *    counts every survey and forward row too, because this lens narrows `my_turn` AND NOTHING ELSE.
- *    Measured on a real workspace: 115 painted, 50 my-turn rows, NONE of them personal — the fold
- *    returns 65, so the control offered "Only yours 65" for a board on which nothing whatsoever
- *    was the reader's. The number was not merely unhelpful, it was the exact claim the reader had
- *    already reported not being able to make sense of.
- *  • the OWNERSHIP COUNT (personal my-turn rows) is the population the reader means, but a press
- *    paints the result size — so a "10" chip that yields 40 rows rebuilds the count-vs-list
- *    mismatch every rule in this header exists to prevent.
- *
- * No fold satisfies both, so there is no number: the word says what the press does, the emphasis on
- * the rows themselves says which ones are yours, and `myTurnPersonalCapDisclosure` — already in this
- * header, already three-way, already narrow-paired — owns the figure.
- *
- * ⚠ AND THE OFFER GATES ON THE OWNERSHIP COUNT, NEVER THE RESULT SIZE. Its predecessor guarded
- * `count === 0`, which cannot express "none of this board is yours": `passesPersonalLens` passes
- * every non-`my_turn` card, so that count only reaches zero on an EMPTY board. This docblock always
- * claimed the control was withheld when there was "nothing to show"; now it actually is.
- *
- * Returns null when the control would do nothing: a board with no personal my-turn row has nothing
- * of yours to show, and one the lens would not narrow at all has nothing to hide.
- *
- * ⚠ …AND IT STANDS DOWN UNDER THE "My turn" PILL. Two pills side by side reading "My turn" and
- * "Only yours" are near-synonyms in the reader's language whatever they mean in ours, six pixels
- * apart, both pressable, with no way to tell from the header which of the two narrowings is
- * actually on. Inside a my_turn isolation the KIND pill is the one the reader just pressed, so it
- * keeps the header and this one goes; the relevance lens is not lost with it — every entry point
- * that seats it (banner, badge, brief line) still does, `AttentionIsolationBanner` NAMES it
- * directly above the board, and "Show everyone's" there is its way out. In the commonest case of
- * all the banner already collapses the pair to one phrase ("Showing only Your turn"), which is the
- * clearest evidence they are one sentence to a reader and two axes only to us.
- */
-export function personalLensToggle(
-  painted: InsightCard[],
-  lens: AttentionRelevanceLens | null,
-  isolation: InsightCard['kind'] | null = null,
-): { pressed: boolean } | null {
-  if (isolation === 'my_turn') return null;
-  if (lens === 'mine') return { pressed: true };
-  if (lens === 'others') return { pressed: false };
-  // The rows a press would KEEP that actually make an ownership claim. `my_turn` is the only kind
-  // that carries one — the forward kinds hold `relevance` for the ranker's weight, and the surveys
-  // do not carry it at all — so this is the only fold that answers "is any of this mine".
-  const ownsSomething = painted.some((c) => c.kind === 'my_turn' && passesPersonalLens(c));
-  if (!ownsSomething) return null;
-  // ...and a lens that hides nothing is a control that does nothing.
-  if (painted.every(passesPersonalLens)) return null;
-  return { pressed: false };
-}
-
-/**
- * WHERE the disclosure goes on the board, which depends on what the header count is counting.
- *
- *   'inline' — isolated to my_turn: the header count IS the my_turn count, so it reads
- *              "50 of 148 items".
- *   'aside'  — un-isolated: the header counts SEVEN kinds, and "95 of 148" would pair a mixed-kind
- *              numerator with a my_turn-only denominator (one row, two populations). The
- *              disclosure gets its own clause instead.
- *   'none'   — isolated to any other kind: no my_turn card is on screen, so there is no number
- *              here to qualify and a clause about 148 would be noise about a hidden population.
- */
-export function myTurnCapPlacement(
-  cap: MyTurnCapDisclosure | null,
-  attentionIsolation: InsightCard['kind'] | null,
-): 'inline' | 'aside' | 'none' {
-  if (cap == null) return 'none';
-  if (attentionIsolation === 'my_turn') return 'inline';
-  return attentionIsolation == null ? 'aside' : 'none';
-}
+const TAB_EMPTY: Record<PendingTabKey, string> = {
+  my_turn: 'Nothing is your turn right now.',
+  fixing: 'No failing builds or merge conflicts are yours to fix.',
+  review: 'No reviews are waiting.',
+  threads: 'No review threads are waiting for an answer.',
+  land: 'Nothing is ready to land.',
+};
 
 export function AttentionView(): JSX.Element {
   // `workspaceId` is null until the workspaces query resolves the account's Default; the hook
   // holds itself idle (skipToken) until then rather than asking the server for an unscoped answer.
   const workspaceId = useFilters((s) => s.workspaceId);
-  // The one-kind lens set by the daily brief's lines. Transient and URL-silent; cleared by any
-  // rail switch or workspace change (see the store).
+  // The kind filter a daily-brief line seats (a chip, inside its tab), the tab the reader picked,
+  // and My turn's relevance lens. The TAB ON SCREEN is derived from the first two — see
+  // `effectivePendingTab` — and never written back.
   const attentionIsolation = useFilters((s) => s.attentionIsolation);
-  const setAttentionIsolation = useFilters((s) => s.setAttentionIsolation);
-  // The RELEVANCE lens — 'mine' (direct + maintained), 'others' (the review-or-reply backlog) or
-  // null. Seated by whichever count the reader clicked (the notification surfaces seat 'mine'; the
-  // brief's two my-turn lines seat one each) so the number they saw and the list this board paints
-  // are one population. Null by default — a stranger's PR in a repo you only read still needs a
-  // review, and this board is where that work is meant to be found.
+  const attentionTab = useFilters((s) => s.attentionTab);
+  const setAttentionTab = useFilters((s) => s.setAttentionTab);
   const attentionRelevance = useFilters((s) => s.attentionRelevance);
   const setAttentionRelevance = useFilters((s) => s.setAttentionRelevance);
   const { data, isLoading, isError } = useAttentionCards(workspaceId);
-  // The cap disclosure's only source on this screen: /api/attention carries the cards, the brief
-  // carries the uncapped my_turn population. Same fold, same scope, same default window (the
-  // brief IS getWorkspaceInsights), and a cheap counts-only route the Feed has usually already
-  // warmed — so this is a cache read, not a second board request.
-  const { data: brief } = useDailyBrief(workspaceId);
-  const all = (data?.cards ?? []).filter((c) => !BOT_CARD_KINDS.has(c.kind));
-  // The RELEVANCE lens applies BEFORE the kind isolation and before every count below it: it is a
-  // property of the population this board is showing, not of the kind filter on top of it.
-  const visible =
-    attentionRelevance == null
-      ? all
-      : all.filter((c) => passesRelevanceLens(c, attentionRelevance));
-  // ⚠ Everything below reads `cards`, the ISOLATED subset — including the item count. A header
-  // that kept counting the full list would name a number the list underneath it doesn't contain.
-  const cards =
-    attentionIsolation == null ? visible : visible.filter((c) => c.kind === attentionIsolation);
-  // Counted off `visible`, never `cards`: the brief's myTurn counts every my_turn card the board
-  // holds, so the same-snapshot guard has to compare like with like whatever the board is filtered to.
-  // ⚠ And the RULE has to match the LENS — under 'mine' the numerator is the personal subset, so
-  // its denominator must be `myTurnPersonalTotal`, and under 'others' it must be
-  // `myTurnOtherTotal`. Pairing either with the broad total both mixes populations and (because
-  // the guard is an equality) drops the disclosure entirely. Pair narrow with narrow, three ways.
-  const myTurnShown = visible.filter((c) => c.kind === 'my_turn').length;
-  const cap =
-    attentionRelevance === 'mine'
-      ? myTurnPersonalCapDisclosure(myTurnShown, brief?.counts)
-      : attentionRelevance === 'others'
-        ? myTurnOtherCapDisclosure(myTurnShown, brief?.counts)
-        : myTurnCapDisclosure(myTurnShown, brief?.counts);
-  const placement = myTurnCapPlacement(cap, attentionIsolation);
-  // The ci_failing cap, disclosed ONLY while the board is isolated to that kind — anywhere else the
-  // header count mixes kinds, and a ci-only denominator beside it would be one row, two populations
-  // (the same reason `myTurnCapPlacement` returns 'none' off-kind). Counted off `visible`, like the
-  // my_turn figure above, so the same-snapshot guard compares like with like.
-  const ciCap =
-    attentionIsolation === 'ci_failing'
-      ? ciFailingCapDisclosure(visible.filter((c) => c.kind === 'ci_failing').length, brief?.counts)
-      : null;
-  // How many cards the lens is holding back — the number the empty state and the banner need to
-  // say "they're filtered, not gone".
-  const hiddenByLens = all.length - visible.length;
-  // The header's "Only yours" control — see `personalLensToggle` for why it carries no number and
-  // what it gates on. Folded off `cards`, the array the board paints: `ordered` below is a
-  // PERMUTATION of exactly this set (head ∪ tail === cards), so the control is offered on exactly
-  // the rows the reader can see — a head that FILTERED would break that quietly, as it would the
-  // cap disclosures above.
-  const personalToggle = personalLensToggle(cards, attentionRelevance, attentionIsolation);
-  // The "My turn" pill — folded off the SAME painted array, for the same reason. Under the pill
-  // `cards` is already the my_turn subset, which is what makes the pressed state self-evident.
-  const myTurnToggle = myTurnPillToggle(cards, attentionIsolation);
 
-  // ── THE "DO NEXT" PARTITION ───────────────────────────────────────────────────────────────
-  //
-  // ⚠ HEAD ∪ TAIL === CARDS, DISJOINT, BY CONSTRUCTION. The head is a RE-ORDERING of the board,
-  // never a filter over it. Everything above this line — `visible`, `myTurnShown`, `cap`,
-  // `placement`, `ciCap`, both empty states — is computed off `all`/`visible`/`cards` and is
-  // untouched by it, which is exactly what keeps every cap disclosure arithmetically true.
-  //
-  // ⚠ AND THAT COUPLING IS INVISIBLE, SO READ IT HERE RATHER THAN IN A DOC: `capFor` gates on
-  // `shown === count`. A future "improvement" that FILTERED `cards` down to the head — or that
-  // dropped a tail row because its PR already appears in the head — would push `myTurnShown`
-  // below `brief.counts.myTurn`, and "50 of 148" would vanish with no error, on precisely the
-  // workspaces where the cap matters.
-  //
-  // Building `byId` off the FINAL `cards` means the relevance lens narrows the head for free,
-  // with no second predicate to keep in step.
-  // ⚠ NOT `attentionIsolation != null` — see `headSuppressedFor` for the one exemption and why it
-  // is narrow. Under the "My turn" pill the head is `doNextIds` ∩ the my_turn cards, which is
-  // still a subset of `cards`, so the partition below and every cap disclosure above are untouched.
-  const headSuppressed = headSuppressedFor(attentionIsolation);
-  const head = useMemo(() => {
-    if (headSuppressed) return [];
-    const byId = new Map(cards.map((c) => [c.id, c]));
-    return (data?.doNextIds ?? [])
-      .map((id) => byId.get(id))
-      .filter((c): c is InsightCard => c != null);
-  }, [headSuppressed, cards, data?.doNextIds]);
-  const ordered = useMemo(() => {
-    if (head.length === 0) return cards;
-    const inHead = new Set(head.map((c) => c.id));
-    return [...head, ...cards.filter((c) => !inHead.has(c.id))];
-  }, [head, cards]);
-
-  // ⚠ THE RANKER'S ONE-PR-IS-ONE-JOB DEDUP APPLIES TO HEAD SEATING ONLY. If a PR carries both a
-  // `merge` card and a `my_turn` card, only the ranked winner is seated in the head; the sibling
-  // stays in the tail, marked (below) rather than dropped. Dropping it would break the partition
-  // above and take the cap disclosures with it. The dedup exists because one instruction must not
-  // burn two of twelve SCARCE head slots — not because the board may show a PR once.
-  const promotedPrIds = useMemo(
-    () => new Set(head.map((c) => ('prId' in c ? c.prId : null)).filter((p): p is number => p != null)),
-    [head],
+  const tabKey = effectivePendingTab(attentionIsolation, attentionTab);
+  const tabs = useMemo(() => tabsOf(data), [data]);
+  const view = useMemo(
+    () => buildPendingView(data, tabKey, attentionIsolation, attentionRelevance),
+    [data, tabKey, attentionIsolation, attentionRelevance],
   );
+  const activeTab = tabs.find((t) => t.key === tabKey);
+  const lensOn = tabKey === 'my_turn' ? attentionRelevance : null;
 
   // ── LIVENESS: ONE GITHUB QUESTION FOR THE WHOLE BOARD ─────────────────────────────────────
   //
-  // Everything above is a read of already-synced rows, which is what lets fifty cards paint in one
+  // Everything here is a read of already-synced rows, which is what lets the board paint in one
   // request. The price is staleness against GITHUB: a PR merged, closed or unblocked by somebody
   // else keeps its card until the adaptive scheduler walks that repo (2-15 min). `useAttentionLiveness`
   // hands the server these ids and gets them re-read in ONE batched `nodes(ids:)` call.
   //
   // ⚠ IT NEVER TOUCHES THIS LIST. On a change it invalidates `['attention-cards']` + `['daily-brief']`
-  // and the server re-ranks — see the partition warning above for what a local splice would cost.
+  // and the server re-ranks.
   //
-  // ⚠ RANKED, THEN SLICED — and the ranking is the honest half. The server caps one sweep at 90
-  // ids (400s an over-cap request rather than truncating it, so a silently-half-freshened board is
-  // unrepresentable), and a big board can carry more distinct PRs than that. So the FORWARD kinds
-  // go first: those are the rows offering a Merge / Update-branch button, where a stale merge state
-  // is a button that 405s, and where "it already merged" is the complaint this whole path exists to
-  // answer. The head follows, then everything else. Built off `all`, not `cards`: a card the reader
-  // has lensed away is still a card the next unfiltered render will show, and freshening it costs
-  // nothing extra inside a batch that is going out anyway.
+  // ⚠ RANKED, THEN SLICED. The server caps one sweep at 90 ids (400s an over-cap request rather
+  // than truncating it). So the rows whose whole claim IS the merge state go first — ready to merge,
+  // behind trunk (a stale one is a button that 405s) and merge conflicts — then the tab on screen,
+  // then everything else.
+  //
+  // ⚠ `prId` IS NULLABLE ON SOME KINDS. A `ci_failing` 'trunk' card names a PR only when the red
+  // head's landing PR resolved, and review-load cards name none — nothing for a PR probe to ask.
   const livenessPrIds = useMemo(() => {
-    // ⚠ `prId` IS NULLABLE ON SOME KINDS. A `ci_failing` 'trunk' card is about a repository's
-    // default branch and names a PR only when the red head's landing PR resolved; the aggregate
-    // bot cards carry none at all. Those rows have nothing for a PR probe to ask about, and a
-    // `-1` placeholder would be an id the server has to reject rather than one we never sent.
     const prIdOf = (c: InsightCard): number | null =>
       'prId' in c && typeof c.prId === 'number' ? c.prId : null;
+    const onScreen = new Set(view.cards.map((c) => c.id));
     const rank = (c: InsightCard): number => {
-      // ⚠ `conflicts` JOINS THE FORWARD KINDS HERE, AND FOR A DIFFERENT REASON THAN THEY DO.
-      // They are ranked first because a stale merge state is a BUTTON THAT 405s; a conflicts card
-      // carries no button at all. It is first because its ENTIRE claim IS the field this sweep
-      // re-reads — `mergeStateStatus`/`mergeable` — so a stale one tells the reader to go resolve
-      // conflicts they resolved two hours ago, with nothing else on the row to contradict it.
-      //
-      // ⚠ AND THIS ONLY GUARANTEES THE ID IS IN THE SWEEP. The server ranks the mergeability half
-      // separately and caps it at 25 (`rankForMergeStatePass`), where `dirty` deliberately sits in
-      // the most-recently-updated ROTATION rather than the priority group — the cost of a stale
-      // conflicts card is a wasted row, not a refused merge. So do not promise freshness in this
-      // card's copy; this makes the question askable, not answered.
       if (c.kind === 'merge' || c.kind === 'update_branch' || c.kind === 'conflicts') return 0;
-      const id = prIdOf(c);
-      return id != null && promotedPrIds.has(id) ? 1 : 2;
+      return onScreen.has(c.id) ? 1 : 2;
     };
     const seen = new Set<number>();
     const out: number[] = [];
-    for (const c of [...all].sort((a, b) => rank(a) - rank(b))) {
+    for (const c of [...(data?.cards ?? [])].sort((a, b) => rank(a) - rank(b))) {
       const id = prIdOf(c);
       if (id == null || seen.has(id)) continue;
       seen.add(id);
@@ -567,17 +286,19 @@ export function AttentionView(): JSX.Element {
       if (out.length >= ATTENTION_LIVENESS_MAX_IDS) break;
     }
     return out;
-  }, [all, promotedPrIds]);
+  }, [data?.cards, view.cards]);
   useAttentionLiveness(workspaceId, livenessPrIds, !isLoading && !isError);
 
   // ── THE PRO NARRATION (optional, additive) ────────────────────────────────────────────────
   //
-  // ⚠ EVERYTHING ABOVE THIS LINE IS THE FREE PRODUCT AND MUST STAY THAT WAY. The board, the
-  // ranked head, the divider and the tail all come from `/api/attention` alone — a core route,
-  // registered unconditionally, whose rank is computed by `db/work-plan.ts`. With the Pro
-  // submodule absent, `useWorkPlan` self-gates on the capability and never fetches, every value
-  // below is undefined, and the screen is complete. That is the property that makes the narration
-  // safe to sell separately: it decorates a surface that stands on its own.
+  // ⚠ EVERYTHING ELSE ON THIS SCREEN IS THE FREE PRODUCT AND MUST STAY THAT WAY. The tabs, their
+  // counts and their order all come from `/api/attention` alone. With the Pro submodule absent,
+  // `useWorkPlan` self-gates on the capability and never fetches, every value below is undefined,
+  // and the screen is complete.
+  //
+  // The plan still picks its items across kinds (its evidence is the Pro seam's, unchanged); its
+  // headline sits above the tabs and each `why` line lands on its card in whichever tab the card
+  // lives.
   const { workPlan: canNarrate } = useProCapabilities();
   const isCloud = useMe().data?.deploymentMode === 'cloud';
   const wp = useWorkPlan(workspaceId, canNarrate);
@@ -591,19 +312,11 @@ export function AttentionView(): JSX.Element {
   const plan = wp.data?.enabled ? (wp.data.plan ?? null) : null;
 
   // The join: a narration step names a WORK-PLAN row id; the board renders CARDS. `cardId` is the
-  // translation table.
-  //
-  // ⚠ THE JOIN KEY STAYS `WorkPlanItem.id`. The plugin's id-intersection check, its payload hash
-  // and every stored plan speak `wp:<kind>:<id>`; `cardId` is a lookup the SPA performs, not a
-  // second spelling of row identity. Nothing in the plugin changes.
-  //
-  // ⚠ AND IT IS INTERSECTED WITH THE HEAD. The order comes from `/api/attention` and the prose
-  // from `/api/pro/work-plan` — two independent requests that can be out of phase — so without
-  // this, a sentence reading "start here" can render under the "Everything else" divider.
+  // translation table. ⚠ THE JOIN KEY STAYS `WorkPlanItem.id` — the plugin's id check, its payload
+  // hash and every stored plan speak `wp:<kind>:<id>`; `cardId` is a lookup the SPA performs.
   const whyById = useMemo(() => {
     const out = new Map<string, string>();
-    if (headSuppressed || plan == null) return out;
-    const inHead = new Set(head.map((c) => c.id));
+    if (plan == null) return out;
     const wpToCard = new Map(
       (wp.data?.evidence?.items ?? []).flatMap((i) =>
         i.cardId != null ? ([[i.id, i.cardId]] as const) : [],
@@ -611,20 +324,10 @@ export function AttentionView(): JSX.Element {
     );
     for (const step of plan.steps) {
       const cardId = wpToCard.get(step.id);
-      if (cardId != null && inHead.has(cardId)) out.set(cardId, step.why);
+      if (cardId != null) out.set(cardId, step.why);
     }
     return out;
-  }, [headSuppressed, plan, head, wp.data?.evidence?.items]);
-
-  // ⚠ SUPPRESSED TOGETHER WITH THE HEAD, and ONLY with it. A `why` says "do this first"; on a
-  // survey board flattened to one kind there is no first, so the headline, every `why`, `parked`
-  // and the dropped-id note all go dark as one — and the generate button is DISABLED rather than
-  // hidden, because an enabled button whose output cannot render spends a credit for nothing and
-  // gets clicked twice. Under the "My turn" pill there IS a first (see `headSuppressedFor`), so
-  // all of it stays. The headline describes the day rather than the filtered board — the isolation
-  // banner above says the board is narrowed, and `whyById` is already intersected with the head,
-  // so no sentence can land on a row the pill is hiding.
-  const narration = headSuppressed ? null : plan;
+  }, [plan, wp.data?.evidence?.items]);
 
   const notice = generate.data?.throttled
     ? 'A plan is already being written — the latest shows here shortly.'
@@ -634,17 +337,35 @@ export function AttentionView(): JSX.Element {
         ? 'Nothing needs doing in this workspace right now.'
         : null;
 
-  // ⚠ THE ALL-CLEAR MUST STAY REACHABLE. A healthy workspace can hold 15-30 `merge`/
-  // `update_branch` rows (one real workspace has 114 merge-ready PRs against a 15-per-kind cap),
-  // while the daily-brief strip self-hides at all-zero. Without this the board would show thirty
-  // rows beside a hidden strip and "Nothing needs attention" would be unreachable on a workspace
-  // where genuinely nothing is waiting on anyone. So when EVERY card is a forward kind, the board
-  // says so — above the rows, which still render.
-  // ⚠ `conflicts` IS DELIBERATELY NOT A THIRD MEMBER HERE, even though it is the third kind built
-  // off a merge-state column. A forward card is work you MAY do; a conflicting PR is work somebody
-  // OWES, and printing "Nothing is waiting on you" above a list of them would be the all-clear over
-  // a broken board.
-  const onlyForward = cards.length > 0 && cards.every((c) => c.kind === 'merge' || c.kind === 'update_branch');
+  // ── "HOW IS THIS ORDERED" ─────────────────────────────────────────────────────────────────
+  const [guideOpen, setGuideOpen] = useState(false);
+  const openGuide = useCallback(() => setGuideOpen(true), []);
+  const closeGuide = useCallback(() => setGuideOpen(false), []);
+  const viewName =
+    view.kind != null
+      ? `${KIND_LABEL[view.kind]} (${TAB_LABEL[view.tab]})`
+      : lensOn === 'mine'
+        ? 'My turn, only yours'
+        : lensOn === 'others'
+          ? 'My turn, not tied to you'
+          : TAB_LABEL[view.tab];
+  const explain = useMemo(
+    () => ({
+      scores: data?.scores,
+      viewName,
+      total: view.total,
+      whyById,
+      onOpenGuide: openGuide,
+    }),
+    [data?.scores, viewName, view.total, whyById, openGuide],
+  );
+
+  const pill = (on: boolean): string =>
+    `shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+      on
+        ? 'border-gray-400 bg-gray-100 text-gray-800 dark:border-gray-500 dark:bg-gray-800 dark:text-gray-100'
+        : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+    }`;
 
   return (
     <div className="space-y-3" data-testid="attention-view">
@@ -654,148 +375,41 @@ export function AttentionView(): JSX.Element {
             branch, yields NaN and lands the reader on the Feed — breaking Back on history
             entries minted earlier in the same session. */}
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Pending</h2>
-        {!isLoading && !isError && (
-          <span
-            className="text-[11px] text-gray-400"
-            title={placement === 'inline' ? cap?.title : undefined}
-          >
-            {placement === 'inline' && cap != null
-              ? `${cap.shown} of ${cap.total} items`
-              : `${cards.length} item${cards.length === 1 ? '' : 's'}`}
-          </span>
-        )}
-        {!isLoading && !isError && placement === 'aside' && cap != null && (
-          // ⚠ THE ASIDE NAMES THE POPULATION IT IS QUALIFYING, AND `cap` IS THREE-WAY — so this
-          // label is three-way too. `cap` above is `myTurnPersonalCapDisclosure` under 'mine',
-          // `myTurnOtherCapDisclosure` under 'others' and the BROAD `myTurnCapDisclosure` under
-          // the default null lens. A two-way label therefore printed "your turn N of M" over the
-          // broad population on the screen most people look at — a one-row, two-populations
-          // mislabel of the same family the cap rules exist to prevent, and the reason the figure
-          // read as unexplained: the number was every item on the board, not the ones that are
-          // yours. Each arm reuses ITS OWN disclosure sentence's noun — "on your plate" is
-          // `myTurnCapDisclosure`'s own wording, "personally involve you" is the personal twin's,
-          // "need a review or reply from someone" is the other twin's — so the short label and the
-          // long title can never describe two different populations.
-          <span className="text-[11px] text-gray-400" title={cap.title}>
-            ·{' '}
-            {attentionRelevance === 'others'
-              ? 'review or reply'
-              : attentionRelevance === 'mine'
-                ? 'your turn'
-                : 'on your plate'}{' '}
-            {cap.shown} of {cap.total}
-          </span>
-        )}
-        {!isLoading && !isError && ciCap != null && (
-          <span className="text-[11px] text-gray-400" title={ciCap.title}>
-            · {ciCap.shown} of {ciCap.total} red builds
-          </span>
-        )}
-        {/* ── THE "My turn" PILL ─────────────────────────────────────────────────────────
-            The reader's own words: "a pill at the top to filter for My Turn only so I can focus
-            in on those at any point." It seats the KIND isolation and nothing else — the
-            relevance lens is an orthogonal axis and a press that silently widened or narrowed it
-            would change a population the reader set from a notification. No rail switch happens
-            here (this component only renders on the attention rail), so nothing clears behind us
-            and both values are seated explicitly: 'my_turn' on, `null` off.
-
-            ⚠ THE LABEL IS THE READER'S WORD, NOT `KIND_LABEL.my_turn`. That table reads "Review
-            or reply" because its entry is stamped on a CARD, where claiming a PR nobody named you
-            on is a false claim about a person; a filter names a population and claims nothing
-            about any one row in it. The title uses the header's own noun for that population —
-            "on your plate", `myTurnCapDisclosure`'s wording — so the pill and the "50 of 180
-            items" beside it cannot be read as two different things.
-
-            ⚠ `attn=my_turn` is a NAVIGATION key, so a press pushes a history entry and Back
-            leaves the filtered board. That is the same contract the daily brief's lines have; no
-            corrective write happens here, so nothing replaces the entry under it.
-
-            ⚠ The head SURVIVES this one isolation — see `headSuppressedFor`. */}
-        {!isLoading && !isError && myTurnToggle != null && (
-          <button
-            type="button"
-            onClick={() => setAttentionIsolation(myTurnToggle.next)}
-            aria-pressed={myTurnToggle.pressed}
-            className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-              myTurnToggle.pressed
-                ? 'border-amber-500 bg-amber-50 text-amber-800 dark:border-amber-400/70 dark:bg-amber-900/30 dark:text-amber-200'
-                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-            }`}
-            title={
-              myTurnToggle.pressed
-                ? 'Showing only what is on your plate. Press again to show the whole board.'
-                : 'Show only what is on your plate — hide stalled reviews, untouched threads and the rest.'
-            }
-          >
-            My turn
-          </button>
-        )}
-        {/* ── THE PERSONAL LENS, AS A CONTROL ────────────────────────────────────────────
-            ⚠ `setAttentionRelevance` ALONE. The two existing ways into this lens each seat an
-            isolation as well (see `personalLensToggle`), so pressing this must not: an isolated
-            board loses the ranked head and every kind but one, which is the opposite of what a
-            reader asking "just show me mine" wants. And the value is SEATED both ways, `null`
-            included — nothing here relies on another action's clear. */}
-        {!isLoading && !isError && personalToggle != null && (
-          <button
-            type="button"
-            onClick={() => setAttentionRelevance(personalToggle.pressed ? null : 'mine')}
-            aria-pressed={personalToggle.pressed}
-            className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-              personalToggle.pressed
-                ? 'border-gray-400 bg-gray-100 text-gray-800 dark:border-gray-500 dark:bg-gray-800 dark:text-gray-100'
-                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-            }`}
-            title={
-              // Both arms name the population in `LENS_COPY.mine`'s own words, so this control, the
-              // banner and the filtered empty state cannot describe one narrowing three ways.
-              personalToggle.pressed
-                ? `Showing ${LENS_COPY.mine.bare}. Press again to show everything.`
-                : `Show only ${LENS_COPY.mine.bare} — the items you’re named on, and the ones in repos you maintain.`
-            }
-          >
-            Only yours
-          </button>
-        )}
+        {/* How the board is gathered and ordered — a short popover with a way into the guide. */}
+        <PendingOrderInfo onOpenGuide={openGuide} />
         {/* ── the Pro narration's controls + honesty signals ──────────────────────────────
-            ⚠ `stale` matters MORE here than it did in the standalone panel: the board
-            re-orders on the attention query's own 5-minute clock while the prose does not, so
-            without it the italic lines would silently describe a list that has moved. */}
-        {canNarrate && !isLoading && !isError && cards.length > 0 && (
+            ⚠ `stale` matters: the tabs re-order on the attention query's own clock while the
+            prose does not, so without it the italic lines would silently describe a list that
+            has moved. */}
+        {canNarrate && !isLoading && !isError && (data?.cards.length ?? 0) > 0 && (
           <div className="ml-auto flex items-center gap-1.5">
-            {narration != null && wp.data?.stale === true && (
+            {plan != null && wp.data?.stale === true && (
               <span
-                className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+                className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400"
                 title="The list has moved on since this plan was written — the rows are current, the italic lines describe the list as it stood."
               >
                 stale
               </span>
             )}
-            {narration != null && (
-              <span className="shrink-0 text-[10px] text-gray-400" title={narration.model}>
-                written {relativeTime(narration.generatedAt)}
+            {plan != null && (
+              <span className="shrink-0 text-[11px] text-gray-500 dark:text-gray-400" title={plan.model}>
+                written {relativeTime(plan.generatedAt)}
               </span>
             )}
             <button
               type="button"
               onClick={() => generate.mutate()}
-              disabled={busy || outOfCredits || headSuppressed}
+              disabled={busy || outOfCredits}
               className="rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
               title={
-                // ⚠ NAMES THE KIND, and no longer claims "a single kind cannot be ordered" — the
-                // "My turn" pill is a single kind that IS ordered (see `headSuppressedFor`), so
-                // the old sentence would now be false on the one isolation a reader seats
-                // themselves. It is only ever seen on a survey board arrived at from a brief line.
-                headSuppressed && attentionIsolation != null
-                  ? `This board is filtered to ${KIND_LABEL[attentionIsolation]}. Clear the filter to plan your day.`
-                  : outOfCredits
-                    ? 'Out of AI credits — resets next month'
-                    : 'Have the model say why the top items are worth doing now. The rows, figures and ranking are computed either way.'
+                outOfCredits
+                  ? 'Out of AI credits — resets next month'
+                  : 'Have the model say why some items are worth doing now. The tabs, figures and order are computed either way.'
               }
             >
               {busy ? (
                 'Planning…'
-              ) : narration != null ? (
+              ) : plan != null ? (
                 <span className="inline-flex items-center gap-1">
                   <RefreshIcon size={11} />
                   Re-plan my day
@@ -807,150 +421,183 @@ export function AttentionView(): JSX.Element {
           </div>
         )}
         {/* Capability off: cloud gets ONE line, OSS/local gets nothing at all (absence, never an
-            advert). ⚠ IT MUST NOT IMPLY THE ORDER IS PRO — the ranking above is free, and only
-            the sentences are not. */}
-        {!canNarrate && isCloud && !isLoading && !isError && cards.length > 0 && (
-          <span className="ml-auto text-[10px] text-gray-400">
-            <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[10px] font-semibold text-ai-signal">
+            advert). ⚠ IT MUST NOT IMPLY THE ORDER IS PRO — the order is free; only the sentences
+            are not. */}
+        {!canNarrate && isCloud && !isLoading && !isError && (data?.cards.length ?? 0) > 0 && (
+          <span className="ml-auto text-[11px] text-gray-500 dark:text-gray-400">
+            <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[11px] font-semibold text-ai-signal">
               Pro
             </span>
-            Have the model say why these are first.
+            Have the model say why some of these come first.
           </span>
         )}
       </div>
 
       {canNarrate && generate.isError && (
-        <div className="text-[11px] text-red-500">
+        <div className="text-[12px] text-red-600 dark:text-red-400">
           {(generate.error as Error)?.message ?? 'Couldn’t write the plan.'}
         </div>
       )}
       {canNarrate && !generate.isError && notice != null && (
-        <div className="text-[11px] text-gray-400">{notice}</div>
+        <div className="text-[12px] text-gray-500 dark:text-gray-400">{notice}</div>
       )}
 
-      {/* GENERATED — the one sentence framing the day, above the head it describes. */}
-      {narration != null && narration.headline.trim() !== '' && (
+      {/* GENERATED — the plan's framing sentences, above the tabs they describe. */}
+      {plan != null && plan.headline.trim() !== '' && (
         <p
-          key={narration.generatedAt}
+          key={plan.generatedAt}
           className="digest-fade-in flex items-start gap-1.5 text-[12px] italic text-ai-ink"
         >
           <SparkleIcon size={12} className="mt-0.5 shrink-0 text-ai-signal" />
-          <span>{narration.headline}</span>
+          <span>{plan.headline}</span>
         </p>
       )}
-      {narration != null && narration.droppedIds > 0 && (
-        <p className="text-[10px] text-amber-600 dark:text-amber-400">
-          {narration.droppedIds} reference{narration.droppedIds === 1 ? '' : 's'} the model named{' '}
-          {narration.droppedIds === 1 ? 'was' : 'were'} not on this list and{' '}
-          {narration.droppedIds === 1 ? 'was' : 'were'} discarded.
+      {plan != null && plan.parked != null && plan.parked.trim() !== '' && (
+        <p className="flex items-start gap-1.5 text-[12px] italic text-ai-ink">
+          <SparkleIcon size={12} className="mt-0.5 shrink-0 text-ai-signal" />
+          <span>{plan.parked}</span>
+        </p>
+      )}
+      {plan != null && plan.droppedIds > 0 && (
+        <p className="text-[11px] text-amber-700 dark:text-amber-400">
+          {plan.droppedIds} reference{plan.droppedIds === 1 ? '' : 's'} the model named{' '}
+          {plan.droppedIds === 1 ? 'was' : 'were'} not on this board and{' '}
+          {plan.droppedIds === 1 ? 'was' : 'were'} discarded.
         </p>
       )}
 
-      {isLoading ? (
-        <div className="space-y-3">
-          {[0, 1, 2].map((i) => (
-            <div
-              key={i}
-              className="h-20 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40"
-            />
-          ))}
-        </div>
-      ) : isError ? (
-        <div className="text-sm text-red-500">Couldn’t load what needs attention.</div>
-      ) : cards.length === 0 && (attentionIsolation != null || attentionRelevance != null) ? (
-        // A filter that matches nothing gets its OWN empty state, naming the filter(s) and
-        // offering the way out of each. The generic "nothing needs attention 🎉" below would be a
-        // lie here — the board is filtered, and there may be plenty of other cards behind it.
-        // ⚠ EVERY LENS VALUE REACHES THIS BRANCH — the test is `!= null`, never a truthiness check
-        // on a boolean that no longer exists. A lens that emptied the board while 50 cards sit
-        // behind it is exactly the "where did my work go" moment, so neither half of the split may
-        // fall through to the celebration.
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          {/* The explicit {' '} pair is load-bearing: JSX drops a trailing space before a
-              newline, so "No " on its own line would render as "NoYour turn items". */}
-          <div>
-            No{' '}
-            {attentionIsolation != null && (
+      {/* ── THE TABS ─────────────────────────────────────────────────────────────────────
+          Each count is the tab's WHOLE population (uncapped), the same figure the daily brief's
+          line for it shows. A tab with nothing in it stays, dimmed, so the layout never shifts
+          and "0" is a fact rather than an absence. */}
+      <div role="tablist" aria-label="Pending" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
+        {tabs.map((t) => {
+          const on = t.key === tabKey;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              aria-controls="pending-tabpanel"
+              onClick={() => setAttentionTab(t.key)}
+              className={`-mb-px flex items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
+                on
+                  ? 'border-gray-300 bg-white text-gray-800 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100'
+                  : 'border-transparent text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
+              }`}
+            >
+              {TAB_LABEL[t.key]}
+              <span
+                className={`rounded-full px-1.5 text-[11px] tabular-nums ${
+                  t.total === 0
+                    ? 'text-gray-500 dark:text-gray-500'
+                    : on
+                      ? 'bg-gray-800 text-white dark:bg-gray-200 dark:text-gray-900'
+                      : 'bg-gray-500/15 text-gray-700 dark:text-gray-300'
+                }`}
+              >
+                {isLoading ? '…' : t.total}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div id="pending-tabpanel" role="tabpanel" className="space-y-3">
+        {/* The tab's narrowing controls: kind chips on a two-kind tab, "Only yours" on My turn. */}
+        {!isLoading && !isError && (view.chips != null || (tabKey === 'my_turn' && offerOnlyYours(activeTab, attentionRelevance))) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {view.chips != null && (
               <>
-                <span className="font-medium text-gray-500 dark:text-gray-300">
-                  {KIND_LABEL[attentionIsolation]}
-                </span>{' '}
+                <button type="button" onClick={() => setAttentionTab(tabKey)} aria-pressed={view.kind == null} className={pill(view.kind == null)}>
+                  All <span className="tabular-nums">{activeTab?.total ?? 0}</span>
+                </button>
+                {view.chips.map((c) => (
+                  <button
+                    key={c.kind}
+                    type="button"
+                    onClick={() => setAttentionTab(tabKey, c.kind)}
+                    aria-pressed={view.kind === c.kind}
+                    className={pill(view.kind === c.kind)}
+                  >
+                    {KIND_LABEL[c.kind]} <span className="tabular-nums">{c.total}</span>
+                  </button>
+                ))}
               </>
             )}
-            items {attentionRelevance != null ? `${LENS_COPY[attentionRelevance].empty} ` : ''}
-            right now.
-          </div>
-          <div className="mt-1 text-[11px]">
-            {attentionIsolation != null &&
-              (visible.length > 0
-                ? `The board is filtered to that one kind — ${visible.length} other item${
-                    visible.length === 1 ? ' is' : 's are'
-                  } hidden. `
-                : 'The board is filtered to that one kind. ')}
-            {attentionRelevance != null &&
-              (hiddenByLens > 0
-                ? `${hiddenByLens} item${hiddenByLens === 1 ? '' : 's'} ${
-                    LENS_COPY[attentionRelevance].hidden
-                  } ${hiddenByLens === 1 ? 'is' : 'are'} hidden — ${
-                    hiddenByLens === 1 ? 'it does' : 'they do'
-                  } still need a review.`
-                : `The board is filtered to ${LENS_COPY[attentionRelevance].bare}.`)}
-          </div>
-          <div className="mt-2 flex items-center justify-center gap-2">
-            {attentionRelevance != null && (
+            {tabKey === 'my_turn' && offerOnlyYours(activeTab, attentionRelevance) && (
+              // ⚠ `setAttentionRelevance` ALONE, seated both ways (`null` included): the lens is
+              // orthogonal to the tab, and a notification that seated 'mine' must be undoable here.
               <button
                 type="button"
-                onClick={() => setAttentionRelevance(null)}
-                className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900/60"
+                onClick={() => setAttentionRelevance(attentionRelevance === 'mine' ? null : 'mine')}
+                aria-pressed={attentionRelevance === 'mine'}
+                className={pill(attentionRelevance === 'mine')}
+                title={`Show only ${LENS_COPY.mine.bare} — the items you’re named on, and the ones in repos you maintain.`}
               >
-                Show everyone’s
+                Only yours{' '}
+                <span className="tabular-nums">{activeTab?.relevanceTotals?.mine ?? ''}</span>
               </button>
             )}
-            {attentionIsolation != null && (
-              <button
-                type="button"
-                onClick={() => setAttentionIsolation(null)}
-                className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900/60"
-              >
-                Clear filter
+            {tabKey === 'my_turn' && attentionRelevance === 'others' && (
+              <button type="button" onClick={() => setAttentionRelevance(null)} aria-pressed className={pill(true)}>
+                Not tied to you{' '}
+                <span className="tabular-nums">{activeTab?.relevanceTotals?.others ?? ''}</span>
               </button>
             )}
           </div>
-        </div>
-      ) : cards.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-gray-300 dark:text-gray-600" />
-          Nothing is pending in this Workspace right now.
-          <div className="mt-1 text-[11px]">
-            Everything waiting on you or your workspace shows up here, most actionable first. PRs
-            that are simply ready to land are listed too, but are not counted as waiting on you.
+        )}
+
+        {isLoading ? (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="h-20 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40"
+              />
+            ))}
           </div>
-        </div>
-      ) : (
-        <>
-          {/* THE ALL-CLEAR VARIANT — see `onlyForward`. The rows below are real work, but nothing
-              on this board is WAITING on anyone, and saying so is what keeps this screen and the
-              (self-hiding) daily-brief strip telling the same story. */}
-          {onlyForward && (
-            <div className="rounded-lg border border-dashed border-gray-300 px-3 py-2 text-[12px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-gray-300 dark:text-gray-600" />
-              Nothing is waiting on you in this Workspace —{' '}
-              <span className="font-medium text-gray-600 dark:text-gray-300">
-                {cards.length} ready to land
-              </span>
-              .
-            </div>
-          )}
-          <AttentionCards
-            cards={ordered}
-            users={data?.users}
-            headCount={head.length}
-            promotedPrIds={promotedPrIds}
-            whyById={whyById}
-            parked={narration?.parked ?? null}
-          />
-        </>
-      )}
+        ) : isError ? (
+          <div className="text-sm text-red-600 dark:text-red-400">Couldn’t load what needs attention.</div>
+        ) : view.cards.length === 0 && view.people.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+            <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-gray-300 dark:text-gray-600" />
+            {view.kind != null
+              ? `No ${KIND_LABEL[view.kind]} cards right now.`
+              : lensOn != null
+                ? `Nothing on My turn ${LENS_COPY[lensOn].empty} right now.`
+                : TAB_EMPTY[tabKey]}
+            {lensOn != null && (
+              <div className="mt-2">
+                <button
+                  type="button"
+                  onClick={() => setAttentionRelevance(null)}
+                  className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900/60"
+                >
+                  Show everyone’s
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <AttentionCards
+              cards={view.cards}
+              users={data?.users}
+              doNextCount={data?.tabs != null ? view.doNextCount : 0}
+              people={view.people}
+              explain={explain}
+            />
+            {view.shown < view.total && (
+              <p className="text-[12px] text-gray-500 dark:text-gray-400">
+                Showing the top {view.shown} of {view.total}. The rest score lower.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+      {guideOpen && <PendingGuideModal onClose={closeGuide} />}
     </div>
   );
 }

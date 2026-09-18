@@ -20,7 +20,6 @@ import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { HumanThemesPanel } from './HumanThemesPanel.js';
 import { InsightsView } from './InsightsView.js';
 import { AttentionView } from './AttentionView.js';
-import { AttentionIsolationBanner } from './AttentionIsolationBanner.js';
 import { BotsView } from './BotsView.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
 
@@ -460,7 +459,7 @@ export function ActivityView(): JSX.Element {
           </button>
 
           {/* PENDING pseudo-row — the worklist. Everything waiting on you or the workspace, in
-              ONE list, led by the ranked "Do next" head (`doNextIds`, scored by db/work-plan.ts).
+              five tabs, each ranked by db/work-plan.ts's Do next score (db/pending-tabs.ts).
               CORE/free — the RANK is code, only its narration is Pro — so it's ALWAYS shown.
               ⚠ LABEL-ONLY rename from "Needs attention": the rail id stays `'attention'`, because
               an unknown `?activityRepo=` value falls into the parseInt branch, yields NaN and
@@ -577,19 +576,12 @@ export function ActivityView(): JSX.Element {
           // repo data loads.
           <BotsView />
         ) : showingAttention ? (
-          // The CORE/free **Pending** board — every card kind in one list, led by the ranked
-          // "Do next" head. Renders on every tier, before repo data loads (its own empty/loading
-          // states); the Pro narration decorates it and is never required for it to be complete.
-          //
-          // The banner above it carries the board's two narrowings — the single KIND set by the
-          // daily brief's lines, and the PERSONAL lens set by the notification surfaces — each
-          // with its own way out. It is the attention-board twin of FeedIsolationBanner (which is
-          // mounted only on the per-repo console + the fallback branch, never here), and renders
-          // null when neither is on.
-          <div className="space-y-3">
-            <AttentionIsolationBanner />
-            <AttentionView />
-          </div>
+          // The CORE/free **Pending** board — five tabs, each a purely scored list with its own
+          // count. Renders on every tier, before repo data loads (its own empty/loading states); the
+          // Pro narration decorates it and is never required for it to be complete. Its narrowings
+          // (a brief line's kind, a notification's "Only yours") show as the selected tab and chip
+          // on the board itself, so no banner sits above it.
+          <AttentionView />
         ) : showingInsights ? (
           <InsightsView />
         ) : noRepos ? (

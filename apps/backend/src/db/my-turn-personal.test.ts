@@ -27,6 +27,7 @@
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { PENDING_LIMITS } from '@pierre-review/shared';
 import type { InsightCard, MyTurnCard } from '@pierre-review/shared';
 
 const DB_PATH = '/tmp/pierre-my-turn-personal-test.sqlite';
@@ -358,13 +359,18 @@ describe('My Turn personal-relevance flag', () => {
     ).length;
     const { counts } = await brief.getDailyBriefEntry(1, scope.workspaceId);
 
-    // The narrow figure counts CARDS (what the board paints), exactly like `myTurn`.
-    expect(counts.myTurnPersonal).toBe(shownPersonal);
+    // The narrow figure is what the Pending board LISTS under "Only yours": it ranks the whole
+    // personal population by score and lists its top `boardListCap`. NOT the personal cards of
+    // this capped fold — those are a different, newest-first set (the fixture makes the
+    // non-personal rows newest precisely so the two differ).
+    expect(counts.myTurnPersonal).toBe(
+      Math.min(insights.myTurnPersonalTotal, PENDING_LIMITS.boardListCap),
+    );
+    expect(counts.myTurnPersonal).not.toBe(shownPersonal);
     expect(counts.myTurnPersonalTotal).toBe(insights.myTurnPersonalTotal);
     // ⚠ The pair must be narrow-with-narrow. Borrowing `myTurnTotal` as the denominator would
     // mix two populations in one row AND break the cap disclosure, which only fires when the
     // displayed figure equals the count it qualifies.
-    expect(counts.myTurnPersonal).toBeLessThan(counts.myTurn);
     expect(counts.myTurnPersonalTotal).toBeLessThan(counts.myTurnTotal);
     expect(counts.myTurnPersonalTotal).toBeGreaterThan(counts.myTurnPersonal);
   });
@@ -390,12 +396,17 @@ describe('My Turn personal-relevance flag', () => {
     );
 
     const { counts } = await brief.getDailyBriefEntry(1, scope.workspaceId);
-    // Each count is folded off the CARDS (what the board paints), like `myTurn` — the same
-    // partition one level down.
-    expect(counts.myTurnDirect + counts.myTurnMaintained + counts.myTurnOther).toBe(
-      counts.myTurn,
-    );
-    expect(counts.myTurnDirect + counts.myTurnMaintained).toBe(counts.myTurnPersonal);
+    // Each displayed figure is the size of the board's list for that view: min(total, cap).
+    const cap = PENDING_LIMITS.boardListCap;
+    expect(counts.myTurn).toBe(Math.min(insights.myTurnTotal, cap));
+    expect(counts.myTurnPersonal).toBe(Math.min(insights.myTurnPersonalTotal, cap));
+    expect(counts.myTurnOther).toBe(Math.min(insights.myTurnOtherTotal, cap));
+    // ⚠ The badge's direct / maintained halves must add up to `myTurnPersonal`. Here the personal
+    // population spills past the cap, so which half the listed items fall in is the board's
+    // ranking — the halves are therefore OMITTED rather than guessed (the badge shows the total).
+    expect(insights.myTurnPersonalTotal).toBeGreaterThan(cap);
+    expect(counts.myTurnDirect).toBeUndefined();
+    expect(counts.myTurnMaintained).toBeUndefined();
 
     // ⚠ EVERY LINE GETS ITS OWN TOTAL, AND THAT IS NOT A STYLE PREFERENCE. The brief's second
     // line ("M need review or reply") displays `myTurnOther`, and `capFor` prints "of N" only
@@ -410,9 +421,8 @@ describe('My Turn personal-relevance flag', () => {
     expect(counts.myTurnMaintainedTotal).toBe(insights.myTurnMaintainedTotal);
     expect(counts.myTurnOtherTotal).toBe(insights.myTurnOtherTotal);
 
-    // ⚠ THE PRE-CAP DISCRIMINATOR, on the split's own totals. The 'maintained' population spills
-    // past the 50-card cap (the non-personal rows are the newest, so they sit INSIDE it), so a
-    // post-cap fold would report the shown figure instead of the real one.
-    expect(counts.myTurnMaintainedTotal).toBeGreaterThan(counts.myTurnMaintained);
+    // ⚠ THE PRE-CAP DISCRIMINATOR, on the split's own totals: the 'maintained' population spills
+    // past the cap, so a post-cap fold would report fewer.
+    expect(counts.myTurnMaintainedTotal).toBeGreaterThan(cap);
   });
 });

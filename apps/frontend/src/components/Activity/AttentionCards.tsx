@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import type {
   AutomatedReviewerKind,
@@ -66,6 +66,8 @@ import {
 } from '../conflicts/ResolveConflictsButton.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
+import { cardKindLabel, KIND_LABEL, myTurnReasonLabel } from './pendingLabels.js';
+import { CardPlacementInfo, PendingBoardContext, type PendingBoardInfo } from './PendingInfo.js';
 
 // The attention-card list — the stalled-review / untouched-thread / reviewer-load / needs-a-reviewer
 // cards, with the full drill-down behaviour (click a card to open the PR / thread, inline thread
@@ -82,38 +84,9 @@ const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
   info: { border: 'border-l-sky-400 dark:border-l-sky-500', dot: 'bg-sky-500' },
 };
 
-// Exported because the isolation banner names the isolated kind with it — one spelling of "what
-// this kind is called", so the banner and the card header can never disagree.
-//
-// ⚠ `my_turn` IS NOT LABELLED "Your turn" HERE, and that is the whole semantic split. The KIND
-// means "this needs a review or reply" — of the 149 such cards on the reporting account, 5 were
-// actually theirs. Naming the kind after the narrow case made the board claim ownership of work
-// belonging to people who had never touched the repo ("50+ items awaiting YOUR review" in a
-// project they are not a contributor to). The kind stays neutral; the OWNERSHIP claim is made
-// per card, off `relevance`, by `cardKindLabel` below. See docs/FRONTEND.md § "Per-workspace
-// 'My Turn'".
-export const KIND_LABEL: Record<InsightCard['kind'], string> = {
-  my_turn: 'Review or reply',
-  // Neutral at the KIND level, like my_turn: the ownership claim ("your PR" vs "trunk in a repo
-  // you maintain") is made per card by `cardKindLabel`, off the card's own `arm`.
-  ci_failing: 'CI failing',
-  bot_signal: 'Review-bot signal',
-  bot_only_review: 'Only a bot reviewed',
-  stalled_review: 'Stalled review',
-  untouched_thread: 'Untouched thread',
-  reviewer_load: 'Review load',
-  reviewer_routing: 'Needs a reviewer',
-  // The two FORWARD kinds — something that is READY rather than something that is wrong. Neutral
-  // at the kind level like the rest; `cardKindLabel` is deliberately NOT extended for them,
-  // because neither makes an ownership claim to soften.
-  merge: 'Ready to merge',
-  update_branch: 'Behind trunk',
-  // ⚠ ONE SPELLING. `REASON_META.merge_conflicts.label` in lib/ui.ts is already 'Merge conflicts';
-  // do not mint a third ('Conflicting', 'Needs a rebase'). And `cardKindLabel` is deliberately NOT
-  // extended for this kind — that function softens OWNERSHIP claims, and this one claims nothing
-  // about the reader.
-  conflicts: 'Merge conflicts',
-};
+// The kind and card labels live in `pendingLabels.ts` (the Pending info popovers read them too, and
+// importing them from here would be a cycle); re-exported so existing importers keep one path.
+export { cardKindLabel, KIND_LABEL, myTurnReasonLabel };
 
 /** GitHub's protection-aware merge state, as a short chip label. Transplanted from the deleted
  *  WorkPlanCard — `lib/ui.ts` carries `MERGE_STATE_STATUSES` and `mergeVerdict()` but no label
@@ -217,42 +190,6 @@ export function pendingQueueBadge(
   };
 }
 
-/**
- * What THIS card is called, as opposed to what its kind is called. THREE labels for `my_turn`,
- * off `MyTurnCard.relevance`, because the boolean it replaced conflated two different
- * relationships:
- *
- *   'direct'     → "Your turn"      — you authored it, you were asked for the review, your
- *                                     thread got a reply, your Claude run finished, or you were
- *                                     @-mentioned (even in a repo you only read).
- *   'maintained' → "In your repos"  — somebody else opened a PR in a repo you maintain. That is
- *                                     ORBIT, not ownership: nobody named you, and calling it
- *                                     "Your turn" is precisely the over-claim the reporter
- *                                     objected to ("work on repos" vs "work tied to me directly
- *                                     through authorship, reply or merge").
- *   'none'       → the neutral KIND label ("Review or reply") — work that needs *someone*.
- *
- * ⚠ AN ABSENT `relevance` RENDERS THE NEUTRAL LABEL, and so does an absent-but-`personal: true`
- * card. That is the opposite of the wire's tolerance rule (absent ⇒ personal, because
- * over-notifying is the safe direction) and it is deliberate: a missing field may never invent an
- * ownership claim ON SCREEN. The only way to see it is a server too old to send the field — where
- * the neutral label is still true, and the notification surfaces (which read `personal`) keep
- * their safe direction independently.
- */
-export function cardKindLabel(card: InsightCard): string {
-  if (card.kind === 'my_turn') {
-    if (card.relevance === 'direct') return 'Your turn';
-    if (card.relevance === 'maintained') return 'In your repos';
-    return KIND_LABEL.my_turn;
-  }
-  // The ci_failing arms are the same distinction one layer over: 'your_pr' is a claim of
-  // AUTHORSHIP, 'trunk' a claim about your patch of ground. The server only ever emits a card the
-  // viewer is on the hook for, so both labels are true — they just are not the same summons.
-  if (card.kind === 'ci_failing') {
-    return card.arm === 'your_pr' ? 'CI failing on your PR' : 'Trunk CI failing';
-  }
-  return KIND_LABEL[card.kind];
-}
 
 /**
  * DOES THIS ROW OUTRANK THE NEUTRAL ONES? The visual half of the same claim `cardKindLabel` makes
@@ -283,40 +220,6 @@ export function pendingCardIsPersonal(card: InsightCard): boolean {
   return card.relevance === 'direct' || card.relevance === 'maintained';
 }
 
-// WHICH My Turn section put this card on your plate. ⚠ Keyed on `MyTurnCardReason` (the six
-// sections of GET /api/my-turn), NOT the older `MyTurnReason` participation union that
-// lib/ui.ts's MY_TURN_REASON_META covers — they are one `sed` apart and mean opposite things.
-const MY_TURN_REASON_LABEL: Record<MyTurnCardReason, string> = {
-  review_request: 'Review requested',
-  thread: 'Reply needed',
-  pr_approved: 'Approved',
-  your_pr: 'Your PR',
-  watched_repo_pr: 'New PR',
-  claude_review: 'Claude review',
-};
-
-/**
- * THE SECTION CHIP. `reason` names the SECTION that emitted the row, which is not always what the
- * reader is being asked to do about it — and on one section those two came apart on screen.
- *
- * ⚠ `watched_repo_pr` NOW HOLDS TWO DIFFERENT FACTS. Since the ball rule, a row survives that
- * section either because you have never touched the PR (`ball.kind === 'untouched'`) or because a
- * person pushed after you last acted (`'commits_after'`). The static map calls both "New PR", so a
- * PR you approved three days ago wore the chip "New PR" immediately beside the detail "You
- * approved · @robin-dunn pushed 2 commits since" — the card contradicting itself in two adjacent
- * elements, which is the same class of defect as the card that could not explain why it was there
- * at all.
- *
- * ⚠ AN ABSENT `ball` FALLS BACK TO THE SECTION LABEL, never to a guess. The field is
- * trailing-optional for wire tolerance, and a response predating it must not have "Pushed since"
- * invented over a PR nobody has touched — the safe direction is the older, vaguer word.
- */
-export function myTurnReasonLabel(card: MyTurnCard): string {
-  if (card.reason === 'watched_repo_pr' && card.ball?.kind === 'commits_after') {
-    return 'Pushed since';
-  }
-  return MY_TURN_REASON_LABEL[card.reason];
-}
 
 function ageLabel(hours: number): string {
   if (hours < 48) return `${hours}h`;
@@ -1349,7 +1252,6 @@ function CardShell({
   innerRef,
   flash = false,
   why,
-  promoted = false,
 }: {
   card: InsightCard;
   right?: React.ReactNode;
@@ -1387,12 +1289,13 @@ function CardShell({
    * these absent, which is what makes the narration safe to sell separately.
    */
   why?: string;
-  /** This card's PR is already seated in the "Do next" head above — see AttentionCards'
-   *  `promotedPrIds`. It renders a back-reference so the row does not read as a second job. */
-  promoted?: boolean;
 }): JSX.Element {
   const sev = SEV[card.severity];
   const personal = pendingCardIsPersonal(card);
+  // The Pro plan's line for this card, wherever the card sits — read from the board once rather
+  // than threaded through every kind's case (which is how most kinds ended up never showing it).
+  const board = useContext(PendingBoardContext);
+  const whyLine = why ?? board?.whyById?.get(card.id);
   // ⚠ PURE, AND OFF THE CARD'S OWN FIELDS. A `ci_failing` card does not extend `InsightPrRef` at
   // all — its subject can be a repo's TRUNK, which is not a pull request and must never be
   // described as one — and neither does `reviewer_load`. The `in` test is what keeps this a
@@ -1451,16 +1354,6 @@ function CardShell({
             {queue.label}
           </span>
         )}
-        {promoted && (
-          <span
-            // 11px, inherited from the row: the floor for a label, and now that three chips can
-            // share this row they have to be one size or the smallest reads as an afterthought.
-            className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium normal-case tracking-normal text-gray-500 dark:text-gray-400"
-            title="This pull request is already listed in “Do next” above — same PR, a different thing to do on it."
-          >
-            already in Do next
-          </span>
-        )}
         {/* ⚠ EXPLANATION, NOT ARITHMETIC. `muted` says WHY this card carries the neutral label
             instead of "Your turn" — the reader muted this repo (or its workspace) in Settings, and
             a card that silently demoted itself is a smaller version of the "where did my work go"
@@ -1495,13 +1388,16 @@ function CardShell({
             </>
           )}
         </span>
+        {/* WHY IS THIS CARD HERE, AND WHY HERE — the Pending board's per-card explanation. It
+            reads the board from context and renders nothing outside the Pending board. */}
+        <CardPlacementInfo card={card} />
       </div>
       {children}
       {/* GENERATED. Its own line, never mixed with a chip — see the `why` prop's contract. */}
-      {why != null && why.trim() !== '' && (
+      {whyLine != null && whyLine.trim() !== '' && (
         <p className="mt-1.5 flex items-start gap-1 text-[11px] italic text-ai-ink">
           <SparkleIcon size={11} className="mt-0.5 shrink-0 not-italic text-ai-signal" />
-          <span className="min-w-0">{why}</span>
+          <span className="min-w-0">{whyLine}</span>
         </p>
       )}
     </li>
@@ -1651,59 +1547,35 @@ function CiFailingBody({
 }
 
 /**
- * Does the "Everything else" divider render, and where?
- *
- * ⚠ BOTH BOUNDS MATTER AND EACH GUARDS A REAL STATE.
- *   • `headCount > 0` — the HEADLESS board, which is COMMON, not an edge: every isolated board
- *     suppresses the head (every daily-brief line click, the Welcome-back banner, every workspace
- *     "Elsewhere" row), as does any response predating `doNextIds`. Without this the board opens
- *     with a divider and nothing above it.
- *   • `headCount < total` — the head swallowing the whole board, where a trailing rule would
- *     introduce an empty section.
+ * Does the "Everything else" divider render? Only when Do next holds some of the list but not all
+ * of it — a tab whose every card is Do next has no "everything else" to introduce.
  *
  * Exported so this is pinned by a test rather than by reading the JSX.
  */
-export function shouldShowDivider(headCount: number | undefined, total: number): boolean {
-  return headCount != null && headCount > 0 && headCount < total;
+export function shouldShowDivider(doNextCount: number | undefined, total: number): boolean {
+  return doNextCount != null && doNextCount > 0 && doNextCount < total;
 }
 
 export function AttentionCards({
   cards,
   users,
-  headCount,
-  whyById,
-  parked,
-  promotedPrIds,
+  doNextCount,
+  people,
+  explain,
 }: {
-  /** ALREADY PARTITIONED by the caller: the ranked head first, then everything else. This is one
-   *  list, not two — see `headCount`. */
+  /** The list on screen, highest score first. Do next is its first `doNextCount` cards. */
   cards: InsightCard[];
   users: User[] | undefined;
+  /** How many leading cards are Do next (0 = no split, e.g. a response predating scores). */
+  doNextCount?: number;
+  /** Review-load cards for the "who has reviews waiting" strip, rendered above the ranked list.
+   *  ⚠ In THIS list, never a second `<AttentionCards>` mount — see the one-mount note below. */
+  people?: InsightCard[];
   /**
-   * How many leading cards form the "Do next" head. A divider `<li>` is rendered BEFORE index
-   * `headCount`, inside the same `<ul>`.
-   *
-   * ⚠ ZERO IS THE COMMON CASE, NOT AN EDGE — every isolated board (every daily-brief line click,
-   * the Welcome-back banner, every workspace "Elsewhere" row) suppresses the head, as does any
-   * response predating `doNextIds`. Hence the explicit `headCount > 0` guard below: without it
-   * the board opens with an "Everything else" rule and nothing above it.
+   * The Pending board's placement data, which turns on every card's info button and carries the
+   * Pro plan's per-card lines. Absent on any other mount (the Pro Insights pane).
    */
-  headCount?: number;
-  /** Pro `workPlan` narration, keyed by CARD id. Absent on every free account. See CardShell's
-   *  `why` for the labelled-apart rule. */
-  whyById?: Map<string, string>;
-  /** Pro: one sentence on what can wait. Rendered on the divider, where "everything else"
-   *  literally begins — never above the head, which would frame the day's work as deferrable. */
-  parked?: string | null;
-  /**
-   * PRs already seated in the head. A TAIL card for one of these is a second card about a PR the
-   * reader has already been told to do — it renders a quiet back-reference rather than reading as
-   * a separate job.
-   *
-   * ⚠ IT MARKS, IT DOES NOT DROP. Removing the sibling would break `head ∪ tail === cards` and,
-   * through it, every cap disclosure on this board (`capFor` gates on `shown === count`).
-   */
-  promotedPrIds?: Set<number>;
+  explain?: Pick<PendingBoardInfo, 'scores' | 'viewName' | 'total' | 'whyById' | 'onOpenGuide'>;
 }): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const selectThread = useFilters((s) => s.selectThread);
@@ -1749,7 +1621,7 @@ export function AttentionCards({
   };
   const openThread = (card: UntouchedThreadCard): void => openThreadOn(card, card.threadId);
 
-  const renderCard = (card: InsightCard, promoted = false): JSX.Element | null => {
+  const renderCard = (card: InsightCard): JSX.Element | null => {
     switch (card.kind) {
       // The VIEWER'S OWN inbox as cards — the same population GET /api/my-turn serves, and the
       // list the daily brief's "N need your review or reply" line counts. Clicking opens the PR
@@ -1768,7 +1640,6 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
-            promoted={promoted}
             right={<span title={dateTime(card.since)}>{relativeTime(card.since)}</span>}
             openedAt={card.openedAt}
             // The ball's clock. It IS the open date on a PR nobody has touched since it appeared,
@@ -1803,7 +1674,6 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
-            promoted={promoted}
             // ⚠ NO "opened Nd" HERE, AND IT IS NOT AN OVERSIGHT. `CiFailingCard` deliberately does
             // NOT extend `InsightPrRef` and carries no `openedAt`: on the 'trunk' arm the subject
             // is a REPOSITORY, and the PR it names is the MERGED landing PR of the red head — its
@@ -1845,7 +1715,6 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
-            promoted={promoted}
             // ⚠ THIS IS ALREADY THE PR'S AGE. The server computes `ageHours` as
             // `Math.round((now - pull_requests.opened_at) / 3_600_000)` (db/queries.ts, the
             // stalled-review fold), so "waiting 3d" and "opened 3d" are the SAME number under two
@@ -1887,7 +1756,6 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
-            promoted={promoted}
             // ⚠ A DIFFERENT CLOCK, AND THE RIGHT ONE. This card's `ageHours` is the THREAD's
             // `created_at` age, not the PR's — the thread is the subject, and "6h old" is what the
             // reader is being asked about. No PR age here.
@@ -1927,7 +1795,6 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
-            promoted={promoted}
             right="unassigned"
             openedAt={card.openedAt}
             onActivate={() => open(metaFor(card, usersById), card.id)}
@@ -1963,8 +1830,6 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
-            promoted={promoted}
-            why={whyById?.get(card.id)}
             right={
               card.lastCommitAt != null ? (
                 <span title={dateTime(card.lastCommitAt)}>{relativeTime(card.lastCommitAt)}</span>
@@ -2010,8 +1875,6 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
-            promoted={promoted}
-            why={whyById?.get(card.id)}
             // ⚠ NO `right` OF ITS OWN, AND THE AGE IS THE WHOLE CLOCK. There is no stored
             // "conflicting since", and `lastCommitAt` — the forward cards' clock — is not on this
             // kind precisely because rendering it here would read as one. The shell's `right !=
@@ -2041,7 +1904,6 @@ export function AttentionCards({
             card={card}
             innerRef={(el) => setCardRef(card.id, el)}
             flash={flashId === card.id}
-            promoted={promoted}
             // ⚠ NO "opened Nd". `ReviewerLoadCard` does not extend `InsightPrRef`: the subject is a
             // PERSON, and `pendingPrs[]` is a LIST. There is no single PR to date.
             right={`${card.reviewsThisSprint} review${card.reviewsThisSprint === 1 ? '' : 's'} this sprint`}
@@ -2095,41 +1957,45 @@ export function AttentionCards({
     }
   };
 
-  const showDivider = shouldShowDivider(headCount, cards.length);
-  /** True for a TAIL card whose PR is already seated in the head — see `promotedPrIds`. */
-  const isPromotedSibling = (card: InsightCard, index: number): boolean =>
-    headCount != null &&
-    index >= headCount &&
-    promotedPrIds != null &&
-    'prId' in card &&
-    card.prId != null &&
-    promotedPrIds.has(card.prId);
+  const split = doNextCount ?? 0;
+  const showDivider = shouldShowDivider(split, cards.length);
+  // Everything a card needs to explain its own position — built once per render, from the SAME
+  // ordered array the list paints, so "3rd of 12" is the row the reader is on.
+  const board = useMemo<PendingBoardInfo | null>(() => {
+    if (explain == null) return null;
+    const indexById = new Map(cards.map((c, i) => [c.id, i]));
+    for (const c of people ?? []) indexById.set(c.id, -1);
+    return { ...explain, indexById, doNextCount: split };
+  }, [explain, cards, people, split]);
 
-  // ⚠ ONE `<ul>`, ONE `<AttentionCards>` MOUNT — never a head list and a tail list. Two mounts
+  const heading = (key: string, label: string, extra?: string): JSX.Element => (
+    <li key={key} className="flex items-baseline gap-2 pt-1 first:pt-0">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {label}
+      </span>
+      {extra != null && <span className="text-[11px] text-gray-500 dark:text-gray-400">{extra}</span>}
+      <span className="h-px flex-1 bg-gray-200 dark:bg-gray-800" aria-hidden />
+    </li>
+  );
+
+  // ⚠ ONE `<ul>`, ONE `<AttentionCards>` MOUNT — never a separate list per section. Two mounts
   // would race on the single `usePinnedTabs.activityFlashItemId` token: each mount's rAF calls
   // `clearFlash()` unconditionally, so whichever ran second would clear a flash the first had
-  // just claimed. Today's correctness there is a scheduling coincidence, not a design.
+  // just claimed. So the people strip, Do next and Everything else are sections of ONE list.
   return (
-    <ul className="space-y-2">
-      {cards.flatMap((card, i) =>
-        showDivider && i === headCount
-          ? [
-              <li key="__do-next-divider" className="flex items-baseline gap-2 pt-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                  Everything else
-                </span>
-                <span className="h-px flex-1 bg-gray-200 dark:bg-gray-800" aria-hidden />
-                {parked != null && parked.trim() !== '' && (
-                  <span className="flex items-start gap-1 text-[11px] italic text-ai-ink">
-                    <SparkleIcon size={11} className="mt-0.5 shrink-0 not-italic text-ai-signal" />
-                    <span className="min-w-0">{parked}</span>
-                  </span>
-                )}
-              </li>,
-              renderCard(card, isPromotedSibling(card, i)),
-            ]
-          : [renderCard(card, isPromotedSibling(card, i))],
-      )}
-    </ul>
+    <PendingBoardContext.Provider value={board}>
+      <ul className="space-y-2">
+        {people != null && people.length > 0 && [
+          heading('__people', 'Reviews waiting on people', 'not ranked'),
+          ...people.map((c) => renderCard(c)),
+        ]}
+        {split > 0 && heading('__do-next', 'Do next')}
+        {cards.flatMap((card, i) =>
+          showDivider && i === split
+            ? [heading('__everything-else', 'Everything else'), renderCard(card)]
+            : [renderCard(card)],
+        )}
+      </ul>
+    </PendingBoardContext.Provider>
   );
 }

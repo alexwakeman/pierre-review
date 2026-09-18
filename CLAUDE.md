@@ -435,15 +435,28 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   `authorIsBot: true` with a NULL kind is a real, common state (an unbranded CI account) and
   renders a generic "Bot"; a bot chip on a person is a false claim about a human, so only bots
   are badged.
-- **The Pending board is `head ∪ tail === cards`, DISJOINT** — `GET /api/attention`'s `doNextIds`
-  is the ranked "Do next" head as CARD ids (free on every tier; only its NARRATION is Pro), and the
-  board renders ONE list with a divider. The head is a **RE-ORDERING, never a filter**: every cap
-  disclosure gates on `shown === count`, so a partition that dropped a card — including a tail row
-  whose PR is already in the head, which is MARKED rather than removed — kills "50 of 148" with no
-  error. The head is suppressed under an ISOLATION only (an isolated board is single-kind), never
-  under the relevance lens, so `headCount === 0` is the common case and the divider needs both
-  bounds (`> 0 && < cards.length`). ⚠ "Pending" is a LABEL-ONLY rename of "Needs attention" — the
-  store/URL literal stays `'attention'`.
+- **The Pending board is FIVE TABS, each a PURELY SCORED list** (`PENDING_TABS`: My turn · Needs
+  fixing · Waiting on review · Unanswered threads · Ready to land; `db/pending-tabs.ts`). Every PR card
+  is scored by the ONE Do next scorer (`db/work-plan.ts` `scoreCards`) and each tab lists highest
+  score first; the first `PENDING_DO_NEXT_SIZE` (5) of whatever view is on screen are "Do next". No
+  severity-first sort, no cross-kind head, no spread rule — a PR with two jobs appears once per job,
+  in each job's tab. ⚠ **IT RANKS THE UNCAPPED FOLD, THEN CAPS**: `/api/attention` calls
+  `getWorkspaceInsights(…, { uncapped: true })` and lists the top `boardListCap` (50) per LIST GROUP
+  (the kind; for My turn, each side of "Only yours"), so every view — tab, kind chip, lens — is its
+  own true top. Every OTHER consumer keeps the default caps (Pro chat / sprint report / Slack inputs
+  and hashes must not grow). ⚠ **EACH COUNT IS ITS OWN POPULATION**: a tab shows `tab.total`, a chip
+  its kind's `kindTotals`, the lens `relevanceTotals` — and the daily brief's lines say the SAME
+  figures (survey lines = `kindTotals`; my_turn / ci lines = min(total, 50)), because each line opens
+  its tab with its own chip or lens. ⚠ `kindTotals.reviewer_routing` is EVERY orphan, suggestion or
+  not; suggestions are looked up (network) for the top `routingSuggestCap` (15) only, AFTER ranking.
+  ⚠ **THE TABS ARE AN ALLOW-LIST** — a new `InsightKind` with no tab is folded, counted and never
+  listed (a compiler-checked test in work-plan.test.ts fails first). ⚠ The visible tab is DERIVED
+  (`effectivePendingTab`: a brief line's kind names its tab, else the picked `attentionTab`, else My
+  turn). ⚠ "Pending" is a LABEL-ONLY rename of "Needs attention" — the store/URL literal stays
+  `'attention'`. ⚠ **The board EXPLAINS its own order** (header + per-card info popovers, "How
+  Pending works" modal), so every admission floor, cap, colour threshold and Do next weight lives
+  ONCE in `packages/shared/src/pending-rules.ts`, read by the folds AND the copy — never retype one
+  as a literal in either ([docs/FRONTEND.md](docs/FRONTEND.md) § The Pending tabs).
 - **A surface that NOTIFIES counts `myTurnPersonal`; a surface you OPEN counts `myTurn`** (banner,
   Workspace badges, "Elsewhere" rows, browser notification vs the Pending board). ⚠ A
   narrow count may only navigate through ITS OWN lens — `attentionRelevance` is THREE-VALUED
@@ -496,11 +509,11 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   the UNSCOPED `getMyTurn` too, because the notification watcher reads exactly that. ⚠ It reaches
   `my_turn` ONLY — the two FORWARD kinds carry `relevance` for the ranker weight and the severity
   accent, not as an ownership claim. ⚠ `muted` is DISPLAY ONLY: no counter, lens or ranker may read
-  it. ⚠ A muted item DOES rank lower in "Do next" (`RELEVANCE_WEIGHT`) — accepted and pinned, not
-  emergent. ⚠ It is also why the Settings **Workspace heading is no longer Pro-gated**: a free
+  it. ⚠ A muted item DOES rank lower in its tab (the score's relevance weight) — accepted and
+  pinned, not emergent. ⚠ It is also why the Settings **Workspace heading is no longer Pro-gated**: a free
   workspace section must never sit below the `/api/pro/settings` gate, which 404s with no plugin.
 - **Visible sub-tabs are DERIVED, never written back** (`feedInnerTab`, `botsInnerTab`,
-  `insightsTab` — Reports' Overview/Bottlenecks) —
+  `insightsTab` — Reports' Overview/Bottlenecks — and the Pending tab, `effectivePendingTab`) —
   compute an `effectiveTab` for the render only; a corrective `set…` permanently forgets the
   choice.
 - **BLAST RADIUS is ONE resolver, `blastRadius()` in `lib/ui.ts`** — Pending cards, the Feed's
@@ -804,10 +817,12 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   cost refusal**, because a partial estate makes the exact claim false in the INFLATING direction —
   money refuses on all three arms while counters and the spread, honest sums over a stated subset,
   still render.
-- **The work plan** (`workPlan` gates the NARRATION ONLY): "what should I work on today", folded
-  into the **Pending** board as its ranked "Do next" head. **THE CODE RANKS, FREE; THE MODEL
-  NARRATES, PAID** — the rank is CORE (`db/work-plan.ts`) and served free by `GET /api/attention`,
-  and the plugin adds a headline, one `why` per head row and a `parked` line. There is no
+- **The work plan** (`workPlan` gates the NARRATION ONLY): "what should I work on today" across the
+  **Pending** tabs. **THE CODE RANKS, FREE; THE MODEL NARRATES, PAID** — the scorer is CORE
+  (`db/work-plan.ts`, the same one the tabs order by), and the plugin adds a headline and a `parked`
+  line above the tabs and one `why` per planned row, shown on that row's card in whatever tab it
+  sits (the plan still picks its rows across kinds, with its own dedup and spread, behind the
+  scenes). There is no
   "Plan for today" panel; it was the attention board's own population on a second, paywalled
   surface. Contract in
   [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § The work plan. What bites:

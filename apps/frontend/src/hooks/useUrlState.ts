@@ -24,9 +24,11 @@ import {
 } from '../store/filters.js';
 import {
   DERIVED_STATES,
+  PENDING_TABS,
   type DerivedState,
   type EventCategory,
   type InsightKind,
+  type PendingTabKey,
   type PrStatus,
   type ReviewState,
 } from '@pierre-review/shared';
@@ -93,6 +95,8 @@ const NAV_KEYS = [
   'activityRepo',
   'attn',
   'attnRel',
+  // The Pending TAB the reader picked — a screen they moved to, so Back must leave it.
+  'attnTab',
   // ⚠ RETIRED BUT STILL LISTED. `?attnPersonal=1` shipped, so history entries and bookmarks carry
   // it; it is parsed (as `attnRel=mine`) and never emitted. It stays a NAV key because leaving one
   // of those legacy entries — the emitted URL drops `attnPersonal` and gains `attnRel` — is a real
@@ -345,6 +349,9 @@ export function readFromUrl(): Partial<FilterState> {
   // both, and each is a view the reader can Back out of independently, so both are addressable.
   // Only the two literals seat it: a link carrying anything else means the broad board (the
   // default), never "something truthy".
+  // The Pending tab. Only a real tab key seats it; anything else means the default (My turn).
+  const attnTab = p.get('attnTab');
+  if (PENDING_TABS.some((t) => t.key === attnTab)) out.attentionTab = attnTab as PendingTabKey;
   const attnRel = p.get('attnRel');
   if (attnRel === 'mine' || attnRel === 'others') out.attentionRelevance = attnRel;
   // ⚠ BACK-COMPAT, ONE DIRECTION ONLY. `?attnPersonal=1` is the retired boolean spelling and it is
@@ -563,6 +570,11 @@ export function writeToUrl(s: FilterState): void {
     // attention board would be inert noise in every link the app produces.
     if (s.activityRepoId === 'attention' && s.attentionIsolation) {
       p.set('attn', s.attentionIsolation);
+    }
+    // Emitted when a tab was PICKED (null = the default My turn, which a bare link means). A kind
+    // filter above names its own tab, so the two together are never contradictory: the kind wins.
+    if (s.activityRepoId === 'attention' && s.attentionTab != null) {
+      p.set('attnTab', s.attentionTab);
     }
     // Emitted independently of `attn` — the two lenses are orthogonal, and a relevance-lensed
     // board showing every kind is a real (if uncommon) view. Same rail gate as its twin: a lens

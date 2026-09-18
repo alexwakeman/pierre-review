@@ -17,7 +17,7 @@ import {
   resolveWorkspaceScope,
 } from '../../db/queries.js';
 import { getWorkspaceRepoActivity } from '../../db/repo-activity.js';
-import { doNextCardIds, rankWorkPlan } from '../../db/work-plan.js';
+import { rankPendingTabs } from '../../db/pending-tabs.js';
 import {
   PR_LIVENESS_MAX_IDS,
   sweepPrLiveness,
@@ -127,14 +127,12 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
   // same cards Pro Insights computes in core getWorkspaceInsights), for the **Pending** rail
   // entry. The bot cards are excluded (they live in the free Bots console).
   //
-  // IT ALSO SERVES THE RANKED "DO NEXT" HEAD, free on every tier — `doNextIds`, the card ids in
-  // `db/work-plan.ts`'s deterministic score order. The rank is code; only its NARRATION is Pro.
+  // SERVED AS FIVE TABS (`db/pending-tabs.ts`), each a purely scored list with its uncapped
+  // count — free on every tier. The rank is code; only the Pro plan's NARRATION is paid.
   //
-  // ⚠ THIS FILTER IS A DENY-LIST OF EXACTLY TWO KINDS, and it must stay one: a new InsightKind
-  // ships here by default, which is the behaviour every non-bot kind wants. It is also one of the
-  // two hand-maintained spellings of "which kinds count" — the other is computeBriefCounts' if/else
-  // chain — and `daily-brief.test.ts` compares them per kind so a kind added to one and not the
-  // other fails rather than reproducing "header 5, list 3".
+  // ⚠ THE TABS ARE AN ALLOW-LIST (`PENDING_TABS`), so a NEW InsightKind reaches this board only
+  // once it is given a tab — otherwise it is folded, counted and never listed. pending-tabs.test.ts
+  // fails when a non-bot kind has no tab, rather than letting it vanish quietly.
   //
   // It passes the whole `BotScope`, not just the repo ids: getWorkspaceInsights needs the
   // workspaceId to know who counts as an automated reviewer for its bot cards. Those two cards are
@@ -144,20 +142,19 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
     const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
-    const insights = await getWorkspaceInsights(accountId, undefined, scope);
-    const cards = insights.cards.filter(
-      (c) => c.kind !== 'bot_signal' && c.kind !== 'bot_only_review',
-    );
-    // ⚠ ONE FOLD, RANKED — `rankWorkPlan` takes the insights we already have rather than
-    // re-folding them. Two folds in one request would be two populations one refresh apart,
-    // which is precisely the defect the Pending consolidation removed.
-    const evidence = await rankWorkPlan(accountId, scope, insights);
-    // ⚠ THE HEAD MUST BE A STRICT SUBSET OF WHAT THE BOARD RENDERS. No work-plan row can be a bot
-    // card today, so this filter is belt-and-braces — but if one ever could, an id here with no
-    // card behind it would silently cost the board a head slot rather than erroring.
-    const rendered = new Set(cards.map((c) => c.id));
-    const doNextIds = doNextCardIds(evidence).filter((id) => rendered.has(id));
-    return { cards, users: insights.users, doNextIds };
+    // ⚠ THE UNCAPPED FOLD — the board ranks every card by its Do next score and THEN lists the
+    // top of each kind, so it must see the whole population. Every other consumer of this fold
+    // (the daily brief included) keeps the default caps; `kindTotals` is the same either way, which
+    // is what keeps each tab's count and the brief line that opens it one number.
+    const insights = await getWorkspaceInsights(accountId, undefined, scope, { uncapped: true });
+    // ONE FOLD, RANKED into the five tabs. The two bot cards belong to no tab and never reach here.
+    const board = await rankPendingTabs(accountId, scope, insights);
+    return {
+      cards: board.cards,
+      users: [...insights.users, ...board.extraUsers],
+      tabs: board.tabs,
+      scores: board.scores,
+    };
   });
 
   // POST /api/attention/liveness — THE BOARD'S ONE GITHUB QUESTION.

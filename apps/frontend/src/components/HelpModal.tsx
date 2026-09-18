@@ -105,10 +105,12 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           <Section title="Pending">
             Everything waiting on you or your Workspace, in one list: items on your plate, red
             builds you are on the hook for, stalled reviews, untouched threads, un-assigned PRs,
-            and PRs that are simply ready to land. The top of the list is <strong>Do next</strong>
-            — ranked by how close each item is to landing and how likely it is to stall — and
-            everything else sits below the divider. The ranking is computed, free, and identical
-            on every plan; Pro adds a sentence per item saying why it is worth doing now.
+            and PRs that are simply ready to land — in five tabs, each showing how many it holds.
+            Every tab lists its cards by how close each is to landing, how long it has waited and
+            how much it is yours; the top five are <strong>Do next</strong>. The{' '}
+            <strong>i</strong> beside the title, and on every card, explains the order. The ranking
+            is computed, free, and identical on every plan; Pro adds a sentence per item saying why
+            it is worth doing now.
           </Section>
 
           <Section title="Reports">

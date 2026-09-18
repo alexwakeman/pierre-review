@@ -78,8 +78,8 @@ export interface ProCapabilities {
   workPlan: boolean; // The work plan's NARRATION (paid, like workspaceInsights/periodReports —
   // the plugin returns `digestEnabled`): the headline, the per-row "why" and the "what can wait"
   // line on the Pending board.
-  // ⚠ IT GATES THE SENTENCES ONLY. The ranked "Do next" head is CORE compute (db/work-plan.ts),
-  // served free on every tier by `GET /api/attention` as `doNextIds` — so a free account gets the
+  // ⚠ IT GATES THE SENTENCES ONLY. The ranking is CORE compute (db/work-plan.ts' scorer), served
+  // free on every tier by `GET /api/attention` as the Pending tabs — so a free account gets the
   // whole ordered board and only the prose is missing. This flag used to gate a standalone
   // "Plan for today" panel, both halves; do not restore that reading.
   // Additive, apiVersion still 21: an older plugin's register() simply returns an object without

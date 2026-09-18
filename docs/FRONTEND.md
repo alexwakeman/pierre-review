@@ -1626,8 +1626,9 @@ verdict line is suppressed — the header's queue chip already said it.
 - `mergeVerdict().canMerge` is true in exactly three cases (`armed`, `unstable`, `clean`/
   `has_hooks`). ⚠ `behind` is FALSE (GitHub 405s), so a `update_branch` card's control is **Update
   branch**, never Merge.
-- ⚠ The buttons must not filter, reorder or drop a card: `head ∪ tail === cards` is what keeps
-  every cap disclosure arithmetically true (`apps/frontend/test/pendingPartition.test.ts`).
+- ⚠ The buttons must not filter, reorder or drop a card: each tab's order and count are the
+  server's, and a local edit would make a tab list fewer cards than its count claims
+  (`apps/frontend/test/pendingTabs.test.ts`).
 - `CardShell`'s `onActivate` skips `a`/`button`/`textarea`/`input`/`[data-noactivate]`, so the
   controls do not also open the PR.
 - **MID-MERGE IS THREE LAYERS, CHECKED MOST-IMMEDIATE FIRST.** (1) a MANUAL merge or branch update
@@ -1682,16 +1683,61 @@ besides an armed intent's Cancel.
   row — printed. `null`/`unknown` say nothing. ⚠ Do NOT route it through `mergeVerdict()` instead: its
   queue branch runs first, so a queued conflicting PR would report `queued` and lose the conflict
   statement — and the queue is already stated by `pendingQueueBadge` in the header.
-- ⚠ **It is NOT a forward kind.** Do not add it to `onlyForward` (`AttentionView`) — a conflicting PR
-  IS waiting on someone (its author), and the all-clear line would print "Nothing is waiting on you"
-  over a board of broken branches. Do not add it to `passesRelevanceLens` either: the lens narrows
-  `my_turn` and nothing else, and `pendingCardIsPersonal` must keep returning false for it — write
-  access to a repo is not ownership of a stranger's PR.
-- A conflicts card can share a `prId` with another kind. The tail sibling is **marked** by
-  `promotedPrIds` ("already in Do next"), never removed: `head ∪ tail === cards` is what keeps
-  "50 of 148" arithmetically true.
+- ⚠ **It is NOT a forward kind** — a conflicting PR IS waiting on someone (its author). Do not let
+  the relevance lens (`passesLens`) narrow it: the lens narrows `my_turn` and nothing else, and
+  `pendingCardIsPersonal` must keep returning false for it — write access to a repo is not
+  ownership of a stranger's PR.
+- A conflicts card can share a `prId` with another kind; each sits in its own tab (conflicts in
+  Needs fixing), so neither hides the other.
 - ⚠ **`INSIGHT_KINDS` in `useUrlState.ts` must carry `'conflicts'`** or `?attn=conflicts` is a
   discarded parse — see the four touch points below.
+
+### The Pending tabs (`AttentionView.tsx`, `pendingTabs.ts`, `db/pending-tabs.ts`)
+
+Pending is five tabs (`PENDING_TABS` in `packages/shared/src/pending-rules.ts`): **My turn** ·
+**Needs fixing** (CI failing, merge conflicts) · **Waiting on review** (stalled review, needs a
+reviewer; review load as a "Reviews waiting on people" strip above the list, unranked and uncounted)
+· **Unanswered threads** · **Ready to land** (ready to merge, behind trunk). Each is a PURELY SCORED
+list — the server's order, highest Do next score first — and the first `PENDING_DO_NEXT_SIZE` (5) of
+whatever view is on screen sit under "Do next", the rest under "Everything else".
+
+- **The server ranks the UNCAPPED fold, then caps** (`rankPendingTabs`): up to `boardListCap` per
+  LIST GROUP — the kind, and for My turn each side of "Only yours" — so the whole tab, a kind chip and
+  the lens are each their own true top. The SPA caps the whole-tab view to `boardListCap` (beyond it
+  the per-kind union has gaps) and says "Showing the top 50 of 176" when it cuts.
+- **Every view's count is its own population**: tab → `tab.total`, chip → `tab.kindTotals[kind]`,
+  lens → `tab.relevanceTotals[lens]`. The daily brief's lines say the same figures and each opens its
+  tab with its own chip / lens seated, so the number clicked is the list landed on.
+- **The tab on screen is DERIVED** (`effectivePendingTab`): a kind (`attentionIsolation`, seated by a
+  brief line) names its own tab and wins; else the picked `attentionTab` (`?attnTab=`, a NAV key);
+  else My turn. Clicking a tab is ONE write that seats the tab and clears the kind
+  (`setAttentionTab`). Old `?attn=<kind>` links land on the right tab with that chip selected.
+- **Removed with the cross-kind head**: `doNextIds`, the "already in Do next" chip, the header "My turn"
+  pill (the tab replaces it), `AttentionIsolationBanner` (the selected tab and chip say the same
+  thing on the board itself) and the spread/superseded explanations. The Pro plan still picks its
+  rows across kinds; its headline and `parked` line sit above the tabs and each `why` lands on its
+  card in whichever tab — `CardShell` reads it from `PendingBoardContext` for EVERY kind (before,
+  only three kinds were passed a `why`, so most narrated rows never showed theirs).
+- **Liveness** sweeps merge-state cards first (ready to merge, behind trunk, conflicts), then the
+  view on screen, then the rest.
+
+**The info popovers** (`PendingInfo.tsx`, `pendingExplain.ts`): the header ⓘ is a four-sentence
+summary; each card's ⓘ says why it is here (and what clears it), its colour rule, its place ("4th of
+176 in Waiting on review · Do next" — position i of the list IS rank i of the view's population) and
+its score as three weighted parts that add up to the total. Both lead to the **"How Pending works"**
+modal (tabs, inside a tab, the score, colours, when it is your turn).
+
+- ⚠ **EVERY NUMBER IN THE COPY IS READ FROM `pending-rules.ts`** — the table `db/queries.ts`
+  (admission floors, caps, colour thresholds, My Turn section colours) and `db/work-plan.ts` (weights,
+  bases incl. the board-only `conflicts` base, adjustments, stall buckets) fold with. Retune THERE.
+- **The per-card working rides `GET /api/attention` as `scores`**, off the same pass that ordered the
+  tabs. Nothing on the client may sort or filter by it.
+- ⚠ **NOTHING FETCHES, AND IT IS A CLICK, NEVER A HOVER.** The popover is a `FloatingPortal` carrying
+  `data-noactivate`: React bubbles portal clicks through the COMPONENT tree to the card's own
+  `onClick`, which would otherwise open the PR.
+- `KIND_LABEL`, `cardKindLabel`, `MY_TURN_REASON_LABEL` and `myTurnReasonLabel` live in
+  `pendingLabels.ts` (importing them from `AttentionCards` would be a cycle); `AttentionCards`
+  re-exports them.
 
 ### "opened 3d" — the PR's own age on a Pending card
 
@@ -2356,36 +2402,13 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   carry it for the RANKER's weight, not as an ownership claim — a PR being ready to land says
   nothing about whose turn it is — and filtering them would stop the brief's two my-turn lines
   partitioning the lensed board, which is the one job this predicate has.
-- ⚠ **THE PENDING BOARD IS `head ∪ tail === cards`, DISJOINT, AND THE HEAD IS A RE-ORDERING — NEVER
-  A FILTER.** `GET /api/attention` returns `doNextIds` (card ids in `db/work-plan.ts`'s score
-  order, free on every tier); `AttentionView` partitions the FINAL `cards` array into head and
-  tail and renders ONE `<ul>` with a divider between them. Everything above the partition —
-  `visible`, `myTurnShown`, `cap`, `placement`, `ciCap`, both empty states — is computed off
-  `all`/`visible`/`cards` and untouched by it, which is exactly what keeps every cap disclosure
-  true. **The coupling is invisible and expensive:** `capFor` gates on `shown === count`, so an
-  "improvement" that filtered `cards` down to the head — or dropped a tail row because its PR is
-  already seated in the head — would make "50 of 148" vanish with no error, on precisely the
-  workspaces where the cap matters. A tail row whose PR is in the head is MARKED ("already in Do
-  next"), never removed. ⚠ ONE `<AttentionCards>` MOUNT, never a head list and a tail list: two
-  mounts race on the single `activityFlashItemId` token, each clearing it unconditionally.
-- ⚠ **THE HEAD IS SUPPRESSED UNDER AN ISOLATION, NOT UNDER A RELEVANCE LENS.** An isolated board is
-  single-kind, so there is no cross-kind ordering question and `capWithKindCoverage`'s
-  one-slot-per-kind pass is meaningless; a relevance-lensed board is still multi-kind (the lens
-  narrows `my_turn` alone), so the head is a legitimate re-ordering of the lensed set. `headCount
-  === 0` is therefore the COMMON case, which is why the divider is guarded on `headCount > 0 &&
-  headCount < cards.length` — without the lower bound the board opens with an "Everything else"
-  rule and nothing above it. **Consequence, stated rather than discovered:** every daily-brief line
-  and `openMyTurnInWorkspace` seat an isolation as well as a lens, so the head is dark on every
-  notification entry point. That is the ruling, not an oversight. The Pro narration — headline,
-  every `why`, `parked`, the dropped-id note — is suppressed with it, and the generate button is
-  DISABLED rather than hidden (an enabled button whose output cannot render spends a credit for
-  nothing and gets clicked twice).
-- **The lens must be VISIBLE, NAMED and REVERSIBLE.** `AttentionIsolationBanner` carries both
-  narrowings, says WHICH lens is on (one shared `LENS_COPY` table, so the banner and
-  `AttentionView`'s filtered empty state cannot phrase the same narrowing two ways), names how many
-  cards it is holding back, and offers "Show everyone's" beside "Clear". ⚠ The empty state tests
-  `attentionRelevance != null` — **all three values reach it**; a lens that hides real work and
-  falls through to "Nothing needs attention 🎉" reads as "my items disappeared".
+- **The board's order, counts and narrowings are the five tabs** — see § The Pending tabs. The
+  cross-kind "Do next" head, its `head ∪ tail` partition, the head's suppression under an isolation
+  and `AttentionIsolationBanner` are gone with it: a daily-brief line or `openMyTurnInWorkspace`
+  now lands on its tab with its chip / lens visibly selected on the board itself, reversible there
+  ("All", or pressing "Only yours" again / "Show everyone's" on an emptied lens). ⚠ ONE
+  `<AttentionCards>` MOUNT still — the people strip, Do next and Everything else are sections of one
+  `<ul>`, because two mounts race on the single `activityFlashItemId` token.
 - **FRESHNESS IS ASYMMETRIC AND THAT IS THE POINT.** `GET /api/daily-brief?rollup=1` computes the
   ACTIVE workspace's counts FRESH per request and serves the other workspaces' lines from a 5-min
   TTL (`db/daily-brief.ts`). The hook preserves the split (`fresh` per line) rather than

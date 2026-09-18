@@ -17,6 +17,7 @@ import {
   type EventType,
   type FeedPrEventChip,
   type InsightKind,
+  type PendingTabKey,
   type MlSeverity,
   type PeriodGrain,
   type PrStatus,
@@ -523,6 +524,17 @@ export interface FilterState {
   // `?attnPersonal=1` is still PARSED as 'mine' (shipped links and history entries), never
   // emitted — see hooks/useUrlState.
   attentionRelevance: AttentionRelevanceLens | null;
+  // Activity **Pending** TAB the reader picked (`PENDING_TABS`), or null for the default (My turn).
+  //
+  // ⚠ THE VISIBLE TAB IS DERIVED, NEVER WRITTEN BACK: a kind filter (`attentionIsolation`, seated
+  // by a daily-brief line) names its own tab and wins; otherwise this; otherwise My turn — see
+  // `effectivePendingTab`. So a brief line needs to seat only the kind, and clicking a tab seats the
+  // tab AND clears the kind in one write (`setAttentionTab`), never two.
+  //
+  // Transient like its siblings: not in FilterDefaults (no FILTER_STORAGE_VERSION bump), cleared by
+  // a rail change, URL-SERIALIZED (`?attnTab=`) and a NAVIGATION key — a tab is a screen the reader
+  // moved to, so Back must be able to leave it.
+  attentionTab: PendingTabKey | null;
   // The cross-repo Feed's "New" markers — see FeedNewCohorts above. Transient, URL-silent,
   // and written ONLY by FeedView's auto-insert path (a batch landed) and its scroll handler
   // (the reader is at the top). Read as a flat id set; never recomputed defensively on render.
@@ -945,6 +957,12 @@ export interface FilterState {
    * works only when the rail actually changes.
    */
   setAttentionRelevance: (lens: AttentionRelevanceLens | null) => void;
+  /**
+   * Show one Pending tab, optionally narrowed to one of its card kinds (a kind chip). ONE write, so
+   * the tab and the kind can never disagree for a render: picking a tab clears any kind filter,
+   * and picking a chip names both.
+   */
+  setAttentionTab: (tab: PendingTabKey, kind?: InsightKind | null) => void;
   /**
    * THE ONE "show me my turn — over there" navigation, in ONE gesture.
    *
@@ -1439,6 +1457,7 @@ function freshDefaults(): FilterData {
     // The board is BROAD by default: every card, whatever its relevance. A lens is only ever
     // seated by arriving from a count that was itself one half of the split.
     attentionRelevance: null,
+    attentionTab: null,
     // No batch has landed yet — a freshly-opened feed is all equally new, so nothing is marked.
     feedNewCohorts: { scopeKey: null, cohorts: [] },
     botAnalyticsWindow: 'rolling_14',
@@ -1529,6 +1548,7 @@ export type UrlOwnedState = Pick<
   | 'selectedThreadId'
   | 'attentionIsolation'
   | 'attentionRelevance'
+  | 'attentionTab'
   | 'feedIsolatedPrId'
   | 'prDetailTab'
   | 'feedInnerTab'
@@ -1547,6 +1567,7 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
     selectedThreadId: d.selectedThreadId,
     attentionIsolation: d.attentionIsolation,
     attentionRelevance: d.attentionRelevance,
+    attentionTab: d.attentionTab,
     feedIsolatedPrId: d.feedIsolatedPrId,
     prDetailTab: d.prDetailTab,
     feedInnerTab: d.feedInnerTab,
@@ -1640,6 +1661,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   // board must pass `null` itself, because setActivityRepo's clear does not fire on an unchanged
   // rail.
   setAttentionRelevance: (lens) => set({ attentionRelevance: lens }),
+  setAttentionTab: (tab, kind = null) => set({ attentionTab: tab, attentionIsolation: kind }),
   // See the declaration above for the two ordering traps this sequence exists to encapsulate.
   // It deliberately calls the PUBLIC setters rather than one fused `set({...})`: a fused write
   // would be a second definition of what a workspace switch clears, free to drift from
@@ -2018,6 +2040,7 @@ export const useFilters = create<FilterState>((set, get) => ({
             feedIsolatedPrId: null,
             attentionIsolation: null,
             attentionRelevance: null,
+            attentionTab: null,
           },
     ),
   setActivityThreadFilter: (st) =>

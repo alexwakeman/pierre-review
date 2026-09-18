@@ -2754,23 +2754,15 @@ paywall. It has been folded into the **Pending** board:
 
 - the two signals the cards never carried (`merge`, `update_branch`) are now real `InsightKind`s
   emitted by `getWorkspaceInsights`, so **all seven** WorkPlanKinds fold off cards;
-- core `GET /api/attention` returns **`doNextIds`** — the ranked head as CARD ids — **free on every
-  tier**, and the board renders ONE list partitioned head / divider / tail;
-- the `workPlan` capability now gates **the sentences only**: a headline, one `why` per head row,
-  and `parked` on the divider. A free or OSS account gets the entire ordered board with no prose.
+- core `GET /api/attention` serves the board as **five tabs**, each ordered by the SAME Do next
+  scorer the plan ranks with (`db/work-plan.ts` `scoreCards`), **free on every tier**;
+- the `workPlan` capability gates **the sentences only**: a headline and `parked` above the tabs,
+  and one `why` per planned row, shown on that row's card in whichever tab it sits. A free or OSS
+  account gets the entire ordered board with no prose.
 
-⚠ **HEAD ∪ TAIL === CARDS, DISJOINT.** The head is a RE-ORDERING, never a filter. Every cap
-disclosure on that board gates on `shown === count`, so an "improvement" that filtered `cards` down
-to the head — or dropped a tail row because its PR is already in the head — would make "50 of 148"
-vanish with no error, on exactly the workspaces where the cap matters. A tail row whose PR is
-seated in the head is MARKED ("already in Do next"), never removed.
-
-⚠ **THE HEAD IS SUPPRESSED UNDER AN ISOLATION, NOT UNDER A RELEVANCE LENS.** An isolated board is
-single-kind, so there is no cross-kind ordering question and `capWithKindCoverage` is meaningless;
-a relevance-lensed board is still multi-kind (`passesRelevanceLens` narrows `my_turn` and nothing
-else), so the head is a legitimate re-ordering there. Consequence, stated rather than discovered:
-every daily-brief line and `openMyTurnInWorkspace` seat an isolation as well as a lens, so the head
-is dark on every notification entry point. That is the ruling, not an oversight.
+The plan still chooses its rows ACROSS kinds (its own per-PR dedup and kind/repo spread, capped at
+`WORK_PLAN_ITEM_CAP`) — that is the evidence the model narrates and the plan hash covers, unchanged.
+The board no longer shows that cross-kind selection as a section; it only carries its lines.
 
 ⚠ **THE TWO FORWARD KINDS INHERIT TWO NARROWINGS** the old standalone query did not have: the card
 fold's **90-day ultra-stale gate** and its **15-per-kind cap**. A long-dormant-but-mergeable PR no
@@ -2782,11 +2774,10 @@ nothing, deliberately. A plan row needs a `WorkPlanKind`, and that vocabulary sp
 repositories**: the union and `BASE_PROXIMITY` in the host (compile-checked) and the plugin's prompt,
 which enumerates `merge|update_branch|unblock_ci|review|reply|thread|nudge` as a **STRING**
 (`packages/pro/src/work-plan/prompt.ts`) that no compiler checks — so a host-only addition hands the
-model a kind it was never told about. Excluding it costs the board nothing structurally: the head is
-an ORDERING, so an un-named card simply renders in the tail and `head ∪ tail === cards` still holds.
-Resolving conflicts is also the one job on that board with no in-app step to rank. Its `cardPrIds`
-gate and `foldCounts` stay untouched for the same reason — a kind that builds no row must not widen
-the reads that exist to build rows.
+model a kind it was never told about. (The board still RANKS conflicts cards inside Needs fixing —
+with a board-only `conflicts` proximity base — but they never become plan rows.) Its PR facts are
+gathered, because the board scores it, and `foldCounts` still ignores it: a kind that builds no plan
+row is counted by no plan figure.
 
 ⚠ **AND THE PLUGIN NEEDED A LINE FOR IT, WHICH NOTHING WOULD HAVE CAUGHT.**
 `packages/pro/src/insights/sprint-report.ts`'s card loop does `bump(repoFullName)` /

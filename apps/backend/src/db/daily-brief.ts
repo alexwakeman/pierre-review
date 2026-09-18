@@ -79,6 +79,7 @@
 // error never sticks for the whole window.
 import { and, eq, gte, inArray } from 'drizzle-orm';
 import type { DailyBriefBotAnomaly, DailyBriefCounts, DailyBriefTrunkRepo } from '@pierre-review/shared';
+import { PENDING_LIMITS } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import {
   automatedReviewerUserIds,
@@ -306,6 +307,32 @@ async function computeBriefCounts(
     else if (c.kind === 'reviewer_routing') needsReviewer += 1;
   }
 
+  // ⚠ THE DISPLAYED FIGURES ARE WHAT THE PENDING BOARD LISTS. The board ranks the UNCAPPED
+  // population by score and lists the top `boardListCap` of each view — My turn, "Only yours", its
+  // complement, CI failing — so each line's figure is min(its total, that cap), paired with the
+  // total for the "of N" disclosure. Counting the cards of THIS capped fold instead would count a
+  // different 50 (the newest, by colour) and could disagree with the list the line opens.
+  const listed = (total: number | undefined, fallback: number): number =>
+    total == null ? fallback : Math.min(total, PENDING_LIMITS.boardListCap);
+  myTurn = listed(insights.myTurnTotal, myTurn);
+  myTurnPersonal = listed(insights.myTurnPersonalTotal, myTurnPersonal);
+  myTurnOther = listed(insights.myTurnOtherTotal, myTurnOther);
+  ciFailing = listed(insights.ciFailingTotal, ciFailing);
+  // ⚠ THE DIRECT / MAINTAINED HALVES MUST ADD UP TO `myTurnPersonal`, because the Workspace badges
+  // print them beside it. They do exactly when every personal item fits on the list — then the
+  // listed set IS the whole population and the halves are its two totals. Past the cap, which of
+  // the two the top-scoring items are is the board's call, not this fold's, so the halves are left
+  // OUT and the badge shows the total alone (its existing "both or neither" refusal).
+  const personalFits =
+    insights.myTurnPersonalTotal == null ||
+    insights.myTurnPersonalTotal <= PENDING_LIMITS.boardListCap;
+  const split = personalFits
+    ? {
+        myTurnDirect: insights.myTurnDirectTotal ?? myTurnDirect,
+        myTurnMaintained: insights.myTurnMaintainedTotal ?? myTurnMaintained,
+      }
+    : {};
+
   return {
     myTurn,
     // The cap DISCLOSURE, passed straight through from the same getWorkspaceInsights call above
@@ -322,9 +349,8 @@ async function computeBriefCounts(
     myTurnPersonalTotal: insights.myTurnPersonalTotal,
     // The split, each count paired with the total folded off the SAME pre-cap array it came from
     // (passed straight through — same fold, same scope, same window as `myTurnTotal`).
-    myTurnDirect,
+    ...split,
     myTurnDirectTotal: insights.myTurnDirectTotal,
-    myTurnMaintained,
     myTurnMaintainedTotal: insights.myTurnMaintainedTotal,
     myTurnOther,
     myTurnOtherTotal: insights.myTurnOtherTotal,
@@ -332,9 +358,13 @@ async function computeBriefCounts(
     // The matched denominator, passed straight through from the same getWorkspaceInsights call —
     // pair narrow with narrow, or the "of N" disclosure silently never fires.
     ciFailingTotal: insights.ciFailingTotal,
-    stalled,
-    untouchedThreads,
-    needsReviewer,
+    // ⚠ THE THREE SURVEY LINES COUNT THE WHOLE POPULATION, not the cards this capped fold kept.
+    // Each line opens its Pending tab with its own kind chip selected, and the chip shows
+    // `kindTotals` — the uncapped figure — so the strip must say the same number or the reader
+    // clicks "15" and lands on "173". The card count stays the fallback for a fold predating it.
+    stalled: insights.kindTotals?.stalled_review ?? stalled,
+    untouchedThreads: insights.kindTotals?.untouched_thread ?? untouchedThreads,
+    needsReviewer: insights.kindTotals?.reviewer_routing ?? needsReviewer,
     resolveBacklog: backlog.totalThreads,
     botAnomalies,
     trunkRed,
