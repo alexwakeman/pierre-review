@@ -8,6 +8,7 @@ import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
 import { LargePrThresholdSection } from './LargePrThresholdSection.js';
 import { BlastRadiusSection } from './BlastRadiusSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
+import { FlowSettingsSection } from './FlowSettingsSection.js';
 import { GithubAppInstallSection } from './GithubAppInstallSection.js';
 import { YourDataSection } from './YourDataSection.js';
 import { useSettingsWorkspace } from './workspaceScope.js';
@@ -196,6 +197,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
                     not wait on a request that 404s with no plugin. It is also what makes this
                     heading non-empty on `npx pierre-review`. */}
                 <PendingMuteSection />
+                {/* Chronology's working hours and budgets — CORE, free to set, and read from the
+                    workspace row, so it too sits above the pro-settings gate. */}
+                <FlowSettingsSection />
                 {/* ⚠ ONLY THE PAID SECTIONS WAIT ON THE PLUGIN, and this line speaks for them
                     alone — it used to speak for the whole half, which is precisely why a free
                     section could not live here. */}

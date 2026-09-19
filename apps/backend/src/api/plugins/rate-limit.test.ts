@@ -253,6 +253,14 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/workspace-metrics')).toEqual(['read']);
   });
 
+  // PUT /api/workspaces/:id/flow-settings — Chronology's working hours and budgets. One UPDATE of
+  // one JSON column on the caller's own workspace row: no GitHub, no model, the same family and
+  // the same decided tier as the Pending mute above.
+  it('puts the Chronology working-hours settings on the workspace-CRUD read tier', () => {
+    expect(tiers('PUT', '/api/workspaces/3/flow-settings')).toEqual(['read']);
+    expect(tiers('PUT', '/api/workspaces/3/flow-settings')).not.toContain('github_write');
+  });
+
   // The ML label surface spends NO GitHub quota and NO Anthropic credit — the model is called
   // only by the background worker, and the per-PR badge index is two indexed reads, so it stays
   // on `read`. (GET /api/bot-severity — the expensive rollup this test used to separate it
@@ -332,6 +340,14 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/pro/work-plan')).not.toContain('ai');
     // ...and must never drift down onto the 600/min blanket the catch-all would have handed it.
     expect(tiers('GET', '/api/pro/work-plan')).not.toEqual(['read']);
+  });
+
+  // /api/pro/flow-pointers — Chronology's pointers, tiered by copying the work plan: the POST is a
+  // model spend, the free GET re-runs the Chronology fold for its `stale` probe.
+  it('tiers the Chronology pointers per verb: POST on the AI pair, GET on the expensive read bucket', () => {
+    expect(tiers('POST', '/api/pro/flow-pointers')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/pro/flow-pointers')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/pro/flow-pointers')).not.toContain('ai');
   });
 
   // /api/pro/bot-themes — the revived Bots "What they're flagging" panel. Both tiers land via

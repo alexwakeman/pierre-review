@@ -2,6 +2,7 @@
 // All timestamps are ISO-8601 strings over the wire.
 
 import type { DoNextAdjustment, DoNextProximityBase, PendingTabKey } from './pending-rules.js';
+import type { FlowBudgetMeasure, FlowSettings, ResolvedFlowSettings } from './flow-settings.js';
 
 export type DerivedState =
   | 'resolved'
@@ -2274,6 +2275,306 @@ export interface FlowResponse {
   unreviewed: UnreviewedRepoStat[];
   refusals: FlowRefusal[];
   coverage: FlowCoverage;
+  // ── WORKING HOURS, BUDGETS AND THE PER-PR VIEW (Chronology, step 1+2) ──────────────────────
+  // Everything below counts WORKING HOURS in the workspace's own zone and days
+  // (`settings`, resolved from `workspaces.flow_settings` — see packages/shared/src/flow-settings.ts).
+  // The fields above keep CLOCK hours, because the rule that calls a repository out ("lopsided
+  // AND slow") was calibrated on clock hours over 66,088 public pull requests and moving it would
+  // silently invalidate that calibration. Trailing optional: independent deploys.
+  /** The working calendar and budgets these figures were measured with. */
+  settings?: ResolvedFlowSettings;
+  /** The workspace split in WORKING hours (`hours` is working hours here). */
+  courtsWork?: CourtShare[];
+  medianLeadWorkHours?: number;
+  p75LeadWorkHours?: number;
+  /** The headline in working hours. Templated server-side like every sentence here. */
+  workHeadline?: string | null;
+  /** Each wait against its budget — the panel's headline chart. */
+  budgets?: FlowBudgetRow[];
+  /** One row per measured pull request, for the scatter and the triangle. Never carries a person. */
+  prs?: FlowPrRow[];
+  /** True when there were more measured PRs than `prs` carries. */
+  prsCapped?: boolean;
+  /** The slowest quarter against the fastest, signal by signal. Null when too few PRs. */
+  contrast?: FlowContrast | null;
+  sizeBands?: FlowSizeBand[];
+  weekdays?: FlowWeekdayRow[];
+  /** PRs that sat approved for more than a working day. */
+  landingTail?: FlowLandingTail | null;
+  /** Per repository: how much of its first reviewing one person does. Never names them. */
+  concentration?: FlowConcentrationRow[];
+  /** Person vs team vs nobody asked, from the stored review-request history. Null when none of the
+   *  window's PRs has its history yet. */
+  requests?: FlowRequestStats | null;
+}
+
+/** One wait measured against its budget. Working hours throughout. */
+export interface FlowBudgetRow {
+  measure: FlowBudgetMeasure;
+  good: number;
+  ok: number;
+  /** The PRs the figures are over — for 'reply', only those that went back to their author. */
+  prs: number;
+  p50: number;
+  p75: number;
+  p90: number;
+  /** Where three in four landed against the budget; null when too few PRs to say. */
+  verdict: 'good' | 'ok' | 'slow' | null;
+  sentence: string;
+}
+
+/** One measured pull request. Carries no person — not the author, not a reviewer. */
+export interface FlowPrRow {
+  prId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  githubUrl: string;
+  openedAt: string;
+  mergedAt: string;
+  /** ISO weekday it opened on (1 = Monday), in the workspace's zone. */
+  openedWeekday: number;
+  /** Clock hours, opened to merged. */
+  leadHours: number;
+  leadWorkHours: number;
+  workHours: Record<PrCourt, number>;
+  /** Working hours from opened to the first human review or comment; null when no person looked
+   *  before it merged (the only human touch came after). */
+  firstLookWorkHours: number | null;
+  /** Times the ball went back to the author. */
+  rounds: number;
+  /** Lines added plus removed, or null when the size was never observed. */
+  lines: number | null;
+  files: number | null;
+  /** The blast-radius surfaces it touches (dependencies, CI, auth, database schema, …). Empty when
+   *  none, or when its file list was never stored. */
+  reachAreas: BlastSurface[];
+  /** Clock hours its checks were red while it was open (from CI observations, approximate). */
+  ciRedHours: number;
+  /** A ticket key read from the title or branch name, e.g. "BMD-984". */
+  ticketKey: string | null;
+  /** Merged by its own author. */
+  selfMerged: boolean;
+  /** The court it spent most working time in (clock time when it had none in working hours). */
+  dominant: PrCourt;
+  /** Who was asked first: a named person, a team, or nobody. Null when its request history has
+   *  not been received yet — "not known", never "nobody". Never says WHICH person or team. */
+  requestKind?: FlowRequestKind | null;
+  /** Working hours from that first request to the first look; null when there was no request,
+   *  the history is not known, or the first look came before anyone was asked. */
+  requestToLookWorkHours?: number | null;
+}
+
+export type FlowRequestKind = 'person' | 'team' | 'none';
+
+export interface FlowRequestRow {
+  kind: FlowRequestKind;
+  prs: number;
+  /** Median working hours from the first request to the first look (null for 'none', or too few). */
+  medianRequestToLookWorkHours: number | null;
+  /** Median working hours from opening to the first look — comparable across all three. */
+  medianFirstLookWorkHours: number | null;
+}
+
+/** Asking for a review: a named person, a team, or nobody — and how soon someone looked. */
+export interface FlowRequestStats {
+  /** Measured PRs whose request history we hold. */
+  known: number;
+  measured: number;
+  /** PRs whose first look came before anyone was asked — left out of the request medians. */
+  lookedBeforeAsked: number;
+  rows: FlowRequestRow[];
+  sentence: string;
+}
+
+export type FlowContrastSignal =
+  | 'firstLook'
+  | 'lines'
+  | 'files'
+  | 'wentBack'
+  | 'ciRed'
+  | 'land'
+  | 'lastDay'
+  | 'reach';
+
+export interface FlowContrastRow {
+  signal: FlowContrastSignal;
+  label: string;
+  unit: 'workHours' | 'count' | 'percent';
+  /** Median (or share, for 'percent') over the fastest quarter. */
+  fast: number;
+  slow: number;
+  /** 'separates' when the slow side is at least twice the fast; 'weak' from 1.3×; else 'none'. */
+  verdict: 'separates' | 'weak' | 'none';
+}
+
+export interface FlowContrast {
+  /** PRs in each quarter. */
+  quartilePrs: number;
+  rows: FlowContrastRow[];
+  sentence: string;
+}
+
+export interface FlowSizeBand {
+  label: string;
+  minLines: number;
+  /** Null for the open-ended top band. */
+  maxLines: number | null;
+  prs: number;
+  /** Null when the band holds too few PRs to give a median. */
+  medianLeadWorkHours: number | null;
+  medianFirstLookWorkHours: number | null;
+}
+
+export interface FlowWeekdayRow {
+  /** ISO weekday, 1 = Monday. */
+  weekday: number;
+  working: boolean;
+  prs: number;
+  medianLeadHours: number | null;
+  medianLeadWorkHours: number | null;
+}
+
+export interface FlowPrLink {
+  prId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  githubUrl: string;
+}
+
+export interface FlowLandingRow extends FlowPrLink {
+  landWorkHours: number;
+  landHours: number;
+  selfMerged: boolean;
+  ticketKey: string | null;
+  /** Other measured PRs in OTHER repositories under the same ticket — it may have been held for them. */
+  siblings: FlowPrLink[];
+}
+
+export interface FlowLandingTail {
+  /** One working day, in working hours. */
+  thresholdWorkHours: number;
+  prsOver: number;
+  /** Their share of all approved-and-waiting working time. */
+  shareOfLanding: number;
+  selfMergedOver: number;
+  rows: FlowLandingRow[];
+  sentence: string;
+}
+
+export interface FlowConcentrationRow {
+  repoId: number;
+  repoFullName: string;
+  prs: number;
+  /** Distinct people who gave these PRs their first human review. */
+  firstReviewers: number;
+  /** The busiest first reviewer's share of them. */
+  topShare: number;
+  /** Median working hours to a first look when it was them, and when it was anyone else. */
+  topFirstLookWorkHours: number | null;
+  othersFirstLookWorkHours: number | null;
+  /** True when their first looks took at least a quarter longer than everyone else's. */
+  slower: boolean;
+}
+
+// ── CHRONOLOGY POINTERS (Pro, `periodReports`) ──────────────────────────────────────────────
+// A few short, evidence-led pointers about the NATURE of the pull requests behind the figures:
+// patterns, good examples, things to try. THE CODE PICKS THE EVIDENCE, THE MODEL WRITES THE
+// SENTENCES: core `db/flow-pointers.ts` folds the rows below from the same `getFlowCourts` pass the
+// panel renders, the plugin narrates them, and every figure on screen stays code-derived.
+//
+// ⚠ NO PERSON IS IN THE EVIDENCE — no author, no reviewer, no login. Comment text is included for
+// a handful of exemplar PRs with every @handle masked, because the reviewers' own words are the
+// best evidence of what a slow review round was about.
+
+/** One measured pull request, as the model sees it. */
+export interface FlowPointerRow {
+  prId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  githubUrl: string;
+  /** Where it sits by working-hour lead time. */
+  quarter: 'fastest' | 'middle' | 'slowest';
+  leadWorkHours: number;
+  workHours: Record<PrCourt, number>;
+  firstLookWorkHours: number | null;
+  rounds: number;
+  lines: number | null;
+  files: number | null;
+  reachAreas: BlastSurface[];
+  ciRedHours: number;
+  openedWeekday: number;
+  ticketKey: string | null;
+  selfMerged: boolean;
+  /** Who was asked first (never which person or team); null = history not known. */
+  requestKind?: FlowRequestKind | null;
+}
+
+/** A slow or quick PR of comparable size, with the words around it. */
+export interface FlowPointerExemplar {
+  prId: number;
+  side: 'slow' | 'fast';
+  /** The size band it was matched within, e.g. "101–400 lines". */
+  sizeBand: string;
+  /** The first human review or comment by someone other than its author, @handles masked. */
+  firstReview: string | null;
+  /** Its description, when stored (lean storage usually does not keep it). */
+  description: string | null;
+}
+
+export interface FlowPointerEvidence {
+  workspaceId: number;
+  windowDays: number;
+  measuredPrs: number;
+  settings: ResolvedFlowSettings;
+  budgets: FlowBudgetRow[];
+  contrast: FlowContrast | null;
+  sizeBands: FlowSizeBand[];
+  weekdays: FlowWeekdayRow[];
+  landing: { prsOver: number; shareOfLanding: number; selfMergedOver: number } | null;
+  concentration: FlowConcentrationRow[];
+  requests?: FlowRequestStats | null;
+  rows: FlowPointerRow[];
+  /** True when there were more measured PRs than `rows` carries. */
+  rowsCapped: boolean;
+  exemplars: FlowPointerExemplar[];
+}
+
+export type FlowPointerKind = 'pattern' | 'example' | 'try';
+
+export interface FlowPointer {
+  kind: FlowPointerKind;
+  /** One or two plain sentences. Never a digit — every figure sits beside it, code-derived. */
+  text: string;
+  /** The pull requests behind it, ⊆ the evidence. */
+  cites: number[];
+}
+
+export interface StoredFlowPointers {
+  pointers: FlowPointer[];
+  model: string;
+  generatedAt: string;
+  /** PR ids the model cited that were not in the evidence — dropped, and said so on screen. */
+  droppedIds: number;
+  /** Pointers dropped whole: no valid citation, a digit, a name, or too long. */
+  droppedPointers: number;
+  /** How many measured pull requests the pointers were written over. */
+  prCount: number;
+}
+
+export interface FlowPointersResponse {
+  enabled: boolean;
+  result: StoredFlowPointers | null;
+  /** Links for every cited PR still in the window, from the LIVE fold — never stored. */
+  links: FlowPrLink[];
+  /** The evidence has moved since these were written. */
+  stale?: boolean;
+  throttled?: boolean;
+  creditsExhausted?: boolean;
+  /** Nothing measured in the window, so nothing was generated or billed. */
+  empty?: boolean;
 }
 
 export interface AdvisorConfigPrBody {
@@ -2557,6 +2858,9 @@ export interface Workspace {
   // Trailing-optional for wire tolerance only; `listWorkspaces` always sets both.
   pendingMuted?: boolean;
   mutedRepoIds?: number[];
+  // Chronology's working hours and wait budgets for this workspace — ONLY what someone changed
+  // (null = every default). Resolve with `resolveFlowSettings`; never read a field raw.
+  flowSettings?: FlowSettings | null;
 }
 
 // What ONE Save on the Pending-mute settings section writes: either half, both, or neither.
@@ -3979,6 +4283,11 @@ export interface MeResponse {
   // OPEN route with `git_too_old` and the overlay prints it once.
   // ⚠ Gate the SPA on THIS, never on `deploymentMode === 'cloud'`.
   conflictResolver: boolean;
+  // The time zone Chronology counts working hours in for a workspace that never set one — the
+  // machine's own zone locally, UTC in the cloud, `WORK_TIMEZONE` over both. The Settings form
+  // shows it as the "default" beside a workspace's zone. Optional: an older server omits it and
+  // the form falls back to the browser's zone.
+  workTimeZone?: string;
   // CLOUD-ONLY: whether this account has consented to contribute aggregate, de-identified
   // weekly review-bot stats to the cross-org benchmark network (opt-in, default false). Drives
   // the Settings consent toggle. Always false in local mode (local never contributes).

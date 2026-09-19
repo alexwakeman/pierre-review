@@ -2743,6 +2743,24 @@ directory layout is unverified against their docs (single `greptile.json` served
 
 ---
 
+## Chronology pointers — the work plan's shape, over Chronology's evidence
+
+Three to five pointers beside Reports → Chronology (a pattern, an example worth copying, a thing to
+try), each citing the pull requests behind it. Full contract: docs/BOTTLENECKS.md § Pointers.
+
+- **Seam**: `ProHostQueries.getFlowPointerEvidence?` — OPTIONAL, so apiVersion STAYS 21 (the
+  `getWorkPlan` precedent). Core folds the evidence in `db/flow-pointers.ts` from the same
+  `getFlowCourts` pass the panel renders and sends NO PERSON: no actor ids, @handles masked in the
+  one piece of free text (the first thing a reviewer said on each exemplar PR).
+- **Plugin**: `packages/pro/src/flow-pointers/` (routes, prompt, hash, schema twins), cache table
+  `pro_flow_pointers` (migration 0034), listed in `eraseProByAccountId`, isolation-tested. Gated like
+  Chronology: `periodReports`, which this plugin publishes as `PRO_DIGEST_ENABLED`.
+- **The parse is the mechanism**: citations ⊆ evidence (strays counted), the Unicode digit gate, an
+  @-handle gate, a length cap, and a pointer with no surviving citation dropped whole. Per-reason
+  drop counts go to the log so the prompt can be tuned against real refusals.
+- `FLOW_POINTERS_PROMPT_VERSION` is folded into the payload hash — bump it with any prompt change,
+  or accounts keep the old prose until their evidence happens to move.
+
 ## The work plan — "what should I work on today"
 
 > **THE CODE RANKS, FREE. THE MODEL NARRATES, PAID.**

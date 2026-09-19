@@ -16,6 +16,7 @@ import type {
   SynthesisInput,
   SynthesisScope,
   BlastSignals,
+  FlowPointerEvidence,
   WorkPlanEvidence,
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../github/compare.js';
@@ -952,6 +953,19 @@ export interface ProHostQueries {
   // plan alone, while every other capability keeps serving. Purely additive — an older plugin
   // simply never calls it.
   getWorkPlan?(accountId: number, scope: BotScopeWire): Promise<WorkPlanEvidence>;
+
+  // CHRONOLOGY POINTERS: the evidence the plugin's Haiku narration may see (core
+  // db/flow-pointers.ts) — the same `getFlowCourts` pass the panel renders, trimmed to bounded
+  // rows, plus the slowest and quickest PR per size band with the first thing a reviewer said.
+  // ⚠ NO PERSON: no actor ids, and every @handle in the text is masked before it leaves core.
+  // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the `getWorkPlan` precedent verbatim. A newer
+  // plugin against an older host finds it `undefined` and reports `enabled:false` for the pointers
+  // alone.
+  getFlowPointerEvidence?(
+    accountId: number,
+    scope: BotScopeWire,
+    windowDays: number,
+  ): Promise<FlowPointerEvidence>;
 
   // BLAST RADIUS: the signal vector for ONE pull request — how far it can reach, folded by core's
   // `db/blast-radius.ts` from the stored `files[]` (which never leaves the backend) plus the

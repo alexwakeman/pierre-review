@@ -69,6 +69,12 @@ async function deletePrSubtree(
   await tx.delete(reviews).where(inArray(reviews.prId, prIds)).execute();
   await tx.delete(commits).where(inArray(commits.prId, prIds)).execute();
   await tx.delete(reviewRequests).where(inArray(reviewRequests.prId, prIds)).execute();
+  // Review-request HISTORY (migration 0066 / pg 0053) — a PR child with no cascade; it must go
+  // before the pullRequests delete below or the sweep FK-fails.
+  await tx
+    .delete(schema.reviewRequestEvents)
+    .where(inArray(schema.reviewRequestEvents.prId, prIds))
+    .execute();
   await tx.delete(prViews).where(inArray(prViews.prId, prIds)).execute();
   // "@you" mention rows (migration 0056 / pg 0043). The pr_id FK cascades, but this sweep runs
   // parent-last by hand on both dialects and a mention row outliving its PR would go on claiming

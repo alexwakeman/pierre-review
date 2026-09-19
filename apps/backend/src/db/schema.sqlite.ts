@@ -26,6 +26,7 @@ import type {
   BlastRadiusConfig,
   BranchCheckRun,
   CheckRun,
+  FlowSettings,
   Label,
   ReviewRouteReason,
   StoredPrFile,
@@ -236,6 +237,11 @@ export const pullRequests = sqliteTable(
     // Earliest review-request time (first ReviewRequestedEvent), null if never requested — the
     // clock start for "review pickup time" (request→first review). Distinct from openedAt.
     firstReviewRequestedAt: integer('first_review_requested_at', { mode: 'timestamp' }),
+    // When this PR's review-request HISTORY (`review_request_events`, migration 0066) was last
+    // written from a response that CARRIED the selection. NULL = we have never received it, which
+    // Chronology reports as "not known" rather than as "never requested" — the two read the same
+    // in the events table and must not on screen. Also the backfill's worklist predicate.
+    reviewRequestsSyncedAt: integer('review_requests_synced_at', { mode: 'timestamp' }),
     lastCommitAt: integer('last_commit_at', { mode: 'timestamp' }),
     mergedAt: integer('merged_at', { mode: 'timestamp' }),
     closedAt: integer('closed_at', { mode: 'timestamp' }),
@@ -358,6 +364,42 @@ export const reviewRequests = sqliteTable(
   (t) => ({
     prIdx: index('rr_pr_idx').on(t.prId),
     userIdx: index('rr_user_idx').on(t.userId),
+  }),
+);
+
+// ── REVIEW-REQUEST HISTORY (migration 0066 / pg 0053) ────────────────────────────────────────
+// Every ReviewRequestedEvent / ReviewRequestRemovedEvent on a PR's timeline — who was asked (a
+// person, or a team), when, and when a request was withdrawn. `review_requests` above holds only
+// the OUTSTANDING requests and GitHub drops a request from it the moment the person reviews, so
+// "was a person or a team asked, and how long until anyone looked" was unanswerable for a merged
+// PR. This table is that history. Read by Chronology (`db/pr-intervals.ts` + `db/flow-detail.ts`).
+//
+// A PR CHILD, like `review_requests`: it reaches its account through `pr_id` and carries no
+// `account_id`, so it is deleted by `deletePrSubtree` and `deleteRepo` (both — a child table missed
+// by either FK-fails that sweep), and the account erasure reaches it through the repo loop.
+//
+// Immutable once written: GitHub's events do not change, so the upsert is DO NOTHING on the
+// node id. The first 25 events per PR are kept (the GraphQL selection's cap): the question these
+// answer is about the FIRST request, which is always inside it.
+export const reviewRequestEvents = sqliteTable(
+  'review_request_events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id),
+    githubNodeId: text('github_node_id').notNull(),
+    kind: text('kind', { enum: ['requested', 'removed'] }).notNull(),
+    occurredAt: integer('occurred_at', { mode: 'timestamp' }).notNull(),
+    // 'user' covers GitHub Users AND Bots (a Copilot review request is a Bot): who is a PERSON is
+    // decided on READ through the lane resolver, never frozen here. 'unknown' = the token could
+    // not see the reviewer (a team needs org visibility) — a request, but not a person or a team.
+    reviewerKind: text('reviewer_kind', { enum: ['user', 'team', 'unknown'] }).notNull(),
+    reviewerUserId: integer('reviewer_user_id').references(() => users.id),
+    teamSlug: text('team_slug'),
+  },
+  (t) => ({
+    prNodeUx: uniqueIndex('review_request_events_pr_node').on(t.prId, t.githubNodeId),
   }),
 );
 
@@ -1124,6 +1166,13 @@ export const workspaces = sqliteTable(
     //
     // ⚠ A UNION WITH `pending_muted_repos`, NOT A PARENT OF IT. See that table.
     pendingMuted: integer('pending_muted', { mode: 'boolean' }).notNull().default(false),
+    // ── CHRONOLOGY'S WORKING HOURS AND WAIT BUDGETS (migration 0065 / pg 0052) ──────────────
+    // OVERRIDES ONLY: NULL until someone changes something, then just the fields they changed.
+    // Every reader resolves through `resolveFlowSettings` (packages/shared/src/flow-settings.ts),
+    // so a later change to a product default reaches every workspace that never overrode it —
+    // the `accounts.blast_radius_config` precedent. Per WORKSPACE, because two teams in two
+    // zones in one account work different hours.
+    flowSettings: text('flow_settings', { mode: 'json' }).$type<FlowSettings>(),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

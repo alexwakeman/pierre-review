@@ -159,6 +159,8 @@ import type {
   SearchResponse,
   Workspace,
   WorkspacePendingMuteUpdate,
+  FlowSettings,
+  FlowPointersResponse,
   WorkspacesResponse,
   ReactionLookupBody,
   ReactionLookupResponse,
@@ -453,6 +455,12 @@ export const api = {
   // ignored, and mutes in OTHER workspaces are untouched — a Save here can never reach them.
   setWorkspacePendingMute: (id: number, body: WorkspacePendingMuteUpdate) =>
     fetch(`/api/workspaces/${id}/pending-mute`, jsonBody('PUT', body)).then((r) =>
+      handle<{ workspace: Workspace }>(r),
+    ),
+  // Chronology's working hours and wait budgets for this workspace. ⚠ THE BODY IS THE WHOLE
+  // OVERRIDE SET: a field left out goes back to its product default, and `{}` resets everything.
+  setWorkspaceFlowSettings: (id: number, body: FlowSettings) =>
+    fetch(`/api/workspaces/${id}/flow-settings`, jsonBody('PUT', body)).then((r) =>
       handle<{ workspace: Workspace }>(r),
     ),
   // MOVE one repo into this workspace. Membership is the only write (see `setWorkspaceRepos`) —
@@ -1642,6 +1650,18 @@ export const api = {
     fetch(withQuery('/api/pro/work-plan', ...workPlanQueryParts(p)), jsonBody('POST')).then((r) =>
       handle<WorkPlanResponse>(r),
     ),
+  // Chronology's pointers (Pro, `periodReports`). ONE builder for both verbs so the POST writes the
+  // row the GET reads: the workspace and the Chronology window. The GET never generates; the POST
+  // is the only billing path.
+  flowPointers: (workspaceId: number, days: number) =>
+    get<FlowPointersResponse>(
+      withQuery('/api/pro/flow-pointers', workspaceParam(workspaceId), `days=${days}`),
+    ),
+  flowPointersGenerate: (workspaceId: number, days: number) =>
+    fetch(
+      withQuery('/api/pro/flow-pointers', workspaceParam(workspaceId), `days=${days}`),
+      jsonBody('POST'),
+    ).then((r) => handle<FlowPointersResponse>(r)),
   // The exact PR list behind the analytics `totals.botOnlyPrs` count — "only a bot reviewed these".
   // Same window/workspace/repoIds wiring as botAnalytics, so the caption's number and this list are
   // computed identically server-side.

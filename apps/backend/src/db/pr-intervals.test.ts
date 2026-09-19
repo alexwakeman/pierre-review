@@ -14,6 +14,7 @@ import {
   __flowTesting,
   median,
   percentile,
+  walkCourtIntervals,
   walkCourts,
   type CourtAction,
   type CourtHours,
@@ -117,6 +118,143 @@ describe('the three judgement calls, pinned deliberately', () => {
     const h = walkCourts(at(0), at(10), selfOnly);
     expect(round(h)).toEqual({ reviewer: 10, author: 0, landing: 0 });
     expect(selfOnly.some((a) => a.by === 'reviewer')).toBe(false);
+  });
+});
+
+describe('the same walk, kept as spells — what working hours are counted over', () => {
+  it('merges consecutive intervals in one court into one spell', () => {
+    // Two reviewer comments in a row keep the ball with the author: one author spell, not two.
+    const w = walkCourtIntervals(at(0), at(10), [reviewer(2), reviewer(4), author(6)]);
+    expect(w.spells.map((s) => [s.court, (s.toMs - s.fromMs) / H])).toEqual([
+      ['reviewer', 2],
+      ['author', 4],
+      ['reviewer', 4],
+    ]);
+  });
+
+  it('counts a round each time the ball goes to the author', () => {
+    expect(walkCourtIntervals(at(0), at(12), [reviewer(1), author(3), reviewer(5), author(8), approve(10)]).rounds).toBe(2);
+    expect(walkCourtIntervals(at(0), at(10), [approve(4)]).rounds).toBe(0);
+  });
+
+  it('records the first look and the first approval, inside the life only', () => {
+    const acts: CourtAction[] = [
+      { atMs: at(-2), by: 'reviewer', approves: false, userId: 1 },
+      { atMs: at(3), by: 'reviewer', approves: false, userId: 7 },
+      { atMs: at(5), by: 'reviewer', approves: true, userId: 8 },
+      { atMs: at(7), by: 'reviewer', approves: true, userId: 9 },
+    ];
+    const w = walkCourtIntervals(at(0), at(10), acts);
+    expect(w.firstLookMs).toBe(at(3));
+    expect(w.firstReviewerId).toBe(7);
+    expect(w.approvedAtMs).toBe(at(5));
+  });
+
+  it('has no first look when the only human touch came after the merge', () => {
+    expect(walkCourtIntervals(at(0), at(10), [reviewer(12)]).firstLookMs).toBeNull();
+  });
+
+  it('agrees with walkCourts on every path, because walkCourts is its sum', () => {
+    // A deterministic scatter of action sequences, not one hand-picked example.
+    let seed = 7;
+    const rand = (): number => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    for (let n = 0; n < 200; n += 1) {
+      const life = 1 + rand() * 200;
+      const acts: CourtAction[] = Array.from({ length: Math.floor(rand() * 8) }, () => ({
+        atMs: at(rand() * life * 1.2 - life * 0.1),
+        by: rand() < 0.5 ? 'reviewer' : 'author',
+        approves: rand() < 0.2,
+      }));
+      const h = walkCourts(at(0), at(life), acts);
+      const spells = walkCourtIntervals(at(0), at(life), acts).spells;
+      const fromSpells: CourtHours = { reviewer: 0, author: 0, landing: 0 };
+      for (const s of spells) fromSpells[s.court] += (s.toMs - s.fromMs) / H;
+      expect(fromSpells.reviewer).toBeCloseTo(h.reviewer, 9);
+      expect(fromSpells.author).toBeCloseTo(h.author, 9);
+      expect(fromSpells.landing).toBeCloseTo(h.landing, 9);
+      // Spells tile the life exactly: contiguous, in order, no overlap.
+      for (let i = 1; i < spells.length; i += 1) expect(spells[i]!.fromMs).toBe(spells[i - 1]!.toMs);
+      if (spells.length > 0) {
+        expect(spells[0]!.fromMs).toBe(at(0));
+        expect(spells[spells.length - 1]!.toMs).toBe(at(life));
+      }
+    }
+  });
+});
+
+describe('the reviewer advice follows this workspace\'s own history', () => {
+  const { directiveFor } = __flowTesting;
+  it('recommends a named reviewer by default, and when a named person was answered faster', () => {
+    expect(directiveFor('reviewer', 2)).toContain('request a named reviewer instead of a team');
+    expect(directiveFor('reviewer', 2, true)).toContain('request a named reviewer instead of a team');
+  });
+
+  it('drops that advice when asking a team was answered at least as quickly here', () => {
+    const d = directiveFor('reviewer', 2, false);
+    expect(d).not.toContain('named reviewer instead of a team');
+    expect(d).toContain('chase the pull requests already past the marks below');
+  });
+});
+
+describe('who was asked first', () => {
+  const { firstRequestOf } = __flowTesting;
+  const human = (id: number | null): boolean => id != null && id < 100;
+  const life = { openedMs: at(0), mergedMs: at(10), requestsKnown: true, authorId: 1 };
+  const ask = (h: number, reviewerKind: string, userId: number | null) => ({
+    atMs: at(h),
+    kind: 'requested' as const,
+    reviewerKind,
+    userId,
+  });
+
+  it('is "not known" — never "nobody" — when the history was not received', () => {
+    expect(firstRequestOf({ ...life, requestsKnown: false }, [], human)).toEqual({
+      requestKind: null,
+      firstRequestMs: null,
+    });
+    expect(firstRequestOf(life, [], human)).toEqual({ requestKind: 'none', firstRequestMs: null });
+  });
+
+  it('counts a person and a team asked in the same moment as a named person', () => {
+    expect(firstRequestOf(life, [ask(2, 'team', null), ask(2, 'user', 5)], human).requestKind).toBe('person');
+    expect(firstRequestOf(life, [ask(2, 'team', null), ask(4, 'user', 5)], human).requestKind).toBe('team');
+  });
+
+  it('skips a request to automation, and a request to the author themselves', () => {
+    expect(firstRequestOf(life, [ask(1, 'user', 500)], human).requestKind).toBe('none');
+    expect(firstRequestOf(life, [ask(1, 'user', 1)], human).requestKind).toBe('none');
+    expect(firstRequestOf(life, [ask(1, 'user', 500), ask(3, 'user', 7)], human)).toEqual({
+      requestKind: 'person',
+      firstRequestMs: at(3),
+    });
+  });
+
+  it('clamps a request stamped before the pull request opened, and ignores one after the merge', () => {
+    expect(firstRequestOf(life, [ask(-1, 'user', 5)], human).firstRequestMs).toBe(at(0));
+    expect(firstRequestOf(life, [ask(11, 'user', 5)], human).requestKind).toBe('none');
+  });
+
+  it('ignores a withdrawn request as a request', () => {
+    const removed = { ...ask(1, 'user', 5), kind: 'removed' as const };
+    expect(firstRequestOf(life, [removed], human).requestKind).toBe('none');
+  });
+});
+
+describe('red checks, approximately', () => {
+  const { ciRedHoursOf } = __flowTesting;
+  it('counts a failure until the next observation, inside the open life only', () => {
+    const obs = [
+      { atMs: at(-5), red: true },
+      { atMs: at(2), red: false },
+      { atMs: at(4), red: true },
+      { atMs: at(7), red: false },
+      { atMs: at(9), red: true },
+    ];
+    // -5..2 clipped to 0..2 = 2h; 4..7 = 3h; 9..merge(10) = 1h.
+    expect(ciRedHoursOf(obs, at(0), at(10))).toBeCloseTo(6, 9);
   });
 });
 

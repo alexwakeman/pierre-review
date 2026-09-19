@@ -380,6 +380,34 @@ contract: [ML-SEVERITY.md](ML-SEVERITY.md).
 
 
 
+## `review_request_events` (CORE, free — who was asked to review, and when)
+
+Every `ReviewRequestedEvent` / `ReviewRequestRemovedEvent` on a PR's timeline (first 25 per PR):
+`kind` (`requested` | `removed`), `occurred_at`, `reviewer_kind` (`user` | `team` | `unknown`),
+`reviewer_user_id` (users AND bots — who is a PERSON is decided on read through the lane resolver)
+and `team_slug`. It exists because `review_requests` holds only OUTSTANDING requests and GitHub
+drops one the moment the person reviews, so "was a person or a team asked, and how soon did anyone
+look" was unanswerable for a merged PR. Read by Chronology (docs/BOTTLENECKS.md § Asking for a review).
+
+- **A PR CHILD WITH NO `account_id`** (the `review_requests` precedent): it reaches its tenant
+  through `pr_id`, so it is NOT in `accountScopedTables()` — it is in BOTH delete paths
+  (`deletePrSubtree`, `deleteRepo`) and the account erasure reaches it through the repo loop.
+- **Immutable**: unique `(pr_id, github_node_id)`, written `onConflictDoNothing` by
+  `persistReviewRequestHistory` (sync/upsert.ts), shared by `persistPr` and the backfill.
+- ⚠ **`pull_requests.review_requests_synced_at` IS THE "WE RECEIVED IT" FACT.** Stamped only from a
+  response that carried the selection; an EMPTY list is a positive statement and is stamped, a
+  missing or nulled selection writes nothing. NULL is "not known", never "nobody was asked", and it
+  is the backfill's worklist.
+
+## `workspaces.flow_settings` (CORE, free — Chronology's working hours and budgets)
+
+JSON (sqlite `text` json / pg `jsonb`) holding OVERRIDES ONLY: NULL until someone changes
+something, then just those fields. Every reader resolves through `resolveFlowSettings`
+(`packages/shared/src/flow-settings.ts`), so a later change to a product default reaches every
+workspace that never overrode it — the `accounts.blast_radius_config` precedent. Per WORKSPACE
+because two teams in two zones in one account work different hours. Written only by
+`PUT /api/workspaces/:id/flow-settings`, which replaces the whole set.
+
 ## `pr_mentions` (CORE, free — "@you was mentioned on this PR")
 
 One row per `(account, PR)` where the account's viewer login is `@`-mentioned in a PR comment, a
@@ -565,6 +593,7 @@ check every hit against its table's declared unique.**
 | `workspaces` | the `workspaces` uniques (incl. the **partial** one-`isDefault`-per-account index that lives in the `.sql` migrations — drizzle index predicates are inert metadata) | `ensureDefaultWorkspace` (`onConflictDoNothing`) |
 | `repos` | `[accountId, githubNodeId]` | `upsertRepo` |
 | `pull_requests` / `events` / children | `(accountId, githubNodeId)` · `(accountId, dedupeKey)` · child `(prId, githubNodeId)` | `sync/upsert.ts` (the whole PR subtree) |
+| `review_request_events` | `[prId, githubNodeId]` — **`onConflictDoNothing`** (events are immutable) | `sync/upsert.ts` `persistReviewRequestHistory` (persistPr + the backfill) |
 | `review_comments` / `pr_comments` / `reviews` | `[prId, githubNodeId]` | `sync/upsert.ts` + the post-write local stamps in `queries.ts` (~7897 / ~7931 / ~7979) |
 | `commit_files` | `sha` (immutable content — a single-column target) | `sync/commit-files.ts` |
 | `pr_views` | `prId` | `markPrViewed` (~5416), the bulk mark-all (~5447) |

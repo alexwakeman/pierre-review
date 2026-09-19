@@ -1498,6 +1498,28 @@ convention this file has to remember.
   REQUEST rather than a paywall it has to render. `useFlowFindings` gates its own `enabled`
   (unconditionally — the hook has one mount and the query POLLS, so a disabled query also stops the
   five-minute timer).
+- **The panel is two halves, WORKING hours above and CLOCK hours below** (docs/BOTTLENECKS.md). Top:
+  the calendar line, a 30/60/90 window picker (React state remembered for the session — not a URL
+  key and not a persisted filter, so "Clear filters" cannot reset it), then **Each wait against its
+  budget** (the headline), **Every pull request** (the scatter + the "20 slowest" table that is its
+  keyboard view), **What the slow ones have in common**, **Approved and waiting**, **Who gives the
+  first review**, **Asking for a review**, **Pointers** and **Where each pull request sits** (the
+  triangle, labelled context). Below: "By repository, in clock hours" — the original court ledger,
+  whose call-out rule stays calibrated on clock hours. An older server sends none of the new fields
+  and only the bottom half renders (`hasWorkingHours`).
+- ⚠ **Court colours are the VALIDATED set** — amber-500/teal-600/indigo-500 light, amber-600/
+  teal-600/indigo-500 dark, one `COURT_SWATCH` for every mark. The old `-400` dark shades failed
+  the lightness band.
+- ⚠ **Every sentence is still the server's.** The panel adds LABELLED FIGURES ("took more than a
+  working day"), never a composed claim. The one exception is `FlowPointersPanel`, which is a
+  model's text and is styled apart on the `--ai-*` tokens with the sparkle; its hook
+  (`useFlowPointers`) ANDs `periodReports` into `enabled`, the GET never generates, and every mount
+  of one scope shares the `['flow-pointers-generate', ws, days]` mutation key.
+- ⚠ **Working-hour figures never print in days** (`formatWorkHours`): "2d" reads as calendar days.
+- **Settings → Workspace → "Working hours and budgets"** (`FlowSettingsSection`, CORE, above the
+  pro-settings gate like the Pending mute). Blank budget boxes mean "the default"; the form sends
+  only what differs from a default (`flowSettingsForm.ts`), and refuses a "good" above the DEFAULT
+  "acceptable", which the server would otherwise silently widen.
 
 ### Reports → Overview → Flow metrics → "Where the work is happening"
 

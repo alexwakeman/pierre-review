@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import type { CourtEvidencePr, PrCourt, RepoCourtProfile } from '@pierre-review/shared';
 import { useFlowFindings } from '../../hooks/useFlowFindings.js';
 import { useFilters } from '../../store/filters.js';
@@ -13,6 +13,34 @@ import {
   WarningIcon,
 } from '../Icons.js';
 import { metaFor } from './AttentionCards.js';
+import { FlowPointersPanel } from './FlowPointersPanel.js';
+import {
+  BudgetChart,
+  COURT_SWATCH,
+  CourtTriangle,
+  LeadScatter,
+} from './ChronologyCharts.js';
+import {
+  ConcentrationTable,
+  ContrastTable,
+  LandingTailList,
+  RequestsTable,
+  SizeBandsChart,
+  SlowestTable,
+  WeekdayChart,
+} from './ChronologyTables.js';
+import {
+  calendarLine,
+  CHRONOLOGY_WINDOWS,
+  effectiveChronologyWindow,
+  formatCount,
+  formatShare,
+  hasWorkingHours,
+  neverWentBack,
+  slowestPrs,
+  slowestTenthShare,
+  type ChronologyWindow,
+} from './chronologyModel.js';
 import {
   buildBottlenecksModel,
   barWidth,
@@ -53,11 +81,8 @@ import {
 /** The evidence rows carry no author identity, so the lookup is always empty by construction. */
 const NO_AUTHOR_LOOKUP = new Map<number, never>() as never;
 
-const COURT_BAR: Record<PrCourt, string> = {
-  reviewer: 'bg-amber-500 dark:bg-amber-400',
-  author: 'bg-teal-600 dark:bg-teal-400',
-  landing: 'bg-indigo-500 dark:bg-indigo-400',
-};
+// ⚠ The validated court colours (see ChronologyCharts.tsx) — one set for every mark on the panel.
+const COURT_BAR: Record<PrCourt, string> = COURT_SWATCH;
 const COURT_TEXT: Record<PrCourt, string> = {
   reviewer: 'text-amber-700 dark:text-amber-400',
   author: 'text-teal-700 dark:text-teal-400',
@@ -219,12 +244,91 @@ function RepoRow({ repo }: { repo: RepoCourtProfile }): JSX.Element {
   );
 }
 
+/**
+ * The window the reader last picked, remembered for the session so leaving the tab and coming back
+ * does not snap it to 30 days. Not in the URL or the persisted filters: it is a reading choice on
+ * one pane, and "Clear filters" must not be what resets it.
+ */
+let rememberedWindow: ChronologyWindow = 30;
+
+function WindowPicker({
+  value,
+  onChange,
+}: {
+  value: ChronologyWindow;
+  onChange: (w: ChronologyWindow) => void;
+}): JSX.Element {
+  return (
+    <div role="group" aria-label="Window" className="inline-flex rounded-md border border-gray-200 p-0.5 dark:border-gray-700">
+      {CHRONOLOGY_WINDOWS.map((w) => (
+        <button
+          key={w}
+          type="button"
+          aria-pressed={value === w}
+          onClick={() => onChange(w)}
+          className={`rounded px-2 py-0.5 text-xs ${
+            value === w
+              ? 'bg-gray-800 font-medium text-white dark:bg-gray-100 dark:text-gray-900'
+              : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+          }`}
+        >
+          {w} days
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Block({
+  title,
+  note,
+  children,
+  testId,
+}: {
+  title: string;
+  note?: ReactNode;
+  children: ReactNode;
+  testId?: string;
+}): JSX.Element {
+  return (
+    <section data-testid={testId} className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+      <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">{title}</h4>
+      {note != null && <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{note}</p>}
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+/** A labelled figure — a number with its name beside it, never a sentence composed from it. */
+function Figure({ value, label }: { value: string; label: string }): JSX.Element {
+  return (
+    <div>
+      <div className="text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-50">{value}</div>
+      <div className="text-[11px] text-gray-500 dark:text-gray-400">{label}</div>
+    </div>
+  );
+}
+
+const SLOWEST_TABLE_ROWS = 20;
+
 export function BottlenecksPanel(): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
+  const [windowDays, setWindowDaysState] = useState<ChronologyWindow>(() =>
+    effectiveChronologyWindow(rememberedWindow),
+  );
+  const setWindowDays = (w: ChronologyWindow): void => {
+    rememberedWindow = w;
+    setWindowDaysState(w);
+  };
+  const [showSlowest, setShowSlowest] = useState(false);
   // ⚠ `workspaceId === null` means "not resolved yet" — the hook holds itself idle on skipToken,
   // so nothing here renders another workspace's numbers during the gap.
-  const q = useFlowFindings(workspaceId, 30);
+  const q = useFlowFindings(workspaceId, windowDays);
   const model = useMemo(() => buildBottlenecksModel(q.data), [q.data]);
+  const resp = q.data;
+  const working = hasWorkingHours(resp);
+  const tenth = useMemo(() => slowestTenthShare(resp?.prs ?? []), [resp?.prs]);
+  const slowest = useMemo(() => slowestPrs(resp?.prs ?? [], SLOWEST_TABLE_ROWS), [resp?.prs]);
 
   if (model == null) {
     return (
@@ -240,19 +344,29 @@ export function BottlenecksPanel(): JSX.Element {
   return (
     <div className="space-y-4" data-testid="bottlenecks-panel">
       <div>
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-            Chronology
-          </h3>
-          <span className="text-[11px] text-gray-400">
-            Every hour a pull request is open, somebody is holding it. Automation is measured on the
-            Bots rail.
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              Chronology
+            </h3>
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              Every hour a pull request is open, somebody is holding it. Automation is measured on
+              the Bots rail.
+            </span>
+          </div>
+          <WindowPicker value={windowDays} onChange={setWindowDays} />
         </div>
-        <div className="mt-1 text-[11px] text-gray-400">
+        {resp?.settings != null && (
+          <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {calendarLine(resp.settings)} Set per workspace in Settings.
+          </div>
+        )}
+        <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
           {coverageLineFor(model.coverage, model.windowDays)}
         </div>
-        {exclusions != null && <div className="text-[11px] text-gray-400">{exclusions}</div>}
+        {exclusions != null && (
+          <div className="text-xs text-gray-500 dark:text-gray-400">{exclusions}</div>
+        )}
         {truncation != null && (
           <div className="mt-1 flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
             <WarningIcon size={11} className="mt-0.5 shrink-0" />
@@ -271,7 +385,165 @@ export function BottlenecksPanel(): JSX.Element {
         </div>
       ) : (
         <>
-          {/* ── The headline: one sentence, the whole workspace ────────────────────────── */}
+          {/* ══ THE WORKING-HOURS HALF (db/flow-detail.ts) ════════════════════════════════
+              Budgets are the headline: an even split between the three courts is not a target,
+              so the panel leads with how long each wait took against what the team set. An older
+              server sends none of these fields, and the court half below still renders. */}
+          {working && resp != null && resp.settings != null && (
+            <>
+              <Block
+                title="Each wait against its budget"
+                note="Working hours only. The bar reaches the point by which three in four pull requests had finished that wait; the dashed line is the budget."
+                testId="chronology-budgets"
+              >
+                {resp.workHeadline != null && (
+                  <p className="mb-3 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+                    {resp.workHeadline}
+                  </p>
+                )}
+                <BudgetChart
+                  rows={resp.budgets ?? []}
+                  dayHours={(resp.settings.endMinute - resp.settings.startMinute) / 60}
+                />
+              </Block>
+
+              {(resp.prs?.length ?? 0) > 0 && (
+                <Block
+                  title="Every pull request"
+                  note="One dot per merged pull request. Colour is the court it spent most of its working time in. Hover for its breakdown; click to open it."
+                  testId="chronology-scatter"
+                >
+                  <div className="mb-3 flex flex-wrap gap-x-8 gap-y-2">
+                    <Figure
+                      value={formatCount(
+                        (resp.prs ?? []).filter((p) => p.leadWorkHours > (resp.settings!.endMinute - resp.settings!.startMinute) / 60).length,
+                      )}
+                      label="took more than a working day"
+                    />
+                    <Figure
+                      value={formatShare(tenth.share)}
+                      label={`of all working-hour waiting sits in the slowest ${formatCount(tenth.count)}`}
+                    />
+                  </div>
+                  <LeadScatter
+                    prs={resp.prs ?? []}
+                    budgetHours={resp.settings.budgets.lead.good}
+                    p75Hours={resp.p75LeadWorkHours ?? 0}
+                  />
+                  {resp.prsCapped && (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Showing {formatCount(resp.prs?.length ?? 0)} of {formatCount(model.measuredPrs)}:
+                      every slow pull request, and an even sample of the rest.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowSlowest((v) => !v)}
+                    aria-expanded={showSlowest}
+                    className="mt-2 text-xs font-medium text-sky-700 hover:underline dark:text-sky-400"
+                  >
+                    {showSlowest ? 'Hide' : 'Show'} the {slowest.length} slowest as a table
+                  </button>
+                  {showSlowest && (
+                    <div className="mt-2">
+                      <SlowestTable prs={slowest} />
+                    </div>
+                  )}
+                </Block>
+              )}
+
+              {(resp.contrast != null || (resp.sizeBands?.length ?? 0) > 0) && (
+                <Block
+                  title="What the slow ones have in common"
+                  note="The slowest quarter against the fastest, then lead time by size and by the day a pull request opened."
+                  testId="chronology-contrast"
+                >
+                  <div className="space-y-5">
+                    {resp.contrast != null ? (
+                      <ContrastTable contrast={resp.contrast} />
+                    ) : (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Too few pull requests to compare the fastest quarter with the slowest.
+                      </p>
+                    )}
+                    <div className="grid gap-5 md:grid-cols-2">
+                      <div>
+                        <h5 className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-200">By size</h5>
+                        <SizeBandsChart bands={resp.sizeBands ?? []} />
+                      </div>
+                      <div>
+                        <h5 className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-200">
+                          By the day it opened
+                        </h5>
+                        <WeekdayChart days={resp.weekdays ?? []} />
+                      </div>
+                    </div>
+                  </div>
+                </Block>
+              )}
+
+              {resp.landingTail != null && (
+                <Block
+                  title="Approved and waiting"
+                  note="Pull requests that sat approved for more than a working day before they merged."
+                  testId="chronology-landing"
+                >
+                  <LandingTailList tail={resp.landingTail} />
+                </Block>
+              )}
+
+              {(resp.concentration?.length ?? 0) > 0 && (
+                <Block
+                  title="Who gives the first review"
+                  note="Per repository, how much of the first reviewing rests on one person, and whether pull requests waited longer when it was them."
+                  testId="chronology-concentration"
+                >
+                  <ConcentrationTable rows={resp.concentration ?? []} />
+                </Block>
+              )}
+
+              {resp.requests != null && (
+                <Block
+                  title="Asking for a review"
+                  note="Whether a named person, a team or nobody was asked first, and how soon somebody looked."
+                  testId="chronology-requests"
+                >
+                  <RequestsTable stats={resp.requests} />
+                </Block>
+              )}
+
+              {/* The one model-written block — AI palette, never a figure, every citation checked. */}
+              <FlowPointersPanel workspaceId={workspaceId} days={windowDays} />
+
+              {(resp.prs?.length ?? 0) > 0 && (
+                <Block
+                  title="Where each pull request sits"
+                  note="For context, not as a target. A pull request approved on its first review never goes back to its author and sits on the right-hand edge — that is the best case, and it is far from the middle."
+                  testId="chronology-triangle"
+                >
+                  <div className="mb-2">
+                    <Figure
+                      value={`${formatCount(neverWentBack(resp.prs ?? []))} of ${formatCount(resp.prs?.length ?? 0)}`}
+                      label="never went back to their author"
+                    />
+                  </div>
+                  <CourtTriangle prs={resp.prs ?? []} overall={resp.courtsWork ?? []} />
+                </Block>
+              )}
+
+              <div className="pt-2">
+                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                  By repository, in clock hours
+                </h4>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  Nights and weekends included. A repository is called out only when one court holds
+                  at least half the time and the slowest quarter took eight clock hours or more.
+                </p>
+              </div>
+            </>
+          )}
+
+          {/* ── The clock-hour headline: one sentence, the whole workspace ─────────────── */}
           <section className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
             <CourtBar courts={model.courts} />
             <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">

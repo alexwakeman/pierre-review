@@ -16,6 +16,7 @@ import type {
   GqlCheckContext,
   GqlHeadCommit,
   GqlPullRequest,
+  GqlReviewRequestEvent,
 } from '../github/queries.js';
 import type { CheckRun, CheckRunState } from '@pierre-review/shared';
 
@@ -30,6 +31,7 @@ const {
   commits,
   events,
   reviewRequests,
+  reviewRequestEvents,
   ciStatusEvents,
   searchIndex,
   workspaceRepos,
@@ -597,6 +599,72 @@ export function nextResolvedAt(
   return null;
 }
 
+/**
+ * Persist a PR's review-request HISTORY (`review_request_events`) and stamp that we received it.
+ * Shared by persistPr and the one-time backfill so the two write one shape.
+ *
+ * ⚠ `nodes === undefined | null` IS "NOT RECEIVED" AND WRITES NOTHING — not the events, not the
+ * stamp. A fixture without the selection and a token GitHub nulled it for both land here, and
+ * stamping them would tell Chronology "never requested" about PRs we simply could not see. An
+ * EMPTY array is a positive statement (no request ever made) and IS stamped.
+ *
+ * Events are immutable on GitHub, so each is inserted DO NOTHING on (pr_id, node id).
+ */
+export async function persistReviewRequestHistory(
+  exec: Executor,
+  prId: number,
+  nodes: Array<GqlReviewRequestEvent | null> | null | undefined,
+  resolver: UserResolver,
+): Promise<void> {
+  if (nodes == null) return;
+  for (const n of nodes) {
+    if (n == null || !n.id || !n.createdAt) continue;
+    const kind =
+      n.__typename === 'ReviewRequestedEvent'
+        ? 'requested'
+        : n.__typename === 'ReviewRequestRemovedEvent'
+          ? 'removed'
+          : null;
+    if (kind == null) continue;
+    const r = n.requestedReviewer as
+      | { __typename: string; id?: string; login?: string; slug?: string | null }
+      | null
+      | undefined;
+    let reviewerKind: 'user' | 'team' | 'unknown' = 'unknown';
+    let reviewerUserId: number | null = null;
+    let teamSlug: string | null = null;
+    if (r && (r.__typename === 'User' || r.__typename === 'Bot') && r.login) {
+      reviewerKind = 'user';
+      reviewerUserId = await resolver.resolve(exec, {
+        login: r.login,
+        id: r.id,
+        __typename: r.__typename,
+      } as GqlActor);
+    } else if (r && r.__typename === 'Team') {
+      reviewerKind = 'team';
+      teamSlug = r.slug ?? null;
+    }
+    await exec
+      .insert(reviewRequestEvents)
+      .values({
+        prId,
+        githubNodeId: n.id,
+        kind,
+        occurredAt: new Date(n.createdAt),
+        reviewerKind,
+        reviewerUserId,
+        teamSlug,
+      })
+      .onConflictDoNothing({ target: [reviewRequestEvents.prId, reviewRequestEvents.githubNodeId] })
+      .execute();
+  }
+  await exec
+    .update(pullRequests)
+    .set({ reviewRequestsSyncedAt: new Date() })
+    .where(eq(pullRequests.id, prId))
+    .execute();
+}
+
 export async function persistPr(
   pr: GqlPullRequest,
   repoId: number,
@@ -853,6 +921,9 @@ export async function persistPr(
           .execute();
       }
     }
+
+    // ---- review-request HISTORY (Chronology's "asked to first look") ----
+    await persistReviewRequestHistory(tx, prId, pr.reviewRequestHistory?.nodes, resolver);
 
     // ---- lifecycle events ----
     await upsertEvent(tx, {

@@ -380,6 +380,17 @@ function tierFor(method: string, path: string): readonly Tier[] {
     return [TIERS.search, TIERS.read];
   }
 
+  // ---- Chronology pointers (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
+  // The work plan's shape and costs exactly: POST is one Haiku call behind a payload-hash $0 cache
+  // (the `ai` pair); the free GET re-runs the whole Chronology fold (`getFlowCourts` — the lane
+  // resolver plus chunked action scans over every merge in the window) plus the exemplar text
+  // reads to recompute the hash for its `stale` probe, so it takes `search`, never the
+  // catch-all's 600/min GET→read branch. The GET must never grow a generation leg.
+  if (path === '/api/pro/flow-pointers') {
+    if (mutating) return [TIERS.ai, TIERS.aiHourly];
+    return [TIERS.search, TIERS.read];
+  }
+
   // ---- The Slack digest family (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
   // TWO paths under one prefix with OPPOSITE costs, which is exactly the shape the catch-all gets
   // wrong: it tiers on the VERB, so both of these are mutating and both would land on the 20/min

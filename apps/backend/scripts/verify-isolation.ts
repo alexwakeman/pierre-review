@@ -2307,6 +2307,37 @@ check(
   await seedFlow(1, A.repoId, 'a', flowA1!, flowA2!, flowBotA!);
   await seedFlow(2, B.repoId, 'b', flowB1!, flowB2!, flowBotB!);
 
+  // ⚠ REVIEW-REQUEST HISTORY for tenant A ONLY (migration 0066). The table carries no account_id
+  // — it reaches its tenant through pr_id — so the proof that B cannot read A's history is that B's
+  // fold, over the same shapes, reports none at all while A's reports all fourteen.
+  {
+    const aFlowPrs = await db
+      .select({ id: schema.pullRequests.id, openedAt: schema.pullRequests.openedAt })
+      .from(schema.pullRequests)
+      .where(and(eq(schema.pullRequests.accountId, 1), eq(schema.pullRequests.repoId, A.repoId)))
+      .execute();
+    for (const p of aFlowPrs) {
+      if (p.openedAt == null) continue;
+      await db
+        .insert(schema.reviewRequestEvents)
+        .values({
+          prId: p.id,
+          githubNodeId: `RRE_iso_${p.id}`,
+          kind: 'requested',
+          occurredAt: new Date(p.openedAt.getTime() + 60_000),
+          reviewerKind: 'user',
+          reviewerUserId: flowA1!.id,
+          teamSlug: null,
+        })
+        .execute();
+      await db
+        .update(schema.pullRequests)
+        .set({ reviewRequestsSyncedAt: new Date() })
+        .where(eq(schema.pullRequests.id, p.id))
+        .execute();
+    }
+  }
+
   const aOut = await getFlowCourts(1, scopeA, WIN);
   const bOut = await getFlowCourts(2, scopeB, WIN);
 
@@ -2342,6 +2373,14 @@ check(
   );
 
   check(
+    'getFlowCourts reads review-request history for the caller own PRs only',
+    (aOut.requests?.known ?? 0) === aOut.measuredPrs &&
+      aOut.measuredPrs > 0 &&
+      (aOut.requests?.rows.find((r) => r.kind === 'person')?.prs ?? 0) === aOut.measuredPrs &&
+      bOut.requests == null,
+  );
+
+  check(
     'getFlowCourts echoes the scope it was handed, never another tenant workspace',
     aOut.workspaceId === scopeA.workspaceId && bOut.workspaceId === scopeB.workspaceId,
   );
@@ -2369,11 +2408,18 @@ check(
   // ⚠ EVERY repoFullName THAT LEAVES THE TENANT, from all three places one can appear: the
   // profile row, its evidence, and the unreviewed-merge stat. Checking only the profiles would
   // pass while an evidence row named another account's repo.
+  // The per-PR layer (db/flow-detail.ts) adds FOUR more places: the scatter rows, the landing
+  // tail, its ticket SIBLINGS — the one field that deliberately looks ACROSS repositories, so the
+  // likeliest to look across tenants too — and the concentration rows.
   const namesOut = (out: typeof aOut): string[] => [
     ...out.repos.map((r) => r.repoFullName),
     ...out.repos.flatMap((r) => r.evidence.map((e) => e.repoFullName)),
     ...out.unreviewed.map((u) => u.repoFullName),
     ...out.unreviewed.flatMap((u) => u.evidence.map((e) => e.repoFullName)),
+    ...(out.prs ?? []).map((p) => p.repoFullName),
+    ...(out.landingTail?.rows ?? []).map((r) => r.repoFullName),
+    ...(out.landingTail?.rows ?? []).flatMap((r) => r.siblings.map((s) => s.repoFullName)),
+    ...(out.concentration ?? []).map((c) => c.repoFullName),
   ];
   check(
     'getFlowCourts names only repos inside the caller own workspace, in profiles AND evidence',
@@ -2383,7 +2429,30 @@ check(
   const idsOut = (out: typeof aOut): number[] => [
     ...out.repos.map((r) => r.repoId),
     ...out.unreviewed.map((u) => u.repoId),
+    ...(out.concentration ?? []).map((c) => c.repoId),
   ];
+  // ⚠ NON-VACUITY for the per-PR layer: the scatter must carry rows, or every `.every()` above
+  // over `prs` is true of nothing.
+  check(
+    'getFlowCourts per-PR rows are PRODUCTIVE on both tenants',
+    (aOut.prs?.length ?? 0) === aOut.measuredPrs && (bOut.prs?.length ?? 0) === bOut.measuredPrs,
+  );
+  const prIdsOf = async (accountId: number, ids: number[]): Promise<number> =>
+    ids.length === 0
+      ? 0
+      : (
+          await db
+            .select({ id: schema.pullRequests.id })
+            .from(schema.pullRequests)
+            .where(and(eq(schema.pullRequests.accountId, accountId), inArray(schema.pullRequests.id, ids)))
+            .execute()
+        ).length;
+  const aPrIds = (aOut.prs ?? []).map((p) => p.prId);
+  const bPrIds = (bOut.prs ?? []).map((p) => p.prId);
+  check(
+    'getFlowCourts per-PR rows are the caller own pull requests',
+    (await prIdsOf(1, aPrIds)) === aPrIds.length && (await prIdsOf(2, bPrIds)) === bPrIds.length,
+  );
   check(
     'getFlowCourts repoId on every row is one of the caller own repos',
     idsOut(aOut).every((id) => scopeA.repoIds.includes(id)) &&
@@ -2409,6 +2478,22 @@ check(
   const emptyWs = await q.createWorkspace(1, 'iso-flow-empty');
   const emptyScope = await q.resolveWorkspaceScope(1, emptyWs.id);
   const emptyOut = await getFlowCourts(1, emptyScope, WIN);
+  // ⚠ The working-hours settings: a workspace id arrives in the URL, so the writer must scope it.
+  const { getResolvedFlowSettings, setWorkspaceFlowSettings } = await import(
+    '../src/db/flow-settings.js'
+  );
+  check(
+    'setWorkspaceFlowSettings(B, A’s workspace) refuses (IDOR blocked)',
+    (await setWorkspaceFlowSettings(2, scopeA.workspaceId, { timeZone: 'Asia/Tokyo' })) === false,
+  );
+  check(
+    'getResolvedFlowSettings(B, A’s workspace) reads defaults, never A’s stored row',
+    (await setWorkspaceFlowSettings(1, scopeA.workspaceId, { timeZone: 'Asia/Tokyo' })) === true &&
+      (await getResolvedFlowSettings(1, scopeA.workspaceId)).timeZone === 'Asia/Tokyo' &&
+      (await getResolvedFlowSettings(2, scopeA.workspaceId)).defaults.timeZone === true,
+  );
+  await setWorkspaceFlowSettings(1, scopeA.workspaceId, {});
+
   check(
     'getFlowCourts on an EMPTY workspace refuses rather than widening to the account',
     emptyOut.repos.length === 0 &&

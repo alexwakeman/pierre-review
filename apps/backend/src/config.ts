@@ -145,6 +145,27 @@ function resolveAppWebUrl(): string {
   return `http://localhost:${intFromEnv('FRONTEND_PORT', 5173)}`;
 }
 
+// Chronology's working hours need a time zone before anyone has set one for a workspace. Locally
+// the machine's own zone is the honest answer (it is the reader's); in the cloud the server's zone
+// is an accident of hosting, so it is UTC and the Settings screen says "default" beside it.
+// WORK_TIMEZONE overrides both. An unrecognised value falls back rather than throwing at boot.
+function resolveDefaultWorkTimezone(): string {
+  const valid = (tz: string | undefined): tz is string => {
+    if (!tz) return false;
+    try {
+      new Intl.DateTimeFormat('en-GB', { timeZone: tz });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const explicit = process.env.WORK_TIMEZONE?.trim();
+  if (valid(explicit)) return explicit;
+  if (isCloud) return 'UTC';
+  const machine = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return valid(machine) ? machine : 'UTC';
+}
+
 export const config = {
   deploymentMode,
   isCloud,
@@ -195,6 +216,9 @@ export const config = {
   // actually syncs. Non-adaptive keeps the classic fixed */5 re-walk. SYNC_CRON overrides.
   syncCron: process.env.SYNC_CRON ?? (syncAdaptive ? '*/1 * * * *' : '*/5 * * * *'),
   syncOverlapMinutes: intFromEnv('SYNC_OVERLAP_MINUTES', 20),
+  // The time zone Chronology counts working hours in for a workspace that never set one
+  // (packages/shared/src/flow-settings.ts). See resolveDefaultWorkTimezone.
+  defaultWorkTimezone: resolveDefaultWorkTimezone(),
   // Phase 0 real-time sync (see docs/REALTIME-SYNC.md). enqueuePrSync coalesces a burst
   // of change signals for the SAME PR — a push emits push + synchronize + check_run
   // within seconds — into ONE targeted syncOnePr fired this many ms after the burst

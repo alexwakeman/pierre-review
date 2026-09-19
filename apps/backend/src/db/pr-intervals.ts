@@ -57,13 +57,33 @@ import type {
   FlowResponse,
   PrCourt,
   RepoCourtProfile,
+  StoredPrFile,
   UnreviewedRepoStat,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { resolveActorLanes, type ActorLanes } from './actor-lanes.js';
 import type { BotScope } from './queries.js';
+import { surfacesForPath } from './blast-radius.js';
+import { getResolvedFlowSettings } from './flow-settings.js';
+import { buildWorkingCalendar } from './working-hours.js';
+import {
+  buildFlowDetail,
+  ticketKeyOf,
+  type CourtSpell,
+  type FlowPrFacts,
+} from './flow-detail.js';
 
-const { commits, prComments, pullRequests, repos, reviewComments, reviews, users } = schema;
+const {
+  ciStatusEvents,
+  commits,
+  prComments,
+  pullRequests,
+  repos,
+  reviewComments,
+  reviewRequestEvents,
+  reviews,
+  users,
+} = schema;
 
 // ── Window ───────────────────────────────────────────────────────────────────────────────────
 export const FLOW_DEFAULT_WINDOW_DAYS = 30;
@@ -157,6 +177,11 @@ export interface CourtAction {
   by: 'reviewer' | 'author';
   /** An approving review. Moves the ball to LANDING and latches. */
   approves: boolean;
+  /**
+   * The person who acted, when known. READ TO COUNT FIRST REVIEWERS (db/flow-detail.ts'
+   * concentration rows), never sent — the walk itself ignores it.
+   */
+  userId?: number | null;
 }
 
 export interface CourtHours {
@@ -165,20 +190,42 @@ export interface CourtHours {
   landing: number;
 }
 
+/** One pass of the ledger, kept as spells so working hours can be counted per stretch. */
+export interface CourtWalk {
+  /** Continuous stretches per court, in order; adjacent stretches in one court are merged. */
+  spells: CourtSpell[];
+  /** Times the ball moved to the author. */
+  rounds: number;
+  /** The first human action by someone other than the author, inside the PR's life. */
+  firstLookMs: number | null;
+  /** Who took it — read to count, never sent. */
+  firstReviewerId: number | null;
+  /** The first approving review inside the PR's life. */
+  approvedAtMs: number | null;
+}
+
 /**
- * THE LEDGER, as a pure function so it can be tested without a database.
+ * THE LEDGER, as a pure function so it can be tested without a database. ⚠ THE ONLY STATE
+ * MACHINE: `walkCourts` below is a sum over these spells, so the clock-hour split and the
+ * working-hour split cannot disagree about who held the ball.
  *
  * `actions` need not be sorted; anything outside `[openedMs, mergedMs]` is ignored rather than
  * clamped, because an action stamped outside the pull request's own life is a data error and
  * silently stretching an interval to cover it would put invented hours on the screen.
  */
-export function walkCourts(
+export function walkCourtIntervals(
   openedMs: number,
   mergedMs: number,
   actions: CourtAction[],
-): CourtHours {
-  const hours: CourtHours = { reviewer: 0, author: 0, landing: 0 };
-  if (!(mergedMs > openedMs)) return hours;
+): CourtWalk {
+  const walk: CourtWalk = {
+    spells: [],
+    rounds: 0,
+    firstLookMs: null,
+    firstReviewerId: null,
+    approvedAtMs: null,
+  };
+  if (!(mergedMs > openedMs)) return walk;
 
   const inLife = actions
     .filter((a) => a.atMs >= openedMs && a.atMs <= mergedMs)
@@ -189,15 +236,24 @@ export function walkCourts(
   let last = openedMs;
 
   const charge = (untilMs: number): void => {
-    const h = (untilMs - last) / HOUR_MS;
-    if (h > 0) hours[court] += h;
+    if (untilMs > last) {
+      const prev = walk.spells[walk.spells.length - 1];
+      if (prev && prev.court === court && prev.toMs === last) prev.toMs = untilMs;
+      else walk.spells.push({ court, fromMs: last, toMs: untilMs });
+    }
     last = untilMs;
   };
 
   for (const a of inLife) {
     charge(a.atMs);
+    const before = court;
+    if (a.by === 'reviewer' && walk.firstLookMs == null) {
+      walk.firstLookMs = a.atMs;
+      walk.firstReviewerId = a.userId ?? null;
+    }
     if (a.approves) {
       approved = true;
+      if (walk.approvedAtMs == null) walk.approvedAtMs = a.atMs;
       court = 'landing';
     } else if (a.by === 'reviewer') {
       // Decision 1: somebody said something, so the author owes a reply — even after an approval.
@@ -207,8 +263,22 @@ export function walkCourts(
       // approval is a branch-protection setting we do not sync.
       court = approved ? 'landing' : 'reviewer';
     }
+    if (court === 'author' && before !== 'author') walk.rounds += 1;
   }
   charge(mergedMs);
+  return walk;
+}
+
+/** Clock hours per court — the sum of `walkCourtIntervals`' spells. */
+export function walkCourts(
+  openedMs: number,
+  mergedMs: number,
+  actions: CourtAction[],
+): CourtHours {
+  const hours: CourtHours = { reviewer: 0, author: 0, landing: 0 };
+  for (const s of walkCourtIntervals(openedMs, mergedMs, actions).spells) {
+    hours[s.court] += (s.toMs - s.fromMs) / HOUR_MS;
+  }
   return hours;
 }
 
@@ -250,11 +320,29 @@ function narrate(
   );
 }
 
-/** The advice, once per court. See `CourtDirective` in shared for why it lives at this grain. */
-function directiveFor(court: PrCourt, repos: number): string {
+/**
+ * The advice, once per court. See `CourtDirective` in shared for why it lives at this grain.
+ *
+ * ⚠ `namedBeatsTeam` IS THIS WORKSPACE'S OWN MEASUREMENT, and it can overrule the default advice.
+ * "Request a named reviewer instead of a team" is the published intervention, but on a real
+ * workspace a team request was answered FASTER (1.8 working hours to 3.1). Advice the reader's
+ * own history contradicts is worse than none, so when the stored request history shows a team
+ * answered at least as quickly, the reviewer paragraph drops that clause. `null` (no history, or
+ * too few of either) keeps the default.
+ */
+function directiveFor(court: PrCourt, repos: number, namedBeatsTeam: boolean | null = null): string {
   const where = `${repos} ${plural(repos, 'repository', 'repositories')} here ${plural(repos, 'is', 'are')}`;
   switch (court) {
     case 'reviewer':
+      if (namedBeatsTeam === false) {
+        return (
+          `${where} spending most of a pull request's life waiting for a person to look — not on ` +
+          `the author, and not on checks. That makes it a routing problem rather than a capacity ` +
+          `one: chase the pull requests already past the marks below. Asking a team has been ` +
+          `answered as quickly as asking a named person here, so what matters is that somebody ` +
+          `follows up, not who was asked.`
+        );
+      }
       return (
         `${where} spending most of a pull request's life waiting for a person to look — not on ` +
         `the author, and not on checks. That makes it a routing problem rather than a capacity ` +
@@ -311,8 +399,28 @@ interface PrRow {
   number: number;
   title: string;
   authorId: number | null;
+  mergedById: number | null;
+  headRefName: string | null;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  files: StoredPrFile[] | null;
   openedMs: number;
   mergedMs: number;
+  /** The review-request history was received for this PR (`review_requests_synced_at`). */
+  requestsKnown: boolean;
+}
+
+/**
+ * Lines added plus removed, or null when the size was never observed. The same ambiguity
+ * `codeLocFor` documents: the columns are NOT NULL with a 0 default, so all-zero columns with a
+ * file list that sums to zero is "we never saw its size", not "it changed nothing".
+ */
+function linesOf(pr: PrRow): number | null {
+  const cols = pr.additions + pr.deletions;
+  if (cols > 0) return cols;
+  const fromFiles = (pr.files ?? []).reduce((n, f) => n + ((f?.additions ?? 0) + (f?.deletions ?? 0)), 0);
+  return fromFiles > 0 ? fromFiles : null;
 }
 
 export async function getFlowCourts(
@@ -337,6 +445,8 @@ export async function getFlowCourts(
     refusals.push({ kind, reason, basis });
   };
 
+  const settings = await getResolvedFlowSettings(accountId, scope.workspaceId);
+
   const empty = (coverage: FlowCoverage): FlowResponse => ({
     workspaceId: scope.workspaceId,
     windowDays,
@@ -350,6 +460,19 @@ export async function getFlowCourts(
     unreviewed: [],
     refusals,
     coverage,
+    settings,
+    courtsWork: sharesOf({ reviewer: 0, author: 0, landing: 0 }),
+    medianLeadWorkHours: 0,
+    p75LeadWorkHours: 0,
+    workHeadline: null,
+    budgets: [],
+    prs: [],
+    prsCapped: false,
+    contrast: null,
+    sizeBands: [],
+    weekdays: [],
+    landingTail: null,
+    concentration: [],
   });
 
   // `[]` is a real answer ("this workspace is empty"), never a widening to the whole account.
@@ -387,6 +510,13 @@ export async function getFlowCourts(
       number: pullRequests.number,
       title: pullRequests.title,
       authorId: pullRequests.authorId,
+      mergedById: pullRequests.mergedById,
+      headRefName: pullRequests.headRefName,
+      additions: pullRequests.additions,
+      deletions: pullRequests.deletions,
+      changedFiles: pullRequests.changedFiles,
+      files: pullRequests.files,
+      requestsSyncedAt: pullRequests.reviewRequestsSyncedAt,
       openedAt: pullRequests.openedAt,
       mergedAt: pullRequests.mergedAt,
     })
@@ -416,8 +546,15 @@ export async function getFlowCourts(
       number: r.number,
       title: r.title,
       authorId: r.authorId,
+      mergedById: r.mergedById,
+      headRefName: r.headRefName,
+      additions: r.additions,
+      deletions: r.deletions,
+      changedFiles: r.changedFiles,
+      files: r.files ?? null,
       openedMs,
       mergedMs,
+      requestsKnown: r.requestsSyncedAt != null,
     });
   }
 
@@ -443,6 +580,11 @@ export async function getFlowCourts(
     userId != null && lanes.laneOf(userId) === 'human';
 
   const actions = new Map<number, CourtAction[]>();
+  const requestEvents = new Map<
+    number,
+    { atMs: number; kind: 'requested' | 'removed'; reviewerKind: string; userId: number | null }[]
+  >();
+  const ciObs = new Map<number, { atMs: number; red: boolean }[]>();
   const push = (prId: number, a: CourtAction): void => {
     const list = actions.get(prId);
     if (list) list.push(a);
@@ -469,6 +611,7 @@ export async function getFlowCourts(
         atMs: r.at.getTime(),
         by: self ? 'author' : 'reviewer',
         approves: !self && r.state === 'approved',
+        userId: r.authorId,
       });
     }
 
@@ -488,6 +631,7 @@ export async function getFlowCourts(
         atMs: r.at.getTime(),
         by: r.authorId === pr.authorId ? 'author' : 'reviewer',
         approves: false,
+        userId: r.authorId,
       });
     }
 
@@ -507,6 +651,7 @@ export async function getFlowCourts(
         atMs: r.at.getTime(),
         by: r.authorId === pr.authorId ? 'author' : 'reviewer',
         approves: false,
+        userId: r.authorId,
       });
     }
 
@@ -522,6 +667,46 @@ export async function getFlowCourts(
     for (const r of cmRows) {
       if (r.at == null) continue;
       push(r.prId, { atMs: r.at.getTime(), by: 'author', approves: false });
+    }
+
+    // Review-request HISTORY — who was asked first, and when. Never moves the ball: a request is
+    // not a review. Read by PR id only (a PR child with no account_id; the ids are this account's).
+    const rrRows = await db
+      .select({
+        prId: reviewRequestEvents.prId,
+        at: reviewRequestEvents.occurredAt,
+        kind: reviewRequestEvents.kind,
+        reviewerKind: reviewRequestEvents.reviewerKind,
+        userId: reviewRequestEvents.reviewerUserId,
+      })
+      .from(reviewRequestEvents)
+      .where(inArray(reviewRequestEvents.prId, ids))
+      .limit(FLOW_ACTION_CAP)
+      .execute();
+    noteCap(rrRows.length, FLOW_ACTION_CAP);
+    for (const r of rrRows) {
+      if (r.at == null) continue;
+      const list = requestEvents.get(r.prId);
+      const e = { atMs: r.at.getTime(), kind: r.kind, reviewerKind: r.reviewerKind, userId: r.userId };
+      if (list) list.push(e);
+      else requestEvents.set(r.prId, [e]);
+    }
+
+    // CI observations — for "checks went red", never for the ball. Red time is approximate: a
+    // failure counts until the next observation, and observations are only as dense as syncs.
+    const ciRows = await db
+      .select({ prId: ciStatusEvents.prId, at: ciStatusEvents.observedAt, status: ciStatusEvents.status })
+      .from(ciStatusEvents)
+      .where(and(eq(ciStatusEvents.accountId, accountId), inArray(ciStatusEvents.prId, ids)))
+      .limit(FLOW_ACTION_CAP)
+      .execute();
+    noteCap(ciRows.length, FLOW_ACTION_CAP);
+    for (const r of ciRows) {
+      if (r.at == null) continue;
+      const list = ciObs.get(r.prId);
+      const o = { atMs: r.at.getTime(), red: r.status === 'failure' || r.status === 'error' };
+      if (list) list.push(o);
+      else ciObs.set(r.prId, [o]);
     }
   }
 
@@ -543,6 +728,7 @@ export async function getFlowCourts(
     pr: PrRow;
     hours: CourtHours;
     leadHours: number;
+    walk: CourtWalk;
   }
   const measured: Measured[] = [];
   const unreviewedByRepo = new Map<number, PrRow[]>();
@@ -567,10 +753,14 @@ export async function getFlowCourts(
       else unreviewedByRepo.set(pr.repoId, [pr]);
       continue;
     }
+    const walk = walkCourtIntervals(pr.openedMs, pr.mergedMs, acts);
+    const hours: CourtHours = { reviewer: 0, author: 0, landing: 0 };
+    for (const sp of walk.spells) hours[sp.court] += (sp.toMs - sp.fromMs) / HOUR_MS;
     measured.push({
       pr,
-      hours: walkCourts(pr.openedMs, pr.mergedMs, acts),
+      hours,
       leadHours: (pr.mergedMs - pr.openedMs) / HOUR_MS,
+      walk,
     });
   }
 
@@ -746,6 +936,49 @@ export async function getFlowCourts(
     );
   }
 
+  // ── Working hours, budgets and the per-PR view (db/flow-detail.ts) ──────────────────────────
+  const facts: FlowPrFacts[] = measured.map((m) => {
+    const reach = new Set<string>();
+    for (const f of m.pr.files ?? []) {
+      if (typeof f?.path === 'string') for (const s of surfacesForPath(f.path)) reach.add(s);
+    }
+    return {
+      prId: m.pr.id,
+      repoId: m.pr.repoId,
+      repoFullName: repoName.get(m.pr.repoId) ?? '',
+      number: m.pr.number,
+      title: m.pr.title,
+      githubUrl: ghUrl(m.pr.repoId, m.pr.number),
+      openedMs: m.pr.openedMs,
+      mergedMs: m.pr.mergedMs,
+      spells: m.walk.spells,
+      rounds: m.walk.rounds,
+      firstLookMs: m.walk.firstLookMs,
+      approvedAtMs: m.walk.approvedAtMs,
+      firstReviewerId: m.walk.firstReviewerId,
+      lines: linesOf(m.pr),
+      files: linesOf(m.pr) == null ? null : m.pr.changedFiles || (m.pr.files?.length ?? null),
+      reachAreas: [...reach].sort() as FlowPrFacts['reachAreas'],
+      ciRedHours: ciRedHoursOf(ciObs.get(m.pr.id) ?? [], m.pr.openedMs, m.pr.mergedMs),
+      ticketKey: ticketKeyOf(m.pr.title, m.pr.headRefName),
+      selfMerged: m.pr.mergedById != null && m.pr.mergedById === m.pr.authorId,
+      ...firstRequestOf(m.pr, requestEvents.get(m.pr.id) ?? [], isHuman),
+    };
+  });
+  const calFrom = facts.reduce((lo, f) => Math.min(lo, f.openedMs), toMs);
+  const calendar = buildWorkingCalendar(settings, calFrom, toMs);
+  const detail = buildFlowDetail(facts, calendar, settings, FLOW_MIN_REPO_PRS);
+
+  // The workspace's own answer to "named person or team?", when it has one — see directiveFor.
+  const person = detail.requests?.rows.find((r) => r.kind === 'person')?.medianRequestToLookWorkHours;
+  const team = detail.requests?.rows.find((r) => r.kind === 'team')?.medianRequestToLookWorkHours;
+  const namedBeatsTeam = person == null || team == null ? null : person < team;
+  if (namedBeatsTeam === false) {
+    for (const d of directives) {
+      if (d.court === 'reviewer') d.directive = directiveFor('reviewer', d.repos, false);
+    }
+  }
+
   return {
     workspaceId: scope.workspaceId,
     windowDays,
@@ -760,7 +993,55 @@ export async function getFlowCourts(
     unreviewed,
     refusals,
     coverage,
+    settings,
+    ...detail,
   };
+}
+
+/**
+ * Who was asked FIRST, and when — from the stored request history.
+ *
+ * ⚠ NULL KIND WHEN THE HISTORY WAS NEVER RECEIVED. A PR with no rows reads "nobody was asked" only
+ * when we hold a positive statement of that (`requestsKnown`); otherwise it is "not known", and
+ * Chronology counts it apart rather than in the "nobody" row.
+ *
+ * The first MOMENT decides: requests made in the same instant (a person and a team together) count
+ * as a named person, because a person was named. Requests to automation (a Copilot review, a bot
+ * account) are skipped — asking a bot is not asking someone to look — so a PR whose only requests
+ * went to bots reads "nobody". A request dated before the PR opened is clamped to the opening.
+ */
+function firstRequestOf(
+  pr: { openedMs: number; mergedMs: number; requestsKnown: boolean; authorId: number | null },
+  events: { atMs: number; kind: 'requested' | 'removed'; reviewerKind: string; userId: number | null }[],
+  isHuman: (userId: number | null) => boolean,
+): { requestKind: 'person' | 'team' | 'none' | null; firstRequestMs: number | null } {
+  if (!pr.requestsKnown) return { requestKind: null, firstRequestMs: null };
+  const asks = events
+    .filter((e) => e.kind === 'requested' && e.atMs <= pr.mergedMs)
+    .filter(
+      (e) =>
+        e.reviewerKind === 'team' ||
+        (e.reviewerKind === 'user' && isHuman(e.userId) && e.userId !== pr.authorId),
+    )
+    .sort((a, b) => a.atMs - b.atMs);
+  const first = asks[0];
+  if (first == null) return { requestKind: 'none', firstRequestMs: null };
+  const sameMoment = asks.filter((e) => e.atMs === first.atMs);
+  const kind = sameMoment.some((e) => e.reviewerKind === 'user') ? 'person' : 'team';
+  return { requestKind: kind, firstRequestMs: Math.max(first.atMs, pr.openedMs) };
+}
+
+/** Clock hours a PR's checks were observed red while it was open. */
+function ciRedHoursOf(obs: { atMs: number; red: boolean }[], openedMs: number, mergedMs: number): number {
+  const sorted = [...obs].sort((a, b) => a.atMs - b.atMs);
+  let red = 0;
+  for (let i = 0; i < sorted.length; i += 1) {
+    const o = sorted[i] as { atMs: number; red: boolean };
+    if (!o.red) continue;
+    const end = i + 1 < sorted.length ? (sorted[i + 1] as { atMs: number }).atMs : mergedMs;
+    red += Math.max(0, Math.min(end, mergedMs) - Math.max(o.atMs, openedMs));
+  }
+  return red / HOUR_MS;
 }
 
 /** Exposed for the unit test — the floors a fixture has to clear or miss. */
@@ -772,6 +1053,10 @@ export const __flowTesting = {
   FLOW_UNREVIEWED_MIN_COUNT,
   FLOW_UNREVIEWED_MIN_SHARE,
   walkCourts,
+  walkCourtIntervals,
+  directiveFor,
+  ciRedHoursOf,
+  firstRequestOf,
   percentile,
   median,
   fmtHours,

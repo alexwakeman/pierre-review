@@ -167,6 +167,8 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // ⚠ NOT a git-version probe: /api/me does not shell out on every SPA boot. A git too old
       // for `merge-tree --write-tree` is refused by the OPEN route with `git_too_old`.
       conflictResolver: true,
+      // Chronology's default working-hours zone for a workspace that never set one.
+      workTimeZone: config.defaultWorkTimezone,
       // Cross-org benchmark consent (cloud-only; always false in local). Drives the Settings toggle.
       benchmarkOptIn: config.isCloud ? req.account?.benchmarkOptIn ?? false : false,
       // The LARGE-PR FLAG's threshold, RESOLVED (stored value, else the product default) so no

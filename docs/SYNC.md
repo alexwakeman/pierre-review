@@ -112,6 +112,19 @@ writes nothing, since a partial log would be indistinguishable from a complete o
 
 ---
 
+### Review-request history backfill (after EVERY walk, user or scheduled)
+
+The fat walk carries each PR's request history (`reviewRequestHistory`, first 25 requested/removed
+events — measured at 0 extra points per page), but only for PRs it touches. Merged PRs from before
+that selection existed would stay "not known" forever, so after every walk
+`sync/backfill-review-requests.ts` re-reads up to 100 merged PRs per repo from the trailing 90 days
+whose `review_requests_synced_at` is NULL, in `nodes(ids:)` batches of 50 (~1 point each). Unlike
+the other post-walk tails this one ALSO runs on the SCHEDULED path — that path has no tail of its
+own, and without it the history would converge only when somebody pressed Sync. Budget-aware
+(`isLimited` / `noteLimited` / `noteBudget`), stamped once per PR, strictly non-fatal. Measured on a
+real workspace: 769 PRs in 26 seconds. ⚠ A nulled selection (a token that may not read it) writes
+nothing and leaves the stamp NULL — "not received" must never become "nobody was asked".
+
 ## Incremental updates (every subsequent sync)
 
 A repo **with** a `lastIncrementalSyncAt` is planned as `mode: 'incremental'`, with

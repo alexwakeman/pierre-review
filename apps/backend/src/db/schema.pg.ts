@@ -30,6 +30,7 @@ import type {
   BlastRadiusConfig,
   BranchCheckRun,
   CheckRun,
+  FlowSettings,
   Label,
   ReviewRouteReason,
   StoredPrFile,
@@ -182,6 +183,12 @@ export const pullRequests = pgTable(
       withTimezone: true,
       mode: 'date',
     }),
+    // Review-request HISTORY last written from a response carrying the selection (migration 0066
+    // / pg 0053). NULL = never received — "not known", never "never requested". See the sqlite twin.
+    reviewRequestsSyncedAt: timestamp('review_requests_synced_at', {
+      withTimezone: true,
+      mode: 'date',
+    }),
     lastCommitAt: timestamp('last_commit_at', {
       withTimezone: true,
       mode: 'date',
@@ -272,6 +279,27 @@ export const reviewRequests = pgTable(
   (t) => ({
     prIdx: index('rr_pr_idx').on(t.prId),
     userIdx: index('rr_user_idx').on(t.userId),
+  }),
+);
+
+// Review-request HISTORY (migration 0066 / pg 0053) — the pg twin. A PR child with no account_id,
+// immutable once written, unique on (pr_id, github_node_id). Full rationale in the sqlite twin.
+export const reviewRequestEvents = pgTable(
+  'review_request_events',
+  {
+    id: serial('id').primaryKey(),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id),
+    githubNodeId: text('github_node_id').notNull(),
+    kind: text('kind', { enum: ['requested', 'removed'] }).notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
+    reviewerKind: text('reviewer_kind', { enum: ['user', 'team', 'unknown'] }).notNull(),
+    reviewerUserId: integer('reviewer_user_id').references(() => users.id),
+    teamSlug: text('team_slug'),
+  },
+  (t) => ({
+    prNodeUx: uniqueIndex('review_request_events_pr_node').on(t.prId, t.githubNodeId),
   }),
 );
 
@@ -879,6 +907,9 @@ export const workspaces = pgTable(
     // are. A UNION with `pending_muted_repos`, never a parent of it; and NOT the dropped
     // `repos.inbox_watch` visibility axis. Full rationale in the sqlite twin.
     pendingMuted: boolean('pending_muted').notNull().default(false),
+    // Chronology's working hours and wait budgets (migration 0065 / pg 0052) — the pg twin.
+    // OVERRIDES ONLY, resolved through `resolveFlowSettings`. Full rationale in the sqlite twin.
+    flowSettings: jsonb('flow_settings').$type<FlowSettings>(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),

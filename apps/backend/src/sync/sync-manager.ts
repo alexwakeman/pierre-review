@@ -451,6 +451,19 @@ export async function runSyncForRepo(
         );
       }
 
+      // Chronology's REVIEW-REQUEST HISTORY for merged PRs the walk will never revisit — bounded
+      // per run, once per PR (stamped), budget-aware, strictly non-fatal. After every walk, like the
+      // files backfill above, so a repo's history converges over a few syncs rather than waiting
+      // for a forced deep re-sync.
+      try {
+        const { backfillReviewRequestHistory } = await import('./backfill-review-requests.js');
+        await backfillReviewRequestHistory(repo.accountId, repoId, log);
+      } catch (err) {
+        log.warn(
+          `review-request backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
+      }
+
       // The BLAST-RADIUS co-change index for this repo. Purely LOCAL — one indexed read of the
       // repo's merged pull requests, an in-memory fold and one upsert; it makes NO GitHub call
       // and spends no rate-limit budget, so unlike the backfill above it needs no gate and no
@@ -724,6 +737,18 @@ export async function syncAllRepos(log: Logger): Promise<void> {
       if (config.syncAdaptive) recordFullWalk(r.id, Date.now());
       // ...and clear any health backoff: this repo is readable again.
       noteWalkSuccess(r.id, Date.now());
+      // Chronology's review-request history for merged PRs the walk never revisits. The
+      // scheduled path carries no post-walk tail of its own (runSyncForRepo's is user-triggered),
+      // and without this the history would only converge when somebody pressed Sync. Bounded,
+      // stamped once per PR, budget-aware, and a failure here is logged, never the walk's.
+      try {
+        const { backfillReviewRequestHistory } = await import('./backfill-review-requests.js');
+        await backfillReviewRequestHistory(repo.accountId, r.id, log);
+      } catch (err) {
+        log.warn(
+          `review-request backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
+      }
     } catch (err) {
       // Health backoff: a repo we cannot read must not be retried at the cadence of a
       // healthy one. The count is the ONLY thing that widens the interval past its activity

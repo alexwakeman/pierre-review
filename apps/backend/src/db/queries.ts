@@ -422,6 +422,9 @@ function mapWorkspace(
     createdAt: w.createdAt.toISOString(),
     pendingMuted: w.pendingMuted,
     mutedRepoIds: repoIds.filter((id) => mutedRepoIds.has(id)),
+    // Overrides only (null = every default) — the SPA resolves them for display with the same
+    // `resolveFlowSettings` the Chronology engine uses.
+    flowSettings: w.flowSettings ?? null,
   };
 }
 
@@ -8484,6 +8487,12 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       await tx
         .delete(schema.reviewRequests)
         .where(inArray(schema.reviewRequests.prId, prIds))
+        .execute();
+      // Review-request HISTORY (migration 0066 / pg 0053) — a PR child with no cascade, cleared
+      // before the pullRequests delete like every other one here.
+      await tx
+        .delete(schema.reviewRequestEvents)
+        .where(inArray(schema.reviewRequestEvents.prId, prIds))
         .execute();
       await tx.delete(prViews).where(inArray(prViews.prId, prIds)).execute();
       // Claude review runs + findings reference these PRs (FKs are ON), so clear

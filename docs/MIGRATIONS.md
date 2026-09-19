@@ -663,3 +663,27 @@ Two nullable `text` columns on `auto_merge_requests`, no backfill and no default
 
 ⚠ **NULL MEANS "NOT RECORDED", AND THAT IS WHY NEITHER TAKES A DEFAULT.** A default on
 `expected_base_ref` would assert the user consented to a branch nobody asked them about.
+
+### `0065_workspace_flow_settings` (pg `0052`)
+
+One nullable JSON column, `workspaces.flow_settings` (sqlite `text`, pg `jsonb`) — Chronology's
+working hours and budgets as OVERRIDES ONLY. No backfill: NULL is "every default", which is right
+for every existing row. See docs/DATA-MODEL.md.
+
+### `0066_review_request_events` (pg `0053`)
+
+The review-request HISTORY table (`review_request_events`, a PR child with no `account_id`, unique
+`(pr_id, github_node_id)`, both FKs) plus `pull_requests.review_requests_synced_at`. No backfill in
+SQL: the one-time GitHub backfill (`sync/backfill-review-requests.ts`) fills it after walks, keyed
+on the NULL stamp. See docs/DATA-MODEL.md and docs/BOTTLENECKS.md § Asking for a review.
+
+### Plugin `0034_flow_pointers`
+
+`pro_flow_pointers`, the Chronology pointers cache — the `pro_work_plans` shape exactly
+(`(account_id, scope_key)` unique, no FK, erased with the account, never pruned per PR).
+
+⚠ **NONE OF THE THREE PG TWINS ABOVE HAS BEEN REPLAYED.** The standing Postgres was not running when
+they were written (2026-09-19); the SQLite halves ran through the real runner on the dev database
+and in every test DB. Repeat § Replaying the pg chain — core should reach **54 applied = 54 journal
+entries** and the plugin **34** — and check `review_request_events` carries both FKs and its unique
+index, and that `workspaces.flow_settings` is `jsonb`.

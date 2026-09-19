@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import type {
-  Workspace,
-  WorkspacePendingMuteUpdate,
-  WorkspacesResponse,
+import {
+  validateFlowSettings,
+  type FlowSettings,
+  type Workspace,
+  type WorkspacePendingMuteUpdate,
+  type WorkspacesResponse,
 } from '@pierre-review/shared';
 import {
   assignReposToWorkspace,
@@ -13,6 +15,7 @@ import {
   renameWorkspace,
 } from '../../db/queries.js';
 import { setWorkspacePendingMute } from '../../db/pending-mute.js';
+import { setWorkspaceFlowSettings } from '../../db/flow-settings.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 // Workspaces (CORE): the ONE scope this app has. A workspace groups an account's repos, and a repo
@@ -82,6 +85,38 @@ const patchSchema = {
 // "leave this fact alone", which is what makes the union a union rather than a chain. Bounded
 // `repoIds` because the body is attacker-shaped; ids outside the workspace's membership are
 // IGNORED by the writer rather than rejected, so a stale client list degrades instead of 400ing.
+// Chronology's working-hours overrides. The shape only — ranges and "ok ≥ good" are checked by
+// `validateFlowSettings`, whose sentences the Settings form also shows. ⚠ Every property must be
+// DECLARED: Fastify's ajv strips undeclared keys silently (the contact-form honeypot defect).
+const budgetSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: { good: { type: 'number' }, ok: { type: 'number' } },
+};
+const flowSettingsSchema = {
+  ...idParamSchema,
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      timeZone: { type: 'string', minLength: 1, maxLength: 64 },
+      days: { type: 'array', items: { type: 'integer' }, maxItems: 7 },
+      startMinute: { type: 'integer' },
+      endMinute: { type: 'integer' },
+      budgets: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          firstLook: budgetSchema,
+          reply: budgetSchema,
+          land: budgetSchema,
+          lead: budgetSchema,
+        },
+      },
+    },
+  },
+};
+
 const pendingMuteSchema = {
   ...idParamSchema,
   body: {
@@ -274,6 +309,39 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const { id } = req.params as { id: number };
       const patch = req.body as WorkspacePendingMuteUpdate;
       if (!(await setWorkspacePendingMute(accountId, id, patch))) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Workspace ${id} not found` };
+      }
+      const workspace = await findWorkspace(accountId, id);
+      if (!workspace) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Workspace ${id} not found` };
+      }
+      return { workspace };
+    },
+  );
+
+  // CHRONOLOGY'S WORKING HOURS AND WAIT BUDGETS for this workspace — CORE and free to SET on
+  // every tier (Chronology itself is Pro; a setting is not a report, and the Settings Workspace
+  // heading is ungated for the same reason the Pending mute is).
+  //
+  // PUT REPLACES THE WHOLE OVERRIDE SET: a field left out goes back to its product default, and
+  // `{}` stores NULL ("Reset to defaults"). The shape is checked by the schema below and the
+  // meaning by `validateFlowSettings` — the SAME function the Settings form runs before it sends,
+  // so the 400's sentence is the one the reader would have seen inline.
+  app.put(
+    '/api/workspaces/:id/flow-settings',
+    { schema: flowSettingsSchema },
+    async (req, reply) => {
+      const accountId = accountIdOf(req);
+      const { id } = req.params as { id: number };
+      const body = req.body as FlowSettings;
+      const problem = validateFlowSettings(body);
+      if (problem) {
+        reply.status(400);
+        return { error: 'InvalidFlowSettings', message: problem };
+      }
+      if (!(await setWorkspaceFlowSettings(accountId, id, body))) {
         reply.status(404);
         return { error: 'NotFound', message: `Workspace ${id} not found` };
       }

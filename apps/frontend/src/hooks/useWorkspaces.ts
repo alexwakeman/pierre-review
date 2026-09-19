@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   Workspace,
   WorkspacePendingMuteUpdate,
+  FlowSettings,
   WorkspacesResponse,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
@@ -118,6 +119,19 @@ export function useWorkspaceMutations() {
     onSettled: invalidate,
   });
 
+  // Chronology's working hours and budgets. Only two things read them: the workspace row (for the
+  // Settings form) and Chronology itself, so this invalidates exactly those rather than the whole
+  // workspace sweep — a change of working hours moves no count on any other screen.
+  const setWorkspaceFlowSettings = useMutation({
+    mutationFn: (v: { id: number; settings: FlowSettings }) =>
+      api.setWorkspaceFlowSettings(v.id, v.settings),
+    onSettled: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ['workspaces'] }),
+        qc.invalidateQueries({ queryKey: ['flow-findings'] }),
+      ]),
+  });
+
   return {
     createWorkspace,
     renameWorkspace,
@@ -125,6 +139,7 @@ export function useWorkspaceMutations() {
     assignRepoToWorkspace,
     setWorkspaceRepos,
     setWorkspacePendingMute,
+    setWorkspaceFlowSettings,
   };
 }
 

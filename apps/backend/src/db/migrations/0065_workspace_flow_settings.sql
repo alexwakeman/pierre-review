@@ -1,0 +1,13 @@
+-- CHRONOLOGY'S WORKING HOURS AND WAIT BUDGETS, per workspace (CORE, free, no AI).
+--
+-- Chronology charges every hour a pull request waits to whoever it is waiting on. Measured on a
+-- real workspace, 73% of those hours fell outside the team's working day — a PR opened on Friday
+-- afternoon was charged a weekend. This column holds the workspace's time zone, working days and
+-- hours, and a budget per wait ("good" / "acceptable", in working hours).
+--
+-- ⚠ OVERRIDES ONLY. NULL until someone changes something, then only the fields they changed.
+-- Every reader resolves through `resolveFlowSettings` in packages/shared/src/flow-settings.ts,
+-- so a later change to a product default reaches every workspace that never overrode it.
+-- No backfill: NULL is "every default", which is correct for every existing row.
+-- The Postgres twin is migrations-pg/0052_workspace_flow_settings.sql.
+ALTER TABLE `workspaces` ADD `flow_settings` text;

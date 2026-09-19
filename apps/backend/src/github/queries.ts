@@ -12,6 +12,33 @@ const commitMessageField = fullText ? '\n                message' : '';
 const reviewCommentDiffHunkField = fullText ? '\n                  diffHunk' : '';
 const prCommentBodyField = '\n              body';
 
+// One review-request timeline event as the SYNC path needs it, shared by the fat PR selection and
+// by the backfill's nodes() query so the two can never drift. `Bot` is selected alongside `User`
+// because a Copilot review request is a Bot; who counts as a PERSON is decided on read.
+const REVIEW_REQUEST_HISTORY_NODE = `nodes {
+      __typename
+      ... on ReviewRequestedEvent {
+        id
+        createdAt
+        requestedReviewer {
+          __typename
+          ... on User { id login }
+          ... on Bot { id login }
+          ... on Team { id slug }
+        }
+      }
+      ... on ReviewRequestRemovedEvent {
+        id
+        createdAt
+        requestedReviewer {
+          __typename
+          ... on User { id login }
+          ... on Bot { id login }
+          ... on Team { id slug }
+        }
+      }
+    }`;
+
 // One review thread as the SYNC path needs it, shared by the fat walk/targeted queries
 // (inside PR_NODE_FIELDS) and by PR_REVIEW_THREADS_PAGE_QUERY, the continuation that drains
 // a PR whose threads overflow one page. Extracted for the same reason PR_NODE_FIELDS is: a
@@ -171,6 +198,21 @@ const PR_NODE_FIELDS = /* GraphQL */ `
         createdAt
       }
     }
+  }
+  # The review-request HISTORY — every request and withdrawal, first 25 (chronological), for
+  # Chronology's "asked to first look" and "a person or a team". Persisted to
+  # review_request_events by persistPr; the SAME selection feeds the one-time backfill
+  # (REVIEW_REQUEST_HISTORY_NODES_QUERY), so a PR's history reads the same whichever path wrote it.
+  #
+  # COST — MEASURED FREE: \`rateLimit(dryRun: true)\` on REPO_ACTIVITY_QUERY read 15 points/page
+  # both without and with this selection. A LEAF connection (no connection beneath it) adds no
+  # nodes to the price; its own \`first:\` would only matter to a child connection, and it has
+  # none — \`requestedReviewer\` is an object. Do not add a connection under it.
+  reviewRequestHistory: timelineItems(
+    itemTypes: [REVIEW_REQUESTED_EVENT, REVIEW_REQUEST_REMOVED_EVENT]
+    first: 25
+  ) {
+    ${REVIEW_REQUEST_HISTORY_NODE}
   }
   headCommit: commits(last: 1) {
     nodes {
@@ -754,6 +796,17 @@ export interface GqlLabel {
   color: string;
 }
 
+export interface GqlReviewRequestEvent {
+  __typename?: string;
+  id?: string | null;
+  createdAt?: string | null;
+  requestedReviewer?:
+    | { __typename: 'User' | 'Bot'; id: string; login: string }
+    | { __typename: 'Team'; id: string; slug: string | null }
+    | { __typename: string }
+    | null;
+}
+
 export interface GqlReviewRequest {
   requestedReviewer:
     | { __typename: 'User'; id: string; login: string }
@@ -839,6 +892,10 @@ export interface GqlPullRequest {
   // Earliest ReviewRequestedEvent (first:1) — for firstReviewRequestedAt / review-pickup latency.
   // Optional: absent on hand-built test fixtures predating the field.
   firstReviewRequest?: { nodes: Array<{ createdAt?: string | null }> };
+  // The review-request HISTORY (first 25 requested/removed events). Optional: absent on
+  // hand-built fixtures, and NULLED by graphqlTolerant when the token may not read it — both mean
+  // "not received", which persistPr must not record as "never requested".
+  reviewRequestHistory?: { nodes: Array<GqlReviewRequestEvent | null> } | null;
   headCommit: { nodes: GqlHeadCommit[] };
   commits: { nodes: GqlCommitNode[] };
   reviews: { nodes: GqlReview[] };
@@ -1195,4 +1252,32 @@ export interface PrLivenessNodesGqlResponse {
   /** GitHub returns a null slot for any id the token cannot see (deleted, private, foreign). */
   nodes: Array<GqlPrLivenessNode | null> | null;
   rateLimit?: { remaining: number; resetAt: string; cost: number } | null;
+}
+
+// The one-time review-request HISTORY backfill (sync/backfill-review-requests.ts): merged PRs the
+// walk will never revisit, re-read by node id in batches. The SAME node selection as the fat walk.
+export const REVIEW_REQUEST_HISTORY_NODES_QUERY = /* GraphQL */ `
+  query ReviewRequestHistoryNodes($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on PullRequest {
+        id
+        reviewRequestHistory: timelineItems(
+          itemTypes: [REVIEW_REQUESTED_EVENT, REVIEW_REQUEST_REMOVED_EVENT]
+          first: 25
+        ) {
+          ${REVIEW_REQUEST_HISTORY_NODE}
+        }
+      }
+    }
+    rateLimit {
+      remaining
+      resetAt
+      cost
+    }
+  }
+`;
+
+export interface ReviewRequestHistoryNodesResponse {
+  nodes: Array<{ id?: string; reviewRequestHistory?: { nodes: Array<GqlReviewRequestEvent | null> } | null } | null>;
+  rateLimit?: { remaining?: number | null; resetAt?: string | null; cost?: number | null } | null;
 }

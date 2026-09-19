@@ -28,7 +28,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [FRONTEND](docs/FRONTEND.md) | stores, tabs/overlays, FilterBar scoping, timeline internals, PrDetail |
 | [MERGE-CI-TRUNK](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, auto-merge runner, the in-app conflict resolver, CI logs, trunk status |
 | [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) | the agentic PR-review feature |
-| [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports -> "Chronology" |
+| [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports -> "Chronology", its working-hours budgets, request history and Pro pointers |
 | [BLAST-RADIUS](docs/BLAST-RADIUS.md) | how far a PR can REACH — the Low/Medium/High chip, the co-change index, the Pro impact note |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) | ML severity/category of bot comments (`packages/ml`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
@@ -915,7 +915,7 @@ with a SECTION per pick; contract in
 Every hour a pull request is open, somebody is holding the ball: a **reviewer** who has not looked,
 an **author** who owes a response, or nobody - approved and waiting to land. **PRO on
 `periodReports`** (no new capability, apiVersion stays 21), deterministic — no model anywhere in
-it. `db/pr-intervals.ts` + `api/routes/flow.ts` + `Activity/BottlenecksPanel.tsx`. Full contract:
+it except the opt-in Pointers block (plugin `flow-pointers/`, optional host seam). `db/pr-intervals.ts` + `api/routes/flow.ts` + `Activity/BottlenecksPanel.tsx`. Full contract:
 **[docs/BOTTLENECKS.md](docs/BOTTLENECKS.md)**. ⚠ The 402 lives on the ROUTE; `getFlowCourts` stays
 capability-blind because `verify:isolation` calls that fold directly, with no account row.
 
@@ -935,6 +935,12 @@ as the LANDING court. Without opening the doc:
 - ⚠ **A NEVER-HUMAN-TOUCHED PR IS EXCLUDED** (46% of merges) - its ledger is 100% reviewer by
   construction. Reported separately as a governance finding.
 - ⚠ **NO PERSON IS NAMED ANYWHERE**, and the server sends no actor ids, so it is structural.
+- ⚠ **WORKING HOURS LEAD, CLOCK HOURS CALL OUT.** The headline is each wait against a per-workspace
+  budget in WORKING hours (`workspaces.flow_settings`, OVERRIDES ONLY — resolve through
+  `resolveFlowSettings`); the lopsided-and-slow repo rule stays on CLOCK hours, where it was
+  calibrated. `walkCourts` is the SUM of `walkCourtIntervals` — ONE state machine.
+- ⚠ **`review_requests_synced_at` NULL IS "NOT KNOWN", NEVER "NOBODY WAS ASKED"** — stamped only from a
+  response that carried the history selection; the backfill runs after EVERY walk, scheduled too.
 
 ## ML severity/category on bot comments (CORE, free tier, no LLM)
 
