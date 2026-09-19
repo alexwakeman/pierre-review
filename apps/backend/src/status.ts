@@ -8,7 +8,8 @@ import { closeDb } from './db/client.js';
 import { getMyTurn, listRepos } from './db/queries.js';
 import { runMigrations } from './db/run-migrations.js';
 import type { Logger } from './sync/sync-repo.js';
-import type { MyTurnResponse, User } from '@pierre-review/shared';
+import type { MyTurnCardReason, MyTurnResponse, User } from '@pierre-review/shared';
+import { MY_TURN_SETTING_LABEL } from '@pierre-review/shared';
 
 // ── tiny ANSI helpers (degrade gracefully when not a TTY) ──────────────────────
 const useColor = process.stdout.isTTY && process.env.NO_COLOR === undefined;
@@ -90,16 +91,37 @@ function render(
   const keys = new Set<string>();
   const lines: string[] = [];
 
+  // Every section the fold returned — a type switched off in Settings comes back EMPTY, so it adds
+  // nothing here and prints nothing below.
   const total =
     data.awaitingReview.length +
+    data.mentions.length +
     data.threadsAwaiting.length +
+    data.threadReplies.length +
+    data.commentReplies.length +
+    data.pushedSince.length +
+    data.ownCiRed.length +
+    data.ownConflicts.length +
+    data.redTrunks.length +
     data.approvedPrs.length +
+    data.ownReady.length +
     data.yourPrs.length +
+    data.ownThreads.length +
     data.watchedRepoPrs.length;
 
   lines.push('');
   lines.push(`  ${bold(cyan('pierre status'))}${dim('  ·  your turn across all repos')}`);
   lines.push('');
+
+  // Which types the reader switched off (Settings → My Turn), named with the SAME labels Settings
+  // uses — said once at the foot, so an empty section never reads as "nothing happened".
+  const offFooter = (): void => {
+    if (data.off.length === 0) return;
+    lines.push(
+      `  ${dim(`Not shown (switched off in Settings → My Turn): ${data.off.map((r) => MY_TURN_SETTING_LABEL[r]).join(', ')}`)}`,
+    );
+    lines.push('');
+  };
 
   if (total === 0) {
     lines.push(`  ${green('All clear — nothing needs your attention.')}`);
@@ -107,6 +129,7 @@ function render(
       lines.push(`  ${dim('No repos added yet — run `pierre` to add some.')}`);
     }
     lines.push('');
+    offFooter();
     return { output: lines.join('\n') + '\n', keys };
   }
 
@@ -142,96 +165,254 @@ function render(
     lines.push(line);
   };
 
-  // 1. PRs where your review is requested.
-  if (data.awaitingReview.length > 0) {
-    section('Review requested of you', data.awaitingReview.length);
-    for (const it of data.awaitingReview) {
-      const author = loginOf(it.authorId);
-      row(
-        `review:${it.prId}`,
-        `${it.repoFullName}#${it.number}`,
-        it.githubUrl,
-        it.title,
-        it.openedAt,
-        author ? `by @${author}` : null,
-      );
-    }
-    lines.push('');
-  }
+  // A dim second line under a row — a comment excerpt or a summary, sanitized like the row.
+  const excerptLine = (raw: string | null | undefined): void => {
+    const excerpt = sanitize((raw ?? '').replace(/\s+/g, ' ').trim());
+    if (excerpt) lines.push(`      ${dim(truncate(excerpt, Math.max(12, termWidth() - 8)))}`);
+  };
+  const by = (id: number | null): string | null => {
+    const login = loginOf(id);
+    return login ? `@${login}` : null;
+  };
 
-  // 2. Review threads you opened that got a reply and aren't resolved.
-  if (data.threadsAwaiting.length > 0) {
-    section('Threads awaiting your reply', data.threadsAwaiting.length);
-    for (const it of data.threadsAwaiting) {
-      const label = it.line != null ? `${it.path}:${it.line}` : it.path;
-      const replier = loginOf(it.lastReplyAuthorId);
-      row(
-        `thread:${it.threadId}`,
-        `${it.repoFullName}#${it.prNumber}`,
-        it.githubUrl,
-        label,
-        it.lastReplyAt,
-        replier ? `↩ @${replier}` : null,
-      );
-      const excerpt = sanitize((it.lastReplyExcerpt ?? '').replace(/\s+/g, ' ').trim());
-      if (excerpt) {
-        lines.push(`      ${dim(truncate(excerpt, Math.max(12, termWidth() - 8)))}`);
+  // ONE PRINTER PER TYPE, run in the READER's order (`data.order`, Settings → My Turn) — the order
+  // My turn groups its cards in on the board. A type with nothing in it prints nothing.
+  const printers: Record<MyTurnCardReason, () => void> = {
+    review_request: () => {
+      if (data.awaitingReview.length === 0) return;
+      section('Review requested of you', data.awaitingReview.length);
+      for (const it of data.awaitingReview) {
+        const author = by(it.authorId);
+        row(
+          `review:${it.prId}`,
+          `${it.repoFullName}#${it.number}`,
+          it.githubUrl,
+          it.title,
+          it.openedAt,
+          author ? `by ${author}` : null,
+        );
       }
-    }
-    lines.push('');
-  }
-
-  // 3. Your open PRs with a standing approval — likely ready to merge.
-  if (data.approvedPrs.length > 0) {
-    section('Approved — ready to merge', data.approvedPrs.length);
-    for (const it of data.approvedPrs) {
-      row(
-        `approved:${it.prId}`,
-        `${it.repoFullName}#${it.number}`,
-        it.githubUrl,
-        it.title,
-        it.openedAt,
-        `✓ ${it.approvals} approval${it.approvals === 1 ? '' : 's'}`,
-      );
-    }
-    lines.push('');
-  }
-
-  // 4. Your open PRs with new activity since you last looked.
-  if (data.yourPrs.length > 0) {
-    section('Your PRs — new activity', data.yourPrs.length);
-    for (const it of data.yourPrs) {
-      row(
-        `yours:${it.prId}`,
-        `${it.repoFullName}#${it.number}`,
-        it.githubUrl,
-        it.title,
-        it.openedAt,
-        null,
-      );
-      if (it.summary) lines.push(`      ${dim(sanitize(it.summary))}`);
-    }
-    lines.push('');
-  }
-
-  // 5. New open PRs by others, opened since the repo was ADDED. The wire field keeps its
-  // historical `watchedRepoPrs` name (the stored dismissal kind pins it — see shared/types.ts);
-  // the section is "New PRs".
-  if (data.watchedRepoPrs.length > 0) {
-    section('New PRs', data.watchedRepoPrs.length);
-    for (const it of data.watchedRepoPrs) {
-      const author = loginOf(it.authorId);
-      row(
-        `newpr:${it.prId}`,
-        `${it.repoFullName}#${it.number}`,
-        it.githubUrl,
-        it.title,
-        it.openedAt,
-        author ? `by @${author}` : null,
-      );
-    }
-    lines.push('');
-  }
+      lines.push('');
+    },
+    mention: () => {
+      if (data.mentions.length === 0) return;
+      section('You were mentioned', data.mentions.length);
+      for (const it of data.mentions) {
+        const who = by(it.mentionedById);
+        row(
+          `mention:${it.prId}`,
+          `${it.repoFullName}#${it.number}`,
+          it.githubUrl,
+          it.title,
+          it.since ?? it.openedAt,
+          who ? `by ${who}` : null,
+        );
+      }
+      lines.push('');
+    },
+    // Review threads you opened that got a reply (or a later commit) and aren't resolved.
+    thread: () => {
+      if (data.threadsAwaiting.length === 0) return;
+      section('Threads awaiting your reply', data.threadsAwaiting.length);
+      for (const it of data.threadsAwaiting) {
+        const label = it.line != null ? `${it.path}:${it.line}` : it.path;
+        const replier = by(it.lastReplyAuthorId);
+        row(
+          `thread:${it.threadId}`,
+          `${it.repoFullName}#${it.prNumber}`,
+          it.githubUrl,
+          label,
+          it.lastReplyAt,
+          replier ? `↩ ${replier}` : null,
+        );
+        excerptLine(it.lastReplyExcerpt);
+      }
+      lines.push('');
+    },
+    thread_reply: () => {
+      if (data.threadReplies.length === 0) return;
+      section('Replies to your comments', data.threadReplies.length);
+      for (const it of data.threadReplies) {
+        const label = it.line != null ? `${it.path}:${it.line}` : it.path;
+        const replier = by(it.lastReplyAuthorId);
+        row(
+          `treply:${it.threadId}`,
+          `${it.repoFullName}#${it.prNumber}`,
+          it.githubUrl,
+          label,
+          it.lastReplyAt,
+          replier ? `↩ ${replier}` : null,
+        );
+        excerptLine(it.lastReplyExcerpt);
+      }
+      lines.push('');
+    },
+    comment_reply: () => {
+      if (data.commentReplies.length === 0) return;
+      section('Comments after yours', data.commentReplies.length);
+      for (const it of data.commentReplies) {
+        row(
+          `creply:${it.prId}`,
+          `${it.repoFullName}#${it.number}`,
+          it.githubUrl,
+          it.title,
+          it.since ?? it.openedAt,
+          by(it.replyAuthorId),
+        );
+        excerptLine(it.replyExcerpt);
+      }
+      lines.push('');
+    },
+    pushed_since: () => {
+      if (data.pushedSince.length === 0) return;
+      section('Pushed since you reviewed', data.pushedSince.length);
+      for (const it of data.pushedSince) {
+        const pusher = by(it.ball?.pusherId ?? null);
+        const n = it.ball?.humanCommitsAfter ?? 1;
+        row(
+          `push:${it.prId}`,
+          `${it.repoFullName}#${it.number}`,
+          it.githubUrl,
+          it.title,
+          it.since ?? it.openedAt,
+          `${pusher ?? 'someone'} pushed ${n}`,
+        );
+      }
+      lines.push('');
+    },
+    own_ci_red: () => {
+      if (data.ownCiRed.length === 0) return;
+      section('Your failing builds', data.ownCiRed.length);
+      for (const it of data.ownCiRed) {
+        row(
+          `ci:${it.prId}`,
+          `${it.repoFullName}#${it.number}`,
+          it.githubUrl,
+          it.title,
+          it.since ?? it.openedAt,
+          null,
+        );
+      }
+      lines.push('');
+    },
+    own_conflicts: () => {
+      if (data.ownConflicts.length === 0) return;
+      section('Your PRs with conflicts', data.ownConflicts.length);
+      for (const it of data.ownConflicts) {
+        row(
+          `conflict:${it.prId}`,
+          `${it.repoFullName}#${it.number}`,
+          it.githubUrl,
+          it.title,
+          it.since ?? it.openedAt,
+          null,
+        );
+      }
+      lines.push('');
+    },
+    trunk_red: () => {
+      if (data.redTrunks.length === 0) return;
+      section('Red default branches', data.redTrunks.length);
+      for (const it of data.redTrunks) {
+        row(
+          `trunk:${it.repoId}`,
+          it.repoFullName,
+          it.githubUrl,
+          `${it.branchName ?? 'trunk'} is red`,
+          it.since,
+          null,
+        );
+      }
+      lines.push('');
+    },
+    // Your open PRs with a standing approval. It says nothing about merge state — most approved PRs
+    // conflict or are blocked — and with `own_ready` on, the mergeable ones are listed under "Your
+    // PRs ready to land" instead, so this heading may not claim "ready".
+    pr_approved: () => {
+      if (data.approvedPrs.length === 0) return;
+      section('Your PRs — approved', data.approvedPrs.length);
+      for (const it of data.approvedPrs) {
+        row(
+          `approved:${it.prId}`,
+          `${it.repoFullName}#${it.number}`,
+          it.githubUrl,
+          it.title,
+          it.openedAt,
+          `✓ ${it.approvals} approval${it.approvals === 1 ? '' : 's'}`,
+        );
+      }
+      lines.push('');
+    },
+    own_ready: () => {
+      if (data.ownReady.length === 0) return;
+      section('Your PRs ready to land', data.ownReady.length);
+      for (const it of data.ownReady) {
+        row(
+          `land:${it.prId}`,
+          `${it.repoFullName}#${it.number}`,
+          it.githubUrl,
+          it.title,
+          it.since ?? it.openedAt,
+          it.forward === 'update_branch' ? 'behind trunk' : 'ready',
+        );
+      }
+      lines.push('');
+    },
+    // Your open PRs with new activity since you last looked.
+    your_pr: () => {
+      if (data.yourPrs.length === 0) return;
+      section('Your PRs — new activity', data.yourPrs.length);
+      for (const it of data.yourPrs) {
+        row(
+          `yours:${it.prId}`,
+          `${it.repoFullName}#${it.number}`,
+          it.githubUrl,
+          it.title,
+          it.openedAt,
+          null,
+        );
+        if (it.summary) lines.push(`      ${dim(sanitize(it.summary))}`);
+      }
+      lines.push('');
+    },
+    own_thread: () => {
+      if (data.ownThreads.length === 0) return;
+      section('Unanswered threads on your PRs', data.ownThreads.length);
+      for (const it of data.ownThreads) {
+        row(
+          `othread:${it.threadId}`,
+          `${it.repoFullName}#${it.prNumber}`,
+          it.githubUrl,
+          it.path,
+          it.since,
+          by(it.originalCommenterId),
+        );
+      }
+      lines.push('');
+    },
+    // Finished Claude reviews are a local, in-app action; the terminal board has never listed them.
+    claude_review: () => {},
+    // New open PRs by others you have never touched, opened since the repo was ADDED. The wire
+    // field keeps its historical `watchedRepoPrs` name; the section is "New PRs".
+    watched_repo_pr: () => {
+      if (data.watchedRepoPrs.length === 0) return;
+      section('New PRs', data.watchedRepoPrs.length);
+      for (const it of data.watchedRepoPrs) {
+        const author = by(it.authorId);
+        row(
+          `newpr:${it.prId}`,
+          `${it.repoFullName}#${it.number}`,
+          it.githubUrl,
+          it.title,
+          it.openedAt,
+          author ? `by ${author}` : null,
+        );
+      }
+      lines.push('');
+    },
+  };
+  for (const reason of data.order) printers[reason]();
+  offFooter();
 
   return { output: lines.join('\n') + '\n', keys };
 }

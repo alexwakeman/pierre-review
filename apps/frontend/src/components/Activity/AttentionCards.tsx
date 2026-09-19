@@ -4,6 +4,7 @@ import type {
   AutomatedReviewerKind,
   CiFailingCard,
   ConflictsCard,
+  DependencyBumpCard,
   InsightCard,
   InsightPrRef,
   InsightReviewer,
@@ -13,8 +14,13 @@ import type {
   MergeStateStatus,
   MyTurnCard,
   MyTurnCardReason,
+  MyTurnOwnWork,
+  MyTurnTrunkCard,
+  PrAutomation,
   ReviewerRoutingCard,
   ReviewStanding,
+  SecurityAlert,
+  SecurityCard,
   StalledReviewCard,
   UntouchedThreadCard,
   UpdateBranchCard,
@@ -32,6 +38,7 @@ import { usePrArmedIntent, usePrStoppedIntent } from '../../hooks/useAutoMerge.j
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
 import {
+  advisoryUrl,
   automatedReviewerMeta,
   CI_META,
   dateTime,
@@ -41,6 +48,7 @@ import {
   relativeTime,
   REVIEW_STATE_META,
   safeExternalUrl,
+  userLabel,
   vendorInk,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
@@ -50,6 +58,7 @@ import {
   ChevronIcon,
   ExternalLinkIcon,
   MergeIcon,
+  ShieldIcon,
   SparkleIcon,
   WarningIcon,
 } from '../Icons.js';
@@ -66,7 +75,15 @@ import {
 } from '../conflicts/ResolveConflictsButton.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
-import { cardKindLabel, KIND_LABEL, myTurnReasonLabel } from './pendingLabels.js';
+import {
+  AUTHOR_ROLE_CHIP,
+  cardKindLabel,
+  DEP_STATE_LABEL,
+  depStateSentence,
+  KIND_LABEL,
+  myTurnReasonLabel,
+  SECURITY_ALERT_SOURCE_LABEL,
+} from './pendingLabels.js';
 import { CardPlacementInfo, PendingBoardContext, type PendingBoardInfo } from './PendingInfo.js';
 
 // The attention-card list — the stalled-review / untouched-thread / reviewer-load / needs-a-reviewer
@@ -435,11 +452,13 @@ export type PrSourceRef = Pick<InsightPrRef, 'authorIsBot' | 'authorBotKind'>;
 /**
  * THE CHIP A CARD'S AUTHOR EARNS: a vendor name, the generic "Bot", or null for no chip at all.
  *
- * ⚠ THE CHIP ONLY EVER MAKES A POSITIVE CLAIM. "A person" is said by the card's author name and
- * avatar, never by a chip — one on every row of a fifty-card board is noise, and it is also the
- * claim we are least entitled to make. So `authorIsBot !== true` returns null, which covers BOTH
- * "the server said person" and "this surface never said" (the search card). Neither may paint a
- * bot chip, and neither needs to paint a "human" one.
+ * ⚠ THE CHIP ONLY EVER MAKES A POSITIVE CLAIM. On the Pending board "a person" is said by the
+ * card's BYLINE — their avatar and name (`PrByline`) — and this chip does not render there at all
+ * (the byline names automation too). It survives for a surface with no byline, the search card,
+ * where nothing names a person, and a chip on every row would be noise and the claim we are least
+ * entitled to make. So `authorIsBot !== true` returns null, which covers BOTH "the server said
+ * person" and "this surface never said". Neither may paint a bot chip, and neither needs to paint
+ * a "human" one.
  *
  * ⚠ AND A KIND WITHOUT THE FLAG IS STILL NULL. The server gates the kind on the flag already;
  * repeating the gate here means a wire regression costs a missing brand, never a vendor chip over
@@ -467,15 +486,180 @@ export type PrMetaFields = Pick<
   | 'codeLocIsLowerBound'
   | 'blast'
 > &
-  Partial<PrSourceRef>;
+  Partial<PrSourceRef> &
+  // The byline's two inputs — OPTIONAL here for the source pair's reason: the search card never had
+  // them, and renders no byline.
+  Partial<Pick<InsightPrRef, 'automation' | 'authorId'>>;
 
-// At-a-glance CI dot + files-changed count + a green/red LOC delta + WHO OPENED IT when that was
-// automation — mirrors the PR-detail size label (ChangesTab / PrDetail). One row, one place, so a
-// new card kind that renders it gets the source chip without remembering to.
-export function PrMetaRow({ pr }: { pr: PrMetaFields }): JSX.Element {
+// ── WHO OPENED IT ─────────────────────────────────────────────────────────────────────────────
+//
+// On the Pending board a Dependabot bump and a colleague's refactor are the same shape of row and
+// want completely different attention, so every PR card names its author: a person by picture and
+// name, automation by a chip. The byline reads `automation` — the SAME resolution the People /
+// Automation lens filters on (`pendingAuthorSideOf`) — so a card can never sit under "People"
+// wearing a bot chip.
+
+/** Vendor kinds that name no product: the chip says what the automation DOES instead. */
+const UNBRANDED_KINDS: ReadonlySet<AutomatedReviewerKind> = new Set<AutomatedReviewerKind>([
+  'in_house',
+  'vendor',
+  'pierre',
+]);
+
+/** The brand a vendor kind names, or null when it names none. */
+function brandOf(kind: AutomatedReviewerKind | null): string | null {
+  return kind != null && !UNBRANDED_KINDS.has(kind) ? automatedReviewerMeta(kind).label : null;
+}
+
+export interface AuthorByline {
+  /** 'person' | 'automation' | 'via' (a tool using a person's account). */
+  mode: 'person' | 'automation' | 'via';
+  /** The chip text, automation modes only: the vendor's brand when branded, else AUTHOR_ROLE_CHIP. */
+  chip: string | null;
+  /** The chip's vendor kind (colour via vendorInk), null = neutral. */
+  chipKind: AutomatedReviewerKind | null;
+  /** The person's (or unbranded bot's) display text; null for a branded bot (the chip says it). */
+  name: string | null;
+  /** Avatar source user id, or null. */
+  avatarUserId: number | null;
+}
+
+/**
+ * WHAT A CARD'S BYLINE SAYS — pure, so the four cases are pinned by a test.
+ *
+ *   • a person                 → avatar + name ("Deleted account" when GitHub has no account left)
+ *   • branded automation       → the vendor's chip ("Dependabot"), no name — the chip IS the name
+ *   • unbranded automation     → what it does ("Coding agent") + its login
+ *   • a tool on a person's account ('marker') → the tool, "via", then the person
+ *
+ * ⚠ `automation` ABSENT OR NULL IS A PERSON, and that is only safe because the wire field is
+ * REQUIRED: the server resolves it for every PR card (`authorAutomationFor`), so null is a
+ * statement, not a gap. `authorIsBot` is deliberately NOT consulted — it is a claim about the
+ * ACCOUNT, and a marker makes a person's account carry automation's work.
+ */
+export function authorByline(
+  pr: { authorId: number | null; automation?: PrAutomation | null },
+  usersById: Map<number, User>,
+): AuthorByline {
+  const user = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
+  const personName = pr.authorId == null ? 'Deleted account' : userLabel(user, pr.authorId);
+  const a = pr.automation ?? null;
+  if (a == null) {
+    return { mode: 'person', chip: null, chipKind: null, name: personName, avatarUserId: pr.authorId };
+  }
+  const brand = brandOf(a.kind);
+  const chip = brand ?? AUTHOR_ROLE_CHIP[a.role];
+  const chipKind = brand != null ? a.kind : null;
+  if (a.source === 'marker') {
+    return { mode: 'via', chip, chipKind, name: personName, avatarUserId: pr.authorId };
+  }
+  return {
+    mode: 'automation',
+    chip,
+    chipKind,
+    // A branded bot is named by its chip; an unbranded one by its LOGIN — "Coding agent" alone
+    // would not say which of a workspace's agents opened this.
+    name: brand != null ? null : (user?.githubLogin ?? userLabel(user, pr.authorId)),
+    // ⚠ A PICTURE OR NOTHING. With no `avatarUrl` the shared Avatar draws two 10px initials, and
+    // beside a chip that already spells the name ("DE" · "Dependabot") they say nothing, below the
+    // 11px floor. Measured: every GitHub-typed Bot account in the real DB has a NULL avatar, so this
+    // is the common case, not an edge. A person keeps the initials — they are that person's mark.
+    avatarUserId: user?.avatarUrl ? pr.authorId : null,
+  };
+}
+
+/** One drawn piece of a byline. */
+export type BylinePart = 'avatar' | 'chip' | 'via' | 'name';
+
+/**
+ * THE ORDER A BYLINE DRAWS ITS PIECES — pure, and the ONLY thing `PrByline` draws from, so a field
+ * `authorByline` returns can never be one the drawing skips (a branded bot's avatar once was).
+ *
+ *   person / automation → avatar, chip, name  (each only when present)
+ *   via                 → chip, "via", avatar, name — the tool first, then whose account it used
+ */
+export function bylineParts(b: AuthorByline): BylinePart[] {
+  const avatar: BylinePart[] = b.avatarUserId != null ? ['avatar'] : [];
+  const chip: BylinePart[] = b.chip != null ? ['chip'] : [];
+  const name: BylinePart[] = b.name != null ? ['name'] : [];
+  return b.mode === 'via'
+    ? [...chip, 'via', ...avatar, ...name]
+    : [...avatar, ...chip, ...name];
+}
+
+/**
+ * THE BYLINE, as drawn. 11px in the meta row's paired greys; a branded chip takes its ink through
+ * `vendorInk` (a raw brand hex may not be text). The name is `UserName` wherever there is an
+ * account, so the popover and profile link behave as everywhere else.
+ */
+export function PrByline({
+  pr,
+  usersById,
+  repoId,
+}: {
+  pr: { authorId: number | null; automation?: PrAutomation | null };
+  usersById: Map<number, User>;
+  repoId?: number;
+}): JSX.Element {
+  const b = authorByline(pr, usersById);
+  const user = b.avatarUserId != null ? usersById.get(b.avatarUserId) : undefined;
+  const meta = b.chipKind != null ? automatedReviewerMeta(b.chipKind) : null;
+  const draw = (part: BylinePart): JSX.Element => {
+    switch (part) {
+      case 'avatar':
+        return <Avatar key={part} user={user} size={13} />;
+      case 'chip':
+        return (
+          <span
+            key={part}
+            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium${
+              meta == null ? ' bg-gray-500/10 text-gray-600 dark:text-gray-300' : ''
+            }`}
+            style={meta != null ? { ...vendorInk(meta.color), background: `${meta.color}1a` } : undefined}
+          >
+            <BotIcon size={12} />
+            {b.chip}
+          </span>
+        );
+      case 'via':
+        return <span key={part}>via</span>;
+      case 'name':
+        return b.avatarUserId != null ? (
+          <UserName key={part} user={user} fallbackId={b.avatarUserId} repoId={repoId} />
+        ) : (
+          <span key={part}>{b.name}</span>
+        );
+    }
+  };
+  return (
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+      {bylineParts(b).map(draw)}
+    </span>
+  );
+}
+
+// At-a-glance CI dot + files-changed count + a green/red LOC delta + WHO OPENED IT — mirrors the
+// PR-detail size label (ChangesTab / PrDetail). One row, one place, so a new card kind that renders
+// it gets the byline without remembering to.
+//
+// ⚠ THE BYLINE NEEDS BOTH HALVES: the board's `usersById` AND a card carrying `automation`. With
+// both, it leads the row and the trailing source chip is NOT drawn — the byline already named the
+// bot, and saying it twice on one row is noise. Without them (the search card, a response
+// predating the field) the row keeps the positive-claim-only chip.
+export function PrMetaRow({
+  pr,
+  usersById,
+}: {
+  pr: PrMetaFields;
+  usersById?: Map<number, User>;
+}): JSX.Element {
   const ci = pr.ciStatus ? CI_META[pr.ciStatus] : null;
+  const byline = usersById != null && 'automation' in pr;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+      {byline && (
+        <PrByline pr={{ authorId: pr.authorId ?? null, automation: pr.automation }} usersById={usersById} />
+      )}
       <span className="inline-flex items-center gap-1" title={ci?.label ?? 'no checks'}>
         <span
           className="inline-block h-2 w-2 rounded-full"
@@ -506,7 +690,7 @@ export function PrMetaRow({ pr }: { pr: PrMetaFields }): JSX.Element {
           ⚠ NOT `expandable` here: the card is a link to the pull request, and a second
           interactive target inside it competes with that. The reasons are in the title. */}
       <BlastRadiusChip pr={pr} />
-      {authorSourceLabel(pr) != null && (
+      {!byline && authorSourceLabel(pr) != null && (
         <BotVendorPill
           kind={pr.authorBotKind ?? null}
           title={
@@ -970,6 +1154,13 @@ export interface PendingMergeGate {
   /** The ONE verdict, run over the card's synced fields — the copy behind an absent button. */
   verdict: MergeVerdictInfo;
   /**
+   * Does the row say the verdict when it offers no button? True on the two forward kinds, where
+   * this row is the card's only statement of its merge state. FALSE on a Dependencies card: its
+   * state row ("Blocked · Required checks or reviews aren’t satisfied") already says it, and the
+   * verdict line under it printed the same state a second time — once the same sentence twice.
+   */
+  verdictLine: boolean;
+  /**
    * GitHub'S MERGE QUEUE HOLDS THIS PR RIGHT NOW — a POSITIVE observation only (`inMergeQueue`
    * null is "not observed" and false is GitHub's "no"; neither claims the queue).
    *
@@ -1001,7 +1192,9 @@ export interface PendingMergeGate {
  * construction (the server's fold is non-draft only), and `mergeVerdict` degrades honestly
  * without them — "update the branch first" simply loses its commit count.
  */
-export function pendingMergeGate(card: MergeReadyCard | UpdateBranchCard): PendingMergeGate {
+export function pendingMergeGate(
+  card: MergeReadyCard | UpdateBranchCard | SecurityCard | DependencyBumpCard,
+): PendingMergeGate {
   // ⚠ ONLY A POSITIVE OBSERVATION REACHES THE VERDICT. `inMergeQueue` is three-state and
   // `MergeVerdictInput.inMergeQueue` is two — `null` ("we never looked") and `false` ("GitHub says
   // no") both mean *do not claim the queue owns this*, which is exactly what `false` means there.
@@ -1010,7 +1203,9 @@ export function pendingMergeGate(card: MergeReadyCard | UpdateBranchCard): Pendi
     // ⚠ null is NOT OBSERVED, never "not conflicting" — the three-state rule. 'unknown' is what
     // `mergeVerdict` calls that, and it is the honest input.
     mergeable: card.mergeable ?? 'unknown',
-    mergeStateStatus: card.mergeStateStatus,
+    // The Dependencies cards carry the state NULLABLE (not observed); the forward kinds never
+    // null it, because a state is what mints them. Same honest input as `mergeable` above.
+    mergeStateStatus: card.mergeStateStatus ?? 'unknown',
     // ⚠ THE QUEUE IS WHY THIS FIELD RIDES THE CARD. GitHub's MergeStateStatus enum has no QUEUED
     // member, so a queued PR reports `blocked` — and a board reading the status alone would offer
     // a Merge button GitHub refuses. `mergeVerdict`'s queue branch runs FIRST, which is what makes
@@ -1020,7 +1215,22 @@ export function pendingMergeGate(card: MergeReadyCard | UpdateBranchCard): Pendi
   // HIDDEN, not disabled. `viewerCanPush` is the synced `repos.viewerPermission` and a VISIBILITY
   // gate only; every route re-checks permission, the head oid and the live merge state before
   // anything irreversible happens.
-  if (!card.viewerCanPush) return { show: false, action: null, verdict, queued };
+  // A Dependencies card states its merge state in its own state row, so this row never repeats it.
+  const dependencies = card.kind === 'security' || card.kind === 'dependency_bump';
+  const verdictLine = !dependencies;
+  if (!card.viewerCanPush) return { show: false, action: null, verdict, verdictLine, queued };
+  // A person's PR a security tool flagged carries NO merge row: it keeps its own cards elsewhere on
+  // the board, and those carry whatever landing it has. This card is about the advisory.
+  if (card.kind === 'security' && !card.dependencyUpdate) {
+    return { show: false, action: null, verdict, verdictLine, queued };
+  }
+  // A DEPENDENCIES card is minted by who opened the PR, not by its merge state, so the verb comes
+  // from the verdict alone: behind → update the branch, mergeable → merge, anything else → nothing.
+  if (dependencies) {
+    const action =
+      verdict.verdict === 'behind' ? 'update_branch' : verdict.canMerge ? 'merge' : null;
+    return { show: true, action, verdict, verdictLine, queued };
+  }
   const action =
     card.kind === 'update_branch'
       ? // The whole point of this card is that GitHub is REFUSING the merge until the branch is
@@ -1032,13 +1242,14 @@ export function pendingMergeGate(card: MergeReadyCard | UpdateBranchCard): Pendi
       : verdict.canMerge
         ? 'merge'
         : null;
-  return { show: true, action, verdict, queued };
+  return { show: true, action, verdict, verdictLine, queued };
 }
 
 /**
- * MERGE ACTIONS ON A PENDING CARD — the two FORWARD kinds only, because those are exactly the
- * rows where the thing to do is "land it". A `my_turn` "review this" card gets no Merge button;
- * reviewing is not merging.
+ * MERGE ACTIONS ON A PENDING CARD — the two FORWARD kinds and a dependency update, because those
+ * are exactly the rows where the thing to do is "land it" — and your own ready PR moved into My
+ * turn (`own_ready`, through `asForwardCard`), which is the same row in another tab. A `my_turn`
+ * "review this" card gets no Merge button; reviewing is not merging.
  *
  * ⚠ NOTHING HERE FETCHES ON MOUNT.
  *   • `usePrArmedIntent` is a SELECTOR over the account-wide armed list the app already polls —
@@ -1052,7 +1263,11 @@ export function pendingMergeGate(card: MergeReadyCard | UpdateBranchCard): Pendi
  * Arming and cancelling stay in `MergeWhenReadyControl` — the ONE path that arms — rather than
  * being re-spelled compactly here.
  */
-function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard }): JSX.Element | null {
+function PendingMergeActions({
+  card,
+}: {
+  card: MergeReadyCard | UpdateBranchCard | SecurityCard | DependencyBumpCard;
+}): JSX.Element | null {
   const gate = pendingMergeGate(card);
   const armed = usePrArmedIntent(card.prId);
   // …and the one the watcher gave up on. Both are selectors over the SAME account-wide poll the
@@ -1126,9 +1341,10 @@ function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard
         // the entry's own state. A second "in merge queue" on the row below is the same fact
         // twice, on the one board where every line has to earn its width.
         null
-      ) : gate.action == null ? (
+      ) : gate.action == null && gate.verdictLine ? (
         // No button, but never a silent row: the verdict IS the answer to "why can't I merge
-        // this?", and it is the same sentence PrDetail leads its merge panel with.
+        // this?", and it is the same sentence PrDetail leads its merge panel with. (A Dependencies
+        // card's state row has already said it — `verdictLine` is false there.)
         <span className={`text-[11px] font-medium ${MERGE_TONE_CLASS[gate.verdict.tone]}`}>
           {gate.verdict.label}
           {gate.verdict.detail != null && (
@@ -1188,25 +1404,32 @@ function PendingMergeActions({ card }: { card: MergeReadyCard | UpdateBranchCard
  * the Cancel for an intent parked at `waiting_conflicts` that will sit there until it expires. It is
  * NEVER mounted un-armed — that would offer to arm a watcher whose blocker only a human can clear.
  */
-function PendingConflictActions({ card }: { card: ConflictsCard }): JSX.Element | null {
+function PendingConflictActions({
+  card,
+}: {
+  card: ConflictsCard | SecurityCard | DependencyBumpCard;
+}): JSX.Element | null {
   const armed = usePrArmedIntent(card.prId);
   // ⚠ THE `armed == null` EARLY RETURN IS GONE. It used to be right — with nothing armed there was
   // nothing to press — and it is exactly the shape of defect that leaves a feature built, gated and
   // unreachable: the resolver button would have been mounted on a row that returns null for the
   // overwhelming majority of cards.
   //
-  // HIDE, never disable. ⚠ No `viewerCanPush` gate here because there is no such field: the kind is
-  // MINTED only for repos the viewer can push to (`writableRepoIds`), so the flag would be a
-  // constant `true` on the wire — see ConflictsCard's contract in packages/shared. That is why
-  // `viewerCanPush` below is a literal, and why it must NOT become a new field on the card.
+  // HIDE, never disable. ⚠ A `conflicts` card has no `viewerCanPush` field: the kind is MINTED only
+  // for repos the viewer can push to (`writableRepoIds`), so the flag would be a constant `true` on
+  // the wire — see ConflictsCard's contract in packages/shared. That is why it is a literal for that
+  // kind, and why it must NOT become a new field on the card. A Dependencies card in the
+  // `conflicts` state is NOT write-gated (it is minted by who opened the PR), so it carries — and
+  // this reads — its own.
   //
   // The row asks the SAME resolver the button asks, so it can drop out entirely rather than
   // render an empty strip of padding under every conflicts card in cloud (where the resolver's
   // routes do not exist) with nothing armed. One rule, one answer.
+  const viewerCanPush = card.kind === 'conflicts' ? true : card.viewerCanPush;
   const canResolve = useConflictResolverEntry({
     state: 'open',
     verdict: 'conflicts',
-    viewerCanPush: true,
+    viewerCanPush,
   });
   if (!canResolve && armed == null) return null;
   return (
@@ -1219,7 +1442,7 @@ function PendingConflictActions({ card }: { card: ConflictsCard }): JSX.Element 
         // reading of the enum. `pendingMergeGate` states the same rule for the forward kinds.
         state="open"
         verdict="conflicts"
-        viewerCanPush
+        viewerCanPush={viewerCanPush}
         target={{
           prId: card.prId,
           repoId: card.repoId,
@@ -1237,6 +1460,202 @@ function PendingConflictActions({ card }: { card: ConflictsCard }): JSX.Element 
           </span>
           <MergeWhenReadyControl prId={card.prId} eager={false} />
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * WHAT A DEPENDENCIES CARD MAY OFFER — the landing actions of the PR it names, and nothing for a
+ * person's PR a security tool flagged (that PR keeps its own cards, which carry its landing).
+ *
+ * ⚠ ONE CARD PER PR IS WHY THIS EXISTS. A dependency-automation PR is listed ONLY in the
+ * Dependencies tab, so its one card has to carry whatever the Ready to land / Needs fixing cards
+ * would have: Merge, Update branch, Merge when ready, or the conflict resolver. It reuses those
+ * rows rather than re-spelling them, so it inherits their rule: NOTHING FETCHES ON MOUNT.
+ */
+function DependencyActions({ card }: { card: SecurityCard | DependencyBumpCard }): JSX.Element | null {
+  if (card.kind === 'security' && !card.dependencyUpdate) return null;
+  if (card.depState === 'conflicts') return <PendingConflictActions card={card} />;
+  return <PendingMergeActions card={card} />;
+}
+
+/** The three facts an advisory chip needs, decided off the card alone. */
+export interface AdvisoryChip {
+  id: string;
+  /** The public page, already through `safeExternalUrl`; undefined for a scheme with none. */
+  href: string | undefined;
+}
+
+/** A piece of a sentence: plain words, or an advisory id drawn as its chip. */
+export type AdvisoryPart = { text: string } | AdvisoryChip;
+
+/** A character an advisory id can continue with — so `CVE-2026-1` never matches inside
+ *  `CVE-2026-12`. A '.' is not one: a sentence may end on an id. */
+const ADVISORY_ID_CHAR = /[A-Za-z0-9_-]/;
+const idBoundary = (ch: string | undefined): boolean => ch == null || !ADVISORY_ID_CHAR.test(ch);
+
+/**
+ * A SENTENCE WITH ITS ADVISORY IDS AS LINKS: "Fixes GHSA-…" becomes the word "Fixes" and the linked
+ * id. Only the card's OWN ids are matched (`advisoryIds`, the full list), longest first, whole ids
+ * only. This is how a card writes each id ONCE — in the sentence that says what it is, linked there —
+ * instead of once in the sentence and again in a chip under it.
+ */
+export function advisoryParts(text: string, ids: readonly string[]): AdvisoryPart[] {
+  const longestFirst = [...ids].sort((a, b) => b.length - a.length);
+  const parts: AdvisoryPart[] = [];
+  let plain = '';
+  let i = 0;
+  while (i < text.length) {
+    const id = idBoundary(text[i - 1])
+      ? longestFirst.find((x) => text.startsWith(x, i) && idBoundary(text[i + x.length]))
+      : undefined;
+    if (id == null) {
+      plain += text[i];
+      i += 1;
+      continue;
+    }
+    if (plain !== '') parts.push({ text: plain });
+    plain = '';
+    parts.push({ id, href: safeExternalUrl(advisoryUrl(id)) });
+    i += id.length;
+  }
+  if (plain !== '') parts.push({ text: plain });
+  return parts;
+}
+
+/**
+ * THE ADVISORY CHIPS on a security card: the ids no sentence on the card already names (`named`),
+ * the first three of them, each linked where its scheme has a public page, and how many more there
+ * are. "+N more" counts the rest of that list — `advisoryIds` is complete up to the server's 50-id
+ * safety cap, so the count is a real denominator.
+ */
+export function advisoryChips(
+  ids: readonly string[],
+  named: ReadonlySet<string> = new Set(),
+): { chips: AdvisoryChip[]; more: number } {
+  const rest = ids.filter((id) => !named.has(id));
+  const shown = rest.slice(0, 3);
+  return {
+    chips: shown.map((id) => ({ id, href: safeExternalUrl(advisoryUrl(id)) })),
+    more: rest.length - shown.length,
+  };
+}
+
+/**
+ * ONE LIVE ALERT, as the card says it: `lead` "Socket flagged GHSA-… and 2 more", then `where`
+ * ("in a review thread", or null). Two halves because a thread alert's `where` is the button that
+ * opens the thread, while the ids in `lead` are links — a link may not sit inside a button. A
+ * reviewer alert is named by its author's brand, else its login — "a reviewer flagged…" names nobody.
+ */
+export function securityAlertLine(
+  alert: SecurityAlert,
+  usersById: Map<number, User>,
+): { lead: string; where: string | null } {
+  const source =
+    alert.source === 'reviewer'
+      ? (brandOf(alert.vendorKind) ??
+        usersById.get(alert.authorId)?.githubLogin ??
+        userLabel(undefined, alert.authorId))
+      : SECURITY_ALERT_SOURCE_LABEL[alert.source];
+  const [first, ...rest] = alert.advisoryIds;
+  const what =
+    first == null ? 'a known advisory' : rest.length > 0 ? `${first} and ${rest.length} more` : first;
+  return { lead: `${source} flagged ${what}`, where: alert.surface === 'thread' ? 'in a review thread' : null };
+}
+
+/** The security half of a `security` card: the fix sentence, the advisory chips, the live alerts. */
+function SecurityDetail({
+  card,
+  usersById,
+  onOpenThread,
+}: {
+  card: SecurityCard;
+  usersById: Map<number, User>;
+  onOpenThread: (threadId: number) => void;
+}): JSX.Element {
+  // Amber only for Dependabot's inferred fix with nothing else behind it — the card's own colour.
+  const inferredOnly = card.fix === 'inferred' && card.alertCount === 0;
+  const tint = inferredOnly
+    ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+    : 'bg-red-500/10 text-red-700 dark:text-red-300';
+  const mark = inferredOnly ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400';
+  const ids = card.advisoryIds;
+  const fixParts = card.detail !== '' ? advisoryParts(card.detail, ids) : [];
+  const alertLines = card.alerts.map((alert) => {
+    const line = securityAlertLine(alert, usersById);
+    return { alert, where: line.where, parts: advisoryParts(line.lead, ids) };
+  });
+  // ⚠ EACH ID ONCE. An id a sentence names is linked THERE; the chip row carries only the rest, so
+  // "Fixes GHSA-…" is never followed by a "GHSA-…" chip saying it again.
+  const named = new Set(
+    [...fixParts, ...alertLines.flatMap((l) => l.parts)].flatMap((p) => ('id' in p ? [p.id] : [])),
+  );
+  const { chips, more } = advisoryChips(ids, named);
+  const moreAlerts = card.alertCount - card.alerts.length;
+  const chip = (c: AdvisoryChip, key: string): JSX.Element =>
+    c.href != null ? (
+      <a
+        key={key}
+        href={c.href}
+        target="_blank"
+        rel="noreferrer noopener"
+        onClick={(e) => e.stopPropagation()}
+        className={`inline-flex items-center gap-1 rounded px-1.5 py-px font-mono text-[11px] hover:underline ${tint}`}
+        title="Open the advisory"
+      >
+        {c.id}
+        <ExternalLinkIcon size={10} />
+      </a>
+    ) : (
+      <span key={key} className={`rounded px-1.5 py-px font-mono text-[11px] ${tint}`}>
+        {c.id}
+      </span>
+    );
+  const words = (parts: AdvisoryPart[]): JSX.Element[] =>
+    parts.map((p, i) => ('id' in p ? chip(p, `${i}`) : <span key={i}>{p.text}</span>));
+  return (
+    <div className="mt-1.5 space-y-1 text-[12px] text-gray-600 dark:text-gray-300">
+      {fixParts.length > 0 && (
+        <p className="flex items-start gap-1.5">
+          <ShieldIcon size={12} className={`mt-0.5 shrink-0 ${mark}`} />
+          <span className="min-w-0">{words(fixParts)}</span>
+        </p>
+      )}
+      {alertLines.map(({ alert, where, parts }, i) => (
+        <p key={`${alert.source}:${alert.at}:${i}`} className="flex items-start gap-1.5">
+          <ShieldIcon size={12} className={`mt-0.5 shrink-0 ${mark}`} />
+          <span className="min-w-0">
+            {words(parts)}
+            {where != null &&
+              (alert.threadId != null ? (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    onClick={() => onOpenThread(alert.threadId as number)}
+                    className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                    title="Open this review thread"
+                  >
+                    {where}
+                  </button>
+                </>
+              ) : (
+                ` ${where}`
+              ))}
+          </span>
+        </p>
+      ))}
+      {(chips.length > 0 || more > 0) && (
+        <div className="flex flex-wrap items-center gap-1.5 pl-[18px] text-[11px]">
+          {chips.map((c) => chip(c, c.id))}
+          {more > 0 && <span className="text-gray-500 dark:text-gray-400">+{more} more</span>}
+        </div>
+      )}
+      {moreAlerts > 0 && (
+        <p className="pl-[18px] text-gray-500 dark:text-gray-400">
+          +{moreAlerts} more {moreAlerts === 1 ? 'alert' : 'alerts'}
+        </p>
       )}
     </div>
   );
@@ -1415,6 +1834,8 @@ function PrLine({
     | ReviewerRoutingCard
     | MergeReadyCard
     | UpdateBranchCard
+    | SecurityCard
+    | DependencyBumpCard
     // ⚠ NARROW ON PURPOSE — do not "simplify" this to `InsightCard`. `ci_failing` and
     // `reviewer_load` do not carry the four fields this reads, and the narrow union is what keeps
     // that a compile error rather than a blank row.
@@ -1448,6 +1869,19 @@ function PrLine({
   );
 }
 
+/**
+ * THE LANDING PR'S BYLINE INPUT on a trunk card, or null when there is nothing to name: the
+ * 'your_pr' arm (its "Your PR" chip already says whose it is) and a red head no PR resolved to (a
+ * direct push — there is no PR, so there is no author to name, and "Deleted account" would be
+ * false). Pure, so the card's one byline decision is pinned by a test.
+ */
+export function landingPrByline(
+  card: CiFailingCard,
+): { authorId: number | null; automation: PrAutomation | null } | null {
+  if (card.arm !== 'trunk' || card.prId == null) return null;
+  return { authorId: card.authorId, automation: card.automation };
+}
+
 // The body of a `ci_failing` card. The REPO is the subject on both arms (it is the one thing that
 // is always there), the PR is an optional second line, and the external link goes wherever the
 // server pointed it — the PR page on 'your_pr', the COMMIT page on 'trunk', where a trunk run's
@@ -1456,14 +1890,20 @@ function CiFailingBody({
   card,
   usersById,
   onOpenPr,
+  chip,
 }: {
   card: CiFailingCard;
   usersById: Map<number, User>;
   onOpenPr: (meta: PinnedPr, returnItemId?: string) => void;
+  /** The chip before the detail. Defaults to whose it is ("Your PR" / "Your repo"); a red default
+   *  branch promoted into My turn passes its type chip instead, because it may be a repo the reader
+   *  does not maintain — "Your repo" there would be false. */
+  chip?: string;
 }): JSX.Element {
   const ci = CI_META[card.ciStatus] ?? null;
   const href = safeExternalUrl(card.githubUrl);
   const hasPr = card.prId != null && card.prNumber != null && card.prTitle != null;
+  const byline = landingPrByline(card);
   return (
     <>
       <div className="flex min-w-0 items-baseline gap-1.5 text-sm">
@@ -1499,11 +1939,12 @@ function CiFailingBody({
         // ⚠ RENDERED ONLY WHEN THERE IS ONE. On the 'trunk' arm a missing PR is ORDINARY — ~11% of
         // red heads are direct pushes to the default branch — so the card says trunk is red and
         // simply names no PR, rather than showing an empty "landed by" row.
+        // ⚠ ON 'trunk', WHO OPENED THE LANDING PR AND WHO LANDED IT ARE TWO PEOPLE, so the row
+        // reads "#12 title · (opened by) Alice · landed by Bob" — the byline sits against the PR it
+        // names, and "landed by" introduces only the merger. (A red head after a Dependabot bump
+        // reads as exactly that.)
         <div className="mt-1 flex min-w-0 flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-          <span>{card.arm === 'trunk' ? 'landed by' : 'PR'}</span>
-          {card.arm === 'trunk' && card.mergedById != null && (
-            <UserChip id={card.mergedById} usersById={usersById} />
-          )}
+          {card.arm === 'your_pr' && <span>PR</span>}
           <button
             type="button"
             onClick={() =>
@@ -1525,11 +1966,18 @@ function CiFailingBody({
           >
             <span className="text-gray-400">#{card.prNumber}</span> {card.prTitle}
           </button>
+          {byline != null && <PrByline pr={byline} usersById={usersById} repoId={card.repoId} />}
+          {card.arm === 'trunk' && card.mergedById != null && (
+            <>
+              <span>landed by</span>
+              <UserChip id={card.mergedById} usersById={usersById} />
+            </>
+          )}
         </div>
       )}
       <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
         <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
-          {card.arm === 'your_pr' ? 'Your PR' : 'Your repo'}
+          {chip ?? (card.arm === 'your_pr' ? 'Your PR' : 'Your repo')}
         </span>
         <span className="min-w-0">{card.detail}</span>
       </div>
@@ -1543,6 +1991,86 @@ function CiFailingBody({
         </div>
       )}
     </>
+  );
+}
+
+// ── A PROMOTED CARD KEEPS ITS CONTROLS ────────────────────────────────────────────────────────
+//
+// Settings → My Turn can MOVE the reader's own work into My turn — a red build, a conflict, a PR
+// ready to land, an unanswered thread, a red default branch. The card moves; its actions must not
+// be lost on the way. So a promoted card carries its home kind's fields (`MyTurnCard.own`, or the
+// trunk card's own), and these adapters rebuild the home card's shape so the SAME components render
+// its controls: `PendingMergeActions`, `PendingConflictActions`, `CiFailingBody`. Nothing is
+// re-spelled, and nothing fetches on mount — those components' own click-gated rule holds.
+//
+// Pure, so `test/pendingCardControls.test.ts` pins them.
+
+type ReadyWork = Extract<MyTurnOwnWork, { kind: 'ready' }>;
+type ConflictsWork = Extract<MyTurnOwnWork, { kind: 'conflicts' }>;
+
+/** A promoted "ready to land" card, as the Ready to land tab's card — merge or update the branch. */
+export function asForwardCard(c: MyTurnCard, own: ReadyWork): MergeReadyCard | UpdateBranchCard {
+  const shared = {
+    ...c,
+    mergeable: own.mergeable,
+    lastCommitAt: own.lastCommitAt,
+    viewerCanPush: own.viewerCanPush,
+    relevance: c.relevance ?? 'direct',
+    detail: c.detail,
+  };
+  return own.forward === 'update_branch'
+    ? { ...shared, kind: 'update_branch', mergeStateStatus: 'behind' }
+    : { ...shared, kind: 'merge', mergeStateStatus: own.mergeStateStatus };
+}
+
+/** A promoted conflicts card, as the Needs fixing tab's card — the resolver entry. */
+export function asConflictsCard(c: MyTurnCard, own: ConflictsWork): ConflictsCard {
+  return {
+    ...c,
+    kind: 'conflicts',
+    mergeStateStatus: own.mergeStateStatus,
+    mergeable: own.mergeable,
+    relevance: c.relevance ?? 'direct',
+  };
+}
+
+/** A promoted red default branch, as the ci_failing trunk card it replaces — same body, same
+ *  landing-PR byline (the four author fields are copied, never re-resolved). */
+export function asCiFailingCard(t: MyTurnTrunkCard): CiFailingCard {
+  return {
+    id: t.id,
+    kind: 'ci_failing',
+    severity: t.severity,
+    arm: 'trunk',
+    repoId: t.repoId,
+    repoFullName: t.repoFullName,
+    ciStatus: t.ciStatus,
+    prId: t.prId,
+    prNumber: t.prNumber,
+    prTitle: t.prTitle,
+    headSha: t.headSha,
+    mergedById: t.mergedById,
+    viewerMerged: t.viewerMerged,
+    detail: t.detail,
+    observedAt: t.observedAt,
+    githubUrl: t.githubUrl,
+    authorId: t.authorId,
+    authorIsBot: t.authorIsBot,
+    authorBotKind: t.authorBotKind,
+    automation: t.automation,
+  };
+}
+
+/** Opens the PR a card names, when it names one — the ci_failing card's rule (a trunk with no
+ *  landing PR has nothing to open, and a click that does nothing is an inert card). */
+function landingPrMeta(
+  c: Pick<CiFailingCard, 'prId' | 'prNumber' | 'prTitle' | 'repoFullName'>,
+  usersById: Map<number, User>,
+): PinnedPr | null {
+  if (c.prId == null || c.prNumber == null || c.prTitle == null) return null;
+  return metaFor(
+    { prId: c.prId, prNumber: c.prNumber, prTitle: c.prTitle, repoFullName: c.repoFullName },
+    usersById,
   );
 }
 
@@ -1575,7 +2103,10 @@ export function AttentionCards({
    * The Pending board's placement data, which turns on every card's info button and carries the
    * Pro plan's per-card lines. Absent on any other mount (the Pro Insights pane).
    */
-  explain?: Pick<PendingBoardInfo, 'scores' | 'viewName' | 'total' | 'whyById' | 'onOpenGuide'>;
+  explain?: Pick<
+    PendingBoardInfo,
+    'tab' | 'rules' | 'scores' | 'viewName' | 'total' | 'whyById' | 'onOpenGuide'
+  >;
 }): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const selectThread = useFilters((s) => s.selectThread);
@@ -1613,13 +2144,92 @@ export function AttentionCards({
   // tab, deep-linked to the thread.
   const open = (meta: PinnedPr, returnItemId?: string): void =>
     openPrDetailTab(meta, { fromActivity: true, returnItemId });
-  // Thread-shaped navigation, shared by the untouched-thread card and a my_turn card whose
-  // reason is 'thread' (the thread id is on a different field on each, so it's a parameter).
+  // Thread-shaped navigation, shared by the untouched-thread card and the thread-grained my_turn
+  // types — 'thread', 'thread_reply', 'own_thread' (the thread id is on a different field on each,
+  // so it's a parameter).
   const openThreadOn = (card: InsightPrRef & { id: string }, threadId: number): void => {
     openPrDetailTab(metaFor(card, usersById), { fromActivity: true, returnItemId: card.id });
     selectThread(card.prId, threadId);
   };
   const openThread = (card: UntouchedThreadCard): void => openThreadOn(card, card.threadId);
+
+  // The VIEWER'S OWN inbox as cards — the same population GET /api/my-turn serves, and the list the
+  // daily brief's "N need your review or reply" line counts. Clicking opens the PR (or, for a
+  // thread-grained type, the thread on the PR's Threads tab); ACTING on the PR is what clears it —
+  // there is no "mark as seen" control and no dismissal table behind one.
+  //
+  // ⚠ Deliberately LEANER than the untouched-thread card: no embedded ThreadCard and no
+  // InsightPrSummary. This kind carries its own much larger cap (MY_TURN_CARD_CAP = 50 vs 15 for the
+  // survey kinds), so a per-card thread fetch would be up to 50 requests to paint one board — the
+  // `ThreadAssessment` failure mode. A thread card navigates to the thread instead.
+  //
+  // A PROMOTED card (`own`) adds its home kind's controls through the adapters above: the merge row
+  // for a PR ready to land, the resolver entry for a conflict, the bot pill on an unanswered thread.
+  const renderMyTurnPr = (card: MyTurnCard): JSX.Element => {
+    const own = card.own;
+    return (
+      <CardShell
+        key={card.id}
+        card={card}
+        innerRef={(el) => setCardRef(card.id, el)}
+        flash={flashId === card.id}
+        right={<span title={dateTime(card.since)}>{relativeTime(card.since)}</span>}
+        openedAt={card.openedAt}
+        // The ball's clock. It IS the open date on a PR nobody has touched since it appeared,
+        // which is most new review requests — see `clockSaysMore`.
+        clockAt={card.since}
+        onActivate={() =>
+          card.threadId != null &&
+          (card.reason === 'thread' || card.reason === 'thread_reply' || card.reason === 'own_thread')
+            ? openThreadOn(card, card.threadId)
+            : open(metaFor(card, usersById), card.id)
+        }
+      >
+        <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
+        <PrMetaRow pr={card} usersById={usersById} />
+        <PrReviewRow pr={card} usersById={usersById} />
+        <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+          <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
+            {myTurnReasonLabel(card)}
+          </span>
+          <span className="min-w-0">{card.detail}</span>
+          {own?.kind === 'thread' && own.botKind != null && <BotVendorPill kind={own.botKind} />}
+        </div>
+        {own?.kind === 'ready' && <PendingMergeActions card={asForwardCard(card, own)} />}
+        {own?.kind === 'conflicts' && <PendingConflictActions card={asConflictsCard(card, own)} />}
+        <MyTurnActions card={card} />
+      </CardShell>
+    );
+  };
+
+  // A red default branch the reader added to My Turn. Its subject is a REPOSITORY, so it renders as
+  // the ci_failing trunk card it moved out of — the same body, the same landing-PR line — with its
+  // type chip where that card says whose it is.
+  const renderMyTurnTrunk = (card: MyTurnTrunkCard): JSX.Element => {
+    const landing = landingPrMeta(card, usersById);
+    return (
+      <CardShell
+        key={card.id}
+        card={card}
+        innerRef={(el) => setCardRef(card.id, el)}
+        flash={flashId === card.id}
+        // No "opened Nd": the subject is a branch, and the PR it names is the MERGED landing PR.
+        right={
+          card.observedAt != null ? (
+            <span title={dateTime(card.observedAt)}>{relativeTime(card.observedAt)}</span>
+          ) : undefined
+        }
+        onActivate={landing != null ? (): void => open(landing, card.id) : undefined}
+      >
+        <CiFailingBody
+          card={asCiFailingCard(card)}
+          usersById={usersById}
+          onOpenPr={open}
+          chip={myTurnReasonLabel(card)}
+        />
+      </CardShell>
+    );
+  };
 
   const renderCard = (card: InsightCard): JSX.Element | null => {
     switch (card.kind) {
@@ -1634,40 +2244,38 @@ export function AttentionCards({
       // board — the `ThreadAssessment` failure mode. A thread-reason card navigates to the thread
       // instead.
       case 'my_turn':
-        return (
-          <CardShell
-            key={card.id}
-            card={card}
-            innerRef={(el) => setCardRef(card.id, el)}
-            flash={flashId === card.id}
-            right={<span title={dateTime(card.since)}>{relativeTime(card.since)}</span>}
-            openedAt={card.openedAt}
-            // The ball's clock. It IS the open date on a PR nobody has touched since it appeared,
-            // which is most new review requests — see `clockSaysMore`.
-            clockAt={card.since}
-            onActivate={() =>
-              card.reason === 'thread' && card.threadId != null
-                ? openThreadOn(card, card.threadId)
-                : open(metaFor(card, usersById), card.id)
-            }
-          >
-            <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-            <PrMetaRow pr={card} />
-            <PrReviewRow pr={card} usersById={usersById} />
-            <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
-                {myTurnReasonLabel(card)}
-              </span>
-              <span className="min-w-0">{card.detail}</span>
-            </div>
-            <MyTurnActions card={card} />
-          </CardShell>
-        );
+        // ⚠ AN EXHAUSTIVE INNER SWITCH, ending in `never`. The outer `default: return null` below
+        // swallows a missing case in silence — the card vanishes while the tab still counts it,
+        // which is exactly how `my_turn` shipped invisible once. A new type fails to compile here.
+        switch (card.reason) {
+          case 'trunk_red':
+            return renderMyTurnTrunk(card);
+          case 'review_request':
+          case 'mention':
+          case 'thread':
+          case 'thread_reply':
+          case 'comment_reply':
+          case 'pushed_since':
+          case 'own_ci_red':
+          case 'own_conflicts':
+          case 'pr_approved':
+          case 'own_ready':
+          case 'your_pr':
+          case 'own_thread':
+          case 'claude_review':
+          case 'watched_repo_pr':
+            return renderMyTurnPr(card);
+          default: {
+            const _x: never = card;
+            return null;
+          }
+        }
       // A red build the viewer is on the hook for. TWO ARMS on one kind, and every PR field is
       // NULLABLE because the 'trunk' arm often has no PR at all (a direct push to the default
       // branch, an association not observed yet) — so this renders the REPO as the subject and the
       // PR as an optional line under it, rather than reusing PrLine (which requires all four).
-      case 'ci_failing':
+      case 'ci_failing': {
+        const landing = landingPrMeta(card, usersById);
         return (
           <CardShell
             key={card.id}
@@ -1687,27 +2295,12 @@ export function AttentionCards({
             // Only the 'your_pr' arm has a PR to open by construction; a 'trunk' card without a
             // landing PR has nothing to activate, and a whole-card click that did nothing would be
             // the inert card this board exists to remove.
-            onActivate={
-              card.prId != null && card.prNumber != null && card.prTitle != null
-                ? (): void =>
-                    open(
-                      metaFor(
-                        {
-                          prId: card.prId as number,
-                          prNumber: card.prNumber as number,
-                          prTitle: card.prTitle as string,
-                          repoFullName: card.repoFullName,
-                        },
-                        usersById,
-                      ),
-                      card.id,
-                    )
-                : undefined
-            }
+            onActivate={landing != null ? (): void => open(landing, card.id) : undefined}
           >
             <CiFailingBody card={card} usersById={usersById} onOpenPr={open} />
           </CardShell>
         );
+      }
       case 'stalled_review':
         return (
           <CardShell
@@ -1723,7 +2316,7 @@ export function AttentionCards({
             onActivate={() => open(metaFor(card, usersById), card.id)}
           >
             <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-            <PrMetaRow pr={card} />
+            <PrMetaRow pr={card} usersById={usersById} />
             <PrReviewRow pr={card} usersById={usersById} />
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
               <span>waiting on</span>
@@ -1771,7 +2364,7 @@ export function AttentionCards({
               }}
             >
               <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-              <PrMetaRow pr={card} />
+              <PrMetaRow pr={card} usersById={usersById} />
               <PrReviewRow pr={card} usersById={usersById} />
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
                 <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-mono">{card.path}</span>
@@ -1800,7 +2393,7 @@ export function AttentionCards({
             onActivate={() => open(metaFor(card, usersById), card.id)}
           >
             <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-            <PrMetaRow pr={card} />
+            <PrMetaRow pr={card} usersById={usersById} />
             <PrReviewRow pr={card} usersById={usersById} />
             {card.topPaths.length > 0 && (
               <div className="mt-1 truncate text-[11px] text-gray-400">
@@ -1842,7 +2435,7 @@ export function AttentionCards({
             onActivate={() => open(metaFor(card, usersById), card.id)}
           >
             <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-            <PrMetaRow pr={card} />
+            <PrMetaRow pr={card} usersById={usersById} />
             <PrReviewRow pr={card} usersById={usersById} />
             <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
               {state != null && (
@@ -1883,7 +2476,7 @@ export function AttentionCards({
             onActivate={() => open(metaFor(card, usersById), card.id)}
           >
             <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-            <PrMetaRow pr={card} />
+            <PrMetaRow pr={card} usersById={usersById} />
             <PrReviewRow pr={card} usersById={usersById} />
             <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
               {state != null && (
@@ -1894,6 +2487,57 @@ export function AttentionCards({
               <span className="min-w-0">{card.detail}</span>
             </div>
             <PendingConflictActions card={card} />
+          </CardShell>
+        );
+      }
+      // ── the Dependencies tab: a dependency-automation PR (ONE card, its merge actions on it) and
+      // a person's PR a security tool flagged for a known advisory ───────────────────────────
+      // ⚠ LIKE EVERY CASE HERE, tsc DOES NOT DEMAND IT: `default: return null` would swallow the
+      // kind, and the tab would count cards it never paints.
+      case 'security':
+      case 'dependency_bump': {
+        const stateChip = card.depState != null ? DEP_STATE_LABEL[card.depState] : null;
+        const stateSentence = depStateSentence(card);
+        return (
+          <CardShell
+            key={card.id}
+            card={card}
+            innerRef={(el) => setCardRef(card.id, el)}
+            flash={flashId === card.id}
+            right={
+              card.lastCommitAt != null ? (
+                <span title={dateTime(card.lastCommitAt)}>{relativeTime(card.lastCommitAt)}</span>
+              ) : undefined
+            }
+            openedAt={card.openedAt}
+            // The head commit's clock, as on the forward cards: most bumps have no commit after
+            // the one they opened with, and then it IS the open date — see `clockSaysMore`.
+            clockAt={card.lastCommitAt}
+            onActivate={() => open(metaFor(card, usersById), card.id)}
+          >
+            <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
+            <PrMetaRow pr={card} usersById={usersById} />
+            <PrReviewRow pr={card} usersById={usersById} />
+            {(stateChip != null || stateSentence != null) && (
+              <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[12px] text-gray-600 dark:text-gray-300">
+                {stateChip != null && (
+                  <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 dark:text-gray-300">
+                    {stateChip}
+                  </span>
+                )}
+                {/* CODE-WRITTEN, time-free — the server's one spelling of the state. */}
+                {stateSentence != null && <span className="min-w-0">{stateSentence}</span>}
+              </div>
+            )}
+            {card.kind === 'security' && (
+              <SecurityDetail
+                card={card}
+                usersById={usersById}
+                onOpenThread={(threadId) => openThreadOn(card, threadId)}
+              />
+            )}
+            {/* Nothing here fetches on mount — see `DependencyActions`. */}
+            <DependencyActions card={card} />
           </CardShell>
         );
       }

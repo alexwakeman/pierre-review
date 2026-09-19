@@ -30,6 +30,12 @@ import { dateTime } from '../lib/ui.js';
 // ids from the baseline would re-diff them as "new" on every poll, and a row that later BECOMES
 // personal (you get @-mentioned on it) would then fire as if it had just appeared.
 //
+// ⚠ SWITCHING A TYPE ON IN SETTINGS MUST NOT ANNOUNCE ITS BACKLOG. Settings → My Turn can add a
+// whole type at once ("Unanswered threads on your PRs" on an account with forty of them), and every
+// one of those rows would diff as "new". So the watcher RE-BASELINES, without firing, whenever the
+// response's `configKey` changes — which it does exactly when WHICH TYPES ARE SHOWN changes, and
+// never for a new order or new weights, so re-ranking cannot swallow a real arrival.
+//
 // ⚠ AND IT KEEPS READING `personal`, NOT the three-valued `MyTurnRelevance` that now splits it.
 // The board LABELS those two halves apart ("Your turn" vs "In your repos") and the brief SPLITS
 // its lines, because both are read inside the app where the distinction is actionable. An OS
@@ -42,6 +48,8 @@ export function useMyTurnNotifications(enabled: boolean): void {
   const { data: repos } = useRepos();
   const { data: workspaces } = useWorkspaces();
   const prevRef = useRef<Set<string> | null>(null);
+  // The `configKey` the baseline was taken under — see the header.
+  const configRef = useRef<string | null>(null);
 
   // repoFullName → Workspace name. My Turn rows carry `repoFullName`, not a repo id, so this is
   // the join; a repo the reference queries have not covered yet simply yields no name.
@@ -105,15 +113,59 @@ export function useMyTurnNotifications(enabled: boolean): void {
     for (const w of data.watchedRepoPrs) {
       at.set(`w:${w.prId}`, w.since ?? w.openedAt);
       repoOf.set(`w:${w.prId}`, w.repoFullName);
-      // The one section the flag actually narrows: a new PR in a repo you neither maintain nor
-      // were mentioned on.
+      // The one section the flag actually narrows: a new PR in a repo you do not maintain.
       isPersonal.set(`w:${w.prId}`, w.personal !== false);
+    }
+    // The sections Settings → My Turn added. Each is EMPTY while its type is switched off (the gate
+    // is server-side), and each is read with `?? []` so a response predating it still diffs.
+    // ⚠ The prefixes are words, never a one-letter one: `startsWith('p:')` must not match `push:`.
+    const note = (id: string, clock: string, repo: string, personal: boolean | undefined): void => {
+      at.set(id, clock);
+      repoOf.set(id, repo);
+      isPersonal.set(id, personal !== false);
+    };
+    for (const m of data.mentions ?? []) {
+      note(`mention:${m.prId}`, m.since ?? m.openedAt, m.repoFullName, m.personal);
+    }
+    for (const t of data.threadReplies ?? []) {
+      note(`treply:${t.threadId}`, t.lastReplyAt, t.repoFullName, t.personal);
+    }
+    for (const c of data.commentReplies ?? []) {
+      note(`creply:${c.prId}`, c.since ?? c.openedAt, c.repoFullName, c.personal);
+    }
+    for (const p of data.pushedSince ?? []) {
+      note(`push:${p.prId}`, p.since ?? p.openedAt, p.repoFullName, p.personal);
+    }
+    for (const c of data.ownCiRed ?? []) {
+      note(`ci:${c.prId}`, c.since ?? c.openedAt, c.repoFullName, c.personal);
+    }
+    for (const c of data.ownConflicts ?? []) {
+      note(`conflict:${c.prId}`, c.since ?? c.openedAt, c.repoFullName, c.personal);
+    }
+    for (const r of data.ownReady ?? []) {
+      note(`land:${r.prId}`, r.since ?? r.openedAt, r.repoFullName, r.personal);
+    }
+    for (const t of data.ownThreads ?? []) {
+      note(`othread:${t.threadId}`, t.since, t.repoFullName, t.personal);
+    }
+    for (const t of data.redTrunks ?? []) {
+      note(`trunk:${t.repoId}:${t.headSha ?? ''}`, t.since, t.repoFullName, t.personal);
     }
 
     const prev = prevRef.current;
     prevRef.current = new Set(at.keys()); // always advance the baseline, even while disabled
 
-    if (prev == null) return; // first load → baseline only, don't fire
+    if (prev == null) {
+      configRef.current = data.configKey ?? null;
+      return; // first load → baseline only, don't fire
+    }
+    // A change to WHICH TYPES ARE SHOWN re-baselines without firing — see the header. The baseline
+    // has already advanced above; only the key is left to store.
+    const configKey = data.configKey ?? null;
+    if (configKey !== configRef.current) {
+      configRef.current = configKey;
+      return;
+    }
     if (!enabled) return;
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
 
@@ -131,12 +183,34 @@ export function useMyTurnNotifications(enabled: boolean): void {
     // `WatchedRepoPrItem` in shared/types.ts — the stored dismissal kind pins them); the SECTION
     // is "New PRs", and this copy has to say that, not resurrect a "watched" the user can't see.
     const newPrs = added.filter((id) => id.startsWith('w:')).length;
+    const n = (prefix: string): number => added.filter((id) => id.startsWith(prefix)).length;
+    const s = (k: number): string => (k === 1 ? '' : 's');
+    const mentions = n('mention:');
+    const threadReplies = n('treply:');
+    const commentReplies = n('creply:');
+    const pushed = n('push:');
+    const ciRed = n('ci:');
+    const conflicts = n('conflict:');
+    const ready = n('land:');
+    const ownThreads = n('othread:');
+    const trunks = n('trunk:');
     const bits: string[] = [];
-    if (reviews) bits.push(`${reviews} review${reviews === 1 ? '' : 's'} requested`);
-    if (threads) bits.push(`${threads} thread${threads === 1 ? '' : 's'} awaiting you`);
+    if (reviews) bits.push(`${reviews} review${s(reviews)} requested`);
+    if (mentions) bits.push(`${mentions} mention${s(mentions)}`);
+    if (threads) bits.push(`${threads} thread${s(threads)} awaiting you`);
+    if (threadReplies) {
+      bits.push(`${threadReplies} repl${threadReplies === 1 ? 'y' : 'ies'} to your comments`);
+    }
+    if (commentReplies) bits.push(`${commentReplies} comment${s(commentReplies)} after yours`);
+    if (pushed) bits.push(`${pushed} PR${s(pushed)} pushed since your review`);
+    if (ciRed) bits.push(`${ciRed} of your builds failed`);
+    if (conflicts) bits.push(`${conflicts} of your PRs ${conflicts === 1 ? 'has' : 'have'} conflicts`);
+    if (trunks) bits.push(`${trunks} default branch${trunks === 1 ? '' : 'es'} red`);
     if (yours) bits.push(`${yours} of your PRs active`);
     if (approved) bits.push(`${approved} of your PRs approved`);
-    if (newPrs) bits.push(`${newPrs} new PR${newPrs === 1 ? '' : 's'} in your repos`);
+    if (ready) bits.push(`${ready} of your PRs ready to land`);
+    if (ownThreads) bits.push(`${ownThreads} unanswered thread${s(ownThreads)} on your PRs`);
+    if (newPrs) bits.push(`${newPrs} new PR${s(newPrs)} in your repos`);
 
     // ONE notification covers N added items, so it carries ONE stamp: the NEWEST added item's
     // event time. (Splitting per item to stamp each would defeat the `tag` collapsing below,

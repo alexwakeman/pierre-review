@@ -11,6 +11,8 @@ import {
 } from '@floating-ui/react';
 import {
   DO_NEXT_RULES,
+  MY_TURN_DEFAULT_ORDER,
+  MY_TURN_SETTING_LABEL,
   MY_TURN_SEVERITY,
   PENDING_DO_NEXT_SIZE,
   PENDING_LIMITS,
@@ -18,8 +20,11 @@ import {
   PENDING_TABS,
   type InsightCard,
   type InsightSeverity,
+  type MyTurnCardReason,
+  type PendingRankRules,
 } from '@pierre-review/shared';
 import { CloseIcon, InfoIcon } from '../Icons.js';
+import { claimActivePopover, closeActivePopover } from '../../lib/activePopover.js';
 import {
   BASE_LABEL,
   explainCard,
@@ -28,11 +33,13 @@ import {
   RELEVANCE_PHRASE,
   SEVERITY_WORD,
   adjustmentLabel,
+  weightsName,
   type CardExplanation,
   type PendingBoardState,
 } from './pendingExplain.js';
-import { KIND_LABEL, MY_TURN_REASON_LABEL } from './pendingLabels.js';
+import { AUTHOR_ROLE_CHIP, KIND_LABEL, MY_TURN_REASON_LABEL } from './pendingLabels.js';
 import { TAB_LABEL } from './pendingTabs.js';
+import { WEIGHT_LABEL, weightPhrase } from '../settings/myTurnSettingsForm.js';
 
 // THE PENDING BOARD'S "WHY IS IT ORDERED LIKE THIS" LAYER — an info button in the board header, one
 // on every card, and a "How Pending works" guide in larger type.
@@ -41,6 +48,10 @@ import { TAB_LABEL } from './pendingTabs.js';
 // every rule quoted comes from `@pierre-review/shared`'s pending-rules — the numbers the server
 // folds with. The board forbids fetch-on-mount (fifty cards) and a popover that fetched on OPEN
 // would still be a request per curious click for data the page already holds.
+//
+// ⚠ THE WEIGHTS AND THE MY TURN ORDER ARE THE READER'S, FROM THE RESPONSE (`rules`). Settings → My
+// Turn changes both, so quoting `DO_NEXT_RULES.weights` would describe somebody else's board. The
+// constant is the fallback for a response that predates `rules` — which was ranked by exactly it.
 //
 // ⚠ A CLICK, NEVER A HOVER. A `title=` tooltip cannot be reached by touch or keyboard, and this is
 // the explanation of the whole screen. The button is a real <button>; the popover is dismissed by
@@ -85,6 +96,13 @@ function InfoPopover({
   });
   const dismiss = useDismiss(context, { escapeKey: false });
   const { getReferenceProps, getFloatingProps } = useInteractions([dismiss]);
+
+  // One board popover at a time (a chart's included), and a modal opening over the board closes it
+  // — Settings opened with Enter on "Customise" makes no outside press (lib/activePopover.ts).
+  useEffect(() => {
+    if (!open) return;
+    return claimActivePopover(() => setOpen(false));
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -148,23 +166,36 @@ function GuideLink({ onClick }: { onClick: () => void }): JSX.Element {
 // ── the header summary ─────────────────────────────────────────────────────────────────────
 
 /** The short version, from the board header. Four facts and a way to the long version. */
-export function PendingOrderInfo({ onOpenGuide }: { onOpenGuide: () => void }): JSX.Element {
-  const w = DO_NEXT_RULES.weights;
+export function PendingOrderInfo({
+  onOpenGuide,
+  rules,
+}: {
+  onOpenGuide: () => void;
+  /** What the server ranked this board with; absent on a response that predates it. */
+  rules?: PendingRankRules;
+}): JSX.Element {
+  const w = rules?.weights ?? DO_NEXT_RULES.weights;
   return (
     <InfoPopover label="How Pending is ordered" align="start">
       {(close) => (
         <>
           <p className="font-semibold text-gray-900 dark:text-gray-50">How Pending is ordered</p>
           <p className="mt-1">
-            Everything waiting on you or your workspace, in five tabs. The number on a tab is
-            everything in it.
+            Everything waiting on you or your workspace, in {PENDING_TABS.length} tabs. The number on
+            a tab is everything in it. Dependency updates and security alerts have their own tab,
+            security first.
           </p>
           <p className="mt-1.5">
-            Each tab lists its cards by score, highest first: how close each is to merged (
-            {Math.round(w.proximity * 100)}%), how long it has waited ({Math.round(w.stall * 100)}%)
-            and how much it is yours ({Math.round(w.relevance * 100)}%). The top{' '}
+            Each tab lists its cards by score, highest first. The score weighs{' '}
+            {weightPhrase('proximity')} ({Math.round(w.proximity * 100)}%), {weightPhrase('stall')} (
+            {Math.round(w.stall * 100)}%) and {weightPhrase('relevance')} (
+            {Math.round(w.relevance * 100)}%). The top{' '}
             {PENDING_DO_NEXT_SIZE} are <span className="font-semibold">Do next</span>.
+            {rules != null && rules.preset !== 'balanced' && ` Weights: ${weightsName(rules.preset)}.`}
           </p>
+          {rules != null && (
+            <p className="mt-1.5">My turn groups its cards by type first, in the order set in Settings.</p>
+          )}
           <p className="mt-1.5">
             The{' '}
             <InfoIcon size={12} title="info" className="inline-block align-[-0.15em]" /> button on a
@@ -310,13 +341,87 @@ const TAB_BLURB: Record<(typeof PENDING_TABS)[number]['key'], string> = {
     'PRs whose requested review has not come, and PRs nobody has been asked to review. People with reviews waiting are listed above them.',
   threads: 'Review comments with no reply and no later commit to their file.',
   land: 'PRs GitHub will merge now, and PRs that need a branch update first.',
+  deps: 'PRs opened by dependency bots, security fixes first, and PRs a security tool flagged for a known advisory.',
+};
+
+/** One row per My Turn type for the guide — when a card appears and what clears it. A `Record`,
+ *  so a new type cannot ship without its row. */
+const MY_TURN_GUIDE: Record<MyTurnCardReason, { appears: string; goes: string }> = {
+  review_request: { appears: 'Someone asks you to review a PR.', goes: 'You submit a review.' },
+  mention: {
+    appears: 'Someone @-mentions you on an open PR.',
+    goes: 'You review, comment or push on it.',
+  },
+  thread: {
+    appears: 'Someone replies in a review thread you started, or the code under it changes.',
+    goes: 'You reply (usually), or resolve the thread (always).',
+  },
+  thread_reply: {
+    appears: 'Someone replies after your comment in a thread someone else started.',
+    goes: 'You reply, or the thread is resolved.',
+  },
+  comment_reply: {
+    appears: 'Someone comments on a PR after your last comment there.',
+    goes: 'You review, comment or push on it.',
+  },
+  pushed_since: {
+    appears: 'Someone pushes to a PR after your last review or comment.',
+    goes: 'You review, comment or push.',
+  },
+  own_ci_red: {
+    appears: 'The latest build on your open PR failed. Only if added in Settings.',
+    goes: 'The build passes.',
+  },
+  own_conflicts: {
+    appears: 'Your PR conflicts with its base. Only if added in Settings.',
+    goes: 'The conflict is resolved.',
+  },
+  trunk_red: {
+    appears: 'A default branch is failing. Only if added in Settings.',
+    goes: 'The branch goes green.',
+  },
+  pr_approved: {
+    appears: 'Your PR has an approval and no “changes requested”.',
+    goes: 'It is merged or closed.',
+  },
+  own_ready: {
+    appears: 'GitHub will merge your PR, or wants the branch updated. Only if added in Settings.',
+    goes: 'It merges, or stops being ready.',
+  },
+  your_pr: {
+    appears: 'Your PR has new commits, comments or reviews since you last opened it here.',
+    goes: 'You open it.',
+  },
+  own_thread: {
+    appears: `A review comment on your PR has had no reply for ${hoursPhrase(PENDING_LIMITS.untouchedThreadMinHours)}. Only if added in Settings.`,
+    goes: 'Someone replies or pushes to its file.',
+  },
+  claude_review: {
+    appears: 'A Claude review finished with findings you have not posted. Local installs only.',
+    goes: 'You post them.',
+  },
+  watched_repo_pr: {
+    appears:
+      'Someone else’s PR you have not touched, opened since the repo was added. Off unless turned on.',
+    goes: 'You review, comment or push.',
+  },
 };
 
 /**
  * "How Pending works" — the tabs, how a tab is ordered, the score, the colours and when something
  * is your turn, in larger type. Opened from either info popover.
  */
-export function PendingGuideModal({ onClose }: { onClose: () => void }): JSX.Element {
+export function PendingGuideModal({
+  onClose,
+  rules,
+}: {
+  onClose: () => void;
+  /** What the server ranked this board with; absent on a response that predates it. */
+  rules?: PendingRankRules;
+}): JSX.Element {
+  useEffect(() => {
+    closeActivePopover();
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
@@ -329,6 +434,10 @@ export function PendingGuideModal({ onClose }: { onClose: () => void }): JSX.Ele
   }, [onClose]);
 
   const R = DO_NEXT_RULES;
+  // The reader's weights and type order, as the server ranked this board — never the constants.
+  const weights = rules?.weights ?? R.weights;
+  const myTurnOrder = rules?.myTurnOrder ?? MY_TURN_DEFAULT_ORDER;
+  const switchedOff = rules?.myTurnOff ?? [];
   const pct = (n: number): string => `${Math.round(n * 100)}%`;
   const bases = (Object.keys(R.proximity) as (keyof typeof R.proximity)[])
     .slice()
@@ -372,9 +481,9 @@ export function PendingGuideModal({ onClose }: { onClose: () => void }): JSX.Ele
 
         <div className="min-h-0 flex-1 space-y-6 overflow-auto px-5 py-4 text-[15px] leading-relaxed text-gray-700 dark:text-gray-200">
           <p>
-            Pending is everything waiting on you or your workspace, in five tabs. It is worked out
-            fresh every time it loads. Nothing is stored and nothing can be dismissed: a card leaves
-            when the work it describes is done.
+            Pending is everything waiting on you or your workspace, in {PENDING_TABS.length} tabs.
+            It is worked out fresh every time it loads. Nothing is stored and nothing can be
+            dismissed: a card leaves when the work it describes is done.
           </p>
 
           <GuideSection title="The tabs">
@@ -403,14 +512,22 @@ export function PendingGuideModal({ onClose }: { onClose: () => void }): JSX.Ele
 
           <GuideSection title="Inside a tab">
             <p>
-              Cards are listed by score, highest first. The top {PENDING_DO_NEXT_SIZE} are{' '}
-              <strong>Do next</strong>; the rest are <strong>Everything else</strong>. Nothing else
-              changes the order.
+              Cards are listed by score, highest first, except in two tabs that list in groups
+              first. The top {PENDING_DO_NEXT_SIZE} are <strong>Do next</strong>; the rest are{' '}
+              <strong>Everything else</strong>.
+            </p>
+            <p>
+              {TAB_LABEL.my_turn} groups its cards by type, in the order set in Settings → My Turn.{' '}
+              {TAB_LABEL.deps} puts every security item before every bump. Inside each group, cards
+              are listed by score. A PR a dependency bot opened is listed only in {TAB_LABEL.deps},
+              unless it is also your turn on it in {TAB_LABEL.my_turn}.
             </p>
             <p>
               A card is only compared with the cards in its own tab. So a PR with two jobs appears
-              twice, once in each job’s tab — your approved PR is in My turn (“Approved”) and in
-              Ready to land (“Ready to merge”).
+              twice, once in each job’s tab — a PR you were asked to review is in {TAB_LABEL.my_turn}{' '}
+              (“{MY_TURN_REASON_LABEL.review_request}”) and, if a thread on it is unanswered, in{' '}
+              {TAB_LABEL.threads}. A type added under Settings → My Turn → Add to My Turn moves into{' '}
+              {TAB_LABEL.my_turn} instead, so it is listed once.
             </p>
           </GuideSection>
 
@@ -426,28 +543,36 @@ export function PendingGuideModal({ onClose }: { onClose: () => void }): JSX.Ele
               </thead>
               <tbody>
                 <tr>
-                  <td className={`${td} font-medium`}>Close to merged</td>
-                  <td className={td}>{pct(R.weights.proximity)}</td>
+                  <td className={`${td} font-medium`}>{WEIGHT_LABEL.proximity}</td>
+                  <td className={td}>{pct(weights.proximity)}</td>
                   <td className={td}>
                     The next step: {bases.map((b) => `${BASE_LABEL[b]} ${outOf100(R.proximity[b])}`).join(' · ')}.
                     Then: {(['conflicts', 'many_untouched_threads', 'small_change'] as const).map(adjustmentLabel).join(', ')}.
                   </td>
                 </tr>
                 <tr>
-                  <td className={`${td} font-medium`}>Time waiting</td>
-                  <td className={td}>{pct(R.weights.stall)}</td>
+                  <td className={`${td} font-medium`}>{WEIGHT_LABEL.stall}</td>
+                  <td className={td}>{pct(weights.stall)}</td>
                   <td className={td}>
                     {stall.join(' · ')}. Measured from the moment that matters for the card: when you
                     were asked, the last commit, or when the thread started.
                   </td>
                 </tr>
                 <tr>
-                  <td className={`${td} font-medium`}>Yours</td>
-                  <td className={td}>{pct(R.weights.relevance)}</td>
+                  <td className={`${td} font-medium`}>{WEIGHT_LABEL.relevance}</td>
+                  <td className={td}>{pct(weights.relevance)}</td>
                   <td className={td}>{rel.join(' · ')}.</td>
                 </tr>
               </tbody>
             </table>
+            {rules != null && rules.preset !== 'balanced' && (
+              <p>
+                {rules.preset === 'custom'
+                  ? 'These are your own weights.'
+                  : `These are your weights (${weightsName(rules.preset)}).`}{' '}
+                Change them in Settings → My Turn.
+              </p>
+            )}
             <p>
               Cards in one tab usually share their next step, so the order mostly comes down to how
               long each has waited and how small the change is.
@@ -548,6 +673,23 @@ export function PendingGuideModal({ onClose }: { onClose: () => void }): JSX.Ele
                     <Dot severity="warn" /> if yours, otherwise <Dot severity="info" />
                   </td>
                 </tr>
+                <tr>
+                  <td className={`${td} font-medium`}>{KIND_LABEL.security}</td>
+                  <td className={td}>
+                    A dependency bot’s PR fixes a known advisory, or a security tool flagged one on a
+                    PR.
+                  </td>
+                  <td className={td}>
+                    <Dot severity="high" /> (<Dot severity="warn" /> when we could only infer it)
+                  </td>
+                </tr>
+                <tr>
+                  <td className={`${td} font-medium`}>{KIND_LABEL.dependency_bump}</td>
+                  <td className={td}>Any other PR a dependency bot opened.</td>
+                  <td className={td}>
+                    <Dot severity="info" />
+                  </td>
+                </tr>
               </tbody>
             </table>
             <p>
@@ -555,8 +697,22 @@ export function PendingGuideModal({ onClose }: { onClose: () => void }): JSX.Ele
             </p>
           </GuideSection>
 
+          <GuideSection title="Who opened it">
+            <p>
+              Every card names who opened the PR. A person shows with their picture and name.
+              Automation shows as a chip: the tool’s name when we know it, otherwise what it does,
+              such as {AUTHOR_ROLE_CHIP.dependency} or {AUTHOR_ROLE_CHIP.code_agent}. Some tools
+              open PRs with a person’s account; those show the tool, then “via” the person. People
+              and Automation above a tab narrow it to one or the other. Coding agents count as
+              automation.
+            </p>
+          </GuideSection>
+
           <GuideSection title="When it is your turn">
-            <p>A My turn card means you owe an action. Six things put one on the board:</p>
+            <p>
+              A My turn card means you owe an action. These put one on the board, in the order My
+              turn groups them:
+            </p>
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr>
@@ -567,67 +723,30 @@ export function PendingGuideModal({ onClose }: { onClose: () => void }): JSX.Ele
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <td className={`${td} font-medium`}>{MY_TURN_REASON_LABEL.review_request}</td>
-                  <td className={td}>Someone asks you to review a PR.</td>
-                  <td className={td}>You submit a review.</td>
-                  <td className={td}>
-                    <Dot severity={MY_TURN_SEVERITY.review_request} />
-                  </td>
-                </tr>
-                <tr>
-                  <td className={`${td} font-medium`}>{MY_TURN_REASON_LABEL.thread}</td>
-                  <td className={td}>
-                    Someone replies in a review thread you started, or the code under it changes.
-                  </td>
-                  <td className={td}>You reply (usually), or resolve the thread (always).</td>
-                  <td className={td}>
-                    <Dot severity={MY_TURN_SEVERITY.thread} />
-                  </td>
-                </tr>
-                <tr>
-                  <td className={`${td} font-medium`}>{MY_TURN_REASON_LABEL.pr_approved}</td>
-                  <td className={td}>Your PR has an approval and no “changes requested”.</td>
-                  <td className={td}>It is merged or closed.</td>
-                  <td className={td}>
-                    <Dot severity={MY_TURN_SEVERITY.pr_approved} />
-                  </td>
-                </tr>
-                <tr>
-                  <td className={`${td} font-medium`}>{MY_TURN_REASON_LABEL.your_pr}</td>
-                  <td className={td}>
-                    Your PR has new commits, comments or reviews since you last opened it here.
-                  </td>
-                  <td className={td}>You open it.</td>
-                  <td className={td}>
-                    <Dot severity={MY_TURN_SEVERITY.your_pr} />
-                  </td>
-                </tr>
-                <tr>
-                  <td className={`${td} font-medium`}>{MY_TURN_REASON_LABEL.claude_review}</td>
-                  <td className={td}>
-                    A Claude review finished with findings you have not posted. Local installs only.
-                  </td>
-                  <td className={td}>You post them.</td>
-                  <td className={td}>
-                    <Dot severity={MY_TURN_SEVERITY.claude_review} />
-                  </td>
-                </tr>
-                <tr>
-                  <td className={`${td} font-medium`}>
-                    {MY_TURN_REASON_LABEL.watched_repo_pr} / Pushed since
-                  </td>
-                  <td className={td}>
-                    Someone else’s PR that you have not touched, or one a person pushed to after your
-                    last review or comment. Only PRs opened since the repo was added.
-                  </td>
-                  <td className={td}>You review, comment or push.</td>
-                  <td className={td}>
-                    <Dot severity={MY_TURN_SEVERITY.watched_repo_pr} />
-                  </td>
-                </tr>
+                {myTurnOrder.map((reason) => (
+                  <tr key={reason}>
+                    <td className={`${td} font-medium`}>{MY_TURN_REASON_LABEL[reason]}</td>
+                    <td className={td}>{MY_TURN_GUIDE[reason].appears}</td>
+                    <td className={td}>{MY_TURN_GUIDE[reason].goes}</td>
+                    <td className={td}>
+                      <Dot severity={MY_TURN_SEVERITY[reason]} />
+                      {/* The card builder's one exception — the ci_failing trunk card's rule. */}
+                      {reason === 'trunk_red' && (
+                        <>
+                          , or <Dot severity="high" /> if you merged the PR that landed it
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
+            {switchedOff.length > 0 && (
+              <p>
+                Switched off in Settings:{' '}
+                {switchedOff.map((r) => MY_TURN_SETTING_LABEL[r]).join(', ')}.
+              </p>
+            )}
             <p>
               Only real actions count: a review, a comment or a commit. Viewing a PR does not, except
               for “{MY_TURN_REASON_LABEL.your_pr}”. Bot comments and bot pushes never make it your
@@ -635,10 +754,10 @@ export function PendingGuideModal({ onClose }: { onClose: () => void }): JSX.Ele
             </p>
             <p>
               The label on a card says how it relates to you. <strong>Your turn</strong>: it names
-              you — you were asked, it is your PR or thread, or someone @-mentioned you.{' '}
-              <strong>In your repos</strong>: you can push to the repo or have merged a PR into it.{' '}
-              <strong>Review or reply</strong>: neither. Muting a repo in Settings keeps its cards on
-              the board but stops them claiming your turn.
+              you — you were asked, mentioned or answered, it is your PR or thread, or you added its
+              type in Settings. <strong>In your repos</strong>: a new PR in a repo you can push to or
+              have merged a PR into. <strong>Review or reply</strong>: neither. Muting a repo in
+              Settings keeps its cards on the board but stops them claiming your turn.
             </p>
           </GuideSection>
         </div>

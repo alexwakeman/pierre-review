@@ -88,6 +88,9 @@ export function barWidth(share: number): string {
 export interface CourtSection {
   court: PrCourt;
   label: string;
+  /** The server's one line for the page. Empty from an older server, which sends none. */
+  summary: string;
+  /** The server's full paragraph, rendered in the "By repository" modal under this court's name. */
   directive: string;
   repos: RepoCourtProfile[];
 }
@@ -97,16 +100,16 @@ export interface BottlenecksModel {
    *  `?days=400` is answered over 90 and every sentence on screen must say 90. */
   windowDays: number;
   measuredPrs: number;
-  headline: string | null;
+  /** The clock-hour split — the page's opening chart only when an older server sends no working
+   *  hours. */
   courts: CourtShare[];
-  medianLeadHours: number;
-  p75LeadHours: number;
   /** Repos WITH a named court, grouped under it. The advice is stated once per section. */
   sections: CourtSection[];
   /** Repos measured but not lopsided-and-slow. Rendered quietly — they are the healthy ones, and
    *  showing them is what stops the panel reading as "everything is on fire". */
   quiet: RepoCourtProfile[];
   unreviewed: FlowResponse['unreviewed'];
+  /** The refusals to print. Not always all of `resp.refusals` — see `buildBottlenecksModel`. */
   refusals: FlowResponse['refusals'];
   coverage: FlowCoverage;
   /** Nothing was measurable at all — distinct from "measured, nothing stood out". */
@@ -125,21 +128,25 @@ export function buildBottlenecksModel(resp: FlowResponse | undefined): Bottlenec
       label: COURT_LABEL[court],
       // A directive the server did not send is not invented here. An older build simply renders
       // the section with its figures and no advice, which is honest.
+      summary: byCourt.get(court)?.summary ?? '',
       directive: byCourt.get(court)?.directive ?? '',
       repos,
     });
   }
+  const quiet = resp.repos.filter((r) => r.dominant == null);
   return {
     windowDays: resp.windowDays,
     measuredPrs: resp.measuredPrs,
-    headline: resp.headline,
     courts: resp.courts,
-    medianLeadHours: resp.medianLeadHours,
-    p75LeadHours: resp.p75LeadHours,
     sections,
-    quiet: resp.repos.filter((r) => r.dominant == null),
+    quiet,
     unreviewed: resp.unreviewed,
-    refusals: resp.refusals,
+    // "Measured N repositories. None stands out." is the "Nothing stands out" list in a sentence,
+    // and whenever the server sends it that list is on screen too. It stays on the wire; printing
+    // it put the same fact on the page twice.
+    refusals: resp.refusals.filter(
+      (r) => !(r.kind === 'courts' && r.basis === 'measured_clean' && quiet.length > 0),
+    ),
     coverage: resp.coverage,
     nothingMeasured: resp.measuredPrs === 0,
   };
@@ -176,7 +183,7 @@ export function exclusionLineFor(c: FlowCoverage): string | null {
     parts.push(`${c.excludedBotAuthored} opened by automation`);
   }
   if (c.excludedNoHumanTouch > 0) {
-    parts.push(`${c.excludedNoHumanTouch} that no person ever reviewed or commented on`);
+    parts.push(`${c.excludedNoHumanTouch} no person reviewed or commented on`);
   }
   if (parts.length === 0) return null;
   return `Set aside: ${parts.join(', and ')}.`;

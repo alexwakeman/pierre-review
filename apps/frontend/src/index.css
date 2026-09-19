@@ -1563,3 +1563,59 @@ body {
   background: transparent;
   padding: 0;
 }
+
+/* Settings → Working hours and budgets. The thumb has a FIXED 14px width: the default tick under the
+   track is positioned from it (BudgetSliders.tsx). Track is gray-500 for 3:1 non-text contrast in
+   both themes.
+   ⚠ ONE VENDOR PSEUDO-ELEMENT PER RULE. A selector list naming `::-webkit-slider-thumb` and
+   `::-moz-range-thumb` together is dropped whole by every engine, since each rejects the other's. */
+.budget-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
+}
+.budget-range:focus {
+  outline: none;
+}
+.budget-range:focus-visible {
+  outline: 2px solid #0ea5e9;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.budget-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #6b7280;
+}
+.budget-range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #6b7280;
+}
+.budget-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 9999px;
+  background: #0284c7;
+  border: 2px solid #ffffff;
+}
+.budget-range::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #0284c7;
+  border: 2px solid #ffffff;
+}
+.dark .budget-range::-webkit-slider-thumb {
+  border-color: #111827;
+}
+.dark .budget-range::-moz-range-thumb {
+  border-color: #111827;
+}

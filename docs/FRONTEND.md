@@ -183,8 +183,13 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
     feed's bot-lens pills — whose 'hide', the DEFAULT, rides the feed route's own `excludeBots`
     param server-side); the board stays member-scoped. **Bots are HIDDEN by default on the
     Timeline too** (`excludeBots: true` in `freshFilterDefaults`; the hidden set is the UNION of
-    `users.isBot` and the workspace's automated-reviewer verdict, a workspace manual "human"
-    winning both ways). The URL follows the excludeStale pattern — `bots=0` = shown, clean URL =
+    `users.isBot`, the accounts GitHub types a Bot (`github_type = 'Bot'`), the `AUTOMATION_VENDORS`
+    logins and prefixes, and the workspace's automated-reviewer verdict, a workspace manual "human"
+    winning both ways — the same set the Pending board calls automation; the two middle halves newly
+    hid 34 events from five accounts on the dev DB). ⚠ **The wire `User.isBot` IS that
+    workspace-free verdict**, not the raw column (`mapUser`, db/queries.ts): every client-side union
+    layers the workspace judgement on top of it, so a narrower flag would have the server hiding an
+    actor the client still counted as a person. The URL follows the excludeStale pattern — `bots=0` = shown, clean URL =
     hidden, legacy `bots=1` still parses — and the persisted blob's v2→v3 migration
     (`migratePersistedFilters`, `useUrlState.ts`) drops only `excludeBots`/`allowedBotIds` so
     existing users get the new default once without losing the rest of their filter bar. ⚠ **`workspaceId` must NOT live in `FilterDefaults`** — persistence and reset
@@ -202,7 +207,8 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   until a PR is selected** (`selectedPrId != null && !overlayActive`); no selection → the
   Timeline takes the full height (App fires a synthetic `resize` on the transition so vis
   refits). Shows **PrDetail** for the selected PR. **App lands on the Activity console by
-  default** (Activity-first; a bare load → `?view=activity`, deep links keep timeline).
+  default, on its Pending board** (Activity-first; a bare load → `?view=activity`, deep links keep
+  timeline).
 - **`AutoMergeBanner`** — the armed-merge PROGRESS STACK, a bottom-right card (same shape as
   `ClaudeReviewBanner`) fed by `GET /api/auto-merge`. One row per armed PR from the click that
   arms, through the watcher's `phase`, to the outcome — see "The armed-merge progress stack"
@@ -851,10 +857,14 @@ The `'comments'` AI-Fix seed's two UI halves. Backend contract:
 
 ## The calm-consolidation surfaces (apiVersion 21 wave)
 
-**Default landing = the FEED, for every tier.** The one-shot "auto-select Insights when Pro is
-on" effect (`insightsDefaultApplied` + `suppressInsightsDefault()`, which the Welcome-back
-banner had to call defensively) is DELETED — the store's plain `'feed'` default IS the landing,
-and the daily surface is the Feed with **`BriefStrip`** on top. The Insights rail entry is
+**Default landing = PENDING, for every tier.** The rail reads Pending · Feed · Bots · Reports and
+its top entry is what opens. `activityRepoId` defaults to `'attention'`, the ONE rail value
+omitted from the URL; `'feed'` is EMITTED and PARSED (`?activityRepo=feed`) so a Feed link
+survives. An unknown or legacy value (`compare`, garbage) and a URL naming no console land on
+Pending — including bookmarks from before this change. The Feed is still the stream with
+**`BriefStrip`** on top; the brief's lines deep-link INTO Pending. (The landing was the Feed from
+P3.1 until this change; the older one-shot "auto-select Insights when Pro is on" effect,
+`insightsDefaultApplied` + `suppressInsightsDefault()`, is deleted.) The Insights rail entry is
 relabelled **"Reports"** — ⚠ LABEL-ONLY: the store/URL token stays `activityRepoId ===
 'insights'` (it is wire/URL-visible across `useUrlState`, FilterBar; renaming it buys nothing
 but broken deep links).
@@ -879,7 +889,7 @@ but broken deep links).
   ThreadAssessment 60-empty-boxes lesson) — everything it reads is already shared (the
   workspace-reviewer listing, the per-PR ML label index, the per-PR annotation index; a pure
   cached GET — the card can never bill). ⚠ Bot membership is the CLIENT MIRROR of the server's
-  UNION set (workspace judgement wins both ways, `users.isBot` fallback) — deliberately NOT the
+  UNION set (workspace judgement wins both ways, the wire `User.isBot` fallback) — deliberately NOT the
   legacy login-string classification PrDetail's bot chips still use; and every figure comes from
   the SAME folds the Threads tab uses (`rollupCounts`/`threadSeverities`/
   `resolvableBotThreadIds`) restricted to the bot subset, so card and tab cannot disagree.
@@ -1278,7 +1288,8 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
 
 Deleted outright with this wave: `BotBehaviourPanel`,
 `WorkspaceComparisonPanel` + `useWorkspaceComparison` + the `'compare'` rail value (no longer
-URL-parsed — a legacy `?activityRepo=compare` link falls through to the `'feed'` default),
+URL-parsed — a legacy `?activityRepo=compare` link lands on the `'attention'` (Pending) default,
+per "Default landing = PENDING"),
 `SprintReportCard` + `useSprintReport`, `lib/workspaceColors.ts`, and `InsightsSubTab`.
 (`BotThemesPanel` + `useBotThemes` were deleted here too and have since been RESTORED — see
 "The Bots Themes panel" below. ⚠ `botsInnerTab` HAS since regained a `'themes'` member: the panel
@@ -1424,7 +1435,7 @@ to removable chips.
   `useMemo` was extracted to the pure `hooks/useMemberSections.ts` (`buildMemberSections`) so the
   picker reuses ONE fold with a different SCOPE and a different BOT VERDICT: `inScopeRepoIds` =
   the WHOLE active workspace's membership (the repo picker is Timeline-only), the UNION bot
-  predicate (workspace `automated` ∪ `users.isBot`, a manual "human" winning both ways), and
+  predicate (workspace `automated` ∪ the wire `User.isBot`, a manual "human" winning both ways), and
   **`includeRosterRemainder: false`** — that remainder was the cross-workspace bleed. FilterBar
   passes exactly the inputs it always computed, so its output is byte-identical (fixture-pinned
   by `test/memberSections.test.ts`).
@@ -1498,15 +1509,32 @@ convention this file has to remember.
   REQUEST rather than a paywall it has to render. `useFlowFindings` gates its own `enabled`
   (unconditionally — the hook has one mount and the query POLLS, so a disabled query also stops the
   five-minute timer).
-- **The panel is two halves, WORKING hours above and CLOCK hours below** (docs/BOTTLENECKS.md). Top:
-  the calendar line, a 30/60/90 window picker (React state remembered for the session — not a URL
-  key and not a persisted filter, so "Clear filters" cannot reset it), then **Each wait against its
-  budget** (the headline), **Every pull request** (the scatter + the "20 slowest" table that is its
-  keyboard view), **What the slow ones have in common**, **Approved and waiting**, **Who gives the
-  first review**, **Asking for a review**, **Pointers** and **Where each pull request sits** (the
-  triangle, labelled context). Below: "By repository, in clock hours" — the original court ledger,
-  whose call-out rule stays calibrated on clock hours. An older server sends none of the new fields
-  and only the bottom half renders (`hasWorkingHours`).
+- **The panel is two halves, WORKING hours above and CLOCK hours below** (docs/BOTTLENECKS.md), and
+  every panel is a `Block`: a title, its "i", the body. The header holds "Chronology", its "i"
+  ("How Chronology works") and a 30/60/90 window picker (React state remembered for the session —
+  not a URL key and not a persisted filter, so "Clear filters" cannot reset it), then the one-line
+  disclosures: the calendar, coverage, what was set aside, truncation. The working-hours half, top
+  to bottom: **Who was holding it, in working hours** (`CourtSplit` over `courtsWork`: a stacked
+  bar and three large percentages), **Each wait against its budget**, **Every pull request** (the
+  scatter + the "20 slowest" table that is its keyboard view), **What the slow ones have in
+  common**, **Approved and waiting**, **Who gives the first review**, **Asking for a review**,
+  **Pointers** and **Where each pull request sits** (the triangle, labelled context). The clock-hours
+  half: **By repository, in clock hours** — the original court ledger, whose call-out rule stays
+  calibrated on clock hours; each court prints the server's one-line `summary` above its repository
+  rows, and the full `directive` sits in that Block's modal — then **Merged without a human
+  review**. Refusals print last, by name. An older server sends none of the working-hour fields
+  (`hasWorkingHours`): the page then opens on the CLOCK-hour split and renders the clock half only.
+- ⚠ **Every panel's explanation is behind its "i"** (`components/InfoModal.tsx`: focus-trapped,
+  Escape captured, 14px; the copy is `Activity/chronologyInfo.tsx`, every number read from
+  `FLOW_RULES`). The page keeps only figures, charts and the disclosure lines. The modal body takes
+  focus on open, because it is the only part that scrolls and the arrow keys scroll only the focused
+  element; opening a modal also closes any pinned chart popover, whose own Escape listener would
+  otherwise take the first Escape.
+- ⚠ **Budget figures live in `ChartPopover`** (`components/charts/ChartPopover.tsx`: hover or
+  keyboard focus opens, click/tap pins, Escape or an outside press closes, one open at a time). A
+  bar past the axis carries an arrow, because the popover is the only place its true value appears.
+  A row with no verdict shows a "Too few" or "None" chip on the page and the server's reason in its
+  popover.
 - ⚠ **Court colours are the VALIDATED set** — amber-500/teal-600/indigo-500 light, amber-600/
   teal-600/indigo-500 dark, one `COURT_SWATCH` for every mark. The old `-400` dark shades failed
   the lightness band.
@@ -1517,9 +1545,18 @@ convention this file has to remember.
   of one scope shares the `['flow-pointers-generate', ws, days]` mutation key.
 - ⚠ **Working-hour figures never print in days** (`formatWorkHours`): "2d" reads as calendar days.
 - **Settings → Workspace → "Working hours and budgets"** (`FlowSettingsSection`, CORE, above the
-  pro-settings gate like the Pending mute). Blank budget boxes mean "the default"; the form sends
-  only what differs from a default (`flowSettingsForm.ts`), and refuses a "good" above the DEFAULT
-  "acceptable", which the server would otherwise silently widen.
+  pro-settings gate like the Pending mute). The form sends only what differs from a default
+  (`flowSettingsForm.ts`), and refuses a "good" above the DEFAULT "acceptable", which the server
+  would otherwise silently widen. Budgets are **two range sliders per wait** (Good | Acceptable,
+  `BudgetSliders`) on ONE stepped scale, half an hour to 5 working days of THIS workspace's day,
+  plus every default and every in-range stored value (`budgetScaleSteps`). A slider resting on its
+  default writes nothing; a stored value outside the scale is pinned at the end, shown with its true
+  value and never rewritten by Save; Good never passes Acceptable and neither pushes the other. The
+  **time zone is a combobox** (`TimeZoneCombobox`, `settings/timeZones.ts`): Intl's zones + UTC +
+  modern names for the legacy ones V8 lists (Kyiv, Kolkata …), today's UTC offset beside each, a
+  "Default (<zone>)" entry for blank, values limited to the list. ⚠ It portals INTO the Settings
+  dialog (inside `aria-modal`), and while open it marks itself `data-owns-escape` so
+  `SettingsModal`'s capture-phase Escape steps aside (`lib/escapeOwner.ts`).
 
 ### Reports → Overview → Flow metrics → "Where the work is happening"
 
@@ -1626,7 +1663,19 @@ repository name written out in full on the left, a stacked bar per measure, ever
 ### The Pending board's merge row (`PendingMergeActions`)
 
 The two FORWARD kinds (`merge`, `update_branch`) carry Merge · Merge-when-ready · Cancel · Update
-branch. Nothing else does — a `my_turn` "review this" card gets no Merge button.
+branch, and so does a Dependencies card whose PR is a dependency update, and a My Turn `own_ready`
+card (your ready PR, promoted in Settings → My Turn — the same row through `asForwardCard`).
+Nothing else does — a `my_turn` "review this" card gets no Merge button.
+
+⚠ **A DEPENDENCIES CARD IS MINTED BY WHO OPENED THE PR, NOT BY ITS MERGE STATE**, so
+`pendingMergeGate` takes its verb from the verdict alone: `behind` → Update branch, `canMerge` →
+Merge, anything else → no button. Its `mergeStateStatus` is NULLABLE (not observed) and reaches
+`mergeVerdict` as `'unknown'`. A `security` card on a person's PR (`dependencyUpdate: false`) gets
+no row at all — that PR keeps its own cards, which carry its landing. `verdictLine` is false for
+both kinds: the card's state row ("Blocked · Required checks or reviews aren’t satisfied") already
+says it, and the verdict line printed it a second time. `DependencyActions` routes a `conflicts`
+state to `PendingConflictActions`, which reads the CARD's own `viewerCanPush` (a Dependencies card
+is not write-gated, unlike the `conflicts` kind), and everything else to `PendingMergeActions`.
 
 ⚠ **A QUEUED CARD IS THE ONE EXCEPTION, AND IT SUBTRACTS.** When the card's synced `inMergeQueue`
 is `true`, GitHub owns the landing: Merge and Merge-when-ready are HIDDEN (pressing either is
@@ -1716,20 +1765,49 @@ besides an armed intent's Cancel.
 
 ### The Pending tabs (`AttentionView.tsx`, `pendingTabs.ts`, `db/pending-tabs.ts`)
 
-Pending is five tabs (`PENDING_TABS` in `packages/shared/src/pending-rules.ts`): **My turn** ·
+Pending is six tabs (`PENDING_TABS` in `packages/shared/src/pending-rules.ts`): **My turn** ·
 **Needs fixing** (CI failing, merge conflicts) · **Waiting on review** (stalled review, needs a
 reviewer; review load as a "Reviews waiting on people" strip above the list, unranked and uncounted)
-· **Unanswered threads** · **Ready to land** (ready to merge, behind trunk). Each is a PURELY SCORED
-list — the server's order, highest Do next score first — and the first `PENDING_DO_NEXT_SIZE` (5) of
-whatever view is on screen sit under "Do next", the rest under "Everything else".
+· **Unanswered threads** · **Ready to land** (ready to merge, behind trunk) · **Dependencies**
+(Security, Bumps). Each is a SCORED list — the server's order, highest Do next score first — and the
+first `PENDING_DO_NEXT_SIZE` (5) of whatever view is on screen sit under "Do next", the rest under
+"Everything else". ⚠ **My turn and Dependencies are STRICT-GROUP tabs**, whatever the scores: My
+turn lists its cards by type in the READER's order (`groupByReason`, Settings → My Turn), and
+Dependencies puts every security card before every bump (`groupByKind`); each group is scored
+within. There are no group headings — each card's type chip names its group, and "Do next" /
+"Everything else" stay the only dividers. A PR a dependency bot opened is listed ONLY in
+Dependencies (plus My turn for a direct summons); the server contract is [BACKEND.md](BACKEND.md)
+§ The Dependencies tab, and My Turn's is § My Turn — the ball rule.
 
 - **The server ranks the UNCAPPED fold, then caps** (`rankPendingTabs`): up to `boardListCap` per
-  LIST GROUP — the kind, and for My turn each side of "Only yours" — so the whole tab, a kind chip and
-  the lens are each their own true top. The SPA caps the whole-tab view to `boardListCap` (beyond it
-  the per-kind union has gaps) and says "Showing the top 50 of 176" when it cuts.
+  LIST GROUP — kind × My turn's "Only yours" side × who opened it — so the whole tab, a kind chip and
+  each lens are their own true top. The SPA caps EVERY view to `boardListCap` (a chip or "Only
+  yours" is now the union of a People list and an Automation list, and beyond the cap that union
+  has gaps) and says "Showing the top 50 of 176. The rest score lower." when it cuts — or, on a
+  strict-group view (My turn, Dependencies with no chip), "Showing the first 50 of 65.", because
+  there the cut is the LAST GROUPS, which can outscore what is shown (`capSentence`).
 - **Every view's count is its own population**: tab → `tab.total`, chip → `tab.kindTotals[kind]`,
-  lens → `tab.relevanceTotals[lens]`. The daily brief's lines say the same figures and each opens its
+  lens → `tab.relevanceTotals[lens]`, author lens → `tab.authorTotals` / `kindAuthorTotals[kind]` /
+  `relevanceAuthorTotals[lens]`. The daily brief's lines say the same figures and each opens its
   tab with its own chip / lens seated, so the number clicked is the list landed on.
+- **The People / Automation lens** (`attentionAuthorLens`: null = everyone, `'people'`,
+  `'automation'`; `?attnBy=`, a NAV key). The side is the server's `pendingAuthorSideOf` — automation
+  iff the card's PR has `automation` set — so the list and every figure beside it are one
+  population, and `people + automation === total` by construction. The pills read "Anyone ·
+  People · Automation", right-aligned; "Anyone", never a second "All", because the kind row's "All"
+  beside it counts the tab UNDER the lens. They show only where both sides are non-empty, or while
+  the lens is on (so it can be turned off) — on the dev DB that is no tab yet, since every
+  automation-authored active PR is a dependency PR. Under the lens a tab badge, a chip and "Only
+  yours" each count their own lensed side. ⚠ It PERSISTS across tab switches (`setAttentionTab`
+  does not clear it; it is a question about the whole board), is cleared by a rail or scope change,
+  and is SEATED to `null` by every entry point that opens the board from a count
+  (`openMyTurnInWorkspace`, `BriefStrip`'s `openBriefLine`) — `setActivityRepo` early-returns on an
+  unchanged rail. Transient, never in `FilterDefaults`.
+- **An emptied view says what emptied it** (`pendingEmptyNote`): "Nothing from automation in
+  Waiting on review right now." with a "Show all", "Nothing under Bumps right now.", or the tab's
+  own sentence. ⚠ The review-load strip counts REVIEWERS, so no PR narrowing hides it: a narrowed
+  view with no cards puts the note ABOVE the strip, or the reader got the strip and no word that
+  the lens had hidden every card.
 - **The tab on screen is DERIVED** (`effectivePendingTab`): a kind (`attentionIsolation`, seated by a
   brief line) names its own tab and wins; else the picked `attentionTab` (`?attnTab=`, a NAV key);
   else My turn. Clicking a tab is ONE write that seats the tab and clears the kind
@@ -1740,8 +1818,77 @@ whatever view is on screen sit under "Do next", the rest under "Everything else"
   rows across kinds; its headline and `parked` line sit above the tabs and each `why` lands on its
   card in whichever tab — `CardShell` reads it from `PendingBoardContext` for EVERY kind (before,
   only three kinds were passed a `why`, so most narrated rows never showed theirs).
-- **Liveness** sweeps merge-state cards first (ready to merge, behind trunk, conflicts), then the
-  view on screen, then the rest.
+- **Liveness** sweeps merge-state cards first (ready to merge, behind trunk, conflicts, every
+  dependency update, which carries its own merge row, and a My Turn `own_ready` / `own_conflicts`
+  card, which carries the same rows), then the view on screen, then the rest.
+- **The order is the READER's, and the response says which.** `GET /api/attention` carries
+  `rules` (`PendingRankRules`: the weights, their preset or `custom`, the My turn type order, the
+  types switched off) — what the server ranked THIS response with. Every explanation reads it:
+  `scoreBreakdown` multiplies by `rules.weights`, the header ⓘ adds "My turn groups its cards by
+  type first, in the order set in Settings." and, off Balanced, "Weights: <preset>.", and the guide
+  prints the reader's weights and "Switched off in Settings: …". `DO_NEXT_RULES.weights` is only the
+  fallback for a response predating `rules`. ⚠ **There is deliberately no "resolved settings" hook
+  for the board**: between a Settings save and the board's refetch the two differ, and an
+  explanation must describe the list on screen.
+- **"Customise"** (My turn only) opens Settings on its My Turn section
+  (`useSettingsModal().openSettings('my-turn')`, `store/settingsModal.ts`). It sits at the right end
+  of the controls row, after the People / Automation pills, inside ONE right-aligned wrapper — two
+  `ml-auto` siblings would split the free space between them. The row always renders on My turn,
+  empty or not, so the way into Settings is there when the tab holds nothing.
+- **A promoted card keeps its home card's controls**, through pure adapters in `AttentionCards.tsx`
+  (pinned in `pendingCardControls.test.ts`): `own_ready` → `PendingMergeActions` (`asForwardCard`),
+  `own_conflicts` → `PendingConflictActions` (`asConflictsCard`), `trunk_red` → the `ci_failing`
+  trunk body with the landing PR's byline (`CiFailingBody` via `asCiFailingCard`), and `own_thread`
+  a `BotVendorPill` when a bot opened the thread. Nothing new fetches on mount. The chip is
+  `myTurnReasonLabel` (fifteen short labels, `MY_TURN_REASON_LABEL`; a ready card says "Ready to
+  merge" or "Behind trunk"). ⚠ **The `my_turn` case is an EXHAUSTIVE inner `switch (card.reason)`
+  ending in `never`**: the outer `default: return null` would hide a new type while the tab still
+  counted it — how `my_turn` once shipped invisible. The trunk card is REPO-grained (`prId` may be
+  null), so nothing may treat a `my_turn` card as a PR before checking `reason !== 'trunk_red'`.
+
+**Every PR card names who opened it** (`PrByline`, drawn from the pure `authorByline` +
+`bylineParts`, pinned in `pendingCardControls.test.ts`). It reads `automation`, the SAME field the
+lens filters on, so a card can never sit under "People" wearing a bot chip:
+
+| `automation` | Byline |
+|---|---|
+| null | avatar + name ("Deleted account" when `authorId` is null) |
+| `source: 'account'`, a branded kind | avatar + the vendor chip ("Dependabot"); the chip IS the name |
+| `source: 'account'`, unbranded (`in_house`/`vendor`/`pierre`/null) | avatar + the role chip (`AUTHOR_ROLE_CHIP`: "Dependency bot", "Coding agent", "CI bot"…) + the login |
+
+⚠ An automation account's avatar is drawn only when it has a PICTURE. Every GitHub-typed Bot row in
+the real DB has a NULL `avatar_url`, and the shared `Avatar`'s fallback is two 10px initials ("DE"
+beside "Dependabot") — below the 11px floor and saying nothing the chip does not. A person keeps
+the initials.
+| `source: 'marker'` | the tool's chip, "via", then the person's avatar and name |
+
+`PrMetaRow` draws the byline first when it has both the board's `usersById` and a card carrying
+`automation`, and then skips the trailing `BotVendorPill` (the bot is not said twice). The Search
+card passes no map and keeps the old positive-claim-only chip. A branded chip takes its ink through
+`vendorInk`. On a `ci_failing` trunk card the landing-PR line carries the byline of the landing PR
+(`landingPrByline`).
+
+**A Dependencies card** (`renderCard`'s `case 'security': case 'dependency_bump':`): the header
+label (`cardKindLabel`: "Security fix", "Likely security fix" for Dependabot's INFERRED fix — never
+"Security fix" above a card that cannot back it, and it carries no fix sentence either, the why lives
+in the info popover — "Security alert", "Dependency update"), the meta row with its byline, the
+review row, the state chip (`DEP_STATE_LABEL`; none for `conflicts` or `needs_review`, whose sentence
+already says it, `ci_red`, or `unknown`) with the state sentence (`depStateSentence`; none for
+`ci_red`, which the meta row's CI dot already says), then, on a `security` card, `SecurityDetail`:
+
+- the fix sentence and each alert row ("Socket flagged GHSA-… and 2 more"), behind a `ShieldIcon`.
+  ⚠ **EACH ADVISORY ID IS WRITTEN ONCE**: an id a sentence names is linked INSIDE that sentence
+  (`advisoryParts`), and the chip row under it lists only the ids no sentence names — the first 3,
+  then "+N more" counted off that remaining list (`advisoryChips`). Links go through
+  `safeExternalUrl(advisoryUrl(id))`; `AIKIDO-` and Semgrep `ssc-` ids have no public page and
+  render as plain chips.
+- a thread alert's `where` ("in a review thread") is its own button that opens the thread — the
+  ids in the lead are links, and a link may not sit inside a button (`securityAlertLine` returns the
+  two halves). A `reviewer` alert is named by its author's brand, else the login.
+- "+N more alerts" off `alertCount`, never `alerts.length`.
+- inferred-only cards are amber, everything else red; chips are 11px mono.
+
+Then `DependencyActions` (see the merge row above). Nothing on the card fetches on mount.
 
 **The info popovers** (`PendingInfo.tsx`, `pendingExplain.ts`): the header ⓘ is a four-sentence
 summary; each card's ⓘ says why it is here (and what clears it), its colour rule, its place ("4th of
@@ -1750,8 +1897,10 @@ its score as three weighted parts that add up to the total. Both lead to the **"
 modal (tabs, inside a tab, the score, colours, when it is your turn).
 
 - ⚠ **EVERY NUMBER IN THE COPY IS READ FROM `pending-rules.ts`** — the table `db/queries.ts`
-  (admission floors, caps, colour thresholds, My Turn section colours) and `db/work-plan.ts` (weights,
-  bases incl. the board-only `conflicts` base, adjustments, stall buckets) fold with. Retune THERE.
+  (admission floors, caps, colour thresholds, My Turn section colours) and `db/work-plan.ts` (bases
+  incl. the board-only `conflicts` base, adjustments, stall buckets, the weight presets) fold with.
+  Retune THERE. The one exception is the weights themselves, which are the reader's and come from
+  the response's `rules`.
 - **The per-card working rides `GET /api/attention` as `scores`**, off the same pass that ordered the
   tabs. Nothing on the client may sort or filter by it.
 - ⚠ **NOTHING FETCHES, AND IT IS A CLICK, NEVER A HOVER.** The popover is a `FloatingPortal` carrying
@@ -1877,8 +2026,9 @@ until the adaptive walk (2-15 min). `AttentionView` mounts ONE batched sweep for
   closure). Keying on them would refetch the sweep every time the board refetched — and a sweep can
   CAUSE a board refetch, which is a loop with a GitHub call in it.
 - **The ids are RANKED, then sliced to `ATTENTION_LIVENESS_MAX_IDS` (90, mirroring the server's
-  enforcing cap, which 400s over-cap rather than truncating).** Forward kinds first — those rows
-  offer a Merge button, where a stale merge state is a button that 405s — then the ranked head,
+  enforcing cap, which 400s over-cap rather than truncating).** Forward kinds, conflicts and
+  dependency updates first — those rows offer a button, where a stale merge state is a button that
+  405s — then the ranked head,
   then the rest. Built off `all`, not `cards`: a lensed-away card is still a card the next
   unfiltered render shows. ⚠ `prId` is NULLABLE on some kinds (a `ci_failing` 'trunk' card names a
   PR only when the red head's landing PR resolved), and those rows are simply not sent.
@@ -2021,12 +2171,15 @@ that carried no suffix.
 | 1 | `GithubAppInstallSection` | global | `isCloud` (+ self-gates on the App provider) |
 | 2 | `BenchmarkConsentSection` | global | `isCloud` |
 | 3 | `LargePrThresholdSection` | global | none — both modes, every tier |
-| 4 | `YourDataSection` | global | `isCloud` |
+| 4 | `BlastRadiusSection` | global | none — both modes, every tier |
+| 5 | `MyTurnSection` (Settings → My Turn) | global (per ACCOUNT) | none — CORE/free, both modes, every tier |
+| 6 | `YourDataSection` | global | `isCloud` |
 | — | **`Workspace · <name>`** | — | none — the scope resolving is the only gate |
-| 5 | `PendingMuteSection` | workspace | none — CORE/free, both modes, every tier |
-| 6 | `SprintSection` (cadence + comparison window) | workspace | `caps.workspaceInsights` + `proReady` |
-| 7 | `SlackSection` (schedule + the bot block) | workspace | `caps.slackDigest` + `proReady` |
-| 8 | `IssueLinksSection` | workspace | `caps.issueLinks` + `proReady` |
+| 7 | `PendingMuteSection` | workspace | none — CORE/free, both modes, every tier |
+| 8 | `FlowSettingsSection` (working hours and budgets) | workspace | none — CORE/free, both modes, every tier |
+| 9 | `SprintSection` (cadence + comparison window) | workspace | `caps.workspaceInsights` + `proReady` |
+| 10 | `SlackSection` (schedule + the bot block) | workspace | `caps.slackDigest` + `proReady` |
+| 11 | `IssueLinksSection` | workspace | `caps.issueLinks` + `proReady` |
 
 - ⚠ **THE HEADING IS THE NAMING RULE NOW, AND IT IS STILL LOAD-BEARING.** There is no workspace
   picker in Settings — the rail's selection is the scope — so a screen that does not say which team
@@ -2065,6 +2218,52 @@ that carried no suffix.
   INVENTORY — the list where every cap must still own a section — and gates the `/api/pro/settings`
   FETCH plus the paid sections. It no longer gates the heading, and must not again. Narrowing the
   first would take the Settings entry away from accounts that still have the global half.
+
+### `MyTurnSection` — Settings → My Turn (CORE, free)
+
+What counts as your turn, the order My turn lists the types in, and the Do next weights every
+Pending tab ranks by. ACCOUNT-grained (one account is one reader, every workspace), carried RAW by
+`/api/me` (`myTurnSettings`), so it sits in the global half above the `pro_settings` gate like its
+two neighbours. One Save for the section. The server contract is [BACKEND.md](BACKEND.md) § My Turn
+— Settings: gates and promotions; the route is `PUT /api/me/my-turn-settings`.
+
+- **Four parts**: "Show in My Turn" (a checkbox per summons type, each with a one-line hint;
+  "Finished Claude reviews" only where `claudeReview` is on), "Add to My Turn" (the four own-work
+  promotions, plus "Red default branch" as Off · Repos you maintain · Every repo in the workspace),
+  "Order of My turn" (an ordered list with up / down buttons) and "How Pending ranks cards" (preset
+  pills, three range sliders, Reset). Type names come from the shared `MY_TURN_SETTING_LABEL`, the
+  one spelling Settings, the CLI and the guide use. The copy says "Show in My Turn", never "mute":
+  the Pending mute is a different control that KEEPS a card.
+- **Pure form logic in `myTurnSettingsForm.ts`**, pinned by `test/myTurnSettingsForm.test.ts` (the
+  `flowSettingsForm.ts` pattern). The body is built with the shared `compactMyTurnSettings`, so a
+  Save of untouched defaults sends `null` and nothing is frozen into the account; "unsaved changes"
+  compares two compactions. The form re-seeds only when the STORED value changes (keyed on its
+  compaction), never on a refetch that would throw away a half-made edit. Errors are the shared
+  validator's sentence, shown before the request is sent.
+- ⚠ **The weights are whole tens that add up to 100**, because every Do next part is a multiple of
+  0.05 and the info popover's working must add up to the score. Moving one slider re-shares the rest
+  between the other two in proportion (`rebalanceWeights`), and ALWAYS from the weights the slide
+  STARTED from (`slideWeight`) — re-sharing already-rounded weights drifted 50/30/20 → 80 → back to
+  50/40/10 and flipped the preset to Custom. A slide continues only while the same slider moves and
+  the weights are still what it last produced; a preset, Reset, another slider or a re-seed starts a
+  new one. The preset is DERIVED from the weights (`presetOf`), never stored; a "Custom" pill appears
+  only when the sliders match no preset, and cannot be clicked. Reset restores the order and the weights and leaves the switches alone.
+- **Reordering is buttons, not drag** — keyboard- and touch-native, no dependency. A hidden type
+  (Claude reviews without the capability) keeps its place and a move steps over it. After a move,
+  focus returns to the same button of the moved row (or its other button at an end), and a
+  visually hidden `aria-live` line says where it went ("“@mentions of you” moved to 1 of 15"),
+  counting only the rows on screen.
+- **Opening straight to it**: `store/settingsModal.ts` (zustand, not persisted, not in the URL)
+  holds the modal's open state and a `focus`, so Pending's "Customise" can open it from deep in the
+  Activity console. With `focus: 'my-turn'` the modal scrolls the section's heading into view and
+  focuses it, one frame after mount. ⚠ `closeSettings` is a store action, so it is referentially
+  stable and SettingsModal's capture-phase Escape handler registers once — never pass an inline
+  arrow.
+- **One save moves five reads, together** (`useSetMyTurnSettings`): `['me']` (seeded at once from
+  what the server stored), `['my-turn']`, and the three board keys `['attention-cards']`,
+  `['daily-brief']`, `['work-plan']`. The notification watcher then RE-BASELINES on the new
+  `configKey` rather than announcing the backlog of a type just switched on (§ Per-workspace "My
+  Turn" below).
 
 ### `PendingMuteSection` — the Pending mute (CORE, free)
 
@@ -2363,9 +2562,11 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
 - ⚠ **A SURFACE THAT NOTIFIES COUNTS `myTurnPersonal`; A SURFACE YOU OPEN COUNTS `myTurn`.**
   The welcome-back banner, the Workspace-dropdown badges, `BriefStrip`'s "Elsewhere" rows and the
   browser notification reach FOR the reader, so they count only what personally involves them
-  (`MyTurnCard.personal` — reviews requested of you, your PRs, threads awaiting your reply, plus
-  new PRs in repos you MAINTAIN or were @-mentioned on). Adding a repo you have never touched used
-  to put every open PR in it on the banner — 425 of 459 items on the reporter's account. The
+  (`MyTurnCard.personal` — every type that names you: reviews requested of you, @-mentions,
+  replies to you, pushes since your review, your PRs, any type you added in Settings, and — only if
+  you switched "New PRs" on — new PRs in repos you MAINTAIN). Adding a repo you have never touched
+  used to put every open PR in it on the banner — 425 of 459 items on the reporter's account; "New
+  PRs" is now off by default as well. The
   "Needs attention" BOARD and the strip's own lines keep the BROAD `myTurn`: that work is real,
   it is just not yours, and hiding it would delete work rather than route it.
   ⚠ Absent narrow fields (a response predating the narrowing) ⇒ fall back to `myTurn` /
@@ -2388,7 +2589,8 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   (it clears `repoIds` / `feedIsolatedPrId` / `attentionIsolation`, and the `null` also stops
   `useWorkspaceSync`'s case-2 branch writing a second `setWorkspace` that would wipe what comes
   next), then `showActivity()`, then `setActivityRepo('attention')`, then
-  `setAttentionIsolation('my_turn')`, then `setAttentionRelevance('mine')`. The workspace write is
+  `setAttentionIsolation('my_turn')`, then `setAttentionRelevance('mine')`, then
+  `setAttentionAuthorLens(null)` (the figure clicked counts every author). The workspace write is
   **skipped when already there** so a Timeline repo narrowing survives. Pinned in
   `apps/frontend/test/attentionIsolation.test.ts`.
 - ⚠ **THE DIVERGENCE RULE: A NARROW COUNT MAY ONLY NAVIGATE THROUGH ITS OWN LENS.** A banner
@@ -2424,7 +2626,7 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   carry it for the RANKER's weight, not as an ownership claim — a PR being ready to land says
   nothing about whose turn it is — and filtering them would stop the brief's two my-turn lines
   partitioning the lensed board, which is the one job this predicate has.
-- **The board's order, counts and narrowings are the five tabs** — see § The Pending tabs. The
+- **The board's order, counts and narrowings are the tabs** — see § The Pending tabs. The
   cross-kind "Do next" head, its `head ∪ tail` partition, the head's suppression under an isolation
   and `AttentionIsolationBanner` are gone with it: a daily-brief line or `openMyTurnInWorkspace`
   now lands on its tab with its chip / lens visibly selected on the board itself, reversible there
@@ -2472,8 +2674,15 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   consume a real diff and swallow the notification.
   ⚠ It fires **only for `personal !== false` rows** (an OS banner is the most interrupting surface
   there is), but the **baseline still tracks EVERY id** — dropping the others would re-diff them
-  as new on every poll, and a row that later becomes personal (you get @-mentioned) would fire as
+  as new on every poll, and a row that later becomes personal (its repo is un-muted) would fire as
   if it had just appeared.
+  ⚠ **It RE-BASELINES, WITHOUT FIRING, when `configKey` changes** — which it does exactly when WHICH
+  types are shown changes (Settings → My Turn), never for a new order or new weights. Otherwise
+  switching on "Unanswered threads on your PRs" would announce every existing one at once. Each
+  section has its own id prefix and sentence bit (`mention:`, `treply:`, `creply:`, `push:`, `ci:`,
+  `conflict:`, `land:`, `othread:`, `trunk:`, beside the older one-letter `r:`/`t:`/`p:`/`a:`/`w:`);
+  every prefix is a word, so `startsWith('p:')` never matches `push:`. `w:` now counts untouched New
+  PRs only.
 
 ## `MyTurnRelevance` — three labels, two brief lines, one split banner
 

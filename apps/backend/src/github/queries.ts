@@ -852,7 +852,9 @@ export interface GqlPullRequest {
   body: string | null;
   // Plain-text rendering of the PR description, fetched UNCONDITIONALLY (unlike the lean-gated
   // markdown `body`) so the cross-team search index can cover descriptions without persisting the
-  // full markdown. Not stored on pullRequests — flows only into search_index via persistPr.
+  // full markdown. Never stored itself: persistPr feeds it to search_index (capped) and, in FULL, to
+  // the dependency/security detector (sync/security-detect.ts), which stores only its verdict.
+  // `String!` in GitHub's schema, so null/undefined mean "not received" — see persistPr.
   bodyText: string | null;
   isDraft: boolean;
   state: 'OPEN' | 'CLOSED' | 'MERGED';
@@ -1279,5 +1281,38 @@ export const REVIEW_REQUEST_HISTORY_NODES_QUERY = /* GraphQL */ `
 
 export interface ReviewRequestHistoryNodesResponse {
   nodes: Array<{ id?: string; reviewRequestHistory?: { nodes: Array<GqlReviewRequestEvent | null> } | null } | null>;
+  rateLimit?: { remaining?: number | null; resetAt?: string | null; cost?: number | null } | null;
+}
+
+// The one-shot DEPENDENCY + SECURITY backfill (sync/backfill-pr-security.ts): open automation PRs
+// the walk classified before the detector existed, or has not revisited since. Exactly the four
+// inputs `classifyPrSecurity` reads — the same fields PR_NODE_FIELDS carries, so a backfilled PR
+// and a walked one are classified from identical text. One leaf connection (`labels`), about one
+// point per batch; `bodyText` is what makes a batch heavy (Dependabot's run to 65 KB each).
+export const PR_SECURITY_NODES_QUERY = /* GraphQL */ `
+  query PrSecurityNodes($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on PullRequest {
+        id
+        title
+        headRefName
+        bodyText
+        labels(first: 20) { nodes { name } }
+      }
+    }
+    rateLimit { remaining resetAt cost }
+  }
+`;
+
+/** Every field optional: an id can resolve to a non-PullRequest (the fragment then yields `{}`)
+ *  and `graphqlTolerant` NULLS a forbidden field — both are "not received", never "empty". */
+export interface PrSecurityNodesResponse {
+  nodes: Array<{
+    id?: string;
+    title?: string;
+    headRefName?: string | null;
+    bodyText?: string | null;
+    labels?: { nodes: Array<{ name: string } | null> } | null;
+  } | null>;
   rateLimit?: { remaining?: number | null; resetAt?: string | null; cost?: number | null } | null;
 }

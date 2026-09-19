@@ -1,0 +1,17 @@
+{
+  "name": "A Snyk security upgrade opened under a person's account (acme#4598's title and branch, a Snyk App body): the snyk-fix- branch and Snyk's own sentence are the proof",
+  "input": {
+    "title": "[Snyk] Security upgrade apollo-server-core from 3.6.2 to 3.12.1",
+    "headRefName": "snyk-fix-476d1f32ddb0e743d31723f1becb1e0b",
+    "labels": [],
+    "bodyText": "\n\nThis PR was automatically created by Snyk using the credentials of a real user.\nSnyk has created this PR to fix 2 vulnerabilities in the pnpm dependencies of this project.\n\nSnyk changed the following file(s):\n\n- `apps/web/package.json`\n\n\n\n\n⚠️ Warning\n\n```\nFailed to update the pnpm-lock.yaml, please update manually before merging.\n```\n\n\n\n\n\nVulnerabilities that will be fixed with an upgrade:\n\n|  | Issue | Score | \n:-------------------------:|:-------------------------|:-------------------------\n | Insecure Automated Optimizations SNYK-JS-NEXT-19269945 | &nbsp;&nbsp;**761**&nbsp;&nbsp; \n | Directory Traversal SNYK-JS-NEXT-19269946 | &nbsp;&nbsp;**761**&nbsp;&nbsp; \n\n\nBreaking Change Risk\n\n\n\n> **Notice:** This assessment is enhanced by AI.\n\n\n\n---\n\n> [!IMPORTANT]\n>\n> - Check the changes in this PR to ensure they won't cause issues with your project.\n> - Max score is 1000. Note that the real score may have changed since the PR was raised.\n> - This PR was automatically created by Snyk using the credentials of a real user.\n\n---\n\n**Note:** _You are seeing this because you or someone else with access to this repository has authorized Snyk to open fix PRs._\n\nFor more information: \n🧐 View latest project report\n📜 Customise PR templates\n🛠 Adjust project settings\n📚 Read about Snyk's upgrade logic\n\n---\n\n**Learn how to fix vulnerabilities with free interactive lessons:**\n\n🦉 Directory Traversal\n\n[//]: # 'snyk:metadata:{\"breakingChangeRiskLevel\":\"low\",\"FF_showPullRequestBreakingChanges\":true,\"FF_showPullRequestBreakingChangesWebSearch\":false,\"customTemplate\":{\"variablesUsed\":[],\"fieldsUsed\":[]},\"dependencies\":[{\"name\":\"next\",\"from\":\"16.3.0\",\"to\":\"16.3.3\"}],\"env\":\"prod\",\"issuesToFix\":[\"SNYK-JS-NEXT-19269945\",\"SNYK-JS-NEXT-19269946\"],\"prId\":\"e77f76d3-8b4e-4015-8636-d7797a68a524\",\"prPublicId\":\"e77f76d3-8b4e-4015-8636-d7797a68a524\",\"packageManager\":\"pnpm\",\"priorityScoreList\":[761,761],\"projectPublicId\":\"dfc0e51a-2449-4fbc-8d9c-a04e4b035060\",\"projectUrl\":\"https://app.snyk.io/org/codewithnuh-BjNUjYNu6cLvHAoVzAXVq8/project/dfc0e51a-2449-4fbc-8d9c-a04e4b035060?utm_source=github&utm_medium=referral&page=fix-pr\",\"prType\":\"fix\",\"templateFieldSources\":{\"branchName\":\"default\",\"commitMessage\":\"default\",\"description\":\"default\",\"title\":\"default\"},\"templateVariants\":[\"updated-fix-title\",\"pr-warning-shown\",\"priorityScore\"],\"type\":\"auto\",\"upgrade\":[\"SNYK-JS-NEXT-19269945\",\"SNYK-JS-NEXT-19269946\"],\"vulns\":[\"SNYK-JS-NEXT-19269945\",\"SNYK-JS-NEXT-19269946\"],\"patch\":[],\"isBreakingChange\":false,\"remediationStrategy\":\"vuln\"}'\n"
+  },
+  "expected": {
+    "dependencyVendor": "snyk",
+    "securityFix": "proven",
+    "advisoryIds": [
+      "SNYK-JS-NEXT-19269945",
+      "SNYK-JS-NEXT-19269946"
+    ]
+  }
+}

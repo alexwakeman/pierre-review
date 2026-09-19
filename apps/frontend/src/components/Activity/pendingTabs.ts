@@ -2,10 +2,13 @@ import {
   PENDING_DO_NEXT_SIZE,
   PENDING_LIMITS,
   PENDING_TABS,
+  pendingAuthorSideOf,
   pendingTabOf,
   type AttentionCardsResponse,
   type InsightCard,
   type InsightKind,
+  type PendingAuthorLens,
+  type PendingAuthorSplit,
   type PendingTab,
   type PendingTabKey,
 } from '@pierre-review/shared';
@@ -14,9 +17,11 @@ import type { AttentionRelevanceLens } from '../../store/filters.js';
 // THE PENDING BOARD'S VIEW MODEL — which tab is on screen, which cards it lists, where Do next
 // ends, and the counts. Pure and JSX-free so `test/pendingTabs.test.ts` can pin it.
 //
-// ⚠ THE ORDER IS THE SERVER'S. `tab.cardIds` arrive highest score first; this module only FILTERS
-// (a kind chip, My turn's "Only yours") and CAPS, never re-sorts. The first `PENDING_DO_NEXT_SIZE`
-// of whatever list is on screen are Do next.
+// ⚠ THE ORDER IS THE SERVER'S. `tab.cardIds` arrive highest score first — except the two
+// strict-group tabs: My turn (grouped by type in the reader's order from Settings → My Turn) and
+// Dependencies (security first, then bumps). This module only FILTERS (a kind chip, My turn's "Only
+// yours", the People / Automation lens) and CAPS, never re-sorts, so a filtered view keeps the
+// groups. The first `PENDING_DO_NEXT_SIZE` of whatever list is on screen are Do next.
 
 export const TAB_LABEL: Record<PendingTabKey, string> = {
   my_turn: 'My turn',
@@ -24,6 +29,7 @@ export const TAB_LABEL: Record<PendingTabKey, string> = {
   review: 'Waiting on review',
   threads: 'Unanswered threads',
   land: 'Ready to land',
+  deps: 'Dependencies',
 };
 
 /**
@@ -50,9 +56,41 @@ export function passesLens(card: InsightCard, lens: AttentionRelevanceLens | nul
   return lens === 'mine' ? card.personal !== false : card.relevance === 'none';
 }
 
+/** Does this card survive the People / Automation lens? The server's own predicate
+ *  (`pendingAuthorSideOf`), so the list and the figures beside it are one population. */
+export function passesAuthorLens(card: InsightCard, lens: PendingAuthorLens | null): boolean {
+  return lens == null || pendingAuthorSideOf(card) === lens;
+}
+
+/** The figure on a tab's badge: the lens's own total when one is on and the server sent it. */
+export function tabBadgeCount(tab: PendingTab, lens: PendingAuthorLens | null): number {
+  return lens != null && tab.authorTotals != null ? tab.authorTotals[lens] : tab.total;
+}
+
+/** Offer the lens only when it would change the list — both sides non-empty — or it is already on
+ *  (so it can always be turned off). */
+export function offerAuthorLens(
+  split: PendingAuthorSplit | null,
+  lens: PendingAuthorLens | null,
+): boolean {
+  if (lens != null) return true;
+  return split != null && split.people > 0 && split.automation > 0;
+}
+
+/** The figure on My turn's "Only yours" / "Not tied to you" pill: the view it opens, which under an
+ *  author lens is that half's own split — never the unlensed half beside a lensed list. */
+export function relevancePillCount(
+  tab: PendingTab | undefined,
+  rel: AttentionRelevanceLens,
+  lens: PendingAuthorLens | null,
+): number | null {
+  if (lens != null) return tab?.relevanceAuthorTotals?.[rel]?.[lens] ?? null;
+  return tab?.relevanceTotals?.[rel] ?? null;
+}
+
 /**
- * THE TABS, from a response. A response from a server predating `tabs` gets the same five tabs
- * built from its cards by kind — in the order the server sent them, with card counts for totals —
+ * THE TABS, from a response. A response from a server predating `tabs` gets the same tabs
+ * (`PENDING_TABS`) built from its cards by kind — in the order the server sent them, with card counts for totals —
  * so an older server still renders a usable board.
  */
 export function tabsOf(data: AttentionCardsResponse | undefined): PendingTab[] {
@@ -90,6 +128,11 @@ export interface PendingView {
   kind: InsightKind | null;
   /** Review-load cards, for the "who has reviews waiting" strip. */
   people: InsightCard[];
+  /** This view BEFORE the People / Automation lens, split by who opened each PR — the lens pills'
+   *  figures and `offerAuthorLens`' input. Null when the server sent no split. */
+  authorSplit: PendingAuthorSplit | null;
+  /** This view's population before the People / Automation lens — the "All" pill's figure. */
+  allTotal: number;
 }
 
 export function buildPendingView(
@@ -97,6 +140,7 @@ export function buildPendingView(
   tabKey: PendingTabKey,
   isolation: InsightKind | null,
   lens: AttentionRelevanceLens | null,
+  authorLens: PendingAuthorLens | null,
 ): PendingView {
   const tabs = tabsOf(data);
   const tab = tabs.find((t) => t.key === tabKey) ?? tabs[0]!;
@@ -109,27 +153,56 @@ export function buildPendingView(
   const kind = isolation != null && kinds.length > 1 && kinds.includes(isolation) ? isolation : null;
   const lensOn = tabKey === 'my_turn' ? lens : null;
 
-  let cards = listed.filter((c) => (kind == null || c.kind === kind) && passesLens(c, lensOn));
-  let total: number;
-  if (kind != null) total = tab.kindTotals[kind] ?? cards.length;
-  else if (lensOn != null) total = tab.relevanceTotals?.[lensOn] ?? cards.length;
-  else {
-    // The whole tab: its true top `boardListCap` (the server listed that many PER KIND, so the
-    // first `boardListCap` of the union are the tab's top — beyond that the union has gaps).
-    cards = cards.slice(0, PENDING_LIMITS.boardListCap);
-    total = tab.total;
+  const narrowed = listed.filter((c) => (kind == null || c.kind === kind) && passesLens(c, lensOn));
+  // ⚠ CAPPED FOR EVERY VIEW, not just the whole tab. The server lists up to `boardListCap` of each
+  // LIST GROUP — kind × My turn's side × who opened it — so a kind chip or "Only yours" is now the
+  // union of a People list and an Automation list: its first `boardListCap` are its true top, and
+  // beyond that the union has gaps. (A view that IS one list group is never longer than the cap.)
+  const cards = narrowed
+    .filter((c) => passesAuthorLens(c, authorLens))
+    .slice(0, PENDING_LIMITS.boardListCap);
+
+  // THE VIEW'S POPULATION, BEFORE AND AFTER THE AUTHOR LENS. Each figure is the server's own count
+  // of exactly this view — never one view's total beside another view's list. The counted
+  // fallback only serves a response predating the figure.
+  const counted = narrowed.length;
+  let allTotal: number;
+  let authorSplit: PendingAuthorSplit | null;
+  if (kind != null) {
+    allTotal = tab.kindTotals[kind] ?? counted;
+    authorSplit = tab.kindAuthorTotals?.[kind] ?? null;
+  } else if (lensOn != null) {
+    allTotal = tab.relevanceTotals?.[lensOn] ?? counted;
+    authorSplit = tab.relevanceAuthorTotals?.[lensOn] ?? null;
+  } else {
+    allTotal = tab.total;
+    authorSplit = tab.authorTotals ?? null;
   }
+  const total = authorLens != null ? (authorSplit?.[authorLens] ?? cards.length) : allTotal;
   return {
     tab: tab.key,
     cards,
     doNextCount: Math.min(PENDING_DO_NEXT_SIZE, cards.length),
     shown: cards.length,
     total: Math.max(total, cards.length),
-    chips: kinds.length > 1 ? kinds.map((k) => ({ kind: k, total: tab.kindTotals[k] ?? 0 })) : null,
+    // Under the lens a chip counts that kind's lensed side, the list its click opens.
+    chips:
+      kinds.length > 1
+        ? kinds.map((k) => ({
+            kind: k,
+            total:
+              authorLens != null
+                ? (tab.kindAuthorTotals?.[k]?.[authorLens] ??
+                  listed.filter((c) => c.kind === k && passesAuthorLens(c, authorLens)).length)
+                : (tab.kindTotals[k] ?? 0),
+          }))
+        : null,
     kind,
     people: (tab.peopleCardIds ?? [])
       .map((id) => byId.get(id))
       .filter((c): c is InsightCard => c != null),
+    authorSplit,
+    allTotal: Math.max(allTotal, Math.min(counted, PENDING_LIMITS.boardListCap)),
   };
 }
 

@@ -54,7 +54,8 @@ title/description/**canonical** baked in. Load-bearing details:
 
 **CLI** (`cli.ts` → `dist/cli.js`): the **`pierre status` subcommand** (peeled off argv
 BEFORE `parseArgs`, whose default case rejects bare tokens) renders the cross-repo My-Turn
-queue in the terminal via `status.ts` — OSC-8 clickable links (non-TTY falls back to
+queue in the terminal via `status.ts` — one section per type in the reader's order (Settings → My
+Turn), with a dim footer naming the types switched off — OSC-8 clickable links (non-TTY falls back to
 `label (url)`), `--watch` repaint loop (new-since-tick bullets), `--sync` (re-syncs ≤ every
 5 min under watch), `--interval/--db`; LOCAL-only (refuses cloud), refuses to create an
 empty DB without `--sync`, one-shot `runMigrations → ensureLocalAccount → getMyTurn →

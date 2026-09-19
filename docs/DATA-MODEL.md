@@ -29,16 +29,18 @@ fixture tests (see Conventions).
 - **`accounts`** — a tenant. Local mode has exactly one (`id 1`, `isLocal=true`,
   synthesized from `gh api user`); cloud has one per signed-in user (encrypted
   `accessTokenEnc`). `lastActiveAt` gates the periodic sync (see Sync). Replaces the
-  old `localUser` singleton.
+  old `localUser` singleton. Also holds the reader's account-grained settings as overrides-only
+  JSON (`blast_radius_config`, and `my_turn_settings` — § `accounts.my_turn_settings` below).
 - **`repos`** — the account's repos (`accountId`; unique `(accountId, owner, name)` and
   `(accountId, githubNodeId)`). The `repos_id_account` unique index is NOT a lookup index — it is
   the PARENT KEY of the composite `(repo_id, account_id)` FK on `workspace_repos`.
   **`createdAt` (when the repo was ADDED) is LOAD-BEARING, not bookkeeping: it is My Turn's clock.**
-  An open, non-draft PR by a non-bot human other than you enters the "New PRs" section only when
-  `openedAt >= repos.createdAt` **for its own repo**, so adding a repo with 400 open PRs does not
-  dump all 400 into My Turn on day one. ⚠ The cutoff is **per repo** — a single global one passes a
-  one-repo fixture and is wrong the moment a second repo is added later (pinned, with that exact
-  case, by `db/my-turn-new-prs.test.ts`).
+  An open, non-draft PR by a human other than you enters the "New PRs" and "Pushed since" sections
+  only when `openedAt >= repos.createdAt` **for its own repo**, so adding a repo with 400 open PRs
+  does not dump all 400 into My Turn on day one; a reply in somebody else's thread, a PR comment
+  or a mention only summons you when it was written at or after the same moment. ⚠ The cutoff is **per repo** — a
+  single global one passes a one-repo fixture and is wrong the moment a second repo is added later
+  (pinned, with that exact case, by `db/my-turn-new-prs.test.ts`).
   **`description`** (TEXT, nullable) is the repo's GitHub "About" text, captured by the activity
   sync like `defaultBranch`/`viewerPermission` — the app's ONLY stored repo-purpose text (READMEs
   are never fetched; PR bodies are lean), added as grounding for the sprint chat's
@@ -134,7 +136,9 @@ fixture tests (see Conventions).
   thing that lets a `blocked` merge state say WHICH half of branch protection is unmet (see
   **Merge, CI logs & trunk status**). `mergeStateStatus` deliberately does NOT model GitHub's
   `DRAFT` value (it maps to `unknown`): draft-ness is already `isDraft`, and folding it in
-  would leave a draft reporting `draft` with no idea whether it is otherwise clean.
+  would leave a draft reporting `draft` with no idea whether it is otherwise clean. Four small
+  derived columns say whether it is a dependency tool's PR and whether it fixes a known advisory —
+  see **`pull_requests` — dependency + security signals** below.
 - **`reviews`** — submitted reviews (`state`: approved / changes_requested / commented /
   dismissed / pending). A reviewer's *standing* decision is their latest non-`commented` review.
 - **`reviewThreads`** + **`reviewComments`** — inline threads (stored `derivedState`) +
@@ -408,19 +412,39 @@ workspace that never overrode it — the `accounts.blast_radius_config` preceden
 because two teams in two zones in one account work different hours. Written only by
 `PUT /api/workspaces/:id/flow-settings`, which replaces the whole set.
 
+## `accounts.my_turn_settings` (CORE, free — Settings → My Turn)
+
+JSON (sqlite `text` json / pg `jsonb`, migration `0068` / pg `0055`) holding OVERRIDES ONLY:
+which My Turn card types are shown (`show`), the red-default-branch scope (`trunkScope`), the type
+order (`order`, stored as all fifteen once changed) and the Do next weights (`weights`, integer
+percents in steps of 10 summing to 100). NULL until the reader changes something, and never a
+stored default: `compactMyTurnSettings` drops anything equal to the product default, on the SPA's
+side and again on the server's. Every reader resolves through `resolveMyTurnSettings`
+(`packages/shared/src/my-turn-settings.ts`), which degrades a malformed part to its default alone.
+Per ACCOUNT, not per workspace: one account is one reader. Written only by
+`PUT /api/me/my-turn-settings`; exported with the account; erased with the `accounts` row. Contract:
+[BACKEND.md](BACKEND.md) § My Turn — Settings: gates and promotions.
+
 ## `pr_mentions` (CORE, free — "@you was mentioned on this PR")
 
-One row per `(account, PR)` where the account's viewer login is `@`-mentioned in a PR comment, a
-review body or an inline review comment. It is the **MENTION arm of My Turn's personal-relevance
-flag** (`MyTurnPr.personal`): the repo arm asks *"is this your patch of ground"*, this one asks
-*"did somebody type your name"* — and a mention makes a PR personal **even in a repo the viewer
-only READS**, which is exactly why it cannot be folded into the maintainer test. Written ONLY by
-`sync/mention-scan.ts`; read only through `db/pr-mentions.ts`.
+One row per `(account, PR)` where a PERSON other than the viewer `@`-mentions the viewer's login in
+a PR comment, a review body or an inline review comment. It feeds My Turn's **`mention` card type**
+(S6 in [BACKEND.md](BACKEND.md) § My Turn — the ball rule), which asks *"did somebody type your
+name, and have you acted since?"* — a summons **even in a repo the viewer only READS**. (It used to
+be the mention arm of the "New PRs" relevance flag; that arm is gone, and a mention is its own
+card.) Written ONLY by `sync/mention-scan.ts` (`db/pr-mentions.ts` `syncAccountMentions`); read by
+a join inside `getMyTurn`.
 
-- **PRESENCE IS THE WHOLE FACT.** There is no `mentioned` boolean and no "scanned, found nothing"
-  row, so every reader is one indexed existence check (`prm_account_pr`). Absence is the answer,
-  and it is the SAFE answer: a deployment whose scanner has never run behaves exactly as it did
-  before mentions existed — the flag degrades to the maintainer test and nothing widens.
+- **`mentioned_at` / `mentioned_by_user_id`** (migration `0068` / pg `0055`) are the NEWEST
+  qualifying mention's time and author — a person, not the viewer, not in the global automation set
+  (`globalAutomationUserIds`). The card clears when the viewer acts after `mentioned_at`, and comes
+  back when a newer mention restamps it. ⚠ **NULL is "not stamped yet", never "no mention"**: rows
+  written before `0068` stay NULL until the scanner's next tick restamps them, and a NULL row shows
+  no card (under-notifying is the safe direction). No FK on `mentioned_by_user_id`: it is a display
+  hint the scanner rewrites every tick, and `users` rows are global and never deleted.
+- **PRESENCE PLUS THE CLOCK IS THE WHOLE FACT.** There is no `mentioned` boolean and no "scanned,
+  found nothing" row. Absence is the SAFE answer: a deployment whose scanner has never run shows no
+  mention cards and nothing else changes.
 - **WHY A TABLE, NOT A COLUMN ON `pull_requests`.** The fact is derived, re-derivable and about a
   `(tenant, PR)` pair rather than about the PR; it is sparse (12 rows out of 8.5k PRs on this
   repo's own dev account). Widening the hottest table in the schema — and every sync upsert that
@@ -437,15 +461,50 @@ only READS**, which is exactly why it cannot be folded into the maintainer test.
 - The FKs cascade from `accounts`/`repos`/`pull_requests`, and unlike `ml_comment_labels` the row
   is ALSO deleted explicitly in **`deleteRepo`** (by `repo_id`), **`deletePrSubtree`** (by
   `pr_id`) and **`eraseAccountData`**, and it is on the `accountScopedTables()` checklist. A
-  surviving row does not merely waste space: it goes on asserting that a deleted PR is personally
-  relevant.
+  surviving row does not merely waste space: it goes on asserting that somebody is waiting on the
+  viewer in a PR that no longer exists.
 - **Deliberately NOT in the account export.** It is fully re-derivable from `prComments` /
   `reviews` / `reviewComments`, which the export already carries verbatim — the same standing as
   `ml_comment_labels` and `search_index`. (Recorded here because `branchCommits`' absence from
   that export was an omission nobody wrote down; this one is a choice.)
 
+## `pull_requests` — dependency + security signals (CORE, free)
 
+Four small DERIVED columns (migration `0067` / pg `0054`), read at sync by
+`sync/security-detect.ts` from the PR's title, branch, labels and FULL `bodyText`:
 
+| Column | Holds |
+|---|---|
+| `dependency_vendor` | the dependency or remediation tool whose OWN marker is on the PR (a `dependabot/` branch, a `[Snyk] ` title, a tool's boilerplate sentence, Checkmarx's `cx-ai-agent` label), or NULL |
+| `security_fix` | `'proven'` (the tool's own security marker), `'inferred'` (a Dependabot group named after an ecosystem, whose body was cut short), or NULL |
+| `advisory_ids` | JSON array of the advisory ids the tool's own text names (title, branch, the body before the release notes), canonical form; NULL when there are none |
+| `security_checked_at` | when the classification was written; NULL = never classified |
+
+- **CONTENT ONLY, NEVER THE AUTHOR.** `dependency_vendor` records a marker, not who opened the PR:
+  a Snyk fix under a person's token still carries Snyk's marker. Whether the AUTHOR is automation
+  is resolved on read, per workspace.
+- **NO BODIES.** Lean storage holds: the body is read in memory during the sync and only the verdict
+  is kept. ⚠ Never classified from `search_index` — it caps the body at 4,000 characters, and
+  Dependabot's security footer is the LAST line of a body that runs to 65 KB.
+- ⚠ **THE WRITE IS THREE-STATE, AND THE FOUR COLUMNS MOVE TOGETHER.** `bodyText` is `String!`, so a
+  null is a partial response and an absent key a response that never carried it — both write
+  nothing. A string, even `''`, is a positive statement, and the classification is written whole,
+  NULLs included. ONE helper, `securityColumnsFor` (`sync/upsert.ts`), serves both writers —
+  `persistPr` and the backfill — so a walk and a backfill cannot store one PR two ways.
+- **`security_checked_at` NULL is the backfill's worklist**: open PRs with an automated author or a
+  tool's branch/title marker ([SYNC.md](SYNC.md) § PR security-signal backfill). A person's PR with
+  no marker is never fetched, so its NULL means "not classified", never "classified clean".
+- ⚠ **KNOWN ADVISORIES ONLY, AND THE MARKER DECIDES.** `security_fix` comes from a tool's own
+  marker, never from an id regex: 6 of 153 stored Dependabot bodies are plain bumps whose release
+  notes cite a CVE, and 12 of the 19 real Dependabot security PRs name no id at all. Ids are
+  extracted only once `security_fix` is set, from an ALLOW-list (`ADVISORY_ID_PATTERNS`) that
+  leaves out CWE, MAL, Trivy misconfiguration and distro ids on purpose.
+- ⚠ **`'inferred'` NEEDS A BODY THAT WAS CUT SHORT** — Dependabot's own truncation note, or fewer
+  named dependencies than the title counts. The second sign is measured, not a guess: GitHub cuts
+  the markdown at 65,536 characters, sometimes inside an HTML tag, and the text rendering then
+  swallows everything after it, the note included (erxes#7874). A COMPLETE body with no security
+  footer is a positive statement that the group is a version update.
+- No new table, so erasure, both delete paths and the account export already cover the columns.
 
 ## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
 
@@ -527,6 +586,37 @@ so the brand name shows.
 ⚠ **`ReviewBotKind` must NEVER absorb the other families.** It is the AI-reviewer cohort: it
 drives the review-bot badge and keys the rows the cross-org benchmark contributes.
 
+### Prefixes, the security vendors, and the marker-only kinds
+
+- **`AUTOMATION_VENDOR_PREFIXES` — one vendor under MANY logins.** Semgrep's App installs per org
+  as `semgrep-code-<org>` / `semgrepcode-<org>`, so an exact table misses every org. Prefixes are
+  matched on the normalised login AFTER the exact table, through ONE lookup, `automationVendorFor`;
+  `automationVendorKind`, `roleForAutomationLogin` and the backend's `roleForBotLogin` all delegate
+  to it. ⚠ **The five derived login SETS stay exact-only**: they feed SQL `IN (…)` predicates, which
+  cannot hold a prefix, so SQL reaches the prefixes through `automationVendorPrefixes()` and a
+  `LIKE`. Mirrored in `sync/bot-detection.ts`, and the drift test covers the prefixes too.
+- **Six logins joined for the dependency + security work**: `snyk-io` (the Snyk App; `snyk-bot` is
+  the legacy User), `aikido-autofix` and `mend-for-github-com` → `dependency`; `endor-labs-pro` →
+  `quality_check`; `step-security-bot` and `orbisai0security` → `code_agent`. Seven kinds came with
+  them: `endor`, `aikido`, `mend`, `frogbot`, `checkmarx`, `step_security`, `orbisai`. None joins
+  `ReviewBotKind` or `REVIEW_BOT_KINDS`. Migration `0067` re-derives role and kind for rows already
+  stored under these logins — the `0053`/`0054` treatment, with the same three conditions.
+- **Marker-only kinds: `frogbot` and `checkmarx`.** They have no login row: Frogbot and Checkmarx
+  open PRs through `github-actions` or a person's token, and are recognised only from the PR's
+  branch, title, body or label (`pull_requests.dependency_vendor`). So each has an explicit
+  `KIND_ROLE_ENTRIES` row (`dependency`). Without it `roleForVendorKind` returns null, which means
+  "legal in every role", and both vendors would appear in every role's picker.
+- **The per-workspace kind map now has a NON-review seed.** `classificationKindForUser` also names
+  the users whose login is EXACTLY an `AUTOMATION_VENDORS` login (renovate, snyk-io, imgbot…), so a
+  Pending byline says "Renovate", not "Bot". The REVIEW_BOTS seed still wins, a STORED kind beats
+  the new seed (only a NULL stored kind takes it), and a manual "human" removes the actor from
+  both. ⚠ **Exact logins only, never a prefix**: the map is also the bot drill-downs' "is this id
+  classified here" gate, which then resolves the login, and a `semgrep-code-<org>` login names
+  another tenant's organisation. ⚠ **`classificationKindForUserForAccount` is unchanged** — it
+  feeds the cross-org benchmark, whose rows leave the tenant, and this work must not move it.
+  The automation SET that goes with it (`hiddenBotUserIds`, widened with `github_type = 'Bot'` and
+  the vendor logins) is in [BACKEND.md](BACKEND.md) § The Dependencies tab.
+
 ## `REVIEW_BOT_KINDS` is an ALLOW-list — `getBenchmarkContributions`
 
 ```ts
@@ -600,7 +690,7 @@ check every hit against its table's declared unique.**
 | `auto_merge_requests` | `[accountId, prId]` — current state, not a log; re-arm OVERWRITES, disarm DELETEs | `armAutoMerge` (~14009) |
 | `benchmark_contributions` | `[accountId, vendorKind, weekStart]` | the benchmark rollup (~13444) |
 | `ml_comment_labels` | `(account_id, target_kind, target_id)` (`mcl_account_target`) | `db/ml-labels.ts` (the enrichment worker's ONLY writer) |
-| `pr_mentions` | `(account_id, pr_id)` (`prm_account_pr`), `onConflictDoNothing` | `db/pr-mentions.ts` `syncAccountMentions` (the mention scanner's ONLY writer) |
+| `pr_mentions` | `(account_id, pr_id)` (`prm_account_pr`), `onConflictDoUpdate` (restamps `login`, `repo_id`, `mentioned_at`, `mentioned_by_user_id`) | `db/pr-mentions.ts` `syncAccountMentions` (the mention scanner's ONLY writer) |
 | `accounts` | the account uniques | `auth/account.ts` (`ensureLocalAccount`, `upsertCloudAccount`) |
 | `repos` head/trunk columns | `[accountId, githubNodeId]` / `branch_commits` composite | `sync/branch-status.ts`, `sync/sync-repo.ts` |
 
@@ -635,7 +725,7 @@ facts is per workspace:
 | Helper | Answers |
 |---|---|
 | `automatedReviewerUserIds(accountId, workspaceId, role)` | the automated id set, `'review'` \| `'all'` |
-| `classificationKindForUser(accountId, workspaceId)` | id → `AutomatedReviewerKind` |
+| `classificationKindForUser(accountId, workspaceId)` | id → `AutomatedReviewerKind` (plus the exact vendor-login seed) |
 | `classificationLabelMap(accountId, workspaceId)` | id → display label |
 | `reviewerRoleForUser(accountId, workspaceId)` | id → `ReviewerRole` (stored) |
 | `manualRoleUserIds(accountId, workspaceId)` | ids whose role was chosen BY A PERSON (automated rows only) |

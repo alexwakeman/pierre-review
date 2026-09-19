@@ -74,6 +74,11 @@ beforeAll(async () => {
   schema = client.schema;
   closeDb = client.closeDb;
   await runMigrations();
+  // Untouched "New PRs" are OFF by default (Settings → My Turn). This fixture's My Turn population
+  // is built on them, so it switches them back on rather than lose what it pins.
+  await (await import('../auth/account.js')).setMyTurnSettings(1, {
+    show: { watched_repo_pr: true },
+  });
   q = await import('./queries.js');
   brief = await import('./daily-brief.js');
 
@@ -226,6 +231,67 @@ beforeAll(async () => {
       })
       .execute();
     await db.insert(reviewRequests).values({ prId: conflictPr.id, userId: bobId }).execute();
+
+    // ── a SECURITY ALERT on the ready-to-land PR, so the `security` line is not vacuous ───────
+    // A Socket "Critical CVE" comment naming an advisory, from the account GitHub types a Bot. The
+    // PR keeps its merge card and gains a `security` one.
+    const { prComments } = schema;
+    const [socket] = await db
+      .insert(users)
+      .values({ githubLogin: 'socket-security', githubNodeId: 'U_socket', isBot: false, githubType: 'Bot' })
+      .returning()
+      .execute();
+    await db
+      .insert(prComments)
+      .values({
+        githubNodeId: 'IC_brief_socket',
+        prId: readyPr.id,
+        authorId: socket.id,
+        body: '<strong>Critical CVE</strong>: see https://socket.dev and https://github.com/advisories/GHSA-9qr9-h5gf-34mp',
+        createdAt: new Date(now - 60 * 60 * 1000),
+      })
+      .execute();
+
+    // ── one DEPENDENCY BUMP, so the "counted by nobody" pin below is not vacuous ─────────────
+    // Same two reasons as the rows above: an `events` row, and opened before the "New PRs"
+    // cutoff. (A dependency PR never takes the orphan path, so it needs no request.)
+    const [dependabot] = await db
+      .insert(users)
+      .values({ githubLogin: 'dependabot[bot]', githubNodeId: 'U_dependabot', isBot: true })
+      .returning()
+      .execute();
+    const [bumpPr] = await db
+      .insert(pullRequests)
+      .values({
+        githubNodeId: 'PR_brief_bump',
+        accountId: 1,
+        repoId: repo.id,
+        number: n++,
+        title: 'bump fixture',
+        state: 'open',
+        isDraft: false,
+        authorId: dependabot.id,
+        dependencyVendor: 'dependabot',
+        openedAt,
+        updatedAt: openedAt,
+        lastCommitAt: new Date(now - 60 * 60 * 1000),
+        mergeable: 'mergeable',
+        mergeStateStatus: 'blocked',
+      })
+      .returning()
+      .execute();
+    await db
+      .insert(events)
+      .values({
+        accountId: 1,
+        repoId: repo.id,
+        prId: bumpPr.id,
+        actorId: dependabot.id,
+        type: 'commit_pushed',
+        occurredAt: new Date(now - 60 * 60 * 1000),
+        dedupeKey: 'brief_ev_bump',
+      })
+      .execute();
   }
 
   // ⚠ Through the production resolver, never a hand-built {workspaceId, repoIds}: it is
@@ -288,16 +354,20 @@ describe('the daily brief counts what the click opens', () => {
     expect({
       my_turn: counts.myTurn,
       ci_failing: counts.ciFailing,
+      security: counts.security,
       stalled_review: counts.stalled,
       untouched_thread: counts.untouchedThreads,
       reviewer_routing: counts.needsReviewer,
     }).toEqual({
       my_turn: live.my_turn ?? 0,
       ci_failing: live.ci_failing ?? 0,
+      security: live.security ?? 0,
       stalled_review: live.stalled_review ?? 0,
       untouched_thread: live.untouched_thread ?? 0,
       reviewer_routing: live.reviewer_routing ?? 0,
     });
+    // Non-vacuity for the newest line: the fixture really holds a security card.
+    expect(live.security ?? 0).toBeGreaterThan(0);
   });
 
   // ⚠ THE TWO FORWARD KINDS ARE COUNTED BY NOBODY, ON PURPOSE — and that is a DECISION, so it
@@ -348,17 +418,44 @@ describe('the daily brief counts what the click opens', () => {
     expect(
       counts.myTurn +
         (counts.ciFailing ?? 0) +
+        (counts.security ?? 0) +
         counts.stalled +
         counts.untouchedThreads +
         counts.needsReviewer,
     ).toBe(
       (live.my_turn ?? 0) +
         (live.ci_failing ?? 0) +
+        (live.security ?? 0) +
         (live.stalled_review ?? 0) +
         (live.untouched_thread ?? 0) +
         (live.reviewer_routing ?? 0),
     );
     // …and no total for it travels either.
     expect(counts).not.toHaveProperty('conflictsTotal');
+  });
+
+  // ⚠ AND SO IS `dependency_bump` — THE FOURTH UNCOUNTED KIND, for a fourth reason: an update is
+  // housekeeping, not something waiting on you. (A `security` card IS counted — the line above.)
+  // Same shape as the two pins before it: the card must exist first, then no scalar may count it.
+  it('lets a dependency bump reach the board WITHOUT entering the brief', async () => {
+    const live = await liveCardCounts();
+    expect(live.dependency_bump ?? 0).toBeGreaterThan(0);
+    const { counts } = await brief.getDailyBriefEntry(1, scope.workspaceId);
+    expect(
+      counts.myTurn +
+        (counts.ciFailing ?? 0) +
+        (counts.security ?? 0) +
+        counts.stalled +
+        counts.untouchedThreads +
+        counts.needsReviewer,
+    ).toBe(
+      (live.my_turn ?? 0) +
+        (live.ci_failing ?? 0) +
+        (live.security ?? 0) +
+        (live.stalled_review ?? 0) +
+        (live.untouched_thread ?? 0) +
+        (live.reviewer_routing ?? 0),
+    );
+    expect(Object.keys(counts).some((k) => /bump|dependenc/i.test(k))).toBe(false);
   });
 });

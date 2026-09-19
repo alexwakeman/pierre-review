@@ -1,13 +1,17 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import type { CourtShare, FlowBudgetRow, FlowPrRow, PrCourt } from '@pierre-review/shared';
 import { FLOW_BUDGET_LABEL } from '@pierre-review/shared';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
+import { ChartPopover } from '../charts/ChartPopover.js';
 import { useChartWidth } from '../charts/common.js';
-import { CheckCircleIcon, TimerIcon, WarningIcon } from '../Icons.js';
+import { CheckCircleIcon, MinusIcon, ThinSampleIcon, TimerIcon, WarningIcon } from '../Icons.js';
 import { metaFor } from './AttentionCards.js';
-import { COURT_ORDER, COURT_SHORT } from './bottlenecksModel.js';
+import { barWidth, COURT_LABEL, COURT_ORDER, COURT_SHORT, formatPct } from './bottlenecksModel.js';
 import {
   BUDGET_SUB,
+  budgetAriaLabel,
+  budgetClip,
+  budgetPopoverRows,
   budgetScale,
   dotRadius,
   formatCount,
@@ -19,8 +23,8 @@ import {
   VERDICT_LABEL,
 } from './chronologyModel.js';
 
-// Chronology's working-hours charts: each wait against its budget (the headline), every pull
-// request as one dot, and where each sits between the three courts (context only).
+// Chronology's charts: who was holding the hours (the split), each wait against its budget, every
+// pull request as one dot, and where each sits between the three courts (context only).
 //
 // ⚠ COURT COLOURS ARE THE VALIDATED SET, NOT THE APP'S OLD DARK SHADES. amber-500 / teal-600 /
 // indigo-500 on light and amber-600 / teal-600 / indigo-500 on dark were run through the palette
@@ -39,6 +43,12 @@ export const COURT_SWATCH: Record<PrCourt, string> = {
   reviewer: 'bg-amber-500 dark:bg-amber-600',
   author: 'bg-teal-600 dark:bg-teal-600',
   landing: 'bg-indigo-500 dark:bg-indigo-500',
+};
+/** A court's figure as TEXT — the darker/lighter shades, so it reads on either ground. */
+export const COURT_TEXT: Record<PrCourt, string> = {
+  reviewer: 'text-amber-700 dark:text-amber-400',
+  author: 'text-teal-700 dark:text-teal-400',
+  landing: 'text-indigo-600 dark:text-indigo-400',
 };
 
 const AXIS_TEXT = 'fill-gray-500 dark:fill-gray-400 text-[11px]';
@@ -62,6 +72,85 @@ export function useOpenFlowPr(): (pr: {
       ),
       { fromActivity: true },
     );
+}
+
+/** A labelled figure — a number with its name beside it, never a sentence composed from it. */
+export function Figure({ value, label }: { value: string; label: string }): JSX.Element {
+  return (
+    <div>
+      <div className="text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-50">{value}</div>
+      <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
+    </div>
+  );
+}
+
+// ── Who was holding it: the three-way split ──────────────────────────────────────────────────
+
+/**
+ * The split between the three courts as one bar, in three sizes: 'lg' is the page's headline (the
+ * three shares printed large beneath it), 'sm' a repository row (the shares in one line), 'bar' the
+ * bar alone for a quiet row, where it carries its own accessible name because nothing is printed.
+ */
+export function CourtSplit({
+  courts,
+  size = 'lg',
+}: {
+  /** Any order; a missing court reads as 0. Drawn in COURT_ORDER. */
+  courts: readonly CourtShare[];
+  /** 'lg' = the Block-1 headline, 'sm' = a repository row, 'bar' = the bar alone (quiet rows). */
+  size?: 'lg' | 'sm' | 'bar';
+}): JSX.Element {
+  const by = new Map(courts.map((c) => [c.court, c.share]));
+  const share = (c: PrCourt): number => by.get(c) ?? 0;
+  const alone = size === 'bar';
+  const bar = (
+    <div
+      className={`flex w-full overflow-hidden rounded-sm bg-gray-200 dark:bg-gray-800 ${
+        size === 'lg' ? 'h-2.5' : 'h-2'
+      }`}
+      {...(alone
+        ? {
+            role: 'img',
+            'aria-label': COURT_ORDER.map((c) => `${COURT_LABEL[c]} ${formatPct(share(c))}`).join(', '),
+          }
+        : { 'aria-hidden': true })}
+    >
+      {COURT_ORDER.map((c) => (
+        <div key={c} className={COURT_SWATCH[c]} style={{ width: barWidth(share(c)) }} />
+      ))}
+    </div>
+  );
+  if (alone) return bar;
+  if (size === 'sm') {
+    return (
+      <div>
+        {bar}
+        <div className="mt-1 text-xs tabular-nums text-gray-600 dark:text-gray-300">
+          {COURT_ORDER.map((c, i) => (
+            <Fragment key={c}>
+              {i > 0 && <span className="decorative-mark text-gray-400 dark:text-gray-500"> · </span>}
+              {COURT_SHORT[c]} <strong className={`font-semibold ${COURT_TEXT[c]}`}>{formatPct(share(c))}</strong>
+            </Fragment>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      {bar}
+      <div className="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-1">
+        {COURT_ORDER.map((c) => (
+          <span key={c} className="inline-flex items-baseline gap-1.5">
+            <span className={`text-2xl font-semibold tabular-nums ${COURT_TEXT[c]}`}>
+              {formatPct(share(c))}
+            </span>
+            <span className="text-xs text-gray-600 dark:text-gray-300">{COURT_LABEL[c].toLowerCase()}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function CourtLegend({ prefix = '' }: { prefix?: string }): JSX.Element {
@@ -89,14 +178,57 @@ const VERDICT_CHIP: Record<NonNullable<FlowBudgetRow['verdict']>, string> = {
   slow: 'text-rose-700 dark:text-rose-400',
 };
 
-function VerdictChip({ verdict }: { verdict: FlowBudgetRow['verdict'] }): JSX.Element | null {
-  if (verdict == null) return null;
+const QUIET_CHIP = 'inline-flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-300';
+
+/**
+ * The verdict, in words and an icon — never colour alone. ⚠ A ROW WITH NO VERDICT STILL SAYS SO.
+ * Before, a refused row simply had no chip, and with its sentence moved into the popover an empty
+ * corner would read as "nothing to report" rather than "too few to judge".
+ */
+function VerdictChip({ row }: { row: FlowBudgetRow }): JSX.Element {
+  const verdict = row.verdict;
+  if (verdict == null) {
+    return row.prs > 0 ? (
+      <span className={QUIET_CHIP}>
+        <ThinSampleIcon size={11} />
+        Too few
+      </span>
+    ) : (
+      <span className={QUIET_CHIP}>
+        <MinusIcon size={11} />
+        None
+      </span>
+    );
+  }
   const Icon = verdict === 'good' ? CheckCircleIcon : verdict === 'ok' ? TimerIcon : WarningIcon;
   return (
-    <span className={`inline-flex items-center gap-1 text-xs font-medium ${VERDICT_CHIP[verdict]}`}>
+    <span
+      data-testid={`verdict-${row.measure}`}
+      className={`inline-flex items-center gap-1 text-xs font-medium ${VERDICT_CHIP[verdict]}`}
+    >
       <Icon size={12} />
       {VERDICT_LABEL[verdict]}
     </span>
+  );
+}
+
+/** The figures behind one row, printed only in its popover. */
+function BudgetPopover({ row }: { row: FlowBudgetRow }): JSX.Element {
+  const { note, figures } = budgetPopoverRows(row);
+  return (
+    <div>
+      <div className="font-semibold text-gray-900 dark:text-gray-50">{FLOW_BUDGET_LABEL[row.measure]}</div>
+      <div className="text-gray-600 dark:text-gray-300">{BUDGET_SUB[row.measure]}</div>
+      {note != null && <p className="mt-1.5">{note}</p>}
+      <dl className="mt-1.5 grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5">
+        {figures.map(([k, v]) => (
+          <Fragment key={k}>
+            <dt className="text-gray-600 dark:text-gray-300">{k}</dt>
+            <dd className="text-right font-medium tabular-nums text-gray-900 dark:text-gray-50">{v}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </div>
   );
 }
 
@@ -112,49 +244,60 @@ function BudgetBullet({
   const [ref, w] = useChartWidth();
   const H = 46;
   const x0 = 6;
-  const x1 = Math.max(x0 + 1, w - 10);
+  // Room at the right edge for the arrow that marks a bar running past the scale.
+  const x1 = Math.max(x0 + 1, w - 16);
   const X = (h: number): number => x0 + (Math.min(Math.max(h, 0), max) / max) * (x1 - x0);
-  const over = (h: number): boolean => h > max;
-  const label =
-    `${FLOW_BUDGET_LABEL[row.measure]}: median ${formatWorkHours(row.p50)}, three in four within ` +
-    `${formatWorkHours(row.p75)}, slowest tenth ${formatWorkHours(row.p90)}; budget ` +
-    `${formatWorkHours(row.good)}, acceptable up to ${formatWorkHours(row.ok)}.`;
+  const clip = budgetClip(row, max);
   return (
-    <div ref={ref} className="h-[46px] w-full">
-      {w > 0 && (
-        <svg width={w} height={H} role="img" aria-label={label} className="block">
-          <rect x={X(0)} y={4} width={X(row.good) - X(0)} height={22} className="fill-emerald-500/15 dark:fill-emerald-400/15" />
-          <rect x={X(row.good)} y={4} width={Math.max(0, X(row.ok) - X(row.good))} height={22} className="fill-amber-400/20 dark:fill-amber-400/15" />
-          <rect x={X(row.ok)} y={4} width={Math.max(0, X(max) - X(row.ok))} height={22} className="fill-rose-500/10 dark:fill-rose-400/10" />
-          {row.prs > 0 && (
-            <>
-              {/* Whisker: three-in-four to the slowest tenth. */}
-              <line x1={X(row.p75)} x2={X(row.p90)} y1={15} y2={15} className="stroke-gray-500 dark:stroke-gray-400" strokeWidth={1.5} />
-              {over(row.p90) && (
-                <path d={`M ${X(max) - 6} 11 L ${X(max)} 15 L ${X(max) - 6} 19`} fill="none" className="stroke-gray-500 dark:stroke-gray-400" strokeWidth={1.5} />
-              )}
-              {/* Bar: where three in four had finished. */}
-              <rect x={X(0)} y={10} width={Math.max(2, X(row.p75) - X(0))} height={10} rx={2} className="fill-gray-800 dark:fill-gray-100" />
-              {/* Dot: the median. */}
-              <circle cx={X(row.p50)} cy={15} r={5} className="fill-white stroke-gray-800 dark:fill-gray-950 dark:stroke-gray-100" strokeWidth={2} />
-            </>
-          )}
-          {/* The budget. */}
-          <line x1={X(row.good)} x2={X(row.good)} y1={0} y2={30} className="stroke-gray-800 dark:stroke-gray-100" strokeWidth={1.5} strokeDasharray="4 3" />
-          {ticks.map((t, i) => (
-            <text
-              key={t}
-              x={X(t)}
-              y={43}
-              textAnchor={i === 0 ? 'start' : i === ticks.length - 1 ? 'end' : 'middle'}
-              className={AXIS_TEXT}
-            >
-              {i === ticks.length - 1 ? `${t}h+` : `${t}h`}
-            </text>
-          ))}
-        </svg>
-      )}
-    </div>
+    <ChartPopover
+      label={budgetAriaLabel(row)}
+      content={<BudgetPopover row={row} />}
+      anchorX={X(Math.min(row.prs > 0 ? row.p75 : row.good, max))}
+      testId={`budget-trigger-${row.measure}`}
+    >
+      <div ref={ref} className="h-[46px] w-full">
+        {w > 0 && (
+          <svg width={w} height={H} aria-hidden="true" className="block">
+            <rect x={X(0)} y={4} width={X(row.good) - X(0)} height={22} className="fill-emerald-500/15 dark:fill-emerald-400/15" />
+            <rect x={X(row.good)} y={4} width={Math.max(0, X(row.ok) - X(row.good))} height={22} className="fill-amber-400/20 dark:fill-amber-400/15" />
+            <rect x={X(row.ok)} y={4} width={Math.max(0, X(max) - X(row.ok))} height={22} className="fill-rose-500/10 dark:fill-rose-400/10" />
+            {row.prs > 0 && (
+              <>
+                {/* Whisker: three-in-four to nine-in-ten. */}
+                <line x1={X(row.p75)} x2={X(row.p90)} y1={15} y2={15} className="stroke-gray-500 dark:stroke-gray-400" strokeWidth={1.5} />
+                {clip === 'tail' && (
+                  <path data-clipped="tail" d={`M ${X(max) - 6} 11 L ${X(max)} 15 L ${X(max) - 6} 19`} fill="none" className="stroke-gray-500 dark:stroke-gray-400" strokeWidth={1.5} />
+                )}
+                {/* Bar: where three in four had finished. */}
+                <rect x={X(0)} y={10} width={Math.max(2, X(row.p75) - X(0))} height={10} rx={2} className="fill-gray-800 dark:fill-gray-100" />
+                {/* Dot: the median. */}
+                <circle cx={X(row.p50)} cy={15} r={5} className="fill-white stroke-gray-800 dark:fill-gray-950 dark:stroke-gray-100" strokeWidth={2} />
+                {/* ⚠ Past the scale: the bar is drawn to the edge, so the arrow is what says it
+                    is longer than it looks — the figure itself is only in the popover. It sits
+                    clear of the median dot and is drawn after it, because a median past the edge
+                    is clamped to the same spot and would otherwise cover it. */}
+                {clip === 'bar' && (
+                  <path data-clipped="bar" d={`M ${x1 + 6} 9 L ${x1 + 14} 15 L ${x1 + 6} 21 Z`} className="fill-gray-800 dark:fill-gray-100" />
+                )}
+              </>
+            )}
+            {/* The budget. */}
+            <line x1={X(row.good)} x2={X(row.good)} y1={0} y2={30} className="stroke-gray-800 dark:stroke-gray-100" strokeWidth={1.5} strokeDasharray="4 3" />
+            {ticks.map((t, i) => (
+              <text
+                key={t}
+                x={X(t)}
+                y={43}
+                textAnchor={i === 0 ? 'start' : i === ticks.length - 1 ? 'end' : 'middle'}
+                className={AXIS_TEXT}
+              >
+                {i === ticks.length - 1 ? `${t}h+` : `${t}h`}
+              </text>
+            ))}
+          </svg>
+        )}
+      </div>
+    </ChartPopover>
   );
 }
 
@@ -166,6 +309,7 @@ export function BudgetChart({
   dayHours: number;
 }): JSX.Element {
   const { max, ticks } = budgetScale(rows, dayHours);
+  const anyClipped = rows.some((r) => budgetClip(r, max) === 'bar');
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
@@ -190,33 +334,33 @@ export function BudgetChart({
           three in four
         </span>
         <span className="inline-flex items-center gap-1.5">
+          <span className="h-0 w-4 border-t-[1.5px] border-gray-500 dark:border-gray-400" />
+          to nine in ten
+        </span>
+        <span className="inline-flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full border-2 border-gray-800 dark:border-gray-100" />
           median
         </span>
+        {anyClipped && (
+          <span className="inline-flex items-center gap-1.5">
+            <svg width={10} height={10} viewBox="0 0 10 10" aria-hidden="true" className="shrink-0">
+              <path d="M 1 0 L 9 5 L 1 10 Z" className="fill-gray-800 dark:fill-gray-100" />
+            </svg>
+            runs past the scale
+          </span>
+        )}
       </div>
       {rows.map((row) => (
         <div key={row.measure} data-testid={`budget-${row.measure}`}>
-          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+          <div className="flex items-baseline justify-between gap-3">
             <span className="text-sm font-medium text-gray-800 dark:text-gray-100">
               {FLOW_BUDGET_LABEL[row.measure]}
             </span>
-            <VerdictChip verdict={row.verdict} />
-          </div>
-          <div className="text-[11px] text-gray-500 dark:text-gray-400">
-            {BUDGET_SUB[row.measure]}
-            {row.prs > 0 && (
-              <>
-                {' · '}
-                {formatCount(row.prs)} {row.prs === 1 ? 'pull request' : 'pull requests'} · median{' '}
-                {formatWorkHours(row.p50)}, slowest tenth {formatWorkHours(row.p90)} or more · budget{' '}
-                {formatWorkHours(row.good)}, acceptable to {formatWorkHours(row.ok)}
-              </>
-            )}
+            <VerdictChip row={row} />
           </div>
           <div className="mt-1">
             <BudgetBullet row={row} max={max} ticks={ticks} />
           </div>
-          <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-300">{row.sentence}</p>
         </div>
       ))}
     </div>
@@ -411,7 +555,7 @@ export function LeadScatter({
         )}
         {hover != null && w > 0 && <PrTip p={hover} width={w} />}
       </div>
-      <div className="text-[11px] text-gray-500 dark:text-gray-400">
+      <div className="text-xs text-gray-500 dark:text-gray-400">
         Lead time in working hours, log scale · by the day it merged
       </div>
     </div>

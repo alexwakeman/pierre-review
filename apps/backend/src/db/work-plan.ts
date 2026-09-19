@@ -28,15 +28,19 @@
 // so this file re-orders one population and derives none of it.
 //
 // ⚠ INHERITED NARROWINGS, BOTH DELIBERATE AND BOTH REAL. The card fold applies an ULTRA-STALE
-// GATE (no activity event in `INSIGHT_MAX_STALE_DAYS` = 90 ⇒ no card) and a 15-PER-KIND CAP that
-// the old standalone query did not. A long-dormant-but-mergeable PR therefore no longer appears
-// here — and that is the point: a ranked row with no card behind it would break the board's
-// `head ∪ tail === cards` partition, which every cap disclosure on that screen depends on.
+// GATE (no activity event in `INSIGHT_MAX_STALE_DAYS` = 90 ⇒ no card), and a row is drawn only
+// from a card the Pending board LISTS (the board's uncapped fold, then `boardListCap` per list
+// group — `listedCardIds`). A long-dormant-but-mergeable PR therefore does not appear here — and
+// that is the point: the plan's `why` is shown on the row's card, so a row with no listed card
+// behind it would be a sentence with nowhere to go.
 //
 // ── THE RANK IS THE CODE'S, NOT THE MODEL'S ─────────────────────────────────────────────────
-// `score = 0.50·proximity + 0.30·stallRisk + 0.20·relevanceWeight`, sorted descending with a
-// TOTAL tie-break chain, so two ticks over unchanged data produce byte-identical order. A sort
-// that could flip under the reader between polls is a defect in a panel people read top-down.
+// `score = w.proximity·proximity + w.stall·stallRisk + w.relevance·relevanceWeight`, with the
+// READER's weights (Settings → My Turn; 0.50 / 0.30 / 0.20 until they choose), sorted descending
+// with a TOTAL tie-break chain, so two ticks over unchanged data produce byte-identical order. A
+// sort that could flip under the reader between polls is a defect in a panel people read top-down.
+// The weights are not hashed: changing them can change WHICH rows the capped plan holds (the plan
+// then reads `stale` once), never a hashed field of a row.
 //
 // ⚠ `ageHours`, `stallRisk` and `score` are DERIVED FROM `now`. They must never enter the
 // plugin's payload hash, or a dormant workspace re-bills on a timer. Everything else on an item —
@@ -48,15 +52,17 @@ import { DO_NEXT_RULES, PENDING_LIMITS } from '@pierre-review/shared';
 import type {
   CiFailingCard,
   ConflictsCard,
+  DependencyBumpCard,
   DoNextAdjustment,
   DoNextProximityBase,
+  DoNextWeights,
   InsightCard,
   MergeStateStatus,
-  MyTurnCard,
   MyTurnCardReason,
   MyTurnRelevance,
   PendingCardScore,
   ReviewerRoutingCard,
+  SecurityCard,
   StalledReviewCard,
   UntouchedThreadCard,
   WorkPlanEvidence,
@@ -66,6 +72,9 @@ import type {
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { getWorkspaceInsights, mergeCardDetail, type BotScope } from './queries.js';
+import { dependencyProximityBase } from './dependency-cards.js';
+import { getMyTurnSettings } from './my-turn-settings.js';
+import { listedCardIds } from './pending-tabs.js';
 import { approvalInfoFromStandings, computeReviewStandingsByPr } from './triage.js';
 
 const { pullRequests, reviewThreads } = schema;
@@ -178,8 +187,16 @@ function stallRiskFor(ageHours: number | null | undefined): number {
   return DO_NEXT_RULES.stallBase;
 }
 
-function scoreFor(proximity: number, stallRisk: number, relevance: MyTurnRelevance): number {
-  const w = DO_NEXT_RULES.weights;
+/** THE SCORE. `w` is the READER's resolved weights (Settings → My Turn; `DO_NEXT_PRESETS.balanced`
+ *  until they choose), never `DO_NEXT_RULES.weights` read directly — that field is the product
+ *  default and the resolver's input, and a scorer reading it would rank by numbers the board's
+ *  explanation no longer prints. */
+function scoreFor(
+  proximity: number,
+  stallRisk: number,
+  relevance: MyTurnRelevance,
+  w: DoNextWeights,
+): number {
   return round4(
     w.proximity * proximity +
       w.stall * stallRisk +
@@ -187,24 +204,51 @@ function scoreFor(proximity: number, stallRisk: number, relevance: MyTurnRelevan
   );
 }
 
-/** A my_turn card's `reason` → the plan's kind. A requested review is review work; a thread
- *  waiting on you is a reply. Everything else lands on the PR itself, which is review work too. */
-function kindForMyTurn(reason: MyTurnCardReason): 'review' | 'reply' {
-  return reason === 'thread' ? 'reply' : 'review';
+/** A classic my_turn card's `reason` → the plan's kind. Somebody answered, named or wrote after
+ *  you — a reply is owed. Everything else lands on the PR itself, which is review work. (The five
+ *  promotions never reach here: each scores as its HOME kind did — see the my_turn arm.) */
+function kindForMyTurn(reason: ClassicMyTurnReason): 'review' | 'reply' {
+  return reason === 'thread' ||
+    reason === 'thread_reply' ||
+    reason === 'comment_reply' ||
+    reason === 'mention'
+    ? 'reply'
+    : 'review';
 }
+
+/** The my_turn reasons that are a summons rather than a promotion of your own work. */
+type ClassicMyTurnReason = Exclude<
+  MyTurnCardReason,
+  'own_ci_red' | 'own_conflicts' | 'own_ready' | 'own_thread' | 'trunk_red'
+>;
 
 /** DEDUP PRIORITY, and it is deliberately TIME-FREE. Several my_turn reasons collapse onto one
  *  `wp:review:<prId>` id (a PR can be both "review requested" and "approved, waiting on you"), and
  *  the id is the model's join key so it must be unique. Picking the winner by SCORE would make the
  *  choice depend on `ageHours`, which would in turn make `reason` — a hashed field — drift on a
  *  timer and re-bill a dormant workspace. So the winner is fixed by severity, then by this rank. */
+///
+/// Every reason, in the product's DEFAULT type order (`MY_TURN_DEFAULT_ORDER`) — fixed, never the
+/// reader's order, because a hashed `reason` must not change with a display preference. The five
+/// promotions are never read here (they rank as their home kinds do), but the `Record` forces an
+/// entry. ⚠ The tie rank is `SEVERITY_RANK × 100 + REASON_RANK`: with fifteen reasons a × 10 would
+/// let a reason bleed across a severity band.
 const REASON_RANK: Record<MyTurnCardReason, number> = {
   review_request: 0,
-  thread: 1,
-  claude_review: 2,
-  pr_approved: 3,
-  your_pr: 4,
-  watched_repo_pr: 5,
+  mention: 1,
+  thread: 2,
+  thread_reply: 3,
+  comment_reply: 4,
+  pushed_since: 5,
+  own_ci_red: 6,
+  own_conflicts: 7,
+  trunk_red: 8,
+  pr_approved: 9,
+  own_ready: 10,
+  your_pr: 11,
+  own_thread: 12,
+  claude_review: 13,
+  watched_repo_pr: 14,
 };
 
 const SEVERITY_RANK: Record<'high' | 'warn' | 'info', number> = { high: 0, warn: 1, info: 2 };
@@ -309,15 +353,18 @@ export async function getWorkPlan(
   accountId: number,
   scope: BotScope,
 ): Promise<WorkPlanEvidence> {
-  // ⚠ THE SAME CALL THE DAILY BRIEF MAKES — same fold, same scope, same DEFAULT window
-  // (`undefined`). A different window here would silently give the plan a different population
-  // from the strip and the board.
+  // ⚠ THE SAME CALL `GET /api/attention` MAKES — same fold, same scope, same DEFAULT window
+  // (`undefined`), and UNCAPPED like the board's. A different window here would silently give the
+  // plan a different population from the strip and the board; the capped fold (15 per kind in
+  // severity / newest order, 50 my_turn cards) would hand the ranker cards the board does not
+  // list, and their `why` would have no card to sit on. `counts` reads `kindTotals` and the
+  // my_turn / ci totals, which are the same number in both folds, so the brief still agrees.
   //
   // ⚠ THIS SIGNATURE IS LOAD-BEARING ACROSS TWO REPOSITORIES. It is `ProHostQueries.getWorkPlan`,
   // and changing its shape is the one thing here that would force an `apiVersion` bump in four
   // literals spanning the host and the plugin submodule. The split below moves the BODY out; the
   // signature does not move.
-  const insights = await getWorkspaceInsights(accountId, undefined, scope);
+  const insights = await getWorkspaceInsights(accountId, undefined, scope, { uncapped: true });
   return rankWorkPlan(accountId, scope, insights);
 }
 
@@ -340,8 +387,15 @@ export async function rankWorkPlan(
   const generatedAt = new Date(now);
   if (scope.repoIds.length === 0) return emptyEvidence(scope.workspaceId, generatedAt);
   const counts = foldCounts(insights);
-  const { candidates } = await scoreCards(accountId, insights.cards, now);
-  return rankCandidates(scope, generatedAt, counts, candidates);
+  // The READER's weights, the same ones the Pending board ranks by — so the plan and the board
+  // below it order one population one way.
+  const settings = await getMyTurnSettings(accountId);
+  const { candidates, scored } = await scoreCards(accountId, insights.cards, now, settings.weights);
+  // ⚠ A ROW MUST NAME A CARD THE BOARD LISTS. The plan's `why` is shown on its card; a row whose
+  // card sits below a tab's `boardListCap` has nowhere to go, and the kind / repo spread in
+  // `capWithKindCoverage` seats exactly such low-scoring rows. The board's own listing rule decides.
+  const listed = listedCardIds(insights.cards, scored, settings.order);
+  return rankCandidates(scope, generatedAt, counts, candidates, listed);
 }
 
 /** One card's Do next score and its working, as the Pending board lists it. */
@@ -355,28 +409,38 @@ export interface ScoredCard extends PendingCardScore {
  * Pending board's tabs, so the two can never score one card two ways.
  *
  * Returns the work-plan `candidates` (the seven signals, with ids / reasons / dedup ranks) and
- * `scored` — the same score for EVERY scorable card, plus `conflicts`, which the board ranks and the
- * work plan never names. Review load and the bot cards get no score.
+ * `scored` — the same score for EVERY scorable card, plus the BOARD-ONLY kinds (`conflicts`,
+ * `security`, `dependency_bump`), which the board ranks and the work plan never names. Review load
+ * and the bot cards get no score.
  */
 export async function scoreCards(
   accountId: number,
   cards: InsightCard[],
   now: number,
+  // The reader's resolved weights (`getMyTurnSettings(accountId).weights`). REQUIRED, so no caller
+  // can forget it and quietly rank by the product default while the board prints the reader's.
+  weights: DoNextWeights,
 ): Promise<{ candidates: Candidate[]; scored: ScoredCard[] }> {
-  const conflicts: ScoredCard[] = [];
+  // Cards the Pending board ranks and the work plan never names — see the note at the loop's end.
+  const boardOnly: ScoredCard[] = [];
   // ── the shared per-PR facts every PR-grained row wants ────────────────────────────────────
   // Batched over the UNION of PR ids the plan could name, so every row gets the same
   // merge/approval/thread facts for free.
   const cardPrIds = new Set<number>();
   for (const c of cards) {
-    if (
-      c.kind === 'my_turn' ||
+    // A red-trunk my_turn card adds nothing: its `prId` is only the landing PR of the branch's
+    // head, and the trunk arm takes no PR facts (see the ci_failing arm below).
+    if (c.kind === 'my_turn') {
+      if (c.reason !== 'trunk_red') cardPrIds.add(c.prId);
+    } else if (
       c.kind === 'stalled_review' ||
       c.kind === 'untouched_thread' ||
       c.kind === 'reviewer_routing' ||
       c.kind === 'merge' ||
       c.kind === 'update_branch' ||
-      c.kind === 'conflicts'
+      c.kind === 'conflicts' ||
+      c.kind === 'security' ||
+      c.kind === 'dependency_bump'
     ) {
       cardPrIds.add(c.prId);
     } else if (c.kind === 'ci_failing' && c.prId != null) cardPrIds.add(c.prId);
@@ -513,7 +577,7 @@ export async function scoreCards(
         facts: parts.facts,
         proximity,
         stallRisk,
-        score: scoreFor(proximity, stallRisk, parts.relevance),
+        score: scoreFor(proximity, stallRisk, parts.relevance, weights),
         reason: parts.reason,
         cardId: parts.cardId,
       },
@@ -557,8 +621,139 @@ export async function scoreCards(
     }
 
     if (card.kind === 'my_turn') {
-      const c = card as MyTurnCard;
-      const kind = kindForMyTurn(c.reason);
+      // ⚠ BRANCH ON THE TRUNK CARD FIRST. `kind === 'my_turn'` narrows to a union whose `prId` is
+      // nullable, and a cast to `MyTurnCard` here would hide exactly the repo-grained card the
+      // compiler exists to make every consumer handle.
+      if (card.reason === 'trunk_red') {
+        const c = card;
+        // A PROMOTED red trunk scores EXACTLY as the ci_failing trunk arm below does — same kind,
+        // same id, same repo-only facts — so the plan's evidence is the same whether or not the
+        // reader promoted it. Only `relevance` (theirs now) and `cardId` differ.
+        push('unblock_ci', `wp:unblock_ci:trunk:${c.repoId}`, SEVERITY_RANK[c.severity], {
+          cardId: c.id,
+          prId: c.prId,
+          repoId: c.repoId,
+          repoFullName: c.repoFullName,
+          prNumber: c.prNumber,
+          prTitle: c.prTitle,
+          githubUrl: c.githubUrl,
+          subject: 'repo',
+          relevance: c.relevance ?? 'none',
+          facts: { ciStatus: c.ciStatus, ageHours: hoursSince(c.observedAt, now), clock: 'observed' },
+          reason: c.maintained
+            ? 'Trunk is red in a repo you maintain — every open PR here builds on it'
+            : 'Trunk is red — every open PR here builds on it',
+          proximityBase: 'red_trunk',
+        });
+        continue;
+      }
+      const c = card;
+      // THE FOUR PR-GRAINED PROMOTIONS score EXACTLY as their home cards did — the same
+      // `WorkPlanKind`, the same id, the same facts, the same `reason` sentence — so the Pro plan's
+      // evidence vocabulary and ids are identical whether or not the reader promoted anything.
+      // Only `relevance` (read off the card) and `cardId` may differ.
+      const own = c.own;
+      if (c.reason === 'own_ci_red' && own?.kind === 'ci_red') {
+        push('unblock_ci', `wp:unblock_ci:${c.prId}`, SEVERITY_RANK[c.severity], {
+          cardId: c.id,
+          prId: c.prId,
+          repoId: c.repoId,
+          repoFullName: c.repoFullName,
+          prNumber: c.prNumber,
+          prTitle: c.prTitle,
+          githubUrl: c.githubUrl,
+          relevance: c.relevance ?? 'none',
+          facts: {
+            ...sharedFacts(c.prId),
+            ciStatus: c.ciStatus,
+            changedFiles: c.changedFiles,
+            ageHours: hoursSince(own.lastCommitAt ?? c.openedAt, now),
+            clock: 'last_commit',
+          },
+          reason: 'Your open PR — its head commit is red',
+        });
+        continue;
+      }
+      if (c.reason === 'own_ready' && own?.kind === 'ready') {
+        const facts: WorkPlanFacts = {
+          ...sharedFacts(c.prId),
+          ciStatus: c.ciStatus,
+          changedFiles: c.changedFiles,
+          ageHours: hoursSince(own.lastCommitAt ?? c.openedAt, now),
+          clock: own.lastCommitAt != null ? 'last_commit' : 'opened',
+        };
+        push(own.forward, `wp:${own.forward}:${c.prId}`, 0, {
+          cardId: c.id,
+          prId: c.prId,
+          repoId: c.repoId,
+          repoFullName: c.repoFullName,
+          prNumber: c.prNumber,
+          prTitle: c.prTitle,
+          githubUrl: c.githubUrl,
+          relevance: c.relevance ?? 'none',
+          facts,
+          reason: mergeCardDetail(own.forward, own.mergeStateStatus, facts.untouchedThreads ?? 0),
+        });
+        continue;
+      }
+      if (c.reason === 'own_conflicts') {
+        // Board-only, like its home `conflicts` card (see the conflicts arm below for why).
+        const facts: WorkPlanFacts = {
+          ...sharedFacts(c.prId),
+          ciStatus: c.ciStatus,
+          changedFiles: c.changedFiles,
+          ageHours: hoursSince(c.openedAt, now),
+          clock: 'opened',
+        };
+        const working = proximityWorking('merge', facts, 'conflicts');
+        const stallRisk = stallRiskFor(facts.ageHours);
+        const relevance = c.relevance ?? 'none';
+        boardOnly.push({
+          cardId: c.id,
+          prId: c.prId,
+          score: scoreFor(working.value, stallRisk, relevance, weights),
+          proximity: working.value,
+          proximityBase: working.base,
+          adjustments: working.adjustments,
+          stallRisk,
+          relevance,
+          ageHours: roundAge(facts.ageHours),
+          clock: facts.clock ?? null,
+        });
+        continue;
+      }
+      if (c.reason === 'own_thread' && own?.kind === 'thread' && c.threadId != null) {
+        // The Unanswered threads card ages in WHOLE hours; so does this, so one thread scores the
+        // same on either tab.
+        const age = hoursSince(c.since, now);
+        push('thread', `wp:thread:${c.prId}:${c.threadId}`, 0, {
+          cardId: c.id,
+          prId: c.prId,
+          repoId: c.repoId,
+          repoFullName: c.repoFullName,
+          prNumber: c.prNumber,
+          prTitle: c.prTitle,
+          threadId: c.threadId,
+          githubUrl: c.githubUrl,
+          relevance: c.relevance ?? 'none',
+          facts: {
+            ...sharedFacts(c.prId),
+            ciStatus: c.ciStatus,
+            changedFiles: c.changedFiles,
+            ageHours: age != null ? Math.round(age) : undefined,
+            clock: 'thread_created',
+          },
+          reason: `Review thread on ${own.path} — no reply and no follow-up commit`,
+        });
+        continue;
+      }
+      if (c.reason === 'own_ci_red' || c.reason === 'own_ready' || c.reason === 'own_thread') {
+        // A promotion whose home facts are missing (`own` absent on the wire) has nothing to score
+        // as — never invent them.
+        continue;
+      }
+      const reason = c.reason;
+      const kind = kindForMyTurn(reason);
       const facts: WorkPlanFacts = {
         ...sharedFacts(c.prId),
         ciStatus: c.ciStatus,
@@ -567,14 +762,17 @@ export async function scoreCards(
         // `since` is the instant the thing that needs you happened. Only the review-request
         // section's is one of the four NAMED clocks; the rest are activity events we observed,
         // and 'observed' is the honest label rather than a nearby-sounding lie.
-        clock: c.reason === 'review_request' ? 'requested' : 'observed',
+        clock: reason === 'review_request' ? 'requested' : 'observed',
       };
       push(
         kind,
+        // A thread-grained reply (`thread`, `thread_reply`) keys on its thread; `mention` and
+        // `comment_reply` are PR-grained — at most one PR-grained summons exists per PR (the fixed
+        // precedence inside `getMyTurn`).
         kind === 'reply' && c.threadId != null
           ? `wp:reply:${c.prId}:${c.threadId}`
           : `wp:${kind}:${c.prId}`,
-        SEVERITY_RANK[c.severity] * 10 + REASON_RANK[c.reason],
+        SEVERITY_RANK[c.severity] * 100 + REASON_RANK[reason],
         {
           cardId: c.id,
           prId: c.prId,
@@ -588,7 +786,7 @@ export async function scoreCards(
           // exactly: a missing field may never invent an ownership claim on screen.
           relevance: c.relevance ?? 'none',
           facts,
-          reason: myTurnReason(c.reason),
+          reason: myTurnReason(reason),
         },
       );
       continue;
@@ -740,10 +938,46 @@ export async function scoreCards(
       });
       continue;
     }
+    // ── security + dependency_bump: SCORED FOR THE BOARD, NEVER A PLAN ROW (the conflicts precedent)
+    // WorkPlanKind is a two-repository contract (the plugin's prompt enumerates seven kinds as a
+    // string); these rank only inside the Dependencies tab, whose strict group already puts security
+    // first — so no security bonus. A dependency PR starts from the base its STATE names (a ready
+    // one splits on approval like a `merge` card); a person's PR a tool flagged, from
+    // `security_alert`.
+    if (card.kind === 'security' || card.kind === 'dependency_bump') {
+      const c = card as SecurityCard | DependencyBumpCard;
+      const facts: WorkPlanFacts = {
+        ...sharedFacts(c.prId),
+        ciStatus: c.ciStatus,
+        changedFiles: c.changedFiles,
+        // The head commit is the code that would land — the merge cards' clock.
+        ageHours: hoursSince(c.lastCommitAt ?? c.openedAt, now),
+        clock: c.lastCommitAt != null ? 'last_commit' : 'opened',
+      };
+      const working = proximityWorking(
+        'merge',
+        facts,
+        dependencyProximityBase(c.depState, facts.approvals ?? 0),
+      );
+      const stallRisk = stallRiskFor(facts.ageHours);
+      boardOnly.push({
+        cardId: c.id,
+        prId: c.prId,
+        score: scoreFor(working.value, stallRisk, c.relevance, weights),
+        proximity: working.value,
+        proximityBase: working.base,
+        adjustments: working.adjustments,
+        stallRisk,
+        relevance: c.relevance,
+        ageHours: roundAge(facts.ageHours),
+        clock: facts.clock ?? null,
+      });
+      continue;
+    }
     // ── conflicts: SCORED FOR THE BOARD, NEVER A PLAN ROW ──────────────────────────────────
     // A conflicts card competes inside the Pending board's "Needs fixing" tab, so it needs a score
     // on the same scale as the red builds beside it. It still never becomes a work-plan ROW — see
-    // the note below — so it is scored straight into `conflicts` and never pushed.
+    // the note below — so it is scored straight into `boardOnly` and never pushed.
     if (card.kind === 'conflicts') {
       const c = card as ConflictsCard;
       const facts: WorkPlanFacts = {
@@ -756,10 +990,10 @@ export async function scoreCards(
       };
       const working = proximityWorking('merge', facts, 'conflicts');
       const stallRisk = stallRiskFor(facts.ageHours);
-      conflicts.push({
+      boardOnly.push({
         cardId: c.id,
         prId: c.prId,
-        score: scoreFor(working.value, stallRisk, c.relevance),
+        score: scoreFor(working.value, stallRisk, c.relevance, weights),
         proximity: working.value,
         proximityBase: working.base,
         adjustments: working.adjustments,
@@ -773,7 +1007,9 @@ export async function scoreCards(
     // reviewer_load / bot_signal / bot_only_review are SURVEYS of the workspace, not things one
     // person does today. They are deliberately not worklist rows.
     //
-    // ⚠ AND NEITHER IS `conflicts`, WHICH IS NOT A SURVEY — so its absence needs its own argument.
+    // ⚠ AND NEITHER ARE `conflicts`, `security` OR `dependency_bump`, WHICH ARE NOT SURVEYS — so
+    // their absence needs its own argument (written for conflicts; the Dependencies kinds follow it
+    // for reason (2), and because their tab's strict group is its own order).
     // Two reasons, and the second is why it stays out today. (1) It is the one job on this board
     // with no in-app step to rank: the plan orders what you could do NEXT, and "go resolve a merge
     // conflict in a checkout" has no next. (2) The kind vocabulary is a TWO-REPOSITORY contract —
@@ -798,7 +1034,7 @@ export async function scoreCards(
       ageHours: roundAge(c.item.facts.ageHours),
       clock: c.item.facts.clock ?? null,
     })),
-    ...conflicts,
+    ...boardOnly,
   ];
   return { candidates, scored };
 }
@@ -808,14 +1044,47 @@ function roundAge(hours: number | undefined): number | null {
   return hours == null ? null : Math.round(hours * 10) / 10;
 }
 
-/** The work plan's dedup → rank → cap over already-scored candidates. */
+/** The work plan's dedup → rank → cap over already-scored candidates. `listed` is the board's
+ *  listed card ids: rows are drawn only from candidates whose card is listed, while `totals` still
+ *  counts every row, so the cap disclosure covers what the board left out too. */
 function rankCandidates(
   scope: BotScope,
   generatedAt: Date,
   counts: WorkPlanEvidence['counts'],
   candidates: Candidate[],
+  listed: ReadonlySet<string>,
 ): WorkPlanEvidence {
-  // ── dedup, rank, cap ──────────────────────────────────────────────────────────────────────
+  const ranked = dedupAndRank(candidates);
+
+  // The UNCAPPED population per kind, folded off the pre-cap array — the disclosure that keeps
+  // WORK_PLAN_ITEM_CAP from reading as "that is everything".
+  //
+  // ⚠ IT COUNTS ITEMS, NOT CARDS, and is therefore NOT comparable to `counts` above: `counts` is
+  // the brief-aligned CARD population, `totals` is the post-dedup ROW population the capped list
+  // is drawn from. Two different questions; conflating them would make one of the two wrong.
+  const totals: Partial<Record<WorkPlanKind, number>> = {};
+  for (const item of ranked) totals[item.kind] = (totals[item.kind] ?? 0) + 1;
+
+  // ⚠ FILTER BEFORE THE DEDUP, NOT AFTER. A PR's listed `merge` row and its unlisted `review` row
+  // collapse onto one survivor; deduping first could pick the unlisted one and then drop the PR.
+  // Which cards are listed is score-ordered, so on a list group over the cap this is the same
+  // bucket-crossing clock dependence the plugin's hash already accepts for the 12-row cap.
+  const onBoard = dedupAndRank(
+    candidates.filter((c) => c.item.cardId != null && listed.has(c.item.cardId)),
+  );
+
+  return {
+    workspaceId: scope.workspaceId,
+    generatedAt: generatedAt.toISOString(),
+    items: capWithKindCoverage(onBoard),
+    totals,
+    counts,
+  };
+}
+
+/** Dedup by id, then by PR, then rank — the rows the cap selects from. */
+function dedupAndRank(candidates: readonly Candidate[]): WorkPlanItem[] {
+  // ── dedup, rank ───────────────────────────────────────────────────────────────────────────
   // ⚠ THE ID IS THE MODEL'S JOIN KEY, so it must be unique. Several signals collapse onto one id
   // (a PR that is both "review requested" and "approved, waiting on you"); the survivor is chosen
   // by the TIME-FREE `tieRank`, never by score — see REASON_RANK.
@@ -872,23 +1141,7 @@ function rankCandidates(
       // The last resort: ids are unique by construction above, so this can never tie.
       a.id.localeCompare(b.id),
   );
-
-  // The UNCAPPED population per kind, folded off the pre-cap array — the disclosure that keeps
-  // WORK_PLAN_ITEM_CAP from reading as "that is everything".
-  //
-  // ⚠ IT COUNTS ITEMS, NOT CARDS, and is therefore NOT comparable to `counts` above: `counts` is
-  // the brief-aligned CARD population, `totals` is the post-dedup ROW population the capped list
-  // is drawn from. Two different questions; conflating them would make one of the two wrong.
-  const totals: Partial<Record<WorkPlanKind, number>> = {};
-  for (const item of ranked) totals[item.kind] = (totals[item.kind] ?? 0) + 1;
-
-  return {
-    workspaceId: scope.workspaceId,
-    generatedAt: generatedAt.toISOString(),
-    items: capWithKindCoverage(ranked),
-    totals,
-    counts,
-  };
+  return ranked;
 }
 
 /**
@@ -964,18 +1217,26 @@ function capWithKindCoverage(ranked: WorkPlanItem[]): WorkPlanItem[] {
 /** CODE-WRITTEN blockers for the my_turn reasons. ⚠ Deliberately free of relative-time phrasing
  *  (the card's own `detail` says "3d ago"): `reason` is a stable, hashable field and a clock
  *  inside it would re-bill a dormant workspace on a timer. */
-function myTurnReason(reason: MyTurnCardReason): string {
+function myTurnReason(reason: ClassicMyTurnReason): string {
   switch (reason) {
     case 'review_request':
       return 'Review requested from you';
+    case 'mention':
+      return 'You were mentioned on this PR';
     case 'thread':
       return 'A reply is waiting on you in this thread';
+    case 'thread_reply':
+      return 'Someone replied to your comment in this thread';
+    case 'comment_reply':
+      return 'Someone commented after your comment';
+    case 'pushed_since':
+      return 'New commits since your last review or comment';
     case 'pr_approved':
       return 'Your PR is approved and waiting on you';
     case 'your_pr':
       return 'Your PR has new activity since you last opened it';
     case 'watched_repo_pr':
-      return 'New PR in this workspace with no review yet';
+      return 'New PR you have not reviewed or commented on';
     case 'claude_review':
       return 'A Claude review has finished and needs actioning';
   }

@@ -23,13 +23,11 @@ import { AttentionView } from './AttentionView.js';
 import { BotsView } from './BotsView.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
 
-// DEFAULT LANDING = THE FEED, for every tier (plan P3.1). There used to be a one-shot
-// module-scoped effect here that auto-selected the Reports/Insights rail entry when Pro was on
-// (`insightsDefaultApplied` + `suppressInsightsDefault()`, which the Welcome-back banner had to
-// call to keep its own 'feed' navigation from being clobbered) — chosen when Insights was the
-// daily chat surface. Post-C5 that pane is a fortnightly ARTIFACT (Reports), and the daily
-// surface is the Feed with the BriefStrip on top, so the store's plain 'feed' default IS the
-// landing and the whole apparatus is gone. Reports stays one click away on the rail.
+// DEFAULT LANDING = PENDING, for every tier. The rail's top entry is what opens: Pending is the
+// ranked worklist, and the Feed (brief on top) is one click below it. The store's plain
+// 'attention' default IS the landing, and it is the one rail value `useUrlState` leaves out of
+// the URL. (The landing was the Feed from plan P3.1 until this change; before that a one-shot
+// effect auto-selected Insights for Pro accounts — that apparatus is gone.)
 
 // Rail sort: attention desc → unread → alphabetical. Computed once per data load so
 // the rail is stable (not jumpy) as the user interacts.
@@ -243,18 +241,18 @@ export function ActivityView(): JSX.Element {
 
   const sorted = useMemo(() => sortRepos(data?.repos ?? []), [data?.repos]);
 
-  // The selected repo (single-repo console). null ⇒ the Feed pseudo-row.
+  // The selected repo (single-repo console). null ⇒ one of the pseudo-rows.
   const selectedRepo =
     typeof activityRepoId === 'number'
       ? sorted.find((r) => r.repoId === activityRepoId) ?? null
       : null;
-  // The cross-repo consolidated Feed is the default detail (also when nothing's set).
+  // Pending is the default detail (also when nothing is set).
   // ('compare' left the activityRepoId union with the Compare rail entry — cross-workspace
   // comparison is Reports' "By workspace" axis now, and a legacy `?activityRepo=compare` link
-  // already normalizes to the Feed in useUrlState.)
-  const showingFeed = activityRepoId === 'feed' || activityRepoId == null;
+  // already normalizes to Pending in useUrlState.)
+  const showingFeed = activityRepoId === 'feed';
   // The CORE/free **Pending** cards console — always available, no Pro gate.
-  const showingAttention = activityRepoId === 'attention';
+  const showingAttention = activityRepoId === 'attention' || activityRepoId == null;
   const showingInsights = activityRepoId === 'insights';
   // The review-bot triage console (BotsView) — the RAIL ENTRY is always available and must stay
   // that way: it owns the free classification/Settings screen, the free bot-only governance
@@ -264,7 +262,7 @@ export function ActivityView(): JSX.Element {
   const showingBots = activityRepoId === 'bots';
 
   // (The one-shot "default to Insights when Pro is on" effect lived here — removed with P3.1:
-  // the Feed, brief on top, is the default landing for every tier. See the note at the top.)
+  // Pending is the default landing; see the note at the top.)
 
   // The cross-repo Feed's sub-tab bar: Feed | Themes(Pro). Still built dynamically so a tab
   // exists only where it means something — Themes needs the Pro AI tier. ("Compare teams" left
@@ -390,86 +388,28 @@ export function ActivityView(): JSX.Element {
             isFetching && data != null ? 'opacity-60 transition-opacity' : ''
           }`}
         >
-          {/* RAIL ORDER, top to bottom: Feed · Bots · Pending · Reports (store value still
-              'insights') — then the per-repo rows BENEATH the whole block. The Feed leads because
-              it is the default landing. Bots sits DIRECTLY under it because the two are read
-              together: most of what scrolls past on the Feed is bot-authored, and the Bots console
-              owns the judgement that decides what the Feed shows — `hiddenBotUserIds` is the union
-              of `users.isBot` and this workspace's automated reviewers, and a manual "human"/"bot"
-              call made under Bots → Settings wins in both directions. The control that filters the
-              stream belongs next to the stream, not three entries away. Pending, the worklist,
-              follows them; Reports sits last as the retrospective surface.
-              (Pending was previously second, on the argument that the Feed and Pending are the two
-              DAILY surfaces. It is still a daily surface — what makes it one is that it absorbed
-              the "Plan for today" panel, not where it sits in this list.)
+          {/* RAIL ORDER, top to bottom: Pending · Feed · Bots · Reports (store value still
+              'insights') — then the per-repo rows BENEATH the whole block. Pending leads because
+              it is where the app opens: the ranked worklist is the first thing a reader needs.
+              The Feed follows as the stream of what happened. Bots sits DIRECTLY under the Feed
+              because the two are read together: most of what scrolls past on the Feed is
+              bot-authored, and the Bots console owns the judgement that decides what the Feed
+              shows — `hiddenBotUserIds` is the union of `users.isBot` and this workspace's
+              automated reviewers, and a manual "human"/"bot" call made under Bots → Settings wins
+              in both directions. The control that filters the stream belongs next to the stream,
+              not three entries away. Reports sits last as the retrospective surface.
               ⚠ ALL FOUR ARE NOW UNGATED. Reports used to be first AND Pro-gated, from when it was
               nothing but the Pro period report; the FREE flow metrics moved into it off the Feed,
               so hiding the entry would have taken a free feature behind the Pro wall.
               (The "Compare workspaces" entry was folded into Reports' "By workspace" axis.) */}
 
-          {/* FEED pseudo-row — this workspace's consolidated state of play, across every repo in
-              it. The old "All repos" pseudo-row was removed (redundant with the Feed + the
-              per-repo entries below). */}
-          <button
-            type="button"
-            onClick={() => setActivityRepo('feed')}
-            aria-pressed={showingFeed}
-            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
-              showingFeed
-                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
-                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
-            }`}
-            title="One chronological stream across every repo in this workspace"
-          >
-            <span className="shrink-0 text-sky-500">
-              <SparkleIcon />
-            </span>
-            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
-              Feed
-            </span>
-          </button>
-
-          {/* BOTS pseudo-row — "the calm layer above your review bots". CORE/free (reads the
-              deterministic bot routes), so it's ALWAYS shown, on every tier, no Pro gate. A bot is
-              one object per WORKSPACE: a vendor running in six of this workspace's repos is ONE
-              row here, and everything about it — automated, role, vendor name, price — is edited
-              at this level.
-              SECOND in the rail, directly under the Feed, because this is where the Feed's own
-              bot judgement is made: the "human"/"bot" call under Bots → Settings feeds
-              `hiddenBotUserIds`, which is what the Feed and the Timeline hide by default. A reader
-              who wants to know why a vendor is (or isn't) in the stream goes one row up or one row
-              down, not across the rail. */}
-          <button
-            type="button"
-            onClick={() => setActivityRepo('bots')}
-            aria-pressed={showingBots}
-            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
-              showingBots
-                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
-                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
-            }`}
-            title="Detect, measure and triage this workspace's automated review bots — classification and triage are free; the ROI table is Pro"
-          >
-            <span className="shrink-0">
-              <BotIcon />
-            </span>
-            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
-              Bots
-            </span>
-          </button>
-
-          {/* PENDING pseudo-row — the worklist. Everything waiting on you or the workspace, in
-              five tabs, each ranked by db/work-plan.ts's Do next score (db/pending-tabs.ts).
-              CORE/free — the RANK is code, only its narration is Pro — so it's ALWAYS shown.
-              ⚠ LABEL-ONLY rename from "Needs attention": the rail id stays `'attention'`, because
-              an unknown `?activityRepo=` value falls into the parseInt branch, yields NaN and
-              lands the reader on the Feed, breaking Back on same-session history entries.
-              THIRD in the rail, under Bots. It is a DAILY surface — it absorbed the "Plan for
-              today" panel that used to sit on the Feed — but that is a fact about its CONTENT, not
-              about this position: it read second for a while on the "the two daily surfaces lead"
-              argument, and moving it down one row costs it nothing, because it is reached from the
-              BriefStrip, the My-Turn banner and the Workspace badges far more often than from
-              this list. */}
+          {/* PENDING pseudo-row — the worklist, and the default landing. Everything waiting on you
+              or the workspace, in tabs, each ranked by db/work-plan.ts's Do next score
+              (db/pending-tabs.ts). CORE/free — the RANK is code, only its narration is Pro — so
+              it's ALWAYS shown. FIRST in the rail because it is what opens.
+              ⚠ LABEL-ONLY rename from "Needs attention": the rail id stays `'attention'` — it is
+              in bookmarks and in history entries Back replays, and it is now the default the URL
+              omits. */}
           <button
             type="button"
             onClick={() => setActivityRepo('attention')}
@@ -494,6 +434,58 @@ export function ActivityView(): JSX.Element {
             </span>
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
               Pending
+            </span>
+          </button>
+
+          {/* FEED pseudo-row — SECOND, under Pending. This workspace's consolidated state of play,
+              across every repo in it. A Feed link carries `?activityRepo=feed` (it is no longer
+              the default). The old "All repos" pseudo-row was removed (redundant with the Feed +
+              the per-repo entries below). */}
+          <button
+            type="button"
+            onClick={() => setActivityRepo('feed')}
+            aria-pressed={showingFeed}
+            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+              showingFeed
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            title="One chronological stream across every repo in this workspace"
+          >
+            <span className="shrink-0 text-sky-500">
+              <SparkleIcon />
+            </span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+              Feed
+            </span>
+          </button>
+
+          {/* BOTS pseudo-row — "the calm layer above your review bots". CORE/free (reads the
+              deterministic bot routes), so it's ALWAYS shown, on every tier, no Pro gate. A bot is
+              one object per WORKSPACE: a vendor running in six of this workspace's repos is ONE
+              row here, and everything about it — automated, role, vendor name, price — is edited
+              at this level.
+              THIRD in the rail, directly under the Feed, because this is where the Feed's own
+              bot judgement is made: the "human"/"bot" call under Bots → Settings feeds
+              `hiddenBotUserIds`, which is what the Feed and the Timeline hide by default. A reader
+              who wants to know why a vendor is (or isn't) in the stream goes one row up or one row
+              down, not across the rail. */}
+          <button
+            type="button"
+            onClick={() => setActivityRepo('bots')}
+            aria-pressed={showingBots}
+            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+              showingBots
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            title="Detect, measure and triage this workspace's automated review bots — classification and triage are free; the ROI table is Pro"
+          >
+            <span className="shrink-0">
+              <BotIcon />
+            </span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+              Bots
             </span>
           </button>
 
@@ -575,12 +567,16 @@ export function ActivityView(): JSX.Element {
           // the human-member filter); carries its own empty states, so it renders even before any
           // repo data loads.
           <BotsView />
-        ) : showingAttention ? (
-          // The CORE/free **Pending** board — five tabs, each a purely scored list with its own
-          // count. Renders on every tier, before repo data loads (its own empty/loading states); the
-          // Pro narration decorates it and is never required for it to be complete. Its narrowings
-          // (a brief line's kind, a notification's "Only yours") show as the selected tab and chip
-          // on the board itself, so no banner sits above it.
+        ) : showingAttention && !noRepos ? (
+          // The CORE/free **Pending** board — the tabs in `PENDING_TABS`, each a scored list with
+          // its own count. The default landing. Renders on every tier, before repo data loads (its
+          // own empty/loading states); the Pro narration decorates it and is never required for it
+          // to be complete. Its narrowings (a brief line's kind, a notification's "Only yours")
+          // show as the selected tab and chip on the board itself, so no banner sits above it.
+          // ⚠ `!noRepos`: an EMPTY workspace falls through to the "move some in" guidance below.
+          // Pending is where the app opens, so without it a workspace just made in "Manage repos &
+          // workspaces" opens on "Nothing is your turn right now." — true, and no help at all.
+          // (`noRepos` waits for the repo data, so the board still paints before that loads.)
           <AttentionView />
         ) : showingInsights ? (
           <InsightsView />

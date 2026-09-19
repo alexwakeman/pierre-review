@@ -1,0 +1,14 @@
+{
+  "name": "JFrog Frogbot fix PR, opened by github-actions — attributed by its own banner, never the login",
+  "input": {
+    "title": "[🐸 Frogbot] Update version of github.com/go-git/go-git/v5 to 5.19.2",
+    "headRefName": "frogbot-github.com/go-git/go-git/v5-2a296dffbe56256b004e55d17e1321c6",
+    "labels": [],
+    "bodyText": "\n\n\n\n\n\n🚨 This automated pull request was created by Frogbot and fixes the below:\n\n\n\n\n\n📦 Vulnerable Dependencies\n\n\n\n| Severity                | ID                  | Contextual Analysis                  | Direct Dependencies                  | Impacted Dependency                  | Fixed Versions                  |\n| :---------------------: | :-----------------------------------: | :-----------------------------------: | :-----------------------------------: | :-----------------------------------: | :-----------------------------------: |\n| ![high](https://raw.githubusercontent.com/jfrog/frogbot/master/resources/v2/applicableHighSeverity.png)    High | - | Not Covered | github.com/go-git/go-git/v5:v5.19.1github.com/jfrog/jfrog-cli-core/v2:v2.60.1-0.20260601130310-8d52a530da18 | github.com/go-git/go-git/v5 v5.19.1 | [5.19.2] |\n\n\n\n\n🔖 Details\n\n\n\nVulnerability Details\n|                 |                   |\n| --------------------- | :-----------------------------------: |\n| **Contextual Analysis:** | Not Covered |\n| **Direct Dependencies:** | github.com/go-git/go-git/v5:v5.19.1, github.com/jfrog/jfrog-cli-core/v2:v2.60.1-0.20260601130310-8d52a530da18 |\n| **Impacted Dependency:** | github.com/go-git/go-git/v5:v5.19.1 |\n| **Fixed Versions:** | [5.19.2] |\n| **CVSS V3:** | 7.1 |\n\nWorktree operations may follow symlinks\n\n\n---\n\n\n[🐸 JFrog Frogbot](https://jfrog.com/help/r/jfrog-security-user-guide/shift-left-on-security/frogbot)\n\n\n"
+  },
+  "expected": {
+    "dependencyVendor": "frogbot",
+    "securityFix": "proven",
+    "advisoryIds": []
+  }
+}

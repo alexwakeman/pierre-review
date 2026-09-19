@@ -174,6 +174,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // the same EXACT `===` for the same near-miss.
   if (path === '/api/me/blast-radius-config') return [TIERS.read];
 
+  // PUT /api/me/my-turn-settings — the My Turn settings (types shown, their order, the Do next
+  // weights). The same shape and the same answer again: one validated UPDATE of one column on one
+  // row plus an in-process cache drop, no GitHub call and no model call. Recorded, with the same
+  // EXACT `===` for the same near-miss.
+  if (path === '/api/me/my-turn-settings') return [TIERS.read];
+
   // ---- Bot Tuning Advisor (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
   // "Follow the token": most advisor routes are DB-only reads/writes, but the generic
   // /api/pro/ branch below puts every mutating POST on the 20/min AI bucket — which would

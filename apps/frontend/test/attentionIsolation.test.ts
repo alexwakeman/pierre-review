@@ -8,8 +8,9 @@
 //   ⚠ `setActivityRepo` CLEARS the isolation, and RETURNS AN EMPTY PATCH when the rail id is
 //     unchanged. So a caller that isolates FIRST and switches SECOND is wiped on the click that
 //     actually changes rail and works on every click that doesn't — i.e. it looks correct the
-//     second time you press it, and only ever fails from a cold Feed. That asymmetry is what
-//     makes this worth a test rather than a comment: both orders "work" in the common case.
+//     second time you press it, and only ever fails when the click starts on another rail entry —
+//     the Feed's brief lines are exactly that. That asymmetry is what makes this worth a test
+//     rather than a comment: both orders "work" in the common case.
 //
 // The rest is the transience contract. `attentionIsolation` must stay OUT of FilterDefaults —
 // persisting a lens set by one click of a brief line would restore a filtered board on a fresh
@@ -25,6 +26,7 @@ import {
   type FilterState,
 } from '../src/store/filters.js';
 import { usePinnedTabs } from '../src/store/pinnedTabs.js';
+import { openBriefLine } from '../src/components/Activity/BriefStrip.js';
 
 describe('attentionIsolation', () => {
   beforeEach(() => {
@@ -316,6 +318,83 @@ describe('attentionIsolation', () => {
       const after = useFilters.getState();
       expect(after.attentionRelevance).toBeNull();
       expect(after.attentionIsolation).toBe('stalled_review');
+    });
+  });
+
+  // ── the AUTHOR lens (People / Automation): the third narrowing, and the same traps ────────────
+  //
+  // ⚠ IT IS A QUESTION ABOUT THE WHOLE BOARD, so a tab switch keeps it — and every entry point that
+  // opens the board FROM A COUNT seats it to `null`, because every such count is every author's.
+  describe('attentionAuthorLens', () => {
+    beforeEach(() => {
+      useFilters.setState({ attentionAuthorLens: null });
+      usePinnedTabs.setState({ activeTab: 'timeline' });
+    });
+
+    it('defaults to null — every author', () => {
+      expect(useFilters.getState().attentionAuthorLens).toBeNull();
+    });
+
+    it('holds either side, and All', () => {
+      useFilters.getState().setAttentionAuthorLens('people');
+      expect(useFilters.getState().attentionAuthorLens).toBe('people');
+      useFilters.getState().setAttentionAuthorLens('automation');
+      expect(useFilters.getState().attentionAuthorLens).toBe('automation');
+      useFilters.getState().setAttentionAuthorLens(null);
+      expect(useFilters.getState().attentionAuthorLens).toBeNull();
+    });
+
+    it('SURVIVES a tab switch and a kind chip — it narrows the board, not one tab', () => {
+      useFilters.setState({ activityRepoId: 'attention', attentionAuthorLens: 'automation' });
+      useFilters.getState().setAttentionTab('deps');
+      useFilters.getState().setAttentionTab('deps', 'security');
+      expect(useFilters.getState().attentionAuthorLens).toBe('automation');
+    });
+
+    it('a rail switch to another entry clears it', () => {
+      useFilters.setState({ activityRepoId: 'attention', attentionAuthorLens: 'people' });
+      useFilters.getState().setActivityRepo('feed');
+      expect(useFilters.getState().attentionAuthorLens).toBeNull();
+    });
+
+    it('a workspace switch clears it', () => {
+      useFilters.setState({ attentionAuthorLens: 'automation' });
+      useFilters.getState().setWorkspace(9, null);
+      expect(useFilters.getState().attentionAuthorLens).toBeNull();
+    });
+
+    it('⚠ openMyTurnInWorkspace seats All, even when the rail is ALREADY attention', () => {
+      // The empty-patch asymmetry: no clear fires here, so only the explicit seat removes a lens
+      // that would open a smaller list than the badge's number.
+      useFilters.setState({ workspaceId: 3, activityRepoId: 'attention', attentionAuthorLens: 'automation' });
+      useFilters.getState().openMyTurnInWorkspace(3);
+      expect(useFilters.getState().attentionAuthorLens).toBeNull();
+      expect(useFilters.getState().attentionRelevance).toBe('mine');
+    });
+
+    it('⚠ a brief line seats All too, even when the rail is ALREADY attention', () => {
+      useFilters.setState({ activityRepoId: 'attention', attentionAuthorLens: 'people', attentionRelevance: 'mine' });
+      openBriefLine('security');
+      const after = useFilters.getState();
+      expect(after.attentionAuthorLens).toBeNull();
+      expect(after.attentionIsolation).toBe('security');
+      expect(after.attentionRelevance).toBeNull();
+    });
+
+    it('…and a brief line from ANOTHER rail lands with its kind and lens seated', () => {
+      useFilters.setState({ activityRepoId: 'feed', attentionAuthorLens: 'people' });
+      openBriefLine('my_turn', 'others');
+      const after = useFilters.getState();
+      expect(after.activityRepoId).toBe('attention');
+      expect(after.attentionIsolation).toBe('my_turn');
+      expect(after.attentionRelevance).toBe('others');
+      expect(after.attentionAuthorLens).toBeNull();
+    });
+
+    it('is NOT persisted with the filter bar (so no FILTER_STORAGE_VERSION bump is owed)', () => {
+      useFilters.setState({ attentionAuthorLens: 'people' });
+      const persisted = pickFilterBarState(useFilters.getState()) as Record<string, unknown>;
+      expect('attentionAuthorLens' in persisted).toBe(false);
     });
   });
 

@@ -125,6 +125,23 @@ own, and without it the history would converge only when somebody pressed Sync. 
 real workspace: 769 PRs in 26 seconds. ⚠ A nulled selection (a token that may not read it) writes
 nothing and leaves the stamp NULL — "not received" must never become "nobody was asked".
 
+### PR security-signal backfill (after EVERY walk, user or scheduled)
+
+`persistPr` classifies every PR it writes (the four dependency + security columns, see
+[DATA-MODEL.md](DATA-MODEL.md)), but an incremental walk only touches PRs updated since the last
+one, and an open security fix waiting for a merge is exactly the PR that sits untouched. So after
+every walk, on both paths like the review-request backfill, `sync/backfill-pr-security.ts` re-reads
+up to 60 open PRs per repo whose `security_checked_at` is NULL and that COULD be dependency
+automation: an automated author (`users.is_bot`, `github_type = 'Bot'`, the vendor and review-bot
+login tables, Semgrep's per-org prefix) or a tool's own branch or title marker (a Snyk fix under a
+person's token). Most recently updated first, in `nodes(ids:)` batches of 20 (Dependabot bodies run
+to 65 KB each, so 20 keeps a response near 1.3 MB; about one point a batch). The same budget
+contract as every cheap consumer (`isLimited` / `noteLimited` / `noteBudget`), stamped once per PR,
+strictly non-fatal. ⚠ A PR GitHub does not return, or returns with `bodyText` nulled, writes
+nothing and stays on the worklist — retried on a later walk, bounded by the per-run cap, never a
+loop. It writes through the same `securityColumnsFor` as `persistPr`, and fills `head_ref_name`
+only where the walk never stored one.
+
 ## Incremental updates (every subsequent sync)
 
 A repo **with** a `lastIncrementalSyncAt` is planned as `mode: 'incremental'`, with
@@ -195,6 +212,11 @@ comments, commits, review requests, and timeline events) in **one transaction**
   `(prId, githubNodeId)` — so two accounts can track the same repo without colliding.
 - **Derived thread state** is computed here (`deriveThreadState`, using the commit
   SHAs + changed files gathered above) and stored on `reviewThreads.derivedState`.
+- **Dependency + security signals** are classified here too (`sync/security-detect.ts`), on the
+  FULL `bodyText` the walk fetches unconditionally — ⚠ never on `search_index`, whose 4,000-character
+  cap cuts off Dependabot's security footer, the last line of a body that runs to 65 KB. Only the
+  verdict is stored (four columns, no body), and only when `bodyText` was received: a null or
+  missing one writes nothing ([DATA-MODEL.md](DATA-MODEL.md) § dependency + security signals).
 - `upsertRepo()` (the repo row itself, not the PR subtree) is likewise a
   `runTransaction`: it writes the repo **and** its `workspace_repos` membership row,
   targeting the account's **Default** workspace, `ON CONFLICT (account_id, repo_id) DO
@@ -342,8 +364,26 @@ a manual `BEGIN`/`COMMIT` on the one shared connection. See [ML-SEVERITY.md](ML-
 
 `sync/mention-scan.ts` is the second pull-based worker in this directory (CORE, free, no LLM, **no
 GitHub quota** — comment and review bodies are always persisted, so nothing is fetched). It fills
-`pr_mentions`, the MENTION arm of My Turn's personal-relevance flag; the table's contract is in
-[DATA-MODEL.md](DATA-MODEL.md).
+`pr_mentions`, which feeds My Turn's `mention` card type (S6 in [BACKEND.md](BACKEND.md) § My Turn
+— the ball rule); the table's contract is in [DATA-MODEL.md](DATA-MODEL.md).
+
+**What each row says.** One row per PR on which a PERSON @-mentions the viewer, carrying the NEWEST
+such mention's time and author (`mentioned_at`, `mentioned_by_user_id`). The card clears when the
+viewer acts after that moment, so the row needs the moment, not just the fact.
+
+- **Who counts.** A mention by the viewer themself is not a summons, and neither is one by
+  automation — the global automation set (`globalAutomationUserIds`, `db/automation-ids.ts`), the
+  SAME set the ball rule uses, so every mention the scanner stamps is one `getMyTurn` honours. A
+  row with no known author is skipped too. The skip happens BEFORE "newest" is decided: a bot that
+  echoes your login after a colleague's mention must not move the card's clock.
+- **Only typed lines count.** Markdown blockquote lines (`> …`) are dropped before the match
+  (`withoutQuotedLines`): a quote-reply repeats somebody else's words, and counting it moved the
+  clock past an action the viewer had already taken and credited the quoter (31 of 1,846 real
+  (PR, login) pairs had their newest mention only inside a quote). Skipped, like a bot's, before
+  "newest" is decided.
+- **Newest first, then the cap.** Each of the three scans (PR comments, inline review comments,
+  review bodies) orders newest first before `MENTION_SCAN_CAP`, so if the cap ever bites it drops
+  the OLDEST matches, never a PR's newest mention.
 
 **Why a worker and not a read.** The obvious implementation is a text predicate inside
 `getMyTurn` — and it is the wrong shape by an order of magnitude. `getMyTurn` runs inside
@@ -352,7 +392,7 @@ scan over every comment and review body in scope (65k rows / ~0.19s on this repo
 account). Paying that per request to answer a question whose answer changes a few times a week is
 a misplaced fold. The scan runs on a `*/5` cron (`MENTION_SCAN_CRON`, a module constant — there is
 no per-deployment decision to make), rotates accounts like the ML worker, and is wall-clock
-bounded at 60s per tick; the request path then does one indexed existence lookup.
+bounded at 60s per tick; the request path then does one indexed join on `pr_mentions`.
 
 **Why a FULL re-derive per tick, and not a cursor.** A watermark over the three comment tables has
 to be right about four different ways the corpus changes, and every wrong answer is silent:
@@ -366,19 +406,26 @@ to be right about four different ways the corpus changes, and every wrong answer
 
 Re-deriving the whole set and diffing it against what is stored is correct under all four with no
 state to keep, and it is affordable because the expensive half is bounded by the MATCHES, not the
-corpus. ⚠ **The delete half is load-bearing**: without it `personal` becomes a ratchet that only
-ever widens.
+corpus. ⚠ **The delete half is load-bearing**: without it the mention card becomes a ratchet that
+only ever widens. ⚠ **So is the restamp**: a stored row counts as unchanged only when its login,
+`mentioned_at` and author all match what was derived; otherwise the writer upserts on the table's
+one unique `(account_id, pr_id)` and moves the clock. Without that, you act, the card clears, and a
+colleague's second "@you?" on the same PR never brings it back. The tick logs `+added ~updated
+-removed`.
 
 **Invalidation — how staleness is bounded, in each direction:**
 
-- a **new mention** becomes personal within one tick;
-- a **removed** mention stops being personal within one tick;
-- a **renamed account** narrows **immediately**, before any tick, because the read
-  (`viewerMentionedPrIds`) is login-scoped against `pr_mentions.login`; it re-widens only once the
-  scan has actually re-derived under the new login;
+- a **new mention**, or a newer one on a PR already stamped, reaches My Turn within one tick;
+- a **removed** mention stops showing within one tick;
+- a **renamed account** narrows **immediately**, before any tick, because the read (a join inside
+  `getMyTurn`) is login-scoped against `pr_mentions.login`; it re-widens only once the scan has
+  actually re-derived under the new login;
 - ⚠ an account whose `github_login` has not resolved yet (local mode before `gh api user`
   answers) is **skipped**, never scanned as the empty string — deriving an empty set would delete
-  every stored row, i.e. a transient `gh` outage would un-personalise the whole inbox.
+  every stored row, i.e. a transient `gh` outage would clear every mention card;
+- in cloud the tick scans only recently active accounts (the sync loop's activity gate), so a
+  reader returning after a break sees new mentions one tick after they come back.
 
-Absence never widens: with no rows at all the flag degrades exactly to the phase-1 maintainer
-test, which is why the feature needs no enable flag.
+Absence never widens: a row with a NULL `mentioned_at` (every row, between migration `0068` and the
+first tick after it) shows no card, and with no rows at all there are simply no mention cards, which
+is why the feature needs no enable flag.

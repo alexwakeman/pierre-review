@@ -6,12 +6,14 @@
 //
 //   myTurn /
 //   ciFailing /
+//   security /
 //   stalled /
 //   untouchedThreads /
 //   needsReviewer    → getWorkspaceInsights card counts — the same cards GET /api/attention
-//                      serves (one my_turn card = one thing on your plate; one stalled_review
-//                      card = one PR; one untouched_thread card = one thread; one
-//                      reviewer_routing card = one PR needing a reviewer).
+//                      serves (one my_turn card = one thing on your plate; one security card =
+//                      one PR with a known-advisory fix or alert; one stalled_review card = one
+//                      PR; one untouched_thread card = one thread; one reviewer_routing card =
+//                      one PR needing a reviewer).
 //                      ⚠ `myTurn` USED TO be getConsolidatedFeed(...).counts.myTurn — a count of
 //                      feed EVENTS in a rolling 14 days, which corresponded to no clickable list
 //                      ("54 items" the user could not open). It is now literally the number of
@@ -68,7 +70,8 @@
 //     one switches workspace, which then fetches that workspace's own FRESH brief, so the number
 //     is re-derived before any list can disagree with it. Freshening the loop instead would
 //     multiply getWorkspaceInsights by workspace count on every Feed mount — the cost this route
-//     is on the `search` tier for.
+//     is on the `search` tier for. A My Turn settings save drops the account's entries
+//     (`clearDailyBriefCountsFor`), because it changes WHICH cards exist, not just how many.
 //
 // ⚠ THEREFORE `generatedAt` DESCRIBES TWO COMPUTATION TIMES, and the honest one is the tighter:
 // it stamps the COUNTS (now == the request), while `botAnomalies` inside the same object may be
@@ -133,6 +136,15 @@ function cached<T>(
 export function clearDailyBriefCache(): void {
   anomalyCache.clear();
   countsCache.clear();
+}
+
+/** Drop ONE account's roll-up counts, so a My Turn settings save cannot leave "Elsewhere" lines
+ *  counting a type the reader just switched off for the rest of the five-minute window. The anomaly
+ *  slice is untouched: settings do not move it. Called by PUT /api/me/my-turn-settings. */
+export function clearDailyBriefCountsFor(accountId: number): void {
+  for (const k of [...countsCache.keys()]) {
+    if (k.startsWith(`${accountId}:`)) countsCache.delete(k);
+  }
 }
 
 // The narrow volume-only anomaly slice (see the module header for why it is NOT the behaviour
@@ -212,6 +224,9 @@ async function briefBotAnomalies(
   });
 }
 
+// Every red default branch in the workspace, sorted, UNCAPPED — `computeBriefCounts` removes the
+// ones the reader promoted into My Turn first and only then applies TRUNK_CAP, so a promoted trunk
+// never takes a slot on this line and is counted once, in My Turn.
 async function trunkRedRepos(
   accountId: number,
   scope: BotScope,
@@ -226,7 +241,6 @@ async function trunkRedRepos(
   return rows
     .filter((r) => r.ci === 'failure' || r.ci === 'error')
     .sort((a, b) => a.name.localeCompare(b.name))
-    .slice(0, TRUNK_CAP)
     .map((r) => ({ repoId: r.id, name: r.name }));
 }
 
@@ -238,7 +252,7 @@ async function computeBriefCounts(
   // exactly the scoped-route posture; the caller already resolved real requests).
   const scope = await resolveWorkspaceScope(accountId, workspaceId);
 
-  const [insights, backlog, botAnomalies, trunkRed] = await Promise.all([
+  const [insights, backlog, botAnomalies, allRedTrunks] = await Promise.all([
     // The /api/attention fold verbatim (getWorkspaceInsights with the default window); the two
     // bot cards it filters out are not counted here either. ⚠ UNCACHED, and that is the point:
     // /api/attention re-runs this exact call on every request, so a cached copy here is a number
@@ -253,6 +267,12 @@ async function computeBriefCounts(
     ),
     trunkRedRepos(accountId, scope),
   ]);
+
+  // ⚠ A RED TRUNK THE READER PROMOTED INTO MY TURN IS COUNTED THERE, NOT HERE — it is a my_turn
+  // card (and in `myTurn` below), so listing it on this line too would count one red branch twice.
+  // Filtered after the fold resolves, then capped.
+  const promotedTrunks = new Set(insights.myTurnTrunkRepoIds ?? []);
+  const trunkRed = allRedTrunks.filter((t) => !promotedTrunks.has(t.repoId)).slice(0, TRUNK_CAP);
 
   let myTurn = 0;
   // The `MyTurnCard.personal` subset of the same cards — the figure the NOTIFICATION surfaces
@@ -284,13 +304,15 @@ async function computeBriefCounts(
   let stalled = 0;
   let untouchedThreads = 0;
   let needsReviewer = 0;
-  // ⚠ THREE KINDS REACH THIS LOOP AND ARE COUNTED BY NO LINE: `merge`, `update_branch` and now
-  // `conflicts`. The first two are opportunities and the strip counts what is WAITING ON YOU. The
-  // third is a genuine problem, but 3 of every 4 are somebody else's PR in a repo you can merely
-  // push to — a "waiting on you" number over that population would be a false claim, and it would
-  // stop the strip self-hiding on a workspace where nothing is actually owed. This allow-list and
-  // the route's deny-list are the two hand-maintained spellings of "which kinds count";
-  // daily-brief.test.ts compares them per kind, so an omission here is a CI failure, not a silence.
+  // ⚠ FOUR KINDS REACH THIS LOOP AND ARE COUNTED BY NO LINE: `merge`, `update_branch`,
+  // `conflicts` and `dependency_bump`. The first two are opportunities and the strip counts what is
+  // WAITING ON YOU. The third is a genuine problem, but 3 of every 4 are somebody else's PR in a
+  // repo you can merely push to — a "waiting on you" number over that population would be a false
+  // claim, and it would stop the strip self-hiding on a workspace where nothing is actually owed.
+  // The fourth is housekeeping — an update, not something waiting on you. (`security` IS counted,
+  // below, off `kindTotals` like the other survey lines.) This allow-list and the route's deny-list
+  // are the two hand-maintained spellings of "which kinds count"; daily-brief.test.ts compares them
+  // per kind, so an omission here is a CI failure, not a silence.
   for (const c of insights.cards) {
     if (c.kind === 'ci_failing') ciFailing += 1;
     else if (c.kind === 'my_turn') {
@@ -358,6 +380,11 @@ async function computeBriefCounts(
     // The matched denominator, passed straight through from the same getWorkspaceInsights call —
     // pair narrow with narrow, or the "of N" disclosure silently never fires.
     ciFailingTotal: insights.ciFailingTotal,
+    // The Dependencies tab's SECURITY population — the figure its "Security" chip shows, uncapped
+    // (a survey line, so no `…Total` twin); the line opens the board isolated to `security`. ⚠ It
+    // is not in the Pro narration's inputs: it is templated, like `ciFailing`'s line, so adding it
+    // re-bills no stored brief.
+    security: insights.kindTotals?.security ?? 0,
     // ⚠ THE THREE SURVEY LINES COUNT THE WHOLE POPULATION, not the cards this capped fold kept.
     // Each line opens its Pending tab with its own kind chip selected, and the chip shows
     // `kindTotals` — the uncapped figure — so the strip must say the same number or the reader

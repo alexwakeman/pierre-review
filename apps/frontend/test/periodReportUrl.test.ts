@@ -96,11 +96,20 @@ describe('the period report link', () => {
     expect(location.search).not.toContain('report=');
   });
 
-  // 'feed' remains the one console that stays out of the URL — it is the bare state a link means
-  // when it says nothing. Pinned so a later "emit every console" tidy-up has to think about it.
-  it("still omits the Feed, which is what a link with no console means", () => {
-    writeToUrl(state({ activityRepoId: 'feed', insightsReportKey: null }));
+  // 'attention' is the one console that stays out of the URL — Pending is where the app opens,
+  // so it is the bare state a link means when it says nothing. Pinned so a later "emit every
+  // console" tidy-up has to think about it.
+  it('omits Pending, which is what a link with no console means', () => {
+    writeToUrl(state({ activityRepoId: 'attention', insightsReportKey: null }));
     expect(location.search).not.toContain('activityRepo=');
+  });
+
+  // …and the Feed is EMITTED since the landing moved off it: left out, a Feed link would open
+  // Pending. Round-tripped, because an emit-only key is erased by the next write.
+  it('emits the Feed, so a Feed link survives', () => {
+    writeToUrl(state({ activityRepoId: 'feed' }));
+    expect(location.search).toContain('activityRepo=feed');
+    expect(readFromUrl().activityRepoId).toBe('feed');
   });
 
   // The selection is not a FILTER. "Clear filters" must not throw away the period the reader is

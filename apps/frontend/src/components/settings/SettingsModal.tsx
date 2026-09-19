@@ -7,12 +7,17 @@ import { IssueLinksSection } from './IssueLinksSection.js';
 import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
 import { LargePrThresholdSection } from './LargePrThresholdSection.js';
 import { BlastRadiusSection } from './BlastRadiusSection.js';
+import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
 import { FlowSettingsSection } from './FlowSettingsSection.js';
 import { GithubAppInstallSection } from './GithubAppInstallSection.js';
 import { YourDataSection } from './YourDataSection.js';
 import { useSettingsWorkspace } from './workspaceScope.js';
 import { CloseIcon } from '../Icons.js';
+import { escapeOwnedByControl } from '../../lib/escapeOwner.js';
+import { closeActivePopover } from '../../lib/activePopover.js';
+import { focusReturner } from '../../lib/focusReturn.js';
+import type { SettingsFocus } from '../../store/settingsModal.js';
 
 // User configuration modal, opened from the header avatar menu. Mirrors HelpModal's shell
 // (fixed overlay + role=dialog card + capture-phase Escape so a dismiss doesn't reach the global
@@ -68,7 +73,14 @@ import { CloseIcon } from '../Icons.js';
 // (one CORE/free `workspace_reviewers` row each), and the toggle — the Slack bot digest — became a
 // property of the DELIVERY in plugin migration 0033 and is now a checkbox inside the Slack section
 // under the schedule it modifies. An empty section pointing elsewhere is a signpost, not a setting.
-export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element {
+export function SettingsModal({
+  focus = null,
+  onClose,
+}: {
+  /** A section to land on — Pending's "Customise" link opens straight to My Turn. */
+  focus?: SettingsFocus | null;
+  onClose: () => void;
+}): JSX.Element {
   const caps = useProCapabilities();
   const isCloud = useMe().data?.deploymentMode === 'cloud';
   // ⚠ THE FETCH IS STILL HERE, AND IT IS NOW PURELY A GATE. No section reads account
@@ -91,14 +103,46 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.stopImmediatePropagation();
-        onClose();
-      }
+      if (e.key !== 'Escape') return;
+      // An open control inside the modal (the time-zone list) owns this Escape: it closes itself
+      // and the modal stays. Capture on window runs before the control's own handler, so this
+      // must step aside.
+      if (escapeOwnedByControl(e.target)) return;
+      e.stopImmediatePropagation();
+      onClose();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
+
+  // ON OPEN, THREE THINGS, ONCE:
+  //  • close any board popover still open (lib/activePopover.ts) — opened with Enter on "Customise"
+  //    or on the avatar menu, the modal makes no outside press, so a Pending "i" or a pinned chart
+  //    popover stayed drawn ABOVE it (z-[60]) and took its first Escape;
+  //  • land on the section the opener asked for: scroll it to the top of the modal and move keyboard
+  //    focus to its heading, so a keyboard reader starts where the link said they would — one frame
+  //    later, so the section has laid out, and never again (the modal never re-scrolls under the
+  //    reader);
+  //  • ON CLOSE, hand focus back to what opened it. Moving focus in and dropping it on <body> on the
+  //    way out left a keyboard reader at the top of the page instead of on the Pending board.
+  //    Captured before the rAF moves it; skipped when the opener is gone (the avatar menu unmounts).
+  useEffect(() => {
+    closeActivePopover();
+    const returnFocus = focusReturner(document.activeElement, document.body);
+    const raf =
+      focus === 'my-turn'
+        ? requestAnimationFrame(() => {
+            const heading = document.getElementById(MY_TURN_SECTION_HEADING_ID);
+            heading?.scrollIntoView({ block: 'start' });
+            heading?.focus({ preventScroll: true });
+          })
+        : null;
+    return () => {
+      if (raf != null) cancelAnimationFrame(raf);
+      returnFocus();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const proReady = proSettings.data != null;
   const scopeReady = workspaceId != null;
@@ -146,6 +190,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
           {/* Blast radius — free and /api/me-backed like the section above it, so it belongs on
               this side of the pro-settings loading gate. */}
           <BlastRadiusSection />
+          {/* My Turn — which card types count as your turn, their order, and the ranking weights.
+              Free, account-grained and /api/me-backed like the two above it, so it sits on this
+              side of the pro-settings gate too. */}
+          <MyTurnSection />
           {/* Data-subject rights (export / delete / cookie choice) — CORE/free, cloud-only. This
               is the self-service machinery the privacy policy at /privacy §9 points at; a local
               install has no hosted account to erase (the data is the user's own SQLite file), so

@@ -1,7 +1,7 @@
 // Chronology's per-PR layer: budgets, the fast-vs-slow contrast, the landing tail and reviewer
 // concentration. Pure — facts and a calendar in, the wire fields out.
 import { describe, expect, it } from 'vitest';
-import { resolveFlowSettings, type PrCourt } from '@pierre-review/shared';
+import { FLOW_RULES, resolveFlowSettings, type PrCourt } from '@pierre-review/shared';
 import { buildWorkingCalendar } from './working-hours.js';
 import {
   __flowDetailTesting,
@@ -237,6 +237,8 @@ describe('the landing tail', () => {
     const tail = detail([held, during, before, sameRepo]).landingTail!;
     const row = tail.rows.find((r) => r.prId === held.prId)!;
     expect(row.siblings.map((s) => s.prId)).toEqual([during.prId]);
+    // The page prints this count as a figure; it must agree with the sentence beside it.
+    expect(tail.siblingsOver).toBe(1);
     expect(tail.sentence).toMatch(/1 shares a ticket with a pull request in another repository that merged while it waited\./);
   });
 
@@ -290,6 +292,64 @@ describe('the per-PR rows', () => {
     const slowest = [...facts].sort((a, b) => b.mergedMs - b.openedMs - (a.mergedMs - a.openedMs)).slice(0, FLOW_PR_ROWS_SLOW_KEEP);
     const shown = new Set(out.prs.map((r) => r.prId));
     expect(slowest.every((f) => shown.has(f.prId))).toBe(true);
+    // ⚠ The headline figures are over EVERY measured PR, never the capped sample: the sample keeps
+    // all the slow ones, so a count over it inflates exactly when it capped.
+    const leads = facts.map((f) => (f.mergedMs - f.openedMs) / H);
+    expect(out.prFigures.overWorkingDay).toBe(leads.filter((h) => h > 24).length);
+    expect(out.prFigures.overWorkingDay).not.toBe(out.prs.filter((r) => r.leadWorkHours > 24).length);
+    expect(out.prFigures.neverWentBack).toBe(facts.length);
+    expect(out.prFigures.slowestTenthCount).toBe(Math.ceil(facts.length / 10));
+  });
+
+  it('computes the per-PR figures over every measured pull request', () => {
+    const facts = Array.from({ length: 20 }, (_, i) => pr([['reviewer', i + 1]]));
+    const f = detail(facts).prFigures;
+    expect(f.slowestTenthCount).toBe(2);
+    expect(f.slowestTenthShare).toBeCloseTo((20 + 19) / 210, 9);
+    expect(f.overWorkingDay).toBe(0);
+    expect(f.neverWentBack).toBe(20);
+
+    const withLong = [...facts, pr([['reviewer', 2], ['author', 28]])];
+    const g = detail(withLong).prFigures;
+    expect(g.overWorkingDay).toBe(1);
+    expect(g.neverWentBack).toBe(20);
+  });
+
+  it('is all zeros when nothing was measured', () => {
+    expect(detail([]).prFigures).toEqual({
+      overWorkingDay: 0,
+      slowestTenthCount: 0,
+      slowestTenthShare: 0,
+      neverWentBack: 0,
+    });
+  });
+});
+
+describe('the rules the page quotes', () => {
+  it('folds with the rules the page quotes', () => {
+    // ⚠ Chronology's "i" modals print FLOW_RULES; the fold must be reading the same numbers.
+    const t = __flowDetailTesting;
+    expect(t.FLOW_BUDGET_MIN_PRS).toBe(FLOW_RULES.budgetMinPrs);
+    expect(t.FLOW_CONTRAST_MIN_QUARTILE).toBe(FLOW_RULES.contrastMinQuartile);
+    expect(t.FLOW_CUT_MIN_PRS).toBe(FLOW_RULES.cutMinPrs);
+    expect(t.FLOW_LANDING_ROWS_CAP).toBe(FLOW_RULES.landingRows);
+    expect(t.FLOW_CONCENTRATION_MIN_SIDE).toBe(FLOW_RULES.concentrationMinSide);
+    expect(t.FLOW_CONCENTRATION_SLOWER_RATIO).toBe(FLOW_RULES.slowerRatio);
+    expect(t.FLOW_CONCENTRATION_SLOWER_MIN_HOURS).toBe(FLOW_RULES.slowerMinHours);
+    expect(t.FLOW_SEPARATES_RATIO).toBe(FLOW_RULES.separatesRatio);
+    expect(t.FLOW_WEAK_RATIO).toBe(FLOW_RULES.weakRatio);
+  });
+
+  it('refuses a budget verdict exactly below the quoted floor', () => {
+    // Behavioural, so a local literal that happened to equal the rule today still fails the day
+    // the rule moves: one PR under the floor has no verdict, the floor itself has one.
+    const n = FLOW_RULES.budgetMinPrs;
+    const at = (k: number) =>
+      detail(Array.from({ length: k }, () => pr([['reviewer', 1], ['landing', 1]]))).budgets.find(
+        (b) => b.measure === 'firstLook',
+      )!.verdict;
+    expect(at(n - 1)).toBeNull();
+    expect(at(n)).not.toBeNull();
   });
 });
 

@@ -235,8 +235,8 @@ resolved config. Three consequences, each of which is why it is not a server fie
   else; moving the sensitivity dial re-runs a fold over rows already in memory. A server count
   would have to invalidate `['workspace-metrics']` too, and a stale cached response would draw one
   distribution while every chip on screen drew another.
-- **It costs no extra request on the ordinary path** — the app lands on the Feed, whose open-PR
-  panel holds that exact cache entry. A cold deep link to Reports pays one `/api/open-prs`.
+- **It costs no extra request once the Feed has been opened** — the Feed's open-PR panel holds that
+  exact cache entry. Opening Reports first pays one `/api/open-prs`.
 
 ⚠ **IT READS `useWorkspaceOpenPrs`, NEVER `useSearchOpenPrs`.** The latter narrows by
 `filters.repoIds`, the TIMELINE board's picker, which is not mounted on Reports.

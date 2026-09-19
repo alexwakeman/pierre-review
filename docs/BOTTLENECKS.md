@@ -19,7 +19,7 @@ Three courts, and they partition the open life of a pull request:
 | Pointers (Pro, model) | core `db/flow-pointers.ts` (evidence) · `packages/pro/src/flow-pointers/` · `GET`/`POST /api/pro/flow-pointers` · `Activity/FlowPointersPanel.tsx` |
 | The route | `apps/backend/src/api/routes/flow.ts` — `GET /api/flow-findings?workspace&days` |
 | The contract | `FlowResponse` and friends in `packages/shared/src/types.ts` |
-| The panel | `apps/frontend/src/components/Activity/BottlenecksPanel.tsx` + `bottlenecksModel.ts` + `ChronologyCharts.tsx` / `ChronologyTables.tsx` / `chronologyModel.ts` |
+| The panel | `apps/frontend/src/components/Activity/BottlenecksPanel.tsx` + `bottlenecksModel.ts` + `ChronologyCharts.tsx` / `ChronologyTables.tsx` / `chronologyModel.ts` + `chronologyInfo.tsx` (the modal copy) · `components/InfoModal.tsx` · `components/charts/ChartPopover.tsx` |
 | Tests | `db/pr-intervals.test.ts` · `db/flow-detail.test.ts` · `db/working-hours.test.ts` · `sync/review-request-history.test.ts` · `api/routes/workspace-flow-settings.test.ts` · the `getFlowCourts` block in `verify-isolation.ts` · `packages/pro/test/flow-pointers.test.ts` · `apps/frontend/test/chronologyModel.test.ts` + `flowSettingsForm.test.ts` |
 
 Deterministic, **no model touches any part of it except the Pointers block**, which is a separate,
@@ -109,7 +109,20 @@ LANDING court where it finally has a denominator.
   does not send actor ids at all, which makes it structural rather than a convention. "Guide the
   work, never rank the people" is the licence this feature operates under.
 - ⚠ **EVERY SENTENCE IS TEMPLATED** in `pr-intervals.ts`. The SPA formats figures and renders the
-  server's prose; it never composes a claim of its own out of the numbers.
+  server's prose; it never composes a claim of its own out of the numbers. The page renders server
+  prose only where it is not a restatement: refusals, a budget row's reason (in its popover, when
+  there is no verdict), the landing tail's empty sentence, each court's one-line `summary` on the
+  page and its full `directive` behind the "i". `workHeadline`, `headline`, `narrative`,
+  `contrast.sentence`, `requests.sentence` and a judged row's `sentence` ride the wire unrendered,
+  and so does the "None stands out" refusal whenever the "Nothing stands out" list is on screen
+  (`buildBottlenecksModel`). Disclosure lines the client builds from wire COUNTS (coverage,
+  exclusions, request coverage, capped lists) state a count, never a finding.
+- ⚠ **A REFUSAL IS ONE PLAIN FACT.** The rule behind it (the lopsided-and-slow call-out, the
+  unreviewed-merge floor) is explained in that section's modal, so the three refusals that used to
+  carry it were shortened on the server; `pr-intervals.test.ts` pins the new wording.
+- ⚠ **`FLOW_RULES` (packages/shared/src/flow-settings.ts) is the ONE spelling of every floor the
+  page quotes**; the engine's local constants are assigned from it and keep their names (a
+  structural test reads them), and `Activity/chronologyInfo.tsx` reads it for the modal copy.
 - Both exclusions are **rendered** (`exclusionLineFor`), as is coverage. Retroactive history is
   coverage-biased, and a reader who does not know what was set aside will mis-read every share.
 
@@ -148,6 +161,8 @@ Settings → Workspace → "Working hours and budgets"; CORE and free to set).
   every workspace that never overrode it. `PUT` replaces the whole override set; `{}` resets. The
   Settings form sends only what differs from a default (`flowSettingsForm.ts`) — a form that sent
   every field would freeze today's defaults into any workspace whose owner merely pressed Save.
+  The Settings form is sliders on a stepped scale (see docs/FRONTEND.md); it still sends overrides
+  only.
 - **The default zone** is the machine's own locally, UTC in the cloud, `WORK_TIMEZONE` over both
   (`config.defaultWorkTimezone`, echoed on `/api/me` as `workTimeZone`).
 - **The calendar** (`db/working-hours.ts`) precomputes each working day's window through Intl, so a
@@ -155,8 +170,8 @@ Settings → Workspace → "Working hours and budgets"; CORE and free to set).
   over a prefix sum. No holidays — a bank holiday is a working day, stated as a weekly pattern.
 - **Budgets, not balance.** An even three-way split is not health: a PR approved on its first review
   never visits its author, which is the best case and reads as lopsided. Each wait instead has a
-  budget in working hours ("good" / "acceptable"), and the headline chart shows where three in four
-  landed against it. Defaults: first look 4/8 (Google's one-business-day guidance as the ceiling),
+  budget in working hours ("good" / "acceptable"), and the chart under the working-hour split shows
+  where three in four landed against it. Defaults: first look 4/8 (Google's one-business-day guidance as the ceiling),
   reply 8/16, approved-to-merged 1/4, whole PR 8/16. The triangle of court shares is kept, labelled
   as context.
 - ⚠ **THE REPO CALL-OUT STAYS ON CLOCK HOURS.** `FLOW_SLOW_P75_HOURS` was calibrated over 66,088 PRs
@@ -178,10 +193,15 @@ view), then: the fastest-vs-slowest-quarter contrast (a row "separates" at 2× w
 floor, so ten times six minutes is not a finding), lead time by size and by weekday (clock beside
 working), the landing tail, and first-review concentration.
 
+`prFigures` carries the scatter's and triangle's headline figures over EVERY measured PR — the
+per-PR rows are capped at 1,000, and a figure counted over a sample was wrong exactly when
+`prsCapped`.
+
 - **Landing tail.** PRs approved for more than a working day. A ticket key (title, else branch)
   offers SIBLINGS — PRs in another repository under the same ticket that merged between this one's
   approval and a day after its merge. A sibling that landed before the approval cannot have held
   it, so it is not offered. The key extractor is the Pro one's no-allow-list fallback.
+  `siblingsOver` counts the PRs approved for over a working day that had at least one sibling.
 - **Concentration names no one.** Per repository: how many people gave first reviews, the busiest
   one's share, and their first-look median against everyone else's ("slower" at 1.25× and 30
   minutes). Read to count; `firstReviewerId` never leaves `flow-detail.ts`.

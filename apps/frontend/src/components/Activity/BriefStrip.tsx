@@ -54,6 +54,9 @@ type ScalarKey =
   // the Pro ordering map keys on this string, so sharing a key would let one phrase reword both.
   | 'myTurnOther'
   | 'ciFailing'
+  // The Dependencies tab's security population. ⚠ Templated only: it is NOT among the Pro
+  // narration's line items (the `ciFailing` precedent), so no stored brief re-bills for it.
+  | 'security'
   | 'stalled'
   | 'untouched'
   | 'needsReviewer'
@@ -113,6 +116,7 @@ function hasAnything(c: DailyBriefCounts): boolean {
     // ⚠ NOT covered by `trunkRed` below: a red build on your OWN open PR leaves trunk green, and
     // without this the strip would hide itself over a line it has something to say on.
     (c.ciFailing ?? 0) > 0 ||
+    (c.security ?? 0) > 0 ||
     c.stalled > 0 ||
     c.untouchedThreads > 0 ||
     c.needsReviewer > 0 ||
@@ -124,6 +128,32 @@ function hasAnything(c: DailyBriefCounts): boolean {
 
 const WEEKDAY = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
 
+/**
+ * WHAT A WORKSPACE LINE'S CLICK DOES: open the **Pending** board ISOLATED to the one card kind the
+ * line counts, so the number the user clicked and the list they land on are the same population.
+ * Exported so the seating order is pinned by a test rather than by reading JSX.
+ *
+ * ⚠ ORDERING: `setActivityRepo` FIRST, the lenses AFTER. `setActivityRepo` clears all three, AND
+ * early-returns an empty patch when the rail id is unchanged — so seating first would be wiped on
+ * the click that switches rail and survive on the clicks that don't. The same rule PrDetail /
+ * BotOnlyPrsDetail document for `feedIsolatedPrId`.
+ *
+ * ⚠ AND IT SEATS BOTH LENSES EXPLICITLY — INCLUDING `null`. Every line opens the list ITS OWN number
+ * counts: for the two my-turn lines that list is one HALF of the my_turn population, so each passes
+ * the relevance lens that paints its half; every other line counts a whole kind and passes `null`.
+ * Every line counts every AUTHOR, so the People / Automation lens is always seated to `null`.
+ * ⚠ NEVER CONDITIONAL. `setActivityRepo` early-returns when the rail is already 'attention' — the
+ * common case here — so a lens left over from an earlier click would survive and open a different
+ * list than the number clicked.
+ */
+export function openBriefLine(kind: InsightKind, lens: AttentionRelevanceLens | null = null): void {
+  const s = useFilters.getState();
+  s.setActivityRepo('attention');
+  s.setAttentionIsolation(kind);
+  s.setAttentionRelevance(lens);
+  s.setAttentionAuthorLens(null);
+}
+
 // (`useAutoNarration` — the one-attempt-per-staleness lazy generation guard — moved to
 // hooks/useSynthesis.ts so the 1:1 person section reuses the same guard instead of a second
 // spelling of it. Behaviour here is unchanged.)
@@ -131,8 +161,6 @@ const WEEKDAY = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
 export function BriefStrip(): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
-  const setAttentionIsolation = useFilters((s) => s.setAttentionIsolation);
-  const setAttentionRelevance = useFilters((s) => s.setAttentionRelevance);
   // The cross-workspace "Elsewhere" lines navigate through this one action — see the button.
   const openMyTurnInWorkspace = useFilters((s) => s.openMyTurnInWorkspace);
   const openBotThreadsTab = usePinnedTabs((s) => s.openBotThreadsTab);
@@ -220,30 +248,15 @@ export function BriefStrip(): JSX.Element | null {
         });
       }
     };
-    // Every line below lands on the **Pending** board ISOLATED to the one card kind the
-    // line is about, so the number the user clicked and the list they land on are the same
-    // population. Four brief lines used to drop the reader on one undifferentiated board.
-    //
-    // ⚠ ORDERING: `setActivityRepo` FIRST, `setAttentionIsolation` SECOND. `setActivityRepo`
-    // clears the isolation, AND early-returns an empty patch when the rail id is unchanged — so
-    // isolating first would be wiped on the click that switches rail and survive on the clicks
-    // that don't. The same rule PrDetail / BotOnlyPrsDetail document for `feedIsolatedPrId`.
-    //
-    // ⚠ AND IT SEATS THE RELEVANCE LENS EXPLICITLY — INCLUDING `null`. Every line here opens the
-    // list ITS OWN number counts, and for the two my-turn lines that list is one HALF of the
-    // my_turn population, so each passes the lens that paints its half; every other line counts a
-    // whole kind and passes `null`. Seating (rather than clearing) is what makes the two my-turn
-    // lines mutually exclusive on the board as well as in the strip.
-    // ⚠ AND IT IS NEVER CONDITIONAL. `setActivityRepo` early-returns an empty patch when the rail
-    // is already 'attention' — the common case here — so a lens left over from an earlier
-    // welcome-back/badge click would survive and open a different list than the number clicked.
+    // Every line below lands on the **Pending** board ISOLATED to the one card kind the line is
+    // about — four brief lines used to drop the reader on one undifferentiated board. The seating
+    // order, and why both lenses are seated every time, is `openBriefLine`'s contract. Seating
+    // (rather than clearing) is what makes the two my-turn lines mutually exclusive on the board
+    // as well as in the strip.
     const openAttention =
       (kind: InsightKind, lens: AttentionRelevanceLens | null = null) =>
-      (): void => {
-        setActivityRepo('attention');
-        setAttentionIsolation(kind);
-        setAttentionRelevance(lens);
-      };
+      (): void =>
+        openBriefLine(kind, lens);
     // ── THE MY-TURN SPLIT: TWO MUTUALLY EXCLUSIVE LINES ─────────────────────────────────────
     //
     // ⚠ "items", not "events". These numbers ARE my_turn card counts — one clickable card per
@@ -318,22 +331,33 @@ export function BriefStrip(): JSX.Element | null {
       openAttention('ci_failing'),
       ciFailingCapDisclosure(counts.ciFailing ?? 0, counts),
     );
+    // The Dependencies tab's SECURITY chip: a fix PR or a live alert naming a known advisory. A
+    // survey line (uncapped, the chip's own figure), so no cap disclosure. Plain bumps get no line
+    // at all — an update is housekeeping, not something waiting on anyone.
+    // The survey lines say "1 PR", never "1 PRs" — the count sits beside the words.
+    const one = (n: number, singular: string, plural: string): string => (n === 1 ? singular : plural);
+    scalar(
+      'security',
+      counts.security ?? 0,
+      one(counts.security ?? 0, 'PR with a security fix or alert', 'PRs with a security fix or alert'),
+      openAttention('security'),
+    );
     scalar(
       'stalled',
       counts.stalled,
-      'PRs stalled awaiting review',
+      one(counts.stalled, 'PR stalled awaiting review', 'PRs stalled awaiting review'),
       openAttention('stalled_review'),
     );
     scalar(
       'untouched',
       counts.untouchedThreads,
-      'review threads untouched',
+      one(counts.untouchedThreads, 'review thread untouched', 'review threads untouched'),
       openAttention('untouched_thread'),
     );
     scalar(
       'needsReviewer',
       counts.needsReviewer,
-      'PRs still need a reviewer',
+      one(counts.needsReviewer, 'PR still needs a reviewer', 'PRs still need a reviewer'),
       openAttention('reviewer_routing'),
     );
     for (const r of counts.trunkRed) {
@@ -386,8 +410,6 @@ export function BriefStrip(): JSX.Element | null {
     openBotDetailTab,
     openBotThreadsTab,
     setActivityRepo,
-    setAttentionIsolation,
-    setAttentionRelevance,
   ]);
 
   // Self-hide: nothing to say here AND nothing elsewhere. (Also while the workspace/brief is
@@ -526,7 +548,7 @@ export function BriefStrip(): JSX.Element | null {
           one-release migration aid for the Pending consolidation (the "Plan for today" card and
           the flow-metric header leaving this screen); that release has long landed, both
           surfaces are a labelled rail click away, and a permanent footnote describing an old
-          layout is just noise on the app's default landing screen. */}
+          layout is just noise on the Feed. */}
     </section>
   );
 }

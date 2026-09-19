@@ -51,6 +51,47 @@ export const FLOW_BUDGET_DEFAULTS: Record<FlowBudgetMeasure, FlowBudget> = {
   lead: { good: 8, ok: 16 },
 };
 
+/**
+ * The floors and ratios Chronology folds with, spelled ONCE so the page's explanations quote the
+ * same numbers (the pending-rules precedent). Read by db/flow-detail.ts, db/pr-intervals.ts and
+ * Activity/chronologyInfo.tsx — never retype one as a literal.
+ *
+ * ⚠ THE THREE REPOSITORY CALL-OUT VALUES ARE A CALIBRATION, not a preference. `minRepoPrs`,
+ * `dominantShare` and `slowP75ClockHours` are the values the replay over 66,088 public pull
+ * requests was measured at, and `pr-intervals.test.ts` pins them exactly; the engine keeps its own
+ * constant NAMES, assigned from here, because a structural test reads the rule by those names.
+ */
+export const FLOW_RULES = {
+  /** A budget verdict needs this many pull requests. */
+  budgetMinPrs: 5,
+  /** A size band, weekday or request row needs this many for a median. */
+  cutMinPrs: 5,
+  /** The fast-versus-slow contrast needs this many in each quarter. */
+  contrastMinQuartile: 8,
+  /** A contrast row "separates" when the slow side is at least this many times the fast. */
+  separatesRatio: 2,
+  /** …and is "weak" from this ratio. */
+  weakRatio: 1.3,
+  /** Each side of the first-review comparison needs this many first looks. */
+  concentrationMinSide: 3,
+  /** "Slower" means at least this many times everyone else's first look… */
+  slowerRatio: 1.25,
+  /** …and at least this many working hours longer. */
+  slowerMinHours: 0.5,
+  /** Pull requests listed under "Approved and waiting". */
+  landingRows: 10,
+  /** Merged, human-touched pull requests a repository needs before it is measured. */
+  minRepoPrs: 12,
+  /** One wait must hold at least this share of a repository's time to be called out… */
+  dominantShare: 0.5,
+  /** …and its slowest quarter must take at least this many CLOCK hours. */
+  slowP75ClockHours: 8,
+  /** Merges without a human review a repository needs before it is listed… */
+  unreviewedMinCount: 10,
+  /** …and the share of its merges they must be. */
+  unreviewedMinShare: 0.2,
+} as const;
+
 /** ISO weekdays, 1 = Monday … 7 = Sunday. */
 export const FLOW_WORKDAY_DEFAULTS = {
   days: [1, 2, 3, 4, 5] as number[],

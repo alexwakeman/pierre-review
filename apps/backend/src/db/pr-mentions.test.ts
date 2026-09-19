@@ -1,4 +1,4 @@
-// The "@you" MENTION arm of My Turn's personal-relevance flag, on a THROWAWAY sqlite DB (the
+// My Turn's @MENTION type and the scanner behind it, on a THROWAWAY sqlite DB (the
 // my-turn-personal.test.ts pattern).
 //
 // WHAT THIS PINS, and why each one is a real defect rather than a restatement of the code:
@@ -7,22 +7,23 @@
 //      `lower(body) LIKE '%@login%'`, which happily matches "@alexwakeman" when the login is
 //      "alex", and "bob@alex.com" for anyone. Deleting the regex confirmation in
 //      `deriveMentionedPrs` leaves a scanner that still finds every true mention and quietly
-//      claims a pile of false ones — no error, no failing count, just a personal inbox full of
-//      strangers. The table-driven case list is what fails then.
-//   2. A MENTION IS PERSONAL IN A REPO THE VIEWER ONLY READS. That is the entire reason this arm
-//      exists: the maintainer arm from phase 1 answers "your patch of ground", this one answers
-//      "somebody typed your name". Every repo in this fixture is deliberately READ with no merge
-//      history, so a maintainer-only implementation scores ZERO here.
-//   3. ABSENCE NEVER WIDENS. Before the scanner has ever run, and for a PR with no mention, the
-//      flag must read exactly as it did in phase 1. A control PR carries that.
-//   4. THE SCAN CONVERGES, in both directions. It re-derives the FULL set and diffs, so an
-//      edited-away mention must REMOVE the row — an insert-only writer would make `personal` a
-//      ratchet that only ever widens, which no test that seeds and scans once would notice.
-//   5. A RENAMED ACCOUNT NARROWS IMMEDIATELY. The read is login-scoped, so a rename stops
-//      claiming those PRs before the scanner has re-run; the next tick then re-derives under the
-//      new login.
-//   6. THE ROW DIES WITH ITS PR. Core schema is mostly cascade-free and the hand-written delete
-//      paths are the real cleanup; a surviving row goes on claiming a deleted PR is personal.
+//      claims a pile of false ones — no error, no failing count, just an inbox full of strangers.
+//      The table-driven case list is what fails then.
+//   2. A MENTION IS A SUMMONS IN A REPO THE VIEWER ONLY READS. That is the entire reason the type
+//      exists: "somebody typed your name", not "your patch of ground". Every repo in this fixture
+//      is deliberately READ with no merge history.
+//   3. THE CARD RUNS ON THE MENTION'S CLOCK. Each row carries the NEWEST qualifying mention's time
+//      and author; the card clears when you act after it, and a NEWER mention must restamp the row
+//      or you would act once and never be summoned again.
+//   4. ONLY A PERSON CAN SUMMON YOU. A bot — including one only GitHub's own type says is a bot —
+//      and the viewer themself derive nothing, and a bot echo never becomes a PR's newest mention.
+//   5. THE SCAN CONVERGES, in both directions. It re-derives the FULL set and diffs, so an
+//      edited-away mention must REMOVE the row — an insert-only writer would make the card a
+//      ratchet that only ever widens.
+//   6. A RENAMED ACCOUNT NARROWS IMMEDIATELY. The read is login-scoped, so a rename stops the cards
+//      before the scanner has re-run; the next tick then re-derives under the new login.
+//   7. THE ROW DIES WITH ITS PR. Core schema is mostly cascade-free and the hand-written delete
+//      paths are the real cleanup.
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
@@ -44,6 +45,7 @@ let eq: any;
 
 const DAY = 24 * 60 * 60 * 1000;
 const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
 // Whole seconds: sqlite stores these as unix-epoch INTEGERS.
 const now = Math.floor(Date.now() / 1000) * 1000;
 const REPO_ADDED = now - 30 * DAY;
@@ -59,8 +61,9 @@ const CASES = [
   { key: 'review-body', kind: 'review', body: 'Handing this to @AlexWakeman (case differs)', mentioned: true },
   { key: 'inline', kind: 'review_comment', body: 'nit: @alexwakeman owns this file', mentioned: true },
   { key: 'markdown-link', kind: 'pr_comment', body: 'see [@alexwakeman](https://github.com/alexwakeman)', mentioned: true },
-  { key: 'quoted-reply', kind: 'pr_comment', body: '> @alexwakeman said earlier', mentioned: true },
   // ── the near-misses ──────────────────────────────────────────────────────────────────────
+  // A quote-reply repeats somebody else's words; the quoter did not summon you.
+  { key: 'quoted-reply', kind: 'pr_comment', body: '> @alexwakeman said earlier', mentioned: false },
   { key: 'prefix-login', kind: 'pr_comment', body: 'cc @alex about the config', mentioned: false },
   { key: 'longer-login', kind: 'pr_comment', body: 'cc @alexwakemanson about the config', mentioned: false },
   { key: 'hyphen-suffix', kind: 'pr_comment', body: 'cc @alexwakeman-bot ran this', mentioned: false },
@@ -74,6 +77,42 @@ const prIdByKey = new Map<string, number>();
 let controlPrId = 0;
 let repoId = 0;
 let viewerId = 0;
+let aliceId = 0;
+let prefixId = 0;
+let botId = 0;
+let typedBotId = 0;
+let nextNumber = 1;
+
+/** A fresh open PR by alice in the fixture's read-only repo. */
+async function insertPr(key: string): Promise<number> {
+  const openedAt = new Date(now - MINUTE * (60 - nextNumber));
+  const [pr] = await db
+    .insert(schema.pullRequests)
+    .values({
+      githubNodeId: `PR_mention_${key}`,
+      accountId: 1,
+      repoId,
+      number: nextNumber++,
+      title: `${key} fixture`,
+      authorId: aliceId,
+      state: 'open',
+      isDraft: false,
+      openedAt,
+      updatedAt: openedAt,
+    })
+    .returning()
+    .execute();
+  prIdByKey.set(key, pr.id);
+  return pr.id;
+}
+
+/** One issue-level PR comment. */
+async function insertComment(prId: number, tag: string, authorId: number, body: string, at: number) {
+  await db
+    .insert(schema.prComments)
+    .values({ prId, githubNodeId: `IC_${tag}`, authorId, body, createdAt: new Date(at) })
+    .execute();
+}
 
 beforeAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
@@ -100,17 +139,26 @@ beforeAll(async () => {
     .where(eq(accounts.id, 1))
     .execute();
 
-  const insertUser = async (login: string): Promise<number> => {
+  const insertUser = async (login: string, isBot = false): Promise<number> => {
     const [u] = await db
       .insert(users)
-      .values({ githubLogin: login, githubNodeId: `U_${login}`, isBot: false })
+      .values({ githubLogin: login, githubNodeId: `U_${login}`, isBot })
       .returning()
       .execute();
     return u.id;
   };
   viewerId = await insertUser(VIEWER_LOGIN);
-  await insertUser(PREFIX_LOGIN);
-  const aliceId = await insertUser('alice-dev');
+  prefixId = await insertUser(PREFIX_LOGIN);
+  aliceId = await insertUser('alice-dev');
+  // Two kinds of automation: one `users.isBot` knows, and one only GitHub's own TYPE says is a bot
+  // (google-cla, socket-security… — `is_bot = 0`, `github_type = 'Bot'`). Neither may summon.
+  botId = await insertUser('dependabot[bot]', true);
+  const [typed] = await db
+    .insert(users)
+    .values({ githubLogin: 'google-cla', githubNodeId: 'U_google-cla', isBot: false, githubType: 'Bot' })
+    .returning()
+    .execute();
+  typedBotId = typed.id;
 
   // ⚠ READ, no default-branch merge history, permission KNOWN. The maintainer arm from phase 1
   // scores zero on every PR below, so anything that comes out personal did so via the mention.
@@ -129,31 +177,8 @@ beforeAll(async () => {
     .execute();
   repoId = repo.id;
 
-  let n = 1;
-  const insertPr = async (key: string): Promise<number> => {
-    const openedAt = new Date(now - MINUTE * (30 - n));
-    const [pr] = await db
-      .insert(pullRequests)
-      .values({
-        githubNodeId: `PR_mention_${key}`,
-        accountId: 1,
-        repoId,
-        number: n++,
-        title: `${key} fixture`,
-        authorId: aliceId,
-        state: 'open',
-        isDraft: false,
-        openedAt,
-        updatedAt: openedAt,
-      })
-      .returning()
-      .execute();
-    return pr.id;
-  };
-
   for (const c of CASES) {
     const prId = await insertPr(c.key);
-    prIdByKey.set(c.key, prId);
     const at = new Date(now - DAY);
     if (c.kind === 'pr_comment') {
       await db
@@ -214,20 +239,14 @@ afterAll(async () => {
 
 const log = { info: () => {}, warn: () => {}, error: () => {} } as any;
 
-/** The `personal` flag of every "New PRs" row, keyed by PR id. */
-async function personalByPr(): Promise<Map<number, boolean>> {
+/** The My Turn mention section, keyed by PR id. */
+async function mentionByPr(): Promise<Map<number, any>> {
   const res = await q.getMyTurn(1);
-  return new Map<number, boolean>(
-    res.watchedRepoPrs.map((p: { prId: number; personal?: boolean }) => [p.prId, p.personal]),
-  );
+  return new Map<number, any>(res.mentions.map((m: { prId: number }) => [m.prId, m]));
 }
 
-/** The three-valued `relevance` of every "New PRs" row, keyed by PR id. */
-async function relevanceByPr(): Promise<Map<number, string | undefined>> {
-  const res = await q.getMyTurn(1);
-  return new Map<number, string | undefined>(
-    res.watchedRepoPrs.map((p: { prId: number; relevance?: string }) => [p.prId, p.relevance]),
-  );
+async function storedFor(prId: number) {
+  return (await mentions.listStoredMentions(1)).find((r: { prId: number }) => r.prId === prId);
 }
 
 describe('@mention detection', () => {
@@ -250,7 +269,7 @@ describe('@mention detection', () => {
 });
 
 describe('the mention scanner', () => {
-  it('derives exactly the mentioning PRs across all three body tables', async () => {
+  it('derives exactly the mentioning PRs across all three body tables, with WHEN and WHO', async () => {
     await scan.runMentionScanTick(log);
     const rows = await mentions.listStoredMentions(1);
     const stored = new Set<number>(rows.map((r: { prId: number }) => r.prId));
@@ -262,46 +281,152 @@ describe('the mention scanner', () => {
     // still pass and the `true` cases would be the only thing holding the file up.
     expect(stored.size).toBe(CASES.filter((c) => c.mentioned).length);
     expect(stored.has(controlPrId)).toBe(false);
-    // The login is stored canonicalised, so a reader's equality test does not depend on how
-    // GitHub spelled it that day.
-    for (const r of rows) expect(r.login).toBe(VIEWER_LOGIN.toLowerCase());
+    for (const r of rows) {
+      // The login is stored canonicalised, so a reader's equality test does not depend on how
+      // GitHub spelled it that day.
+      expect(r.login).toBe(VIEWER_LOGIN.toLowerCase());
+      // THE MENTION CLOCK: when, and by whom. The card clears on an action AFTER this moment.
+      expect(r.mentionedAt?.getTime()).toBe(now - DAY);
+      expect(r.mentionedByUserId).toBe(aliceId);
+    }
   });
 
-  it('makes a mentioned PR personal in a repo the viewer only READS', async () => {
-    const personal = await personalByPr();
+  it('turns a mention into a DIRECT My Turn card in a repo the viewer only READS', async () => {
+    const byPr = await mentionByPr();
     for (const c of CASES) {
       const prId = prIdByKey.get(c.key)!;
-      // ⚠ THE WHOLE POINT. Every repo here is READ with no merge history, so phase 1's
-      // maintainer arm answers false for all of these — a true can only have come from a mention.
-      expect(personal.get(prId), `${c.key} (${c.body})`).toBe(c.mentioned);
+      // ⚠ THE WHOLE POINT. Every repo here is READ with no merge history, so nothing but the
+      // mention can have put these here.
+      expect(byPr.has(prId), `${c.key} (${c.body})`).toBe(c.mentioned);
     }
-    // ABSENCE NEVER WIDENS: a PR nobody mentioned the viewer on reads exactly as it did before
-    // this feature existed.
-    expect(personal.get(controlPrId)).toBe(false);
+    expect(byPr.has(controlPrId)).toBe(false);
+    for (const m of byPr.values()) {
+      expect(m.relevance).toBe('direct');
+      expect(m.personal).toBe(true);
+      expect(m.mentionedById).toBe(aliceId);
+      // Dated by the MENTION, not by the PR's open time.
+      expect(Date.parse(m.since)).toBe(now - DAY);
+    }
   });
 
-  it('makes a mention DIRECT, not merely "maintained"', async () => {
-    // ⚠ THE ARM DISCRIMINATOR. `personal` above is the UNION of the two arms and would pass with
-    // them swapped; `relevance` is where they must stay apart. Every repo in this fixture is READ
-    // with no merge history, so the maintainer arm scores zero on all of them — a mention has to
-    // come out 'direct' ("YOUR TURN": somebody typed your name), never 'maintained' ("IN YOUR
-    // REPOS": your patch of ground, which none of these is).
-    const relevance = await relevanceByPr();
-    for (const c of CASES) {
-      const prId = prIdByKey.get(c.key)!;
-      expect(relevance.get(prId), `${c.key} (${c.body})`).toBe(c.mentioned ? 'direct' : 'none');
+  it('lists a PR once — a mentioned PR is a mention card, never also a "New PR"', async () => {
+    const { setMyTurnSettings } = await import('../auth/account.js');
+    await setMyTurnSettings(1, { show: { watched_repo_pr: true } });
+    try {
+      const res = await q.getMyTurn(1);
+      const mentioned = new Set(res.mentions.map((m: { prId: number }) => m.prId));
+      const fresh = new Set(res.watchedRepoPrs.map((m: { prId: number }) => m.prId));
+      for (const id of mentioned) expect(fresh.has(id)).toBe(false);
+      // …and nothing is lost: every fixture PR is in exactly one of the two.
+      expect(mentioned.size + fresh.size).toBe(CASES.length + 1);
+      // A New PR in a read-only repo is not about you: the mention arm that used to promote it
+      // to 'direct' is gone, because a mention is its own type now.
+      for (const r of res.watchedRepoPrs) expect(r.relevance).toBe('none');
+    } finally {
+      await setMyTurnSettings(1, null);
     }
-    expect(relevance.get(controlPrId)).toBe('none');
   });
 
-  it('keeps returning every row — the flag is still advisory, not a filter', async () => {
-    const res = await q.getMyTurn(1);
-    expect(res.watchedRepoPrs.length).toBe(CASES.length + 1);
+  it('clears the card when you act after the mention — and keeps the stored row', async () => {
+    const prId = prIdByKey.get('pr-comment')!;
+    expect((await mentionByPr()).has(prId)).toBe(true);
+    await insertComment(prId, 'viewer-answer', viewerId, 'on it', now - DAY + HOUR);
+    // ⚠ THE BALL RULE, not the scanner: the row still states a true fact (you were mentioned),
+    // and the card is gone because you acted after it.
+    expect((await mentionByPr()).has(prId)).toBe(false);
+    expect(await storedFor(prId)).toBeDefined();
+  });
+
+  it('RESTAMPS the row when a newer mention arrives, which brings the card back', async () => {
+    const prId = prIdByKey.get('pr-comment')!;
+    const at = now - HOUR;
+    await insertComment(prId, 'prefix-asks', prefixId, 'thanks — @alexwakeman one more thing?', at);
+    const res = await mentions.syncAccountMentions(
+      1,
+      VIEWER_LOGIN,
+      await mentions.deriveMentionedPrs(1, VIEWER_LOGIN),
+    );
+    // An UPDATE of the kept row — not a delete and re-insert, and not "unchanged".
+    expect(res.updated).toBe(1);
+    expect(res.added).toBe(0);
+    expect(res.removed).toBe(0);
+    const row = await storedFor(prId);
+    expect(row?.mentionedAt?.getTime()).toBe(at);
+    expect(row?.mentionedByUserId).toBe(prefixId);
+    // You acted at now − 1d + 1h; the new mention is later, so the ball is yours again.
+    const card = (await mentionByPr()).get(prId);
+    expect(card?.mentionedById).toBe(prefixId);
+    expect(Date.parse(card?.since)).toBe(at);
+    // A second pass over unchanged data writes nothing.
+    const again = await mentions.syncAccountMentions(
+      1,
+      VIEWER_LOGIN,
+      await mentions.deriveMentionedPrs(1, VIEWER_LOGIN),
+    );
+    expect(again).toEqual({ added: 0, updated: 0, removed: 0 });
+  });
+
+  it('lets only a PERSON summon you — never automation of either kind, never yourself', async () => {
+    const onlyBot = await insertPr('only-bot');
+    await insertComment(onlyBot, 'bot-cc', botId, 'Dependabot will rebase this for @alexwakeman', now - HOUR);
+    const onlyTypedBot = await insertPr('only-typed-bot');
+    await insertComment(onlyTypedBot, 'cla-cc', typedBotId, '@alexwakeman please sign the CLA', now - HOUR);
+    const onlySelf = await insertPr('only-self');
+    await insertComment(onlySelf, 'self-cc', viewerId, 'note to @alexwakeman: revisit', now - HOUR);
+    // A PERSON'S mention followed by a bot echo: the person's stays the newest mention.
+    const echoed = await insertPr('echoed');
+    await insertComment(echoed, 'echo-person', aliceId, '@alexwakeman can you look?', now - 3 * HOUR);
+    await insertComment(echoed, 'echo-bot', typedBotId, 'cc @alexwakeman (automated)', now - HOUR);
+
+    const derived = await mentions.deriveMentionedPrs(1, VIEWER_LOGIN);
+    const byPr = new Map(derived.map((d: { prId: number }) => [d.prId, d]));
+    expect(byPr.has(onlyBot)).toBe(false);
+    // ⚠ The GLOBAL automation set, not `users.isBot` alone: this account is `is_bot = 0`.
+    expect(byPr.has(onlyTypedBot)).toBe(false);
+    expect(byPr.has(onlySelf)).toBe(false);
+    expect((byPr.get(echoed) as any)?.mentionedById).toBe(aliceId);
+    expect((byPr.get(echoed) as any)?.mentionedAt.getTime()).toBe(now - 3 * HOUR);
+  });
+
+  it('never lets a QUOTED mention restamp the clock or bring the card back', async () => {
+    const quoted = await insertPr('quote-reply-after');
+    await insertComment(quoted, 'q-alice', aliceId, '@alexwakeman can you look?', now - 3 * HOUR);
+    await insertComment(quoted, 'q-viewer', viewerId, 'looking now', now - 2 * HOUR);
+    // After you acted, a person quote-replies the old mention. They did not summon you.
+    await insertComment(quoted, 'q-quote', prefixId, '> @alexwakeman can you look?\n\nsame question here', now - HOUR);
+    const sync = async () =>
+      mentions.syncAccountMentions(1, VIEWER_LOGIN, await mentions.deriveMentionedPrs(1, VIEWER_LOGIN));
+    await sync();
+    const row = await storedFor(quoted);
+    expect(row?.mentionedAt?.getTime()).toBe(now - 3 * HOUR);
+    expect(row?.mentionedByUserId).toBe(aliceId);
+    expect((await mentionByPr()).has(quoted)).toBe(false);
+    // Productive: the same words TYPED by that person are a new mention, and bring the card back.
+    await insertComment(quoted, 'q-typed', prefixId, 'still: @alexwakeman can you look?', now - HOUR + MINUTE);
+    await sync();
+    expect((await storedFor(quoted))?.mentionedByUserId).toBe(prefixId);
+    expect((await mentionByPr()).get(quoted)?.mentionedById).toBe(prefixId);
+  });
+
+  it('shows NO card for a row the scanner has not stamped yet', async () => {
+    const { prMentions } = schema;
+    await scan.runMentionScanTick(log);
+    const prId = prIdByKey.get('inline')!;
+    expect((await mentionByPr()).has(prId)).toBe(true);
+    // The state migration 0068 leaves every existing row in until the first tick restamps it.
+    await db
+      .update(prMentions)
+      .set({ mentionedAt: null, mentionedByUserId: null })
+      .where(eq(prMentions.prId, prId))
+      .execute();
+    expect((await mentionByPr()).has(prId)).toBe(false);
+    await scan.runMentionScanTick(log);
+    expect((await mentionByPr()).has(prId)).toBe(true);
   });
 
   it('REMOVES a mention that was edited away', async () => {
     const { prComments } = schema;
-    const prId = prIdByKey.get('pr-comment')!;
+    const prId = prIdByKey.get('markdown-link')!;
     await db
       .update(prComments)
       .set({ body: 'cc the platform team instead' })
@@ -309,27 +434,24 @@ describe('the mention scanner', () => {
       .execute();
 
     await scan.runMentionScanTick(log);
-    const stored = new Set<number>(
-      (await mentions.listStoredMentions(1)).map((r: { prId: number }) => r.prId),
-    );
     // ⚠ An insert-only writer passes every other case in this file and fails only here: the
     // stored set has to CONVERGE on the derived one, not accumulate it.
-    expect(stored.has(prId)).toBe(false);
-    expect((await personalByPr()).get(prId)).toBe(false);
+    expect(await storedFor(prId)).toBeUndefined();
+    expect((await mentionByPr()).has(prId)).toBe(false);
     // Restore, so the ordering of the cases below does not depend on this one.
     await db
       .update(prComments)
-      .set({ body: 'cc @alexwakeman — mind taking a look?' })
+      .set({ body: 'see [@alexwakeman](https://github.com/alexwakeman)' })
       .where(eq(prComments.prId, prId))
       .execute();
     await scan.runMentionScanTick(log);
-    expect((await personalByPr()).get(prId)).toBe(true);
+    expect((await mentionByPr()).has(prId)).toBe(true);
   });
 
   it('narrows IMMEDIATELY when the account login changes, then re-derives', async () => {
     const { accounts } = schema;
     const prId = prIdByKey.get('inline')!;
-    expect((await personalByPr()).get(prId)).toBe(true);
+    expect((await mentionByPr()).has(prId)).toBe(true);
 
     await db
       .update(accounts)
@@ -337,17 +459,17 @@ describe('the mention scanner', () => {
       .where(eq(accounts.id, 1))
       .execute();
     // ⚠ BEFORE the scanner runs. The read is login-scoped precisely so a rename cannot leave a
-    // stale row claiming a stranger's PR is personal for as long as a tick.
-    const beforeScan = await personalByPr();
-    expect(beforeScan.get(prId)).toBe(false);
-    // …and the PR that mentions the NEW login is not personal yet either — nothing widens on a
+    // stale row summoning the new login for as long as a tick.
+    const beforeScan = await mentionByPr();
+    expect(beforeScan.has(prId)).toBe(false);
+    // …and the PR that mentions the NEW login is not a card yet either — nothing widens on a
     // rename until the scan has actually looked.
-    expect(beforeScan.get(prIdByKey.get('prefix-login')!)).toBe(false);
+    expect(beforeScan.has(prIdByKey.get('prefix-login')!)).toBe(false);
 
     await scan.runMentionScanTick(log);
-    const afterScan = await personalByPr();
-    expect(afterScan.get(prIdByKey.get('prefix-login')!)).toBe(true);
-    expect(afterScan.get(prId)).toBe(false);
+    const afterScan = await mentionByPr();
+    expect(afterScan.has(prIdByKey.get('prefix-login')!)).toBe(true);
+    expect(afterScan.has(prId)).toBe(false);
     // The rows derived under the old login are GONE, not merely ignored.
     const logins = new Set<string>(
       (await mentions.listStoredMentions(1)).map((r: { login: string }) => r.login),

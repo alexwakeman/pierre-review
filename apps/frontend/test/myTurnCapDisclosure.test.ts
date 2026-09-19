@@ -484,6 +484,32 @@ describe('passesLens (the one predicate the tabs, the server cap and the brief s
       expect(mine !== others).toBe(true);
     }
   });
+
+  it('a red default branch in My turn is one more card in the SAME pair — no second predicate', () => {
+    // Settings → My Turn can move a red default branch into My turn. It is kind `my_turn` with no PR
+    // of its own, and the server counts it in `myTurnPersonal` / `myTurnOther` by `relevance` alone
+    // — so the board's two halves must claim it by the same predicate, or the displayed figure and
+    // the brief's figure stop being one population and every cap disclosure goes silent.
+    const board = [
+      { kind: 'my_turn', reason: 'review_request', prId: 4, relevance: 'direct', personal: true },
+      { kind: 'my_turn', reason: 'trunk_red', prId: null, relevance: 'direct', personal: true },
+      { kind: 'my_turn', reason: 'trunk_red', prId: 5, relevance: 'none', personal: false, muted: true },
+    ] as unknown as InsightCard[];
+    const mine = board.filter((c) => passesLens(c, 'mine')).length;
+    const others = board.filter((c) => passesLens(c, 'others')).length;
+    expect([mine, others]).toEqual([2, 1]);
+    const c = counts({
+      myTurn: 3,
+      myTurnTotal: 70,
+      myTurnPersonal: 2,
+      myTurnPersonalTotal: 60,
+      myTurnOther: 1,
+      myTurnOtherTotal: 10,
+    });
+    expect(myTurnCapDisclosure(board.length, c)?.total).toBe(70);
+    expect(myTurnPersonalCapDisclosure(mine, c)?.total).toBe(60);
+    expect(myTurnOtherCapDisclosure(others, c)?.total).toBe(10);
+  });
 });
 
 // ── THE CARD LABELS: three, off `relevance` ──────────────────────────────────────────────────
@@ -509,6 +535,28 @@ describe('cardKindLabel (my_turn)', () => {
     // still true.
     expect(cardKindLabel(card({ personal: true }))).toBe(KIND_LABEL.my_turn);
     expect(cardKindLabel(card({ personal: false }))).toBe(KIND_LABEL.my_turn);
+  });
+
+  it('a type ADDED to My Turn, in a muted repo, is named as its home tab names it — never "Review or reply"', () => {
+    // A muted repo forces relevance 'none'; the neutral kind label would call a failing build or a
+    // conflict "Review or reply".
+    const muted = (over: Partial<InsightCard>): string =>
+      cardKindLabel(card({ relevance: 'none', personal: false, muted: true, ...over } as Partial<InsightCard>));
+    expect(muted({ reason: 'own_ci_red' } as Partial<InsightCard>)).toBe('CI failing on your PR');
+    expect(muted({ reason: 'own_conflicts' } as Partial<InsightCard>)).toBe(KIND_LABEL.conflicts);
+    expect(
+      muted({ reason: 'own_ready', own: { kind: 'ready', forward: 'update_branch' } } as Partial<InsightCard>),
+    ).toBe(KIND_LABEL.update_branch);
+    expect(
+      muted({ reason: 'own_ready', own: { kind: 'ready', forward: 'merge' } } as Partial<InsightCard>),
+    ).toBe(KIND_LABEL.merge);
+    expect(muted({ reason: 'own_thread' } as Partial<InsightCard>)).toBe(KIND_LABEL.untouched_thread);
+    expect(muted({ reason: 'trunk_red' } as Partial<InsightCard>)).toBe('Trunk CI failing');
+    // A summons keeps the neutral label, and unmuted, a promotion is still "Your turn".
+    expect(muted({ reason: 'pr_approved' } as Partial<InsightCard>)).toBe(KIND_LABEL.my_turn);
+    expect(cardKindLabel(card({ reason: 'own_ci_red', relevance: 'direct' } as Partial<InsightCard>))).toBe(
+      'Your turn',
+    );
   });
 
   it('the three labels are DISTINCT — the split is invisible if two of them collide', () => {

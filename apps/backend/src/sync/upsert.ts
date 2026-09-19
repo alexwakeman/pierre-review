@@ -8,6 +8,11 @@ import { ensureDefaultWorkspace } from '../db/queries.js';
 import { config } from '../config.js';
 import { isLikelyBot } from './bot-detection.js';
 import {
+  classifyPrSecurity,
+  type DependencyMarkerVendor,
+  type PrSecurityInput,
+} from './security-detect.js';
+import {
   deriveThreadState,
   type CommitInput,
 } from './derive-thread-state.js';
@@ -665,6 +670,27 @@ export async function persistReviewRequestHistory(
     .execute();
 }
 
+/** The four `pull_requests` security columns, ALWAYS written together (migration 0067). */
+export interface SecurityColumns {
+  dependencyVendor: DependencyMarkerVendor | null;
+  securityFix: 'proven' | 'inferred' | null;
+  advisoryIds: string[] | null;
+  securityCheckedAt: Date;
+}
+
+/** One classification → the four columns, for BOTH writers (`persistPr` and the one-shot backfill
+ *  in sync/backfill-pr-security.ts), so a walk and a backfill can never store the same PR two ways.
+ *  An empty id list is stored as NULL. The caller owns the "only on a received `bodyText`" gate. */
+export function securityColumnsFor(input: PrSecurityInput): SecurityColumns {
+  const s = classifyPrSecurity(input);
+  return {
+    dependencyVendor: s.dependencyVendor,
+    securityFix: s.securityFix,
+    advisoryIds: s.advisoryIds.length > 0 ? s.advisoryIds : null,
+    securityCheckedAt: new Date(),
+  };
+}
+
 export async function persistPr(
   pr: GqlPullRequest,
   repoId: number,
@@ -672,6 +698,23 @@ export async function persistPr(
   commitFilesBySha: Map<string, string[]>,
   accountId: number,
 ): Promise<void> {
+  // DEPENDENCY + SECURITY SIGNALS — the three-state write (the `queueObserved` pattern below).
+  // GitHub types `bodyText` String!, so a null can only be a partial response and `undefined` a
+  // response that never carried the selection: both LEARN NOTHING and write nothing. A string —
+  // even '' — is a positive statement, and the classification is written whole, NULLs included.
+  // ⚠ The FULL bodyText, never `searchRows`/`search_index`: that copy is capped at 4,000
+  // characters and Dependabot's security footer is the last line of a body that runs to 65 KB.
+  // ⚠ Classified BEFORE the transaction: it is pure CPU over text the PR's author wrote, and no
+  // regex over that text should run while the write lock is held.
+  const securityObserved: SecurityColumns | Record<string, never> =
+    typeof pr.bodyText === 'string'
+      ? securityColumnsFor({
+          title: pr.title,
+          headRefName: pr.headRefName ?? null,
+          labels: (pr.labels?.nodes ?? []).map((l) => l.name),
+          bodyText: pr.bodyText,
+        })
+      : {};
   await runTransaction(async (tx) => {
     const authorId = await resolver.resolve(tx, pr.author);
     // The actual merger (null for non-merged PRs / when GitHub omits the actor).
@@ -799,6 +842,7 @@ export async function persistPr(
         // selection" means. Same shape as branch-status.ts's `observed`.
         ...queueObserved,
         labels,
+        ...securityObserved,
         checkRuns: config.persistBodies ? checkRuns : null,
         additions,
         deletions,
@@ -829,6 +873,7 @@ export async function persistPr(
           reviewDecision,
           ...queueObserved,
           labels,
+          ...securityObserved,
           checkRuns: config.persistBodies ? checkRuns : null,
           additions,
           deletions,

@@ -4,8 +4,9 @@
 // WHAT THIS PINS, and why each is a fixture rather than a comment:
 //
 //   1. ⚠ THE RESOLUTION ORDER IS NOT THE LOGIN. `authorIsBot` is the SAME union the SPA's "hide
-//      bots" lens hides by (`hiddenBotUserIds`): `users.isBot` ∪ this WORKSPACE's automated
-//      reviewers, with a MANUAL "this is a human" judgement winning in BOTH directions. Writing
+//      bots" lens hides by (`hiddenBotUserIds`): `users.isBot` ∪ `github_type='Bot'` ∪ the vendor
+//      logins ∪ this WORKSPACE's automated reviewers, with a MANUAL "this is a human" judgement
+//      winning in BOTH directions over every half (item 5 pins the `github_type` half). Writing
 //      `reviewBotKind(login)` here instead would type-check, pass a naive fixture, and put a
 //      vendor chip on an actor the Timeline beside it calls a person — the "stored role/kind
 //      beats the login seed" rule losing to a convenience.
@@ -19,6 +20,10 @@
 //      `viewerMaintainedRepoIds` also counts "has landed a PR on the default branch", which is
 //      deliberately behavioural (My Turn's relevance gate) and would show merge buttons to
 //      someone GitHub will refuse.
+//   5. `automation` — WHO OPENED IT as the People / Automation lens and the byline read it — rides
+//      the SAME resolution as the flag: null exactly when the flag is false (no marker here), and a
+//      role when it is true. ⚠ An account GitHub TYPES a Bot is automation even when `users.isBot`
+//      missed it and no workspace has classified it (socket-security, Copilot on real data).
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
@@ -90,10 +95,10 @@ beforeAll(async () => {
   // null — every `relevance: 'direct'` fold would then match nobody.
   await db.update(accounts).set({ githubLogin: VIEWER_LOGIN }).where(eq(accounts.id, 1)).execute();
 
-  const insertUser = async (login: string, isBot = false): Promise<number> => {
+  const insertUser = async (login: string, isBot = false, githubType: string | null = null): Promise<number> => {
     const [u] = await db
       .insert(users)
-      .values({ githubLogin: login, githubNodeId: `U_${login}`, isBot })
+      .values({ githubLogin: login, githubNodeId: `U_${login}`, isBot, githubType })
       .returning()
       .execute();
     return u.id;
@@ -114,6 +119,11 @@ beforeAll(async () => {
   // ⚠ An ordinary-looking login a person marked AUTOMATED in this workspace. No vocabulary claims
   // it; only the stored row does.
   const inHouseId = await insertUser('acme-refactor-agent');
+  // ⚠ GitHub TYPES it a Bot; `users.isBot` is false and no workspace row exists — the real
+  // socket-security row. The widened union catches it twice over (its `github_type` and its vendor
+  // login) and the vendor seed names it; pending-deps.test.ts isolates the `github_type` half with
+  // a login no vocabulary names.
+  const typedBotId = await insertUser('socket-security', false, 'Bot');
 
   const insertRepo = async (key: string, viewerPermission: string): Promise<number> => {
     const [repo] = await db
@@ -192,6 +202,7 @@ beforeAll(async () => {
   await insertPr(writableRepoId, 'by-vendor', vendorId);
   await insertPr(writableRepoId, 'by-vouched-human', vouchedId);
   await insertPr(writableRepoId, 'by-in-house', inHouseId);
+  await insertPr(writableRepoId, 'by-typed-bot', typedBotId);
   // The push gate's negative: same author, a repo the viewer only READS.
   await insertPr(readOnlyRepoId, 'in-read-only', humanId, { authorId: humanId });
   // …and the merge history that makes `viewerMaintainedRepoIds` claim that repo, so a gate
@@ -304,6 +315,64 @@ describe('the PR source on an attention card', () => {
     const cards = await mergeCards(otherScope);
     expect(source(cards.get('elsewhere-by-vouched')!)).toEqual([true, 'greptile']);
   });
+
+  it('⚠ flags an account GitHub types a Bot, with the vendor its login names', async () => {
+    const cards = await mergeCards();
+    expect(source(cards.get('by-typed-bot')!)).toEqual([true, 'socket']);
+  });
+});
+
+describe('automation — who opened it, on the same resolution as the flag', () => {
+  it('is null for a person, and for a person someone vouched for', async () => {
+    const cards = await mergeCards();
+    expect(cards.get('by-human')!.automation).toBeNull();
+    expect(cards.get('by-vouched-human')!.automation).toBeNull();
+  });
+
+  it('⚠ calls an unbranded bot that OPENS a PR a coding agent, with no brand', async () => {
+    const cards = await mergeCards();
+    expect(cards.get('by-unbranded')!.automation).toEqual({
+      role: 'code_agent',
+      kind: null,
+      source: 'account',
+    });
+  });
+
+  it('names a review bot by its login', async () => {
+    const cards = await mergeCards();
+    expect(cards.get('by-vendor')!.automation).toEqual({
+      role: 'review',
+      kind: 'coderabbit',
+      source: 'account',
+    });
+  });
+
+  it('reads a role a person chose off the stored row', async () => {
+    const cards = await mergeCards();
+    expect(cards.get('by-in-house')!.automation).toEqual({
+      role: 'review',
+      kind: 'in_house',
+      source: 'account',
+    });
+  });
+
+  it('does not leak the vouch across workspaces here either', async () => {
+    const cards = await mergeCards(otherScope);
+    expect(cards.get('elsewhere-by-vouched')!.automation).toEqual({
+      role: 'review',
+      kind: 'greptile',
+      source: 'account',
+    });
+  });
+
+  it('reads the typed Bot’s role off its vendor login', async () => {
+    const cards = await mergeCards();
+    expect(cards.get('by-typed-bot')!.automation).toEqual({
+      role: 'quality_check',
+      kind: 'socket',
+      source: 'account',
+    });
+  });
 });
 
 describe('viewerCanPush on the forward cards', () => {
@@ -320,5 +389,34 @@ describe('viewerCanPush on the forward cards', () => {
     expect(cards.get('in-read-only')!.viewerCanPush).toBe(false);
     // The card itself still ships: the board shows the PR, it just offers no button.
     expect(cards.get('in-read-only')!.kind).toBe('merge');
+  });
+});
+
+// The wire `User` every client-side bot union falls back to (the Feed's lenses and pill counts, the
+// member picker). It must say what `hiddenBotUserIds` says without a workspace, or the server hides
+// an actor the client then counts as a person.
+describe('mapUser — the wire isBot is the global automation verdict', () => {
+  const row = (over: Record<string, unknown>) => ({
+    id: 1,
+    githubNodeId: 'U_1',
+    githubLogin: 'someone',
+    githubType: 'User',
+    displayName: null,
+    avatarUrl: null,
+    isBot: false,
+    ...over,
+  });
+  it('leaves a person a person', () => {
+    expect(q.mapUser(row({})).isBot).toBe(false);
+  });
+  it('keeps the users.isBot flag', () => {
+    expect(q.mapUser(row({ githubLogin: 'dependabot[bot]', isBot: true })).isBot).toBe(true);
+  });
+  it('⚠ flags an account GitHub types a Bot that users.isBot missed', () => {
+    expect(q.mapUser(row({ githubLogin: 'socket-security', githubType: 'Bot' })).isBot).toBe(true);
+  });
+  it('⚠ flags a known vendor login, exact or by prefix', () => {
+    expect(q.mapUser(row({ githubLogin: 'renovate' })).isBot).toBe(true);
+    expect(q.mapUser(row({ githubLogin: 'semgrep-code-acme' })).isBot).toBe(true);
   });
 });

@@ -25,6 +25,17 @@
 //      is keyed by prId, the half that does not change, and `armControlPhase` is the one resolver
 //      that decides what the control shows.
 //
+//   6. EVERY CARD NAMES WHO OPENED IT. The byline reads `automation` — the same resolution the
+//      People / Automation lens filters on — so a person gets their name, a branded bot its vendor
+//      chip, an unbranded one what it does plus its login, and a tool on a person's account says
+//      "<tool> via <person>". A missing account says so, and is never a bot.
+//   7. A DEPENDENCIES CARD LANDS LIKE A FORWARD CARD. One card per dependency PR carries its merge
+//      actions, decided by the same `mergeVerdict`; a person's PR a security tool flagged carries
+//      none (its own cards do).
+//   8. A PROMOTED MY TURN CARD KEEPS ITS CONTROLS. Settings → My Turn can move your own work into
+//      My turn; the adapters rebuild the home card's shape so the same merge row, resolver entry
+//      and trunk body render it — and the same gate decides what they offer.
+//
 //   ⚠ AND THE WHOLE POINT OF THE GATE BEING PURE: it is fed the card's OWN synced fields and
 //   nothing else. Every one of these assertions runs with no React, no query client and no
 //   network, which is the same property that keeps fifty mounted cards from making ~150 GitHub
@@ -36,20 +47,36 @@ import { describe, expect, it } from 'vitest';
 import type {
   AutomatedReviewerKind,
   ConflictsCard,
+  DependencyBumpCard,
+  DependencyPrState,
   InsightReviewer,
   MergeQueueEntryState,
   MergeReadyCard,
   MergeStateStatus,
   Mergeable,
   MyTurnCard,
+  MyTurnOwnWork,
   MyTurnRelevance,
+  MyTurnTrunkCard,
+  PrAutomation,
   PrReviewDecision,
   ReviewStanding,
+  SecurityAlert,
+  SecurityCard,
   UpdateBranchCard,
+  User,
 } from '@pierre-review/shared';
 import {
+  advisoryChips,
+  advisoryParts,
+  asCiFailingCard,
+  asConflictsCard,
+  asForwardCard,
+  authorByline,
   authorSourceLabel,
+  bylineParts,
   cardKindLabel,
+  securityAlertLine,
   conflictsStateChip,
   KIND_LABEL,
   clockSaysMore,
@@ -59,6 +86,7 @@ import {
   pendingQueueBadge,
   pendingReviewerChips,
   pendingReviewLead,
+  landingPrByline,
   myTurnReasonLabel,
 } from '../src/components/Activity/AttentionCards.js';
 import {
@@ -67,12 +95,20 @@ import {
   armDraftReducer,
   dispatchArmDraft,
 } from '../src/hooks/useAutoMerge.js';
+import { advisoryUrl } from '../src/lib/ui.js';
+import {
+  AUTHOR_ROLE_CHIP,
+  DEP_STATE_LABEL,
+  depStateSentence,
+  SECURITY_ALERT_SOURCE_LABEL,
+} from '../src/components/Activity/pendingLabels.js';
 
 /** The `InsightPrRef` half every PR-bearing card carries, with the source pair varied per test. */
 function prRef(
   over: {
     authorIsBot?: boolean;
     authorBotKind?: AutomatedReviewerKind | null;
+    automation?: PrAutomation | null;
     inMergeQueue?: boolean | null;
     mergeQueueEntryState?: MergeQueueEntryState | null;
     reviewDecision?: PrReviewDecision | null;
@@ -97,6 +133,8 @@ function prRef(
     openedAt: '2026-08-20T10:00:00.000Z',
     authorIsBot: false,
     authorBotKind: null,
+    // REQUIRED on the wire: null is "a person opened it", a statement rather than a gap.
+    automation: null as PrAutomation | null,
     // ⚠ `null` IS THE HONEST DEFAULT for the queue pair: a PR synced before the columns existed,
     // or a walk that did not carry the selection. It is NOT "not queued".
     inMergeQueue: null as boolean | null,
@@ -428,7 +466,13 @@ describe('a queued card keeps its cancel', () => {
 // ── RELEVANCE EMPHASIS ───────────────────────────────────────────────────────────────────────
 
 function myTurnCard(
-  over: { relevance?: MyTurnRelevance; muted?: boolean; reason?: MyTurnCard['reason']; ball?: MyTurnCard['ball'] } = {},
+  over: {
+    relevance?: MyTurnRelevance;
+    muted?: boolean;
+    reason?: MyTurnCard['reason'];
+    ball?: MyTurnCard['ball'];
+    own?: MyTurnOwnWork;
+  } = {},
 ): MyTurnCard {
   return {
     id: 'mt:review_request:101',
@@ -444,35 +488,163 @@ function myTurnCard(
   };
 }
 
-describe('the section chip names what you are being asked to do', () => {
-  it('⚠ says "Pushed since", not "New PR", once somebody pushed after you acted', () => {
-    // THE REGRESSION. Since the ball rule, `watched_repo_pr` holds two different facts, and the
-    // chip was a static map keyed on `reason` alone — so a PR the reader had approved three days
-    // earlier wore "New PR" directly beside the detail "You approved · @robin-dunn pushed 2
-    // commits since". Two adjacent elements on one card, contradicting each other.
-    const card = myTurnCard({
-      reason: 'watched_repo_pr',
-      ball: { kind: 'commits_after', yourLastAction: 'approved', humanCommitsAfter: 2 },
-    });
-    expect(myTurnReasonLabel(card)).toBe('Pushed since');
+/** A red default branch promoted into My turn — the ci_failing trunk arm's fields, as a my_turn. */
+function trunkCard(over: Partial<MyTurnTrunkCard> = {}): MyTurnTrunkCard {
+  return {
+    id: 'myturn:trunk_red:7:abc1234',
+    kind: 'my_turn',
+    reason: 'trunk_red',
+    severity: 'warn',
+    repoId: 7,
+    repoFullName: 'acme/api',
+    branchName: 'main',
+    ciStatus: 'failure',
+    headSha: 'abc1234def',
+    prId: 55,
+    prNumber: 12,
+    prTitle: 'Land the thing',
+    mergedById: 3,
+    viewerMerged: false,
+    maintained: false,
+    observedAt: '2026-08-27T09:00:00.000Z',
+    githubUrl: 'https://github.com/acme/api/commit/abc1234def',
+    detail: 'main is red at abc1234',
+    since: '2026-08-27T09:00:00.000Z',
+    personal: true,
+    relevance: 'direct',
+    threadId: null,
+    authorId: 9,
+    authorIsBot: true,
+    authorBotKind: 'dependabot',
+    automation: { role: 'dependency', kind: 'dependabot', source: 'account' },
+    ...over,
+  };
+}
+
+describe('the type chip names what you are being asked to do', () => {
+  it('says "Pushed since" on its own type — no longer a second reading of "New PR"', () => {
+    // Since Settings → My Turn, "somebody pushed after you acted" is its own type with its own
+    // switch, so the chip is the map. The regression it replaced: a PR the reader had approved
+    // wore "New PR" beside "You approved · @robin-dunn pushed 2 commits since".
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'pushed_since' }))).toBe('Pushed since');
+    expect(
+      myTurnReasonLabel(myTurnCard({ reason: 'watched_repo_pr', ball: { kind: 'untouched' } })),
+    ).toBe('New PR');
   });
 
-  it('still says "New PR" for a PR nobody has touched — the one place that is true', () => {
-    expect(myTurnReasonLabel(myTurnCard({ reason: 'watched_repo_pr', ball: { kind: 'untouched' } }))).toBe(
-      'New PR',
+  it('says which kind of ready a promoted PR is — the words its home tab uses', () => {
+    const ready = (forward: 'merge' | 'update_branch'): MyTurnOwnWork => ({
+      kind: 'ready',
+      forward,
+      mergeStateStatus: forward === 'merge' ? 'clean' : 'behind',
+      mergeable: 'mergeable',
+      lastCommitAt: null,
+      viewerCanPush: true,
+    });
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'own_ready', own: ready('merge') }))).toBe(
+      KIND_LABEL.merge,
+    );
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'own_ready', own: ready('update_branch') }))).toBe(
+      KIND_LABEL.update_branch,
     );
   });
 
-  it('⚠ an ABSENT ball falls back to the section label, never to a guess', () => {
-    // `ball` is trailing-optional for wire tolerance. A response predating it must not have
-    // "Pushed since" invented over a PR nobody has touched — the safe direction is the vaguer word.
-    expect(myTurnReasonLabel(myTurnCard({ reason: 'watched_repo_pr' }))).toBe('New PR');
+  it('names every other type from the one map, the trunk card included', () => {
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'review_request' }))).toBe('Review requested');
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'mention' }))).toBe('Mentioned');
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'thread_reply' }))).toBe('Reply to you');
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'own_ci_red' }))).toBe('Build failed');
+    expect(myTurnReasonLabel(trunkCard())).toBe('Trunk red');
+  });
+});
+
+// ── A PROMOTED CARD KEEPS ITS CONTROLS ──────────────────────────────────────────────────────
+
+describe('a promoted card, rebuilt as its home card', () => {
+  const ready = (over: Partial<Extract<MyTurnOwnWork, { kind: 'ready' }>> = {}) =>
+    ({
+      kind: 'ready',
+      forward: 'merge',
+      mergeStateStatus: 'clean',
+      mergeable: 'mergeable',
+      lastCommitAt: '2026-08-27T09:00:00.000Z',
+      viewerCanPush: true,
+      ...over,
+    }) as Extract<MyTurnOwnWork, { kind: 'ready' }>;
+
+  it('offers Merge on a PR GitHub will merge, through the SAME gate as a merge card', () => {
+    const own = ready();
+    const f = asForwardCard(myTurnCard({ reason: 'own_ready', own }), own);
+    expect(f.kind).toBe('merge');
+    expect(f.prId).toBe(101);
+    expect(pendingMergeGate(f)).toMatchObject({ show: true, action: 'merge' });
   });
 
-  it('leaves every other section alone', () => {
-    expect(myTurnReasonLabel(myTurnCard({ reason: 'review_request' }))).toBe('Review requested');
-    expect(myTurnReasonLabel(myTurnCard({ reason: 'thread' }))).toBe('Reply needed');
-    expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review' }))).toBe('Claude review');
+  it('offers Update branch on a PR that is behind — never Merge', () => {
+    const own = ready({ forward: 'update_branch', mergeStateStatus: 'behind' });
+    const f = asForwardCard(myTurnCard({ reason: 'own_ready', own }), own);
+    expect(f).toMatchObject({ kind: 'update_branch', mergeStateStatus: 'behind' });
+    expect(pendingMergeGate(f).action).toBe('update_branch');
+    // The home card's contract is `mergeStateStatus: 'behind'` BY TYPE, and the gate reads the
+    // state, not the kind — so the adapter pins it rather than trusting the promoted row's copy.
+    const drifted = ready({ forward: 'update_branch', mergeStateStatus: 'unknown' });
+    const g = asForwardCard(myTurnCard({ reason: 'own_ready', own: drifted }), drifted);
+    expect(pendingMergeGate(g).action).toBe('update_branch');
+  });
+
+  it('hides the row where you cannot push — the promoted fact, never a constant', () => {
+    const own = ready({ viewerCanPush: false });
+    expect(pendingMergeGate(asForwardCard(myTurnCard({ reason: 'own_ready', own }), own)).show).toBe(
+      false,
+    );
+  });
+
+  it('carries a promoted conflict’s merge state to the resolver entry', () => {
+    const own: Extract<MyTurnOwnWork, { kind: 'conflicts' }> = {
+      kind: 'conflicts',
+      mergeStateStatus: 'dirty',
+      mergeable: 'conflicting',
+    };
+    const c = asConflictsCard(myTurnCard({ reason: 'own_conflicts', own, relevance: 'direct' }), own);
+    expect(c).toMatchObject({ kind: 'conflicts', mergeStateStatus: 'dirty', mergeable: 'conflicting' });
+    expect(c.prId).toBe(101);
+    // The header already says "Merge conflicts" — the `dirty` arm adds no second chip.
+    expect(conflictsStateChip(c)).toBeNull();
+  });
+
+  it('rebuilds a red default branch as the trunk card, with the landing PR’s byline', () => {
+    const t = trunkCard();
+    const c = asCiFailingCard(t);
+    expect(c).toMatchObject({
+      kind: 'ci_failing',
+      arm: 'trunk',
+      repoId: 7,
+      prId: 55,
+      headSha: 'abc1234def',
+      mergedById: 3,
+      githubUrl: t.githubUrl,
+    });
+    // The four author fields are COPIED — never re-resolved — so the two cards for one red trunk
+    // cannot disagree about who opened the landing PR.
+    expect(landingPrByline(c)).toEqual({ authorId: 9, automation: t.automation });
+    expect(c.authorIsBot).toBe(true);
+    expect(c.authorBotKind).toBe('dependabot');
+  });
+
+  it('names no landing PR when the red head resolved to none — a direct push', () => {
+    const c = asCiFailingCard(
+      trunkCard({ prId: null, prNumber: null, prTitle: null, mergedById: null, authorId: null, authorIsBot: false, authorBotKind: null, automation: null }),
+    );
+    expect(landingPrByline(c)).toBeNull();
+  });
+});
+
+describe('what a red default branch in My turn is called', () => {
+  it('says "Your turn" like any type you added — and never "Review or reply" when muted', () => {
+    expect(cardKindLabel(trunkCard())).toBe('Your turn');
+    expect(cardKindLabel(trunkCard({ relevance: 'none', personal: false, muted: true }))).toBe(
+      'Trunk CI failing',
+    );
   });
 });
 
@@ -1133,5 +1305,421 @@ describe('which auto-merge intent a PR surface should show', () => {
 
   it('never crosses PRs', () => {
     expect(stoppedIntentOf([failed], 8)).toBeNull();
+  });
+});
+
+
+// ── WHO OPENED IT: the byline ────────────────────────────────────────────────────────────────
+const user = (id: number, githubLogin: string, displayName: string | null = null): User => ({
+  id,
+  githubLogin,
+  displayName,
+  avatarUrl: null,
+  isBot: false,
+});
+const USERS = new Map<number, User>([
+  [9, user(9, 'alice', 'Alice Liddell')],
+  [12, user(12, 'dependabot[bot]')],
+  [13, user(13, 'erxes-dev-agent')],
+  [14, { ...user(14, 'renovate[bot]'), avatarUrl: 'https://avatars.githubusercontent.com/in/2740' }],
+]);
+
+describe('the byline', () => {
+  it('names a person by name, with their avatar', () => {
+    expect(authorByline({ authorId: 9, automation: null }, USERS)).toEqual({
+      mode: 'person',
+      chip: null,
+      chipKind: null,
+      name: 'Alice Liddell',
+      avatarUserId: 9,
+    });
+  });
+
+  it('says "Deleted account" when GitHub has no account left — never a bot, never blank', () => {
+    const b = authorByline({ authorId: null, automation: null }, USERS);
+    expect(b.mode).toBe('person');
+    expect(b.name).toBe('Deleted account');
+    expect(b.avatarUserId).toBeNull();
+  });
+
+  it('names a BRANDED bot by its vendor chip alone — the chip is the name', () => {
+    const b = authorByline(
+      { authorId: 14, automation: { role: 'dependency', kind: 'renovate', source: 'account' } },
+      USERS,
+    );
+    expect(b).toEqual({
+      mode: 'automation',
+      chip: 'Renovate',
+      chipKind: 'renovate',
+      name: null,
+      avatarUserId: 14,
+    });
+  });
+
+  it('⚠ draws a bot’s avatar only when it has a PICTURE — never initials beside the chip', () => {
+    // Every GitHub-typed Bot row in the real DB has a NULL avatar_url, and the Avatar fallback is
+    // two 10px initials: "DE" beside "Dependabot" says nothing, below the 11px floor.
+    const bot = authorByline(
+      { authorId: 12, automation: { role: 'dependency', kind: 'dependabot', source: 'account' } },
+      USERS,
+    );
+    expect(bot.avatarUserId).toBeNull();
+    expect(bot.chip).toBe('Dependabot');
+    expect(
+      authorByline({ authorId: 13, automation: { role: 'code_agent', kind: null, source: 'account' } }, USERS)
+        .avatarUserId,
+    ).toBeNull();
+    // A PERSON keeps the initials — they are that person's mark, and nothing else names them twice.
+    expect(authorByline({ authorId: 9, automation: null }, USERS).avatarUserId).toBe(9);
+  });
+
+  it('⚠ names an UNBRANDED bot by what it does, plus its login — never a person, never "Bot"', () => {
+    const b = authorByline(
+      { authorId: 13, automation: { role: 'code_agent', kind: null, source: 'account' } },
+      USERS,
+    );
+    expect(b.mode).toBe('automation');
+    expect(b.chip).toBe(AUTHOR_ROLE_CHIP.code_agent);
+    expect(b.chip).toBe('Coding agent');
+    expect(b.chipKind).toBeNull();
+    expect(b.name).toBe('erxes-dev-agent');
+    // `in_house` is a classification, not a brand: it reads by role too.
+    expect(
+      authorByline(
+        { authorId: 13, automation: { role: 'dependency', kind: 'in_house', source: 'account' } },
+        USERS,
+      ).chip,
+    ).toBe('Dependency bot');
+  });
+
+  it('⚠ says "<tool> via <person>" when a tool opened the PR on a person’s account', () => {
+    // Snyk opens fix PRs with a member's credentials: the account is Alice's, the work is Snyk's.
+    const b = authorByline(
+      { authorId: 9, automation: { role: 'dependency', kind: 'snyk', source: 'marker' } },
+      USERS,
+    );
+    expect(b).toEqual({
+      mode: 'via',
+      chip: 'Snyk',
+      chipKind: 'snyk',
+      name: 'Alice Liddell',
+      avatarUserId: 9,
+    });
+    // …and an unbranded marker falls back to the role chip, still "via" the person.
+    expect(
+      authorByline({ authorId: 9, automation: { role: 'dependency', kind: null, source: 'marker' } }, USERS)
+        .chip,
+    ).toBe('Dependency bot');
+  });
+
+  it('⚠ DRAWS every piece it returns — a branded bot keeps its avatar — in the order it reads', () => {
+    // The drawing maps `bylineParts` and nothing else. A branded bot's avatar used to be dropped,
+    // because the avatar was drawn only beside a NAME, and the chip IS a branded bot's name.
+    const draw = (pr: { authorId: number | null; automation: PrAutomation | null }) =>
+      bylineParts(authorByline(pr, USERS));
+    expect(draw({ authorId: 9, automation: null })).toEqual(['avatar', 'name']);
+    expect(draw({ authorId: null, automation: null })).toEqual(['name']);
+    expect(
+      draw({ authorId: 14, automation: { role: 'dependency', kind: 'renovate', source: 'account' } }),
+    ).toEqual(['avatar', 'chip']);
+    // …and one with no picture draws its chip alone (see the avatar rule above).
+    expect(
+      draw({ authorId: 12, automation: { role: 'dependency', kind: 'dependabot', source: 'account' } }),
+    ).toEqual(['chip']);
+    expect(draw({ authorId: 13, automation: { role: 'code_agent', kind: null, source: 'account' } })).toEqual([
+      'chip',
+      'name',
+    ]);
+    // A tool on a person's account: the tool first, then whose account it used.
+    expect(draw({ authorId: 9, automation: { role: 'dependency', kind: 'snyk', source: 'marker' } })).toEqual([
+      'chip',
+      'via',
+      'avatar',
+      'name',
+    ]);
+  });
+
+  it('has a chip for every role', () => {
+    for (const label of Object.values(AUTHOR_ROLE_CHIP)) expect(label.length).toBeGreaterThan(0);
+    expect(Object.keys(AUTHOR_ROLE_CHIP).sort()).toEqual(
+      ['code_agent', 'dependency', 'housekeeping', 'quality_check', 'release', 'review'].sort(),
+    );
+  });
+});
+
+// ── THE DEPENDENCIES CARDS ───────────────────────────────────────────────────────────────────
+const DEPENDABOT: PrAutomation = { role: 'dependency', kind: 'dependabot', source: 'account' };
+
+function bumpCard(over: {
+  depState?: DependencyPrState;
+  mergeStateStatus?: MergeStateStatus | null;
+  mergeable?: Mergeable | null;
+  viewerCanPush?: boolean;
+  inMergeQueue?: boolean | null;
+} = {}): DependencyBumpCard {
+  return {
+    id: 'deps:101',
+    kind: 'dependency_bump',
+    severity: 'info',
+    ...prRef({ authorIsBot: true, authorBotKind: 'dependabot', automation: DEPENDABOT, inMergeQueue: over.inMergeQueue ?? null }),
+    mergeStateStatus: over.mergeStateStatus === undefined ? 'clean' : over.mergeStateStatus,
+    mergeable: over.mergeable === undefined ? 'mergeable' : over.mergeable,
+    lastCommitAt: '2026-08-27T09:00:00.000Z',
+    relevance: 'maintained',
+    viewerCanPush: over.viewerCanPush ?? true,
+    depState: over.depState ?? 'ready',
+    detail: 'Nothing is blocking this — it can land now',
+  };
+}
+
+function securityCard(over: Partial<SecurityCard> = {}): SecurityCard {
+  return {
+    id: 'security:101',
+    kind: 'security',
+    severity: 'high',
+    ...prRef({ authorIsBot: true, authorBotKind: 'dependabot', automation: DEPENDABOT }),
+    mergeStateStatus: 'clean',
+    mergeable: 'mergeable',
+    lastCommitAt: '2026-08-27T09:00:00.000Z',
+    relevance: 'maintained',
+    viewerCanPush: true,
+    dependencyUpdate: true,
+    depState: 'ready',
+    fix: 'proven',
+    alerts: [],
+    alertCount: 0,
+    advisoryIds: ['GHSA-9qr9-h5gf-34mp'],
+    detail: 'Fixes GHSA-9qr9-h5gf-34mp',
+    stateDetail: 'Nothing is blocking this — it can land now',
+    ...over,
+  };
+}
+
+describe('a Dependencies card’s merge row', () => {
+  it('offers Merge on a ready dependency update — bump or security fix', () => {
+    expect(pendingMergeGate(bumpCard()).action).toBe('merge');
+    expect(pendingMergeGate(securityCard()).action).toBe('merge');
+    // `unstable` is mergeable here too: one resolver, one answer.
+    expect(pendingMergeGate(bumpCard({ mergeStateStatus: 'unstable' })).action).toBe('merge');
+  });
+
+  it('offers Update branch, never Merge, on a behind one', () => {
+    const gate = pendingMergeGate(bumpCard({ depState: 'behind', mergeStateStatus: 'behind' }));
+    expect(gate.show).toBe(true);
+    expect(gate.action).toBe('update_branch');
+  });
+
+  it('offers no merge verb on conflicts — the resolver entry is a different row', () => {
+    expect(
+      pendingMergeGate(bumpCard({ depState: 'conflicts', mergeStateStatus: 'dirty', mergeable: 'conflicting' }))
+        .action,
+    ).toBeNull();
+  });
+
+  it('HIDES the row for a reader who cannot push', () => {
+    const gate = pendingMergeGate(bumpCard({ viewerCanPush: false }));
+    expect(gate.show).toBe(false);
+    expect(gate.action).toBeNull();
+  });
+
+  it('⚠ gives a person’s PR a security tool flagged NO merge row — its own cards carry one', () => {
+    const flagged = securityCard({
+      dependencyUpdate: false,
+      depState: null,
+      fix: null,
+      automation: null,
+      authorIsBot: false,
+      authorBotKind: null,
+      stateDetail: null,
+      detail: '',
+    });
+    const gate = pendingMergeGate(flagged);
+    expect(gate.show).toBe(false);
+    expect(gate.action).toBeNull();
+  });
+
+  it('⚠ treats a NULL merge state as not observed — no verb, and no throw', () => {
+    const gate = pendingMergeGate(bumpCard({ depState: 'unknown', mergeStateStatus: null, mergeable: null }));
+    expect(gate.show).toBe(true);
+    expect(gate.action).toBeNull();
+  });
+
+  it('hides Merge while GitHub’s queue holds the PR', () => {
+    const gate = pendingMergeGate(bumpCard({ inMergeQueue: true }));
+    expect(gate.queued).toBe(true);
+    expect(gate.action).toBeNull();
+  });
+
+  it('⚠ never says the merge state twice — the card’s state row says it, so the merge row does not', () => {
+    // A blocked update printed "Blocked · Required checks or reviews aren’t satisfied" and, under
+    // it, "blocked — required checks or reviews aren’t satisfied": one sentence, twice.
+    const blocked = pendingMergeGate(bumpCard({ depState: 'blocked', mergeStateStatus: 'blocked' }));
+    expect(blocked.show).toBe(true);
+    expect(blocked.action).toBeNull();
+    expect(blocked.verdictLine).toBe(false);
+    expect(
+      pendingMergeGate(securityCard({ depState: 'ci_red', mergeStateStatus: 'blocked' })).verdictLine,
+    ).toBe(false);
+    // A forward card has no state row: its merge row is the one place an absent button is explained.
+    expect(pendingMergeGate(mergeCard({ mergeStateStatus: 'blocked' })).verdictLine).toBe(true);
+    expect(pendingMergeGate(updateBranchCard()).verdictLine).toBe(true);
+  });
+});
+
+describe('what a Dependencies card is called', () => {
+  it('says which kind of security item it is — a fix, or an alert', () => {
+    expect(cardKindLabel(securityCard())).toBe('Security fix');
+    // An inferred fix is headed as what is known, never as a fix the card cannot back.
+    expect(cardKindLabel(securityCard({ fix: 'inferred' }))).toBe('Likely security fix');
+    expect(cardKindLabel(securityCard({ fix: null }))).toBe('Security alert');
+    expect(cardKindLabel(bumpCard())).toBe('Dependency update');
+  });
+
+  it('names the two chips as the tab names them', () => {
+    expect(KIND_LABEL.security).toBe('Security');
+    expect(KIND_LABEL.dependency_bump).toBe('Bumps');
+  });
+
+  it('has a state chip decision for EVERY state — and says nothing where the chip would repeat or guess', () => {
+    const states: DependencyPrState[] = ['conflicts', 'ci_red', 'behind', 'ready', 'needs_review', 'blocked', 'unknown'];
+    expect(Object.keys(DEP_STATE_LABEL).sort()).toEqual([...states].sort());
+    expect(DEP_STATE_LABEL.ready).toBe(KIND_LABEL.merge);
+    expect(DEP_STATE_LABEL.behind).toBe(KIND_LABEL.update_branch);
+    // The sentence says "Conflicts with main" / "Needs an approving review" (and the review row
+    // says "GitHub: review required" above it); the meta row's CI dot says "CI failing"; GitHub has
+    // not worked `unknown` out.
+    expect(DEP_STATE_LABEL.conflicts).toBeNull();
+    expect(DEP_STATE_LABEL.needs_review).toBeNull();
+    expect(DEP_STATE_LABEL.ci_red).toBeNull();
+    expect(DEP_STATE_LABEL.unknown).toBeNull();
+  });
+
+  it('prints the state sentence once — and none for a red build, which the CI dot already says', () => {
+    expect(depStateSentence({ ...bumpCard({ depState: 'ci_red' }), detail: 'CI is failing' })).toBeNull();
+    expect(
+      depStateSentence(securityCard({ depState: 'ci_red', stateDetail: 'CI is failing' })),
+    ).toBeNull();
+    expect(
+      depStateSentence({
+        ...bumpCard({ depState: 'needs_review' }),
+        detail: 'Needs an approving review',
+      }),
+    ).toBe('Needs an approving review');
+    expect(depStateSentence(securityCard({ stateDetail: 'Nothing is blocking this — it can land now' }))).toBe(
+      'Nothing is blocking this — it can land now',
+    );
+    // A person's PR a tool flagged has no dependency state, and so no sentence.
+    expect(depStateSentence(securityCard({ depState: null, stateDetail: null }))).toBeNull();
+  });
+});
+
+describe('the advisory links', () => {
+  it('points each scheme at its public page', () => {
+    expect(advisoryUrl('CVE-2026-30827')).toBe('https://nvd.nist.gov/vuln/detail/CVE-2026-30827');
+    expect(advisoryUrl('GHSA-9qr9-h5gf-34mp')).toBe('https://github.com/advisories/GHSA-9qr9-h5gf-34mp');
+    expect(advisoryUrl('RUSTSEC-2024-0001')).toBe('https://rustsec.org/advisories/RUSTSEC-2024-0001');
+    expect(advisoryUrl('GO-2024-2887')).toBe('https://pkg.go.dev/vuln/GO-2024-2887');
+    expect(advisoryUrl('PYSEC-2024-12')).toBe('https://osv.dev/vulnerability/PYSEC-2024-12');
+    expect(advisoryUrl('OSV-2024-3')).toBe('https://osv.dev/vulnerability/OSV-2024-3');
+    expect(advisoryUrl('SNYK-JS-LODASH-1018905')).toBe('https://security.snyk.io/vuln/SNYK-JS-LODASH-1018905');
+  });
+
+  it('gives NO link for a scheme with no public page', () => {
+    expect(advisoryUrl('AIKIDO-2024-10001')).toBeNull();
+    expect(advisoryUrl('ssc-0f4a2b6c-1d2e-4f50-8a9b-0c1d2e3f4a5b')).toBeNull();
+    expect(advisoryUrl('CWE-79')).toBeNull();
+  });
+
+  it('shows the first three, and counts the rest from the full list', () => {
+    (globalThis as unknown as { window: unknown }).window ??= { location: { origin: 'http://localhost' } };
+    const { chips, more } = advisoryChips(['CVE-2026-1', 'GHSA-aaaa-bbbb-cccc', 'AIKIDO-2024-1', 'CVE-2026-2', 'CVE-2026-3']);
+    expect(chips.map((c) => c.id)).toEqual(['CVE-2026-1', 'GHSA-aaaa-bbbb-cccc', 'AIKIDO-2024-1']);
+    expect(chips[0]!.href).toBe('https://nvd.nist.gov/vuln/detail/CVE-2026-1');
+    // No public page: a chip with no link, never a link to nowhere.
+    expect(chips[2]!.href).toBeUndefined();
+    expect(more).toBe(2);
+    expect(advisoryChips(['CVE-2026-1']).more).toBe(0);
+  });
+
+  it('⚠ writes each id ONCE — linked in the sentence that names it, never again as a chip', () => {
+    (globalThis as unknown as { window: unknown }).window ??= { location: { origin: 'http://localhost' } };
+    // "Fixes GHSA-…" used to be followed by a "GHSA-…" chip: the same id twice, one line apart.
+    const ids = ['GHSA-9qr9-h5gf-34mp'];
+    expect(advisoryParts('Fixes GHSA-9qr9-h5gf-34mp', ids)).toEqual([
+      { text: 'Fixes ' },
+      { id: 'GHSA-9qr9-h5gf-34mp', href: 'https://github.com/advisories/GHSA-9qr9-h5gf-34mp' },
+    ]);
+    const named = new Set(['GHSA-9qr9-h5gf-34mp']);
+    expect(advisoryChips(ids, named)).toEqual({ chips: [], more: 0 });
+    // "and 2 more" in the sentence — the chip row lists exactly those two, and counts from THEM.
+    const five = ['CVE-2026-1', 'CVE-2026-2', 'CVE-2026-3', 'CVE-2026-4', 'CVE-2026-5'];
+    const fix = advisoryParts('Fixes CVE-2026-1 and 4 more', five);
+    expect(fix.flatMap((p) => ('id' in p ? [p.id] : []))).toEqual(['CVE-2026-1']);
+    const rest = advisoryChips(five, new Set(['CVE-2026-1']));
+    expect(rest.chips.map((c) => c.id)).toEqual(['CVE-2026-2', 'CVE-2026-3', 'CVE-2026-4']);
+    expect(rest.more).toBe(1);
+  });
+
+  it('matches WHOLE ids only, the longest first, and only the card’s own', () => {
+    (globalThis as unknown as { window: unknown }).window ??= { location: { origin: 'http://localhost' } };
+    // CVE-2026-1 is a prefix of CVE-2026-12: neither may swallow, or split, the other.
+    const idsOf = (text: string, ids: string[]): string[] =>
+      advisoryParts(text, ids).flatMap((p) => ('id' in p ? [p.id] : []));
+    expect(idsOf('Socket flagged CVE-2026-12', ['CVE-2026-1'])).toEqual([]);
+    expect(idsOf('Socket flagged CVE-2026-12', ['CVE-2026-1', 'CVE-2026-12'])).toEqual(['CVE-2026-12']);
+    expect(idsOf('Fixes CVE-2026-1.', ['CVE-2026-1'])).toEqual(['CVE-2026-1']);
+    // An id the card does not carry stays words: no link is invented.
+    expect(advisoryParts('Fixes CVE-2026-9', ['CVE-2026-1'])).toEqual([{ text: 'Fixes CVE-2026-9' }]);
+    // A sentence with no id is one plain part, unchanged.
+    const plain = 'Fixes a known security advisory';
+    expect(advisoryParts(plain, ['CVE-2026-1'])).toEqual([{ text: plain }]);
+  });
+});
+
+describe('an alert, as a sentence', () => {
+  // What the reader reads: the lead, then — as its own button when there is a thread — where it is.
+  const securityAlertSentence = (a: SecurityAlert, users: Map<number, User>): string => {
+    const line = securityAlertLine(a, users);
+    return line.where == null ? line.lead : `${line.lead} ${line.where}`;
+  };
+  const alert = (over: Partial<SecurityAlert>): SecurityAlert => ({
+    source: 'socket',
+    authorId: 12,
+    vendorKind: null,
+    surface: 'comment',
+    threadId: null,
+    advisoryIds: ['GHSA-9qr9-h5gf-34mp'],
+    at: '2026-09-01T00:00:00.000Z',
+    ...over,
+  });
+
+  it('names the tool and the advisory', () => {
+    expect(securityAlertSentence(alert({}), USERS)).toBe(
+      `${SECURITY_ALERT_SOURCE_LABEL.socket} flagged GHSA-9qr9-h5gf-34mp`,
+    );
+    expect(securityAlertSentence(alert({ advisoryIds: ['CVE-2026-1', 'CVE-2026-2', 'CVE-2026-3'] }), USERS)).toBe(
+      'Socket flagged CVE-2026-1 and 2 more',
+    );
+  });
+
+  it('says where a review-thread alert lives', () => {
+    expect(
+      securityAlertSentence(alert({ source: 'code_scanning', surface: 'thread', threadId: 4 }), USERS),
+    ).toBe('Code scanning flagged GHSA-9qr9-h5gf-34mp in a review thread');
+  });
+
+  it('⚠ keeps "where" OUT of the lead — the lead’s ids are links, and a link may not sit in the thread’s button', () => {
+    const line = securityAlertLine(alert({ source: 'code_scanning', surface: 'thread', threadId: 4 }), USERS);
+    expect(line).toEqual({ lead: 'Code scanning flagged GHSA-9qr9-h5gf-34mp', where: 'in a review thread' });
+    expect(securityAlertLine(alert({}), USERS).where).toBeNull();
+  });
+
+  it('names a reviewer alert by its author’s brand, else its login — never "a reviewer"', () => {
+    expect(
+      securityAlertSentence(alert({ source: 'reviewer', vendorKind: 'coderabbit', surface: 'thread', threadId: 1 }), USERS),
+    ).toBe('CodeRabbit flagged GHSA-9qr9-h5gf-34mp in a review thread');
+    expect(
+      securityAlertSentence(alert({ source: 'reviewer', vendorKind: 'in_house', authorId: 13 }), USERS),
+    ).toBe('erxes-dev-agent flagged GHSA-9qr9-h5gf-34mp');
   });
 });

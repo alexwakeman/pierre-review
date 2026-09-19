@@ -1,6 +1,8 @@
 import { useEffect, type ReactNode } from 'react';
 import { Wordmark } from './Wordmark';
 import { CloseIcon, WorkspaceIcon } from './Icons.js';
+import { closeActivePopover } from '../lib/activePopover.js';
+import { weightPhrase } from './settings/myTurnSettingsForm.js';
 
 // Compact, scrollable help overlay opened from the header "?" button. A very brief
 // tour of the core flows — tracking repos, the timeline, focus mode, navigation.
@@ -8,6 +10,11 @@ import { CloseIcon, WorkspaceIcon } from './Icons.js';
 // capture phase and stops propagation so a stray dismiss doesn't also reach the
 // global keyboard hook (which would exit focus / clear the selection).
 export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
+  // A board popover opened from the keyboard would otherwise stay open over this dialog, and take
+  // its first Escape (lib/activePopover.ts).
+  useEffect(() => {
+    closeActivePopover();
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
@@ -50,9 +57,9 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             A dashboard for GitHub pull-request activity across a Workspace of repos —
             built for sprint situational-awareness: who’s doing what, which PRs are
             stalled, which review threads sit untouched, and what needs <em>you</em>. It
-            opens on the <strong>Activity</strong> console; the <strong>Timeline</strong>{' '}
-            is a second lens. Runs locally off your <Code>gh</Code> login (or hosted, with
-            GitHub sign-in).
+            opens on <strong>Pending</strong>, in the <strong>Activity</strong> console; the{' '}
+            <strong>Timeline</strong> is a second lens. Runs locally off your <Code>gh</Code>{' '}
+            login (or hosted, with GitHub sign-in).
           </p>
 
           <Section title="Add repos & scope with Workspaces">
@@ -69,9 +76,10 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           </Section>
 
           <Section title="Activity console (the default)">
-            The left rail is your state of play: a cross-repo <strong>Feed</strong>,{' '}
-            <strong>Bots</strong>, <strong>Pending</strong> and <strong>Reports</strong>, then the
-            Workspace’s repos as a flat list. The Feed is one chronological stream of real activity
+            The left rail is your state of play: <strong>Pending</strong>, where the app opens,
+            then a cross-repo <strong>Feed</strong>, <strong>Bots</strong> and{' '}
+            <strong>Reports</strong>, then the Workspace’s repos as a flat list. The Feed is one
+            chronological stream of real activity
             — opens, merges, reviews, comments, and pushes that addressed a thread. Filter it with
             the pills: <strong>My Turn</strong> (things that concern you — you authored it, were
             asked to review, or already chimed in), <strong>Comments</strong> /{' '}
@@ -105,9 +113,13 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           <Section title="Pending">
             Everything waiting on you or your Workspace, in one list: items on your plate, red
             builds you are on the hook for, stalled reviews, untouched threads, un-assigned PRs,
-            and PRs that are simply ready to land — in five tabs, each showing how many it holds.
-            Every tab lists its cards by how close each is to landing, how long it has waited and
-            how much it is yours; the top five are <strong>Do next</strong>. The{' '}
+            PRs that are simply ready to land, and dependency updates and security alerts — in six
+            tabs, each showing how many it holds. Every tab lists its cards by a score that weighs{' '}
+            {weightPhrase('proximity')}, {weightPhrase('stall')} and {weightPhrase('relevance')} (My
+            turn groups by type in the order you set, and Dependencies lists security items first);
+            the top five are{' '}
+            <strong>Do next</strong>. <strong>Settings → My Turn</strong> chooses what counts as
+            your turn and how the three are weighed. The{' '}
             <strong>i</strong> beside the title, and on every card, explains the order. The ranking
             is computed, free, and identical on every plan; Pro adds a sentence per item saying why
             it is worth doing now.

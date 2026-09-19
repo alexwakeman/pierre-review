@@ -111,6 +111,11 @@ beforeAll(async () => {
   schema = client.schema;
   closeDb = client.closeDb;
   await runMigrations();
+  // Untouched "New PRs" are OFF by default (Settings → My Turn). This fixture's My Turn population
+  // is built on them, so it switches them back on rather than lose what it pins.
+  await (await import('../auth/account.js')).setMyTurnSettings(1, {
+    show: { watched_repo_pr: true },
+  });
   q = await import('./queries.js');
   brief = await import('./daily-brief.js');
 

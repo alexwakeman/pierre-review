@@ -1,9 +1,12 @@
-import type {
-  FlowBudgetRow,
-  FlowPrRow,
-  FlowResponse,
-  PrCourt,
-  ResolvedFlowSettings,
+import {
+  FLOW_BUDGET_LABEL,
+  type FlowBudgetRow,
+  type FlowPrFigures,
+  type FlowPrRow,
+  type FlowRequestStats,
+  type FlowResponse,
+  type PrCourt,
+  type ResolvedFlowSettings,
 } from '@pierre-review/shared';
 
 // The render model for Chronology's WORKING-HOURS half — the budget chart, the scatter, the
@@ -113,7 +116,7 @@ export const VERDICT_LABEL: Record<NonNullable<FlowBudgetRow['verdict']>, string
   slow: 'Slow',
 };
 
-/** One small line under each budget row: how the figures were measured. */
+/** What each wait measures, in words — the popover's second line and the "i" modal's list. */
 export const BUDGET_SUB: Record<FlowBudgetRow['measure'], string> = {
   firstLook: 'Opened to the first human review or comment',
   reply: 'The slowest reply on each pull request that went back to its author',
@@ -137,6 +140,60 @@ export function budgetScale(rows: readonly FlowBudgetRow[], dayHours: number): {
   const ticks: number[] = [];
   for (let t = 0; t <= max; t += step) ticks.push(t);
   return { max, ticks };
+}
+
+/** How a row's marks meet the right edge of the shared scale. */
+export type BudgetClip = 'none' | 'tail' | 'bar';
+
+/**
+ * 'bar' when three in four ran past the axis (p75 > max), 'tail' when only nine in ten did.
+ *
+ * ⚠ A CLIPPED BAR MUST SAY SO ON THE CHART. The scale is shared, so a row past it is drawn to the
+ * edge rather than rescaled — and a bar stopped at the edge looks exactly like one that ended
+ * there. The figures moved into a popover, so the mark is the only thing on the page that tells a
+ * reader this bar is longer than it looks.
+ */
+export function budgetClip(row: FlowBudgetRow, max: number): BudgetClip {
+  if (row.prs === 0) return 'none';
+  if (row.p75 > max) return 'bar';
+  if (row.p90 > max) return 'tail';
+  return 'none';
+}
+
+/**
+ * The popover's content: the server's reason when there is no verdict, then the figures.
+ *
+ * ⚠ FIGURES AND SERVER PROSE ONLY. A judged row's own sentence restates the figures and the chip,
+ * so it is not shown; a row without a verdict has no chip to say why, so its reason is.
+ */
+export function budgetPopoverRows(row: FlowBudgetRow): {
+  note: string | null;
+  figures: [string, string][];
+} {
+  const figures: [string, string][] = [];
+  if (row.prs > 0) {
+    figures.push(
+      ['Pull requests', formatCount(row.prs)],
+      ['Median', formatWorkHours(row.p50)],
+      ['Three in four within', formatWorkHours(row.p75)],
+      ['Nine in ten within', formatWorkHours(row.p90)],
+    );
+  }
+  figures.push(['Budget', formatWorkHours(row.good)], ['Acceptable up to', formatWorkHours(row.ok)]);
+  return { note: row.verdict == null && row.sentence !== '' ? row.sentence : null, figures };
+}
+
+/** The chart trigger's accessible name — every figure the popover holds, in one sentence. */
+export function budgetAriaLabel(row: FlowBudgetRow): string {
+  const label = FLOW_BUDGET_LABEL[row.measure];
+  const budget = `Budget ${formatWorkHours(row.good)}, acceptable up to ${formatWorkHours(row.ok)}.`;
+  if (row.prs === 0) return `${label}: No pull requests. ${budget}`;
+  const verdict = row.verdict == null ? 'Too few to judge' : VERDICT_LABEL[row.verdict];
+  return (
+    `${label}: ${verdict}. ${formatCount(row.prs)} pull ${row.prs === 1 ? 'request' : 'requests'}; ` +
+    `median ${formatWorkHours(row.p50)}, three in four within ${formatWorkHours(row.p75)}, ` +
+    `nine in ten within ${formatWorkHours(row.p90)}. ${budget}`
+  );
 }
 
 // ── The scatter ──────────────────────────────────────────────────────────────────────────────
@@ -172,7 +229,7 @@ export function slowestPrs(prs: readonly FlowPrRow[], n: number): FlowPrRow[] {
     .slice(0, n);
 }
 
-/** The share of all working-hour waiting the slowest tenth holds — the scatter's caption. */
+/** The share of all working-hour waiting the slowest tenth holds — for `prFiguresOf`'s fallback. */
 export function slowestTenthShare(prs: readonly FlowPrRow[]): { count: number; share: number } {
   const sorted = [...prs].map((p) => p.leadWorkHours).sort((a, b) => b - a);
   const count = Math.ceil(sorted.length / 10);
@@ -185,7 +242,7 @@ export function slowestTenthShare(prs: readonly FlowPrRow[]): { count: number; s
 //
 // ⚠ CONTEXT, NOT A TARGET. Balance between the three courts is not health: a pull request approved
 // on its first review never visits its author, which is the best outcome and sits on an EDGE of
-// this triangle. The panel says so beside it, and the budget chart is the headline.
+// this triangle. Its "i" says so, and the budget chart is the headline.
 
 /** Below this many working minutes of waiting, a PR has no meaningful position and is left off. */
 export const TRIANGLE_MIN_HOURS = 0.05;
@@ -206,6 +263,45 @@ export function trianglePoint(work: Record<PrCourt, number>): TrianglePoint | nu
 /** How many pull requests never went back to their author — the edge the caption names. */
 export function neverWentBack(prs: readonly FlowPrRow[]): number {
   return prs.filter((p) => p.rounds === 0).length;
+}
+
+// ── The headline figures over every measured pull request ────────────────────────────────────
+
+/**
+ * The scatter's and the triangle's headline figures.
+ *
+ * ⚠ THE SERVER'S, WHENEVER IT SENT THEM. `prs` is capped at 1,000 rows — every slow pull request,
+ * then an even sample of the rest — so a count folded over it inflates exactly when it capped
+ * (all the slow ones are kept). An older server sends no `prFigures`: the list is then recounted
+ * only when it is COMPLETE, and when it is a sample there is no honest figure to print — null, and
+ * the Figures row is not drawn.
+ */
+export function prFiguresOf(resp: FlowResponse): FlowPrFigures | null {
+  if (resp.prFigures != null) return resp.prFigures;
+  if (resp.prsCapped || resp.prs == null || resp.settings == null) return null;
+  const dayHours = (resp.settings.endMinute - resp.settings.startMinute) / 60;
+  const tenth = slowestTenthShare(resp.prs);
+  return {
+    overWorkingDay: resp.prs.filter((p) => p.leadWorkHours > dayHours).length,
+    slowestTenthCount: tenth.count,
+    slowestTenthShare: tenth.share,
+    neverWentBack: neverWentBack(resp.prs),
+  };
+}
+
+// ── Asking for a review: the two disclosure lines under the table ──────────────────────────────
+
+/** "Who was asked is known for 40 of 52 pull requests so far." — only while some are unknown. */
+export function requestCoverageLine(stats: FlowRequestStats): string | null {
+  if (stats.known >= stats.measured) return null;
+  return `Who was asked is known for ${formatCount(stats.known)} of ${formatCount(stats.measured)} pull requests so far.`;
+}
+
+/** The pull requests left out of the request figures because somebody looked before anyone asked. */
+export function lookedBeforeAskedLine(stats: FlowRequestStats): string | null {
+  const n = stats.lookedBeforeAsked;
+  if (n <= 0) return null;
+  return `${formatCount(n)} had a first look before anyone was asked and ${n === 1 ? 'is' : 'are'} left out of the request figures.`;
 }
 
 // ── What the working-hours half needs to render at all ────────────────────────────────────────

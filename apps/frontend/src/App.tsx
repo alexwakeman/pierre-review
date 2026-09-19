@@ -25,6 +25,7 @@ import { GlobalLoadingBar } from './components/GlobalLoadingBar.js';
 import { WelcomeBackBanner } from './components/WelcomeBackBanner.js';
 import { HelpModal } from './components/HelpModal.js';
 import { SettingsModal } from './components/settings/SettingsModal.js';
+import { useSettingsModal } from './store/settingsModal.js';
 import { ConflictResolverOverlay } from './components/conflicts/ConflictResolverOverlay.js';
 import { ClosedResolverToast } from './components/conflicts/ClosedResolverToast.js';
 import { SignInGate } from './components/SignInGate.js';
@@ -70,7 +71,14 @@ export default function App(): JSX.Element {
   useDetailCacheReconciler();
   const [dark, toggleDark] = useDarkMode();
   const [helpOpen, setHelpOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // The Settings modal opens from the avatar menu AND from Pending's "Customise" link, so its
+  // state lives in a store. `closeSettings` is a zustand action — referentially STABLE, which
+  // SettingsModal needs: it registers its capture-phase Escape handler in an effect keyed on
+  // `onClose`, and an inline arrow re-registered it on every App render.
+  const settingsOpen = useSettingsModal((s) => s.open);
+  const settingsFocus = useSettingsModal((s) => s.focus);
+  const openSettings = useSettingsModal((s) => s.openSettings);
+  const closeSettings = useSettingsModal((s) => s.closeSettings);
   // The config modal (and its avatar-menu entry) only exist when there's a Pro setting to show.
 
   // Opt-in browser notifications for new My Turn items + completed Claude reviews.
@@ -140,11 +148,11 @@ export default function App(): JSX.Element {
   // bot-PRs) covers the warm full board. Drives the `inert` a11y treatment. pr-focus is NOT
   // an overlay — it replaces the board slot, so it doesn't set this.
   //
-  // Note the axis: these are TABS. The Activity console's own RAIL entries — Insights, Feed,
-  // Bots, Needs attention, and each repo — are not tabs and get no branch here; they are
-  // `filters.activityRepoId` values rendered inside <ActivityView/>, which is already covered
-  // by `inboxActive`. (The "Compare workspaces" rail line is gone — cross-workspace comparison
-  // is Reports' "By workspace" axis, inside the Insights rail entry; still no TabKind for it.)
+  // Note the axis: these are TABS. The Activity console's own RAIL entries — Pending, Feed,
+  // Bots, Reports (store value `'insights'`), and each repo — are not tabs and get no branch
+  // here; they are `filters.activityRepoId` values rendered inside <ActivityView/>, which is
+  // already covered by `inboxActive`. (The "Compare workspaces" rail line is gone —
+  // cross-workspace comparison is Reports' "By workspace" axis; still no TabKind for it.)
   const overlayActive =
     prDetailId != null ||
     inboxActive ||
@@ -339,14 +347,14 @@ export default function App(): JSX.Element {
               // so gating the only entry point on a PRO capability stranded a free setting behind
               // a menu item that never rendered. The modal can no longer be empty in any
               // configuration, so the entry point no longer needs a gate.
-              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenSettings={() => openSettings()}
             />
           )}
         </div>
       </header>
 
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsModal focus={settingsFocus} onClose={closeSettings} />}
       {/* The merge-conflict resolver, mounted HERE and not inside PrDetail: it opens from three
           places (the pane's Conflicts row, the expanded merge panel, the Pending board) and must
           not unmount when the pane behind it closes. It renders null until something opens it —

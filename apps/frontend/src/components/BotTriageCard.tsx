@@ -33,7 +33,8 @@ import { BotIcon } from './Icons.js';
 //
 // Bot membership is the CLIENT MIRROR OF THE SERVER'S UNION SET (`hiddenBotUserIds`): the
 // workspace's stored judgement wins in both directions (`automated` adds, a manual "human"
-// removes), `users.isBot` is the fallback — the same rule FeedView's `isUnionBot` applies.
+// removes), the wire `User.isBot` — itself users.isBot ∪ GitHub-typed Bot ∪ a vendor login — is
+// the fallback, the same rule FeedView's `isUnionBot` applies.
 // Deliberately NOT the legacy login-string classification PrDetail's bot chips still use.
 //
 // Count discipline: every figure is computed by the SAME fold the Threads tab uses on the same

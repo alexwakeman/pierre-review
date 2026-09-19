@@ -344,6 +344,7 @@ export const BOT_VENDOR_META: Record<
   gitguardian: { label: 'GitGuardian', color: '#1c3f94' },
   semgrep: { label: 'Semgrep', color: '#1aa382' },
   trunk: { label: 'Trunk', color: '#2d6a5a' },
+  endor: { label: 'Endor Labs', color: '#1e7f6e' },
   // Dependency & version bumps
   dependabot: { label: 'Dependabot', color: '#0366d6' },
   renovate: { label: 'Renovate', color: '#1a1f6c' },
@@ -351,6 +352,10 @@ export const BOT_VENDOR_META: Record<
   pyup: { label: 'PyUp', color: '#3775a9' },
   greenkeeper: { label: 'Greenkeeper', color: '#3aa757' },
   depfu: { label: 'Depfu', color: '#7b5ea7' },
+  aikido: { label: 'Aikido', color: '#6551f3' },
+  mend: { label: 'Mend', color: '#f05a28' },
+  frogbot: { label: 'Frogbot', color: '#40be46' },
+  checkmarx: { label: 'Checkmarx', color: '#6b3fa0' },
   // Code agents — automation that writes code
   sweep: { label: 'Sweep', color: '#e0913a' },
   codegen: { label: 'Codegen', color: '#b45309' },
@@ -362,6 +367,8 @@ export const BOT_VENDOR_META: Record<
   crowdin: { label: 'Crowdin', color: '#2e3340' },
   mintlify: { label: 'Mintlify', color: '#0d9f6e' },
   allstar: { label: 'Allstar', color: '#8d6e2f' },
+  step_security: { label: 'StepSecurity', color: '#0e7490' },
+  orbisai: { label: 'OrbisAI', color: '#3b5bdb' },
   // Release & merge automation
   mergify: { label: 'Mergify', color: '#ee6c4d' },
   kodiak: { label: 'Kodiak', color: '#3f7a8c' },
@@ -1724,6 +1731,26 @@ export function safeExternalUrl(raw: string | null | undefined): string | undefi
   // scheme are rejected by default. mailto: is not used in a data-derived href anywhere.
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
   return trimmed;
+}
+
+/**
+ * THE PUBLIC PAGE OF A KNOWN SECURITY ADVISORY, or null for a scheme with no stable public URL
+ * (`AIKIDO-…` and Semgrep's `ssc-…` live behind the vendor's own login).
+ *
+ * Keyed on the CANONICAL spelling the server sends (`canonicalAdvisoryId` in
+ * apps/backend/src/sync/security-detect.ts: `GHSA-` + lowercase groups, `ssc-` lowercase, every
+ * other scheme upper case). ⚠ Callers still route the result through `safeExternalUrl` — the id is
+ * data, and a URL built from data is a sink like any other.
+ */
+export function advisoryUrl(id: string): string | null {
+  const enc = encodeURIComponent(id);
+  if (id.startsWith('CVE-')) return `https://nvd.nist.gov/vuln/detail/${enc}`;
+  if (id.startsWith('GHSA-')) return `https://github.com/advisories/${enc}`;
+  if (id.startsWith('RUSTSEC-')) return `https://rustsec.org/advisories/${enc}`;
+  if (id.startsWith('GO-')) return `https://pkg.go.dev/vuln/${enc}`;
+  if (id.startsWith('PYSEC-') || id.startsWith('OSV-')) return `https://osv.dev/vulnerability/${enc}`;
+  if (id.startsWith('SNYK-')) return `https://security.snyk.io/vuln/${enc}`;
+  return null;
 }
 
 // Prefill for "replying" to a comment: GitHub issue comments are flat (no native

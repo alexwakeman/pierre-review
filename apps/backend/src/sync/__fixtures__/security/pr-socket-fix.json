@@ -1,0 +1,16 @@
+{
+  "name": "Socket Fix: the socket/fix/<GHSA> branch; the id is canonicalised",
+  "input": {
+    "title": "Fix for GHSA-9WV6-86V2-598J",
+    "headRefName": "socket/fix/GHSA-9wv6-86v2-598j",
+    "labels": [],
+    "bodyText": "Socket fix for GHSA-9wv6-86v2-598j.\n\n\nVulnerability Summary: path-to-regexp outputs backtracking regular expressions\n\nSeverity: HIGH\n\nAffected Packages: path-to-regexp (NPM)"
+  },
+  "expected": {
+    "dependencyVendor": "socket",
+    "securityFix": "proven",
+    "advisoryIds": [
+      "GHSA-9wv6-86v2-598j"
+    ]
+  }
+}

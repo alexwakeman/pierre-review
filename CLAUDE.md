@@ -342,16 +342,18 @@ Four deliberately-separated state layers: **server state** in TanStack Query (PR
 on demand, IndexedDB-persisted at `staleTime: Infinity`), **filter/selection** in Zustand
 `store/filters.ts` (`workspaceId` is the scope), **tabs** in `store/pinnedTabs.ts` (exactly one
 board mounts at a time), **URL** mirrored by `useUrlState.ts` (serializer diffs against
-defaults). App lands on the Activity FEED; the Insights rail entry is labelled **"Reports"**
-(LABEL-ONLY — the store/URL value stays `'insights'`). Cloud renders `<SignInGate>` on a 401.
+defaults). App lands on the **Pending** board (default `activityRepoId: 'attention'`, the one rail
+value left out of the URL; a Feed link carries `?activityRepo=feed`); the Insights rail entry is
+labelled **"Reports"** (LABEL-ONLY — the store/URL value stays `'insights'`). Cloud renders
+`<SignInGate>` on a 401.
 
 Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any:
 
 - **Bots are HIDDEN by default on Timeline AND Feed**, using the UNION set `hiddenBotUserIds`
-  (`users.isBot` ∪ the workspace's automated reviewers; a manual "human" judgement wins BOTH
-  directions); the Feed lens `'hide'` rides the SERVER's `excludeBots`, excluded before the page
-  cap. ⚠ `useSearchTimeline` and `rosterTimelineSearch` always send `excludeBots=false` — the
-  Members dropdown's bot listing depends on it.
+  (`users.isBot` ∪ `github_type='Bot'` ∪ vendor logins ∪ the workspace's automated reviewers; a
+  manual "human" judgement wins BOTH directions); the Feed lens `'hide'` rides the SERVER's
+  `excludeBots`, excluded before the page cap. ⚠ `useSearchTimeline` and `rosterTimelineSearch`
+  always send `excludeBots=false` — the Members dropdown's bot listing depends on it.
 - **`workspaceId === null` means "not resolved yet"** — nothing may render workspace-scoped data
   while null, and `?workspace=` is omitted while null (an unconditional `p.set` writes the
   literal `?workspace=null` on every bare load).
@@ -404,15 +406,16 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   **never inside `WorkspaceMetricsPanel`** — that panel ALSO mounts per-repo behind a Pro gate,
   where a per-repo breakdown is one row for paying accounts only.
 - **Pending cards carry MERGE-RELATED ACTIONS, on the two FORWARD kinds only** (`merge`,
-  `update_branch`) - Merge, Merge-when-ready, Cancel, Update branch. ⚠ **NOTHING ON THE BOARD
-  MAY FETCH ON MOUNT**: `MergeWhenReadyControl` fetches merge-options EAGERLY (~3 GitHub calls per
-  PR), so fifty cards would be 150 calls to paint a board. The buttons gate on the card's OWN
-  synced `mergeStateStatus`/`mergeable`/`viewerCanPush` through `mergeVerdict()`, and the live
-  fetch is CLICK-GATED. `viewerCanPush` rides the card for the same reason; it is a VISIBILITY
-  gate only - the merge route re-checks permission, head oid and live merge state. HIDE, never
-  disable. Mid-merge is THREE layers on one row: a live manual merge (read off the SHARED
-  `mergePrMutationKey`/`updateBranchMutationKey` via `useIsMutating`, never a per-mount
-  `isPending`), then the armed intent's `armedPhaseHeadline`, then the synced verdict.
+  `update_branch`; + a dependency PR's card and an `own_ready` My Turn card) - Merge,
+  Merge-when-ready, Cancel, Update branch.
+  ⚠ **NOTHING ON THE BOARD MAY FETCH ON MOUNT**: `MergeWhenReadyControl` fetches merge-options
+  EAGERLY (~3 GitHub calls per PR), so fifty cards would be 150 calls to paint a board. The buttons
+  gate on the card's OWN synced `mergeStateStatus`/`mergeable`/`viewerCanPush` through
+  `mergeVerdict()`, and the live fetch is CLICK-GATED. `viewerCanPush` rides the card for the same
+  reason; it is a VISIBILITY gate only - the merge route re-checks permission, head oid and live
+  merge state. HIDE, never disable. Mid-merge is THREE layers on one row: a live manual merge (read
+  off the SHARED `mergePrMutationKey`/`updateBranchMutationKey` via `useIsMutating`, never a
+  per-mount `isPending`), then the armed intent's `armedPhaseHeadline`, then the synced verdict.
   ⚠ **`conflicts` is a THIRD merge-state-derived kind carrying EXACTLY ONE action, the resolver
   entry** — `ResolveConflictsButton`, never a merge (the old "it carries no action, GitHub offers no
   resolve button either" is retired). It is minted ONLY in repos the viewer can PUSH to —
@@ -434,29 +437,37 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   bot-hiding union uses, never a second classifier that can disagree with the Timeline. WARN
   `authorIsBot: true` with a NULL kind is a real, common state (an unbranded CI account) and
   renders a generic "Bot"; a bot chip on a person is a false claim about a human, so only bots
-  are badged.
-- **The Pending board is FIVE TABS, each a PURELY SCORED list** (`PENDING_TABS`: My turn · Needs
-  fixing · Waiting on review · Unanswered threads · Ready to land; `db/pending-tabs.ts`). Every PR card
-  is scored by the ONE Do next scorer (`db/work-plan.ts` `scoreCards`) and each tab lists highest
-  score first; the first `PENDING_DO_NEXT_SIZE` (5) of whatever view is on screen are "Do next". No
+  are badged. `automation` (role/kind/source) drives the byline and the People/Automation lens; a
+  tool's MARKER makes a person's PR automation.
+- **The Pending board is SIX TABS, each a SCORED list** (`PENDING_TABS`: My turn · Needs fixing ·
+  Waiting on review · Unanswered threads · Ready to land · Dependencies; `db/pending-tabs.ts`).
+  Every PR card is scored by the ONE Do next scorer (`db/work-plan.ts` `scoreCards`) and each tab
+  lists highest score first; the first `PENDING_DO_NEXT_SIZE` (5) of whatever view is on screen are
+  "Do next". My turn (the reader's type order, Settings → My Turn) and Dependencies (security,
+  then bumps) are STRICT-GROUP tabs; a dependency-automation PR is listed ONLY in Dependencies (plus
+  `my_turn` for a direct summons) — every other kind drops it from its SEED list, before
+  `kindTotals` ([docs/BACKEND.md](docs/BACKEND.md) § The Dependencies tab). No
   severity-first sort, no cross-kind head, no spread rule — a PR with two jobs appears once per job,
   in each job's tab. ⚠ **IT RANKS THE UNCAPPED FOLD, THEN CAPS**: `/api/attention` calls
   `getWorkspaceInsights(…, { uncapped: true })` and lists the top `boardListCap` (50) per LIST GROUP
-  (the kind; for My turn, each side of "Only yours"), so every view — tab, kind chip, lens — is its
-  own true top. Every OTHER consumer keeps the default caps (Pro chat / sprint report / Slack inputs
-  and hashes must not grow). ⚠ **EACH COUNT IS ITS OWN POPULATION**: a tab shows `tab.total`, a chip
-  its kind's `kindTotals`, the lens `relevanceTotals` — and the daily brief's lines say the SAME
-  figures (survey lines = `kindTotals`; my_turn / ci lines = min(total, 50)), because each line opens
-  its tab with its own chip or lens. ⚠ `kindTotals.reviewer_routing` is EVERY orphan, suggestion or
-  not; suggestions are looked up (network) for the top `routingSuggestCap` (15) only, AFTER ranking.
-  ⚠ **THE TABS ARE AN ALLOW-LIST** — a new `InsightKind` with no tab is folded, counted and never
-  listed (a compiler-checked test in work-plan.test.ts fails first). ⚠ The visible tab is DERIVED
+  (kind × My turn's "Only yours" side × who opened it), so every view — tab, kind chip, lens — is
+  its own true top. Every OTHER consumer keeps the default caps (Pro chat / sprint report / Slack
+  inputs and hashes must not grow) — except the Pro work plan, which folds uncapped and may name
+  ONLY a card the tabs list (`listedCardIds`). ⚠ **EACH COUNT IS ITS OWN POPULATION**: a tab shows `tab.total`,
+  a chip its kind's `kindTotals`, the lenses `relevanceTotals` / `authorTotals` — and the daily
+  brief's lines say the SAME figures (survey lines = `kindTotals`; my_turn / ci lines =
+  min(total, 50)), because each line opens its tab with its own chip or lens.
+  ⚠ `kindTotals.reviewer_routing` is EVERY orphan, suggestion or not; suggestions are looked up
+  (network) for the top `routingSuggestCap` (15) only, AFTER ranking. ⚠ **THE TABS ARE AN
+  ALLOW-LIST** — a new `InsightKind` with no tab is folded, counted and never listed (a
+  compiler-checked test in work-plan.test.ts fails first). ⚠ The visible tab is DERIVED
   (`effectivePendingTab`: a brief line's kind names its tab, else the picked `attentionTab`, else My
   turn). ⚠ "Pending" is a LABEL-ONLY rename of "Needs attention" — the store/URL literal stays
   `'attention'`. ⚠ **The board EXPLAINS its own order** (header + per-card info popovers, "How
-  Pending works" modal), so every admission floor, cap, colour threshold and Do next weight lives
-  ONCE in `packages/shared/src/pending-rules.ts`, read by the folds AND the copy — never retype one
-  as a literal in either ([docs/FRONTEND.md](docs/FRONTEND.md) § The Pending tabs).
+  Pending works" modal), so every admission floor, cap, colour threshold and Do next preset lives
+  ONCE in `packages/shared/src/pending-rules.ts`, read by the folds AND the copy (which prints the
+  response's `rules`) — never retype one as a literal in either ([docs/FRONTEND.md](docs/FRONTEND.md)
+  § The Pending tabs).
 - **A surface that NOTIFIES counts `myTurnPersonal`; a surface you OPEN counts `myTurn`** (banner,
   Workspace badges, "Elsewhere" rows, browser notification vs the Pending board). ⚠ A
   narrow count may only navigate through ITS OWN lens — `attentionRelevance` is THREE-VALUED
@@ -474,22 +485,26 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   the only key emitted.
 - **MY TURN IS THE BALL RULE — STATE-DERIVED, NOTHING STORED.** A my_turn card exists only while
   the reader owes an action and has not taken it since the last RELATED thing that happened.
-  Recomputed every read: no dismissal, no tombstone, no "done". Full contract:
+  Recomputed every read: no dismissal, no tombstone, no "done"; per-account settings
+  (`accounts.my_turn_settings`, overrides only) switch whole types off INSIDE `getMyTurn`, and a
+  promoted card MOVES (the home builders drop its id). Full contract:
   [docs/BACKEND.md](docs/BACKEND.md) § My Turn — the ball rule. Without opening it:
   ⚠ **`repos.createdAt` IS NOT THIS PREDICATE** — it is an ONBOARDING FLOOR (adding a repo with 400
   open PRs must not dump all 400 on you): per-repo, viewer-blind, evaluated once. The ball is
   per-PR, per-viewer, time-ordered. Its predecessor had NO activity join at all, so the card was a
   fact about the PR's CREATION — and creation never un-happens.
-  ⚠ **RELATEDNESS, NOT RECENCY.** Only three things return the ball after you act: a human reply in
-  YOUR thread, YOUR thread going `likely_addressed`, or a human COMMIT after your last action. A
-  human comment elsewhere on the PR does not. ⚠ **NO BOT ACTION EVER RETURNS IT, INCLUDING A PUSH** —
+  ⚠ **RELATEDNESS, NOT RECENCY.** After you act, only these return the ball: a human reply in YOUR
+  thread or after YOUR comment in another's, YOUR thread going `likely_addressed`, a human COMMIT, a
+  human @mention, or a human PR comment when YOUR last action was a PR comment. Any other human
+  comment does not. ⚠ **NO BOT ACTION EVER RETURNS IT, INCLUDING A PUSH** —
   deliberately DIVERGING from Chronology (`db/pr-intervals.ts`), which counts every commit whatever
   the author. Both are right for their own question; never "fix" one to match the other. Bot-ness
-  resolves through the GLOBAL `users.isBot` set, NEVER `hiddenBotUserIds` (it REQUIRES a workspaceId,
+  resolves through the GLOBAL automation set (`globalAutomationUserIds`: `users.isBot` ∪
+  `github_type='Bot'` ∪ vendor logins), NEVER `hiddenBotUserIds` (it REQUIRES a workspaceId,
   and `getMyTurn` also runs UNSCOPED for the notification watcher).
   ⚠ **FILTER THE SEED LIST, NEVER THE BUILT ARRAY** — `myTurnTotal = ranked.length` is taken after
   seed assembly and before the 50-slice, so dropping seeds moves numerator and denominator together.
-  The test lives in the HELPER that `getMyTurn` and `getActionableActivityIds` SHARE.
+  The rules and the Settings gates live INSIDE `getMyTurn` and its helpers, never in a consumer.
   ⚠ **A card must say WHY the ball is yours.** "New PR from @x" is true ONLY of a PR you never
   touched; `MyTurnCard.ball` carries the fact and the SPA picks the words — a section chip keyed on
   `reason` alone said "New PR" beside its own detail reading "You approved · @x pushed 2 commits
@@ -935,8 +950,8 @@ as the LANDING court. Without opening the doc:
 - ⚠ **A NEVER-HUMAN-TOUCHED PR IS EXCLUDED** (46% of merges) - its ledger is 100% reviewer by
   construction. Reported separately as a governance finding.
 - ⚠ **NO PERSON IS NAMED ANYWHERE**, and the server sends no actor ids, so it is structural.
-- ⚠ **WORKING HOURS LEAD, CLOCK HOURS CALL OUT.** The headline is each wait against a per-workspace
-  budget in WORKING hours (`workspaces.flow_settings`, OVERRIDES ONLY — resolve through
+- ⚠ **WORKING HOURS LEAD, CLOCK HOURS CALL OUT.** The page opens on the working-hour split, then each
+  wait against a per-workspace budget (`workspaces.flow_settings`, OVERRIDES ONLY — resolve through
   `resolveFlowSettings`); the lopsided-and-slow repo rule stays on CLOCK hours, where it was
   calibrated. `walkCourts` is the SUM of `walkCourtIntervals` — ONE state machine.
 - ⚠ **`review_requests_synced_at` NULL IS "NOT KNOWN", NEVER "NOBODY WAS ASKED"** — stamped only from a
@@ -1204,13 +1219,11 @@ rules:
 **Known gaps** — full list in [docs/MIGRATIONS.md](docs/MIGRATIONS.md). The ones that change
 how you work:
 
-- **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ The whole
-  chain is currently green: core `0000`→`0043` (44/44) **and** all 28 plugin pg twins applied
-  into a throwaway database on **PostgreSQL 16.9**, 2026-08-27, yielding full table parity with
-  SQLite (the only absentee is `pro_migrations`, which the plugin's own runner creates rather
-  than a `.sql` file). Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying
-  the pg chain. **A new pg migration is unreplayed until someone repeats this** — the suite will
-  not tell you.
+- **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
+  **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0055` and plugin `0034` are NOT replayed.
+  Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
+  pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence
     (pg `0040`/`0041` vs their sqlite twins `0053`/`0054`) is REAL but unreachable: the two
     disagree on `foo[bot]bar` (`foo[bot]bar` vs `foobar`) and on a LEADING `[bot]`, and agree

@@ -1,0 +1,16 @@
+{
+  "name": "A group a PERSON named (\"tools\"), truncated: not the grouped-security-updates shape",
+  "input": {
+    "title": "Bump the tools group across 1 directory with 2 updates",
+    "headRefName": "dependabot/npm_and_yarn/tools-d440b5915d",
+    "labels": [
+      "dependencies"
+    ],
+    "bodyText": "Bumps the tools group with 8 updates in the / directory:\n\n\n\nPackage\nFrom\nTo\n\n\n\n\nkysely\n0.25.0\n0.28.14\n\n\nzx\n7.2.3\n8.8.5\n\n\n@hono/node-server\n1.14.3\n1.19.13\n\n\nhono\n4.7.10\n4.12.14\n\n\nminimatch\n7.4.6\n7.4.8\n\n\nuuid\n9.0.1\n14.0.0\n\n\nrollup\n3.29.5\n3.30.0\n\n\nvalibot\n1.0.0-beta.7\n1.2.0\n\n\n\nBumps the tools group with 1 update in the /drizzle-arktype directory: zx.\nBumps the tools group with 6 updates in the /drizzle-kit directory:\n\n\n\nPackage\nFrom\nTo\n\n\n\n\nglob\n10.4.5\n12.0.0\n\n\nzx\n7.2.3\n8.8.5\n\n\n@hono/node-server\n1.14.3\n1.19.13\n\n\nhono\n4.7.10\n4.12.14\n\n\nminimatch\n7.4.6\n7.4.8\n\n\nuuid\n10.0.0\n14.0.0\n\n\n\nBumps the tools group with 3 updates in the /drizzle-orm directory: glob, kysely and zx.\nBumps the tools group with 1 update in the /drizzle-typebox directory: zx.\nBumps the tools group with 2 updates in the /drizzle-valibot directory: zx and valibot.\nBumps the npm_and_yarn g\n...\nDescription has been truncated\n"
+  },
+  "expected": {
+    "dependencyVendor": "dependabot",
+    "securityFix": null,
+    "advisoryIds": []
+  }
+}

@@ -67,6 +67,9 @@ const AUTOMATION_VENDORS: Record<string, { kind: AutomatedReviewerKind; role: Re
   'pyup-bot': { kind: 'pyup', role: 'dependency' },
   greenkeeper: { kind: 'greenkeeper', role: 'dependency' },
   depfu: { kind: 'depfu', role: 'dependency' },
+  'snyk-io': { kind: 'snyk', role: 'dependency' },
+  'aikido-autofix': { kind: 'aikido', role: 'dependency' },
+  'mend-for-github-com': { kind: 'mend', role: 'dependency' },
   sonarqubecloud: { kind: 'sonarqube', role: 'quality_check' },
   sonarcloud: { kind: 'sonarqube', role: 'quality_check' },
   codecov: { kind: 'codecov', role: 'quality_check' },
@@ -81,6 +84,7 @@ const AUTOMATION_VENDORS: Record<string, { kind: AutomatedReviewerKind; role: Re
   gitguardian: { kind: 'gitguardian', role: 'quality_check' },
   'semgrep-app': { kind: 'semgrep', role: 'quality_check' },
   'trunk-io': { kind: 'trunk', role: 'quality_check' },
+  'endor-labs-pro': { kind: 'endor', role: 'quality_check' },
   'devin-ai-integration': { kind: 'devin', role: 'code_agent' },
   'sweep-ai': { kind: 'sweep', role: 'code_agent' },
   'codegen-sh': { kind: 'codegen', role: 'code_agent' },
@@ -93,6 +97,8 @@ const AUTOMATION_VENDORS: Record<string, { kind: AutomatedReviewerKind; role: Re
   'crowdin-bot': { kind: 'crowdin', role: 'code_agent' },
   mintlify: { kind: 'mintlify', role: 'code_agent' },
   allstar: { kind: 'allstar', role: 'code_agent' },
+  'step-security-bot': { kind: 'step_security', role: 'code_agent' },
+  orbisai0security: { kind: 'orbisai', role: 'code_agent' },
   mergify: { kind: 'mergify', role: 'release' },
   kodiak: { kind: 'kodiak', role: 'release' },
   kodiakhq: { kind: 'kodiak', role: 'release' },
@@ -129,6 +135,21 @@ const AUTOMATION_VENDORS: Record<string, { kind: AutomatedReviewerKind; role: Re
   'gitpod-io': { kind: 'gitpod', role: 'housekeeping' },
 };
 
+// Logins that are one vendor under MANY names — Semgrep's App installs per org as
+// `semgrep-code-<org>` / `semgrepcode-<org>`. The LOCAL copy of `AUTOMATION_VENDOR_PREFIXES` in
+// shared, same hand-sync contract and the same drift test. Matched on the normalised login AFTER
+// the exact table. ⚠ The per-family login SETS below stay exact-only: they feed SQL `IN (…)`
+// predicates, and a prefix cannot live in one — SQL reaches these through
+// `automationVendorPrefixes()` and a `LIKE`.
+const AUTOMATION_VENDOR_PREFIXES: readonly {
+  prefix: string;
+  kind: AutomatedReviewerKind;
+  role: ReviewerRole;
+}[] = [
+  { prefix: 'semgrep-code-', kind: 'semgrep', role: 'quality_check' },
+  { prefix: 'semgrepcode-', kind: 'semgrep', role: 'quality_check' },
+];
+
 function normalizeLogin(login: string): string {
   return login.toLowerCase().replace(/\[bot\]$/, '');
 }
@@ -151,8 +172,7 @@ const HOUSEKEEPING_BOTS = loginsWithRole('housekeeping');
 // `dependabot[bot]` exist as SEPARATE user rows on real accounts, with conflicting automated
 // flags, and normalising is what stops one actor being split across two lanes.
 export function dependencyBot(login: string | null | undefined): boolean {
-  if (!login) return false;
-  return DEPENDENCY_BOTS.has(normalizeLogin(login));
+  return roleForBotLogin(login) === 'dependency';
 }
 
 // The bare dependency-automation login slugs, for the query layer's `IN (…)` predicate — the same
@@ -165,8 +185,7 @@ export function dependencyBotLogins(): string[] {
 // `@pierre-review/shared`. Normalises case + the `[bot]` suffix so it matches whether the login
 // arrived via GraphQL (bare slug) or REST (`slug[bot]`).
 export function qualityCheckBot(login: string | null | undefined): boolean {
-  if (!login) return false;
-  return QUALITY_CHECK_BOTS.has(normalizeLogin(login));
+  return roleForBotLogin(login) === 'quality_check';
 }
 
 // The bare quality-check login slugs — used by the query layer to resolve the DEFAULT role of a
@@ -179,20 +198,17 @@ export function qualityCheckBotLogins(): string[] {
 
 /** True when a login is a known code-authoring automation. Mirror of `codeAgentBot` in shared. */
 export function codeAgentBot(login: string | null | undefined): boolean {
-  if (!login) return false;
-  return CODE_AGENT_BOTS.has(normalizeLogin(login));
+  return roleForBotLogin(login) === 'code_agent';
 }
 
 /** True when a login is a known release / merge automation. Mirror of `releaseBot` in shared. */
 export function releaseBot(login: string | null | undefined): boolean {
-  if (!login) return false;
-  return RELEASE_BOTS.has(normalizeLogin(login));
+  return roleForBotLogin(login) === 'release';
 }
 
 /** True when a login is a known housekeeping automation. Mirror of `housekeepingBot` in shared. */
 export function housekeepingBot(login: string | null | undefined): boolean {
-  if (!login) return false;
-  return HOUSEKEEPING_BOTS.has(normalizeLogin(login));
+  return roleForBotLogin(login) === 'housekeeping';
 }
 
 export function codeAgentBotLogins(): string[] {
@@ -218,8 +234,7 @@ export function housekeepingBotLogins(): string[] {
 // while `resolveActorLanes` falls back to the quality gate (it declines to CREDIT an unknown
 // automation as a reviewer). Both are deliberate and they are allowed to differ.
 export function roleForBotLogin(login: string | null | undefined): ReviewerRole | null {
-  if (!login) return null;
-  return AUTOMATION_VENDORS[normalizeLogin(login)]?.role ?? null;
+  return automationVendorFor(login)?.role ?? null;
 }
 
 // Every review bot is also a bot, so folding REVIEW_BOTS into the known set keeps a
@@ -285,13 +300,17 @@ export function matchesAutomatedLoginPattern(login: string): boolean {
 }
 
 /** The full vendor row for a known non-review automation login — identity AND default role in one
- *  lookup, mirroring `AUTOMATION_VENDORS` in shared. Returns null for an AI reviewer (that is
- *  `reviewBotKind`'s job) and for anything unknown. */
+ *  lookup, mirroring `automationVendorFor` in shared: the exact table first, then the prefix table.
+ *  Returns null for an AI reviewer (that is `reviewBotKind`'s job) and for anything unknown. */
 export function automationVendorFor(
   login: string | null | undefined,
 ): { kind: AutomatedReviewerKind; role: ReviewerRole } | null {
   if (!login) return null;
-  return AUTOMATION_VENDORS[normalizeLogin(login)] ?? null;
+  const norm = normalizeLogin(login);
+  const exact = AUTOMATION_VENDORS[norm];
+  if (exact) return exact;
+  const hit = AUTOMATION_VENDOR_PREFIXES.find((p) => norm.startsWith(p.prefix));
+  return hit ? { kind: hit.kind, role: hit.role } : null;
 }
 
 /** The vendor identity of a non-review automation, or null. Mirror of `automationVendorKind` in
@@ -307,4 +326,17 @@ export function automationVendorKind(
 /** Every login the vendor table covers — the drift guard's key set. */
 export function automationVendorLogins(): string[] {
   return Object.keys(AUTOMATION_VENDORS);
+}
+
+/** The exact vendor logins in BOTH spellings, bare and `[bot]`-suffixed, lowercased — for a SQL
+ *  `lower(github_login) IN (…)`, which cannot normalise the suffix the way `normalizeLogin` does. */
+export function automationVendorLoginsForSql(): string[] {
+  const exact = automationVendorLogins();
+  return [...exact, ...exact.map((l) => `${l}[bot]`)];
+}
+
+/** The vendor login PREFIXES, lowercased — for `lower(github_login) LIKE '<prefix>%'`. The exact
+ *  list above cannot carry them. */
+export function automationVendorPrefixes(): readonly string[] {
+  return AUTOMATION_VENDOR_PREFIXES.map((p) => p.prefix);
 }

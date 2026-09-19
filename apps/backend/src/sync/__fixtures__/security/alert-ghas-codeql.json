@@ -1,0 +1,5 @@
+{
+  "name": "A GHAS CodeQL root — SAST, never an advisory",
+  "author": "github-advanced-security",
+  "body": "## CodeQL / Database query built from user-controlled sources\n\nThis query string depends on a [user-provided value](1).\n\n[Show more details](https://github.com/acme/app/security/code-scanning/12)"
+}

@@ -13,15 +13,27 @@ import type {
 import { safeExternalUrl } from '../../lib/ui.js';
 import { ExternalLinkIcon, PullRequestIcon, WarningIcon } from '../Icons.js';
 import { COURT_SHORT } from './bottlenecksModel.js';
-import { useOpenFlowPr } from './ChronologyCharts.js';
-import { dayLong, formatCount, formatShare, formatWorkHours } from './chronologyModel.js';
+import { Figure, useOpenFlowPr } from './ChronologyCharts.js';
+import {
+  dayLong,
+  formatCount,
+  formatShare,
+  formatWorkHours,
+  lookedBeforeAskedLine,
+  requestCoverageLine,
+} from './chronologyModel.js';
 
-// Chronology's per-PR tables. Every figure is formatted here; every SENTENCE is the server's.
+// Chronology's per-PR tables. Every figure is formatted here; every SENTENCE is the server's, and
+// only where it is not a restatement of the table beside it — how each table is read lives behind
+// its panel's "i" (chronologyInfo.tsx). The one-line disclosures under a table state a COUNT from
+// the wire, never a finding.
 //
 // ⚠ NO PERSON. The concentration table carries a share and two medians per repository and never a
 // name — the server sends none, and a reader who wants to know who it is can ask the team.
 
 const TH = 'px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-400';
+/** A one-line disclosure under a table or list: a count, in a sentence. */
+const NOTE = 'mt-1 text-xs text-gray-500 dark:text-gray-400';
 const TD = 'px-2 py-1.5 text-xs text-gray-700 dark:text-gray-200';
 const NUM = 'text-right tabular-nums';
 
@@ -76,8 +88,7 @@ const CONTRAST_VERDICT: Record<FlowContrastRow['verdict'], string> = {
 export function ContrastTable({ contrast }: { contrast: FlowContrast }): JSX.Element {
   return (
     <div>
-      <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-300">{contrast.sentence}</p>
-      <div className="mt-2 overflow-x-auto">
+      <div className="overflow-x-auto">
         <table className="w-full min-w-[420px] border-collapse">
           <thead>
             <tr className="border-b border-gray-200 dark:border-gray-800">
@@ -107,10 +118,7 @@ export function ContrastTable({ contrast }: { contrast: FlowContrast }): JSX.Ele
           </tbody>
         </table>
       </div>
-      <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-        {formatCount(contrast.quartilePrs)} pull requests in each quarter, ranked by working-hour lead
-        time. “Separates” means the slow side is at least twice the fast side.
-      </p>
+      <p className={NOTE}>{formatCount(contrast.quartilePrs)} pull requests in each quarter.</p>
     </div>
   );
 }
@@ -151,10 +159,6 @@ export function SizeBandsChart({ bands }: { bands: FlowSizeBand[] }): JSX.Elemen
           <HBar value={b.medianLeadWorkHours} max={max} className="bg-gray-700 dark:bg-gray-300" />
         </div>
       ))}
-      <p className="text-[11px] text-gray-500 dark:text-gray-400">
-        Median working hours from opened to merged, by lines added plus removed. Measured on this
-        workspace, not assumed.
-      </p>
     </div>
   );
 }
@@ -201,10 +205,6 @@ export function WeekdayChart({ days }: { days: FlowWeekdayRow[] }): JSX.Element 
           </div>
         </div>
       ))}
-      <p className="text-[11px] text-gray-500 dark:text-gray-400">
-        Median lead time by the day a pull request opened. The gap between the two bars is time
-        outside working hours.
-      </p>
     </div>
   );
 }
@@ -212,13 +212,33 @@ export function WeekdayChart({ days }: { days: FlowWeekdayRow[] }): JSX.Element 
 // ── Approved and waiting ─────────────────────────────────────────────────────────────────────
 
 export function LandingTailList({ tail }: { tail: FlowLandingTail }): JSX.Element {
+  // Nothing waited: the server's one sentence is the whole finding. Otherwise the figures say it,
+  // and the sentence (which restates them) stays on the wire.
+  if (tail.prsOver === 0) {
+    return <p className="text-xs text-gray-700 dark:text-gray-300">{tail.sentence}</p>;
+  }
+  const siblingsOver = tail.siblingsOver ?? 0;
   return (
     <div>
-      <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-300">{tail.sentence}</p>
+      <div className="flex flex-wrap gap-x-8 gap-y-2">
+        <Figure value={formatCount(tail.prsOver)} label="sat approved over a working day" />
+        <Figure value={formatShare(tail.shareOfLanding)} label="of all time spent approved" />
+        {tail.selfMergedOver > 0 && (
+          <Figure value={formatCount(tail.selfMergedOver)} label="merged by their own author" />
+        )}
+        {/* "Merged alongside", the rows' own words: counted only when the other pull request
+            merged while this one waited, not whenever the two share a ticket. */}
+        {siblingsOver > 0 && (
+          <Figure
+            value={formatCount(siblingsOver)}
+            label="merged alongside a pull request in another repository"
+          />
+        )}
+      </div>
       {tail.rows.length > 0 && (
-        <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800/70">
+        <ul className="mt-3 divide-y divide-gray-100 dark:divide-gray-800/70">
           {tail.rows.map((r) => (
-            <li key={r.prId} className="py-1.5">
+            <li key={r.prId} className="py-1.5 text-xs">
               <div className="flex items-baseline gap-2">
                 <PrLink pr={r} />
                 <span className="ml-auto shrink-0 whitespace-nowrap text-xs tabular-nums text-gray-500 dark:text-gray-400">
@@ -245,6 +265,11 @@ export function LandingTailList({ tail }: { tail: FlowLandingTail }): JSX.Elemen
             </li>
           ))}
         </ul>
+      )}
+      {tail.prsOver > tail.rows.length && (
+        <p className={NOTE}>
+          Showing the {formatCount(tail.rows.length)} slowest of {formatCount(tail.prsOver)}.
+        </p>
       )}
     </div>
   );
@@ -290,11 +315,6 @@ export function ConcentrationTable({ rows }: { rows: FlowConcentrationRow[] }): 
           </tbody>
         </table>
       </div>
-      <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-        Nobody is named. A high share is a cover risk for when that person is away; “slower” marks a
-        busiest reviewer whose first looks take at least a quarter longer than everyone else’s.
-        Medians in working hours; “—” means fewer than three to go on.
-      </p>
     </div>
   );
 }
@@ -343,10 +363,11 @@ const REQUEST_ROW_LABEL: Record<FlowRequestKind, string> = {
 };
 
 export function RequestsTable({ stats }: { stats: FlowRequestStats }): JSX.Element {
+  const coverage = requestCoverageLine(stats);
+  const lookedFirst = lookedBeforeAskedLine(stats);
   return (
     <div>
-      <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-300">{stats.sentence}</p>
-      <div className="mt-2 overflow-x-auto">
+      <div className="overflow-x-auto">
         <table className="w-full min-w-[440px] border-collapse">
           <thead>
             <tr className="border-b border-gray-200 dark:border-gray-800">
@@ -372,12 +393,8 @@ export function RequestsTable({ stats }: { stats: FlowRequestStats }): JSX.Eleme
           </tbody>
         </table>
       </div>
-      <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-        Medians in working hours; “—” means none, or fewer than five to go on. Who was asked is read
-        from each pull request’s history on GitHub and never named here.
-        {stats.lookedBeforeAsked > 0 &&
-          ` ${formatCount(stats.lookedBeforeAsked)} had a first look before anyone was asked and are left out of the request figures.`}
-      </p>
+      {coverage != null && <p className={NOTE}>{coverage}</p>}
+      {lookedFirst != null && <p className={NOTE}>{lookedFirst}</p>}
     </div>
   );
 }

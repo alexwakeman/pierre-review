@@ -1,0 +1,5 @@
+{
+  "name": "Trivy SCA via code scanning, posted as a GHAS review thread",
+  "author": "github-advanced-security",
+  "body": "## Trivy / python-requests: Redirect from HTTPS to HTTP does not remove Authorization header\n\nPackage: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2018-18074\nSeverity: HIGH\nFixed Version: 2.20.0\nLink: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)\n\n[Show more details](https://github.com/acme/hello-world/security/code-scanning/52)"
+}

@@ -340,9 +340,12 @@ export function FeedView({
       const r = reviewerByUserId.get(userId);
       if (r != null) {
         if (r.automated) return true;
-        // A manual "this is a human" beats the global isBot flag.
+        // A manual "this is a human" beats the wire flag.
         if (r.isManualOverride) return false;
       }
+      // `User.isBot` on the wire is the server's WORKSPACE-FREE automation verdict (users.isBot ∪
+      // GitHub types it a Bot ∪ a vendor login — mapUser in db/queries.ts), which is exactly the
+      // half of hiddenBotUserIds this judgement layer sits on top of.
       return user?.isBot ?? false;
     },
     [reviewerByUserId],

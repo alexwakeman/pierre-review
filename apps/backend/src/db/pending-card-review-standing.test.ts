@@ -66,6 +66,8 @@ async function prCards(): Promise<Map<string, (InsightCard & InsightPrRef)[]>> {
   const keyByPrId = new Map([...prIdByKey].map(([k, v]) => [v, k]));
   const out = new Map<string, (InsightCard & InsightPrRef)[]>();
   for (const c of insights.cards as InsightCard[]) {
+    // A red-trunk my_turn card is repo-grained and carries no `InsightPrRef` (none here anyway).
+    if (c.kind === 'my_turn' && c.reason === 'trunk_red') continue;
     if (
       c.kind !== 'my_turn' &&
       c.kind !== 'stalled_review' &&

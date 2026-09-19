@@ -134,9 +134,9 @@ Timeline on the **tab axis** (`ActiveTab = 'timeline' | 'activity' | <Tab.key>` 
 active workspace's repos**:
 
 ```
-✦ Feed                always — THE default landing, BriefStrip on top
+⚠ Pending             always (CORE/free) — THE default landing, the ranked worklist
+✦ Feed                always — BriefStrip on top; a Feed link carries ?activityRepo=feed
 🤖 Bots               always (CORE/free)
-⚠ Pending             always (CORE/free) — the worklist, led by the ranked "Do next" head
 ◈ Reports             always — FREE flow metrics above the PRO period report
 ── repos ──           flat: no grouping headers, no colour dots, no "Other" bucket
 ```
@@ -144,15 +144,14 @@ active workspace's repos**:
 ⚠ **ALL FOUR ARE UNGATED.** Reports used to be FIRST and wrapped in `{caps.workspaceInsights && …}`,
 from when it was nothing but the Pro period report. The FREE flow-metric header moved into it off
 the Feed, so gating the entry would have taken a free feature behind the Pro wall; the pane gates
-its own Pro halves internally instead. ⚠ **BOTS SITS SECOND, DIRECTLY UNDER THE FEED** — the
-argument that once put Pending there ("the two DAILY surfaces lead") was retired: what makes
-Pending a daily surface is its CONTENT (it absorbed the "Plan for today" panel), not its row, and it
-is reached from the BriefStrip, the My-Turn banner and the Workspace badges far more often than from
-the rail. Bots earns the second slot because Bots → Settings is where the human/bot call that feeds
-`hiddenBotUserIds` is made — the control that filters the stream now sits next to the stream.
+its own Pro halves internally instead. ⚠ **PENDING LEADS BECAUSE IT IS WHERE THE APP OPENS**
+(`'attention'` is the store default and the one rail value left out of the URL; see "Default
+landing = PENDING" in docs/FRONTEND.md). **Bots sits directly under the Feed** because Bots →
+Settings is where the human/bot call that feeds `hiddenBotUserIds` is made — the control that
+filters the stream sits next to the stream.
 ⚠ **"Pending" is a LABEL-ONLY rename of "Needs attention"** — the store/URL literal stays
-`'attention'`, because an unknown `?activityRepo=` value falls into the `parseInt` branch, yields
-NaN and lands the reader on the Feed, breaking Back on same-session history entries. (The "Compare workspaces" rail
+`'attention'`: it is in bookmarks and in history entries Back replays, and an unknown
+`?activityRepo=` value now lands the reader on Pending anyway. (The "Compare workspaces" rail
 entry is GONE — cross-workspace comparison is Reports' "By workspace" axis; `'compare'` left the
 `activityRepoId` union and the URL parser, and `lib/workspaceColors.ts` went with
 `WorkspaceComparisonPanel`, its only importer.) **The rail is no
@@ -163,18 +162,21 @@ bucket are all deleted. Selecting a repo shows a **compact header** (stats + thr
 per-repo Pro digest) atop that repo's **open-PR list** (`RepoOpenPrList` — all its open PRs with
 at-a-glance CI / approval standing / thread counts) THEN that **repo's own feed** (`RepoFeedHeader`
 + `RepoOpenPrList` + `<FeedView repoId>`). The rail selection is `store/filters.ts` `activityRepoId`
-(`'feed'` default | `'bots'` | `'attention'` | `'insights'` | a repoId; `'retro'`
+(`'attention'` default = Pending | `'feed'` | `'bots'` | `'insights'` | a repoId; `'retro'`
 is gone with the Retro panel, `'compare'` with the Compare rail entry — no longer URL-parsed, so a
-legacy `?activityRepo=compare` link falls through the parseInt branch and lands on the `'feed'`
-default, normalization by construction).
+legacy `?activityRepo=compare` link falls through the parseInt branch and lands on the
+`'attention'` default (Pending), normalization by construction).
 
 - ⚠ **Branch POSITION in the right-detail chain is load-bearing.** The chain is `noReposAtAll →
-  showingBots → showingAttention → showingInsights → noRepos → showingFeed`, where
+  showingBots → (showingAttention && !noRepos) → showingInsights → noRepos → showingFeed`, where
   `noRepos` means "the SELECTED workspace has no repos" (the account may have plenty, living in
   other workspaces — the empty state distinguishes the two, since the remedy differs: add a repo vs.
   move one in). The lesson the deleted `showingCompare` branch taught still applies to any new
   account-wide pseudo-row: it must sit **BEFORE `noRepos`**, or it becomes unreachable whenever the
-  selected workspace happens to be empty — exactly when someone is setting workspaces up.
+  selected workspace happens to be empty — exactly when someone is setting workspaces up. Pending is
+  the deliberate exception: it is workspace-scoped, so an empty workspace yields to the "move some
+  in" guidance rather than "Nothing is your turn right now" (`noRepos` waits for the repo data, so
+  the board still paints before that loads).
 
 Built **entirely on the read layer**: `getActivity` composes
 `getInsights`/`getOpenPrs`/`getMergers`; `listClaudeReviewsByRepo` is retrieval-only. **Scoped by
@@ -628,8 +630,10 @@ cards** with a "My Turn" badge + a `feedMyTurnOnly` "My Turn only" toggle; they'
 uncapped, plain activity is capped (`FEED_EVENT_CAP`). Cards render the **full comment/review body
 as markdown**, the affected threads inline, + a merge/review credit line
 (`mergedById`/`reviewers`). The **`excludeBots`** filter drops bot-authored activity BEFORE the
-page cap, using the UNION bot definition (`users.isBot` ∪ the workspace's automated set, manual
-"human" wins) — it is what the lens's default 'hide' sends; a bot contributor's own activity tab
+page cap, using the UNION bot definition `hiddenBotUserIds` (`users.isBot` ∪ `github_type='Bot'`
+∪ the review-bot and `AUTOMATION_VENDORS` logins ∪ the workspace's automated set, a manual "human"
+winning over every half — see docs/FRONTEND.md, bots hidden by default) — it is what the lens's
+default 'hide' sends; a bot contributor's own activity tab
 derives an effective 'all' so it isn't empty (derive-for-render, never written back). **PAGINATED**
 — `useConsolidatedFeed` is a `useInfiniteQuery` (page 0 loads `FEED_PAGE_SIZE`=50, "Load more" by
 `offset`; `total` tells the client when to stop). **No "seen"/Done concept.**
@@ -983,28 +987,28 @@ addition, so **`apiVersion` stays 21** and an older plugin simply never reads th
   always meant ("may a notification surface interrupt?"). Read `relevance` for anything that
   LABELS a row; a card that writes "YOUR TURN" off `personal` claims ownership of a stranger's
   work in a repo you happen to have write on — the defect the split exists to end.
-- **The rule lives in `getMyTurn`, once.** Five of the six sections are `'direct'` by construction
-  (they exist only because the viewer is involved) and are stamped in `toMyTurnPr`. The sixth —
-  "New PRs" — has TWO ARMS that answer different questions, and they now **stay two facts all the
-  way to the label**. The MAINTAINER arm (`viewerMaintainedRepoIds`) asks *is this your patch of
-  ground*: `repos.viewerPermission` ∈ WRITE/MAINTAIN/ADMIN **∪** the repos `getMergers` says the
-  viewer has landed a PR on (default branch only) — it yields **`'maintained'`**. The MENTION arm
-  (`viewerMentionedPrIds` over `pr_mentions`) asks *did somebody type your name*, holds **even in a
-  repo the viewer only READS**, and yields **`'direct'`** — which WINS over the maintainer arm.
-  Neither arm ⇒ `'none'`. The insight-card block READS `relevance` off the row and folds
-  `personal` from it — the `since` rule applied to the second question this fold would otherwise
-  answer twice, and one source of truth so the board's label and the notification's count cannot
-  disagree about the same card.
-- **The mention arm is DERIVED OFFLINE** (`sync/mention-scan.ts` → `pr_mentions`), never computed
-  in the request: the underlying question is a substring scan over every comment body in scope and
-  this fold runs on every Feed landing. ⚠ **Absence never widens** — no rows means the flag is
-  exactly the maintainer test it was before mentions existed, so a fresh deployment (or one whose
-  scanner is off) behaves identically. See [DATA-MODEL.md](DATA-MODEL.md) § `pr_mentions` and
-  [SYNC.md](SYNC.md) § "@mention derivation".
-- ⚠ **NOTHING IS NARROWED BY IT.** `GET /api/my-turn` keeps returning every row (the CLI status
-  board needs the full set) and the "Needs
-  attention" board keeps painting every card — a PR in a repo you only read does still need a
-  review. The flag exists for the surfaces that INTERRUPT (welcome-back banner, Workspace-dropdown
+- **The rule lives in `getMyTurn`, once.** Every section but "New PRs" is `'direct'` by
+  construction — it exists only because the viewer is involved, or because they added the type in
+  Settings → My Turn (the own-work promotions and red default branches) — and is stamped through
+  `relevanceFor`. "New PRs" (`watched_repo_pr`, off by default) is the one section that needs a
+  test: the MAINTAINER test (`viewerMaintainedRepoIds`) asks *is this your patch of ground* —
+  `repos.viewerPermission` ∈ WRITE/MAINTAIN/ADMIN **∪** the repos `getMergers` says the viewer has
+  landed a PR on (default branch only) — and yields **`'maintained'`**, else `'none'`. The MENTION
+  arm that used to lift a New PR to `'direct'` is gone: a mention is its own `mention` type
+  ([BACKEND.md](BACKEND.md) § My Turn, S6), `'direct'` **even in a repo the viewer only READS**.
+  The insight-card block READS `relevance` off the row and folds `personal` from it — the `since`
+  rule applied to the second question this fold would otherwise answer twice, and one source of
+  truth so the board's label and the notification's count cannot disagree about the same card.
+- **Mentions are DERIVED OFFLINE** (`sync/mention-scan.ts` → `pr_mentions`, stamped with the
+  newest human mention's time and author), never computed in the request: the underlying question
+  is a substring scan over every comment body in scope and this fold runs on every Feed landing.
+  ⚠ **Absence never widens** — a row the scanner has not stamped yet, or no rows at all, means no
+  mention card. See [DATA-MODEL.md](DATA-MODEL.md) § `pr_mentions` and [SYNC.md](SYNC.md)
+  § "@mention derivation".
+- ⚠ **RELEVANCE NARROWS NOTHING.** `GET /api/my-turn` returns every row of every shown type (the
+  CLI status board needs the full set) and the Pending board keeps painting every card — a PR in a
+  repo you only read does still need a review. (Switching a TYPE off in Settings does remove its
+  rows, everywhere at once — a separate gate, inside `getMyTurn`.) The flag exists for the surfaces that INTERRUPT (welcome-back banner, Workspace-dropdown
   badges, browser notifications), which must not summon you for 425 strangers' PRs.
 - ⚠ **EVERY total is folded off the PRE-CAP ranked array**, in one pass next to `myTurnTotal`.
   Counted after the 50-card slice any of them would be bounded by 50 and stop being a total.
@@ -1048,6 +1052,11 @@ card. **TWO ARMS, carried on one kind by `CiFailingCard.arm`:**
 - ⚠ **EVERY PR FIELD IS NULLABLE AND A NULL IS ORDINARY.** ~11% of red heads are DIRECT PUSHES to
   trunk (a legitimate steady state, not a sync gap). The card still says trunk is red; it just
   names no PR.
+- **It names who opened its PR** — `authorId`, `authorIsBot`, `authorBotKind`, `automation`, all
+  REQUIRED: the viewer on `your_pr`, the LANDING PR's author on `trunk` (`resolveTrunkCommitPrs`
+  selects `authorId` and `dependencyVendor` for it), and nobody when no PR resolved. The Pending
+  board's People / Automation lens then has one predicate for every card. A dependency PR's red
+  build is not a `your_pr` card at all: it is on its Dependencies card.
 - ⚠ **`viewerMerged` ATTRIBUTES LANDING, NEVER BREAKING** — trunk may have been red before that PR
   merged, and the card says so on its face.
 - **TWO NEIGHBOURING QUESTIONS ARE DELIBERATELY NOT BUILT** (measured on real data, cut, and
@@ -1060,7 +1069,10 @@ card. **TWO ARMS, carried on one kind by `CiFailingCard.arm`:**
 - ⚠ **`ciFailing` AND `trunkRed` ARE TWO LINES, NOT ONE.** `trunkRed` names EVERY red trunk in the
   workspace and each of its lines opens that repo's console; `ciFailing` counts the subset that is
   YOURS plus your own red PRs and opens the board isolated to `ci_failing`. Folding either into the
-  other gives one of them a list its number does not match.
+  other gives one of them a list its number does not match. What the reader PROMOTED into My Turn
+  (Settings → My Turn) leaves them: a promoted red build leaves `ciFailing`, a promoted red trunk
+  leaves both (`trunkRed` drops `myTurnTrunkRepoIds` before its cap), and each is counted once, in
+  `myTurn`.
 - **Cap:** it shares `INSIGHT_CARD_CAP` (15) with the survey kinds but, like `my_turn`, DISCLOSES
   it (`ciFailingTotal` + `ciFailingCapDisclosure`) — a worklist the viewer clears may not be
   silently capped. Everything is trailing-optional, so **`apiVersion` stays 21**.
@@ -2772,7 +2784,7 @@ paywall. It has been folded into the **Pending** board:
 
 - the two signals the cards never carried (`merge`, `update_branch`) are now real `InsightKind`s
   emitted by `getWorkspaceInsights`, so **all seven** WorkPlanKinds fold off cards;
-- core `GET /api/attention` serves the board as **five tabs**, each ordered by the SAME Do next
+- core `GET /api/attention` serves the board as **six tabs**, each ordered by the SAME Do next
   scorer the plan ranks with (`db/work-plan.ts` `scoreCards`), **free on every tier**;
 - the `workPlan` capability gates **the sentences only**: a headline and `parked` above the tabs,
   and one `why` per planned row, shown on that row's card in whichever tab it sits. A free or OSS
@@ -2782,9 +2794,15 @@ The plan still chooses its rows ACROSS kinds (its own per-PR dedup and kind/repo
 `WORK_PLAN_ITEM_CAP`) — that is the evidence the model narrates and the plan hash covers, unchanged.
 The board no longer shows that cross-kind selection as a section; it only carries its lines.
 
-⚠ **THE TWO FORWARD KINDS INHERIT TWO NARROWINGS** the old standalone query did not have: the card
-fold's **90-day ultra-stale gate** and its **15-per-kind cap**. A long-dormant-but-mergeable PR no
-longer appears — which is the point, since a ranked row with no card behind it breaks the partition.
+⚠ **A PLAN ROW MUST NAME A CARD THE BOARD LISTS.** `getWorkPlan` folds the board's UNCAPPED
+`getWorkspaceInsights` and draws its rows only from `listedCardIds` (db/pending-tabs.ts — the
+board's own listing rule, `boardListCap` per list group). It used to rank the capped fold (15 per
+kind by severity / newest), and the kind/repo spread then seated low-scoring rows the board did not
+list: on real data up to 10 of 12 `why`s had no card to sit on. `totals` still counts every row.
+
+⚠ **THE TWO FORWARD KINDS INHERIT A NARROWING** the old standalone query did not have: the card
+fold's **90-day ultra-stale gate**. A long-dormant-but-mergeable PR no longer appears — which is the
+point, since a ranked row with no card behind it has nowhere to show its line.
 
 ⚠ **`conflicts` IS A CARD, NOT A PLAN ROW — AND THE SEVEN `WorkPlanKind`s ARE UNCHANGED.** The
 Pending board's third merge-state kind falls out of `db/work-plan.ts`'s card→job chain and produces
@@ -2810,6 +2828,20 @@ own `continue` beside `ci_failing` and the two forward kinds, and
 provide. `insightsHash`'s `default: return ''` is filtered out (an unmatched kind contributes
 nothing, not an empty slot), `chat.ts`'s if/else chain folds nothing before matching, and
 `preset-prompt.ts` uses per-kind type-guard filters — all three are safe as written.
+
+⚠ **THE DEPENDENCIES TAB'S TWO KINDS FOLLOW THE `conflicts` PRECEDENT EXACTLY** (`security`,
+`dependency_bump`; [BACKEND.md](BACKEND.md) § The Dependencies tab). `scoreCards` scores them for the
+board — into the same `boardOnly` list as `conflicts`, from the base their state names
+(`DEPENDENCY_STATE_BASE`, plus the board-only `security_alert` 0.55 and `waiting` 0.3) — and they
+never become plan rows: `WorkPlanKind` is unchanged, and so is `foldCounts` / `WorkPlanEvidence.counts`.
+The sprint report needed its own `continue` for them, the fourth such line, or both would have been
+counted into repo `importance` and the PR table (`SecurityCard` and `DependencyBumpCard` extend
+`InsightPrRef`, so nothing fails to compile); the kind-coverage test fails without it. `chat.ts` needs
+no code: its chain folds nothing before it matches. `apiVersion` stays 21 (a new union member and
+optional fields). ⚠ **The plan and the sprint report re-key ONCE** per workspace that had dependency
+PRs: those PRs left `stalled_review`, `untouched_thread`, `reviewer_routing` and the forward kinds, so
+the cards both hashes cover changed. Expect one `stale` and one regeneration, not a recurring one —
+nothing `now`-derived entered either hash.
 
 ⚠ **MERGE PROXIMITY IS APPROVAL-CONDITIONAL** (0.95 approved / 0.45 not, the latter deliberately
 below `review` 0.55 and `reply` 0.5). A clean PR nobody has reviewed is ready for GitHub, not ready
@@ -2864,9 +2896,27 @@ refusing the merge.
 
 ### The rank
 
-`score = 0.50·proximity + 0.30·stallRisk + 0.20·relevanceWeight`, sorted descending with a **total**
-tie-break chain, so two ticks over unchanged data produce byte-identical order — a panel people read
-top-down may not reshuffle between polls.
+`score = w.proximity·proximity + w.stall·stallRisk + w.relevance·relevanceWeight`, with the READER's
+weights (Settings → My Turn; the default, Balanced, is 0.50 / 0.30 / 0.20), sorted descending with a
+**total** tie-break chain, so two ticks over unchanged data produce byte-identical order — a panel
+people read top-down may not reshuffle between polls.
+
+⚠ **MY TURN SETTINGS REACH THE PLAN, AND `apiVersion` STAYS 21.** `rankWorkPlan` reads the account's
+weights (`getMyTurnSettings`) exactly as the board's `rankPendingTabs` does, so the plan and the
+tabs rank one way. `packages/pro` reads no weight and the plan hash folds no score, but a weight
+change can swap which rows the cap keeps, and promoting `own_thread` or `trunk_red` changes those
+rows' `relevance` (a home untouched-thread row is scored `'none'`; the promoted one is the reader's,
+`'direct'`) — either makes a stored plan read `stale` ONCE; nothing regenerates on its own. A
+promoted row keeps its home row's `WorkPlanKind`, id and facts (`wp:unblock_ci:<prId>`,
+`wp:<merge|update_branch>:<prId>`, `wp:thread:<prId>:<threadId>`, `wp:unblock_ci:trunk:<repoId>`;
+`own_conflicts` stays board-only like `conflicts`) — only `relevance` and `cardId` differ, and the
+SPA joins each `why` by the current `cardId`. `WorkPlanKind`, `WorkPlanItem` and
+`ProHostQueries.getWorkPlan` are unchanged. ⚠ **The sprint report skips a promoted card for the
+same reason it skips its home kind** (`c.reason === 'trunk_red' || MY_TURN_OWN_WORK_REASONS.has(…)`
+— the `trunk_red` literal is REQUIRED: `Set.has` does not narrow the union, and the repo-grained
+`MyTurnTrunkCard` has no `additions` for `bump`). So an own untouched thread leaves that report's
+untouched count while the reader has it promoted — a reading setting, stated.
+`sprint-report-kind-coverage.test.ts` pins the skip.
 
 ⚠ **`ageHours`, `stallRisk` and `score` are derived from `now`** and must never enter
 `workPlanPayloadHash`, or a dormant workspace re-bills on a timer *and* the free GET (which

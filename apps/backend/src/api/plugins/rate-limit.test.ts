@@ -240,6 +240,14 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('PUT', '/api/me/blast-radius-config')).not.toContain('ai');
   });
 
+  // PUT /api/me/my-turn-settings — the My Turn settings. The same decision as its two neighbours:
+  // one validated UPDATE of one column, no GitHub and no model.
+  it('keeps the My Turn settings write on read', () => {
+    expect(tiers('PUT', '/api/me/my-turn-settings')).toEqual(['read']);
+    expect(tiers('PUT', '/api/me/my-turn-settings')).not.toContain('github_write');
+    expect(tiers('PUT', '/api/me/my-turn-settings')).not.toContain('ai');
+  });
+
   // PUT /api/workspaces/:id/pending-mute — the Pending mute. One boolean UPDATE plus a bounded
   // delete/insert over `pending_muted_repos`, all inside the workspace's own membership: no
   // GitHub, no model. It takes `read` through the workspace-CRUD line, which is the DECIDED

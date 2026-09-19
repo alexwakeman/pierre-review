@@ -4,11 +4,13 @@ import { describe, expect, it } from 'vitest';
 // how we guarantee the backend's local review-bot copy never drifts from the shared map.
 import {
   AUTOMATION_VENDORS,
+  AUTOMATION_VENDOR_PREFIXES,
   DEPENDENCY_BOTS,
   QUALITY_CHECK_BOTS,
   REVIEW_BOTS,
   REVIEW_BOT_KINDS,
   REVIEWER_ROLES,
+  automationVendorFor as sharedAutomationVendorFor,
   automationVendorKind as sharedAutomationVendorKind,
   isBenchmarkableVendorKind,
   roleForAutomationLogin as sharedRoleForLogin,
@@ -18,12 +20,16 @@ import {
   qualityCheckBot as sharedQualityCheckBot,
   releaseBot as sharedReleaseBot,
   reviewBotKind as sharedReviewBotKind,
+  roleForVendorKind,
+  vendorKindsForRole,
 } from '@pierre-review/shared';
 import { BENCHMARKABLE_VENDOR_KINDS } from '../db/queries.js';
 import {
   automationVendorFor,
   automationVendorKind,
   automationVendorLogins,
+  automationVendorLoginsForSql,
+  automationVendorPrefixes,
   codeAgentBot,
   codeAgentBotLogins,
   dependencyBot,
@@ -241,10 +247,26 @@ describe('AUTOMATION_VENDORS ⇄ shared parity (kept in lockstep BY HAND)', () =
     }
   });
 
+  it('covers exactly the same login PREFIXES', () => {
+    expect([...automationVendorPrefixes()].sort()).toEqual(
+      AUTOMATION_VENDOR_PREFIXES.map((p) => p.prefix).sort(),
+    );
+  });
+
+  it('agrees on the kind AND the role behind every prefix', () => {
+    for (const { prefix, kind, role } of AUTOMATION_VENDOR_PREFIXES) {
+      expect(automationVendorFor(`${prefix}acme`), prefix).toEqual({ kind, role });
+      expect(automationVendorFor(`${prefix}acme`), prefix).toEqual(
+        sharedAutomationVendorFor(`${prefix}acme`),
+      );
+    }
+  });
+
   it('agrees with the shared predicates on every login in every vocabulary', () => {
     const all = [
       ...Object.keys(AUTOMATION_VENDORS),
       ...Object.keys(REVIEW_BOTS),
+      ...AUTOMATION_VENDOR_PREFIXES.map((p) => `${p.prefix}acme[bot]`),
       'alexwakeman',
       'some-unknown-app',
     ];
@@ -265,6 +287,48 @@ describe('AUTOMATION_VENDORS ⇄ shared parity (kept in lockstep BY HAND)', () =
     expect(releaseBot('mergify[bot]')).toBe(true);
     expect(housekeepingBot('Stale[bot]')).toBe(true);
     expect(automationVendorKind('Dependabot[bot]')).toBe('dependabot');
+  });
+});
+
+// Semgrep installs its App per org, so its login is `semgrep-code-<org>` — an exact table misses
+// every org there is. The prefix table is tried AFTER the exact one.
+describe('vendor login prefixes', () => {
+  it('gives a per-org Semgrep login its vendor and its role', () => {
+    expect(roleForBotLogin('semgrep-code-acme[bot]')).toBe('quality_check');
+    expect(roleForBotLogin('SemgrepCode-Acme')).toBe('quality_check');
+    expect(automationVendorKind('semgrep-code-acme')).toBe('semgrep');
+    expect(qualityCheckBot('semgrep-code-acme[bot]')).toBe(true);
+  });
+
+  it('matches a prefix only at the START of the login', () => {
+    expect(automationVendorFor('acme-semgrep-code-x')).toBeNull();
+    // Nor is the brand word alone: a person may own that login.
+    expect(automationVendorFor('semgrep')).toBeNull();
+    expect(automationVendorFor('semgrep-code')).toBeNull();
+  });
+
+  // ⚠ The login SETS feed SQL `IN (…)` predicates, which cannot hold a prefix, so they stay exact.
+  // SQL reaches the prefixes through `automationVendorPrefixes()` and a `LIKE`.
+  it('keeps the prefixes out of the exact login sets', () => {
+    expect(qualityCheckBotLogins().some((l) => l.startsWith('semgrep-code-'))).toBe(false);
+    expect(automationVendorLoginsForSql().some((l) => l.startsWith('semgrepcode-'))).toBe(false);
+  });
+});
+
+// The SQL spelling of the exact table: `lower(github_login) IN (…)` cannot strip `[bot]`, so
+// every login is listed in both spellings or half the real `users` rows are missed.
+describe('automationVendorLoginsForSql', () => {
+  it('lists every exact vendor login bare AND `[bot]`-suffixed', () => {
+    const sql = new Set(automationVendorLoginsForSql());
+    for (const login of automationVendorLogins()) {
+      expect(sql.has(login), login).toBe(true);
+      expect(sql.has(`${login}[bot]`), login).toBe(true);
+    }
+    expect(sql.size).toBe(automationVendorLogins().length * 2);
+  });
+
+  it('is already lowercased, since the SQL lowercases only the column side', () => {
+    for (const login of automationVendorLoginsForSql()) expect(login).toBe(login.toLowerCase());
   });
 });
 
@@ -289,6 +353,18 @@ describe('the two vendor tables agree where they overlap', () => {
     for (const role of REVIEWER_ROLES) {
       if (role === 'review') continue;
       expect(covered.has(role), `role '${role}' has no login vocabulary`).toBe(true);
+    }
+  });
+
+  // Frogbot and Checkmarx open PRs through github-actions or a person's token, so no login row
+  // carries their kind. Without an explicit role they map to `null` — "legal in every role" — and
+  // turn up in every family's vendor picker.
+  it('gives the marker-only vendors a role, so they sit in one picker only', () => {
+    for (const kind of ['frogbot', 'checkmarx'] as const) {
+      expect(roleForVendorKind(kind), kind).toBe('dependency');
+      expect(vendorKindsForRole('dependency'), kind).toContain(kind);
+      expect(vendorKindsForRole('review'), kind).not.toContain(kind);
+      expect(vendorKindsForRole('quality_check'), kind).not.toContain(kind);
     }
   });
 
@@ -329,6 +405,14 @@ describe('the benchmark allow-list', () => {
     for (const k of ['in_house', 'pierre', 'vendor', 'sonarqube', 'dependabot', 'google_cla']) {
       expect(isBenchmarkableVendorKind(k), k).toBe(false);
     }
+    // The security vendors, including the two recognised by marker alone (no login row above).
+    for (const k of [
+      'endor', 'aikido', 'mend', 'frogbot', 'checkmarx', 'step_security', 'orbisai',
+      ...AUTOMATION_VENDOR_PREFIXES.map((p) => p.kind),
+    ]) {
+      expect(REVIEW_BOT_KINDS.has(k), k).toBe(false);
+      expect(isBenchmarkableVendorKind(k), k).toBe(false);
+    }
     expect(isBenchmarkableVendorKind(null)).toBe(false);
     expect(isBenchmarkableVendorKind(undefined)).toBe(false);
   });
@@ -357,6 +441,31 @@ describe('the logins this change was built for', () => {
     expect(roleForBotLogin('pre-commit-ci[bot]')).toBe('code_agent');
     expect(roleForBotLogin('imgbot')).toBe('code_agent');
     expect(roleForBotLogin('transifex-integration')).toBe('code_agent');
+  });
+
+  it('files the security remediation apps with the dependency bots', () => {
+    expect(automationVendorFor('snyk-io')).toEqual({ kind: 'snyk', role: 'dependency' });
+    expect(automationVendorFor('snyk-io[bot]')).toEqual({ kind: 'snyk', role: 'dependency' });
+    expect(automationVendorFor('aikido-autofix[bot]')).toEqual({ kind: 'aikido', role: 'dependency' });
+    expect(automationVendorFor('mend-for-github-com[bot]')).toEqual({
+      kind: 'mend',
+      role: 'dependency',
+    });
+    expect(automationVendorFor('endor-labs-pro[bot]')).toEqual({
+      kind: 'endor',
+      role: 'quality_check',
+    });
+    // Both open PRs that are not version bumps: workflow hardening and SAST autofixes.
+    expect(roleForBotLogin('step-security-bot')).toBe('code_agent');
+    expect(roleForBotLogin('orbisai0security')).toBe('code_agent');
+  });
+
+  // ⚠ D2 of the dependencies spec: the vocabulary widens, `users.isBot` does not. `isLikelyBot`
+  // decides that flag at sync time, and socket-security arrives from GraphQL without `[bot]`.
+  it('does not change what isLikelyBot flags', () => {
+    expect(isLikelyBot('socket-security')).toBe(false);
+    expect(isLikelyBot('snyk-io')).toBe(false);
+    expect(isLikelyBot('semgrep-code-acme')).toBe(false);
   });
 
   it('keeps the AI reviewers that merely SOUND like agents out of code_agent', () => {

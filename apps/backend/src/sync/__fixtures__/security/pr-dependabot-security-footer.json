@@ -1,0 +1,17 @@
+{
+  "name": "Dependabot security update: the footer proves it; the GHSA its release notes quote is not the fix id",
+  "input": {
+    "title": "Bump mermaid from 11.15.0 to 11.16.1 in /ui-tests",
+    "headRefName": "dependabot/npm_and_yarn/ui-tests/mermaid-11.16.1",
+    "labels": [
+      "dependencies",
+      "javascript"
+    ],
+    "bodyText": "Bumps mermaid from 11.15.0 to 11.16.1.\n\nRelease notes\nSourced from mermaid's releases.\n\nmermaid@11.16.1\nPatch Changes\n\n\n#8022 12d472c Thanks @alice! - fix: handle CSS sibling combinators in compileCSS\n\n\n#8022 2cd6dcf Thanks @alice! - fix: increase protections against prototype pollution\nUser-controlled input already has protections against prototype pollution.\nFixes: GHSA-c4c3-pg64-4m4v\n\n\n#8022 99af3fc Thanks @alice! - fix(architecture): use Maps and Sets to store groups/services\nServices are now rendered in the order they are defined and more service IDs\nare now supported.\n\n\n#8022 2cd6dcf Thanks @alice! - deprecate: Deprecate the mermaidAPI.setConfig() function\nCalling this function has no observable effect, as the next time a\nrender() or parse() is called, the currentConfig is cleared.\n\n\n#8022 630aa7e Thanks @alice! - fix(xychart): support zero-width x-axis ranges\n\n\n#8022 59b22fa Thanks @alice! - fix(radar): limit number of ticks to 32\nSetting a ticks value higher than this would only show 32 ticks.\n\n\n\n... (truncated)\n\n\nCommits\n\n7ecca0c Version Packages (#8023)\n\n\n\n\n\nDependabot commands and options\n\nYou can trigger Dependabot actions by commenting on this PR:\n\n@dependabot rebase will rebase this PR\n@dependabot recreate will recreate this PR, overwriting any edits that have been made to it\n@dependabot show <dependency name> ignore conditions will show all of the ignore conditions of the specified dependency\n@dependabot ignore this major version will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n@dependabot ignore this minor version will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n@dependabot ignore this dependency will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\nYou can disable automated security fix PRs for this repo from the Security Alerts page.\n\n\n\nNote\nAutomatic rebases have been disabled on this pull request as it has been open for over 30 days."
+  },
+  "expected": {
+    "dependencyVendor": "dependabot",
+    "securityFix": "proven",
+    "advisoryIds": []
+  }
+}

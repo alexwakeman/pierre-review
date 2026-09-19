@@ -32,6 +32,7 @@ import type {
   CheckRun,
   FlowSettings,
   Label,
+  MyTurnSettings,
   ReviewRouteReason,
   StoredPrFile,
 } from '@pierre-review/shared';
@@ -76,6 +77,9 @@ export const accounts = pgTable('accounts', {
   // BLAST RADIUS reading settings ({sensitivity, surfacesOff[], overrides?}); NULL = the product
   // defaults, applied SPA-side. See the sqlite twin. Kept in sync by hand (schema-parity.test.ts).
   blastRadiusConfig: jsonb('blast_radius_config').$type<BlastRadiusConfig>(),
+  // MY TURN settings (types shown, their order, the Do next weights); NULL = the product defaults,
+  // resolved by packages/shared. See the sqlite twin. Kept in sync by hand (schema-parity.test.ts).
+  myTurnSettings: jsonb('my_turn_settings').$type<MyTurnSettings>(),
 });
 
 export const repos = pgTable(
@@ -248,6 +252,13 @@ export const pullRequests = pgTable(
     // stale verdict outliving the commit it described. Kept in sync by hand.
     contentKind: text('content_kind', { enum: ['comments', 'formatting', 'code'] }),
     contentKindSha: text('content_kind_sha'),
+    // DEPENDENCY + SECURITY SIGNALS (migration pg 0054), read at sync from the PR's own title /
+    // branch / labels / FULL bodyText. See the sqlite twin — no bodies, the four are written
+    // together or not at all, and `security_checked_at` NULL is the backfill's worklist.
+    dependencyVendor: text('dependency_vendor'),
+    securityFix: text('security_fix', { enum: ['proven', 'inferred'] }),
+    advisoryIds: jsonb('advisory_ids').$type<string[]>(),
+    securityCheckedAt: timestamp('security_checked_at', { withTimezone: true, mode: 'date' }),
   },
   (t) => ({
     repoIdx: index('pr_repo_idx').on(t.repoId),
@@ -1273,6 +1284,10 @@ export const prMentions = pgTable(
       .notNull()
       .references(() => pullRequests.id, { onDelete: 'cascade' }),
     login: text('login').notNull(),
+    // The newest non-automation, non-self mention's time and author; NULL = not stamped yet (no
+    // card). See the sqlite twin.
+    mentionedAt: timestamp('mentioned_at', { withTimezone: true, mode: 'date' }),
+    mentionedByUserId: integer('mentioned_by_user_id'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),

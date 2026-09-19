@@ -1,5 +1,7 @@
 import type { Page, Route } from '@playwright/test';
 import type {
+  AttentionCardsResponse,
+  AttentionLivenessResponse,
   AwaitingReviewItem,
   ConsolidatedFeedItem,
   ConsolidatedFeedResponse,
@@ -22,9 +24,22 @@ import type {
   ArmedMergeListResponse,
   SyncActivityResponse,
   DailyBriefResponse,
+  DependencyBumpCard,
+  InsightCard,
+  InsightKind,
+  InsightPrRef,
+  PendingAuthorSplit,
+  PendingTab,
+  SecurityCard,
 } from '@pierre-review/shared';
-// A VALUE, not a type — the fixture quotes the shipped default rather than re-typing 1500.
-import { LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
+// VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
+// build the Pending tabs from the shipped list rather than re-typing it.
+import {
+  LARGE_PR_CODE_LOC_DEFAULT,
+  PENDING_TABS,
+  pendingAuthorSideOf,
+  resolveMyTurnSettings,
+} from '@pierre-review/shared';
 
 // Deterministic, self-contained API fixtures for the My Turn / Feed / Focus-mode
 // regression tests. Every /api/** request is intercepted in the browser (page.route)
@@ -227,6 +242,8 @@ const ME_RESPONSE: MeResponse = {
     botTriage: false,
   },
   benchmarkOptIn: false,
+  // No My Turn overrides — the product defaults, resolved by the SPA through the shared resolver.
+  myTurnSettings: null,
   authNotices: [],
   // AI balances (summary turns + agent credits). Unmetered/none for the e2e local tier.
   aiUsage: null,
@@ -268,8 +285,152 @@ const DAILY_BRIEF: DailyBriefResponse = {
     resolveBacklog: 0,
     botAnomalies: [],
     trunkRed: [],
+    // The Dependencies tab's security chip. Zero, so the strip stays empty (see above) — the two
+    // Dependencies cards below sit on the board, not in the brief.
+    security: 0,
   },
   generatedAt: iso(0),
+};
+
+// ── THE PENDING BOARD — THE DEFAULT LANDING ─────────────────────────────────────────────────────
+// The app opens on Pending, so EVERY spec's first paint calls `GET /api/attention`. Left to the
+// catch-all `{}`, the board would render off a response with no `cards` — a blank-page risk the
+// moment any required field is read in render. Empty tabs are the honest fixture: the specs here
+// are about the Feed, and an empty board is a state the board already renders.
+// ⚠ The tabs come from `PENDING_TABS`, never a literal list, so a tab added to the shipped list
+// appears here without an edit.
+//
+// Two cards sit in the Dependencies tab — a Dependabot security fix and a plain bump — so the
+// fixture carries every REQUIRED field of the two newest kinds (`automation` included) and the
+// board renders them the moment a spec opens that tab. My turn, where the app lands, stays empty.
+const DEPENDABOT: User = {
+  id: 4,
+  githubLogin: 'dependabot[bot]',
+  displayName: null,
+  avatarUrl: null,
+  isBot: true,
+};
+
+/** The PR half of a Dependencies card: every REQUIRED `InsightPrRef` field, Dependabot's byline. */
+function dependabotPr(prId: number, number: number, title: string): InsightPrRef {
+  return {
+    prId,
+    repoId: REPO.id,
+    repoFullName: REPO.fullName,
+    prNumber: number,
+    prTitle: title,
+    authorId: DEPENDABOT.id,
+    githubUrl: `https://github.com/${REPO.fullName}/pull/${number}`,
+    ciStatus: 'success',
+    changedFiles: 1,
+    additions: 3,
+    deletions: 3,
+    openedAt: iso(2),
+    authorIsBot: true,
+    authorBotKind: 'dependabot',
+    automation: { role: 'dependency', kind: 'dependabot', source: 'account' },
+    inMergeQueue: null,
+    mergeQueueEntryState: null,
+    reviewDecision: null,
+    reviewApprovals: 0,
+    reviewChangesRequested: false,
+    reviewers: [],
+    reviewerCount: 0,
+  };
+}
+
+const SECURITY_CARD: SecurityCard = {
+  ...dependabotPr(201, 81, 'Bump tornado from 6.4.1 to 6.5'),
+  id: 'security:201',
+  kind: 'security',
+  severity: 'high',
+  mergeStateStatus: 'clean',
+  mergeable: 'mergeable',
+  lastCommitAt: iso(2),
+  relevance: 'maintained',
+  viewerCanPush: true,
+  dependencyUpdate: true,
+  depState: 'ready',
+  fix: 'proven',
+  alerts: [],
+  alertCount: 0,
+  advisoryIds: ['GHSA-9qr9-h5gf-34mp'],
+  detail: 'Fixes GHSA-9qr9-h5gf-34mp',
+  stateDetail: 'Nothing is blocking this — it can land now',
+};
+
+const BUMP_CARD: DependencyBumpCard = {
+  ...dependabotPr(202, 82, 'Bump eslint from 9.1.0 to 9.2.0'),
+  id: 'deps:202',
+  kind: 'dependency_bump',
+  severity: 'info',
+  mergeStateStatus: 'behind',
+  mergeable: 'mergeable',
+  lastCommitAt: iso(2),
+  relevance: 'maintained',
+  viewerCanPush: true,
+  depState: 'behind',
+  detail: 'GitHub blocks the merge until the branch is updated',
+};
+
+// Security before bumps — the Dependencies tab's strict group, as the server orders it.
+const ATTENTION_CARDS: InsightCard[] = [SECURITY_CARD, BUMP_CARD];
+
+/** A population split by who opened it — the server's own predicate, so the fixture's totals
+ *  agree with its cards by construction (people + automation === total). */
+function authorSplit(cards: InsightCard[]): PendingAuthorSplit {
+  return {
+    people: cards.filter((c) => pendingAuthorSideOf(c) === 'people').length,
+    automation: cards.filter((c) => pendingAuthorSideOf(c) === 'automation').length,
+  };
+}
+
+// The reader's My Turn settings, never changed: what `/api/my-turn` and `/api/attention` report.
+const MY_TURN_DEFAULTS = resolveMyTurnSettings(null);
+
+const ATTENTION: AttentionCardsResponse = {
+  cards: ATTENTION_CARDS,
+  users: [DEPENDABOT],
+  tabs: PENDING_TABS.map((t): PendingTab => {
+    const ranked: readonly InsightKind[] = t.kinds.filter((k) => k !== 'reviewer_load');
+    const cards = ATTENTION_CARDS.filter((c) => ranked.includes(c.kind));
+    const ofKind = (k: InsightKind): InsightCard[] => cards.filter((c) => c.kind === k);
+    return {
+      key: t.key,
+      total: cards.length,
+      kindTotals: Object.fromEntries(ranked.map((k) => [k, ofKind(k).length])),
+      cardIds: cards.map((c) => c.id),
+      authorTotals: authorSplit(cards),
+      kindAuthorTotals: Object.fromEntries(ranked.map((k) => [k, authorSplit(ofKind(k))])),
+      ...(t.key === 'my_turn'
+        ? {
+            relevanceTotals: { mine: 0, others: 0 },
+            relevanceAuthorTotals: { mine: authorSplit([]), others: authorSplit([]) },
+          }
+        : {}),
+    };
+  }),
+  scores: {},
+  // The ranking the server used — the product defaults, as a reader who never opened Settings
+  // gets them.
+  rules: {
+    weights: MY_TURN_DEFAULTS.weights,
+    preset: MY_TURN_DEFAULTS.preset,
+    myTurnOrder: MY_TURN_DEFAULTS.order,
+    myTurnOff: MY_TURN_DEFAULTS.off,
+  },
+};
+// The board's batched liveness sweep (POST). Landing on Pending fires it on every spec's first
+// paint; `changed: 0` means "nothing moved", so it never triggers a refetch loop. ⚠ NOT OPTIONAL:
+// under the catch-all `{}`, the hook's `data.changed <= 0` guard reads `undefined <= 0` (false),
+// and every sweep would refetch the three board keys.
+const ATTENTION_LIVENESS: AttentionLivenessResponse = {
+  workspaceId: WORKSPACE.id,
+  checked: 0,
+  mergeStateChecked: 0,
+  changed: 0,
+  leftOpenSet: 0,
+  paused: null,
 };
 
 const ARMED_MERGES: ArmedMergeListResponse = { requests: [] };
@@ -308,6 +469,20 @@ const MY_TURN: MyTurnResponse = {
   watchedRepoPrs: WATCHED_IDS.map((id): WatchedRepoPrItem => myTurnPr(id)),
   claudeReviewsToAction: [],
   users: USERS,
+  // The sections Settings → My Turn added, empty here, and the reader's resolved settings. The
+  // three settings fields come FROM the shared resolver, so the fixture cannot drift from it.
+  mentions: [],
+  threadReplies: [],
+  commentReplies: [],
+  pushedSince: [],
+  ownCiRed: [],
+  ownConflicts: [],
+  ownReady: [],
+  ownThreads: [],
+  redTrunks: [],
+  order: MY_TURN_DEFAULTS.order,
+  off: MY_TURN_DEFAULTS.off,
+  configKey: MY_TURN_DEFAULTS.configKey,
 };
 
 
@@ -582,6 +757,9 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.endsWith('/api/auto-merge')) return json(route, ARMED_MERGES);
       if (path.endsWith('/api/sync-activity')) return json(route, SYNC_ACTIVITY);
       if (path.endsWith('/api/my-turn')) return json(route, MY_TURN);
+      // The Pending board, where the app lands, and its liveness sweep (a POST on its own path).
+      if (path.endsWith('/api/attention/liveness')) return json(route, ATTENTION_LIVENESS);
+      if (path.endsWith('/api/attention')) return json(route, ATTENTION);
       if (path.endsWith('/api/activity/feed')) return json(route, CONSOLIDATED_FEED);
       if (path.endsWith('/api/activity')) return json(route, ACTIVITY);
       if (path.includes('/api/timeline')) return json(route, TIMELINE);
@@ -609,4 +787,5 @@ export const fixtures = {
   CONSOLIDATED_FEED,
   ACTIVITY,
   WORKSPACE,
+  ATTENTION,
 };

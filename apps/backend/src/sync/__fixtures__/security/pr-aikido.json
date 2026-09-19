@@ -1,0 +1,16 @@
+{
+  "name": "Aikido AutoFix: a vendor that only ever opens fix PRs; its own id scheme",
+  "input": {
+    "title": "[Aikido] Fix security issue in requests via minor version upgrade from 2.33.0 to 2.34.0",
+    "headRefName": "fix/AIK-16916-update-packages-63714791-sbrn",
+    "labels": [],
+    "bodyText": "Upgrade requests to fix proxy bypass vulnerability allowing attackers to skip proxy-based egress controls and SSRF protections via domain boundary matching.\n\r✅ There are no breaking changes\n\r \n\r ✅ 1 CVE resolved by this upgrade \n\r \n\r\n\rThis PR will resolve the following CVEs:\n\r| Issue | Severity           | Description |\n| --- | --- | --- |\n|  AIKIDO-2026-106840  |  MEDIUM  | [requests] Proxy bypass vulnerability in `no_proxy` matching logic allows attackers to bypass proxy-based egress controls by using lookalike domain names that match suffix patterns without respecting domain boundaries. This enables direct connections that circumvent SSRF protections and proxy-based security controls. |\n\r\n\r \n\r \n\r 🔗 Related Tasks \n\r \n\r\n\r\n- https://aikido.atlassian.net/browse/AIK-16916\n\r\n\r "
+  },
+  "expected": {
+    "dependencyVendor": "aikido",
+    "securityFix": "proven",
+    "advisoryIds": [
+      "AIKIDO-2026-106840"
+    ]
+  }
+}

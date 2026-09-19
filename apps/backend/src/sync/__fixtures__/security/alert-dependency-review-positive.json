@@ -1,0 +1,5 @@
+{
+  "name": "GitHub Dependency Review with vulnerable packages — the real all-clear layout with the counts that fire",
+  "author": "github-actions",
+  "body": "<!-- dependency-review-pr-comment-marker -->\n<h1>Dependency Review</h1>\nThe following issues were found:<ul><li>❌ 2 vulnerable package(s)</li><li>✅ 0 package(s) with incompatible licenses</li></ul>\n<h2>Vulnerabilities</h2>\n<h4>package-lock.json</h4>\n<table><tr><th>Name</th><th>Version</th><th>Vulnerability</th><th>Severity</th></tr>\n<tr><td>path-to-regexp</td><td>0.1.7</td><td><a href=\"https://github.com/advisories/GHSA-9wv6-86v2-598j\">path-to-regexp outputs backtracking regular expressions</a></td><td>high</td></tr>\n<tr><td>braces</td><td>3.0.2</td><td><a href=\"https://github.com/advisories/GHSA-grv7-fg5c-xmjg\">Uncontrolled resource consumption in braces</a></td><td>high</td></tr></table>\n"
+}

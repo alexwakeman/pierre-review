@@ -6,7 +6,9 @@ import type {
   BlastSurface,
   BlastThresholds,
   LocalUser,
+  MyTurnSettings,
 } from '@pierre-review/shared';
+import { compactMyTurnSettings } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { getGithubTokenAsync } from '../github/auth.js';
 import { decryptToken } from './crypto.js';
@@ -41,6 +43,12 @@ export interface Account {
   // are not mirrored on this side). Same account grain and same two-state rule as the threshold
   // above.
   blastRadiusConfig: BlastRadiusConfig | null;
+  // MY TURN settings — which card types count as your turn, their order, and the Do next weights
+  // — as the STORED overrides, or null when the user has never changed anything (→ the product
+  // defaults; resolve through `resolveMyTurnSettings`). Same account grain and same two-state rule
+  // as the two settings above. Optional only so the auth hook's no-account-yet fallback literal
+  // (api/plugins/auth.ts) needs no entry: absent reads exactly as null.
+  myTurnSettings?: MyTurnSettings | null;
 }
 
 export type AccountPlan = 'free' | 'pro';
@@ -88,6 +96,7 @@ function rowToAccount(row: typeof schema.accounts.$inferSelect): Account {
     benchmarkOptIn: row.benchmarkOptIn ?? false,
     largePrCodeLocThreshold: row.largePrCodeLocThreshold ?? null,
     blastRadiusConfig: row.blastRadiusConfig ?? null,
+    myTurnSettings: row.myTurnSettings ?? null,
   };
 }
 
@@ -467,6 +476,32 @@ export async function setBlastRadiusConfig(
     .where(eq(accounts.id, accountId))
     .execute();
   // ⚠ Same rule as the threshold above, and the same failure without it.
+  await refreshLocalAccountCache(accountId);
+  return value;
+}
+
+/**
+ * Set (or clear) an account's MY TURN settings, and return what was STORED.
+ *
+ * The value is COMPACTED first (`compactMyTurnSettings`, the ONE definition of "an override" the
+ * Settings form builds its body with too), so a default is never frozen into the row — `null`, or
+ * anything that compacts to nothing, stores NULL and the account follows the product defaults
+ * again. Validate BEFORE calling: compaction drops a malformed part silently, which is right for a
+ * stored value and wrong for a request.
+ */
+export async function setMyTurnSettings(
+  accountId: number,
+  settings: MyTurnSettings | null,
+): Promise<MyTurnSettings | null> {
+  const { accounts } = schema;
+  const value = compactMyTurnSettings(settings);
+  await db
+    .update(accounts)
+    .set({ myTurnSettings: value })
+    .where(eq(accounts.id, accountId))
+    .execute();
+  // ⚠ Same rule as the two settings above, and the same failure without it: Settings would save,
+  // then `/api/me` would hand the old value back and revert the form.
   await refreshLocalAccountCache(accountId);
   return value;
 }

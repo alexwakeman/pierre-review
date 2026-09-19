@@ -120,6 +120,9 @@ import type {
   BlastRadiusConfigResponse,
   LargePrThresholdBody,
   LargePrThresholdResponse,
+  MyTurnSettings,
+  MyTurnSettingsBody,
+  MyTurnSettingsResponse,
   RepoAnalytics,
   RepoClaudeReviewsResponse,
   RepoDigest,
@@ -759,6 +762,16 @@ export const api = {
       '/api/me/blast-radius-config',
       jsonBody('PUT', { config } as BlastRadiusConfigBody),
     ).then((r) => handle<BlastRadiusConfigResponse>(r)),
+  // The reader's MY TURN settings (Settings → My Turn): which card types show, the type order and
+  // the Do next weights. ACCOUNT-GRAINED and unscoped like the two above. A PUT of the WHOLE
+  // overrides object; `null` RESETS to the product defaults. Build the body with
+  // `compactMyTurnSettings` (the server applies it again), and render the ECHO — it is what the
+  // database holds.
+  setMyTurnSettings: (settings: MyTurnSettings | null) =>
+    fetch(
+      '/api/me/my-turn-settings',
+      jsonBody('PUT', { settings } as MyTurnSettingsBody),
+    ).then((r) => handle<MyTurnSettingsResponse>(r)),
   // Workspace review-intelligence "Insights" (Pro; workspaceInsights capability) — the attention
   // CARDS (+ the sprint report). The flow-metric HEADER moved OUT to the free
   // /api/workspace-metrics, the Retro panel was deleted, and cross-workspace comparison is the

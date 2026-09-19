@@ -1,0 +1,17 @@
+{
+  "name": "An ordinary bump of trufflesecurity/trufflehog whose release notes quote \"[SECURITY]\" — not the title, not a marker",
+  "input": {
+    "title": "Bump trufflesecurity/trufflehog from 3.95.9 to 3.96.0",
+    "headRefName": "dependabot/github_actions/trufflesecurity/trufflehog-3.96.0",
+    "labels": [
+      "dependencies",
+      "github_actions"
+    ],
+    "bodyText": "Bumps trufflesecurity/trufflehog from 3.95.9 to 3.96.0.\n\nRelease notes\nSourced from trufflesecurity/trufflehog's releases.\n\nv3.96.0\nWhat's Changed\n\n[INS-355] Added Hashicorp vault token detector by @MuneebUllahKhan222 in trufflesecurity/trufflehog#4819\nTig\n...\nity/trufflehog#5002\nUpdate module github.com/go-git/go-git/v5 to v5.19.1 [SECURITY] by @renovate[bot] in trufflesecurity/trufflehog#5034\nRetry git clone on transient network error\n"
+  },
+  "expected": {
+    "dependencyVendor": "dependabot",
+    "securityFix": null,
+    "advisoryIds": []
+  }
+}

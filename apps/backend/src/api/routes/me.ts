@@ -6,13 +6,17 @@ import type {
   LargePrThresholdBody,
   LargePrThresholdResponse,
   MeResponse,
+  MyTurnSettingsBody,
+  MyTurnSettingsResponse,
 } from '@pierre-review/shared';
+import { MY_TURN_TOGGLES, validateMyTurnSettings } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import {
   accountToLocalUser,
   setBenchmarkConsent,
   setBlastRadiusConfig,
   setLargePrCodeLocThreshold,
+  setMyTurnSettings,
 } from '../../auth/account.js';
 import { resolveLargePrThreshold } from '../../db/code-loc.js';
 import { aiCreditStatus, monthStartMs } from '../../db/credits.js';
@@ -27,6 +31,7 @@ import {
 import { getAuthNotices } from '../../sync/auth-notices.js';
 import { isSeverityApiConfigured } from '../../ml/severity-client.js';
 import { getMyTurn } from '../../db/queries.js';
+import { clearDailyBriefCountsFor } from '../../db/daily-brief.js';
 
 const benchmarkConsentSchema = {
   body: {
@@ -99,6 +104,50 @@ const blastRadiusConfigSchema = {
               highSubsystems: { type: 'integer', minimum: 1, maximum: 100_000 },
               lowCodeLoc: { type: 'integer', minimum: 1, maximum: 1_000_000 },
               lowCodeFiles: { type: 'integer', minimum: 1, maximum: 100_000 },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+// The MY TURN settings. `settings: null` RESETS to the product defaults — a union, not an optional
+// key, like the two settings above.
+//
+// ⚠ EVERY PROPERTY IS DECLARED, down to each `show` key (built from `MY_TURN_TOGGLES`, the one list).
+// Fastify's ajv STRIPS an undeclared key silently rather than rejecting it (the contact-form
+// honeypot defect), so a key missing here would be a switch that saves as nothing. The schema
+// checks SHAPE only; MEANING — a known type, no repeats, weights in steps of 10 summing to 100 — is
+// `validateMyTurnSettings`, whose sentence the Settings form shows before it ever sends.
+const myTurnSettingsSchema = {
+  body: {
+    type: 'object',
+    required: ['settings'],
+    additionalProperties: false,
+    properties: {
+      settings: {
+        type: ['object', 'null'],
+        additionalProperties: false,
+        properties: {
+          show: {
+            type: 'object',
+            additionalProperties: false,
+            properties: Object.fromEntries(MY_TURN_TOGGLES.map((k) => [k, { type: 'boolean' }])),
+          },
+          trunkScope: { type: 'string', maxLength: 32 },
+          order: {
+            type: 'array',
+            maxItems: 15,
+            items: { type: 'string', maxLength: 32 },
+          },
+          weights: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              proximity: { type: 'integer' },
+              stall: { type: 'integer' },
+              relevance: { type: 'integer' },
             },
           },
         },
@@ -187,6 +236,10 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // nothing is duplicated. Free feature → top-level, not inside `pro` (the `mlSeverity`
       // argument again).
       blastRadius: req.account?.blastRadiusConfig ?? null,
+      // The MY TURN settings, RAW and nullable (the stored overrides) — the `blastRadius` rule: the
+      // SPA resolves them through the ONE `resolveMyTurnSettings`, so nothing is duplicated here.
+      // Free feature → top-level, not inside `pro` (the `mlSeverity` argument).
+      myTurnSettings: req.account?.myTurnSettings ?? null,
       // Orgs currently SAML-blocked for this account (empty in the normal case + in local).
       authNotices: getAuthNotices(accountId),
       aiUsage,
@@ -271,6 +324,34 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     // exists to prevent one field over.
     const stored = await setBlastRadiusConfig(accountId, incoming);
     const body: BlastRadiusConfigResponse = { status: 'ok', blastRadius: stored };
+    return body;
+  });
+
+  // The MY TURN settings — the third ONE-PER-ACCOUNT setting on this route: which card types count
+  // as your turn, the order My turn groups them in, and the Do next weights every Pending tab
+  // ranks by. Account-grained because one account is one reader, in every workspace.
+  //
+  // A PUT (the body is the WHOLE settings object, replacing the stored one). ⚠ ECHOES WHAT WAS
+  // STORED: `setMyTurnSettings` compacts to overrides only, so a sent default is not stored and
+  // Settings must render what the database holds, not what it sent.
+  //
+  // No 404: the target is the caller's own account (an unauthenticated cloud call is a 401 at the
+  // gate). Both modes, every tier — the feature is free. Rate tier `read`, DECIDED and pinned in
+  // rate-limit.test.ts: one validated UPDATE, no GitHub and no model.
+  app.put('/api/me/my-turn-settings', { schema: myTurnSettingsSchema }, async (req, reply) => {
+    const accountId = accountIdOf(req);
+    const { settings } = req.body as MyTurnSettingsBody;
+    if (settings !== null) {
+      const problem = validateMyTurnSettings(settings);
+      if (problem != null) {
+        return reply.code(400).send({ error: 'InvalidMyTurnSettings', message: problem });
+      }
+    }
+    const stored = await setMyTurnSettings(accountId, settings);
+    // The brief's roll-up counts are cached for five minutes; a save that switched a type off
+    // must not leave "Elsewhere" lines counting it until the TTL runs out.
+    clearDailyBriefCountsFor(accountId);
+    const body: MyTurnSettingsResponse = { status: 'ok', myTurnSettings: stored };
     return body;
   });
 

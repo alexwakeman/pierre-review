@@ -242,8 +242,10 @@ nothing).
   login→`ReviewBotKind` only. A stored workspace judgement and the `quality_check` role never reach
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
-- ✅ **The pg chain is currently REPLAYED AND GREEN — see § Replaying the pg chain below.** Last
-  re-run **2026-09-09** on the standing local Postgres (16.9): core through `db:migrate`
+- ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
+  ⚠ pg `0052`–`0055` and plugin `0034` are NOT (written 2026-09-19 with the Postgres down; see the
+  note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
+  (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
   `accounts.blast_radius_config` present as `jsonb` and `repo_file_coupling` carrying both FKs plus
   its `rfc_account_repo` unique index. Blast radius adds NO plugin migration, so the **33** plugin
@@ -682,8 +684,43 @@ on the NULL stamp. See docs/DATA-MODEL.md and docs/BOTTLENECKS.md § Asking for 
 `pro_flow_pointers`, the Chronology pointers cache — the `pro_work_plans` shape exactly
 (`(account_id, scope_key)` unique, no FK, erased with the account, never pruned per PR).
 
-⚠ **NONE OF THE THREE PG TWINS ABOVE HAS BEEN REPLAYED.** The standing Postgres was not running when
-they were written (2026-09-19); the SQLite halves ran through the real runner on the dev database
-and in every test DB. Repeat § Replaying the pg chain — core should reach **54 applied = 54 journal
-entries** and the plugin **34** — and check `review_request_events` carries both FKs and its unique
-index, and that `workspaces.flow_settings` is `jsonb`.
+### `0067_pr_security_signals` (pg `0054`)
+
+Four nullable columns on `pull_requests` — `dependency_vendor`, `security_fix`, `advisory_ids`
+(sqlite `text` json / pg `jsonb`) and `security_checked_at` — with no backfill in SQL: NULL
+`security_checked_at` is "never classified", and the GitHub backfill
+(`sync/backfill-pr-security.ts`) works through open automation PRs after walks. See
+docs/DATA-MODEL.md § dependency + security signals and docs/SYNC.md.
+
+It also carries the `workspace_reviewers` UPDATEs for six new automation logins and Semgrep's
+per-org App (three for `role`, seven for `kind`): the stored role and kind beat the login seed on
+read, so a code-only vocabulary change never reaches a workspace whose Bots tab already classified
+them. Same three conditions as `0053`/`0054` (`source <> 'manual'`; `identity_source <> 'manual'`
+with `kind IN ('in_house','vendor')`; `label = NULL`), and the same `replace` vs `regexp_replace`
+divergence. Both twins share `when` `1789696800000`.
+
+### `0068_my_turn_settings` (pg `0055`)
+
+Three nullable columns, no backfill in SQL:
+
+- `accounts.my_turn_settings` (sqlite `text` json / pg `jsonb`) — the reader's My Turn settings as
+  OVERRIDES ONLY; NULL is "every default", which is right for every existing row (the `0062`
+  `blast_radius_config` rule). See docs/DATA-MODEL.md § `accounts.my_turn_settings`.
+- `pr_mentions.mentioned_at` (sqlite `integer` / pg `timestamp with time zone`) and
+  `pr_mentions.mentioned_by_user_id` (`integer`, no FK) — the newest human mention's time and
+  author. Existing rows stay NULL until the mention scanner's next tick restamps them (it re-derives
+  the whole set every tick), and a NULL row shows no card. The table's unique is unchanged, so the
+  scanner's new `onConflictDoUpdate` targets the existing `prm_account_pr`.
+
+Both twins share `when` `1789783200000` (one day after `0067`/`0054`). The pg file uses
+`ADD COLUMN IF NOT EXISTS`, so a half-applied replay can re-run.
+
+⚠ **NONE OF THE FIVE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0055` and plugin `0034`). The
+standing Postgres was not running when they were written (2026-09-19); the SQLite halves ran through
+the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain — core
+should reach **56 applied = 56 journal entries** and the plugin **34** — and check
+`review_request_events` carries both FKs and its unique index, that `workspaces.flow_settings`,
+`pull_requests.advisory_ids` and `accounts.my_turn_settings` are `jsonb`, and that
+`security_checked_at` and `pr_mentions.mentioned_at` are `timestamp with time zone`. ⚠ `0055` is
+worth one WITH-DATA step: run the scanner's `ON CONFLICT (account_id, pr_id) DO UPDATE` against an
+existing row and check the row was restamped, not duplicated.

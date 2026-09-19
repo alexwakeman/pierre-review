@@ -1,0 +1,17 @@
+{
+  "name": "An ordinary undici bump whose release notes list eight CVEs: no security marker, so no fix and no ids",
+  "input": {
+    "title": "Bump undici from 7.16.0 to 8.5.0",
+    "headRefName": "dependabot/npm_and_yarn/undici-8.5.0",
+    "labels": [
+      "dependencies",
+      "javascript"
+    ],
+    "bodyText": "Bumps undici from 7.16.0 to 8.5.0.\n \n Release notes \n Sourced from undici's releases . \n \n v8.5.0 \n ⚠️ Security Release \n This release line addresses 8 security advisories . Most are fixed in\n v8.5.0 ; the SOCKS5 pool-reuse issue was fixed earlier in v8.2.0 . \n \n Action required: Upgrade to undici 8.5.0 or later. \n npm install undici@^8.5.0\n \n \n Summary \n \n \n \n Advisory \n CVE \n Severity (CVSS) \n Fixed in \n Fix commit \n \n \n \n \n GHSA-vxpw-j846-p89q \n CVE-2026-12151 \n High (7.5) \n 8.5.0 \n 32dbf0b3 \n \n \n GHSA-38rv-x7px-6hhq \n CVE-2026-9675 \n High (7.5) \n 8.5.0 \n b4c287b3 \n \n \n GHSA-vmh5-mc38-953g \n CVE-2026-9697 \n High (7.4) \n 8.5.0 \n 42d49559 \n \n \n GHSA-hm92-r4w5-c3mj \n CVE-2026-6734 \n High (7.5) \n 8.2.0 \n a516f870 \n \n \n GHSA-pr7r-676h-xcf6 \n CVE-2026-9678 \n Moderate (5.9) \n 8.5.0 \n cb105d7c \n \n \n GHSA-p88m-4jfj-68fv \n CVE-2026-9679 \n Moderate (5.9) \n 8.5.0 \n 5655ea43 \n \n \n GHSA-g8m3-5g58-fq7m \n CVE-2026-11525 \n Low (3.7) \n 8.5.0 \n 5655ea43 \n \n \n GHSA-35p6-xmwp-9g52 \n CVE-2026-6733 \n Low (3.7) \n 8.5.0 \n 6ea54ef8 \n \n \n \n \n High severity \n WebSocket DoS via fragment count bypass — CVE-2026-12151 \n GHSA-vxpw-j846-p89q · CWE-400, CWE-770\n Fix: 32dbf0b3 websocket: limit the number of fragments in a message (also c5ed7875 handle empty fragments and stream limits ) \n A malicious WebSocket server can stream a large number of small or empty\ncontinuation frames. Undici enforced a limit on cumulative payload size but did\nnot limit the number of fragments per message, leading to unbounded memory\ngrowth and denial of service. \n \n Affected: applications using new WebSocket(...) or WebSocketStream \nagainst untrusted endpoints. \n Workaround: none — upgrade is required. \n \n WebSocket DoS via cumulative fragment bypass — CVE-2026-9675 \n GHSA-38rv-x7px-6hhq · CWE-400, CWE-770\n Fix: b4c287b3 fix(websocket): enforce max payload size across fragments \n Undici validated the size of individual frames but did not track cumulative size\nacross a fragmented message. An attacker could send many small fragments that\neach pass per-frame validation but collectively exceed the configured limit,\ncausing memory exhaustion. This is a regression introduced in 8.1.0 (the \n \n \n ... (truncated) \n \n \n Commits \n \n a0806e1 Bumped v8.5.0 ( #5429 ) \n 8a0392c test: detect available python command in wpt runner ( #5427 ) \n f4045b9 ci: increase Node.js workflow timeout ( #5426 ) \n 363e44f chore: removed repro-h2-pipelining-default.mjs and lint ( #5420 ) \n c5ed787 websocket: handle empty fragments and strea"
+  },
+  "expected": {
+    "dependencyVendor": "dependabot",
+    "securityFix": null,
+    "advisoryIds": []
+  }
+}

@@ -135,7 +135,8 @@ export function PendingMuteSection(): JSX.Element {
           Muted items <span className="font-medium">stay on the Pending board</span> — they just
           stop being flagged as your turn. They no longer trigger notifications and no longer
           count towards “needs your attention”; they move into the broader “review or reply”
-          list. Red builds and stalled PRs are not affected.
+          list. Red builds and stalled PRs in their own tabs are not affected; types you added to
+          My Turn are muted like the rest.
         </>
       }
     >

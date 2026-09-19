@@ -464,6 +464,19 @@ export async function runSyncForRepo(
         );
       }
 
+      // DEPENDENCY + SECURITY signals for open automation PRs the walk has not classified — the
+      // same shape as the backfill above: bounded per run, stamped once per PR, budget-aware,
+      // strictly non-fatal. After every walk, so a PR classified before the detector existed
+      // converges in a few syncs rather than waiting for its next push.
+      try {
+        const { backfillPrSecurity } = await import('./backfill-pr-security.js');
+        await backfillPrSecurity(repo.accountId, repoId, log);
+      } catch (err) {
+        log.warn(
+          `security backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
+      }
+
       // The BLAST-RADIUS co-change index for this repo. Purely LOCAL — one indexed read of the
       // repo's merged pull requests, an in-memory fold and one upsert; it makes NO GitHub call
       // and spends no rate-limit budget, so unlike the backfill above it needs no gate and no
@@ -747,6 +760,16 @@ export async function syncAllRepos(log: Logger): Promise<void> {
       } catch (err) {
         log.warn(
           `review-request backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
+      }
+      // The dependency + security backfill, for the same reason: without it, an open automation
+      // PR nobody pushes to is only classified when somebody presses Sync.
+      try {
+        const { backfillPrSecurity } = await import('./backfill-pr-security.js');
+        await backfillPrSecurity(repo.accountId, r.id, log);
+      } catch (err) {
+        log.warn(
+          `security backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
         );
       }
     } catch (err) {

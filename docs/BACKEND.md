@@ -209,9 +209,12 @@ of either does not have to find this doc first.
 ## My Turn — the ball rule
 
 **MY TURN = the reader owes an action on this PR, and nothing they have done since the last RELATED
-event discharges it.** Derived on every read from `reviews`, `review_comments`, `pr_comments` and
-`commits`. Nothing is stored: there is no dismissal table, no "done" state, no tombstone. A card
-appears when the state says so and vanishes when the state says so.
+event discharges it.** Derived on every read from `reviews`, `review_comments`, `pr_comments`,
+`commits` and the mention scanner's `pr_mentions` (plus, for the promotions below, the PR's own
+merge and CI columns and `repos`' default-branch columns). Nothing about a card is stored: there is
+no dismissal table, no "done" state, no tombstone. A card appears when the state says so and
+vanishes when the state says so. What IS stored is the reader's choice of which TYPES exist
+(§ Settings: gates and promotions), never a verdict on one card.
 
 ### What the predecessor did, and why it was wrong
 
@@ -231,20 +234,50 @@ a `>=` operator.
 
 ### The summons — what puts the ball in your court
 
-| # | Rule | Where |
-|---|---|---|
-| S1 | A review is outstanding from you (`review_requests` row with `user_id = me`) | pre-existing |
-| S2 | A PR in a repo you added that you have **never touched** (`mineLast == null`) | the reformed `watched_repo_pr` |
-| S3a | A human **reply** in a thread you opened, still unresolved | `getThreadsAwaiting` — the ONE place the rule already existed |
-| S3b | A thread you opened has gone **`likely_addressed`** | `awaitingKind: 'likely_addressed'` |
-| S3c | A human **commit** after your last action — new code makes your review stale | `NewPrBall.kind === 'commits_after'` |
-| S4 | A finished Claude review with an un-posted actionable finding | `getUnactionedClaudeReviews` |
+Each rule is one card type (`MyTurnCardReason`) and one section of `MyTurnResponse`. "Human" means an
+author id that is known, is not you, and is not in the global automation set (below).
+
+| # | Rule | Type · section | Clock (`since`) |
+|---|---|---|---|
+| S1 | A review is outstanding from you (`review_requests` row with `user_id = me`) | `review_request` · `awaitingReview` | when it was requested |
+| S2 | A PR in a repo you added that you have **never touched** (`mineLast == null`). **Off by default** — a survey of the workspace, not a summons | `watched_repo_pr` · `watchedRepoPrs` | `openedAt` |
+| S3a | The newest **human** comment in a thread you opened is not yours, and the thread is unresolved. A bot reply never counts | `thread` · `threadsAwaiting` (`getThreadTurns`) | that comment |
+| S3b | You had the last human word in a thread you opened, and it has gone **`likely_addressed`** | `thread` (`awaitingKind: 'likely_addressed'`) | your comment |
+| S3c | A human **commit** after your last action — new code makes your review stale | `pushed_since` · `pushedSince` (`NewPrBall.kind === 'commits_after'`) | that commit |
+| S3d | In a thread SOMEBODY ELSE opened that you commented in, the newest human comment is someone else's, after your newest comment there, unresolved | `thread_reply` · `threadReplies` (`getThreadTurns`) | that comment |
+| S4 | A finished Claude review with an un-posted actionable finding | `claude_review` · `claudeReviewsToAction` | when the run finished |
+| S5 | Your newest action on the PR is a **PR-level comment**, and a human commented at PR level after it | `comment_reply` · `commentReplies` | the FIRST such comment (when the ball came back) |
+| S6 | A human **@-mentioned** you on an open PR after your last action on it | `mention` · `mentions` | `pr_mentions.mentioned_at` |
+
+- **S3c, S5 and S6 are `direct`**, like every rule but S2: each needs you to have been involved.
+  S3c used to share S2's section and relevance; it is its own type now, so the two have separate
+  switches and S2 alone keeps the maintainer test (`'maintained'` / `'none'`).
+- **The onboarding floor reaches the new sources.** S3d, S5 and S6 need the summoning event at or
+  after the repo's `createdAt`; without it, adding a repo and its 90-day backfill would surface two
+  months of old replies and mentions at once. (S2 and S3c already read it through
+  `getAddedRepoActionablePrIds`.)
+- **S6 reads a clock the scanner stamps** (`sync/mention-scan.ts`, [SYNC.md](SYNC.md) § "@mention
+  derivation"): the newest mention of you by a human on each PR. A row with a NULL `mentioned_at`
+  (the scanner has not restamped it since migration `0068`) shows no card — under-notifying is the
+  safe direction. A new mention shows within one scan tick (5 min); in cloud the scanner covers only
+  recently active accounts, so a returning reader waits one tick.
+- **S3d, S5 and S6 include drafts and automation-authored PRs**: conversations happen on drafts,
+  and a colleague can name you on a Dependabot PR.
+- **One PR, one summons.** The PR-grained types claim PRs in a FIXED precedence —
+  `review_request > pr_approved > your_pr > mention > comment_reply > pushed_since > watched_repo_pr`
+  — and each drops what an earlier SHOWN type claimed. ⚠ Fixed, never the reader's display order:
+  which card exists must not depend on a display preference. Thread-grained, own-work, Claude and
+  red-trunk cards coexist with everything (each is a different job).
 
 ### What does NOT return the ball
 
-⚠ **RELATEDNESS, NOT RECENCY.** A human PR-level comment, or a comment on somebody else's thread,
-does **not** summon you back. This is the difference between the rule as specified and a naive
-"anything after me" rule, and it is what stops a teammate's side-comment re-summoning you.
+⚠ **RELATEDNESS, NOT RECENCY.** A human comment that is not an answer to you does **not** summon
+you back: a PR-level comment after your review, a comment in a thread you never wrote in. This is
+the difference between the rule as specified and a naive "anything after me" rule, and it is what
+stops a teammate's side-comment re-summoning you. ⚠ **S5 is narrow on purpose**: it fires only when
+your LAST action on the PR was itself a PR-level comment — the narrowest reading in which the next
+person's comment is plausibly a reply to yours. It can still fire on a courtesy "thanks, merged"
+after your "LGTM"; the type's switch is the escape, not a wider or cleverer rule.
 
 ⚠ **NO BOT ACTION EVER RETURNS THE BALL — INCLUDING A PUSH.** This **deliberately diverges** from
 Chronology (`db/pr-intervals.ts`), which counts *every* commit regardless of author because a push is
@@ -252,15 +285,32 @@ code arriving whoever's name is on it. That is right for an aggregate flow measu
 personal summons: a formatting bot's push is not a reason to re-read a PR. Both rules are correct for
 their own question — **do not "fix" one to match the other.**
 
-⚠ Bot-ness resolves through the **global `users.isBot` set**, never `hiddenBotUserIds`, which REQUIRES
-a `workspaceId` — and `getMyTurn` also runs **unscoped** for the notification watcher. A commit with a
-null author is *not* a human push (unproven must not summon).
+⚠ Bot-ness resolves through the **global AUTOMATION set** — `globalAutomationUserIds()`
+(`db/automation-ids.ts`): `users.isBot` ∪ `users.github_type = 'Bot'` ∪ the `AUTOMATION_VENDORS`
+logins and prefixes. `getMyTurn` reads it ONCE and hands it to every rule, and the mention scanner
+builds from the same set, so a mention it stamps is one the ball rule honours. Why not `users.isBot`
+alone: S3d, S5 and S6 read OTHER people's comments, and on the dev DB five accounts GitHub types as
+a Bot but `isBot` misses wrote **112 PR comments on 82 open PRs** (google-cla 73, socket-security
+24, cdp-github-action 12, gitguardian 2, jit-ci 1) — each would have summoned you as "a person
+commented after you". The wider set also stops Copilot and cdp-github-action pushes returning the
+ball (S3c), and stops a PR opened by a GitHub-typed Bot being a "New PR" (S2). `users.isBot` itself
+is unchanged.
+
+⚠ It is still **never `hiddenBotUserIds`**, which REQUIRES a `workspaceId` — and `getMyTurn` also
+runs **unscoped** for the notification watcher. So a workspace's manual "this is a human" cannot
+reach it; accepted, because every member is an account GitHub types as an App or a known vendor
+login. A commit or comment with a null author is *not* a human (unproven must not summon).
 
 ### Discharge
 
 Any action of yours at or after the summoning moment: a review of **any** state (a bare `commented`
-review counts), a review comment, a PR comment, or a commit. ⚠ `pr_views` is NOT an action —
-`markPrViewed` stamps on pane open, so reading it here would clear cards on hover.
+review counts), a review comment, a PR comment, or a commit (`lastActionClocks`). The thread types
+(S3a, S3b, S3d) clear when you comment in that thread or it is resolved. Every type clears when the
+PR closes. The promotions below clear on STATE, not on your action: the build goes green, the
+conflict is resolved, the PR stops being ready, the thread gets a reply or a later commit, the
+branch goes green.
+⚠ `pr_views` is NOT an action — `markPrViewed` stamps on pane open, so reading it here would clear
+cards on hover.
 
 ⚠ **`events` is NOT usable for this.** It looks free and is **lossy**: `sync/upsert.ts` emits
 `review_submitted` only when `isSubstantiveReview` passes, so bodiless `commented` reviews produce no
@@ -273,12 +323,14 @@ assembly and *before* the 50-slice. Removing seeds moves numerator and denominat
 cap disclosure stays arithmetically true; removing cards after the slice — or on the client — leaves
 `myTurnTotal` stale and over-claims "50 of 148".
 
-⚠ It belongs in the **helper**, which `getMyTurn` and `getActionableActivityIds` SHARE, so the board,
-the browser notification, the brief count and the activity list move together.
+⚠ It belongs **inside `getMyTurn`** — its section gates and its helpers (`getAddedRepoActionablePrIds`,
+`getThreadTurns`, `lastActionClocks`) — so the board, the browser notification, the brief count and
+the CLI move together. (`getAddedRepoActionablePrIds` once had a second caller,
+`getActionableActivityIds`; it was deleted with the dismissals table.)
 
 ### Two adjacent bugs the Done button was hiding
 
-⚠ **`getThreadsAwaiting` had no `state = 'open'` predicate.** With dismissals removed it returned 31
+⚠ **`getThreadsAwaiting` (now `getThreadTurns`) had no `state = 'open'` predicate.** With dismissals removed it returned 31
 threads, every one on a PR that had already merged or closed — each previously hand-dismissed.
 Deleting the button without this makes the board strictly worse.
 
@@ -294,5 +346,246 @@ commits since"**, and its section chip says **"Pushed since"**. `MyTurnCard.ball
 the SPA picks the WORDS — a chip keyed on `reason` alone said "New PR" directly beside that detail,
 the card contradicting itself in two adjacent elements. ⚠ An **absent** `ball` falls back to the
 section label, never to a guess: the field is trailing-optional for wire tolerance, and an older
-response must not have "Pushed since" invented over a PR nobody has touched.
+response must not have "Pushed since" invented over a PR nobody has touched. (S3c is now its own
+`pushed_since` type with its own chip, so the chip no longer depends on `ball`; `ball` still carries
+the pusher and your last action for the detail line.)
 
+### Settings: gates and promotions
+
+The reader decides which types exist, how My turn orders them and how Pending ranks cards
+(Settings → My Turn). FREE, both modes, every tier, PER ACCOUNT: one account is one reader, and the
+same settings apply in every workspace.
+
+- **Storage is overrides only.** `accounts.my_turn_settings` is NULL until the reader changes
+  something ([DATA-MODEL.md](DATA-MODEL.md)). Every reader resolves it through ONE shared function,
+  `resolveMyTurnSettings` (`packages/shared/src/my-turn-settings.ts`); a malformed part falls back
+  to its default alone. `compactMyTurnSettings` is the one definition of "an override", used by the
+  SPA to build the body and again by the server before it stores, so a Save never freezes a default.
+  The server-side read is `getMyTurnSettings` (`db/my-turn-settings.ts`), straight from `accounts`,
+  never from the local-account cache. The one writer is `PUT /api/me/my-turn-settings`
+  ([API.md](API.md)); its setter refreshes the local-account cache, or `/api/me` would hand the
+  Settings form the old value in local mode.
+- **A type switched off is REMOVED, not hidden.** The gate runs inside `getMyTurn`, and a
+  switched-off section is not computed at all (its queries are skipped). So the list, every count,
+  the brief lines, the browser notifications and the CLI shrink together, in the scoped and the
+  unscoped call alike. A switched-off type claims nothing, so a PR it would have held falls through
+  to the next shown type in the precedence above. Defaults: every summons on except S2
+  (`watched_repo_pr`); every promotion off.
+- **Five PROMOTIONS move a card from another tab into My turn** — four about your own PRs,
+  `own_ci_red` (a red build), `own_conflicts` (a conflict, in a repo you can push to), `own_ready`
+  (GitHub will merge it now, or once the branch is updated) and `own_thread` (a review thread with
+  no reply and no later commit for a day), plus `trunk_red` (a red default branch, scoped `off` /
+  `maintained` / `all`). Each is `direct`.
+  - ⚠ **A PROMOTED CARD MOVES, IT IS NEVER LISTED TWICE.** `getWorkspaceInsights` builds
+    `promotedCi` / `promotedConflicts` / `promotedReady` / `promotedThreads` / `promotedTrunks`
+    from the one `getMyTurn` result, and each home builder (`ci_failing` both arms, `merge` /
+    `update_branch`, `conflicts`, `untouched_thread`) drops those ids from its SEED list before its
+    `kindTotals`, beside the Dependencies `depPrIds` test. The tab counts move with their lists.
+  - **The population is the home card's exactly**: your own open PR, non-draft, with an activity
+    event inside `maxQuietDays`, classified by the same functions (`db/pending-classify.ts`:
+    `isRedCiStatus`, `isConflicting`, `forwardKindOf`). `own_conflicts` keeps the `conflicts` write
+    gate; a thread you started on your own PR stays on its home tab.
+  - ⚠ **A PR carrying a dependency tool's marker is never promoted**, even under your own login
+    (a Snyk fix pushed with your token): it is a dependency PR and lives in the Dependencies tab.
+  - `own_ready` takes `pr_approved`'s claim when both are shown: the ready card carries the approval
+    standing and the Merge button, and dropping the approval card without its claim would let the
+    PR fall through to `your_pr` and turn one card into two.
+  - **`trunk_red` is `direct` in both scopes** (the reader asked for it, so it notifies); `maintained`
+    is a display fact that picks the sentence. The landing PR resolves through the same
+    `resolveTrunkCommitPrs` as the `ci_failing` trunk arm, and `MyTurnTrunkCard` carries the same
+    four author fields, so the People / Automation lens puts it on exactly one side. It is
+    REPO-grained: `kind === 'my_turn'` no longer implies a PR, and every consumer branches on
+    `reason === 'trunk_red'` before treating one as a PR (the scorer, the card renderer, the Pro
+    sprint report).
+- **The Pending mute still rides `relevance`** for every new type (`relevanceFor`), so a muted
+  repo's rows stay listed as `'none'`; a mute never removes a row. A switched-off type does.
+- **The ranking settings.** The type ORDER groups My turn (`tabGroupRank`, `groupByReason`), and the
+  three Do next WEIGHTS (integer percents, steps of 10, summing to 100; presets Balanced 50/30/20,
+  Mine first 30/10/60, Oldest first 20/70/10, Quick wins 80/10/10) reach `scoreCards` for every tab
+  and for the Pro work plan. `rankPendingTabs` returns them as `rules` on `/api/attention`, so the
+  board explains the order the reader actually got ([FRONTEND.md](FRONTEND.md) § The Pending tabs).
+  Measured on the dev DB before the build (773 listed cards): under Balanced, 401 of them outrank a
+  fresh direct review request; under Mine first, none do. Balanced stays the default, so nobody's
+  order moves until they choose.
+- **The brief counts a promoted red trunk once**: `trunkRed` leaves out
+  `WorkspaceInsightsResponse.myTurnTrunkRepoIds` before its cap, and `ciFailing` counts only the
+  `ci_failing` cards that were not promoted. A save drops the account's cached roll-up counts
+  (`clearDailyBriefCountsFor`), so "Elsewhere" lines never count a type the reader just removed.
+- On the dev account (an observer with no PRs of its own) the defaults leave ONE card on My turn —
+  three.js #34066, a `comment_reply` — where it held 551 before. With the app now opening on
+  Pending, that account's cold open is an almost empty My turn.
+
+## The Dependencies tab — dependency automation and security (CORE)
+
+The sixth Pending tab (`deps` in `PENDING_TABS`) holds two card kinds: **`security`** and
+**`dependency_bump`**. Deterministic, free on every tier, no model, no new route and no new table
+(the four `pull_requests` columns it reads are in [DATA-MODEL.md](DATA-MODEL.md) § `pull_requests` —
+dependency + security signals). Built in `getWorkspaceInsights` (`db/queries.ts`), ranked in
+`db/pending-tabs.ts`, scored in `db/work-plan.ts`.
+
+### A dependency PR is listed ONLY there
+
+A **dependency PR** is an open PR whose resolved author role is `'dependency'`
+(`authorAutomationFor(…).role`, below): a dependency bot opened it, or a person's PR carries a
+dependency tool's own marker (`pull_requests.dependency_vendor`). The fold resolves the set ONCE
+(`depPrIds`, right after the open-PR select) and every other PR kind drops those PRs from its SEED
+list, **before its `kindTotals` is taken** — so each total is exactly its cards, and one PR never
+shows the same merge state in two tabs.
+
+| Kind | Dependency PRs |
+|---|---|
+| `ci_failing` (the `your_pr` arm) | excluded — the Dependencies card says "CI failing" |
+| `merge` / `update_branch` | excluded — the Dependencies card carries the merge actions |
+| `conflicts` | excluded — the Dependencies card carries the same resolver entry |
+| `stalled_review`, `reviewer_routing` | excluded — the card says "Needs review" |
+| `untouched_thread` | excluded — filtered from `threadRows` before the total |
+| `my_turn` | **KEPT.** A review requested of you on a Dependabot PR is a direct summons and wins. `getMyTurn` reads no `depPrIds`, so a thread you started on one, or a marker PR under your own account, also stays — except that the own-work PROMOTIONS skip a marker PR (§ My Turn — Settings), which would otherwise be listed twice |
+| `reviewer_load` | **KEPT.** It counts a person's review queue the way GitHub holds it, and is a strip about people, not a PR card |
+
+`rg -a "depPrIds.has" apps/backend/src/db/queries.ts` shows the six exclusion sites plus the builder.
+
+### One card per PR
+
+For each PR in the open-PR population (the board's one admission floor, below):
+
+- **a dependency PR** gets a `security` card when its own markers fix a known advisory
+  (`security_fix` set) or a live automation alert names one, and a `dependency_bump` card
+  otherwise. It carries its merge fields and, on the board, its merge actions. Never both kinds.
+- **a person's PR** gets a `security` card (`dependencyUpdate: false`, `depState: null`, `fix: null`)
+  only for a live alert, and KEEPS its other cards: the alert is an extra job, not the PR's home.
+
+Card facts, all read off the synced row:
+
+- `depState` (`dependencyPrState`, `db/dependency-cards.ts`), first match wins: `conflicts` →
+  `ci_red` → `behind` → `ready` → `needs_review` → `blocked` → `unknown`. NULL columns are NOT
+  OBSERVED and fall to `unknown`, never to `ready`. ⚠ **A red build GitHub would still merge is
+  `ready`**, not `ci_red`: `unstable` means only NON-required checks are red, and `unstable` is
+  mergeable (`READY_MERGE_STATES`, `mergeVerdict`). So a ready dependency PR and a person's `merge`
+  card print one sentence for one state: the `ready` detail IS `mergeCardDetail('merge', mss, 0)`.
+- `severity`: `high` when a tool's marker or alert names an advisory, `warn` for Dependabot's
+  inferred fix with no alert behind it, `info` for a bump.
+- `relevance` (direct / maintained / none, the merge block's three tiers) feeds the ranker weight
+  and the colour only, never an ownership claim. ⚠ **NOT MUTED**: the Pending mute reaches `my_turn`
+  only.
+- `viewerCanPush` is a VISIBILITY gate for the merge controls. There is no write gate on the kind
+  (the merge/routing precedent), unlike `conflicts`.
+- `advisoryIds` is every id the fix and the alerts name, canonical, deduplicated, fix ids first,
+  complete up to the 50-id safety cap. `detail` ("Fixes GHSA-… and 2 more") counts the FIX's own
+  ids only, never an alert's: the PR may not fix what a tool flagged. `alerts` is the newest 3;
+  `alertCount` is the whole population behind the "+N".
+
+### Who opened it — the author resolution
+
+ONE resolution feeds the card's byline, its side of the People / Automation lens and its
+Dependencies-tab membership, so the three cannot disagree. It is read ONCE per fold
+(`resolveAuthorAutomationInputs`), and `prRef` stays synchronous.
+
+- **The SET** is `hiddenBotUserIds`, widened: `users.isBot` ∪ the review-bot logins ∪ every
+  account GitHub TYPES a Bot (`users.github_type = 'Bot'` — the Apps whose login GraphQL returns
+  without `[bot]`: 7 such users on the dev DB, who wrote 112 PR comments on open PRs) ∪ every
+  `AUTOMATION_VENDORS` login and prefix ∪ the workspace's automated rows. ⚠ A manual "this is a
+  human" still removes the actor from EVERY half. The same set drives the Timeline's `excludeBots`
+  and the Feed lens: measured, 34 events from five accounts became hidden there (Copilot,
+  lumberbot-app, ImgBotApp, diffray-bot, orbisai0security).
+- **The KIND** is `classificationKindForUser`, now seeded from the non-review vendors too
+  (renovate, snyk-io, imgbot…), so a byline names the tool instead of a nameless "Bot". The
+  REVIEW_BOTS seed still wins; a STORED kind beats the new seed, and only a NULL stored kind takes
+  it. ⚠ **EXACT LOGINS ONLY** (`exactAutomationVendorUsers`): this map is also the bot drill-downs'
+  "is this id classified here" gate, which then resolves the login, so a prefix match
+  (`semgrep-code-<org>`) would hand any tenant another org's name. A prefixed login still counts as
+  automation and still gets its role; only its brand waits for a workspace row.
+  `classificationKindForUserForAccount` is unchanged: it feeds the cross-org benchmark.
+- **The ROLE** is `authorAutomationFor` (`db/dependency-cards.ts`, pure): (1) a dependency
+  tool's marker on the PR ⇒ `{role: 'dependency', kind: the tool, source: 'account' | 'marker'}` —
+  the marker wins the role even over an automated author with another role (Socket Fix and Frogbot
+  run as `github-actions`); (2) an author outside the set ⇒ null, a person; (3) otherwise the
+  manual role, the login vocabularies, a non-`review` stored role, a review-bot kind, and last
+  `code_agent`. ⚠ **The last resort is `code_agent`, NOT `resolveActorLanes`' `quality_gate`**: an
+  unknown automation that OPENS a PR writes code. Different question, deliberate divergence.
+- `authorIsBot` / `authorBotKind` keep their meaning, a claim about the ACCOUNT. `automation` is a
+  claim about the PR, which a marker can make of a person's account.
+- `ci_failing` carries the same four author fields: the viewer on `your_pr`, the LANDING PR's
+  author on `trunk`, and none (the people side) when no PR resolved. So the lens has ONE predicate
+  for every card, `pendingAuthorSideOf` in `packages/shared/src/pending-rules.ts`.
+- ⚠ **Pending and Reports can disagree on an actor.** The kind seed reaches `resolveActorLanes`
+  (measured: 7 events moved lane, from ImgBotApp and orbisai0security), but `github_type = 'Bot'`
+  does not, so Copilot's coding agent and `cdp-github-action` are automation on Pending and people
+  in the Reports lanes. `resolveActorLanes` was deliberately left alone.
+
+Two small modules hold what more than one fold asks:
+
+- **`db/pending-classify.ts`** — "is this build red?" (`RED_CI_STATUSES`, `isRedCiStatus`) and
+  "does it conflict?" (`isConflicting`), spelled once for the home cards and the Dependencies cards.
+  Pure: no `db/client`, no `db/triage`.
+- **`db/automation-ids.ts`** — the global readers (`githubTypeBotUserIds`, `automationVendorUserIds`,
+  `exactAutomationVendorUsers`, and their union with `users.isBot`, `globalAutomationUserIds` — the
+  My Turn ball rule's automation set). Ids only, used as membership tests; `users` is global. A
+  separate module so My Turn's mention scanner (`db/pr-mentions.ts`) can reach them without
+  importing `queries.ts`.
+
+### Security alerts are derived on read
+
+`deriveSecurityAlerts(prIds, automatedIds, kindOf)` (`db/security-alerts.ts`) folds the stored
+comment rows of open PRs into live alerts. The rules are the detector's (`evaluateSecurityAlerts`,
+`sync/security-detect.ts`); the file only reads candidates. Nothing is stored.
+
+- ⚠ **TENANCY IS THE ID LIST.** `pr_comments`, `reviews` and `review_comments` carry no
+  `account_id`. Every read is keyed by `pr_id IN (prIds)`, and the only caller passes the fold's
+  account-scoped `openPrIds`. Never export a variant that takes ids from a request.
+  `verify:isolation` checks it directly: the reader answers for the ids it is handed, even when
+  another tenant's PR carries the same comment.
+- ⚠ **THE SQL PRE-FILTER MAY BE LOOSER THAN THE EVALUATOR, NEVER STRICTER.** It is built from
+  `SECURITY_ALERT_PREFILTER`, because a tool's "all clear" (Socket's "All alerts resolved") names no
+  advisory and must still reach the evaluator: the latest row decides. The evaluator re-applies
+  every literal EXACT-CASE, so SQLite's case-blind `LIKE` and Postgres' case-sensitive one alert on
+  the same rows.
+- **Comments and reviews are narrowed to the tools' own accounts**, with the same looseness: an
+  author-gated rule reads only its tool's login; an author-free rule (Frogbot, Checkmarx, which post
+  through `github-actions` or a person's token) reads any row carrying its marker
+  (`AUTHOR_FREE_ALERT_MARKERS`, held to the rules by `pending-deps.test.ts`). **Threads are not
+  narrowed**: the `reviewer` fallback reads every automated root carrying any literal, which no
+  narrower `LIKE` can promise on Postgres. Measured on Erxes (83 active PRs, 5.2 MB of comment text,
+  99.8% of it automation's own): all literals over every comment and review took ~65 ms of a
+  ~400 ms fold; the narrowed reads take ~10 ms; threads stay ~60 ms. Gating on the automated
+  authors instead was slower.
+- **Latest row, per tool.** On comments and reviews, the tool's LATEST row per (PR, rule, author)
+  decides — per sticky comment, because Socket keeps two on one PR (the alerts report and the
+  dependency overview). A later clear from the same tool retracts the alert. Unsubmitted
+  (`pending`) reviews are skipped.
+- **Thread roots only.** A thread alert comes from the thread's FIRST comment (the earliest
+  `(created_at, id)` of the whole thread, from one extra read on `rc_thread_idx`, no correlated
+  subquery), never a reply. It clears when the thread is resolved or `likely_addressed`.
+- A row with no author never alerts: every alert names who raised it.
+
+### Ranking, the floor and the brief
+
+- **Strict group, then score.** `tabGroupRank` puts every `security` card before every
+  `dependency_bump`; each group is ordered by the Do next score. Both kinds are scored for the
+  board and are NEVER work-plan rows (the `conflicts` precedent): a dependency PR starts from the
+  base its state names (`DEPENDENCY_STATE_BASE`; a `ready` one splits on approval like a `merge`
+  card), and a person's flagged PR from `security_alert` (0.55). There is no security bonus: the
+  strict group already orders security first.
+- **Split totals.** `rankPendingTabs` counts `authorTotals`, `kindAuthorTotals` and (My turn)
+  `relevanceAuthorTotals` off the uncapped cards with `pendingAuthorSideOf`, so
+  `people + automation === total` by construction. The list cap is per LIST GROUP
+  (`listGroupOf`: kind × My turn's "Only yours" side × who opened it), so every view is its own
+  true top 50.
+- **The board's one admission floor applies** (open, non-draft, an event within `maxQuietDays` =
+  90). Measured on the dev DB: 716 of 1,438 open non-draft PRs pass it, and it holds out 8 security
+  items (7 fix PRs in drizzle-orm and erxes, and a Socket alert on erxes#7643) and 7 bumps, all in
+  repos the viewer only READS. Exempting security would be a one-predicate change plus a separate
+  id set, or every other kind would re-admit the quiet PRs.
+- **The brief** gains one line, `security` = `kindTotals.security` (uncapped, like the other survey
+  lines), which opens the board isolated to `security`. It is templated and is not among the Pro
+  narration's inputs, so no stored brief re-bills. `dependency_bump` is counted by no line: an
+  update is housekeeping.
+
+Measured on the dev DB when built (workspaces 1–8): `dependency_bump` 7 / 9 / 0 / 0 / 0 / 3 / 9 / 1
+and `security` 0 / 0 / 1 / 0 / 2 / 0 / 0 / 0, every one a `dependabot[bot]` PR (the three security
+cards are erxes#7874, inferred, and jupyter/notebook #8021 / #8022, proven). CDP's Waiting on review
+went from 17 to 8 and Ready to land from 9 to 4. Live comment alerts on active PRs: 0 — the two
+CodeRabbit thread roots naming an advisory sit in resolved threads. No active PR is opened by
+non-dependency automation, so the People / Automation lens is offered on no tab yet.
+
+Tests: `db/pending-deps.test.ts` (the fold, throwaway DB), `db/dependency-cards.test.ts` (the pure
+helpers), `verify:isolation` (the alert reader and the backfill worklist).

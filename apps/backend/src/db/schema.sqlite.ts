@@ -28,6 +28,7 @@ import type {
   CheckRun,
   FlowSettings,
   Label,
+  MyTurnSettings,
   ReviewRouteReason,
   StoredPrFile,
 } from '@pierre-review/shared';
@@ -100,6 +101,11 @@ export const accounts = sqliteTable('accounts', {
   // table across three dial positions and `shared` is types-only on this side (PACKAGING), so
   // the SPA resolves — `/api/me` echoes this column RAW, nulls and all.
   blastRadiusConfig: text('blast_radius_config', { mode: 'json' }).$type<BlastRadiusConfig>(),
+  // MY TURN settings — which card types show, their order, and the Do next weights. OVERRIDES
+  // ONLY, NULL = the product defaults. One writer (PUT /api/me/my-turn-settings, which compacts
+  // before storing), resolved by packages/shared `resolveMyTurnSettings`. ACCOUNT grain: one
+  // account = one reader.
+  myTurnSettings: text('my_turn_settings', { mode: 'json' }).$type<MyTurnSettings>(),
 });
 
 export const repos = sqliteTable(
@@ -327,6 +333,22 @@ export const pullRequests = sqliteTable(
     // and treats a mismatch as NULL. Storing the verdict without the sha is how a stale
     // "comments only" survives a force-push that added a schema change.
     contentKindSha: text('content_kind_sha'),
+    // ---- DEPENDENCY + SECURITY SIGNALS (migration 0067) — read from the PR's own title / branch /
+    // labels / FULL bodyText at sync (sync/security-detect.ts). ⚠ Derived, small, NO BODIES (lean
+    // storage). ⚠ All four are written together or not at all: a response that did not carry
+    // `bodyText` (null/undefined) writes NOTHING; a classified PR writes all four, NULLs included —
+    // a positive statement. `security_checked_at` NULL is "never classified" and is the backfill's
+    // worklist (sync/backfill-pr-security.ts).
+    // The tool whose OWN marker is on the PR (a `DependencyMarkerVendor`). CONTENT ONLY, never
+    // the author login — a Snyk fix opened under a person's token still carries Snyk's marker.
+    dependencyVendor: text('dependency_vendor'),
+    // 'proven' = the tool's own security marker; 'inferred' = Dependabot's ecosystem-named group
+    // with its truncation note. NULL = not a known-advisory fix, including every ordinary bump
+    // whose release notes quote a CVE.
+    securityFix: text('security_fix', { enum: ['proven', 'inferred'] }),
+    // Canonical advisory ids named by the vendor-selected fields; NULL when there are none.
+    advisoryIds: text('advisory_ids', { mode: 'json' }).$type<string[]>(),
+    securityCheckedAt: integer('security_checked_at', { mode: 'timestamp' }),
   },
   (t) => ({
     repoIdx: index('pr_repo_idx').on(t.repoId),
@@ -1716,11 +1738,12 @@ export const mlCommentLabels = sqliteTable(
   }),
 );
 
-// ── "@you" on a PR — the MENTION arm of My Turn's personal-relevance rule (CORE, no AI) ────
-// PRESENCE IS THE WHOLE FACT: a row means "this account's viewer login is @mentioned somewhere
-// on this PR" (a PR comment, a review body, or an inline review comment). There is no
-// `mentioned` boolean and no row for "scanned, found nothing" — absence is the answer, which is
-// what lets every reader be a single indexed existence check.
+// ── "@you" on a PR — the source of My Turn's @mention cards (CORE, no AI) ─────────────────────
+// PRESENCE IS THE FACT: a row means "this account's viewer login is @mentioned somewhere on this
+// PR" (a PR comment, a review body, or an inline review comment). There is no `mentioned` boolean
+// and no row for "scanned, found nothing" — absence is the answer. The row also carries WHEN the
+// newest such mention was made and by whom (`mentioned_at`), because the card clears when the
+// viewer acts after that moment.
 //
 // WHY A TABLE AND NOT A COLUMN ON pull_requests. The fact is DERIVED and re-derivable, it is
 // about a (tenant, PR) pair rather than about the PR, and it is sparse — 12 rows out of 8.5k PRs
@@ -1753,6 +1776,12 @@ export const prMentions = sqliteTable(
     // case-insensitive, so the stored form has to be canonical or a reader's equality test
     // would depend on how GitHub happened to spell the login that day).
     login: text('login').notNull(),
+    // The NEWEST mention of `login` on this PR by a person who is not the viewer and not
+    // automation (the global automation set). NULL = the scanner has not stamped this row yet —
+    // the reader shows NO card for it (under-notifying is the safe direction). Rewritten by every
+    // scan tick. No FK on the author: a display hint the scanner rewrites, over a global table.
+    mentionedAt: integer('mentioned_at', { mode: 'timestamp' }),
+    mentionedByUserId: integer('mentioned_by_user_id'),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

@@ -14,13 +14,16 @@
 //      the viewer clears, so it discloses. Borrowing `myTurnTotal` as its denominator would be one
 //      row mixing two populations AND (because the guard is an equality) would drop the "of N"
 //      entirely on exactly the workspaces it exists for.
+//   3. A TRUNK CARD NAMES WHO OPENED THE LANDING PR. The card carries the landing PR's author and
+//      `automation` (so a red head after a Dependabot bump reads as one), and a head no PR resolved
+//      to names nobody — never "Deleted account".
 //
 // Run from the workspace that HAS vitest:
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { describe, expect, it } from 'vitest';
-import type { DailyBriefCounts } from '@pierre-review/shared';
+import type { CiFailingCard, DailyBriefCounts } from '@pierre-review/shared';
 import { ciFailingCapDisclosure } from '../src/components/Activity/AttentionView.js';
-import { KIND_LABEL } from '../src/components/Activity/AttentionCards.js';
+import { KIND_LABEL, landingPrByline } from '../src/components/Activity/AttentionCards.js';
 import { INSIGHT_KINDS } from '../src/hooks/useUrlState.js';
 
 /** A brief fold with only the fields this rule reads varied. */
@@ -56,6 +59,50 @@ describe('a new InsightKind reaches every hand-written list', () => {
     // a browser Back out of the narrowed view leaves the app.
     expect(INSIGHT_KINDS).toContain('conflicts');
     expect(KIND_LABEL.conflicts).toBe('Merge conflicts');
+  });
+});
+
+describe('the landing PR’s byline on a trunk card', () => {
+  const trunk = (over: Partial<CiFailingCard> = {}): CiFailingCard => ({
+    id: 'ci:trunk:7',
+    kind: 'ci_failing',
+    severity: 'warn',
+    arm: 'trunk',
+    repoId: 7,
+    repoFullName: 'acme/api',
+    ciStatus: 'failure',
+    prId: 55,
+    prNumber: 12,
+    prTitle: 'Bump lodash',
+    headSha: 'a1b2c3d4',
+    mergedById: 3,
+    viewerMerged: false,
+    authorId: 12,
+    authorIsBot: true,
+    authorBotKind: 'dependabot',
+    automation: { role: 'dependency', kind: 'dependabot', source: 'account' },
+    detail: 'Trunk is red in a repo you maintain',
+    observedAt: '2026-09-01T00:00:00.000Z',
+    githubUrl: 'https://github.com/acme/api/commit/a1b2c3d4',
+    ...over,
+  });
+
+  it('is the landing PR’s author and automation — the card’s own new fields', () => {
+    expect(landingPrByline(trunk())).toEqual({
+      authorId: 12,
+      automation: { role: 'dependency', kind: 'dependabot', source: 'account' },
+    });
+    expect(landingPrByline(trunk({ authorId: 9, automation: null }))).toEqual({ authorId: 9, automation: null });
+  });
+
+  it('names nobody when no PR resolved — a direct push has no author to name', () => {
+    expect(
+      landingPrByline(trunk({ prId: null, prNumber: null, prTitle: null, authorId: null, automation: null })),
+    ).toBeNull();
+  });
+
+  it('names nobody on the viewer’s own red PR — its “Your PR” chip already says whose it is', () => {
+    expect(landingPrByline(trunk({ arm: 'your_pr', authorId: 1, automation: null }))).toBeNull();
   });
 });
 

@@ -17,6 +17,7 @@ import {
   type EventType,
   type FeedPrEventChip,
   type InsightKind,
+  type PendingAuthorLens,
   type PendingTabKey,
   type MlSeverity,
   type PeriodGrain,
@@ -524,6 +525,24 @@ export interface FilterState {
   // `?attnPersonal=1` is still PARSED as 'mine' (shipped links and history entries), never
   // emitted — see hooks/useUrlState.
   attentionRelevance: AttentionRelevanceLens | null;
+  // Activity **Pending** AUTHOR lens: null (default) → every card; 'people' → only cards whose PR a
+  // person opened; 'automation' → only cards whose PR automation opened (bots, coding agents, and a
+  // person's PR a tool's own marker proves the tool made). The predicate is the server's ONE
+  // `pendingAuthorSideOf`, so the list and every figure beside it are one population.
+  //
+  // ⚠ THREE-VALUED FOR THE RELEVANCE LENS'S REASON: "People" and "Automation" are each a view with
+  // its own server-counted total, and `null` (All) is a third. A pill is never `total − other`.
+  //
+  // ⚠ IT PERSISTS ACROSS TAB SWITCHES — `setAttentionTab` does NOT clear it. "Show me only what
+  // people opened" is a question about the whole board, and re-asking it on every tab would make the
+  // tab strip's badges (which read the lens's own totals) flip back and forth under the reader.
+  //
+  // Transient like its siblings: NOT in FilterDefaults / freshFilterDefaults / pickFilterBarState
+  // (no FILTER_STORAGE_VERSION bump is owed), cleared by a rail or scope change — and SEATED
+  // explicitly, `null` included, by every entry point that opens the board from a count
+  // (`openMyTurnInWorkspace`, the daily brief's lines), because `setActivityRepo` early-returns `{}`
+  // on an unchanged rail. URL-SERIALIZED (`?attnBy=people|automation`) and a NAVIGATION key.
+  attentionAuthorLens: PendingAuthorLens | null;
   // Activity **Pending** TAB the reader picked (`PENDING_TABS`), or null for the default (My turn).
   //
   // ⚠ THE VISIBLE TAB IS DERIVED, NEVER WRITTEN BACK: a kind filter (`attentionIsolation`, seated
@@ -795,20 +814,22 @@ export interface FilterState {
   } | null;
 
   // Activity tab (the master-detail triage console). Which detail is shown:
-  // 'feed' = the cross-repo consolidated Feed (the default landing detail), a number =
-  // that single repo's console, null = nothing selected yet (treated as 'feed'). Client-
-  // side narrow, no refetch. (The old 'all' briefing-feed pseudo-row was removed — it was
-  // redundant with the Feed + per-repo entries.) Transient (mirrors myTurnOnly/
-  // insightsOpen): in freshDefaults() but NOT in pickFilterBarState /
-  // sanitizePersistedFilters. `?activityRepo=<id>` / `bots` / `attention` are the
-  // URL mirrors (see useUrlState); the active TAB lives in the pinnedTabs store. 'bots' = the
-  // CORE/free review-bot triage console (BotsView); 'insights' is the Pro Insights rail entry.
+  // 'attention' = the Pending board (the default landing detail), 'feed' = the cross-repo
+  // consolidated Feed, a number = that single repo's console, null = nothing selected yet
+  // (treated as 'attention'). Client-side narrow, no refetch. (The old 'all' briefing-feed
+  // pseudo-row was removed — it was redundant with the Feed + per-repo entries.) Transient
+  // (mirrors myTurnOnly/insightsOpen): in freshDefaults() but NOT in pickFilterBarState /
+  // sanitizePersistedFilters. `?activityRepo=<id>` / `feed` / `bots` / `insights` are the
+  // URL mirrors (see useUrlState) — 'attention', the default, is the one value left out; the
+  // active TAB lives in the pinnedTabs store. 'bots' = the CORE/free review-bot triage console
+  // (BotsView); 'insights' is the Reports rail entry.
   // (The 'retro' rail value was REMOVED with the Retro panel — it was already unreachable:
   // nothing called setActivityRepo('retro') and useUrlState never parsed it. 'compare' was
   // REMOVED with the "Compare workspaces" rail entry — cross-workspace comparison is Reports'
   // "By workspace" axis now. This field is transient and 'compare' is no longer URL-parsed, so a
   // stale value cannot enter the store; a legacy `?activityRepo=compare` link falls through the
-  // read side's parseInt branch and lands on the 'feed' default — normalization by construction.)
+  // read side's parseInt branch and lands on the 'attention' default — normalization by
+  // construction.)
   activityRepoId: number | 'feed' | 'attention' | 'insights' | 'bots' | null;
   // Soft thread-state filter inside an Activity repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
@@ -957,6 +978,12 @@ export interface FilterState {
    * works only when the rail actually changes.
    */
   setAttentionRelevance: (lens: AttentionRelevanceLens | null) => void;
+  /**
+   * Seat the board's People / Automation lens (`null` = All). The same ordering trap as the two
+   * setters above: `setActivityRepo` clears it and early-returns `{}` on an unchanged rail, so a
+   * caller opening the board from a count seats its value — `null` included — AFTER the rail switch.
+   */
+  setAttentionAuthorLens: (lens: PendingAuthorLens | null) => void;
   /**
    * Show one Pending tab, optionally narrowed to one of its card kinds (a kind chip). ONE write, so
    * the tab and the kind can never disagree for a render: picking a tab clears any kind filter,
@@ -1307,8 +1334,9 @@ export function freshFilterDefaults(): FilterDefaults {
     userIds: null,
     // Bots are HIDDEN on a fresh load (default ON) — bot chatter is clutter for situational
     // awareness, same reasoning as excludeStale below. The hidden set is the UNION definition
-    // server-side (users.isBot ∪ the workspace's automated-reviewer verdict, with a manual
-    // "this is a human" beating the global flag both ways). The user can show bots via the
+    // server-side, `hiddenBotUserIds` (users.isBot ∪ github_type='Bot' ∪ the vendor logins ∪ the
+    // workspace's automated-reviewer verdict, with a manual "this is a human" beating every global
+    // half both ways). The user can show bots via the
     // Members dropdown, and that non-default choice round-trips as bots=0 (see useUrlState).
     // This is the baseline the URL serializer diffs against.
     excludeBots: true,
@@ -1457,6 +1485,8 @@ function freshDefaults(): FilterData {
     // The board is BROAD by default: every card, whatever its relevance. A lens is only ever
     // seated by arriving from a count that was itself one half of the split.
     attentionRelevance: null,
+    // Every author, like the relevance lens: a lens is only ever seated by a reader's own click.
+    attentionAuthorLens: null,
     attentionTab: null,
     // No batch has landed yet — a freshly-opened feed is all equally new, so nothing is marked.
     feedNewCohorts: { scopeKey: null, cohorts: [] },
@@ -1494,10 +1524,10 @@ function freshDefaults(): FilterData {
     botFlaggingSeed: null,
     botVolumeSeed: null,
     peopleReportSeed: null,
-    // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
-    // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
-    // with no thread-state filter.
-    activityRepoId: 'feed',
+    // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open lands
+    // on Pending — the worklist, ranked — for every tier, with no thread-state filter. The
+    // Feed is one rail click below it.
+    activityRepoId: 'attention',
     activityThreadFilter: null,
     repoConsoleTabs: {},
     expandedFileGroups: [],
@@ -1548,6 +1578,7 @@ export type UrlOwnedState = Pick<
   | 'selectedThreadId'
   | 'attentionIsolation'
   | 'attentionRelevance'
+  | 'attentionAuthorLens'
   | 'attentionTab'
   | 'feedIsolatedPrId'
   | 'prDetailTab'
@@ -1567,6 +1598,7 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
     selectedThreadId: d.selectedThreadId,
     attentionIsolation: d.attentionIsolation,
     attentionRelevance: d.attentionRelevance,
+    attentionAuthorLens: d.attentionAuthorLens,
     attentionTab: d.attentionTab,
     feedIsolatedPrId: d.feedIsolatedPrId,
     prDetailTab: d.prDetailTab,
@@ -1594,6 +1626,8 @@ export const useFilters = create<FilterState>((set, get) => ({
       // LEFT, so carrying it into the next one would filter a board against a number nobody
       // showed the reader.
       attentionRelevance: null,
+      // …and so does the author lens: the new workspace's board may hold nothing on that side.
+      attentionAuthorLens: null,
     }),
   toggleRepo: (id) =>
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),
@@ -1661,6 +1695,8 @@ export const useFilters = create<FilterState>((set, get) => ({
   // board must pass `null` itself, because setActivityRepo's clear does not fire on an unchanged
   // rail.
   setAttentionRelevance: (lens) => set({ attentionRelevance: lens }),
+  // ⚠ NOT cleared by `setAttentionTab` below — the lens is a question about the whole board.
+  setAttentionAuthorLens: (lens) => set({ attentionAuthorLens: lens }),
   setAttentionTab: (tab, kind = null) => set({ attentionTab: tab, attentionIsolation: kind }),
   // See the declaration above for the two ordering traps this sequence exists to encapsulate.
   // It deliberately calls the PUBLIC setters rather than one fused `set({...})`: a fused write
@@ -1678,6 +1714,10 @@ export const useFilters = create<FilterState>((set, get) => ({
     // (direct + maintained), so the list they land on has to be the same population — which is
     // what 'mine' paints. Seated AFTER both clears above it, exactly like the isolation.
     s.setAttentionRelevance('mine');
+    // …and the author lens, seated to "everyone" for the same reason: the figure clicked counts
+    // every author, so a People or Automation lens left on from an earlier visit would open a
+    // smaller list than the number. Last, like the two above it.
+    s.setAttentionAuthorLens(null);
   },
   pushFeedNewCohort: (scopeKey, ids, atTop) =>
     set((s) => {
@@ -2040,6 +2080,7 @@ export const useFilters = create<FilterState>((set, get) => ({
             feedIsolatedPrId: null,
             attentionIsolation: null,
             attentionRelevance: null,
+            attentionAuthorLens: null,
             attentionTab: null,
           },
     ),

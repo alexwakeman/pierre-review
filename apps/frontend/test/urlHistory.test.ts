@@ -129,7 +129,9 @@ beforeEach(() => {
   // A clean filter bar as well as a clean history — these tests assert on the whole query string,
   // and vitest shares one module-level store across a file.
   useFilters.getState().resetAllFilters();
-  entries = ['/app/?workspace=5&view=activity'];
+  // The starting board is the FEED, named in the entry: a bare URL means Pending now, so seating
+  // the Feed under a bare entry would make the first refinement disagree with its own URL.
+  entries = ['/app/?workspace=5&view=activity&activityRepo=feed'];
   cursor = 0;
   seat(entries[0] as string);
   useFilters.setState({
@@ -138,6 +140,7 @@ beforeEach(() => {
     activityRepoId: 'feed',
     attentionIsolation: null,
     attentionRelevance: null,
+    attentionAuthorLens: null,
     feedIsolatedPrId: null,
     feedInnerTab: 'feed',
     botsInnerTab: 'roi',
@@ -154,7 +157,18 @@ describe('the verb: navigations push, refinements replace', () => {
   it('a rail switch PUSHES', () => {
     gesture(() => useFilters.getState().setActivityRepo('attention'));
     expect(entries).toHaveLength(2);
-    expect(location.search).toContain('activityRepo=attention');
+    // Pending is the default, so its URL names no console.
+    expect(location.search).not.toContain('activityRepo=');
+  });
+
+  it('a Feed link survives: the Feed is emitted and parsed', () => {
+    gesture(() => useFilters.getState().setActivityRepo('bots'));
+    gesture(() => useFilters.getState().setActivityRepo('feed'));
+    expect(location.search).toContain('activityRepo=feed');
+    back();
+    expect(useFilters.getState().activityRepoId).toBe('bots');
+    forward();
+    expect(useFilters.getState().activityRepoId).toBe('feed');
   });
 
   it('a filter change REPLACES — Back is not a per-click undo stack', () => {
@@ -194,7 +208,7 @@ describe('the verb: navigations push, refinements replace', () => {
     markUrlCorrection();
     gesture(() => useFilters.getState().setActivityRepo('attention'));
     expect(entries).toHaveLength(1);
-    expect(location.search).toContain('activityRepo=attention');
+    expect(location.search).not.toContain('activityRepo=');
     // …and it is a ONE-SHOT: the next real navigation pushes again.
     gesture(() => useFilters.getState().setActivityRepo('bots'));
     expect(entries).toHaveLength(2);
@@ -271,7 +285,7 @@ describe('Back from Needs attention (the reported bug)', () => {
       useFilters.getState().setActivityRepo('attention');
       useFilters.getState().setAttentionIsolation('stalled_review');
     });
-    expect(location.search).toContain('activityRepo=attention');
+    expect(location.search).not.toContain('activityRepo=');
     expect(location.search).toContain('attn=stalled_review');
     // ONE entry for one gesture, even though it was two setters.
     expect(entries).toHaveLength(2);
@@ -454,6 +468,90 @@ describe('the relevance lens on Needs attention', () => {
   });
 });
 
+// ── The AUTHOR lens (`attnBy`) — People / Automation ───────────────────────────────────────────
+//
+// A different list with its own server-counted totals, so it is a VIEW: its own entry, cleared by a
+// pop onto a URL that does not name it, and seated only by its two literals.
+describe('the People / Automation lens on Pending', () => {
+  it('rides the URL and PUSHES — it changes what the board shows', () => {
+    gesture(() => useFilters.getState().setActivityRepo('attention'));
+    gesture(() => useFilters.getState().setAttentionAuthorLens('automation'));
+    expect(entries).toHaveLength(3);
+    expect(location.search).toContain('attnBy=automation');
+  });
+
+  it('round-trips through Back and Forward', () => {
+    gesture(() => useFilters.getState().setActivityRepo('attention'));
+    gesture(() => useFilters.getState().setAttentionAuthorLens('people'));
+    gesture(() => useFilters.getState().setAttentionAuthorLens('automation'));
+
+    back();
+    expect(useFilters.getState().attentionAuthorLens).toBe('people');
+    back();
+    // ⚠ Gone, not merely off-screen: the popped URL says nothing about it.
+    expect(useFilters.getState().attentionAuthorLens).toBeNull();
+    expect(useFilters.getState().activityRepoId).toBe('attention');
+
+    forward();
+    expect(useFilters.getState().attentionAuthorLens).toBe('people');
+  });
+
+  it('survives a tab switch in the URL too — it narrows the board, not one tab', () => {
+    gesture(() => {
+      useFilters.getState().setActivityRepo('attention');
+      useFilters.getState().setAttentionAuthorLens('automation');
+    });
+    gesture(() => useFilters.getState().setAttentionTab('deps'));
+    expect(location.search).toContain('attnTab=deps');
+    expect(location.search).toContain('attnBy=automation');
+  });
+
+  it('is emitted only ON the attention rail — and a rail switch clears it', () => {
+    gesture(() => {
+      useFilters.getState().setActivityRepo('attention');
+      useFilters.getState().setAttentionAuthorLens('people');
+    });
+    expect(location.search).toContain('attnBy=people');
+    gesture(() => useFilters.getState().setActivityRepo('feed'));
+    expect(location.search).not.toContain('attnBy');
+    expect(useFilters.getState().attentionAuthorLens).toBeNull();
+  });
+
+  it('only the two literals seat it — anything else means All', () => {
+    for (const v of ['0', 'bots', 'humans', 'Automation', 'all']) {
+      seat(`/app/?workspace=5&view=activity&attnBy=${v}`);
+      applyUrlToStores();
+      expect(useFilters.getState().attentionAuthorLens).toBeNull();
+    }
+    seat('/app/?workspace=5&view=activity&attnBy=people');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionAuthorLens).toBe('people');
+    seat('/app/?workspace=5&view=activity&attnBy=automation');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionAuthorLens).toBe('automation');
+  });
+
+  it('a Dependencies brief line’s kind survives a parse', () => {
+    seat('/app/?workspace=5&view=activity&attn=security');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionIsolation).toBe('security');
+    seat('/app/?workspace=5&view=activity&attn=dependency_bump');
+    applyUrlToStores();
+    expect(useFilters.getState().attentionIsolation).toBe('dependency_bump');
+  });
+
+  it('the banner gesture is ONE entry and lands with every author', () => {
+    gesture(() => {
+      useFilters.getState().setActivityRepo('attention');
+      useFilters.getState().setAttentionAuthorLens('automation');
+    });
+    gesture(() => useFilters.getState().openMyTurnInWorkspace(5));
+    expect(location.search).not.toContain('attnBy');
+    back();
+    expect(useFilters.getState().attentionAuthorLens).toBe('automation');
+  });
+});
+
 describe('Back after a workspace switch', () => {
   it('restores the workspace AND the narrowings the switch cleared', () => {
     gesture(() => {
@@ -515,6 +613,26 @@ describe('a pop onto a URL that omits a key', () => {
     back();
     expect(useFilters.getState().repoConsoleTabs).toEqual({ 7: 'bots' });
     expect(useFilters.getState().searchSeed).not.toBeNull();
+  });
+
+  it('a popped URL naming no console lands on Pending, the default', () => {
+    entries = [
+      '/app/?workspace=5&view=activity',
+      '/app/?workspace=5&view=activity&activityRepo=bots',
+    ];
+    cursor = 1;
+    seat(entries[1] as string);
+    useFilters.setState({ activityRepoId: 'bots' });
+    back();
+    expect(useFilters.getState().activityRepoId).toBe('attention');
+  });
+
+  // A legacy console (`compare`) or plain garbage falls through the parseInt branch and names
+  // nothing, so the pop's reset leaves the default standing.
+  it('an unknown console lands on Pending', () => {
+    seat('/app/?workspace=5&view=activity&activityRepo=compare');
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().activityRepoId).toBe('attention');
   });
 
   // ⚠ `workspaceId: null` does not mean "no workspace", it means "not resolved yet" — it blanks

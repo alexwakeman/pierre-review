@@ -23,6 +23,7 @@
 // It stays on clock hours, and the screen labels those rows as such.
 import {
   FLOW_BUDGET_MEASURES,
+  FLOW_RULES,
   type BlastSurface,
   type CourtShare,
   type FlowBudgetMeasure,
@@ -33,6 +34,7 @@ import {
   type FlowContrastSignal,
   type FlowLandingRow,
   type FlowLandingTail,
+  type FlowPrFigures,
   type FlowPrLink,
   type FlowPrRow,
   type FlowRequestKind,
@@ -48,27 +50,30 @@ import type { WorkingCalendar } from './working-hours.js';
 const HOUR_MS = 3_600_000;
 
 // ── Floors and caps ─────────────────────────────────────────────────────────────────────────
+// ⚠ Every floor the page QUOTES is assigned from `FLOW_RULES` (packages/shared/src/flow-settings.ts),
+// so the explanation behind each "i" and the fold cannot drift apart. The caps below it are not
+// quoted anywhere and stay local.
 /** A budget verdict needs this many pull requests behind its percentile. */
-const FLOW_BUDGET_MIN_PRS = 5;
+const FLOW_BUDGET_MIN_PRS = FLOW_RULES.budgetMinPrs;
 /** The contrast compares quarters, so it needs this many in each. */
-const FLOW_CONTRAST_MIN_QUARTILE = 8;
+const FLOW_CONTRAST_MIN_QUARTILE = FLOW_RULES.contrastMinQuartile;
 /** A size band or weekday needs this many before its median is shown. */
-const FLOW_CUT_MIN_PRS = 5;
+const FLOW_CUT_MIN_PRS = FLOW_RULES.cutMinPrs;
 /** Per-PR rows on the wire. Past it: every slow PR, and an even sample of the rest. */
 const FLOW_PR_ROWS_CAP = 1_000;
 const FLOW_PR_ROWS_SLOW_KEEP = 250;
-const FLOW_LANDING_ROWS_CAP = 10;
+const FLOW_LANDING_ROWS_CAP = FLOW_RULES.landingRows;
 const FLOW_SIBLINGS_CAP = 5;
 /** A sibling merging this long after the PR itself still counts — they often land together. */
 const SIBLING_AFTER_MS = 24 * HOUR_MS;
 /** Concentration: each side of the comparison needs this many first looks. */
-const FLOW_CONCENTRATION_MIN_SIDE = 3;
+const FLOW_CONCENTRATION_MIN_SIDE = FLOW_RULES.concentrationMinSide;
 /** "Slower" means at least this much slower than everyone else, and by at least half an hour. */
-const FLOW_CONCENTRATION_SLOWER_RATIO = 1.25;
-const FLOW_CONCENTRATION_SLOWER_MIN_HOURS = 0.5;
+const FLOW_CONCENTRATION_SLOWER_RATIO = FLOW_RULES.slowerRatio;
+const FLOW_CONCENTRATION_SLOWER_MIN_HOURS = FLOW_RULES.slowerMinHours;
 /** A contrast row "separates" at 2×, is "weak" from 1.3×. */
-const FLOW_SEPARATES_RATIO = 2;
-const FLOW_WEAK_RATIO = 1.3;
+const FLOW_SEPARATES_RATIO = FLOW_RULES.separatesRatio;
+const FLOW_WEAK_RATIO = FLOW_RULES.weakRatio;
 
 /** Size bands in lines added plus removed — fixed edges, this workspace's own medians. */
 const SIZE_BANDS: { label: string; min: number; max: number | null }[] = [
@@ -129,6 +134,7 @@ export interface FlowDetail {
   landingTail: FlowLandingTail | null;
   concentration: FlowConcentrationRow[];
   requests: FlowRequestStats | null;
+  prFigures: FlowPrFigures;
 }
 
 // ── Small helpers ───────────────────────────────────────────────────────────────────────────
@@ -485,6 +491,7 @@ function landingTailOf(worked: Worked[], dayHours: number): FlowLandingTail | nu
     prsOver: over.length,
     shareOfLanding: r2(shareOfLanding),
     selfMergedOver,
+    siblingsOver: withSiblings,
     rows,
     sentence,
   };
@@ -643,6 +650,29 @@ function capRows(worked: Worked[]): { rows: Worked[]; capped: boolean } {
   return { rows: keep, capped: true };
 }
 
+// ── The per-PR headline figures ─────────────────────────────────────────────────────────────
+
+/**
+ * The scatter's and the triangle's headline figures, over EVERY measured pull request.
+ *
+ * ⚠ NEVER OVER `prs`. The per-PR rows are capped at FLOW_PR_ROWS_CAP (every slow PR, then an even
+ * stride), so a count folded over them is wrong exactly when `prsCapped` — and wrong in the
+ * inflating direction, because the slow ones are all kept. The same definitions the SPA used to
+ * apply to the capped list: over a working day, the slowest tenth's share, never went back.
+ */
+function prFiguresOf(worked: Worked[], dayHours: number): FlowPrFigures {
+  const leads = worked.map((w) => w.leadWork).sort((a, b) => b - a);
+  const slowestTenthCount = Math.ceil(leads.length / 10);
+  const total = leads.reduce((s, v) => s + v, 0);
+  const top = leads.slice(0, slowestTenthCount).reduce((s, v) => s + v, 0);
+  return {
+    overWorkingDay: worked.filter((w) => w.leadWork > dayHours).length,
+    slowestTenthCount,
+    slowestTenthShare: total > 0 ? top / total : 0,
+    neverWentBack: worked.filter((w) => w.f.rounds === 0).length,
+  };
+}
+
 // ── The fold ────────────────────────────────────────────────────────────────────────────────
 
 const COURT_PHRASE: Record<PrCourt, string> = {
@@ -743,6 +773,7 @@ export function buildFlowDetail(
     landingTail: landingTailOf(worked, dayHours),
     concentration: concentrationOf(worked, minRepoPrs),
     requests: requestsOf(worked, dayHours),
+    prFigures: prFiguresOf(worked, dayHours),
   };
 }
 
@@ -786,6 +817,13 @@ export function ticketKeyOf(title: string, branch: string | null): string | null
 export const __flowDetailTesting = {
   FLOW_BUDGET_MIN_PRS,
   FLOW_CONTRAST_MIN_QUARTILE,
+  FLOW_CUT_MIN_PRS,
+  FLOW_LANDING_ROWS_CAP,
+  FLOW_CONCENTRATION_MIN_SIDE,
+  FLOW_CONCENTRATION_SLOWER_RATIO,
+  FLOW_CONCENTRATION_SLOWER_MIN_HOURS,
+  FLOW_SEPARATES_RATIO,
+  FLOW_WEAK_RATIO,
   FLOW_PR_ROWS_CAP,
   FLOW_PR_ROWS_SLOW_KEEP,
   verdictOf,

@@ -1,5 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
-import type { DailyBriefCounts, InsightCard, PendingTabKey } from '@pierre-review/shared';
+import type {
+  DailyBriefCounts,
+  InsightCard,
+  InsightKind,
+  PendingAuthorLens,
+  PendingTabKey,
+} from '@pierre-review/shared';
 import {
   ATTENTION_LIVENESS_MAX_IDS,
   useAttentionCards,
@@ -14,10 +20,14 @@ import {
   useWorkPlanGenerating,
 } from '../../hooks/useWorkPlan.js';
 import { useFilters, type AttentionRelevanceLens } from '../../store/filters.js';
+import { useSettingsModal } from '../../store/settingsModal.js';
 import {
   buildPendingView,
   effectivePendingTab,
+  offerAuthorLens,
   offerOnlyYours,
+  relevancePillCount,
+  tabBadgeCount,
   tabsOf,
   TAB_LABEL,
 } from './pendingTabs.js';
@@ -25,6 +35,7 @@ import { relativeTime } from '../../lib/ui.js';
 import { CheckCircleIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { AttentionCards, KIND_LABEL } from './AttentionCards.js';
 import { PendingGuideModal, PendingOrderInfo } from './PendingInfo.js';
+import { capSentence } from './pendingExplain.js';
 
 // The **Pending** rail entry (CORE/free) — the attention cards (your turn / stalled reviews
 // / untouched threads / reviewer load / needs-a-reviewer) that used to sit under the Pro Insights
@@ -196,7 +207,7 @@ export function personalMyTurnCount(counts: DailyBriefCounts): number {
 export const LENS_COPY: Record<
   AttentionRelevanceLens,
   {
-    /** Follows "No <kind> items …" in the filtered empty state. */
+    /** Follows "Nothing on My turn …" in the filtered empty state. */
     empty: string;
     /** Names the OTHER half in "· N more <hidden>". */
     hidden: string;
@@ -207,13 +218,13 @@ export const LENS_COPY: Record<
   }
 > = {
   mine: {
-    empty: 'personally involve you',
+    empty: 'personally involves you',
     hidden: 'in repos you don’t maintain',
     withKind: 'that personally involves you',
     bare: 'what personally involves you',
   },
   others: {
-    empty: 'are waiting on someone other than you',
+    empty: 'is waiting on someone other than you',
     hidden: 'tied to you directly',
     withKind: 'that isn’t tied to you',
     bare: 'what isn’t tied to you',
@@ -226,7 +237,61 @@ const TAB_EMPTY: Record<PendingTabKey, string> = {
   review: 'No reviews are waiting.',
   threads: 'No review threads are waiting for an answer.',
   land: 'Nothing is ready to land.',
+  deps: 'No dependency updates or security alerts are waiting.',
 };
+
+/** What an empty (or emptied) list says, and where. */
+export interface PendingEmptyNote {
+  sentence: string;
+  /** 'alone' — nothing at all to list. 'above' — above the review-load strip, which counts
+   *  REVIEWERS, so no PR narrowing hides it: a narrowed view can be empty with the strip still up. */
+  placement: 'alone' | 'above';
+  /** The People / Automation lens when it is what emptied the view — the note offers "Show all". */
+  emptiedBy: PendingAuthorLens | null;
+}
+
+/**
+ * WHAT AN EMPTY LIST SAYS — the one narrowing that emptied it, in plain words. Pure, for the test.
+ *
+ *   the People / Automation lens → "Nothing from automation in Waiting on review right now."
+ *   a kind chip                  → "Nothing under Bumps right now." (a chip name is not a noun, so
+ *                                  "No Bumps cards" was not English)
+ *   My turn's relevance lens     → "Nothing on My turn personally involves you right now."
+ *   nothing                      → the tab's own sentence
+ *
+ * The author lens counts as what emptied the view only when the view holds cards without it; on a
+ * tab that is empty anyway the tab's own sentence is the true one.
+ *
+ * ⚠ AN EMPTY LIST WITH THE REVIEW-LOAD STRIP STILL UP gets the note only when a narrowing emptied
+ * it (the note then sits above the strip, with its way back). Un-narrowed, the strip IS the tab's
+ * content, and "No reviews are waiting." over a strip of pending reviews would contradict it.
+ */
+export function pendingEmptyNote(v: {
+  tab: PendingTabKey;
+  kind: InsightKind | null;
+  relevance: AttentionRelevanceLens | null;
+  authorLens: PendingAuthorLens | null;
+  /** The view's population before the author lens (`PendingView.allTotal`). */
+  allTotal: number;
+  /** How many cards the view lists, and how many review-load cards the strip shows. */
+  cards: number;
+  people: number;
+}): PendingEmptyNote | null {
+  if (v.cards > 0) return null;
+  const emptiedBy = v.authorLens != null && v.allTotal > 0 ? v.authorLens : null;
+  const narrowed = emptiedBy != null || v.kind != null || v.relevance != null;
+  if (v.people > 0 && !narrowed) return null;
+  const where = v.kind != null ? `under ${KIND_LABEL[v.kind]}` : `in ${TAB_LABEL[v.tab]}`;
+  const sentence =
+    emptiedBy != null
+      ? `Nothing from ${emptiedBy} ${where} right now.`
+      : v.kind != null
+        ? `Nothing ${where} right now.`
+        : v.relevance != null
+          ? `Nothing on My turn ${LENS_COPY[v.relevance].empty} right now.`
+          : TAB_EMPTY[v.tab];
+  return { sentence, placement: v.people > 0 ? 'above' : 'alone', emptiedBy };
+}
 
 export function AttentionView(): JSX.Element {
   // `workspaceId` is null until the workspaces query resolves the account's Default; the hook
@@ -240,13 +305,22 @@ export function AttentionView(): JSX.Element {
   const setAttentionTab = useFilters((s) => s.setAttentionTab);
   const attentionRelevance = useFilters((s) => s.attentionRelevance);
   const setAttentionRelevance = useFilters((s) => s.setAttentionRelevance);
-  const { data, isLoading, isError } = useAttentionCards(workspaceId);
+  // The People / Automation lens — ONE store field for the whole board (it survives a tab switch),
+  // filtered by the server's own `pendingAuthorSideOf`, every figure the server's own split.
+  const attentionAuthorLens = useFilters((s) => s.attentionAuthorLens);
+  const setAttentionAuthorLens = useFilters((s) => s.setAttentionAuthorLens);
+  const { data, isLoading: fetching, isError } = useAttentionCards(workspaceId);
+  // ⚠ AN UNRESOLVED WORKSPACE IS LOADING, NOT EMPTY. The hook idles on `skipToken` while
+  // `workspaceId` is null, and an idle query is not `isLoading` — so without this the landing
+  // screen painted "0" on every tab and "Nothing is your turn right now." for the moment before
+  // `GET /api/workspaces` lands, on every cold open.
+  const isLoading = fetching || workspaceId == null;
 
   const tabKey = effectivePendingTab(attentionIsolation, attentionTab);
   const tabs = useMemo(() => tabsOf(data), [data]);
   const view = useMemo(
-    () => buildPendingView(data, tabKey, attentionIsolation, attentionRelevance),
-    [data, tabKey, attentionIsolation, attentionRelevance],
+    () => buildPendingView(data, tabKey, attentionIsolation, attentionRelevance, attentionAuthorLens),
+    [data, tabKey, attentionIsolation, attentionRelevance, attentionAuthorLens],
   );
   const activeTab = tabs.find((t) => t.key === tabKey);
   const lensOn = tabKey === 'my_turn' ? attentionRelevance : null;
@@ -263,8 +337,9 @@ export function AttentionView(): JSX.Element {
   //
   // ⚠ RANKED, THEN SLICED. The server caps one sweep at 90 ids (400s an over-cap request rather
   // than truncating it). So the rows whose whole claim IS the merge state go first — ready to merge,
-  // behind trunk (a stale one is a button that 405s) and merge conflicts — then the tab on screen,
-  // then everything else.
+  // behind trunk (a stale one is a button that 405s), merge conflicts, every dependency update
+  // (each carries its own merge row), and the same two facts about your own PR when you moved them
+  // into My turn (they carry the same rows) — then the tab on screen, then everything else.
   //
   // ⚠ `prId` IS NULLABLE ON SOME KINDS. A `ci_failing` 'trunk' card names a PR only when the red
   // head's landing PR resolved, and review-load cards name none — nothing for a PR probe to ask.
@@ -274,6 +349,8 @@ export function AttentionView(): JSX.Element {
     const onScreen = new Set(view.cards.map((c) => c.id));
     const rank = (c: InsightCard): number => {
       if (c.kind === 'merge' || c.kind === 'update_branch' || c.kind === 'conflicts') return 0;
+      if (c.kind === 'dependency_bump' || (c.kind === 'security' && c.dependencyUpdate)) return 0;
+      if (c.kind === 'my_turn' && (c.reason === 'own_ready' || c.reason === 'own_conflicts')) return 0;
       return onScreen.has(c.id) ? 1 : 2;
     };
     const seen = new Set<number>();
@@ -342,22 +419,81 @@ export function AttentionView(): JSX.Element {
   const openGuide = useCallback(() => setGuideOpen(true), []);
   const closeGuide = useCallback(() => setGuideOpen(false), []);
   const viewName =
-    view.kind != null
+    (view.kind != null
       ? `${KIND_LABEL[view.kind]} (${TAB_LABEL[view.tab]})`
       : lensOn === 'mine'
         ? 'My turn, only yours'
         : lensOn === 'others'
           ? 'My turn, not tied to you'
-          : TAB_LABEL[view.tab];
+          : TAB_LABEL[view.tab]) +
+    (attentionAuthorLens === 'people'
+      ? ', people only'
+      : attentionAuthorLens === 'automation'
+        ? ', automation only'
+        : '');
+  // `rules` is what the server ranked THIS response with — the reader's weights and My Turn type
+  // order — so every popover explains the list on screen, never the product constants.
   const explain = useMemo(
     () => ({
+      tab: view.tab,
+      rules: data?.rules,
       scores: data?.scores,
       viewName,
       total: view.total,
       whyById,
       onOpenGuide: openGuide,
     }),
-    [data?.scores, viewName, view.total, whyById, openGuide],
+    [view.tab, data?.rules, data?.scores, viewName, view.total, whyById, openGuide],
+  );
+  // Settings → My Turn, opened straight to its section — the "Customise" link on My turn.
+  const openSettings = useSettingsModal((s) => s.openSettings);
+  // Offer the People / Automation pills only where they would change the list (both sides
+  // non-empty), or when the lens is already on — so it can always be turned off.
+  const authorLensOffered = offerAuthorLens(view.authorSplit, attentionAuthorLens);
+  const onlyYoursOffered = tabKey === 'my_turn' && offerOnlyYours(activeTab, attentionRelevance);
+  // My turn always has one control — "Customise" — so its row renders even over an empty tab.
+  const showControls =
+    !isLoading &&
+    !isError &&
+    (view.chips != null || onlyYoursOffered || authorLensOffered || tabKey === 'my_turn');
+  // What an empty list says and where — including above the review-load strip, which no PR
+  // narrowing hides (see `pendingEmptyNote`).
+  const empty = pendingEmptyNote({
+    tab: tabKey,
+    kind: view.kind,
+    relevance: lensOn,
+    authorLens: attentionAuthorLens,
+    allTotal: view.allTotal,
+    cards: view.cards.length,
+    people: view.people.length,
+  });
+  const emptyNote = empty != null && (
+    <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+      <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-gray-300 dark:text-gray-600" />
+      {empty.sentence}
+      {empty.emptiedBy != null && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setAttentionAuthorLens(null)}
+            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900/60"
+          >
+            Show all
+          </button>
+        </div>
+      )}
+      {empty.emptiedBy == null && lensOn != null && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setAttentionRelevance(null)}
+            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900/60"
+          >
+            Show everyone’s
+          </button>
+        </div>
+      )}
+    </div>
   );
 
   const pill = (on: boolean): string =>
@@ -371,12 +507,13 @@ export function AttentionView(): JSX.Element {
     <div className="space-y-3" data-testid="attention-view">
       <div className="flex items-center gap-2">
         {/* LABEL-ONLY rename (the Insights→Reports precedent): the store/URL literal stays
-            `'attention'`, because an unknown `?activityRepo=` value falls into the parseInt
-            branch, yields NaN and lands the reader on the Feed — breaking Back on history
-            entries minted earlier in the same session. */}
+            `'attention'`. Pending is now the default, so that literal is what keeps
+            `?activityRepo=` OMITTED rather than misparsed — an unknown value falls into the
+            parseInt branch, yields NaN and lands the reader on Pending, the default — which would
+            break Back on history entries minted earlier in the same session. */}
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Pending</h2>
         {/* How the board is gathered and ordered — a short popover with a way into the guide. */}
-        <PendingOrderInfo onOpenGuide={openGuide} />
+        <PendingOrderInfo onOpenGuide={openGuide} rules={data?.rules} />
         {/* ── the Pro narration's controls + honesty signals ──────────────────────────────
             ⚠ `stale` matters: the tabs re-order on the attention query's own clock while the
             prose does not, so without it the italic lines would silently describe a list that
@@ -473,6 +610,9 @@ export function AttentionView(): JSX.Element {
       <div role="tablist" aria-label="Pending" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
         {tabs.map((t) => {
           const on = t.key === tabKey;
+          // Under the People / Automation lens a badge counts that side of its tab — the list a
+          // click on it opens. The server's own figure, never `total − other`.
+          const count = tabBadgeCount(t, attentionAuthorLens);
           return (
             <button
               key={t.key}
@@ -490,14 +630,14 @@ export function AttentionView(): JSX.Element {
               {TAB_LABEL[t.key]}
               <span
                 className={`rounded-full px-1.5 text-[11px] tabular-nums ${
-                  t.total === 0
+                  count === 0
                     ? 'text-gray-500 dark:text-gray-500'
                     : on
                       ? 'bg-gray-800 text-white dark:bg-gray-200 dark:text-gray-900'
                       : 'bg-gray-500/15 text-gray-700 dark:text-gray-300'
                 }`}
               >
-                {isLoading ? '…' : t.total}
+                {isLoading ? '…' : count}
               </span>
             </button>
           );
@@ -505,13 +645,19 @@ export function AttentionView(): JSX.Element {
       </div>
 
       <div id="pending-tabpanel" role="tabpanel" className="space-y-3">
-        {/* The tab's narrowing controls: kind chips on a two-kind tab, "Only yours" on My turn. */}
-        {!isLoading && !isError && (view.chips != null || (tabKey === 'my_turn' && offerOnlyYours(activeTab, attentionRelevance))) && (
+        {/* The tab's narrowing controls: kind chips on a two-kind tab, "Only yours" on My turn, and
+            — right-aligned — the People / Automation lens wherever it would change the list, then
+            My turn's "Customise". The row always renders on My turn, empty or not, so the way into
+            Settings → My Turn is there when the tab holds nothing. */}
+        {showControls && (
           <div className="flex flex-wrap items-center gap-1.5">
             {view.chips != null && (
               <>
                 <button type="button" onClick={() => setAttentionTab(tabKey)} aria-pressed={view.kind == null} className={pill(view.kind == null)}>
-                  All <span className="tabular-nums">{activeTab?.total ?? 0}</span>
+                  All{' '}
+                  <span className="tabular-nums">
+                    {activeTab != null ? tabBadgeCount(activeTab, attentionAuthorLens) : 0}
+                  </span>
                 </button>
                 {view.chips.map((c) => (
                   <button
@@ -526,7 +672,7 @@ export function AttentionView(): JSX.Element {
                 ))}
               </>
             )}
-            {tabKey === 'my_turn' && offerOnlyYours(activeTab, attentionRelevance) && (
+            {onlyYoursOffered && (
               // ⚠ `setAttentionRelevance` ALONE, seated both ways (`null` included): the lens is
               // orthogonal to the tab, and a notification that seated 'mine' must be undoable here.
               <button
@@ -537,14 +683,69 @@ export function AttentionView(): JSX.Element {
                 title={`Show only ${LENS_COPY.mine.bare} — the items you’re named on, and the ones in repos you maintain.`}
               >
                 Only yours{' '}
-                <span className="tabular-nums">{activeTab?.relevanceTotals?.mine ?? ''}</span>
+                <span className="tabular-nums">
+                  {relevancePillCount(activeTab, 'mine', attentionAuthorLens) ?? ''}
+                </span>
               </button>
             )}
             {tabKey === 'my_turn' && attentionRelevance === 'others' && (
               <button type="button" onClick={() => setAttentionRelevance(null)} aria-pressed className={pill(true)}>
                 Not tied to you{' '}
-                <span className="tabular-nums">{activeTab?.relevanceTotals?.others ?? ''}</span>
+                <span className="tabular-nums">
+                  {relevancePillCount(activeTab, 'others', attentionAuthorLens) ?? ''}
+                </span>
               </button>
+            )}
+            {/* ⚠ ONE right-aligned wrapper for everything at the row's end. Two `ml-auto` siblings
+                split the free space between them, so the lens would float mid-row. */}
+            {(authorLensOffered || tabKey === 'my_turn') && (
+              <div className="ml-auto flex flex-wrap items-center gap-3">
+                {authorLensOffered && (
+                  // ⚠ `setAttentionAuthorLens` ALONE — the lens is orthogonal to the tab, the kind chip
+                  // and "Only yours", and each pill's figure is the server's own count of the view it
+                  // opens (`authorSplit`, the view BEFORE this lens), never a subtraction.
+                  <div role="group" aria-label="Who opened it" className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setAttentionAuthorLens(null)}
+                      aria-pressed={attentionAuthorLens == null}
+                      className={pill(attentionAuthorLens == null)}
+                    >
+                      {/* "Anyone", never a second "All": the kind row's "All" beside it counts the tab
+                          UNDER this lens, and two pills with one name and two figures say nothing. */}
+                      Anyone <span className="tabular-nums">{view.allTotal}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttentionAuthorLens('people')}
+                      aria-pressed={attentionAuthorLens === 'people'}
+                      className={pill(attentionAuthorLens === 'people')}
+                    >
+                      People <span className="tabular-nums">{view.authorSplit?.people ?? ''}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttentionAuthorLens('automation')}
+                      aria-pressed={attentionAuthorLens === 'automation'}
+                      className={pill(attentionAuthorLens === 'automation')}
+                    >
+                      Automation <span className="tabular-nums">{view.authorSplit?.automation ?? ''}</span>
+                    </button>
+                  </div>
+                )}
+                {tabKey === 'my_turn' && (
+                  // What counts as your turn, the type order and the ranking weights all live in
+                  // Settings → My Turn; this opens the modal on that section.
+                  <button
+                    type="button"
+                    aria-haspopup="dialog"
+                    className="text-[12px] font-medium text-sky-700 hover:underline dark:text-sky-400"
+                    onClick={() => openSettings('my-turn')}
+                  >
+                    Customise
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -560,28 +761,14 @@ export function AttentionView(): JSX.Element {
           </div>
         ) : isError ? (
           <div className="text-sm text-red-600 dark:text-red-400">Couldn’t load what needs attention.</div>
-        ) : view.cards.length === 0 && view.people.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-            <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-gray-300 dark:text-gray-600" />
-            {view.kind != null
-              ? `No ${KIND_LABEL[view.kind]} cards right now.`
-              : lensOn != null
-                ? `Nothing on My turn ${LENS_COPY[lensOn].empty} right now.`
-                : TAB_EMPTY[tabKey]}
-            {lensOn != null && (
-              <div className="mt-2">
-                <button
-                  type="button"
-                  onClick={() => setAttentionRelevance(null)}
-                  className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900/60"
-                >
-                  Show everyone’s
-                </button>
-              </div>
-            )}
-          </div>
+        ) : empty?.placement === 'alone' ? (
+          emptyNote
         ) : (
           <>
+            {/* ⚠ A NARROWED view with no cards still paints the review-load strip — it counts
+                REVIEWERS, so no PR narrowing applies to it — and without this the reader got the
+                strip and no word that the lens or chip had hidden every card, nor a way back. */}
+            {empty?.placement === 'above' && emptyNote}
             <AttentionCards
               cards={view.cards}
               users={data?.users}
@@ -591,13 +778,13 @@ export function AttentionView(): JSX.Element {
             />
             {view.shown < view.total && (
               <p className="text-[12px] text-gray-500 dark:text-gray-400">
-                Showing the top {view.shown} of {view.total}. The rest score lower.
+                {capSentence(view.tab, view.kind, view.shown, view.total, data?.rules)}
               </p>
             )}
           </>
         )}
       </div>
-      {guideOpen && <PendingGuideModal onClose={closeGuide} />}
+      {guideOpen && <PendingGuideModal onClose={closeGuide} rules={data?.rules} />}
     </div>
   );
 }

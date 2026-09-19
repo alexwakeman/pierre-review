@@ -470,6 +470,20 @@
       "when": 1789610400000,
       "tag": "0066_review_request_events",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1789696800000,
+      "tag": "0067_pr_security_signals",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1789783200000,
+      "tag": "0068_my_turn_settings",
+      "breakpoints": true
     }
   ]
 }

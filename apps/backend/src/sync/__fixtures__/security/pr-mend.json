@@ -1,0 +1,19 @@
+{
+  "name": "Mend Remediate fix PR: its branch and its own sentence; the ids its release notes repeat are not re-read",
+  "input": {
+    "title": "Update dependency compression to v1.8.2",
+    "headRefName": "whitesource-remediate/compression-1.x-lockfile",
+    "labels": [
+      "security fix"
+    ],
+    "bodyText": "This PR contains the following updates:\n\n| Package | Type | Update | Change |\n|---|---|---|---|\n| compression | dependencies | minor | `1.7.4` → `1.8.2` |\n\nBy merging this PR, the below vulnerabilities will be automatically resolved:\n\n| Severity           |     CVSS Score       |Vulnerability  |\n|---|---|---|\n|  High | 7.5 | CVE-2026-87776 |\n|  Low | 3.4 | CVE-2025-7339 |\n\n\n---\n\nRelease Notes\n\n \n expressjs/compression (compression) \n\n`v1.8.2`\n\nCompare Source\n\n\\=====\n\n- Fix CVE-2026-87776 (GHSA-vc2v-76pw-4v95)\n- deps: add destroy\\@&#8203;1.2.0\n- Match `Cache-Control: no-transform` directive case-insensitively\n\n`v1.8.1`\n\nCompare Source\n\n\\=====\n\n- deps: on-headers@\\~1.1.0\n  - Fix CVE-2025-7339 (GHSA-76c9-3jph-rj3q)\n\n`v1.8.0`\n\nCompare Source\n\n\\=====\n\n- Use `res.headersSent` when available\n- Replace `_implicitHeader` with `writeHead` property\n- add brotli support for versions of node that support it\n- Add the enforceEncoding option for requests without `Accept-Encoding` header\n\n`v1.7.5`\n\nCompare Source\n\n\\=====\n\n- deps: Replace accepts with negotiator@\\~0.6.4\n  - Add preference option\n- deps: bytes\\@&#8203;3.1.2\n  - Add petabyte (`pb`) support\n  - Fix \"thousandsSeparator\" incorrecting formatting fractional part\n  - Fix return value for un-parsable strings\n- deps: compressible@\\~2.0.18\n  - Mark `font/ttf` as compressible\n  - Remove compressible from `multipart/mixed`\n  - deps: mime-db@'>= 1.43.0  \n\n---\n\n - [ ] If you want to rebase/retry this PR, check this box\n\n"
+  },
+  "expected": {
+    "dependencyVendor": "mend",
+    "securityFix": "proven",
+    "advisoryIds": [
+      "CVE-2026-87776",
+      "CVE-2025-7339"
+    ]
+  }
+}

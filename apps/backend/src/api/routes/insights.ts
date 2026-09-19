@@ -127,8 +127,10 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
   // same cards Pro Insights computes in core getWorkspaceInsights), for the **Pending** rail
   // entry. The bot cards are excluded (they live in the free Bots console).
   //
-  // SERVED AS FIVE TABS (`db/pending-tabs.ts`), each a purely scored list with its uncapped
-  // count — free on every tier. The rank is code; only the Pro plan's NARRATION is paid.
+  // SERVED AS SIX TABS (`db/pending-tabs.ts`), each a scored list with its uncapped count — My
+  // turn grouped by the reader's type order and Dependencies by kind (security, then bumps) — free
+  // on every tier. The rank is code, with the reader's weights; only the Pro plan's NARRATION is
+  // paid.
   //
   // ⚠ THE TABS ARE AN ALLOW-LIST (`PENDING_TABS`), so a NEW InsightKind reaches this board only
   // once it is given a tab — otherwise it is folded, counted and never listed. pending-tabs.test.ts
@@ -147,13 +149,16 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
     // (the daily brief included) keeps the default caps; `kindTotals` is the same either way, which
     // is what keeps each tab's count and the brief line that opens it one number.
     const insights = await getWorkspaceInsights(accountId, undefined, scope, { uncapped: true });
-    // ONE FOLD, RANKED into the five tabs. The two bot cards belong to no tab and never reach here.
+    // ONE FOLD, RANKED into the six tabs. The two bot cards belong to no tab and never reach here.
     const board = await rankPendingTabs(accountId, scope, insights);
     return {
       cards: board.cards,
       users: [...insights.users, ...board.extraUsers],
       tabs: board.tabs,
       scores: board.scores,
+      // The weights and My turn type order the scores and the order above were built with — what
+      // the board's explanations print, so they describe THIS reader's ranking.
+      rules: board.rules,
     };
   });
 

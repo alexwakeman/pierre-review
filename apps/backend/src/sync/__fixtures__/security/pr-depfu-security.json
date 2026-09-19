@@ -1,0 +1,18 @@
+{
+  "name": "Depfu security update: its banner sentence proves it; the id quoted in its advisory list is kept, the release notes are not read",
+  "input": {
+    "title": "🚨 [security] Update postcss 8.4.35 → 8.5.26 (minor)",
+    "headRefName": "depfu/update/pnpm/postcss-8.5.26",
+    "labels": [
+      "depfu"
+    ],
+    "bodyText": "🚨 Your current dependencies have known security vulnerabilities 🚨\nThis dependency update fixes known security vulnerabilities. Please see the details below and assess their impact carefully. We recommend to merge and deploy this as soon as possible!\n\nHere is everything you need to know about this update. Please take a good look at what changed and the test results before merging this pull request.\nWhat changed?\n✳️ postcss (8.4.35 → 8.5.26) · Repo · Changelog\n\nSecurity Advisories 🚨\n🚨 PostCSS: incomplete fix of GHSA-6g55-p6wh-862q — attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset\nMore info than we can show here.\n🚨 PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure\nMore info than we can show here.\n🚨 PostCSS: Arbitrary file read and information disclosure via attacker-controlled sourceMappingURL in CSS comments\nMore info than we can show here.\n🚨 PostCSS has XSS via Unescaped </style> in its CSS Stringify Output\nMore info than we can show here.\n\n\nRelease Notes\nToo many releases to show here. View the full release notes.\n\n\nCommits\nSee the full diff on Github. The new version differs by more commits than we can show here.\n\n\n\n"
+  },
+  "expected": {
+    "dependencyVendor": "depfu",
+    "securityFix": "proven",
+    "advisoryIds": [
+      "GHSA-6g55-p6wh-862q"
+    ]
+  }
+}

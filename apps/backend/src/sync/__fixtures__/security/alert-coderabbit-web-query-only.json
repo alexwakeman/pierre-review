@@ -1,0 +1,5 @@
+{
+  "name": "A CodeRabbit finding about data integrity whose only advisory id sits inside a quoted web query",
+  "author": "coderabbitai",
+  "body": "_⚠️ Potential issue_ | _🟠 Major_\n\n<details>\n<summary>🧩 Analysis chain</summary>\n\n🏁 Script executed:\n\n```shell\nrg -n \"parseXml\" src\n```\n\n<details>\n<summary>🔎 Web query</summary>\n\n`fast-xml-parser 5.2.5 CVE-2026-25896 GHSA-m7jm-9gc2-mpf2 5.3.5 fixed`\n\n- 1: https://github.com/advisories/GHSA-m7jm-9gc2-mpf2\n\n</details>\n\n---\n\n</details>\n\n**Reject documents whose `totalAmount` does not equal the sum of their lines.**\n\nThe importer trusts the header total, so a mismatched file saves inconsistent rows.\n\n<details>\n<summary>🧠 Learnings used</summary>\n\n```\nLearnt from: alice\nRepo: acme/app PR: 7643\nLearning: patch GHSA-46wh-pxpv-q5gq in the shared workspace too.\n```\n\n</details>\n\n<!-- This is an auto-generated comment by CodeRabbit -->\n"
+}

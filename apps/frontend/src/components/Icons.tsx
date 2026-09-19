@@ -559,6 +559,16 @@ export function BotIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// A shield — a KNOWN SECURITY ADVISORY (the Pending board's Dependencies tab: a fix PR's sentence
+// and each live alert row). Not the maintainer mark beside a user name, which is its own drawing.
+export function ShieldIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M12 3.2 19 5.8v5.6c0 4.4-3 7.9-7 9.4-4-1.5-7-5-7-9.4V5.8Z" />
+    </IconShell>
+  );
+}
+
 // Head and shoulders — one person.
 export function PersonIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   return (

@@ -1,4 +1,14 @@
-import type { InsightCard, MyTurnCard, MyTurnCardReason } from '@pierre-review/shared';
+import type {
+  DependencyBumpCard,
+  DependencyPrState,
+  InsightCard,
+  MyTurnCard,
+  MyTurnCardReason,
+  MyTurnTrunkCard,
+  ReviewerRole,
+  SecurityAlertSource,
+  SecurityCard,
+} from '@pierre-review/shared';
 
 // WHAT THE PENDING BOARD CALLS THINGS — the kind labels and the per-card ownership label, moved
 // out of AttentionCards.tsx so the board's info popovers (pendingExplain.ts) can name a card
@@ -35,6 +45,10 @@ export const KIND_LABEL: Record<InsightCard['kind'], string> = {
   // extended for this kind — that function softens OWNERSHIP claims, and this one claims nothing
   // about the reader.
   conflicts: 'Merge conflicts',
+  // The Dependencies tab's two kinds, named as its chips name them. The CARD says which security
+  // item it is (`cardKindLabel`: a fix, or an alert), because the chip counts both.
+  security: 'Security',
+  dependency_bump: 'Bumps',
 };
 
 /**
@@ -43,8 +57,9 @@ export const KIND_LABEL: Record<InsightCard['kind'], string> = {
  * relationships:
  *
  *   'direct'     → "Your turn"      — you authored it, you were asked for the review, your
- *                                     thread got a reply, your Claude run finished, or you were
- *                                     @-mentioned (even in a repo you only read).
+ *                                     thread or comment got a reply, your Claude run finished, you
+ *                                     were @-mentioned (even in a repo you only read), or you
+ *                                     added its type in Settings → My Turn.
  *   'maintained' → "In your repos"  — somebody else opened a PR in a repo you maintain. That is
  *                                     ORBIT, not ownership: nobody named you, and calling it
  *                                     "Your turn" is precisely the over-claim the reporter
@@ -63,7 +78,23 @@ export function cardKindLabel(card: InsightCard): string {
   if (card.kind === 'my_turn') {
     if (card.relevance === 'direct') return 'Your turn';
     if (card.relevance === 'maintained') return 'In your repos';
-    return KIND_LABEL.my_turn;
+    // A type the reader ADDED to My Turn (Settings → Add to My Turn), in a muted repo: the neutral
+    // KIND label says "Review or reply", which is never true of a branch, a failing build, a
+    // conflict or a PR that is ready. Name what it is instead — as its home tab names it.
+    switch (card.reason) {
+      case 'trunk_red':
+        return 'Trunk CI failing';
+      case 'own_ci_red':
+        return 'CI failing on your PR';
+      case 'own_conflicts':
+        return KIND_LABEL.conflicts;
+      case 'own_ready':
+        return card.own?.kind === 'ready' ? KIND_LABEL[card.own.forward] : KIND_LABEL.merge;
+      case 'own_thread':
+        return KIND_LABEL.untouched_thread;
+      default:
+        return KIND_LABEL.my_turn;
+    }
   }
   // The ci_failing arms are the same distinction one layer over: 'your_pr' is a claim of
   // AUTHORSHIP, 'trunk' a claim about your patch of ground. The server only ever emits a card the
@@ -71,40 +102,110 @@ export function cardKindLabel(card: InsightCard): string {
   if (card.kind === 'ci_failing') {
     return card.arm === 'your_pr' ? 'CI failing on your PR' : 'Trunk CI failing';
   }
+  // Not an ownership claim either — what the card IS. A fix PR carries the tool's own security
+  // marker; an alert is a security tool flagging a PR that may be anybody's. ⚠ An INFERRED fix
+  // (Dependabot's grouping, the confirming line cut off) is headed as what is known — never
+  // "Security fix" above a card that cannot back it. Why it is only likely lives in the popover.
+  if (card.kind === 'security') {
+    return card.fix === 'proven'
+      ? 'Security fix'
+      : card.fix === 'inferred'
+        ? 'Likely security fix'
+        : 'Security alert';
+  }
+  if (card.kind === 'dependency_bump') return 'Dependency update';
   return KIND_LABEL[card.kind];
 }
 
-// WHICH My Turn section put this card on your plate. ⚠ Keyed on `MyTurnCardReason` (the six
-// sections of GET /api/my-turn), NOT the older `MyTurnReason` participation union that
-// lib/ui.ts's MY_TURN_REASON_META covers — they are one `sed` apart and mean opposite things.
-export const MY_TURN_REASON_LABEL: Record<MyTurnCardReason, string> = {
-  review_request: 'Review requested',
-  thread: 'Reply needed',
-  pr_approved: 'Approved',
-  your_pr: 'Your PR',
-  watched_repo_pr: 'New PR',
-  claude_review: 'Claude review',
+/**
+ * THE BYLINE CHIP FOR AUTOMATION WITH NO BRAND — what it does, when we cannot say who it is. ONE
+ * spelling, read by the card byline and the guide. A branded tool is named by its vendor label
+ * instead (`automatedReviewerMeta`), never by this.
+ */
+export const AUTHOR_ROLE_CHIP: Record<ReviewerRole, string> = {
+  dependency: 'Dependency bot',
+  code_agent: 'Coding agent',
+  release: 'Release bot',
+  housekeeping: 'Housekeeping bot',
+  quality_check: 'CI bot',
+  review: 'Review bot',
 };
 
 /**
- * THE SECTION CHIP. `reason` names the SECTION that emitted the row, which is not always what the
- * reader is being asked to do about it — and on one section those two came apart on screen.
- *
- * ⚠ `watched_repo_pr` NOW HOLDS TWO DIFFERENT FACTS. Since the ball rule, a row survives that
- * section either because you have never touched the PR (`ball.kind === 'untouched'`) or because a
- * person pushed after you last acted (`'commits_after'`). The static map calls both "New PR", so a
- * PR you approved three days ago wore the chip "New PR" immediately beside the detail "You
- * approved · @robin-dunn pushed 2 commits since" — the card contradicting itself in two adjacent
- * elements, which is the same class of defect as the card that could not explain why it was there
- * at all.
- *
- * ⚠ AN ABSENT `ball` FALLS BACK TO THE SECTION LABEL, never to a guess. The field is
- * trailing-optional for wire tolerance, and a response predating it must not have "Pushed since"
- * invented over a PR nobody has touched — the safe direction is the older, vaguer word.
+ * A Dependencies card's state chip. `null` says nothing, on purpose: `conflicts` and `needs_review`
+ * because the card's sentence already says it ("Conflicts with main", "Needs an approving review" —
+ * and the review row above says "GitHub: review required"), `ci_red` because the meta row's CI dot
+ * says "CI failing" a line above (the card prints no state line for it at all), and `unknown`
+ * because GitHub has not worked the merge state out, and a state nobody observed is not a fact to
+ * print. Total, so a new state forces a decision here.
  */
-export function myTurnReasonLabel(card: MyTurnCard): string {
-  if (card.reason === 'watched_repo_pr' && card.ball?.kind === 'commits_after') {
-    return 'Pushed since';
-  }
+export const DEP_STATE_LABEL: Record<DependencyPrState, string | null> = {
+  ready: 'Ready to merge',
+  behind: 'Behind trunk',
+  conflicts: null,
+  ci_red: null,
+  needs_review: null,
+  blocked: 'Blocked',
+  unknown: null,
+};
+
+/**
+ * A Dependencies card's state SENTENCE, or null to print none. `ci_red` prints none: the meta row's
+ * CI dot already says "CI failing", and a chip-less "CI is failing" under it said it twice. (The
+ * server keeps the sentence — the ranker's reason reads it.)
+ */
+export function depStateSentence(card: SecurityCard | DependencyBumpCard): string | null {
+  if (card.depState === 'ci_red') return null;
+  const s = card.kind === 'security' ? card.stateDetail : card.detail;
+  return s != null && s !== '' ? s : null;
+}
+
+/** Which tool raised a live security alert, by name. `reviewer` is absent: that alert is named by
+ *  its author's vendor (or login), because "a reviewer flagged…" names nobody. */
+export const SECURITY_ALERT_SOURCE_LABEL: Record<Exclude<SecurityAlertSource, 'reviewer'>, string> = {
+  socket: 'Socket',
+  dependency_review: 'Dependency Review',
+  endor: 'Endor Labs',
+  semgrep: 'Semgrep',
+  code_scanning: 'Code scanning',
+  snyk: 'Snyk',
+  frogbot: 'Frogbot',
+  checkmarx: 'Checkmarx',
+};
+
+// WHICH My Turn type put this card on your plate — the card's chip. ⚠ Keyed on
+// `MyTurnCardReason` (the fifteen types of GET /api/my-turn and Settings → My Turn), NOT the older
+// `MyTurnReason` participation union that lib/ui.ts's MY_TURN_REASON_META covers — they are one
+// `sed` apart and mean opposite things. Settings names the same types in longer words
+// (`MY_TURN_SETTING_LABEL`); this is the short form a chip can carry.
+export const MY_TURN_REASON_LABEL: Record<MyTurnCardReason, string> = {
+  review_request: 'Review requested',
+  mention: 'Mentioned',
+  thread: 'Reply needed',
+  thread_reply: 'Reply to you',
+  comment_reply: 'Comment after yours',
+  pushed_since: 'Pushed since',
+  own_ci_red: 'Build failed',
+  own_conflicts: 'Merge conflicts',
+  trunk_red: 'Trunk red',
+  pr_approved: 'Approved',
+  own_ready: 'Ready to land',
+  your_pr: 'Your PR',
+  own_thread: 'Unanswered thread',
+  claude_review: 'Claude review',
+  watched_repo_pr: 'New PR',
+};
+
+/**
+ * THE TYPE CHIP. `reason` names the type that emitted the row; the chip says it, with one
+ * refinement: a promoted "ready to land" card says WHICH kind of ready — "Ready to merge" or
+ * "Behind trunk", the words its home tab uses — because the two ask for different clicks.
+ *
+ * "Pushed since" used to be a second reading of `watched_repo_pr` (off `ball.kind`). It is its own
+ * type now (`pushed_since`, with its own switch in Settings), so the chip is the map and nothing
+ * here has to guess.
+ */
+export function myTurnReasonLabel(card: MyTurnCard | MyTurnTrunkCard): string {
+  if (card.reason === 'own_ready' && card.own?.kind === 'ready') return KIND_LABEL[card.own.forward];
   return MY_TURN_REASON_LABEL[card.reason];
 }

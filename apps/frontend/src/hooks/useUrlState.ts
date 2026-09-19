@@ -60,6 +60,8 @@ export const INSIGHT_KINDS: readonly InsightKind[] = [
   'merge',
   'update_branch',
   'conflicts',
+  'security',
+  'dependency_bump',
   'bot_signal',
   'bot_only_review',
 ];
@@ -102,6 +104,8 @@ const NAV_KEYS = [
   // of those legacy entries — the emitted URL drops `attnPersonal` and gains `attnRel` — is a real
   // navigation, and the diff has to see BOTH halves of that swap to say so.
   'attnPersonal',
+  // The People / Automation lens — a different list with its own totals, so Back must leave it.
+  'attnBy',
   'feedPr',
   'feedTab',
   'botsTab',
@@ -320,16 +324,19 @@ export function readFromUrl(): Partial<FilterState> {
   if (activityRepo) {
     if (activityRepo === 'bots') out.activityRepoId = 'bots';
     else if (activityRepo === 'attention') out.activityRepoId = 'attention';
+    // 'feed' is parsed EXPLICITLY since the landing moved to Pending: the write side emits it, so
+    // a Feed link must come back as the Feed rather than fall through to the default.
+    else if (activityRepo === 'feed') out.activityRepoId = 'feed';
     // ('compare' is deliberately NOT parsed: the "Compare workspaces" rail entry was folded into
     // Reports' "By workspace" axis. A legacy `?activityRepo=compare` link falls through the
-    // parseInt branch below — NaN, nothing set — and lands on the 'feed' default, which is the
-    // normalization for a value that no longer exists.)
+    // parseInt branch below — NaN, nothing set — and lands on the 'attention' default, which is
+    // the normalization for a value that no longer exists. Any other unknown value does the same.)
     // 'insights' USED to be write-only-by-omission: a landing default that stayed out of the URL
     // and was not parsed here either. That made the period report unforwardable — `?report=` names
     // a period on a console the link could not select, so the recipient landed on the Feed and saw
     // no report at all. It is parsed and emitted now. (The one-shot landing default that used to
-    // auto-select this rail entry for Pro accounts is GONE — the store default is 'feed' on every
-    // tier, so making Reports free-visible changes nothing about where the app lands.)
+    // auto-select this rail entry for Pro accounts is GONE — the store default is 'attention' on
+    // every tier, so making Reports free-visible changes nothing about where the app lands.)
     else if (activityRepo === 'insights') out.activityRepoId = 'insights';
     else {
       const n = Number.parseInt(activityRepo, 10);
@@ -360,6 +367,9 @@ export function readFromUrl(): Partial<FilterState> {
   // ('mine' = direct + maintained = the old `personal`); it is never emitted again. The new key
   // WINS when both appear, so a legacy entry can never override a live one.
   else if (p.get('attnPersonal') === '1') out.attentionRelevance = 'mine';
+  // The People / Automation lens. Only the two literals seat it; anything else means All.
+  const attnBy = p.get('attnBy');
+  if (attnBy === 'people' || attnBy === 'automation') out.attentionAuthorLens = attnBy;
   // The Feed's single-PR isolation — the attention board's twin, addressable for the same reason.
   const feedPr = p.get('feedPr');
   if (feedPr) {
@@ -554,7 +564,7 @@ export function writeToUrl(s: FilterState): void {
   // The active BOARD (the only tabs that are URL-deep-linkable; pinned-PR tabs stay
   // localStorage-only). Read the active tab from the pinnedTabs store — a different
   // store than this subscriber's, so useUrlState also subscribes to it. `activityRepo`
-  // is emitted only for a single-repo console (the 'all' feed is the default).
+  // is emitted for every console except Pending, the default.
   //
   // ⚠ BOTH boards are emitted AFFIRMATIVELY, and the timeline half is not optional. Silence
   // now MEANS Activity (`landingTabFromUrl`), so leaving the board implicit would bounce a
@@ -584,6 +594,10 @@ export function writeToUrl(s: FilterState): void {
     if (s.activityRepoId === 'attention' && s.attentionRelevance != null) {
       p.set('attnRel', s.attentionRelevance);
     }
+    // The author lens — orthogonal to both lenses above, on the same rail gate.
+    if (s.activityRepoId === 'attention' && s.attentionAuthorLens != null) {
+      p.set('attnBy', s.attentionAuthorLens);
+    }
     if (
       s.feedIsolatedPrId != null &&
       (s.activityRepoId === 'feed' || typeof s.activityRepoId === 'number')
@@ -596,21 +610,21 @@ export function writeToUrl(s: FilterState): void {
     if (s.activityRepoId === 'bots' && s.botsInnerTab !== 'roi') {
       p.set('botsTab', s.botsInnerTab);
     }
-    // A single-repo console and the CORE Bots / **Pending** consoles are deep-linkable,
-    // and so is 'insights' — it is a landing default AND a real destination, and omitting it
-    // made the period report's `?report=` link land on the Feed.
-    // Only 'feed' stays out of the URL now, because it is the bare state a link means when it
-    // says nothing. Emitting a value the read side does not parse would be write-only, so the
-    // two halves must always be changed together.
+    // A single-repo console and the Feed / Bots / Reports consoles are deep-linkable — Reports
+    // because omitting it made the period report's `?report=` link land somewhere else.
+    // Only 'attention' stays out of the URL, because it is the bare state a link means when it
+    // says nothing. 'feed' is emitted since the landing moved to Pending — without it a Feed
+    // link would open Pending. Emitting a value the read side does not parse would be
+    // write-only, so the two halves always change together.
     // (The 'retro' pseudo-row is gone with the Retro panel; the 'compare' pseudo-row is gone
     // with the Compare rail entry — its surface is Reports' "By workspace" axis, reachable via
     // `?activityRepo=insights&report=…`.)
     if (typeof s.activityRepoId === 'number') {
       p.set('activityRepo', String(s.activityRepoId));
+    } else if (s.activityRepoId === 'feed') {
+      p.set('activityRepo', 'feed');
     } else if (s.activityRepoId === 'bots') {
       p.set('activityRepo', 'bots');
-    } else if (s.activityRepoId === 'attention') {
-      p.set('activityRepo', 'attention');
     } else if (s.activityRepoId === 'insights') {
       p.set('activityRepo', 'insights');
       // The pane's sub-tab, on the same "only where the strip is on screen" gate as `feedTab` /
@@ -626,6 +640,7 @@ export function writeToUrl(s: FilterState): void {
       if (s.insightsReportGrain !== 'sprint') p.set('reportGrain', s.insightsReportGrain);
       if (s.insightsReportKey) p.set('report', s.insightsReportKey);
     }
+    // 'attention' (and null) stay out: a link naming no console means Pending.
   } else if (
     parseTabKey(activeTab) != null ||
     parseUserActivityKey(activeTab) != null ||

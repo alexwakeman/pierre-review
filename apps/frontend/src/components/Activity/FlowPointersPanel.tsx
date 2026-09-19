@@ -4,7 +4,9 @@ import {
   useFlowPointersGenerating,
   useGenerateFlowPointers,
 } from '../../hooks/useFlowPointers.js';
+import { InfoButton } from '../InfoModal.js';
 import { SparkleIcon } from '../Icons.js';
+import { PointersInfo } from './chronologyInfo.js';
 import { PrLink } from './ChronologyTables.js';
 
 // Chronology's POINTERS — the one model-written block on the panel, and styled apart from
@@ -16,6 +18,10 @@ import { PrLink } from './ChronologyTables.js';
 // checked against the evidence; the links under each pointer come from the LIVE fold.
 //
 // ⚠ NOTHING GENERATES ON ITS OWN. The GET reads the cache; the button is the only thing that spends.
+//
+// ⚠ "WRITTEN BY AI" STAYS ON THE PAGE. How the pointers are made moved behind the "i" with every
+// other panel's explanation, but the line saying a model wrote them did not: a model-derived
+// sentence and a code-derived figure must be labelled apart where the reader sees them.
 
 const KIND_LABEL: Record<FlowPointerKind, string> = {
   pattern: 'Pattern',
@@ -55,7 +61,12 @@ export function FlowPointersPanel({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <SparkleIcon size={14} className="text-ai-signal" />
-          <h4 className="text-sm font-semibold text-ai-ink">Pointers</h4>
+          <span className="flex items-center gap-1">
+            <h4 className="text-sm font-semibold text-ai-ink">Pointers</h4>
+            <InfoButton title="Pointers" className="text-ai-ink">
+              <PointersInfo />
+            </InfoButton>
+          </span>
           {result != null && data.stale && (
             <span className="rounded border border-ai-hairline px-1.5 text-[11px] text-ai-ink">
               Out of date
@@ -73,10 +84,7 @@ export function FlowPointersPanel({
           </button>
         )}
       </div>
-      <p className="mt-0.5 text-xs text-ai-ink">
-        Written by a model from the pull requests above: patterns, examples worth copying, and things
-        to try. It names no one and writes no figures — the figures are the charts.
-      </p>
+      <p className="mt-0.5 text-xs text-ai-ink">Written by AI from the pull requests on this page.</p>
 
       {data.empty ? (
         <p className="mt-3 text-xs text-ai-ink">Nothing merged in this window to write about.</p>
@@ -104,7 +112,7 @@ export function FlowPointersPanel({
       )}
 
       {result != null && (
-        <p className="mt-3 text-[11px] text-ai-ink">
+        <p className="mt-3 text-xs text-ai-ink">
           Written {when(result.generatedAt)} over {result.prCount} pull requests.
           {result.droppedPointers > 0 &&
             ` ${result.droppedPointers} ${result.droppedPointers === 1 ? 'pointer was' : 'pointers were'} dropped for citing nothing real or breaking a rule.`}
@@ -113,13 +121,13 @@ export function FlowPointersPanel({
         </p>
       )}
       {last?.throttled && (
-        <p className="mt-1 text-[11px] text-ai-ink">Written moments ago — try again in a minute.</p>
+        <p className="mt-1 text-xs text-ai-ink">Written moments ago — try again in a minute.</p>
       )}
       {last?.creditsExhausted && (
-        <p className="mt-1 text-[11px] text-ai-ink">Out of AI credits for this month.</p>
+        <p className="mt-1 text-xs text-ai-ink">Out of AI credits for this month.</p>
       )}
       {generate.isError && (
-        <p className="mt-1 text-[11px] text-rose-700 dark:text-rose-400">
+        <p className="mt-1 text-xs text-rose-700 dark:text-rose-400">
           {(generate.error as Error)?.message ?? 'Could not write pointers.'}
         </p>
       )}

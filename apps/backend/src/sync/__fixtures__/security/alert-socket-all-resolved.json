@@ -1,0 +1,5 @@
+{
+  "name": "Socket's sticky comment after the alerts were resolved",
+  "author": "socket-security",
+  "body": "**All alerts resolved.** Learn more about [Socket for GitHub](https://socket.dev?utm_medium=gh).\n\nThis PR previously contained dependency changes with security issues that have been resolved, removed, or ignored.\n\n[View full report](https://socket.dev/dashboard/org/acme/diff-scan/694956a7-0450-4711-bb35-81c49cb7f0fd?tab=alerts&action=error%2Cwarn)"
+}

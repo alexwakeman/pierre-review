@@ -27,6 +27,7 @@ import type {
   CiStatus,
   CommitDetail,
   ConflictsCard,
+  DependencyBumpCard,
   DerivedState,
   EventType,
   InsightCard,
@@ -39,6 +40,8 @@ import type {
   MyTurnCardReason,
   ReviewerSuggestion,
   ReviewerRoutingCard,
+  SecurityAlert,
+  SecurityCard,
   UpdateBranchCard,
   WorkspaceInsightsResponse,
   WorkspaceMetrics,
@@ -107,6 +110,15 @@ import type {
   FeedAffectedThread,
   MyTurnPr,
   MyTurnRelevance,
+  MyTurnTrunkCard,
+  MyTurnOwnWork,
+  MentionItem,
+  CommentReplyItem,
+  OwnCiRedItem,
+  OwnConflictsItem,
+  OwnReadyItem,
+  OwnThreadItem,
+  RedTrunkItem,
   BotSignalCard,
   BotSignalVendorStat,
   AutomatedReviewerKind,
@@ -167,6 +179,7 @@ import type {
 // from `shared` (not typed here) because the board's info popovers print the same values; a local
 // literal would let the app explain an order it no longer produces. See pending-rules.ts.
 import {
+  automationVendorFor,
   MY_TURN_SEVERITY,
   PENDING_KIND_RANK,
   PENDING_LIMITS,
@@ -203,11 +216,12 @@ import {
   type TriageResult,
 } from './triage.js';
 import { getAccountById, getAccountUserId } from '../auth/account.js';
-import { viewerMentionedPrIds } from './pr-mentions.js';
+import { getMyTurnSettings } from './my-turn-settings.js';
 import { getMutedPendingRepoIds, repoGrainedPendingMutes } from './pending-mute.js';
 import { enrichReviewerSuggestions } from '../github/reviewer-suggest.js';
 import { ensureRoutingPrFiles } from '../sync/routing-files.js';
 import {
+  automationVendorKind,
   matchesAutomatedLoginPattern,
   qualityCheckBotLogins,
   reviewBotKind,
@@ -237,6 +251,27 @@ import { hubReadingFor, loadRepoCoupling, type RepoCoupling } from './file-coupl
 import { DAYS_PER_MONTH, botWindowMs } from './bot-window.js';
 import { detectChangepoints } from './changepoint.js';
 import { dormantBotUserIds } from './bot-dormancy.js';
+import {
+  automationVendorUserIds,
+  exactAutomationVendorUsers,
+  githubTypeBotUserIds,
+  globalAutomationUserIds,
+} from './automation-ids.js';
+import {
+  forwardKindOf,
+  isConflicting,
+  isRedCiStatus,
+  RED_CI_STATUSES,
+} from './pending-classify.js';
+import {
+  authorAutomationFor,
+  dependencyPrState,
+  dependencyStateDetail,
+  securityFixDetail,
+  unionAdvisoryIds,
+  type AuthorAutomationInputs,
+} from './dependency-cards.js';
+import { deriveSecurityAlerts } from './security-alerts.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
 // timestamptz (drizzle binds the Date through the codec), whereas SQLite columns
@@ -290,9 +325,9 @@ const {
   workspaceReviewers,
   benchmarkContributions,
   autoMergeRequests,
-  // "@you was mentioned on this PR" (migration 0056 / pg 0043). Read here only through
-  // db/pr-mentions.ts; named in this destructure for the ONE thing that has to live in this
-  // file — `deleteRepo`'s hand-written cascade.
+  // "@you was mentioned on this PR" (migration 0056 / pg 0043; the mention clock is 0068 / pg
+  // 0055). WRITTEN only by db/pr-mentions.ts (the scanner); read here by `getMyTurn`'s mention
+  // join, and named for `deleteRepo`'s hand-written cascade.
   prMentions,
 } = schema;
 
@@ -310,13 +345,19 @@ function diffAnchorId(path: string): string {
   return createHash('sha256').update(path, 'utf8').digest('hex');
 }
 
+// ⚠ The wire `isBot` is the GLOBAL automation verdict, not the raw column: `users.isBot` ∪ GitHub
+// typing the account a Bot ∪ a known vendor login (exact or prefix) — the same set
+// `globalAutomationUserIds` (db/automation-ids.ts) reads and `hiddenBotUserIds` widens with. Every
+// client-side bot union (the Feed's lenses and pill counts, the member picker, the PR detail) falls
+// back to this flag, so a narrower one here let socket-security or Copilot be hidden by the server
+// yet counted as a person by the client. `users.isBot` itself keeps its meaning.
 export function mapUser(u: typeof users.$inferSelect): User {
   return {
     id: u.id,
     githubLogin: u.githubLogin,
     displayName: u.displayName,
     avatarUrl: u.avatarUrl,
-    isBot: u.isBot,
+    isBot: u.isBot || u.githubType === 'Bot' || automationVendorFor(u.githubLogin) != null,
   };
 }
 
@@ -3534,6 +3575,10 @@ interface TrunkLandingPr {
    *  attributes LANDING, never BREAKING — trunk may well have been red before this PR merged
    *  (see the ci_failing block in getWorkspaceInsights for why we do not try to say more). */
   mergedById: number | null;
+  /** Who OPENED it, and the dependency tool's own marker on it — the ci_failing trunk card's
+   *  author fields (`authorAutomationFor`), so the People / Automation lens reads one predicate. */
+  authorId: number | null;
+  dependencyVendor: string | null;
 }
 
 async function resolveTrunkCommitPrs(
@@ -3577,8 +3622,10 @@ async function resolveTrunkCommitPrs(
       title: pullRequests.title,
       state: pullRequests.state,
       // Selected HERE rather than re-queried by a caller: this is already the one hop from a
-      // trunk sha to its PR row. The feed-item caller simply ignores the extra column.
+      // trunk sha to its PR row. The feed-item caller simply ignores the extra columns.
       mergedById: pullRequests.mergedById,
+      authorId: pullRequests.authorId,
+      dependencyVendor: pullRequests.dependencyVendor,
     })
     .from(pullRequests)
     .where(
@@ -3600,6 +3647,8 @@ async function resolveTrunkCommitPrs(
         title: pr.title,
         state: pr.state as PrState,
         mergedById: pr.mergedById,
+        authorId: pr.authorId,
+        dependencyVendor: pr.dependencyVendor,
       });
   }
   return out;
@@ -3755,20 +3804,6 @@ export function mergeCardDetail(
 // restate "you have 54 things" as "you have 15". 50 keeps the board bounded while sitting above
 // any realistic personal inbox; the tail beyond it is disclosed by /api/my-turn's own listing.
 const MY_TURN_CARD_CAP = PENDING_LIMITS.myTurnCardCap;
-
-/**
- * IS THIS BUILD RED? — and RED IS ALWAYS THE PAIR `failure` | `error`, never one of them.
- *
- * GitHub reports an infrastructure/permissions problem as `error` and a genuine check failure as
- * `failure`, and every layer of this app that asks "is it red" has to accept both: db/triage.ts's
- * reason tags, getWorkspaceMetricsDetail's own local `isRed`, and the SPA's lib/ui.ts. A fold that
- * tested only 'failure' would silently drop every errored build — which is the half that most
- * often needs a human.
- */
-const RED_CI_STATUSES = ['failure', 'error'] as const;
-function isRedCiStatus(ci: CiStatus | null): boolean {
-  return (RED_CI_STATUSES as readonly string[]).includes(ci ?? '');
-}
 
 /** "just now" / "42m ago" / "6h ago" / "3d ago" — the my_turn card's one-line detail suffix. */
 function agoLabel(fromMs: number, nowMs: number): string {
@@ -4573,12 +4608,13 @@ export async function getWorkspaceInsights(
   accountId: number,
   window: MetricsWindow | undefined,
   scope: BotScope,
-  // ⚠ `uncapped` IS THE PENDING BOARD'S FOLD AND NOBODY ELSE'S. The board ranks every card by its
-  // Do next score and THEN lists the top `boardListCap` of each kind, so it needs the whole
-  // population here — a per-kind cap applied first (in severity / newest order) would hand the
-  // ranker the wrong 15. Every other consumer (the daily brief, the Pro insights pane, chat, the
-  // sprint report, Slack) keeps the default caps: their inputs, prompt sizes and payload hashes
-  // must not grow because the board changed. `kindTotals` is identical either way.
+  // ⚠ `uncapped` IS THE PENDING BOARD'S FOLD — and the work plan's, which may name only what the
+  // board lists. The board ranks every card by its Do next score and THEN lists the top
+  // `boardListCap` of each list group, so it needs the whole population here — a per-kind cap
+  // applied first (in severity / newest order) would hand the ranker the wrong 15. Every other
+  // consumer (the daily brief, the Pro insights pane, chat, the sprint report, Slack) keeps the
+  // default caps: their inputs, prompt sizes and payload hashes must not grow because the board
+  // changed (the plan's hash covers only its ≤12 rows). `kindTotals` is identical either way.
   opts: { uncapped?: boolean } = {},
 ): Promise<WorkspaceInsightsResponse> {
   const uncapped = opts.uncapped === true;
@@ -4618,6 +4654,9 @@ export async function getWorkspaceInsights(
   // where a silent cap is the same lie my_turn's was. Written inside the block below, so an empty
   // workspace leaves it undefined = nothing to disclose.
   let ciFailingTotal: number | undefined;
+  // The repos whose red default branch the reader PROMOTED into My Turn — see
+  // `WorkspaceInsightsResponse.myTurnTrunkRepoIds`. Written by the my_turn block below.
+  let myTurnTrunkRepoIds: number[] | undefined;
   // Every kind's pre-cap population — see `WorkspaceInsightsResponse.kindTotals`. Written by each
   // builder BEFORE it slices, so it is the same number in the capped and the uncapped fold.
   const kindTotals: Partial<Record<InsightKind, number>> = {};
@@ -4703,31 +4742,72 @@ export async function getWorkspaceInsights(
       myTurnOtherTotal,
       ciFailingTotal,
       kindTotals,
+      myTurnTrunkRepoIds,
     };
   };
   if (repoIds.length === 0) return finish();
 
-  // WHO OPENED IT — the one bot judgement this fold makes, resolved ONCE into two maps that
-  // `prRef` below reads. `prRef` stays SYNCHRONOUS: it is called from six card builders inside
-  // tight loops, and making it async to answer "is this a bot" per row would issue one lookup per
-  // card for an answer that is the same for the whole workspace.
+  // WHO OPENED IT — the one bot judgement this fold makes, resolved ONCE into the maps `prRef`
+  // below reads. `prRef` stays SYNCHRONOUS: it is called from six card builders inside tight
+  // loops, and making it async to answer "is this a bot" per row would issue one lookup per card
+  // for an answer that is the same for the whole workspace.
   //
   // ⚠ THE RESOLUTION IS NOT THE LOGIN, AND IT IS NOT A NEW ONE. `hiddenBotUserIds` is the exact
-  // union the SPA's "hide bots" lens already hides by — `users.isBot` ∪ THIS workspace's automated
-  // reviewers (vendor-login seed + `workspace_reviewers` rows flagged automated), with a manual
-  // "this is a human" winning BOTH directions — and `classificationKindForUser` is the exact map
-  // every other vendor chip on this board reads (the untouched-thread pill below is one). A second
-  // classifier here would let the Timeline call an actor a bot while the card beside it calls the
-  // same actor a person, which is the "stored role/kind beats the login seed" rule losing to a
-  // convenience `reviewBotKind(login)`.
+  // union the SPA's "hide bots" lens already hides by — `users.isBot` ∪ `github_type = 'Bot'` ∪ the
+  // vendor logins ∪ THIS workspace's automated reviewers, with a manual "this is a human" winning
+  // BOTH directions — and `classificationKindForUser` is the exact map every other vendor chip on
+  // this board reads (the untouched-thread pill below is one). A second classifier here would let
+  // the Timeline call an actor a bot while the card beside it calls the same actor a person, which
+  // is the "stored role/kind beats the login seed" rule losing to a convenience
+  // `reviewBotKind(login)`. The ROLE (`authorAutomationFor`) is read off the same maps.
   //
   // ⚠ DELIBERATELY BELOW THE EMPTY-WORKSPACE EARLY RETURN: a workspace with no repos emits no
-  // cards, so it must not pay for four reads to classify nobody.
-  const [botAuthorIds, authorBotKinds] = await Promise.all([
-    hiddenBotUserIds(accountId, scope.workspaceId),
-    classificationKindForUser(accountId, scope.workspaceId),
-  ]);
-  const botAuthorIdSet = new Set(botAuthorIds);
+  // cards, so it must not pay for the reads to classify nobody.
+  const authorInputs = await resolveAuthorAutomationInputs(accountId, scope.workspaceId);
+  const botAuthorIdSet = authorInputs.automatedIds;
+  const authorBotKinds = authorInputs.kindOf;
+  // The logins `authorAutomationFor` matches the vendor vocabularies against — read BY ID for the
+  // authors this fold builds cards for (the global `users` table), before the first `prRef` call
+  // on them. A missing login only costs an automation its vendor ROLE (it falls to `code_agent`),
+  // never its automation flag.
+  const learnLogins = async (ids: (number | null)[]): Promise<void> => {
+    const missing = [...new Set(ids)].filter(
+      (id): id is number => id != null && !authorInputs.loginOf.has(id),
+    );
+    if (missing.length === 0) return;
+    for (const u of await db
+      .select({ id: users.id, login: users.githubLogin })
+      .from(users)
+      .where(inArray(users.id, missing))
+      .execute())
+      authorInputs.loginOf.set(u.id, u.login);
+  };
+  // WHO OPENED IT, for any PR — the flag, its vendor and the automation role. `prRef` and both
+  // ci_failing arms spread this beside their own `authorId`, so a card's byline, its side of the
+  // People / Automation lens and its Dependencies-tab membership are one resolution.
+  const authorFields = (
+    authorId: number | null,
+    dependencyVendor: string | null,
+  ): Pick<InsightPrRef, 'authorIsBot' | 'authorBotKind' | 'automation'> => {
+    const authorIsBot = authorId != null && botAuthorIdSet.has(authorId);
+    return {
+      authorIsBot,
+      // ⚠ A KIND ONLY EVER RIDES ALONG WITH THE FLAG. The kind map names a SUBSET of the flagged
+      // set (the same vendor logins and workspace rows; the flag also holds `users.isBot`, the
+      // accounts GitHub types a Bot and the per-org prefixes, none of which carries a brand), and
+      // a manual "human" removes the actor from both. Gating the kind on the flag means a future
+      // divergence costs a chip's BRAND, never a vendor chip painted over a person's name.
+      authorBotKind: authorIsBot && authorId != null ? authorBotKinds.get(authorId) ?? null : null,
+      // ⚠ NOT the flag again: a dependency tool's own MARKER (a Snyk fix pushed with a member's
+      // token) makes a person-authored PR automation here, while `authorIsBot` stays a claim about
+      // the ACCOUNT.
+      automation: authorAutomationFor(
+        authorId,
+        (dependencyVendor as AutomatedReviewerKind | null) ?? null,
+        authorInputs,
+      ),
+    };
+  };
 
   // WHERE THE REVIEW STANDS — ONE fold, called TWICE, into ONE map.
   //
@@ -4808,13 +4888,20 @@ export async function getWorkspaceInsights(
       // every card on that path to `codeLoc: null` — an "unknown" that looks exactly like the
       // honest one and is indistinguishable at the render. A missing select is a compile error.
       files: StoredPrFile[] | null;
+      // THE DEPENDENCY TOOL'S OWN MARKER on the PR (`pull_requests.dependency_vendor`, read at sync
+      // from its branch/title/body). REQUIRED for the reason `files` is: an omitted select would
+      // quietly call a Snyk fix pushed under a person's account "a person" — and it decides which
+      // tab the PR is listed in.
+      dependencyVendor: string | null;
     },
     // `standingsByPr.get(p.id)` — see the map's declaration for why this is a parameter and not
     // an ambient lookup. `undefined` is the honest empty: no non-pending review exists.
     standings: PrReviewStandings | undefined,
   ): InsightPrRef => {
     const authorId = p.authorId;
-    const authorIsBot = authorId != null && botAuthorIdSet.has(authorId);
+    // Registered HERE as well as at the call sites — the reviewer-chip rule below: a byline the
+    // client can only render as a numeric id is the failure the registry exists to prevent.
+    addUser(authorId);
     // The counts come from the ONE fold the chips come from, so "2 approvals" and the chips
     // beside it are the same rows by construction — never two reads of `reviews`.
     const approval = standings ? approvalInfoFromStandings(standings) : null;
@@ -4865,12 +4952,8 @@ export async function getWorkspaceInsights(
       additions: p.additions,
       deletions: p.deletions,
       openedAt: p.openedAt.toISOString(),
-      authorIsBot,
-      // ⚠ A KIND ONLY EVER RIDES ALONG WITH THE FLAG. The two maps agree by construction (both
-      // start from the same vendor-login seed and the same workspace rows, and a manual "human"
-      // removes the actor from both), but gating the kind on the flag means a future divergence
-      // costs a chip's BRAND, never a vendor chip painted over a person's name.
-      authorBotKind: authorIsBot && authorId != null ? authorBotKinds.get(authorId) ?? null : null,
+      // WHO OPENED IT: the flag, its vendor, and the automation role — see `authorFields`.
+      ...authorFields(authorId, p.dependencyVendor),
       // ⚠ CARRIED APART, NOT MERGED. `reviewDecision` is GITHUB's verdict on whether review still
       // blocks the merge; the three fields under it are OURS, folded from the review rows. They
       // disagree on real data (ours counts an approval GitHub has since dismissed), and picking a
@@ -4902,7 +4985,7 @@ export async function getWorkspaceInsights(
   // The VIEWER'S OWN inbox, promoted from an uncountable Feed facet to first-class cards.
   //
   // ⚠ This is NOT a re-derivation. It calls the SAME `getMyTurn` fold that `GET /api/my-turn`
-  // serves — passing the workspace scope — and emits one card per row of its six sections. The
+  // serves — passing the workspace scope — and emits one card per row of its sections. The
   // daily brief then counts the cards emitted here, so the strip's number and the list the user
   // lands on are the same object by construction. (The count used to come from the consolidated
   // feed's `counts.myTurn`: a tally of EVENTS in a rolling 14 days, which corresponded to no
@@ -4911,8 +4994,29 @@ export async function getWorkspaceInsights(
   // Computed HERE, before the open-PR guard below, for the same reason the two bot cards are: a
   // thread awaiting your reply, or a finished Claude review, can sit on a PR that guard drops
   // (drafts, ultra-stale) — and dropping it would understate the brief's number.
+  //
+  // ⚠ DEPENDENCY PRs KEEP THEIR my_turn CARDS — the one kind that does. A review requested of you
+  // on a Dependabot PR is a direct summons, and it wins over "listed only in Dependencies".
+  //
+  // THE ONE my_turn FOLD for this request, read ONCE, OUTSIDE the block below, because two parts
+  // of this function need it: the my_turn cards, and the HOME BUILDERS further down, which drop
+  // every item the reader PROMOTED into My Turn (Settings → My Turn → "Add to My Turn").
+  //
+  // ⚠ A PROMOTED CARD MOVES, IT IS NEVER LISTED TWICE. Both sides are built from this one result
+  // BY ID, so an item is in exactly one tab whatever the predicates do — and the predicates match
+  // anyway (the same shared classifiers, the same own / non-draft / active-in-90-days population,
+  // the same write gate for conflicts). Each home builder drops these from its SEED list, before
+  // its `kindTotals`, so every tab count moves with its list.
+  const mt = await getMyTurn(accountId, scope);
+  const promotedCi = new Set(mt.ownCiRed.map((i) => i.prId));
+  const promotedConflicts = new Set(mt.ownConflicts.map((i) => i.prId));
+  const promotedReady = new Set(mt.ownReady.map((i) => i.prId));
+  const promotedThreads = new Set(mt.ownThreads.map((i) => i.threadId));
+  const promotedTrunks = new Set(mt.redTrunks.map((i) => i.repoId));
+  // The WHOLE promoted-trunk population, never the capped cards — the daily brief's red-trunk line
+  // leaves these out, so a trunk the reader promoted is counted once, in My Turn.
+  myTurnTrunkRepoIds = mt.redTrunks.map((t) => t.repoId);
   {
-    const mt = await getMyTurn(accountId, scope);
     const loginById = new Map(mt.users.map((u) => [u.id, u.githubLogin]));
     const handle = (id: number | null): string =>
       id != null ? `@${loginById.get(id) ?? `user${id}`}` : 'someone';
@@ -4921,7 +5025,8 @@ export async function getWorkspaceInsights(
     // the sort is done (the cards' wire field is ISO), and is NULL when the section row carries no
     // usable timestamp of its own — `sinceFor` then dates the card off the PR row.
     type Seed = {
-      reason: MyTurnCardReason;
+      /** Every type but `trunk_red`, whose subject is a repository — see `RankedMyTurn`. */
+      reason: Exclude<MyTurnCardReason, 'trunk_red'>;
       /** WHAT THE CARD `id` KEYS ON, and nothing else — it is NOT on the wire. Two cards can sit
        *  on one PR (a thread reply and a finished Claude review), and two threads can sit on one
        *  PR, so `myturn:<reason>:<prId>` would collapse them into one React key and one board row.
@@ -4930,9 +5035,12 @@ export async function getWorkspaceInsights(
        *  scrolled to, flashed or returned to from a PR tab keeps its identity across this change.
        *  Null on 'your_pr', which falls back to the PR id. */
       refId: number | null;
-      /** `MyTurnCard.ball` — set only on 'watched_repo_pr'. The card carries the FACT; the SPA
-       *  picks the words for it. */
+      /** `MyTurnCard.ball` — set only on 'watched_repo_pr' and 'pushed_since'. The card carries the
+       *  FACT; the SPA picks the words for it. */
       ball?: NewPrBall;
+      /** `MyTurnCard.own` — set only on the four PR-grained promotions, carrying exactly the facts
+       *  the card's HOME kind carried, so the board can render the same controls on it. */
+      own?: MyTurnOwnWork;
       threadId: number | null;
       severity: InsightSeverity;
       detail: string;
@@ -4961,10 +5069,10 @@ export async function getWorkspaceInsights(
       i.since != null ? new Date(Date.parse(i.since)) : null;
 
     // THE RELEVANCE ANSWER, READ NOT RE-DERIVED — the `sinceOf` rule applied to the second thing
-    // this block would otherwise answer for a second time. `getMyTurn` owns the relevance rule
-    // AND the maintainer/mention sets it needs (one repo/merger/mention read per fold); re-running
-    // it here would cost a second batch of queries and could disagree with the wire the very same
-    // request serves.
+    // this block would otherwise answer for a second time. `getMyTurn` owns the relevance rule,
+    // the maintainer set it needs and the Pending mute (one read each per fold); re-running it here
+    // would cost a second batch of queries and could disagree with the wire the very same request
+    // serves.
     //
     // Absent ⇒ fall back to the older boolean: `true` ⇒ 'direct', `false` ⇒ 'none'. A row that
     // carries no `relevance` cannot be told apart from 'maintained', and it never has to be —
@@ -5052,40 +5160,176 @@ export async function getWorkspaceInsights(
         extraActorIds: [],
       });
     }
-    for (const i of mt.watchedRepoPrs) {
+    // S3(c) — a PERSON pushed after your last review or comment. WHY THE BALL IS YOURS, in the
+    // card's own words: what you did, and who pushed how much since. The wire says which case this
+    // is (`WatchedRepoPrItem.ball`) — nothing is re-derived here.
+    for (const i of mt.pushedSince) {
       const at = sinceOf(i) ?? new Date(Date.parse(i.openedAt));
-      // WHY THE BALL IS YOURS, in the card's own words. "New PR from @x · 11d ago" is true only
-      // of a PR you have never touched; it was printed over PRs the viewer had already approved,
-      // which is the complaint this whole change answers. The wire says which case this is
-      // (`WatchedRepoPrItem.ball`) — nothing is re-derived here.
       const ball = i.ball;
-      const pushed =
-        ball?.kind === 'commits_after'
-          ? `${ball.humanCommitsAfter ?? 1} commit${(ball.humanCommitsAfter ?? 1) === 1 ? '' : 's'}`
-          : '';
+      const n = ball?.humanCommitsAfter ?? 1;
       seeds.push({
-        reason: 'watched_repo_pr',
-        // Rides the card so the SPA's section chip can say which of the two things this is.
-        // Without it the chip is keyed on `reason` alone and reads "New PR" over a row kept
-        // because somebody pushed after your review — the card contradicting its own detail.
+        reason: 'pushed_since',
         ball,
         refId: i.prId,
         threadId: null,
-        severity: MY_TURN_SEVERITY.watched_repo_pr,
-        detail:
-          ball?.kind === 'commits_after'
-            ? `${YOUR_LAST_ACTION_LABEL[ball.yourLastAction ?? 'reviewed']} · ${handle(ball.pusherId ?? null)} pushed ${pushed} since`
-            : `New PR from ${handle(i.authorId)} · ${agoLabel(at.getTime(), now)}`,
+        severity: MY_TURN_SEVERITY.pushed_since,
+        detail: `${YOUR_LAST_ACTION_LABEL[ball?.yourLastAction ?? 'reviewed']} · ${handle(ball?.pusherId ?? null)} pushed ${n} commit${n === 1 ? '' : 's'} since`,
         since: at,
         prId: i.prId,
-        // The ONE section that is ever anything but 'direct': 'maintained' when it is a repo the
-        // viewer has write on or has landed a PR into, 'none' for a stranger's PR in a repo they
-        // merely track. (A mention on it makes it 'direct' again, even in a read-only repo.)
         relevance: relevanceOf(i),
         muted: mutedOf(i),
-        // The pusher is named in the detail on an S3(c) row, so the client has to be able to
-        // resolve them; `addUser` ignores a null.
+        // The pusher is named in the detail, so the client has to be able to resolve them;
+        // `addUser` ignores a null.
         extraActorIds: [i.authorId, ball?.pusherId ?? null],
+      });
+    }
+    // S2 — a PR you have never touched. "New PR from @x" is true ONLY of such a PR, which is now
+    // the only thing this section holds (the pushed-since rows have their own type above).
+    for (const i of mt.watchedRepoPrs) {
+      const at = sinceOf(i) ?? new Date(Date.parse(i.openedAt));
+      seeds.push({
+        reason: 'watched_repo_pr',
+        ball: i.ball,
+        refId: i.prId,
+        threadId: null,
+        severity: MY_TURN_SEVERITY.watched_repo_pr,
+        detail: `New PR from ${handle(i.authorId)} · ${agoLabel(at.getTime(), now)}`,
+        since: at,
+        prId: i.prId,
+        // The ONE type that is ever anything but 'direct': 'maintained' when it is a repo the
+        // viewer can push to or has landed a PR into, 'none' for a stranger's PR in a repo they
+        // merely track.
+        relevance: relevanceOf(i),
+        muted: mutedOf(i),
+        extraActorIds: [i.authorId],
+      });
+    }
+    // S6 — a PERSON @-mentioned you, after your last action on the PR.
+    for (const i of mt.mentions) {
+      const at = sinceOf(i) ?? new Date(Date.parse(i.openedAt));
+      seeds.push({
+        reason: 'mention',
+        refId: i.prId,
+        threadId: null,
+        severity: MY_TURN_SEVERITY.mention,
+        detail: `${handle(i.mentionedById)} mentioned you ${agoLabel(at.getTime(), now)}`,
+        since: at,
+        prId: i.prId,
+        relevance: relevanceOf(i),
+        muted: mutedOf(i),
+        extraActorIds: [i.mentionedById],
+      });
+    }
+    // S3(d) — a PERSON answered your comment in a thread somebody else started.
+    for (const i of mt.threadReplies) {
+      const at = new Date(Date.parse(i.lastReplyAt));
+      seeds.push({
+        reason: 'thread_reply',
+        refId: i.threadId,
+        threadId: i.threadId,
+        severity: MY_TURN_SEVERITY.thread_reply,
+        detail: `${handle(i.lastReplyAuthorId)} replied to your comment ${agoLabel(at.getTime(), now)}`,
+        since: at,
+        prId: i.prId,
+        relevance: relevanceOf(i),
+        muted: mutedOf(i),
+        extraActorIds: [i.lastReplyAuthorId],
+      });
+    }
+    // S5 — a PERSON commented on the PR right after your PR comment.
+    for (const i of mt.commentReplies) {
+      const at = sinceOf(i) ?? new Date(Date.parse(i.openedAt));
+      seeds.push({
+        reason: 'comment_reply',
+        refId: i.prId,
+        threadId: null,
+        severity: MY_TURN_SEVERITY.comment_reply,
+        detail: `${handle(i.replyAuthorId)} commented after you ${agoLabel(at.getTime(), now)}`,
+        since: at,
+        prId: i.prId,
+        relevance: relevanceOf(i),
+        muted: mutedOf(i),
+        extraActorIds: [i.replyAuthorId],
+      });
+    }
+    // ── THE FOUR PR-GRAINED PROMOTIONS. Each card carries its HOME kind's facts on `own`, so the
+    // board renders the same controls (the merge row, the resolver entry) on it; the home builders
+    // below drop the same ids, so each is listed once. Details are time-free, like the home cards'.
+    for (const i of mt.ownCiRed) {
+      seeds.push({
+        reason: 'own_ci_red',
+        refId: i.prId,
+        threadId: null,
+        severity: MY_TURN_SEVERITY.own_ci_red,
+        detail: 'Its latest build failed',
+        since: sinceOf(i),
+        prId: i.prId,
+        relevance: relevanceOf(i),
+        muted: mutedOf(i),
+        extraActorIds: [],
+        own: { kind: 'ci_red', lastCommitAt: i.lastCommitAt },
+      });
+    }
+    for (const i of mt.ownConflicts) {
+      seeds.push({
+        reason: 'own_conflicts',
+        refId: i.prId,
+        threadId: null,
+        severity: MY_TURN_SEVERITY.own_conflicts,
+        detail: `Conflicts with ${i.baseRefName ?? 'the base branch'}`,
+        since: sinceOf(i),
+        prId: i.prId,
+        relevance: relevanceOf(i),
+        muted: mutedOf(i),
+        extraActorIds: [],
+        own: { kind: 'conflicts', mergeStateStatus: i.mergeStateStatus, mergeable: i.mergeable },
+      });
+    }
+    for (const i of mt.ownReady) {
+      seeds.push({
+        reason: 'own_ready',
+        refId: i.prId,
+        threadId: null,
+        severity: MY_TURN_SEVERITY.own_ready,
+        // The Ready to land card's own sentence, from the ONE builder both use.
+        detail: mergeCardDetail(i.forward, i.mergeStateStatus, 0),
+        since: sinceOf(i),
+        prId: i.prId,
+        relevance: relevanceOf(i),
+        muted: mutedOf(i),
+        extraActorIds: [],
+        own: {
+          kind: 'ready',
+          forward: i.forward,
+          mergeStateStatus: i.mergeStateStatus,
+          mergeable: i.mergeable,
+          lastCommitAt: i.lastCommitAt,
+          viewerCanPush: i.viewerCanPush,
+        },
+      });
+    }
+    for (const i of mt.ownThreads) {
+      // The Unanswered threads card's vendor pill, resolved from the SAME workspace map.
+      const botKind =
+        i.originalCommenterId != null ? (authorBotKinds.get(i.originalCommenterId) ?? null) : null;
+      seeds.push({
+        reason: 'own_thread',
+        refId: i.threadId,
+        threadId: i.threadId,
+        severity: MY_TURN_SEVERITY.own_thread,
+        detail: `No reply to ${handle(i.originalCommenterId)} on ${i.path}`,
+        since: new Date(Date.parse(i.since)),
+        prId: i.prId,
+        relevance: relevanceOf(i),
+        muted: mutedOf(i),
+        extraActorIds: [i.originalCommenterId],
+        own: {
+          kind: 'thread',
+          path: i.path,
+          originalCommenterId: i.originalCommenterId,
+          botKind,
+          botLabel: botKind ? labelForKind(botKind) : null,
+        },
       });
     }
     for (const i of mt.claudeReviewsToAction) {
@@ -5104,65 +5348,130 @@ export async function getWorkspaceInsights(
       });
     }
 
-    if (seeds.length > 0) {
+    // ── THE RED DEFAULT BRANCHES the reader promoted (repo-grained, no PR required). Their
+    // LANDING PR's author is resolved EXACTLY as the ci_failing trunk arm resolves it — the same
+    // helper, the same author fields — so the two cards for one red trunk cannot disagree about
+    // who opened it, and `pendingAuthorSideOf` puts the card on exactly one side of the People /
+    // Automation lens ('people' when no PR resolved, the trunk arm's own rule). Re-resolved here
+    // rather than carried on the /api/my-turn wire, which keeps an internal detection column off it.
+    const trunkLanding = await resolveTrunkCommitPrs(
+      accountId,
+      mt.redTrunks.flatMap((t) => (t.headSha != null ? [{ repoId: t.repoId, sha: t.headSha }] : [])),
+    );
+    await learnLogins([...trunkLanding.values()].map((l) => l.authorId));
+    const trunkAuthor = (
+      t: RedTrunkItem,
+    ): Pick<MyTurnTrunkCard, 'authorId' | 'authorIsBot' | 'authorBotKind' | 'automation'> => {
+      const landed = t.headSha != null ? trunkLanding.get(`${t.repoId}:${t.headSha}`) : undefined;
+      return landed != null
+        ? { authorId: landed.authorId, ...authorFields(landed.authorId, landed.dependencyVendor) }
+        : { authorId: null, authorIsBot: false, authorBotKind: null, automation: null };
+    };
+
+    if (seeds.length > 0 || mt.redTrunks.length > 0) {
       // The PR context (repoId / CI / diff size) the sections don't carry. These PRs are already
       // inside `scope.repoIds` — getMyTurn was passed the scope — so this select is the account
       // guard, not the scope one.
       const seedPrIds = [...new Set(seeds.map((s) => s.prId))];
-      const prRows = await db
-        .select({
-          id: pullRequests.id,
-          repoId: pullRequests.repoId,
-          number: pullRequests.number,
-          title: pullRequests.title,
-          authorId: pullRequests.authorId,
-          openedAt: pullRequests.openedAt,
-          ciStatus: pullRequests.ciStatus,
-          changedFiles: pullRequests.changedFiles,
-          additions: pullRequests.additions,
-          deletions: pullRequests.deletions,
-          // The large-PR flag's per-file breakdown. `prRef` REQUIRES it — omitting it here
-          // would make every my_turn card report an unknown code size.
-          files: pullRequests.files,
-          // GitHub's own review verdict + merge-queue membership — required by `prRef`.
-          reviewDecision: pullRequests.reviewDecision,
-          inMergeQueue: pullRequests.inMergeQueue,
-          // Required by `prRef` — the comments-only cap needs all three or none.
-          contentKind: pullRequests.contentKind,
-          contentKindSha: pullRequests.contentKindSha,
-          headSha: pullRequests.headSha,
-          mergeQueueEntryState: pullRequests.mergeQueueEntryState,
-        })
-        .from(pullRequests)
-        .where(
-          and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, seedPrIds)),
-        )
-        .execute();
+      const prRows =
+        seedPrIds.length === 0
+          ? []
+          : await db
+              .select({
+                id: pullRequests.id,
+                repoId: pullRequests.repoId,
+                number: pullRequests.number,
+                title: pullRequests.title,
+                authorId: pullRequests.authorId,
+                openedAt: pullRequests.openedAt,
+                ciStatus: pullRequests.ciStatus,
+                changedFiles: pullRequests.changedFiles,
+                additions: pullRequests.additions,
+                deletions: pullRequests.deletions,
+                // The large-PR flag's per-file breakdown. `prRef` REQUIRES it — omitting it here
+                // would make every my_turn card report an unknown code size.
+                files: pullRequests.files,
+                // GitHub's own review verdict + merge-queue membership — required by `prRef`.
+                reviewDecision: pullRequests.reviewDecision,
+                inMergeQueue: pullRequests.inMergeQueue,
+                // Required by `prRef` — the comments-only cap needs all three or none.
+                contentKind: pullRequests.contentKind,
+                contentKindSha: pullRequests.contentKindSha,
+                headSha: pullRequests.headSha,
+                mergeQueueEntryState: pullRequests.mergeQueueEntryState,
+                // Required by `prRef` — who opened it, when a tool's marker says so.
+                dependencyVendor: pullRequests.dependencyVendor,
+              })
+              .from(pullRequests)
+              .where(
+                and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, seedPrIds)),
+              )
+              .execute();
       const prRowById = new Map(prRows.map((p) => [p.id, p]));
+      await learnLogins(prRows.map((p) => p.authorId));
       // Call ONE of the fold's two calls — see `standingsByPr`. These ids are the my_turn seeds,
       // which include PRs the open-PR select below deliberately drops (drafts, ultra-stale).
       await foldStandings(seedPrIds);
 
       // Every seed already carries its own clock (`sinceOf` above, or the thread/run timestamp);
-      // openedAt is only the floor for a row that carries none. The per-reason resolution that
-      // used to live HERE — review_request off `firstReviewRequestedAt`, your_pr off `updatedAt` —
-      // moved upstream into `getMyTurn`, so the wire, the card and the notification all read ONE
+      // openedAt is only the floor for a row that carries none. The per-reason resolution lives
+      // upstream in `getMyTurn`, so the wire, the card and the notification all read ONE
       // derivation of "when did this happen".
       const sinceFor = (s: Seed, p: (typeof prRows)[number]): Date => s.since ?? p.openedAt;
 
+      // PR-grained seeds and repo-grained red trunks in ONE union, so they share the one sort, the
+      // one cap and the one set of totals below — a trunk card is a my_turn card to every counter,
+      // lens and total, with no second predicate anywhere.
+      type RankedMyTurn =
+        | {
+            type: 'pr';
+            s: Seed;
+            p: (typeof prRows)[number];
+            since: Date;
+            severity: InsightSeverity;
+            relevance: MyTurnRelevance;
+          }
+        | {
+            type: 'trunk';
+            t: RedTrunkItem;
+            since: Date;
+            severity: InsightSeverity;
+            relevance: MyTurnRelevance;
+          };
       const sevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
-      const ranked = seeds
-        .flatMap((s) => {
+      const ranked: RankedMyTurn[] = [
+        ...seeds.flatMap((s): RankedMyTurn[] => {
           const p = prRowById.get(s.prId);
           // A PR the account doesn't own can't reach here; a missing row means the PR was
           // deleted between the two reads. Drop the card rather than render a hollow one.
-          return p ? [{ s, p, since: sinceFor(s, p) }] : [];
-        })
-        .sort(
-          (a, b) =>
-            sevRank[a.s.severity] - sevRank[b.s.severity] ||
-            b.since.getTime() - a.since.getTime(),
-        );
+          return p
+            ? [
+                {
+                  type: 'pr',
+                  s,
+                  p,
+                  since: sinceFor(s, p),
+                  severity: s.severity,
+                  relevance: s.relevance,
+                },
+              ]
+            : [];
+        }),
+        ...mt.redTrunks.map(
+          (t): RankedMyTurn => ({
+            type: 'trunk',
+            t,
+            since: new Date(Date.parse(t.since)),
+            // You LANDED the commit sitting on a red trunk: the home arm's `high`, for its reason.
+            severity: t.viewerMerged ? 'high' : MY_TURN_SEVERITY.trunk_red,
+            // Absent ⇒ 'none': a missing field may never invent an ownership claim.
+            relevance: t.relevance ?? 'none',
+          }),
+        ),
+      ].sort(
+        (a, b) =>
+          sevRank[a.severity] - sevRank[b.severity] || b.since.getTime() - a.since.getTime(),
+      );
       // ⚠ THE CAP IS DISCLOSED, NOT HIDDEN. `ranked.length` is the population this board would
       // paint uncapped — on a real workspace 148 against a cap of 50 — and it travels as
       // `myTurnTotal` so the header can say "50 of 148". It is deliberately measured AFTER the
@@ -5175,18 +5484,58 @@ export async function getWorkspaceInsights(
       // ⚠ FOLDED OFF THE PRE-CAP ARRAY, for the same reason `myTurnTotal` is. Counted after the
       // slice it would be bounded by 50 and would stop being a total; counted here it is the real
       // "how many of these are actually about you" population the notification surfaces need.
-      myTurnPersonalTotal = ranked.filter((r) => r.s.relevance !== 'none').length;
+      myTurnPersonalTotal = ranked.filter((r) => r.relevance !== 'none').length;
       // The three-way split of the same array, in the same pass and under the same pre-cap rule.
       // Mutually exclusive and exhaustive: direct + maintained + other === myTurnTotal, and
       // direct + maintained === myTurnPersonalTotal. Spelled out rather than subtracted — see the
       // declaration above for why a subtracted denominator is a silent defect, not a shortcut.
-      myTurnDirectTotal = ranked.filter((r) => r.s.relevance === 'direct').length;
-      myTurnMaintainedTotal = ranked.filter((r) => r.s.relevance === 'maintained').length;
-      myTurnOtherTotal = ranked.filter((r) => r.s.relevance === 'none').length;
+      myTurnDirectTotal = ranked.filter((r) => r.relevance === 'direct').length;
+      myTurnMaintainedTotal = ranked.filter((r) => r.relevance === 'maintained').length;
+      myTurnOtherTotal = ranked.filter((r) => r.relevance === 'none').length;
       kindTotals.my_turn = ranked.length;
       const built = uncapped ? ranked : ranked.slice(0, MY_TURN_CARD_CAP);
 
-      for (const { s, p, since } of built) {
+      for (const r of built) {
+        if (r.type === 'trunk') {
+          const t = r.t;
+          addUser(t.landingPr?.mergedById ?? null);
+          const author = trunkAuthor(t);
+          addUser(author.authorId);
+          const branch = t.branchName ?? 'trunk';
+          const card: MyTurnTrunkCard = {
+            id: `myturn:trunk_red:${t.repoId}:${t.headSha ?? ''}`,
+            kind: 'my_turn',
+            reason: 'trunk_red',
+            severity: r.severity,
+            repoId: t.repoId,
+            repoFullName: t.repoFullName,
+            branchName: t.branchName,
+            ciStatus: t.ciStatus,
+            headSha: t.headSha,
+            prId: t.landingPr?.prId ?? null,
+            prNumber: t.landingPr?.number ?? null,
+            prTitle: t.landingPr?.title ?? null,
+            mergedById: t.landingPr?.mergedById ?? null,
+            viewerMerged: t.viewerMerged,
+            maintained: t.maintained,
+            observedAt: t.observedAt,
+            githubUrl: t.githubUrl,
+            // The home card's sentence: what is red, where, and the one attribution this data
+            // supports (who LANDED the head — never who broke it).
+            detail: `${t.maintained ? 'You maintain this repo — ' : ''}${branch} is red${
+              t.headSha != null ? ` at ${t.headSha.slice(0, 7)}` : ''
+            }${t.viewerMerged ? '; you merged the PR that landed this commit' : ''}`,
+            since: r.since.toISOString(),
+            personal: r.relevance !== 'none',
+            relevance: r.relevance,
+            muted: t.muted ? true : undefined,
+            threadId: null,
+            ...author,
+          };
+          cards.push(card);
+          continue;
+        }
+        const { s, p, since } = r;
         addUser(p.authorId);
         for (const id of s.extraActorIds) addUser(id);
         const card: MyTurnCard = {
@@ -5197,8 +5546,11 @@ export async function getWorkspaceInsights(
           severity: s.severity,
           ...prRef(p, standingsByPr.get(p.id)),
           reason: s.reason,
-          // Only 'watched_repo_pr' ever sets it; `undefined` elsewhere keeps it off the wire.
+          // Only 'watched_repo_pr' and 'pushed_since' set it; `undefined` elsewhere keeps it off
+          // the wire.
           ball: s.ball,
+          // Only the four promotions set it — see `MyTurnCard.own`.
+          own: s.own,
           threadId: s.threadId,
           detail: s.detail,
           since: since.toISOString(),
@@ -5377,6 +5729,12 @@ export async function getWorkspaceInsights(
       contentKindSha: pullRequests.contentKindSha,
       headSha: pullRequests.headSha,
       mergeQueueEntryState: pullRequests.mergeQueueEntryState,
+      // THE DEPENDENCIES TAB's three columns, written at sync from the PR's own title / branch /
+      // labels / FULL body (sync/security-detect.ts): which tool's marker it carries, whether that
+      // marker fixes a known advisory, and the ids it names. Content only — never the author.
+      dependencyVendor: pullRequests.dependencyVendor,
+      securityFix: pullRequests.securityFix,
+      advisoryIds: pullRequests.advisoryIds,
     })
     .from(pullRequests)
     .where(
@@ -5406,6 +5764,21 @@ export async function getWorkspaceInsights(
   // two forward kinds, stalled_review, reviewer_routing, and the untouched_thread rows — whose
   // PRs are constrained to `openPrIds` by their own join.
   await foldStandings(openPrIds);
+  await learnLogins(openPrs.map((p) => p.authorId));
+
+  // ── WHICH OPEN PRs ARE DEPENDENCY AUTOMATION (decisions §5) ──────────────────────────────────
+  // They get exactly ONE card, in the Dependencies tab (the builder below the conflicts block),
+  // and NO card of any kind below except my_turn — a review REQUESTED OF YOU is a direct summons
+  // and wins (getMyTurn is untouched). The role is `authorAutomationFor`'s, the SAME resolution the
+  // card's byline and its People / Automation side read, so a PR cannot be "automation" on its card
+  // and a person's in the tab it is listed in.
+  // ⚠ FILTER THE SEED LIST, NEVER THE BUILT ARRAY: every exclusion below runs BEFORE its kind's
+  // `kindTotals` is taken, so each total is exactly its cards.
+  const depPrIds = new Set(
+    openPrs
+      .filter((p) => authorFields(p.authorId, p.dependencyVendor).automation?.role === 'dependency')
+      .map((p) => p.id),
+  );
 
   // ── ci_failing cards (CORE, deterministic, no AI) ─────────────────────────────────
   // RED BUILDS THE VIEWER IS ON THE HOOK FOR. Two arms, and they are two different claims — the
@@ -5462,7 +5835,19 @@ export async function getWorkspaceInsights(
     // CI is not yet a summons) and not ultra-stale (an abandoned PR is not an inbox item).
     if (viewerId != null) {
       for (const p of openPrs) {
-        if (p.authorId !== viewerId || !isRedCiStatus(p.ciStatus)) continue;
+        // A dependency PR's red build is on its Dependencies card ("CI failing"), not here; one the
+        // reader promoted into My Turn is on its my_turn card.
+        if (
+          p.authorId !== viewerId ||
+          !isRedCiStatus(p.ciStatus) ||
+          depPrIds.has(p.id) ||
+          promotedCi.has(p.id)
+        ) {
+          continue;
+        }
+        // The card names its author (`authorId` below), so the author is registered like every
+        // other card's — or a viewer whose only card is this one reaches the client as a bare id.
+        addUser(viewerId);
         const at = p.lastCommitAt ?? p.openedAt;
         ciSeeds.push({
           sortAt: at.getTime(),
@@ -5481,6 +5866,9 @@ export async function getWorkspaceInsights(
             headSha: null,
             mergedById: null,
             viewerMerged: false,
+            // You opened it — the same resolution every PR card's author goes through.
+            authorId: viewerId,
+            ...authorFields(viewerId, p.dependencyVendor),
             detail: 'You opened this PR — its head commit is red',
             observedAt: at.toISOString(),
             githubUrl: ghUrl(p.repoId, p.number),
@@ -5521,13 +5909,15 @@ export async function getWorkspaceInsights(
     // landed a PR on its default branch". Skipped entirely when no trunk is red, because membership
     // is the only thing that could change the answer.
     const maintained = redTrunks.length > 0 ? await maintainedRepoIds() : new Set<number>();
-    const myRedTrunks = redTrunks.filter((r) => maintained.has(r.id));
+    // A red trunk the reader promoted into My Turn is listed there instead (it MOVES).
+    const myRedTrunks = redTrunks.filter((r) => maintained.has(r.id) && !promotedTrunks.has(r.id));
     // ONE lookup for every red head, before the loop — resolving inside it would repeat the same
     // two queries per repo.
     const landingPrs = await resolveTrunkCommitPrs(
       accountId,
       myRedTrunks.flatMap((r) => (r.headSha != null ? [{ repoId: r.id, sha: r.headSha }] : [])),
     );
+    await learnLogins([...landingPrs.values()].map((l) => l.authorId));
     for (const r of myRedTrunks) {
       // ⚠ A MISS HERE IS ORDINARY, NOT A GAP. ~11% of red heads are DIRECT PUSHES to the default
       // branch (a legitimate steady state), and others simply have no association observed yet or
@@ -5535,6 +5925,7 @@ export async function getWorkspaceInsights(
       const landed = r.headSha != null ? landingPrs.get(`${r.id}:${r.headSha}`) : undefined;
       const viewerMerged = landed?.mergedById != null && landed.mergedById === viewerId;
       addUser(landed?.mergedById ?? null);
+      addUser(landed?.authorId ?? null);
       const full = repoName.get(r.id) ?? '';
       const branch = r.branchName ?? 'trunk';
       const shortSha = r.headSha != null ? r.headSha.slice(0, 7) : null;
@@ -5557,6 +5948,12 @@ export async function getWorkspaceInsights(
           headSha: r.headSha,
           mergedById: landed?.mergedById ?? null,
           viewerMerged,
+          // WHO OPENED the landing PR (spec D14) — so the People / Automation lens has ONE
+          // predicate for every card. No PR resolved: nobody, and the card is on the people side.
+          authorId: landed?.authorId ?? null,
+          ...(landed != null
+            ? authorFields(landed.authorId, landed.dependencyVendor)
+            : { authorIsBot: false, authorBotKind: null, automation: null }),
           detail: `You maintain this repo — ${branch} is red${shortSha != null ? ` at ${shortSha}` : ''}${
             viewerMerged ? '; you merged the PR that landed this commit' : ''
           }`,
@@ -5611,21 +6008,20 @@ export async function getWorkspaceInsights(
     const mergeSeeds: { card: MergeReadyCard | UpdateBranchCard; sortAt: number }[] = [];
     const candidates: { p: (typeof openPrs)[number]; kind: 'merge' | 'update_branch' }[] = [];
     for (const p of openPrs) {
-      const state = p.mergeStateStatus as MergeStateStatus | null;
-      if (state == null) continue;
+      // A dependency PR carries its merge actions on its Dependencies card instead; a PR the
+      // reader promoted into My Turn ("Your PRs ready to land") carries them on its my_turn card.
+      if (depPrIds.has(p.id) || promotedReady.has(p.id)) continue;
       // ⚠ CONFLICTS OUTRANK 'behind', the same precedence `mergeVerdict()` applies (lib/ui.ts,
-      // where the conflicts test runs before draft, blocked and behind). GitHub's own
-      // `canUpdateBranch` is "behind AND NOT conflicting" (PrMergeOptions), so an Update-branch
-      // button on a conflicting PR is a button GitHub refuses — and without this guard a
-      // hypothetical behind+conflicting row would be TWO cards for one PR.
-      if (state === 'dirty' || (p.mergeable as Mergeable | null) === 'conflicting') continue;
-      if (state === 'behind') candidates.push({ p, kind: 'update_branch' });
-      else if (
-        READY_MERGE_STATES.has(state) &&
-        (p.mergeable as Mergeable | null) !== 'conflicting'
-      ) {
-        candidates.push({ p, kind: 'merge' });
-      }
+      // where the conflicts test runs before draft, blocked and behind) — without it a
+      // hypothetical behind+conflicting row would be TWO cards for one PR, and a `clean` state
+      // with `mergeable: 'conflicting'` would reach the merge list. Decided by the ONE shared
+      // `forwardKindOf`, the same test My Turn's `own_ready` promotion classifies with.
+      const kind = forwardKindOf(
+        p,
+        p.mergeStateStatus != null &&
+          READY_MERGE_STATES.has(p.mergeStateStatus as MergeStateStatus),
+      );
+      if (kind != null) candidates.push({ p, kind });
     }
     // Only now is the maintained set worth resolving — and only once (see `maintainedRepoIds`).
     const maintained = candidates.length > 0 ? await maintainedRepoIds() : new Set<number>();
@@ -5738,8 +6134,11 @@ export async function getWorkspaceInsights(
     const conflictSeeds: { card: ConflictsCard; sortAt: number }[] = [];
     for (const p of openPrs) {
       if (!writableRepoIds.has(p.repoId)) continue;
+      // A conflicting dependency PR says so on its Dependencies card, with the same resolver entry;
+      // one the reader promoted into My Turn, on its my_turn card.
+      if (depPrIds.has(p.id) || promotedConflicts.has(p.id)) continue;
+      if (!isConflicting(p)) continue;
       const state = p.mergeStateStatus as MergeStateStatus | null;
-      if (state !== 'dirty' && (p.mergeable as Mergeable | null) !== 'conflicting') continue;
       // ⚠ NO `maintainedRepoIds()` CALL, AND THAT IS NOT AN OMISSION: `writableRepoIds` ⊆ that set
       // by construction (viewerMaintainedRepoIds adds every WRITE_PERMISSIONS repo before it adds
       // the merge-history proxy), so a card that exists at all is at LEAST 'maintained' and 'none'
@@ -5781,6 +6180,130 @@ export async function getWorkspaceInsights(
     // after the write gate: 4.
     kindTotals.conflicts = conflictSeeds.length;
     for (const seed of conflictSeeds.slice(0, kindCap)) cards.push(seed.card);
+  }
+
+  // ── Dependencies-tab cards: `security` + `dependency_bump` (CORE, deterministic, no AI) ──────
+  // ONE CARD PER PR. A dependency PR is `security` when its own markers prove or infer a
+  // known-advisory fix (pull_requests.security_fix) OR a live automation alert names an advisory;
+  // otherwise `dependency_bump`. A NON-dependency PR gets a `security` card only for a live alert —
+  // and KEEPS its other cards (it is a person's work; the alert is an extra job).
+  //
+  // ⚠ KNOWN ADVISORIES ONLY. The markers were read at sync from the FULL body (never
+  // `search_index`); the alerts are derived on read from the tools' own comments and clear by
+  // STATE (db/security-alerts.ts), so nothing here is stored or dismissed.
+  // ⚠ NOT MUTED: the Pending mute reaches my_turn only (the forward-kind rule).
+  // ⚠ NO WRITE GATE (the merge/routing precedent): the merge controls hide on `viewerCanPush`.
+  // ⚠ THE BOARD'S ONE ADMISSION FLOOR: these iterate `openPrs` (open, non-draft, activity within
+  // `maxQuietDays`), like every other kind — so a security PR nobody has touched in 90 days is not
+  // listed, the same as a stalled review that old.
+  {
+    const alertsByPr =
+      openPrIds.length > 0
+        ? await deriveSecurityAlerts(openPrIds, authorInputs.automatedIds, authorInputs.kindOf)
+        : new Map<number, SecurityAlert[]>();
+    const needMaintained = openPrs.some((p) => depPrIds.has(p.id) || alertsByPr.has(p.id));
+    const maintained = needMaintained ? await maintainedRepoIds() : new Set<number>();
+    const secSeeds: { card: SecurityCard; sortAt: number }[] = [];
+    const bumpSeeds: { card: DependencyBumpCard; sortAt: number }[] = [];
+    for (const p of openPrs) {
+      const dep = depPrIds.has(p.id);
+      const alerts = alertsByPr.get(p.id) ?? [];
+      if (!dep && alerts.length === 0) continue;
+      // A person's PR is never a "fix": its own markers would have made it a dependency PR.
+      const fix = dep ? ((p.securityFix as 'proven' | 'inferred' | null) ?? null) : null;
+      // For the ranker's weight and the colour only — the merge block's three tiers, and like
+      // there never an ownership claim on screen.
+      const relevance: MyTurnRelevance =
+        viewerId != null && p.authorId === viewerId
+          ? 'direct'
+          : maintained.has(p.repoId)
+            ? 'maintained'
+            : 'none';
+      const mss = (p.mergeStateStatus as MergeStateStatus | null) ?? null;
+      const depState = dep
+        ? dependencyPrState({
+            mergeStateStatus: mss,
+            mergeable: (p.mergeable as Mergeable | null) ?? null,
+            ciStatus: p.ciStatus,
+            reviewDecision: p.reviewDecision,
+            readyToMerge: mss != null && READY_MERGE_STATES.has(mss),
+          })
+        : null;
+      // A ready dependency PR says exactly what a `merge` card says — ONE builder.
+      const stateDetail =
+        depState != null
+          ? dependencyStateDetail(
+              depState,
+              { baseRefName: p.baseRefName, mergeStateStatus: mss, reviewDecision: p.reviewDecision },
+              mergeCardDetail('merge', mss ?? 'unknown', 0),
+            )
+          : null;
+      const shared = {
+        ...prRef(p, standingsByPr.get(p.id)),
+        mergeStateStatus: mss,
+        mergeable: (p.mergeable as Mergeable | null) ?? null,
+        lastCommitAt: p.lastCommitAt?.toISOString() ?? null,
+        relevance,
+        // A VISIBILITY gate, never the authority — the merge routes re-check everything.
+        viewerCanPush: writableRepoIds.has(p.repoId),
+      };
+      for (const a of alerts) addUser(a.authorId);
+      const sortAt = (p.lastCommitAt ?? p.openedAt).getTime();
+      if (fix != null || alerts.length > 0) {
+        const fixIds = (p.advisoryIds as string[] | null) ?? [];
+        secSeeds.push({
+          sortAt,
+          card: {
+            ...shared,
+            id: `security:${p.id}`,
+            kind: 'security',
+            // Red when a tool's own marker or alert NAMES an advisory; amber when all we have is
+            // Dependabot's grouping (the confirming line was cut off).
+            severity: fix === 'inferred' && alerts.length === 0 ? 'warn' : 'high',
+            dependencyUpdate: dep,
+            depState,
+            fix,
+            // The card names a few; `alertCount` is the whole population behind its "+N".
+            alerts: alerts.slice(0, 3),
+            alertCount: alerts.length,
+            advisoryIds: unionAdvisoryIds(fixIds, alerts),
+            // ⚠ The FIX's own ids only: "Fixes X and 2 more" must not count an alert's id the PR
+            // may not fix. The chips carry the union above.
+            detail: securityFixDetail(fix, fixIds),
+            stateDetail,
+          },
+        });
+      } else {
+        bumpSeeds.push({
+          sortAt,
+          card: {
+            ...shared,
+            id: `deps:${p.id}`,
+            kind: 'dependency_bump',
+            // Housekeeping, never urgent.
+            severity: 'info',
+            depState: depState!,
+            detail: stateDetail!,
+          },
+        });
+      }
+    }
+    // RELEVANCE-FIRST, THEN NEWEST — the merge block's cap-order rule (the cap applies before the
+    // ranker in the DEFAULT fold only; the board's fold is uncapped).
+    const depRelRank: Record<MyTurnRelevance, number> = { direct: 0, maintained: 1, none: 2 };
+    const depOrder = (
+      a: { card: { relevance: MyTurnRelevance; repoFullName: string }; sortAt: number },
+      b: { card: { relevance: MyTurnRelevance; repoFullName: string }; sortAt: number },
+    ): number =>
+      depRelRank[a.card.relevance] - depRelRank[b.card.relevance] ||
+      b.sortAt - a.sortAt ||
+      a.card.repoFullName.localeCompare(b.card.repoFullName);
+    secSeeds.sort(depOrder);
+    bumpSeeds.sort(depOrder);
+    kindTotals.security = secSeeds.length;
+    kindTotals.dependency_bump = bumpSeeds.length;
+    for (const seed of secSeeds.slice(0, kindCap)) cards.push(seed.card);
+    for (const seed of bumpSeeds.slice(0, kindCap)) cards.push(seed.card);
   }
 
   if (openPrIds.length === 0) return finish();
@@ -5873,6 +6396,8 @@ export async function getWorkspaceInsights(
   const stalledAll = openPrs
     .filter(
       (p) =>
+        // A dependency PR waiting on review says so on its Dependencies card.
+        !depPrIds.has(p.id) &&
         requestedPrIds.has(p.id) &&
         p.openedAt != null &&
         (now - p.openedAt.getTime()) / 3_600_000 > INSIGHT_STALLED_REVIEW_HOURS,
@@ -5932,6 +6457,8 @@ export async function getWorkspaceInsights(
       contentKindSha: pullRequests.contentKindSha,
       headSha: pullRequests.headSha,
       mergeQueueEntryState: pullRequests.mergeQueueEntryState,
+      // Required by `prRef`, same as above.
+      dependencyVendor: pullRequests.dependencyVendor,
     })
     .from(reviewThreads)
     .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
@@ -5943,8 +6470,14 @@ export async function getWorkspaceInsights(
       ),
     )
     .execute();
-  kindTotals.untouched_thread = threadRows.length;
-  const threads = threadRows
+  // A thread on a dependency PR is that PR's business, and the PR is listed only in Dependencies;
+  // a thread the reader promoted into My Turn ("Unanswered threads on your PRs") is listed there.
+  // Filtered BEFORE the total, so the count is exactly these cards.
+  const keptThreadRows = threadRows.filter(
+    (t) => !depPrIds.has(t.prId) && !promotedThreads.has(t.threadId),
+  );
+  kindTotals.untouched_thread = keptThreadRows.length;
+  const threads = keptThreadRows
     .map((t) => ({ t, ageHours: Math.round((now - t.createdAt.getTime()) / 3_600_000) }))
     .sort((a, b) => b.ageHours - a.ageHours)
     .slice(0, kindCap);
@@ -5981,6 +6514,10 @@ export async function getWorkspaceInsights(
   }
 
   // (3) REVIEWER LOAD — ranked by pending-queue depth, with sprint load alongside.
+  //
+  // ⚠ DEPENDENCY PRs STAY IN IT, unlike every PR card above. This counts a PERSON's queue the way
+  // GitHub holds it: a review requested on a Dependabot PR is still a request on that reviewer's
+  // plate, and this is a strip about people, not a card about a pull request.
   //
   // ⚠ ITS POPULATION IS NARROWER THAN `pendingByReviewer`, AND ONLY HERE. A (reviewer, PR) pair
   // stops being review DEBT the moment that reviewer has spoken on the PR, or GitHub's own
@@ -6053,6 +6590,8 @@ export async function getWorkspaceInsights(
   // `requestedPrIds`, not `pendingByPr`: a TEAM request already has a reviewer on the hook.
   const orphanPool = openPrs.filter(
     (p) =>
+      // A dependency PR nobody has reviewed says "Needs review" on its Dependencies card.
+      !depPrIds.has(p.id) &&
       !requestedPrIds.has(p.id) &&
       !reviewedPrIds.has(p.id) &&
       p.openedAt != null &&
@@ -6875,14 +7414,25 @@ function summariseNew(n: NewSinceLastViewed): string {
 // RELATED thing that happened discharges it. It is STATE-DERIVED, recomputed on every read, and
 // nothing about it is stored — there is no "I dealt with this" row to go stale.
 //
-// What puts the ball in your court: a review outstanding from you (`reviewRequestedFromMe`); a PR
-// in a repo you track that you have NEVER TOUCHED; a human reply in a thread you opened; a thread
-// you opened that has gone `likely_addressed`; a human COMMIT after your last action; a finished
-// Claude review you have not acted on.
-// What does NOT: any bot action of any kind, and a human comment elsewhere on the PR that is not
-// about you. RECENCY IS NOT RELATEDNESS — that is the whole difference from the "anything after
-// me" rule this replaced.
+// What puts the ball in your court: a review outstanding from you (`reviewRequestedFromMe`); a
+// PERSON @-mentioning you; a human reply in a thread you opened, or after your comment in a thread
+// somebody else opened; a thread you opened that has gone `likely_addressed`; a human PR comment
+// right after YOUR PR comment; a human COMMIT after your last action; a PR in a repo you track that
+// you have NEVER TOUCHED; a finished Claude review you have not acted on.
+// What does NOT: any automation action of any kind (the GLOBAL automation set,
+// `globalAutomationUserIds`), and a human comment elsewhere on the PR that is not about you.
+// RECENCY IS NOT RELATEDNESS — that is the whole difference from the "anything after me" rule this
+// replaced.
 // What takes it away: any action of yours at or after the summoning moment, and the PR closing.
+//
+// SETTINGS DECIDE WHICH TYPES EXIST, NOT WHETHER A RULE HOLDS. `accounts.my_turn_settings`
+// (resolved by `getMyTurnSettings`) switches whole types on and off and promotes four kinds of
+// your own work plus red default branches into My Turn. A switched-off type is not computed at
+// all, so it is gone from the list, every count, the brief and the notifications at once.
+
+/** The channel your newest action on a PR came through. `comment_reply` (S5) needs it: the next
+ *  person's PR comment is plausibly an answer to you only when your LAST action was a PR comment. */
+type MineChannel = 'review' | 'review_comment' | 'pr_comment' | 'commit';
 
 /** Your last action on a PR and what a person did after it. Backend-internal; the parts the card
  *  copy needs travel on the wire as `NewPrBall`. */
@@ -6891,6 +7441,8 @@ interface PrActionClocks {
    *  yours. null = you have never touched this PR (S2). */
   mineLast: Date | null;
   mineLastAction: MyLastAction | null;
+  /** which of the four channels `mineLast` came through. Internal only — never on the wire. */
+  mineLastChannel: MineChannel | null;
   /** newest commit by a HUMAN who is not you, whenever it landed. */
   othersHumanCommitLast: Date | null;
   /** how many of those landed strictly AFTER `mineLast` (0 when `mineLast` is null). */
@@ -6909,25 +7461,6 @@ interface NewPrBallState {
   since: Date | null;
 }
 
-// The GLOBAL bot actor set (`users.isBot`), the ONE set THE BALL RULE resolves bot-ness with.
-//
-// ⚠ NOT `hiddenBotUserIds`. That union is `users.isBot` ∪ a WORKSPACE's automated reviewers, so it
-// REQUIRES a workspaceId — and `getMyTurn` also runs UNSCOPED, for the browser-notification
-// watcher. A rule that could only be evaluated in the scoped form would put the ball back in your
-// court on the most interrupting surface in the product and nowhere else. `users` is global, so
-// this answer is the same in both forms, which is exactly what a summons rule needs.
-async function globalBotUserIds(): Promise<Set<number>> {
-  return new Set(
-    (
-      await db
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(eq(schema.users.isBot, true))
-        .execute()
-    ).map((u) => u.id),
-  );
-}
-
 // WHAT YOU LAST DID on a PR, and what a PERSON did after — the clocks THE BALL RULE turns on.
 // Four BATCHED reads, each on an existing index (`rv_pr_idx`, `rc_thread_idx`'s table via
 // `prId`, `prc_pr_idx`, `commit_pr_idx`); never one read per PR, because this runs over every
@@ -6941,7 +7474,8 @@ async function globalBotUserIds(): Promise<Set<number>> {
 export async function lastActionClocks(
   viewerId: number,
   prIds: number[],
-  // The global bot set, when the caller already holds it (both callers do). Omitted ⇒ read here.
+  // The GLOBAL automation set, when the caller already holds it (`getMyTurn` passes its one read).
+  // Omitted ⇒ read here.
   botUserIds?: ReadonlySet<number>,
 ): Promise<Map<number, PrActionClocks>> {
   const out = new Map<number, PrActionClocks>();
@@ -6950,13 +7484,14 @@ export async function lastActionClocks(
     out.set(id, {
       mineLast: null,
       mineLastAction: null,
+      mineLastChannel: null,
       othersHumanCommitLast: null,
       humanCommitsAfterMine: 0,
       lastHumanCommitAfterMine: null,
       lastHumanCommitAuthorId: null,
     });
   }
-  const bots = botUserIds ?? (await globalBotUserIds());
+  const bots = botUserIds ?? (await globalAutomationUserIds());
 
   const [myReviews, myReviewComments, myPrComments, allCommits] = await Promise.all([
     db
@@ -6986,12 +7521,13 @@ export async function lastActionClocks(
   // ⚠ A BARE `commented` REVIEW COUNTS AS ACTING. Every review state does — `dismissed` and
   // `pending` included. You looked at the PR and said something; the question this answers is
   // "have I engaged since", not "did I engage WELL".
-  const noteMine = (prId: number, at: Date, action: MyLastAction) => {
+  const noteMine = (prId: number, at: Date, action: MyLastAction, channel: MineChannel) => {
     const c = out.get(prId);
     if (!c) return;
     if (c.mineLast == null || at.getTime() > c.mineLast.getTime()) {
       c.mineLast = at;
       c.mineLastAction = action;
+      c.mineLastChannel = channel;
     }
   };
   for (const r of myReviews) {
@@ -7003,12 +7539,13 @@ export async function lastActionClocks(
         : r.state === 'changes_requested'
           ? 'changes_requested'
           : 'reviewed',
+      'review',
     );
   }
-  for (const c of myReviewComments) noteMine(c.prId, c.at, 'commented');
-  for (const c of myPrComments) noteMine(c.prId, c.at, 'commented');
+  for (const c of myReviewComments) noteMine(c.prId, c.at, 'commented', 'review_comment');
+  for (const c of myPrComments) noteMine(c.prId, c.at, 'commented', 'pr_comment');
   for (const c of allCommits) {
-    if (c.authorId === viewerId) noteMine(c.prId, c.at, 'pushed');
+    if (c.authorId === viewerId) noteMine(c.prId, c.at, 'pushed', 'commit');
   }
 
   for (const c of allCommits) {
@@ -7022,7 +7559,9 @@ export async function lastActionClocks(
     // (db/pr-intervals.ts:~513), which counts EVERY commit regardless of author. That is right
     // there — the court ledger measures how long a PR sat, and a dependency bump genuinely
     // occupies the clock — and wrong here, where the question is whether a PERSON did something
-    // you now owe a response to. Do not "fix" one to match the other.
+    // you now owe a response to. Do not "fix" one to match the other. (The automation set is the
+    // GLOBAL one, so a GitHub-typed Bot such as Copilot or cdp-github-action pushing is not a
+    // person either, though `users.isBot` misses both.)
     if (bots.has(c.authorId)) continue;
     if (
       clocks.othersHumanCommitLast == null ||
@@ -7044,44 +7583,37 @@ export async function lastActionClocks(
   return out;
 }
 
-// "New PRs" inbox eligibility, IGNORING the cross-section dedupe: the open PRs that qualify for
-// the section (opened on/after the repo was ADDED to the account, authored by a non-bot human
-// other than you, non-draft) AND on which THE BALL IS STILL IN YOUR COURT. Shared by getMyTurn
-// (which then layers the dedupe) and getActionableActivityIds.
+// "New PRs" and "pushed since" eligibility, IGNORING the cross-section dedupe: the open PRs that
+// qualify (opened on/after the repo was ADDED to the account, authored by a human other than you,
+// non-draft) AND on which THE BALL IS STILL IN YOUR COURT. Its ONE caller is `getMyTurn`, which
+// splits the survivors into the two sections and layers the dedupe on top (its sibling
+// `getActionableActivityIds` was deleted with the dismissals table).
 //
 // ⚠ `repos.createdAt` IS THE CLOCK for the first half, and it is load-bearing. Without a cutoff,
 // adding a repo with 400 open PRs dumps all 400 into My Turn on day one. It replaced a separate
 // `inboxWatchStartedAt` stamped by the retired "watched" toggle; `createdAt` is NOT NULL, so
 // unlike that column it can never be missing and there is no "no cutoff → show nothing" branch.
 //
-// ⚠ THE BALL RULE IS APPLIED HERE, TO THE SEED LIST, AND NOWHERE ELSE. Two reasons:
-//   • getWorkspaceInsights measures `myTurnTotal = ranked.length` AFTER seed assembly and BEFORE
-//     the 50-card slice, so dropping seeds moves numerator and denominator together and every cap
-//     disclosure ("50 of 148") stays arithmetically true. Dropping cards after the slice — or on
-//     the client — leaves the total describing a population the list no longer holds.
-//   • This helper is ALREADY the single source shared by getMyTurn and getActionableActivityIds,
-//     whose own contract says the two must never drift. One edit keeps the board, the browser
-//     notification, the daily-brief count and the activity list in lockstep.
+// ⚠ THE BALL RULE IS APPLIED HERE, TO THE SEED LIST, AND NOWHERE ELSE. getWorkspaceInsights
+// measures `myTurnTotal = ranked.length` AFTER seed assembly and BEFORE the 50-card slice, so
+// dropping seeds moves numerator and denominator together and every cap disclosure ("50 of 148")
+// stays arithmetically true. Dropping cards after the slice — or on the client — leaves the total
+// describing a population the list no longer holds.
 //
 // The value carries WHY each survivor survived: the card copy has to say it (a card that cannot
 // explain itself is the bug this change exists to close), and re-deriving it in the card builder
 // would be a second answer to a question already answered here.
 async function getAddedRepoActionablePrIds(
-  accountId: number,
   localUserId: number,
   open: TimelinePr[],
   openRows: PrRow[],
+  // The account's repo → added-at map and the GLOBAL automation set, both read ONCE by
+  // `getMyTurn` and handed down rather than re-read here.
+  addedAtByRepo: ReadonlyMap<number, Date>,
+  bots: ReadonlySet<number>,
 ): Promise<Map<number, NewPrBallState>> {
-  const repoRows = await db
-    .select({ repoId: repos.id, addedAt: repos.createdAt })
-    .from(repos)
-    .where(eq(repos.accountId, accountId))
-    .execute();
-  const addedAtByRepo = new Map<number, Date>();
-  for (const r of repoRows) addedAtByRepo.set(r.repoId, r.addedAt);
   const out = new Map<number, NewPrBallState>();
   if (addedAtByRepo.size === 0) return out;
-  const botUserIds = await globalBotUserIds();
   const rowById = new Map(openRows.map((p) => [p.id, p]));
   const candidates: number[] = [];
   for (const t of open) {
@@ -7090,14 +7622,14 @@ async function getAddedRepoActionablePrIds(
     const addedAt = addedAtByRepo.get(t.repoId);
     if (addedAt == null) continue;
     if (t.authorId == null || t.authorId === localUserId) continue;
-    if (botUserIds.has(t.authorId)) continue;
+    if (bots.has(t.authorId)) continue;
     const m = rowById.get(t.id);
     if (!m || m.isDraft) continue;
     if (m.openedAt.getTime() >= addedAt.getTime()) candidates.push(t.id);
   }
   if (candidates.length === 0) return out;
 
-  const clocks = await lastActionClocks(localUserId, candidates, botUserIds);
+  const clocks = await lastActionClocks(localUserId, candidates, bots);
   for (const prId of candidates) {
     const c = clocks.get(prId);
     if (!c) continue;
@@ -7109,8 +7641,8 @@ async function getAddedRepoActionablePrIds(
       continue;
     }
     // S3c — you acted, and then a PERSON pushed code. New code arrived after you engaged, so
-    // your read of this PR is stale. Nothing else after your action returns the ball: not a bot
-    // of any kind, and not a human comment on somebody else's thread (recency is not
+    // your read of this PR is stale. Nothing else after your action returns the ball here: not
+    // automation of any kind, and not a human comment on somebody else's thread (recency is not
     // relatedness — that is the rule this replaced).
     if (c.humanCommitsAfterMine > 0) {
       out.set(prId, {
@@ -7130,21 +7662,45 @@ async function getAddedRepoActionablePrIds(
   return out;
 }
 
-// THE "my turn" FOLD — the six sections of what is on the viewer's plate, PR/thread-grained.
+/** The PRs among `prIds` with a real activity EVENT at or after `cutoff` — the same "not
+ *  abandoned" gate `getWorkspaceInsights` applies to every PR card (`openPrs`' EXISTS over
+ *  `events`), so a promoted own-work item and its home card see one population. */
+async function recentlyActivePrIds(
+  accountId: number,
+  prIds: number[],
+  cutoff: Date,
+): Promise<Set<number>> {
+  if (prIds.length === 0) return new Set();
+  const rows = await db
+    .selectDistinct({ prId: events.prId })
+    .from(events)
+    .where(
+      and(
+        eq(events.accountId, accountId),
+        inArray(events.prId, prIds),
+        gte(events.occurredAt, cutoff),
+      ),
+    )
+    .execute();
+  return new Set(rows.flatMap((r) => (r.prId != null ? [r.prId] : [])));
+}
+
+// THE "my turn" FOLD — everything on the viewer's plate, PR-, thread- and repo-grained, one
+// section per card type (`MyTurnCardReason`).
 //
 // `scope` is OPTIONAL and the two shapes are deliberately different questions:
 //   • omitted  → the ACCOUNT-WIDE inbox. `GET /api/my-turn` and the CLI status board take this.
-//                Its POPULATION is still byte-identical to the pre-scope version — the scope
-//                parameter narrows the six sections' driving queries and nothing else.
-//                ⚠ THE PENDING MUTE IS THE ONE THING THAT REACHES THE UNSCOPED FORM TOO, and it
+//                The scope parameter narrows the sections' driving queries and nothing else.
+//                ⚠ THE PENDING MUTE AND THE SETTINGS BOTH REACH THE UNSCOPED FORM TOO, and they
 //                had to: the browser-notification watcher reads exactly this call, deliberately
 //                with no `?workspace=` ("an OS notification is read outside the app entirely,
-//                where only-the-selected-workspace would be a silence bug"), so a mute applied
-//                only in the scoped form would leave the most interrupting surface in the product
-//                firing for a repo the user had just silenced. It needs no scope parameter to do
-//                it: a repo belongs to EXACTLY ONE workspace, so a workspace-grained mute is
-//                fully resolvable per repo id. It changes no row's PRESENCE — only `relevance`,
-//                `personal` and the advisory `muted` flag on rows that are returned either way.
+//                where only-the-selected-workspace would be a silence bug"), so a mute or a
+//                switched-off type applied only in the scoped form would leave the most
+//                interrupting surface in the product firing for something the user had just
+//                silenced. Neither needs a scope parameter: settings are per account, and a repo
+//                belongs to EXACTLY ONE workspace, so a workspace-grained mute resolves per repo.
+//                The mute changes no row's PRESENCE — only `relevance`, `personal` and the
+//                advisory `muted` flag; a switched-off type changes presence, of a whole section.
 //   • passed   → the WORKSPACE inbox: every section's driving query is narrowed to
 //                `scope.repoIds`, and an EMPTY repo list is an ordinary, immediate empty answer
 //                (a freshly created workspace), never a widening to the whole account.
@@ -7155,14 +7711,30 @@ export async function getMyTurn(
   scope?: BotScope,
 ): Promise<MyTurnResponse> {
   const localUserId = await getAccountUserId(accountId);
+  // THE READER'S SETTINGS — which types exist at all. Read here, inside the one fold, so the
+  // account-wide call (notifications, CLI) and every scoped one obey the same switches.
+  const settings = await getMyTurnSettings(accountId);
+  const show = settings.show;
   const empty: MyTurnResponse = {
     awaitingReview: [],
-    yourPrs: [],
-    approvedPrs: [],
+    mentions: [],
     threadsAwaiting: [],
-    watchedRepoPrs: [],
+    threadReplies: [],
+    commentReplies: [],
+    pushedSince: [],
+    ownCiRed: [],
+    ownConflicts: [],
+    redTrunks: [],
+    approvedPrs: [],
+    ownReady: [],
+    yourPrs: [],
+    ownThreads: [],
     claudeReviewsToAction: [],
+    watchedRepoPrs: [],
     users: [],
+    order: settings.order,
+    off: settings.off,
+    configKey: settings.configKey,
   };
   if (localUserId == null) return empty;
   // An empty workspace has nothing on your plate — and returning here also dodges the
@@ -7170,10 +7742,18 @@ export async function getMyTurn(
   if (scope && scope.repoIds.length === 0) return empty;
   // null (not []) is the "no narrowing" sentinel the scoped helpers below test for.
   const scopedRepoIds = scope ? scope.repoIds : null;
+  const now = Date.now();
 
   const referencedUsers = new Set<number>();
+  const noteUser = (id: number | null | undefined): void => {
+    if (id != null) referencedUsers.add(id);
+  };
 
-  // Open PRs, enriched with triage, are the basis for sections 1 & 2.
+  // THE AUTOMATION SET — ONE read, handed to every rule below. GLOBAL (users.isBot ∪ GitHub-typed
+  // Bots ∪ vendor logins), never `hiddenBotUserIds`, which needs a workspace this fold may not have.
+  const bots = await globalAutomationUserIds();
+
+  // Open PRs, enriched with triage, are the basis for every PR-grained section.
   const openRows = await db
     .select()
     .from(pullRequests)
@@ -7188,8 +7768,41 @@ export async function getMyTurn(
     )
     .execute();
   const open = await buildTimelinePrs(openRows, accountId);
+  const openById = new Map(open.map((t) => [t.id, t]));
+
+  // ONE read of the account's repos, folded four ways: display names, the ONBOARDING FLOOR (a
+  // repo's `createdAt` — an event before the repo was added must not summon anyone, or adding a
+  // repo with a 90-day backfill would surface two months of old replies and mentions at once), the
+  // WRITE set (the `conflicts` population gate) and the red-default-branch candidates.
+  // Account-wide like the `listRepos` call it replaced; the scope narrows the trunk candidates.
+  const repoRows = await db
+    .select({
+      id: repos.id,
+      owner: repos.owner,
+      name: repos.name,
+      createdAt: repos.createdAt,
+      viewerPermission: repos.viewerPermission,
+      defaultBranchName: repos.defaultBranchName,
+      defaultBranchHeadSha: repos.defaultBranchHeadSha,
+      defaultBranchCiStatus: repos.defaultBranchCiStatus,
+      defaultBranchUpdatedAt: repos.defaultBranchUpdatedAt,
+    })
+    .from(repos)
+    .where(eq(repos.accountId, accountId))
+    .execute();
   const repoNameById = new Map<number, string>();
-  for (const r of await listRepos(accountId)) repoNameById.set(r.id, r.fullName);
+  const addedAtByRepo = new Map<number, Date>();
+  const writable = new Set<number>();
+  for (const r of repoRows) {
+    repoNameById.set(r.id, `${r.owner}/${r.name}`);
+    addedAtByRepo.set(r.id, r.createdAt);
+    if (WRITE_PERMISSIONS.has(r.viewerPermission ?? '')) writable.add(r.id);
+  }
+  /** The onboarding floor — see `repoRows`. A repo we cannot place has no floor to pass. */
+  const passesFloor = (repoId: number, at: Date): boolean => {
+    const addedAt = addedAtByRepo.get(repoId);
+    return addedAt != null && at.getTime() >= addedAt.getTime();
+  };
 
   // ── THE PENDING MUTE. One read, ACCOUNT-WIDE, unioning the two independently-owned facts
   //    (`workspaces.pending_muted` OR a `pending_muted_repos` row) — see db/pending-mute.ts.
@@ -7198,14 +7811,14 @@ export async function getMyTurn(
   //    only one.
   const mutedRepoIds = await getMutedPendingRepoIds(accountId);
   // THE ONE FOLD. Every section routes its answer through here, so a mute cannot be applied to
-  // four sections and forgotten on the fifth, and `personal` stays derived from `relevance` in
-  // one place — which is what stops the board's label and the notification's count disagreeing.
+  // most sections and forgotten on the last, and `personal` stays derived from `relevance` in one
+  // place — which is what stops the board's label and the notification's count disagreeing.
   //
   // ⚠ A MUTE IS A DOWNGRADE TO `'none'`, NOT A NEW STATE. `'none'` already means exactly what the
   // reader asked for — "a regular pending item, not flagged any more": the card keeps its place
   // on the board and in the broad `myTurn` count, and only the OWNERSHIP CLAIM and the counts
-  // that claim feeds move. A second boolean AND-ed into the five notification surfaces would be
-  // five predicates that can drift from each other; this is one.
+  // that claim feeds move. A second boolean AND-ed into the notification surfaces would be several
+  // predicates that can drift from each other; this is one.
   //
   // ⚠ `muted` IS EXPLANATION, NEVER ARITHMETIC. It is set only when true and no counter, lens or
   // ranker may read it — they all read `relevance`, which has already absorbed the mute. It
@@ -7228,12 +7841,10 @@ export async function getMyTurn(
   // REPLACES THEM: what is on your plate is derived from state on every read, so a card leaves
   // because you acted on the PR — not because you told the app you had. A stored "I dealt with
   // this" is a second, un-checkable answer to the same question, and it was the wrong one
-  // whenever the two disagreed (the Done button existed precisely to hide cards the rule could
-  // not retire on its own).
+  // whenever the two disagreed.
   //
-  // ⚠ NOT THE PENDING MUTE, which is a different, KEPT feature (`workspaces.pending_muted` /
-  // `pending_muted_repos`, read below via `getMutedPendingRepoIds`). A mute changes no row's
-  // presence — only whether it may CLAIM YOUR TURN.
+  // ⚠ NOT THE PENDING MUTE, which is a different, KEPT feature (above), and NOT a switched-off
+  // type, which removes a whole section for as long as the reader keeps it off.
 
   const meta = (prId: number) =>
     openRows.find((p) => p.id === prId)!;
@@ -7241,12 +7852,12 @@ export async function getMyTurn(
   // `since` is THE CLOCK — when the thing that needs you happened — and it is a PARAMETER
   // rather than something derived here because each section dates off a different column
   // (see `MyTurnPr.since`). Making it required is the point: a new section cannot quietly
-  // fall back to `openedAt`, which is the wrong moment for three of the four.
+  // fall back to `openedAt`, which is the wrong moment for most of them.
   const toMyTurnPr = (t: TimelinePr, since: Date) => {
     const m = meta(t.id);
     const repoFullName = repoNameById.get(t.repoId) ?? `repo ${t.repoId}`;
     const [owner, name] = repoFullName.split('/');
-    if (t.authorId != null) referencedUsers.add(t.authorId);
+    noteUser(t.authorId);
     return {
       prId: t.id,
       repoFullName,
@@ -7257,191 +7868,460 @@ export async function getMyTurn(
       openedAt: t.openedAt,
       githubUrl: `https://github.com/${owner}/${name}/pull/${m.number}`,
       since: since.toISOString(),
-      // The DEFAULT of the relevance rule (see `MyTurnRelevance`): five of the six sections
-      // require your involvement to exist at all — a review was requested of YOU, it is YOUR PR,
-      // YOUR PR was approved, YOUR thread got a reply, YOU asked for the run — so membership IS
-      // the relevance test and there is nothing further to check. Only "New PRs" admits work
-      // nobody asked you about, and it overrides BOTH of these below.
+      // The DEFAULT of the relevance rule (see `MyTurnRelevance`): every section but "New PRs"
+      // requires your involvement to exist at all — a review was requested of YOU, somebody named
+      // or answered YOU, it is YOUR PR, YOU asked for the run — so membership IS the relevance test
+      // and there is nothing further to check. Only "New PRs" admits work nobody asked you about,
+      // and it overrides this below.
       //
       // `personal` is DERIVED from `relevance` (`!== 'none'`) and written anyway: it is still the
       // field every notification surface reads, and keeping the server the one place that folds
       // the three values down to the boolean is what stops the two ever disagreeing.
       //
-      // ⚠ THROUGH `relevanceFor`, which is also where the PENDING MUTE lands: a muted repo turns
-      // this default into 'none' + personal:false + muted:true. "New PRs" overrides the pair
-      // below — through the same helper, so it cannot escape the mute.
+      // ⚠ THROUGH `relevanceFor`, which is also where the PENDING MUTE lands.
       ...relevanceFor(t.repoId, 'direct'),
     };
   };
 
+  // ── ONE PR, ONE SUMMONS ──────────────────────────────────────────────────────────────────
+  // The PR-grained sections claim PRs in a FIXED precedence —
+  //   review_request > pr_approved > your_pr > mention > comment_reply > pushed_since >
+  //   watched_repo_pr
+  // — and each drops the PRs a section before it has already claimed. ⚠ FIXED, NEVER THE READER'S
+  // ORDER: which card exists must not depend on a display preference. A switched-off section
+  // claims nothing, so its PRs fall through to the next type that is shown. Thread-grained,
+  // own-work, Claude and red-trunk sections coexist with everything: each is a different job.
+  const newestFirst = <T extends { since?: string }>(rows: T[]): T[] =>
+    rows.sort((a, b) => (b.since ?? '').localeCompare(a.since ?? ''));
+  const claimed = new Set<number>();
+  const claim = <T extends { prId: number }>(items: T[]): T[] => {
+    const kept = items.filter((i) => !claimed.has(i.prId));
+    for (const i of kept) claimed.add(i.prId);
+    return kept;
+  };
+
+  // ── OWN WORK — the four promotions (Settings → My Turn → "Add to My Turn") ─────────────────
+  // Each MOVES a card out of its home tab (Needs fixing / Ready to land / Unanswered threads)
+  // into My turn; `getWorkspaceInsights` drops the same ids from the home builders, so it is never
+  // listed twice. The population is the home cards' EXACTLY: your own open PR, non-draft, with a
+  // real activity event inside `maxQuietDays`, classified by the SAME shared functions
+  // (db/pending-classify.ts).
+  // ⚠ A PR CARRYING A DEPENDENCY TOOL'S MARKER IS NOT PROMOTED, even when your token opened it (a
+  // Snyk fix pushed as you): it is a dependency PR, listed in the Dependencies tab, and promoting
+  // it would list it twice.
+  const wantOwn =
+    show.own_ci_red || show.own_conflicts || show.own_ready || show.own_thread;
+  const ownRows = wantOwn
+    ? openRows.filter(
+        (p) => p.authorId === localUserId && !p.isDraft && p.dependencyVendor == null,
+      )
+    : [];
+  const activeOwn =
+    ownRows.length > 0
+      ? await recentlyActivePrIds(
+          accountId,
+          ownRows.map((p) => p.id),
+          new Date(now - PENDING_LIMITS.maxQuietDays * 86_400_000),
+        )
+      : new Set<number>();
+  const own = ownRows.filter((p) => activeOwn.has(p.id) && openById.has(p.id));
+
+  const ownCiRed: OwnCiRedItem[] = show.own_ci_red
+    ? own
+        .filter((p) => isRedCiStatus(p.ciStatus))
+        .map((p) => ({
+          // Dated by the head commit — the code the red verdict is about (the home card's clock).
+          ...toMyTurnPr(openById.get(p.id)!, p.lastCommitAt ?? p.openedAt),
+          ciStatus: p.ciStatus as CiStatus,
+          lastCommitAt: p.lastCommitAt?.toISOString() ?? null,
+        }))
+    : [];
+  const ownConflicts: OwnConflictsItem[] = show.own_conflicts
+    ? own
+        // The home card's WRITE gate: GitHub's resolver entry needs push access.
+        .filter((p) => writable.has(p.repoId) && isConflicting(p))
+        .map((p) => ({
+          ...toMyTurnPr(openById.get(p.id)!, p.openedAt),
+          mergeStateStatus: (p.mergeStateStatus as MergeStateStatus | null) ?? null,
+          mergeable: (p.mergeable as Mergeable | null) ?? null,
+          baseRefName: p.baseRefName ?? null,
+        }))
+    : [];
+  const ownReady: OwnReadyItem[] = show.own_ready
+    ? own.flatMap((p) => {
+        const forward = forwardKindOf(
+          p,
+          p.mergeStateStatus != null &&
+            READY_MERGE_STATES.has(p.mergeStateStatus as MergeStateStatus),
+        );
+        if (forward == null) return [];
+        return [
+          {
+            ...toMyTurnPr(openById.get(p.id)!, p.lastCommitAt ?? p.openedAt),
+            forward,
+            mergeStateStatus:
+              forward === 'update_branch' ? 'behind' : (p.mergeStateStatus as MergeStateStatus),
+            mergeable: (p.mergeable as Mergeable | null) ?? null,
+            lastCommitAt: p.lastCommitAt?.toISOString() ?? null,
+            // A VISIBILITY gate for the card's merge row, never the authority (the merge routes
+            // re-check permission, head oid and live state).
+            viewerCanPush: writable.has(p.repoId),
+          },
+        ];
+      })
+    : [];
+  const ownThreads: OwnThreadItem[] = [];
+  if (show.own_thread && own.length > 0) {
+    const ownById = new Map(own.map((p) => [p.id, p]));
+    const rows = await db
+      .select({
+        id: reviewThreads.id,
+        prId: reviewThreads.prId,
+        path: reviewThreads.path,
+        line: reviewThreads.line,
+        originalCommenterId: reviewThreads.originalCommenterId,
+        createdAt: reviewThreads.createdAt,
+      })
+      .from(reviewThreads)
+      .where(
+        and(
+          inArray(reviewThreads.prId, [...ownById.keys()]),
+          // The Unanswered threads tab's predicate, verbatim: no reply and no later commit, older
+          // than the tab's floor.
+          eq(reviewThreads.derivedState, 'untouched'),
+          lt(
+            reviewThreads.createdAt,
+            new Date(now - PENDING_LIMITS.untouchedThreadMinHours * 3_600_000),
+          ),
+          // A thread you started on your own PR is a note to yourself — it stays on its home tab.
+          or(
+            isNull(reviewThreads.originalCommenterId),
+            ne(reviewThreads.originalCommenterId, localUserId),
+          ),
+        ),
+      )
+      .execute();
+    for (const t of rows) {
+      const p = ownById.get(t.prId)!;
+      const repoFullName = repoNameById.get(p.repoId) ?? `repo ${p.repoId}`;
+      noteUser(t.originalCommenterId);
+      ownThreads.push({
+        threadId: t.id,
+        prId: t.prId,
+        repoFullName,
+        prNumber: p.number,
+        prTitle: p.title,
+        path: t.path,
+        line: t.line,
+        originalCommenterId: t.originalCommenterId,
+        since: t.createdAt.toISOString(),
+        githubUrl: `https://github.com/${repoFullName}/pull/${p.number}`,
+        ...relevanceFor(p.repoId, 'direct'),
+      });
+    }
+    ownThreads.sort((a, b) => a.since.localeCompare(b.since));
+  }
+
   // 1. Awaiting your review (S1) — a `review_requests` row with your user id on it. GitHub
   //    removes that row the moment you submit, so the state IS the rule: nothing here needs a
-  //    second "have I acted since" test, and there is no dismissal to layer on any more.
-  const awaitingReview = await Promise.all(
-    open
-      .filter((t) => t.reviewRequestedFromMe)
-      .map(async (t) => {
-        // otherReviewersRequested is recomputed via triage map; re-derive count.
-        const others = await countOtherReviewers(t.id, localUserId);
-        const m = meta(t.id);
-        // The review-pickup clock: when a review was REQUESTED of you (the PR's open time only
-        // stands in for repos synced before that column existed).
-        return {
-          ...toMyTurnPr(t, m.firstReviewRequestedAt ?? m.openedAt),
-          alsoRequested: others,
-        };
-      }),
-  );
+  //    second "have I acted since" test. ⚠ Dependency PRs keep this card: a direct summons wins
+  //    over "listed only in Dependencies".
+  const awaitingReview = show.review_request
+    ? claim(
+        await Promise.all(
+          open
+            .filter((t) => t.reviewRequestedFromMe)
+            .map(async (t) => {
+              // otherReviewersRequested is recomputed via triage map; re-derive count.
+              const others = await countOtherReviewers(t.id, localUserId);
+              const m = meta(t.id);
+              // The review-pickup clock: when a review was REQUESTED of you (the PR's open time
+              // only stands in for repos synced before that column existed).
+              return {
+                ...toMyTurnPr(t, m.firstReviewRequestedAt ?? m.openedAt),
+                alsoRequested: others,
+              };
+            }),
+        ),
+      )
+    : [];
 
   // 2. Your authored, open PRs that have a standing approval (likely ready to merge).
   //    An approving review lands them here; they leave automatically once the PR is
   //    merged/closed (it drops out of `open`) — which is the action they are asking for.
-  const approvalInfo = await computeApprovalInfoByPr(open.map((t) => t.id));
-  const approvedPrs: ApprovedPrItem[] = open
-    .filter((t) => {
-      // Drafts can't merge even when approved — don't claim "ready to merge".
-      if (t.authorId !== localUserId || t.isDraft) return false;
-      return approvalInfo.get(t.id)?.approved === true;
-    })
-    .map((t) => ({
-      // Dated by the NEWEST approval — the same fold the section's dismissal test uses above.
-      ...toMyTurnPr(t, approvalInfo.get(t.id)?.latestApprovalAt ?? meta(t.id).openedAt),
-      approvals: approvalInfo.get(t.id)?.approvals ?? 0,
-      mergeable: t.mergeable,
-      mergeStateStatus: t.mergeStateStatus,
-    }));
-  const approvedShownIds = new Set(approvedPrs.map((i) => i.prId));
+  //    ⚠ When "Your PRs ready to land" is shown, a PR it holds is NOT also an approval card: the
+  //    ready card carries the approval standing AND the Merge button, so it is the same job.
+  //    ⚠ AND IT TAKES THE APPROVAL CARD'S CLAIM WITH IT. Dropped without the claim, the PR falls
+  //    through to "New activity on your PRs", so switching a promotion on would turn one card into
+  //    two. An unapproved ready PR never had an approval card, so it has nothing to take.
+  const ownReadyIds = new Set(ownReady.map((i) => i.prId));
+  const approvedPrs: ApprovedPrItem[] = [];
+  if (show.pr_approved) {
+    const approvalInfo = await computeApprovalInfoByPr(open.map((t) => t.id));
+    approvedPrs.push(
+      ...claim(
+        open
+          .filter((t) => {
+            // Drafts can't merge even when approved — don't claim "ready to merge".
+            if (t.authorId !== localUserId || t.isDraft) return false;
+            if (approvalInfo.get(t.id)?.approved !== true) return false;
+            if (ownReadyIds.has(t.id)) {
+              claimed.add(t.id);
+              return false;
+            }
+            return true;
+          })
+          .map((t) => ({
+            // Dated by the NEWEST approval.
+            ...toMyTurnPr(t, approvalInfo.get(t.id)?.latestApprovalAt ?? meta(t.id).openedAt),
+            approvals: approvalInfo.get(t.id)?.approvals ?? 0,
+            mergeable: t.mergeable,
+            mergeStateStatus: t.mergeStateStatus,
+          })),
+      ),
+    );
+  }
 
-  // 3. Your PRs with new activity since you last looked — excluding ones already shown
-  //    under "approved" (the stronger, more actionable signal wins).
-  const yourPrs = open
-    .filter(
-      (t) =>
-        t.authorId === localUserId &&
-        !approvedShownIds.has(t.id) &&
-        t.newSinceLastViewed != null &&
-        (t.newSinceLastViewed.comments > 0 ||
-          t.newSinceLastViewed.reviews > 0 ||
-          t.newSinceLastViewed.commits > 0),
-    )
-    .map((t) => ({
-      // Dated by the PR's last update — that update IS the "new activity" this section reports.
-      ...toMyTurnPr(t, meta(t.id).updatedAt),
-      newSinceLastViewed: t.newSinceLastViewed!,
-      summary: summariseNew(t.newSinceLastViewed!),
-    }));
-
-  // 2b. New open PRs in your repos WHERE THE BALL IS STILL YOURS. Built AFTER awaitingReview +
-  //     yourPrs so those PRs aren't shown twice. Eligibility (opened on/after the repo was ADDED,
-  //     by a non-bot human other than you, non-draft, AND either never touched by you or pushed
-  //     to by a person since you last acted) is the shared getAddedRepoActionablePrIds; here we
-  //     layer the cross-section dedupe on top.
-  //     ⚠ This section is workspace-scoped BY CONSTRUCTION, not by a predicate of its own: it
-  //     only ever emits ids drawn from `open`/`openRows`, which the query above already narrowed
-  //     to `scope.repoIds`. (Its repos read is a repo → addedAt CUTOFF map, so narrowing it would
-  //     change nothing but the row count.)
-  const newRepoPrEligible = await getAddedRepoActionablePrIds(
-    accountId,
-    localUserId,
-    open,
-    openRows,
-  );
-  const inOtherSections = new Set<number>([
-    ...awaitingReview.map((i) => i.prId),
-    ...yourPrs.map((i) => i.prId),
-    ...approvedPrs.map((i) => i.prId),
-  ]);
-  // The response field keeps its wire name (`MyTurnResponse.watchedRepoPrs`).
-  const newRepoPrCandidates = open.filter(
-    (t) => newRepoPrEligible.has(t.id) && !inOtherSections.has(t.id),
-  );
-  // ⚠ THE ONE SECTION THAT NEEDS A RELEVANCE TEST, and it is a FLAG, not a filter. Every
-  //   candidate above still ships (the "Needs attention" board paints them all, and the CLI
-  //   status board + the Done tab's restorability contract both read the full set); what the
-  //   maintainer test decides is whether the NOTIFICATION surfaces are allowed to interrupt the
-  //   viewer about it. Narrowing the section itself would delete work rather than route it.
-  //   Membership is what changes the answer, so the extra read is skipped when nothing is here.
-  //
-  //   THE RULE HAS TWO ARMS AND THEY ANSWER DIFFERENT QUESTIONS. The repo arm asks "is this your
-  //   patch of ground"; the mention arm asks "did somebody type your name". A mention makes a PR
-  //   personal EVEN IN A REPO YOU ONLY READ — which is the whole reason it is not folded into the
-  //   maintainer test. The mention set is DERIVED OFFLINE (sync/mention-scan.ts) precisely so this
-  //   line stays an indexed existence check: the underlying question is a substring scan over
-  //   every comment body in scope, and this function runs on every Feed landing.
-  const [maintainedRepoIds, mentionedPrIds] =
-    newRepoPrCandidates.length > 0
-      ? await Promise.all([
-          viewerMaintainedRepoIds(accountId, localUserId),
-          // Login-scoped, so a renamed account narrows immediately rather than trusting rows the
-          // scanner has not caught up with. No rows at all ⇒ an empty set ⇒ this arm contributes
-          // nothing and the flag is exactly the maintainer test it was before mentions existed.
-          getAccountById(accountId).then((a) =>
-            viewerMentionedPrIds(
-              accountId,
-              a?.githubLogin ?? null,
-              newRepoPrCandidates.map((t) => t.id),
-            ),
-          ),
-        ])
-      : [new Set<number>(), new Set<number>()];
-  const watchedRepoPrs: WatchedRepoPrItem[] = newRepoPrCandidates
-    .map((t) => {
-      // WHY this row is still yours, decided once in `getAddedRepoActionablePrIds` and READ here
-      // — never re-derived. It carries the section's CLOCK too: for a PR you have never touched,
-      // opening genuinely is the event (`openedAt`); for one you acted on, the event is the PUSH
-      // that landed after you, and dating that row off `openedAt` would say "11d ago" about
-      // something that happened this morning.
-      const state = newRepoPrEligible.get(t.id);
-      // ⚠ THE TWO ARMS STAY TWO FACTS. They used to be OR-ed into one boolean, and that union is
-      // precisely what made the board unreadable: "somebody typed your name on this PR" and "this
-      // PR is in a repo you happen to have write on" are not the same summons, and a card that
-      // said "YOUR TURN" for the second one was claiming ownership of a stranger's work. Keep
-      // them separate all the way to the label; collapse only at the very end, into `personal`.
-      //
-      // DIRECT WINS: a mention in a repo you also maintain is still about you.
-      const relevance: MyTurnRelevance = mentionedPrIds.has(t.id)
-        ? 'direct'
-        : maintainedRepoIds.has(t.repoId)
-          ? 'maintained'
-          : 'none';
-      return {
-        ...toMyTurnPr(t, state?.since ?? meta(t.id).openedAt),
-        // DERIVED, and written here rather than left to the consumer so `personal` keeps meaning
-        // exactly what it meant before this split existed: "may a notification surface interrupt
-        // the viewer about this row?" — direct ∪ maintained, unchanged. Through `relevanceFor`,
-        // so a muted repo collapses BOTH arms to 'none' here exactly as it does everywhere else.
-        ...relevanceFor(t.repoId, relevance),
-        ball: state?.ball,
-      };
-    })
-    .sort((a, b) => b.since.localeCompare(a.since));
-
-  // 3. Threads awaiting your response (S3a + S3b): you opened the thread and it isn't resolved,
-  //    and EITHER somebody replied after you OR a later commit touched the file. See
-  //    `getThreadsAwaiting` for which is which — the two are worded apart on the card.
-  const threadRows = await getThreadsAwaiting(
-    localUserId,
-    accountId,
-    repoNameById,
-    scopedRepoIds,
-  );
-
-  // S4 — completed Claude reviews you have not acted on (local-only feature; empty otherwise).
-  const claudeRows: ClaudeReviewToAction[] = getProCapabilities().claudeReview
-    ? await getUnactionedClaudeReviews(accountId, scopedRepoIds)
+  // 3. Your PRs with new activity since you last looked — a PR already claimed above (an approval
+  //    card, or the ready card standing in for one: the stronger, more actionable signal) is not
+  //    repeated here.
+  const yourPrs = show.your_pr
+    ? claim(
+        open
+          .filter(
+            (t) =>
+              t.authorId === localUserId &&
+              t.newSinceLastViewed != null &&
+              (t.newSinceLastViewed.comments > 0 ||
+                t.newSinceLastViewed.reviews > 0 ||
+                t.newSinceLastViewed.commits > 0),
+          )
+          .map((t) => ({
+            // Dated by the PR's last update — that update IS the "new activity" this section
+            // reports.
+            ...toMyTurnPr(t, meta(t.id).updatedAt),
+            newSinceLastViewed: t.newSinceLastViewed!,
+            summary: summariseNew(t.newSinceLastViewed!),
+          })),
+      )
     : [];
 
-  // ⚠ THESE TWO SECTIONS ARE THE ONLY ONES WITH NO `repoId` IN HAND. `ThreadAwaitingItem` and
-  // `ClaudeReviewToAction` carry `repoFullName` (a rendering field) and `prId`, not a repo id —
-  // and a thread's PR may be CLOSED, so it is not necessarily in `openRows` either. Resolving the
-  // mute by reversing `repoNameById` would work today and would be a trap tomorrow: the map's own
-  // `?? 'repo <id>'` fallback produces names that reverse to nothing, and two accounts' repos are
-  // only distinct by id. One narrow indexed select over the PR ids actually present is total by
-  // construction — and it is skipped entirely when nothing is muted, which is the overwhelmingly
-  // common case, so the unmuted account pays nothing for this.
+  // 4 + 5. MENTIONS (S6) and COMMENT REPLIES (S5) — two sources, ONE `lastActionClocks` call over
+  //    the union of their candidates.
+  //    S6: the mention scanner (sync/mention-scan.ts) stamps each `pr_mentions` row with the NEWEST
+  //        mention of you by a person; the card exists while you have not acted since that moment.
+  //        A row the scanner has not stamped yet (NULL `mentioned_at`) shows NO card — under-
+  //        notifying is the safe direction. Login-scoped, so an account rename narrows at once.
+  //    S5: your newest action on the PR is a PR-LEVEL COMMENT, and a person commented at PR level
+  //        after it. ⚠ ONLY THEN: anything wider is the "anything after me" rule this replaced;
+  //        this is the narrowest reading in which the next comment is plausibly an answer to you.
+  //    Drafts and automation-authored PRs are included for both — a colleague can name you on a
+  //    Dependabot PR, and conversations happen on drafts.
+  const mentionRows: { prId: number; repoId: number; at: Date; byId: number | null }[] = [];
+  if (show.mention) {
+    const account = await getAccountById(accountId);
+    const login = account?.githubLogin?.toLowerCase() ?? '';
+    if (login !== '') {
+      for (const r of await db
+        .select({
+          prId: prMentions.prId,
+          repoId: pullRequests.repoId,
+          at: prMentions.mentionedAt,
+          byId: prMentions.mentionedByUserId,
+        })
+        .from(prMentions)
+        .innerJoin(pullRequests, eq(pullRequests.id, prMentions.prId))
+        .where(
+          and(
+            eq(prMentions.accountId, accountId),
+            eq(pullRequests.accountId, accountId),
+            eq(prMentions.login, login),
+            isNotNull(prMentions.mentionedAt),
+            eq(pullRequests.state, 'open'),
+            scopedRepoIds == null ? undefined : inArray(pullRequests.repoId, scopedRepoIds),
+          ),
+        )
+        .execute()) {
+        if (r.at != null) mentionRows.push({ prId: r.prId, repoId: r.repoId, at: r.at, byId: r.byId });
+      }
+    }
+  }
+  const commentCandidateIds = show.comment_reply
+    ? [
+        ...new Set(
+          (
+            await db
+              .select({ prId: prComments.prId })
+              .from(prComments)
+              .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+              .where(
+                and(
+                  eq(pullRequests.accountId, accountId),
+                  eq(pullRequests.state, 'open'),
+                  scopedRepoIds == null ? undefined : inArray(pullRequests.repoId, scopedRepoIds),
+                  eq(prComments.authorId, localUserId),
+                ),
+              )
+              .execute()
+          ).map((r) => r.prId),
+        ),
+      ]
+    : [];
+  const summonClocks = await lastActionClocks(
+    localUserId,
+    [...new Set([...mentionRows.map((r) => r.prId), ...commentCandidateIds])],
+    bots,
+  );
+
+  const mentions: MentionItem[] = newestFirst(
+    claim(
+      mentionRows
+        .filter((r) => {
+          if (!openById.has(r.prId)) return false;
+          const mine = summonClocks.get(r.prId)?.mineLast ?? null;
+          return (mine == null || mine.getTime() < r.at.getTime()) && passesFloor(r.repoId, r.at);
+        })
+        .map((r) => {
+          noteUser(r.byId);
+          return { ...toMyTurnPr(openById.get(r.prId)!, r.at), mentionedById: r.byId };
+        }),
+    ),
+  );
+
+  const commentReplies: CommentReplyItem[] = [];
+  const replyCandidates = commentCandidateIds.filter(
+    (id) => summonClocks.get(id)?.mineLastChannel === 'pr_comment' && openById.has(id),
+  );
+  if (replyCandidates.length > 0) {
+    const comments = await db
+      .select({
+        prId: prComments.prId,
+        authorId: prComments.authorId,
+        body: prComments.body,
+        createdAt: prComments.createdAt,
+      })
+      .from(prComments)
+      .where(inArray(prComments.prId, replyCandidates))
+      .orderBy(asc(prComments.createdAt))
+      .execute();
+    const byPr = new Map<number, typeof comments>();
+    for (const c of comments) {
+      const arr = byPr.get(c.prId) ?? [];
+      arr.push(c);
+      byPr.set(c.prId, arr);
+    }
+    const found: CommentReplyItem[] = [];
+    for (const prId of replyCandidates) {
+      const t = openById.get(prId)!;
+      const mine = summonClocks.get(prId)!.mineLast!;
+      // The FIRST person's comment after yours: the moment the ball came back.
+      const reply = (byPr.get(prId) ?? []).find(
+        (c) =>
+          c.createdAt.getTime() > mine.getTime() &&
+          c.authorId != null &&
+          c.authorId !== localUserId &&
+          !bots.has(c.authorId) &&
+          passesFloor(t.repoId, c.createdAt),
+      );
+      if (reply == null) continue;
+      noteUser(reply.authorId);
+      found.push({
+        ...toMyTurnPr(t, reply.createdAt),
+        replyAuthorId: reply.authorId,
+        replyExcerpt: truncate(reply.body ?? '', 140),
+      });
+    }
+    commentReplies.push(...newestFirst(claim(found)));
+  }
+
+  // 6 + 7. PUSHED SINCE (S3c) and NEW PRs (S2) — one eligibility pass
+  //     (`getAddedRepoActionablePrIds`), split by WHY each row is yours: a person pushed after your
+  //     last action, or you have never touched it. Built last among the PR-grained sections so a
+  //     PR already claimed above is not shown twice.
+  //     ⚠ Workspace-scoped BY CONSTRUCTION: it only ever emits ids drawn from `open`/`openRows`.
+  const newRepoPrEligible =
+    show.pushed_since || show.watched_repo_pr
+      ? await getAddedRepoActionablePrIds(localUserId, open, openRows, addedAtByRepo, bots)
+      : new Map<number, NewPrBallState>();
+  const eligibleOf = (kind: NewPrBall['kind']) =>
+    open.filter((t) => newRepoPrEligible.get(t.id)?.kind === kind);
+
+  // Somebody pushed after YOUR review or comment: new code you read an older version of. DIRECT —
+  // you engaged with this PR, so the change is about your read of it.
+  const pushedSince: WatchedRepoPrItem[] = show.pushed_since
+    ? newestFirst(
+        claim(
+          eligibleOf('commits_after').map((t) => {
+            const state = newRepoPrEligible.get(t.id)!;
+            noteUser(state.ball.pusherId ?? null);
+            return {
+              ...toMyTurnPr(t, state.since ?? meta(t.id).openedAt),
+              ball: state.ball,
+            };
+          }),
+        ),
+      )
+    : [];
+
+  // A PR you have never touched. ⚠ THE ONE SECTION THAT NEEDS A RELEVANCE TEST, and it is a FLAG,
+  // not a filter: 'maintained' in a repo you can push to or have landed a PR into, 'none'
+  // otherwise. Off by default — it is a survey of the workspace, not a summons. Membership is what
+  // changes the answer, so the maintainer read is skipped when nothing is here.
+  const untouched = show.watched_repo_pr
+    ? eligibleOf('untouched').filter((t) => !claimed.has(t.id))
+    : [];
+  for (const t of untouched) claimed.add(t.id);
+  const maintainedForNew =
+    untouched.length > 0
+      ? await viewerMaintainedRepoIds(accountId, localUserId)
+      : new Set<number>();
+  const watchedRepoPrs: WatchedRepoPrItem[] = newestFirst(
+    untouched.map((t) => ({
+      // For a PR you have never touched, opening genuinely is the event.
+      ...toMyTurnPr(t, meta(t.id).openedAt),
+      // Through `relevanceFor`, so a muted repo collapses 'maintained' to 'none' here exactly as
+      // it does everywhere else.
+      ...relevanceFor(t.repoId, maintainedForNew.has(t.repoId) ? 'maintained' : 'none'),
+      ball: newRepoPrEligible.get(t.id)!.ball,
+    })),
+  );
+
+  // 8. Threads (S3a/S3b — yours; S3d — somebody else's you commented in). See `getThreadTurns`.
+  const threadTurns =
+    show.thread || show.thread_reply
+      ? await getThreadTurns({
+          localUserId,
+          accountId,
+          repoNameById,
+          repoIds: scopedRepoIds,
+          bots,
+          addedAtByRepo,
+          wantOwn: show.thread,
+          wantOthers: show.thread_reply,
+        })
+      : { threadsAwaiting: [], threadReplies: [] };
+
+  // S4 — completed Claude reviews you have not acted on (local-only feature; empty otherwise).
+  const claudeRows: ClaudeReviewToAction[] =
+    show.claude_review && getProCapabilities().claudeReview
+      ? await getUnactionedClaudeReviews(accountId, scopedRepoIds)
+      : [];
+
+  // ⚠ THESE SECTIONS HAVE NO `repoId` IN HAND. `ThreadAwaitingItem` and `ClaudeReviewToAction`
+  // carry `repoFullName` (a rendering field) and `prId`, not a repo id — and a Claude review's PR
+  // may be CLOSED, so it is not necessarily in `openRows` either. Resolving the mute by reversing
+  // `repoNameById` would work today and be a trap tomorrow (the map's own `?? 'repo <id>'`
+  // fallback reverses to nothing). One narrow indexed select over the PR ids actually present is
+  // total by construction — and it is skipped entirely when nothing is muted, the common case.
   const repoIdByPrId = new Map<number, number>();
   if (mutedRepoIds.size > 0) {
-    const ids = [...new Set([...threadRows.map((t) => t.prId), ...claudeRows.map((c) => c.prId)])];
+    const ids = [
+      ...new Set([
+        ...threadTurns.threadsAwaiting.map((t) => t.prId),
+        ...threadTurns.threadReplies.map((t) => t.prId),
+        ...claudeRows.map((c) => c.prId),
+      ]),
+    ];
     if (ids.length > 0) {
       const rows = await db
         .select({ id: pullRequests.id, repoId: pullRequests.repoId })
@@ -7452,22 +8332,80 @@ export async function getMyTurn(
     }
   }
 
-  // You opened the thread and someone replied to YOU — DIRECT by construction. Stamped rather
-  // than left absent so every section answers the relevance question in the same two fields, and
-  // through `relevanceFor` so a muted repo downgrades it like every other section.
-  const threadsAwaiting = threadRows.map((ta) => ({
+  // You opened the thread, or you commented in it, and someone answered YOU — DIRECT by
+  // construction. Stamped rather than left absent so every section answers the relevance question
+  // in the same two fields, and through `relevanceFor` so a muted repo downgrades it too.
+  const threadsAwaiting = threadTurns.threadsAwaiting.map((ta) => ({
     ...ta,
     ...relevanceFor(repoIdByPrId.get(ta.prId), 'direct'),
   }));
-  for (const ta of threadsAwaiting) {
-    if (ta.lastReplyAuthorId != null) referencedUsers.add(ta.lastReplyAuthorId);
-  }
+  const threadReplies = threadTurns.threadReplies.map((ta) => ({
+    ...ta,
+    ...relevanceFor(repoIdByPrId.get(ta.prId), 'direct'),
+  }));
+  for (const ta of [...threadsAwaiting, ...threadReplies]) noteUser(ta.lastReplyAuthorId);
 
-  // You asked for the run — DIRECT by construction, same as the thread section.
+  // You asked for the run — DIRECT by construction, same as the thread sections.
   const claudeReviewsToAction: ClaudeReviewToAction[] = claudeRows.map((c) => ({
     ...c,
     ...relevanceFor(repoIdByPrId.get(c.prId), 'direct'),
   }));
+
+  // 9. RED DEFAULT BRANCHES (promotion, repo-grained) — `trunkScope` 'maintained' keeps repos you
+  //    maintain (`viewerMaintainedRepoIds`, the ci_failing trunk arm's own set), 'all' every repo in
+  //    scope. DIRECT in both scopes: the reader added this type in Settings, so it is theirs and it
+  //    notifies — `maintained` stays a display fact that picks the card's sentence, and only the
+  //    Pending mute downgrades it. The landing PR is resolved through the SAME helper as the home
+  //    card, so the two can never name different PRs for one red head.
+  const redTrunks: RedTrunkItem[] = [];
+  if (settings.trunkScope !== 'off') {
+    const inScope = scopedRepoIds == null ? null : new Set(scopedRepoIds);
+    const red = repoRows.filter(
+      (r) => (inScope == null || inScope.has(r.id)) && isRedCiStatus(r.defaultBranchCiStatus),
+    );
+    const maintained =
+      red.length > 0 ? await viewerMaintainedRepoIds(accountId, localUserId) : new Set<number>();
+    const kept = red.filter((r) => settings.trunkScope === 'all' || maintained.has(r.id));
+    const landing = await resolveTrunkCommitPrs(
+      accountId,
+      kept.flatMap((r) =>
+        r.defaultBranchHeadSha != null ? [{ repoId: r.id, sha: r.defaultBranchHeadSha }] : [],
+      ),
+    );
+    for (const r of kept) {
+      const full = repoNameById.get(r.id) ?? `repo ${r.id}`;
+      const sha = r.defaultBranchHeadSha;
+      const landed = sha != null ? landing.get(`${r.id}:${sha}`) : undefined;
+      noteUser(landed?.mergedById);
+      const observedAt = r.defaultBranchUpdatedAt?.toISOString() ?? null;
+      redTrunks.push({
+        repoId: r.id,
+        repoFullName: full,
+        branchName: r.defaultBranchName,
+        ciStatus: r.defaultBranchCiStatus as CiStatus,
+        headSha: sha,
+        observedAt,
+        landingPr:
+          landed != null
+            ? {
+                prId: landed.id,
+                number: landed.number,
+                title: landed.title,
+                mergedById: landed.mergedById,
+              }
+            : null,
+        viewerMerged: landed?.mergedById != null && landed.mergedById === localUserId,
+        maintained: maintained.has(r.id),
+        since: observedAt ?? new Date(now).toISOString(),
+        // The COMMIT page — a trunk run's checks live on the commit (the trunk_ci_failed feed
+        // rule); the repo page when we hold no head sha.
+        githubUrl:
+          sha != null ? `https://github.com/${full}/commit/${sha}` : `https://github.com/${full}`,
+        ...relevanceFor(r.id, 'direct'),
+      });
+    }
+    redTrunks.sort((a, b) => b.since.localeCompare(a.since));
+  }
 
   const users =
     referencedUsers.size > 0
@@ -7482,12 +8420,24 @@ export async function getMyTurn(
 
   return {
     awaitingReview,
-    yourPrs,
-    approvedPrs,
+    mentions,
     threadsAwaiting,
-    watchedRepoPrs,
+    threadReplies,
+    commentReplies,
+    pushedSince,
+    ownCiRed,
+    ownConflicts,
+    redTrunks,
+    approvedPrs,
+    ownReady,
+    yourPrs,
+    ownThreads,
     claudeReviewsToAction,
+    watchedRepoPrs,
     users,
+    order: settings.order,
+    off: settings.off,
+    configKey: settings.configKey,
   };
 }
 
@@ -7503,60 +8453,90 @@ async function countOtherReviewers(
   return rows.filter((r) => r.userId != null && r.userId !== localUserId).length;
 }
 
-// Threads YOU opened that are still on your plate — S3(a) and S3(b) of THE BALL RULE, which are
-// two different events and are kept two events all the way to the card.
+// THE THREAD TURNS — three events on review threads, kept apart all the way to the card:
 //
-//   S3(a) `'reply'`            — somebody had the last word after you and the thread is
-//                                unresolved. The long-standing case; `lastReply*` is THEIR
-//                                comment.
-//   S3(b) `'likely_addressed'` — you had the last word, but sync classified the thread
-//                                `likely_addressed`: a commit touched the thread's file after
-//                                your comment. ⚠ This was INVISIBLE before — the "someone else
-//                                spoke last" test dropped it — which is exactly the state where
-//                                the fix probably landed and nobody told you.
-//                                ⚠ `likely_addressed` is a HEURISTIC (sync/derive-thread-state.ts:
-//                                an unrelated edit or a rename produces it too), so the copy for
-//                                this row says a commit touched the file and stops. It must never
-//                                say the thread was addressed.
-async function getThreadsAwaiting(
-  localUserId: number,
-  accountId: number,
-  repoNameById: Map<number, string>,
-  // The workspace's repo narrowing, or null/undefined for the account-wide (unscoped) read that
-  // GET /api/my-turn and the CLI status board take. An EMPTY array is a real, scoped answer
-  // ("this workspace has no repos") and the caller short-circuits before reaching here.
-  repoIds?: number[] | null,
-): Promise<ThreadAwaitingItem[]> {
-  // Scope to the account by joining the thread → its PR → repo.
-  const threadJoinRows = await db
-    .select({
-      id: reviewThreads.id,
-      prId: reviewThreads.prId,
-      path: reviewThreads.path,
-      line: reviewThreads.line,
-      derivedState: reviewThreads.derivedState,
-    })
-    .from(reviewThreads)
-    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(
-      and(
-        eq(repos.accountId, accountId),
-        repoIds == null ? undefined : inArray(pullRequests.repoId, repoIds),
-        // ⚠ X1 OF THE BALL RULE — THE PR MUST STILL BE OPEN. This predicate was MISSING, and
-        // nothing showed it because a stored dismissal was hiding the result: on the author's own
-        // dev DB this section returned 31 threads, ALL 31 on PRs that had already merged or
-        // closed, every one of them dismissed by hand at some point. There is no action owed on a
-        // thread whose PR has landed, and the four PR-shaped sections have always folded `open`
-        // only — this one just never said so.
-        eq(pullRequests.state, 'open'),
-        eq(reviewThreads.originalCommenterId, localUserId),
-        sql`${reviewThreads.derivedState} != 'resolved'`,
-      ),
-    )
-    .execute();
-  const threads = threadJoinRows;
-  if (threads.length === 0) return [];
+//   S3(a) `thread`, `'reply'`            — a thread YOU opened: a PERSON had the last word after
+//                                          you and the thread is unresolved. `lastReply*` is THEIR
+//                                          comment.
+//   S3(b) `thread`, `'likely_addressed'` — a thread YOU opened: you had the last word, but sync
+//                                          classified the thread `likely_addressed` (a commit
+//                                          touched its file after your comment). ⚠ A HEURISTIC
+//                                          (sync/derive-thread-state.ts: an unrelated edit or a
+//                                          rename produces it too), so the copy says a commit
+//                                          touched the file and stops.
+//   S3(d) `thread_reply`                 — a thread SOMEBODY ELSE opened that you commented in: a
+//                                          PERSON answered after your newest comment there, and
+//                                          that answer postdates the repo being added (the
+//                                          onboarding floor).
+//
+// ⚠ "HAD THE LAST WORD" MEANS THE LAST *HUMAN* WORD, for all three. A bot reply (a review bot
+// re-posting, a CLA bot) after your comment is not an answer to you; before this rule was
+// human-only, it summoned you on your own threads. `lastHuman` skips the GLOBAL automation set and
+// comments with no known author, and the card is built from it rather than from the last row.
+async function getThreadTurns(opts: {
+  localUserId: number;
+  accountId: number;
+  repoNameById: Map<number, string>;
+  // The workspace's repo narrowing, or null for the account-wide (unscoped) read. An EMPTY array
+  // is a real, scoped answer ("this workspace has no repos") and the caller short-circuits before
+  // reaching here.
+  repoIds: number[] | null;
+  bots: ReadonlySet<number>;
+  addedAtByRepo: ReadonlyMap<number, Date>;
+  /** S3(a)/S3(b) — threads you opened. */
+  wantOwn: boolean;
+  /** S3(d) — threads somebody else opened, that you commented in. */
+  wantOthers: boolean;
+}): Promise<{ threadsAwaiting: ThreadAwaitingItem[]; threadReplies: ThreadAwaitingItem[] }> {
+  const { localUserId, accountId, repoNameById, repoIds, bots, addedAtByRepo } = opts;
+  const threadCols = {
+    id: reviewThreads.id,
+    prId: reviewThreads.prId,
+    path: reviewThreads.path,
+    line: reviewThreads.line,
+    derivedState: reviewThreads.derivedState,
+  };
+  const scoped = and(
+    eq(pullRequests.accountId, accountId),
+    repoIds == null ? undefined : inArray(pullRequests.repoId, repoIds),
+    // ⚠ X1 OF THE BALL RULE — THE PR MUST STILL BE OPEN. There is no action owed on a thread
+    // whose PR has landed (this predicate was once missing, and 31 of 31 rows it returned were on
+    // merged or closed PRs, hidden only by stored dismissals).
+    eq(pullRequests.state, 'open'),
+    sql`${reviewThreads.derivedState} != 'resolved'`,
+  );
+
+  const ownThreads = opts.wantOwn
+    ? await db
+        .select(threadCols)
+        .from(reviewThreads)
+        .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+        .where(and(scoped, eq(reviewThreads.originalCommenterId, localUserId)))
+        .execute()
+    : [];
+  // Somebody else's threads you have commented in — a JOIN on your comments, deduped here (never a
+  // giant `IN` of thread ids).
+  const otherRows = opts.wantOthers
+    ? await db
+        .select(threadCols)
+        .from(reviewComments)
+        .innerJoin(reviewThreads, eq(reviewThreads.id, reviewComments.threadId))
+        .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+        .where(
+          and(
+            scoped,
+            eq(reviewComments.authorId, localUserId),
+            or(
+              isNull(reviewThreads.originalCommenterId),
+              ne(reviewThreads.originalCommenterId, localUserId),
+            ),
+          ),
+        )
+        .execute()
+    : [];
+  const otherThreads = [...new Map(otherRows.map((t) => [t.id, t])).values()];
+  const threads = [...ownThreads, ...otherThreads];
+  if (threads.length === 0) return { threadsAwaiting: [], threadReplies: [] };
 
   const prIds = [...new Set(threads.map((t) => t.prId))];
   const prRows = await db
@@ -7566,13 +8546,12 @@ async function getThreadsAwaiting(
     .execute();
   const prById = new Map(prRows.map((p) => [p.id, p]));
 
-  // Batch-load the comments for every candidate thread in one query, ordered so
-  // the last entry per thread is the most recent reply (avoids an N+1 loop).
-  const threadIds = threads.map((t) => t.id);
+  // ONE comment load over the union of thread ids, ordered so the last entry per thread is the
+  // most recent (avoids an N+1 loop).
   const allComments = await db
     .select()
     .from(reviewComments)
-    .where(inArray(reviewComments.threadId, threadIds))
+    .where(inArray(reviewComments.threadId, threads.map((t) => t.id)))
     .orderBy(asc(reviewComments.createdAt))
     .execute();
   const commentsByThread = new Map<number, typeof allComments>();
@@ -7581,22 +8560,18 @@ async function getThreadsAwaiting(
     arr.push(c);
     commentsByThread.set(c.threadId, arr);
   }
+  const lastHuman = (comments: typeof allComments) =>
+    comments.findLast((c) => c.authorId != null && !bots.has(c.authorId));
 
-  const out: ThreadAwaitingItem[] = [];
-  for (const t of threads) {
-    const comments = commentsByThread.get(t.id) ?? [];
-    const last = comments.at(-1);
-    if (!last) continue;
-    // Someone other than you had the last word (S3a), OR you did and a commit has touched the
-    // file since (S3b). Anything else — you spoke last and nothing has moved — is not yours.
-    const youSpokeLast = last.authorId === localUserId;
-    if (youSpokeLast && t.derivedState !== 'likely_addressed') continue;
-    const awaitingKind = youSpokeLast ? 'likely_addressed' : 'reply';
-    const pr = prById.get(t.prId);
-    if (!pr) continue;
+  const item = (
+    t: (typeof threads)[number],
+    pr: (typeof prRows)[number],
+    shown: (typeof allComments)[number],
+    awaitingKind: 'reply' | 'likely_addressed',
+  ): ThreadAwaitingItem => {
     const repoFullName = repoNameById.get(pr.repoId) ?? `repo ${pr.repoId}`;
     const [owner, name] = repoFullName.split('/');
-    out.push({
+    return {
       threadId: t.id,
       prId: t.prId,
       repoFullName,
@@ -7605,22 +8580,52 @@ async function getThreadsAwaiting(
       line: t.line,
       derivedState: t.derivedState,
       awaitingKind,
-      // Prefer the stored excerpt (always present, incl. lean mode); fall back to
-      // truncating the full body for rows synced before the excerpt column existed.
+      // Prefer the stored excerpt (always present, incl. lean mode); fall back to truncating the
+      // full body for rows synced before the excerpt column existed.
       // ⚠ On an S3(b) row this is YOUR OWN comment, not a reply — which is why `awaitingKind`
-      // rides alongside and the card copy branches on it. Rendering it as "@you replied" would
-      // be the masquerade this field exists to prevent.
-      lastReplyExcerpt: last.excerpt ?? truncate(last.body ?? '', 140),
-      // Full markdown (comment bodies are always persisted); null on pre-persistence
-      // lean rows — the Feed then falls back to the excerpt.
-      lastReplyBody: last.body ?? null,
-      lastReplyAt: last.createdAt.toISOString(),
-      lastReplyAuthorId: last.authorId,
+      // rides alongside and the card copy branches on it.
+      lastReplyExcerpt: shown.excerpt ?? truncate(shown.body ?? '', 140),
+      // Full markdown (comment bodies are always persisted); null on pre-persistence lean rows —
+      // the Feed then falls back to the excerpt.
+      lastReplyBody: shown.body ?? null,
+      lastReplyAt: shown.createdAt.toISOString(),
+      lastReplyAuthorId: shown.authorId,
       githubUrl: `https://github.com/${owner}/${name}/pull/${pr.number}`,
-    });
+    };
+  };
+
+  const threadsAwaiting: ThreadAwaitingItem[] = [];
+  for (const t of ownThreads) {
+    const pr = prById.get(t.prId);
+    const last = lastHuman(commentsByThread.get(t.id) ?? []);
+    if (!pr || !last) continue;
+    // A person other than you had the last word (S3a), OR you did and a commit has touched the
+    // file since (S3b). Anything else — you spoke last and nothing has moved — is not yours.
+    const youSpokeLast = last.authorId === localUserId;
+    if (youSpokeLast && t.derivedState !== 'likely_addressed') continue;
+    threadsAwaiting.push(item(t, pr, last, youSpokeLast ? 'likely_addressed' : 'reply'));
   }
-  out.sort((a, b) => b.lastReplyAt.localeCompare(a.lastReplyAt));
-  return out;
+
+  const threadReplies: ThreadAwaitingItem[] = [];
+  for (const t of otherThreads) {
+    const pr = prById.get(t.prId);
+    const comments = commentsByThread.get(t.id) ?? [];
+    const last = lastHuman(comments);
+    const mine = comments.findLast((c) => c.authorId === localUserId);
+    if (!pr || !last || !mine || last.authorId === localUserId) continue;
+    // The answer must postdate your newest comment here, and the repo being added.
+    if (last.createdAt.getTime() <= mine.createdAt.getTime()) continue;
+    const addedAt = addedAtByRepo.get(pr.repoId);
+    if (addedAt == null || last.createdAt.getTime() < addedAt.getTime()) continue;
+    threadReplies.push(item(t, pr, last, 'reply'));
+  }
+
+  const newestFirst = (a: ThreadAwaitingItem, b: ThreadAwaitingItem) =>
+    b.lastReplyAt.localeCompare(a.lastReplyAt);
+  return {
+    threadsAwaiting: threadsAwaiting.sort(newestFirst),
+    threadReplies: threadReplies.sort(newestFirst),
+  };
 }
 
 // Recent-activity window for the CORE reviewer suggester (both the dir-overlap authorship
@@ -9931,27 +10936,37 @@ function narrowAutomatedIds(
   });
 }
 
-// The UNION bot set that "hide bots" hides (the Timeline's excludeBots + the Feed lens): the
-// global `users.isBot` flag ∪ this WORKSPACE's automated-reviewer verdict (vendor-login seed +
-// `workspace_reviewers` rows flagged automated), with the workspace's manual "this is a human"
-// winning BOTH directions — it removes the actor from the set even where the global table flags
-// the login a Bot. Either half alone lies: `isBot` misses workspace-classified in-house bots
-// (deepsource-io etc.), and the workspace set misses dependabot-style non-review bots the global
-// heuristic catches. Per-workspace on purpose — a judgement must never leak across workspaces,
-// so the caller passes the REQUEST's resolved scope, never a default.
+// The UNION bot set that "hide bots" hides (the Timeline's excludeBots + the Feed lens) and the
+// Pending board calls automation (`authorIsBot`, the People / Automation lens): the global
+// `users.isBot` flag ∪ the review-bot logins ∪ every account GitHub itself TYPES a Bot
+// (`users.github_type = 'Bot'` — the Apps whose login GraphQL returns without `[bot]`, so
+// `isLikelyBot` misses them: Copilot, socket-security, lumberbot-app…) ∪ every known NON-review
+// vendor login (`AUTOMATION_VENDORS` + its prefixes: renovate, snyk-io, imgbot…) ∪ this
+// WORKSPACE's automated-reviewer verdict (`workspace_reviewers` rows flagged automated). Either
+// half alone lies: `isBot` misses workspace-classified in-house bots (deepsource-io etc.), and the
+// workspace set misses dependabot-style non-review bots the global heuristic catches.
+//
+// ⚠ The workspace's manual "this is a human" still wins BOTH directions, over EVERY global half —
+// the two new ones included. A login that looks like a vendor, or an account GitHub types a Bot,
+// is exactly the kind a person corrects by hand (a colleague's personal automation account run as
+// their own), and a judgement nobody can override is a classifier, not a judgement.
+// Per-workspace on purpose — a judgement must never leak across workspaces, so the caller passes
+// the REQUEST's resolved scope, never a default.
 async function hiddenBotUserIds(
   accountId: number,
   workspaceId: number,
 ): Promise<number[]> {
-  const [globalIds, vendorIds, resolved] = await Promise.all([
+  const [globalIds, vendorIds, githubTypeIds, automationIds, resolved] = await Promise.all([
     botUserIds(),
     reviewBotUserIds(),
+    githubTypeBotUserIds(),
+    automationVendorUserIds(),
     resolveWorkspaceReviewers(accountId, workspaceId),
   ]);
-  // Same verdict rule as narrowAutomatedIds (role 'all'), applied over BOTH halves of the
-  // union — a manualHuman row must also subtract a `users.isBot` id, which the automated
-  // helpers alone cannot express (they never see the global flag).
-  const set = new Set<number>([...globalIds, ...vendorIds]);
+  // Same verdict rule as narrowAutomatedIds (role 'all'), applied over EVERY half of the
+  // union — a manualHuman row must also subtract a global id, which the automated helpers alone
+  // cannot express (they never see the global flags).
+  const set = new Set<number>([...globalIds, ...vendorIds, ...githubTypeIds, ...automationIds]);
   for (const [id, r] of resolved) {
     if (r.automated) set.add(id);
     else if (r.manualHuman) set.delete(id);
@@ -9967,20 +10982,34 @@ async function hiddenBotUserIds(
 // ⚠ IDENTITY IS PER WORKSPACE NOW. The same login may legitimately be named `coderabbit` in one
 // workspace and left unnamed in another; nothing reconciles them and nothing is meant to. A colour
 // or label lookup must therefore be built from the ACTIVE workspace's answer.
+//
+// The NON-review vendors (`AUTOMATION_VENDORS`: renovate, snyk, imgbot…) seed it too, so a
+// Dependabot PR's byline and a Renovate drill-down name their tool rather than a nameless "Bot".
+// ⚠ STORED BEATS THAT SEED: a workspace row a person (or the classifier) wrote keeps its kind, and
+// only a NULL stored kind — "no identity recorded" — takes the seed before the generic default.
+// The REVIEW_BOTS seed still wins over both, unchanged.
 export async function classificationKindForUser(
   accountId: number,
   workspaceId: number,
 ): Promise<Map<number, AutomatedReviewerKind>> {
   const resolved = await resolveWorkspaceReviewers(accountId, workspaceId);
-  const map = await vendorLoginKindMap();
+  const [map, automationSeed] = await Promise.all([vendorLoginKindMap(), automationVendorKindMap()]);
   for (const [id, r] of resolved) {
     if (!r.automated) {
-      // A manual "this is a human" unmakes even a vendor login's kind.
-      if (r.manualHuman) map.delete(id);
+      // A manual "this is a human" unmakes even a vendor login's kind — BOTH seeds.
+      if (r.manualHuman) {
+        map.delete(id);
+        automationSeed.delete(id);
+      }
       continue;
     }
-    if (map.has(id)) continue;
-    map.set(id, r.kind ?? 'in_house');
+    if (map.has(id)) continue; // the REVIEW_BOTS seed still wins (unchanged)
+    map.set(id, r.kind ?? automationSeed.get(id) ?? 'in_house');
+  }
+  // Actors with NO automated row here: the seed alone — renovate[bot], imgbot, snyk-bot, the legacy
+  // `dependabot` row. Never an actor a person vouched for in this workspace.
+  for (const [id, kind] of automationSeed) {
+    if (!map.has(id) && resolved.get(id)?.manualHuman !== true) map.set(id, kind);
   }
   return map;
 }
@@ -10034,6 +11063,27 @@ export async function classificationKindForUserForAccount(
     out.set(id, kind ?? 'in_house');
   }
   return out;
+}
+
+// AUTOMATION_VENDORS logins in the GLOBAL users table → their vendor kind. The NON-review seed of
+// `classificationKindForUser`. Kept apart from `vendorLoginKindMap` below because the ACCOUNT-WIDE
+// benchmark map (`classificationKindForUserForAccount`) must not change: its answer leaves the
+// tenant. (None of these kinds is in REVIEW_BOT_KINDS anyway.)
+//
+// ⚠ EXACT LOGINS ONLY (`exactAutomationVendorUsers` matches no prefix) — never the per-org PREFIX
+// half (`semgrep-code-<org>`). This map is also
+// the bot drill-downs' "is this id classified here" gate (`getBotVendorPrs`, the ML comment list),
+// which then resolves the login: a global row seeded by prefix would hand any tenant ANOTHER org's
+// name for the asking. An exact vendor login is a public identity, like the REVIEW_BOTS seed. A
+// prefixed login still counts as automation (`hiddenBotUserIds`, ids only) and still gets its
+// role from `roleForBotLogin`; only its brand waits for a workspace row to name it.
+async function automationVendorKindMap(): Promise<Map<number, AutomatedReviewerKind>> {
+  const map = new Map<number, AutomatedReviewerKind>();
+  for (const r of await exactAutomationVendorUsers()) {
+    const kind = automationVendorKind(r.login);
+    if (kind) map.set(r.id, kind);
+  }
+  return map;
 }
 
 // Known vendor logins (the GLOBAL users table) → their vendor kind. The seed both kind maps start
@@ -10131,6 +11181,28 @@ export async function manualRoleUserIds(
     if (r.source === 'manual' && r.automated) out.set(id, r.role);
   }
   return out;
+}
+
+/** The four maps `authorAutomationFor` (db/dependency-cards.ts) reads, for ONE workspace — the
+ *  Pending board's "who opened it" resolution, read ONCE per fold. `loginOf` is filled lazily by
+ *  the caller for the fold's author ids (global users table, read by id). */
+export async function resolveAuthorAutomationInputs(
+  accountId: number,
+  workspaceId: number,
+): Promise<Omit<AuthorAutomationInputs, 'loginOf'> & { loginOf: Map<number, string> }> {
+  const [automatedIds, kindOf, manualRoleOf, storedRoleOf] = await Promise.all([
+    hiddenBotUserIds(accountId, workspaceId),
+    classificationKindForUser(accountId, workspaceId),
+    manualRoleUserIds(accountId, workspaceId),
+    reviewerRoleForUser(accountId, workspaceId),
+  ]);
+  return {
+    automatedIds: new Set(automatedIds),
+    kindOf,
+    manualRoleOf,
+    storedRoleOf,
+    loginOf: new Map<number, string>(),
+  };
 }
 
 // Best-effort review-body / comment severity inference from the account's fingerprint

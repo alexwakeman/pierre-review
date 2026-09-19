@@ -9,7 +9,7 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/backend src/db/pr-intervals.test.ts
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { PrCourt } from '@pierre-review/shared';
+import { FLOW_RULES, type PrCourt } from '@pierre-review/shared';
 import {
   __flowTesting,
   median,
@@ -195,7 +195,112 @@ describe('the reviewer advice follows this workspace\'s own history', () => {
   it('drops that advice when asking a team was answered at least as quickly here', () => {
     const d = directiveFor('reviewer', 2, false);
     expect(d).not.toContain('named reviewer instead of a team');
-    expect(d).toContain('chase the pull requests already past the marks below');
+    expect(d).toContain('chase the reviews that are already overdue');
+  });
+
+  it('reads the same wherever it is shown', () => {
+    // The paragraph used to sit above the repository rows and pointed at "the marks below"; it now
+    // renders alone in a modal, where nothing is below it but the next court's paragraph.
+    for (const court of ['reviewer', 'author', 'landing'] as const) {
+      for (const namedBeatsTeam of [null, true, false]) {
+        expect(directiveFor(court, 2, namedBeatsTeam)).not.toMatch(/\b(below|above)\b/i);
+      }
+    }
+  });
+});
+
+describe('the one-line advice', () => {
+  // The page prints `summary` under each court's heading; the full `directive` moved behind the
+  // "i". One line each, the rule that put the repositories there, and the action — nothing more.
+  const { directiveSummaryFor } = __flowTesting;
+  const NO_PERSON = /\b(who|whose|somebody's|their name)\b/i;
+
+  it('states the rule and the action for each court, exactly', () => {
+    expect(directiveSummaryFor('reviewer')).toBe(
+      'At least 50% of the time here is spent waiting for a reviewer. Ask a named person rather than a team, and chase overdue reviews.',
+    );
+    expect(directiveSummaryFor('reviewer', false)).toBe(
+      'At least 50% of the time here is spent waiting for a reviewer. Chase overdue reviews.',
+    );
+    expect(directiveSummaryFor('author')).toBe(
+      'At least 50% of the time here is spent waiting for the author. Fewer, clearer review rounds will help more than speed.',
+    );
+    expect(directiveSummaryFor('landing')).toBe(
+      'At least 50% of the time here is spent approved and waiting to merge. Arm “merge when ready” to land these.',
+    );
+  });
+
+  it('drops the named-person clause only on a measured "a team was as quick"', () => {
+    expect(directiveSummaryFor('reviewer', true)).toContain('named person');
+    expect(directiveSummaryFor('reviewer', null)).toContain('named person');
+    expect(directiveSummaryFor('reviewer', false)).not.toContain('named person');
+  });
+
+  it('is overridden together with the paragraph, so the page and its "i" never disagree', () => {
+    // STRUCTURAL: the override runs inside `getFlowCourts`, which needs a database. A summary left
+    // on the default while the paragraph dropped the named-person advice would print the advice the
+    // workspace's own history contradicts, one line above the modal that withdraws it.
+    const src = readFileSync(new URL('./pr-intervals.ts', import.meta.url), 'utf8');
+    const start = src.indexOf('for (const d of directives) {');
+    expect(start, 'the reviewer-advice override moved or was renamed').toBeGreaterThan(-1);
+    const block = src.slice(start, src.indexOf('\n  }\n', start));
+    expect(block).toContain("d.directive = directiveFor('reviewer', d.repos, false)");
+    expect(block).toContain("d.summary = directiveSummaryFor('reviewer', false)");
+  });
+
+  it('names no one, in any court', () => {
+    for (const court of ['reviewer', 'author', 'landing'] as const) {
+      for (const named of [null, false] as const) {
+        expect(directiveSummaryFor(court, named)).not.toMatch(NO_PERSON);
+      }
+    }
+  });
+
+  it('quotes the dominant share the fold uses, which is the one the page explains', () => {
+    const { FLOW_DOMINANT_SHARE, FLOW_SLOW_P75_HOURS, FLOW_MIN_REPO_PRS } = __flowTesting;
+    expect(FLOW_DOMINANT_SHARE).toBe(FLOW_RULES.dominantShare);
+    expect(FLOW_SLOW_P75_HOURS).toBe(FLOW_RULES.slowP75ClockHours);
+    expect(FLOW_MIN_REPO_PRS).toBe(FLOW_RULES.minRepoPrs);
+    expect(__flowTesting.FLOW_UNREVIEWED_MIN_COUNT).toBe(FLOW_RULES.unreviewedMinCount);
+    expect(__flowTesting.FLOW_UNREVIEWED_MIN_SHARE).toBe(FLOW_RULES.unreviewedMinShare);
+    expect(directiveSummaryFor('author')).toContain(
+      `At least ${Math.round(FLOW_RULES.dominantShare * 100)}%`,
+    );
+  });
+});
+
+describe('the refusals state one fact each', () => {
+  // The rule behind each refusal is explained behind its section's "i"; the refusal itself is the
+  // plain fact. These three used to carry the explanation too, which put it on screen twice.
+  const { noHumanReviewReason, noneStandsOutReason, unreviewedUnderFloorReason } = __flowTesting;
+  const NO_PERSON = /\b(who|whose|somebody's|their name)\b/i;
+
+  it('says exactly what was found', () => {
+    expect(noHumanReviewReason(30)).toBe(
+      'No pull request merged in the last 30 days had a human review or comment on it.',
+    );
+    expect(noneStandsOutReason(7, 30)).toBe('Measured 7 repositories in the last 30 days. None stands out.');
+    expect(noneStandsOutReason(1, 90)).toBe('Measured 1 repository in the last 90 days. None stands out.');
+    expect(unreviewedUnderFloorReason()).toBe(
+      'No repository merged enough pull requests without a human review to name.',
+    );
+  });
+
+  it('names no one', () => {
+    for (const s of [noHumanReviewReason(30), noneStandsOutReason(3, 30), unreviewedUnderFloorReason()]) {
+      expect(s).not.toMatch(NO_PERSON);
+    }
+  });
+
+  it('is what the engine refuses with — no second, longer spelling left inline', () => {
+    // STRUCTURAL, like the dominant-court check below: `getFlowCourts` needs a database, so the
+    // one guarantee reachable from here is that it calls these helpers and carries no copy of the
+    // old explanations.
+    const src = readFileSync(new URL('./pr-intervals.ts', import.meta.url), 'utf8');
+    expect(src).toContain("refuse('courts', noHumanReviewReason(windowDays))");
+    expect(src).toContain("refuse('courts', noneStandsOutReason(clearedFloor, windowDays), 'measured_clean')");
+    expect(src).toContain(': unreviewedUnderFloorReason()');
+    expect(src).not.toMatch(/no waiting time to attribute|lopsided towards one court|worth naming \(the floor/);
   });
 });
 
@@ -647,8 +752,8 @@ describe('the calibration, replayed over 66,088 public pull requests', () => {
 
   it('counts the two exclusions disjointly, so the rates on screen can be read side by side', () => {
     // 35.4% bot-authored and 54.3% never-human-touched are rendered next to each other by
-    // `exclusionLineFor` — "Set aside: N opened by automation, and M that no person ever reviewed
-    // or commented on." — and a reader adds them up. That only means anything if a pull request
+    // `exclusionLineFor` — "Set aside: N opened by automation, and M no person reviewed or
+    // commented on." — and a reader adds them up. That only means anything if a pull request
     // lands in exactly ONE bucket, and it does, because the bot check `continue`s before the
     // human-touch check is ever reached. Structural, because both counters live inside a
     // database-bound loop.

@@ -39,7 +39,13 @@
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { WorkPlanEvidence, WorkPlanItem, WorkPlanKind } from '@pierre-review/shared';
+import { DO_NEXT_PRESETS } from '@pierre-review/shared';
+import type {
+  InsightCard,
+  WorkPlanEvidence,
+  WorkPlanItem,
+  WorkPlanKind,
+} from '@pierre-review/shared';
 
 const DB_PATH = '/tmp/pierre-work-plan-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
@@ -58,6 +64,8 @@ let planScope: any;
 /** The over-the-cap filler workspace — the disclosure + stability assertions read this. */
 let fillerScope: any;
 let emptyScope: any;
+/** One repo whose merge cards overflow both the capped fold's 15 and the board's list cap. */
+let crowdScope: any;
 
 const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 60 * 60 * 1000;
@@ -66,6 +74,8 @@ const HOUR = 60 * 60 * 1000;
 const now = Math.floor(Date.now() / 1000) * 1000;
 const REPO_ADDED = now - 30 * DAY;
 const FILLER_PRS = 20;
+/** More than `boardListCap` (50) + the capped fold's 15, so the 15 newest all fall off the board. */
+const CROWD_PRS = 66;
 
 const VIEWER_LOGIN = 'viewer-me';
 const TRUNK_SHA = 'aaaaaaa1111111111111111111111111111111ab';
@@ -94,6 +104,11 @@ beforeAll(async () => {
   schema = client.schema;
   closeDb = client.closeDb;
   await runMigrations();
+  // Untouched "New PRs" are OFF by default (Settings → My Turn). This fixture's My Turn population
+  // is built on them, so it switches them back on rather than lose what it pins.
+  await (await import('../auth/account.js')).setMyTurnSettings(1, {
+    show: { watched_repo_pr: true },
+  });
   q = await import('./queries.js');
   brief = await import('./daily-brief.js');
   workPlan = await import('./work-plan.js');
@@ -374,6 +389,48 @@ beforeAll(async () => {
   // FOUR DAYS — the top stall bucket (>= 96h → 1.00).
   threadId = await untouchedThread(pr('thr'), 'thr', 'src/auth/login.ts', now - 4 * DAY);
 
+  // ── three DEPENDENCIES-TAB cards: board-only kinds, never plan rows ───────────────────────
+  // Two hours old (the default), so none is a routing orphan, and in `mine` (ADMIN). A Dependabot
+  // PR GitHub wants updated, a ready one nobody approved, and a person's PR a security tool flagged.
+  {
+    const [dependabot] = await db
+      .insert(users)
+      .values({ githubLogin: 'dependabot[bot]', githubNodeId: 'U_wp_dependabot', isBot: true })
+      .returning()
+      .execute();
+    const [socket] = await db
+      .insert(users)
+      .values({ githubLogin: 'socket-security', githubNodeId: 'U_wp_socket', isBot: false, githubType: 'Bot' })
+      .returning()
+      .execute();
+    await insertPr(mine, 'dep-behind', {
+      authorId: dependabot.id,
+      dependencyVendor: 'dependabot',
+      mergeable: 'mergeable',
+      mergeStateStatus: 'behind',
+    });
+    await touch(mine, pr('dep-behind'));
+    await insertPr(mine, 'dep-ready', {
+      authorId: dependabot.id,
+      dependencyVendor: 'dependabot',
+      mergeable: 'mergeable',
+      mergeStateStatus: 'clean',
+    });
+    await touch(mine, pr('dep-ready'));
+    await insertPr(mine, 'sec-flagged', { authorId: aliceId, mergeStateStatus: 'blocked' });
+    await touch(mine, pr('sec-flagged'));
+    await db
+      .insert(schema.prComments)
+      .values({
+        githubNodeId: 'IC_wp_socket',
+        prId: pr('sec-flagged'),
+        authorId: socket.id,
+        body: '<strong>Critical CVE</strong>: see https://socket.dev and https://github.com/advisories/GHSA-9qr9-h5gf-34mp',
+        createdAt: new Date(now - HOUR),
+      })
+      .execute();
+  }
+
   // ── the FILLER repo: its only job is to push a workspace OVER the 12-item cap ────────────
   // It keeps the REPO_ADDED cutoff (unlike the two above), so every one of its PRs is a My Turn
   // "New PR" — twenty `review` rows, none of which any assertion names.
@@ -386,6 +443,44 @@ beforeAll(async () => {
     await touch(filler, pr(`f${i}`));
   }
 
+  // ── the CROWD repo: one list group (merge, people) past BOTH caps ─────────────────────────
+  // CROWD_PRS ready-to-land PRs nobody approved, in a repo the viewer only reads. The OLDER the
+  // head commit, the HIGHER the score (stall risk), so the capped fold's 15 NEWEST are the 15
+  // lowest-scoring — none of which the board lists. Opened two hours ago (under the orphan floor);
+  // the last commit predates the PR, as it does whenever a branch is pushed before it is opened.
+  const crowd = await insertRepo('crowd', { viewerPermission: 'READ' });
+  for (let i = 0; i < CROWD_PRS; i++) {
+    await insertPr(crowd, `c${i}`, {
+      authorId: aliceId,
+      mergeable: 'mergeable',
+      mergeStateStatus: 'clean',
+      lastCommitAt: new Date(now - (i + 1) * HOUR),
+    });
+    await touch(crowd, pr(`c${i}`));
+  }
+  // …plus a second kind in the same repo and three of the NEWEST merge cards in a second repo. The
+  // plan's kind / repo spread seats rows from the repo it has seated least — here the three
+  // lowest-scoring merge cards in the group, which the board does not list.
+  for (let i = 0; i < 3; i++) {
+    await insertPr(crowd, `cb${i}`, {
+      authorId: aliceId,
+      mergeable: 'mergeable',
+      mergeStateStatus: 'behind',
+      lastCommitAt: new Date(now - 30 * HOUR),
+    });
+    await touch(crowd, pr(`cb${i}`));
+  }
+  const crowd2 = await insertRepo('crowd2', { viewerPermission: 'READ' });
+  for (let i = 0; i < 3; i++) {
+    await insertPr(crowd2, `cn${i}`, {
+      authorId: aliceId,
+      mergeable: 'mergeable',
+      mergeStateStatus: 'clean',
+      lastCommitAt: new Date(now - (10 + i) * 60_000),
+    });
+    await touch(crowd2, pr(`cn${i}`));
+  }
+
   // ⚠ Through the production resolver, never a hand-built {workspaceId, repoIds}: it is
   // `ensureRepoMemberships` that puts a repo inserted straight into `repos` into the account's
   // Default workspace. Hand-build it and every count is 0 and the fixture asserts nothing.
@@ -393,6 +488,9 @@ beforeAll(async () => {
   const planWs = await q.createWorkspace(1, 'Plan');
   await q.assignReposToWorkspace(planWs.id, 1, [mine, other]);
   planScope = await q.resolveWorkspaceScope(1, planWs.id);
+  const crowdWs = await q.createWorkspace(1, 'Crowd');
+  await q.assignReposToWorkspace(crowdWs.id, 1, [crowd, crowd2]);
+  crowdScope = await q.resolveWorkspaceScope(1, crowdWs.id);
   fillerScope = await q.resolveWorkspaceScope(1, null);
   const emptyWs = await q.createWorkspace(1, 'Empty');
   emptyScope = await q.resolveWorkspaceScope(1, emptyWs.id);
@@ -902,8 +1000,46 @@ describe('a conflicts card is a CARD, never a plan row', () => {
   });
 });
 
+describe('the Dependencies kinds are CARDS, never plan rows', () => {
+  // The `conflicts` precedent, for the same two-repository reason: `WorkPlanKind` is the plugin's
+  // prompt vocabulary too. They are SCORED — they compete inside the Dependencies tab — from the
+  // base their state names.
+  it('reach the board, and produce no work-plan row', async () => {
+    const insights = await q.getWorkspaceInsights(1, undefined, planScope, { uncapped: true });
+    const ids = insights.cards.map((c: { id: string }) => c.id);
+    // Non-vacuity: all three really are cards.
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        `deps:${pr('dep-behind')}`,
+        `deps:${pr('dep-ready')}`,
+        `security:${pr('sec-flagged')}`,
+      ]),
+    );
+    const ev = await workPlan.rankWorkPlan(1, planScope, insights);
+    for (const key of ['dep-behind', 'dep-ready', 'sec-flagged']) {
+      expect([key, ev.items.find((i: WorkPlanItem) => i.prId === pr(key))]).toEqual([key, undefined]);
+    }
+    expect(
+      (workPlan.doNextCardIds(ev) as string[]).some((id) => /^(deps|security):/.test(id)),
+    ).toBe(false);
+  });
+
+  it('start from the base their state names', async () => {
+    const insights = await q.getWorkspaceInsights(1, undefined, planScope, { uncapped: true });
+    const { getMyTurnSettings } = await import('./my-turn-settings.js');
+    const { weights } = await getMyTurnSettings(1);
+    const { scored } = await workPlan.scoreCards(1, insights.cards, Date.now(), weights);
+    const base = (id: string) => scored.find((s: { cardId: string }) => s.cardId === id)?.proximityBase;
+    expect(base(`deps:${pr('dep-behind')}`)).toBe('update_branch');
+    // Nobody approved it: ready for GitHub, not for a person — the merge card's rule.
+    expect(base(`deps:${pr('dep-ready')}`)).toBe('merge_unapproved');
+    // A person's PR a tool flagged has no merge state of its own to start from.
+    expect(base(`security:${pr('sec-flagged')}`)).toBe('security_alert');
+  });
+});
+
 describe('the Pending tabs', () => {
-  // `GET /api/attention` now serves five tabs, each a PURELY SCORED list with its UNCAPPED count
+  // `GET /api/attention` serves `PENDING_TABS`, each a scored list with its UNCAPPED count
   // (db/pending-tabs.ts). These pin what the board and the daily brief lean on: every card in
   // exactly one tab, each tab in score order, and each tab's count the same number as the brief
   // line that opens it. Reuses this file's fixture because it already holds every kind.
@@ -920,7 +1056,8 @@ describe('the Pending tabs', () => {
     const ALL: Record<import('@pierre-review/shared').InsightKind, true> = {
       my_turn: true, ci_failing: true, stalled_review: true, untouched_thread: true,
       reviewer_load: true, reviewer_routing: true, conflicts: true, merge: true,
-      update_branch: true, bot_signal: true, bot_only_review: true,
+      update_branch: true, security: true, dependency_bump: true, bot_signal: true,
+      bot_only_review: true,
     };
     const kinds = Object.keys(ALL);
     const seen = PENDING_TABS.flatMap((t) => [...t.kinds]);
@@ -944,19 +1081,37 @@ describe('the Pending tabs', () => {
     }
   });
 
-  it('orders every tab by score, highest first', async () => {
+  it('orders every tab by score, highest first — a strict-group tab by its group first', async () => {
+    const { PENDING_TABS } = await import('@pierre-review/shared');
+    let grouped = 0;
     for (const s of [planScope, fillerScope]) {
-      const { tabs, scores } = await board(s);
+      const { tabs, scores, cards, rules } = await board(s);
+      const byId = new Map(cards.map((c: InsightCard) => [c.id, c]));
       let checked = 0;
       for (const t of tabs) {
-        const list = t.cardIds.map((id: string) => scores[id]!);
-        for (let i = 1; i < list.length; i++) {
-          expect(list[i - 1]!.score).toBeGreaterThanOrEqual(list[i]!.score);
+        const def = PENDING_TABS.find((d) => d.key === t.key)!;
+        // Dependencies groups by kind; My turn by the card type's place in the READER's order
+        // (`rules.myTurnOrder`, Settings → My Turn); every other tab is one scored list.
+        const rank = (id: string): number => {
+          const card = byId.get(id)!;
+          if (def.groupByReason && card.kind === 'my_turn') {
+            return rules.myTurnOrder.indexOf(card.reason);
+          }
+          return def.groupByKind ? def.kinds.indexOf(card.kind as never) : 0;
+        };
+        for (let i = 1; i < t.cardIds.length; i++) {
+          const [a, b] = [t.cardIds[i - 1]!, t.cardIds[i]!];
+          // The group never goes backwards, and within one group the score never rises.
+          expect(rank(a)).toBeLessThanOrEqual(rank(b));
+          if (rank(a) === rank(b)) expect(scores[a]!.score).toBeGreaterThanOrEqual(scores[b]!.score);
+          else grouped += 1;
           checked += 1;
         }
       }
       expect(checked).toBeGreaterThan(0);
     }
+    // Non-vacuity: the Plan fixture really crosses a group boundary in the Dependencies tab.
+    expect(grouped).toBeGreaterThan(0);
   });
 
   it('counts each tab as the sum of its kinds’ uncapped totals, which match the listed cards here', async () => {
@@ -966,11 +1121,20 @@ describe('the Pending tabs', () => {
       for (const t of tabs) {
         const sum = Object.values(t.kindTotals as Record<string, number>).reduce((n, v) => n + v, 0);
         expect(t.total).toBe(sum);
+        // The author split is the same population, counted by who opened each PR.
+        expect(t.authorTotals!.people + t.authorTotals!.automation).toBe(t.total);
         for (const [kind, total] of Object.entries(t.kindTotals as Record<string, number>)) {
           const listed = t.cardIds.filter(
             (id: string) => cards.find((c: { id: string }) => c.id === id)?.kind === kind,
           ).length;
-          expect([kind, listed]).toEqual([kind, Math.min(total, PENDING_LIMITS.boardListCap)]);
+          // Each author side is capped on its own, so a kind lists min(side, cap) per side.
+          const side = t.kindAuthorTotals![kind as keyof typeof t.kindTotals]!;
+          expect(side.people + side.automation).toBe(total);
+          const cap = PENDING_LIMITS.boardListCap;
+          expect([kind, listed]).toEqual([
+            kind,
+            Math.min(side.people, cap) + Math.min(side.automation, cap),
+          ]);
         }
       }
     }
@@ -1014,12 +1178,13 @@ describe('the Pending tabs', () => {
     const round4 = (n: number): number => Math.round(n * 10_000) / 10_000;
     const clamp01 = (n: number): number => Math.min(1, Math.max(0, n));
     for (const s of [planScope, fillerScope]) {
-      const { scores } = await board(s);
+      const { scores, rules } = await board(s);
       for (const p of Object.values(scores) as any[]) {
         let prox: number = (DO_NEXT_RULES.proximity as Record<string, number>)[p.proximityBase]!;
         for (const a of p.adjustments) prox += (DO_NEXT_RULES.adjustments as Record<string, number>)[a]!;
         expect(p.proximity).toBe(round4(clamp01(prox)));
-        const w = DO_NEXT_RULES.weights;
+        // The weights the RESPONSE says it used — never the constant, which is only the default.
+        const w = rules.weights;
         expect(p.score).toBe(
           round4(
             w.proximity * p.proximity +
@@ -1039,5 +1204,53 @@ describe('the Pending tabs', () => {
     expect(review.peopleCardIds).toEqual(load.map((c: { id: string }) => c.id));
     for (const c of load) expect(review.cardIds).not.toContain(c.id);
     expect(review.kindTotals.reviewer_load).toBeUndefined();
+  });
+});
+
+describe('the plan names only cards the board lists', () => {
+  // The plan's `why` is shown on its row's card, so a row whose card sits below a tab's
+  // `boardListCap` has nowhere to go. MUTATION-TESTED: with `getWorkPlan` back on the capped fold,
+  // every Crowd row is one of the 15 NEWEST merge cards, and none of those is listed.
+  const listedIds = async (s: any): Promise<Set<string>> => {
+    const insights = await q.getWorkspaceInsights(1, undefined, s, { uncapped: true });
+    const tabs = await import('./pending-tabs.js');
+    const board = await tabs.rankPendingTabs(1, s, insights);
+    return new Set(board.tabs.flatMap((t: { cardIds: string[] }) => t.cardIds));
+  };
+
+  it.each([
+    ['Balanced', undefined],
+    ['Oldest first', DO_NEXT_PRESETS.oldest_first],
+  ])('holds under the %s weights', async (_label, weights) => {
+    const { setMyTurnSettings } = await import('../auth/account.js');
+    await setMyTurnSettings(1, { show: { watched_repo_pr: true }, ...(weights ? { weights } : {}) });
+    try {
+      for (const s of [crowdScope, planScope, fillerScope]) {
+        const ev = await plan(s);
+        const listed = await listedIds(s);
+        expect(ev.items.length).toBeGreaterThan(0);
+        for (const item of ev.items) {
+          expect([item.id, item.cardId != null && listed.has(item.cardId)]).toEqual([item.id, true]);
+        }
+      }
+    } finally {
+      await setMyTurnSettings(1, { show: { watched_repo_pr: true } });
+    }
+  });
+
+  it('is not vacuous — Crowd overflows both caps, and the capped fold keeps only unlisted cards', async () => {
+    const capped = await q.getWorkspaceInsights(1, undefined, crowdScope);
+    expect(capped.kindTotals.merge).toBe(CROWD_PRS + 3);
+    const cappedMerge = capped.cards.filter((c: InsightCard) => c.kind === 'merge');
+    expect(cappedMerge.length).toBeGreaterThan(0);
+    const listed = await listedIds(crowdScope);
+    for (const c of cappedMerge) expect([c.id, listed.has(c.id)]).toEqual([c.id, false]);
+    // The plan still fills every row, from the cards the board does list — and still discloses
+    // every row it could have drawn from.
+    const ev = await plan(crowdScope);
+    expect(ev.items).toHaveLength(workPlan.WORK_PLAN_ITEM_CAP);
+    expect(ev.totals.merge).toBe(CROWD_PRS + 3);
+    // The spread's pull is real: the second repo's three merge cards are the group's lowest.
+    for (let i = 0; i < 3; i++) expect(listed.has(`wp:merge:${pr(`cn${i}`)}`)).toBe(false);
   });
 });

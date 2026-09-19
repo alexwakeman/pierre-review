@@ -2629,6 +2629,331 @@ check(
   );
 }
 
+// ── THE DEPENDENCIES TAB (db/security-alerts.ts, sync/backfill-pr-security.ts) ─────────────
+// Two readers that live OUTSIDE db/queries.ts, plus the fold that calls one of them.
+//
+// `deriveSecurityAlerts` reads `pr_comments` / `reviews` / `review_comments`, NONE of which carries
+// an account_id: its only tenancy is the list of PR ids it is handed, and its one caller hands it
+// the fold's ACCOUNT-SCOPED open-PR ids. So the structural rule is checked directly: it answers for
+// the ids it was given and for nothing else, even when another tenant's PR carries the identical
+// comment. `prSecurityBackfillWorklist` takes a repo id and spends GitHub quota on what it returns.
+//
+// ⚠ EVERY CHECK IS SEEDED NON-VACUOUSLY: each account gets a dependency PR (a proven Dependabot
+// security fix, never classified by the backfill) AND a Socket "Critical CVE" alert on its base
+// PR, so the own-tenant direction is asserted first and a reader that returned nothing would fail.
+{
+  const { deriveSecurityAlerts } = await import('../src/db/security-alerts.js');
+  const { prSecurityBackfillWorklist } = await import('../src/sync/backfill-pr-security.js');
+  const [socket] = await db
+    .insert(schema.users)
+    .values({ githubLogin: 'socket-security', githubNodeId: 'U_iso_socket', githubType: 'Bot' })
+    .returning()
+    .execute();
+  const SOCKET_BODY =
+    '<strong>Critical CVE</strong>: see https://socket.dev and https://github.com/advisories/GHSA-9qr9-h5gf-34mp';
+  const seedDeps = async (accountId: number, tag: string, base: { repoId: number; prId: number }) => {
+    const [dep] = await db
+      .insert(pullRequests)
+      .values({
+        githubNodeId: `PR_dep_${tag}`,
+        accountId,
+        repoId: base.repoId,
+        number: 2,
+        title: `Bump x for ${tag}`,
+        state: 'open',
+        isDraft: false,
+        headRefName: 'dependabot/npm_and_yarn/x-1.0.0',
+        dependencyVendor: 'dependabot',
+        securityFix: 'proven',
+        securityCheckedAt: null,
+        openedAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .execute();
+    await db
+      .insert(events)
+      .values({
+        accountId,
+        repoId: base.repoId,
+        prId: dep!.id,
+        type: 'pr_opened',
+        occurredAt: now,
+        dedupeKey: `pr_opened:PR_dep_${tag}`,
+      })
+      .execute();
+    await db
+      .insert(schema.prComments)
+      .values({
+        githubNodeId: `IC_iso_socket_${tag}`,
+        prId: base.prId,
+        authorId: socket!.id,
+        body: SOCKET_BODY,
+        createdAt: now,
+      })
+      .execute();
+    return dep!.id;
+  };
+  const depA = await seedDeps(1, 'A', A);
+  const depB = await seedDeps(2, 'B', B);
+
+  // The workspace that holds the account's repo NOW — earlier sections move repos between
+  // workspaces, so the Default one is not a safe guess.
+  const scopeHolding = async (accountId: number, repoId: number) => {
+    const [m] = await db
+      .select({ workspaceId: schema.workspaceRepos.workspaceId })
+      .from(schema.workspaceRepos)
+      .where(
+        and(eq(schema.workspaceRepos.accountId, accountId), eq(schema.workspaceRepos.repoId, repoId)),
+      )
+      .execute();
+    return q.resolveWorkspaceScope(accountId, m!.workspaceId);
+  };
+  const securityPrIds = async (accountId: number, repoId: number) => {
+    const s = await scopeHolding(accountId, repoId);
+    const insights = await q.getWorkspaceInsights(accountId, undefined, s, { uncapped: true });
+    return {
+      security: new Set(insights.cards.filter((c) => c.kind === 'security').map((c) => c.prId)),
+      anyPr: new Set(insights.cards.flatMap((c) => ('prId' in c && c.prId != null ? [c.prId] : []))),
+    };
+  };
+  const insA = await securityPrIds(1, A.repoId);
+  check(
+    'getWorkspaceInsights(A) has a security card for A’s dependency PR AND for A’s alerted PR',
+    insA.security.has(depA) && insA.security.has(A.prId),
+  );
+  check(
+    'getWorkspaceInsights(A) names no PR of B’s',
+    !insA.anyPr.has(B.prId) && !insA.anyPr.has(depB),
+  );
+  const insB = await securityPrIds(2, B.repoId);
+  check(
+    'getWorkspaceInsights(B) has a security card for B’s dependency PR AND for B’s alerted PR',
+    insB.security.has(depB) && insB.security.has(B.prId),
+  );
+  check(
+    'getWorkspaceInsights(B) names no PR of A’s',
+    !insB.anyPr.has(A.prId) && !insB.anyPr.has(depA),
+  );
+
+  const wlOwn = await prSecurityBackfillWorklist(2, B.repoId);
+  check(
+    'prSecurityBackfillWorklist(B, B’s repo) lists B’s unclassified dependency PR',
+    wlOwn.some((r) => r.id === depB),
+  );
+  check(
+    'prSecurityBackfillWorklist(A, B’s repo) lists nothing (IDOR blocked)',
+    (await prSecurityBackfillWorklist(1, B.repoId)).length === 0,
+  );
+
+  const automated = new Set([socket!.id]);
+  const alertsA = await deriveSecurityAlerts([A.prId], automated, new Map());
+  check(
+    'deriveSecurityAlerts([A’s PR]) finds A’s alert',
+    (alertsA.get(A.prId)?.length ?? 0) === 1,
+  );
+  check(
+    'deriveSecurityAlerts([A’s PR]) answers for A’s PR only, though B’s carries the same comment',
+    [...alertsA.keys()].every((id) => id === A.prId),
+  );
+}
+
+// ── MY TURN: SETTINGS, MENTIONS, REPLIES, PROMOTIONS (db/my-turn-settings.ts, getMyTurn) ──────
+// The per-ACCOUNT settings row, and five sections whose readers are new: `mentions` (a join on
+// `pr_mentions`, whose rows carry a LOGIN), `commentReplies` and `threadReplies` (comment tables
+// with no account_id of their own), and the promotions `ownCiRed` / `redTrunks`.
+//
+// ⚠ THE NEGATIVE HAS TO BE ABLE TO FAIL. Account 1's placeholder login is empty, which makes
+// getMyTurn short-circuit — so both accounts get a real viewer first, and account A's data carries
+// BAIT: rows keyed on B's own login ('bob') or authored by B's viewer. A reader that dropped its
+// account predicate would hand those to B, because by login and authorship they ARE B's. Each A
+// section is asserted populated FIRST, and B's own positives prove B's fold ran at all.
+{
+  const { setMyTurnSettings } = await import('../src/auth/account.js');
+  const { getMyTurnSettings } = await import('../src/db/my-turn-settings.js');
+  const { resolveMyTurnSettings } = await import('@pierre-review/shared');
+  const { users, prComments, reviewThreads, reviewComments, prMentions } = schema;
+  const HOUR = 3_600_000;
+  const at = (hoursAgo: number) => new Date(now.getTime() - hoursAgo * HOUR);
+
+  await db.update(accounts).set({ githubLogin: 'viewer-a' }).where(eq(accounts.id, 1)).execute();
+  const mkUser = async (login: string) =>
+    (
+      await db
+        .insert(users)
+        .values({ githubLogin: login, githubNodeId: `U_mt_${login}`, isBot: false })
+        .returning()
+        .execute()
+    )[0]!.id;
+  const viewerA = await mkUser('viewer-a');
+  const viewerB = await mkUser('bob');
+  const colleague = await mkUser('colleague-mt');
+  // The onboarding floor: every event below must postdate the repo being ADDED.
+  await db
+    .update(repos)
+    .set({ createdAt: at(30 * 24) })
+    .where(inArray(repos.id, [A.repoId, B.repoId]))
+    .execute();
+
+  let n = 100;
+  const mkPr = async (
+    accountId: number,
+    repoId: number,
+    tag: string,
+    authorId: number | null,
+    ci?: 'failure',
+  ) => {
+    const [pr] = await db
+      .insert(pullRequests)
+      .values({
+        githubNodeId: `PR_mt_${tag}`,
+        accountId,
+        repoId,
+        number: n++,
+        title: `My Turn ${tag}`,
+        authorId,
+        state: 'open',
+        isDraft: false,
+        ciStatus: ci ?? null,
+        openedAt: at(48),
+        updatedAt: at(1),
+      })
+      .returning()
+      .execute();
+    await db
+      .insert(events)
+      .values({
+        accountId,
+        repoId,
+        prId: pr!.id,
+        type: 'pr_opened',
+        occurredAt: at(47),
+        dedupeKey: `pr_opened:PR_mt_${tag}`,
+      })
+      .execute();
+    return pr!.id;
+  };
+  const comment = async (prId: number, tag: string, authorId: number, hoursAgo: number) =>
+    db
+      .insert(prComments)
+      .values({ prId, githubNodeId: `IC_mt_${tag}`, authorId, body: `comment ${tag}`, createdAt: at(hoursAgo) })
+      .execute();
+  const threadWithReply = async (prId: number, tag: string, commenter: number) => {
+    const [t] = await db
+      .insert(reviewThreads)
+      .values({
+        prId,
+        githubNodeId: `RT_mt_${tag}`,
+        path: 'src/a.ts',
+        isResolved: false,
+        derivedState: 'replied_unresolved',
+        originalCommenterId: colleague,
+        createdAt: at(4),
+      })
+      .returning()
+      .execute();
+    const rc = (who: number, hoursAgo: number, k: string) =>
+      db
+        .insert(reviewComments)
+        .values({
+          prId,
+          threadId: t!.id,
+          githubNodeId: `RC_mt_${tag}_${k}`,
+          authorId: who,
+          body: `thread ${k}`,
+          createdAt: at(hoursAgo),
+        })
+        .execute();
+    await rc(colleague, 4, 'root');
+    await rc(commenter, 3, 'mine');
+    await rc(colleague, 2, 'answer');
+    return t!.id;
+  };
+  const mention = async (accountId: number, repoId: number, prId: number, login: string) =>
+    db
+      .insert(prMentions)
+      .values({ accountId, repoId, prId, login, mentionedAt: at(1), mentionedByUserId: colleague })
+      .execute();
+  const redTrunk = (repoId: number) =>
+    db
+      .update(repos)
+      .set({
+        defaultBranchName: 'main',
+        defaultBranchHeadSha: `sha_trunk_${repoId}`,
+        defaultBranchCiStatus: 'failure',
+        defaultBranchUpdatedAt: at(1),
+      })
+      .where(eq(repos.id, repoId))
+      .execute();
+
+  // A's own rows, and BAIT for B inside A's account.
+  const aMention = await mkPr(1, A.repoId, 'a-mention', colleague);
+  await mention(1, A.repoId, aMention, 'viewer-a');
+  const baitMention = await mkPr(1, A.repoId, 'bait-mention', colleague);
+  await mention(1, A.repoId, baitMention, 'bob');
+  const aReply = await mkPr(1, A.repoId, 'a-reply', colleague);
+  await comment(aReply, 'a-mine', viewerA, 3);
+  await comment(aReply, 'a-answer', colleague, 2);
+  const baitReply = await mkPr(1, A.repoId, 'bait-reply', colleague);
+  await comment(baitReply, 'bait-mine', viewerB, 3);
+  await comment(baitReply, 'bait-answer', colleague, 2);
+  const aThreadPr = await mkPr(1, A.repoId, 'a-thread', colleague);
+  const aThread = await threadWithReply(aThreadPr, 'a', viewerA);
+  const baitThreadPr = await mkPr(1, A.repoId, 'bait-thread', colleague);
+  const baitThread = await threadWithReply(baitThreadPr, 'bait', viewerB);
+  const aOwn = await mkPr(1, A.repoId, 'a-own', viewerA, 'failure');
+  const baitOwn = await mkPr(1, A.repoId, 'bait-own', viewerB, 'failure');
+  await redTrunk(A.repoId);
+  // B's own positives: its fold must actually run for the negatives below to mean anything.
+  const bOwn = await mkPr(2, B.repoId, 'b-own', viewerB, 'failure');
+  await redTrunk(B.repoId);
+
+  // THE SETTING IS PER ACCOUNT. A saves; B still reads the product default.
+  await setMyTurnSettings(1, { show: { own_ci_red: true }, trunkScope: 'all' });
+  const settingsA = await getMyTurnSettings(1);
+  const settingsB = await getMyTurnSettings(2);
+  check(
+    "getMyTurnSettings(A) holds A's saved switches",
+    settingsA.show.own_ci_red && settingsA.trunkScope === 'all',
+  );
+  check(
+    "getMyTurnSettings(B) is the product default after A saves",
+    settingsB.configKey === resolveMyTurnSettings(null).configKey &&
+      Object.values(settingsB.defaults).every(Boolean),
+  );
+  // …and B switches the same types on, so a leak would have somewhere to land.
+  await setMyTurnSettings(2, { show: { own_ci_red: true }, trunkScope: 'all' });
+
+  const mtA = await q.getMyTurn(1);
+  check("getMyTurn(A) has A's mention", mtA.mentions.some((m) => m.prId === aMention));
+  check("getMyTurn(A) has A's comment reply", mtA.commentReplies.some((m) => m.prId === aReply));
+  check("getMyTurn(A) has A's thread reply", mtA.threadReplies.some((t) => t.threadId === aThread));
+  check("getMyTurn(A) has A's own red build", mtA.ownCiRed.some((m) => m.prId === aOwn));
+  check("getMyTurn(A) has A's red trunk", mtA.redTrunks.some((t) => t.repoId === A.repoId));
+
+  const mtB = await q.getMyTurn(2);
+  check("getMyTurn(B) has B's own red build (B's fold ran)", mtB.ownCiRed.some((m) => m.prId === bOwn));
+  check("getMyTurn(B) has B's red trunk (B's fold ran)", mtB.redTrunks.some((t) => t.repoId === B.repoId));
+  const aPrs = new Set([aMention, baitMention, aReply, baitReply, aThreadPr, baitThreadPr, aOwn, baitOwn]);
+  check(
+    "getMyTurn(B) has none of A's mentions — not even the row keyed on B's own login",
+    !mtB.mentions.some((m) => aPrs.has(m.prId)),
+  );
+  check(
+    "getMyTurn(B) has none of A's comment replies — not even after B's viewer's comment",
+    !mtB.commentReplies.some((m) => aPrs.has(m.prId)),
+  );
+  check(
+    "getMyTurn(B) has none of A's thread replies",
+    !mtB.threadReplies.some((t) => aPrs.has(t.prId) || t.threadId === aThread || t.threadId === baitThread),
+  );
+  check(
+    "getMyTurn(B) has none of A's own-work PRs — not even one B's viewer authored",
+    !mtB.ownCiRed.some((m) => aPrs.has(m.prId)),
+  );
+  check("getMyTurn(B) has no red trunk of A's", !mtB.redTrunks.some((t) => t.repoId === A.repoId));
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

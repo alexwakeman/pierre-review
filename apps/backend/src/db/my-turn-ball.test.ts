@@ -145,11 +145,13 @@ async function addCommit(
     .execute();
 }
 
-/** The "New PRs" rows getMyTurn would return right now, keyed by fixture name. */
+/** The "New PRs" survivors getMyTurn would return right now, keyed by fixture name — the two
+ *  sections one eligibility pass feeds: never touched (`watchedRepoPrs`) and pushed to by a person
+ *  since you acted (`pushedSince`). */
 async function newPrRows(): Promise<Map<string, WatchedRepoPrItem>> {
   const mt = await q.getMyTurn(1, scope);
   const byPrId = new Map<number, WatchedRepoPrItem>(
-    (mt.watchedRepoPrs as WatchedRepoPrItem[]).map((r) => [r.prId, r]),
+    ([...mt.watchedRepoPrs, ...mt.pushedSince] as WatchedRepoPrItem[]).map((r) => [r.prId, r]),
   );
   const out = new Map<string, WatchedRepoPrItem>();
   for (const [key, prId] of prIdByKey) {
@@ -164,7 +166,8 @@ async function myTurnCards(): Promise<Map<string, MyTurnCard>> {
   const insights = await q.getWorkspaceInsights(1, undefined, scope);
   const byPrId = new Map<number, MyTurnCard>();
   for (const c of insights.cards as InsightCard[]) {
-    if (c.kind !== 'my_turn') continue;
+    // A red-trunk card is repo-grained — no fixture PR to key it on (none here: no trunk is red).
+    if (c.kind !== 'my_turn' || c.reason === 'trunk_red') continue;
     byPrId.set(c.prId, c);
   }
   const out = new Map<string, MyTurnCard>();
@@ -428,6 +431,10 @@ beforeAll(async () => {
   // `ensureRepoMemberships` that puts a repo inserted straight into `repos` into the account's
   // Default workspace. Hand-build it and the repo belongs to no workspace and every fold is 0.
   scope = await q.resolveWorkspaceScope(1, null);
+  // Untouched "New PRs" are OFF by default (Settings → My Turn); this file pins the ball rule over
+  // them, so it keeps its population by switching them on. Pushed-since rows are on by default.
+  const { setMyTurnSettings } = await import('../auth/account.js');
+  await setMyTurnSettings(1, { show: { watched_repo_pr: true } });
 });
 
 afterAll(async () => {
@@ -440,6 +447,11 @@ describe('the ball rule decides which "New PRs" rows survive', () => {
     const rows = await newPrRows();
     expect(rows.has('untouched')).toBe(true);
     expect(rows.get('untouched')!.ball?.kind).toBe('untouched');
+    // …in its own section, the one the "New PRs" switch governs.
+    const mt = await q.getMyTurn(1, scope);
+    expect(mt.watchedRepoPrs.map((r: WatchedRepoPrItem) => r.prId)).toEqual([
+      prIdByKey.get('untouched'),
+    ]);
   });
 
   it('drops a PR you acted on with nothing since (X1) — every channel counts as acting', async () => {
@@ -464,6 +476,17 @@ describe('the ball rule decides which "New PRs" rows survive', () => {
     // The clock is the PUSH, not `openedAt` — a row dated off the open time says "29d ago" about
     // something that happened an hour after your review.
     expect(Date.parse(row!.since!)).toBe(AFTER_ME + HOUR);
+    // ⚠ ITS OWN TYPE NOW, and DIRECT: new code arrived after YOU engaged, so it is about your read
+    // of the PR — not "a PR in your repos". It lives in `pushedSince`, never in `watchedRepoPrs`.
+    const mt = await q.getMyTurn(1, scope);
+    const pushed = mt.pushedSince.find(
+      (r: WatchedRepoPrItem) => r.prId === prIdByKey.get('human-commit-after'),
+    );
+    expect(pushed?.relevance).toBe('direct');
+    expect(pushed?.personal).toBe(true);
+    expect(
+      mt.watchedRepoPrs.some((r: WatchedRepoPrItem) => r.prId === prIdByKey.get('human-commit-after')),
+    ).toBe(false);
   });
 
   it('does NOT bring a PR back for any BOT action', async () => {
@@ -550,6 +573,9 @@ describe('a surviving card says why the ball is yours', () => {
     const cards = await myTurnCards();
     const card = cards.get('human-commit-after');
     expect(card).toBeDefined();
+    expect(card!.reason).toBe('pushed_since');
+    expect(card!.id).toBe(`myturn:pushed_since:${prIdByKey.get('human-commit-after')}`);
+    expect(card!.relevance).toBe('direct');
     expect(card!.detail).toBe('You approved · @alice-dev pushed 2 commits since');
   });
 

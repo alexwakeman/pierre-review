@@ -1,6 +1,6 @@
 // Background derivation of "@you was mentioned on this PR" (CORE, free tier, no LLM, no GitHub
-// quota). Feeds the MENTION arm of My Turn's personal-relevance flag; contract + storage
-// rationale in db/pr-mentions.ts and docs/DATA-MODEL.md.
+// quota). Feeds My Turn's `mention` card type (when, and by whom, a person last @-mentioned you
+// on each PR); contract + storage rationale in db/pr-mentions.ts and docs/DATA-MODEL.md.
 //
 // WHY THIS IS A WORKER AND NOT A READ. The natural-looking implementation is a full-text
 // predicate inside `getMyTurn` — and it is the wrong shape by an order of magnitude. `getMyTurn`
@@ -19,11 +19,12 @@
 //     renamed account all self-heal without a migration or a backfill trigger.
 //
 // STALENESS IS BOUNDED BY ONE TICK, in one direction each:
-//   • NEW mention → personal within one tick (≤ MENTION_SCAN_CRON).
-//   • REMOVED mention / RENAMED account → stops being personal within one tick, and the READ is
-//     additionally login-scoped (viewerMentionedPrIds), so a rename narrows IMMEDIATELY and only
-//     widens again once the scan has actually re-derived under the new login. Absence never
-//     widens anything: with no rows at all, `personal` degrades exactly to the maintainer test.
+//   • NEW mention (or a NEWER one on a PR already stamped) → a card within one tick
+//     (≤ MENTION_SCAN_CRON). A row migration 0068 left with a NULL `mentioned_at` shows no card
+//     until the first tick restamps it — under-notifying is the safe direction.
+//   • REMOVED mention / RENAMED account → the card goes within one tick, and the READ (inside
+//     `getMyTurn`) is additionally login-scoped, so a rename narrows IMMEDIATELY and only widens
+//     again once the scan has actually re-derived under the new login.
 // The one case NOT bounded by a tick is a mention typed into a comment we never re-read: comment
 // bodies are re-upserted by every sync of the PR, so this is bounded by the sync cadence, not by
 // this worker.
@@ -57,6 +58,7 @@ const TICK_BUDGET_MS = 60_000;
 export interface MentionScanStats {
   accounts: number;
   added: number;
+  updated: number;
   removed: number;
   failures: number;
 }
@@ -83,7 +85,7 @@ async function activeAccountIds(): Promise<Array<{ id: number; login: string }>>
  * single bad tenant must not stop the rest.
  */
 export async function runMentionScanTick(log: FastifyBaseLogger): Promise<MentionScanStats> {
-  const stats: MentionScanStats = { accounts: 0, added: 0, removed: 0, failures: 0 };
+  const stats: MentionScanStats = { accounts: 0, added: 0, updated: 0, removed: 0, failures: 0 };
   if (running) return stats;
   running = true;
   const deadline = Date.now() + TICK_BUDGET_MS;
@@ -100,13 +102,14 @@ export async function runMentionScanTick(log: FastifyBaseLogger): Promise<Mentio
       // has no viewer to match, and scanning for the empty string would match nothing anyway.
       // ⚠ It must NOT fall through to `syncAccountMentions`: that would derive an EMPTY set and
       // delete every row the account already has, i.e. a transient `gh` outage would silently
-      // un-personalise the whole inbox.
+      // clear every mention card.
       if (!account.login) continue;
       try {
         const derived = await deriveMentionedPrs(account.id, account.login);
         const res = await syncAccountMentions(account.id, account.login, derived);
         stats.accounts += 1;
         stats.added += res.added;
+        stats.updated += res.updated;
         stats.removed += res.removed;
       } catch (err) {
         stats.failures += 1;
@@ -114,9 +117,9 @@ export async function runMentionScanTick(log: FastifyBaseLogger): Promise<Mentio
       }
     }
 
-    if (stats.added > 0 || stats.removed > 0) {
+    if (stats.added > 0 || stats.updated > 0 || stats.removed > 0) {
       log.info(
-        `mention scan: +${stats.added} / -${stats.removed} mentioned PR(s) across ${stats.accounts} account(s)`,
+        `mention scan: +${stats.added} ~${stats.updated} -${stats.removed} mentioned PR(s) across ${stats.accounts} account(s)`,
       );
     }
   } catch (err) {

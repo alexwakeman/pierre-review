@@ -49,16 +49,17 @@
 // a cycle-time figure belongs to the period the work COMPLETED in, or a long-running pull request
 // would move between windows as it aged.
 import { and, eq, gte, inArray, lt } from 'drizzle-orm';
-import type {
-  CourtEvidencePr,
-  CourtShare,
-  FlowCoverage,
-  FlowRefusal,
-  FlowResponse,
-  PrCourt,
-  RepoCourtProfile,
-  StoredPrFile,
-  UnreviewedRepoStat,
+import {
+  FLOW_RULES,
+  type CourtEvidencePr,
+  type CourtShare,
+  type FlowCoverage,
+  type FlowRefusal,
+  type FlowResponse,
+  type PrCourt,
+  type RepoCourtProfile,
+  type StoredPrFile,
+  type UnreviewedRepoStat,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { resolveActorLanes, type ActorLanes } from './actor-lanes.js';
@@ -102,25 +103,28 @@ const FLOW_ACTION_CAP = 200_000;
 const ID_CHUNK = 900;
 
 // ── Floors and thresholds ────────────────────────────────────────────────────────────────────
+// ⚠ Assigned from `FLOW_RULES` (packages/shared/src/flow-settings.ts), the ONE spelling the page's
+// explanations quote. The NAMES stay: `pr-intervals.test.ts` reads the dominant-court expression
+// by them, and pins the three calibrated values exactly.
 /** Merged, human-touched pull requests a repo needs before its profile is a number rather than an
  *  anecdote. */
-const FLOW_MIN_REPO_PRS = 12;
+const FLOW_MIN_REPO_PRS = FLOW_RULES.minRepoPrs;
 /** A court must hold at least this share before it is worth naming as the thing to fix. */
-const FLOW_DOMINANT_SHARE = 0.5;
+const FLOW_DOMINANT_SHARE = FLOW_RULES.dominantShare;
 /**
  * ⚠ AND THE REPO MUST ACTUALLY BE SLOW. This is the single most important constant in the file.
  * A real repository in the development corpus is 73% author-court with a p75 lead time of
  * EIGHTEEN MINUTES; reporting its share alone would invent a crisis in a healthy repo — the exact
  * failure that made the path-bucket findings worthless. Lopsided AND slow, or say nothing.
  */
-const FLOW_SLOW_P75_HOURS = 8;
+const FLOW_SLOW_P75_HOURS = FLOW_RULES.slowP75ClockHours;
 /** Openable pull requests offered per claim. */
 const FLOW_EVIDENCE_CAP = 5;
 /** Repos listed. A board nobody can read is not a worklist. */
 const FLOW_REPO_CAP = 12;
 /** Below this share of a repo's merges, an unreviewed-merge rate is not worth a line. */
-const FLOW_UNREVIEWED_MIN_SHARE = 0.2;
-const FLOW_UNREVIEWED_MIN_COUNT = 10;
+const FLOW_UNREVIEWED_MIN_SHARE = FLOW_RULES.unreviewedMinShare;
+const FLOW_UNREVIEWED_MIN_COUNT = FLOW_RULES.unreviewedMinCount;
 
 const HOUR_MS = 3_600_000;
 
@@ -338,7 +342,7 @@ function directiveFor(court: PrCourt, repos: number, namedBeatsTeam: boolean | n
         return (
           `${where} spending most of a pull request's life waiting for a person to look — not on ` +
           `the author, and not on checks. That makes it a routing problem rather than a capacity ` +
-          `one: chase the pull requests already past the marks below. Asking a team has been ` +
+          `one: chase the reviews that are already overdue. Asking a team has been ` +
           `answered as quickly as asking a named person here, so what matters is that somebody ` +
           `follows up, not who was asked.`
         );
@@ -346,8 +350,8 @@ function directiveFor(court: PrCourt, repos: number, namedBeatsTeam: boolean | n
       return (
         `${where} spending most of a pull request's life waiting for a person to look — not on ` +
         `the author, and not on checks. That makes it a routing problem rather than a capacity ` +
-        `one: request a named reviewer instead of a team, and chase the pull requests already ` +
-        `past the marks below. Both are cheap, and both are the interventions with the largest ` +
+        `one: request a named reviewer instead of a team, and chase the reviews that are already ` +
+        `overdue. Both are cheap, and both are the interventions with the largest ` +
         `measured effect on how long a pull request stays open.`
       );
     case 'author':
@@ -364,6 +368,46 @@ function directiveFor(court: PrCourt, repos: number, namedBeatsTeam: boolean | n
         `"merge when ready" lands these without anyone watching them.`
       );
   }
+}
+
+/**
+ * The same advice in ONE line, for the page; `directiveFor`'s paragraph sits behind the "i".
+ *
+ * ⚠ It states the rule that put the repositories here (the dominant share, read from the constant
+ * so it cannot drift from the fold) and the action, and nothing else — the per-repository figures
+ * are printed on the rows beneath it. `namedBeatsTeam` has the same meaning as in `directiveFor`:
+ * only a measured `false` drops the named-reviewer clause.
+ */
+function directiveSummaryFor(court: PrCourt, namedBeatsTeam: boolean | null = null): string {
+  const lead = `At least ${pct(FLOW_DOMINANT_SHARE)} of the time here is spent `;
+  switch (court) {
+    case 'reviewer':
+      return namedBeatsTeam === false
+        ? `${lead}waiting for a reviewer. Chase overdue reviews.`
+        : `${lead}waiting for a reviewer. Ask a named person rather than a team, and chase overdue reviews.`;
+    case 'author':
+      return `${lead}waiting for the author. Fewer, clearer review rounds will help more than speed.`;
+    case 'landing':
+      return `${lead}approved and waiting to merge. Arm “merge when ready” to land these.`;
+  }
+}
+
+// ── The refusals ─────────────────────────────────────────────────────────────────────────────
+//
+// ⚠ ONE PLAIN FACT EACH. The rule behind a refusal (the lopsided-and-slow call-out, the
+// unreviewed-merge floor) is explained behind that section's "i" on the page, quoting FLOW_RULES;
+// repeating it inside the refusal put the same explanation on screen twice.
+
+function noHumanReviewReason(windowDays: number): string {
+  return `No pull request merged in the last ${windowDays} days had a human review or comment on it.`;
+}
+
+function noneStandsOutReason(measured: number, windowDays: number): string {
+  return `Measured ${measured} ${plural(measured, 'repository', 'repositories')} in the last ${windowDays} days. None stands out.`;
+}
+
+function unreviewedUnderFloorReason(): string {
+  return 'No repository merged enough pull requests without a human review to name.';
 }
 
 function headlineFor(courts: CourtShare[], medianLead: number, p75Lead: number, prs: number): string {
@@ -473,6 +517,7 @@ export async function getFlowCourts(
     weekdays: [],
     landingTail: null,
     concentration: [],
+    prFigures: { overWorkingDay: 0, slowestTenthCount: 0, slowestTenthShare: 0, neverWentBack: 0 },
   });
 
   // `[]` is a real answer ("this workspace is empty"), never a widening to the whole account.
@@ -783,10 +828,7 @@ export async function getFlowCourts(
   };
 
   if (measured.length === 0) {
-    refuse(
-      'courts',
-      `No pull request merged in the last ${windowDays} days had a human review or comment on it, so there is no waiting time to attribute.`,
-    );
+    refuse('courts', noHumanReviewReason(windowDays));
   }
 
   // ── Workspace-wide ─────────────────────────────────────────────────────────────────────────
@@ -881,7 +923,11 @@ export async function getFlowCourts(
     repos: shownRepos.filter((r) => r.dominant === court).length,
   }))
     .filter((d) => d.repos > 0)
-    .map((d) => ({ ...d, directive: directiveFor(d.court, d.repos) }));
+    .map((d) => ({
+      ...d,
+      directive: directiveFor(d.court, d.repos),
+      summary: directiveSummaryFor(d.court),
+    }));
 
   if (measured.length > 0 && clearedFloor === 0) {
     refuse(
@@ -889,11 +935,7 @@ export async function getFlowCourts(
       `No repository reached ${FLOW_MIN_REPO_PRS} merged pull requests with a human review in the last ${windowDays} days.`,
     );
   } else if (shownRepos.length > 0 && shownRepos.every((p) => p.dominant == null)) {
-    refuse(
-      'courts',
-      `Measured ${clearedFloor} ${plural(clearedFloor, 'repository', 'repositories')} in the last ${windowDays} days; none was both lopsided towards one court and slow enough to act on.`,
-      'measured_clean',
-    );
+    refuse('courts', noneStandsOutReason(clearedFloor, windowDays), 'measured_clean');
   }
 
   // ── Merged without a human review ──────────────────────────────────────────────────────────
@@ -931,7 +973,7 @@ export async function getFlowCourts(
       'unreviewed',
       excludedNoHumanTouch === 0
         ? `Every pull request merged in the last ${windowDays} days had a human review or comment on it.`
-        : `No repository merged enough pull requests without a human review to be worth naming (the floor is ${FLOW_UNREVIEWED_MIN_COUNT} and ${pct(FLOW_UNREVIEWED_MIN_SHARE)} of its merges).`,
+        : unreviewedUnderFloorReason(),
       'measured_clean',
     );
   }
@@ -975,7 +1017,9 @@ export async function getFlowCourts(
   const namedBeatsTeam = person == null || team == null ? null : person < team;
   if (namedBeatsTeam === false) {
     for (const d of directives) {
-      if (d.court === 'reviewer') d.directive = directiveFor('reviewer', d.repos, false);
+      if (d.court !== 'reviewer') continue;
+      d.directive = directiveFor('reviewer', d.repos, false);
+      d.summary = directiveSummaryFor('reviewer', false);
     }
   }
 
@@ -1055,6 +1099,10 @@ export const __flowTesting = {
   walkCourts,
   walkCourtIntervals,
   directiveFor,
+  directiveSummaryFor,
+  noHumanReviewReason,
+  noneStandsOutReason,
+  unreviewedUnderFloorReason,
   ciRedHoursOf,
   firstRequestOf,
   percentile,

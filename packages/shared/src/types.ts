@@ -1,8 +1,15 @@
 // API types shared between frontend and backend.
 // All timestamps are ISO-8601 strings over the wire.
 
-import type { DoNextAdjustment, DoNextProximityBase, PendingTabKey } from './pending-rules.js';
+import type {
+  DoNextAdjustment,
+  DoNextPreset,
+  DoNextProximityBase,
+  DoNextWeights,
+  PendingTabKey,
+} from './pending-rules.js';
 import type { FlowBudgetMeasure, FlowSettings, ResolvedFlowSettings } from './flow-settings.js';
+import type { MyTurnSettings } from './my-turn-settings.js';
 
 export type DerivedState =
   | 'resolved'
@@ -103,6 +110,8 @@ export interface User {
   githubLogin: string;
   displayName: string | null;
   avatarUrl: string | null;
+  /** Automation by every signal that needs no workspace: `users.isBot` ∪ GitHub types the account
+   *  a Bot ∪ a known vendor login. A workspace's own judgement is layered on top by the client. */
   isBot: boolean;
 }
 
@@ -231,6 +240,10 @@ export const AUTOMATION_VENDORS: Record<
   'pyup-bot': { kind: 'pyup', role: 'dependency' },
   greenkeeper: { kind: 'greenkeeper', role: 'dependency' },
   depfu: { kind: 'depfu', role: 'dependency' },
+  // Security remediation apps that open fix PRs.
+  'snyk-io': { kind: 'snyk', role: 'dependency' }, // the Snyk GitHub App (snyk-bot is the legacy User)
+  'aikido-autofix': { kind: 'aikido', role: 'dependency' }, // Aikido AutoFix: `[Aikido] Fix … security issues` PRs
+  'mend-for-github-com': { kind: 'mend', role: 'dependency' }, // Mend (ex-WhiteSource) Remediate fix PRs
 
   // ── Quality gates, scanners and CI ───────────────────────────────────────────────────────
   // They post VERDICTS, not findings: all 786 of SonarQube's comments on the measured workspace
@@ -252,6 +265,7 @@ export const AUTOMATION_VENDORS: Record<
   gitguardian: { kind: 'gitguardian', role: 'quality_check' },
   'semgrep-app': { kind: 'semgrep', role: 'quality_check' },
   'trunk-io': { kind: 'trunk', role: 'quality_check' },
+  'endor-labs-pro': { kind: 'endor', role: 'quality_check' }, // Endor Labs: one sticky SCA findings comment
 
   // ── Code agents — automation that WRITES CODE that is not a version bump ─────────────────
   // The category that did not exist when the first lists were written and now matters most. A
@@ -273,6 +287,8 @@ export const AUTOMATION_VENDORS: Record<
   'crowdin-bot': { kind: 'crowdin', role: 'code_agent' },
   mintlify: { kind: 'mintlify', role: 'code_agent' },
   allstar: { kind: 'allstar', role: 'code_agent' },
+  'step-security-bot': { kind: 'step_security', role: 'code_agent' }, // workflow-hardening PRs; a GitHub User
+  orbisai0security: { kind: 'orbisai', role: 'code_agent' }, // SAST autofix PRs, not CVE fixes
 
   // ── Release & merge automation ───────────────────────────────────────────────────────────
   // Neither inspects nor reports on the code: it ACTS on the repository once other conditions are
@@ -319,6 +335,19 @@ export const AUTOMATION_VENDORS: Record<
   'gitpod-io': { kind: 'gitpod', role: 'housekeeping' },
 };
 
+/** Logins that are one vendor under MANY names — Semgrep's App installs per org as
+ *  `semgrep-code-<org>` / `semgrepcode-<org>`. Matched on the NORMALISED login (lowercased, `[bot]`
+ *  stripped), AFTER the exact table. ⚠ The five derived login SETS below stay exact-only: they feed
+ *  SQL `IN (…)` predicates, and a prefix cannot live in one. */
+export const AUTOMATION_VENDOR_PREFIXES: readonly {
+  prefix: string;
+  kind: AutomatedReviewerKind;
+  role: ReviewerRole;
+}[] = [
+  { prefix: 'semgrep-code-', kind: 'semgrep', role: 'quality_check' },
+  { prefix: 'semgrepcode-', kind: 'semgrep', role: 'quality_check' },
+];
+
 /** Normalise a login the way every vocabulary here matches it: lowercased, `[bot]` suffix
  *  stripped. The suffix stripping is load-bearing — `dependabot` and `dependabot[bot]` are
  *  SEPARATE `users` rows with different GitHub node ids on real accounts, and a lookup that
@@ -327,21 +356,32 @@ export function normalizeBotLogin(login: string): string {
   return login.toLowerCase().replace(/\[bot\]$/, '');
 }
 
+/** The vendor row for a login — the exact table first, then the prefix table. THE one lookup;
+ *  `automationVendorKind` and `roleForAutomationLogin` delegate to it. */
+export function automationVendorFor(
+  login: string | null | undefined,
+): { kind: AutomatedReviewerKind; role: ReviewerRole } | null {
+  if (!login) return null;
+  const norm = normalizeBotLogin(login);
+  const exact = AUTOMATION_VENDORS[norm];
+  if (exact) return exact;
+  const hit = AUTOMATION_VENDOR_PREFIXES.find((p) => norm.startsWith(p.prefix));
+  return hit ? { kind: hit.kind, role: hit.role } : null;
+}
+
 /** The vendor identity of a non-review automation, or null. Orthogonal to `reviewBotKind`, which
  *  answers the narrower "is this an AI reviewer" and must NOT be widened to cover these. */
 export function automationVendorKind(
   login: string | null | undefined,
 ): AutomatedReviewerKind | null {
-  if (!login) return null;
-  return AUTOMATION_VENDORS[normalizeBotLogin(login)]?.kind ?? null;
+  return automationVendorFor(login)?.kind ?? null;
 }
 
 /** The DEFAULT role a login implies, or null when no vocabulary claims it. Null is not "it
  *  reviews" — see `defaultRoleFor` and `resolveActorLanes`, which fall back differently on
  *  purpose. */
 export function roleForAutomationLogin(login: string | null | undefined): ReviewerRole | null {
-  if (!login) return null;
-  return AUTOMATION_VENDORS[normalizeBotLogin(login)]?.role ?? null;
+  return automationVendorFor(login)?.role ?? null;
 }
 
 const loginsWithRole = (role: ReviewerRole): ReadonlySet<string> =>
@@ -512,14 +552,15 @@ export interface PeriodLanes {
 // axis, which is orthogonal to the role) and nothing else.
 export type QualityCheckVendorKind =
   | 'sonarqube' | 'codecov' | 'codeclimate' | 'codefactor' | 'hound' | 'coveralls' | 'codacy'
-  | 'github_actions' | 'jit' | 'socket' | 'gitguardian' | 'semgrep' | 'trunk';
+  | 'github_actions' | 'jit' | 'socket' | 'gitguardian' | 'semgrep' | 'trunk' | 'endor';
 
 export type DependencyVendorKind =
-  | 'dependabot' | 'renovate' | 'snyk' | 'pyup' | 'greenkeeper' | 'depfu';
+  | 'dependabot' | 'renovate' | 'snyk' | 'pyup' | 'greenkeeper' | 'depfu'
+  | 'aikido' | 'mend' | 'frogbot' | 'checkmarx';
 
 export type CodeAgentVendorKind =
   | 'sweep' | 'codegen' | 'deepsource_autofix' | 'pre_commit_ci' | 'restyled' | 'imgbot'
-  | 'transifex' | 'crowdin' | 'mintlify' | 'allstar';
+  | 'transifex' | 'crowdin' | 'mintlify' | 'allstar' | 'step_security' | 'orbisai';
 
 export type ReleaseVendorKind =
   | 'mergify' | 'kodiak' | 'bulldozer' | 'release_please' | 'semantic_release'
@@ -647,6 +688,10 @@ const KIND_ROLE_ENTRIES = new Map<AutomatedReviewerKind, ReviewerRole | null>([
   // is enough. `devin` is deliberately overwritten by AUTOMATION_VENDORS above — same brand, and
   // what it DOES is author code.
   ...Object.values(REVIEW_BOTS).map((k) => [k, 'review'] as [AutomatedReviewerKind, ReviewerRole]),
+  // MARKER-ONLY vendors — recognised from a PR's branch/title/body, never from a login (Frogbot and
+  // Checkmarx open PRs through github-actions or a person's token).
+  ['frogbot', 'dependency'],
+  ['checkmarx', 'dependency'],
   ['pierre', 'review'],
   ['in_house', null],
   ['vendor', null],
@@ -2211,6 +2256,9 @@ export interface CourtDirective {
   repos: number;
   /** ⚠ TEMPLATED. One short paragraph. */
   directive: string;
+  /** ⚠ TEMPLATED. One line for the page; `directive` is the full paragraph, shown behind the "i".
+   *  Optional: independent deploys. */
+  summary?: string;
 }
 
 /** Merged without a human review — a governance fact, not a productivity one. */
@@ -2257,6 +2305,18 @@ export interface FlowCoverage {
   excludedBotAuthored: number;
 }
 
+/** Per-PR headline figures over EVERY measured pull request — never over the capped `prs` sample. */
+export interface FlowPrFigures {
+  /** Measured PRs whose working-hour lead time exceeded one working day. */
+  overWorkingDay: number;
+  /** ceil(measured / 10). */
+  slowestTenthCount: number;
+  /** 0..1 — the slowest tenth's share of all working-hour lead time (unrounded). */
+  slowestTenthShare: number;
+  /** Measured PRs that never went back to their author (rounds === 0). */
+  neverWentBack: number;
+}
+
 export interface FlowResponse {
   workspaceId: number;
   windowDays: number;
@@ -2287,7 +2347,8 @@ export interface FlowResponse {
   courtsWork?: CourtShare[];
   medianLeadWorkHours?: number;
   p75LeadWorkHours?: number;
-  /** The headline in working hours. Templated server-side like every sentence here. */
+  /** The headline in working hours. Templated server-side like every sentence here.
+   *  Not rendered since the CourtSplit; kept for independent deploys. */
   workHeadline?: string | null;
   /** Each wait against its budget — the panel's headline chart. */
   budgets?: FlowBudgetRow[];
@@ -2306,6 +2367,7 @@ export interface FlowResponse {
   /** Person vs team vs nobody asked, from the stored review-request history. Null when none of the
    *  window's PRs has its history yet. */
   requests?: FlowRequestStats | null;
+  prFigures?: FlowPrFigures;
 }
 
 /** One wait measured against its budget. Working hours throughout. */
@@ -2459,6 +2521,9 @@ export interface FlowLandingTail {
   /** Their share of all approved-and-waiting working time. */
   shareOfLanding: number;
   selfMergedOver: number;
+  /** Of `prsOver`, how many share a ticket with a pull request in another repository that merged
+   *  while they waited. */
+  siblingsOver?: number;
   rows: FlowLandingRow[];
   sentence: string;
 }
@@ -4328,6 +4393,24 @@ export interface MeResponse {
   // the spend baseline from the first authenticated call (seeds the Track-usage panel + any
   // meter). null when unavailable. A null limit/allowance inside means that seam is unmetered.
   aiUsage: AiUsageResponse | null;
+  // The reader's My Turn settings (Settings → My Turn): which card types show, the type order and
+  // the Do next weights. RAW STORED OVERRIDES — `null` means "never changed anything", and the SPA
+  // resolves through the ONE `resolveMyTurnSettings` (the `blastRadius` precedent above).
+  // TOP-LEVEL and NOT inside `pro`: a free feature, and `entitledProCapabilities` zeroes `pro` for
+  // a free cloud account (the `mlSeverity` argument).
+  myTurnSettings: MyTurnSettings | null;
+}
+
+/** Body of PUT /api/me/my-turn-settings. `null` resets everything to the product default. */
+export interface MyTurnSettingsBody {
+  settings: MyTurnSettings | null;
+}
+
+/** Response of PUT /api/me/my-turn-settings — what was STORED (compacted to overrides only), so
+ *  Settings renders what the database holds rather than what it sent. */
+export interface MyTurnSettingsResponse {
+  status: 'ok';
+  myTurnSettings: MyTurnSettings | null;
 }
 
 // ---- Pro per-account settings (packages/pro `pro_settings`; via GET/PUT /api/pro/settings) ----
@@ -5270,13 +5353,12 @@ export interface AuthNotice {
  * WHY THIS ROW IS ON YOUR PLATE — three values, because the boolean it replaces conflated two
  * genuinely different relationships and the card copy has to tell them apart.
  *
- *   • `'direct'`     — the work is tied to YOU: a review was requested of you, it is your PR,
- *                      your PR was approved, your thread got a reply, you asked for the Claude
- *                      run — OR somebody @-mentioned your login on the PR. ⚠ The mention arm
- *                      holds EVEN IN A REPO YOU ONLY READ; that is the whole reason it is not
- *                      folded into the maintainer test below. (Derived offline into
- *                      `pr_mentions` by sync/mention-scan.ts; with no rows this arm contributes
- *                      nothing and nothing widens.) Card copy: "YOUR TURN".
+ *   • `'direct'`     — the work is tied to YOU: a review was requested of you, somebody
+ *                      @-mentioned you, replied to you or pushed since your review, it is your PR,
+ *                      your PR was approved, you asked for the Claude run — or you added the type
+ *                      to My Turn in Settings (the own-work promotions and a red default branch).
+ *                      ⚠ Holds EVEN IN A REPO YOU ONLY READ, which is why none of it is folded into
+ *                      the maintainer test below. Card copy: "YOUR TURN".
  *   • `'maintained'` — a NEW PR by somebody else in a repo you maintain (WRITE/MAINTAIN/ADMIN on
  *                      the repo, or you have landed a PR on its default branch). Your patch of
  *                      ground, not your work — ORBIT, not ownership. Card copy: "IN YOUR REPOS".
@@ -5284,11 +5366,11 @@ export interface AuthNotice {
  *                      it still paints; it just may not interrupt you. Card copy: "REVIEW OR
  *                      REPLY".
  *
- * `'direct'` WINS over `'maintained'` — a mention in a repo you also maintain is still about you.
- *
  * ⚠ THIS NARROWS NOTHING, ANYWHERE. Every row and every card still ships; relevance decides how a
  * card is LABELLED and which count it lands in, never whether it exists. Narrowing the population
- * by it would delete work rather than route it.
+ * by it would delete work rather than route it. (What DOES remove rows is the reader switching a
+ * card TYPE off in Settings → My Turn — a separate gate, applied inside `getMyTurn` so every
+ * surface shrinks together; see `MyTurnSettings`.)
  *
  * ⚠ IT IS ALSO THE CARRIER OF THE PENDING MUTE, and that is deliberate rather than an overload of
  * convenience. Muting a workspace or a repo (`Workspace.pendingMuted` / `.mutedRepoIds`) forces
@@ -5398,7 +5480,10 @@ export type MyLastAction =
 // itself is the complaint this field exists to answer.
 //
 // `'untouched'` — you have never acted on this PR (no review, no comment, no commit of yours).
+//   These rows are the `watchedRepoPrs` section (`watched_repo_pr`).
 // `'commits_after'` — you acted, and then a PERSON pushed code, so your read of it is stale.
+//   These rows are the `pushedSince` section (`pushed_since`), split out so each has its own
+//   switch in Settings.
 //   ⚠ Only a person: a bot push, of any kind, never returns the ball.
 export interface NewPrBall {
   kind: 'untouched' | 'commits_after';
@@ -5420,10 +5505,102 @@ export interface NewPrBall {
 // be a value STORED in `my_turn_dismissals.kind`; that table is gone, so the identifier is now
 // held only by the cost of renaming a string that appears in `MyTurnCardReason`, the card ids,
 // the ranker and four test files.
+//
+// Two sections share this shape: `watchedRepoPrs` holds the UNTOUCHED rows only
+// (`ball.kind === 'untouched'`), and `pushedSince` the rows a person pushed to after your last
+// action (`ball.kind === 'commits_after'`).
 export interface WatchedRepoPrItem extends MyTurnPr {
   /** WHY this row is still yours — see `NewPrBall`. Trailing-optional for wire tolerance only;
    *  `getMyTurn` always sets it. */
   ball?: NewPrBall;
+}
+
+/** S5 — a person commented at PR level after your newest PR-level comment, and your newest action
+ *  on the PR is still that comment. `since` (on MyTurnPr) is the FIRST such comment's time — the
+ *  moment the ball came back. */
+export interface CommentReplyItem extends MyTurnPr {
+  replyAuthorId: number | null;
+  /** First 140 chars of the reply, whitespace collapsed. */
+  replyExcerpt: string;
+}
+
+/** S6 — a person @-mentioned you on an open PR after your last action on it. `since` is the newest
+ *  qualifying mention's time (`pr_mentions.mentioned_at`). */
+export interface MentionItem extends MyTurnPr {
+  mentionedById: number | null;
+}
+
+/** Promotion (Settings → My Turn): your own open, non-draft, recently active PR whose head CI is
+ *  red. It MOVES here from the Needs fixing tab — never listed twice. */
+export interface OwnCiRedItem extends MyTurnPr {
+  ciStatus: CiStatus;
+  lastCommitAt: string | null;
+}
+
+/** Promotion: your own PR conflicts with its base, in a repo you can push to (the `conflicts`
+ *  card's own population gate). */
+export interface OwnConflictsItem extends MyTurnPr {
+  mergeStateStatus: MergeStateStatus | null;
+  mergeable: Mergeable | null;
+  baseRefName: string | null;
+}
+
+/** Promotion: your own PR that GitHub will merge now ('merge') or once the branch is updated
+ *  ('update_branch') — the Ready to land tab's two kinds. */
+export interface OwnReadyItem extends MyTurnPr {
+  forward: 'merge' | 'update_branch';
+  mergeStateStatus: MergeStateStatus;
+  mergeable: Mergeable | null;
+  lastCommitAt: string | null;
+  /** See MergeReadyCard.viewerCanPush — a visibility gate, never the authority. */
+  viewerCanPush: boolean;
+}
+
+/** Promotion: a review thread on your own PR with no reply and no later commit, older than
+ *  `PENDING_LIMITS.untouchedThreadMinHours`. Thread-grained, like the Unanswered threads tab. */
+export interface OwnThreadItem {
+  threadId: number;
+  prId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  path: string;
+  line: number | null;
+  originalCommenterId: number | null;
+  /** ISO — the thread's own createdAt. */
+  since: string;
+  githubUrl: string;
+  /** See `MyTurnPr.personal` / `.relevance` / `.muted`. */
+  personal?: boolean;
+  relevance?: MyTurnRelevance;
+  muted?: boolean;
+}
+
+/** Promotion: the default branch of a repo is red right now. REPO-grained — no PR is required. */
+export interface RedTrunkItem {
+  repoId: number;
+  repoFullName: string;
+  branchName: string | null;
+  ciStatus: CiStatus;
+  headSha: string | null;
+  /** When we last refreshed the branch snapshot — our observation, not the commit's time. */
+  observedAt: string | null;
+  /** The PR that landed the red head, when the sha resolves to one. Null is ordinary (~11% of red
+   *  heads are direct pushes). */
+  landingPr: { prId: number; number: number; title: string; mergedById: number | null } | null;
+  viewerMerged: boolean;
+  /** You can push to the repo or have merged into its default branch (`viewerMaintainedRepoIds`).
+   *  DISPLAY ONLY — it picks the card's sentence; `relevance` is what every counter reads. */
+  maintained: boolean;
+  /** ISO — `observedAt`, or the fold time when null. Display clock only. */
+  since: string;
+  /** The commit page (the trunk_ci_failed feed rule); the repo page when `headSha` is null. */
+  githubUrl: string;
+  /** See `MyTurnPr.personal` / `.relevance` / `.muted`. A red default branch you added is
+   *  `'direct'` in either scope; only the Pending mute downgrades it. */
+  personal?: boolean;
+  relevance?: MyTurnRelevance;
+  muted?: boolean;
 }
 
 export interface ThreadAwaitingItem {
@@ -5456,9 +5633,10 @@ export interface ThreadAwaitingItem {
    *  Trailing-optional for wire tolerance only; `getMyTurn` always sets it. Absent ⇒ `'reply'`,
    *  which is what every response predating this field was. */
   awaitingKind?: 'reply' | 'likely_addressed';
-  /** See `MyTurnPr.personal`. Always true here — you opened the thread, so a reply on it is
-   *  personally addressed to you by construction. Carried anyway so a notification surface can
-   *  read ONE field across every section instead of knowing which sections are exempt. */
+  /** See `MyTurnPr.personal`. Always true here — you opened the thread (`threadsAwaiting`) or
+   *  commented in it (`threadReplies`), so a reply after you is addressed to you by construction.
+   *  Carried anyway so a notification surface can read ONE field across every section instead of
+   *  knowing which sections are exempt. */
   personal?: boolean;
   /** See `MyTurnPr.relevance`. Always `'direct'` here, for the same by-construction reason —
    *  UNLESS the thread's repo is muted for Pending, which downgrades it to `'none'` like every
@@ -5497,13 +5675,43 @@ export interface MyTurnResponse {
   // against `yourPrs` — an approved PR shows here, not under "new activity".
   approvedPrs: ApprovedPrItem[];
   threadsAwaiting: ThreadAwaitingItem[];
-  // New open PRs by others, opened at or after their repo was added (deduped against the
-  // sections above). Empty when the account has no repos.
+  // New open PRs by others you have never acted on, opened at or after their repo was added
+  // (deduped against the sections above). Untouched rows only — see `pushedSince`. Empty when the
+  // account has no repos, or when the type is switched off (it is OFF by default).
   watchedRepoPrs: WatchedRepoPrItem[];
   // Completed Claude reviews awaiting action (empty when Claude Review is disabled).
   claudeReviewsToAction: ClaudeReviewToAction[];
   // Users referenced by any row, for client-side lookup.
   users: User[];
+  // ── Every section below is EMPTY when its type is switched off in Settings → My Turn: the gate
+  // runs inside `getMyTurn`, so this response, the board, the brief and notifications shrink
+  // together. The SPA still reads each with `?? []` (a response predating the field). ──
+  /** S6 — see MentionItem. */
+  mentions: MentionItem[];
+  /** S3d — replies to your comment in a review thread SOMEONE ELSE started. Same shape as
+   *  `threadsAwaiting`; `lastReply*` is the other person's comment, `awaitingKind` is always
+   *  'reply'. */
+  threadReplies: ThreadAwaitingItem[];
+  /** S5 — see CommentReplyItem. */
+  commentReplies: CommentReplyItem[];
+  /** S3c — the "pushed since you reviewed" rows, split OUT of `watchedRepoPrs`. Every row's
+   *  `ball.kind === 'commits_after'`. */
+  pushedSince: WatchedRepoPrItem[];
+  /** The four own-work promotions and the red default branches — OFF by default. When on, each
+   *  item MOVES here from its own tab (the home card is not built), so nothing is listed twice. */
+  ownCiRed: OwnCiRedItem[];
+  ownConflicts: OwnConflictsItem[];
+  ownReady: OwnReadyItem[];
+  ownThreads: OwnThreadItem[];
+  redTrunks: RedTrunkItem[];
+  /** The reader's resolved type order (all fifteen) — the CLI prints its sections in this order. */
+  order: MyTurnCardReason[];
+  /** The types switched off (`trunk_red` is off when the trunk scope is 'off'), in `order`. */
+  off: MyTurnCardReason[];
+  /** Changes exactly when WHICH TYPES ARE SHOWN changes (`off` + the trunk scope) — never with the
+   *  order or the weights. The notification watcher re-baselines on it, or switching a type on
+   *  would announce its whole existing backlog. */
+  configKey: string;
 }
 
 // ---- my turn: activity Feed (the account's repos, last 14 days) ----
@@ -5666,16 +5874,19 @@ export interface PrRefreshResponse {
   updatedAt: string; // ISO-8601, the row's updatedAt after the refresh
 }
 
-// WHY an item is on your plate — the six sections of GET /api/my-turn, one value each, carried by
-// `MyTurnCard.reason`.
+// WHY an item is on your plate — the fifteen sections of GET /api/my-turn, one value each, carried
+// by `MyTurnCard.reason` (`MyTurnTrunkCard` for `trunk_red`). Each value is ONE user-facing type:
+// one switch and one row in the order list in Settings → My Turn, one chip, one notification bit.
+// The union's order below is the product's default type order (`MY_TURN_DEFAULT_ORDER`).
 //
 // These used to be five dismissal kinds plus `'your_pr'`: five sections you could press "Done" on,
 // and one that cleared itself when you opened the PR. THE DISMISSAL SUBSYSTEM IS GONE — the table,
 // the routes and the button — because a card now leaves this board when you ACT on the PR, which
 // is what the reader meant by "done" in the first place. A stored dismissal was manual
 // compensation for a predicate the fold did not have; it never expired, so an item you pressed
-// once stayed pressed while the work came back. Nothing here is a wire value any more: these six
-// strings are only ever computed and rendered.
+// once stayed pressed while the work came back. These strings are computed and rendered — and,
+// since Settings → My Turn, STORED as keys and order entries of `accounts.my_turn_settings`, so a
+// rename now needs a data migration.
 //
 // ⚠ NOT `MyTurnReason`, which is a DIFFERENT, older union ('requested' | 'authored' | 'merged' |
 // 'reviewed' | 'commented'): that one says how you PARTICIPATE in a feed row, this one says which
@@ -5683,11 +5894,20 @@ export interface PrRefreshResponse {
 // things — the `-Card-` infix is load-bearing.
 export type MyTurnCardReason =
   | 'review_request'
+  | 'mention'
   | 'thread'
-  | 'watched_repo_pr'
+  | 'thread_reply'
+  | 'comment_reply'
+  | 'pushed_since'
+  | 'own_ci_red'
+  | 'own_conflicts'
+  | 'trunk_red'
   | 'pr_approved'
+  | 'own_ready'
+  | 'your_pr'
+  | 'own_thread'
   | 'claude_review'
-  | 'your_pr';
+  | 'watched_repo_pr';
 
 export interface UpdateUserBody {
   isBot: boolean;
@@ -7067,6 +7287,12 @@ export type InsightKind =
   // consolidation removes. All seven WorkPlanKinds now fold off these cards.
   | 'merge' // approved-or-clean and GitHub will take it
   | 'update_branch' // mergeStateStatus === 'behind' — GitHub is REFUSING the merge
+  // THE DEPENDENCIES TAB. A PR opened by DEPENDENCY AUTOMATION (Dependabot, Renovate, Snyk… — or a
+  // person's PR carrying such a tool's own branch/title/body marker) gets exactly ONE card, here,
+  // and no card of the kinds above except `my_turn`. A person's PR a security tool flagged for a
+  // KNOWN ADVISORY also gets one `security` card here, and keeps its other cards.
+  | 'security' // a dependency PR fixing a known advisory, or any PR an automation alert flagged
+  | 'dependency_bump' // any other dependency-automation PR — housekeeping, with its merge actions
   | 'bot_signal' // AI-review-bot signal-to-noise across the sprint (deterministic)
   | 'bot_only_review'; // PRs whose only review(s) came from an automated reviewer (WS7)
 
@@ -7101,6 +7327,18 @@ export interface InsightReviewer extends PrReviewerRef {
   botKind: AutomatedReviewerKind | null;
 }
 
+// Who made a change, when it was automation — the Pending board's byline and its People /
+// Automation lens both read this ONE resolution (`authorAutomationFor`, db/dependency-cards.ts).
+export interface PrAutomation {
+  /** What the automation is for. 'dependency' puts the PR in the Dependencies tab. */
+  role: ReviewerRole;
+  /** The vendor when recognised; null = unbranded (renders by role + login). */
+  kind: AutomatedReviewerKind | null;
+  /** 'account' — the author account is automation. 'marker' — the account is a PERSON's and the
+   *  PR's own branch/title/body names the tool (Snyk opens fix PRs with a member's credentials). */
+  source: 'account' | 'marker';
+}
+
 // Shared PR context carried by every PR-bearing insight card — enough to render the
 // at-a-glance CI / size indicators and open the PR without a second fetch.
 export interface InsightPrRef {
@@ -7133,6 +7371,12 @@ export interface InsightPrRef {
   /** The vendor family when one is recognised. ⚠ `null` WITH `authorIsBot: true` is a real and
    *  common state — an unbranded CI account — and renders as a generic "Bot", never as a person. */
   authorBotKind: AutomatedReviewerKind | null;
+  /** WHO MADE THIS CHANGE, when it was automation; null for a person's own PR. REQUIRED — the
+   *  `authorIsBot` rule: an absent field would render automation as a person. Built only by
+   *  `prRef` through `authorAutomationFor` (db/dependency-cards.ts). ⚠ Unlike `authorIsBot`, a
+   *  vendor MARKER makes a person-authored PR automation here; `authorIsBot` stays a claim about the
+   *  ACCOUNT. Drives the byline and the People / Automation lens (`pendingAuthorSideOf`). */
+  automation: PrAutomation | null;
   // ── GitHub's native merge queue ────────────────────────────────────────────────────────────
   //
   // Carried on the card because the Pending board MAY NOT FETCH ON MOUNT, and a queued PR is
@@ -7236,8 +7480,8 @@ export interface SuggestedReviewersResponse {
 // An item that is on YOUR plate, as a first-class card on the needs-attention board.
 //
 // ⚠ THIS IS THE SAME POPULATION AS `GET /api/my-turn`, WORKSPACE-SCOPED — the server builds these
-// cards by calling the very same fold (`getMyTurn(accountId, scope)`), one card per row of its six
-// sections, never a re-derivation. And the daily brief's "N need your review or reply" IS the
+// cards by calling the very same fold (`getMyTurn(accountId, scope)`), one card per row of its
+// sections, never a re-derivation (a red default branch is the repo-grained `MyTurnTrunkCard`). And the daily brief's "N need your review or reply" IS the
 // number of `my_turn` cards emitted here, so the strip's number and the list the user lands on
 // cannot disagree. (It used to be a count of feed EVENTS in a rolling 14 days, which corresponded
 // to no clickable list at all — that is the defect this card kind exists to close.)
@@ -7249,16 +7493,17 @@ export interface SuggestedReviewersResponse {
 // anything the client did with the number.
 export interface MyTurnCard extends InsightCardBase, InsightPrRef {
   kind: 'my_turn';
-  reason: MyTurnCardReason;
-  /** WHY the ball is in your court on a `watched_repo_pr` row — see `NewPrBall`. Set only for that
-   *  reason; absent everywhere else.
+  /** Every type but `trunk_red`, whose subject is a repository — see `MyTurnTrunkCard`. */
+  reason: Exclude<MyTurnCardReason, 'trunk_red'>;
+  /** WHY the ball is in your court on a `watched_repo_pr` or `pushed_since` row — see `NewPrBall`.
+   *  Set only for those two reasons; absent everywhere else.
    *  ⚠ THE CARD CARRIES THE FACT AND THE SPA CHOOSES THE WORDS. The section label was a static
    *  string keyed on `reason` alone, so a row kept because somebody pushed after your review still
    *  wore the chip "New PR" beside a detail reading "You approved · @x pushed 2 commits since" —
    *  the card contradicting itself in two adjacent elements. `reason` names the SECTION that
    *  emitted the row; only this names what the reader is being asked to do about it. */
   ball?: NewPrBall;
-  /** set only when reason === 'thread' */
+  /** set only on the thread-grained reasons: `thread`, `thread_reply` and `own_thread` */
   threadId: number | null;
   /** one-line "what happened", e.g. "3 new comments · 1 new commit" or "@alice replied 3d ago" */
   detail: string;
@@ -7291,6 +7536,77 @@ export interface MyTurnCard extends InsightCardBase, InsightPrRef {
    *  not an input to `personal`, to any brief count, to the relevance lens or to the ranker, all
    *  of which read `relevance`. Set only when true. */
   muted?: boolean;
+  /** Set ONLY on the four PR-grained promotions (`own_ci_red`, `own_conflicts`, `own_ready`,
+   *  `own_thread`). It carries exactly the fields the card's HOME kind carried, so the SPA renders
+   *  the same controls (the merge row, the resolver button) — a promoted card moves, it does not
+   *  lose its actions. */
+  own?: MyTurnOwnWork;
+}
+
+/** The home-kind facts a promoted My Turn card carries — see `MyTurnCard.own`. */
+export type MyTurnOwnWork =
+  | { kind: 'ci_red'; lastCommitAt: string | null }
+  | { kind: 'conflicts'; mergeStateStatus: MergeStateStatus | null; mergeable: Mergeable | null }
+  | {
+      kind: 'ready';
+      forward: 'merge' | 'update_branch';
+      mergeStateStatus: MergeStateStatus;
+      mergeable: Mergeable | null;
+      lastCommitAt: string | null;
+      viewerCanPush: boolean;
+    }
+  | {
+      kind: 'thread';
+      path: string;
+      originalCommenterId: number | null;
+      botKind: AutomatedReviewerKind | null;
+      botLabel: string | null;
+    };
+
+/** A red default branch promoted into My turn (Settings → My Turn → Red default branch).
+ *
+ *  `kind: 'my_turn'`, so every my_turn count, lens and total includes it with no second predicate
+ *  — but NOT an `InsightPrRef`: its subject is a repository. ⚠ That is deliberate: `c.kind ===
+ *  'my_turn'` now narrows to a union whose `prId` is `number | null`, so every consumer that treated
+ *  a my_turn card as a PR fails to compile until it handles this one. A `card as MyTurnCard` cast
+ *  defeats that — branch on `reason === 'trunk_red'` first. */
+export interface MyTurnTrunkCard extends InsightCardBase {
+  kind: 'my_turn';
+  reason: 'trunk_red';
+  repoId: number;
+  repoFullName: string;
+  branchName: string | null;
+  /** Always red — 'failure' | 'error'. */
+  ciStatus: CiStatus;
+  headSha: string | null;
+  /** The LANDING PR of the red head; all four null when the sha resolves to none (ordinary). */
+  prId: number | null;
+  prNumber: number | null;
+  prTitle: string | null;
+  mergedById: number | null;
+  /** You merged the landing PR — an attribution of LANDING, never of breaking (CiFailingCard). */
+  viewerMerged: boolean;
+  /** DISPLAY ONLY — picks the card's sentence; `relevance` is what every counter reads. */
+  maintained: boolean;
+  /** When we last refreshed the branch snapshot — our observation, not the commit's time. */
+  observedAt: string | null;
+  /** The commit page; the repo page when `headSha` is null. Render via safeExternalUrl. */
+  githubUrl: string;
+  detail: string;
+  since: string;
+  personal: boolean;
+  relevance?: MyTurnRelevance;
+  muted?: boolean;
+  threadId: null;
+  /** The LANDING PR's author, exactly as `CiFailingCard`'s trunk arm carries it — same names, same
+   *  resolution — so the two cards for one red trunk cannot disagree about who opened the landing
+   *  PR. All null/false when no PR resolved. `automation` decides the People / Automation side
+   *  (`pendingAuthorSideOf`), so a tab's `authorTotals.people + automation === total` holds with
+   *  trunk cards in it. REQUIRED — an absent field would silently count automation as a person. */
+  authorId: number | null;
+  authorIsBot: boolean;
+  authorBotKind: AutomatedReviewerKind | null;
+  automation: PrAutomation | null;
 }
 
 // Which relationship puts a red build on the viewer's plate. TWO ARMS, and they are two different
@@ -7336,6 +7652,15 @@ export interface CiFailingCard extends InsightCardBase {
   /** 'trunk' only — `mergedById` IS the viewer: they put this commit on trunk themselves. This is
    *  an ATTRIBUTION OF LANDING, never of BREAKING: the build may have been red before it. */
   viewerMerged: boolean;
+  /** Who opened the PR this card names: the viewer on 'your_pr'; the LANDING PR's author on
+   *  'trunk'; null when no PR resolved. */
+  authorId: number | null;
+  /** Same resolution as InsightPrRef's three fields, for that PR — REQUIRED for the same reason
+   *  (an absent field would count automation as a person), and so the People / Automation lens has
+   *  ONE predicate for every card. All false/null when no PR resolved. */
+  authorIsBot: boolean;
+  authorBotKind: AutomatedReviewerKind | null;
+  automation: PrAutomation | null;
   /** one-line "what is red and why it is yours", built server-side like the my_turn card's */
   detail: string;
   /** ISO — THE HONEST CLOCK, and it means something different per arm, which is why it is not
@@ -7511,8 +7836,104 @@ export interface ConflictsCard extends InsightCardBase, InsightPrRef {
   detail: string;
 }
 
+// ---- the Dependencies tab: `security` + `dependency_bump` (see InsightKind) -----------------
+//
+// ONE CARD PER PR. A dependency-automation PR is listed ONLY here (plus `my_turn` for a direct
+// summons), so each card carries that PR's merge fields and — on the board — its merge actions.
+// ⚠ Security is KNOWN ADVISORIES ONLY: the PR's own markers (read at sync from the full body) or a
+// live automation alert naming an advisory id (derived on read, cleared by state).
+
+/** A dependency PR's next step, folded from its synced merge columns (first match wins: conflicts →
+ *  ci_red → behind → ready → needs_review → blocked → unknown). ⚠ A red build GitHub would still
+ *  merge (`unstable`) is 'ready', never 'ci_red'. ⚠ 'unknown' is NOT OBSERVED. */
+export type DependencyPrState =
+  | 'conflicts'
+  | 'ci_red'
+  | 'behind'
+  | 'ready'
+  | 'needs_review'
+  | 'blocked'
+  | 'unknown';
+
+/** The fields both Dependencies kinds carry — the forward cards' merge fields, same meanings. */
+interface DependencyCardFields {
+  /** ⚠ null = NOT OBSERVED, never "fine". */
+  mergeStateStatus: MergeStateStatus | null;
+  mergeable: Mergeable | null;
+  lastCommitAt: string | null;
+  /** For the ranker's weight and the colour only — never an ownership claim on screen. */
+  relevance: MyTurnRelevance;
+  /** Visibility gate for the merge controls (MergeReadyCard.viewerCanPush — never the authority). */
+  viewerCanPush: boolean;
+}
+
+/** Which tool raised a live security alert. `reviewer` is the last resort: an automation's own
+ *  review-thread ROOT that no tool rule identified and that still names an advisory. The detector
+ *  (apps/backend/src/sync/security-detect.ts) spells the same union; keep the two identical. */
+export type SecurityAlertSource =
+  | 'socket'
+  | 'dependency_review'
+  | 'endor'
+  | 'semgrep'
+  | 'code_scanning'
+  | 'snyk'
+  | 'frogbot'
+  | 'checkmarx'
+  | 'reviewer';
+
+/** One LIVE automation alert naming a known advisory. State-derived: it disappears when the tool's
+ *  latest comment of that kind stops naming one, or the review thread is resolved/likely addressed. */
+export interface SecurityAlert {
+  source: SecurityAlertSource;
+  /** Who posted it — resolves in `users[]`. */
+  authorId: number;
+  /** The author's classified vendor (names a 'reviewer' alert: "CodeRabbit flagged …"). */
+  vendorKind: AutomatedReviewerKind | null;
+  surface: 'comment' | 'review' | 'thread';
+  /** Set when surface === 'thread' — the SPA opens it. */
+  threadId: number | null;
+  /** Canonical ids it names, at most 5. */
+  advisoryIds: string[];
+  /** ISO — when the deciding comment was written. */
+  at: string;
+}
+
+/** A dependency PR with nothing security-related: one card, all its merge actions. */
+export interface DependencyBumpCard extends InsightCardBase, InsightPrRef, DependencyCardFields {
+  kind: 'dependency_bump';
+  depState: DependencyPrState;
+  /** CODE-WRITTEN, TIME-FREE — the state as a sentence. */
+  detail: string;
+}
+
+/** A known-advisory item: a dependency PR whose own markers fix one, OR any PR a security tool
+ *  flagged for one. One card per PR; a dependency PR that is also flagged is still ONE card. */
+export interface SecurityCard extends InsightCardBase, InsightPrRef, DependencyCardFields {
+  kind: 'security';
+  /** true — dependency automation: it lives ONLY in this tab and carries its merge actions. false —
+   *  a person's PR a tool flagged: it keeps its other cards, and this one carries no merge actions. */
+  dependencyUpdate: boolean;
+  /** null exactly when `dependencyUpdate` is false. */
+  depState: DependencyPrState | null;
+  /** The PR's own markers: 'proven' (the tool's security marker) or 'inferred' (Dependabot's
+   *  ecosystem-named group whose confirming line GitHub cut off). null = only alerts put it here. */
+  fix: 'proven' | 'inferred' | null;
+  /** Live alerts, newest first, at most 3. */
+  alerts: SecurityAlert[];
+  /** How many live alerts there are — the "+N" denominator (never `alerts.length` subtracted). */
+  alertCount: number;
+  /** Every id the fix and the alerts name, deduplicated, canonical, fix ids first (complete up to
+   *  the 50-id safety cap). May be empty: a proven fix whose markers name no id. */
+  advisoryIds: string[];
+  /** CODE-WRITTEN, TIME-FREE — the fix as a sentence, '' when `fix` is null. */
+  detail: string;
+  /** The dependency state as a sentence; null when `dependencyUpdate` is false. */
+  stateDetail: string | null;
+}
+
 export type InsightCard =
   | MyTurnCard
+  | MyTurnTrunkCard
   | CiFailingCard
   | StalledReviewCard
   | UntouchedThreadCard
@@ -7521,6 +7942,8 @@ export type InsightCard =
   | MergeReadyCard
   | UpdateBranchCard
   | ConflictsCard
+  | SecurityCard
+  | DependencyBumpCard
   | BotSignalCard
   | BotOnlyReviewCard;
 
@@ -7680,25 +8103,33 @@ export interface WorkspaceInsightsResponse {
    * Trailing optional (independent deploys).
    */
   kindTotals?: Partial<Record<InsightKind, number>>;
+  /** Repos whose red default branch is a my_turn card for this viewer in this fold — the WHOLE
+   *  population, never the capped cards. The daily brief's red-trunk line leaves these out, so a
+   *  trunk the reader promoted into My Turn is counted once, there. Trailing optional. */
+  myTurnTrunkRepoIds?: number[];
 }
 
 // The attention cards (your turn / red builds / stalled reviews / untouched threads / reviewer
-// load / needs-a-reviewer / ready-to-land / behind-trunk), served CORE/free by GET /api/attention
-// for the **Pending** rail entry — the same cards the (Pro) Insights pane computes in core
-// getWorkspaceInsights, minus the bot-signal cards (those live in the free Bots console).
-// No AI, no capability gate.
+// load / needs-a-reviewer / ready-to-land / behind-trunk / dependency updates and security
+// alerts), served CORE/free by GET /api/attention for the **Pending** rail entry — the same cards
+// the (Pro) Insights pane computes in core getWorkspaceInsights, minus the bot-signal cards (those
+// live in the free Bots console). No AI, no capability gate.
 export interface AttentionCardsResponse {
   cards: InsightCard[];
   users: User[];
   /**
-   * THE FIVE TABS (`PENDING_TABS`), each with its UNCAPPED count and its cards in score order.
+   * THE SIX TABS (`PENDING_TABS`), each with its UNCAPPED count and its cards in score order.
    *
    * ⚠ THE ORDER IS THE SERVER'S. Every PR card is scored by `db/work-plan.ts`'s Do next formula and
    * each tab lists its cards highest score first — no severity-first sort and no cross-kind spread
-   * rule. The first `PENDING_DO_NEXT_SIZE` of whatever the reader is looking at are "Do next".
+   * rule — except the two STRICT-GROUP tabs, whose groups come first and are each listed by score:
+   * My turn (`groupByReason` — the reader's type order, `rules.myTurnOrder`) and Dependencies
+   * (`groupByKind` — security, then bumps). The first `PENDING_DO_NEXT_SIZE` of whatever the reader
+   * is looking at are "Do next".
    *
-   * `cards` carries only what the tabs list (the top `boardListCap` of each kind, plus the
-   * review-load strip), so a tab's `total` may exceed its listed cards — the tab says so.
+   * `cards` carries only what the tabs list (the top `boardListCap` of each list group — the kind,
+   * split by My turn's "Only yours" side and by who opened it — plus the review-load strip), so a
+   * tab's `total` may exceed its listed cards — the tab says so.
    *
    * Trailing optional: the SPA and the server deploy independently, and a response predating this
    * field must still render (as one unsplit list).
@@ -7707,6 +8138,33 @@ export interface AttentionCardsResponse {
   /** Each listed PR card's Do next score and its working, keyed by card id — for the cards' info
    *  popovers. Explanation only: nothing on the client may sort or filter by it. */
   scores?: Record<string, PendingCardScore>;
+  /** The ranking rules the server used for THIS response — the reader's weights and My Turn type
+   *  order. Every explanation prints these, never the product constants. Trailing optional: a
+   *  response predating the field explains with `DO_NEXT_RULES.weights`. */
+  rules?: PendingRankRules;
+}
+
+/** The ranking the server actually used for one /api/attention response (Settings → My Turn,
+ *  resolved). ACCOUNT grain: one reader, every workspace. */
+export interface PendingRankRules {
+  /** 0..1, summing to 1, multiples of 0.1. Every `scores[id].score` on the response used these. */
+  weights: DoNextWeights;
+  /** Derived from the weights — an exact match on all three, else 'custom'. Never stored. */
+  preset: DoNextPreset | 'custom';
+  /** All fifteen types, in the reader's order. My turn is grouped by this. */
+  myTurnOrder: MyTurnCardReason[];
+  /** Types switched off in Settings, in `myTurnOrder` (the guide's "not shown" line). */
+  myTurnOff: MyTurnCardReason[];
+}
+
+// ── The People / Automation lens ──
+/** Which side of the board's author lens a card falls on — `pendingAuthorSideOf`. */
+export type PendingAuthorLens = 'people' | 'automation';
+/** One population split by who opened each PR. Both halves are server-counted; a pill is never
+ *  `total − other`. */
+export interface PendingAuthorSplit {
+  people: number;
+  automation: number;
 }
 
 export interface PendingTab {
@@ -7715,20 +8173,29 @@ export interface PendingTab {
   total: number;
   /** Uncapped count per card kind in the tab — the kind chips' figures. */
   kindTotals: Partial<Record<InsightKind, number>>;
-  /** Listed card ids, highest score first (ties: longer waiting, then PR id, then card id). At most
-   *  `boardListCap` of EACH kind, so the first `boardListCap` of the whole list are the tab's true
-   *  top cards, and a kind filter still shows that kind's top ones. */
+  /** Listed card ids, highest score first (ties: longer waiting, then PR id, then card id); in a
+   *  strict-group tab, by group first, then score (My turn: the reader's type order; Dependencies:
+   *  kind). At most `boardListCap` of EACH
+   *  list group (kind × My turn's "Only yours" side × who opened it), so every view the board can
+   *  show — tab, kind chip, relevance lens, author lens — is its own true top. */
   cardIds: string[];
   /** My turn only: the uncapped split by whether the item names you ('mine' = direct + maintained)
    *  or not — the "Only yours" view's own denominator. */
   relevanceTotals?: { mine: number; others: number };
+  /** The tab's PR cards by who opened them (`pendingAuthorSideOf`), uncapped — the lens's own
+   *  denominators. people + automation === total, by construction. Trailing-optional. */
+  authorTotals?: PendingAuthorSplit;
+  /** The same split per ranked kind — a kind chip under the lens. */
+  kindAuthorTotals?: Partial<Record<InsightKind, PendingAuthorSplit>>;
+  /** My turn only: each side of "Only yours", split by who opened it. */
+  relevanceAuthorTotals?: { mine: PendingAuthorSplit; others: PendingAuthorSplit };
   /** Review-load card ids for the "who has reviews waiting" strip ('review' tab only). */
   peopleCardIds?: string[];
 }
 
 /** One card's Do next score and how it was reached. */
 export interface PendingCardScore {
-  /** 0..1 — `DO_NEXT_RULES.weights` over the three parts below. */
+  /** 0..1 — `AttentionCardsResponse.rules.weights` over the three parts below. */
   score: number;
   /** 0..1 after clamping; the base plus each applied adjustment. */
   proximity: number;
@@ -10105,6 +10572,10 @@ export interface DailyBriefCounts {
   /** The uncapped population behind `ciFailing` (`WorkspaceInsightsResponse.ciFailingTotal`,
    *  passed straight through). ⚠ The matched denominator — pair narrow with narrow. */
   ciFailingTotal?: number;
+  /** The Dependencies tab's SECURITY population — `kindTotals.security`, uncapped, the same figure
+   *  its "Security" chip shows (a survey line like `stalled`, so no `…Total` twin). The line opens the
+   *  board isolated to `security`. Trailing-optional (independent deploys). */
+  security?: number;
   /** stalled_review cards on /api/attention (one card = one PR). */
   stalled: number;
   /** untouched_thread cards on /api/attention (one card = one thread). */

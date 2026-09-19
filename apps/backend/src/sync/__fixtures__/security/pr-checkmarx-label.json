@@ -1,0 +1,18 @@
+{
+  "name": "Checkmarx AI remediation under a person's token, retitled and on a person's branch: the cx-ai-agent label still names it",
+  "input": {
+    "title": "fix: patch growl command injection",
+    "headRefName": "alice-patch-1",
+    "labels": [
+      "cx-ai-agent"
+    ],
+    "bodyText": "\nRemediation\n\n---\n\nCVE-2017-16042 ·  Critical\n\nFix OS command injection vulnerability in growl (via mocha)\n\nWhat is the issue?\nThe vulnerable package `growl` (prior to version 1.10.0) passes unsanitized user-controlled input directly to Node.js's `child_process.exec()`, enabling OS command injection (CWE-78). It is pulled in as a transitive dependency of `mocha@^2.4.5`, which resolves to a version that depends on `growl@1.9.2`. An attacker who can influence test output or notification content can inject shell metacharacters to execute arbitrary commands with the privileges of the Node.js process.\n\nWhy should it be fixed?\nCVE-2017-16042 is a critical-severity Remote Code Execution vulnerability that can fully compromise CI/CD build environments. Exploitation requires no authentication and low complexity, making it trivially exploitable. A successful attack could lead to secrets exfiltration, supply-chain tampering, or lateral movement within the organization's infrastructure.\n\nHow should it be fixed?\nUpgrading `mocha` from `^2.4.5` to `^5.2.0` in `package.json`. This resolves the transitive dependency on `growl@1.9.2` (vulnerable) and replaces it with `growl@1.10.5` (patched), which added proper shell argument escaping via `shell-escape` before passing input to `exec()`. The upgrade is backward-compatible with the existing `grunt-mocha-test@^0.12.7` dependency, which declares mo"
+  },
+  "expected": {
+    "dependencyVendor": "checkmarx",
+    "securityFix": "proven",
+    "advisoryIds": [
+      "CVE-2017-16042"
+    ]
+  }
+}
