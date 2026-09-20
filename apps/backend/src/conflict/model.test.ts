@@ -748,6 +748,26 @@ describe('the wire projection', () => {
     expect(entry?.regionCount).toBeGreaterThanOrEqual(2);
   });
 
+  it('counts the regions that take a decision, not the context lines', async () => {
+    // ⚠ THE COMMIT GATE'S DENOMINATOR, AND IT IS NEITHER OF ITS NEIGHBOURS. `regionCount` folds
+    // in `unchanged` context; `conflictCount` leaves out every one-sided change, which the reader
+    // now has to answer too. Anyone "simplifying" `decidableCount` into either breaks this.
+    const { repo, headSha, baseSha } = threeWayRepo(
+      { 'f.txt': 'a\nb\nc\nd\ne\n' },
+      (r) => r.write('f.txt', 'a\nOURS\nc\nOURS-ONLY\ne\n'),
+      (r) => r.write('f.txt', 'a\nTHEIRS\nc\nd\ne\n'),
+    );
+    const model = await ready(repo, headSha, baseSha);
+    const entry = conflictFileEntries(model)[0];
+    const regions = model.files[0]?.regions ?? [];
+    const decidable = regions.filter((r) => r.kind !== 'unchanged').length;
+    const unchanged = regions.filter((r) => r.kind === 'unchanged').length;
+    expect(unchanged).toBeGreaterThan(0);
+    expect(entry?.decidableCount).toBe(decidable);
+    expect(entry?.decidableCount).toBeLessThan(entry?.regionCount ?? 0);
+    expect(entry?.decidableCount).toBeGreaterThan(entry?.conflictCount ?? 0);
+  });
+
   it('empties `ours` and `theirs` on an unchanged region and numbers each side itself', async () => {
     const { repo, headSha, baseSha } = threeWayRepo(
       { 'f.txt': 'h1\nh2\nb\nt1\n' },

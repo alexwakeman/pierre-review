@@ -1,6 +1,4 @@
 import { memo } from 'react';
-import type { SlotRole } from '../../lib/mergeResolver.js';
-import { WASH_CLASS } from './copy.js';
 
 // ── ONE PANE'S CELL FOR ONE REGION ───────────────────────────────────────────────────────────
 //
@@ -17,6 +15,22 @@ import { WASH_CLASS } from './copy.js';
 // ⚠ THE WASH SIZES ITSELF TO THE CONTENT, THE CELL FILLS THE ROW. The grid stretches every cell
 // to the tallest in its row; the leftover under a short side gets `.mr-filler`'s hatch, which is
 // the only thing distinguishing "this side has nothing here" from "this side's lines are blank".
+//
+// ⚠ THE HATCH NOW CARRIES THAT FACT ALONE, AND NOTHING ELSE IN HERE COMPETES WITH IT. A side the
+// reader turned down used to keep a 1px outline (`.mr-edge-*`) in place of its wash; that family is
+// deleted, so a side with no wash is either offering nothing or was not taken, and the hatch keeps
+// saying only which pane has no lines. Nothing in here has a box of its own, which is what keeps
+// the three panes aligned — a real border would move the text and they would drift.
+//
+// ⚠ A PANE WHOSE ANSWER IS "DELETE THESE LINES" STILL HAS TO BE PAINTED. The wash sits on the
+// CONTENT box, so a side with no rows is a 0px box and paints nothing however loudly it is
+// classed — and a pane's paint now MEANS "there is something here to take" (`panePaint`). A
+// delete/modify conflict would otherwise show a bare left pane beside a red right one and read as
+// one-sided while it is contested, with a live arrow over the bare half. So a painted cell with no
+// rows gets one line's worth of height and wears its wash there, the same concession
+// `RegionRibbons`' `MIN_EDGE` already makes for a side that contributed a decision but no lines.
+// It cannot grow a row: a decidable region always has content in some other pane, and the grid
+// stretches every cell to the tallest one anyway.
 
 export type CellRow =
   /** `n` is that SIDE's own file line number. The CENTRE pane passes null: the result has
@@ -29,25 +43,38 @@ export type CellRow =
 
 export const CodeCell = memo(function CodeCell({
   rows,
-  role,
+  paint,
   rule,
   ariaHidden,
+  anchor,
 }: {
   rows: CellRow[];
-  role: SlotRole;
-  /** The centre cell wears a 2px left rule in the role's ink — encoding two of three. */
+  /** The wash class for THIS pane, already looked up by `paintClass` — `''` where the pane paints
+   *  nothing. ⚠ A CLASS NAME, NOT A ROLE: the three panes no longer share one, and a component may
+   *  not spell a colour. */
+  paint?: string | null;
+  /** The centre cell wears a 2px left rule in the STATE's ink — encoding two of three, and the one
+   *  that still separates `ignored` from `unapplied` now that an undecided centre has no wash. */
   rule?: string | null;
   /** Set on the left/right cells of a region whose content the strip already announces, so the
    *  same lines are not read out three times. */
   ariaHidden?: boolean;
+  /** `data-mr-cell="<fileIndex>:<regionId>:<pane>"`. ⚠ IT GOES ON THE BOX THAT SIZES TO THE
+   *  CONTENT, not on the stretched grid cell: it is the hunk's own rectangle that the ribbon
+   *  overlay measures, and the centre's grid cell also holds the strip and the suggestion panel.
+   *  The overlay only ever READS this rect — see `ResolverPanes`' one-scroller invariant. */
+  anchor?: string;
 }): JSX.Element {
-  const wash = role == null ? '' : WASH_CLASS[role];
+  // See the header: paint on a zero-row cell is paint on a zero-height box, and with `panePaint`'s
+  // new rule that silence is a claim ("nothing to take here") rather than an accident.
+  const emptyButPainted = rows.length === 0 && paint != null && paint !== '';
   return (
     <div className="mr-filler min-w-0" aria-hidden={ariaHidden === true ? true : undefined}>
       <div
-        className={`min-w-0 font-mono text-[12px] leading-[18px] text-gray-900 dark:text-gray-100 ${wash} ${
-          rule != null ? `border-l-2 ${rule}` : ''
-        }`}
+        data-mr-cell={anchor}
+        className={`min-w-0 font-mono text-[12px] leading-[18px] text-gray-900 dark:text-gray-100 ${
+          paint ?? ''
+        } ${rule != null ? `border-l-2 ${rule}` : ''} ${emptyButPainted ? 'h-[18px]' : ''}`}
       >
         {rows.map((row, i) =>
           row.kind === 'gap' ? (

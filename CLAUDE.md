@@ -678,7 +678,23 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   process, claimed in a SYNCHRONOUS window; 3 retained records per account / 24 per process, freed
   by EVICTING a settled one. A session is pinned to `(headSha, baseSha, modelHash)` with
   `CONFLICT_MODEL_VERSION` folded into the hash — bump it in the same commit as any fold change, or
-  a stale session lands bytes nobody chose. Rebase is single-commit-only and never runs `git rebase`.
+  a stale session lands bytes nobody chose; ⚠ but NOT for `autoApply` or for anything about the
+  paint, neither of which changes what bytes a decision produces.
+  ⚠ **NOTHING IS APPLIED BEFORE THE READER PRESSES SOMETHING** — the SPA opens every session with
+  `autoApply: false` (BOTH open arms) and there is no client seeding pass, so the centre pane opens
+  with NO wash. ⚠ **The commit is HARD BLOCKED until every decidable region in every supported file
+  is decided** — `CommitPlan.canCommit` is the ONE gate, and everything it will not carry is NAMED
+  on the landing step (`notCarried` is not just the unsupported files). ⚠ **Hue means a different
+  thing per pane**: a SIDE is painted ONLY where it OFFERS something (`sideOffered` over
+  `region.allowed` — so `both_same` paints the LEFT only), wearing the conflict TYPE while
+  undecided and `applied` GREEN once its lines reach the result; a turned-down side and both sides
+  of an ignored region paint NOTHING (`.mr-edge-*` is DELETED — do not re-add an outline). The
+  CENTRE wears the STATE and is bare while undecided; every ribbon is the applied green.
+  ⚠ **The gutter arrow is the ONE pointer route to "take this side"** — a real roving-tab-stop
+  control reading that same `sideOffered`, and it DISAPPEARS once that side's lines are in the
+  result (an arrow is an offer to add; on an added side it offers a no-op). Undo or Ignore brings
+  it back, derived from the slot with no re-reveal state, and it carries no `aria-pressed` —
+  presence IS the state. The strip carries the two side verbs only when the panes are STACKED. Rebase is single-commit-only and never runs `git rebase`.
   Read [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md) § Resolving conflicts in the app before
   touching any of it.
 - CI logs are live ranged reads of the signed Actions blob URL — server-side only, **NEVER

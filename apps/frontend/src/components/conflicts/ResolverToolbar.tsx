@@ -8,7 +8,7 @@ import {
   UNDO_LAST,
   WAND_BUTTON,
   WAND_BUTTON_TITLE,
-  conflictsDecided,
+  decisionsDecided,
 } from './copy.js';
 
 // ── THE TOOLBAR ──────────────────────────────────────────────────────────────────────────────
@@ -56,6 +56,8 @@ export function ResolverToolbar({
   language: string | null;
   baseOpen: boolean;
   onBaseOpen: (open: boolean) => void;
+  /** The countdown, off the shell's ONE `CommitPlan` — every DECIDABLE region, which is the
+   *  population the commit gate holds out for. Never re-folded here. */
   decided: number;
   total: number;
   /** The landing step. Absent ⇒ no button — the toolbar never assumes there is somewhere to go.
@@ -127,7 +129,7 @@ export function ResolverToolbar({
 
       <div className="ml-auto flex items-center gap-2">
         <span className="text-[11px] text-gray-600 dark:text-gray-300">
-          {conflictsDecided(decided, total)}
+          {decisionsDecided(decided, total)}
         </span>
         {onLand != null && (
           <button

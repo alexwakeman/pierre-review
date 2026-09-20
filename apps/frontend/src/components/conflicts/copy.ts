@@ -1,5 +1,6 @@
 import type { ConflictCommitPhase, ConflictRegion } from '@pierre-review/shared';
-import type { SlotDecision, SlotRole } from '../../lib/mergeResolver.js';
+import { toDecide } from '../../lib/mergeResolver.js';
+import type { PanePaint, SlotDecision, SlotRole } from '../../lib/mergeResolver.js';
 
 // ── THE RESOLVER'S WORDS ─────────────────────────────────────────────────────────────────────
 //
@@ -27,8 +28,12 @@ export const paneTheirs = (baseRef: string): string => `Changes from ${baseRef}`
 export function stateWord(region: ConflictRegion, slot: SlotDecision): string {
   if (region.kind === 'unchanged') return '';
   switch (slot.kind) {
+    // ⚠ ONE WORD FOR BOTH KINDS. "Not applied" used to sit on an undecided one-sided change back
+    // when one-sided changes were applied for you, so the phrase named a state somebody had
+    // chosen. Nothing is applied before a press now, so it is the OPENING state of every change —
+    // and the commit is blocked on it, which "Not applied" does not say.
     case 'unapplied':
-      return region.kind === 'conflict' ? 'Needs a decision' : 'Not applied';
+      return 'Needs a decision';
     case 'ignored':
       return 'Ignored';
     case 'wand':
@@ -58,6 +63,34 @@ export const WASH_CLASS: Record<Exclude<SlotRole, null>, string> = {
   ignored: 'mr-wash-ignored',
 };
 
+// ── `EDGE_CLASS` — DELETED, AND IT MUST NOT COME BACK ────────────────────────────────────────
+//
+// A side the reader turned down used to drop to a 1px outline in its own hue, on the argument that
+// "this was the other option" and "this pane has nothing here" are different facts. They are — but
+// a rejected side now paints NOTHING, `.mr-filler`'s hatch still says which pane has no lines, and
+// the strip's word still says what was decided. What the outline added on screen was a red or blue
+// rectangle around a block nobody took, beside a green one they did. `.mr-edge-*` is gone from
+// `index.css` and `resolverTokens.test.ts` asserts no such rule exists.
+
+/** The one place a pane's paint becomes a class. `''` is a real answer, and it covers four cases
+ *  now: an `unchanged` region, an undecided RESULT, a side offering nothing (`both_same`'s right,
+ *  a one-sided region's silent half) and a side the decision turned down. */
+export function paintClass(paint: PanePaint | null): string {
+  return paint == null ? '' : WASH_CLASS[paint];
+}
+
+/** The ribbon's fill class.
+ *
+ *  ⚠ A CLASS, NOT AN ATTRIBUTE. `var()` works as a CSS PROPERTY and not inside an SVG presentation
+ *  attribute, so `fill="rgb(var(--mr-applied) / 0.22)"` paints nothing at all. The path carries
+ *  this class name and `index.css` owns the value, exactly as every other colour here does.
+ *
+ *  ⚠ ONE CLASS, NOT A LOOKUP. It used to be keyed on the region's TYPE. A ribbon joins an ACCEPTED
+ *  side to the result it produced and an accepted side is green, so a type-hued band between two
+ *  green blocks was the one discontinuity in the row. See `ribbonSides`' header for the argument
+ *  this overrules. */
+export const FILL_CLASS = 'mr-fill-applied';
+
 export const RULE_CLASS: Record<Exclude<SlotRole, null>, string> = {
   change: 'mr-rule-change',
   conflict: 'mr-rule-conflict',
@@ -81,6 +114,25 @@ export function regionGroupLabel(
   const noun = region.kind === 'conflict' ? 'Conflict' : 'Change';
   return `${noun} ${ordinal} of ${total} in ${path}`;
 }
+
+/**
+ * The two gutter arrows' ACCESSIBLE NAME — the strip's verb plus the position `regionGroupLabel`
+ * already spells.
+ *
+ * ⚠ THE POSITION IS NOT PADDING HERE, IT IS THE ONLY COPY OF IT THESE CONTROLS GET. The strip's
+ * `role="group"` announces "Conflict 2 of 5 in src/foo.ts" around everything inside it; the gutter
+ * arrows live in their own grid cells, two columns away, so they are outside that group and a name
+ * of "Take your version" alone would read as one of several hundred identical buttons with nothing
+ * saying which change it belongs to. The visible tooltip stays the short verb — this is the long
+ * form, for a reader who cannot see which row the pointer is on.
+ */
+export const gutterLabel = (
+  action: string,
+  region: ConflictRegion,
+  ordinal: number,
+  total: number,
+  path: string,
+): string => `${action} — ${regionGroupLabel(region, ordinal, total, path)}`;
 
 /** The button labels. Icon-only controls, so these are the accessible names AND the tooltips —
  *  which is why each is a whole instruction rather than a word. */
@@ -107,9 +159,11 @@ export const UNDO_LAST = 'Undo';
 export const unsupportedHeadline = (n: number): string =>
   `${n} file${n === 1 ? '' : 's'} need resolving on GitHub.`;
 export const fileCount = (decided: number, total: number): string => `${decided} of ${total} files`;
-/** ⚠ RE-EXPORTED, NOT RE-SPELLED — it is declared in `lib/mergeResolver.ts`, where the two
- *  folds that fall back to it live. */
-export { CANT_RESOLVE_HERE } from '../../lib/mergeResolver.js';
+/** ⚠ RE-EXPORTED, NOT RE-SPELLED — declared in `lib/mergeResolver.ts`, where the folds that use
+ *  them live. A library may not import from `components/`, so the declaration is there and the
+ *  vocabulary is readable here. */
+export { CANT_RESOLVE_HERE, NOTHING_TO_DECIDE } from '../../lib/mergeResolver.js';
+export { toDecide };
 
 /** The banners above the panes — facts about the model, stated once. */
 export const RENAME_DETECTION_OFF =
@@ -123,9 +177,26 @@ export const NARROW_PANES =
 export const showUnchanged = (n: number): string => `Show ${n} unchanged line${n === 1 ? '' : 's'}`;
 export const HIDE_UNCHANGED = 'Hide unchanged lines';
 
-/** The status line. */
-export const conflictsDecided = (decided: number, total: number): string =>
-  total === 0 ? 'Nothing contested in this pull request.' : `${decided} of ${total} conflicts decided`;
+/**
+ * The status line — the toolbar's and the footer's, which are the SAME number read off the SAME
+ * `CommitPlan`.
+ *
+ * ⚠ ITS POPULATION IS THE COMMIT GATE'S. It used to count contested regions only, which could
+ * read "3 of 3 conflicts decided" beside a Commit button held shut by four one-sided changes
+ * nobody had answered. Every decidable region is the reader's to answer now, so the counter
+ * counts exactly what the gate holds out for.
+ */
+export const decisionsDecided = (decided: number, total: number): string =>
+  total === 0 ? 'Nothing to decide in this pull request.' : `${decided} of ${total} changes decided`;
+
+/** What the overlay says while the model is still being read — the panes' notice AND the footer's
+ *  fallback, which is the same moment seen from two places.
+ *
+ *  ⚠ THE FOOTER MUST NOT SAY "Nothing to decide yet" HERE. `decisionsDecided(0, 0)` already means
+ *  "there is nothing in this pull request to decide", and a fallback saying the same thing while
+ *  the files are still arriving asserts a fact about the pull request nobody has established — a
+ *  second later it flips to "12 of 12 changes decided". */
+export const READING_FILES = 'Reading the conflicting files…';
 
 // ── THE LANDING STEP ─────────────────────────────────────────────────────────────────────────
 //
@@ -138,10 +209,38 @@ export const CONTINUE_TO_COMMIT = 'Continue';
 export const WHAT_GOES_IN = 'What is being committed';
 export const filesResolved = (resolved: number, total: number): string =>
   `${resolved} of ${total} file${total === 1 ? '' : 's'} resolved`;
+/** ⚠ EVERY FILE THIS COMMIT WILL NOT CARRY AND THE READER CANNOT FINISH. A half-decided file
+ *  BLOCKS the commit now instead of being dropped from it, so it is in "Still to decide" above,
+ *  not here. What is left is the model's own exclusions: a file it cannot represent, and a
+ *  supported file it found nothing decidable in. Both stay conflicted on GitHub, and both have to
+ *  be NAMED — a file dropped from a commit with nothing on screen about it is the silent exclusion
+ *  the whole gate exists to end. */
 export const STILL_CONFLICTED = 'Still conflicted:';
 export const STAYS_CONFLICTED =
   'This pull request stays conflicted until these are resolved too.';
-export const NOTHING_DECIDED_YET = 'Decide a whole file before committing.';
+
+/** The blocked half: the files still holding the commit shut, each with a click that goes there.
+ *  ⚠ THE SENTENCE CARRIES THE TOTAL AND THE ROWS CARRY THE PER-FILE COUNT, so neither number has
+ *  to stand in for the other.
+ *  ⚠ THE COLON MATCHES `STILL_CONFLICTED`'s. They are two sibling headings four lines apart in one
+ *  section; punctuating one and not the other reads as an oversight. */
+export const STILL_TO_DECIDE = 'Still to decide:';
+export const decideTheRest = (n: number): string =>
+  `${n} change${n === 1 ? '' : 's'} left to decide.`;
+/** ⚠ IT CARRIES BOTH VISIBLE SPANS. The row renders the path AND the per-file remainder, and an
+ *  `aria-label` REPLACES the whole subtree — a name of "Go to src/foo.ts" alone leaves a screen
+ *  reader with no remainder anywhere on the screen (the sentence above is the cross-file total),
+ *  and drops the visible "3 to decide" out of the accessible name, which is WCAG 2.5.3. */
+export const jumpToFileLabel = (path: string, remaining: number): string =>
+  `Go to ${path}, ${toDecide(remaining)}`;
+
+/** Nothing in the commit and nothing the reader can do about it here: every file is either one
+ *  the model cannot represent or one it found nothing decidable in.
+ *  ⚠ IT IS NOT `unsupportedHeadline`. That sentence counts UNSUPPORTED files and says GitHub is
+ *  where they are resolved; it was being handed `rows.length` — every file — and fired on
+ *  perfectly supported ones, so a blocked button explained itself with a false sentence. */
+export const NOTHING_TO_COMMIT =
+  'Nothing here can be committed. These files have to be finished on GitHub.';
 
 /**
  * ⚠ THE ONE SENTENCE HERE THAT NEEDS MORE WORDS, NOT FEWER.
@@ -265,17 +364,24 @@ export const OPEN_COMPARE = 'Open the compare view';
  *  it. */
 export const DECISIONS_KEPT = 'Your decisions are kept until you reload.';
 
+/** ⚠ THE SAME POPULATION AS THE COUNTER ABOVE IT — every decidable region, off the one
+ *  `CommitPlan`. It used to count contested regions, so a reader who had answered fifteen
+ *  one-sided changes and no conflicts was asked to confirm under the sentence "0 of 3 conflicts
+ *  resolved". */
 export const closeConfirmQuestion = (decided: number, total: number): string =>
-  `${decided} of ${total} conflicts resolved, nothing pushed. Your choices are kept until you reload.`;
+  `${decided} of ${total} changes decided, nothing pushed. Your choices are kept until you reload.`;
 export const KEEP_WORKING = 'Keep working';
 export const CLOSE_ANYWAY = 'Close';
 
 /**
- * ⚠ A COUNT, NOT A FRACTION, AND THAT IS DELIBERATE. `ClosedResolver.decidedCount` is every region
- * the reader answered INCLUDING the auto-applied one-sided changes nobody was asked about, while
- * the header's denominator is CONTESTED regions only — pairing the two prints "31 of 8". The
- * overlay can say "6 of 9 conflicts" because it still has the loaded files to fold; the toast
- * outlives them, so it says the one number it actually holds.
+ * ⚠ A COUNT, NOT A FRACTION, AND THAT IS DELIBERATE. `ClosedResolver.decidedCount` counts every
+ * DECIDABLE region the reader answered, while the store's other number, `conflictCount`, is
+ * CONTESTED regions only — pairing those two on this record prints "31 of 8". Nothing seeds a
+ * decision any more, so the numerator is honest, but the two fields are still two populations.
+ *
+ * ⚠ AND THE TOAST CANNOT REBUILD A DENOMINATOR ANYWAY. It outlives the loaded files AND the
+ * manifest, so the overlay's "9 of 12 changes decided" is not available to it. It says the one
+ * number it actually holds.
  */
 export const closedToast = (decided: number): string =>
   `Conflict resolver closed — ${decided} decision${decided === 1 ? '' : 's'} kept, nothing pushed.`;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type {
   ConflictCommitBody,
   ConflictCommitTarget,
@@ -9,8 +9,8 @@ import type {
 } from '@pierre-review/shared';
 import {
   buildCommitBody,
-  commitPlan,
   landingTargets,
+  type CommitPlan,
   type LandingFileRow,
 } from '../../lib/conflictCommit.js';
 import { checkBranchName, branchNameMessage } from '../../lib/branchName.js';
@@ -27,24 +27,28 @@ import {
   LANDING_BACK,
   NEW_BRANCH,
   NEW_BRANCH_FIELD,
-  NOTHING_DECIDED_YET,
   NOTHING_PUSHED,
+  NOTHING_TO_COMMIT,
   OPEN_PR_FOR_BRANCH,
   PARTIAL_COMMIT_NOTE,
   REBASE_AND_FORCE_PUSH,
   START_AGAIN,
   STAYS_CONFLICTED,
   STILL_CONFLICTED,
+  STILL_TO_DECIDE,
   STRATEGY_MERGE,
   STRATEGY_MERGE_FULL,
   STRATEGY_MERGE_PARTIAL,
   STRATEGY_REBASE,
   WHAT_GOES_IN,
   WHERE_TO_PUT_IT,
+  decideTheRest,
   filesResolved,
+  jumpToFileLabel,
   pinnedOn,
   pushToBranch,
   strategyRebaseDetail,
+  toDecide,
 } from './copy.js';
 
 // ── THE LANDING STEP ─────────────────────────────────────────────────────────────────────────
@@ -64,11 +68,13 @@ export function LandingStep({
   session,
   sessionKey,
   files,
+  plan,
   headMoved,
   autoMergeArmed,
   commitError,
   connectionLost,
   onBack,
+  onJumpToFile,
   onCommit,
   onRestart,
   onClose,
@@ -76,6 +82,10 @@ export function LandingStep({
   session: ConflictSession;
   sessionKey: string;
   files: Record<number, ConflictFileContent>;
+  /** ⚠ THE ONE GATE, FOLDED ONCE IN THE SHELL. This screen asks it what is going in, what is
+   *  still outstanding and whether the commit may go at all; the button and the list under it
+   *  cannot disagree because there is only one fold. */
+  plan: CommitPlan;
   /** The PR's head moved on GitHub since the model was pinned. Disables the commit. */
   headMoved: boolean;
   /** `usePrArmedIntent(prId) != null` — a live "merge when ready" row, not a local flag. */
@@ -88,6 +98,8 @@ export function LandingStep({
    *  ⚠ NOT a failure — see the `running` branch below and `COMMIT_UNCONFIRMED`. */
   connectionLost: boolean;
   onBack: () => void;
+  /** Go back to the panes with the cursor on that file's first unanswered region. */
+  onJumpToFile: (index: number) => void;
   onCommit: (body: ConflictCommitBody) => void;
   onRestart: () => void;
   /**
@@ -126,7 +138,6 @@ export function LandingStep({
     if (commitError != null) setSubmitted(false);
   }, [commitError]);
 
-  const plan = useMemo(() => commitPlan(session, files, decisions), [session, files, decisions]);
   const commit = session.commit;
   const failed = commit?.status === 'failed' || commitError != null;
   const running = !failed && (submitted || commit?.status === 'running');
@@ -147,8 +158,34 @@ export function LandingStep({
           reserved: session.reservedBranchNames,
         });
 
-  const nothingToCommit = plan.resolved.length === 0;
-  const blocked = headMoved || nothingToCommit || branchProblem != null || running;
+  // ⚠ THE HARD GATE. `plan.canCommit` is FALSE while any supported file still holds an unanswered
+  // region — the whole point of the change: a half-decided file used to be dropped from the
+  // commit silently and listed as "Still conflicted". Nothing is excluded from a commit without
+  // the reader choosing it now.
+  const blocked = headMoved || !plan.canCommit || branchProblem != null || running;
+
+  // ⚠ EVERY FILE THIS COMMIT WILL NOT CARRY, MINUS THE ONES ALREADY NAMED ABOVE — folded in
+  // `conflictCommit.ts` beside the gate, not narrowed here. See `CommitPlan.notCarried`: it is
+  // deliberately NOT "the unsupported ones", because a supported file with nothing decidable in it
+  // is also dropped from the commit and also has to be seen.
+  const cantFinishHere = plan.notCarried;
+
+  /** ONE sentence for why the button will not go, rendered above it AND given to `title`. A bare
+   *  disabled button used to be the whole explanation on three of its four reasons. */
+  const blockedReason =
+    headMoved
+      ? HEAD_MOVED
+      : plan.outstanding.length > 0
+        ? decideTheRest(plan.decidableTotal - plan.decidedTotal)
+        : plan.resolved.length === 0
+          ? // ⚠ NOT `unsupportedHeadline`, AND NOT `plan.rows.length`. This branch fires whenever
+            // nothing reached the commit, which includes a pull request of perfectly supported
+            // files the model found nothing decidable in — telling that reader "1 file needs
+            // resolving on GitHub." was both the wrong count and a false claim. The list above
+            // names each file with its own reason; this says only what the button cannot do.
+            NOTHING_TO_COMMIT
+          : // The branch field prints its own refusal right beside itself — not twice.
+            null;
 
   function submit(): void {
     if (blocked) return;
@@ -157,7 +194,7 @@ export function LandingStep({
       : { kind: 'pr_branch' };
     setSubmitted(true);
     onCommit(
-      buildCommitBody({ session, loaded: files, decisions, suggestionIds, strategy, target }),
+      buildCommitBody({ session, plan, loaded: files, decisions, suggestionIds, strategy, target }),
     );
   }
 
@@ -177,12 +214,43 @@ export function LandingStep({
             {filesResolved(plan.resolved.length, plan.totalFiles)}
           </p>
           <PathList rows={plan.resolved} />
-          {plan.stillConflicted.length > 0 && (
+          {/* ⚠ THE BLOCKING LIST, ABOVE THE INFORMATIONAL ONE. These are files the reader can
+              finish; "Still conflicted" below is files GitHub has to finish. Each row is a real
+              <button> — it navigates, so it needs the keyboard. */}
+          {plan.outstanding.length > 0 && (
+            <>
+              <p className="mt-2 text-[12px] text-gray-800 dark:text-gray-100">
+                {STILL_TO_DECIDE}
+              </p>
+              <ul className="mt-0.5">
+                {plan.outstanding.map((row) => (
+                  <li key={row.index}>
+                    <button
+                      type="button"
+                      onClick={() => onJumpToFile(row.index)}
+                      // ⚠ IT REPEATS BOTH VISIBLE SPANS. An `aria-label` replaces the whole
+                      // subtree, so a name of "Go to <path>" alone would drop the per-file
+                      // remainder out of the accessible name — and that remainder appears nowhere
+                      // else for a screen-reader user.
+                      aria-label={jumpToFileLabel(row.path, row.remaining)}
+                      className="flex w-full flex-wrap items-baseline gap-x-2 rounded px-1 py-0.5 text-left text-[12px] hover:bg-gray-100 dark:hover:bg-gray-800"
+                    >
+                      <span className="font-mono text-gray-800 dark:text-gray-100">{row.path}</span>
+                      <span className="text-gray-600 dark:text-gray-300">
+                        {toDecide(row.remaining)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {cantFinishHere.length > 0 && (
             <>
               <p className="mt-2 text-[12px] text-gray-800 dark:text-gray-100">
                 {STILL_CONFLICTED}
               </p>
-              <PathList rows={plan.stillConflicted} withLabel />
+              <PathList rows={cantFinishHere} withLabel />
               <p className="mt-1 text-[12px] text-gray-700 dark:text-gray-200">
                 {STAYS_CONFLICTED}
               </p>
@@ -294,9 +362,6 @@ export function LandingStep({
           {autoMergeArmed && (
             <p className="text-[12px] text-gray-800 dark:text-gray-100">{AUTO_MERGE_ARMED}</p>
           )}
-          {nothingToCommit && (
-            <p className="text-[12px] text-gray-800 dark:text-gray-100">{NOTHING_DECIDED_YET}</p>
-          )}
 
           {failed ? (
             // ⚠ THE DECISIONS ARE UNTOUCHED. A refusal is the server declining to write anything,
@@ -346,17 +411,27 @@ export function LandingStep({
               {commit?.phase != null ? COMMIT_SENTENCE[commit.phase] : 'Starting…'}
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <SecondaryButton onClick={onBack}>{LANDING_BACK}</SecondaryButton>
-              <button
-                type="button"
-                onClick={submit}
-                disabled={blocked}
-                title={headMoved ? HEAD_MOVED : undefined}
-                className="rounded bg-gray-900 px-3 py-1 text-xs font-medium text-white disabled:opacity-40 dark:bg-gray-100 dark:text-gray-900"
-              >
-                {strategy === 'rebase' ? REBASE_AND_FORCE_PUSH : COMMIT_AND_PUSH}
-              </button>
+            <div className="flex flex-col gap-2">
+              {/* The reason sits ABOVE the button and is its description — a disabled control
+                  whose reason lives nowhere is the defect this replaces. */}
+              {blockedReason != null && (
+                <p id={BLOCKED_REASON_ID} className="text-[12px] text-gray-800 dark:text-gray-100">
+                  {blockedReason}
+                </p>
+              )}
+              <div className="flex items-center gap-2">
+                <SecondaryButton onClick={onBack}>{LANDING_BACK}</SecondaryButton>
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={blocked}
+                  title={blockedReason ?? undefined}
+                  aria-describedby={blockedReason != null ? BLOCKED_REASON_ID : undefined}
+                  className="rounded bg-gray-900 px-3 py-1 text-xs font-medium text-white disabled:opacity-40 dark:bg-gray-100 dark:text-gray-900"
+                >
+                  {strategy === 'rebase' ? REBASE_AND_FORCE_PUSH : COMMIT_AND_PUSH}
+                </button>
+              </div>
             </div>
           )}
         </section>
@@ -372,7 +447,8 @@ function SectionHeading({ children }: { children: React.ReactNode }): JSX.Elemen
 }
 
 /** The paths, one per line, monospace. `withLabel` is the "Still conflicted" list, where each row
- *  carries WHY — the server's noun phrase for an unsupported file, ours for a half-decided one. */
+ *  carries WHY — the server's noun phrase for a file the model cannot represent, ours ("Nothing to
+ *  decide") for a supported one it found nothing decidable in. */
 function PathList({
   rows,
   withLabel = false,
@@ -460,6 +536,9 @@ function SecondaryButton({
     </button>
   );
 }
+
+/** The commit button's `aria-describedby` target. One view, one button, so one id. */
+const BLOCKED_REASON_ID = 'conflict-commit-blocked-reason';
 
 const EMPTY_DECISIONS: Readonly<Record<string, ConflictDecision>> = Object.freeze({});
 const EMPTY_SUGGESTIONS: Readonly<Record<string, string>> = Object.freeze({});

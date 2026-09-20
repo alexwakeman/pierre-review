@@ -14,19 +14,35 @@ import { INK_CLASS, actionLabels, regionGroupLabel, stateWord } from './copy.js'
 
 // ── THE CONTROL SET FOR ONE REGION ───────────────────────────────────────────────────────────
 //
-// ⚠ THIS STRIP IS THE ALWAYS-VISIBLE, KEYBOARD-REACHABLE SET. The two gutter arrows beside the
-// panes are a hover-revealed DUPLICATE for mouse speed, and nothing in the resolver is reachable
-// only by hovering — a merge tool that hides its verbs behind a pointer is unusable with a
-// keyboard and unusable on a touch screen.
+// ⚠ "TAKE THIS SIDE" IS NOT ON THIS STRIP ANY MORE — IT IS THE GUTTER ARROW, AND THERE IS NOW
+// ONLY ONE OF IT. `ours` and `theirs` used to sit at the head of this strip AND again as a
+// hover-revealed arrow in each gutter: one verb, two controls, every region announcing as a pair
+// of identical buttons. The arrow won the job because it sits beside the pane whose lines it
+// takes and points into the result, which is the whole sentence without a word in it. It is now
+// ALWAYS drawn, carries a real name and a real tab stop, and is no longer `aria-hidden` — see
+// `SlotRow`'s `gutter`. The rule that nothing in the resolver is reachable only by hovering did
+// not change; the control that has to obey it did.
+//
+// What is left here is every verb that is NOT about one side: both orders, the order swap, the
+// wand, ignore, Ask Claude and undo — plus the state word, which is the encoding that survives a
+// reader who cannot separate the hues, and the only thing that still tells `Ignored` from
+// `Needs a decision` now that neither paints a side.
+//
+// ⚠ EXCEPT WHEN THE PANES ARE STACKED. Below `NARROW_PX` there are no gutter tracks to put an
+// arrow in, so `sideTakes` puts the two side verbs back here. One control per verb in EACH
+// layout — not a duplicate, a relocation.
 //
 // ⚠ ROVING TAB STOPS. Only the ACTIVE region's buttons are in the tab order; every other strip's
-// are `tabIndex={-1}`. Four hundred regions is four hundred strips, and without this Tab walks
-// two thousand buttons before it reaches the toolbar. The single-key bindings on the panes
-// container (`←`/`→`/`b`/`x`/`u`) reach every control on the active region without tabbing at all.
+// are `tabIndex={-1}`, and `SlotRow`'s two gutter arrows read the same `active` prop so they obey
+// the same scheme. Four hundred regions is four hundred strips, and without this Tab walks two
+// thousand buttons before it reaches the toolbar. The single-key bindings on the panes container
+// (`←`/`→`/`b`/`x`/`u`) reach every control on the active region without tabbing at all.
 //
 // ⚠ `role="group"` + `aria-label` LIVE HERE, NOT ON THE ROW. The row wrapper is
 // `display: contents`, which removes it from the accessibility tree entirely, so the grouping and
-// the "Conflict 2 of 5 in src/…" position have nowhere else to go.
+// the "Conflict 2 of 5 in src/…" position have nowhere else to go. The gutter arrows sit in their
+// own grid cells OUTSIDE this group, which is why each of them names its own position — see
+// `gutterLabel` in `copy.ts`.
 
 const BTN =
   'flex items-center gap-1 rounded border px-1 py-0.5 text-[11px] leading-none transition-colors ' +
@@ -46,6 +62,7 @@ export function SlotStrip({
   path,
   baseRef,
   active,
+  sideTakes,
   onAskClaude,
   askInFlight,
   onActivate,
@@ -60,6 +77,9 @@ export function SlotStrip({
   path: string;
   baseRef: string;
   active: boolean;
+  /** The panes are stacked, so there are no gutter tracks and the two single-side takes have
+   *  nowhere else to live. See the header: a relocation, never a second copy. */
+  sideTakes: boolean;
   /** Offer "Ask Claude" on this region. Absent ⇒ the control does not render AT ALL — the reader
    *  is unentitled, or the resolver is running somewhere the plugin is not. ABSENT, NEVER LOCKED:
    *  a lock inside a screen already doing its whole job would advertise into a working feature. */
@@ -115,9 +135,11 @@ export function SlotStrip({
       <span className={`mr-1 text-[11px] font-medium ${role == null ? '' : INK_CLASS[role]}`}>
         {stateWord(region, slot)}
       </span>
-      {allows('ours') &&
+      {sideTakes &&
+        allows('ours') &&
         button('ours', slot.kind === 'left', labels.left, <AcceptLeftIcon size={13} />, 'ours')}
-      {allows('theirs') &&
+      {sideTakes &&
+        allows('theirs') &&
         button('theirs', slot.kind === 'right', labels.right, <AcceptRightIcon size={13} />, 'theirs')}
       {allows('both_ours_first') &&
         button(

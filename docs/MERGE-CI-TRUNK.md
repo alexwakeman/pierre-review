@@ -203,6 +203,55 @@ RIGHT is the base branch ("Changes from `<base>`"), CENTRE is the result — see
 and changed only by per-region decisions. The ancestor is a popover (`BasePopover`), because it is
 the thing the other two are both changes TO rather than a fourth option.
 
+**Nothing is applied until the reader presses something.** The SPA opens every session with
+`autoApply: false` — on BOTH open arms in `hooks/useConflictSession.ts`, because `claimSession`
+re-attaches a LIVE session and ignores the flag on that path — and there is no client-side seeding
+pass either: `autoApplyMoves` is DELETED and must not come back. The centre pane therefore opens
+with no wash at all and every decidable region reads "Needs a decision". ⚠ **The server knob stays**
+— `ConflictOpenBody.autoApply` and `defaultDecisionFor` are untouched; what changed is the value the
+SPA sends, which is now the contract. ⚠ **Do NOT bump `CONFLICT_MODEL_VERSION` for it**: `autoApply`
+changes which decision a region STARTS on, not what the region IS, which is exactly why `hash.ts`
+leaves it out of the model hash — a defensive bump would throw away every live session's decisions.
+
+**The commit is HARD BLOCKED until every decidable region in every supported file is decided.**
+`CommitPlan.canCommit` (`lib/conflictCommit.ts`) is the ONE gate, folded ONCE in the shell and handed
+down to the panes, the landing step, the footer, the close confirm and the result panel, so no two of
+them can disagree. `outstanding` is every supported file with an unanswered region, counted off the
+MANIFEST's `decidableCount` so a file nobody opened still blocks, and the landing step lists each as
+a `<button>` that jumps to that file's first unanswered region. ⚠ **A half-decided file is no longer
+dropped from the commit and labelled "Still conflicted"** — nothing is excluded from a commit without
+the reader choosing it. ⚠ **"Still conflicted" is `CommitPlan.notCarried`, which is NOT "the
+unsupported ones"**: a SUPPORTED file whose regions all came out `unchanged` (a mode-only conflict,
+say) is dropped from the commit too, and narrowing that list to `state === 'unsupported'` put it
+nowhere on screen at all — the same silent exclusion one class over. ⚠ The one counter is
+`decidedTotal` / `decidableTotal`, every DECIDABLE region across the pull request; the file menu's
+trigger, its rows and the toolbar countdown all fold through it, and the wand's own sentence is per
+FILE over CONTESTED regions and says "in this file" for exactly that reason. ⚠ The route's
+`IncompleteDecisions` stays as the second line of defence — a client gate is never the gate. ⚠
+**Continue is deliberately NOT disabled**; it is the only route to the list that explains the block,
+so only Commit and push / Rebase and force-push is.
+
+**The ribbons: one filled bezier per side that actually put content into the result**
+(`components/conflicts/RegionRibbons.tsx`), drawn across the 1.75rem gutter track from the accepted
+hunk's near edge to the centre hunk's, in the applied GREEN — **one class, `.mr-fill-applied`**,
+because a ribbon joins an accepted side (green) to the result (green) and a type-hued band between
+them read as a third, different thing. `ribbonSides()` (beside `panePaint`, so the two cannot
+drift) is the rule: `ours` → left, `theirs` → right, both-orders and wand/suggestion → both, and ⚠
+**`base`/ignored and UNDECIDED draw nothing at all** — that is where it still differs from the
+wash, which paints every OFFERED side of an undecided region (`sideOffered`) in the conflict type;
+a ribbon claims content reached the result, which nothing has yet. ⚠ It reads `sideOffered` too, so
+a ribbon can never leave a pane the wash left bare. ⚠ **THE OVERLAY ONLY EVER READS GEOMETRY**: it holds no React
+state, never writes `scrollTop`, never calls `focus()` and gives no pane a scroller of its own — it
+is a read-only exception to the one-scroller invariant below, built the way
+`Timeline/index.tsx`'s `drawCrossConnectors` is (imperative SVG into a `DocumentFragment`,
+`replaceChildren`, rAF-coalesced, `pointer-events: none`, `aria-hidden`). Cell rects are cached in
+CONTENT coordinates on a structural change only, so a scroll frame is arithmetic and no
+`getBoundingClientRect()` at all; a region fully off the page is culled on the UNION of its two
+boxes, and one whose far end has scrolled past the fold is drawn in full and CLIPPED, never
+clamped. ⚠ **`.mr-ribbons` carries no z-index on purpose** — positioned at z-index `auto` it paints
+under the panes' sticky `z-10` headers. ⚠ **`CONFLICT_MODEL_VERSION` IS NOT BUMPED FOR ANY OF
+THIS**: it pins what bytes a decision produces, and a shape over the gutter produces none.
+
 **Hunk-level accept/ignore only. There is no typing anywhere.** `ConflictDecision` is a closed enum
 — `base` · `ours` · `theirs` · `both_ours_first` · `both_theirs_first` · `disjoint_merge` ·
 `suggestion` — and ⚠ **there is no `custom` member and there must never be one.** That is a property
@@ -229,8 +278,9 @@ submodule, symlink, file/directory, rename/rename, rename/delete, modify/delete,
 non-UTF-8, too big, too many conflicts, no shared history, engine disagreement, budget exhausted) is
 ⚠ **listed and DISABLED, never hidden** — an unlisted file is why the PR stays conflicted after a
 commit with nothing on screen to explain it. Each carries a NOUN PHRASE naming the reason, and the
-panel states the instruction once above the list. A commit may be partial; `stillConflicting` says
-so and the PR stays conflicted.
+panel states the instruction once above the list. A commit may be partial — but only because of these files,
+since every SUPPORTED file must be fully decided before the button goes (see the gate above);
+`stillConflicting` says so and the PR stays conflicted.
 
 **Landing: merge or rebase, and rebase is single-commit only.** `merge` builds a two-parent commit
 when every conflicted file was resolved and a one-parent commit when it was partial — ⚠ **a partial

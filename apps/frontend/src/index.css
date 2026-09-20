@@ -1381,12 +1381,30 @@ body {
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
    MERGE-CONFLICT RESOLVER — the four semantic colours, and the code cell's ground
 
-   Four roles, and every one of them is a STATE the reader acts on, not a decoration:
+   Four roles: TWO CONFLICT TYPES and TWO DECISION STATES, and not one of them is a decoration:
 
-     change    a side changed these lines and nothing has been decided about it yet
-     conflict  both sides changed these lines, differently
-     applied   a decision was taken and it puts a change into the result
-     ignored   a decision was taken and it keeps the ancestor's lines
+     change    ONE side changed these lines — a TYPE, worn by a side pane while the region is
+               still undecided
+     conflict  both sides changed these lines, differently — a TYPE, same rule
+     applied   these lines are in the result — a STATE, worn by the centre AND by a side whose
+               lines were taken
+     ignored   a decision was taken and it keeps the ancestor's lines — a STATE
+
+   ⚠ WHICH PANE WEARS WHICH IS NOT ONE ANSWER. A SIDE pane is painted ONLY while it is offering
+   the reader something (`region.allowed` names its button's decision — so `both_same` paints the
+   LEFT only, and `ours_only` never paints the right), in the conflict type while undecided and in
+   `applied` green once its lines went into the result. A side the decision turned down, and both
+   sides of an ignored region, paint NOTHING. The CENTRE pane wears the state: NOTHING while the
+   region is undecided, then `applied` or `ignored`. `lib/mergeResolver.ts`'s `panePaint` is the
+   one place that decides; this file only owns the values.
+
+   ⚠ TWO RULES WERE REVERSED HERE AND THE REASONING IS KEPT RATHER THAN DELETED. A side used to
+   keep its conflict type for the life of the region ("a side is a piece of somebody's branch") and
+   a turned-down side used to drop to a 1px outline in the same hue (`.mr-edge-*`, now deleted)
+   rather than lose its paint, on the argument that "this was the other option" and "this pane has
+   nothing here" are different facts. They are — but on screen that left a red block feeding a green
+   result through a red ribbon, all three describing one accepted change, and it put a wash over a
+   pane with no lines and no button. `.mr-filler`'s hatch owns "nothing here" alone now.
 
    ⚠ `--mr-conflict` IS NOT `--ai-signal`. Vermilion is the AI surface's accent and the Pro badge
    draws in it; a merge conflict is not an AI marker, and borrowing that hue would make every
@@ -1437,6 +1455,14 @@ body {
   background: rgb(var(--mr-ignored) / 0.1);
 }
 
+/* ── `.mr-edge-*` — DELETED, AND IT MUST NOT COME BACK ───────────────────────────────────────
+   A side the reader turned down used to keep a 1px inset outline in its own hue (at 0.7, measured
+   clear of WCAG 1.4.11's 3:1) in place of its wash. It is gone: a rejected side, and both sides of
+   an ignored region, now paint nothing at all. The fact it encoded — "this was the other option" —
+   is carried by the strip's word and by the region still being there to re-decide, and what the
+   outline actually did on screen was ring an untaken block in red beside the green one that won.
+   `test/resolverTokens.test.ts` asserts no `.mr-edge-` rule exists. */
+
 /* The ink. Used for the strip's state word and the centre cell's 2px rule — three encodings per
    region (wash, rule, word) so the state survives a reader who cannot separate these hues. */
 .mr-ink-change {
@@ -1473,6 +1499,66 @@ body {
     rgb(var(--mr-ignored) / 0.14) 0 1px,
     transparent 1px 7px
   );
+}
+
+/* ── THE RIBBONS ─────────────────────────────────────────────────────────────────────────────
+   The filled bezier that joins an ACCEPTED hunk to the result it produced, drawn across the
+   1.75rem gutter track by `components/conflicts/RegionRibbons.tsx`.
+
+   ⚠ NO `z-index`, AND THAT IS THE WHOLE STICKY-HEADER STORY. The overlay is positioned with
+   z-index `auto`, so it paints in step 8 of the painting algorithm while the panes' sticky headers
+   (`z-10`) paint in step 9 — above it, regardless of tree order. Giving this rule a z-index would
+   put the ribbons over the headers.
+
+   ⚠ `pointer-events: none` IS NOT COSMETIC, AND IT IS NOT THE WHOLE STORY EITHER. The overlay
+   covers the gutter track, whose accept arrows are the ONLY pointer route to "take this side"
+   (they are always drawn now, and the strip no longer carries that verb), and the scroller's own
+   wheel surface — `pointer-events` keeps those CLICKABLE. It does not keep them UNOBSCURED: a
+   z-auto positioned overlay paints above a non-positioned child, so the arrow would be drawn
+   through a 0.22 fill. `SlotRow`'s gutter cell carries `relative z-[1]` for exactly that, which
+   puts it over the ribbons and still under the headers' `z-10`.
+
+   ⚠ `overflow: hidden` IS THE CLIP. A ribbon whose far end has scrolled past the fold is drawn in
+   full and cut here — clamping its coordinates instead would bend the curve and move the apparent
+   edge of a hunk, which is a lie about where that hunk is.
+
+   ⚠ `width: 100%` IS LOAD-BEARING, AND `left: 0; right: 0` DOES NOT REPLACE IT. An `<svg>` is a
+   REPLACED element, so CSS 2.1 §10.3.8 gives an absolutely-positioned one its INTRINSIC width and
+   simply ignores `right` as over-constrained — the default 300x150. The overlay therefore sized
+   itself to 300px while the gutter it draws in sits at x≈555, and `overflow: hidden` clipped every
+   ribbon away: correct paths, correct coordinates, nothing on screen. Height escaped it only
+   because `RegionRibbons` writes that one inline. Do not "tidy" this back to the two offsets. */
+.mr-ribbons {
+  position: absolute;
+  left: 0;
+  right: 0;
+  width: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* ⚠ ONE FILL, IN THE APPLIED GREEN — NOT THE REGION'S CONFLICT TYPE. A ribbon leaves a side whose
+   lines were TAKEN, and such a side is now green, and it lands on a green result: a type-hued band
+   between two green blocks was the one discontinuity left in the row. The argument it overrules is
+   worth keeping, because it was right about its own facts: "a ribbon exists only once a decision
+   was taken, so keying the hue on the state would make every ribbon `applied` and the hue would
+   carry nothing". Every ribbon IS applied — the hue carrying nothing is the point, because the two
+   blocks it joins already carry everything.
+
+   ⚠ 0.22, NOT THE WASHES' 0.10–0.14. A wash is held down so it never shouts over the code it
+   tints; a ribbon sits on the BARE GUTTER with nothing to read on it, and at 0.12 it is invisible
+   at arm's length. Composited over the page ground it measures 1.42 (light) and 1.65 (dark).
+
+   ⚠ THAT IS DELIBERATELY NOT 3:1, AND THE REASON IS WRITTEN DOWN RATHER THAN ASSUMED. The ribbon
+   carries no text, and it is the FOURTH encoding of a state the wash, the centre's 2px rule and
+   the strip's word already carry — WCAG 1.4.11 exempts a redundant non-text mark. The floor
+   `test/resolverTokens.test.ts` enforces exists so nobody silently ships alpha 0.03, and so a
+   ribbon is never fainter than the wash it joins.
+
+   ⚠ NO `dark:` TWIN. `--mr-*` already flips at `:root` / `.dark`; a second rule here would be a
+   second place to keep in step. ⚠ SPACE-SEPARATED CHANNELS, as everywhere above. */
+.mr-fill-applied {
+  fill: rgb(var(--mr-applied) / 0.22);
 }
 
 /* ── SYNTAX COLOURS, SCOPED TO THE RESOLVER ──────────────────────────────────────────────────

@@ -54,6 +54,11 @@ function hexToRgb(hex: string): RGB {
 const ROLES = ['change', 'conflict', 'applied', 'ignored'] as const;
 type Role = (typeof ROLES)[number];
 
+// ⚠ NO `SIDE_ROLES` LIST ANY MORE. `change` and `conflict` are still the two hues a SIDE pane can
+// wear, but only while its region is UNDECIDED — once a decision is taken a side is `applied` green
+// or it is bare, so there is no longer a colour family keyed on "side-ness" for a test to walk.
+// See `lib/mergeResolver.ts`'s `panePaint`.
+
 /** The declaration block of a selector that actually carries `--mr-change`. There are two other
  *  `:root` blocks in this file (the AI tokens, the wordmark), so the predicate matters. */
 function blockCarrying(selector: string, marker: string): string {
@@ -99,6 +104,17 @@ function alphaFor(role: Role): number {
   return Number(m[1]);
 }
 
+/** The alpha the RIBBON paints at, read off its own rule. Same reason as `alphaFor`: the test
+ *  measures what the page paints, not what somebody remembered writing.
+ *  ⚠ ONE RULE, NOT A FAMILY — every ribbon is the applied green now. */
+function ribbonAlpha(): number {
+  const m = /\.mr-fill-applied\s*\{[^}]*fill:\s*rgb\(var\(--mr-applied\)\s*\/\s*([\d.]+)\)/.exec(
+    CSS,
+  );
+  if (m == null) throw new Error('no .mr-fill-applied rule in index.css');
+  return Number(m[1]);
+}
+
 describe('the four resolver roles', () => {
   it('declares all four in both themes, space-separated', () => {
     for (const role of ROLES) {
@@ -134,6 +150,82 @@ describe('the four resolver roles', () => {
         AA_BODY,
       );
     }
+  });
+
+  it('has no outline family at all, for any role', () => {
+    // ⚠ DELETED, NOT MERELY UNUSED, AND THE REASONING IS KEPT IN `index.css`. A side the reader
+    // turned down used to drop to a 1px inset outline in its own hue rather than lose its paint,
+    // because "this was the other option" and "this pane has nothing here" are different facts.
+    // They are — but the outline ringed an untaken block in red beside the green one that won, and
+    // a rejected side now paints nothing. A rule left behind here is a colour the next reader
+    // would reach for.
+    // ⚠ A SELECTOR, NOT A MENTION. `index.css` still NAMES `.mr-edge-*` in the comment recording
+    // why it went, and a bare `/\.mr-edge-/` fails on that prose — which would push the next
+    // reader to delete the reasoning to get the test green.
+    expect(CSS, 'no .mr-edge-* rule may survive').not.toMatch(/^\s*\.mr-edge-[\w-]*\s*[,{]/m);
+  });
+
+  it('draws a ribbon that is never fainter than the wash it joins', () => {
+    // ⚠ A RIBBON IS MEASURED AGAINST A DIFFERENT FLOOR AGAIN, AND THE REASON IS WRITTEN DOWN SO
+    // NOBODY "FIXES" IT TO 4.5 OR 3. It carries no text, so AA does not bind, and it is the FOURTH
+    // encoding of a state the wash, the centre's 2px rule and the strip's word already carry —
+    // WCAG 1.4.11 exempts a redundant non-text mark. What this pins is that the mark is actually
+    // visible: a ribbon sits on the BARE GUTTER with nothing to read on it, so a wash alpha there
+    // would be invisible at arm's length, and nobody may silently ship 0.03.
+    //
+    // ⚠ ONE FAMILY NOW, AND IT IS THE ONE IT JOINS. The ribbon leaves an accepted side and lands on
+    // the result, and both of those are `applied` green — so the wash it must not be fainter than
+    // is `applied`'s, not a per-type one.
+    const RIBBON_FLOOR = 1.25;
+    const alpha = ribbonAlpha();
+    expect(alpha, '.mr-fill-applied vs the applied wash').toBeGreaterThan(alphaFor('applied'));
+    const light = over(channels(lightInk['applied']!), alpha, LIGHT_BG);
+    const dark = over(channels(darkInk['applied']!), alpha, DARK_BG);
+    expect(contrastRatio(light, LIGHT_BG), 'light ribbon on page').toBeGreaterThanOrEqual(
+      RIBBON_FLOOR,
+    );
+    expect(contrastRatio(dark, DARK_BG), 'dark ribbon on page').toBeGreaterThanOrEqual(
+      RIBBON_FLOOR,
+    );
+  });
+
+  it('paints the ribbon from a CSS class, never an SVG attribute', () => {
+    // ⚠ `var()` WORKS AS A CSS PROPERTY AND NOT INSIDE AN SVG PRESENTATION ATTRIBUTE. A path
+    // carrying `fill="rgb(var(--mr-applied) / 0.22)"` paints nothing at all, silently — so the
+    // fill lives here as a class and `RegionRibbons` only ever sets a class name.
+    expect(blockCarrying('\\.mr-fill-applied', 'fill:'), '.mr-fill-applied').toMatch(
+      /fill:\s*rgb\(var\(--mr-applied\)\s*\//,
+    );
+    // ⚠ NO z-index ON THE OVERLAY. It is positioned with z-index `auto`, which paints it UNDER the
+    // panes' sticky headers (`z-10`); giving it one would put the ribbons over them. And
+    // `pointer-events: none` keeps the gutter's accept arrows clickable underneath.
+    const ribbons = blockCarrying('\\.mr-ribbons', 'position:');
+    expect(ribbons).toMatch(/pointer-events:\s*none/);
+    expect(ribbons).toMatch(/overflow:\s*hidden/);
+    expect(ribbons, '.mr-ribbons must not carry a z-index').not.toMatch(/z-index:/);
+    // ⚠ AN `<svg>` IS A REPLACED ELEMENT, so CSS 2.1 §10.3.8 gives an absolutely-positioned one
+    // its INTRINSIC 300x150 and ignores `right` as over-constrained — `left: 0; right: 0` sizes a
+    // div and does NOT size this. Shipped once: correct paths at correct coordinates, every one
+    // clipped out of existence by `overflow: hidden` against a 300px box, and 1,420 green tests.
+    // Nothing here can measure layout, so this asserts the one declaration that fixed it.
+    expect(ribbons, '.mr-ribbons needs an explicit width — left/right do not size an <svg>').toMatch(
+      /width:\s*100%/,
+    );
+  });
+
+  it('has exactly ONE ribbon fill, and it is the applied green', () => {
+    // ⚠ THIS TEST IS THE INVERSE OF THE ONE IT REPLACES, AND THE OLD REASONING IS RECORDED RATHER
+    // THAN DELETED. It used to assert `.mr-fill-applied` must NOT exist: "a ribbon exists only
+    // because a decision was taken, so an `.mr-fill-applied` would be every ribbon there is and the
+    // hue would carry nothing." Every ribbon IS applied — that part was right. What changed is that
+    // a hue carrying nothing is now the CORRECT outcome: the ribbon joins an accepted side (green)
+    // to the result (green), so a type-hued band between them read as a third, different thing.
+    expect(CSS, 'the ribbon paints in --mr-applied').toMatch(/\.mr-fill-applied\b/);
+    // The per-type fills are gone, and `ignored` never had one: keeping the ancestor takes no
+    // side's lines, so there is no linkage to draw.
+    expect(CSS).not.toMatch(/\.mr-fill-change\b/);
+    expect(CSS).not.toMatch(/\.mr-fill-conflict\b/);
+    expect(CSS).not.toMatch(/\.mr-fill-ignored\b/);
   });
 
   it('does not borrow the AI accent for a conflict', () => {

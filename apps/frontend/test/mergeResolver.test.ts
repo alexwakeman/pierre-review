@@ -6,11 +6,12 @@ import type {
   ConflictRegionKind,
 } from '@pierre-review/shared';
 import {
-  autoApplyMoves,
   centreLines,
-  conflictsDecidedAcross,
   fileRowState,
+  panePaint,
+  ribbonSides,
   serializeFileDecisions,
+  sideOffered,
   slotFor,
   slotRole,
   tallyFile,
@@ -75,6 +76,7 @@ const entry = (index: number, over: Partial<ConflictFileEntry> = {}): ConflictFi
   unsupportedLabel: null,
   regionCount: 3,
   conflictCount: 2,
+  decidableCount: 2,
   wandResolvableCount: 0,
   maxSideBytes: 100,
   ...over,
@@ -202,6 +204,210 @@ describe('ignored vs unapplied', () => {
   });
 });
 
+describe('what each pane paints', () => {
+  const conflict = R(1, 'conflict', { base: ['b'], ours: ['o'], theirs: ['t'] });
+  const oneSided = R(2, 'ours_only', { base: ['b'], ours: ['o'], theirs: ['b'] });
+  const paint = (
+    region: ConflictRegion,
+    decision: ConflictDecision | null,
+    pane: 'left' | 'centre' | 'right',
+  ): ReturnType<typeof panePaint> =>
+    panePaint(
+      region,
+      slotFor(region, 0, decision == null ? {} : { [`0:${region.id}`]: decision }, {}),
+      pane,
+    );
+
+  it('leaves the RESULT bare until a decision puts something in it', () => {
+    // ⚠ THE HEADLINE RULE, AND THE CENTRE IS THE PANE THE REWORK DID NOT TOUCH. Nothing is applied
+    // before the reader presses something, so the result pane may not open wearing a colour for a
+    // change nobody accepted.
+    expect(paint(conflict, null, 'centre')).toBeNull();
+    expect(paint(oneSided, null, 'centre')).toBeNull();
+    expect(paint(oneSided, 'ours', 'centre')).toBe('applied');
+    expect(paint(oneSided, 'base', 'centre')).toBe('ignored');
+  });
+
+  it('paints a side ONLY where that side has something to bring in', () => {
+    // ⚠ THE TEST IS `region.allowed`, NOT `region.kind`. A pane whose button's decision is not
+    // offered has nothing to take and no arrow to take it with, so painting it put a wash over
+    // filler hatch and invited a click no control existed for.
+    const kinds: Array<[ConflictRegionKind, ConflictDecision[], boolean, boolean]> = [
+      // kind, allowed, left painted?, right painted?
+      ['unchanged', ['base'], false, false],
+      ['ours_only', ['ours', 'base'], true, false],
+      ['theirs_only', ['theirs', 'base'], false, true],
+      // ⚠ `both_same` IS LEFT ONLY. Both branches made the same edit, the model offers
+      // `['ours','base']`, and there is nothing on the right to bring in — so main's identical
+      // copy sits there as ordinary unpainted text.
+      ['both_same', ['ours', 'base'], true, false],
+      ['conflict', ['base', 'ours', 'theirs', 'both_ours_first', 'both_theirs_first'], true, true],
+    ];
+    for (const [kind, allowed, left, right] of kinds) {
+      const region = R(9, kind, { allowed });
+      const undecided = { kind: 'unapplied' } as const;
+      expect(panePaint(region, undecided, 'left') != null, `${kind} left`).toBe(left);
+      expect(panePaint(region, undecided, 'right') != null, `${kind} right`).toBe(right);
+    }
+  });
+
+  it('wears the conflict TYPE while undecided, and the applied green once taken', () => {
+    // ⚠ THIS REVERSES THE OLD RULE ON PURPOSE. A side used to keep its type for the life of the
+    // region; it now joins the result's green the moment its lines are in the result, so the two
+    // blocks a ribbon joins read as one thing.
+    expect(paint(conflict, null, 'left')).toBe('conflict');
+    expect(paint(conflict, null, 'right')).toBe('conflict');
+    expect(paint(oneSided, null, 'left')).toBe('change');
+    expect(paint(conflict, 'ours', 'left')).toBe('applied');
+    expect(paint(conflict, 'theirs', 'right')).toBe('applied');
+    expect(paint(oneSided, 'ours', 'left')).toBe('applied');
+  });
+
+  it('paints NOTHING on a side the decision turned down', () => {
+    // ⚠ NO OUTLINE. A rejected side used to keep a 1px edge in its own hue; `.mr-edge-*` is gone
+    // and so is the `filled: false` arm that reached it.
+    const both = (d: ConflictDecision | null): [unknown, unknown] => [
+      paint(conflict, d, 'left'),
+      paint(conflict, d, 'right'),
+    ];
+    expect(both('ours')).toEqual(['applied', null]);
+    expect(both('theirs')).toEqual([null, 'applied']);
+    expect(both('both_ours_first')).toEqual(['applied', 'applied']);
+    expect(both('both_theirs_first')).toEqual(['applied', 'applied']);
+    // Keeping the ancestor takes NEITHER side, so neither is painted.
+    expect(both('base')).toEqual([null, null]);
+  });
+
+  it('greens both sides for a merge, which is what a merge is', () => {
+    const merged = R(3, 'conflict', {
+      base: ['b'],
+      ours: ['o'],
+      theirs: ['t'],
+      allowed: ['base', 'ours', 'theirs', 'disjoint_merge'],
+      wand: { decision: 'disjoint_merge', reason: 'disjoint_words' },
+      mergedLines: ['o t'],
+    });
+    expect(paint(merged, 'disjoint_merge', 'left')).toBe('applied');
+    expect(paint(merged, 'disjoint_merge', 'right')).toBe('applied');
+    expect(paint(merged, 'disjoint_merge', 'centre')).toBe('applied');
+  });
+
+  it('paints nothing at all for an unchanged region', () => {
+    const unchanged = R(4, 'unchanged', { base: ['keep'], ours: [], theirs: [] });
+    for (const pane of ['left', 'centre', 'right'] as const) {
+      expect(panePaint(unchanged, { kind: 'unapplied' }, pane)).toBeNull();
+    }
+  });
+});
+
+describe('sideOffered', () => {
+  it('reads `allowed`, so it cannot disagree with the button beside it', () => {
+    // The gutter arrow and the wash go through this one predicate. A region whose server-sent
+    // `allowed` omits a side offers nothing there, whatever its kind would suggest.
+    const odd = R(5, 'conflict', { allowed: ['ours', 'base'] });
+    expect(sideOffered(odd, 'left')).toBe(true);
+    expect(sideOffered(odd, 'right')).toBe(false);
+  });
+});
+
+describe('ribbonSides', () => {
+  const conflict = R(1, 'conflict', { base: ['b'], ours: ['o'], theirs: ['t'] });
+  const oneSided = R(2, 'ours_only', { base: ['b'], ours: ['o'], theirs: ['b'] });
+  const sides = (region: ConflictRegion, decision: ConflictDecision | null): readonly string[] =>
+    ribbonSides(
+      region,
+      slotFor(region, 0, decision == null ? {} : { [`0:${region.id}`]: decision }, {}),
+    );
+
+  it('draws nothing until a decision has been taken', () => {
+    // ⚠ THIS USED TO BE WHERE `ribbonSides` AND `panePaint` DISAGREED: an undecided region kept
+    // the wash on both sides while drawing no ribbon. They agree now — an undecided side wears the
+    // conflict TYPE and only a CONTRIBUTED side is green — and a ribbon is still a claim that a
+    // decision moved bytes, so it stays keyed on `'contributed'` alone.
+    expect(sides(conflict, null)).toEqual([]);
+    expect(sides(oneSided, null)).toEqual([]);
+  });
+
+  it('draws from the side whose lines went into the result', () => {
+    expect(sides(conflict, 'ours')).toEqual(['left']);
+    expect(sides(conflict, 'theirs')).toEqual(['right']);
+    expect(sides(oneSided, 'ours')).toEqual(['left']);
+  });
+
+  it('draws from both sides when both were taken, in either order', () => {
+    // The ribbon says where the content CAME FROM, not in what order it was laid down.
+    expect(sides(conflict, 'both_ours_first')).toEqual(['left', 'right']);
+    expect(sides(conflict, 'both_theirs_first')).toEqual(['left', 'right']);
+  });
+
+  it('draws from both sides for a merge', () => {
+    const merged = R(3, 'conflict', {
+      base: ['b'],
+      ours: ['o'],
+      theirs: ['t'],
+      allowed: ['base', 'ours', 'theirs', 'disjoint_merge'],
+      wand: { decision: 'disjoint_merge', reason: 'disjoint_words' },
+      mergedLines: ['o t'],
+    });
+    expect(sides(merged, 'disjoint_merge')).toEqual(['left', 'right']);
+  });
+
+  it('draws nothing for an ignored region, and nothing for an unchanged one', () => {
+    // ⚠ `ignored` AND `unapplied` BOTH DRAW NOTHING AND STAY DIFFERENT STATES. Keeping the
+    // ancestor is an answer that took NEITHER side's lines, so there is no linkage to draw; the
+    // counter still depends on telling it apart from a region nobody answered.
+    expect(sides(conflict, 'base')).toEqual([]);
+    const unchanged = R(4, 'unchanged', { base: ['keep'], ours: [], theirs: [] });
+    expect(ribbonSides(unchanged, { kind: 'unapplied' })).toEqual([]);
+    expect(ribbonSides(unchanged, { kind: 'ignored' })).toEqual([]);
+  });
+
+  it('agrees with the paint on every side it leaves', () => {
+    // ⚠ THE ONE INVARIANT THAT MUST HOLD BETWEEN THE TWO ENCODINGS: a ribbon may only leave a side
+    // the wash calls `applied`. A ribbon leaving a bare side would be the gutter contradicting the
+    // pane it starts from. `ribbonHue` is retired — every ribbon is the applied green now, for
+    // exactly this reason.
+    const decisions: Array<ConflictDecision | null> = [
+      null,
+      'ours',
+      'theirs',
+      'both_ours_first',
+      'both_theirs_first',
+      'base',
+    ];
+    for (const region of [conflict, oneSided]) {
+      for (const d of decisions) {
+        if (d != null && !region.allowed.includes(d)) continue;
+        const slot = slotFor(region, 0, { [`0:${region.id}`]: d ?? 'base' }, {});
+        const live = d == null ? { kind: 'unapplied' as const } : slot;
+        for (const side of ribbonSides(region, live)) {
+          expect(panePaint(region, live, side), `${region.kind}/${d}/${side}`).toBe('applied');
+        }
+      }
+    }
+  });
+
+  it('will not leave a side the region does not offer, even on a decision naming both', () => {
+    // ⚠ THE TEST ABOVE CANNOT CATCH THIS AND SKIPS EXACTLY THE CASE THAT WOULD BREAK IT — it
+    // filters on `region.allowed.includes(d)` first. `sideOutcome` answers `'contributed'` for BOTH
+    // sides of a both-order, a wand merge and an accepted suggestion WITHOUT asking whether each
+    // side is on offer, so the two encodings agree today only because `allowedDecisions` happens
+    // never to pair a both-order with a withheld side. That is reachability, not an invariant: give
+    // `both_same` a `both_ours_first` tomorrow and a ribbon comes out of an UNPAINTED right pane.
+    // Hence the same `sideOffered` gate on both folds, and hence a region built by hand to sit in
+    // the combination the server does not currently emit.
+    const lopsided = R(6, 'both_same', {
+      base: ['b'],
+      ours: ['o'],
+      theirs: ['o'],
+      allowed: ['ours', 'base', 'both_ours_first'],
+    });
+    const slot = slotFor(lopsided, 0, { '0:6': 'both_ours_first' }, {});
+    expect(panePaint(lopsided, slot, 'right'), 'the right pane offers nothing').toBeNull();
+    expect(ribbonSides(lopsided, slot), 'so no ribbon may leave it').toEqual(['left']);
+  });
+});
+
 describe('centreLines folds through the shared fold', () => {
   const region = R(1, 'conflict', { base: ['b'], ours: ['o'], theirs: ['t'] });
 
@@ -227,27 +433,12 @@ describe('centreLines folds through the shared fold', () => {
   });
 });
 
-describe('counters', () => {
-  it('takes the denominator from the manifest and the numerator from the loaded files', () => {
-    const files = [entry(0, { conflictCount: 2 }), entry(1, { conflictCount: 3 })];
-    const loaded = {
-      0: { regions: [R(1, 'conflict'), R(2, 'conflict')] },
-    };
-    // File 1 was never opened, so it carries no decisions — that is exact, not an estimate.
-    expect(conflictsDecidedAcross(files, loaded, { '0:1': 'ours' })).toEqual({
-      total: 5,
-      decided: 1,
-    });
-  });
-
-  it('leaves an unsupported file out of the denominator entirely', () => {
-    const files = [
-      entry(0, { conflictCount: 2 }),
-      entry(1, { conflictCount: 4, unsupported: 'binary', unsupportedLabel: 'Binary file' }),
-    ];
-    expect(conflictsDecidedAcross(files, {}, {})).toEqual({ total: 2, decided: 0 });
-  });
-});
+// ── `conflictsDecidedAcross` — RETIRED, AND ITS TESTS WITH IT ───────────────────────────────
+//
+// It counted CONTESTED regions only. Nothing is auto-applied any more and the commit is blocked
+// until EVERY decidable region is answered, so that pairing could print "3 of 3 conflicts
+// decided" beside a Commit button held shut. The one number lives on `CommitPlan` now
+// (`decidedTotal` / `decidableTotal`) and `test/conflictCommit.test.ts` pins it.
 
 describe('fileRowState', () => {
   it('names the reason on an unsupported row and never invents a fourth state', () => {
@@ -265,39 +456,43 @@ describe('fileRowState', () => {
     expect(fileRowState(entry(0), { decidable: 3, decided: 3, conflicts: 2, conflictsDecided: 2 })).toEqual(
       { state: 'resolved', label: 'Resolved' },
     );
+    // ⚠ EVERY DECIDABLE REGION, NOT THE CONTESTED SUBSET. This row said "2 conflicts" beside a
+    // file holding three decisions, which understated what the commit gate holds out for.
     expect(fileRowState(entry(0), { decidable: 3, decided: 0, conflicts: 2, conflictsDecided: 0 })).toEqual(
-      { state: 'conflicts', label: '2 conflicts' },
+      { state: 'conflicts', label: '3 to decide' },
     );
+  });
+
+  it('says how many an unopened file has left to decide, from the manifest', () => {
+    // ⚠ `decidableCount`, NEVER `conflictCount`. A file with no contested regions and four
+    // one-sided changes used to read "Not opened yet" with no number at all, while blocking the
+    // commit on four decisions nobody had made.
+    expect(fileRowState(entry(0, { conflictCount: 0, decidableCount: 4 }), null)).toEqual({
+      state: 'conflicts',
+      label: '4 to decide',
+    });
+    expect(fileRowState(entry(0, { conflictCount: 0, decidableCount: 0 }), null)).toEqual({
+      state: 'conflicts',
+      label: 'Nothing to decide',
+    });
   });
 
   it('⚠ a file with nothing decidable is not "Resolved" — commitPlan would not send it', () => {
     // `0 >= 0` is true, so a bare `decided >= decidable` ticks this row off in the file menu
-    // while `commitPlan` classifies it `untouched` and lists it under "Still conflicted".
+    // while `commitPlan` classifies it `untouched` and never puts it on the wire.
     expect(
       fileRowState(entry(0), { decidable: 0, decided: 0, conflicts: 0, conflictsDecided: 0 }),
     ).toEqual({ state: 'conflicts', label: 'Nothing to decide' });
   });
 });
 
-describe('autoApplyMoves', () => {
-  it('seeds only a default that APPLIES a change', () => {
-    const regions = [
-      R(1, 'ours_only', { defaultDecision: 'ours' }),
-      // `base` is the undecided start — for every contested region, and for every region when the
-      // session was opened with autoApply off. Writing it would record an answer nobody gave.
-      R(2, 'conflict', { defaultDecision: 'base' }),
-      R(3, 'unchanged', { defaultDecision: 'base' }),
-    ];
-    expect(autoApplyMoves(regions, 4, {})).toEqual([
-      { fileIndex: 4, regionId: 1, decision: 'ours' },
-    ]);
-  });
-
-  it('never overwrites a stored decision', () => {
-    const regions = [R(1, 'ours_only', { defaultDecision: 'ours' })];
-    expect(autoApplyMoves(regions, 0, { '0:1': 'base' })).toEqual([]);
-  });
-});
+// ── `autoApplyMoves` — DELETED, AND ITS TESTS WITH IT ───────────────────────────────────────
+//
+// It seeded every one-sided region's own side into the store the moment a file's regions
+// arrived. NOTHING IS APPLIED BEFORE THE READER PRESSES SOMETHING now: the session opens with
+// `autoApply: false`, so every region arrives on `base` and nothing writes a decision the reader
+// did not make. The server knob and `defaultDecisionFor` are untouched — see
+// `conflict/model.test.ts`, which still pins both.
 
 describe("the wand's merged bytes come off the wire", () => {
   // ⚠ THE SPA MUST NOT RECOMPUTE THEM. It used to: a second word-diff implementation living in

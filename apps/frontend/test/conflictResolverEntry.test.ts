@@ -273,7 +273,7 @@ describe('decisions survive a close and are dropped by a pin change', () => {
     expect(fresh?.decidedCount).toBe(0);
   });
 
-  it('⚠ a re-seed never re-applies the auto-apply defaults over a reader’s own choice', () => {
+  it('⚠ a re-seed never re-applies a default over a reader’s own choice', () => {
     resetStore();
     const api = useConflictResolverStore.getState();
     const key = resolverSessionKey(TARGET.prId, 'head1', 'base1', 'model1');

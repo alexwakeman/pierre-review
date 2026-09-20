@@ -60,7 +60,9 @@ export function HunkSuggestionPanel({
       <div className="px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200">
         {countLine(suggestion)}
       </div>
-      <CodeCell rows={rows} role={null} />
+      {/* No paint: the panel's own `--ai-*` surface already says whose text this is, and a
+          resolver wash here would claim a state the region has not reached. */}
+      <CodeCell rows={rows} />
       <div className="flex flex-wrap items-center gap-2 px-2 py-1">
         <button
           type="button"

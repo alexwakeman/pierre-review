@@ -38,6 +38,9 @@ function entry(index: number, path: string, over: Partial<ConflictFileEntry> = {
     unsupportedLabel: null,
     regionCount: 2,
     conflictCount: 1,
+    // ⚠ THE GATE'S DENOMINATOR FOR A FILE NOBODY OPENED. Two decidable regions to match the two
+    // this fixture's `content()` callers hand in.
+    decidableCount: 2,
     wandResolvableCount: 0,
     maxSideBytes: 100,
     ...over,
@@ -93,6 +96,7 @@ describe('commitPlan', () => {
         unsupportedLabel: 'A binary file',
         regionCount: 0,
         conflictCount: 0,
+        decidableCount: 0,
       }),
     ]);
     const loaded = {
@@ -135,20 +139,172 @@ describe('commitPlan', () => {
   });
 });
 
+describe('the commit gate', () => {
+  // ⚠ WHAT THIS EXISTS FOR. A half-decided file used to be dropped from the commit body and
+  // listed as "Still conflicted" — a silent exclusion wearing a label. Nothing is excluded from a
+  // commit without the reader choosing it now, and `canCommit` is the one predicate that says so.
+
+  it('blocks while any supported file still has an undecided region', () => {
+    const s = session([entry(0, 'src/a.ts'), entry(1, 'src/b.ts')]);
+    const loaded = {
+      0: content(0, 'src/a.ts', [region(1, 'conflict'), region(2, 'ours_only')]),
+      1: content(1, 'src/b.ts', [region(1, 'conflict'), region(2, 'conflict')]),
+    };
+    const plan = commitPlan(s, loaded, { '0:1': 'ours', '0:2': 'ours', '1:1': 'theirs' });
+    expect(plan.canCommit).toBe(false);
+    expect(plan.outstanding).toEqual([
+      { index: 1, path: 'src/b.ts', remaining: 1, opened: true },
+    ]);
+    expect(plan.decidableTotal).toBe(4);
+    expect(plan.decidedTotal).toBe(3);
+  });
+
+  it('counts a file nobody opened from the manifest, not from regions it does not have', () => {
+    // The load-bearing one. A file whose regions were never fetched carries no decisions and
+    // cannot be folded — its whole `decidableCount` is outstanding, or the gate would open over
+    // work nobody has seen.
+    const s = session([entry(0, 'src/a.ts', { decidableCount: 1 }), entry(1, 'src/b.ts', { decidableCount: 3 })]);
+    const plan = commitPlan(s, { 0: content(0, 'src/a.ts', [region(1, 'conflict')]) }, { '0:1': 'ours' });
+    expect(plan.canCommit).toBe(false);
+    expect(plan.outstanding).toEqual([
+      { index: 1, path: 'src/b.ts', remaining: 3, opened: false },
+    ]);
+    expect(plan.decidableTotal).toBe(4);
+    expect(plan.decidedTotal).toBe(1);
+  });
+
+  it('never lists an unsupported file as outstanding — the model excluded it, not the reader', () => {
+    const s = session([
+      entry(0, 'src/a.ts', { decidableCount: 1 }),
+      entry(1, 'assets/logo.png', {
+        unsupported: 'binary',
+        unsupportedLabel: 'A binary file',
+        regionCount: 0,
+        conflictCount: 0,
+        decidableCount: 0,
+      }),
+    ]);
+    const plan = commitPlan(s, { 0: content(0, 'src/a.ts', [region(1, 'conflict')]) }, { '0:1': 'ours' });
+    expect(plan.outstanding).toEqual([]);
+    expect(plan.canCommit).toBe(true);
+    // It is still named on screen, with the server's own noun phrase.
+    expect(plan.stillConflicted.map((r) => r.label)).toEqual(['A binary file']);
+  });
+
+  it('still refuses when every file is unsupported', () => {
+    const s = session([
+      entry(0, 'assets/logo.png', {
+        unsupported: 'binary',
+        unsupportedLabel: 'A binary file',
+        regionCount: 0,
+        conflictCount: 0,
+        decidableCount: 0,
+      }),
+    ]);
+    const plan = commitPlan(s, {}, {});
+    expect(plan.outstanding).toEqual([]);
+    // Nothing outstanding, and nothing to commit either.
+    expect(plan.canCommit).toBe(false);
+  });
+
+  it('⚠ a file with nothing decidable neither ships nor blocks', () => {
+    const s = session([
+      entry(0, 'src/a.ts', { decidableCount: 1 }),
+      entry(1, 'src/empty.ts', { regionCount: 2, conflictCount: 0, decidableCount: 0 }),
+    ]);
+    const plan = commitPlan(
+      s,
+      {
+        0: content(0, 'src/a.ts', [region(1, 'conflict')]),
+        1: content(1, 'src/empty.ts', [region(1, 'unchanged'), region(2, 'unchanged')]),
+      },
+      { '0:1': 'ours' },
+    );
+    expect(plan.resolved.map((r) => r.path)).toEqual(['src/a.ts']);
+    expect(plan.outstanding).toEqual([]);
+    expect(plan.canCommit).toBe(true);
+    // ⚠ NOT "Nothing decided" — that accuses the reader of something there was nothing to do.
+    expect(plan.rows[1]?.label).toBe('Nothing to decide');
+    // ⚠ AND IT MUST STILL BE NAMED ON SCREEN. It is dropped from the commit and the pull request
+    // stays conflicted on it, so it rides `notCarried` — the list the landing step renders. A
+    // filter of `state === 'unsupported'` would leave it nowhere at all.
+    expect(plan.notCarried.map((r) => r.path)).toEqual(['src/empty.ts']);
+  });
+
+  it('⚠ `notCarried` is every dropped file, never just the unsupported ones', () => {
+    const s = session([
+      entry(0, 'src/done.ts', { decidableCount: 1 }),
+      entry(1, 'src/half.ts', { decidableCount: 2 }),
+      entry(2, 'src/empty.ts', { regionCount: 1, conflictCount: 0, decidableCount: 0 }),
+      entry(3, 'assets/logo.png', {
+        unsupported: 'binary',
+        unsupportedLabel: 'A binary file',
+        regionCount: 0,
+        conflictCount: 0,
+        decidableCount: 0,
+      }),
+    ]);
+    const plan = commitPlan(
+      s,
+      {
+        0: content(0, 'src/done.ts', [region(1, 'conflict')]),
+        1: content(1, 'src/half.ts', [region(1, 'conflict'), region(2, 'ours_only')]),
+        2: content(2, 'src/empty.ts', [region(1, 'unchanged')]),
+      },
+      { '0:1': 'ours', '1:1': 'ours' },
+    );
+    // The half-decided file is named ABOVE, in "Still to decide", and holds the commit shut — so
+    // it must NOT be repeated here.
+    expect(plan.outstanding.map((o) => o.path)).toEqual(['src/half.ts']);
+    expect(plan.notCarried.map((r) => r.path)).toEqual(['src/empty.ts', 'assets/logo.png']);
+    // Every file the commit will not carry is named in exactly one of the two lists.
+    const named = new Set([
+      ...plan.resolved.map((r) => r.path),
+      ...plan.outstanding.map((o) => o.path),
+      ...plan.notCarried.map((r) => r.path),
+    ]);
+    expect(named.size).toBe(s.files.length);
+  });
+
+  it('opens the commit only when every decidable region in every supported file is answered', () => {
+    const s = session([entry(0, 'src/a.ts'), entry(1, 'src/b.ts')]);
+    const loaded = {
+      0: content(0, 'src/a.ts', [region(1, 'conflict'), region(2, 'ours_only')]),
+      1: content(1, 'src/b.ts', [region(1, 'theirs_only'), region(2, 'conflict')]),
+    };
+    const plan = commitPlan(s, loaded, {
+      '0:1': 'ours',
+      '0:2': 'base',
+      '1:1': 'theirs',
+      '1:2': 'both_ours_first',
+    });
+    expect(plan.canCommit).toBe(true);
+    expect(plan.outstanding).toEqual([]);
+    expect(plan.resolved.map((r) => r.path)).toEqual(['src/a.ts', 'src/b.ts']);
+    expect(plan.decidedTotal).toBe(plan.decidableTotal);
+  });
+});
+
 describe('buildCommitBody', () => {
   it('omits a half-decided file WHOLE rather than sending part of it', () => {
-    // ⚠ THE RULE THIS FILE EXISTS FOR. `decisions` is exhaustive per file server-side, so a
-    // partially serialised file is `IncompleteDecisions` — which refuses the WHOLE commit and takes
-    // every other file's work down with it.
+    // ⚠ THE SECOND LINE OF DEFENCE, NOW UNREACHABLE FROM THE UI. `plan.canCommit` is false while
+    // b.ts holds an unanswered region, and the landing step's button gates on it — so this state
+    // cannot be submitted. It is pinned anyway: `decisions` is exhaustive per file server-side,
+    // so a partially serialised file is `IncompleteDecisions`, which refuses the WHOLE commit and
+    // takes every other file's work down with it.
     const s = session([entry(0, 'src/a.ts'), entry(1, 'src/b.ts')]);
     const loaded = {
       0: content(0, 'src/a.ts', [region(1, 'conflict')]),
       1: content(1, 'src/b.ts', [region(1, 'conflict'), region(2, 'conflict')]),
     };
+    const decisions = { '0:1': 'ours', '1:1': 'theirs' } as const;
+    const plan = commitPlan(s, loaded, decisions);
+    expect(plan.canCommit).toBe(false);
     const body = buildCommitBody({
       session: s,
+      plan,
       loaded,
-      decisions: { '0:1': 'ours', '1:1': 'theirs' },
+      decisions,
       suggestionIds: {},
       strategy: 'merge',
       target: { kind: 'pr_branch' },
@@ -158,11 +314,14 @@ describe('buildCommitBody', () => {
   });
 
   it('echoes the pins the reader was looking at', () => {
-    const s = session([entry(0, 'src/a.ts')]);
+    const s = session([entry(0, 'src/a.ts', { decidableCount: 1 })]);
+    const loaded = { 0: content(0, 'src/a.ts', [region(1, 'conflict')]) };
+    const decisions = { '0:1': 'ours' } as const;
     const body = buildCommitBody({
       session: s,
-      loaded: { 0: content(0, 'src/a.ts', [region(1, 'conflict')]) },
-      decisions: { '0:1': 'ours' },
+      plan: commitPlan(s, loaded, decisions),
+      loaded,
+      decisions,
       suggestionIds: {},
       strategy: 'rebase',
       target: { kind: 'new_branch', branch: 'fix/x', openPr: true },
@@ -189,6 +348,7 @@ describe('stillConflictingPaths', () => {
         unsupportedLabel: 'A binary file',
         regionCount: 0,
         conflictCount: 0,
+        decidableCount: 0,
       }),
     ]);
     const plan = commitPlan(

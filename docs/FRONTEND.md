@@ -2098,17 +2098,51 @@ landmines:
   the design this replaces, and it drifts on every wrapped line. `min-h-0` on the scroller is
   load-bearing: without it the flex child refuses to shrink and the grid overflows the viewport.
   Below `NARROW_PX` (1100, measured live) the columns stack.
+  ⚠ **There is now ONE read-only exception, and it is read-only in both directions.**
+  `RegionRibbons.tsx` measures `[data-mr-cell]` boxes and joins an accepted hunk to its result with
+  a bezier across the gutter — but it holds no React state, never writes `scrollTop`, never calls
+  `focus()`, and adds no scroller. It caches rects in CONTENT coordinates on a structural change
+  only, so a scroll frame reads `scrollTop`/`clientHeight` and does arithmetic; it re-measures
+  SYNCHRONOUSLY in a layout effect when a decision changes row heights (an rAF there paints one
+  frame of ribbons on the rows they used to join), and through the rAF from its `ResizeObserver`
+  (a draw inside an RO callback can loop). It is suppressed entirely below `NARROW_PX`. Anything
+  that gives it a scroll-sync job, or routes a scroll frame through React, brings back everything
+  this invariant exists to prevent. Full contract: docs/MERGE-CI-TRUNK.md § The ribbons.
 - ⚠ **KEYBOARD SCOPE: only `Escape` is on `window`.** Everything else is `onKeyDown` on the panes'
   `tabIndex={-1}` container, so `←`/`→`/`b`/`x`/`u` cannot fight a text caret in the branch-name
   field or the file list's own `↑↓`. That is the `HelpModal` precedent — one key globally, never a
   scheme.
 - ⚠ **ROVING TAB STOPS.** Only the ACTIVE region's buttons are in the tab order; every other
-  `SlotStrip`'s are `tabIndex={-1}`. Four hundred regions is four hundred strips, and without this
-  Tab walks two thousand buttons before it reaches the toolbar. `role="group"` + `aria-label` live
+  `SlotStrip`'s — **and every other row's two gutter arrows**, which read the same `active` prop —
+  are `tabIndex={-1}`. Four hundred regions is four hundred strips, and without this Tab walks two
+  thousand buttons before it reaches the toolbar. `role="group"` + `aria-label` live
   on the STRIP, not the row: the row wrapper is `display: contents`, which removes it from the
   accessibility tree entirely, so the grouping and the "Conflict 2 of 5 in src/…" position have
-  nowhere else to go. The in-pane buttons are a hover-revealed DUPLICATE for mouse speed — nothing
-  here is reachable only by hovering.
+  nowhere else to go.
+- ⚠ **"TAKE THIS SIDE" IS THE GUTTER ARROW AND NOTHING ELSE.** `ours`/`theirs` used to sit on the
+  strip AND again as a hover-revealed, `aria-hidden` arrow in each gutter: one verb, two controls,
+  every region announcing as a pair of identical buttons. The strip gave the verb up; the arrow is
+  now ALWAYS drawn, really named (`gutterLabel` in `copy.ts` — it carries the region's position,
+  because the arrows sit in their own grid cells OUTSIDE the strip's `role="group"`), really
+  focusable, and carries `aria-pressed`. It renders only where `sideOffered(region, side)` — the
+  SAME predicate the wash reads — so an unofferable pane gets neither paint nor arrow.
+  ⚠ **Below `NARROW_PX` the gutter CELLS are not emitted at all**, so `SlotStrip`'s `sideTakes`
+  puts the two side verbs back on the strip: one control per verb in each layout, never two in
+  either. Nothing in the resolver is reachable only by hovering.
+  ⚠ Three rules follow from it being a REAL control rather than a decorative twin, each of which was
+  a live defect the moment the strip's copies went: **`aria-pressed` is
+  `sideOutcome(slot, side) === 'contributed'`**, not "is this button's own decision the current
+  one?" — a both-order, the wand and an accepted suggestion all land BOTH sides, and only the green
+  wash said so, which reaches no screen reader. **The keyboard reveal aims at `data-mr-take`**, left
+  then right, falling back to the strip — `el.querySelector('button')` inside `[data-mr-region]` is
+  the STRIP, whose first button is now "Ignore this change and keep the ancestor" on every one-sided
+  change, so `n` parked focus one reflex Space from discarding it. And **the panes' `Enter` binding
+  exempts any real control** (`closest('button, a[href], [role="button"]')`): a button fires its
+  click on Enter DOWN, so `preventDefault()` on the way up cancelled the press and sent the reader to
+  the commit step with no side taken, while Space worked.
+  ⚠ A painted pane with NO ROWS still gets one line of height (`CodeCell`) — the wash sits on the
+  content box, so a side whose answer is "delete these lines" would paint nothing at all, and with
+  C1's rule that silence now claims "nothing here to take" beside a live arrow.
 - **The store (`store/conflictResolver.ts`) holds CHOICES ONLY** — no file text, no regions, no
   suggestion lines — and it is deliberately NOT a slice of `store/filters.ts`, which is persisted
   and URL-mirrored. ⚠ **The pins are part of the key** (`${prId}:${headSha}:${baseSha}:${modelHash}`):
@@ -2129,9 +2163,15 @@ landmines:
   the PR stays conflicted after a commit, and hiding it leaves nothing on screen to explain that.
   No "partly decided" ring either: a part-decided file says `1 of 3 decided` in words, which is also
   the only form carrying its denominator.
-- **The wand's sentence names its own population.** It runs per FILE while the header counts
-  conflicts across the whole PR, so a bare "Nothing left to decide." sat beside "1 of 3 conflicts
-  decided" and the two flatly contradicted each other on screen. It says "…in this file".
+- **The wand's sentence names its own population.** It runs per FILE and counts CONTESTED regions,
+  while the header counts every DECIDABLE region across the whole pull request — so a bare "Nothing
+  left to decide." sat beside a countdown at a different grain and the two flatly contradicted each
+  other on screen. It says "…in this file".
+- ⚠ **EVERY PER-FILE NUMBER FOLDS THROUGH `fileRowState`.** The file-menu TRIGGER quoted contested
+  regions (`· 1 conflict`) beside a menu row reading `6 to decide` and a Commit button held shut by
+  all six — three numbers about one file, and the only one visible without opening the menu was the
+  one that understated the work. It also never counted down, because `tally.conflicts` is the file's
+  total rather than its remainder.
 - **`ClosedResolverToast` is a plain card in the ONE bottom-right toast column**, never its own
   `fixed bottom-4 right-4` element.
 - The `--mr-*` / `--mr-hl-*` colour tokens and their hand-run guards: see **The AI-surface palette**
@@ -2350,11 +2390,32 @@ column's under-call COUNTS stay violet while the chip the click opens is vermili
 `ai_review` LANE stays violet in lane charts.
 
 **⚠ THE RESOLVER'S `--mr-*` TOKENS LIVE IN THE SAME FILE AND ARE NOT PART OF THIS FAMILY.**
-`--mr-change` · `--mr-conflict` · `--mr-applied` · `--mr-ignored` (four semantic STATES, not
-decorations: a side changed these lines and nothing is decided · both sides changed them differently
-· a decision puts a change into the result · a decision keeps the ancestor), plus seven scoped
-`--mr-hl-*` syntax colours for the code cells. Same space-separated-channel rule, same silent
-failure if it is broken.
+`--mr-change` · `--mr-conflict` · `--mr-applied` · `--mr-ignored` — **two conflict TYPES and two
+decision STATES**, not decorations (one side changed these lines · both sides changed them
+differently · a decision puts a change into the result · a decision keeps the ancestor).
+⚠ **Which pane wears which is not one answer.** A SIDE pane is painted **only while it is offering
+the reader something** — the test is `region.allowed` (through the one `sideOffered` predicate, which
+the gutter arrow reads too, though the arrow additionally goes away once that side's lines are in the
+result: an arrow is an offer to ADD, and paint is a statement about what a pane holds, so the two
+part company on a taken side), so `ours_only` paints the left, `theirs_only` the right, **`both_same`
+the LEFT ONLY** (nothing on the right to bring in, so main's identical copy is ordinary unpainted
+text) and a `conflict` both. It wears the conflict TYPE while UNDECIDED and turns **`applied` green**
+once its lines reach the result; a side the decision turned down, and both sides of an ignored
+region, paint **NOTHING**. The CENTRE is unchanged: it wears the STATE and carries **NO wash at all
+while the region is undecided**, leaving the 2px rule and the strip's word as its two surviving
+encodings. `lib/mergeResolver.ts`'s `panePaint` is the ONE decider (`sideOutcome` beside it has
+THREE values — undecided / contributed / rejected — because a boolean made "nobody answered" and
+"this side is in the result" the same fact); `slotRole` is the STATE role and is deliberately not the
+pane's paint. The ribbon overlay's SVG fill is **one class, `.mr-fill-applied`** — it joins an
+accepted (green) side to the green result, so a type-hued band between them read as a third thing —
+⚠ and it must be a CLASS, because `var()` works as a CSS property and paints NOTHING inside an SVG
+presentation attribute. Plus seven scoped `--mr-hl-*` syntax colours for the code cells. Same
+space-separated-channel rule, same silent failure if it is broken.
+- ⚠ **`.mr-edge-*` IS DELETED AND MUST NOT COME BACK.** A turned-down side used to keep a 1px inset
+  outline in its own hue rather than lose its paint ("this was the other option" and "this pane has
+  nothing here" are different facts). On screen it ringed an untaken block in red beside the green
+  one that won. `resolverTokens.test.ts` asserts no such SELECTOR exists — it matches a rule, not a
+  mention, so the reasoning can stay written down in `index.css` beside the deletion.
 - ⚠ **`--mr-conflict` IS NOT `--ai-signal`.** Vermilion is the AI surface's accent and the Pro badge
   draws in it; a merge conflict is not an AI marker, and borrowing that hue would make every
   contested hunk look like something a model produced.

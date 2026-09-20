@@ -1195,8 +1195,9 @@ export async function buildConflictModel(args: {
 
 /**
  * The manifest rows. `regionCount` counts EVERY region; `conflictCount` counts the contested
- * ones — the number the header counts down — and `wandResolvableCount` is the subset of those
- * the wand can settle without picking a side.
+ * ones; `decidableCount` counts every region that takes a decision — the population the commit
+ * gate and the header both work in — and `wandResolvableCount` is the subset of the contested
+ * ones the wand can settle without picking a side.
  */
 export function conflictFileEntries(model: ConflictModel): ConflictFileEntry[] {
   return model.files.map((f) => ({
@@ -1207,6 +1208,7 @@ export function conflictFileEntries(model: ConflictModel): ConflictFileEntry[] {
     unsupportedLabel: f.unsupportedLabel,
     regionCount: f.regions.length,
     conflictCount: f.regions.filter((r) => r.kind === 'conflict').length,
+    decidableCount: f.regions.filter((r) => r.kind !== 'unchanged').length,
     wandResolvableCount: f.regions.filter(
       (r) => r.kind === 'conflict' && r.wand !== null,
     ).length,

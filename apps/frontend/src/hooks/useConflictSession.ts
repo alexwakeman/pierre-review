@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ConflictFileContent,
+  ConflictOpenBody,
   ConflictSession,
   ConflictSessionEvent,
 } from '@pierre-review/shared';
@@ -175,7 +176,15 @@ export function useConflictSession(prId: number | null): ConflictSessionState {
         // `restart` on every attempt after the first: attempt 0 is happy to re-attach to a live
         // session (a reopen after an accidental close costs nothing), while an explicit restart is
         // the reader asking for a model built against the shas as they are NOW.
-        opened = await api.openConflictSession(prId, attempt > 0 ? { restart: true } : {});
+        //
+        // ⚠ NOTHING IS APPLIED BEFORE THE READER PRESSES SOMETHING. `autoApply: false` is the
+        // server half — every region starts at `base`, undecided — and the client half is that no
+        // effect seeds a decision any more. BOTH ARMS CARRY IT, because `claimSession` RE-ATTACHES
+        // to a live session and ignores the new flag, so a session another tab opened would
+        // otherwise still hand back applying defaults.
+        const open: ConflictOpenBody =
+          attempt > 0 ? { restart: true, autoApply: false } : { autoApply: false };
+        opened = await api.openConflictSession(prId, open);
       } catch (e) {
         if (ac.signal.aborted) return;
         setOpenError(

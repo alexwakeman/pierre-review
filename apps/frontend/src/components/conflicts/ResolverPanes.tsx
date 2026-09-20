@@ -6,8 +6,6 @@ import type {
   ConflictSession,
 } from '@pierre-review/shared';
 import {
-  autoApplyMoves,
-  conflictsDecidedAcross,
   slotFor,
   tallyFile,
   wandPlan,
@@ -16,6 +14,7 @@ import {
 } from '../../lib/mergeResolver.js';
 import { languageForPath } from '../../lib/hljsLines.js';
 import { regionKey, useConflictResolverStore, useResolverSession } from '../../store/conflictResolver.js';
+import { RegionRibbons } from './RegionRibbons.js';
 import { ResolverToolbar } from './ResolverToolbar.js';
 import { SlotRow } from './SlotRow.js';
 import { useHunkSuggestion } from './useHunkSuggestion.js';
@@ -72,6 +71,10 @@ export function ResolverPanes({
   loadFile,
   onRetryFile,
   suggestionLines,
+  decidedTotal,
+  decidableTotal,
+  jumpToFile,
+  onJumpConsumed,
   onLand,
 }: {
   session: ConflictSession;
@@ -89,6 +92,16 @@ export function ResolverPanes({
    *  in; a `'suggestion'` decision whose lines are not to hand renders as undecided rather than as
    *  something else's text. Absent until the per-hunk suggestion ships. */
   suggestionLines?: Readonly<Record<string, string[]>>;
+  /** The countdown, off the shell's ONE `CommitPlan`. ⚠ HANDED IN, NEVER RE-FOLDED HERE: the
+   *  toolbar and the overlay footer print the same two numbers, and a second fold is how they
+   *  come to disagree. Same population as the commit gate. */
+  decidedTotal: number;
+  decidableTotal: number;
+  /** The landing step sent the reader back to finish a file. A file INDEX only — the landing step
+   *  does not hold that file's regions and must not fetch them to name a region. */
+  jumpToFile?: number | null;
+  /** Clears the one-shot above, so a second press of the same row jumps again. */
+  onJumpConsumed?: () => void;
   /** The landing step, owned by the commit view. Absent ⇒ `Enter` does nothing and no continue
    *  button renders — the panes never assume there is somewhere to go. */
   onLand?: () => void;
@@ -99,7 +112,6 @@ export function ResolverPanes({
   // reader presses "Use this".
   const claude = useHunkSuggestion(session.prId, session.sessionId);
   const decideRegion = useConflictResolverStore((s) => s.decideRegion);
-  const decideRegions = useConflictResolverStore((s) => s.decideRegions);
   const decisions = stored?.decisions ?? EMPTY_DECISIONS;
   const suggestionIds = stored?.suggestionIds ?? EMPTY_SUGGESTIONS;
 
@@ -118,7 +130,6 @@ export function ResolverPanes({
   const focusOnActivate = useRef(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
-  const seeded = useRef<Set<string>>(new Set());
 
   const activeFile = files[activeIndex] ?? null;
   const activeEntry = session.files.find((f) => f.index === activeIndex) ?? null;
@@ -149,27 +160,39 @@ export function ResolverPanes({
     void loadFile(activeIndex);
   }, [activeIndex, files, loadingFiles, fileErrors, loadFile]);
 
-  // The auto-apply pass, run once per file per pinned model. ⚠ IT ONLY SEEDS DEFAULTS THAT APPLY
-  // A CHANGE and only where nothing is stored — see `autoApplyMoves`. Writing it here rather than
-  // at seed time is forced by the payload shape: `defaultDecision` lives on the regions, and the
-  // regions arrive per file.
-  useEffect(() => {
-    if (activeFile == null || stored == null) return;
-    const mark = `${sessionKey}:${activeFile.index}`;
-    if (seeded.current.has(mark)) return;
-    seeded.current.add(mark);
-    const moves = autoApplyMoves(activeFile.regions, activeFile.index, decisions);
-    if (moves.length === 0) return;
-    decideRegions({ key: sessionKey, decisions: moves });
-  }, [activeFile, stored, sessionKey, decisions, decideRegions]);
+  // ⚠ NOTHING SEEDS A DECISION HERE ANY MORE. An auto-apply pass used to write every one-sided
+  // region's own side into the store the moment a file's regions arrived, so the centre pane
+  // opened already green over changes nobody had looked at. The session now opens with
+  // `autoApply: false` and the reader's first press is the first decision — see the retired
+  // `autoApplyMoves` block in `lib/mergeResolver.ts`.
 
-  // A different pinned model is a different set of files; forget what was seeded against the old
-  // one or a reopened session would skip its own auto-apply.
+  // A different pinned model is a different set of files; its undo history is not this one's.
   useEffect(() => {
-    seeded.current = new Set();
     undoStack.current = [];
     setUndoDepth(0);
   }, [sessionKey]);
+
+  // ── THE LANDING STEP'S JUMP ────────────────────────────────────────────────────────────────
+  //
+  // "Still to decide" names a file and this lands the cursor on its first unanswered region.
+  // Two steps, because the regions may not be here yet: seed the file, then wait for its content.
+  //
+  // ⚠ NOT IN THE STORE. `store/conflictResolver.ts` holds CHOICES only; a UI cursor there is the
+  // derived-state trap. And nothing new writes `scrollTop` or calls `focus()` — `focusOnActivate`
+  // hands the reveal to the one effect that already owns it.
+  const pendingJump = useRef<number | null>(null);
+  useEffect(() => {
+    if (jumpToFile == null) return;
+    pendingJump.current = jumpToFile;
+    focusOnActivate.current = true;
+    setActiveIndex(jumpToFile);
+    setActiveRegionId(null);
+    onJumpConsumed?.();
+  }, [jumpToFile, onJumpConsumed]);
+
+  // The second half is further down — it has to run AFTER the "land on the first decidable
+  // region" effect, or that effect's write (taken from a render where `activeRegionId` was still
+  // null) lands last and the jump silently arrives at region 1 instead.
 
   const tallies = useMemo(() => {
     const out: Record<number, FileTally> = {};
@@ -178,11 +201,6 @@ export function ResolverPanes({
     }
     return out;
   }, [files, decisions]);
-
-  const counts = useMemo(
-    () => conflictsDecidedAcross(session.files, files, decisions),
-    [session.files, files, decisions],
-  );
 
   /** Regions that take a decision, in file order, with their 1-based position. */
   const decidable = useMemo(() => {
@@ -369,17 +387,67 @@ export function ResolverPanes({
     setActiveRegionId(decidable[0]?.id ?? null);
   }, [decidable, activeRegionId]);
 
+  // The jump's second half. ⚠ DECLARED AFTER THE EFFECT ABOVE ON PURPOSE — both run in the same
+  // commit off a render where `activeRegionId` is null, so whichever is declared last is the one
+  // whose write survives. The landing effect wants region 1; the jump wants the first region
+  // still needing an answer, which is the whole point of the row that was clicked.
+  useEffect(() => {
+    const idx = pendingJump.current;
+    if (idx == null || activeIndex !== idx) return;
+    // ⚠ A RECORDED FAILURE CLEARS IT, or the jump waits forever on a file that will never load.
+    if (fileErrors[idx] != null) {
+      pendingJump.current = null;
+      return;
+    }
+    // The fetch effect further up is already on it.
+    const content = files[idx];
+    if (content == null) return;
+    pendingJump.current = null;
+    const first = content.regions.find(
+      (r) => r.kind !== 'unchanged' && decisions[regionKey(idx, r.id)] == null,
+    );
+    // Nothing left here after all — the effect above has already landed on region 1.
+    if (first == null) return;
+    focusOnActivate.current = true;
+    setActiveRegionId(first.id);
+  }, [activeIndex, files, fileErrors, decisions]);
+
   // Reveal + focus the active region. Focus only when a KEY put us here — see `focusOnActivate`.
+  //
+  // ⚠ IT AIMS AT THE AFFIRMATIVE TAKE, NOT AT "THE FIRST BUTTON IN THE STRIP". It used to be
+  // `el.querySelector('button')` — fine while the strip led with "Take your version", and a live
+  // hazard the moment the strip gave the two side verbs up to the gutter: on every one-sided change
+  // the strip's first button is now "Ignore this change and keep the ancestor", so walking a file
+  // with `n` parked focus on Ignore and one reflex Space discarded the change. The gutter arrows
+  // carry `data-mr-take` for exactly this, and they live in their own grid cells, two columns from
+  // `[data-mr-region]` — so the lookup is by the region's own key against the scroller, left
+  // before right (a `theirs_only` region has no left arrow), falling back to the strip when a
+  // region offers no side at all.
+  //
+  // ⚠ AN ARROW ALSO GOES AWAY ONCE ITS SIDE IS IN THE RESULT, AND THAT IS SAFE ONLY BECAUSE OF
+  // `step`'s filter. Every path that arms `focusOnActivate` lands on a region that is
+  // `kind !== 'unchanged'` AND undecided, so at least one arrow is always rendered there and the
+  // strip fallback stays unreachable from the keyboard. Widen `step` to walk decided regions and
+  // the fallback comes alive again — landing focus on Ignore, which is the bug this lookup exists
+  // to prevent.
   useEffect(() => {
     if (activeRegionId == null) return;
-    const el = scrollerRef.current?.querySelector<HTMLElement>(
+    const scroller = scrollerRef.current;
+    const el = scroller?.querySelector<HTMLElement>(
       `[data-mr-region="${activeIndex}:${activeRegionId}"]`,
     );
-    if (el == null) return;
+    if (el == null || scroller == null) return;
     el.scrollIntoView({ block: 'nearest' });
     if (focusOnActivate.current) {
       focusOnActivate.current = false;
-      el.querySelector<HTMLElement>('button')?.focus();
+      const take =
+        scroller.querySelector<HTMLElement>(
+          `[data-mr-take="${activeIndex}:${activeRegionId}:left"]`,
+        ) ??
+        scroller.querySelector<HTMLElement>(
+          `[data-mr-take="${activeIndex}:${activeRegionId}:right"]`,
+        );
+      (take ?? el.querySelector<HTMLElement>('button'))?.focus();
     }
   }, [activeIndex, activeRegionId]);
 
@@ -389,6 +457,12 @@ export function ResolverPanes({
       // Never steal a key from a field. There is no free typing in the resolver itself, but the
       // landing step's branch name lives inside the same overlay.
       if (t?.closest('input, textarea, select, [contenteditable="true"]') != null) return;
+      // ⚠ NEVER STEAL `Enter` FROM A CONTROL EITHER. A `<button>` fires its click on Enter DOWN, so
+      // `preventDefault()` here cancels the press — and the gutter arrow became focusable in the
+      // same change that made it the only pointer route to "take this side", so Tab-to-arrow-then-
+      // Enter went to the commit step and took no side, silently, while Space still worked. The
+      // two keys that activate a button have to agree.
+      if (e.key === 'Enter' && t?.closest('button, a[href], [role="button"]') != null) return;
 
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
@@ -492,8 +566,8 @@ export function ResolverPanes({
         language={language}
         baseOpen={baseOpen}
         onBaseOpen={setBaseOpen}
-        decided={counts.decided}
-        total={counts.total}
+        decided={decidedTotal}
+        total={decidableTotal}
         onLand={onLand}
       />
 
@@ -503,104 +577,131 @@ export function ResolverPanes({
         wandMessage={wandMessage}
       />
 
-      <div
-        ref={scrollerRef}
-        tabIndex={-1}
-        onKeyDown={onKeyDown}
-        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden outline-none"
-      >
-        {activeFile == null ? (
-          <div className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
-            {activeEntry == null ? (
-              'Nothing to resolve here.'
-            ) : fileErrors[activeIndex] != null ? (
-              <span className="flex flex-wrap items-center gap-2">
-                <span>{fileErrors[activeIndex]}</span>
-                <button
-                  type="button"
-                  onClick={() => onRetryFile(activeIndex)}
-                  className="rounded border border-gray-300 px-2 py-0.5 text-[11px] hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
-                >
-                  Try again
-                </button>
-              </span>
-            ) : (
-              `Reading ${activeEntry.path}…`
-            )}
-          </div>
-        ) : (
-          <div
-            className="grid items-stretch"
-            style={{
-              gridTemplateColumns: narrow
-                ? 'minmax(0,1fr)'
-                : 'minmax(0,1fr) 1.75rem minmax(0,1fr) 1.75rem minmax(0,1fr)',
-            }}
-          >
-            {!narrow && (
-              <div className="contents">
-                <PaneHeader>{PANE_OURS}</PaneHeader>
-                <PaneHeader />
-                <PaneHeader>{PANE_RESULT}</PaneHeader>
-                <PaneHeader />
-                <PaneHeader>{paneTheirs(session.baseRef)}</PaneHeader>
-              </div>
-            )}
-            {activeFile.regions.map((region) => {
-              const ordinal = decidable.findIndex((r) => r.id === region.id) + 1;
-              return (
-                <SlotRow
-                  key={region.id}
-                  region={region}
-                  slot={slots.get(region.id) ?? UNAPPLIED}
-                  fileIndex={activeFile.index}
-                  path={activeFile.path}
-                  baseRef={session.baseRef}
-                  ordinal={ordinal}
-                  total={decidable.length}
-                  language={language}
-                  narrow={narrow}
-                  active={region.id === activeRegionId}
-                  ask={claude.states[regionKey(activeFile.index, region.id)]}
-                  onAskClaude={
-                    claude.enabled
-                      ? () =>
-                          claude.ask({
-                            fileIndex: activeFile.index,
-                            regionId: region.id,
-                            // The CONTENT pin beside the id's ADDRESS: the server refuses if the
-                            // region's bytes moved under the id it was asked about.
-                            fingerprint: region.fingerprint,
-                          })
-                      : undefined
-                  }
-                  onUseSuggestion={(suggestion) => {
-                    setActiveRegionId(region.id);
-                    claude.accept(activeFile.index, region.id, suggestion);
-                    // ⚠ THE HANDLE, NEVER THE TEXT. The lines the commit splices are the ones the
-                    // server holds; the store keeps the id and the panes keep the lines to read.
-                    apply([
-                      {
-                        fileIndex: activeFile.index,
-                        regionId: region.id,
-                        decision: 'suggestion',
-                        suggestionId: suggestion.suggestionId,
-                      },
-                    ]);
-                    setAnnouncement('Took Claude’s suggestion.');
-                  }}
-                  onDiscardSuggestion={() => claude.clear(activeFile.index, region.id)}
-                  onActivate={() => setActiveRegionId(region.id)}
-                  onDecide={(d) => {
-                    setActiveRegionId(region.id);
-                    if (d != null && !region.allowed.includes(d)) return;
-                    apply([{ fileIndex: activeFile.index, regionId: region.id, decision: d }]);
-                  }}
-                />
-              );
-            })}
-          </div>
-        )}
+      {/* ⚠ THE ONE POSITIONING ANCESTOR, AND IT EXISTS SO NOTHING HAS TO MEASURE THE TOOLBAR. This
+          wrapper's box IS the scroller's box, so the ribbon overlay is `left:0; right:0` with no
+          offset to recompute when `Banners` appears or disappears (it returns null most of the
+          time). `relative` with z-index AUTO: it must NOT become a stacking context, or the sticky
+          pane headers stop painting over the ribbons. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          ref={scrollerRef}
+          tabIndex={-1}
+          onKeyDown={onKeyDown}
+          className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden outline-none"
+        >
+          {activeFile == null ? (
+            <div className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
+              {activeEntry == null ? (
+                'Nothing to resolve here.'
+              ) : fileErrors[activeIndex] != null ? (
+                <span className="flex flex-wrap items-center gap-2">
+                  <span>{fileErrors[activeIndex]}</span>
+                  <button
+                    type="button"
+                    onClick={() => onRetryFile(activeIndex)}
+                    className="rounded border border-gray-300 px-2 py-0.5 text-[11px] hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
+                  >
+                    Try again
+                  </button>
+                </span>
+              ) : (
+                `Reading ${activeEntry.path}…`
+              )}
+            </div>
+          ) : (
+            <div
+              // The ribbon overlay's `ResizeObserver` target: every row height that can change
+              // without a prop change — a wrapped line, an unchanged region unfolding, a suggestion
+              // panel mounting — changes THIS element's height.
+              data-mr-grid
+              className="grid items-stretch"
+              style={{
+                gridTemplateColumns: narrow
+                  ? 'minmax(0,1fr)'
+                  : 'minmax(0,1fr) 1.75rem minmax(0,1fr) 1.75rem minmax(0,1fr)',
+              }}
+            >
+              {!narrow && (
+                <div className="contents">
+                  <PaneHeader>{PANE_OURS}</PaneHeader>
+                  <PaneHeader />
+                  <PaneHeader>{PANE_RESULT}</PaneHeader>
+                  <PaneHeader />
+                  <PaneHeader>{paneTheirs(session.baseRef)}</PaneHeader>
+                </div>
+              )}
+              {activeFile.regions.map((region) => {
+                const ordinal = decidable.findIndex((r) => r.id === region.id) + 1;
+                return (
+                  <SlotRow
+                    key={region.id}
+                    region={region}
+                    slot={slots.get(region.id) ?? UNAPPLIED}
+                    fileIndex={activeFile.index}
+                    path={activeFile.path}
+                    baseRef={session.baseRef}
+                    ordinal={ordinal}
+                    total={decidable.length}
+                    language={language}
+                    narrow={narrow}
+                    active={region.id === activeRegionId}
+                    ask={claude.states[regionKey(activeFile.index, region.id)]}
+                    onAskClaude={
+                      claude.enabled
+                        ? () =>
+                            claude.ask({
+                              fileIndex: activeFile.index,
+                              regionId: region.id,
+                              // The CONTENT pin beside the id's ADDRESS: the server refuses if the
+                              // region's bytes moved under the id it was asked about.
+                              fingerprint: region.fingerprint,
+                            })
+                        : undefined
+                    }
+                    onUseSuggestion={(suggestion) => {
+                      setActiveRegionId(region.id);
+                      claude.accept(activeFile.index, region.id, suggestion);
+                      // ⚠ THE HANDLE, NEVER THE TEXT. The lines the commit splices are the ones the
+                      // server holds; the store keeps the id and the panes keep the lines to read.
+                      apply([
+                        {
+                          fileIndex: activeFile.index,
+                          regionId: region.id,
+                          decision: 'suggestion',
+                          suggestionId: suggestion.suggestionId,
+                        },
+                      ]);
+                      setAnnouncement('Took Claude’s suggestion.');
+                    }}
+                    onDiscardSuggestion={() => claude.clear(activeFile.index, region.id)}
+                    onActivate={() => setActiveRegionId(region.id)}
+                    onDecide={(d) => {
+                      setActiveRegionId(region.id);
+                      if (d != null && !region.allowed.includes(d)) return;
+                      apply([{ fileIndex: activeFile.index, regionId: region.id, decision: d }]);
+                      // ⚠ THE SAME LINE `decideActive` WRITES, AND IT WAS MISSING HERE. This is the
+                      // path every BUTTON takes — the strip's verbs and the gutter arrows — so a
+                      // reader pressing Space on the arrow got nothing from the control (an icon)
+                      // and nothing from the live region either, while `←`/`→` announced. The wash
+                      // and the strip's word both change on screen and neither reaches a screen
+                      // reader.
+                      setAnnouncement(
+                        d == null ? 'Decision cleared.' : `${DECISION_SAID[d]} on this change.`,
+                      );
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <RegionRibbons
+          scrollerRef={scrollerRef}
+          fileIndex={activeFile?.index ?? -1}
+          regions={activeFile?.regions ?? EMPTY_REGIONS}
+          slots={slots}
+          narrow={narrow}
+        />
       </div>
 
       {/* Every move writes a line here. Without it the keyboard path is silent: the wash changes
@@ -614,7 +715,13 @@ export function ResolverPanes({
 
 function PaneHeader({ children }: { children?: React.ReactNode }): JSX.Element {
   return (
-    <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300">
+    // `data-mr-pane-header` is the ribbon overlay's height probe: the overlay starts below this
+    // band so a ribbon can never appear behind a header. The `z-10` is the other half of that —
+    // see `.mr-ribbons`' note on why the overlay carries no z-index at all.
+    <div
+      data-mr-pane-header
+      className="sticky top-0 z-10 border-b border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300"
+    >
       {children}
     </div>
   );
@@ -661,5 +768,8 @@ const DECISION_SAID: Record<ConflictDecision, string> = {
 };
 
 const UNAPPLIED = Object.freeze({ kind: 'unapplied' } as const);
+/** ⚠ FROZEN AND MODULE-LEVEL, not a `[]` literal in the prop: a fresh array every render would
+ *  re-fire the ribbon overlay's measure effect on every keystroke. */
+const EMPTY_REGIONS: readonly ConflictRegion[] = Object.freeze([]);
 const EMPTY_DECISIONS: Readonly<Record<string, ConflictDecision>> = Object.freeze({});
 const EMPTY_SUGGESTIONS: Readonly<Record<string, string>> = Object.freeze({});

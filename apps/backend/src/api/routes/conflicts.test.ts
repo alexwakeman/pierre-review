@@ -427,6 +427,43 @@ describe('opening', () => {
     expect(session.error?.message).toBe('Couldn’t work out the conflicts in this pull request.');
   });
 
+  it('starts every region at base when the body says autoApply:false', async () => {
+    // ⚠ IT ALSO PROVES AJV IS NOT STRIPPING THE FLAG. `openSchema` carries
+    // `additionalProperties: false`, so a field the schema does not declare is removed silently
+    // and the SPA's "nothing is applied before you press something" becomes a no-op nothing
+    // reports. The contact form's honeypot is the same defect one layer over.
+    const oneSided: ConflictModelFile = file(0, {
+      regions: [
+        {
+          id: 0,
+          kind: 'ours_only',
+          base: ['base()'],
+          ours: ['ours()'],
+          theirs: [],
+          fingerprint: 'fp-one-sided',
+          wand: { decision: 'ours', reason: 'only_ours' },
+          mergedLines: null,
+        },
+      ],
+    });
+    buildConflictModel.mockResolvedValue(ready(model({ files: [oneSided] })));
+
+    const on = await openReady(writePrId, {});
+    const onContent = await app.inject({
+      method: 'GET',
+      url: `/api/prs/${writePrId}/conflicts/files/0?session=${on.sessionId}`,
+    });
+    // The knob still works the other way — it is the SPA's choice that changed, not the protocol.
+    expect(onContent.json().regions[0].defaultDecision).toBe('ours');
+
+    const off = await openReady(writePrId, { restart: true, autoApply: false });
+    const offContent = await app.inject({
+      method: 'GET',
+      url: `/api/prs/${writePrId}/conflicts/files/0?session=${off.sessionId}`,
+    });
+    expect(offContent.json().regions[0].defaultDecision).toBe('base');
+  });
+
   it('reports a conflict-free merge as `clean`, and does not invent work', async () => {
     buildConflictModel.mockResolvedValue({ status: 'clean', model: model({ files: [] }) });
     const session = await openReady();

@@ -22,8 +22,7 @@ import {
 } from '../../store/conflictResolver.js';
 import { CloseIcon, ExternalLinkIcon } from '../Icons.js';
 import { safeExternalUrl } from '../../lib/ui.js';
-import { conflictsDecidedAcross } from '../../lib/mergeResolver.js';
-import { commitPlan } from '../../lib/conflictCommit.js';
+import { commitPlan, type CommitPlan } from '../../lib/conflictCommit.js';
 import { ResolverPanes } from './ResolverPanes.js';
 import { LandingStep } from './LandingStep.js';
 import { CommitResultPanel } from './CommitResultPanel.js';
@@ -31,9 +30,10 @@ import { CloseResolverConfirm } from './CloseResolverConfirm.js';
 import {
   BRANCH_MOVED_RESTART,
   DECISIONS_KEPT,
+  READING_FILES,
   SESSION_GONE,
   START_AGAIN,
-  conflictsDecided,
+  decisionsDecided,
 } from './copy.js';
 
 // ── THE RESOLVER SHELL ───────────────────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ const PREPARE_SENTENCE: Record<ConflictPreparePhase, string> = {
   cloning: 'Getting a copy of the repository…',
   fetching: 'Fetching both branches…',
   merging: 'Working out what conflicts…',
-  reading: 'Reading the conflicting files…',
+  reading: READING_FILES,
 };
 
 export function ConflictResolverOverlay(): JSX.Element | null {
@@ -97,6 +97,10 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
   // used for a commit already in flight, and the one thing it must never do is offer a retry.
   const connectionLost = connection === 'lost';
   const [view, setView] = useState<'panes' | 'landing'>('panes');
+  // A one-shot: the landing step's "Still to decide" row sends the reader back to a FILE, and the
+  // panes put the cursor on that file's first unanswered region. ⚠ A FILE INDEX, NOT A REGION —
+  // the landing step does not hold that file's regions and must not fetch them to name one.
+  const [jumpTo, setJumpTo] = useState<number | null>(null);
 
   const key =
     session != null && session.status === 'ready'
@@ -121,11 +125,14 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
 
   const decisions = stored?.decisions ?? EMPTY_DECISIONS;
 
-  const counts = useMemo(
+  // ⚠ ONE FOLD, ONE NUMBER. The footer, the toolbar's countdown, the close confirm, the landing
+  // step's gate and the result panel all read THIS object. Three separate predicates used to
+  // answer "can we commit?" and two separate folds answered "how much is done", which is how a
+  // button and the list under it come to disagree. It costs what the panes' own tally already
+  // pays on every decision.
+  const plan = useMemo<CommitPlan | null>(
     () =>
-      session == null
-        ? { total: 0, decided: 0 }
-        : conflictsDecidedAcross(session.files, files, decisions),
+      session == null || session.status !== 'ready' ? null : commitPlan(session, files, decisions),
     [session, files, decisions],
   );
 
@@ -147,10 +154,14 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
   // requests. The landing step says out loud that the push will disarm it, BEFORE the button.
   const armed = usePrArmedIntent(target.prId) != null;
 
-  // ⚠ THE WORK AT RISK IS CONTESTED REGIONS THE READER ANSWERED, not `decidedCount`. The store's
-  // counter includes the auto-apply pass, which lands the moment a file's regions arrive — gating
-  // on it would put a confirm bar in front of somebody who opened a file and looked at it.
-  const atRisk = counts.decided > 0 && !committed;
+  // ⚠ THE WORK AT RISK IS EVERY DECISION THE READER MADE. It used to be CONTESTED regions only,
+  // because an auto-apply pass wrote a decision per one-sided region the moment a file's regions
+  // arrived and gating on that would have put a confirm bar in front of somebody who opened a
+  // file and looked at it. Nothing seeds a decision any more, so that reason is gone — and the
+  // narrow count UNDER-fires: a reader who answered fifteen one-sided changes and no conflicts
+  // had `decided === 0`, so Escape closed outright and `beforeunload` (the ONE gesture the store
+  // cannot survive) never registered.
+  const atRisk = plan != null && plan.decidedTotal > 0 && !committed;
 
   // Escape. ⚠ CAPTURE PHASE + `stopImmediatePropagation`, the HelpModal precedent: the global
   // `useKeyboard` hook treats Escape as "leave the current tab → the board", so without this the
@@ -280,7 +291,7 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
           connectionLost={connectionLost}
           sessionKey={key}
           files={files}
-          decisions={decisions}
+          plan={plan}
           loadingFiles={loadingFiles}
           fileErrors={fileErrors}
           loadFile={loadFile}
@@ -288,6 +299,8 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
           onRestart={restart}
           view={view}
           onView={setView}
+          jumpTo={jumpTo}
+          onJumpTo={setJumpTo}
           headMoved={headMoved}
           autoMergeArmed={armed}
           commitError={commitMutation.error?.message ?? null}
@@ -301,27 +314,29 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
 
       {confirming && (
         <CloseResolverConfirm
-          decided={counts.decided}
-          total={counts.total}
+          decided={plan?.decidedTotal ?? 0}
+          total={plan?.decidableTotal ?? 0}
           onKeep={() => setConfirming(false)}
           onClose={() => close({ reason: 'user' })}
         />
       )}
 
-      {/* ⚠ THE COUNTDOWN IS OVER CONTESTED REGIONS, NOT OVER EVERY DECISION. `decidedCount` on the
-          store counts every region the reader has answered INCLUDING the auto-applied one-sided
-          changes, which nobody was asked about — pairing it with `conflictCount` would print
-          "31 of 8 decided". `conflictsDecidedAcross` takes its denominator from the manifest and
-          its numerator from the loaded files, which is exact: a file nobody opened carries no
-          decisions.
+      {/* ⚠ THE COUNTDOWN IS THE COMMIT GATE'S OWN POPULATION — every region that takes a
+          decision, across every supported file, with the denominator off the MANIFEST so a file
+          nobody opened is still counted. It used to count contested regions only, which was
+          honest while one-sided changes were applied for you and is not now: it could read
+          "3 of 3 conflicts decided" beside a Commit button held shut by four one-sided changes.
+          It is the SAME `plan` object the landing step gates on, so the two cannot disagree.
 
           The second line replaces the old "nothing here is saved": decisions ARE kept, under the
           pinned key, and that is precisely what makes an accidental Escape survivable. */}
       <footer className="flex shrink-0 flex-wrap items-baseline gap-x-3 border-t border-gray-200 px-4 py-1.5 text-[11px] text-gray-600 dark:border-gray-800 dark:text-gray-300">
         <span>
-          {session != null && session.status === 'ready'
-            ? conflictsDecided(counts.decided, counts.total)
-            : 'Nothing to decide yet'}
+          {/* ⚠ THE FALLBACK IS "still reading", NOT "nothing to decide". `plan` is null until
+              the session is ready, and `decisionsDecided(0, 0)` already owns the sentence that
+              says this pull request has nothing to decide — asserting that here, a second before
+              it flips to "12 of 12 changes decided", is a claim nobody has established. */}
+          {plan != null ? decisionsDecided(plan.decidedTotal, plan.decidableTotal) : READING_FILES}
         </span>
         <span>{DECISIONS_KEPT}</span>
       </footer>
@@ -358,7 +373,7 @@ function ResolverBody({
   connectionLost,
   sessionKey,
   files,
-  decisions,
+  plan,
   loadingFiles,
   fileErrors,
   loadFile,
@@ -366,6 +381,8 @@ function ResolverBody({
   onRestart,
   view,
   onView,
+  jumpTo,
+  onJumpTo,
   headMoved,
   autoMergeArmed,
   commitError,
@@ -380,9 +397,9 @@ function ResolverBody({
   connectionLost: boolean;
   sessionKey: string | null;
   files: Record<number, ConflictFileContent>;
-  /** The pinned model's decisions, handed down rather than re-read: the shell already subscribes
-   *  to them for the countdown, and a second subscription is a second answer waiting to differ. */
-  decisions: Readonly<Record<string, ConflictDecision>>;
+  /** ⚠ THE ONE GATE AND THE ONE COUNTER, folded once in the shell. Null until the model is
+   *  `ready`, which is also every branch below that renders a sentence rather than the panes. */
+  plan: CommitPlan | null;
   loadingFiles: ReadonlySet<number>;
   fileErrors: Readonly<Record<number, string>>;
   loadFile: (index: number) => Promise<ConflictFileContent | null>;
@@ -390,6 +407,9 @@ function ResolverBody({
   onRestart: () => void;
   view: 'panes' | 'landing';
   onView: (v: 'panes' | 'landing') => void;
+  /** The landing step's one-shot "finish this file" target, consumed by the panes. */
+  jumpTo: number | null;
+  onJumpTo: (index: number | null) => void;
   headMoved: boolean;
   autoMergeArmed: boolean;
   commitError: string | null;
@@ -422,17 +442,19 @@ function ResolverBody({
   if (session.status === 'clean') {
     return <Notice text={`This pull request no longer conflicts with ${session.baseRef}.`} />;
   }
-  if (sessionKey == null) return <Notice text="Reading the conflicting files…" />;
+  // `ready` ⇒ both of these are here. The guard is what tells the compiler so, and it renders the
+  // same sentence as the line above it because it is the same moment.
+  if (sessionKey == null || plan == null) return <Notice text={READING_FILES} />;
 
   const result = session.commit?.status === 'done' ? session.commit.result : null;
   if (result != null) {
     // ⚠ TERMINAL, AND IT DOES NOT AUTO-CLOSE: this is the only place the per-file refusals are
-    // stated. The plan is folded here rather than inside the panel so the panel stays a renderer.
+    // stated. The plan is the shell's ONE fold, handed down — the panel stays a renderer.
     return (
       <CommitResultPanel
         session={session}
         result={result}
-        plan={commitPlan(session, files, decisions)}
+        plan={plan}
         onClose={() => onClose(true)}
       />
     );
@@ -444,12 +466,18 @@ function ResolverBody({
         session={session}
         sessionKey={sessionKey}
         files={files}
+        plan={plan}
         headMoved={headMoved}
         autoMergeArmed={autoMergeArmed}
         commitError={commitError}
         connectionLost={connectionLost}
         onBack={() => {
           onResetCommit();
+          onView('panes');
+        }}
+        onJumpToFile={(index) => {
+          onResetCommit();
+          onJumpTo(index);
           onView('panes');
         }}
         onCommit={onCommit}
@@ -479,6 +507,10 @@ function ResolverBody({
       fileErrors={fileErrors}
       loadFile={loadFile}
       onRetryFile={onRetryFile}
+      decidedTotal={plan.decidedTotal}
+      decidableTotal={plan.decidableTotal}
+      jumpToFile={jumpTo}
+      onJumpConsumed={() => onJumpTo(null)}
       onLand={() => onView('landing')}
     />
   );

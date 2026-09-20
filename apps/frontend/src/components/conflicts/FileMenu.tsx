@@ -49,7 +49,8 @@ export function FileMenu({
 }: {
   files: ConflictFileEntry[];
   activeIndex: number;
-  /** Only LOADED files have one; an unopened file's row says how many conflicts it holds. */
+  /** Only LOADED files have one; an unopened file's row falls back to the manifest's
+   *  `decidableCount`, which is what `fileRowState` does. */
   tallies: Readonly<Record<number, FileTally>>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -73,16 +74,22 @@ export function FileMenu({
   }, [open]);
 
   const active = files.find((f) => f.index === activeIndex) ?? files[0];
+  // ⚠ THE SAME FOLD THE ROWS USE. A bare `decided >= decidable` with no `decidable > 0` guard
+  // counts a file with nothing decidable as resolved — exactly the trap `fileRowState`'s own ⚠
+  // documents — so the header would tick off a file the rows call "Nothing to decide".
   const resolvedFiles = useMemo(
     () =>
-      files.filter((f) => {
-        const t = tallies[f.index];
-        return f.unsupported == null && t != null && t.decided >= t.decidable;
-      }).length,
+      files.filter((f) => fileRowState(f, tallies[f.index] ?? null).state === 'resolved').length,
     [files, tallies],
   );
   const unsupportedCount = files.filter((f) => f.unsupported != null).length;
-  const activeConflicts = active == null ? 0 : (tallies[active.index]?.conflicts ?? active.conflictCount);
+  // ⚠ THE SAME FOLD AS THE ROWS AND THE GATE. The trigger used to read `· 1 conflict` off the
+  // CONTESTED population, sitting inches from a countdown over the DECIDABLE one and a Commit
+  // button held shut by all of it — three numbers about one file, and the only one visible without
+  // opening the menu was the one that understated the work. It also never counted down, because
+  // `tally.conflicts` is the file's total rather than its remainder. `fileRowState` says
+  // "6 to decide" → "2 of 6 decided" → "Resolved", which is what the gate holds out for.
+  const activeRow = active == null ? null : fileRowState(active, tallies[active.index] ?? null);
 
   return (
     <>
@@ -98,10 +105,8 @@ export function FileMenu({
         <span className="truncate font-mono" title={active?.path}>
           {active == null ? 'No files' : truncateLeft(active.path, 44)}
         </span>
-        {active != null && (
-          <span className="shrink-0 text-gray-500 dark:text-gray-400">
-            · {activeConflicts} conflict{activeConflicts === 1 ? '' : 's'}
-          </span>
+        {activeRow != null && (
+          <span className="shrink-0 text-gray-500 dark:text-gray-400">· {activeRow.label}</span>
         )}
         <CaretIcon size={11} className="shrink-0 text-gray-500 dark:text-gray-400" />
       </button>

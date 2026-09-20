@@ -103,13 +103,203 @@ export function slotFor(
   return { kind };
 }
 
-/** Which of the four colours a region is wearing right now. `unchanged` wears none. */
+/**
+ * The region's STATE, in one of the four colours. `unchanged` wears none.
+ *
+ * ⚠ THIS IS THE STATE ROLE AND IT IS NOT THE PANE'S PAINT. It drives the strip's ink and the
+ * centre cell's 2px rule — the two encodings that must keep working for every state, including the
+ * undecided one where the centre now carries no wash at all. What a given PANE paints is
+ * `panePaint` below, and the two still disagree: this role is a fact about the REGION and exists
+ * for every state, while a pane's paint also depends on whether that pane is offering anything and
+ * whether its lines were taken.
+ */
 export function slotRole(region: ConflictRegion, slot: SlotDecision): SlotRole {
   if (region.kind === 'unchanged') return null;
   if (slot.kind === 'unapplied') return region.kind === 'conflict' ? 'conflict' : 'change';
   if (slot.kind === 'ignored') return 'ignored';
   return 'applied';
 }
+
+// ── WHAT EACH PANE PAINTS ────────────────────────────────────────────────────────────────────
+//
+// ⚠ PAINT ON A SIDE MEANS "THERE IS A DECISION TO TAKE HERE", AND NOTHING ELSE.
+//
+//   A SIDE is painted ONLY while it is offering the reader something — `region.allowed` names the
+//   decision that pane's button would send (`'ours'` on the left, `'theirs'` on the right), and a
+//   pane whose decision is not in that list is offering nothing. Per kind: `unchanged` paints
+//   neither, `ours_only` the left, `theirs_only` the right, `both_same` THE LEFT ONLY, and a
+//   `conflict` both.
+//
+//   ⚠ `both_same` IS THE ONE THAT LOOKS LIKE AN EXCEPTION AND IS NOT. Both branches made the same
+//   edit, so the model offers `['ours', 'base']` and there is nothing on the right to bring in.
+//   The right pane's identical copy therefore sits there as ordinary unpainted text. This replaces
+//   an earlier rule that painted every non-`unchanged` region on BOTH sides, which put a blue wash
+//   over main's "nothing here" filler hatch and invited a click that no control existed for.
+//
+//   ⚠ THE GUTTER ARROW USES THE SAME TEST — `sideOffered` below is the one spelling of it, so a
+//   painted side and an available arrow cannot come apart.
+//
+//   ⚠ `.mr-filler`'s 45° hatch IS NOT PAINT AND STAYS. It says "this side has no lines here",
+//   which is a different fact from "there is something here to take", and with the wash gone from
+//   an unofferable side it carries that fact alone.
+//
+//   THE HUE ON A SIDE IS THE CONFLICT TYPE ONLY WHILE THE REGION IS UNDECIDED. Once the reader has
+//   answered, a side that went into the result turns GREEN — the same `applied` green as the
+//   centre, because it is now a piece of the result rather than one of two offers. A side the
+//   decision turned down loses its paint entirely.
+//
+//   ⚠ THIS REVERSES AN EARLIER RULE, DELIBERATELY. A side used to keep its conflict type for the
+//   life of the region ("a side is a piece of somebody's branch; a decision does not change what it
+//   is") and a turned-down side dropped to a 1px outline in the same hue. On screen that left a red
+//   block feeding a green block with a red ribbon between them, all three describing one accepted
+//   change. The outline family is deleted (see `copy.ts` and `index.css`): rejected and ignored now
+//   paint nothing, and `.mr-filler` plus the strip's word carry what is left.
+//
+//   The CENTRE is UNCHANGED: nothing while the region is undecided, then applied or ignored.
+//   ⚠ AN UNDECIDED CENTRE HAS NO WASH AT ALL. Nothing is put into the result before the reader
+//   presses something, so the result pane must not open wearing colour for changes nobody has
+//   accepted. Its remaining two encodings are the 2px rule (still in the state's ink, so `ignored`
+//   and `unapplied` still read apart) and the strip's word.
+
+export type SlotPane = 'left' | 'centre' | 'right';
+
+/** The two hues a SIDE can wear while the region is UNDECIDED. Both are conflict types; neither is
+ *  a state. After a decision a side is green or it is bare. */
+export type SideRole = 'change' | 'conflict';
+
+/** One pane's paint for one region: a role, or nothing at all.
+ *  ⚠ A ROLE, NOT AN OBJECT WITH A `filled` FLAG. The flag existed for the outline a turned-down
+ *  side wore; nothing is outlined any more, so the second arm would be a shape no caller can
+ *  produce. */
+export type PanePaint = Exclude<SlotRole, null>;
+
+/** The decision each side's own button sends. */
+const SIDE_DECISION: Record<'left' | 'right', ConflictDecision> = {
+  left: 'ours',
+  right: 'theirs',
+};
+
+/**
+ * Is there anything on this side to bring in?
+ *
+ * ⚠ THE TEST IS `region.allowed`, WHICH THE SERVER ALREADY DECIDED (`allowedDecisions` in
+ * `conflict/model.ts`). A second rule keyed on `region.kind` would be a copy of that switch living
+ * one repository away from it, free to disagree. Both the wash and the gutter arrow go through
+ * here, so a pane can never be painted as a choice it cannot offer.
+ */
+export function sideOffered(region: ConflictRegion, pane: 'left' | 'right'): boolean {
+  return region.allowed.includes(SIDE_DECISION[pane]);
+}
+
+/**
+ * What became of one side's lines.
+ *
+ * ⚠ THREE OUTCOMES, NOT A BOOLEAN. Its predecessor answered "may this side keep its wash?" and
+ * returned TRUE for both sides of an UNDECIDED region — two different facts ("nobody has answered"
+ * and "this side is in the result") behind one `true`, which `ribbonSides` then had to unpick with
+ * a guard of its own. The three states now paint three different things: the conflict type, the
+ * applied green, and nothing.
+ */
+export type SideOutcome = 'undecided' | 'contributed' | 'rejected';
+
+export function sideOutcome(slot: SlotDecision, pane: 'left' | 'right'): SideOutcome {
+  switch (slot.kind) {
+    case 'unapplied':
+      return 'undecided';
+    // Keeping the ancestor takes NEITHER side.
+    case 'ignored':
+      return 'rejected';
+    case 'left':
+      return pane === 'left' ? 'contributed' : 'rejected';
+    case 'right':
+      return pane === 'right' ? 'contributed' : 'rejected';
+    // Both taken in some order, the wand's word merge, an accepted suggestion: content from both
+    // sides reached the result.
+    case 'both-lr':
+    case 'both-rl':
+    case 'wand':
+    case 'ai':
+      return 'contributed';
+  }
+}
+
+export function panePaint(
+  region: ConflictRegion,
+  slot: SlotDecision,
+  pane: SlotPane,
+): PanePaint | null {
+  if (region.kind === 'unchanged') return null;
+  if (pane === 'centre') {
+    if (slot.kind === 'unapplied') return null;
+    return slot.kind === 'ignored' ? 'ignored' : 'applied';
+  }
+  if (!sideOffered(region, pane)) return null;
+  switch (sideOutcome(slot, pane)) {
+    case 'contributed':
+      return 'applied';
+    case 'rejected':
+      return null;
+    case 'undecided': {
+      const undecided: SideRole = region.kind === 'conflict' ? 'conflict' : 'change';
+      return undecided;
+    }
+  }
+}
+
+// ── WHICH SIDES THE RIBBON JOINS ─────────────────────────────────────────────────────────────
+
+/** The two panes a ribbon can start from. The centre is always its other end. */
+export type RibbonSide = 'left' | 'right';
+
+const NO_SIDES: readonly RibbonSide[] = Object.freeze([]);
+const LEFT_ONLY: readonly RibbonSide[] = Object.freeze(['left'] as const);
+const RIGHT_ONLY: readonly RibbonSide[] = Object.freeze(['right'] as const);
+const BOTH_SIDES: readonly RibbonSide[] = Object.freeze(['left', 'right'] as const);
+
+/**
+ * Which sides actually PUT CONTENT INTO THE RESULT for this region — the only thing a ribbon is
+ * allowed to claim.
+ *
+ * ⚠ IT IS `sideOutcome(...) === 'contributed'` AND THE SAME `sideOffered` GATE `panePaint` OPENS
+ * WITH. It used to need a guard of its own because its helper returned `true` for both sides of an
+ * undecided region; with three honest outcomes the ribbon rule and the paint rule read the same
+ * answer, so a ribbon leaving a side the wash says was turned down is not expressible.
+ *
+ * ⚠ THE `sideOffered` HALF IS NOT REDUNDANT TODAY AND MUST STAY. `sideOutcome` answers
+ * `'contributed'` for BOTH sides of a both-order, a wand merge and an accepted suggestion without
+ * asking whether each side is offered at all — so the pair agrees only because
+ * `allowedDecisions` happens never to offer a both-order on a kind that withholds a side. Give
+ * `both_same` a `both_ours_first` tomorrow and, without this, a ribbon would be drawn out of an
+ * UNPAINTED right pane. Reachability is not an invariant; the shared gate is.
+ *
+ * ⚠ `ignored` AND `unapplied` BOTH DRAW NOTHING, and they stay different states for the reason
+ * `SlotDecision`'s header gives (`ignored` serialises as `'base'`, `unapplied` as nothing). Neither
+ * put a side's lines in the result, so neither has a linkage to draw; the counter still needs them
+ * apart.
+ */
+export function ribbonSides(region: ConflictRegion, slot: SlotDecision): readonly RibbonSide[] {
+  if (region.kind === 'unchanged') return NO_SIDES;
+  const left = sideOffered(region, 'left') && sideOutcome(slot, 'left') === 'contributed';
+  const right = sideOffered(region, 'right') && sideOutcome(slot, 'right') === 'contributed';
+  if (left && right) return BOTH_SIDES;
+  if (left) return LEFT_ONLY;
+  if (right) return RIGHT_ONLY;
+  return NO_SIDES;
+}
+
+// ── `ribbonHue` — RETIRED, AND WHY ITS ARGUMENT NO LONGER HOLDS ──────────────────────────────
+//
+// A ribbon used to wear the REGION'S TYPE on the reasoning that "a ribbon exists only because a
+// decision was taken, so keying it on the state would make every ribbon `applied` and the hue would
+// carry nothing". That is still true — and it is now the correct outcome rather than the objection.
+// A ribbon joins an ACCEPTED side to the result it produced, and an accepted side is green (see
+// `panePaint`), so a type-hued band between two green blocks was the one discontinuity in the row.
+// Every ribbon is green, `copy.ts`'s `FILL_CLASS` is a single class rather than a lookup, and the
+// hue carries nothing because the two blocks it joins already carry everything.
+
+// ⚠ NOTHING ELSE MAY REINTRODUCE A PER-REGION RIBBON COLOUR. The linkage is readable because it is
+// continuous with what it joins; a second hue in the gutter is a fifth encoding of a state three
+// already carry.
 
 // ── THE CENTRE TEXT ──────────────────────────────────────────────────────────────────────────
 
@@ -244,10 +434,11 @@ export function wandSentence(plan: WandPlan): string {
   if (plan.conflictsResolved > 0) {
     clauses.push(`${plural(plan.conflictsResolved, 'conflict', 'conflicts')} resolved`);
   }
-  // ⚠ THIS SENTENCE IS ABOUT ONE FILE AND MUST SAY SO. The wand runs per file, but the header
-  // counts conflicts across the whole pull request — so a bare "Nothing left to decide." sat
-  // beside "1 of 3 conflicts decided" and the two flatly contradicted each other on screen. Two
-  // numbers at two grains, neither naming its own population.
+  // ⚠ THIS SENTENCE IS ABOUT ONE FILE AND MUST SAY SO. The wand runs per FILE and counts CONTESTED
+  // regions; the header counts every DECIDABLE region across the whole pull request — so a bare
+  // "Nothing left to decide." sat beside a countdown at a different grain and the two flatly
+  // contradicted each other on screen. Two numbers at two grains, neither naming its own
+  // population.
   if (clauses.length > 0) {
     if (plan.conflictsLeft > 0) return `${clauses.join(', ')}, ${plan.conflictsLeft} left.`;
     return `${clauses.join(', ')}. Nothing left to decide in this file.`;
@@ -291,32 +482,14 @@ export function tallyFile(
   return { decidable, decided, conflicts, conflictsDecided };
 }
 
-/**
- * The header's countdown.
- *
- * ⚠ THE DENOMINATOR IS THE MANIFEST'S AND THE NUMERATOR IS THE LOADED FILES'. That pairing is
- * exact rather than approximate: a file whose regions have never been fetched cannot carry a
- * decision, because there was nothing on screen to decide. Counting conflicts (not every region)
- * keeps the two halves the same population — `ConflictFileEntry.conflictCount` is contested
- * regions only, and the auto-applied one-sided changes are not something the reader is being
- * asked about.
- */
-export function conflictsDecidedAcross(
-  files: readonly ConflictFileEntry[],
-  loaded: Readonly<Record<number, { regions: ConflictRegion[] }>>,
-  decisions: Readonly<Record<string, ConflictDecision>>,
-): { total: number; decided: number } {
-  let total = 0;
-  let decided = 0;
-  for (const entry of files) {
-    if (entry.unsupported != null) continue;
-    total += entry.conflictCount;
-    const content = loaded[entry.index];
-    if (content == null) continue;
-    decided += tallyFile(content.regions, entry.index, decisions).conflictsDecided;
-  }
-  return { total, decided };
-}
+// ── `conflictsDecidedAcross` — RETIRED ───────────────────────────────────────────────────────
+//
+// It counted CONTESTED regions only, which was the honest pairing while one-sided changes were
+// auto-applied and nobody was being asked about them. Now every decidable region is the reader's
+// to answer and the commit is blocked until they all are, so a header reading "3 of 3 conflicts
+// decided" over a blocked commit is the two-surfaces-disagree defect this file keeps warning
+// about. ONE number lives in the overlay now and it is `CommitPlan.decidedTotal` /
+// `decidableTotal` — the gate's own population, folded once in `lib/conflictCommit.ts`.
 
 // ── THE FILE MENU'S ROW STATE ────────────────────────────────────────────────────────────────
 
@@ -328,6 +501,15 @@ export type FileRowState = 'unsupported' | 'resolved' | 'partial' | 'conflicts';
  *  It lives in `lib/` rather than `copy.ts` because the two folds that need it are libraries and
  *  a library may not import from `components/`. */
 export const CANT_RESOLVE_HERE = 'Can’t be resolved here';
+
+/** How many regions in a file still take a decision. ⚠ ONE DECLARATION, for the same reason as
+ *  `CANT_RESOLVE_HERE` above: the file menu's rows and the landing step's "Still to decide" list
+ *  say the same thing about the same file, and two spellings is one phrase drifting into two.
+ *  `copy.ts` re-exports it. */
+export const toDecide = (n: number): string => `${n} to decide`;
+
+/** A supported file with no region anybody can answer. It neither ships nor blocks. */
+export const NOTHING_TO_DECIDE = 'Nothing to decide';
 
 /**
  * One row's state and the words on it.
@@ -343,20 +525,26 @@ export function fileRowState(
   if (entry.unsupported != null) {
     return { state: 'unsupported', label: entry.unsupportedLabel ?? CANT_RESOLVE_HERE };
   }
+  // ⚠ AN UNOPENED ROW COUNTS `decidableCount`, NOT `conflictCount`. A file with no contested
+  // regions and four one-sided changes used to read "Not opened yet" with no number at all, while
+  // blocking the commit on four decisions nobody had made.
   if (tally == null) {
-    if (entry.conflictCount === 0) return { state: 'conflicts', label: 'Not opened yet' };
-    return { state: 'conflicts', label: plural(entry.conflictCount, 'conflict', 'conflicts') };
+    if (entry.decidableCount === 0) return { state: 'conflicts', label: NOTHING_TO_DECIDE };
+    return { state: 'conflicts', label: toDecide(entry.decidableCount) };
   }
   // ⚠ `decidable === 0` IS NOT "Resolved", and `>=` alone would say it was. `commitPlan`'s
   // classifier requires `decidable > 0` before a file goes on the wire, so a bare `0 >= 0` here
   // would tick a file off in the menu that the landing step then lists under "Still conflicted"
   // — two surfaces disagreeing about one file.
-  if (tally.decidable === 0) return { state: 'conflicts', label: 'Nothing to decide' };
+  if (tally.decidable === 0) return { state: 'conflicts', label: NOTHING_TO_DECIDE };
   if (tally.decided >= tally.decidable) return { state: 'resolved', label: 'Resolved' };
   if (tally.decided > 0) {
     return { state: 'partial', label: `${tally.decided} of ${tally.decidable} decided` };
   }
-  return { state: 'conflicts', label: plural(tally.conflicts, 'conflict', 'conflicts') };
+  // ⚠ THE SAME POPULATION AS THE ROW ABOVE IT. This used to count CONTESTED regions ("2
+  // conflicts") beside a file holding three decisions, which understated what the commit gate
+  // would hold out for.
+  return { state: 'conflicts', label: toDecide(tally.decidable) };
 }
 
 // ── THE COMMIT WIRE ──────────────────────────────────────────────────────────────────────────
@@ -387,32 +575,15 @@ export function serializeFileDecisions(
   return out;
 }
 
-/**
- * The auto-apply pass, as decisions to WRITE when a file's regions first arrive.
- *
- * ⚠ ONLY A DEFAULT THAT APPLIES A CHANGE IS SEEDED. `defaultDecision === 'base'` means "this
- * region starts on the ancestor", which is the UNDECIDED state — for a contested region always,
- * and for every region when the session was opened with `autoApply: false`. Writing `'base'` into
- * the store there would record an answer the reader never gave, and `ignored` would stop being
- * something they chose.
- *
- * ⚠ IT NEVER OVERWRITES. The caller filters to regions with no stored decision; re-opening a file
- * must not undo the reader's work.
- */
-export function autoApplyMoves(
-  regions: readonly ConflictRegion[],
-  fileIndex: number,
-  decisions: Readonly<Record<string, ConflictDecision>>,
-): Array<{ fileIndex: number; regionId: number; decision: ConflictDecision }> {
-  const out: Array<{ fileIndex: number; regionId: number; decision: ConflictDecision }> = [];
-  for (const region of regions) {
-    if (region.kind === 'unchanged') continue;
-    if (region.defaultDecision === 'base') continue;
-    if (decisions[regionKey(fileIndex, region.id)] != null) continue;
-    out.push({ fileIndex, regionId: region.id, decision: region.defaultDecision });
-  }
-  return out;
-}
+// ── THE AUTO-APPLY PASS — DELETED, AND IT MUST NOT COME BACK ─────────────────────────────────
+//
+// `autoApplyMoves` used to write every one-sided region's own side into the store the moment a
+// file's regions arrived, so the centre pane opened already green. NOTHING IS APPLIED BEFORE THE
+// READER PRESSES SOMETHING now: the session opens with `autoApply: false`, every region starts at
+// `base`, and the centre pane carries no wash until a decision puts something in it.
+//
+// ⚠ THE SERVER KNOB STAYS. `ConflictOpenBody.autoApply` and `defaultDecisionFor` are untouched —
+// what changed is which value the SPA sends, not what the protocol can express.
 
 // ── THE DETERMINISTIC WORD MERGE — DELETED, AND IT MUST NOT COME BACK ────────────────────────
 //

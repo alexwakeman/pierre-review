@@ -60,8 +60,13 @@ export interface ConflictFileEntry {
   unsupportedLabel: string | null;
   /** Every region, all kinds. 0 when unsupported. */
   regionCount: number;
-  /** Regions where both sides disagree — the number the header counts down. */
+  /** Regions where both sides disagree. */
   conflictCount: number;
+  /** Regions that take a decision — every kind except `unchanged`.
+   *  ⚠ THE COMMIT GATE COUNTS THESE ACROSS EVERY FILE, INCLUDING ONES NOBODY OPENED, so it can
+   *  be neither `regionCount` (which includes context) nor `conflictCount` (which leaves out
+   *  one-sided changes). It is also the header's denominator. */
+  decidableCount: number;
   /** Of `conflictCount`, how many the wand can settle without picking a side. */
   wandResolvableCount: number;
   /** Largest of the three sides, so the SPA can warn before fetching the file. */

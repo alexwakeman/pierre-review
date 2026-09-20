@@ -7,22 +7,33 @@ import type {
   ConflictLandStrategy,
   ConflictSession,
 } from '@pierre-review/shared';
-import { CANT_RESOLVE_HERE, serializeFileDecisions, tallyFile } from './mergeResolver.js';
+import {
+  CANT_RESOLVE_HERE,
+  NOTHING_TO_DECIDE,
+  serializeFileDecisions,
+  tallyFile,
+} from './mergeResolver.js';
 
 // ── WHAT ACTUALLY GETS COMMITTED ─────────────────────────────────────────────────────────────
 //
 // The landing step's fold: which files are going into the commit, which ones are staying
 // conflicted, and the body the commit route takes. Pure and in a `.ts` file so it can be tested
-// — the two rules below are the ones that would otherwise fail silently.
+// — the rules below are the ones that would otherwise fail silently.
 //
-// ⚠ A PARTIALLY DECIDED FILE IS OMITTED WHOLE, NEVER HALF-SENT. `ConflictFileResolution.decisions`
-// is EXHAUSTIVE over its file's non-`unchanged` regions; a missing id is `IncompleteDecisions` and
-// refuses the WHOLE commit, so half-sending one file would take every other file's work down with
-// it. The half-decided file is listed on screen under "Still conflicted" instead — which is the
-// truth about it either way.
+// ⚠ NOTHING IS EXCLUDED FROM A COMMIT WITHOUT THE READER CHOOSING IT. A half-decided file used to
+// be dropped from the body and listed under "Still conflicted", which is a silent exclusion
+// wearing a label. `canCommit` is now FALSE while any supported file has an unanswered region,
+// and the landing step names each one with a click that goes there. The only thing still left out
+// is an `unsupported` file, which the MODEL excluded and which the server cannot take either.
+//
+// ⚠ A PARTIALLY DECIDED FILE IS STILL OMITTED WHOLE RATHER THAN HALF-SENT.
+// `ConflictFileResolution.decisions` is EXHAUSTIVE over its file's non-`unchanged` regions; a
+// missing id is `IncompleteDecisions` and refuses the WHOLE commit. That rule survives as the
+// second line of defence behind the gate, not as the way a partial file is handled.
 //
 // ⚠ A FILE NOBODY OPENED CARRIES NO DECISIONS, and that is not the same as "no conflicts". Its
-// regions were never fetched, so there is nothing to serialise; it counts as still conflicted.
+// regions were never fetched, so there is nothing to serialise — and its whole `decidableCount`
+// (off the MANIFEST, which is all we have for it) is outstanding.
 
 /** Why a file is not going into the commit — or that it is. */
 export type LandingFileState =
@@ -43,19 +54,58 @@ export interface LandingFileRow {
   label: string;
   /** Contested regions in this file that the reader answered. Sums into the success sentence. */
   conflictsDecided: number;
+  /** Regions in this file that take a decision. From the file's regions once they are here, from
+   *  the manifest's `decidableCount` before that. 0 for an unsupported file. */
+  decidable: number;
+  /** Of those, how many the reader has answered. 0 for a file whose regions never arrived. */
+  decided: number;
+  /** Have this file's regions been fetched? False ⇒ nothing in it can have been decided. */
+  opened: boolean;
+}
+
+/** A supported file with regions still unanswered. The commit is blocked until this list is
+ *  empty, and the landing step names every entry with a click that jumps there. */
+export interface OutstandingFile {
+  index: number;
+  path: string;
+  /** Regions still needing an answer. For a file nobody opened this is the manifest's whole
+   *  `decidableCount` — nothing can have been decided in a file whose regions never arrived. */
+  remaining: number;
+  /** False ⇒ the regions have not been fetched; the click that jumps there fetches them. */
+  opened: boolean;
 }
 
 export interface CommitPlan {
   rows: LandingFileRow[];
   /** `state === 'resolved'`, in manifest order. */
   resolved: LandingFileRow[];
-  /** Everything else, in manifest order — the "Still conflicted:" list. */
+  /** Everything else, in manifest order. The post-commit panel's population — see
+   *  `stillConflictingPaths` — and the SUPERSET `notCarried` is cut from. */
   stillConflicted: LandingFileRow[];
+  /**
+   * The "Still conflicted:" list: every file this commit will NOT carry and the reader cannot
+   * finish here — `stillConflicted` minus whatever `outstanding` already names above it.
+   *
+   * ⚠ IT IS NOT "the unsupported ones". `classify` also produces a SUPPORTED row with
+   * `decidable === 0` (every region came out `unchanged` — a mode-only conflict, say). That row
+   * never reaches `resolved`, so `buildCommitBody` never sends it, and `remaining` is 0, so it
+   * never blocks. Filter this list to `state === 'unsupported'` and that file is dropped from the
+   * commit with NOTHING on screen about it — the exact silent exclusion the gate exists to end.
+   */
+  notCarried: LandingFileRow[];
   /** Contested regions across the RESOLVED files only. The success sentence's numerator. */
   conflictsResolved: number;
   /** `session.files.length` — the denominator of "4 of 7 files resolved". Unsupported files are
    *  in it because they are files this pull request still conflicts on. */
   totalFiles: number;
+  /** ⚠ THE ONE GATE. Every other "can we commit?" in the SPA reads this — a second predicate is
+   *  how a button and the list under it come to disagree. */
+  outstanding: OutstandingFile[];
+  canCommit: boolean;
+  /** The counter's population, and the gate's: regions that take a decision, across every
+   *  SUPPORTED file, with the denominator off the manifest so a file nobody opened is counted. */
+  decidableTotal: number;
+  decidedTotal: number;
 }
 
 /** One file's row, from the manifest entry plus whatever regions have been fetched. */
@@ -64,50 +114,56 @@ function classify(
   loaded: ConflictFileContent | undefined,
   decisions: Readonly<Record<string, ConflictDecision>>,
 ): LandingFileRow {
+  const at = { index: entry.index, path: entry.path };
   if (entry.unsupported != null) {
+    // ⚠ NEVER OUTSTANDING. The MODEL excluded it, the server cannot take it, and it is named on
+    // screen with the server's own noun phrase — a choice the reader can see, not a silent drop.
     return {
-      index: entry.index,
-      path: entry.path,
+      ...at,
       state: 'unsupported',
       label: entry.unsupportedLabel ?? CANT_RESOLVE_HERE,
       conflictsDecided: 0,
+      decidable: 0,
+      decided: 0,
+      opened: false,
     };
   }
   if (loaded == null) {
     return {
-      index: entry.index,
-      path: entry.path,
+      ...at,
       state: 'untouched',
-      label: 'Not opened',
+      label: entry.decidableCount === 0 ? NOTHING_TO_DECIDE : 'Not opened',
       conflictsDecided: 0,
+      decidable: entry.decidableCount,
+      decided: 0,
+      opened: false,
     };
   }
   const tally = tallyFile(loaded.regions, entry.index, decisions);
-  if (tally.decidable > 0 && tally.decided >= tally.decidable) {
-    return {
-      index: entry.index,
-      path: entry.path,
-      state: 'resolved',
-      label: 'Resolved',
-      conflictsDecided: tally.conflictsDecided,
-    };
+  const counts = {
+    conflictsDecided: tally.conflictsDecided,
+    decidable: tally.decidable,
+    decided: tally.decided,
+    opened: true,
+  };
+  // ⚠ `decidable === 0` IS NOT "Nothing decided". There was nothing to decide, so accusing the
+  // reader of not deciding it is a sentence about them rather than about the file. It neither
+  // ships (`classify` never calls it resolved) nor blocks (`remaining` is 0).
+  if (tally.decidable === 0) {
+    return { ...at, state: 'untouched', label: NOTHING_TO_DECIDE, ...counts };
+  }
+  if (tally.decided >= tally.decidable) {
+    return { ...at, state: 'resolved', label: 'Resolved', ...counts };
   }
   if (tally.decided > 0) {
     return {
-      index: entry.index,
-      path: entry.path,
+      ...at,
       state: 'partial',
       label: `${tally.decided} of ${tally.decidable} decided`,
-      conflictsDecided: tally.conflictsDecided,
+      ...counts,
     };
   }
-  return {
-    index: entry.index,
-    path: entry.path,
-    state: 'untouched',
-    label: 'Nothing decided',
-    conflictsDecided: 0,
-  };
+  return { ...at, state: 'untouched', label: 'Nothing decided', ...counts };
 }
 
 export function commitPlan(
@@ -117,12 +173,33 @@ export function commitPlan(
 ): CommitPlan {
   const rows = session.files.map((entry) => classify(entry, loaded[entry.index], decisions));
   const resolved = rows.filter((r) => r.state === 'resolved');
+  const supported = rows.filter((r) => r.state !== 'unsupported');
+  const outstanding: OutstandingFile[] = [];
+  let decidableTotal = 0;
+  let decidedTotal = 0;
+  for (const row of supported) {
+    decidableTotal += row.decidable;
+    decidedTotal += row.decided;
+    const remaining = row.decidable - row.decided;
+    if (remaining > 0) {
+      outstanding.push({ index: row.index, path: row.path, remaining, opened: row.opened });
+    }
+  }
+  const outstandingIndexes = new Set(outstanding.map((o) => o.index));
+  const stillConflicted = rows.filter((r) => r.state !== 'resolved');
   return {
     rows,
     resolved,
-    stillConflicted: rows.filter((r) => r.state !== 'resolved'),
+    stillConflicted,
+    notCarried: stillConflicted.filter((r) => !outstandingIndexes.has(r.index)),
     conflictsResolved: resolved.reduce((n, r) => n + r.conflictsDecided, 0),
     totalFiles: session.files.length,
+    outstanding,
+    // The second clause keeps an all-unsupported pull request blocked — there is nothing this
+    // commit could carry, and the landing step says so in the server's own words.
+    canCommit: outstanding.length === 0 && resolved.length > 0,
+    decidableTotal,
+    decidedTotal,
   };
 }
 
@@ -166,20 +243,29 @@ export function landingTargets(session: ConflictSession, newBranchChosen: boolea
 /**
  * The commit body.
  *
- * ⚠ ONLY `resolved` FILES TRAVEL. See the second ⚠ in the module header. The pins are echoed from
- * the session the reader has been looking at, not re-read from anywhere: if the server's model has
- * moved on, `ModelStale` is exactly the answer we want, and nothing is written.
+ * ⚠ ONLY `resolved` FILES TRAVEL, and when `plan.canCommit` that IS every supported file. See the
+ * module header: the gate is what makes the two the same set, so the old "omitted whole" rule is
+ * now the second line of defence rather than the behaviour.
+ *
+ * ⚠ IT MAY ONLY BE CALLED WITH `plan.canCommit`. The caller's `submit()` gates on the SAME plan
+ * object this takes — passed in, not recomputed, so the button and the body cannot be looking at
+ * two folds. The route's `IncompleteDecisions` stays where it is: a client gate is never the
+ * gate.
+ *
+ * The pins are echoed from the session the reader has been looking at, not re-read from anywhere:
+ * if the server's model has moved on, `ModelStale` is exactly the answer we want, and nothing is
+ * written.
  */
 export function buildCommitBody(args: {
   session: ConflictSession;
+  plan: CommitPlan;
   loaded: Readonly<Record<number, ConflictFileContent>>;
   decisions: Readonly<Record<string, ConflictDecision>>;
   suggestionIds: Readonly<Record<string, string>>;
   strategy: ConflictLandStrategy;
   target: ConflictCommitTarget;
 }): ConflictCommitBody {
-  const { session, loaded, decisions, suggestionIds, strategy, target } = args;
-  const plan = commitPlan(session, loaded, decisions);
+  const { session, plan, loaded, decisions, suggestionIds, strategy, target } = args;
   const files = plan.resolved.flatMap((row) => {
     const content = loaded[row.index];
     if (content == null) return [];
