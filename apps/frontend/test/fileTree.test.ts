@@ -3,6 +3,7 @@
 // over them are not testable in this suite (vitest.config pins `test/**/*.test.ts`, no JSX).
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildFileTree, lineRowIndex, parsePatch, type FileTreeEntry } from '../src/lib/diff.js';
 
@@ -138,5 +139,46 @@ describe('lineRowIndex', () => {
   it('returns null when the line is not in the patch', () => {
     expect(lineRowIndex(rows, 999, 'RIGHT')).toBeNull();
     expect(lineRowIndex([], 1, 'RIGHT')).toBeNull();
+  });
+});
+
+// ── THE RAIL IS NOT CONDITIONAL ON HOW MANY FILES CHANGED ────────────────────────────────────
+//
+// A source scan, because `ChangesTab` is JSX and this suite cannot render it (see the header).
+// It is worth a test anyway: the defect it pins was invisible in every other way. The rail used
+// to hide under `TREE_MIN_FILES = 5`, so a 4-file pull request had no file browser and a 5-file
+// one did, with nothing on screen accounting for the difference — reported, eventually, as
+// "sometimes the file browser is not visible, and I don't know why". A threshold reintroduced
+// for the old "it does not earn the width" reason would reproduce it exactly, and no rendering
+// test, type or lint rule would object.
+describe('the Changes tab rail has no file-count threshold', () => {
+  const SRC = readFileSync(
+    new URL('../src/components/ChangesTab.tsx', import.meta.url),
+    'utf8',
+  );
+  // Comments out: the ⚠ above the rail NAMES the old constant in order to forbid it, so a scan
+  // of the raw file finds the string and reports the opposite of the truth.
+  const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  it('declares no minimum-files constant', () => {
+    expect(CODE).not.toMatch(/TREE_MIN_FILES/);
+  });
+
+  it('never gates the rail on files.length', () => {
+    // ⚠ COMPARED AGAINST A NON-ZERO DIGIT, NOT ANY DIGIT. `files.length > 0` is the emptiness
+    // test behind `havePatches` — "did any patch come back at all" — and is a different question
+    // from "are there enough of them to deserve a panel". Forbidding both would fail on the code
+    // as it correctly stands, which is how a guard gets loosened into uselessness later.
+    expect(CODE, 'no minimum-count comparison anywhere in the component').not.toMatch(
+      /files\.length\s*[<>]=?\s*[1-9]/,
+    );
+    expect(CODE, 'and no derived showTree flag').not.toMatch(/showTree/);
+  });
+
+  it('still hides the rail below the md breakpoint, which is the only permitted reason', () => {
+    // Not a nicety: it is the one absence the reader can explain to themselves, and removing it
+    // would put a 224px rail beside a diff on a phone. If this ever goes, it is a decision, not
+    // a tidy-up — so it is pinned rather than left to the class string.
+    expect(SRC).toMatch(/className="sticky top-0 z-20 hidden shrink-0 self-start md:flex"/);
   });
 });

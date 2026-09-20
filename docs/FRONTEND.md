@@ -559,8 +559,16 @@ rail reads the same way). **Single-child directory chains collapse into one row*
 nothing is hidden. `STATUS_META` moved out of `FileDiffView` into `components/diff/status.ts` so
 the header and the rail can never disagree about what "R" means.
 
-- **Auto-hidden under `TREE_MIN_FILES = 5`** (a 3-file PR does not earn 224px, and the bottom
-  detail pane is 384px tall by default) and hidden below the `md` breakpoint.
+- ⚠ **ALWAYS RENDERED ON THE PATCHES PATH — there is NO file-count threshold, and a test pins
+  that** (`fileTree.test.ts`). It used to auto-hide under `TREE_MIN_FILES = 5` because "a 3-file
+  PR does not earn 224px". The argument was about width; what shipped was about IDENTITY — a
+  4-file PR had no file browser and a 5-file one did, with nothing on screen accounting for it,
+  and it was reported as "sometimes the file browser is not visible, and I don't know why". The
+  width objection already had an answer the reader controls: the drag handle, persisted. **Hidden
+  below the `md` breakpoint and nowhere else** — a viewport too narrow for a rail AND a diff,
+  which is self-evident and reverses when the window grows. ⚠ The rail is also absent on the
+  `!havePatches` fallback, but that branch returns early and SAYS SO ("showing the changed-file
+  list"), which is the difference that matters: an absence the reader can account for.
 - **Sticky, with its own bounded scroller (`max-h-[70vh]`) — deliberately NOT an `h-full
   overflow-auto` column.** The Changes tab has no scroll container of its own: PrDetail's
   `min-h-0 flex-1 overflow-auto` is what every per-file `sticky top-0` header sticks to, and a

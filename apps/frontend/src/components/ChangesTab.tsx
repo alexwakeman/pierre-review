@@ -20,9 +20,18 @@ import { ExternalLinkIcon } from './Icons.js';
 // summary header, the navigation rail and the lean metadata fallback. Patches are hydrated
 // on demand (usePrFiles); on a miss we fall back to the metadata file list with GitHub links.
 
-// Below this many changed files the navigation rail is HIDDEN: a 3-file PR does not earn
-// 224px of width, and the bottom detail pane is only 384px tall by default.
-const TREE_MIN_FILES = 5;
+// ⚠ THE RAIL HAS NO FILE-COUNT THRESHOLD, AND MUST NOT GROW ONE AGAIN. It used to hide under
+// `TREE_MIN_FILES = 5` because "a 3-file PR does not earn 224px of width". That argument is about
+// WIDTH; what shipped was about IDENTITY — two pull requests open side by side, one with a file
+// list and one without, and nothing on screen saying why. It was reported as "sometimes the file
+// browser is not visible, and I don't know why", which is what an invisible threshold always
+// produces: not a complaint about the rail, a complaint about the app being unpredictable. The
+// width objection already has an answer the reader controls — the drag handle below, and it
+// persists; a reader should not have to know a number to predict whether a panel exists.
+//
+// The ONE remaining reason it can be absent is the `md` breakpoint on the rail itself: a viewport
+// too narrow for a rail AND a diff. That one is self-evident, and reverses when the window grows.
+
 // Floor for the measured rail height, so dragging the detail split almost shut leaves the tree
 // scrollable rather than collapsing it to a sliver.
 const MIN_RAIL_PX = 160;
@@ -238,7 +247,6 @@ export function ChangesTab({
   }
 
   const havePatches = !isError && files.length > 0;
-  const showTree = files.length >= TREE_MIN_FILES;
   // A reveal request for a file this view isn't rendering — the live diff is capped at 100
   // files, and a Claude Review finding describes the head SHA its run read, not necessarily
   // this one. Say so rather than letting the click land as a silent no-op.
@@ -308,55 +316,55 @@ export function ChangesTab({
             rather than its own `h-full overflow-auto` column: the Changes tab has NO scroll
             container of its own (PrDetail's `min-h-0 flex-1 overflow-auto` is what every
             per-file `sticky top-0` header sticks to), so a nested full-height scroller here
-            would move that containing block. Hidden below `md` and below TREE_MIN_FILES.
-            The rail + its drag handle share ONE sticky flex wrapper so the handle inherits
-            the rail's height (and its stickiness) instead of needing its own measurement. */}
-        {showTree && (
-          <div className="sticky top-0 z-20 hidden shrink-0 self-start md:flex">
-            <div
-              ref={railRef}
-              // `max-h-[70vh]` is the pre-measure fallback only; the inline value below is the
-              // real cap and wins. See the measuring effect for why a viewport fraction is wrong.
-              // The WIDTH is the user's dragged value (useResizablePane), which is why the old
-              // `md:w-56` is gone — an inline style and a utility class would fight.
-              style={{ width: railW, ...(railMaxH != null ? { maxHeight: railMaxH } : null) }}
-              className="max-h-[70vh] min-w-0 shrink-0 overflow-y-auto overscroll-contain border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950"
-            >
-              <FileTree
-                nodes={tree}
-                selectedPath={selectedTreePath}
-                revealNonce={focus?.nonce}
-                railHeight={railMaxH}
-                onSelectFile={(path) => setFocus({ path, nonce: Date.now() })}
-                note={
-                  data?.truncated ? (
-                    <div className="px-2 pb-1 pt-0.5 text-[10px] leading-snug text-amber-600 dark:text-amber-400">
-                      Showing {files.length} of {pr.changedFilesCount} files.{' '}
-                      <a
-                        href={`${pr.githubUrl}/files`}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="text-blue-500 hover:underline"
-                      >
-                        All on GitHub{' '}
-                        <ExternalLinkIcon size={10} className="inline-block align-[-0.1em]" />
-                      </a>
-                    </div>
-                  ) : null
-                }
-              />
-            </div>
-            {/* THE SPLITTER. `touch-none` so a touch drag resizes instead of scrolling the
-                pane. 6px wide: enough to grab without an overlay that would steal clicks
-                from the diff's gutter, and it reads as the rail's own edge next to the rail's
-                1px border. Keyboard: ←/→ (×4 with Shift), Home/End, Enter to reset — the same
-                reset as a double-click. */}
-            <div
-              {...separatorProps}
-              className="w-1.5 shrink-0 cursor-col-resize touch-none bg-gray-200 transition-colors hover:bg-blue-400 focus-visible:bg-blue-500 focus-visible:outline-none dark:bg-gray-800 dark:hover:bg-blue-500"
+            would move that containing block. Hidden below `md`, and NOT otherwise — see the ⚠
+            at the top of this file. Past here `files` is non-empty by `havePatches`, so there is
+            always something to list. The rail + its drag handle share ONE sticky flex wrapper so
+            the handle inherits the rail's height (and its stickiness) instead of needing its own
+            measurement. */}
+        <div className="sticky top-0 z-20 hidden shrink-0 self-start md:flex">
+          <div
+            ref={railRef}
+            // `max-h-[70vh]` is the pre-measure fallback only; the inline value below is the
+            // real cap and wins. See the measuring effect for why a viewport fraction is wrong.
+            // The WIDTH is the user's dragged value (useResizablePane), which is why the old
+            // `md:w-56` is gone — an inline style and a utility class would fight.
+            style={{ width: railW, ...(railMaxH != null ? { maxHeight: railMaxH } : null) }}
+            className="max-h-[70vh] min-w-0 shrink-0 overflow-y-auto overscroll-contain border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950"
+          >
+            <FileTree
+              nodes={tree}
+              selectedPath={selectedTreePath}
+              revealNonce={focus?.nonce}
+              railHeight={railMaxH}
+              onSelectFile={(path) => setFocus({ path, nonce: Date.now() })}
+              note={
+                data?.truncated ? (
+                  <div className="px-2 pb-1 pt-0.5 text-[10px] leading-snug text-amber-600 dark:text-amber-400">
+                    Showing {files.length} of {pr.changedFilesCount} files.{' '}
+                    <a
+                      href={`${pr.githubUrl}/files`}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-blue-500 hover:underline"
+                    >
+                      All on GitHub{' '}
+                      <ExternalLinkIcon size={10} className="inline-block align-[-0.1em]" />
+                    </a>
+                  </div>
+                ) : null
+              }
             />
           </div>
-        )}
+          {/* THE SPLITTER. `touch-none` so a touch drag resizes instead of scrolling the
+              pane. 6px wide: enough to grab without an overlay that would steal clicks
+              from the diff's gutter, and it reads as the rail's own edge next to the rail's
+              1px border. Keyboard: ←/→ (×4 with Shift), Home/End, Enter to reset — the same
+              reset as a double-click. */}
+          <div
+            {...separatorProps}
+            className="w-1.5 shrink-0 cursor-col-resize touch-none bg-gray-200 transition-colors hover:bg-blue-400 focus-visible:bg-blue-500 focus-visible:outline-none dark:bg-gray-800 dark:hover:bg-blue-500"
+          />
+        </div>
         {/* No divide-y: each file's (sticky) header carries its own bottom border. */}
         <div className="min-w-0 flex-1">
           {focusMissing && focus != null && (
