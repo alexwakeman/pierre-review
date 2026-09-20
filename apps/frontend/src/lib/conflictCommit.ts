@@ -203,6 +203,91 @@ export function commitPlan(
   };
 }
 
+// ── WHY THE COMMIT WILL NOT GO ───────────────────────────────────────────────────────────────
+//
+// ⚠ ONE SENTENCE, ONE PLACE, TWO BUTTONS. The toolbar's "Commit and push" (the entry to the review
+// step) and the landing step's own (the press) are BOTH shut while the same facts hold, so the
+// explanation is folded here rather than spelled in either component. Two disabled controls
+// explaining one refusal in two sentences is the same defect as two folds answering "can we
+// commit?", one screen over.
+//
+// ⚠ THE THREE STRINGS LIVE HERE RATHER THAN IN `components/conflicts/copy.ts` for the reason
+// `CANT_RESOLVE_HERE` does: a library may not import from `components/`. `copy.ts` re-exports them,
+// so the resolver's vocabulary still reads as a whole there.
+
+/** ⚠ THE CLIENT MAKES NO OTHER COMPARISON. `usePrLiveRefresh` already re-reads the PR while the
+ *  pane is open and the pinned head is on the session; a second answer to "has this moved?" is how
+ *  two surfaces come to disagree. */
+export const HEAD_MOVED =
+  'This pull request moved on GitHub while you were here. Committing will be refused — close this and start again.';
+
+/** Nothing in the commit and nothing the reader can do about it here: every file is either one the
+ *  model cannot represent or one it found nothing decidable in.
+ *  ⚠ IT IS NOT `unsupportedHeadline`. That sentence counts UNSUPPORTED files and says GitHub is
+ *  where they are resolved; it was being handed every file, so it fired on perfectly supported ones
+ *  and a blocked button explained itself with a false sentence. */
+export const NOTHING_TO_COMMIT =
+  'Nothing here can be committed. These files have to be finished on GitHub.';
+
+/** The remainder, across every supported file. ⚠ THE SENTENCE CARRIES THE TOTAL AND THE PER-FILE
+ *  ROWS CARRY THEIR OWN COUNT, so neither number has to stand in for the other. */
+export const decideTheRest = (n: number): string =>
+  `${n} change${n === 1 ? '' : 's'} left to decide.`;
+
+/**
+ * Why the commit cannot go — or null when it can.
+ *
+ * ⚠ IT IS ALSO THE GATE. `reason != null` is exactly `headMoved || !plan.canCommit`, because
+ * `canCommit` is `outstanding.length === 0 && resolved.length > 0` and the two branches below are
+ * those two halves. Every caller disables on THIS returning non-null and prints what it returns:
+ * gating on one predicate and explaining with another is how a button and the sentence under it
+ * come apart.
+ *
+ * ⚠ `headMoved` IS NOT IN `canCommit` AND MUST NOT BE FOLDED INTO IT. `commitPlan` is a pure fold
+ * over the session and the reader's decisions; the head moving is a fact about GitHub observed by
+ * the shell (`useHeadMoved`), and a plan that changed under a background sync would stop being a
+ * function of what the reader did.
+ *
+ * ⚠ THE BRANCH-NAME REFUSAL IS DELIBERATELY NOT HERE. It prints beside the field it is about, on
+ * the landing step, which is the only screen that has one — and the toolbar, which has no field,
+ * must not be shut by it.
+ */
+export function commitBlockedReason(plan: CommitPlan, headMoved: boolean): string | null {
+  if (headMoved) return HEAD_MOVED;
+  if (plan.outstanding.length > 0) return decideTheRest(plan.decidableTotal - plan.decidedTotal);
+  // ⚠ NOT `plan.rows.length` AND NOT AN UNSUPPORTED COUNT. This fires whenever nothing reached the
+  // commit, which includes a pull request of perfectly supported files the model found nothing
+  // decidable in.
+  if (plan.resolved.length === 0) return NOTHING_TO_COMMIT;
+  return null;
+}
+
+/**
+ * The next file that still needs decisions — the toolbar's "Next".
+ *
+ * ⚠ IT WALKS `outstanding`, NOT THE MANIFEST. The toolbar chevrons and `[`/`]` page through every
+ * file in order, conflict-blind; this one goes where the work is. And it walks FILES: `n`/`p` walk
+ * REGIONS inside the file the reader is in (`ResolverPanes.step`).
+ *
+ * ⚠ IT WRAPS RATHER THAN STOPPING, and that can never loop over nothing: the button renders only
+ * while this returns an index, and it returns one only while some OTHER file is outstanding.
+ *
+ * ⚠ THE FILE THE READER IS ALREADY IN IS NEVER THE ANSWER. If it is the only one left, there is
+ * nowhere to jump — a "Next" that lands you where you are reads as a broken control — so this
+ * returns null, the button is absent, and `n` is what moves from there. The counter's popover still
+ * names the file and the commit is still shut, so nothing goes unexplained.
+ */
+export function nextOutstandingFile(
+  outstanding: readonly OutstandingFile[],
+  activeIndex: number,
+): number | null {
+  const others = outstanding.filter((o) => o.index !== activeIndex);
+  // `outstanding` is built in manifest order, so "the next one after this file" is the first entry
+  // with a higher index and the wrap is the first entry outright.
+  const after = others.find((o) => o.index > activeIndex);
+  return (after ?? others[0])?.index ?? null;
+}
+
 /** Which "Where to put it" options the landing step offers, and where the commit is going. */
 export interface LandingTargets {
   /** Render the "Push to <headRef>" option at all. */
@@ -262,17 +347,27 @@ export function buildCommitBody(args: {
   loaded: Readonly<Record<number, ConflictFileContent>>;
   decisions: Readonly<Record<string, ConflictDecision>>;
   suggestionIds: Readonly<Record<string, string>>;
+  /** ⚠ TRAILING-OPTIONAL SO A CALLER CANNOT SILENTLY OMIT IT AND SHIP. Left out, every
+   *  hand-edited region is dropped from its file's decisions and the commit comes back
+   *  `IncompleteDecisions` naming that file — loud, and still not what anybody wanted. */
+  editIds?: Readonly<Record<string, string>>;
   strategy: ConflictLandStrategy;
   target: ConflictCommitTarget;
 }): ConflictCommitBody {
-  const { session, plan, loaded, decisions, suggestionIds, strategy, target } = args;
+  const { session, plan, loaded, decisions, suggestionIds, editIds, strategy, target } = args;
   const files = plan.resolved.flatMap((row) => {
     const content = loaded[row.index];
     if (content == null) return [];
     return [
       {
         index: row.index,
-        decisions: serializeFileDecisions(content.regions, row.index, decisions, suggestionIds),
+        decisions: serializeFileDecisions(
+          content.regions,
+          row.index,
+          decisions,
+          suggestionIds,
+          editIds ?? {},
+        ),
       },
     ];
   });

@@ -5,11 +5,24 @@
    CENTRE is the result, seeded from the merge base and changed only by per-region decisions.
    The merge base is not a pane.
 
-   ⚠ NOTHING ON THIS WIRE ACCEPTS FILE CONTENT FROM THE CLIENT. Every request field is an
-   index, an id or an enum member. Resolved text exists in two places: the server's in-memory
-   session, and the read-only payloads the server sends down. That is what makes "no free
-   typing" a property of the protocol rather than a UI convention, and it is why an accepted
-   model suggestion travels back as an opaque `suggestionId`.
+   ⚠ ONE ROUTE ON THIS WIRE ACCEPTS TYPED TEXT, AND THE COMMIT IS NOT IT. This used to read
+   "NOTHING ON THIS WIRE ACCEPTS FILE CONTENT FROM THE CLIENT", full stop. Half of that moved
+   and half of it did not, and the two halves are worth separating because only one of them was
+   ever the safety property.
+
+     WHAT MOVED. `POST …/conflicts/edit` takes the lines a reader typed for ONE region — region
+     -scoped, pinned by `fingerprint`, and validated SERVER-SIDE (text-ness, no surviving
+     conflict marker, a size cap) BEFORE an id exists for it. A refusal mints nothing, so there
+     is no handle to redeem.
+
+     WHAT DID NOT. The COMMIT body still carries nothing but indexes, ids and enum members. The
+     server folds its OWN regions through `foldFile` and hashes the result with
+     `git hash-object`; a `'suggestion'` or `'edited'` decision names text the SERVER holds, by
+     an opaque handle it minted. So the property that actually mattered — the server commits
+     only bytes it folded, from a request that names no content — survives verbatim.
+
+   Resolved text therefore still exists in exactly two places: the server's in-memory session,
+   and the read-only payloads the server sends down.
 
    ⚠ NOTHING HERE IS STORED. No table, no migration. The model is pinned to (headSha, baseSha)
    and worthless the instant either moves.
@@ -104,7 +117,17 @@ export type ConflictRegionKind =
  *                         recompute them.
  *   `suggestion`        — a Pro per-hunk model resolution the user accepted, addressed by
  *                         `suggestionId`; the lines live in the server session.
- *  ⚠ There is no `custom` member and there must never be one. */
+ *   `edited`            — lines the READER typed for this region, addressed by `editId`; the
+ *                         lines live in the server session, exactly as a suggestion's do.
+ *
+ *  ⚠ THE RULE IS NOT "NO TYPED TEXT" — IT IS THAT TEXT REACHES THE FOLD ONLY THROUGH A
+ *  SERVER-HELD HANDLE, NEVER INLINE ON THE COMMIT. This replaces "there is no `custom` member
+ *  and there must never be one", which `'edited'` makes false as written. A `custom` member
+ *  carrying its lines in the commit body would still be forbidden, and for the reason that
+ *  sentence was really protecting: the server would then be committing bytes it never read,
+ *  validated, or showed anybody. `'edited'` carries an ID. The text was validated on its own
+ *  route, before the id existed, and is spliced from the session — the `'suggestion'`
+ *  mechanism, reused. */
 export type ConflictDecision =
   | 'base'
   | 'ours'
@@ -112,7 +135,8 @@ export type ConflictDecision =
   | 'both_ours_first'
   | 'both_theirs_first'
   | 'disjoint_merge'
-  | 'suggestion';
+  | 'suggestion'
+  | 'edited';
 
 /** Why the wand would take a region, in its own words — it must be able to say exactly what
  *  it did, so the reason rides every region it touches.
@@ -145,7 +169,9 @@ export interface ConflictRegion {
   /** Offerable buttons. `unchanged` → `['base']`; one-sided → its side + `base`; `both_same`
    *  → `['ours','base']`; `conflict` → the five deterministic members, plus `disjoint_merge`
    *  iff `wand?.reason === 'disjoint_words'`.
-   *  ⚠ `'suggestion'` never appears here — it is a session fact, not a model fact. */
+   *  ⚠ NEITHER `'suggestion'` NOR `'edited'` EVER APPEARS HERE — both are session facts, not
+   *  model facts. Whether a region may be edited is `kind !== 'unchanged'`, which this list
+   *  already says by existing at all. */
   allowed: ConflictDecision[];
   /** null when the wand would leave this region alone — including every contested conflict
    *  whose two edits are not provably disjoint. */
@@ -169,7 +195,9 @@ export interface ConflictRegion {
 
 /** Does each side's file end with a newline? The FOLD rule: the terminator of the committed
  *  file is the one belonging to the LAST region's chosen source — the second side for a
- *  both-ordering, `ours` for `disjoint_merge`, and the suggestion's own for `suggestion`. */
+ *  both-ordering, `ours` for `disjoint_merge`, and its own stored one for `suggestion` and
+ *  `edited` (the server sets an edit's from the OURS side; a reader edits lines inside a
+ *  region, not the file's final newline). */
 export interface ConflictFileTerminators {
   base: boolean;
   ours: boolean;
@@ -206,6 +234,11 @@ export type ConflictLandErrorCode =
   | 'UnknownFileIndex'
   | 'IncompleteDecisions'
   | 'UnknownSuggestion'
+  /** An `editId` the session no longer holds, or one addressing a DIFFERENT region or file.
+   *  Its own code beside `UnknownSuggestion` because they are two different facts with two
+   *  different sentences — one sends the reader back to Claude, the other back to their own
+   *  text. */
+  | 'UnknownEdit'
   | 'InvalidBranch'
   | 'ReservedBranch'
   | 'BranchExists'
@@ -293,6 +326,12 @@ export interface ConflictRegionDecision {
   decision: ConflictDecision;
   /** Required iff `decision === 'suggestion'`. Addresses text the SERVER holds. */
   suggestionId?: string;
+  /** Required iff `decision === 'edited'`. Addresses text the SERVER holds — minted by
+   *  `POST …/conflicts/edit` AFTER validating the lines, so an id that exists is an id whose
+   *  text was checked. ⚠ It must be DECLARED in the commit route's ajv schema: that schema is
+   *  `additionalProperties: false`, and a field it does not name is stripped SILENTLY, which
+   *  would resolve an edited region with nothing. */
+  editId?: string;
 }
 
 export interface ConflictFileResolution {
@@ -318,6 +357,74 @@ export interface ConflictCommitBody {
    *  "commit the files you did resolve" is expressed. */
   files: ConflictFileResolution[];
 }
+
+/* ---- CORE: editing one region's result by hand ---- */
+
+/**
+ * THE ONE REQUEST IN THIS FAMILY THAT CARRIES TYPED TEXT — see the ⚠ in the file header for
+ * which half of the old invariant moved and which half did not.
+ *
+ * It is scoped to ONE region of ONE file, pinned exactly as `ConflictHunkSuggestBody` is: `id`
+ * is the ADDRESS, `fingerprint` is the CONTENT. Without the fingerprint a handle minted against
+ * one region's bytes could be redeemed, after a rebuild, against a region that kept its id and
+ * changed its content — "text nobody read, in the place it lands", which is the sentence the
+ * land route already uses for the suggestion guard.
+ *
+ * ⚠ IT DOES NOT DECIDE THE REGION. A successful edit mints a handle; the reader's decision is a
+ * separate write carrying `{decision:'edited', editId}`, exactly as accepting a suggestion is.
+ */
+export interface ConflictRegionEditBody {
+  sessionId: string;
+  fileIndex: number;
+  regionId: number;
+  /** The region's `fingerprint`, as the CONTENT pin beside the id's ADDRESS. */
+  fingerprint: string;
+  /** What the reader typed. The SERVER splits it into lines, so the line vocabulary of the fold
+   *  is never something a client gets to assert. */
+  text: string;
+}
+
+/** Why an edit was refused. Every member is a REFUSAL, not a degraded answer: nothing is
+ *  stored, no id is minted, and the reader's text stays in their textarea for them to fix.
+ *  ⚠ A DEAD SESSION IS NOT IN HERE. That is a 409 `SessionExpired`, the same status and the same
+ *  sentence as on the other six routes — the reader's whole resolve is gone, which is a fact
+ *  about the session rather than about the text they typed, and the SPA already recovers from it
+ *  in one place. */
+export type ConflictRegionEditRefusal =
+  | 'unknown_region'
+  /** An `unchanged` region. Context lines are read-only — they are what the reader's edit sits
+   *  BETWEEN, and the commit gate never asks about them. */
+  | 'not_editable'
+  /** The bytes moved under the id: the model was rebuilt while the textarea was open. */
+  | 'moved'
+  /** A NUL, a lone surrogate or a BOM. ⚠ A lone surrogate is a REAL hazard rather than a
+   *  formality: the land path does `Buffer.from(text, 'utf8')`, which substitutes U+FFFD
+   *  silently, and its byte-for-byte claim rests on every side having decoded STRICTLY as UTF-8
+   *  at model build. Typed text does not inherit that provenance. */
+  | 'not_text'
+  /** A conflict marker survived. */
+  | 'markers'
+  /** Over `config.conflictSuggestMaxChars` — ONE budget governs both text ingresses. */
+  | 'too_long'
+  /** This session is already holding as much typed text as it may. */
+  | 'too_many_edits';
+
+export interface ConflictRegionEdit {
+  fileIndex: number;
+  regionId: number;
+  /** The handle the commit body carries. Valid only within this session, and only for this
+   *  region. */
+  editId: string;
+  /** The SERVER's own split of the text it stored, echoed so the centre pane renders exactly
+   *  the lines the commit will splice. ⚠ NOT the client's copy of what it typed: rendering that
+   *  instead would be a second implementation of "what you saw is what lands". */
+  lines: string[];
+}
+
+export type ConflictRegionEditResponse =
+  | { ok: true; edit: ConflictRegionEdit }
+  /** The server's own sentence, rendered verbatim. */
+  | { ok: false; refusal: ConflictRegionEditRefusal; message: string };
 
 /* ---- Results ---- */
 

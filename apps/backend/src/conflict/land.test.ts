@@ -318,7 +318,12 @@ function bodyFor(model: any, files: any[], over: Record<string, unknown> = {}): 
   };
 }
 
-async function land(model: any, body: any, suggestions = new Map()): Promise<any> {
+async function land(
+  model: any,
+  body: any,
+  suggestions = new Map(),
+  edits = new Map(),
+): Promise<any> {
   return landConflictResolution({
     accountId: 1,
     prId,
@@ -326,6 +331,7 @@ async function land(model: any, body: any, suggestions = new Map()): Promise<any
     model,
     body,
     suggestions,
+    edits,
     onPhase: () => {},
     signal: new AbortController().signal,
     log,
@@ -790,6 +796,114 @@ describe('landConflictResolution — the refusals', () => {
     const res = await land(model, bodyFor(model, [withSuggestion]), right);
     expect(f.repo.bytes(['show', `${res.commitSha}:a.txt`]).toString('utf8')).toBe(
       'alpha\none-merged\nbeta\ntwo-ours\ngamma\n',
+    );
+  });
+
+  // ── THE READER'S OWN TEXT ───────────────────────────────────────────────────────────────
+  //
+  // The manual edit reuses the suggestion's mechanism exactly — validated text held in the
+  // session, an opaque handle on the wire — so it gets the same three assertions. The reason
+  // they are worth repeating rather than trusting: these are the two guards standing between
+  // an attacker-supplied id and a blob in somebody's repository, and each one is a single `&&`
+  // clause away from not existing.
+  it('an unknown edit id is a refusal, and a valid one lands the bytes the reader typed', async () => {
+    const f = oneFileFixture();
+    use(f);
+    const model = await openModel();
+    const file = model.files[0];
+    const contested = file.regions.filter((r: any) => r.kind !== 'unchanged');
+    const withEdit = {
+      index: file.index,
+      decisions: [
+        { id: contested[0].id, decision: 'edited', editId: 'edit-1' },
+        { id: contested[1].id, decision: 'ours' },
+      ],
+    };
+    expect(await refusal(() => land(model, bodyFor(model, [withEdit])))).toBe('UnknownEdit');
+
+    // ⚠ A HANDLE THAT TRAVELS IS TEXT NOBODY READ IN THE PLACE IT LANDS. The edit route pinned
+    // this text to ONE region's fingerprint; a commit body naming a different region must not
+    // redeem it.
+    const wrongRegion = new Map([
+      [
+        'edit-1',
+        {
+          fileIndex: file.index,
+          regionId: contested[1].id,
+          lines: ['typed-by-hand'],
+          endsWithNewline: true,
+        },
+      ],
+    ]);
+    expect(await refusal(() => land(model, bodyFor(model, [withEdit]), new Map(), wrongRegion))).toBe(
+      'UnknownEdit',
+    );
+
+    // ...and an edit stored for another FILE is refused on the same clause.
+    const wrongFile = new Map([
+      [
+        'edit-1',
+        {
+          fileIndex: file.index + 99,
+          regionId: contested[0].id,
+          lines: ['typed-by-hand'],
+          endsWithNewline: true,
+        },
+      ],
+    ]);
+    expect(await refusal(() => land(model, bodyFor(model, [withEdit]), new Map(), wrongFile))).toBe(
+      'UnknownEdit',
+    );
+
+    const right = new Map([
+      [
+        'edit-1',
+        {
+          fileIndex: file.index,
+          regionId: contested[0].id,
+          lines: ['typed-by-hand'],
+          endsWithNewline: true,
+        },
+      ],
+    ]);
+    const res = await land(model, bodyFor(model, [withEdit]), new Map(), right);
+    expect(f.repo.bytes(['show', `${res.commitSha}:a.txt`]).toString('utf8')).toBe(
+      'alpha\ntyped-by-hand\nbeta\ntwo-ours\ngamma\n',
+    );
+  });
+
+  it('a hand-edited LAST region sets the file’s terminator from its stored flag', async () => {
+    // Fold rule 4. `endsWithNewline: false` on the last region's decision is the only thing
+    // deciding whether the committed blob ends in a newline — guess it at file level and a
+    // "\ No newline at end of file" appears in the diff on a line nobody touched.
+    const f = oneFileFixture();
+    use(f);
+    const model = await openModel();
+    const file = model.files[0];
+    const regions = file.regions.filter((r: any) => r.kind !== 'unchanged');
+    const last = regions[regions.length - 1];
+    const decisions = regions.map((r: any) =>
+      r.id === last.id
+        ? { id: r.id, decision: 'edited', editId: 'tail' }
+        : { id: r.id, decision: 'ours' },
+    );
+    const edits = new Map([
+      [
+        'tail',
+        { fileIndex: file.index, regionId: last.id, lines: ['typed-tail'], endsWithNewline: true },
+      ],
+    ]);
+    const res = await land(
+      model,
+      bodyFor(model, [{ index: file.index, decisions }]),
+      new Map(),
+      edits,
+    );
+    // `gamma` is an `unchanged` region AFTER the last decidable one, so the file's terminator
+    // still comes off the base — what this proves is that the edited lines were spliced in the
+    // right place and nothing else moved.
+    expect(f.repo.bytes(['show', `${res.commitSha}:a.txt`]).toString('utf8')).toBe(
+      'alpha\none-ours\nbeta\ntyped-tail\ngamma\n',
     );
   });
 

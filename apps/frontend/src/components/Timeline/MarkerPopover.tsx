@@ -16,6 +16,7 @@ import { useFilters } from '../../store/filters.js';
 import { relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
 import { markerVisual } from './markerTemplate.js';
 import { StateBadge } from '../StateBadge.js';
+import { hunkLineMarker, useHunkHighlight } from '../DiffHunk.js';
 import { Markdown } from '../Markdown.js';
 import { CloseIcon, ExternalLinkIcon } from '../Icons.js';
 
@@ -113,9 +114,14 @@ function SingleEvent({
     ) ?? thread?.comments[0];
   // The code anchor is the thread's location; prefer the clicked comment's hunk but
   // fall back to the root's (replies often carry no diffHunk).
-  const anchor = thread
-    ? firstHunkLine(threadComment?.diffHunk ?? thread.comments[0]?.diffHunk ?? null)
+  const anchorHunk = thread
+    ? (threadComment?.diffHunk ?? thread.comments[0]?.diffHunk ?? null)
     : null;
+  const anchor = firstHunkLine(anchorHunk);
+  // ⚠ THE WHOLE HUNK IS HIGHLIGHTED AND THE LAST ENTRY TAKEN. Highlighting the anchor line on its
+  // own is the forbidden thing (`hljsLines.ts`'s header): a lexer started mid-file has no state,
+  // so a line inside a block comment comes back coloured as ordinary code.
+  const anchorHtml = useHunkHighlight(anchorHunk, thread?.path ?? null)?.at(-1) ?? null;
 
   // Commit + PR-comment markers resolve their detail (sha / message / body /
   // GitHub link) from the PR detail, joined by the event's ref id — keeps the
@@ -209,7 +215,16 @@ function SingleEvent({
 
       {anchor && (
         <pre className="overflow-x-auto rounded border border-gray-200 bg-gray-50 px-2 py-1 font-mono text-[11px] leading-snug text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
-          {anchor}
+          {anchorHtml != null ? (
+            <>
+              {/* The +/-/space marker prints plain — it is diff notation, not code.
+                  ⚠ ONLY highlight.js OUTPUT REACHES `dangerouslySetInnerHTML`. */}
+              {hunkLineMarker(anchor)}
+              <span className="code-hl" dangerouslySetInnerHTML={{ __html: anchorHtml }} />
+            </>
+          ) : (
+            anchor
+          )}
         </pre>
       )}
 

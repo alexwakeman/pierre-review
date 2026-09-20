@@ -259,6 +259,66 @@ describe('decisions survive a close and are dropped by a pin change', () => {
     expect(after?.sessionId).toBe('server-b');
   });
 
+  it('⚠ a REOPEN drops a HAND-EDITED region too — the identical bug, verbatim', () => {
+    // `'edited'` is a handle into the same kind of in-memory map as `'suggestion'`, minted by
+    // the same server session, and dead the same instant. Carrying it across gives the file menu
+    // a "Resolved" row the centre pane renders as undecided, and a commit refused whole with
+    // `UnknownEdit`. Dropping it back to undecided asks the reader again, on a region they can
+    // see is unanswered — and their text is still in the box when they reopen it.
+    resetStore();
+    const api = useConflictResolverStore.getState();
+    const key = resolverSessionKey(TARGET.prId, 'head1', 'base1', 'model1');
+    api.seedSession({ key, sessionId: 'server-a', conflictCount: 2 });
+    api.decideRegion({ key, fileIndex: 0, regionId: 1, decision: 'theirs' });
+    api.decideRegion({ key, fileIndex: 0, regionId: 2, decision: 'edited', editId: 'edit-1' });
+    expect(useConflictResolverStore.getState().sessions[key]?.editIds['0:2']).toBe('edit-1');
+    expect(useConflictResolverStore.getState().sessions[key]?.decidedCount).toBe(2);
+
+    useConflictResolverStore
+      .getState()
+      .seedSession({ key, sessionId: 'server-b', conflictCount: 2 });
+    const after = useConflictResolverStore.getState().sessions[key];
+    expect(after?.decisions['0:1']).toBe('theirs');
+    expect(after?.decisions['0:2']).toBeUndefined();
+    expect(after?.editIds).toEqual({});
+    expect(after?.decidedCount).toBe(1);
+  });
+
+  it('⚠ a RE-SEED under the SAME server session keeps the handles — the poll must not wipe them', () => {
+    // ⚠ THE CASE EVERY TEST ABOVE MISSES, AND THE ONE THAT ACTUALLY HAPPENS. Those two re-seed
+    // with a DIFFERENT `sessionId`, which is a reopen. `ConflictResolverOverlay`'s seed effect
+    // depends on the whole `session` object, and `useConflictSession` hands back a NEW object on
+    // every SSE frame (including the commit's own `commit_progress`) and again every
+    // `POLL_IDLE_MS` once the server ends the stream at ten minutes — all under the SAME id. An
+    // unconditional drop therefore deleted every hand-typed region within eight seconds of minute
+    // ten, and again the instant Commit was pressed, with nothing on screen saying why.
+    resetStore();
+    const api = useConflictResolverStore.getState();
+    const key = resolverSessionKey(TARGET.prId, 'head1', 'base1', 'model1');
+    api.seedSession({ key, sessionId: 'server-a', conflictCount: 3 });
+    api.decideRegion({ key, fileIndex: 0, regionId: 1, decision: 'edited', editId: 'edit-1' });
+    api.decideRegion({
+      key,
+      fileIndex: 0,
+      regionId: 2,
+      decision: 'suggestion',
+      suggestionId: 'sug-1',
+    });
+    api.decideRegion({ key, fileIndex: 0, regionId: 3, decision: 'ours' });
+    expect(useConflictResolverStore.getState().sessions[key]?.decidedCount).toBe(3);
+
+    useConflictResolverStore
+      .getState()
+      .seedSession({ key, sessionId: 'server-a', conflictCount: 3 });
+    const after = useConflictResolverStore.getState().sessions[key];
+    expect(after?.decisions['0:1']).toBe('edited');
+    expect(after?.editIds['0:1']).toBe('edit-1');
+    expect(after?.decisions['0:2']).toBe('suggestion');
+    expect(after?.suggestionIds['0:2']).toBe('sug-1');
+    expect(after?.decisions['0:3']).toBe('ours');
+    expect(after?.decidedCount).toBe(3);
+  });
+
   it('⚠ a MOVED HEAD finds nothing — decisions are never migrated onto a new merge', () => {
     resetStore();
     const api = useConflictResolverStore.getState();
@@ -328,6 +388,55 @@ describe('the decision map and its counter cannot disagree', () => {
     expect(useConflictResolverStore.getState().sessions[key]?.suggestionIds['0:1']).toBeUndefined();
   });
 
+  it('⚠ an EDIT handle is dropped the same way, and Undo clears it like any other decision', () => {
+    resetStore();
+    const api = useConflictResolverStore.getState();
+    const key = resolverSessionKey(TARGET.prId, 'h', 'b', 'm');
+    api.seedSession({ key, sessionId: 's1', conflictCount: 1 });
+    api.decideRegion({ key, fileIndex: 0, regionId: 1, decision: 'edited', editId: 'edit-1' });
+    expect(useConflictResolverStore.getState().sessions[key]?.editIds['0:1']).toBe('edit-1');
+
+    // Taking a side instead drops the handle — a stale one goes to a commit route that answers
+    // `UnknownEdit` about a decision the reader has already changed their mind about.
+    useConflictResolverStore
+      .getState()
+      .decideRegion({ key, fileIndex: 0, regionId: 1, decision: 'theirs' });
+    expect(useConflictResolverStore.getState().sessions[key]?.editIds['0:1']).toBeUndefined();
+
+    // ...and clearing back to undecided drops decision and handle together.
+    useConflictResolverStore
+      .getState()
+      .decideRegion({ key, fileIndex: 0, regionId: 1, decision: 'edited', editId: 'edit-2' });
+    useConflictResolverStore
+      .getState()
+      .decideRegion({ key, fileIndex: 0, regionId: 1, decision: null });
+    const s = useConflictResolverStore.getState().sessions[key];
+    expect(s?.decisions['0:1']).toBeUndefined();
+    expect(s?.editIds['0:1']).toBeUndefined();
+    expect(s?.decidedCount).toBe(0);
+  });
+
+  it('⚠ the two handles never cross: an editId cannot ride a `suggestion` decision', () => {
+    // Two stores, two provenances, two refusal sentences. One map would let a `'suggestion'`
+    // redeem an `editId` and be told "that suggestion has expired. Ask Claude again." about text
+    // the reader typed themselves.
+    resetStore();
+    const api = useConflictResolverStore.getState();
+    const key = resolverSessionKey(TARGET.prId, 'h', 'b', 'm');
+    api.seedSession({ key, sessionId: 's1', conflictCount: 1 });
+    api.decideRegion({
+      key,
+      fileIndex: 0,
+      regionId: 1,
+      decision: 'suggestion',
+      suggestionId: 'sug-1',
+      editId: 'edit-1',
+    });
+    const s = useConflictResolverStore.getState().sessions[key];
+    expect(s?.suggestionIds['0:1']).toBe('sug-1');
+    expect(s?.editIds['0:1']).toBeUndefined();
+  });
+
   it('the wand’s whole run is ONE write, so the counter is never seen half-updated', () => {
     resetStore();
     const api = useConflictResolverStore.getState();
@@ -354,6 +463,7 @@ describe('⚠ the LRU never evicts the session you are looking at', () => {
     key,
     decisions: {},
     suggestionIds: {},
+    editIds: {},
     decidedCount: 0,
     conflictCount: 0,
   });

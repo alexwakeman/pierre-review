@@ -89,7 +89,7 @@ export const CodeCell = memo(function CodeCell({
                 // hljs's own emitter and returns null on every gate it cannot clear; the plain
                 // branch below is React's normal text rendering.
                 <span
-                  className="mr-code min-h-[18px] min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]"
+                  className="code-hl min-h-[18px] min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]"
                   dangerouslySetInnerHTML={{ __html: row.html }}
                 />
               ) : (

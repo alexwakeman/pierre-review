@@ -239,7 +239,11 @@ export function ThreadCard({
             }
             anchor={
               i === 0 ? (
-                <CodeAnchor diffHunk={anchorHunk} threadId={thread.id} />
+                <CodeAnchor
+                  diffHunk={anchorHunk}
+                  path={thread.path}
+                  threadId={thread.id}
+                />
               ) : undefined
             }
             // Replies get their own "Show" (the root is covered by the card-header

@@ -1,9 +1,17 @@
 import hljs from 'highlight.js';
 
-// ── SYNTAX HIGHLIGHTING, ONE CELL AT A TIME ──────────────────────────────────────────────────
+// ── SYNTAX HIGHLIGHTING, FOR EVERY SURFACE IN THE APP THAT SHOWS CODE ────────────────────────
 //
 // The resolver paints three code panes whose rows must line up, so it needs highlighted text
-// SPLIT BY LINE. There is exactly one honest way to get that.
+// SPLIT BY LINE. There is exactly one honest way to get that. It was written for the resolver
+// and is now the app's only highlighter outside `Markdown.tsx`: the Changes tab, a thread's code
+// anchor, the timeline marker popover, Claude Review's finding hunks and suggestions, the
+// addressed-check evidence patch and the advisor's generated config all come through here.
+//
+// ⚠ A UNIFIED DIFF IS NOT VALID SOURCE, so a diff does not call `highlightLines` directly — it
+// calls `highlightDiffRows` in `lib/diff.ts`, which reconstructs the two sides and highlights each
+// separately. Feeding interleaved `-`/`+` lines to one lexer pass is the same failure as the
+// line-by-line one below, in a different disguise.
 //
 // ⚠ HIGHLIGHT THE WHOLE CELL, THEN CUT. Highlighting line by line loses the lexer's state at
 // every newline, and the result is not "slightly worse" — it is wrong in a way that reads as a
@@ -28,7 +36,15 @@ import hljs from 'highlight.js';
 // the fallback path (this function returning null) escapes through React's normal text rendering.
 // Nothing else may be passed through this file.
 
-/** Gate 2. Above this a cell renders plain — see the header. */
+/**
+ * Gate 2. Above this a cell renders plain — see the header.
+ *
+ * ⚠ IT STAYS AT 400 THOUGH THE UNIT CHANGED. It was picked against one resolver CELL and now also
+ * gates a whole Changes-tab FILE, which is a bigger thing — but a file past 400 patch lines already
+ * starts collapsed (`LARGE_PATCH_LINES` = 250 in FileDiffView) and is something a reader scrolls
+ * rather than reads. If a real case turns up where colour visibly drops out, give THAT call site
+ * its own limit rather than raising this one for every surface at once.
+ */
 export const MAX_HIGHLIGHT_LINES = 400;
 
 /**
@@ -155,4 +171,27 @@ export function highlightLines(lines: string[], language: string | null): string
   // shift the colouring by a line for the rest of the cell, so refuse and render plain.
   if (split.length !== lines.length) return null;
   return split;
+}
+
+/**
+ * One highlighted HTML string for a WHOLE blob, or null when a gate says render it plain.
+ *
+ * For the two surfaces that render code as one element rather than a list of rows — Claude
+ * Review's `suggestion` block and the Bot Advisor's generated config file. They have no per-line
+ * wrappers to zip against, so cutting the HTML up and joining it again would be work done only to
+ * undo it. Same three gates, same escaping, and it lives HERE so the
+ * `dangerouslySetInnerHTML` contract stated in this file's header keeps covering every caller.
+ */
+export function highlightBlock(text: string, language: string | null): string | null {
+  if (language == null) return null;
+  if (text === '') return null;
+  // Same line budget as `highlightLines`, counted the same way, so a blob and a row list of equal
+  // size get the same answer.
+  if (text.split('\n').length > MAX_HIGHLIGHT_LINES) return null;
+  if (hljs.getLanguage(language) == null) return null;
+  try {
+    return hljs.highlight(text, { language, ignoreIllegals: true }).value;
+  } catch {
+    return null;
+  }
 }

@@ -1,4 +1,5 @@
 import type { PrFileDiffStatus, ThreadStateCounts } from '@pierre-review/shared';
+import { highlightLines } from './hljsLines.js';
 
 // A tiny pure parser for a single file's unified-diff `patch` string (as GitHub
 // returns it on the REST `files` endpoint): header-less, starting at the first
@@ -106,6 +107,99 @@ export function anchorLineFromHunk(
     if (r.oldLine != null && r.oldLine > 0) return { line: r.oldLine, side: 'LEFT' };
   }
   return null;
+}
+
+// ---- syntax highlighting a diff (every surface in the app that renders one) ----
+
+/**
+ * The `\ No newline at end of file` annotation GitHub emits. `parsePatch` classifies it as a
+ * CONTEXT row with no line numbers, so it is not a marked diff line and it is not code: slicing its
+ * first character would hand the lexer " No newline at end of file". A real context line always
+ * carries its leading space, so it can never start with a backslash.
+ */
+export function isNoNewlineRow(row: DiffRow): boolean {
+  return row.kind === 'context' && row.text.startsWith('\\');
+}
+
+/**
+ * A diff row split into its leading +/-/space MARKER and the source line underneath it.
+ *
+ * ⚠ THE MARKER IS NOT CODE AND MUST NEVER REACH THE LEXER. It is diff notation: a `-` in front of a
+ * line is not a minus operator, and highlighting it as one colours a deletion's first token wrong
+ * on every row. Renderers print `marker` as plain text and colour `body`.
+ *
+ * ⚠ A CONTEXT ROW IS STRIPPED ONLY WHEN IT ACTUALLY HAS A LEADING SPACE. `parsePatch` classifies
+ * ANY unmarked line as context — a truncated hunk that opens on real code, or a body that is not a
+ * diff at all — and an unconditional `slice(1)` there silently eats the line's first character.
+ * `hunk` headers and the no-newline annotation are returned whole, with no marker.
+ */
+export function splitDiffMarker(row: DiffRow): { marker: string; body: string } {
+  if (row.kind === 'hunk' || isNoNewlineRow(row)) return { marker: '', body: row.text };
+  if (row.kind === 'add' || row.kind === 'del') {
+    return { marker: row.text.slice(0, 1), body: row.text.slice(1) };
+  }
+  return row.text.startsWith(' ')
+    ? { marker: ' ', body: row.text.slice(1) }
+    : { marker: '', body: row.text };
+}
+
+/**
+ * Highlighted HTML per diff row — one entry per input row, `null` on the rows that are not code,
+ * or `null` overall when a gate says render the whole thing plain.
+ *
+ * ⚠ TWO PASSES, BECAUSE A UNIFIED DIFF IS NOT VALID SOURCE. Consecutive `-` and `+` lines are two
+ * versions of ONE line. Feed them to one lexer pass and a del/add pair that opens a string or a
+ * block comment on one side only leaves the lexer in a state no version of the file was ever in,
+ * and everything after it is mis-coloured — the same failure `hljsLines.ts` forbids for line-by-line
+ * highlighting, in a new disguise. So the OLD side (context + del) and the NEW side (context + add)
+ * are reconstructed and highlighted separately, then each row takes its own side's entry. A context
+ * row takes the new side; the two agree on it by construction.
+ *
+ * ⚠ AN EMPTY SIDE IS NOT A FAILURE. A newly-added file has no old side at all, and
+ * `highlightLines([])` returns null by its own gate — treating that as a refusal would leave every
+ * added file uncoloured. A side with no lines has nothing to get wrong.
+ *
+ * ⚠ ONE SIDE REFUSING REFUSES BOTH. Half a coloured file reads as a rendering bug, not as a
+ * deliberate limit.
+ */
+export function highlightDiffRows(
+  rows: readonly DiffRow[],
+  language: string | null,
+): (string | null)[] | null {
+  if (language == null || rows.length === 0) return null;
+  const oldLines: string[] = [];
+  const newLines: string[] = [];
+  // Per row: where its text sits in each side's array, or null when that side has no such line.
+  const oldAt: (number | null)[] = [];
+  const newAt: (number | null)[] = [];
+  for (const row of rows) {
+    if (row.kind === 'hunk' || isNoNewlineRow(row)) {
+      oldAt.push(null);
+      newAt.push(null);
+      continue;
+    }
+    const { body } = splitDiffMarker(row);
+    if (row.kind === 'add') oldAt.push(null);
+    else {
+      oldAt.push(oldLines.length);
+      oldLines.push(body);
+    }
+    if (row.kind === 'del') newAt.push(null);
+    else {
+      newAt.push(newLines.length);
+      newLines.push(body);
+    }
+  }
+  const oldHtml = oldLines.length === 0 ? [] : highlightLines(oldLines, language);
+  const newHtml = newLines.length === 0 ? [] : highlightLines(newLines, language);
+  if (oldHtml == null || newHtml == null) return null;
+  return rows.map((_row, i) => {
+    const n = newAt[i];
+    if (n != null) return newHtml[n] ?? null;
+    const o = oldAt[i];
+    if (o != null) return oldHtml[o] ?? null;
+    return null;
+  });
 }
 
 // Total number of patch lines (used by the collapse-by-default size heuristic).

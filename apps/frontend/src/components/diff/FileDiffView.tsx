@@ -12,12 +12,15 @@ import { ApiError } from '../../api/client.js';
 import {
   anchorRowFor,
   commentTarget,
+  highlightDiffRows,
   isLockFile,
   lineRowIndex,
   parsePatch,
   patchLineCount,
+  splitDiffMarker,
   type DiffRow,
 } from '../../lib/diff.js';
+import { languageForPath } from '../../lib/hljsLines.js';
 import { DERIVED_STATE_META, relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
 import { CheckIcon, ChevronIcon, ExternalLinkIcon } from '../Icons.js';
 import { MentionTextarea } from '../MentionTextarea.js';
@@ -32,6 +35,11 @@ import { SELECTED_BORDER, STATUS_META, UNSELECTED_BORDER } from './status.js';
 // on GitHub yet, so it passes neither. The Changes tab additionally passes its review
 // threads (`threadCtx`, resolved included) so they render inline at their diff line as
 // collapsed pills, like GitHub.
+//
+// The code is syntax-highlighted per file, language resolved from the PATH (`highlightDiffRows`
+// — two passes over the reconstructed old and new sides, because a unified diff is not valid
+// source). ⚠ The add/del signal is carried by `ROW_BG`'s TINT alone, which is why no row here
+// has ever had an add/del text colour to lose.
 
 // One changed file with its unified-diff patch. A superset of the Changes tab's
 // PrFileDiff and the AI-Fix `parseGitPatch` output (githubUrl optional).
@@ -120,6 +128,7 @@ function gutterText(n: number | undefined): string {
 
 function DiffLine({
   row,
+  html,
   filePath,
   fileUrl,
   commenting,
@@ -131,6 +140,8 @@ function DiffLine({
   focusNonce,
 }: {
   row: DiffRow;
+  /** This row's highlighted body, or null to render it as plain text — see the render below. */
+  html: string | null;
   filePath: string;
   // When null, inline commenting is disabled (read-only AI-Fix diff).
   fileUrl: string | null;
@@ -146,7 +157,10 @@ function DiffLine({
   focusNonce: number | null;
 }): JSX.Element {
   const target = commenting ? commentTarget(row) : null;
-  const display = row.kind === 'hunk' ? row.text : row.text.slice(1) || ' ';
+  // `splitDiffMarker` rather than a bare `slice(1)`: an unmarked context row (a patch whose first
+  // line is real code) would otherwise lose its first character, and the plain and highlighted
+  // branches must print the same text.
+  const display = row.kind === 'hunk' ? row.text : splitDiffMarker(row).body || ' ';
 
   // Scroll-and-flash. Ordinary DOM here (the gated scroll rules are the vis TIMELINE's), so a
   // ref + scrollIntoView is the whole mechanism — never write scrollTop by hand. `block:
@@ -196,12 +210,22 @@ function DiffLine({
           </div>
         </td>
         <td className="w-full whitespace-pre px-2 align-top">
+          {/* ⚠ THE MARKER STAYS OUTSIDE THE HIGHLIGHTED SPAN. It is diff notation, not code — a
+              lexer handed `-foo` reads a minus operator — so `highlightDiffRows` strips it and it
+              is printed here, plain, in both branches. */}
           {row.kind !== 'hunk' && (
             <span className="select-none text-gray-400">
               {row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' '}
             </span>
           )}
-          {display}
+          {html != null ? (
+            // ⚠ ONLY highlight.js OUTPUT REACHES HERE. `highlightDiffRows` escapes through hljs's
+            // own emitter and returns null on every gate it cannot clear; the branch below is
+            // React's normal text rendering.
+            <span className="code-hl" dangerouslySetInnerHTML={{ __html: html }} />
+          ) : (
+            display
+          )}
         </td>
       </tr>
       {open && commenting && target && (
@@ -683,6 +707,24 @@ function FileDiffBlock({
     if (hasFocus) setExpanded(true);
   }, [hasFocus]);
 
+  // Language-aware colouring for the whole file's rows, in ONE two-pass lexer run (see
+  // `highlightDiffRows`). Memoised beside `rows` because it is the expensive part: the inline
+  // comment box opening, a thread pill expanding and the ~5s PR poll all re-render this block.
+  // Null — an unlisted extension, a patch past the line gate, a lexer that threw — means every row
+  // renders as plain text, which is what this diff looked like before.
+  //
+  // ⚠ GATED ON `expanded`, AND THAT IS WHY IT IS DECLARED DOWN HERE RATHER THAN BESIDE `rows`.
+  // The diff table is behind `{expanded && …}`, and `startsCollapsed` fires at
+  // `LARGE_PATCH_LINES` (250) while `highlightDiffRows` only refuses past `MAX_HIGHLIGHT_LINES`
+  // (400) PER RECONSTRUCTED SIDE — so every file in the 251-to-~800-row band, `pnpm-lock.yaml`
+  // included, was fully lexed on mount for output nobody could see. MEASURED at ~17-20ms per file
+  // at the gate, and `fetchPrFilesWithPatch` caps the list at 100 blocks with no windowing. The
+  // memo re-runs when the reader opens the file, which is the moment the work is first needed.
+  const html = useMemo(
+    () => (expanded ? highlightDiffRows(rows, languageForPath(file.path)) : null),
+    [expanded, rows, file.path],
+  );
+
   // Which row (if any) the focus target addresses. Known even while collapsed — `rows` is
   // parsed from the patch, not from what's rendered — so the block can decide up front
   // whether the LINE will scroll itself or whether it must scroll the file header instead.
@@ -840,6 +882,7 @@ function FileDiffBlock({
                   <Fragment key={i}>
                     <DiffLine
                       row={row}
+                      html={html?.[i] ?? null}
                       filePath={file.path}
                       fileUrl={githubUrl}
                       commenting={commenting}

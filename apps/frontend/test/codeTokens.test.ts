@@ -1,17 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-// ── THE RESOLVER'S COLOURS, MEASURED FROM SOURCE ─────────────────────────────────────────────
+// ── THE CODE SURFACES' COLOURS, MEASURED FROM SOURCE ─────────────────────────────────────────
 //
 // ⚠ HAND-RUN, like every test under `apps/frontend/test`:
 //     ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 //
 // ⚠ THIS EXISTS BECAUSE `textContrast.test.ts` CANNOT SEE THESE COLOURS. That scanner resolves
-// Tailwind utilities with a numeric shade (`text-gray-400`, `fill-gray-500`); the resolver's
-// palette is four CSS custom properties and seven scoped syntax colours, which match nothing it
-// looks for. So this test reads `index.css`, composites each wash at ITS OWN declared alpha over
-// the page ground, and measures both directions in both themes. The same gap is recorded in
+// Tailwind utilities with a numeric shade (`text-gray-400`, `fill-gray-500`); what is measured here
+// is four CSS custom properties and seven scoped syntax colours, which match nothing it looks for.
+// So this test reads `index.css`, composites each wash at ITS OWN declared alpha over the ground
+// beneath it, and measures both directions in both themes. The same gap is recorded in
 // `index.css`'s own header and in docs/FRONTEND.md beside `--ai-*`.
+//
+// ⚠ IT WAS `resolverTokens.test.ts` AND IT IS NOT RESOLVER-ONLY ANY MORE. The four `--mr-*` state
+// washes still are — they encode a merge state and nothing else paints them. The seven syntax
+// colours are not: they moved to `.code-hl` and now paint on the Changes tab's diff rows, thread
+// code anchors, the timeline marker popover, Claude Review's finding hunks and suggestions, the
+// addressed-check evidence patch and the advisor's generated config. Every one of those is a
+// GROUND, and `CODE_GROUNDS` below lists them all — a surface added without a ground here is a
+// surface nobody measured.
 //
 // The formula is `textContrast.test.ts:52-68`'s, restated rather than imported: that file exports
 // `contrastRatio` but importing a test from a test couples two hand-run suites, and the four lines
@@ -238,36 +246,150 @@ describe('the four resolver roles', () => {
   });
 });
 
-describe('the resolver’s syntax colours', () => {
-  const HL = ['keyword', 'string', 'comment', 'number', 'title', 'type', 'meta'] as const;
-  const lightHl = tokens(blockCarrying('\\.mr-code', '--mr-hl-keyword'), 'mr-hl');
-  const darkHl = tokens(blockCarrying('\\.dark \\.mr-code', '--mr-hl-keyword'), 'mr-hl');
+// ── EVERY GROUND THE SHARED SYNTAX COLOURS PAINT ON ──────────────────────────────────────────
+//
+// Tailwind v3 defaults, the shades these surfaces actually use. Same table as
+// `textContrast.test.ts` keeps, for the same reason: a utility name is not a colour.
+const TW = {
+  white: '#ffffff',
+  'gray-50': '#f9fafb',
+  'gray-100': '#f3f4f6',
+  'gray-800': '#1f2937',
+  'gray-900': '#111827',
+  'gray-950': '#030712',
+  'green-500': '#22c55e',
+  'red-500': '#ef4444',
+  'sky-500': '#0ea5e9',
+  'amber-300': '#fcd34d',
+  'amber-400': '#fbbf24',
+  'emerald-50': '#ecfdf5',
+  'emerald-950': '#022c22',
+  'rose-50': '#fff1f2',
+  'rose-950': '#4c0519',
+} as const;
 
-  /** Every ground a code cell can sit on: the page and the four washes. */
-  function grounds(inks: Record<string, string>, page: RGB): RGB[] {
-    return [page, ...ROLES.map((role) => over(channels(inks[role]!), alphaFor(role), page))];
+const tw = (name: keyof typeof TW): RGB => hexToRgb(TW[name]);
+
+/**
+ * Every ground syntax-coloured text sits on, OUTSIDE the resolver. Named after the component and
+ * the class it is written with, so a reader can check each one against the source.
+ *
+ * ⚠ A NEW CODE SURFACE ADDS A ROW HERE. The point of moving the palette out of `.mr-code` was that
+ * seven screens share it; a screen whose ground nobody measured is the `vendorInk` defect again —
+ * a colour that is correct on the page it was designed against and fails on the one it shipped to.
+ *
+ * ⚠ THE FLASH ROWS ARE REAL GROUNDS. FileDiffView paints `bg-amber-300/40` over a focused row
+ * INSTEAD of its diff tint for four seconds, and the code underneath stays readable or it does not.
+ * They are the tightest measurement in the file (dark comment, 4.76:1) — if one has to move, move
+ * the colour, not the ground.
+ */
+const CODE_GROUNDS: { name: string; light: RGB; dark: RGB }[] = [
+  // FileDiffView (Changes tab + AI Fix): ROW_BG over the page.
+  { name: 'diff add row', light: over(tw('green-500'), 0.1, LIGHT_BG), dark: over(tw('green-500'), 0.1, DARK_BG) },
+  { name: 'diff del row', light: over(tw('red-500'), 0.1, LIGHT_BG), dark: over(tw('red-500'), 0.1, DARK_BG) },
+  { name: 'diff hunk row', light: over(tw('sky-500'), 0.05, LIGHT_BG), dark: over(tw('sky-500'), 0.05, DARK_BG) },
+  { name: 'diff focus flash', light: over(tw('amber-300'), 0.4, LIGHT_BG), dark: over(tw('amber-400'), 0.25, DARK_BG) },
+  // DiffHunk / CodeAnchor / MarkerPopover: the block ground, then its own +/- tints on top of it.
+  { name: 'hunk block', light: tw('gray-50'), dark: tw('gray-900') },
+  { name: 'hunk block (60% dark twin)', light: tw('gray-50'), dark: over(tw('gray-900'), 0.6, DARK_BG) },
+  { name: 'hunk add row', light: over(tw('green-500'), 0.1, tw('gray-50')), dark: over(tw('green-500'), 0.15, tw('gray-900')) },
+  { name: 'hunk del row', light: over(tw('red-500'), 0.1, tw('gray-50')), dark: over(tw('red-500'), 0.15, tw('gray-900')) },
+  // ClaudeReviewTab: FindingHunk, then the suggestion block.
+  { name: 'finding hunk', light: tw('gray-50'), dark: over(tw('gray-900'), 0.6, DARK_BG) },
+  { name: 'suggestion block', light: tw('gray-100'), dark: tw('gray-800') },
+  // CommentAnnotations' evidence patch: the container, then its add/del rows.
+  { name: 'evidence patch', light: tw('white'), dark: tw('gray-900') },
+  { name: 'evidence add row', light: tw('emerald-50'), dark: over(tw('emerald-950'), 0.4, tw('gray-900')) },
+  { name: 'evidence del row', light: tw('rose-50'), dark: over(tw('rose-950'), 0.4, tw('gray-900')) },
+  // BotAdvisorPanel's generated config file.
+  { name: 'generated config', light: tw('gray-50'), dark: over(tw('gray-900'), 0.4, DARK_BG) },
+  // BasePopover (the resolver's compare-base view) sits on the popover card, not on a wash.
+  { name: 'popover card', light: tw('white'), dark: tw('gray-900') },
+  // HunkSuggestionPanel: Claude's proposed lines sit on `bg-ai-surface-2`, the AI surface's raised
+  // step (`--ai-surface-2` in index.css), not on a merge wash.
+  { name: 'ai suggestion panel', light: hexToRgb('#f4f4ef'), dark: hexToRgb('#1c1c21') },
+];
+
+describe('the shared syntax colours', () => {
+  const HL = ['keyword', 'string', 'comment', 'number', 'title', 'type', 'meta'] as const;
+  const lightHl = tokens(blockCarrying('\\.code-hl', '--code-hl-keyword'), 'code-hl');
+  const darkHl = tokens(blockCarrying('\\.dark \\.code-hl', '--code-hl-keyword'), 'code-hl');
+
+  /** Every ground code text can sit on: the page, the four resolver washes, and the list above. */
+  function grounds(inks: Record<string, string>, page: RGB, theme: 'light' | 'dark'): [string, RGB][] {
+    return [
+      ['page', page],
+      ...ROLES.map((role): [string, RGB] => [
+        `${role} wash`,
+        over(channels(inks[role]!), alphaFor(role), page),
+      ]),
+      ...CODE_GROUNDS.map((g): [string, RGB] => [g.name, theme === 'light' ? g.light : g.dark]),
+    ];
   }
 
-  it('clears AA on the page and on every wash, in both themes', () => {
-    // ⚠ `highlight.js/styles/github-dark.css` is imported globally and every other consumer paints
-    // it on a fixed #0d1117 ground. The resolver's cells sit on the washes above, which are
-    // near-white in light mode — github-dark's #a5d6ff strings measure 1.3:1 there. Hence the
-    // scoped `.mr-code` palette, and hence this measurement.
+  it('clears AA on every ground a code surface paints, in both themes', () => {
+    // ⚠ `highlight.js/styles/github-dark.css` is imported globally and only `.md-body pre` paints
+    // it on a ground it is correct against (a fixed #0d1117). Everything measured here sits on a
+    // ground the component chose — a near-white wash, a green diff tint, gray-50 — where
+    // github-dark's #a5d6ff strings measure 1.3:1. Hence the `.code-hl` palette, and hence this.
     for (const name of HL) {
       const light = hexToRgb(lightHl[name]!);
-      for (const ground of grounds(lightInk, LIGHT_BG)) {
-        expect(contrastRatio(light, ground), `light ${name}`).toBeGreaterThanOrEqual(AA_BODY);
+      for (const [ground, rgb] of grounds(lightInk, LIGHT_BG, 'light')) {
+        expect(contrastRatio(light, rgb), `light ${name} on ${ground}`).toBeGreaterThanOrEqual(
+          AA_BODY,
+        );
       }
       const dark = hexToRgb(darkHl[name]!);
-      for (const ground of grounds(darkInk, DARK_BG)) {
-        expect(contrastRatio(dark, ground), `dark ${name}`).toBeGreaterThanOrEqual(AA_BODY);
+      for (const [ground, rgb] of grounds(darkInk, DARK_BG, 'dark')) {
+        expect(contrastRatio(dark, rgb), `dark ${name} on ${ground}`).toBeGreaterThanOrEqual(
+          AA_BODY,
+        );
       }
     }
   });
 
   it('clears the syntax theme’s own background out of the way', () => {
-    // github-dark sets a background on `.hljs` itself. Inside a resolver cell the WASH is the
-    // ground and it encodes a state, so a syntax theme painting over it would delete the state.
-    expect(CSS).toMatch(/\.mr-code \.hljs,\s*\n\s*\.mr-code code\.hljs \{\s*\n\s*background: transparent;/);
+    // github-dark sets a background on `.hljs` itself. Every surface here supplies its own ground
+    // and that ground MEANS something — a merge state, an add/del — so a syntax theme painting
+    // over it would delete the signal.
+    expect(CSS).toMatch(
+      /\.code-hl \.hljs,\s*\n\s*\.code-hl code\.hljs \{\s*\n\s*background: transparent;/,
+    );
+  });
+
+  it('⚠ OVERRIDES EVERY CLASS github-dark COLOURS — a class that reaches no token is unmeasured', () => {
+    // ⚠ THE BLIND SPOT THE TEST ABOVE CANNOT SEE. It walks the SEVEN declared `--code-hl-*`
+    // tokens, so a `.hljs-*` class that never reaches one is outside the loop entirely — the
+    // suite passes while the claim in that test's own title is false. Five classes were in exactly
+    // that position: `hljs-subst` (every `${…}` in a template literal), `hljs-code`,
+    // `hljs-formula`, `hljs-emphasis` and `hljs-strong`, all falling through to github-dark's
+    // #c9d1d9 / #8b949e — 1.32:1 to 3.08:1 on the light-mode grounds above.
+    //
+    // ⚠ IT READS THE INSTALLED STYLESHEET, not a list somebody wrote down. `github-dark.css` is
+    // imported globally (main.tsx + index.css), so a highlight.js bump that colours a new class
+    // reopens the gap with no other signal anywhere.
+    const GITHUB_DARK = readFileSync(
+      new URL('../node_modules/highlight.js/styles/github-dark.css', import.meta.url).pathname,
+      'utf8',
+    );
+    const coloured = new Set<string>();
+    for (const rule of GITHUB_DARK.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!/(^|[^-])color\s*:|background(-color)?\s*:/.test(rule[2]!)) continue;
+      for (const cls of rule[1]!.matchAll(/\.hljs-[a-zA-Z0-9_]+/g)) coloured.add(cls[0]!);
+    }
+    expect(coloured.size, 'the scan found the stylesheet, not an empty file').toBeGreaterThan(20);
+    const overridden = new Set(
+      [...CSS.matchAll(/\.code-hl\s+(\.hljs-[a-zA-Z0-9_]+)/g)].map((m) => m[1]!),
+    );
+    const missing = [...coloured].filter((c) => !overridden.has(c)).sort();
+    expect(missing, 'github-dark colours these and .code-hl does not').toEqual([]);
+  });
+
+  it('is not named after the resolver', () => {
+    // ⚠ THE PREFIX IS THE POINT. `--mr-*` is the resolver's STATE-WASH family; the syntax colours
+    // are the one member that is not about merge state, and seven other screens paint with them
+    // now. A `.mr-code` left anywhere is a claim that they belong to the resolver.
+    expect(CSS, 'no .mr-code selector may survive').not.toMatch(/\.mr-code\b/);
+    expect(CSS, 'no --mr-hl-* token may survive').not.toMatch(/--mr-hl-/);
   });
 });

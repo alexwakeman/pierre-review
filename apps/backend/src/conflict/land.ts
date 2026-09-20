@@ -11,6 +11,7 @@ import {
   type ConflictDecision,
   type ConflictFileResolution,
   type ConflictLandErrorCode,
+  type ConflictRegionDecision,
   type ConflictSkippedFile,
   type ResolvedDecision,
 } from '@pierre-review/shared';
@@ -40,10 +41,13 @@ import type { ConflictModel, ConflictModelFile, ConflictModelRegion } from './mo
  * rather than dependent on their fix, and it means two concurrent jobs on one clone cannot
  * collide: the only mutable state is a scratch index in a per-job temp directory.
  *
- * ⚠ NOTHING THE CLIENT SENDS IS FILE CONTENT. A decision is an enum member; an accepted model
- * suggestion is an opaque `suggestionId` whose lines live in the server's session. No
- * caller-supplied path is ever resolved against a filesystem either — paths become
- * `update-index` entries in a tree object, which contains harder than any path guard could.
+ * ⚠ NOTHING THE COMMIT BODY SENDS IS FILE CONTENT. A decision is an enum member; an accepted
+ * model suggestion is an opaque `suggestionId` and a hand-edited region an opaque `editId`,
+ * whose lines live in the server's session — validated, in the edit's case, on its own route
+ * before that id existed. The reader can now type into the centre pane, and this path still
+ * folds only bytes it holds. No caller-supplied path is ever resolved against a filesystem
+ * either — paths become `update-index` entries in a tree object, which contains harder than any
+ * path guard could.
  */
 
 /* ═════════════════════════════════ errors ═════════════════════════════════ */
@@ -73,6 +77,19 @@ export interface StoredSuggestion {
   endsWithNewline: boolean;
 }
 
+/**
+ * One region's text as the READER typed it, already through `validateConflictEdit` and already
+ * pinned to the region's `fingerprint` at mint time. Structurally identical to a
+ * `StoredSuggestion` and deliberately a separate type: the two have different provenances and
+ * separate stores, and a shared name is the first step towards a shared map.
+ */
+export interface StoredEdit {
+  fileIndex: number;
+  regionId: number;
+  lines: string[];
+  endsWithNewline: boolean;
+}
+
 export interface LandArgs {
   accountId: number;
   prId: number;
@@ -82,6 +99,9 @@ export interface LandArgs {
   model: ConflictModel;
   body: ConflictCommitBody;
   suggestions: ReadonlyMap<string, StoredSuggestion>;
+  /** The session's manual edits. Required rather than optional, like `suggestions`: a caller
+   *  that forgets it turns every hand-edited region into `UnknownEdit` at push time. */
+  edits: ReadonlyMap<string, StoredEdit>;
   onPhase: (p: ConflictCommitPhase) => void;
   signal: AbortSignal;
   /**
@@ -124,7 +144,7 @@ export async function landConflictResolution(args: LandArgs): Promise<ConflictCo
   // Pure CPU over strings already in memory: no side effect can survive a refusal here, which
   // is why it runs before the rebuild rather than after it. `IncompleteDecisions` is worth
   // getting for free.
-  const plan = planResolution(model, body.files, args.suggestions);
+  const plan = planResolution(model, body.files, args.suggestions, args.edits);
 
   // ⚠ REBASE IS ALL-OR-NOTHING. The model only OFFERS rebase when every conflicted file is
   // resolvable, but the request can still leave one out — and a rebased commit that reparents
@@ -489,13 +509,15 @@ interface ResolutionPlan {
  * Turn the request's per-region decisions into per-file bytes, or refuse.
  *
  * THE MODEL IS THE ALLOW-LIST. Every index, every region id and every decision is checked
- * against it, and a `suggestionId` is checked against the session's own store — so the only
- * text that can reach a blob is text the server produced and the reader saw.
+ * against it, and a `suggestionId` / `editId` is checked against the session's own store — so
+ * the only text that can reach a blob is text the server holds: either produced here, or typed
+ * by the reader and validated on the edit route before its id existed.
  */
 function planResolution(
   model: ConflictModel,
   files: readonly ConflictFileResolution[],
   suggestions: ReadonlyMap<string, StoredSuggestion>,
+  edits: ReadonlyMap<string, StoredEdit>,
 ): ResolutionPlan {
   const byIndex = new Map(model.files.map((f) => [f.index, f]));
   const resolved: ResolvedFile[] = [];
@@ -538,7 +560,7 @@ function planResolution(
           `${file.path} carries two decisions for the same region.`,
         );
       }
-      decisions.set(d.id, resolveDecision(file, region, d.decision, d.suggestionId, suggestions));
+      decisions.set(d.id, resolveDecision(file, region, d, suggestions, edits));
     }
 
     // Rule 2 of the fold, enforced here so the refusal names the file: EXHAUSTIVE over every
@@ -586,21 +608,22 @@ function planResolution(
   return { resolved, skipped, full: unresolved.length === 0, unresolved };
 }
 
-/** One region's decision, with the two payload-bearing members resolved from the places their
+/** One region's decision, with the three payload-bearing members resolved from the places their
  *  lines actually live — never recomputed, so the fold that lands is the fold that was
  *  reviewed. */
 function resolveDecision(
   file: ConflictModelFile,
   region: ConflictModelRegion,
-  decision: ConflictDecision,
-  suggestionId: string | undefined,
+  sent: ConflictRegionDecision,
   suggestions: ReadonlyMap<string, StoredSuggestion>,
+  edits: ReadonlyMap<string, StoredEdit>,
 ): ResolvedDecision {
+  const decision: ConflictDecision = sent.decision;
   if (decision === 'suggestion') {
-    if (!suggestionId) {
+    if (!sent.suggestionId) {
       throw landError('UnknownSuggestion', `${file.path} accepted a suggestion with no id.`);
     }
-    const stored = suggestions.get(suggestionId);
+    const stored = suggestions.get(sent.suggestionId);
     // The id must address THIS region: a suggestion is a handle on one hunk's lines, and a
     // handle that travels to another hunk is text nobody read in the place it lands.
     if (!stored || stored.fileIndex !== file.index || stored.regionId !== region.id) {
@@ -608,6 +631,25 @@ function resolveDecision(
     }
     return {
       decision: 'suggestion',
+      lines: stored.lines,
+      endsWithNewline: stored.endsWithNewline,
+    };
+  }
+  if (decision === 'edited') {
+    if (!sent.editId) {
+      throw landError('UnknownEdit', `${file.path} carries an edit with no id.`);
+    }
+    const stored = edits.get(sent.editId);
+    // ⚠ THE SAME GUARD, FOR THE SAME REASON, AND IT IS NOT REDUNDANT WITH THE FINGERPRINT CHECK
+    // THE EDIT ROUTE ALREADY MADE. That one proved the text was written against THIS region's
+    // bytes; this one proves the handle has not since been moved onto a different region by the
+    // commit body. Both are "text nobody read, in the place it lands" — one across time, one
+    // across regions.
+    if (!stored || stored.fileIndex !== file.index || stored.regionId !== region.id) {
+      throw landError('UnknownEdit', 'That edit is no longer available.');
+    }
+    return {
+      decision: 'edited',
       lines: stored.lines,
       endsWithNewline: stored.endsWithNewline,
     };

@@ -11,7 +11,7 @@ import type {
   ConflictSessionStatus,
 } from '@pierre-review/shared';
 import { config } from '../config.js';
-import type { StoredSuggestion } from './land.js';
+import type { StoredEdit, StoredSuggestion } from './land.js';
 import type { ConflictModel } from './model-types.js';
 import { conflictFileEntries } from './model.js';
 
@@ -45,6 +45,9 @@ import { conflictFileEntries } from './model.js';
 /** The suggestion store's handle. Opaque to the client; valid only inside its own session. */
 export type SuggestionId = string;
 
+/** The manual-edit store's handle. Same shape, same lifetime, DIFFERENT STORE — see `edits`. */
+export type EditId = string;
+
 export interface ConflictSessionRecord {
   sessionId: string;
   accountId: number;
@@ -63,10 +66,17 @@ export interface ConflictSessionRecord {
   /**
    * Pro per-hunk suggestions the host has already validated. The plugin never returns text to
    * the client and the client never sends text back, so this map is the ONLY place a model's
-   * lines exist between the two — which is what makes "no free typing" a property of the
-   * protocol rather than a UI convention.
+   * lines exist between the two.
    */
   suggestions: Map<SuggestionId, StoredSuggestion>;
+  /**
+   * The reader's OWN text for a region, validated by `validateConflictEdit` before its id
+   * existed. Mechanically identical to `suggestions` — that is the point, it is that mechanism
+   * reused — and kept in a SEPARATE map because the two have different provenances and
+   * different refusal sentences. One map would let a `'suggestion'` decision redeem an `editId`
+   * and be told "that suggestion has expired. Ask Claude again." about text the reader typed.
+   */
+  edits: Map<EditId, StoredEdit>;
   /** When the record was minted. ⚠ THE ONE CLOCK `touch()` CANNOT MOVE — see
    *  `MAX_SESSION_LIFETIME_MS`. */
   createdAt: number;
@@ -360,6 +370,7 @@ export function claimSession(
     modelHash: '',
     commit: null,
     suggestions: new Map(),
+    edits: new Map(),
     createdAt: now,
     expiresAt: now + config.conflictSessionTtlMs,
     openRunning: true,
@@ -563,6 +574,64 @@ export function storeSuggestion(
   return id;
 }
 
+/* ═════════════════════════════ manual edits (CORE) ═════════════════════════════ */
+
+/**
+ * ⚠ A THIRD MEMORY BOUND, FOR THE ONE THING IN THIS FILE A READER CAN GROW BY TYPING.
+ *
+ * The record caps above bound how many MODELS the process retains; this bounds how much typed
+ * text one of them may accumulate — and since nothing is ever evicted (see `storeEdit`), it is
+ * the WHOLE bound. Without it the ceiling would be one edit per decidable region per save:
+ * `CONFLICT_MAX_FILES` × `CONFLICT_MAX_REGIONS` is 4,800 regions, at up to
+ * `conflictSuggestMaxChars` (4,000) each, so ~19 MiB per session before anybody re-saves — more
+ * than the 8 MiB the whole model is capped at, in a process every tenant shares. Sixty-four
+ * full-size edits is far more hand-editing than any resolution contains and well under a
+ * megabyte, so the refusal is reachable by a script and not by a person.
+ *
+ * ⚠ IT IS TIED TO THE PER-EDIT CAP RATHER THAN SPELLED AS A NUMBER, so the two move together.
+ */
+const MAX_EDIT_CHARS_PER_SESSION = 64 * config.conflictSuggestMaxChars;
+
+const editChars = (edit: StoredEdit): number => {
+  let n = 0;
+  for (const line of edit.lines) n += line.length + 1;
+  return n;
+};
+
+/**
+ * Store one validated edit and mint its handle, or null when this session is already holding
+ * as much typed text as it may.
+ *
+ * ⚠ A HANDLE IS NEVER EVICTED — `storeSuggestion`'s rule, and for the same reason. Re-saving a
+ * region used to DELETE its previous edit on the argument that "a region has one current text";
+ * true of the region, false of the handles pointing at it. The undo stack is the counter-example
+ * that shipped: it files `previousEditId` when a decision is replaced, so a second save followed
+ * by one Ctrl+Z restored an id the server had just destroyed. The pane could not tell — the
+ * client's own line map is append-only, so the region went on rendering applied-green and
+ * counting as decided — and the WHOLE commit then came back `UnknownEdit`, naming no file and no
+ * region, with every region on screen looking answered. A second tab saving the same region did
+ * it to the first tab's decisions from across the process. `MAX_EDIT_CHARS_PER_SESSION` is the
+ * bound now, and it is a real one.
+ *
+ * ⚠ AND THE BUDGET IS COMPUTED WITHOUT MUTATING, so a refusal is the no-op this route's contract
+ * promises ("a refusal mints nothing, so there is no handle to redeem"). The eviction ran BEFORE
+ * the sum, so a save that overran the cap destroyed the region's previous, accepted, already-
+ * decided edit on its way to answering `too_many_edits` — the same unlocatable `UnknownEdit` at
+ * commit time, reached by doing nothing wrong.
+ *
+ * ⚠ THE HOST MINTS THE ID, exactly as it does for a suggestion: an id minted anywhere else is
+ * an id into a store the commit path cannot read.
+ */
+export function storeEdit(rec: ConflictSessionRecord, edit: StoredEdit): EditId | null {
+  let held = 0;
+  for (const e of rec.edits.values()) held += editChars(e);
+  if (held + editChars(edit) > MAX_EDIT_CHARS_PER_SESSION) return null;
+  const id = randomUUID();
+  rec.edits.set(id, edit);
+  touch(rec, Date.now());
+  return id;
+}
+
 /* ═════════════════════════════ the wire projection ═════════════════════════════ */
 
 /**
@@ -618,6 +687,7 @@ export const __testing = {
   MAX_JOBS_PER_ACCOUNT,
   MAX_SESSIONS_PER_ACCOUNT,
   MAX_TOTAL_SESSIONS,
+  MAX_EDIT_CHARS_PER_SESSION,
   reset: (): void => {
     for (const rec of sessions.values()) rec.subscribers.clear();
     sessions.clear();

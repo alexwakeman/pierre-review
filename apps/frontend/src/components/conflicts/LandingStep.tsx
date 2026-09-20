@@ -9,6 +9,7 @@ import type {
 } from '@pierre-review/shared';
 import {
   buildCommitBody,
+  commitBlockedReason,
   landingTargets,
   type CommitPlan,
   type LandingFileRow,
@@ -28,7 +29,6 @@ import {
   NEW_BRANCH,
   NEW_BRANCH_FIELD,
   NOTHING_PUSHED,
-  NOTHING_TO_COMMIT,
   OPEN_PR_FOR_BRANCH,
   PARTIAL_COMMIT_NOTE,
   REBASE_AND_FORCE_PUSH,
@@ -42,7 +42,7 @@ import {
   STRATEGY_REBASE,
   WHAT_GOES_IN,
   WHERE_TO_PUT_IT,
-  decideTheRest,
+  commitPressName,
   filesResolved,
   jumpToFileLabel,
   pinnedOn,
@@ -114,7 +114,11 @@ export function LandingStep({
 }): JSX.Element {
   const stored = useResolverSession(sessionKey);
   const decisions = stored?.decisions ?? EMPTY_DECISIONS;
-  const suggestionIds = stored?.suggestionIds ?? EMPTY_SUGGESTIONS;
+  const suggestionIds = stored?.suggestionIds ?? EMPTY_HANDLES;
+  // ⚠ THE HANDLES, FROM THE STORE, WHICH IS WHY THIS STEP NEEDS NOTHING FROM THE PANES IT JUST
+  // REPLACED. `ResolverPanes` is unmounted by now and its hooks' line maps went with it; the
+  // commit carries ids, so the text never has to be here at all.
+  const editIds = stored?.editIds ?? EMPTY_HANDLES;
 
   const rebaseOffered = session.strategies.includes('rebase');
   const [strategy, setStrategy] = useState<ConflictLandStrategy>('merge');
@@ -158,34 +162,27 @@ export function LandingStep({
           reserved: session.reservedBranchNames,
         });
 
-  // ⚠ THE HARD GATE. `plan.canCommit` is FALSE while any supported file still holds an unanswered
-  // region — the whole point of the change: a half-decided file used to be dropped from the
-  // commit silently and listed as "Still conflicted". Nothing is excluded from a commit without
-  // the reader choosing it now.
-  const blocked = headMoved || !plan.canCommit || branchProblem != null || running;
+  /** ONE sentence for why the button will not go, rendered above it AND given to `title`. A bare
+   *  disabled button used to be the whole explanation on three of its four reasons.
+   *
+   *  ⚠ FOLDED IN `lib/conflictCommit.ts`, NOT HERE, SINCE THE TOOLBAR'S BUTTON STARTED SHARING THE
+   *  LOCK. That button is the entry to this screen; if this screen composed the sentence, a reader
+   *  shut out at the toolbar would meet one explanation and a reader who got here would meet
+   *  another for the same three facts. */
+  const blockedReason = commitBlockedReason(plan, headMoved);
+
+  // ⚠ THE HARD GATE. `blockedReason != null` IS `headMoved || !plan.canCommit` — `canCommit` is
+  // false while any supported file still holds an unanswered region, which is the whole point:
+  // a half-decided file used to be dropped from the commit silently and listed as "Still
+  // conflicted". The two clauses beside it are this screen's alone — the branch-name field and a
+  // push already in flight are facts the toolbar has no way of knowing about.
+  const blocked = blockedReason != null || branchProblem != null || running;
 
   // ⚠ EVERY FILE THIS COMMIT WILL NOT CARRY, MINUS THE ONES ALREADY NAMED ABOVE — folded in
   // `conflictCommit.ts` beside the gate, not narrowed here. See `CommitPlan.notCarried`: it is
   // deliberately NOT "the unsupported ones", because a supported file with nothing decidable in it
   // is also dropped from the commit and also has to be seen.
   const cantFinishHere = plan.notCarried;
-
-  /** ONE sentence for why the button will not go, rendered above it AND given to `title`. A bare
-   *  disabled button used to be the whole explanation on three of its four reasons. */
-  const blockedReason =
-    headMoved
-      ? HEAD_MOVED
-      : plan.outstanding.length > 0
-        ? decideTheRest(plan.decidableTotal - plan.decidedTotal)
-        : plan.resolved.length === 0
-          ? // ⚠ NOT `unsupportedHeadline`, AND NOT `plan.rows.length`. This branch fires whenever
-            // nothing reached the commit, which includes a pull request of perfectly supported
-            // files the model found nothing decidable in — telling that reader "1 file needs
-            // resolving on GitHub." was both the wrong count and a false claim. The list above
-            // names each file with its own reason; this says only what the button cannot do.
-            NOTHING_TO_COMMIT
-          : // The branch field prints its own refusal right beside itself — not twice.
-            null;
 
   function submit(): void {
     if (blocked) return;
@@ -194,7 +191,16 @@ export function LandingStep({
       : { kind: 'pr_branch' };
     setSubmitted(true);
     onCommit(
-      buildCommitBody({ session, plan, loaded: files, decisions, suggestionIds, strategy, target }),
+      buildCommitBody({
+        session,
+        plan,
+        loaded: files,
+        decisions,
+        suggestionIds,
+        editIds,
+        strategy,
+        target,
+      }),
     );
   }
 
@@ -426,6 +432,13 @@ export function LandingStep({
                   onClick={submit}
                   disabled={blocked}
                   title={blockedReason ?? undefined}
+                  // ⚠ THE NAME SAYS WHICH BUTTON THIS IS. The toolbar's says the same two words
+                  // and opens this screen; this one pushes. A screen reader meeting "Commit and
+                  // push, button" in both places has nothing to tell them apart — see
+                  // `commitPressName`, and note it still OPENS with the visible label.
+                  aria-label={commitPressName(
+                    strategy === 'rebase' ? REBASE_AND_FORCE_PUSH : COMMIT_AND_PUSH,
+                  )}
                   aria-describedby={blockedReason != null ? BLOCKED_REASON_ID : undefined}
                   className="rounded bg-gray-900 px-3 py-1 text-xs font-medium text-white disabled:opacity-40 dark:bg-gray-100 dark:text-gray-900"
                 >
@@ -541,4 +554,7 @@ function SecondaryButton({
 const BLOCKED_REASON_ID = 'conflict-commit-blocked-reason';
 
 const EMPTY_DECISIONS: Readonly<Record<string, ConflictDecision>> = Object.freeze({});
-const EMPTY_SUGGESTIONS: Readonly<Record<string, string>> = Object.freeze({});
+/** The empty map for EITHER handle set — suggestion ids or edit ids. ⚠ FROZEN AND
+ *  MODULE-LEVEL, not a `{}` literal at the call site: a fresh object every render would break
+ *  every memo that depends on it. */
+const EMPTY_HANDLES: Readonly<Record<string, string>> = Object.freeze({});

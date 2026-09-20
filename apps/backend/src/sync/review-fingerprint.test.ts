@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fingerprintReview } from './review-fingerprint.js';
 
 describe('fingerprintReview', () => {
-  it("recognises Pierre's own posted-review marker → 'pierre'", () => {
+  it("recognises Limn's own posted-review marker → 'pierre'", () => {
     const fp = fingerprintReview(
       'Nice work overall.\n\n<!-- pierre:claude-review v=1 -->',
       [],

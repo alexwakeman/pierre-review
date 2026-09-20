@@ -573,8 +573,13 @@ describe('the wand', () => {
     const content = conflictFileContent(model, 0, true);
     const contested = content?.regions.find((r) => r.kind === 'conflict');
     expect(contested?.allowed).toContain('disjoint_merge');
-    // ⚠ `suggestion` is a SESSION fact, not a model fact — it must never be advertised here.
+    // ⚠ NEITHER `suggestion` NOR `edited` IS A MODEL FACT — both are SESSION facts, addressing
+    // text held in one server process's memory, and neither may ever be advertised here. What
+    // `allowed` answers is "which of the deterministic members does this region offer", and a
+    // handle-bearing member has no answer to that. The UI knows a region is editable because it
+    // is decidable at all, and the SERVER re-checks that on the edit route (`not_editable`).
     expect(contested?.allowed).not.toContain('suggestion');
+    expect(contested?.allowed).not.toContain('edited');
     // A contested region always starts undecided, auto-apply or not.
     expect(contested?.defaultDecision).toBe('base');
   });

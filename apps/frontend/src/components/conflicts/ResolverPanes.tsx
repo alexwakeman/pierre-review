@@ -12,17 +12,21 @@ import {
   wandSentence,
   type FileTally,
 } from '../../lib/mergeResolver.js';
+import { nextOutstandingFile, type CommitPlan } from '../../lib/conflictCommit.js';
 import { languageForPath } from '../../lib/hljsLines.js';
 import { regionKey, useConflictResolverStore, useResolverSession } from '../../store/conflictResolver.js';
 import { RegionRibbons } from './RegionRibbons.js';
 import { ResolverToolbar } from './ResolverToolbar.js';
 import { SlotRow } from './SlotRow.js';
 import { useHunkSuggestion } from './useHunkSuggestion.js';
+import { useRegionEdit } from './useRegionEdit.js';
 import {
   NARROW_PANES,
   PANE_OURS,
   PANE_RESULT,
   RENAME_DETECTION_OFF,
+  STAYS_CONFLICTED,
+  STILL_CONFLICTED,
   paneTheirs,
   truncatedNotice,
 } from './copy.js';
@@ -60,6 +64,10 @@ type UndoEntry = Array<{
   regionId: number;
   previous: ConflictDecision | null;
   previousSuggestionId: string | null;
+  /** ⚠ CARRIED LIKE THE SUGGESTION'S. Undo restores the DECISION and its handle together, or
+   *  undoing back onto an edit would leave `'edited'` with no id — a region reading "Your text"
+   *  whose text the pane cannot draw. */
+  previousEditId: string | null;
 }>;
 
 export function ResolverPanes({
@@ -71,8 +79,8 @@ export function ResolverPanes({
   loadFile,
   onRetryFile,
   suggestionLines,
-  decidedTotal,
-  decidableTotal,
+  plan,
+  landBlockedReason,
   jumpToFile,
   onJumpConsumed,
   onLand,
@@ -92,11 +100,16 @@ export function ResolverPanes({
    *  in; a `'suggestion'` decision whose lines are not to hand renders as undecided rather than as
    *  something else's text. Absent until the per-hunk suggestion ships. */
   suggestionLines?: Readonly<Record<string, string[]>>;
-  /** The countdown, off the shell's ONE `CommitPlan`. ⚠ HANDED IN, NEVER RE-FOLDED HERE: the
-   *  toolbar and the overlay footer print the same two numbers, and a second fold is how they
-   *  come to disagree. Same population as the commit gate. */
-  decidedTotal: number;
-  decidableTotal: number;
+  /** The shell's ONE `CommitPlan`. ⚠ HANDED IN, NEVER RE-FOLDED HERE: the toolbar's countdown, the
+   *  overlay footer, the close confirm and the landing step's gate all read this object, and a
+   *  second fold is how they come to disagree. The panes take the whole plan rather than two
+   *  numbers off it because the toolbar now also names the OUTSTANDING FILES and jumps between
+   *  them — the same rows the landing step lists. */
+  plan: CommitPlan;
+  /** `commitBlockedReason(plan, headMoved)`, folded in the shell because `headMoved` is a fact
+   *  about GitHub that the plan deliberately knows nothing about. Non-null shuts the toolbar's
+   *  "Commit and push" AND the `Enter` binding below, and is the sentence both of them wear. */
+  landBlockedReason: string | null;
   /** The landing step sent the reader back to finish a file. A file INDEX only — the landing step
    *  does not hold that file's regions and must not fetch them to name a region. */
   jumpToFile?: number | null;
@@ -111,15 +124,21 @@ export function ResolverPanes({
   // reader is not entitled. It owns its own pending state: nothing reaches `decisions` until the
   // reader presses "Use this".
   const claude = useHunkSuggestion(session.prId, session.sessionId);
+  // The resolver's one text box — CORE, free, both modes, no tier check anywhere near it. Like
+  // the Ask above, it owns its own pending state: nothing reaches `decisions` until a save comes
+  // back with a handle.
+  const edits = useRegionEdit(session.prId, session.sessionId);
   const decideRegion = useConflictResolverStore((s) => s.decideRegion);
   const decisions = stored?.decisions ?? EMPTY_DECISIONS;
-  const suggestionIds = stored?.suggestionIds ?? EMPTY_SUGGESTIONS;
+  const suggestionIds = stored?.suggestionIds ?? EMPTY_HANDLES;
+  const editIds = stored?.editIds ?? EMPTY_HANDLES;
 
   const resolvable = useMemo(() => session.files.filter((f) => f.unsupported == null), [session.files]);
   const [activeIndex, setActiveIndex] = useState<number>(() => resolvable[0]?.index ?? -1);
   const [activeRegionId, setActiveRegionId] = useState<number | null>(null);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
   const [baseOpen, setBaseOpen] = useState(false);
+  const [outstandingOpen, setOutstandingOpen] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [wandMessage, setWandMessage] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
@@ -226,20 +245,38 @@ export function ResolverPanes({
     [suggestionLines, claude.acceptedLines],
   );
 
+  const held = useMemo(
+    () => ({
+      suggestionIds,
+      suggestionLines: acceptedLines,
+      editIds,
+      // The SERVER's split of what the reader typed, out of the hook's module map — which is why
+      // it survives the landing step unmounting these panes.
+      editLines: edits.editLines,
+    }),
+    [suggestionIds, acceptedLines, editIds, edits.editLines],
+  );
+
   const slots = useMemo(() => {
     const out = new Map<number, ReturnType<typeof slotFor>>();
     if (activeFile == null) return out;
     for (const region of activeFile.regions) {
-      out.set(region.id, slotFor(region, activeFile.index, decisions, suggestionIds, acceptedLines));
+      out.set(region.id, slotFor(region, activeFile.index, decisions, held));
     }
     return out;
-  }, [activeFile, decisions, suggestionIds, acceptedLines]);
+  }, [activeFile, decisions, held]);
 
   // ── DECIDING ───────────────────────────────────────────────────────────────────────────────
 
   const apply = useCallback(
     (
-      moves: Array<{ fileIndex: number; regionId: number; decision: ConflictDecision | null; suggestionId?: string | null }>,
+      moves: Array<{
+        fileIndex: number;
+        regionId: number;
+        decision: ConflictDecision | null;
+        suggestionId?: string | null;
+        editId?: string | null;
+      }>,
     ) => {
       if (moves.length === 0) return;
       const entry: UndoEntry = moves.map((m) => {
@@ -249,27 +286,32 @@ export function ResolverPanes({
           regionId: m.regionId,
           previous: decisions[rk] ?? null,
           previousSuggestionId: suggestionIds[rk] ?? null,
+          previousEditId: editIds[rk] ?? null,
         };
       });
       undoStack.current = [...undoStack.current, entry].slice(-UNDO_STACK_LIMIT);
       setUndoDepth(undoStack.current.length);
       for (const m of moves) {
-        // ⚠ ANY OTHER CONTROL ON A REGION DISCARDS ITS PENDING SUGGESTION. A suggestion the
-        // reader has moved past must not sit under the cell still offering "Use this" — the
-        // decision beneath it has already changed.
+        // ⚠ ANY OTHER CONTROL ON A REGION DISCARDS ITS PENDING SUGGESTION AND CLOSES ITS TEXT
+        // BOX. Neither may sit under the cell still offering to replace something the decision
+        // beneath them has already changed. Closing the box drops an unsaved draft, which is the
+        // right trade: the reader just pressed a different answer for this very region.
         if (m.decision !== 'suggestion') claude.clear(m.fileIndex, m.regionId);
+        if (m.decision !== 'edited') edits.close(m.fileIndex, m.regionId);
         decideRegion({
           key: sessionKey,
           fileIndex: m.fileIndex,
           regionId: m.regionId,
           decision: m.decision,
           suggestionId: m.suggestionId ?? null,
+          editId: m.editId ?? null,
         });
       }
     },
-    // `claude.clear` is a stable `useCallback`; depending on the whole hook object would rebuild
-    // this callback (and the three that close over it) on every Ask state change.
-    [decisions, suggestionIds, decideRegion, sessionKey, claude.clear],
+    // `claude.clear` and `edits.close` are stable `useCallback`s; depending on either whole hook
+    // object would rebuild this callback (and the three that close over it) on every Ask or save
+    // state change.
+    [decisions, suggestionIds, editIds, decideRegion, sessionKey, claude.clear, edits.close],
   );
 
   const decideActive = useCallback(
@@ -296,6 +338,7 @@ export function ResolverPanes({
         regionId: step.regionId,
         decision: step.previous,
         suggestionId: step.previousSuggestionId,
+        editId: step.previousEditId,
       });
     }
     setAnnouncement('Undone.');
@@ -381,6 +424,47 @@ export function ResolverPanes({
     [resolvable, activeIndex],
   );
 
+  /**
+   * Go to a named file's first UNANSWERED region — the toolbar's "Next" and the counter popover's
+   * rows, which are the same motion the landing step's "Still to decide" rows make.
+   *
+   * ⚠ IT GOES THROUGH `pendingJump`, NOT STRAIGHT TO A REGION. The regions may not be here yet:
+   * seed the file, let the fetch effect run, and the jump's second half picks the first region
+   * still needing an answer. Landing on region 1 of a file whose first four are decided is the
+   * defect that effect exists to prevent, and a second path that reached past it would reopen it.
+   */
+  const goToFile = useCallback(
+    (index: number) => {
+      // ⚠ THE FILE THE READER IS ALREADY IN PICKS ITS REGION HERE. `pendingJump`'s second half is
+      // keyed on `activeIndex` CHANGING, so a jump to the file already on screen never re-runs it
+      // and the "land on the first decidable region" effect wins with region 1 — which on a file
+      // whose first four are answered is the row they just finished. "Next" can never ask for this
+      // (it excludes the current file), the counter's popover can: it lists every outstanding file.
+      if (index === activeIndex) {
+        const first = files[index]?.regions.find(
+          (r) => r.kind !== 'unchanged' && decisions[regionKey(index, r.id)] == null,
+        );
+        if (first == null) return;
+        focusOnActivate.current = true;
+        setActiveRegionId(first.id);
+        return;
+      }
+      pendingJump.current = index;
+      focusOnActivate.current = true;
+      setActiveIndex(index);
+      setActiveRegionId(null);
+      const path = session.files.find((f) => f.index === index)?.path;
+      if (path != null) setAnnouncement(`Moved to ${path}.`);
+    },
+    [activeIndex, files, decisions, session.files],
+  );
+
+  // ⚠ FILES, NOT REGIONS. `n`/`p` walk the regions inside the file the reader is in; this is the
+  // toolbar's "Next", which goes to the next FILE that still needs decisions and wraps. Null means
+  // there is nowhere to jump — everything is decided, or the only file left is this one — and the
+  // button is then absent rather than disabled. See `nextOutstandingFile`.
+  const nextOutstanding = nextOutstandingFile(plan.outstanding, activeIndex);
+
   // Land on the first decidable region whenever the file changes, so `←`/`→` always have a target.
   useEffect(() => {
     if (activeRegionId != null && decidable.some((r) => r.id === activeRegionId)) return;
@@ -454,8 +538,13 @@ export function ResolverPanes({
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       const t = e.target as HTMLElement | null;
-      // Never steal a key from a field. There is no free typing in the resolver itself, but the
-      // landing step's branch name lives inside the same overlay.
+      // ⚠ NEVER STEAL A KEY FROM A FIELD, AND THIS IS NOW LOAD-BEARING RATHER THAN DEFENSIVE.
+      // It used to guard only the landing step's branch-name input, which lives inside the same
+      // overlay; `RegionEditPanel`'s textarea sits INSIDE THIS SCROLLER, so every keystroke in it
+      // bubbles here. Without this line typing `b` in the box would take both sides of the
+      // region being edited, `x` would ignore it, and Enter would leave for the commit step —
+      // all while the caret sat in the text those keys were changing. `resolverControls.test.ts`
+      // pins that this guard runs BEFORE the single-key verbs and before the Enter arm.
       if (t?.closest('input, textarea, select, [contenteditable="true"]') != null) return;
       // ⚠ NEVER STEAL `Enter` FROM A CONTROL EITHER. A `<button>` fires its click on Enter DOWN, so
       // `preventDefault()` here cancels the press — and the gutter arrow became focusable in the
@@ -531,12 +620,21 @@ export function ResolverPanes({
         case 'Enter':
           if (onLand == null) return;
           e.preventDefault();
+          // ⚠ THE SAME LOCK AS THE TOOLBAR BUTTON, OFF THE SAME `commitBlockedReason`. Enter here
+          // is the toolbar's own door — the two used to differ only in that this one had no way of
+          // being disabled, which is exactly how a gated button comes to have a keyboard bypass.
+          // A shut door says why: the button wears the sentence as its description, so the key
+          // speaks it.
+          if (landBlockedReason != null) {
+            setAnnouncement(landBlockedReason);
+            return;
+          }
           onLand();
           return;
         default:
       }
     },
-    [decideActive, runWand, step, stepFile, undoLast, onLand],
+    [decideActive, runWand, step, stepFile, undoLast, onLand, landBlockedReason],
   );
 
   const at = resolvable.findIndex((f) => f.index === activeIndex);
@@ -566,8 +664,17 @@ export function ResolverPanes({
         language={language}
         baseOpen={baseOpen}
         onBaseOpen={setBaseOpen}
-        decided={decidedTotal}
-        total={decidableTotal}
+        decided={plan.decidedTotal}
+        total={plan.decidableTotal}
+        outstanding={plan.outstanding}
+        outstandingOpen={outstandingOpen}
+        onOutstandingOpen={setOutstandingOpen}
+        onJumpToFile={goToFile}
+        nextOutstanding={nextOutstanding}
+        onNextOutstanding={() => {
+          if (nextOutstanding != null) goToFile(nextOutstanding);
+        }}
+        blockedReason={landBlockedReason}
         onLand={onLand}
       />
 
@@ -592,7 +699,35 @@ export function ResolverPanes({
           {activeFile == null ? (
             <div className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
               {activeEntry == null ? (
-                'Nothing to resolve here.'
+                // ⚠ THIS IS THE ONLY SCREEN A PULL REQUEST WITH NOTHING RESOLVABLE EVER REACHES,
+                // so it has to carry the refusal. A binary-only conflict produces a `ready`
+                // session with no resolvable file: "Next" is absent, the commit button is shut,
+                // and every other sentence on screen ("Nothing to resolve here.", "Nothing to
+                // decide in this pull request.") reads as "there are no conflicts" while the pull
+                // request is in fact still conflicted and has to be finished on GitHub. The
+                // sentence that says so used to be reachable only by pressing the button this
+                // gate disabled.
+                <div className="flex flex-col gap-2">
+                  <div>{landBlockedReason ?? 'Nothing to resolve here.'}</div>
+                  {plan.notCarried.length > 0 && (
+                    <div>
+                      <div className="font-medium text-gray-700 dark:text-gray-200">
+                        {STILL_CONFLICTED}
+                      </div>
+                      <ul className="mt-0.5">
+                        {plan.notCarried.map((row) => (
+                          <li key={row.index} className="flex flex-wrap items-baseline gap-x-2">
+                            <span className="font-mono text-gray-800 dark:text-gray-100">
+                              {row.path}
+                            </span>
+                            <span>{row.label}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-1">{STAYS_CONFLICTED}</div>
+                    </div>
+                  )}
+                </div>
               ) : fileErrors[activeIndex] != null ? (
                 <span className="flex flex-wrap items-center gap-2">
                   <span>{fileErrors[activeIndex]}</span>
@@ -634,7 +769,15 @@ export function ResolverPanes({
                 const ordinal = decidable.findIndex((r) => r.id === region.id) + 1;
                 return (
                   <SlotRow
-                    key={region.id}
+                    // ⚠ THE FILE INDEX IS PART OF THE KEY, AND THAT IS NOT TIDINESS. Region ids
+                    // restart at 1 in every file (`model.ts`), and this grid is the SAME element
+                    // across a file switch — so React reconciled file A's row 3 with file B's row
+                    // 3 instead of remounting it, and every piece of local state in that subtree
+                    // came along: the unchanged-lines fold, and (worse) `RegionEditPanel`'s draft,
+                    // which sits at a fixed child slot. Typing in file B's region 3 and switching
+                    // back put file B's text in file A's box, under file A's fingerprint, one
+                    // press from the commit.
+                    key={`${activeFile.index}:${region.id}`}
                     region={region}
                     slot={slots.get(region.id) ?? UNAPPLIED}
                     fileIndex={activeFile.index}
@@ -674,6 +817,54 @@ export function ResolverPanes({
                       setAnnouncement('Took Claude’s suggestion.');
                     }}
                     onDiscardSuggestion={() => claude.clear(activeFile.index, region.id)}
+                    edit={edits.states[regionKey(activeFile.index, region.id)]}
+                    editDraft={edits.draftFor(activeFile.index, region.id)}
+                    onEditDraft={(text) => edits.noteDraft(activeFile.index, region.id, text)}
+                    // ⚠ OFFERED ON EVERY DECIDABLE REGION AND ON NO `unchanged` ONE. Context is
+                    // read-only — the server refuses it with `not_editable`, and this is the
+                    // affordance saying so before anybody presses it.
+                    onOpenEdit={
+                      region.kind === 'unchanged'
+                        ? undefined
+                        : () => {
+                            setActiveRegionId(region.id);
+                            // A pending suggestion under the same cell is something the reader
+                            // has just moved past, exactly as `apply` treats it.
+                            claude.clear(activeFile.index, region.id);
+                            edits.open(activeFile.index, region.id);
+                          }
+                    }
+                    onCancelEdit={() => edits.close(activeFile.index, region.id)}
+                    onSaveEdit={(text) => {
+                      setActiveRegionId(region.id);
+                      void edits
+                        .save({
+                          fileIndex: activeFile.index,
+                          regionId: region.id,
+                          // The CONTENT pin beside the id's ADDRESS, the same one the Ask sends:
+                          // the server refuses if this region's bytes moved under its id while
+                          // the box was open.
+                          fingerprint: region.fingerprint,
+                          text,
+                        })
+                        .then((saved) => {
+                          // A refusal has already put the server's sentence above the box; there
+                          // is nothing to decide and nothing to announce that is not on screen.
+                          if (saved == null) return;
+                          // ⚠ THE HANDLE, NEVER THE TEXT. The lines the commit splices are the
+                          // ones the server holds; the store keeps the id and the hook keeps the
+                          // lines to read.
+                          apply([
+                            {
+                              fileIndex: activeFile.index,
+                              regionId: region.id,
+                              decision: 'edited',
+                              editId: saved.editId,
+                            },
+                          ]);
+                          setAnnouncement('Saved your text for this change.');
+                        });
+                    }}
                     onActivate={() => setActiveRegionId(region.id)}
                     onDecide={(d) => {
                       setActiveRegionId(region.id);
@@ -765,6 +956,9 @@ const DECISION_SAID: Record<ConflictDecision, string> = {
   base: 'Ignored',
   disjoint_merge: 'Merged both edits',
   suggestion: 'Took the suggestion',
+  // Reached only by Undo landing back on an edit — a save announces itself in its own words,
+  // because "used your own text" after pressing Save says nothing the reader did not just do.
+  edited: 'Used your own text',
 };
 
 const UNAPPLIED = Object.freeze({ kind: 'unapplied' } as const);
@@ -772,4 +966,7 @@ const UNAPPLIED = Object.freeze({ kind: 'unapplied' } as const);
  *  re-fire the ribbon overlay's measure effect on every keystroke. */
 const EMPTY_REGIONS: readonly ConflictRegion[] = Object.freeze([]);
 const EMPTY_DECISIONS: Readonly<Record<string, ConflictDecision>> = Object.freeze({});
-const EMPTY_SUGGESTIONS: Readonly<Record<string, string>> = Object.freeze({});
+/** The empty map for EITHER handle set — suggestion ids or edit ids. ⚠ FROZEN AND
+ *  MODULE-LEVEL, not a `{}` literal at the call site: a fresh object every render would break
+ *  every memo that depends on it. */
+const EMPTY_HANDLES: Readonly<Record<string, string>> = Object.freeze({});

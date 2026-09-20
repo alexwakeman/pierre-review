@@ -300,13 +300,14 @@ beforeEach(() => {
 /* ═════════════════════════════ registration + gates ═════════════════════════════ */
 
 describe('the family is registered in local mode', () => {
-  it('routes all six paths', () => {
+  it('routes all seven paths', () => {
     // The mirror of the cloud assertion in conflicts-cloud.test.ts. Without this half, "they
     // 404 in cloud" would be satisfied by a typo in every path.
     expect(app.hasRoute({ method: 'POST', url: '/api/prs/:id/conflicts' })).toBe(true);
     expect(app.hasRoute({ method: 'GET', url: '/api/prs/:id/conflicts' })).toBe(true);
     expect(app.hasRoute({ method: 'GET', url: '/api/prs/:id/conflicts/stream' })).toBe(true);
     expect(app.hasRoute({ method: 'GET', url: '/api/prs/:id/conflicts/files/:fileIndex' })).toBe(true);
+    expect(app.hasRoute({ method: 'POST', url: '/api/prs/:id/conflicts/edit' })).toBe(true);
     expect(app.hasRoute({ method: 'POST', url: '/api/prs/:id/conflicts/commit' })).toBe(true);
     expect(app.hasRoute({ method: 'DELETE', url: '/api/prs/:id/conflicts' })).toBe(true);
   });
@@ -329,6 +330,13 @@ describe('ownership and permission', () => {
       manifest(foreignPrId, 'whatever'),
       app.inject({ method: 'GET', url: `/api/prs/${foreignPrId}/conflicts/stream?session=x` }),
       app.inject({ method: 'GET', url: `/api/prs/${foreignPrId}/conflicts/files/0?session=x` }),
+      // ⚠ THE ONE ROUTE THAT TAKES TEXT IS OWNERSHIP-CHECKED LIKE THE REST, AND FIRST. A
+      // well-formed body, for the reason below.
+      app.inject({
+        method: 'POST',
+        url: `/api/prs/${foreignPrId}/conflicts/edit`,
+        payload: { sessionId: 'x', fileIndex: 0, regionId: 0, fingerprint: 'fp', text: 'mine' },
+      }),
       // A WELL-FORMED body on purpose: the schema runs before the handler, so a malformed one
       // would 400 and prove nothing about ownership.
       commit(
@@ -500,6 +508,313 @@ describe('one file’s regions', () => {
       error: 'UnknownFileIndex',
       message: 'That file isn’t part of this session. Reopen the resolver.',
     });
+  });
+});
+
+/* ═════════════════════════ editing one region by hand ═════════════════════════ */
+
+// ⚠ THE ONE ROUTE IN THE APP THAT ACCEPTS TYPED FILE CONTENT. Everything below is about the
+// three things that keep that safe: it validates BEFORE it mints, so an id that exists is an id
+// whose bytes were checked; it pins the text to the region's CONTENT, not just its address; and
+// the commit still carries nothing but the id.
+describe('editing one region by hand', () => {
+  const edit = (prId: number, body: unknown) =>
+    app.inject({ method: 'POST', url: `/api/prs/${prId}/conflicts/edit`, payload: body });
+
+  /** A body for region 0 of file 0, whose fingerprint the fixture sets to `fp-0-0`. */
+  const editBody = (session: ConflictSession, over: Record<string, unknown> = {}) => ({
+    sessionId: session.sessionId,
+    fileIndex: 0,
+    regionId: 0,
+    fingerprint: 'fp-0-0',
+    text: 'typed-by-hand',
+    ...over,
+  });
+
+  it('stores the text and hands back an opaque id, deciding nothing', async () => {
+    const session = await openReady();
+    const res = await edit(writePrId, editBody(session));
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.ok).toBe(true);
+    expect(body.edit.fileIndex).toBe(0);
+    expect(body.edit.regionId).toBe(0);
+    expect(typeof body.edit.editId).toBe('string');
+    // ⚠ THE SERVER'S OWN SPLIT, ECHOED — so the centre pane renders the lines the commit will
+    // splice rather than its own second opinion about where the text breaks.
+    expect(body.edit.lines).toEqual(['typed-by-hand']);
+    // The region is not decided by this. A commit that named no decision for it still refuses.
+    const bare = await commit(writePrId, commitBody(session, { files: [{ index: 0, decisions: [] }] }));
+    expect(bare.statusCode).toBe(400);
+    expect(bare.json().error).toBe('IncompleteDecisions');
+  });
+
+  it('splits on newlines, and an EMPTY box is zero lines', async () => {
+    const session = await openReady();
+    const many = await edit(writePrId, editBody(session, { text: 'one\ntwo\nthree' }));
+    expect(many.json().edit.lines).toEqual(['one', 'two', 'three']);
+    const none = await edit(writePrId, editBody(session, { text: '' }));
+    expect(none.json().edit.lines).toEqual([]);
+  });
+
+  it('REFUSES on the fingerprint, which is the content pin beside the id’s address', async () => {
+    // Without this, text written against one version of a region could be redeemed, after a
+    // rebuild, against a region that kept its id and changed its bytes.
+    const session = await openReady();
+    const res = await edit(writePrId, editBody(session, { fingerprint: 'fp-stale' }));
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      ok: false,
+      refusal: 'moved',
+      message: 'This change moved while you were editing it. Reopen the resolver.',
+    });
+  });
+
+  it('refuses an `unchanged` region — context lines are read-only', async () => {
+    // Region 1 of the fixture file is context. Keeping it unanswerable is what let this ship
+    // without bumping `CONFLICT_MODEL_VERSION`.
+    const session = await openReady();
+    const res = await edit(writePrId, editBody(session, { regionId: 1, fingerprint: 'fp-0-1' }));
+    expect(res.json().refusal).toBe('not_editable');
+  });
+
+  it('refuses a lone surrogate and a surviving conflict marker', async () => {
+    const session = await openReady();
+    // ⚠ `Buffer.from(text,'utf8')` substitutes U+FFFD for a lone surrogate SILENTLY, so without
+    // this the committed bytes are not the bytes anybody saw.
+    const surrogate = await edit(writePrId, editBody(session, { text: 'a\uD800b' }));
+    expect(surrogate.json().refusal).toBe('not_text');
+    // ⚠ Nothing downstream inspects the bytes: the land path's guard proves each conflicted path
+    // was OVERWRITTEN, never that what overwrote it is clean.
+    const marked = await edit(writePrId, editBody(session, { text: '<<<<<<< HEAD\nmine' }));
+    expect(marked.json().refusal).toBe('markers');
+  });
+
+  it('refuses text over the cap, and mints nothing when it does', async () => {
+    const session = await openReady();
+    const res = await edit(writePrId, editBody(session, { text: 'x'.repeat(50_000) }));
+    expect(res.json().refusal).toBe('too_long');
+    expect(res.json().edit).toBeUndefined();
+  });
+
+  it('answers 409 SessionExpired for a dead session, like every other route here', async () => {
+    const session = await openReady();
+    const res = await edit(writePrId, editBody(session, { sessionId: 'not-a-session' }));
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('SessionExpired');
+  });
+
+  it('403s a reader who cannot push, before it looks at the text', async () => {
+    const res = await edit(readPrId, {
+      sessionId: 'x',
+      fileIndex: 0,
+      regionId: 0,
+      fingerprint: 'fp',
+      text: 'mine',
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('NotPermitted');
+  });
+
+  it('⚠ AJV DOES NOT STRIP `editId` FROM THE COMMIT BODY', async () => {
+    // The per-decision item is `additionalProperties: false`, so a field the schema does not
+    // name is removed SILENTLY — the commit would then resolve an edited region with no id at
+    // all and answer `UnknownEdit` about an edit that is sitting right there in the session.
+    // The same defect already bit `autoApply` on the open schema and the contact form's
+    // honeypot one feature over, which is why this is an assertion rather than a comment.
+    const session = await openReady();
+    const minted = (await edit(writePrId, editBody(session))).json().edit.editId as string;
+    const res = await commit(
+      writePrId,
+      commitBody(session, {
+        files: [{ index: 0, decisions: [{ id: 0, decision: 'edited', editId: minted }] }],
+      }),
+    );
+    expect(res.statusCode).toBe(202);
+    const sent = landConflictResolution.mock.calls[0]?.[0] as any;
+    expect(sent.body.files[0].decisions[0]).toEqual({
+      id: 0,
+      decision: 'edited',
+      editId: minted,
+    });
+    // ...and the land path is handed the store the id addresses, not just the id.
+    expect(sent.edits.get(minted)).toEqual({
+      fileIndex: 0,
+      regionId: 0,
+      lines: ['typed-by-hand'],
+      endsWithNewline: true,
+    });
+  });
+
+  it('refuses the commit when the id is not one this session minted', async () => {
+    const session = await openReady();
+    const res = await commit(
+      writePrId,
+      commitBody(session, {
+        files: [{ index: 0, decisions: [{ id: 0, decision: 'edited', editId: 'made-up' }] }],
+      }),
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({
+      error: 'UnknownEdit',
+      message: 'One of your edits has expired. Make it again.',
+    });
+    expect(landConflictResolution).not.toHaveBeenCalled();
+  });
+
+  it('⚠ a SUPERSEDED handle stays redeemable — re-saving may not kill what Undo points at', async () => {
+    // ⚠ THIS TEST IS THE INVERSE OF THE ONE IT REPLACES, AND THE OLD REASONING IS RECORDED RATHER
+    // THAN DELETED. `storeEdit` used to DELETE the region's previous edit on the argument that "a
+    // region has one current text, so nothing references the old id". True of the region, false of
+    // the handles: `ResolverPanes`' undo stack files `previousEditId` when a decision is replaced,
+    // so a second save followed by one Ctrl+Z restored an id the server had just destroyed. The
+    // pane could not tell (its line map is append-only), so the region went on rendering as
+    // decided — and the WHOLE commit then came back `UnknownEdit`, naming no file and no region,
+    // on a board where everything looked answered. Two tabs on one PR did it across the process.
+    const session = await openReady();
+    const first = (await edit(writePrId, editBody(session))).json().edit.editId as string;
+    const second = (await edit(writePrId, editBody(session, { text: 'second go' }))).json().edit
+      .editId as string;
+    expect(second).not.toBe(first);
+    const undone = await commit(
+      writePrId,
+      commitBody(session, {
+        files: [{ index: 0, decisions: [{ id: 0, decision: 'edited', editId: first }] }],
+      }),
+    );
+    expect(undone.statusCode).toBe(202);
+    const sent = landConflictResolution.mock.calls[0]?.[0] as any;
+    expect(sent.edits.get(first)?.lines).toEqual(['typed-by-hand']);
+    // Both live at once, addressing the two texts they were minted for.
+    expect(sent.edits.get(second)?.lines).toEqual(['second go']);
+  });
+
+  it('⚠ a `too_many_edits` refusal MINTS NOTHING AND DESTROYS NOTHING', async () => {
+    // The budget used to be summed AFTER the region's previous edit was deleted, so a save that
+    // overran the cap took the reader's already-accepted edit with it on the way to refusing —
+    // leaving the store pointing at a handle the server no longer had, and the commit answering
+    // the same unlocatable `UnknownEdit`. A refusal is a no-op or the route's own contract
+    // ("a refusal mints nothing, so there is no handle to redeem") is not true.
+    const session = await openReady();
+    const first = (await edit(writePrId, editBody(session))).json().edit.editId as string;
+    const big = 'x'.repeat(4000);
+    let refused: Record<string, unknown> | null = null;
+    for (let i = 0; i < 200 && refused == null; i += 1) {
+      const body = (await edit(writePrId, editBody(session, { text: big }))).json();
+      if (body.ok === false) refused = body;
+    }
+    expect(refused).toEqual({
+      ok: false,
+      refusal: 'too_many_edits',
+      message: 'This session is holding as many edits as it can. Commit what you have.',
+    });
+    const res = await commit(
+      writePrId,
+      commitBody(session, {
+        files: [{ index: 0, decisions: [{ id: 0, decision: 'edited', editId: first }] }],
+      }),
+    );
+    expect(res.statusCode).toBe(202);
+  });
+
+  it('⚠ re-imposes the region’s CRLF, which the textarea already stripped', async () => {
+    // A textarea's API value normalises every CRLF to a bare LF before React can see a keystroke,
+    // so one character typed into a Windows-authored file used to rewrite the WHOLE hunk's line
+    // endings — every line of the diff changed, and a genuinely wrong file in any repo carrying
+    // `* text eol=crlf`. The client cannot send the CRs; it never had them.
+    buildConflictModel.mockResolvedValue(
+      ready(
+        model({
+          files: [
+            file(0, {
+              regions: [
+                {
+                  id: 0,
+                  kind: 'conflict',
+                  base: ['base()\r'],
+                  ours: ['ours()\r'],
+                  theirs: ['theirs()\r'],
+                  fingerprint: 'fp-0-0',
+                  wand: null,
+                  mergedLines: null,
+                },
+              ],
+            }),
+          ],
+        }),
+      ),
+    );
+    const session = await openReady();
+    const res = await edit(writePrId, editBody(session, { text: 'one\ntwo' }));
+    expect(res.json().edit.lines).toEqual(['one\r', 'two\r']);
+  });
+
+  it('⚠ keeps a BOM file’s FIRST region editable, and refuses U+FEFF anywhere else', async () => {
+    // `model.ts` decodes with `ignoreBOM: true` on purpose, so a BOM file's first line really does
+    // begin U+FEFF and the textarea really is seeded with it. The blanket `not_text` refusal made
+    // that region permanently unsaveable, with a sentence ("Retype the odd one out") naming a
+    // zero-width character — and the only escape, retyping the hunk, silently stripped the BOM.
+    buildConflictModel.mockResolvedValue(
+      ready(
+        model({
+          files: [
+            file(0, {
+              regions: [
+                {
+                  id: 0,
+                  kind: 'conflict',
+                  base: ['﻿base()'],
+                  ours: ['﻿ours()'],
+                  theirs: ['﻿theirs()'],
+                  fingerprint: 'fp-0-0',
+                  wand: null,
+                  mergedLines: null,
+                },
+                {
+                  id: 1,
+                  kind: 'conflict',
+                  base: ['tail()'],
+                  ours: ['our-tail()'],
+                  theirs: ['their-tail()'],
+                  fingerprint: 'fp-0-1',
+                  wand: null,
+                  mergedLines: null,
+                },
+              ],
+            }),
+          ],
+        }),
+      ),
+    );
+    const session = await openReady();
+    const kept = await edit(writePrId, editBody(session, { text: '﻿using System;' }));
+    expect(kept.json().edit.lines).toEqual(['﻿using System;']);
+    // ⚠ AND IT IS RE-ATTACHED WHEN THE READER LOST IT. They cannot have dropped it deliberately.
+    const restored = await edit(writePrId, editBody(session, { text: 'using System;' }));
+    expect(restored.json().edit.lines).toEqual(['﻿using System;']);
+    // A BOM in the middle is still junk...
+    const middle = await edit(writePrId, editBody(session, { text: 'a﻿b' }));
+    expect(middle.json().refusal).toBe('not_text');
+    // ...and so is one on a region that does not start the file.
+    const later = await edit(
+      writePrId,
+      editBody(session, { regionId: 1, fingerprint: 'fp-0-1', text: '﻿x' }),
+    );
+    expect(later.json().refusal).toBe('not_text');
+  });
+
+  it('does not let one tenant’s id be redeemed against another’s session', async () => {
+    // Belt to `getSession`'s braces: the id is minted inside a record keyed `(accountId, prId)`,
+    // so a foreign caller cannot even reach the store to look one up.
+    const session = await openReady();
+    const minted = (await edit(writePrId, editBody(session))).json().edit.editId as string;
+    const res = await commit(
+      foreignPrId,
+      commitBody(session, {
+        files: [{ index: 0, decisions: [{ id: 0, decision: 'edited', editId: minted }] }],
+      }),
+    );
+    expect(res.statusCode).toBe(404);
   });
 });
 

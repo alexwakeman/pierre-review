@@ -586,11 +586,11 @@ describe('tierFor — GitHub quota spenders', () => {
   });
 });
 
-// SIX paths under one prefix with FOUR different costs — the exact shape this file gets wrong
+// SEVEN paths under one prefix with FOUR different costs — the exact shape this file gets wrong
 // when it guesses, and the reason every line is anchored at BOTH ends. `/conflicts` is a PREFIX
-// of `/conflicts/commit`, so an unanchored match would hand the open, the commit, the file read
-// and the stream one bucket, which is right for exactly one of them — and the one it would be
-// wrong about most expensively runs `git push`.
+// of both `/conflicts/commit` and `/conflicts/edit`, so an unanchored match would hand the open,
+// the commit, the edit, the file read and the stream one bucket, which is right for exactly one
+// of them — and the one it would be wrong about most expensively runs `git push`.
 describe('tierFor — merge-conflict resolver', () => {
   it('puts the open on the sync bucket — it starts a clone, it writes nothing upstream', () => {
     expect(tiers('POST', '/api/prs/12/conflicts')).toEqual(['sync']);
@@ -604,6 +604,22 @@ describe('tierFor — merge-conflict resolver', () => {
     // fall into the 20/min sync bucket — and, far worse, an unanchored open line would have put
     // the push there instead of on the write bucket.
     expect(tiers('POST', '/api/prs/12/conflicts/commit')).not.toEqual(
+      tiers('POST', '/api/prs/12/conflicts'),
+    );
+  });
+
+  it('gives the manual edit its own line, tighter than the blanket read', () => {
+    // The one route in the app that accepts typed file content. It spends no git and no GitHub
+    // quota — it spends RETAINED MEMORY in a shared process — so the 600/min blanket is the
+    // wrong ceiling even though it looks like a cheap write.
+    expect(tiers('POST', '/api/prs/12/conflicts/edit')).toEqual(['search', 'read']);
+    // ⚠ THE NEAR MISS. Without its own anchored line it would fall through to the catch-all
+    // `mutating` branch — which is the 600/min read bucket, since `conflicts` is deliberately
+    // NOT in the `hitsGithub` alternation.
+    expect(tiers('POST', '/api/prs/12/conflicts/edit')).not.toEqual(['read']);
+    // ...and it must not be caught by the open's line either, which would bill a keystroke-paced
+    // save against the 20/min clone bucket.
+    expect(tiers('POST', '/api/prs/12/conflicts/edit')).not.toEqual(
       tiers('POST', '/api/prs/12/conflicts'),
     );
   });

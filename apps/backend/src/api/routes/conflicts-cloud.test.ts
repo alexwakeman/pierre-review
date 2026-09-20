@@ -1,19 +1,19 @@
-// THE CLOUD POSTURE: the merge-conflict resolver's six routes EXIST when `DEPLOYMENT_MODE=cloud`,
+// THE CLOUD POSTURE: the merge-conflict resolver's seven routes EXIST when `DEPLOYMENT_MODE=cloud`,
 // and every one of them is behind the cloud auth gate and the same per-tenant ownership check the
 // local build uses.
 //
-// ⚠ THIS FILE USED TO ASSERT THE OPPOSITE — that all six 404 in cloud. It was INVERTED rather than
+// ⚠ THIS FILE USED TO ASSERT THE OPPOSITE — that they all 404 in cloud. It was INVERTED rather than
 // deleted, because it is the tenancy proof for this family and the feature shipping in cloud is
 // exactly when that proof has to get stronger. What it pins now:
 //
-//   1. ALL SIX PATHS ARE REGISTERED. The gate was registration itself, so its removal is a fact
+//   1. ALL SEVEN PATHS ARE REGISTERED. The gate was registration itself, so its removal is a fact
 //      about the route table and nothing else.
-//   2. THE CLOUD AUTH GATE IS IN FRONT OF EVERY ONE. Unauthenticated, all six answer 401 — nobody
+//   2. THE CLOUD AUTH GATE IS IN FRONT OF EVERY ONE. Unauthenticated, all seven answer 401 — nobody
 //      without a session can reach a clone, a fetch or a push. `/api/health` answering 200 in the
-//      same run is the control: the gate refuses these six, not everything.
-//   3. ANOTHER TENANT'S PR IS A 404 ON ALL SIX. Not 403, not an empty session: a 404, so the family
+//      same run is the control: the gate refuses these seven, not everything.
+//   3. ANOTHER TENANT'S PR IS A 404 ON ALL SEVEN. Not 403, not an empty session: a 404, so the family
 //      is not an existence oracle.
-//   4. NO PUSH RIGHTS IS A 403 ON ALL SIX. The resolver ends in a push; a reader who cannot push
+//   4. NO PUSH RIGHTS IS A 403 ON ALL SEVEN. The resolver ends in a push; a reader who cannot push
 //      must not be able to start one, or to read a repository's source through the file route.
 //
 // Its own file because `config` is read at import time (the landing-routes.test.ts pattern) — one
@@ -22,7 +22,7 @@
 // ⚠ 3 AND 4 RUN ON A BARE FASTIFY, NOT `buildApp()`. Cloud means Postgres, and there is no
 // Postgres here; a sealed session cookie would also have to be minted to get past the gate proved
 // in 2. So the ownership LOOKUP is stubbed and what these two assert is the thing the routes
-// themselves own: that every one of the six calls it, passes the CALLER'S account id, and refuses
+// themselves own: that every one of the seven calls it, passes the CALLER'S account id, and refuses
 // exactly as the table says. That the lookup itself is account-scoped is proved by
 // `conflicts.test.ts` on a real sqlite DB and by `verify:isolation` — this file must not restate
 // it, and must not pretend to.
@@ -38,7 +38,7 @@ process.env.ENCRYPTION_KEY = '0'.repeat(64);
 process.env.APP_BASE_URL = 'https://app.example.com';
 process.env.DATABASE_URL = 'postgres://pierre:pierre@127.0.0.1:5432/pierre_never_connected';
 
-// The one DB call the six routes make. Spread the real module: every other route file in the app
+// The one DB call the seven routes make. Spread the real module: every other route file in the app
 // imports from here, and `WRITE_PERMISSIONS` — which `requireWritablePr` reads — must stay real or
 // the 403 assertion becomes a test of the stub.
 const getPrWriteContext =
@@ -71,7 +71,7 @@ const COMMIT_BODY = {
   files: [],
 };
 
-/** The six, as `app.inject` arguments. One list, used by every sweep below. */
+/** The seven, as `app.inject` arguments. One list, used by every sweep below. */
 function requests(prId: number): Array<{ label: string; args: Record<string, unknown> }> {
   const session = 'session-under-test';
   const q = `?session=${session}`;
@@ -80,6 +80,18 @@ function requests(prId: number): Array<{ label: string; args: Record<string, unk
     { label: 'manifest', args: { method: 'GET', url: `/api/prs/${prId}/conflicts${q}` } },
     { label: 'stream', args: { method: 'GET', url: `/api/prs/${prId}/conflicts/stream${q}` } },
     { label: 'file', args: { method: 'GET', url: `/api/prs/${prId}/conflicts/files/0${q}` } },
+    {
+      // ⚠ THE ONE ROUTE THAT TAKES TYPED FILE CONTENT IS IN EVERY SWEEP BELOW, deliberately. It
+      // is the newest way into somebody else's source code, and the ownership and permission
+      // checks in front of it are the same two lines as on the other six — which is exactly the
+      // kind of sameness that stops being true when nobody asserts it.
+      label: 'edit',
+      args: {
+        method: 'POST',
+        url: `/api/prs/${prId}/conflicts/edit`,
+        payload: { sessionId: session, fileIndex: 0, regionId: 0, fingerprint: 'fp', text: 'x' },
+      },
+    },
     {
       label: 'commit',
       args: { method: 'POST', url: `/api/prs/${prId}/conflicts/commit`, payload: COMMIT_BODY },
@@ -93,6 +105,7 @@ const PATHS: Array<[string, string]> = [
   ['GET', '/api/prs/:id/conflicts'],
   ['GET', '/api/prs/:id/conflicts/stream'],
   ['GET', '/api/prs/:id/conflicts/files/:fileIndex'],
+  ['POST', '/api/prs/:id/conflicts/edit'],
   ['POST', '/api/prs/:id/conflicts/commit'],
   ['DELETE', '/api/prs/:id/conflicts'],
 ];
@@ -138,7 +151,7 @@ describe('the resolver in cloud', () => {
     expect(config.cloneCacheMaxBytes).toBe(1024 * 1024 * 1024);
   });
 
-  it('registers all six paths', () => {
+  it('registers all seven paths', () => {
     for (const [method, url] of PATHS) {
       expect({ method, url, registered: app.hasRoute({ method, url }) }).toEqual({
         method,
@@ -158,12 +171,12 @@ describe('the resolver in cloud', () => {
       const res = await app.inject(args);
       expect({ label, status: res.statusCode }).toEqual({ label, status: 401 });
     }
-    // The control: the gate refuses these six, not every route in the app. Without this the
+    // The control: the gate refuses these seven, not every route in the app. Without this the
     // assertion above would pass just as well on a build that 401s everything.
     expect((await app.inject({ method: 'GET', url: '/api/health' })).statusCode).toBe(200);
   });
 
-  it('answers 404 on all six for a pull request that is not the caller’s', async () => {
+  it('answers 404 on all seven for a pull request that is not the caller’s', async () => {
     // Exactly what the real lookup does: scoped by account, so another tenant's id resolves to
     // nothing. NOT 403 — a 403 would confirm the pull request exists.
     getPrWriteContext.mockImplementation(async (prId, accountId) =>
@@ -186,10 +199,10 @@ describe('the resolver in cloud', () => {
     for (const call of getPrWriteContext.mock.calls) {
       expect(call[1]).toBe(OTHER_ACCOUNT);
     }
-    expect(getPrWriteContext).toHaveBeenCalledTimes(6);
+    expect(getPrWriteContext).toHaveBeenCalledTimes(7);
   });
 
-  it('answers 403 on all six without push rights', async () => {
+  it('answers 403 on all seven without push rights', async () => {
     getPrWriteContext.mockImplementation(async (prId) => ({
       prId,
       owner: 'acme',

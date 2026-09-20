@@ -2325,9 +2325,12 @@ is still the captured git diff.
   other's live tree; `applyClaudeReviewAuth` also mutates `process.env` and is only safe because
   AI-Fix concurrency is 1. Route through the existing `enqueue`/`claimed`.
 - ⚠ **Every comment body and hunk in the prompt is attacker-authored** — this seed WIDENS the
-  untrusted channel from title/description/diff to every comment anyone dragged in, and the fixer
-  has `Bash`. The untrusted-input paragraph is the whole mitigation: keep it verbatim, fence each
-  comment individually, and never interpolate comment text into a tool name, path or git argument.
+  untrusted channel from title/description/diff to every comment anyone dragged in. It used to read
+  "…and the fixer has `Bash`"; **it no longer does** (see *The fix agent has no shell* below), which
+  is the largest single reduction this seed's exposure has had — but the fixer still has WRITE
+  access to a worktree the host then pushes, so nothing else here relaxes. The untrusted-input
+  paragraph is the whole mitigation: keep it verbatim, fence each comment individually, and never
+  interpolate comment text into a tool name or a path.
 - ⚠ **Bot-ness on a stored target is core's global `users.isBot`, not the UI's union rule** (isBot ∪
   the workspace's automated reviewers, manual "human" winning both directions). That set is
   module-private in core's query layer and is not on `ProHostQueries`, so the plugin does not fork
@@ -2349,6 +2352,63 @@ is still the captured git diff.
 - ⚠ **A pushback never posts itself.** It renders as text with an editable prefilled composer and an
   explicit Send, posting through core's existing thread-reply / PR-comment routes. A double-post is
   not undoable, so a sent pushback is replaced by a sent state rather than re-offered.
+
+### The fix agent has no shell
+
+`Bash` is gone from the fixer's tool surface. `FIX_TOOLS` (`apps/backend/src/coding/agent.ts`) is
+Read/Glob/Grep + Write/Edit/MultiEdit + `submit_fix`, and `DISALLOWED_TOOLS` is
+`['Bash','NotebookEdit']` — the same pair the conflict resolver has always had, and the same call
+Claude Review made (the comment above `WORKTREE_TOOLS` in `apps/backend/src/review/agent.ts` is the
+long version of the argument, and this is the identical input shape). The fixer reads and edits. It
+installs nothing, builds nothing and runs no tests.
+
+**Why.** Two reasons, either sufficient.
+
+- **Safety.** The run is `permissionMode:'bypassPermissions'` with `settingSources:[]`, so nothing
+  else was constraining the shell — and its entire input (title, description, diff, and on the
+  `'comments'` seed nothing BUT review comments) is written by whoever opened the PR. The blocklist
+  that stood in for a boundary was `Bash(rm *)`, `Bash(sudo *)`, `Bash(git push *)`,
+  `Bash(git commit *)`, `Bash(git config *)`: five literal prefixes, silent on `curl -d @~/.ssh/…`
+  and every other spelling. *A blocklist cannot enumerate the badness of a shell.*
+- **Speed and cost.** The builds and tests it ran were read by NOTHING: `runCodingAgent`'s success
+  criterion is a captured diff under `aiFixPatchMaxBytes`, `launchFix` marks the row succeeded the
+  moment the seam returns un-aborted, and no column on the fix row records a verification. The bill
+  was real — `aiFixMaxTurns` (40) and `aiFixBudgetUsd` ($3) are the only stoppers, there is **no
+  wall-clock timeout**, a suite's output returns as a `tool_result` billed as input on the next
+  turn, and `MAX_CONCURRENT = 1` (`coding/manager.ts`) is ONE global slot, so one account's test run
+  queued every other account's fix, rebase and push behind it. CI runs the tests on push.
+
+⚠ **THOSE `Bash(git …)` ENTRIES WERE THE MECHANICAL HALF OF "THE HOST OWNS THE COMMIT".** The rule
+is unchanged and now strictly harder — a denied shell cannot run git at all — but the grep-able
+evidence is gone, so it is written out in the comment above `FIX_TOOLS` and still SAID in the
+prompt (`WORKTREE_RULES`' "Do NOT commit, push, create branches", pinned by a test). The agent
+leaves edits in the working tree, `captureWorktreeDiff` makes a patch, `coding/git-ops.ts` commits
+and pushes it after the reader picks a target.
+
+⚠ **THE PROMPT AND THE TOOL LIST CHANGE IN THE SAME COMMIT.** Removing the tool alone would leave
+the prompt offering a shell, and every refused call costs one of 40 turns and a slice of the $3.
+Two texts: `WORKTREE_RULES` (`packages/pro/src/ai-fix/prompts.ts`), ONE constant interpolated into
+both `buildFixSystemPrompt` and `buildFixCommentsSystemPrompt` so they cannot drift; and the
+**CI-analysis capability sentence**, which also said "run builds and tests locally, then commit and
+push" — the commit/push half was already false — and whose answer is stored RAW and rendered to the
+reader through `<Markdown>`, as well as setting the Fixability badge. `packages/pro/test/ai-fix-no-shell.test.ts`
+pins all of it; `apps/backend/src/coding/tool-surface.test.ts` pins the tool lists and
+mutation-tests its own scan.
+
+⚠ **`verifying` IS A FALSE FRIEND — do not delete it while "removing verification".** It is emitted
+only on the rebase/merge path (`coding/merge.ts`) and its body is `git diff` + `git format-patch`
++ `git diff --name-only`. It never ran tests. Its SPA label is `AiFixTab.tsx`'s
+"Verifying the result", which is about the rebase producing a clean patch, not about a suite.
+
+**What the reader is told.** One templated line beside the diff, above the Push controls:
+*"Not built or tested — CI will run on push."* ⚠ **Not in the model's summary** — a product fact is
+not model prose (the Bot Tuning Advisor precedent). Nothing had to be retracted: the fixer never
+made a verification claim on screen.
+
+**What this costs, honestly.** A fix that wanted a codegen step, a formatter, or `git log` for
+context must now write the edit by hand or decline. Accepted, for the reason Claude Review accepted
+it. The way back is a container/VM boundary, or `canUseTool` under a non-bypass permission mode —
+**not** re-adding `Bash` with a longer blocklist.
 
 ### The evidence window anchors on the ROOT comment (`t3|` → `t4|`)
 

@@ -577,8 +577,15 @@ export interface PostReviewArgs {
   // kind of contract narrowing that would want an apiVersion bump for no gain — a plugin build
   // that still sends them type-checks and is simply ignored. Do NOT re-gate the marker on
   // `pierreMarker`.
+  //
+  // ⚠ THE `pierre` IN BOTH FIELD NAMES IS FROZEN, and so is the marker they refer to. The app is
+  // called Limn now; these are wire/contract surface and the marker is already in GitHub review
+  // bodies we cannot edit, so neither spelling follows the rename. The footer they mention is
+  // GONE — it never read "Limn"; it read "🤖 Reviewed with Pierre + Claude", appeared in no
+  // detector, and was deleted (review/post-seam.ts:90). Recorded here as history, not as a thing
+  // that ships.
   pierreMarker?: boolean; // append a hidden `<!-- pierre:claude-review v=1 -->` marker
-  pierreFooter?: boolean; // append a visible "🤖 Reviewed with Pierre + Claude" footer
+  pierreFooter?: boolean; // RETIRED: once appended a visible footer to the posted review body
 }
 
 export type PostReviewOutcome =
@@ -1163,9 +1170,13 @@ export interface ProContext {
   // that demands a bump, and a bump is four literals across TWO REPOS whose half-application
   // degrades the ENTIRE plugin to OSS mode with nothing thrown.
   //
-  // ⚠ IT IS ALSO `undefined` IN CLOUD, and that is the same fact one level up: the six resolver
-  // routes are registered only when `!config.isCloud`, so a hunk seam there would address
-  // sessions that cannot exist.
+  // ⚠ IT IS ALSO `undefined` IN CLOUD (`bind.ts`), AND THE REASON THAT USED TO BE GIVEN HERE IS
+  // NO LONGER TRUE. This said the seam was withheld because "the resolver routes are registered
+  // only when `!config.isCloud`, so a hunk seam there would address sessions that cannot exist".
+  // The resolver is registered UNCONDITIONALLY now and its sessions exist in both modes
+  // (docs/MERGE-CI-TRUNK.md § Resolving conflicts in the app), so what remains is a standing
+  // decision not to offer the PAID per-hunk suggestion on the cloud resolver — not a structural
+  // impossibility. Whoever revisits it changes `bind.ts`; nothing here has to move.
   conflicts?: ConflictSeam;
 }
 

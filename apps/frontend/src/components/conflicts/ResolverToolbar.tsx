@@ -1,21 +1,35 @@
 import type { ConflictFileEntry, ConflictRegion } from '@pierre-review/shared';
+import type { OutstandingFile } from '../../lib/conflictCommit.js';
 import type { FileTally } from '../../lib/mergeResolver.js';
 import { ChevronIcon, UndoIcon, WandIcon } from '../Icons.js';
 import { BasePopover } from './BasePopover.js';
 import { FileMenu } from './FileMenu.js';
+import { OutstandingPopover } from './OutstandingPopover.js';
 import {
-  CONTINUE_TO_COMMIT,
+  COMMIT_AND_PUSH,
+  COMMIT_ENTRY_NAME,
+  COMMIT_ENTRY_TITLE,
+  FILE_NEXT,
+  FILE_PREV,
+  NEXT_OUTSTANDING,
+  NEXT_OUTSTANDING_LABEL,
   UNDO_LAST,
   WAND_BUTTON,
   WAND_BUTTON_TITLE,
-  decisionsDecided,
 } from './copy.js';
 
 // ── THE TOOLBAR ──────────────────────────────────────────────────────────────────────────────
 //
 // The file the reader is in, the two file steps, the wand, the undo stack, the merge-base popup,
-// and the countdown. Everything here has a single-key binding on the panes container as well —
-// the toolbar is where the verbs are NAMED, not the only place they are reachable.
+// the countdown and the way out. Everything here has a single-key binding on the panes container as
+// well — the toolbar is where the verbs are NAMED, not the only place they are reachable.
+//
+// ⚠ THREE CONTROLS MOVE BETWEEN FILES AND THEY ARE NOT THE SAME CONTROL. The chevrons page the
+// MANIFEST, in order, conflict-blind, and they say so ("Next file in the list"). "Next" goes to the
+// next file that still needs decisions (`nextOutstandingFile`) and disappears once none does. The
+// keys `n`/`p` walk REGIONS inside the file the reader is in, and `[`/`]` are the chevrons. Two
+// controls announcing as "Next …" is the duplicate-verb problem the gutter arrows cost us, so the
+// chevrons were re-worded rather than the new button being given a quieter name.
 
 export function ResolverToolbar({
   files,
@@ -37,6 +51,13 @@ export function ResolverToolbar({
   onBaseOpen,
   decided,
   total,
+  outstanding,
+  outstandingOpen,
+  onOutstandingOpen,
+  onJumpToFile,
+  nextOutstanding,
+  onNextOutstanding,
+  blockedReason,
   onLand,
 }: {
   files: ConflictFileEntry[];
@@ -60,8 +81,24 @@ export function ResolverToolbar({
    *  population the commit gate holds out for. Never re-folded here. */
   decided: number;
   total: number;
+  /** Every supported file still holding an unanswered region, off the same `CommitPlan`. The
+   *  counter's popover names them; the commit gate holds out for them. */
+  outstanding: readonly OutstandingFile[];
+  outstandingOpen: boolean;
+  onOutstandingOpen: (open: boolean) => void;
+  /** Go to that file's first unanswered region. */
+  onJumpToFile: (index: number) => void;
+  /** `nextOutstandingFile(outstanding, activeIndex)`. Null ⇒ no "Next" button at all: either
+   *  everything is decided or the only outstanding file is the one the reader is already in. */
+  nextOutstanding: number | null;
+  onNextOutstanding: () => void;
+  /** `commitBlockedReason(plan, headMoved)` — the ONE sentence for why the commit cannot go, and
+   *  the gate itself: non-null disables the button below. Null ⇒ nothing is in the way. */
+  blockedReason: string | null;
   /** The landing step. Absent ⇒ no button — the toolbar never assumes there is somewhere to go.
-   *  `Enter` on the panes container is the same door. */
+   *  `Enter` on the panes container is the same door, and it is gated on the SAME
+   *  `blockedReason` — two doors with different locks is how one of them comes to be the way
+   *  round the other. */
   onLand?: () => void;
 }): JSX.Element {
   return (
@@ -71,8 +108,8 @@ export function ResolverToolbar({
           type="button"
           onClick={() => onStepFile(-1)}
           disabled={!canStepBack}
-          title="Previous file"
-          aria-label="Previous file"
+          title={FILE_PREV}
+          aria-label={FILE_PREV}
           className="rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800"
         >
           <ChevronIcon dir="left" size={13} />
@@ -81,8 +118,8 @@ export function ResolverToolbar({
           type="button"
           onClick={() => onStepFile(1)}
           disabled={!canStepForward}
-          title="Next file"
-          aria-label="Next file"
+          title={FILE_NEXT}
+          aria-label={FILE_NEXT}
           className="rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800"
         >
           <ChevronIcon dir="right" size={13} />
@@ -128,20 +165,63 @@ export function ResolverToolbar({
       />
 
       <div className="ml-auto flex items-center gap-2">
-        <span className="text-[11px] text-gray-600 dark:text-gray-300">
-          {decisionsDecided(decided, total)}
-        </span>
-        {onLand != null && (
+        {/* ⚠ ABSENT, NEVER DISABLED. `nextOutstanding` is null exactly when there is nowhere to
+            jump — nothing outstanding, or nothing outstanding but this file — and a "Next" that
+            lands the reader where they already are reads as a broken control. */}
+        {nextOutstanding != null && (
           <button
             type="button"
-            onClick={onLand}
-            title="Review what gets committed"
-            className="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-900 hover:border-gray-400 dark:border-gray-600 dark:text-gray-100 dark:hover:border-gray-500"
+            onClick={onNextOutstanding}
+            title={NEXT_OUTSTANDING_LABEL}
+            aria-label={NEXT_OUTSTANDING_LABEL}
+            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
           >
-            {CONTINUE_TO_COMMIT}
+            {NEXT_OUTSTANDING}
           </button>
+        )}
+
+        <OutstandingPopover
+          decided={decided}
+          total={total}
+          outstanding={outstanding}
+          blockedReason={blockedReason}
+          open={outstandingOpen}
+          onOpenChange={onOutstandingOpen}
+          onJumpToFile={onJumpToFile}
+        />
+
+        {onLand != null && (
+          <>
+            {/* ⚠ THE REASON IS NOT VISIBLE HERE AND IT IS NOT NOWHERE EITHER. The toolbar is one
+                line; the sentence is on the button's tooltip, in the counter's popover beside it
+                (which also names the files, with a click that goes to each) and in the button's
+                accessible description, which is what a screen reader reads out when it announces
+                the button as dimmed. The landing step keeps its visible paragraph. */}
+            {blockedReason != null && (
+              <span id={BLOCKED_REASON_ID} className="sr-only">
+                {blockedReason}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={onLand}
+              disabled={blockedReason != null}
+              title={blockedReason ?? COMMIT_ENTRY_TITLE}
+              aria-label={COMMIT_ENTRY_NAME}
+              aria-describedby={blockedReason != null ? BLOCKED_REASON_ID : undefined}
+              className="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-900 disabled:opacity-40 hover:border-gray-400 dark:border-gray-600 dark:text-gray-100 dark:hover:border-gray-500"
+            >
+              {COMMIT_AND_PUSH}
+            </button>
+          </>
         )}
       </div>
     </div>
   );
 }
+
+/** The toolbar button's `aria-describedby` target. One toolbar, one button, so one id — and it is
+ *  deliberately NOT the landing step's (`conflict-commit-blocked-reason`): the two views never
+ *  mount together, but two elements that could ever share an id is not a fact worth betting a
+ *  screen reader's description on. */
+const BLOCKED_REASON_ID = 'conflict-toolbar-blocked-reason';

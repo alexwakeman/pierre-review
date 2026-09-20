@@ -66,6 +66,10 @@ function labelToolUse(name: string, input: Record<string, unknown>): string {
       const p = str(input.pattern);
       return p ? `Grep "${clip(p, ARG_CAP)}"` : 'Grep …';
     }
+    // Unreachable as things stand — NEITHER caller allows Bash any more (coding/agent.ts
+    // denies it outright for the fixer and the resolver alike), so no such block arrives and
+    // the panel simply shows fewer lines. Kept because this function's contract is "label
+    // whatever the SDK hands me", and the default branch below would render this one worse.
     case 'Bash': {
       const c = str(input.command);
       return c ? `Bash ${clip(c, ARG_CAP)}` : 'Bash …';

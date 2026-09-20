@@ -1655,7 +1655,7 @@ export function FeedView({
             <span className="tabular-nums opacity-70">{ciFailuresCount}</span>
           )}
         </button>
-        {/* Bot lens — Pierre as the calm layer above your review bot. Cycles all → hide → only.
+        {/* Bot lens — Limn as the calm layer above your review bot. Cycles all → hide → only.
             MUST also render whenever the lens is non-'all': under the server-side 'hide' the
             counts facet is computed over the already-excluded stream, so botCount reads 0
             exactly when hiding is working — and this pill is the only way back to 'all'.

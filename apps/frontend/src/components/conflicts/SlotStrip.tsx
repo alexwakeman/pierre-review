@@ -5,12 +5,13 @@ import {
   AcceptLeftIcon,
   AcceptRightIcon,
   IgnoreHunkIcon,
+  PencilIcon,
   SparkleIcon,
   SwapOrderIcon,
   UndoIcon,
   WandIcon,
 } from '../Icons.js';
-import { INK_CLASS, actionLabels, regionGroupLabel, stateWord } from './copy.js';
+import { EDIT_REGION, INK_CLASS, actionLabels, regionGroupLabel, stateWord } from './copy.js';
 
 // ── THE CONTROL SET FOR ONE REGION ───────────────────────────────────────────────────────────
 //
@@ -24,9 +25,10 @@ import { INK_CLASS, actionLabels, regionGroupLabel, stateWord } from './copy.js'
 // not change; the control that has to obey it did.
 //
 // What is left here is every verb that is NOT about one side: both orders, the order swap, the
-// wand, ignore, Ask Claude and undo — plus the state word, which is the encoding that survives a
-// reader who cannot separate the hues, and the only thing that still tells `Ignored` from
-// `Needs a decision` now that neither paints a side.
+// wand, ignore, Ask Claude, Edit and undo — plus the state word, which is the encoding that
+// survives a reader who cannot separate the hues, and the only thing that still tells `Ignored`
+// from `Needs a decision` now that neither paints a side, or `Your text` from a taken side now
+// that both wear the applied green in the centre.
 //
 // ⚠ EXCEPT WHEN THE PANES ARE STACKED. Below `NARROW_PX` there are no gutter tracks to put an
 // arrow in, so `sideTakes` puts the two side verbs back here. One control per verb in EACH
@@ -65,6 +67,8 @@ export function SlotStrip({
   sideTakes,
   onAskClaude,
   askInFlight,
+  onEdit,
+  editOpen,
   onActivate,
   onDecide,
 }: {
@@ -86,6 +90,12 @@ export function SlotStrip({
   onAskClaude?: (() => void) | undefined;
   /** An Ask is in flight for this region. */
   askInFlight?: boolean;
+  /** Open the text box for this region's result. Offered on EVERY decidable region — it is not a
+   *  side, so there is no kind that withholds it — and absent only on `unchanged`, which is
+   *  context and which this strip never renders for anyway. CORE and free: no tier check. */
+  onEdit?: (() => void) | undefined;
+  /** The text box is open for this region, so the button reads as the toggle it is. */
+  editOpen?: boolean;
   onActivate: () => void;
   /** `null` clears the decision back to undecided — the region-level undo. */
   onDecide: (decision: ConflictDecision | null) => void;
@@ -186,6 +196,30 @@ export function SlotStrip({
         >
           <SparkleIcon size={13} />
           <span>{askInFlight === true ? 'Asking…' : 'Ask Claude'}</span>
+        </button>
+      )}
+      {/* ⚠ NOT A DECISION, LIKE "Ask Claude" BESIDE IT — it opens a box, and the region stays
+          exactly as it was until the reader presses Save. So it does NOT go through `onDecide`
+          (which would also refuse it: `'edited'` is deliberately absent from `region.allowed`,
+          being a session fact rather than a model one) and it carries `aria-expanded` rather
+          than `aria-pressed`, because what it toggles is a panel, not a state of the region.
+          It sits LAST among the verbs and before Undo: the side takes and the wand are what
+          most regions need, and this is the way out when none of them fits. */}
+      {onEdit != null && (
+        <button
+          type="button"
+          tabIndex={tab}
+          aria-expanded={editOpen === true}
+          title={labels.edit}
+          aria-label={labels.edit}
+          onClick={() => {
+            onActivate();
+            onEdit();
+          }}
+          className={editOpen === true ? BTN_ON : BTN}
+        >
+          <PencilIcon size={13} />
+          <span>{EDIT_REGION}</span>
         </button>
       )}
       {slot.kind !== 'unapplied' &&

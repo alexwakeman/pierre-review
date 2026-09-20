@@ -1,5 +1,5 @@
 import { useFilters } from '../../store/filters.js';
-import { DiffHunk } from '../DiffHunk.js';
+import { DiffHunk, hunkLineMarker, useHunkHighlight } from '../DiffHunk.js';
 import { ChevronIcon } from '../Icons.js';
 
 type LineKind = 'add' | 'del' | 'ctx';
@@ -10,10 +10,18 @@ function classify(line: string): LineKind {
   return 'ctx';
 }
 
+// ⚠ THE BORDER CARRIES ADD/DEL; THE TEXT COLOUR ONLY DOES SO WHEN THE CODE IS NOT HIGHLIGHTED.
+// On a highlighted line the green/red ink and the syntax colours fight over the same characters,
+// and the 2px border already says which side the anchor is on. Split so one can be dropped.
 const BORDER: Record<LineKind, string> = {
-  add: 'border-green-500 text-green-600 dark:text-green-300',
-  del: 'border-red-500 text-red-600 dark:text-red-300',
-  ctx: 'border-gray-400 text-gray-600 dark:text-gray-300',
+  add: 'border-green-500',
+  del: 'border-red-500',
+  ctx: 'border-gray-400',
+};
+const INK: Record<LineKind, string> = {
+  add: 'text-green-600 dark:text-green-300',
+  del: 'text-red-600 dark:text-red-300',
+  ctx: 'text-gray-600 dark:text-gray-300',
 };
 
 // The single line a thread is anchored to, with the full surrounding hunk
@@ -21,23 +29,31 @@ const BORDER: Record<LineKind, string> = {
 // you're replying to in an email thread.
 export function CodeAnchor({
   diffHunk,
+  path,
   threadId,
 }: {
   diffHunk: string | null;
+  /** The thread's file — the only source of a language. Absent ⇒ the anchor renders plain. */
+  path?: string | null;
   threadId: number;
 }): JSX.Element | null {
   const expanded = useFilters((s) => s.expandedDiffHunks.includes(threadId));
   const toggle = useFilters((s) => s.toggleDiffHunk);
+  // ⚠ THE WHOLE HUNK IS HIGHLIGHTED AND THE LAST ENTRY TAKEN, never the anchor line on its own.
+  // A lexer started at one line has no state: a line inside a block comment or a template literal
+  // comes back coloured as ordinary code. Hooks run before the early returns below.
+  const html = useHunkHighlight(diffHunk, path);
   if (!diffHunk) return null;
 
   const lines = diffHunk.replace(/\n$/, '').split('\n');
   const anchorLine = lines.at(-1) ?? '';
   const kind = classify(anchorLine);
+  const anchorHtml = html?.at(-1) ?? null;
 
   if (expanded) {
     return (
       <div className="space-y-1">
-        <DiffHunk hunk={diffHunk} onCollapse={() => toggle(threadId)} />
+        <DiffHunk hunk={diffHunk} path={path} onCollapse={() => toggle(threadId)} />
         <button
           type="button"
           onClick={() => toggle(threadId)}
@@ -51,13 +67,26 @@ export function CodeAnchor({
     );
   }
 
+  // The anchor line itself: marker printed plain, body coloured. ⚠ ONLY highlight.js OUTPUT
+  // REACHES `dangerouslySetInnerHTML`; the else-branch is React's normal text rendering.
+  const body =
+    anchorHtml != null ? (
+      <>
+        {hunkLineMarker(anchorLine)}
+        <span className="code-hl" dangerouslySetInnerHTML={{ __html: anchorHtml }} />
+      </>
+    ) : (
+      anchorLine || ' '
+    );
+  const ink = anchorHtml != null && kind !== 'ctx' ? '' : INK[kind];
+
   // Single-line hunk: the anchor IS the whole context, nothing to expand.
   if (lines.length <= 1) {
     return (
       <pre
-        className={`overflow-x-auto border-l-2 bg-gray-50 py-0.5 pl-2 font-mono text-[12px] leading-snug dark:bg-gray-900/60 ${BORDER[kind]}`}
+        className={`overflow-x-auto border-l-2 bg-gray-50 py-0.5 pl-2 font-mono text-[12px] leading-snug dark:bg-gray-900/60 ${BORDER[kind]} ${ink}`}
       >
-        {anchorLine || ' '}
+        {body}
       </pre>
     );
   }
@@ -72,9 +101,9 @@ export function CodeAnchor({
       onClick={() => toggle(threadId)}
       aria-expanded={false}
       title="Show the full code context"
-      className={`flex w-full items-center gap-2 overflow-hidden rounded-r border-l-2 bg-gray-50 py-0.5 pl-2 pr-2 text-left font-mono text-[12px] leading-snug hover:bg-gray-100 dark:bg-gray-900/60 dark:hover:bg-gray-800/60 ${BORDER[kind]}`}
+      className={`flex w-full items-center gap-2 overflow-hidden rounded-r border-l-2 bg-gray-50 py-0.5 pl-2 pr-2 text-left font-mono text-[12px] leading-snug hover:bg-gray-100 dark:bg-gray-900/60 dark:hover:bg-gray-800/60 ${BORDER[kind]} ${ink}`}
     >
-      <span className="min-w-0 flex-1 truncate">{anchorLine || ' '}</span>
+      <span className="min-w-0 flex-1 truncate">{body}</span>
       <span className="inline-flex shrink-0 items-center gap-1 font-sans text-[10px] text-gray-400">
         <ChevronIcon dir="down" size={10} />
         {lines.length} lines

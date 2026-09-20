@@ -3,9 +3,13 @@ import type {
   ConflictCommitBody,
   ConflictLandErrorCode,
   ConflictOpenBody,
+  ConflictRegionEditBody,
+  ConflictRegionEditRefusal,
+  ConflictRegionEditResponse,
   ConflictSessionEvent,
 } from '@pierre-review/shared';
 import { assertPushTarget } from '../../coding/git.js';
+import { config } from '../../config.js';
 import { gitSupportsMergeTree } from '../../conflict/git.js';
 import { conflictModelHash } from '../../conflict/hash.js';
 import { landConflictResolution, type ConflictLandError } from '../../conflict/land.js';
@@ -22,14 +26,16 @@ import {
   settleCommitFailed,
   settleFailed,
   settleReady,
+  storeEdit,
   subscribe,
   type ConflictSessionRecord,
 } from '../../conflict/session.js';
+import { editShapeFor, validateConflictEdit } from '../../conflict/suggestion.js';
 import { getPrWriteContext, WRITE_PERMISSIONS } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 /**
- * THE MERGE-CONFLICT RESOLVER'S SIX ROUTES (CORE / free, BOTH MODES).
+ * THE MERGE-CONFLICT RESOLVER'S SEVEN ROUTES (CORE / free, BOTH MODES).
  *
  * ⚠ REGISTERED UNCONDITIONALLY. These were local-only; they are not any more. There is still no
  * `CONFLICT_RESOLVER_ENABLED` and there must not be one, because a per-handler env check LOOKS
@@ -46,12 +52,17 @@ import { accountIdOf } from '../plugins/auth.js';
  *   GET    /api/prs/:id/conflicts?session=      the manifest (no regions)
  *   GET    /api/prs/:id/conflicts/stream        the ONE SSE channel — prepare AND commit
  *   GET    /api/prs/:id/conflicts/files/:index  one file's regions
+ *   POST   /api/prs/:id/conflicts/edit          one region's text, typed → an opaque `editId`
  *   POST   /api/prs/:id/conflicts/commit        the push → 202, phases on the stream
  *   DELETE /api/prs/:id/conflicts?session=      drop the server session
  *
- * ⚠ NOTHING ON THIS WIRE ACCEPTS FILE CONTENT. Every request field is an index, an id or an
- * enum member; an accepted model suggestion travels as an opaque `suggestionId` addressing text
- * the SERVER holds. That is what makes "no free typing" a property of the protocol.
+ * ⚠ EXACTLY ONE OF THESE ACCEPTS FILE CONTENT, AND IT IS NOT THE COMMIT. `…/conflicts/edit`
+ * takes the lines a reader typed for ONE region, pinned by `fingerprint`, and VALIDATES THEM
+ * BEFORE AN ID EXISTS — text-ness, no surviving conflict marker, a size cap. Every field of
+ * every other request, the commit included, is still an index, an id or an enum member: an
+ * accepted model suggestion travels as an opaque `suggestionId` and a hand-edited region as an
+ * opaque `editId`, both addressing text the SERVER holds. The property that mattered is
+ * unchanged — the server commits only bytes it folded, from a request that names no content.
  *
  * WHY OPEN AND COMMIT ARE ASYNCHRONOUS. Fastify's `requestTimeout` is 60s and a git command may
  * take 120; a cold `ensureClone` on a large repository blows straight past both. So each of the
@@ -106,6 +117,32 @@ const fileSchema = {
   querystring: sessionQuerySchema.querystring,
 };
 
+/**
+ * The ONE body in this family that carries typed text.
+ *
+ * ⚠ `text`'s `maxLength` HERE IS A STRUCTURAL BOUND, NOT THE PRODUCT CAP. Its job is to stop a
+ * megabyte-scale body reaching the validator's scans at all; the cap the reader is actually held
+ * to is `config.conflictSuggestMaxChars`, checked in `validateConflictEdit` so the refusal is
+ * `too_long` with our own sentence rather than an ajv type error. Two numbers, two jobs — do not
+ * collapse them into one, and do not put the product cap here where a config change could not
+ * move it.
+ */
+const editSchema = {
+  ...idParamSchema,
+  body: {
+    type: 'object',
+    required: ['sessionId', 'fileIndex', 'regionId', 'fingerprint', 'text'],
+    additionalProperties: false,
+    properties: {
+      sessionId: { type: 'string', minLength: 1, maxLength: 100 },
+      fileIndex: { type: 'integer', minimum: 0 },
+      regionId: { type: 'integer', minimum: 0 },
+      fingerprint: { type: 'string', minLength: 1, maxLength: 128 },
+      text: { type: 'string', maxLength: 1_000_000 },
+    },
+  },
+};
+
 const commitSchema = {
   ...idParamSchema,
   body: {
@@ -146,6 +183,12 @@ const commitSchema = {
                 additionalProperties: false,
                 properties: {
                   id: { type: 'integer', minimum: 0 },
+                  // ⚠ THE ENUM AND THE TWO HANDLES ARE ALL DECLARED HERE OR THEY DO NOT ARRIVE.
+                  // This object is `additionalProperties: false`, so ajv STRIPS a field it does
+                  // not name — silently, with no error anywhere — and a commit would then
+                  // resolve a hand-edited region with no id at all. A test pins `editId`
+                  // surviving for exactly that reason; the same defect already bit `autoApply`
+                  // on the open schema and the contact form's honeypot one feature over.
                   decision: {
                     type: 'string',
                     enum: [
@@ -156,9 +199,11 @@ const commitSchema = {
                       'both_theirs_first',
                       'disjoint_merge',
                       'suggestion',
+                      'edited',
                     ],
                   },
                   suggestionId: { type: 'string', minLength: 1, maxLength: 100 },
+                  editId: { type: 'string', minLength: 1, maxLength: 100 },
                 },
               },
             },
@@ -187,9 +232,35 @@ const notFound = (reply: FastifyReply, id: number): ErrorBody =>
 const SESSION_EXPIRED = 'This session is no longer open. Reopen it and take your decisions again.';
 
 /**
+ * The edit route's refusals, one sentence each.
+ *
+ * ⚠ EVERY ONE NAMES WHAT IS WRONG WITH THE TEXT AND STOPS. None of them explains what a merge
+ * conflict is, none apologises, and none offers a workaround the reader can already see — the
+ * textarea is still open with their words in it, and Cancel is right there.
+ *
+ * ⚠ AND NONE ECHOES THE INPUT. The same rule the suggestion validator's caller follows: the one
+ * screen whose job is to show text about to be committed is the last place to render a string
+ * we have just said we will not vouch for.
+ */
+const EDIT_REFUSAL_SENTENCE: Record<ConflictRegionEditRefusal, string> = {
+  unknown_region: 'That change isn’t part of this session.',
+  not_editable: 'Unchanged lines can’t be edited here.',
+  moved: 'This change moved while you were editing it. Reopen the resolver.',
+  not_text: 'This has characters that can’t be saved to a file. Retype the odd one out.',
+  markers: 'This still has conflict markers in it. Take them out and save again.',
+  too_long: `An edit can be at most ${config.conflictSuggestMaxChars.toLocaleString('en-GB')} characters.`,
+  too_many_edits: 'This session is holding as many edits as it can. Commit what you have.',
+};
+
+const editRefusal = (
+  refusal: ConflictRegionEditRefusal,
+  message: string,
+): ConflictRegionEditResponse => ({ ok: false, refusal, message });
+
+/**
  * The `(accountId, prId)` a request may act on, or a refusal.
  *
- * ⚠ ONE RESOLVER FOR ALL SIX ROUTES. A 404 for another tenant's id is what keeps the family from
+ * ⚠ ONE RESOLVER FOR ALL SEVEN ROUTES. A 404 for another tenant's id is what keeps the family from
  * being an existence oracle, and a per-handler copy of that rule is a per-handler chance to
  * forget it.
  */
@@ -239,7 +310,7 @@ const MAX_STREAM_SUBSCRIBERS = 4;
  *  the one that runs. */
 const STREAM_MAX_MS = 10 * 60_000;
 
-/** One mapper, so the six routes cannot disagree about what a claim refusal means. */
+/** One mapper, so the seven routes cannot disagree about what a claim refusal means. */
 function refuseBusy(
   reply: FastifyReply,
   reason: 'pr' | 'account' | 'capacity' | 'shutdown',
@@ -405,7 +476,91 @@ export async function conflictRoutes(app: FastifyInstance): Promise<void> {
     return content;
   });
 
-  // ---- 5. Commit --------------------------------------------------------------------------
+  // ---- 5. One region's text, typed by the reader ------------------------------------------
+  //
+  // ⚠ THIS IS THE ONE PLACE IN THE FAMILY THAT TAKES FILE CONTENT, AND EVERYTHING ABOUT IT IS
+  // SHAPED BY THAT. It validates BEFORE it mints, so an id that exists is an id whose text has
+  // been checked; it refuses rather than trimming, so nothing is stored that the reader did not
+  // see; and it decides NOTHING — a successful edit hands back a handle, and the region stays
+  // undecided until the SPA sends `{decision:'edited', editId}`.
+  //
+  // ⚠ IT IS SYNCHRONOUS AND CHEAP, UNLIKE THE OTHER TWO POSTS. No clone, no fetch, no git: a
+  // string scan and a Map write against a session already in memory. So it answers 200 with the
+  // outcome rather than 202 with a promise.
+  //
+  // A REFUSAL IS A 200 CARRYING `{ok:false}`, the suggestion route's shape. These are outcomes
+  // the reader acts on — fix the text, take a side instead — not transport errors, and the SPA
+  // renders the server's sentence verbatim either way. The three real errors (not this
+  // account's PR, no push rights, no session) keep their status codes.
+  app.post('/api/prs/:id/conflicts/edit', { schema: editSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const body = req.body as ConflictRegionEditBody;
+    const accountId = accountIdOf(req);
+
+    const allowed = await requireWritablePr(reply, accountId, id);
+    if (!allowed.ok) return allowed.body;
+
+    const rec = getSession(accountId, id, body.sessionId);
+    const model = rec?.model ?? null;
+    // The family's own answer for a dead session, not a `{ok:false}` refusal: the reader's whole
+    // resolve is gone, which is not a fact about the text they just typed.
+    if (!rec || !model) return refuse(reply, 409, 'SessionExpired', SESSION_EXPIRED);
+
+    const file = model.files.find((f) => f.index === body.fileIndex) ?? null;
+    const region = file?.regions.find((r) => r.id === body.regionId) ?? null;
+    if (!file || !region || file.unsupported !== null) {
+      return editRefusal('unknown_region', EDIT_REFUSAL_SENTENCE.unknown_region);
+    }
+    // Context lines are read-only: an `unchanged` region is what the edit sits BETWEEN, it takes
+    // no decision, and the fold would ignore a decision on it anyway (rule 1).
+    if (region.kind === 'unchanged') {
+      return editRefusal('not_editable', EDIT_REFUSAL_SENTENCE.not_editable);
+    }
+    // ⚠ THE CONTENT PIN. The id is an ADDRESS and a rebuild can hand the same address different
+    // bytes; without this, text written against one version of a region could be redeemed
+    // against another — text nobody read, in the place it lands. The suggestion route makes
+    // exactly this check for exactly this reason.
+    if (region.fingerprint !== body.fingerprint) {
+      return editRefusal('moved', EDIT_REFUSAL_SENTENCE.moved);
+    }
+
+    // ⚠ THE REGION'S OWN INVISIBLE BYTES, INHERITED RATHER THAN READ BACK OFF THE WIRE. A
+    // textarea normalises every CRLF it is handed to a bare LF before the SPA can see it, so
+    // without this one keystroke in a Windows-authored file rewrote the whole hunk's line
+    // endings; and the file's own UTF-8 BOM, which `model.ts` deliberately keeps as a character,
+    // would otherwise refuse the first region of every such file as `not_text`. See
+    // `editShapeFor`.
+    const shape = editShapeFor(
+      [region.base, region.ours, region.theirs],
+      file.regions[0]?.id === region.id,
+    );
+    const checked = validateConflictEdit(body.text, config.conflictSuggestMaxChars, shape);
+    if (!checked.ok) return editRefusal(checked.refusal, EDIT_REFUSAL_SENTENCE[checked.refusal]);
+
+    const editId = storeEdit(rec, {
+      fileIndex: file.index,
+      regionId: region.id,
+      lines: checked.lines,
+      // Fold rule 4. The reader edited lines INSIDE a region, not the file's final newline, so
+      // there is nothing in their text to read this off — and a payload-bearing decision has to
+      // carry one. The ours side's is the same inheritance a suggestion takes, and it matters
+      // only when the edited region is the file's last.
+      endsWithNewline: file.terminators.ours,
+    });
+    if (editId == null) {
+      return editRefusal('too_many_edits', EDIT_REFUSAL_SENTENCE.too_many_edits);
+    }
+    const response: ConflictRegionEditResponse = {
+      ok: true,
+      // ⚠ THE SERVER'S OWN SPLIT, ECHOED. The centre pane renders these, so it renders exactly
+      // the lines the commit will splice — rather than the client's second opinion about where
+      // its own text breaks.
+      edit: { fileIndex: file.index, regionId: region.id, editId, lines: checked.lines },
+    };
+    return response;
+  });
+
+  // ---- 6. Commit --------------------------------------------------------------------------
   app.post('/api/prs/:id/conflicts/commit', { schema: commitSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
     const body = req.body as ConflictCommitBody;
@@ -485,7 +640,7 @@ export async function conflictRoutes(app: FastifyInstance): Promise<void> {
     return sessionView(rec);
   });
 
-  // ---- 6. Close -------------------------------------------------------------------------
+  // ---- 7. Close -------------------------------------------------------------------------
   app.delete('/api/prs/:id/conflicts', { schema: sessionQuerySchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
     const { session } = req.query as { session: string };
@@ -571,6 +726,7 @@ async function runCommit(
       model,
       body,
       suggestions: rec.suggestions,
+      edits: rec.edits,
       onPhase: (p) => setCommitPhase(rec, p),
       signal,
       log,
@@ -599,6 +755,7 @@ const LAND_ERROR_CODES = new Set<string>([
   'UnknownFileIndex',
   'IncompleteDecisions',
   'UnknownSuggestion',
+  'UnknownEdit',
   'InvalidBranch',
   'ReservedBranch',
   'BranchExists',
@@ -688,14 +845,29 @@ function preflightDecisions(
     const decided = new Set<number>();
     for (const d of req.decisions) {
       decided.add(d.id);
-      if (d.decision !== 'suggestion') continue;
-      if (d.suggestionId == null || !rec.suggestions.has(d.suggestionId)) {
-        return refuse(
-          reply,
-          400,
-          'UnknownSuggestion',
-          'That suggestion has expired. Ask Claude again.',
-        );
+      // ⚠ BOTH HANDLE-BEARING MEMBERS, AND TWO SENTENCES. `land.ts` re-checks each against the
+      // region it names — the authority, because it runs against the rebuilt model — but a dead
+      // handle is worth catching here for the real status code, and one refusal sends the reader
+      // back to Claude while the other sends them back to their own text.
+      if (d.decision === 'suggestion') {
+        if (d.suggestionId == null || !rec.suggestions.has(d.suggestionId)) {
+          return refuse(
+            reply,
+            400,
+            'UnknownSuggestion',
+            'That suggestion has expired. Ask Claude again.',
+          );
+        }
+      }
+      if (d.decision === 'edited') {
+        if (d.editId == null || !rec.edits.has(d.editId)) {
+          return refuse(
+            reply,
+            400,
+            'UnknownEdit',
+            'One of your edits has expired. Make it again.',
+          );
+        }
       }
     }
     // Rule 2 of the fold: EXHAUSTIVE over the file's non-`unchanged` regions. A one-sided change

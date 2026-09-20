@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   FloatingPortal,
   autoUpdate,
@@ -13,6 +13,7 @@ import type { ConflictFileEntry } from '@pierre-review/shared';
 import { fileRowState, type FileTally } from '../../lib/mergeResolver.js';
 import { CaretIcon, CheckIcon, ConflictIcon, MinusIcon } from '../Icons.js';
 import { INK_CLASS, fileCount, unsupportedHeadline } from './copy.js';
+import { useResolverPopoverEscape } from './popoverLayer.js';
 
 // ── THE FILE LIST ────────────────────────────────────────────────────────────────────────────
 //
@@ -67,6 +68,13 @@ export function FileMenu({
   });
   const dismiss = useDismiss(context);
   const { getReferenceProps, getFloatingProps } = useInteractions([dismiss]);
+
+  // ⚠ `Escape` GOES THROUGH THE SHARED HOOK, and this menu had NO handler of its own at all — it
+  // relied on floating-ui's `useDismiss`, which listens on `document` and therefore never saw the
+  // key: the overlay shell's `window` capture handler stopped it dead one target earlier. So
+  // Escape on an open file menu closed the WHOLE RESOLVER. See `popoverLayer.ts`.
+  const closeSelf = useCallback(() => onOpenChange(false), [onOpenChange]);
+  useResolverPopoverEscape(open, closeSelf);
 
   useEffect(() => {
     if (!open) return;

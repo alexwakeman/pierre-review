@@ -169,15 +169,15 @@ the SPA's entry gate reads it and a field that disappears is a field every calle
 It is CORE and free in both modes: no `ProGate`, no upsell, no seventh visible-but-locked surface.
 
 **Nothing about the routes changed for multi-tenancy, because nothing about them was ever
-single-tenant.** Ownership is `getPrWriteContext(id, accountId)` on all six (→ 404, so the family is
-not an existence oracle), write permission is re-checked on all six (→ 403), and ⚠ **every git fetch
+single-tenant.** Ownership is `getPrWriteContext(id, accountId)` on all seven (→ 404, so the family
+is not an existence oracle), write permission is re-checked on all seven (→ 403), and ⚠ **every git fetch
 goes out under the CALLER'S OWN token**, into a ref namespaced by session id
 (`fetchRefIntoClone`, review/clone-manager.ts). That last property was incidental under one account
 and is now LOAD-BEARING: the clone cache is keyed `owner__name` and shared across tenants, so it
 holds OBJECTS, never permission — a tenant who cannot read a private repository cannot fetch from
 it, whoever else has already cloned it. `conflicts-cloud.test.ts` pins all of it; it used to assert
-the six paths 404 in cloud and was INVERTED rather than deleted, because this is the moment that
-proof has to get stronger.
+the resolver's paths 404 in cloud and was INVERTED rather than deleted, because this is the moment
+that proof has to get stronger.
 
 **Two caps, two sentences, and neither names another tenant.** A resolver job is a clone, two
 fetches and a merge-tree. ONE running job per ACCOUNT ("you're already resolving another pull
@@ -227,9 +227,34 @@ nowhere on screen at all — the same silent exclusion one class over. ⚠ The o
 `decidedTotal` / `decidableTotal`, every DECIDABLE region across the pull request; the file menu's
 trigger, its rows and the toolbar countdown all fold through it, and the wand's own sentence is per
 FILE over CONTESTED regions and says "in this file" for exactly that reason. ⚠ The route's
-`IncompleteDecisions` stays as the second line of defence — a client gate is never the gate. ⚠
-**Continue is deliberately NOT disabled**; it is the only route to the list that explains the block,
-so only Commit and push / Rebase and force-push is.
+`IncompleteDecisions` stays as the second line of defence — a client gate is never the gate.
+
+**BOTH BUTTONS ARE SHUT, AND ONE FOLD SAYS WHY.** The toolbar's button says **"Commit and push"** —
+the same words as the landing step's, deliberately: one is the entry to the press and the other is
+the press, and they are told apart by their ACCESSIBLE NAMES (`COMMIT_ENTRY_NAME` /
+`commitPressName`), never by diverging labels. Both are disabled by
+`commitBlockedReason(plan, headMoved)` (`lib/conflictCommit.ts`), which returns null exactly when
+`plan.canCommit && !headMoved` and otherwise returns the ONE sentence both of them print. ⚠
+**`headMoved` is NOT in `canCommit` and must not be folded into it** — the plan is a pure fold over
+the session and the reader's decisions, while the head moving is a fact about GitHub the shell
+observed. ⚠ **`Enter` on the panes container is the same door and carries the same lock**: it
+announces the reason instead of landing, because a gated button with an ungated keystroke beside it
+is a bypass, not a shortcut. ⚠ The landing step keeps two clauses of its own — the branch-name
+refusal (which prints beside the field it is about) and a push already in flight — and the toolbar,
+which has neither, must not be shut by them.
+
+⚠ **THIS REVERSES "Continue is deliberately NOT disabled"**, which held because pressing it was the
+only route to the list explaining the block. The list moved: the toolbar's "N of M changes decided"
+counter is now a popover (`OutstandingPopover`) carrying the blocked sentence and the SAME per-file
+rows, each a `<button>` that jumps to that file's first unanswered region. ⚠ `notCarried` — what the
+commit will not carry — is still rendered only on the landing step, and every unsupported file is
+listed with the server's own noun phrase in the FILE MENU, so nothing went out of reach behind the
+shut button. ⚠ **"Next" jumps to the next file that still needs decisions** (`nextOutstandingFile`:
+it walks `outstanding`, not the manifest, and WRAPS) and is ABSENT rather than disabled once there
+is nowhere to jump — including when the only outstanding file is the one the reader is already in,
+where the jump would land them where they are. The chevrons still page the manifest and were
+re-worded to "Previous/Next file in the list", because two controls announcing as "Next …" is the
+duplicate-verb problem the gutter arrows already cost us; `n`/`p` still walk REGIONS within a file.
 
 **The ribbons: one filled bezier per side that actually put content into the result**
 (`components/conflicts/RegionRibbons.tsx`), drawn across the 1.75rem gutter track from the accepted
@@ -237,7 +262,7 @@ hunk's near edge to the centre hunk's, in the applied GREEN — **one class, `.m
 because a ribbon joins an accepted side (green) to the result (green) and a type-hued band between
 them read as a third, different thing. `ribbonSides()` (beside `panePaint`, so the two cannot
 drift) is the rule: `ours` → left, `theirs` → right, both-orders and wand/suggestion → both, and ⚠
-**`base`/ignored and UNDECIDED draw nothing at all** — that is where it still differs from the
+**`base`/ignored, UNDECIDED and `edited` draw nothing at all** — that is where it still differs from the
 wash, which paints every OFFERED side of an undecided region (`sideOffered`) in the conflict type;
 a ribbon claims content reached the result, which nothing has yet. ⚠ It reads `sideOffered` too, so
 a ribbon can never leave a pane the wash left bare. ⚠ **THE OVERLAY ONLY EVER READS GEOMETRY**: it holds no React
@@ -252,12 +277,79 @@ clamped. ⚠ **`.mr-ribbons` carries no z-index on purpose** — positioned at z
 under the panes' sticky `z-10` headers. ⚠ **`CONFLICT_MODEL_VERSION` IS NOT BUMPED FOR ANY OF
 THIS**: it pins what bytes a decision produces, and a shape over the gutter produces none.
 
-**Hunk-level accept/ignore only. There is no typing anywhere.** `ConflictDecision` is a closed enum
-— `base` · `ours` · `theirs` · `both_ours_first` · `both_theirs_first` · `disjoint_merge` ·
-`suggestion` — and ⚠ **there is no `custom` member and there must never be one.** That is a property
-of the PROTOCOL, not a UI convention: nothing on the conflict wire accepts file content from the
-client, every request field is an index, an id or an enum member, and an accepted Pro suggestion
-travels back as an opaque `suggestionId` addressing text the SERVER holds.
+**Hunk-level accept/ignore, plus ONE text box — and the invariant it retracts is narrower than it
+looks.** `ConflictDecision` is a closed enum — `base` · `ours` · `theirs` · `both_ours_first` ·
+`both_theirs_first` · `disjoint_merge` · `suggestion` · `edited`. This page used to say "there is no
+typing anywhere" and "there is no `custom` member and there must never be one". Read what each half
+of that was protecting:
+
+- **WHAT MOVED.** `POST …/conflicts/edit` takes the lines a reader typed for ONE region. It is
+  scoped to DECIDABLE regions (`unchanged` context refuses with `not_editable`), pinned by the
+  region's `fingerprint` as well as its id, and VALIDATED BEFORE AN ID EXISTS — no NUL, no lone
+  surrogate, no surviving conflict marker, and at most `CONFLICT_SUGGEST_MAX_CHARS` (one budget for
+  both text ingresses). A refusal mints nothing AND DESTROYS NOTHING: the budget is summed without
+  mutating, or a save that overran the cap took the region's previous accepted edit with it.
+- ⚠ **THE REGION'S TWO INVISIBLE BYTES ARE INHERITED, NOT READ BACK OFF THE WIRE** (`editShapeFor`).
+  A textarea's API value normalises every CRLF to a bare LF before React sees a keystroke, so one
+  character typed into a Windows-authored file rewrote the WHOLE hunk's line endings — every line of
+  the diff changed, and a genuinely wrong file in any repo carrying `* text eol=crlf`. And the BOM
+  that `model.ts` deliberately KEEPS as a character (`ignoreBOM: true`) made the first region of
+  every BOM file refuse `not_text` for ever, over a zero-width character the sentence told the
+  reader to retype. So: the region's own line ending is re-imposed when its evidence is unanimous,
+  and one LEADING U+FEFF is allowed and re-attached when this region is where the file's BOM lives.
+  U+FEFF anywhere else is still `not_text`, and `validateConflictSuggestion` — whose input is MODEL
+  output — is untouched.
+- ⚠ **A SUPERSEDED HANDLE IS NEVER EVICTED**, `storeSuggestion`'s rule. Re-saving a region used to
+  delete its previous edit on the argument that "a region has one current text" — true of the
+  region, false of the handles pointing at it. The undo stack files `previousEditId`, so a second
+  save plus one Ctrl+Z restored an id the server had just destroyed: the pane went on rendering the
+  region decided (its line map is append-only) and the WHOLE commit came back `UnknownEdit`, naming
+  no file and no region. Two tabs on one PR did it across the process.
+  `MAX_EDIT_CHARS_PER_SESSION` is the bound.
+- **WHAT DID NOT.** The COMMIT body still carries nothing but indexes, ids and enum members.
+  `'edited'` travels as an opaque `editId` exactly as an accepted Pro suggestion travels as a
+  `suggestionId`; the server re-folds its OWN regions through `foldFile` and hashes the result. So
+  the property that mattered — **the server commits only bytes it folded, from a request that names
+  no content** — is unchanged. A `custom` member carrying its lines inline is still forbidden, and
+  for that reason.
+- ⚠ **`CONFLICT_MODEL_VERSION` IS NOT BUMPED FOR IT, AND THAT IS THE REASON EDITING IS SCOPED THE
+  WAY IT IS.** The test is "does this function's output change for a given input"; no input that was
+  previously possible can contain a member that did not previously exist, and `hash.ts` covers
+  neither `region.allowed` nor `defaultDecision` — the only two things a new member touches. A
+  defensive bump would throw away every live session's decisions. Same argument as `autoApply` and
+  the ribbons.
+- ⚠ **VALIDATION DELIBERATELY OMITS THE SUGGESTION VALIDATOR'S CHECKS 6, 7 AND 8** (context not
+  repeated, common lines kept, side lines kept). Those exist because a MODEL silently drops lines it
+  was not asked to drop. A person deleting a line is the feature — an empty box is ZERO lines, which
+  is how a whole hunk gets deleted.
+- ⚠ **AN EDITED REGION'S CENTRE IS GREEN AND NO RIBBON LEAVES IT.** Both sides paint nothing and
+  `ribbonSides` returns none, because the text came from neither pane and a ribbon would claim a
+  correspondence nothing can state. The strip's word, `Your text`, is what says whose it is.
+  Undo clears it like any other decision.
+- ⚠ **THE UI IS A PANEL UNDER THE CENTRE CELL, NOT A `contenteditable` AND NOT A TEXTAREA REPLACING
+  THE CELL** — the slot `HunkSuggestionPanel` already uses. That keeps `data-mr-cell` on a
+  content-sized box (so ribbon geometry never learns about it), keeps `CodeCell` a pure memo with no
+  local state, and keeps hljs output out from under a caret. The draft is RENDERED in the panel and
+  REMEMBERED in `useRegionEdit`'s ref, keyed `${fileIndex}:${regionId}`; the store holds the handle;
+  `useRegionEdit`'s module map holds the saved lines, keyed by SERVER session, because
+  `ResolverPanes` unmounts the moment the toolbar's "Commit and push" is pressed.
+  ⚠ **EVERY ROW IS KEYED BY FILE AND REGION.** Region ids restart at 1 in every file and the grid is
+  the same element across a file switch, so a bare `key={region.id}` reconciled file A's row with
+  file B's — and the panel at its fixed child slot came back holding file B's text under file A's
+  fingerprint. ⚠ **AND THE BOX IS `readOnly` WHILE SAVING, NEVER `disabled`**: a browser blurs a
+  disabled element, so the caret vanished exactly when a refusal asked the reader to fix their text.
+  Focus goes back to the control the box was opened from, because `document.body` is outside `#root`
+  and every single-key verb in the panes dies there.
+- ⚠ **`Escape` BELONGS TO THE INNERMOST THING OPEN, AND REGISTRATION ORDER IS NOT A MECHANISM**
+  (`popoverLayer.ts`). The shell's handler is added on MOUNT, so it won the race against every
+  popover and its `stopImmediatePropagation` meant no later `window` listener ever ran — Escape on
+  the file menu, the compare-base popup or the counter's list closed the WHOLE RESOLVER, and killed
+  floating-ui's own `document`-level dismiss with it. The three popovers now take the key through
+  one counted hook and the shell stands aside while any of them is open.
+- ⚠ **`ResolverPanes.onKeyDown` RETURNS FOR A FIELD BEFORE THE SINGLE-KEY VERBS**, and that guard is
+  now load-bearing rather than defensive: the textarea is inside the scroller, so `b` would
+  otherwise take both sides of the region being edited and Enter would leave for the commit step.
+  `resolverControls.test.ts` pins both its existence and its position.
 
 **The wand NEVER picks a side.** `ConflictWandReason` has exactly four members — `only_ours`,
 `only_theirs`, `both_same`, `disjoint_words` — and ⚠ **there is deliberately no member meaning "we
@@ -310,7 +402,10 @@ and not for tidiness**: a merge-strategy resolution commit has exactly the two-p
 reader never consented to merge.
 
 **Nothing is stored.** No table, no migration, no journal entry, no `accountScopedTables()` entry,
-nothing in `localStorage`. The server session is a module-level `Map`, bounded four ways —
+nothing in `localStorage`. The reader's typed edits are held in the same module-level session and
+die with it, bounded by a per-session character budget (64 × `CONFLICT_SUGGEST_MAX_CHARS`) with one
+live edit per region — re-saving REPLACES, so the store is bounded by region count rather than by
+keystrokes. The server session is a module-level `Map`, bounded four ways —
 a 30-minute idle TTL, a **4-hour absolute lifetime `touch()` cannot extend**, and retained-record
 caps of **3 per account / 24 per process** (LRU eviction of a SETTLED record, this account's share
 first). ⚠ **The TTL alone bounds nothing**: every manifest read touches, the SPA polls the manifest

@@ -43,8 +43,12 @@
 // identity and price in a single row it would overwrite a human's vendor correction on every auto
 // pass — the exact bug the two-table split was built to kill, reintroduced inside one row.
 //
-// `import type` only from shared.
+// ⚠ Shared is no longer `import type` only here: `GENERIC_REVIEWER_LABELS` is a VALUE import.
+// That is safe now — build-release.mjs compiles the package, vendors it at release/dist/shared
+// and rewrites the specifier to a relative path (CLAUDE.md § Packaging). The big login→kind
+// tables in sync/bot-detection.ts are still hand-copied, for the drift-test reason stated there.
 import { and, eq, inArray } from 'drizzle-orm';
+import { GENERIC_REVIEWER_LABELS } from '@pierre-review/shared';
 import type {
   AutomatedReviewerKind,
   ClassificationConfidence,
@@ -95,6 +99,12 @@ export type ClassifyOpts = PersistOpts;
 
 // Fallback display labels for the vendor kinds. The frontend's BOT_VENDOR_META is the
 // source of truth for rendering; this is what lands in the persisted `label` column.
+//
+// ⚠ TWO SIBLINGS, HAND-KEPT: `BOT_VENDOR_META` (apps/frontend/src/lib/ui.ts) and the Pro
+// plugin's Slack `BOT_LABELS` (packages/pro/src/slack/report.ts). Change one branded label,
+// change all three. The three UNBRANDED kinds are no longer restated here — `labelFor` reads
+// them from `GENERIC_REVIEWER_LABELS` in shared, because those were exactly the keys the three
+// copies had drifted apart on.
 //
 // ⚠ `Record<AutomatedReviewerKind, …>` minus the three generic kinds, so a vendor added to the
 // union without a label here is a COMPILE error rather than a card rendering the raw slug
@@ -198,12 +208,13 @@ const ROLE_NOUN: Record<ReviewerRole, string> = {
 // Exported so the query layer (db/queries.ts) labels analytics/dedup groupings from the
 // same source of truth as the persisted classification `label`.
 export function labelFor(kind: AutomatedReviewerKind): string {
-  if (kind === 'pierre') return 'Limn · Claude';
-  // ⚠ "In-house / custom", NOT "In-house AI". The kind is the fallback for EVERY role now, so an
-  // unbranded quality gate or CLA bot lands here — and calling those "In-house AI" is how the
-  // bucket got its reputation for being wrong. It is the role-neutral escape hatch.
-  if (kind === 'in_house') return 'In-house / custom';
-  if (kind === 'vendor') return 'Vendor';
+  // The three unbranded kinds come from shared: 'pierre' composes the product name, and
+  // 'in_house' is "In-house / custom" rather than "In-house AI" for a reason recorded there.
+  // Both spellings used to be restated here, in the SPA and in the Slack digest, and the three
+  // had drifted.
+  if (kind === 'pierre' || kind === 'in_house' || kind === 'vendor') {
+    return GENERIC_REVIEWER_LABELS[kind];
+  }
   return VENDOR_LABELS[kind] ?? kind;
 }
 

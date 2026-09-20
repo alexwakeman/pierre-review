@@ -36,6 +36,8 @@ import {
   useUpdateFinding,
   useUpdateReview,
 } from '../hooks/useClaudeReview.js';
+import { highlightBlock, languageForPath } from '../lib/hljsLines.js';
+import { hunkLineMarker, useHunkHighlight } from './DiffHunk.js';
 import { Markdown } from './Markdown.js';
 import { MentionTextarea } from './MentionTextarea.js';
 import {
@@ -314,10 +316,13 @@ function ActivityLog({ lines }: { lines: string[] }): JSX.Element | null {
 }
 
 // Per-line colour for a rendered diff hunk.
-function hunkLineClass(line: string): string {
+// ⚠ `highlighted` DROPS THE ADD/DEL INK. On a syntax-coloured row the green/red text colour and
+// the token colours fight over the same characters; the leading +/- still says which side the line
+// is on. The `@@` header and context rows keep theirs — neither is an add/del claim.
+function hunkLineClass(line: string, highlighted = false): string {
   if (line.startsWith('@@')) return 'font-medium text-gray-600 dark:text-gray-300';
-  if (line.startsWith('+')) return 'text-green-700 dark:text-green-400';
-  if (line.startsWith('-')) return 'text-red-700 dark:text-red-400';
+  if (line.startsWith('+')) return highlighted ? '' : 'text-green-700 dark:text-green-400';
+  if (line.startsWith('-')) return highlighted ? '' : 'text-red-700 dark:text-red-400';
   return 'text-gray-500 dark:text-gray-400';
 }
 
@@ -334,11 +339,18 @@ const BTN_SECONDARY =
 // "Hide" control or its @@ header line — never via a code line, so clicking the code
 // to read/select it doesn't fold it away. State is local + transient — it never
 // persists across reloads.
-function FindingHunk({ hunk }: { hunk: string }): JSX.Element {
+function FindingHunk({ hunk, path }: { hunk: string; path?: string | null }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
+  // The whole hunk in one two-pass run, index-aligned with `lines` — never the preview line on
+  // its own, which is the forbidden mid-file lexer start (`hljsLines.ts`'s header).
+  const html = useHunkHighlight(hunk, path);
   const lines = hunk.replace(/\n$/, '').split('\n');
-  // Prefer the @@ header for the collapsed preview; else the anchor (last) line.
-  const preview = lines.find((l) => l.startsWith('@@')) ?? lines.at(-1) ?? '';
+  // Prefer the @@ header for the collapsed preview; else the anchor (last) line. Tracked by INDEX
+  // as well, so the preview can take its own highlighted entry rather than a second lexer pass.
+  const headerIdx = lines.findIndex((l) => l.startsWith('@@'));
+  const previewIdx = headerIdx >= 0 ? headerIdx : lines.length - 1;
+  const preview = lines[previewIdx] ?? '';
+  const previewHtml = html?.[previewIdx] ?? null;
   // The header only doubles as a collapse target when it really IS the first line;
   // a truncated hunk opens on real code, which stays plain, selectable text.
   const headerCollapses = lines[0]?.startsWith('@@') === true;
@@ -353,8 +365,19 @@ function FindingHunk({ hunk }: { hunk: string }): JSX.Element {
         className="mt-1 flex w-full items-center gap-2 overflow-hidden rounded bg-gray-50 px-2 py-1.5 text-left font-mono text-xs dark:bg-gray-900/60"
       >
         <ChevronIcon dir="right" className="shrink-0 text-gray-400" />
-        <span className={`min-w-0 flex-1 truncate ${hunkLineClass(preview)}`}>
-          {preview === '' ? ' ' : preview}
+        <span className={`min-w-0 flex-1 truncate ${hunkLineClass(preview, previewHtml != null)}`}>
+          {previewHtml != null ? (
+            <>
+              {/* The marker is diff notation, not code, so it prints plain.
+                  ⚠ ONLY highlight.js OUTPUT REACHES `dangerouslySetInnerHTML`. */}
+              {hunkLineMarker(preview)}
+              <span className="code-hl" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+            </>
+          ) : preview === '' ? (
+            ' '
+          ) : (
+            preview
+          )}
         </span>
         {lines.length > 1 && (
           <span className="shrink-0 font-sans text-[10px] text-gray-400">
@@ -387,8 +410,20 @@ function FindingHunk({ hunk }: { hunk: string }): JSX.Element {
               {l === '' ? ' ' : l}
             </button>
           ) : (
-            <div key={i} className={hunkLineClass(l)}>
-              {l === '' ? ' ' : l}
+            <div key={i} className={hunkLineClass(l, html?.[i] != null)}>
+              {html?.[i] != null ? (
+                <>
+                  {hunkLineMarker(l)}
+                  <span
+                    className="code-hl"
+                    dangerouslySetInnerHTML={{ __html: html[i]! }}
+                  />
+                </>
+              ) : l === '' ? (
+                ' '
+              ) : (
+                l
+              )}
             </div>
           ),
         )}
@@ -403,6 +438,32 @@ function FindingHunk({ hunk }: { hunk: string }): JSX.Element {
         Hide code
       </button>
     </div>
+  );
+}
+
+// Claude's replacement code for the finding's line(s) — a whole blob, not a diff, so it goes
+// through `highlightBlock` rather than the per-row path. ⚠ ONLY highlight.js OUTPUT REACHES
+// `dangerouslySetInnerHTML`; a null (unlisted extension, past the line gate, lexer threw) renders
+// the suggestion as plain text, which is what it was before.
+function SuggestionBlock({
+  suggestion,
+  path,
+}: {
+  suggestion: string;
+  path?: string | null;
+}): JSX.Element {
+  const html = useMemo(
+    () => (path == null || path === '' ? null : highlightBlock(suggestion, languageForPath(path))),
+    [suggestion, path],
+  );
+  return (
+    <pre className="mt-1 overflow-x-auto rounded bg-gray-100 px-2 py-1.5 font-mono text-xs dark:bg-gray-800">
+      {html != null ? (
+        <code className="code-hl" dangerouslySetInnerHTML={{ __html: html }} />
+      ) : (
+        <code>{suggestion}</code>
+      )}
+    </pre>
   );
 }
 
@@ -730,7 +791,7 @@ function FindingRow({
 
           {/* The (collapsible) diff hunk this finding covers. */}
           {finding.diffHunk != null && finding.diffHunk !== '' && (
-            <FindingHunk hunk={finding.diffHunk} />
+            <FindingHunk hunk={finding.diffHunk} path={finding.path} />
           )}
 
           {/* Claude's body (read-only). */}
@@ -738,9 +799,7 @@ function FindingRow({
             <Markdown>{finding.body}</Markdown>
           </div>
           {finding.suggestion != null && finding.suggestion !== '' && (
-            <pre className="mt-1 overflow-x-auto rounded bg-gray-100 px-2 py-1.5 font-mono text-xs dark:bg-gray-800">
-              <code>{finding.suggestion}</code>
-            </pre>
+            <SuggestionBlock suggestion={finding.suggestion} path={finding.path} />
           )}
 
           {/* Your reword — shown when set, editable on the latest run. */}

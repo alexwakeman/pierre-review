@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { PRODUCT_NAME } from '@pierre-review/shared';
 import type {
   BotVendorAnalytics,
   BotVendorComment,
@@ -590,7 +591,7 @@ export function BotPrsDetail(): JSX.Element {
                     disabled={disabled}
                     title={
                       disabled
-                        ? 'Pierre’s verbatim reviews are posted with the human’s token — there are no per-comment rows to list.'
+                        ? `${PRODUCT_NAME}’s verbatim reviews are posted with the human’s token — there are no per-comment rows to list.`
                         : t.key === 'comments'
                           ? 'Everything this bot said in the window — inline comments, PR comments and review summaries'
                           : 'The PRs this bot touched in the window'

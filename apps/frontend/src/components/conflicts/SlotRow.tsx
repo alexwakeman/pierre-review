@@ -17,8 +17,10 @@ import { highlightLines } from '../../lib/hljsLines.js';
 import { AcceptLeftIcon, AcceptRightIcon, ChevronIcon } from '../Icons.js';
 import { CodeCell, type CellRow } from './CodeCell.js';
 import { HunkSuggestionPanel } from './HunkSuggestionPanel.js';
+import { RegionEditPanel } from './RegionEditPanel.js';
 import { SlotStrip } from './SlotStrip.js';
 import type { HunkAskState } from './useHunkSuggestion.js';
+import type { RegionEditState } from './useRegionEdit.js';
 import {
   HIDE_UNCHANGED,
   PANE_OURS,
@@ -97,6 +99,12 @@ export function SlotRow({
   onAskClaude,
   onUseSuggestion,
   onDiscardSuggestion,
+  edit,
+  editDraft,
+  onEditDraft,
+  onOpenEdit,
+  onCancelEdit,
+  onSaveEdit,
   onActivate,
   onDecide,
 }: {
@@ -116,6 +124,16 @@ export function SlotRow({
   onAskClaude?: (() => void) | undefined;
   onUseSuggestion?: ((suggestion: ConflictHunkSuggestion) => void) | undefined;
   onDiscardSuggestion?: (() => void) | undefined;
+  /** This region's text box, or undefined when it is closed. */
+  edit?: RegionEditState | undefined;
+  /** What the reader had typed when this row last unmounted — a file switch, on an editor that
+   *  is still open. Undefined ⇒ the box opens from the region's own centre lines. */
+  editDraft?: string | undefined;
+  onEditDraft?: ((text: string) => void) | undefined;
+  /** Absent ⇒ no Edit control at all. `unchanged` regions pass nothing: context is read-only. */
+  onOpenEdit?: (() => void) | undefined;
+  onCancelEdit?: (() => void) | undefined;
+  onSaveEdit?: ((text: string) => void) | undefined;
   onActivate: () => void;
   onDecide: (decision: ConflictDecision | null) => void;
 }): JSX.Element {
@@ -285,6 +303,8 @@ export function SlotRow({
       sideTakes={narrow}
       onAskClaude={onAskClaude}
       askInFlight={ask?.status === 'asking'}
+      onEdit={onOpenEdit}
+      editOpen={edit != null}
       onActivate={onActivate}
       onDecide={onDecide}
     />
@@ -301,6 +321,30 @@ export function SlotRow({
         language={language}
         onUse={onUseSuggestion}
         onDiscard={onDiscardSuggestion}
+      />
+    );
+
+  // ⚠ THE TEXT BOX SITS IN THE SAME SLOT, FOR THE SAME REASONS. It is another state of this
+  // cell, read against the two side panes already aligned to it — and putting it here rather
+  // than inside `CodeCell` is what keeps `data-mr-cell` on a content-sized box, so the ribbon
+  // geometry never learns about it. See `RegionEditPanel`'s header.
+  //
+  // ⚠ IT IS SEEDED FROM `centre`, WHICH IS THE FOLD'S OWN OUTPUT for whatever this region is
+  // currently showing — including a previous edit. Editing therefore starts from what is on
+  // screen, never from one side chosen on the reader's behalf. A remembered DRAFT wins over it:
+  // this row unmounts on a file switch while its editor state stays open, so without one the box
+  // came back with the seed and the reader's typing gone.
+  const editor =
+    edit == null || onSaveEdit == null || onCancelEdit == null || onEditDraft == null ? null : (
+      <RegionEditPanel
+        state={edit}
+        seed={editDraft ?? centre.join('\n')}
+        path={path}
+        ordinal={ordinal}
+        total={total}
+        onDraft={onEditDraft}
+        onSave={onSaveEdit}
+        onCancel={onCancelEdit}
       />
     );
 
@@ -331,6 +375,7 @@ export function SlotRow({
             anchor={anchor('centre')}
           />
           {pending}
+          {editor}
           <StackedSide
             label={paneTheirs(baseRef)}
             rows={right}
@@ -352,6 +397,7 @@ export function SlotRow({
             {strip}
             <CodeCell rows={middle} paint={centrePaint} rule={rule} anchor={anchor('centre')} />
             {pending}
+            {editor}
           </div>
           <div className="border-t border-gray-200 dark:border-gray-800">
             {gutter('right')}

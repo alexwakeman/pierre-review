@@ -13,9 +13,16 @@ import type { ConflictDecision } from '@pierre-review/shared';
 // spend a clone on every address-bar visit. `workspaceId` is kept out of `FilterDefaults` for the
 // same family of reason — persistence and reset share one list.
 //
-// ⚠ IT HOLDS CHOICES ONLY. No file text, no regions, no suggestions' lines. The resolved bytes
-// live in the server's in-memory session and in the read-only payloads it sends down; that is
-// what makes "no free typing" a property of the protocol rather than a UI convention.
+// ⚠ IT HOLDS CHOICES ONLY. No file text, no regions, no suggestion's lines — and, since the
+// centre pane became editable, no EDIT's lines either. The resolved bytes live in the server's
+// in-memory session and in the read-only payloads it sends down; what lives here is the opaque
+// handle that addresses them. That split is why the commit body can carry nothing but indexes,
+// ids and enum members even though one route now accepts typed text.
+//
+// ⚠ A HANDLE'S LINES THEREFORE LIVE SOMEWHERE ELSE, AND "somewhere else" MUST OUTLIVE A
+// COMPONENT. `useHunkSuggestion` and `useRegionEdit` each keep a module-level map keyed by SERVER
+// session, because `ResolverPanes` unmounts the moment the reader presses Continue — see those
+// files' headers for what breaks when the handle survives and the lines do not.
 //
 // ⚠ THE PINS ARE PART OF THE KEY. A session is consent to ONE three-way merge, so decisions are
 // filed under `${prId}:${headSha}:${baseSha}:${modelHash}`. Somebody pushing to the branch, or
@@ -45,6 +52,12 @@ export interface ResolverSession {
    *  `decisions` because a `'suggestion'` decision is worthless without it, and the commit body
    *  carries the two as separate fields. */
   suggestionIds: Record<string, string>;
+  /** `${fileIndex}:${regionId}` → a saved manual edit's opaque handle, for an `'edited'`
+   *  decision. ⚠ A SECOND MAP, NOT A SHARED "handles" ONE. The two address two different server
+   *  stores with two different provenances and two different refusal sentences; one map would
+   *  let a `'suggestion'` decision redeem an `editId` and be told "that suggestion has expired.
+   *  Ask Claude again." about text the reader typed themselves. */
+  editIds: Record<string, string>;
   /** The SERVER session these handles were minted in. ⚠ A handle addresses a Map in one server
    *  process's memory, so it dies with that session even when the pins — and therefore this
    *  record's `key` — are identical. See `seedSession`. */
@@ -144,6 +157,7 @@ interface ConflictResolverState {
     regionId: number;
     decision: ConflictDecision | null;
     suggestionId?: string | null;
+    editId?: string | null;
   }) => void;
   /** Record MANY at once — the wand's whole run is one write, so the counter cannot be seen
    *  half-updated. */
@@ -154,6 +168,7 @@ interface ConflictResolverState {
       regionId: number;
       decision: ConflictDecision;
       suggestionId?: string | null;
+      editId?: string | null;
     }>;
   }) => void;
 }
@@ -170,18 +185,25 @@ function countDecided(decisions: Readonly<Record<string, ConflictDecision>>): nu
 }
 
 /**
- * Every decision EXCEPT the ones addressing a server-held suggestion. Exported for the test that
- * pins it; called only from `seedSession`, where the ⚠ explains why.
+ * Every decision EXCEPT the two that address text a SERVER SESSION holds. Exported for the test
+ * that pins it; called only from `seedSession`, where the ⚠ explains why.
+ *
+ * ⚠ BOTH MEMBERS, NOT JUST `'suggestion'`. `'edited'` is the identical bug verbatim: the handle
+ * points into a Map in one server process, a re-seed means a new server session, and a decision
+ * carried across would make the file menu read "Resolved" (the counter sees an entry) while the
+ * centre pane renders it undecided (`slotFor` will not draw lines it does not hold) — and then
+ * the commit refuses the WHOLE request with `UnknownEdit`.
  */
-export function dropSuggestions(session: ResolverSession): {
+export function dropServerHeldDecisions(session: ResolverSession): {
   decisions: Record<string, ConflictDecision>;
   suggestionIds: Record<string, string>;
+  editIds: Record<string, string>;
 } {
   const decisions: Record<string, ConflictDecision> = {};
   for (const [rk, d] of Object.entries(session.decisions)) {
-    if (d !== 'suggestion') decisions[rk] = d;
+    if (d !== 'suggestion' && d !== 'edited') decisions[rk] = d;
   }
-  return { decisions, suggestionIds: {} };
+  return { decisions, suggestionIds: {}, editIds: {} };
 }
 
 export const useConflictResolverStore = create<ConflictResolverState>((set) => ({
@@ -226,50 +248,78 @@ export const useConflictResolverStore = create<ConflictResolverState>((set) => (
       // silently undo them. A DIFFERENT merge is a different key and lands in the `existing ==
       // null` arm on its own.
       //
-      // ⚠ EXCEPT AN ACCEPTED SUGGESTION, WHICH IS THE ONE DECISION THE PINS DO NOT KEEP ALIVE.
-      // Every other member of `ConflictDecision` is a self-describing enum the server can honour
-      // from the model alone; `'suggestion'` is a handle into the SERVER session's in-memory map,
-      // and a reopen mints a new one. Carried across, the region reads "Resolved" in the file
-      // menu (the counter sees a decision) while the centre pane renders it undecided (`slotFor`
-      // refuses to draw lines it does not hold) — and then the commit refuses the WHOLE request
-      // with `UnknownSuggestion`. Dropping it back to undecided is the honest state: the reader
-      // is asked again, on a region they can see is unanswered.
-      const carried = existing == null ? null : dropSuggestions(existing);
+      // ⚠ EXCEPT THE TWO HANDLE-BEARING DECISIONS, AND ONLY WHEN THE SERVER SESSION ACTUALLY
+      // CHANGED. Every other member of `ConflictDecision` is a self-describing enum the server
+      // can honour from the model alone; `'suggestion'` and `'edited'` are handles into the
+      // SERVER session's in-memory maps, so a re-seed under a DIFFERENT `sessionId` is a re-seed
+      // onto handles that no longer resolve. Carried across, the region reads "Resolved" in the
+      // file menu (the counter sees a decision) while the centre pane renders it undecided
+      // (`slotFor` refuses to draw lines it does not hold) — and then the commit refuses the
+      // WHOLE request with `UnknownSuggestion` / `UnknownEdit`. Dropping them back to undecided
+      // is the honest state: the reader is asked again, on a region they can see is unanswered.
+      //
+      // ⚠ THE `sessionId` COMPARISON IS THE WHOLE FIX, AND IT WAS MISSING. This function is not
+      // called once per opening — it is called on EVERY frame `useConflictSession` produces, and
+      // that hook emits a fresh object per SSE frame (including the commit's own
+      // `commit_progress`) and again every `POLL_IDLE_MS` once the server ends the stream at ten
+      // minutes. Dropping unconditionally therefore wiped every hand-typed region and every
+      // accepted suggestion, silently, within eight seconds of minute ten — and again the moment
+      // the reader pressed Commit. Same server session ⇒ the handles are still live ⇒ carry
+      // everything untouched.
+      const carried =
+        existing == null
+          ? null
+          : existing.sessionId === sessionId
+            ? {
+                decisions: existing.decisions,
+                suggestionIds: existing.suggestionIds,
+                editIds: existing.editIds,
+              }
+            : dropServerHeldDecisions(existing);
       const decisions = carried?.decisions ?? { ...(defaults ?? {}) };
       const session: ResolverSession = {
         key,
         sessionId,
         decisions,
         suggestionIds: carried?.suggestionIds ?? {},
+        editIds: carried?.editIds ?? {},
         decidedCount: countDecided(decisions),
         conflictCount,
       };
       return pruneResolverSessions(touch(s.order, key), { ...s.sessions, [key]: session });
     }),
 
-  decideRegion: ({ key, fileIndex, regionId, decision, suggestionId }) =>
+  decideRegion: ({ key, fileIndex, regionId, decision, suggestionId, editId }) =>
     set((s) => {
       const existing = s.sessions[key];
       if (existing == null) return {};
       const rk = regionKey(fileIndex, regionId);
       const decisions = { ...existing.decisions };
       const suggestionIds = { ...existing.suggestionIds };
+      const editIds = { ...existing.editIds };
       if (decision == null) {
         delete decisions[rk];
         delete suggestionIds[rk];
+        // Undo clears an edit's handle exactly as it clears any other decision. The lines stay
+        // in the hook's module map until the session ends, which costs nothing and is what lets
+        // a redo-by-hand start from what was there.
+        delete editIds[rk];
       } else {
         decisions[rk] = decision;
-        // ⚠ THE HANDLE IS CLEARED WHENEVER THE DECISION IS NOT `'suggestion'`. A stale
-        // suggestionId left under a region the reader has since taken a side on would be sent to
-        // a commit route that answers `UnknownSuggestion` — an error about something the reader
-        // has already changed their mind about.
+        // ⚠ EACH HANDLE IS CLEARED WHENEVER THE DECISION IS NOT ITS OWN MEMBER. A stale
+        // suggestionId or editId left under a region the reader has since taken a side on would
+        // be sent to a commit route that answers `UnknownSuggestion` / `UnknownEdit` — an error
+        // about something the reader has already changed their mind about.
         if (decision === 'suggestion' && suggestionId != null) suggestionIds[rk] = suggestionId;
         else delete suggestionIds[rk];
+        if (decision === 'edited' && editId != null) editIds[rk] = editId;
+        else delete editIds[rk];
       }
       const session: ResolverSession = {
         ...existing,
         decisions,
         suggestionIds,
+        editIds,
         decidedCount: countDecided(decisions),
       };
       return { sessions: { ...s.sessions, [key]: session }, order: touch(s.order, key) };
@@ -281,16 +331,20 @@ export const useConflictResolverStore = create<ConflictResolverState>((set) => (
       if (existing == null) return {};
       const decisions = { ...existing.decisions };
       const suggestionIds = { ...existing.suggestionIds };
+      const editIds = { ...existing.editIds };
       for (const d of incoming) {
         const rk = regionKey(d.fileIndex, d.regionId);
         decisions[rk] = d.decision;
         if (d.decision === 'suggestion' && d.suggestionId != null) suggestionIds[rk] = d.suggestionId;
         else delete suggestionIds[rk];
+        if (d.decision === 'edited' && d.editId != null) editIds[rk] = d.editId;
+        else delete editIds[rk];
       }
       const session: ResolverSession = {
         ...existing,
         decisions,
         suggestionIds,
+        editIds,
         decidedCount: countDecided(decisions),
       };
       return { sessions: { ...s.sessions, [key]: session }, order: touch(s.order, key) };

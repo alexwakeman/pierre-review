@@ -40,6 +40,12 @@ export function stateWord(region: ConflictRegion, slot: SlotDecision): string {
       return 'Merged';
     case 'ai':
       return 'Suggested';
+    // ⚠ THE ONE PLACE THAT SAYS THE CENTRE IS THE READER'S OWN TEXT. An edited region's centre
+    // wears the same applied green as a taken side, and neither side pane is painted — so this
+    // word is what separates "you wrote this" from "you took one of these". It is also why the
+    // two sides go bare: see `sideOutcome`'s `edit` arm.
+    case 'edit':
+      return 'Your text';
     case 'both-lr':
     case 'both-rl':
       return 'Both applied';
@@ -70,7 +76,7 @@ export const WASH_CLASS: Record<Exclude<SlotRole, null>, string> = {
 // a rejected side now paints NOTHING, `.mr-filler`'s hatch still says which pane has no lines, and
 // the strip's word still says what was decided. What the outline added on screen was a red or blue
 // rectangle around a block nobody took, beside a green one they did. `.mr-edge-*` is gone from
-// `index.css` and `resolverTokens.test.ts` asserts no such rule exists.
+// `index.css` and `codeTokens.test.ts` asserts no such rule exists.
 
 /** The one place a pane's paint becomes a class. `''` is a real answer, and it covers four cases
  *  now: an `unchanged` region, an undecided RESULT, a side offering nothing (`both_same`'s right,
@@ -144,9 +150,62 @@ export const actionLabels = (baseRef: string) => ({
   swap: 'Swap which side goes first',
   ignore: 'Ignore this change and keep the ancestor',
   undo: 'Undo this decision',
+  edit: 'Edit the result for this change',
 });
 
-/** The toolbar. */
+// ── EDITING ONE REGION'S RESULT ──────────────────────────────────────────────────────────────
+//
+// The resolver's one text box. Everything here is about ONE region, and none of it explains what
+// editing is for — the reader opened it because they wanted the trailing comma gone.
+
+/** The strip's button. A verb, and short enough to sit beside six other controls. */
+export const EDIT_REGION = 'Edit';
+/** The panel's own heading. It names the population — this region's result, not the file. */
+export const EDIT_PANEL_TITLE = 'Your text for this change';
+export const EDIT_SAVE = 'Save';
+export const EDIT_CANCEL = 'Cancel';
+export const EDIT_SAVING = 'Saving…';
+/** The textarea's accessible name. Icon-free control, so this is also what a screen reader
+ *  announces on entry; it names the file, because a resolver may hold forty of them. */
+export const editFieldLabel = (path: string, ordinal: number, total: number): string =>
+  `Result for change ${ordinal} of ${total} in ${path}`;
+/** Under the box, always — the ONE fact about this control that is nowhere else on screen: what
+ *  it replaces. ⚠ IT USED TO END "Nothing is committed until you push." That is true and it is
+ *  also the shape of the whole overlay — a footer counting decisions, a "Commit and push" that
+ *  only opens the review step, then the press itself — so it was reassurance nobody asked for,
+ *  which is verbiage however true it is. */
+export const EDIT_HINT = 'This replaces the result for this change only.';
+
+/** The toolbar.
+ *
+ * ⚠ THE TWO FILE CHEVRONS PAGE THE MANIFEST AND SAY SO. They used to announce as "Previous file"
+ * and "Next file"; the toolbar now also carries a word-labelled "Next" that goes to the next file
+ * still needing decisions, and two controls announcing as "Next …" is the duplicate-verb problem
+ * the gutter arrows already cost us. Plain sequential paging is a different job, so it keeps its
+ * chevrons and names itself for what it is. */
+export const FILE_PREV = 'Previous file in the list';
+export const FILE_NEXT = 'Next file in the list';
+
+/** The jump to the next file that still needs decisions. ⚠ THE VISIBLE WORD AND THE ACCESSIBLE
+ *  NAME DIFFER ON PURPOSE: "Next" is what the reader asked for and what fits beside six other
+ *  controls, and the name says which "next" it is. The name CONTAINS the visible word, which is
+ *  WCAG 2.5.3 and not decoration. It is absent — never disabled — once nothing else is
+ *  outstanding; see `nextOutstandingFile`. */
+export const NEXT_OUTSTANDING = 'Next';
+export const NEXT_OUTSTANDING_LABEL = 'Next file that needs decisions';
+
+/** The counter's popover — the outstanding list, reachable from the panes.
+ *
+ * ⚠ IT EXISTS BECAUSE THE DOOR IS NOW LOCKED. The per-file "Still to decide" rows used to live
+ * only on the landing step, and the toolbar button was left enabled precisely so a blocked reader
+ * could get to them. The button is gated on the same fold as the commit now, so the list has to be
+ * reachable without it — a disabled control whose reason lives nowhere is the defect the landing
+ * step's own blocked paragraph exists to prevent. The rows are the same rows, one fold over. */
+export const OUTSTANDING_TITLE = 'What is left to decide';
+/** The popover with nothing left in it. It says the fact and stops — the button beside it is the
+ *  action, and telling the reader to press it is an instruction nobody asked for. */
+export const ALL_DECIDED = 'Everything is decided.';
+
 export const WAND_BUTTON = 'Take the obvious ones';
 export const WAND_BUTTON_TITLE =
   'Apply every change only one side made, and merge the conflicts whose edits don’t overlap. Never picks a side.';
@@ -164,6 +223,12 @@ export const fileCount = (decided: number, total: number): string => `${decided}
  *  vocabulary is readable here. */
 export { CANT_RESOLVE_HERE, NOTHING_TO_DECIDE } from '../../lib/mergeResolver.js';
 export { toDecide };
+
+/** ⚠ RE-EXPORTED FOR THE SAME REASON, ONE FOLD OVER. These three are the words
+ *  `commitBlockedReason` picks between, and that fold is a library — so the strings sit beside it
+ *  and are readable here. The toolbar's button, the toolbar's counter popover and the landing
+ *  step's button all print whatever it returns; none of them composes a sentence of its own. */
+export { HEAD_MOVED, NOTHING_TO_COMMIT, decideTheRest } from '../../lib/conflictCommit.js';
 
 /** The banners above the panes — facts about the model, stated once. */
 export const RENAME_DETECTION_OFF =
@@ -204,7 +269,13 @@ export const READING_FILES = 'Reading the conflicting files…';
 // every decision intact. Three questions in order: what is going in, how it lands, where it goes.
 
 export const LANDING_BACK = 'Back to the panes';
-export const CONTINUE_TO_COMMIT = 'Continue';
+
+// ⚠ `CONTINUE_TO_COMMIT = 'Continue'` IS RETIRED, NOT RENAMED IN PLACE. The toolbar's button says
+// `COMMIT_AND_PUSH` now, the same constant the landing step's button renders, so the two say the
+// same words in the same case — which is the point: one is the entry to the press, the other is
+// the press, and a reader who has decided everything should see the same verb in both places.
+// What separates them is the ACCESSIBLE NAME (`COMMIT_ENTRY_NAME` / `commitPressName`), because
+// "two buttons called Commit and push" is exactly what a screen reader would otherwise hear.
 
 export const WHAT_GOES_IN = 'What is being committed';
 export const filesResolved = (resolved: number, total: number): string =>
@@ -225,22 +296,12 @@ export const STAYS_CONFLICTED =
  *  ⚠ THE COLON MATCHES `STILL_CONFLICTED`'s. They are two sibling headings four lines apart in one
  *  section; punctuating one and not the other reads as an oversight. */
 export const STILL_TO_DECIDE = 'Still to decide:';
-export const decideTheRest = (n: number): string =>
-  `${n} change${n === 1 ? '' : 's'} left to decide.`;
 /** ⚠ IT CARRIES BOTH VISIBLE SPANS. The row renders the path AND the per-file remainder, and an
  *  `aria-label` REPLACES the whole subtree — a name of "Go to src/foo.ts" alone leaves a screen
  *  reader with no remainder anywhere on the screen (the sentence above is the cross-file total),
  *  and drops the visible "3 to decide" out of the accessible name, which is WCAG 2.5.3. */
 export const jumpToFileLabel = (path: string, remaining: number): string =>
   `Go to ${path}, ${toDecide(remaining)}`;
-
-/** Nothing in the commit and nothing the reader can do about it here: every file is either one
- *  the model cannot represent or one it found nothing decidable in.
- *  ⚠ IT IS NOT `unsupportedHeadline`. That sentence counts UNSUPPORTED files and says GitHub is
- *  where they are resolved; it was being handed `rows.length` — every file — and fired on
- *  perfectly supported ones, so a blocked button explained itself with a false sentence. */
-export const NOTHING_TO_COMMIT =
-  'Nothing here can be committed. These files have to be finished on GitHub.';
 
 /**
  * ⚠ THE ONE SENTENCE HERE THAT NEEDS MORE WORDS, NOT FEWER.
@@ -277,16 +338,27 @@ export const pinnedOn = (headSha: string, baseSha: string): string =>
 export const COMMIT_AND_PUSH = 'Commit and push';
 export const REBASE_AND_FORCE_PUSH = 'Rebase and force-push';
 
+/**
+ * The two buttons that share the words "Commit and push", told apart for a reader who cannot see
+ * where they are.
+ *
+ * ⚠ THE VISIBLE LABEL IS THE SAME ON PURPOSE AND THE ACCESSIBLE NAME IS NOT. The toolbar's button
+ * opens the review step — what is going in, how it lands, where it goes — and the landing step's
+ * button is the press that reaches GitHub. Sighted readers have the whole screen to tell those
+ * apart; a screen reader has the name, and "Commit and push, button" twice in one dialog says
+ * nothing about which one pushes. Both names OPEN with the visible words (WCAG 2.5.3), so "press
+ * Commit and push" still finds either.
+ */
+export const COMMIT_ENTRY_NAME = `${COMMIT_AND_PUSH} — review what goes in first`;
+export const commitPressName = (verb: string): string => `${verb} — pushes to GitHub now`;
+/** The toolbar button's tooltip while nothing blocks it. Blocked, it wears the refusal instead —
+ *  one sentence, from `commitBlockedReason`, the same one the landing step prints. */
+export const COMMIT_ENTRY_TITLE = 'Review what gets committed, then push';
+
 /** Stated BEFORE the button, never after the push. It is true because the commit disarms the
  *  intent explicitly — the sentence and the behaviour ship together. */
 export const AUTO_MERGE_ARMED =
   'Merge when ready is armed on this pull request. Pushing this commit disarms it — arm it again afterwards.';
-
-/** ⚠ THE CLIENT MAKES NO OTHER COMPARISON. `usePrLiveRefresh` already re-reads the PR while the
- *  pane is open, and the pinned head is on the session; a second answer to "has this moved?" is
- *  how two surfaces come to disagree. */
-export const HEAD_MOVED =
-  'This pull request moved on GitHub while you were here. Committing will be refused — close this and start again.';
 
 /** Wire vocabulary → one short sentence, the same rule as the prepare phases. */
 export const COMMIT_SENTENCE: Record<ConflictCommitPhase, string> = {

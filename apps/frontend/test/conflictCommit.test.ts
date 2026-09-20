@@ -7,10 +7,16 @@ import type {
   ConflictSession,
 } from '@pierre-review/shared';
 import {
+  HEAD_MOVED,
+  NOTHING_TO_COMMIT,
   buildCommitBody,
+  commitBlockedReason,
   commitPlan,
+  decideTheRest,
   landingTargets,
+  nextOutstandingFile,
   stillConflictingPaths,
+  type OutstandingFile,
 } from '../src/lib/conflictCommit.js';
 
 // Region ids are stable only WITHIN their file, so every fixture here reuses 1/2/3 across files
@@ -285,6 +291,140 @@ describe('the commit gate', () => {
   });
 });
 
+// ── WHY THE COMMIT WILL NOT GO ───────────────────────────────────────────────────────────────
+//
+// ⚠ WHAT THIS EXISTS FOR. The toolbar's "Commit and push" used to be an always-enabled "Continue",
+// on the argument that pressing it was the only route to the list explaining the block. It is shut
+// now — and TWO buttons (the toolbar's entry and the landing step's press) plus the panes' `Enter`
+// binding are shut by this one fold. A second predicate anywhere is how one of them comes to be
+// the way round another, and a second SENTENCE is how one refusal comes to have two explanations.
+
+describe('commitBlockedReason', () => {
+  /** Every supported file decided: the plan the gate opens on. */
+  function readyPlan(): ReturnType<typeof commitPlan> {
+    const s = session([entry(0, 'src/a.ts', { decidableCount: 1 })]);
+    return commitPlan(s, { 0: content(0, 'src/a.ts', [region(1, 'conflict')]) }, { '0:1': 'ours' });
+  }
+
+  it('is null when everything is decided and the head has not moved', () => {
+    const plan = readyPlan();
+    expect(plan.canCommit).toBe(true);
+    expect(commitBlockedReason(plan, false)).toBeNull();
+  });
+
+  it('names the head move FIRST, even over a plan that could otherwise commit', () => {
+    // ⚠ `headMoved` IS NOT IN `canCommit` and must not be: the plan is a fold over the session and
+    // the reader's decisions, while this is a fact about GitHub the shell observed. A gate reading
+    // `canCommit` alone would let the press through on a branch that had moved under it.
+    expect(commitBlockedReason(readyPlan(), true)).toBe(HEAD_MOVED);
+  });
+
+  it('counts the remainder ACROSS files, not the file the reader is in', () => {
+    const s = session([entry(0, 'src/a.ts'), entry(1, 'src/b.ts')]);
+    const plan = commitPlan(
+      s,
+      {
+        0: content(0, 'src/a.ts', [region(1, 'conflict'), region(2, 'ours_only')]),
+        1: content(1, 'src/b.ts', [region(1, 'conflict'), region(2, 'conflict')]),
+      },
+      { '0:1': 'ours', '0:2': 'ours' },
+    );
+    expect(commitBlockedReason(plan, false)).toBe(decideTheRest(2));
+  });
+
+  it('says "nothing here can be committed" when every file is unsupported', () => {
+    // The state `commitPlan` pins separately: `outstanding` is EMPTY and `canCommit` is false, so a
+    // reason keyed on `outstanding.length` alone would return null and open the door.
+    const s = session([
+      entry(0, 'assets/logo.png', {
+        unsupported: 'binary',
+        unsupportedLabel: 'A binary file',
+        regionCount: 0,
+        conflictCount: 0,
+        decidableCount: 0,
+      }),
+    ]);
+    expect(commitBlockedReason(commitPlan(s, {}, {}), false)).toBe(NOTHING_TO_COMMIT);
+  });
+
+  it('says it for a SUPPORTED file with nothing decidable in it too', () => {
+    // ⚠ NOT `unsupportedHeadline`. Nothing reached the commit, and the reason must not claim these
+    // files are ones the model cannot represent — this one is perfectly supported and simply held
+    // no decision.
+    const s = session([entry(0, 'src/empty.ts', { regionCount: 1, conflictCount: 0, decidableCount: 0 })]);
+    const plan = commitPlan(s, { 0: content(0, 'src/empty.ts', [region(1, 'unchanged')]) }, {});
+    expect(plan.outstanding).toEqual([]);
+    expect(commitBlockedReason(plan, false)).toBe(NOTHING_TO_COMMIT);
+  });
+
+  it('⚠ IS THE GATE: null exactly when `canCommit && !headMoved`', () => {
+    // The equivalence the toolbar, the landing step and the panes' `Enter` all lean on. Gating on
+    // one predicate and explaining with another is how a disabled button comes to have a sentence
+    // that does not match it — or a keyboard bypass that does not exist on screen.
+    const cases = [
+      commitPlan(session([entry(0, 'a.ts', { decidableCount: 1 })]), { 0: content(0, 'a.ts', [region(1, 'conflict')]) }, { '0:1': 'ours' }),
+      commitPlan(session([entry(0, 'a.ts', { decidableCount: 1 })]), { 0: content(0, 'a.ts', [region(1, 'conflict')]) }, {}),
+      commitPlan(session([entry(0, 'a.ts', { decidableCount: 2 })]), {}, {}),
+      commitPlan(
+        session([
+          entry(0, 'logo.png', {
+            unsupported: 'binary',
+            unsupportedLabel: 'A binary file',
+            regionCount: 0,
+            conflictCount: 0,
+            decidableCount: 0,
+          }),
+        ]),
+        {},
+        {},
+      ),
+    ];
+    for (const plan of cases) {
+      for (const headMoved of [false, true]) {
+        expect(commitBlockedReason(plan, headMoved) == null).toBe(plan.canCommit && !headMoved);
+      }
+    }
+  });
+});
+
+describe('nextOutstandingFile', () => {
+  const outstanding = (...indexes: number[]): OutstandingFile[] =>
+    indexes.map((index) => ({ index, path: `src/${index}.ts`, remaining: 1, opened: false }));
+
+  it('goes to the next outstanding file after the one the reader is in', () => {
+    expect(nextOutstandingFile(outstanding(1, 4, 7), 4)).toBe(7);
+  });
+
+  it('skips files that need nothing, whatever the manifest order says', () => {
+    // ⚠ IT WALKS `outstanding`, NOT THE MANIFEST. The chevrons page file 3 after file 2 whether or
+    // not 3 holds a decision; this goes where the work is.
+    expect(nextOutstandingFile(outstanding(0, 9), 2)).toBe(9);
+  });
+
+  it('wraps rather than stopping at the end', () => {
+    expect(nextOutstandingFile(outstanding(1, 4), 4)).toBe(1);
+    // And from a file past the last outstanding one.
+    expect(nextOutstandingFile(outstanding(1, 4), 8)).toBe(1);
+  });
+
+  it('is null when nothing is outstanding — which is when the button is absent', () => {
+    expect(nextOutstandingFile([], 3)).toBeNull();
+  });
+
+  it('⚠ is null when the ONLY outstanding file is the one the reader is already in', () => {
+    // A "Next" that lands you where you are reads as a broken control. `n` moves within the file;
+    // the counter's popover still names it; the commit is still shut and still says why.
+    expect(nextOutstandingFile(outstanding(4), 4)).toBeNull();
+  });
+
+  it('never answers with the current file when there is somewhere else to go', () => {
+    expect(nextOutstandingFile(outstanding(2, 5), 2)).toBe(5);
+    // ...including on the wrap, where the naive `find(i > active) ?? list[0]` returns the reader
+    // to the file they are standing in.
+    expect(nextOutstandingFile(outstanding(2, 5), 5)).toBe(2);
+  });
+});
+
 describe('buildCommitBody', () => {
   it('omits a half-decided file WHOLE rather than sending part of it', () => {
     // ⚠ THE SECOND LINE OF DEFENCE, NOW UNREACHABLE FROM THE UI. `plan.canCommit` is false while
@@ -332,6 +472,47 @@ describe('buildCommitBody', () => {
     expect(body.modelHash).toBe('model0000');
     expect(body.strategy).toBe('rebase');
     expect(body.target).toEqual({ kind: 'new_branch', branch: 'fix/x', openPr: true });
+  });
+
+  it('carries a hand-edited region’s HANDLE and none of its text', () => {
+    // ⚠ THE PROPERTY THAT SURVIVED THE CENTRE PANE BECOMING EDITABLE. One route now takes typed
+    // lines; this body still names no content at all, so the server commits only bytes it
+    // folded from its own session.
+    const s = session([entry(0, 'src/a.ts', { decidableCount: 1 })]);
+    const loaded = { 0: content(0, 'src/a.ts', [region(1, 'conflict')]) };
+    const decisions = { '0:1': 'edited' } as const;
+    const body = buildCommitBody({
+      session: s,
+      plan: commitPlan(s, loaded, decisions),
+      loaded,
+      decisions,
+      suggestionIds: {},
+      editIds: { '0:1': 'edit-1' },
+      strategy: 'merge',
+      target: { kind: 'pr_branch' },
+    });
+    expect(body.files[0]?.decisions).toEqual([{ id: 1, decision: 'edited', editId: 'edit-1' }]);
+    expect(JSON.stringify(body)).not.toContain('typed');
+  });
+
+  it('⚠ OMITTING `editIds` drops the edit rather than sending it bare', () => {
+    // `editIds` is trailing-optional so an existing caller compiles; this is what that costs.
+    // The region is dropped from the file's decisions, so the server answers
+    // `IncompleteDecisions` NAMING THE FILE — loud, and recoverable — rather than
+    // `UnknownEdit`, which refuses the whole commit over a field the client simply forgot.
+    const s = session([entry(0, 'src/a.ts', { decidableCount: 1 })]);
+    const loaded = { 0: content(0, 'src/a.ts', [region(1, 'conflict')]) };
+    const decisions = { '0:1': 'edited' } as const;
+    const body = buildCommitBody({
+      session: s,
+      plan: commitPlan(s, loaded, decisions),
+      loaded,
+      decisions,
+      suggestionIds: {},
+      strategy: 'merge',
+      target: { kind: 'pr_branch' },
+    });
+    expect(body.files[0]?.decisions).toEqual([]);
   });
 });
 

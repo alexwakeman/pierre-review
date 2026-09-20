@@ -1,7 +1,12 @@
-import type { ConflictSuggestionRefusal } from '@pierre-review/shared';
+import type { ConflictRegionEditRefusal, ConflictSuggestionRefusal } from '@pierre-review/shared';
 import { hasConflictMarkers } from '../coding/merge.js';
 
 /**
+ * THE TWO TEXT INGRESSES' VALIDATORS. The Pro per-hunk suggestion's, and the CORE manual
+ * edit's — in one file because they are the same job (nothing untrusted becomes a blob until
+ * something here has vouched for it) and because they must not drift into two vocabularies for
+ * one fact. They are DIFFERENT functions, though, and the bottom of this file says why.
+ *
  * THE PRO PER-HUNK SUGGESTION'S VALIDATORS — and they live in CORE, deliberately.
  *
  * ⚠ WHY THEY ARE NOT IN THE PLUGIN. `packages/pro/test/` does not run in CI and is not
@@ -364,4 +369,141 @@ export function validateConflictSuggestion(
   }
 
   return { ok: true, lines: region, keptCommonLines };
+}
+
+/* ═══════════════════════ the reader's own text (CORE, free, both modes) ═══════════════════════ */
+
+export type ConflictEditCheck =
+  | { ok: true; lines: string[] }
+  | { ok: false; refusal: Extract<ConflictRegionEditRefusal, 'not_text' | 'markers' | 'too_long'> };
+
+/**
+ * The two invisible properties of the region's OWN bytes that a textarea cannot carry, and which
+ * the stored edit therefore has to inherit from it rather than from what came back over the wire.
+ *
+ * ⚠ NEITHER IS A PREFERENCE OR A GUESS. Both are read off the region's own line texts by
+ * `editShapeFor`, and both are imposed only when the region's evidence is UNANIMOUS — a mixed
+ * region is left exactly as the reader typed it, because there is no convention there to keep.
+ */
+export interface ConflictEditShape {
+  /** Every line of this region ends `\r`, so the file is CRLF and the edit must be too. */
+  crlf: boolean;
+  /** This region starts the file and the file starts with a UTF-8 BOM. */
+  leadingBom: boolean;
+}
+
+export const NO_EDIT_SHAPE: ConflictEditShape = { crlf: false, leadingBom: false };
+
+/**
+ * What an edit to this region has to inherit from it.
+ *
+ * ⚠ A TEXTAREA DESTROYS BOTH FACTS AND SAYS NOTHING. The browser's API value normalises every
+ * CRLF to a bare LF before React ever sees a keystroke (HTML's "normalize newlines"), so one
+ * character typed into a Windows-authored file used to rewrite the WHOLE hunk's line endings —
+ * a diff of every line, and a genuinely wrong file in any repo carrying `* text eol=crlf`. A BOM
+ * survives the round trip but is zero-width, so `validateConflictEdit`'s blanket U+FEFF refusal
+ * made the first region of every BOM file permanently uneditable, with a sentence
+ * ("Retype the odd one out") naming a character nobody can see.
+ *
+ * @param sides the region's own `base`, `ours` and `theirs` line texts, terminators attached.
+ * @param isFirstRegion is this the file's FIRST region? Only there can a BOM be legitimate.
+ */
+export function editShapeFor(
+  sides: ReadonlyArray<readonly string[]>,
+  isFirstRegion: boolean,
+): ConflictEditShape {
+  const lines = sides.flat();
+  return {
+    // ⚠ UNANIMOUS, NOT A MAJORITY. A CRLF file's final line carries no `\r` when the file has no
+    // trailing newline, so that region reads as mixed and is left alone — which is correct: there
+    // is nothing there to re-impose without inventing a byte.
+    crlf: lines.length > 0 && lines.every((l) => l.endsWith('\r')),
+    leadingBom: isFirstRegion && sides.some((side) => side[0]?.startsWith('﻿') === true),
+  };
+}
+
+/**
+ * THE MANUAL EDIT'S VALIDATOR — three checks, and the list of what it deliberately does NOT
+ * check is the more important half.
+ *
+ *  1. Text-ness  — no NUL, no lone surrogate, no BOM.
+ *  2. Markers    — no surviving conflict marker.
+ *  3. Length     — bounded by `config.conflictSuggestMaxChars`, ONE budget for both ingresses.
+ *
+ * ⚠ 1 IS NOT A FORMALITY HERE. `land.ts` does `Buffer.from(foldToText(...), 'utf8')`, and its
+ * byte-for-byte round-trip claim rests on every side having decoded STRICTLY as UTF-8 at model
+ * build — which is why `not_text` is a file-level REFUSAL there rather than a lossy decode.
+ * Typed text does not inherit that provenance: a lone surrogate reaches `Buffer.from` and is
+ * silently substituted with U+FFFD, so the bytes committed would not be the bytes anybody saw.
+ *
+ * ⚠ THE U+FEFF HALF OF 1 IS NOT BLANKET, AND THE EXCEPTION IS THE FILE'S OWN BOM. `model.ts`
+ * decodes with `ignoreBOM: true` deliberately, so a BOM file's first line really does begin
+ * U+FEFF and the textarea really is seeded with it. Refusing that made the first region of every
+ * Visual-Studio-authored file permanently uneditable — and the only escape, retyping the hunk
+ * from scratch, silently stripped the BOM that the decoder exists to preserve. So when
+ * `shape.leadingBom` says this region owns the file's BOM, one LEADING U+FEFF is taken off before
+ * the scan and put back on the first stored line. Anywhere else it is still `not_text`, and
+ * `validateConflictSuggestion` — whose input is MODEL output, where a BOM is junk — is untouched.
+ *
+ * ⚠ AND THE LINE ENDING IS RE-IMPOSED, BECAUSE THE BROWSER ALREADY DESTROYED IT. See
+ * `editShapeFor`: a textarea hands back LF for every CRLF it was given, so without this one
+ * keystroke in a CRLF file rewrites the whole hunk's endings. Imposing costs nothing when the
+ * region is LF (`shape.crlf` false ⇒ this is a no-op) and is the only way the stored lines can
+ * agree with their own neighbours.
+ *
+ * ⚠ 2 IS NOT COVERED BY ANYTHING ELSE. The land path's full-resolution guard only proves each
+ * conflicted path was OVERWRITTEN (merge-tree's tree stores marker content at those paths); it
+ * never inspects the bytes. A typed `<<<<<<<` would commit with nothing refusing it.
+ *
+ * ⚠ AND CHECKS 6, 7 AND 8 OF THE SUGGESTION VALIDATOR ARE DELIBERATELY ABSENT — context not
+ * repeated, common lines kept, side lines kept. Those three exist because a MODEL silently drops
+ * lines it was not asked to drop, and the reader has no way to know it happened. A PERSON
+ * deleting a line is not a failure mode, it is the feature: the whole reason this route exists
+ * is the trailing comma, the duplicated import, the brace that belongs to neither side. Porting
+ * them over would refuse exactly the edits somebody opened the textarea to make.
+ *
+ * The order is text-ness → markers → length, matching the suggestion validator's: the marker is
+ * the fact worth telling somebody about, and "this is also too long" can wait. The scans cannot
+ * run away on a huge body because the route's ajv schema bounds `text` structurally first.
+ */
+export function validateConflictEdit(
+  text: string,
+  maxChars: number,
+  shape: ConflictEditShape = NO_EDIT_SHAPE,
+): ConflictEditCheck {
+  // The file's own BOM, off the front before the scan and back on after it. Only ever ONE, only
+  // ever leading, and only when this region is where the file's BOM lives.
+  const bom = shape.leadingBom && text.startsWith('\uFEFF');
+  const body = bom ? text.slice(1) : text;
+  if (body.includes('\0') || body.includes('\uFEFF') || LONE_SURROGATE.test(body)) {
+    return { ok: false, refusal: 'not_text' };
+  }
+  if (hasConflictMarkers(body)) return { ok: false, refusal: 'markers' };
+  if (body.length > maxChars) return { ok: false, refusal: 'too_long' };
+  const lines = splitEditLines(body).map((l) =>
+    shape.crlf && !l.endsWith('\r') ? `${l}\r` : l,
+  );
+  // \u26A0 RE-ATTACHED TO THE FIRST LINE, NOT TO THE TEXT. The reader may have deleted it \u2014 it is
+  // zero-width, so they cannot have done so deliberately \u2014 and the file's decoder is documented
+  // to keep it. An edit that leaves the region EMPTY has no first line, and in that case the BOM
+  // goes with the lines the reader deleted, which is the one place they really did choose.
+  if (shape.leadingBom && lines[0] != null && !lines[0].startsWith('\uFEFF')) {
+    lines[0] = `\uFEFF${lines[0]}`;
+  }
+  return { ok: true, lines };
+}
+
+/**
+ * The reader's text as fold lines.
+ *
+ * ⚠ AN EMPTY TEXTAREA IS ZERO LINES, NOT ONE BLANK ONE. `''.split('\n')` is `['']`, which folds
+ * to a region containing one empty line — not what somebody who selected everything and pressed
+ * delete asked for. Deleting a whole hunk has to be reachable; it is half of why this exists.
+ *
+ * ⚠ A TRAILING NEWLINE IS A REAL TRAILING BLANK LINE, and stays one. The suggestion validator
+ * trims trailing blanks because a verbose model pads its answer; a person who left a blank line
+ * at the end of the box can see it there and meant it.
+ */
+function splitEditLines(text: string): string[] {
+  return text === '' ? [] : text.split('\n');
 }

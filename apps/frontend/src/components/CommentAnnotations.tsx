@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   AnnotationKind,
   AnnotationRunTarget,
@@ -9,6 +9,8 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { ADDRESSED_VERDICT_META, userLabel } from '../lib/ui.js';
+import { highlightDiffRows, parsePatch, splitDiffMarker } from '../lib/diff.js';
+import { languageForPath } from '../lib/hljsLines.js';
 import { annotationRunMessage } from '../lib/annotationRun.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import {
@@ -186,13 +188,21 @@ function parseEvidence(raw: string | null | undefined): AddressedEvidence | null
 
 const short = (sha: string): string => sha.slice(0, 7);
 
-function diffLineClass(line: string): string {
+// ⚠ THE TINT CARRIES ADD/DEL; THE TEXT COLOUR ONLY DOES SO WHEN THE ROW IS NOT SYNTAX-COLOURED.
+// On a highlighted row the emerald/rose ink and the token colours fight over the same characters
+// and the tint already says which side the line is on. The `@@` header and context rows keep
+// theirs: neither is an add/del claim.
+function diffLineClass(line: string, highlighted = false): string {
   if (line.startsWith('@@')) return 'text-sky-700 dark:text-sky-400';
   if (line.startsWith('+')) {
-    return 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
+    return highlighted
+      ? 'bg-emerald-50 dark:bg-emerald-950/40'
+      : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
   }
   if (line.startsWith('-')) {
-    return 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300';
+    return highlighted
+      ? 'bg-rose-50 dark:bg-rose-950/40'
+      : 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300';
   }
   return 'text-gray-600 dark:text-gray-400';
 }
@@ -212,7 +222,15 @@ function EvidenceBlock({ evidence }: { evidence: AddressedEvidence }): JSX.Eleme
   // a reader who never clicks never learns it. That was the reported bug: a verdict saying it
   // could not see the code, sitting above a collapsed block that explained exactly why.
   const [open, setOpen] = useState(!grounded || anchorMissing);
-  const lines = evidence.patch != null ? evidence.patch.split('\n') : [];
+  // ⚠ THE SHARED PARSER, NOT A SECOND SPLIT. This used to `split('\n')` and re-spell the +/-
+  // classification inline; `parsePatch` is the one place that knows a `\ No newline at end of
+  // file` row is an annotation rather than a line, and it is what `highlightDiffRows` indexes
+  // against. (It also drops the empty trailing row a bare split left behind.)
+  const rows = useMemo(() => parsePatch(evidence.patch), [evidence.patch]);
+  const html = useMemo(
+    () => highlightDiffRows(rows, languageForPath(evidence.path)),
+    [rows, evidence.path],
+  );
 
   // The COLLAPSED row states the grounding outcome, not just the sha range. "comparing a1b2c3..
   // d4e5f6" reads as "grounded" whatever actually happened, which is precisely backwards when
@@ -255,15 +273,32 @@ function EvidenceBlock({ evidence }: { evidence: AddressedEvidence }): JSX.Eleme
           {evidence.outcome === 'changed' && evidence.patch != null ? (
             <div className="mt-1 max-h-72 overflow-auto rounded border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
               <pre className="w-max min-w-full text-[11px] leading-[1.35]">
-                {lines.map((line, i) => (
-                  <div
-                    // The patch is a fixed snapshot: index IS the identity of a line here.
-                    key={i}
-                    className={`px-2 font-mono whitespace-pre ${diffLineClass(line)}`}
-                  >
-                    {line === '' ? ' ' : line}
-                  </div>
-                ))}
+                {rows.map((row, i) => {
+                  const code = html?.[i] ?? null;
+                  return (
+                    <div
+                      // The patch is a fixed snapshot: index IS the identity of a line here.
+                      key={i}
+                      className={`px-2 font-mono whitespace-pre ${diffLineClass(row.text, code != null)}`}
+                    >
+                      {code != null ? (
+                        <>
+                          {/* The marker is diff notation, not code, so it prints plain.
+                              ⚠ ONLY highlight.js OUTPUT REACHES `dangerouslySetInnerHTML`. */}
+                          {splitDiffMarker(row).marker}
+                          <span
+                            className="code-hl"
+                            dangerouslySetInnerHTML={{ __html: code }}
+                          />
+                        </>
+                      ) : row.text === '' ? (
+                        ' '
+                      ) : (
+                        row.text
+                      )}
+                    </div>
+                  );
+                })}
               </pre>
             </div>
           ) : (

@@ -340,6 +340,10 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('Failed to start pierre:', err);
+  // The product NAME, not the command — the banner above already says Limn. A literal rather
+  // than shared's PRODUCT_NAME on purpose: this module has no top-level imports outside
+  // `node:*` (everything else is a dynamic import, to keep `npx` startup lean) and one word is
+  // not worth loading shared before the failure can be printed.
+  console.error('Failed to start Limn:', err);
   process.exit(1);
 });

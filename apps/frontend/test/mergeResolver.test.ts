@@ -202,6 +202,92 @@ describe('ignored vs unapplied', () => {
     ).toEqual([{ id: 3, decision: 'suggestion', suggestionId: 'sug-1' }]);
     expect(serializeFileDecisions([conflict], 0, { '0:3': 'suggestion' }, {})).toEqual([]);
   });
+
+  it("carries an edit's handle, and refuses to send an edit without one", () => {
+    // The same rule for the same reason: a handle-bearing decision sent bare comes back
+    // `UnknownEdit` and refuses the WHOLE commit, where omitting it is `IncompleteDecisions`
+    // naming the file the reader can go and fix.
+    const conflict = R(4, 'conflict');
+    expect(
+      serializeFileDecisions([conflict], 0, { '0:4': 'edited' }, {}, { '0:4': 'edit-1' }),
+    ).toEqual([{ id: 4, decision: 'edited', editId: 'edit-1' }]);
+    expect(serializeFileDecisions([conflict], 0, { '0:4': 'edited' }, {}, {})).toEqual([]);
+    // ⚠ AND IT NEVER PUTS ONE HANDLE UNDER THE OTHER'S MEMBER. A `'suggestion'` decision must
+    // not go out wearing an `editId` — the server would answer about the wrong thing.
+    expect(
+      serializeFileDecisions([conflict], 0, { '0:4': 'suggestion' }, {}, { '0:4': 'edit-1' }),
+    ).toEqual([]);
+  });
+
+  it('counts an EDITED region as decided, like every other answer', () => {
+    // `tallyFile` counts "is there an entry under this region key", not which member — so the
+    // commit gate, the file menu's rows and the countdown all see an edited region as answered
+    // for free. Pinned because a member-aware fold here would silently block the commit on a
+    // region the reader had plainly answered.
+    const conflict = R(5, 'conflict');
+    expect(tallyFile([conflict], 0, { '0:5': 'edited' }).decided).toBe(1);
+    expect(tallyFile([conflict], 0, { '0:5': 'edited' }).conflictsDecided).toBe(1);
+  });
+});
+
+// ── THE READER'S OWN TEXT ────────────────────────────────────────────────────────────────────
+
+describe('a hand-edited region', () => {
+  const conflict = R(1, 'conflict', { base: ['b'], ours: ['o'], theirs: ['t'] });
+  const held = { editIds: { '0:1': 'e1' }, editLines: { e1: ['typed', 'by hand'] } };
+
+  it('renders the SERVER’s stored lines, and degrades to undecided without them', () => {
+    const slot = slotFor(conflict, 0, { '0:1': 'edited' }, held);
+    expect(slot.kind).toBe('edit');
+    expect(centreLines(conflict, slot)).toEqual(['typed', 'by hand']);
+    // ⚠ A HANDLE WITHOUT ITS LINES IS UNDECIDED, NOT THE ANCESTOR. Rendering `base` here while
+    // the counter said "decided" and the commit still carried the handle is the
+    // what-you-saw-is-not-what-lands failure the whole screen exists to prevent.
+    const noLines = slotFor(conflict, 0, { '0:1': 'edited' }, { editIds: { '0:1': 'e1' } });
+    expect(noLines.kind).toBe('unapplied');
+    const noHandle = slotFor(conflict, 0, { '0:1': 'edited' }, {});
+    expect(noHandle.kind).toBe('unapplied');
+  });
+
+  it('paints the CENTRE and neither side, and draws no ribbon', () => {
+    // ⚠ THE ONE STATE WHERE THE CENTRE IS GREEN AND NO RIBBON LEAVES IT. The text came from
+    // neither pane, so a ribbon would claim a correspondence nothing can state — and a painted
+    // side would claim a provenance for text the reader may have replaced entirely.
+    const slot = slotFor(conflict, 0, { '0:1': 'edited' }, held);
+    expect(panePaint(conflict, slot, 'centre')).toBe('applied');
+    expect(panePaint(conflict, slot, 'left')).toBeNull();
+    expect(panePaint(conflict, slot, 'right')).toBeNull();
+    expect(ribbonSides(conflict, slot)).toEqual([]);
+    // The state role is `applied`, which is what the centre's 2px rule reads — the strip's word
+    // is what separates this from a taken side.
+    expect(slotRole(conflict, slot)).toBe('applied');
+  });
+
+  it('is answerable on a ONE-SIDED region, which no side-shaped member is', () => {
+    // `'edited'` is not a side, so `region.allowed` — which lists the deterministic members —
+    // never mentions it, and the shared fold hoists it past the per-kind allow-list.
+    const oneSided = R(2, 'ours_only', { base: ['b'], ours: ['o'], theirs: ['b'] });
+    expect(oneSided.allowed).not.toContain('edited');
+    const slot = slotFor(
+      oneSided,
+      0,
+      { '0:2': 'edited' },
+      { editIds: { '0:2': 'e2' }, editLines: { e2: ['mine'] } },
+    );
+    expect(slot.kind).toBe('edit');
+    expect(centreLines(oneSided, slot)).toEqual(['mine']);
+  });
+
+  it('renders an EMPTY edit as an empty region — deleting a hunk is the feature', () => {
+    const slot = slotFor(
+      conflict,
+      0,
+      { '0:1': 'edited' },
+      { editIds: { '0:1': 'e0' }, editLines: { e0: [] } },
+    );
+    expect(slot.kind).toBe('edit');
+    expect(centreLines(conflict, slot)).toEqual([]);
+  });
 });
 
 describe('what each pane paints', () => {

@@ -32,6 +32,7 @@ import {
   useAdvisorPutProfile,
 } from '../../hooks/useAdvisor.js';
 import { automatedReviewerMeta, vendorInk } from '../../lib/ui.js';
+import { highlightBlock, languageForPath } from '../../lib/hljsLines.js';
 import { BotIcon } from '../Icons.js';
 
 const INTENT_LABEL: Record<string, string> = {
@@ -257,6 +258,25 @@ function ProfileSection({
         <div className="text-red-600 dark:text-red-400">{(put.error as Error).message}</div>
       )}
     </div>
+  );
+}
+
+/**
+ * A config file the advisor generated, shown before anything is written — `.coderabbit.yaml` and
+ * its siblings. A whole file, not a diff, so it goes through `highlightBlock`; the language comes
+ * from the path printed directly above it.
+ *
+ * ⚠ ONLY highlight.js OUTPUT REACHES `dangerouslySetInnerHTML`. A null — an unlisted extension, a
+ * file past the line gate, a lexer that threw — renders plain text, which is what this was.
+ */
+function GeneratedFile({ path, text }: { path: string; text: string }): JSX.Element {
+  const html = useMemo(() => highlightBlock(text, languageForPath(path)), [text, path]);
+  const cls =
+    'max-h-72 overflow-auto whitespace-pre-wrap rounded border border-gray-200 bg-gray-50 p-2 text-[11px] text-gray-700 dark:border-gray-800 dark:bg-gray-900/40 dark:text-gray-300';
+  return html != null ? (
+    <pre className={`code-hl ${cls}`} dangerouslySetInnerHTML={{ __html: html }} />
+  ) : (
+    <pre className={cls}>{text}</pre>
   );
 }
 
@@ -543,9 +563,7 @@ function BotSection({
                   Copy
                 </button>
               </div>
-              <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded border border-gray-200 bg-gray-50 p-2 text-[11px] text-gray-700 dark:border-gray-800 dark:bg-gray-900/40 dark:text-gray-300">
-                {f.after}
-              </pre>
+              <GeneratedFile path={f.path} text={f.after} />
             </div>
           ))}
         </div>

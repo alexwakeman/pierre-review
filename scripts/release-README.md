@@ -99,6 +99,6 @@ locally instead — a larger database, but PR detail then works fully offline.
 ## License
 
 Source-available under the **Functional Source License (FSL-1.1-MIT)** — see
-[LICENSE](./LICENSE). You may use, self-host, and modify Pierre freely; you may
+[LICENSE](./LICENSE). You may use, self-host, and modify Limn freely; you may
 **not** offer it as a competing commercial or hosted product. Each release
 automatically converts to the **MIT License** two years after its publication.

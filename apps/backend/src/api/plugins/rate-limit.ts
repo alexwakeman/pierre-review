@@ -631,13 +631,16 @@ function tierFor(method: string, path: string): readonly Tier[] {
     return [TIERS.sync];
   }
   // ---- The merge-conflict resolver (CORE / free, BOTH MODES) ----
-  // SIX paths under one prefix with FOUR different costs, which is the exact shape this file
-  // gets wrong when it guesses. Each is anchored at BOTH ends: the segment is `conflicts`
-  // (PLURAL — `conflict` matches nothing, the `comments`/`/comment` trap one vocabulary over),
-  // and `/conflicts` is a PREFIX of `/conflicts/commit`, so an unanchored match would hand the
-  // open, the commit, the file read and the stream one bucket — right for one of the four.
+  // SEVEN paths under one prefix with FOUR different costs, which is the exact shape this file
+  // gets wrong when it guesses. ⚠ SEVEN ROUTES, FOUR BUCKETS — the edit route reuses the file
+  // read's `[search, read]` verbatim, and three reads share `[read]`, so the counts do not track
+  // each other and adding a route does not add a cost. Each is anchored at BOTH ends: the segment
+  // is `conflicts` (PLURAL — `conflict` matches nothing, the `comments`/`/comment` trap one
+  // vocabulary over), and `/conflicts` is a PREFIX of `/conflicts/commit` and of
+  // `/conflicts/edit`, so an unanchored match would hand the open, the commit, the edit, the file
+  // read and the stream one bucket — right for one of the five it would swallow.
   // ⚠ Do NOT add `conflicts` to the `hitsGithub` alternation below: that regex is unanchored
-  // and would swallow all five.
+  // and would swallow all seven.
   //
   //   POST …/conflicts          starts a CLONE (ensureClone + two fetches + merge-tree):
   //                             disk, CPU and GitHub bandwidth, minutes cold. Same shape as
@@ -645,6 +648,14 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //                             githubWrite (it writes nothing upstream), emphatically not
   //                             the 600/min blanket.
   //   POST …/conflicts/commit   a real `git push`. githubWrite, like every other write here.
+  //   POST …/conflicts/edit     the ONE route in the app that accepts typed file content: a
+  //                             string scan and a Map write, no git and no GitHub. Cheap — and
+  //                             the 600/min blanket is still WRONG for it, because what it
+  //                             spends is not CPU, it is RETAINED MEMORY in a process every
+  //                             tenant shares (a per-session budget caps the total, but the
+  //                             bucket is what stops somebody arriving at it). 60/min is more
+  //                             saves than any reader makes; same reasoning as the file read
+  //                             beside it, different resource.
   //   GET  …/conflicts/files/N  an in-memory read whose RESPONSE BODY IS THE WORK — a
   //                             three-pane model of one source file. The bot-benchmark
   //                             argument verbatim, so the same 60/min bucket.
@@ -662,6 +673,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (method === 'POST' && /^\/api\/prs\/\d+\/conflicts$/.test(path)) return [TIERS.sync];
   if (method === 'DELETE' && /^\/api\/prs\/\d+\/conflicts$/.test(path)) return [TIERS.read];
   if (mutating && /^\/api\/prs\/\d+\/conflicts\/commit$/.test(path)) return [TIERS.githubWrite];
+  if (mutating && /^\/api\/prs\/\d+\/conflicts\/edit$/.test(path)) return [TIERS.search, TIERS.read];
   if (!mutating && /^\/api\/prs\/\d+\/conflicts\/files\/\d+$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }

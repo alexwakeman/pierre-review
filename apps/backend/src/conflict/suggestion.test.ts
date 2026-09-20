@@ -8,6 +8,7 @@ import {
   conflictFences,
   hunkRegionChars,
   nonceCollides,
+  validateConflictEdit,
   validateConflictSuggestion,
   type ConflictHunkContext,
 } from './suggestion.js';
@@ -327,5 +328,82 @@ describe('hunkRegionChars', () => {
     expect(hunkRegionChars([], [], [])).toBe(0);
     // A hunk's size is its own; the context lines the seam attaches are not part of it.
     expect(hunkRegionChars(HUNK.base, HUNK.ours, HUNK.theirs)).toBe(small);
+  });
+});
+
+// ── THE READER'S OWN TEXT ────────────────────────────────────────────────────────────────────
+//
+// Three checks, and the absences matter as much as the checks: a person deleting a line is the
+// feature, so none of the suggestion validator's "did you drop something?" rules apply here.
+
+describe('validateConflictEdit', () => {
+  const CAP = 4000;
+
+  it('takes ordinary code, and splits it on newlines exactly as typed', () => {
+    const out = validateConflictEdit('if (a) {\n  go();\n}', CAP);
+    expect(out.ok).toBe(true);
+    if (out.ok) expect(out.lines).toEqual(['if (a) {', '  go();', '}']);
+  });
+
+  it('treats an EMPTY box as zero lines, not one blank one', () => {
+    // Deleting a whole hunk has to be reachable; `''.split('\n')` is `['']`, which would fold to
+    // a region containing one empty line — not what somebody who selected everything and pressed
+    // delete asked for.
+    const out = validateConflictEdit('', CAP);
+    expect(out.ok).toBe(true);
+    if (out.ok) expect(out.lines).toEqual([]);
+  });
+
+  it('keeps a trailing blank line, because a person who left one meant it', () => {
+    const out = validateConflictEdit('a\n', CAP);
+    expect(out.ok).toBe(true);
+    if (out.ok) expect(out.lines).toEqual(['a', '']);
+  });
+
+  it('refuses a NUL, a BOM and a LONE SURROGATE', () => {
+    // ⚠ THE LONE SURROGATE IS THE REAL HAZARD. `land.ts` does `Buffer.from(text, 'utf8')`, which
+    // substitutes U+FFFD silently — so without this the bytes committed are not the bytes the
+    // reader saw, and the land path's byte-for-byte claim is false for typed text.
+    for (const bad of ['a\0b', '\uFEFFa', 'a\uD800b', 'tail\uDC00']) {
+      const out = validateConflictEdit(bad, CAP);
+      expect(out.ok, JSON.stringify(bad)).toBe(false);
+      if (!out.ok) expect(out.refusal).toBe('not_text');
+    }
+    // A COMPLETE surrogate pair is ordinary text and must not be caught by it.
+    const emoji = validateConflictEdit('const flag = "🚩";', CAP);
+    expect(emoji.ok).toBe(true);
+  });
+
+  it('refuses a surviving conflict marker', () => {
+    // Nothing downstream would: the land path's full-resolution guard proves each conflicted
+    // path was OVERWRITTEN, never that the bytes are clean.
+    const out = validateConflictEdit('<<<<<<< HEAD\nmine\n>>>>>>> theirs', CAP);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.refusal).toBe('markers');
+  });
+
+  it('reports the MARKER when the text is both marked and over-long', () => {
+    // The order is the suggestion validator's, and for its reason: the marker is the fact worth
+    // telling somebody about, and "it is also too long" can wait.
+    const out = validateConflictEdit(`<<<<<<< HEAD\n${'x'.repeat(CAP * 2)}`, CAP);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.refusal).toBe('markers');
+  });
+
+  it('bounds the text at the cap it is given', () => {
+    expect(validateConflictEdit('x'.repeat(CAP), CAP).ok).toBe(true);
+    const over = validateConflictEdit('x'.repeat(CAP + 1), CAP);
+    expect(over.ok).toBe(false);
+    if (!over.ok) expect(over.refusal).toBe('too_long');
+  });
+
+  it('does NOT apply the suggestion validator’s three drop-detectors', () => {
+    // ⚠ THE POINT OF THE WHOLE FEATURE. Checks 6, 7 and 8 exist because a MODEL silently drops
+    // lines it was not asked to drop. A person deleting the duplicated import, the brace that
+    // belongs to neither side, or the whole hunk is doing the thing they opened the box for —
+    // and every one of these would refuse under those rules.
+    for (const text of ['', 'just this one line', 'a']) {
+      expect(validateConflictEdit(text, CAP).ok, JSON.stringify(text)).toBe(true);
+    }
   });
 });

@@ -15,6 +15,7 @@ import {
   BLAST_HIGH_SURFACES,
   BLAST_SENSITIVITY_DEFAULT,
   BLAST_THRESHOLDS,
+  GENERIC_REVIEWER_LABELS,
   LARGE_PR_CODE_LOC_DEFAULT,
 } from '@pierre-review/shared';
 import type {
@@ -304,7 +305,14 @@ export const MY_TURN_REASON_META: Record<MyTurnReason, { label: string; title: s
 // AutomatedReviewerKind = ReviewBotKind ∪ 'in_house' ∪ 'pierre' (vendor classification lives
 // in @pierre-review/shared reviewBotKind; presentation lives here). Drives the PrDetail
 // "Bots" chip, the feed vendor tag, the bot-signal / bot-ROI cards, so a review-comment card
-// reads "CodeRabbit flagged…" (or "In-house AI" / "Pierre · Claude") not a bare bot login.
+// reads "CodeRabbit flagged…" (or "In-house / custom" / "Limn · Claude") not a bare bot login.
+//
+// ⚠ THIS MAP HAS TWO SIBLINGS AND THEY HAVE DRIFTED BEFORE: the backend's `labelFor`
+// (sync/reviewer-classify.ts, which also PERSISTS the label) and the Pro plugin's Slack
+// `BOT_LABELS` (packages/pro/src/slack/report.ts). The three UNBRANDED kinds at the bottom now
+// read one spelling from `GENERIC_REVIEWER_LABELS` in shared, because those were the two keys
+// the three copies disagreed on. The branded labels are still hand-kept in triplicate — change
+// one, change all three.
 export const BOT_VENDOR_META: Record<
   AutomatedReviewerKind,
   { label: string; color: string }
@@ -394,11 +402,13 @@ export const BOT_VENDOR_META: Record<
   vercel: { label: 'Vercel', color: '#5f5f5f' },
   gitpod: { label: 'Gitpod', color: '#ff8a00' },
   // ── The three UNBRANDED kinds — legal in every role, rendered by login rather than by brand ──
-  in_house: { label: 'In-house / custom', color: '#6b7280' },
+  // Labels come from shared so the SPA, the backend's persisted `label` and the Slack digest
+  // cannot say three different things; the colours stay here, where the ground is known.
+  in_house: { label: GENERIC_REVIEWER_LABELS.in_house, color: '#6b7280' },
   // Generic proprietary vendor (user-classified, brand unknown) — neutral tint; like
   // in_house it is NOT branded, so buildBotColorMap gives each one a distinct palette hue.
-  vendor: { label: 'Vendor', color: '#71717a' },
-  pierre: { label: 'Limn · Claude', color: '#d97757' },
+  vendor: { label: GENERIC_REVIEWER_LABELS.vendor, color: '#71717a' },
+  pierre: { label: GENERIC_REVIEWER_LABELS.pierre, color: '#d97757' },
 };
 
 // Display meta for an automated-reviewer kind (vendor / in-house / Pierre). The one lookup

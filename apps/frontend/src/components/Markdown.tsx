@@ -112,6 +112,15 @@ function declaredSizeVars(width: unknown, height: unknown): CSSProperties | unde
 // is parsed by rehype-raw, then allowlisted by rehype-sanitize BEFORE
 // rehype-highlight runs — so highlight's hljs/code classNames survive the
 // sanitizer. Plugin order is load-bearing: raw → sanitize → highlight.
+//
+// ⚠ THIS FILE AUTO-DETECTS THE LANGUAGE AND `lib/hljsLines.ts` REFUSES TO. THE DIVERGENCE IS
+// DELIBERATE — DO NOT "FIX" EITHER TO MATCH THE OTHER. There, a language is resolved from the
+// FILE PATH and a wrong guess would colour a diff hunk as something it is not, which is a claim
+// about the code. Here there is no path: a fenced block in a bot comment usually carries no
+// language tag, so `detect: false` would strip the colour from most of them and the cost of a
+// wrong guess is a mis-tinted quotation nobody will act on. This is also why `.md-body pre` keeps
+// its own fixed #0d1117 ground (index.css) — github-dark is correct against that one, and these
+// blocks do NOT go through the `.code-hl` palette the app's other code surfaces share.
 // Memoized on its single string child: markdown+syntax-highlight parsing is expensive,
 // and this component renders in hot, frequently-re-rendering places (the Feed's rows, PR
 // comments, thread bodies, Insights). With a stable body string, a parent re-render (e.g. a

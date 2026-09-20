@@ -425,6 +425,21 @@ function FixResult({
           <div className="overflow-hidden rounded border border-gray-200 text-gray-800 dark:border-gray-800 dark:text-gray-200">
             <FileDiffView files={diffFiles} />
           </div>
+          {/* The fixer has no shell — it reads and edits, and nothing here was installed, built
+              or run (apps/backend/src/coding/agent.ts, FIX_TOOLS). The run makes no verification
+              claim of its own, but a diff sitting above a Push button invites the reader to
+              assume one, so the fact is stated once, here, where they are about to press it.
+              TEMPLATED, never asked of the model: a product fact does not belong in model prose
+              (the Bot Tuning Advisor precedent).
+              ⚠ IT STATES WHAT WE KNOW AND STOPS. It used to end "— CI will run on push", which is
+              a promise about the REPOSITORY that this card cannot make: `ciStatusFrom(null)` is
+              `'unknown'` for a PR with no check rollup at all, and whole repos here are like that
+              (62 of 63 PRs on one, 1,014 of 9,544 overall). The sentence exists to stop the reader
+              assuming verification, so a second clause inventing some is the thing it was written
+              to remove. */}
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            Not built or tested here.
+          </p>
           <PushControls
             pr={pr}
             fix={fix}

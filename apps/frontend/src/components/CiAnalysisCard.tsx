@@ -126,7 +126,7 @@ export function CiAnalysisCard({ pr }: { pr: PrDetail }): JSX.Element | null {
   const analysis = data?.analysis ?? null;
   // ONE predicate, read by the "out of date" chip AND by the "Fix it" gate below — see
   // ciAnalysisStale for why the two must not be computed separately.
-  const stale = ciAnalysisStale(analysis, data?.headSha, pr.headSha);
+  const stale = ciAnalysisStale(analysis, data?.headSha, pr.headSha, data?.generatedAt);
   const outOfCredits = data?.creditsExhausted === true;
   // `pr.ciStatus` is included deliberately, and it is the SAME predicate the server computes
   // (`prHasFailures` reads pullRequests.ciStatus). Without it the card is blank whenever the

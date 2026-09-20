@@ -8,7 +8,9 @@
 // section (in-house AI tools that copy a severity taxonomy but carry no brand marker).
 //
 // Correctness contract (pinned by review-fingerprint.test.ts):
-//   • Pierre's own posted-review marker `<!-- pierre:claude-review` → tool 'pierre'.
+//   • Limn's own posted-review marker `<!-- pierre:claude-review` → tool 'pierre'. The marker
+//     and the kind keep the old spelling permanently — both are stamped into GitHub review
+//     bodies / stored rows we do not control.
 //   • a branded vendor marker → that vendor's ReviewBotKind.
 //   • generic AI markers / a uniform severity taxonomy across ≥2 comments → 'in_house'.
 //   • a plain human review body → { marked: false, tool: null, markers: [] }.
@@ -30,12 +32,17 @@ interface FingerprintDef {
 }
 
 // Branded, vendor-specific markers. Ordered by specificity; the FIRST vendor whose
-// marker matches wins (Pierre first — its own review is dogfooded through the same
+// marker matches wins (Limn first — its own review is dogfooded through the same
 // detector). All matched against the combined review + comment text, case-insensitive.
 const FINGERPRINTS: FingerprintDef[] = [
   {
     kind: 'pierre',
-    patterns: [{ name: 'Pierre review marker', re: /<!--\s*pierre:claude-review/i }],
+    // ⚠ THE NAME IS DISPLAY, THE REGEX IS NOT. The name lands in
+    // `workspace_reviewers.reasons_json` and prints as a tooltip ("matched pierre fingerprint:
+    // Limn review marker"), so it follows the product name. The PATTERN must never move: it is
+    // the ONLY producer of the 'pierre' kind, and the marker it matches is already stamped into
+    // GitHub review bodies we cannot edit.
+    patterns: [{ name: 'Limn review marker', re: /<!--\s*pierre:claude-review/i }],
   },
   {
     kind: 'coderabbit',

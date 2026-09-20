@@ -127,10 +127,15 @@ export interface MentionCandidate extends User {
 }
 
 // ── Third-party AI review bots ────────────────────────────────────────────────
-// Pierre is "the calm layer above your review bot": it classifies which vendor an
+// Limn is "the calm layer above your review bot": it classifies which vendor an
 // AI reviewer belongs to so its firehose can be triaged, not just excluded as noise.
-// The kind is the vendor; display label/colour live in the frontend (lib/ui.ts
-// BOT_VENDOR_META) so shared stays presentation-free.
+// The kind is the vendor; display label/colour for the ~80 BRANDED kinds live in the
+// frontend (lib/ui.ts BOT_VENDOR_META) so shared stays presentation-free.
+//
+// ⚠ ONE NARROW EXCEPTION as of the Pierre→Limn sweep: the three UNBRANDED kinds'
+// labels live in ./product.ts (GENERIC_REVIEWER_LABELS), because one of them composes
+// the product name and another carries a judgement, and three independent copies of
+// them had already drifted apart on both. Branded labels did NOT move.
 //
 // The backend cannot import this map at runtime (shared isn't shipped server-side —
 // see the `REASON_PRIORITY` note in db/queries.ts), so it keeps a LOCAL copy in
@@ -830,7 +835,7 @@ export interface ReviewerClassification {
   login: string;
   automated: boolean;
   kind: AutomatedReviewerKind | null;   // null when human
-  label: string;                        // "CodeRabbit" | "In-house AI" | "acme-ci" | "Pierre · Claude"
+  label: string;                        // "CodeRabbit" | "In-house / custom" | "acme-ci" | "Limn · Claude"
   // What this automation is FOR (see ReviewerRole). Always 'review' for a human — the field is
   // meaningless when `automated` is false, and callers must gate on `automated` first rather
   // than reading a human's role. Persisted NOT NULL DEFAULT 'review', so it is never absent.
@@ -1835,7 +1840,7 @@ export interface BotOnlyPrItem {
   title: string;
   repoId: number;      // for the cross-repo drill-down's repo filter
   repoFullName: string;
-  botLabel: string;    // the first automated reviewer's label ("CodeRabbit" | "Pierre · Claude" | …)
+  botLabel: string;    // the first automated reviewer's label ("CodeRabbit" | "Limn · Claude" | …)
   state: PrState;      // 'open' (mergeable) | 'merged' (in window)
   githubUrl: string;
   openedAt: string;    // ISO-8601 — the PR age (sortable)
@@ -6379,6 +6384,27 @@ export interface PrSummaryResponse {
 // Pierre's agentic fixer could actually fix it). Drives how much the report elaborates.
 export type AiConfidence = 'high' | 'medium' | 'low';
 
+/**
+ * When the CI-analysis prompt last changed WHAT IT CLAIMS THE FIXER CAN DO. An analysis stored
+ * before this is read as out of date, exactly as one whose head has moved is.
+ *
+ * ⚠ IT IS A CONTRACT VERSION WEARING A TIMESTAMP, NOT A FRESHNESS POLICY. The cache key hashes
+ * `head|diff|check logs` — the prompt is deliberately not a term — so a prompt edit invalidates
+ * nothing already stored, and the rows kept telling readers the fixer would "run the repository's
+ * linter/build to validate the fix locally" and "commit and push" long after it had no shell at
+ * all. 17 of 19 rows on one dev database said so, 3 of them still seedable to the agent, which
+ * would spend turns and budget reaching for a tool that is denied outright. Staleness does not
+ * re-bill anybody: the card says the analysis is out of date and offers Analyze, and the seed
+ * refuses rather than narrating a capability the product does not have.
+ *
+ * ⚠ BOTH HALVES READ IT FROM HERE. `ciAnalysisStale` in the SPA and `ciSeedDecision` in the
+ * plugin are twins that must never disagree — a chip saying the analysis is old beside a button
+ * that seeds an agent with it is the defect that pairing exists to prevent.
+ *
+ * 2026-09-20T00:00:00Z — the day the prompt stopped offering a shell.
+ */
+export const CI_ANALYSIS_CONTRACT_EPOCH_MS = Date.UTC(2026, 8, 20);
+
 export interface CiAnalysisResponse {
   enabled: boolean;
   // The root-cause + potential-fixes report (markdown), or null if never generated.
@@ -7721,7 +7747,7 @@ export interface ReviewerRoutingCard extends InsightCardBase, InsightPrRef {
 
 // Per-vendor rollup carried by the bot_signal card.
 export interface BotSignalVendorStat {
-  kind: AutomatedReviewerKind; // vendor, in-house, or Pierre (widened from ReviewBotKind for the bot-triage platform)
+  kind: AutomatedReviewerKind; // vendor, in-house, or Limn's own (widened from ReviewBotKind for the bot-triage platform)
   threads: number; // review threads this bot opened in the sprint window
   actedOn: number; // of those, in state resolved|likely_addressed (the acted-on heuristic)
   untouched: number; // in state untouched (the pure backlog/noise)

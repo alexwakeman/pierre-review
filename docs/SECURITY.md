@@ -143,6 +143,15 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
   shell that is RCE on the developer's machine via a stranger's PR. The old
   `Bash(rm *)`-style blocklist was never a boundary. Both review prompts + the AI-Fix prompt
   gained explicit **untrusted-input / prompt-injection** instructions.
+- **`coding/agent.ts`**: **the AI-Fix agent followed**, and all three agentic runs are now
+  shell-free. `FIX_TOOLS` lost `Bash`; `DISALLOWED_TOOLS` is `['Bash','NotebookEdit']`, matching
+  `RESOLVE_DISALLOWED_TOOLS`. Same input shape as a review, and WIDER on the `'comments'` seed,
+  whose whole payload is comment bodies. The five `Bash(rm *)`/`Bash(git …)` prefixes it replaced
+  were the same non-boundary. ⚠ The `Bash(git commit *)`/`Bash(git push *)` pair also encoded
+  "the host owns the commit" — still true, and now enforced harder, but say so in prose because
+  the grep no longer finds it. The fixer's build/test capability went with the shell; CI runs on
+  push, and the SPA says so beside the diff (see
+  [docs/PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § The fix agent has no shell).
 
 **The local clone cache (`~/.pierre-review/clones`) — five fixes, and the standing invariant.**
 The AI-Fix agent, Claude Review and now the merge-conflict resolver all work inside this cache, so

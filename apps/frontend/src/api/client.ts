@@ -46,6 +46,8 @@ import type {
   ConflictCommitBody,
   ConflictFileContent,
   ConflictOpenBody,
+  ConflictRegionEditBody,
+  ConflictRegionEditResponse,
   ConflictSession,
   ConsolidatedFeedResponse,
   WorkspaceInsightsResponse,
@@ -618,14 +620,17 @@ export const api = {
 
   // ---- The merge-conflict resolver (CORE / free, BOTH MODES) ----
   //
-  // ⚠ THESE ROUTES DO NOT EXIST IN CLOUD. They are registered only when `!config.isCloud`, so a
-  // cloud call falls to the not-found handler exactly like a typo'd URL. `MeResponse
-  // .conflictResolver` is the ONE thing that decides whether a caller may reach for them, and it
-  // gates every entry button — nothing here probes.
+  // ⚠ THESE ROUTES EXIST IN BOTH MODES. `app.ts` registers the family unconditionally and
+  // `MeResponse.conflictResolver` is `true` in both — the old "local only" gate is RETRACTED
+  // (docs/MERGE-CI-TRUNK.md § Resolving conflicts in the app). That field stays on the wire as
+  // the ONE thing deciding whether a caller may reach for these, and it gates every entry
+  // button; nothing here probes.
   //
-  // ⚠ NOTHING ON THIS WIRE SENDS FILE CONTENT. Every request field is an index, an id or an enum
-  // member; an accepted model suggestion travels back as an opaque `suggestionId` addressing text
-  // the SERVER holds. That is what makes "no free typing" a property of the protocol.
+  // ⚠ EXACTLY ONE OF THESE SENDS FILE CONTENT, AND IT IS NOT THE COMMIT. `editConflictRegion`
+  // carries the lines a reader typed for ONE region, which the server validates before it mints
+  // a handle for them. Every field of every other request, the commit included, is an index, an
+  // id or an enum member: an accepted model suggestion travels back as an opaque `suggestionId`
+  // and a hand-edited region as an opaque `editId`, both addressing text the SERVER holds.
   //
   // Open and commit are ASYNCHRONOUS: both validate everything cheap synchronously and refuse
   // with a real status code, then answer 202 and run. Progress arrives on the ONE session SSE
@@ -646,6 +651,16 @@ export const api = {
   conflictFile: (prId: number, sessionId: string, fileIndex: number) =>
     get<ConflictFileContent>(
       `/api/prs/${prId}/conflicts/files/${fileIndex}?session=${encodeURIComponent(sessionId)}`,
+    ),
+  // ONE region's result, typed by the reader → an opaque `editId` the commit body carries. The
+  // server validates the text (no NUL, no lone surrogate, no BOM, no surviving conflict marker,
+  // a size cap) BEFORE the id exists, so a handle that came back is a handle whose bytes were
+  // checked. ⚠ A REFUSAL IS A 200 CARRYING `{ok:false}` and the server's own sentence — an
+  // outcome the reader fixes, not a transport error. A DEAD SESSION is still a 409, the same as
+  // on every other route here, and `handle` throws it with the server's message.
+  editConflictRegion: (prId: number, body: ConflictRegionEditBody) =>
+    fetch(`/api/prs/${prId}/conflicts/edit`, jsonBody('POST', body)).then((r) =>
+      handle<ConflictRegionEditResponse>(r),
     ),
   // The push. The body echoes the pins (`expectedHeadSha`, `expectedBaseSha`, `modelHash`); a
   // mismatch is refused and nothing is written.

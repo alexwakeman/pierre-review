@@ -30,7 +30,8 @@ import { regionKey } from '../../store/conflictResolver.js';
 // while the overlay is open. It dies with the SERVER SESSION, which is also when the handle dies.
 //
 // ⚠ AND THAT IS WHY THE ACCEPTED LINES OUTLIVE THIS HOOK'S MOUNT. `ResolverPanes` unmounts the
-// moment the reader presses Continue — the landing step replaces it inside the same overlay — so
+// moment the reader presses the toolbar's "Commit and push" — the landing step replaces it inside
+// the same overlay, and that button is the entry to the press rather than the press itself — so
 // component state alone loses them on `Back`, and `slotFor` would then render an ACCEPTED
 // suggestion as undecided while the commit still carried its `suggestionId`. The counter would
 // say decided, the pane would say "Needs a decision", and the push would land Claude's text: the

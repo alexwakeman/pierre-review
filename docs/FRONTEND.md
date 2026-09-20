@@ -2112,6 +2112,15 @@ landmines:
   `tabIndex={-1}` container, so `←`/`→`/`b`/`x`/`u` cannot fight a text caret in the branch-name
   field or the file list's own `↑↓`. That is the `HelpModal` precedent — one key globally, never a
   scheme.
+- ⚠ **THE TOOLBAR'S "Commit and push" IS GATED, AND `Enter` ON THE PANES CARRIES THE SAME LOCK.**
+  Both read `commitBlockedReason(plan, headMoved)` — null exactly when `plan.canCommit &&
+  !headMoved`, otherwise the ONE sentence the button wears (tooltip + `aria-describedby`) and the
+  landing step prints above its own button. It was "Continue", never disabled, because pressing it
+  was the only way to the list explaining the block; that list is now a popover off the
+  toolbar's "N of M changes decided" counter (`OutstandingPopover`, the same per-file jump rows).
+  ⚠ **"Next" walks OUTSTANDING files** (`nextOutstandingFile`, wraps) and is ABSENT once there is
+  nowhere to jump — the chevrons page the manifest and say so ("Next file in the list"), `n`/`p`
+  walk regions. Full contract: docs/MERGE-CI-TRUNK.md § Resolving conflicts in the app.
 - ⚠ **ROVING TAB STOPS.** Only the ACTIVE region's buttons are in the tab order; every other
   `SlotStrip`'s — **and every other row's two gutter arrows**, which read the same `active` prop —
   are `tabIndex={-1}`. Four hundred regions is four hundred strips, and without this Tab walks two
@@ -2124,19 +2133,27 @@ landmines:
   every region announcing as a pair of identical buttons. The strip gave the verb up; the arrow is
   now ALWAYS drawn, really named (`gutterLabel` in `copy.ts` — it carries the region's position,
   because the arrows sit in their own grid cells OUTSIDE the strip's `role="group"`), really
-  focusable, and carries `aria-pressed`. It renders only where `sideOffered(region, side)` — the
-  SAME predicate the wash reads — so an unofferable pane gets neither paint nor arrow.
+  focusable. It renders only where `sideOffered(region, side)` — the SAME predicate the wash reads —
+  so an unofferable pane gets neither paint nor arrow, AND only while that side is not already in
+  the result (`sideOutcome(slot, side) !== 'contributed'`): an arrow is an offer to ADD, and on an
+  added side it offers a no-op. Undo or Ignore brings it back, derived from the slot with no
+  re-reveal state.
   ⚠ **Below `NARROW_PX` the gutter CELLS are not emitted at all**, so `SlotStrip`'s `sideTakes`
   puts the two side verbs back on the strip: one control per verb in each layout, never two in
   either. Nothing in the resolver is reachable only by hovering.
   ⚠ Three rules follow from it being a REAL control rather than a decorative twin, each of which was
-  a live defect the moment the strip's copies went: **`aria-pressed` is
-  `sideOutcome(slot, side) === 'contributed'`**, not "is this button's own decision the current
-  one?" — a both-order, the wand and an accepted suggestion all land BOTH sides, and only the green
-  wash said so, which reaches no screen reader. **The keyboard reveal aims at `data-mr-take`**, left
+  a live defect the moment the strip's copies went: **it carries NO `aria-pressed`, because presence
+  IS the state.** It briefly did, reading `sideOutcome(slot, side) === 'contributed'` — which is now
+  exactly the condition under which the button does not render, so it could only ever have announced
+  "not pressed", on every arrow, forever. A dead ARIA attribute reads as a considered claim, so it is
+  gone; the strip's word still says the state in words. **The keyboard reveal aims at `data-mr-take`**, left
   then right, falling back to the strip — `el.querySelector('button')` inside `[data-mr-region]` is
   the STRIP, whose first button is now "Ignore this change and keep the ancestor" on every one-sided
-  change, so `n` parked focus one reflex Space from discarding it. And **the panes' `Enter` binding
+  change, so `n` parked focus one reflex Space from discarding it. ⚠ **That fallback is now
+  UNREACHABLE from the keyboard, and only by luck of one filter**: an arrow also goes away once its
+  side is in the result, so a decided region can have none — but `step()` (the `n`/`p` walk) visits
+  only regions that are `kind !== 'unchanged'` AND undecided, which always have at least one. Widen
+  `step()` to walk decided regions and the Ignore-focus bug comes back. And **the panes' `Enter` binding
   exempts any real control** (`closest('button, a[href], [role="button"]')`): a button fires its
   click on Enter DOWN, so `preventDefault()` on the way up cancelled the press and sent the reader to
   the commit step with no side taken, while Space worked.
@@ -2144,17 +2161,34 @@ landmines:
   content box, so a side whose answer is "delete these lines" would paint nothing at all, and with
   C1's rule that silence now claims "nothing here to take" beside a live arrow.
 - **The store (`store/conflictResolver.ts`) holds CHOICES ONLY** — no file text, no regions, no
-  suggestion lines — and it is deliberately NOT a slice of `store/filters.ts`, which is persisted
+  suggestion lines, and no EDIT lines either — and it is deliberately NOT a slice of `store/filters.ts`, which is persisted
   and URL-mirrored. ⚠ **The pins are part of the key** (`${prId}:${headSha}:${baseSha}:${modelHash}`):
   a pushed branch or a moved base mints a different key and the old decisions are simply not found,
   never migrated onto a merge the reader did not see. Same reasoning as the auto-merge intent's
   `expectedHeadOid`.
 - ⚠ **AN ACCEPTED "Ask Claude" SUGGESTION'S LINES MUST OUTLIVE THE PANES' MOUNT.** `ResolverPanes`
-  unmounts the moment the reader presses Continue, so component state alone loses them on `Back` —
+  unmounts the moment the reader presses the toolbar's "Commit and push" (the entry to the landing
+  step, not the press), so component state alone loses them on `Back` —
   `slotFor` would then render an ACCEPTED suggestion as undecided while the commit still carried its
   `suggestionId`: the counter says decided, the pane says "Needs a decision", and the push lands
   Claude's text. They live in a module map keyed by SERVER SESSION, pruned to the live one on every
   mount. The STORE keeps the opaque handle and deliberately not the text.
+- ⚠ **THE CENTRE PANE IS EDITABLE, AND THE EDITOR IS A PANEL UNDER THE CELL — never a
+  `contenteditable`, never a textarea replacing `CodeCell`.** `RegionEditPanel` mounts in the slot
+  `HunkSuggestionPanel` uses, for three reasons that each cost something if ignored: `data-mr-cell`
+  stays on a CONTENT-SIZED box (the ribbon overlay measures that rectangle, so an editor inside it
+  points every ribbon in the file at a textarea-sized rect); `CodeCell` stays a pure memo with no
+  local state; and hljs output never goes under a caret (`hljsLines.ts` allows only hljs output to
+  reach `dangerouslySetInnerHTML`). ⚠ **The draft lives in the PANEL**, seeded ONCE per opening from
+  the region's current folded centre — a `useEffect` mirroring the seed would overwrite what the
+  reader had typed — the STORE holds the `editId`, and `useRegionEdit`'s module map holds the lines,
+  keyed by SERVER session, for exactly the reason the Ask hook's map exists. ⚠ **`onKeyDown`'s field
+  guard is now load-bearing**: the textarea is inside the scroller, so without the early return `b`
+  would take both sides of the region being edited and Enter would leave for the commit step.
+  `resolverControls.test.ts` pins the guard AND its position. ⚠ **An edited region's centre is
+  green, both sides paint NOTHING and it draws NO ribbon** — the text came from neither pane — and
+  the strip word `Your text` is what says so. Editing is CORE and free; `unchanged` context is
+  read-only and the server refuses it.
 - ⚠ **"Ask Claude" is ABSENT, not locked, when unentitled.** The six visible-but-locked surfaces are
   an ENUMERATED exception in `components/ProGate.tsx` and a seventh needs its own written argument
   there. This is one paid control inside a screen already doing its whole job for a free reader; a
@@ -2174,8 +2208,8 @@ landmines:
   total rather than its remainder.
 - **`ClosedResolverToast` is a plain card in the ONE bottom-right toast column**, never its own
   `fixed bottom-4 right-4` element.
-- The `--mr-*` / `--mr-hl-*` colour tokens and their hand-run guards: see **The AI-surface palette**
-  above.
+- The `--mr-*` state washes and the shared `--code-hl-*` syntax colours, with their hand-run guards:
+  see **The AI-surface palette** above.
 
 ### Two defects that only running it found — and both will come back
 
@@ -2409,24 +2443,90 @@ THREE values — undecided / contributed / rejected — because a boolean made "
 pane's paint. The ribbon overlay's SVG fill is **one class, `.mr-fill-applied`** — it joins an
 accepted (green) side to the green result, so a type-hued band between them read as a third thing —
 ⚠ and it must be a CLASS, because `var()` works as a CSS property and paints NOTHING inside an SVG
-presentation attribute. Plus seven scoped `--mr-hl-*` syntax colours for the code cells. Same
-space-separated-channel rule, same silent failure if it is broken.
+presentation attribute. Same space-separated-channel rule, same silent failure if it is broken.
+The seven syntax colours that used to live here as `--mr-hl-*` inside `.mr-code` are now
+`--code-hl-*` inside `.code-hl` and are **shared by every code surface in the app** — see
+**Where code is rendered** below.
 - ⚠ **`.mr-edge-*` IS DELETED AND MUST NOT COME BACK.** A turned-down side used to keep a 1px inset
   outline in its own hue rather than lose its paint ("this was the other option" and "this pane has
   nothing here" are different facts). On screen it ringed an untaken block in red beside the green
-  one that won. `resolverTokens.test.ts` asserts no such SELECTOR exists — it matches a rule, not a
+  one that won. `codeTokens.test.ts` asserts no such SELECTOR exists — it matches a rule, not a
   mention, so the reasoning can stay written down in `index.css` beside the deletion.
 - ⚠ **`--mr-conflict` IS NOT `--ai-signal`.** Vermilion is the AI surface's accent and the Pro badge
   draws in it; a merge conflict is not an AI marker, and borrowing that hue would make every
   contested hunk look like something a model produced.
 - ⚠ **`test/textContrast.test.ts` CANNOT SEE ANY OF THEM.** That scanner resolves Tailwind utilities
   with a numeric shade (`text-gray-400`); a custom property matches nothing it looks for. The guard
-  is **`apps/frontend/test/resolverTokens.test.ts`**, which parses the declarations back out of
+  is **`apps/frontend/test/codeTokens.test.ts`** (it was `resolverTokens.test.ts` until the syntax
+  colours stopped being the resolver's), which parses the declarations back out of
   `index.css`, composites each wash at ITS OWN declared alpha over the page ground and asserts AA in
   both directions in both themes. Both suites are HAND-RUN
   (`./apps/backend/node_modules/.bin/vitest run --root apps/frontend`). The measured ratios are
   tabulated in `index.css`'s own header; if you change a channel, re-run that test rather than
   eyeballing it.
+- ⚠ **A `.hljs-*` CLASS THAT REACHES NO `--code-hl-*` TOKEN IS OUTSIDE THAT LOOP ENTIRELY.** The
+  contrast test walks the seven declared tokens, so five classes github-dark colours and `.code-hl`
+  did not — `hljs-subst` (every `${…}` in a template literal), `hljs-code`, `hljs-formula`,
+  `hljs-emphasis`, `hljs-strong` — fell through to #c9d1d9 / #8b949e and measured 1.32:1 to 3.08:1
+  on the light-mode grounds, while the suite stayed green. `codeTokens.test.ts` now PARSES the
+  installed `github-dark.css` and fails on any coloured class the palette does not match, so a
+  highlight.js bump cannot reopen it silently.
+
+### Where code is rendered, and which surfaces highlight it
+
+Every surface that shows source goes through **`lib/hljsLines.ts`** — one highlighter, three gates,
+and the `.code-hl` palette above — with exactly one deliberate exception, `Markdown.tsx`.
+
+| Surface | Component | Path comes from |
+|---|---|---|
+| Changes tab + AI Fix diff | `diff/FileDiffView.tsx` | `file.path` |
+| Thread code anchor (collapsed line and expanded hunk) | `ThreadView/CodeAnchor.tsx` → `DiffHunk.tsx` | `thread.path` |
+| Timeline marker popover's anchor line | `Timeline/MarkerPopover.tsx` | `thread.path` |
+| Claude Review finding hunk + its suggestion | `ClaudeReviewTab.tsx` | `finding.path` |
+| Addressed-check evidence patch | `components/CommentAnnotations.tsx` | `evidence.path` |
+| Bot Advisor's generated config file | `Activity/BotAdvisorPanel.tsx` | `f.path` |
+| Conflict resolver's three panes, compare-base popover, Ask-Claude suggestion | `conflicts/CodeCell.tsx`, `BasePopover.tsx` | the session's file |
+
+- ⚠ **A DIFF IS NOT SOURCE, SO IT GOES THROUGH `highlightDiffRows` (`lib/diff.ts`), NEVER
+  `highlightLines`.** Consecutive `-`/`+` rows are two versions of ONE line; one lexer pass over
+  them leaves the lexer in a state no version of the file was ever in, and a pair that opens a
+  string or a block comment on one side only mis-colours everything after it. The fold reconstructs
+  the OLD side (context + del) and the NEW side (context + add), highlights each, and zips each row
+  back to its own side. A context row takes the new side. An EMPTY side (a newly-added file has no
+  old one) is not a refusal; one side refusing refuses both, because half a coloured file reads as a
+  rendering bug.
+- ⚠ **THE +/-/space MARKER NEVER REACHES THE LEXER AND IS NEVER COLOURED AS CODE.** It is diff
+  notation — a `-` is not a minus operator. `splitDiffMarker` is the one strip rule, and it strips a
+  CONTEXT row only when it really has a leading space: `parsePatch` classifies any unmarked line as
+  context (a truncated hunk, a body that is not a diff), and a blind `slice(1)` there eats the
+  line's first character. `@@` headers and the `\ No newline at end of file` row are not code at all
+  and are skipped whole.
+- ⚠ **WHERE A SURFACE SET BOTH A BACKGROUND AND AN ADD/DEL TEXT COLOUR, THE TEXT COLOUR IS DROPPED
+  ON HIGHLIGHTED ROWS ONLY.** The tint already carries add/del on its own (`FileDiffView` has always
+  relied on it); green ink under green tokens is two claims fighting for the same characters.
+  `DiffHunk`, `CodeAnchor`, `ClaudeReviewTab`'s `hunkLineClass` and `CommentAnnotations`'
+  `diffLineClass` each keep their `@@` and context styling, which is not an add/del claim.
+- ⚠ **A ONE-LINE-FROM-A-HUNK SURFACE HIGHLIGHTS THE WHOLE HUNK AND TAKES THE LAST ENTRY**
+  (`useHunkHighlight`, exported from `DiffHunk.tsx`). Highlighting that line alone is the mid-file
+  lexer start `hljsLines.ts` forbids: a line inside a block comment comes back coloured as code.
+- ⚠ **`Markdown.tsx` IS THE ONE EXCEPTION AND STAYS ONE.** It highlights fenced blocks through
+  `rehype-highlight` with `detect: true` — auto-detection, which `hljsLines.ts` refuses. Both are
+  right: there a language is resolved from a FILE PATH and a wrong guess is a claim about the code,
+  here there is no path and most bot comments fence code with no language tag. `.md-body pre` also
+  keeps its own fixed `#0d1117` ground, which is the only ground the global `github-dark.css` is
+  correct against — markdown blocks do NOT use `.code-hl`. Do not route one through the other, and
+  do not change the plugin order (raw → sanitize → highlight).
+- **`MAX_HIGHLIGHT_LINES` stays at 400** even though it now also gates a whole Changes-tab FILE and
+  not just one resolver cell: a file past 400 patch lines already starts collapsed
+  (`LARGE_PATCH_LINES` = 250) and is scrolled rather than read. A real case where colour visibly
+  drops out gets a per-call limit, not a raise for every surface at once.
+- ⚠ **ONLY highlight.js OUTPUT MAY REACH `dangerouslySetInnerHTML`.** `highlightLines` /
+  `highlightDiffRows` / `highlightBlock` escape through hljs's own emitter and return `null` on
+  every gate they cannot clear; the null branch is React's ordinary text rendering. Nothing else
+  goes through that door, on any surface.
+- **Not code, and deliberately left plain:** the AI-Fix agent's `recentActivity` log, `CheckList`'s
+  CI logs, `ClaudeReviewTab`'s "exact context sent to Claude" block and `BotAdvisorPanel`'s brief
+  markdown. None of them has a file path, so none of them has a language.
 
 ⚠ **A hex a component DERIVES a wash from cannot become a var.** `FeedView`'s `itemGlyph`
 returns `{color}` and the chip paints `background: glyph.color + '1a'`. The `claude_review` kind

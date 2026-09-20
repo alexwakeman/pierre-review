@@ -33,31 +33,59 @@ import {
 import { captureWorktreeDiff } from './git.js';
 import { describeAssistantBlocks } from './activity.js';
 
-// The WRITE tool surface for the fixer: the read tools PLUS Write/Edit/MultiEdit, and
-// the submit_fix MCP tool for the prose summary. The agent NEVER runs git writes — the
-// host commits/pushes — so git commit/push/config stay denied (as do rm/sudo).
+// The WRITE tool surface for the fixer: Read/Glob/Grep to explore, Write/Edit/MultiEdit to
+// make the change, and the submit_fix MCP tool for the prose summary. NO SHELL.
+//
+// ---- Bash is deliberately ABSENT (this used to include it) ----
+//
+// Two independent reasons, either sufficient on its own.
+//
+// SAFETY — the argument the comment above `WORKTREE_TOOLS` in review/agent.ts already makes at
+// length, for the identical input shape. Everything this agent reads (the PR title, the description, the diff, the review
+// comments — and on the `'comments'` seed, NOTHING BUT review comments) was written by whoever
+// opened the pull request. Pair that with `permissionMode:'bypassPermissions'` and
+// `settingSources:[]` below, which is to say nothing else was constraining the shell either, and
+// a stranger's PR text becomes a remote-code-execution path on the developer's own machine. The
+// blocklist that used to sit here — `Bash(rm *)`, `Bash(sudo *)`, `Bash(git push *)`,
+// `Bash(git commit *)`, `Bash(git config *)` — stopped five literal prefixes and nothing else:
+// "A blocklist cannot enumerate the badness of a shell."
+//
+// ⚠ THOSE `Bash(git …)` ENTRIES WERE ALSO THE MECHANICAL HALF OF "THE HOST OWNS THE COMMIT, NOT
+// THE AGENT", and that rule is unchanged — a denied shell cannot run git at all, so a bare
+// 'Bash' guarantees it strictly harder. What is gone is the grep-able evidence, so it is written
+// here instead: the agent leaves its edits in the working tree, `captureWorktreeDiff` turns them
+// into a patch, and coding/git-ops.ts commits and pushes THAT — after the reader picks a target.
+// The prompt still says it too (WORKTREE_RULES in the plugin's ai-fix/prompts.ts).
+//
+// SPEED — the shell's real use here was running builds and tests, and nothing downstream ever
+// read the answer: runCodingAgent's success criterion is a captured diff under
+// `aiFixPatchMaxBytes`, and no column on the fix row records whether anything was verified. The
+// cost was real: a suite runs against `aiFixMaxTurns` (40) and `aiFixBudgetUsd` ($3) with NO
+// wall-clock limit, returns its output as a tool_result billed as input on the next turn, and
+// holds the single global job slot (MAX_CONCURRENT = 1, coding/manager.ts) that every other
+// account's fix, rebase and push queues behind. CI runs the tests on push.
+//
+// ⚠ What this costs, stated plainly: a fix that wanted a codegen step, a formatter, or `git log`
+// for context must now write the edit by hand or decline. That is the accepted trade — Claude
+// Review made the identical one. The way back is a container/VM boundary, or `canUseTool` under a
+// non-bypass permission mode — NOT re-adding 'Bash' with a longer blocklist.
 const FIX_TOOLS = [
   'Read',
   'Glob',
   'Grep',
-  'Bash',
   'Write',
   'Edit',
   'MultiEdit',
   'mcp__fix__submit_fix',
 ];
-const DISALLOWED_TOOLS = [
-  'NotebookEdit',
-  'Bash(rm *)',
-  'Bash(sudo *)',
-  'Bash(git push *)',
-  'Bash(git commit *)',
-  'Bash(git config *)',
-];
+// Denied OUTRIGHT rather than by command pattern, for the reasons above. Belt and braces: Bash is
+// also absent from the allow list, so there are two independent reasons it cannot run.
+const DISALLOWED_TOOLS = ['Bash', 'NotebookEdit'];
 
-// The conflict-resolver's tool surface is deliberately NARROWER: no Bash at all, so it
-// cannot tamper with the in-progress merge/rebase (no `git add`/`--continue`/`--abort`).
-// It only reads + edits the conflicted files and reports via submit_resolution; the
+// The conflict-resolver's tool surface: no Bash either — it has never had one — and the reason
+// is its own, on top of the fixer's. This agent runs in a worktree that is ALREADY mid-merge or
+// mid-rebase, so a shell could tamper with the operation in flight (`git add`, `--continue`,
+// `--abort`). It only reads + edits the conflicted files and reports via submit_resolution; the
 // host stages and continues the operation.
 const RESOLVE_TOOLS = [
   'Read',

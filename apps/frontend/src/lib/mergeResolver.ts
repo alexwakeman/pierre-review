@@ -36,7 +36,10 @@ export type SlotDecision =
   | { kind: 'both-rl' }
   | { kind: 'ignored' }
   | { kind: 'wand'; lines: string[] }
-  | { kind: 'ai'; suggestionId: string; lines: string[] };
+  | { kind: 'ai'; suggestionId: string; lines: string[] }
+  /** The reader typed this region's result themselves. The lines are the SERVER's copy, echoed
+   *  back when it stored them, so the pane renders exactly what the commit will splice. */
+  | { kind: 'edit'; editId: string; lines: string[] };
 
 /** The four semantic colours. One role per state; `index.css` owns the values. */
 export type SlotRole = 'change' | 'conflict' | 'applied' | 'ignored' | null;
@@ -50,10 +53,11 @@ const WIRE_BY_KIND: Record<Exclude<SlotDecision['kind'], 'unapplied'>, ConflictD
   ignored: 'base',
   wand: 'disjoint_merge',
   ai: 'suggestion',
+  edit: 'edited',
 };
 
-/** The wire enum → `SlotDecision.kind`, for reading the store back. `disjoint_merge` and
- *  `suggestion` need their lines attaching by the caller, which is why this is not the whole job. */
+/** The wire enum → `SlotDecision.kind`, for reading the store back. The three payload-bearing
+ *  members need their lines attaching by the caller, which is why this is not the whole job. */
 const KIND_BY_WIRE: Record<ConflictDecision, Exclude<SlotDecision['kind'], 'unapplied'>> = {
   ours: 'left',
   theirs: 'right',
@@ -62,6 +66,7 @@ const KIND_BY_WIRE: Record<ConflictDecision, Exclude<SlotDecision['kind'], 'unap
   base: 'ignored',
   disjoint_merge: 'wand',
   suggestion: 'ai',
+  edited: 'edit',
 };
 
 export function wireDecisionFor(slot: SlotDecision): ConflictDecision | null {
@@ -69,18 +74,39 @@ export function wireDecisionFor(slot: SlotDecision): ConflictDecision | null {
 }
 
 /**
+ * Where the two handle-addressed decisions' handles and lines live.
+ *
+ * ⚠ ONE PARAMETER OBJECT RATHER THAN FOUR POSITIONAL ARGUMENTS, and every field optional: a
+ * caller that holds none of it (every test of the deterministic members, for one) passes `{}`.
+ * The store holds the HANDLES; the LINES come from the hooks' module maps, which is the split
+ * `store/conflictResolver.ts`'s header insists on.
+ */
+export interface HeldRegionText {
+  /** `${fileIndex}:${regionId}` → an accepted Pro suggestion's handle. */
+  suggestionIds?: Readonly<Record<string, string>> | undefined;
+  /** `suggestionId` → its lines. */
+  suggestionLines?: Readonly<Record<string, string[]>> | undefined;
+  /** `${fileIndex}:${regionId}` → a saved manual edit's handle. */
+  editIds?: Readonly<Record<string, string>> | undefined;
+  /** `editId` → its lines, as the SERVER split them. */
+  editLines?: Readonly<Record<string, string[]>> | undefined;
+}
+
+/**
  * Read one region's state out of the stored decisions.
  *
- * `suggestionLines` supplies the text for an accepted Pro suggestion, which the store deliberately
- * does not hold (it holds the opaque handle). A `'suggestion'` decision whose lines are not to
- * hand degrades to `unapplied` rather than rendering something else's text.
+ * ⚠ A HANDLE WITHOUT ITS LINES DEGRADES TO `unapplied`, FOR BOTH MEMBERS. The store deliberately
+ * holds neither the suggestion's text nor the reader's own, so a decision whose lines are not to
+ * hand is one this pane cannot honestly draw — and drawing the ancestor instead, while the
+ * counter says decided and the commit still carries the handle, is the what-you-saw-is-not-what-
+ * lands failure this whole screen exists to prevent. Degrading is visible: the region reads
+ * "Needs a decision" and the reader is asked again.
  */
 export function slotFor(
   region: ConflictRegion,
   fileIndex: number,
   decisions: Readonly<Record<string, ConflictDecision>>,
-  suggestionIds: Readonly<Record<string, string>>,
-  suggestionLines?: Readonly<Record<string, string[]>>,
+  held: HeldRegionText,
 ): SlotDecision {
   const rk = regionKey(fileIndex, region.id);
   const wire = decisions[rk];
@@ -95,10 +121,16 @@ export function slotFor(
     return lines == null ? { kind: 'unapplied' } : { kind: 'wand', lines };
   }
   if (kind === 'ai') {
-    const id = suggestionIds[rk];
-    const lines = id != null ? suggestionLines?.[id] : undefined;
+    const id = held.suggestionIds?.[rk];
+    const lines = id != null ? held.suggestionLines?.[id] : undefined;
     if (id == null || lines == null) return { kind: 'unapplied' };
     return { kind: 'ai', suggestionId: id, lines };
+  }
+  if (kind === 'edit') {
+    const id = held.editIds?.[rk];
+    const lines = id != null ? held.editLines?.[id] : undefined;
+    if (id == null || lines == null) return { kind: 'unapplied' };
+    return { kind: 'edit', editId: id, lines };
   }
   return { kind };
 }
@@ -209,6 +241,15 @@ export function sideOutcome(slot: SlotDecision, pane: 'left' | 'right'): SideOut
     // Keeping the ancestor takes NEITHER side.
     case 'ignored':
       return 'rejected';
+    // ⚠ NEITHER DOES THE READER'S OWN TEXT, AND THAT IS THE DECISION RATHER THAN A CONSEQUENCE
+    // OF ONE. An edit usually starts from whatever the centre was showing, so a side often did
+    // contribute most of the characters — but nothing here knows how much, and a correspondence
+    // we cannot state is one we must not draw. So both sides go bare and the region draws no
+    // ribbon; what the centre holds came from the reader, and the strip's word is where that is
+    // said. The alternative — painting the side the edit was seeded from — would claim a
+    // provenance for text somebody may have replaced entirely.
+    case 'edit':
+      return 'rejected';
     case 'left':
       return pane === 'left' ? 'contributed' : 'rejected';
     case 'right':
@@ -231,6 +272,9 @@ export function panePaint(
   if (region.kind === 'unchanged') return null;
   if (pane === 'centre') {
     if (slot.kind === 'unapplied') return null;
+    // An edited centre wears the APPLIED green like any other answered region: something is in
+    // the result and the reader put it there. What tells it apart from a taken side is the two
+    // bare side panes beside it, the missing ribbon, and the strip's word.
     return slot.kind === 'ignored' ? 'ignored' : 'applied';
   }
   if (!sideOffered(region, pane)) return null;
@@ -276,6 +320,11 @@ const BOTH_SIDES: readonly RibbonSide[] = Object.freeze(['left', 'right'] as con
  * `SlotDecision`'s header gives (`ignored` serialises as `'base'`, `unapplied` as nothing). Neither
  * put a side's lines in the result, so neither has a linkage to draw; the counter still needs them
  * apart.
+ *
+ * ⚠ AND NEITHER DOES `edit`, WHICH IS THE ONE STATE WHERE THE CENTRE IS GREEN AND NO RIBBON
+ * LEAVES IT. That asymmetry is deliberate and is the picture: a ribbon says "these lines came
+ * from there", and the reader's own text came from neither pane. `sideOutcome` answers
+ * `'rejected'` on both sides for exactly this, so the wash and the ribbon still read one answer.
  */
 export function ribbonSides(region: ConflictRegion, slot: SlotDecision): readonly RibbonSide[] {
   if (region.kind === 'unchanged') return NO_SIDES;
@@ -305,6 +354,12 @@ export function ribbonSides(region: ConflictRegion, slot: SlotDecision): readonl
 
 const LINE_TEXT = (l: ConflictLine): string => l.text;
 
+/** The three slot kinds that carry their own lines → the wire member the fold expects. */
+const PAYLOAD_DECISION: Record<
+  'wand' | 'ai' | 'edit',
+  'disjoint_merge' | 'suggestion' | 'edited'
+> = { wand: 'disjoint_merge', ai: 'suggestion', edit: 'edited' };
+
 /**
  * What the centre pane shows for ONE region.
  *
@@ -319,9 +374,18 @@ export function centreLines(region: ConflictRegion, slot: SlotDecision): string[
   const wire = wireDecisionFor(slot);
   if (wire == null) return region.base.map(LINE_TEXT);
   const resolved: ResolvedDecision =
-    slot.kind === 'wand' || slot.kind === 'ai'
-      ? { decision: slot.kind === 'wand' ? 'disjoint_merge' : 'suggestion', lines: slot.lines, endsWithNewline: true }
-      : { decision: wire as Exclude<ConflictDecision, 'disjoint_merge' | 'suggestion'> };
+    slot.kind === 'wand' || slot.kind === 'ai' || slot.kind === 'edit'
+      ? {
+          // The three payload-bearing members, each rendering the lines the CALLER handed in —
+          // the server's stored word merge, the server's stored suggestion, the server's stored
+          // copy of what the reader typed. Nothing here is recomputed.
+          decision: PAYLOAD_DECISION[slot.kind],
+          lines: slot.lines,
+          // A per-region call reads `lines` only; the file's real terminator is the LAST
+          // region's business and the land route's, not a cell's.
+          endsWithNewline: true,
+        }
+      : { decision: wire as Exclude<ConflictDecision, 'disjoint_merge' | 'suggestion' | 'edited'> };
   const result = foldFile(
     {
       regions: [
@@ -561,6 +625,7 @@ export function serializeFileDecisions(
   fileIndex: number,
   decisions: Readonly<Record<string, ConflictDecision>>,
   suggestionIds: Readonly<Record<string, string>>,
+  editIds: Readonly<Record<string, string>> = {},
 ): ConflictRegionDecision[] {
   const out: ConflictRegionDecision[] = [];
   for (const region of regions) {
@@ -568,9 +633,18 @@ export function serializeFileDecisions(
     const rk = regionKey(fileIndex, region.id);
     const decision = decisions[rk];
     if (decision == null) continue;
+    // ⚠ A HANDLE-BEARING DECISION WITH NO HANDLE IS DROPPED, NOT SENT BARE. The server would
+    // answer `UnknownSuggestion` / `UnknownEdit` and refuse the WHOLE commit; omitting it makes
+    // the same region `IncompleteDecisions` instead, which names the file and sends the reader
+    // somewhere they can act. Neither is reachable while the store keeps the two in step — this
+    // is the belt to that braces.
     const suggestionId = decision === 'suggestion' ? suggestionIds[rk] : undefined;
     if (decision === 'suggestion' && suggestionId == null) continue;
-    out.push(suggestionId != null ? { id: region.id, decision, suggestionId } : { id: region.id, decision });
+    const editId = decision === 'edited' ? editIds[rk] : undefined;
+    if (decision === 'edited' && editId == null) continue;
+    if (suggestionId != null) out.push({ id: region.id, decision, suggestionId });
+    else if (editId != null) out.push({ id: region.id, decision, editId });
+    else out.push({ id: region.id, decision });
   }
   return out;
 }

@@ -665,12 +665,33 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   once per TURN, not per lifetime** — a landing clears its repo-siblings' marks, or a batch
   strands itself at "behind" until the 72h expiry.
 - **Conflicts are RESOLVED IN THE APP now** (`src/conflict/`, `components/conflicts/`) — CORE/free
-  and **IN BOTH MODES** (`app.ts` registers the six routes unconditionally and
+  and **IN BOTH MODES** (`app.ts` registers the seven routes unconditionally and
   `MeResponse.conflictResolver` is `true` in both; there is no `CONFLICT_RESOLVER_ENABLED` and no
   cloud upsell).
-  Three panes, hunk-level accept/ignore, **no free typing anywhere** — `ConflictDecision` is closed,
-  there is no `custom` member, and nothing on the wire accepts file content, which is a property of
-  the PROTOCOL, not a UI convention. ⚠ **The wand NEVER picks a side** (one-sided, identical, or
+  Three panes, hunk-level accept/ignore, plus **ONE text box: the reader may edit the CENTRE pane's
+  result for a DECIDABLE region** (`'edited'`, migration-free). ⚠ **THE OLD "no free typing anywhere"
+  IS NARROWED, NOT DELETED, AND ONLY ONE HALF MOVED.** `POST …/conflicts/edit` takes typed lines for
+  ONE region, pinned by `fingerprint` and validated SERVER-SIDE before an id exists (no NUL / lone
+  surrogate, no surviving conflict marker, `CONFLICT_SUGGEST_MAX_CHARS`); it refuses `unchanged`
+  context (`not_editable`), which is why `CONFLICT_MODEL_VERSION` is NOT bumped. ⚠ **The region's two
+  INVISIBLE bytes are inherited from the region, never read back off the wire** (`editShapeFor`): a
+  textarea normalises CRLF to LF before React sees a keystroke, so one character typed into a
+  Windows-authored file rewrote the whole hunk's endings; and the file's own UTF-8 BOM — which
+  `model.ts` deliberately KEEPS (`ignoreBOM: true`) — made the first region of every BOM file refuse
+  `not_text` for ever. The region's line ending is re-imposed when its own evidence is unanimous, and
+  one LEADING U+FEFF is allowed and re-attached on the region that owns the file's BOM; anywhere else
+  it is still `not_text`. ⚠ **A superseded `editId` is NEVER evicted** — the undo stack files
+  `previousEditId`, so deleting one made Undo restore a dead handle and the WHOLE commit answer
+  `UnknownEdit` naming no file; `MAX_EDIT_CHARS_PER_SESSION` is the bound, and it is summed WITHOUT
+  mutating so a refusal destroys nothing. The **COMMIT body
+  still carries nothing but indexes, ids and enum members** — `'edited'` travels as an opaque
+  `editId` exactly as a Pro suggestion travels as a `suggestionId` — so the property that mattered
+  survives: the server commits only bytes it folded, from a request that names no content. A `custom`
+  member carrying lines INLINE is still forbidden. ⚠ Validation deliberately omits the suggestion
+  validator's "did you drop something" checks — a person deleting a line is the feature, and an empty
+  box is zero lines. ⚠ An edited region's centre is green, **both sides paint nothing and it draws NO
+  ribbon** (the text came from neither side); the strip word is `Your text` and Undo clears it.
+  ⚠ **The wand NEVER picks a side** (one-sided, identical, or
   provably disjoint at word level — nothing else). ⚠ **No worktree at any phase** and nothing stored in the
   DB (no table, no migration) — but it DOES keep a shared blobless CLONE CACHE on disk
   (`config.cloneDir`; the container's ephemeral `/tmp` in cloud), swept by `conflict/janitor.ts`'s
@@ -684,7 +705,18 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   `autoApply: false` (BOTH open arms) and there is no client seeding pass, so the centre pane opens
   with NO wash. ⚠ **The commit is HARD BLOCKED until every decidable region in every supported file
   is decided** — `CommitPlan.canCommit` is the ONE gate, and everything it will not carry is NAMED
-  on the landing step (`notCarried` is not just the unsupported files). ⚠ **Hue means a different
+  on the landing step (`notCarried` is not just the unsupported files). ⚠ **BOTH BUTTONS ARE SHUT
+  BY ONE FOLD AND PRINT ITS ONE SENTENCE** — the toolbar's button and the landing step's both say
+  "Commit and push" (entry vs press, told apart by their ACCESSIBLE NAMES) and both read
+  `commitBlockedReason(plan, headMoved)`, null exactly when `canCommit && !headMoved`; `Enter` on
+  the panes is the same door with the same lock, and `headMoved` stays OUT of `canCommit` (a fact
+  about GitHub, not about the reader's decisions). The old "Continue is never disabled because it is
+  the only route to the list that explains the block" is REVERSED, so that list moved: it is a
+  popover off the toolbar's "N of M changes decided" counter, with the same per-file jump rows.
+  ⚠ **"Next" walks OUTSTANDING files and WRAPS** (`nextOutstandingFile`), and is ABSENT — never
+  disabled — once there is nowhere to jump, including when the only outstanding file is the one you
+  are in; the chevrons still page the manifest ("Next file in the list") and `n`/`p` still walk
+  REGIONS. ⚠ **Hue means a different
   thing per pane**: a SIDE is painted ONLY where it OFFERS something (`sideOffered` over
   `region.allowed` — so `both_same` paints the LEFT only), wearing the conflict TYPE while
   undecided and `applied` GREEN once its lines reach the result; a turned-down side and both sides
@@ -781,6 +813,31 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
 - **AI Fix has FOUR seeds** (`AiFixSeed`); ⚠ the newest, `'comments'`, WIDENS the
   attacker-authored channel to every comment dragged in (fencing is the mitigation) and must
   never get its own queue/slot — the worktree is keyed on the SHA alone.
+- ⚠ **THE FIX AGENT HAS NO SHELL** — `FIX_TOOLS` is Read/Glob/Grep + Write/Edit/MultiEdit +
+  `submit_fix`, and `DISALLOWED_TOOLS` is `['Bash','NotebookEdit']`, matching the conflict
+  resolver and Claude Review. It reads and edits; **it installs nothing, builds nothing and runs
+  no tests** — and the SPA says exactly that beside the diff ("Not built or tested here.",
+  TEMPLATED, never in the model's summary). ⚠ **IT STOPS THERE AND DOES NOT PROMISE CI.**
+  `ciStatusFrom(null)` is `'unknown'` for a PR with no check rollup at all and whole repos here are
+  like that (62 of 63 PRs on one, 1,014 of 9,544 overall), so "CI will run on push" invents the
+  verification the sentence exists to deny. The old `Bash(git commit *)`-style blocklist is gone: it was five literal
+  prefixes over an attacker-authored input channel, and its builds/tests were read by nothing
+  (success = a captured diff under `aiFixPatchMaxBytes`) while holding the ONE global job slot
+  (`MAX_CONCURRENT = 1`) against `aiFixMaxTurns`/`aiFixBudgetUsd` with no wall clock. ⚠ **The
+  prompt and the tool list change together** — `WORKTREE_RULES` (one constant, both fix prompts)
+  and the CI-analysis capability sentence, whose answer is stored raw and RENDERED. ⚠ **AND THE
+  CAPABILITY SENTENCE IS A TERM OF THE CACHE KEY EVEN THOUGH THE PROMPT IS NOT**: the payload hash
+  is `v3|head|diff|check logs`, so a prompt edit alone leaves every stored row asserting a shell and
+  a push the product does not have — 17 of 19 real rows did, 3 of them still seedable to the agent.
+  `CI_ANALYSIS_CONTRACT_EPOCH_MS` (shared) is what retires them: `ciSeedDecision` refuses a pre-epoch
+  row exactly as it refuses a moved head, and `ciAnalysisStale` marks it out of date on the card.
+  ⚠ The read-time Pierre→Limn patch is bounded to those same pre-epoch rows — the prompt names no
+  brand now, so a `Pierre` in a fresh answer is the REPOSITORY's own content (three people in this
+  account's `users` table are called Pierre) and rewriting it corrupts both the card and the agent's
+  task. ⚠ The
+  `verifying` phase is a FALSE FRIEND: rebase/merge-path only, and its body is `git diff` +
+  `git format-patch` — it never ran tests. Cost accepted: a fix wanting a codegen step, a
+  formatter or `git log` must write the edit by hand or decline.
 - **Bot Tuning Advisor** (Pro, `botAdvisor`): CORE computes the evidence cells, the PLUGIN
   emits. Non-negotiables — recommendation text is TEMPLATED, never model-generated (the ONE LLM
   touchpoint sits behind a diff-guard `llm-isolation.test.ts` pins unreachable); **a cell with
@@ -1156,7 +1213,8 @@ auth plumbing, or any AI route.** Two zero-dependency core plugins own the postu
   (it only console-warns) and check-run `details_url` etc. are third-party-supplied — go
   through `safeExternalUrl()` in `lib/ui.ts`.
 - **Anything an agent reads from a PR is UNTRUSTED input.** Don't widen an agent's tool surface
-  — `review/agent.ts` denies `Bash` outright, and a per-command blocklist is no substitute.
+  — ALL THREE agentic runs now deny `Bash` outright (`review/agent.ts`, and `coding/agent.ts` for
+  both the fixer and the conflict resolver), and a per-command blocklist is no substitute.
 - **Heuristics get fixture tests.** Before changing `derive-thread-state.ts`, add a sample to
   `src/sync/__fixtures__/threads/` (README has the JSON shape).
 - **Idempotency is load-bearing.** New entities upsert on their GitHub node ID — the conflict

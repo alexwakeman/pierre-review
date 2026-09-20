@@ -9,6 +9,17 @@ import type { ConflictFileTerminators, ConflictRegionKind } from './conflicts.js
  * discipline as PERIOD_METRICS_SCHEMA_VERSION. The failure is silent: a stale session lands
  * bytes the user did not choose.
  *
+ * ⚠ AND ADDING A DECISION MEMBER IS NOT SUCH A CHANGE. `'edited'` was added without a bump,
+ * deliberately, and the reasoning is written down here so the next reader does not "fix" it
+ * defensively. The test is "output for a given input", and no input that was previously
+ * possible can contain a member that did not previously exist: every old decision folds to the
+ * same bytes it always did. The hash itself agrees — `conflict/hash.ts` covers the version, the
+ * shas, the merge-base facts and each region's id / kind / fingerprint / wand / merged-lines
+ * digest, and it covers NEITHER `region.allowed` NOR `defaultDecision`, which are the only two
+ * things a new member touches. A bump is not free: it invalidates every live session, so every
+ * reader mid-resolve loses their decisions. `RegionRibbons.tsx` and docs/MERGE-CI-TRUNK.md make
+ * the same argument for the same reason.
+ *
  * THE RULES, which are decisions and not options:
  *
  *  1. `unchanged` regions emit `base` and take no decision.
@@ -22,16 +33,20 @@ import type { ConflictFileTerminators, ConflictRegionKind } from './conflicts.js
  *     diverges from itself.
  *  4. THE FILE TERMINATOR belongs to the LAST region's chosen SOURCE: `base`/`ours`/`theirs`
  *     take that side's; `both_ours_first` takes `theirs`; `both_theirs_first` takes `ours`;
- *     `disjoint_merge` and `suggestion` carry their own `endsWithNewline`. Guessing it at
- *     file level appends a newline nobody chose, and it shows up in the PR diff as
+ *     `disjoint_merge`, `suggestion` and `edited` carry their own `endsWithNewline`. Guessing
+ *     it at file level appends a newline nobody chose, and it shows up in the PR diff as
  *     "\ No newline at end of file" vanishing on a line the reader never touched.
- *  5. `'disjoint_merge'` carries no payload on the wire; the CALLER resolves it to lines
- *     before calling here — the SPA by recomputing `region.wand`, the server from the
- *     model's stored merge. Both come from the same word diff.
+ *  5. THE THREE PAYLOAD-BEARING MEMBERS CARRY NO PAYLOAD ON THE WIRE; the CALLER resolves each
+ *     to lines before calling here. `disjoint_merge` from `region.mergedLines`, which the
+ *     server computed at model build; `suggestion` and `edited` from the server's own session
+ *     store, addressed by an opaque handle. None of the three is ever recomputed.
+ *  6. `'edited'` IS ALLOWED ON EVERY DECIDABLE KIND, unlike every side-shaped member. It is
+ *     not a claim about either side — it is the reader's own text — so the only thing it
+ *     cannot sit on is `unchanged`, which takes no decision at all.
  */
 export const CONFLICT_MODEL_VERSION = 1;
 
-/** A decision with everything the fold needs. The two payload-bearing members are resolved
+/** A decision with everything the fold needs. The three payload-bearing members are resolved
  *  by the caller, because their lines live somewhere this pure function cannot reach. */
 export type ResolvedDecision =
   | {
@@ -43,7 +58,7 @@ export type ResolvedDecision =
         | 'both_theirs_first';
     }
   | {
-      decision: 'disjoint_merge' | 'suggestion';
+      decision: 'disjoint_merge' | 'suggestion' | 'edited';
       lines: string[];
       endsWithNewline: boolean;
     };
@@ -94,6 +109,10 @@ function terminatorSideFor(
 /** True when this decision may be applied to a region of this kind. `unchanged` takes no
  *  decision at all, so it is not listed here — rule 1 handles it before we get this far. */
 function isAllowed(kind: ConflictRegionKind, decision: ResolvedDecision['decision']): boolean {
+  // Rule 6, and it has to be hoisted: `'edited'` is not a side, so the per-kind arms below —
+  // which each name the sides that kind offers — would refuse it on all four of them. The
+  // reader's own text is answerable on any region they can be asked about.
+  if (decision === 'edited') return kind !== 'unchanged';
   switch (kind) {
     case 'unchanged':
       return decision === 'base';
@@ -155,6 +174,7 @@ export function foldFile(
         break;
       case 'disjoint_merge':
       case 'suggestion':
+      case 'edited':
         out.push(...chosen.lines);
         break;
     }

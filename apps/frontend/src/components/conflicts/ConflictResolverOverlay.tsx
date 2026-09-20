@@ -22,7 +22,8 @@ import {
 } from '../../store/conflictResolver.js';
 import { CloseIcon, ExternalLinkIcon } from '../Icons.js';
 import { safeExternalUrl } from '../../lib/ui.js';
-import { commitPlan, type CommitPlan } from '../../lib/conflictCommit.js';
+import { commitBlockedReason, commitPlan, type CommitPlan } from '../../lib/conflictCommit.js';
+import { resolverPopoverOpen } from './popoverLayer.js';
 import { ResolverPanes } from './ResolverPanes.js';
 import { LandingStep } from './LandingStep.js';
 import { CommitResultPanel } from './CommitResultPanel.js';
@@ -116,8 +117,12 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
     seedSession({
       key,
       // ⚠ THE SERVER SESSION, NOT THE PIN KEY. A reopen onto the same two shas mints the same
-      // key and a DIFFERENT server session; `seedSession` uses this to drop the accepted
-      // suggestions, whose handles only that process's session could redeem.
+      // key and a DIFFERENT server session; `seedSession` compares this against what it already
+      // holds and drops the accepted suggestions and hand-typed edits only when it has CHANGED,
+      // because their handles are redeemable in that one process's session and nowhere else.
+      // ⚠ THIS EFFECT RE-RUNS ON EVERY SESSION FRAME — `useConflictSession` hands back a fresh
+      // object per SSE event and per manifest poll — so the guard lives in the store rather than
+      // in this dep array, where a later edit could quietly remove it again.
       sessionId: session.sessionId,
       conflictCount: session.files.reduce((n, f) => n + f.conflictCount, 0),
     });
@@ -171,9 +176,16 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
   //
   // ⚠ A SECOND ESCAPE PICKS "KEEP WORKING". Escape is what raised the question, so pressing it
   // again has to be the harmless answer — anything else makes the reflex destructive.
+  //
+  // ⚠ AND IT STANDS ASIDE FOR ANYTHING OPEN ON TOP OF THE PANES. This listener is added on MOUNT,
+  // so it wins the registration race against every popover that opens later — which meant Escape
+  // on the file menu, the compare-base popup or the counter's list closed the WHOLE RESOLVER
+  // instead of the popover, and swallowed floating-ui's own dismiss with it. `popoverLayer.ts`
+  // owns the count; the innermost open thing gets the key and stops it there.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return;
+      if (resolverPopoverOpen()) return;
       e.stopImmediatePropagation();
       if (confirming) {
         setConfirming(false);
@@ -507,8 +519,11 @@ function ResolverBody({
       fileErrors={fileErrors}
       loadFile={loadFile}
       onRetryFile={onRetryFile}
-      decidedTotal={plan.decidedTotal}
-      decidableTotal={plan.decidableTotal}
+      plan={plan}
+      // ⚠ THE SAME CALL THE LANDING STEP MAKES, ONE FOLD, TWO CALLERS. The toolbar's button and
+      // the landing step's button are both shut by this and both print what it returns, so the
+      // entry to the press and the press itself cannot explain one refusal in two sentences.
+      landBlockedReason={commitBlockedReason(plan, headMoved)}
       jumpToFile={jumpTo}
       onJumpConsumed={() => onJumpTo(null)}
       onLand={() => onView('landing')}

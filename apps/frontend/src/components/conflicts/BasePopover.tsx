@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback } from 'react';
 import {
   FloatingPortal,
   autoUpdate,
@@ -13,6 +13,7 @@ import type { ConflictRegion } from '@pierre-review/shared';
 import { highlightLines } from '../../lib/hljsLines.js';
 import { CompareBaseIcon } from '../Icons.js';
 import { COMPARE_BASE, COMPARE_BASE_EMPTY, COMPARE_BASE_HEADER } from './copy.js';
+import { useResolverPopoverEscape } from './popoverLayer.js';
 
 // ── COMPARE WITH THE MERGE BASE ──────────────────────────────────────────────────────────────
 //
@@ -21,9 +22,11 @@ import { COMPARE_BASE, COMPARE_BASE_EMPTY, COMPARE_BASE_HEADER } from './copy.js
 // quarter of the width from the three things they are actually choosing between. A fourth pane
 // also breaks the "one grid, five tracks" alignment guarantee for a column nobody decides in.
 //
-// ⚠ ITS OWN `Escape` CLOSES IT AND STOPS THERE. Without `stopPropagation` the one keypress would
-// close this popover AND the whole resolver, because the overlay's Escape handler is on `window`
-// in the capture phase.
+// ⚠ ITS OWN `Escape` CLOSES IT AND STOPS THERE — through `useResolverPopoverEscape`, NOT through
+// a local listener. A local one did not work: the overlay's handler is registered on MOUNT and
+// same-target, same-phase listeners fire in registration order, so the shell's
+// `stopImmediatePropagation` ran first and this popover's never did. The shared hook also counts
+// itself, which is what tells the shell to stand aside.
 
 export function BasePopover({
   region,
@@ -47,17 +50,9 @@ export function BasePopover({
   });
   const dismiss = useDismiss(context);
   const { getReferenceProps, getFloatingProps } = useInteractions([dismiss]);
+  const closeSelf = useCallback(() => onOpenChange(false), [onOpenChange]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return;
-      e.stopImmediatePropagation();
-      onOpenChange(false);
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [open, onOpenChange]);
+  useResolverPopoverEscape(open, closeSelf);
 
   const lines = region?.base.map((l) => l.text) ?? [];
   const html = highlightLines(lines, language);
@@ -95,7 +90,7 @@ export function BasePopover({
                 {COMPARE_BASE_EMPTY}
               </div>
             ) : (
-              <div className="mr-code max-h-[50vh] overflow-y-auto px-2.5 py-1.5 font-mono text-[12px] leading-[18px] text-gray-900 dark:text-gray-100">
+              <div className="code-hl max-h-[50vh] overflow-y-auto px-2.5 py-1.5 font-mono text-[12px] leading-[18px] text-gray-900 dark:text-gray-100">
                 {lines.map((text, i) => (
                   <div key={i} className="flex">
                     <span className="w-9 shrink-0 select-none pr-2 text-right tabular-nums text-gray-500 dark:text-gray-400">

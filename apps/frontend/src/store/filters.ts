@@ -398,7 +398,7 @@ export interface FilterState {
   // Review items. Transient (like feedMyTurnOnly) — owned by the Activity lane, not a
   // persisted filter, not URL-synced. Mutually exclusive with feedMyTurnOnly.
   feedClaudeOnly: boolean;
-  // Activity "Feed" bot lens (Pierre as the layer above your review bot): 'hide' (default —
+  // Activity "Feed" bot lens (Limn as the layer above your review bot): 'hide' (default —
   // drop bot-authored rows, the anti-fatigue view), 'all', or 'only' (bot activity only).
   // 'hide' is SERVER-side (useConsolidatedFeed sends excludeBots=true, so bots are excluded
   // BEFORE the page cap and a bot-heavy window fills with human rows); 'only' stays a
