@@ -527,6 +527,29 @@ request it was still working on, and uvicorn only logs on completion. `serve_loc
 defaults to 2. Raise both together to drain a large backlog; lower both together on a memory-tight
 box (each worker resident-loads both ~150 MB int8 heads).
 
+⚠ **The service's resident memory is set by the LARGEST BATCH SHAPE it has ever run, not by
+traffic.** ONNX Runtime's CPU arena grows to the peak activation working set and, by default,
+never gives it back. One 32 × 512-token mini-batch takes a session from ~0.15 GB to ~1.45 GB, and
+the service holds FOUR sessions (2 workers × severity + category). That is how the Railway
+service went 0.65 → 4.71 GB in one backlog burst on 2026-09-15 and then stayed there with no
+traffic (~$40/month of memory). The backend's `ML_BATCH_MAX_CHARS` does NOT bound this: it caps
+characters per request, but one long diff still pads every row in its mini-batch to 512 tokens.
+The bound lives in the service (`packages/ml`, `_OnnxHead`): mini-batches are capped by padded
+tokens (`BOT_MONITOR_ONNX_TOKEN_BUDGET`, default 4096), and the arena frees its unused regions
+after every run (`BOT_MONITOR_ONNX_ARENA_SHRINK`, default on). Measured on the real artifact, one
+session through the same backlog: 1,446 MB → 173 MB retained, for ~9% more wall time. Adding
+workers multiplies the resident floor, not the per-session peak.
+
+⚠ **Arena shrink is numerically identical (logits bit-equal); the token budget is NOT**, because
+the int8 export is not padding-invariant: the same comment, alone in a batch, moves its logits by
+up to 1.4 when padded from its own length to 512. So a label depends on its widest batch
+neighbour, under ANY batching. Measured on 600 real bot comments against each one scored alone:
+the old fixed-32 batches disagreed on 61 severity labels and 71 category sets, the token-budget
+batches on 50 and 70. The budget is no worse than what it replaced, but it does move ~7% of labels
+relative to it, and stored labels are never re-scored, so the two populations meet at the deploy.
+`BOT_MONITOR_ONNX_TOKEN_BUDGET=0` restores the old batches exactly. The padding sensitivity itself
+is a model-export defect, still open.
+
 ⚠ **The URL is exported as `SEVERITY_API_DEFAULT_URL`, never as `SEVERITY_API_URL`**, and
 `config.ts` reads it only as a fallback. `process.loadEnvFile` does **not** overwrite an
 already-set variable, so putting `SEVERITY_API_URL` on the dev command line would have BEATEN
