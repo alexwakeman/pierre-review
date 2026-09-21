@@ -560,8 +560,11 @@ fail. The local dev loop (`git lfs pull`, both heads) served the model the whole
 prod disagreed on category with nothing to show it. Category labels stored before that date are
 marker labels, and stored labels are never re-scored. Every served head must be listed in the
 script's `PATHS`; check the service's startup log for `taxonomy backend: composite (severity=…,
-category=…)` after any artifact change. Loading the second head adds ~0.3 GB to the resident floor
-(one ~150 MB head per worker) and a second forward pass per batch.
+category=…)` after any artifact change. ⚠ The second head is NOT ~150 MB of memory: MEASURED on
+Railway, the idle floor went 0.65 GB (severity only) → 1.63 GB (both heads, 2 workers), ≈ 0.5 GB
+per head per worker once onnxruntime has loaded and optimised it, ≈ +$10/month. It also costs a
+second forward pass per batch. `BOT_MONITOR_CATEGORY_BACKEND=marker` reverts the axis (restart
+only), and fewer workers lower the floor (see the `SEVERITY_API_WORKERS` note above).
 
 ⚠ **The URL is exported as `SEVERITY_API_DEFAULT_URL`, never as `SEVERITY_API_URL`**, and
 `config.ts` reads it only as a fallback. `process.loadEnvFile` does **not** overwrite an
