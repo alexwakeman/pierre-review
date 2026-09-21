@@ -529,10 +529,11 @@ box (each worker resident-loads both ~150 MB int8 heads).
 
 ⚠ **The service's resident memory is set by the LARGEST BATCH SHAPE it has ever run, not by
 traffic.** ONNX Runtime's CPU arena grows to the peak activation working set and, by default,
-never gives it back. One 32 × 512-token mini-batch takes a session from ~0.15 GB to ~1.45 GB, and
-the service holds FOUR sessions (2 workers × severity + category). That is how the Railway
-service went 0.65 → 4.71 GB in one backlog burst on 2026-09-15 and then stayed there with no
-traffic (~$40/month of memory). The backend's `ML_BATCH_MAX_CHARS` does NOT bound this: it caps
+never gives it back. One 32 × 512-token mini-batch takes a session from ~0.15 GB to ~1.45 GB
+(measured on macOS). The Railway service went 0.65 → 4.71 GB in one backlog burst on 2026-09-15
+and then stayed there with no traffic (~$40/month of memory) — with only TWO sessions (severity ×
+2 workers; the category model was not in the image, see below), so ~2 GB each, most likely two
+concurrent requests landing on one worker. With both heads loaded the service holds FOUR. The backend's `ML_BATCH_MAX_CHARS` does NOT bound this: it caps
 characters per request, but one long diff still pads every row in its mini-batch to 512 tokens.
 The bound lives in the service (`packages/ml`, `_OnnxHead`): mini-batches are capped by padded
 tokens (`BOT_MONITOR_ONNX_TOKEN_BUDGET`, default 4096), and the arena frees its unused regions
@@ -549,6 +550,18 @@ batches on 50 and 70. The budget is no worse than what it replaced, but it does 
 relative to it, and stored labels are never re-scored, so the two populations meet at the deploy.
 `BOT_MONITOR_ONNX_TOKEN_BUDGET=0` restores the old batches exactly. The padding sensitivity itself
 is a model-export defect, still open.
+
+⚠ **Until 2026-09-21 the deployed category axis was the marker lexicon, not the model.** The
+image build hydrates Git-LFS weights with `packages/ml/scripts/fetch_lfs_model.py`, which named the
+SEVERITY head only, so from the day the category head shipped (2026-08-05) it reached the image as a
+130-byte pointer. onnxruntime raised `INVALID_PROTOBUF` at startup and the service fell back to
+markers for that axis — silently, because every load failure is designed to degrade rather than
+fail. The local dev loop (`git lfs pull`, both heads) served the model the whole time, so dev and
+prod disagreed on category with nothing to show it. Category labels stored before that date are
+marker labels, and stored labels are never re-scored. Every served head must be listed in the
+script's `PATHS`; check the service's startup log for `taxonomy backend: composite (severity=…,
+category=…)` after any artifact change. Loading the second head adds ~0.3 GB to the resident floor
+(one ~150 MB head per worker) and a second forward pass per batch.
 
 ⚠ **The URL is exported as `SEVERITY_API_DEFAULT_URL`, never as `SEVERITY_API_URL`**, and
 `config.ts` reads it only as a fallback. `process.loadEnvFile` does **not** overwrite an
