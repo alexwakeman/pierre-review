@@ -144,6 +144,10 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
     () => [...(repos ?? [])].sort((a, b) => a.fullName.localeCompare(b.fullName)),
     [repos],
   );
+  // A FIRST-TIME account: the repo list has loaded and is empty. The selector opens this modal by
+  // itself for such an account (WorkspaceSelector), so the modal says what to do first and focuses
+  // the add box — whose empty-query state lists public repos to try. `undefined` is still loading.
+  const noReposYet = repos != null && repos.length === 0;
   const inSelected = useMemo(
     () => (selected ? sortedRepos.filter((r) => homeOf(r) === selected.id) : []),
     [sortedRepos, selected, homeOf],
@@ -329,9 +333,21 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
             a workspace the user isn't viewing left every board empty while the data landed
             somewhere invisible. onSuccess (not fire-and-forget) so the switch can't race the
             move and land on the pre-move membership. */}
+        {noReposYet && (
+          <div className="border-b border-gray-200 bg-sky-50/60 px-4 py-3 dark:border-gray-800 dark:bg-sky-950/20">
+            <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+              Add a repo to get started
+            </div>
+            <p className="mt-0.5 text-xs text-gray-600 dark:text-gray-300">
+              Search GitHub for a repo by name, or pick one of the suggested public repos to try
+              Limn out.
+            </p>
+          </div>
+        )}
         <div className="relative z-20 flex items-center gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
           {selected ? (
             <RepoSearch
+              autoFocus={noReposYet}
               placeholder={`Add a repo to ${selected.name}…`}
               onAdded={(repo) => {
                 const targetId = selected.id;
@@ -357,7 +373,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
               }}
             />
           ) : (
-            <RepoSearch />
+            <RepoSearch autoFocus={noReposYet} />
           )}
           <span className="min-w-0 truncate text-[11px] text-gray-400">
             {selected ? `New repos join “${selected.name}”` : ''}

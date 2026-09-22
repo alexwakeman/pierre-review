@@ -82,9 +82,14 @@ export function RepoSearch({
   onAdded,
   // Optional placeholder override (e.g. "Add a repo to Platform…" in WorkspaceManager).
   placeholder = 'Search repos to add…',
+  // Focus the box on mount, which opens the curated suggestions (focus with an empty query shows
+  // them). WorkspaceManager sets it for a zero-repo account, so a first-time reader sees repos to
+  // try without having to find the box first.
+  autoFocus = false,
 }: {
   onAdded?: (repo: Repo) => void;
   placeholder?: string;
+  autoFocus?: boolean;
 } = {}): JSX.Element {
   const qc = useQueryClient();
   const requestSyncModal = useFilters((s) => s.requestSyncModal);
@@ -341,6 +346,7 @@ export function RepoSearch({
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
+        autoFocus={autoFocus}
         placeholder={placeholder}
         role="combobox"
         aria-expanded={panelOpen}

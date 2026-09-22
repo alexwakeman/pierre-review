@@ -3,10 +3,19 @@ import type { Workspace } from '@pierre-review/shared';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { activeWorkspaceBadge, useMyTurnByWorkspace } from '../hooks/useMyTurnByWorkspace.js';
 import { consumeRestoredWorkspaceScope, markUrlCorrection } from '../hooks/useUrlState.js';
+import { useRepos } from '../hooks/useTimeline.js';
 import { useWorkspaces } from '../hooks/useWorkspaces.js';
 import { useFilters } from '../store/filters.js';
 import { WorkspaceManagerModal } from './Activity/WorkspaceManager.js';
 import { CaretIcon, DotIcon, GearIcon, WorkspaceIcon } from './Icons.js';
+
+/**
+ * Whether this page load has already opened the manager for a zero-repo account. MODULE state, not
+ * component state: the selector remounts (StrictMode, a view switch), and a reader who closed the
+ * modal must not have it pop back on the next mount. A reload is a new load, so an account that is
+ * still empty sees it again — which is the point: signing in with nothing to show opens here.
+ */
+let firstRunManagerShown = false;
 
 /**
  * The My-Turn count badge, shared by the collapsed trigger and every menu row so the two can
@@ -200,6 +209,20 @@ export function WorkspaceSelector(): JSX.Element {
   // the bottom opens the full management modal.
   const [manageOpen, setManageOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // A FIRST-TIME account (no repos at all) opens straight into the manager, once per page load, so
+  // the first thing on screen is the way to add a repo. `repos` is never persisted to IndexedDB, so
+  // an empty list here is the server's answer for this load, not a stale one; `undefined` is
+  // "still loading" and must not open anything. It waits for the workspaces too, so the add box
+  // opens already aimed at a workspace. Never closed for the reader: once a repo is added the
+  // modal stays up showing its sync.
+  const { data: repos } = useRepos();
+  useEffect(() => {
+    if (firstRunManagerShown || repos == null || workspaces == null) return;
+    if (repos.length > 0) return;
+    firstRunManagerShown = true;
+    setManageOpen(true);
+  }, [repos, workspaces]);
 
   // Resolve the active workspace and keep repoIds honest (see the hook above).
   useWorkspaceSync();

@@ -152,7 +152,14 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
     **`WorkspaceManager`** modal ("Manage repos & workspaces"), where repo add/remove/assignment
     and the debounced GitHub search picker (`RepoSearch` → `/api/repos/search`) live (a successful
     add pops the sync-progress modal via `syncModalSignal`); `RepoSearch` also mounts standalone
-    inside `FirstRunOnboarding` (zero-repo first run). Each row also carries an **amber My-Turn
+    inside `FirstRunOnboarding` (zero-repo first run). ⚠ **A ZERO-REPO account opens straight into
+    that modal**, once per PAGE LOAD (a module flag in `WorkspaceSelector`, so a remount or a view
+    switch never re-opens it after a close; a reload — which is what signing in is — does). It waits
+    for BOTH `['repos']` and `['workspaces']`: `undefined` is "still loading", never "empty", and
+    `repos` is not IndexedDB-persisted, so `[]` is the server's answer for this load. In that state
+    the modal leads with "Add a repo to get started" and `RepoSearch autoFocus` opens its curated
+    suggestions without a click. It never closes itself — an added repo's sync shows in the modal.
+    Each row also carries an **amber My-Turn
     badge** and the collapsed trigger carries the OTHER workspaces' total — see *Per-workspace
     "My Turn"* below.
   - **`RepoSelectPanel` is TIMELINE-ONLY, and `filters.repoIds` is therefore timeline-local in
