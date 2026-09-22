@@ -10,7 +10,9 @@ import {
   tallyFile,
   wandPlan,
   wandSentence,
+  wholeFilePlan,
   type FileTally,
+  type WholeFileSide,
 } from '../../lib/mergeResolver.js';
 import { nextOutstandingFile, type CommitPlan } from '../../lib/conflictCommit.js';
 import { languageForPath } from '../../lib/hljsLines.js';
@@ -21,12 +23,14 @@ import { SlotRow } from './SlotRow.js';
 import { useHunkSuggestion } from './useHunkSuggestion.js';
 import { useRegionEdit } from './useRegionEdit.js';
 import {
+  FILE_NOW_OURS,
   NARROW_PANES,
   PANE_OURS,
   PANE_RESULT,
   RENAME_DETECTION_OFF,
   STAYS_CONFLICTED,
   STILL_CONFLICTED,
+  fileNowTheirs,
   paneTheirs,
   truncatedNotice,
 } from './copy.js';
@@ -353,6 +357,31 @@ export function ResolverPanes({
     setAnnouncement(sentence);
   }, [activeFile, decisions, apply]);
 
+  // The two whole-file takes. ⚠ ONE `apply`, SO ONE UNDO ENTRY, exactly like the wand's run: a
+  // press that rewrote a file must come back with one press too. Only the regions whose decision
+  // changes are written, so a second press of the same button is a no-op rather than a second
+  // undo entry — which is also why the button is disabled once the file already reads that way.
+  const takeWholeFile = useCallback(
+    (side: WholeFileSide) => {
+      if (activeFile == null) return;
+      const { moves } = wholeFilePlan(activeFile.regions, activeFile.index, decisions, side);
+      if (moves.length === 0) return;
+      apply(moves.map((m) => ({ ...m, suggestionId: null, editId: null })));
+      const sentence = side === 'ours' ? FILE_NOW_OURS : fileNowTheirs(session.baseRef);
+      // The wand's banner slot: it is the same kind of fact — what one press just did to this file.
+      setWandMessage(sentence);
+      setAnnouncement(sentence);
+    },
+    [activeFile, decisions, apply, session.baseRef],
+  );
+
+  const takeFileDisabled = useMemo(() => {
+    if (activeFile == null) return { ours: true, theirs: true };
+    const none = (side: WholeFileSide): boolean =>
+      wholeFilePlan(activeFile.regions, activeFile.index, decisions, side).moves.length === 0;
+    return { ours: none('ours'), theirs: none('theirs') };
+  }, [activeFile, decisions]);
+
   useEffect(() => {
     if (wandMessage == null) return;
     const t = window.setTimeout(() => setWandMessage(null), WAND_MESSAGE_MS);
@@ -638,6 +667,9 @@ export function ResolverPanes({
   );
 
   const at = resolvable.findIndex((f) => f.index === activeIndex);
+  // The file on screen's row of the shell's ONE plan — the toolbar's per-file count reads this and
+  // nothing else, so it cannot disagree with the total beside it or the gate behind both.
+  const activeRow = plan.rows.find((r) => r.index === activeIndex && r.state !== 'unsupported');
   const wandDisabled =
     activeFile == null || wandPlan(activeFile.regions, activeFile.index, decisions).moves.length === 0;
 
@@ -656,6 +688,9 @@ export function ResolverPanes({
         onStepFile={stepFile}
         canStepBack={at > 0}
         canStepForward={at >= 0 && at < resolvable.length - 1}
+        baseRef={session.baseRef}
+        onTakeFile={takeWholeFile}
+        takeFileDisabled={takeFileDisabled}
         onWand={runWand}
         wandDisabled={wandDisabled}
         onUndo={undoLast}
@@ -664,6 +699,8 @@ export function ResolverPanes({
         language={language}
         baseOpen={baseOpen}
         onBaseOpen={setBaseOpen}
+        fileDecided={activeRow?.decided ?? null}
+        fileDecidable={activeRow?.decidable ?? null}
         decided={plan.decidedTotal}
         total={plan.decidableTotal}
         outstanding={plan.outstanding}

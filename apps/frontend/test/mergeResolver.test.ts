@@ -17,6 +17,9 @@ import {
   tallyFile,
   wandPlan,
   wandSentence,
+  wholeFileDecisionFor,
+  wholeFilePlan,
+  type WholeFileSide,
 } from '../src/lib/mergeResolver.js';
 import { useConflictResolverStore } from '../src/store/conflictResolver.js';
 
@@ -119,6 +122,89 @@ describe('wandPlan', () => {
     expect(plan.changesApplied).toBe(1);
     expect(plan.conflictsLeft).toBe(1);
     expect(plan.moves.map((m) => m.decision)).toEqual(['disjoint_merge', 'ours']);
+  });
+});
+
+describe('the whole-file takes', () => {
+  // REALISTIC sides: a region only one branch changed carries the ancestor's lines on the other
+  // side, and `unchanged` carries empty sides (the wire's shape, not the fixture default).
+  const file = (): ConflictRegion[] => [
+    R(1, 'unchanged', { base: ['keep'], ours: [], theirs: [] }),
+    R(2, 'ours_only', { base: ['b'], ours: ['B'], theirs: ['b'] }),
+    R(3, 'theirs_only', { base: ['c'], ours: ['c'], theirs: ['C'] }),
+    R(4, 'both_same', { base: ['d'], ours: ['D'], theirs: ['D'] }),
+    R(5, 'conflict', { base: ['e'], ours: ['E-ours'], theirs: ['E-theirs'] }),
+  ];
+
+  /** Fold the file the way the centre pane does, after applying the plan's moves. */
+  const resultOf = (
+    regions: ConflictRegion[],
+    side: WholeFileSide,
+    start: Record<string, ConflictDecision> = {},
+  ): string[] => {
+    const decisions = { ...start };
+    for (const m of wholeFilePlan(regions, 0, decisions, side).moves) {
+      decisions[`0:${m.regionId}`] = m.decision;
+    }
+    return regions.flatMap((r) => centreLines(r, slotFor(r, 0, decisions, {})));
+  };
+
+  /** One side's own text, region by region — what "that branch's file" means. */
+  const sideText = (regions: ConflictRegion[], side: WholeFileSide): string[] =>
+    regions.flatMap((r) =>
+      (r.kind === 'unchanged' ? r.base : side === 'ours' ? r.ours : r.theirs).map((l) => l.text),
+    );
+
+  it('makes the result EXACTLY your version of the file', () => {
+    const regions = file();
+    expect(resultOf(regions, 'ours')).toEqual(sideText(regions, 'ours'));
+  });
+
+  it("makes the result EXACTLY main's version of the file", () => {
+    const regions = file();
+    expect(resultOf(regions, 'theirs')).toEqual(sideText(regions, 'theirs'));
+  });
+
+  it("keeps an edit BOTH branches made when taking main's file", () => {
+    // ⚠ `both_same` offers no `theirs`. Falling through to `base` would drop main's own edit and
+    // produce neither branch's file.
+    const same = R(4, 'both_same', { base: ['d'], ours: ['D'], theirs: ['D'] });
+    expect(wholeFileDecisionFor(same, 'theirs')).toBe('ours');
+    expect(wholeFileDecisionFor(same, 'ours')).toBe('ours');
+  });
+
+  it('leaves the other branch’s one-sided change out, as the ancestor', () => {
+    const theirsOnly = R(3, 'theirs_only', { base: ['c'], ours: ['c'], theirs: ['C'] });
+    const oursOnly = R(2, 'ours_only', { base: ['b'], ours: ['B'], theirs: ['b'] });
+    expect(wholeFileDecisionFor(theirsOnly, 'ours')).toBe('base');
+    expect(wholeFileDecisionFor(oursOnly, 'theirs')).toBe('base');
+    expect(wholeFileDecisionFor(R(1, 'unchanged'), 'ours')).toBeNull();
+  });
+
+  it('overwrites earlier decisions in the file, and writes only what changes', () => {
+    const regions = file();
+    const start: Record<string, ConflictDecision> = {
+      '0:2': 'ours', // already what "your file" wants
+      '0:5': 'both_theirs_first', // the reader's earlier answer — replaced
+      '0:3': 'edited', // a hand-typed edit — replaced too
+    };
+    const plan = wholeFilePlan(regions, 0, start, 'ours');
+    expect(plan.moves).toEqual([
+      { fileIndex: 0, regionId: 3, decision: 'base' },
+      { fileIndex: 0, regionId: 4, decision: 'ours' },
+      { fileIndex: 0, regionId: 5, decision: 'ours' },
+    ]);
+    // A second press has nothing to do — which is what disables the button.
+    const after = { ...start };
+    for (const m of plan.moves) after[`0:${m.regionId}`] = m.decision;
+    expect(wholeFilePlan(regions, 0, after, 'ours').moves).toEqual([]);
+  });
+
+  it('addresses the regions of THIS file only', () => {
+    const regions = file();
+    const plan = wholeFilePlan(regions, 3, { '0:5': 'theirs' }, 'ours');
+    expect(plan.moves.every((m) => m.fileIndex === 3)).toBe(true);
+    expect(plan.moves.find((m) => m.regionId === 5)?.decision).toBe('ours');
   });
 });
 

@@ -91,13 +91,12 @@ export function FileMenu({
     [files, tallies],
   );
   const unsupportedCount = files.filter((f) => f.unsupported != null).length;
-  // ⚠ THE SAME FOLD AS THE ROWS AND THE GATE. The trigger used to read `· 1 conflict` off the
-  // CONTESTED population, sitting inches from a countdown over the DECIDABLE one and a Commit
-  // button held shut by all of it — three numbers about one file, and the only one visible without
-  // opening the menu was the one that understated the work. It also never counted down, because
-  // `tally.conflicts` is the file's total rather than its remainder. `fileRowState` says
-  // "6 to decide" → "2 of 6 decided" → "Resolved", which is what the gate holds out for.
-  const activeRow = active == null ? null : fileRowState(active, tallies[active.index] ?? null);
+  // ⚠ THE TRIGGER CARRIES THE PATH AND NO COUNT. It used to read `· 1 conflict` off the CONTESTED
+  // population (three numbers about one file, the visible one understating the work), then
+  // `fileRowState`'s label — and then the toolbar grew "This file: N of M changes left" beside the
+  // all-files total, off the shell's `CommitPlan`, which is the same fact again. One fact, one
+  // place: the count lives with the total it is compared against; the ROWS below keep theirs,
+  // because in the list the count is what tells one file from the next.
 
   return (
     <>
@@ -113,9 +112,6 @@ export function FileMenu({
         <span className="truncate font-mono" title={active?.path}>
           {active == null ? 'No files' : truncateLeft(active.path, 44)}
         </span>
-        {activeRow != null && (
-          <span className="shrink-0 text-gray-500 dark:text-gray-400">· {activeRow.label}</span>
-        )}
         <CaretIcon size={11} className="shrink-0 text-gray-500 dark:text-gray-400" />
       </button>
 

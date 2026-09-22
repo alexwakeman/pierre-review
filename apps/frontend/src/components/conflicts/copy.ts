@@ -206,6 +206,40 @@ export const OUTSTANDING_TITLE = 'What is left to decide';
  *  action, and telling the reader to press it is an instruction nobody asked for. */
 export const ALL_DECIDED = 'Everything is decided.';
 
+/** The two whole-file takes (`wholeFilePlan`). ⚠ "FILE" IS THE WORD THAT SEPARATES THEM FROM THE
+ *  GUTTER ARROWS, which say "Take your version" about ONE change — the same verb at a different
+ *  grain, so the grain is in the name. The tooltip states the consequence, because on a region
+ *  only the other branch changed, "your file" means leaving that change out. */
+export const TAKE_FILE_OURS = 'Take your file';
+export const takeFileTheirs = (baseRef: string): string => `Take ${baseRef}’s file`;
+export const takeFileOursTitle = (baseRef: string): string =>
+  `Make this whole file your version. ${baseRef}’s changes to it are left out.`;
+export const takeFileTheirsTitle = (baseRef: string): string =>
+  `Make this whole file ${baseRef}’s version. Your changes to it are left out.`;
+/** Said once the press lands — the banner and the live region. */
+export const FILE_NOW_OURS = 'This file is now your version.';
+export const fileNowTheirs = (baseRef: string): string => `This file is now ${baseRef}’s version.`;
+
+/** The two counts beside the outstanding list's trigger: the file on screen, then every file.
+ *
+ *  ⚠ BOTH ARE THE COMMIT GATE'S POPULATION — every DECIDABLE region, read off the shell's ONE
+ *  `CommitPlan` (`rows` for the file, `decidableTotal`/`decidedTotal` for the whole) — so the two
+ *  cannot disagree with each other, with the footer's "N of M changes decided", or with the
+ *  button they hold shut. They count DOWN because the reader asked what is left; the footer
+ *  counts up, and the two always sum to the same denominator. */
+export const fileChangesLeft = (remaining: number, decidable: number): string =>
+  decidable === 0
+    ? 'This file: nothing to decide'
+    : remaining === 0
+      ? 'This file: all decided'
+      : `This file: ${remaining} of ${decidable} changes left`;
+export const allChangesLeft = (remaining: number, decidable: number): string =>
+  decidable === 0
+    ? 'Nothing to decide in this pull request.'
+    : remaining === 0
+      ? 'All files: all decided'
+      : `All files: ${remaining} of ${decidable} changes left`;
+
 export const WAND_BUTTON = 'Take the obvious ones';
 export const WAND_BUTTON_TITLE =
   'Apply every change only one side made, and merge the conflicts whose edits don’t overlap. Never picks a side.';

@@ -2136,7 +2136,7 @@ landmines:
   on the STRIP, not the row: the row wrapper is `display: contents`, which removes it from the
   accessibility tree entirely, so the grouping and the "Conflict 2 of 5 in src/…" position have
   nowhere else to go.
-- ⚠ **"TAKE THIS SIDE" IS THE GUTTER ARROW AND NOTHING ELSE.** `ours`/`theirs` used to sit on the
+- ⚠ **"TAKE THIS SIDE" (for ONE change) IS THE GUTTER ARROW AND NOTHING ELSE.** `ours`/`theirs` used to sit on the
   strip AND again as a hover-revealed, `aria-hidden` arrow in each gutter: one verb, two controls,
   every region announcing as a pair of identical buttons. The strip gave the verb up; the arrow is
   now ALWAYS drawn, really named (`gutterLabel` in `copy.ts` — it carries the region's position,
@@ -2209,11 +2209,27 @@ landmines:
   while the header counts every DECIDABLE region across the whole pull request — so a bare "Nothing
   left to decide." sat beside a countdown at a different grain and the two flatly contradicted each
   other on screen. It says "…in this file".
-- ⚠ **EVERY PER-FILE NUMBER FOLDS THROUGH `fileRowState`.** The file-menu TRIGGER quoted contested
+- ⚠ **EVERY PER-FILE NUMBER IS THE GATE'S POPULATION.** The file-menu TRIGGER quoted contested
   regions (`· 1 conflict`) beside a menu row reading `6 to decide` and a Commit button held shut by
   all six — three numbers about one file, and the only one visible without opening the menu was the
   one that understated the work. It also never counted down, because `tally.conflicts` is the file's
-  total rather than its remainder.
+  total rather than its remainder. The menu ROWS fold through `fileRowState`; the toolbar now prints
+  **"This file: N of M changes left" beside "All files: N of M changes left"**, both off the shell's
+  ONE `CommitPlan` (`plan.rows` for the file, `decidedTotal`/`decidableTotal` for the whole), and the
+  trigger carries the PATH ONLY — "2 of 6 decided" beside "4 of 6 changes left" was one fact twice.
+  The toolbar counts DOWN, the footer counts up; same population, same denominator.
+- **"Take your file" / "Take main's file" make the result one branch's version of the WHOLE file**
+  (`wholeFilePlan` in `lib/mergeResolver.ts`) — one `apply`, so one undo entry, and they overwrite
+  what the reader had already decided in that file, a hand-typed edit included. ⚠ **"Your file" is
+  not `'ours'` everywhere**: a region only the other branch changed takes `'base'` (this side's
+  version is the ancestor), and `both_same` under "main's file" takes `'ours'` — it offers no
+  `theirs`, and `'base'` there would drop an edit main also made. `mergeResolver.test.ts` folds
+  every kind through `centreLines` and asserts the result IS that side's text. ⚠ **No key is bound
+  to either** (the one toolbar verb without one): `←`/`→` already mean "take this side" for ONE
+  change, and a reflex key that rewrites a whole file is not a shortcut. They do not retract the
+  gutter-arrow rule below — the arrow is still the one per-CHANGE route to a side; these name the
+  FILE so the two never announce alike. Not the wand either: the wand never picks a side because it
+  acts for the reader, and this is the reader picking one.
 - **`ClosedResolverToast` is a plain card in the ONE bottom-right toast column**, never its own
   `fixed bottom-4 right-4` element.
 - The `--mr-*` state washes and the shared `--code-hl-*` syntax colours, with their hand-run guards:

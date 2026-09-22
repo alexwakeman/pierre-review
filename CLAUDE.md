@@ -730,11 +730,14 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   undecided and `applied` GREEN once its lines reach the result; a turned-down side and both sides
   of an ignored region paint NOTHING (`.mr-edge-*` is DELETED — do not re-add an outline). The
   CENTRE wears the STATE and is bare while undecided; every ribbon is the applied green.
-  ⚠ **The gutter arrow is the ONE pointer route to "take this side"** — a real roving-tab-stop
+  ⚠ **The gutter arrow is the ONE pointer route to "take this side" for ONE change** — a real roving-tab-stop
   control reading that same `sideOffered`, and it DISAPPEARS once that side's lines are in the
   result (an arrow is an offer to add; on an added side it offers a no-op). Undo or Ignore brings
   it back, derived from the slot with no re-reveal state, and it carries no `aria-pressed` —
-  presence IS the state. The strip carries the two side verbs only when the panes are STACKED. Rebase is single-commit-only and never runs `git rebase`.
+  presence IS the state. The strip carries the two side verbs only when the panes are STACKED.
+  The toolbar's **"Take your file" / "Take main's file"** are the FILE-grain verb (`wholeFilePlan`,
+  one undo entry, no key bound): ⚠ "your file" is `'base'` on a region only the other side changed
+  and `both_same` → `'ours'` under "main's file", or the result is neither branch's file. Rebase is single-commit-only and never runs `git rebase`.
   Read [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md) § Resolving conflicts in the app before
   touching any of it.
 - CI logs are live ranged reads of the signed Actions blob URL — server-side only, **NEVER

@@ -363,6 +363,15 @@ SPA's second implementation dropped every pure insertion and rendered the ancest
 commit landed merged. `packages/shared/src/conflict-fold.ts` is the ONE fold, called by the centre
 pane and by the land route, which is what makes "what you saw is what lands" structural.
 
+**One branch's version of a whole file is a READER'S press, not a wand run.** The toolbar's "Take
+your file" / "Take `main`'s file" write, in one undo entry, the decision that makes every region of
+the file on screen read as that side's text (`wholeFilePlan`, `lib/mergeResolver.ts`) — overwriting
+whatever the reader had decided there, hand-typed edits included. ⚠ It is `'ours'`/`'theirs'` only
+where the region offers that side: a region only the OTHER branch changed takes `'base'` (this side
+left it as the ancestor), and `both_same` under "main's file" takes `'ours'` because it offers no
+`theirs` — `'base'` there drops an edit main also made. It sends only enum members, so nothing about
+the commit body, the fold or `CONFLICT_MODEL_VERSION` changes.
+
 **The per-file workflow.** The session is a MANIFEST — files, counts, pins, landing options — and
 carries no regions: a thirty-file conflict with regions inline is a multi-megabyte payload on every
 progress frame. One file's regions arrive on selection. A file the model cannot represent (binary,

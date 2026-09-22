@@ -14,7 +14,7 @@ import { CaretIcon } from '../Icons.js';
 import {
   ALL_DECIDED,
   OUTSTANDING_TITLE,
-  decisionsDecided,
+  allChangesLeft,
   jumpToFileLabel,
   toDecide,
 } from './copy.js';
@@ -59,7 +59,8 @@ export function OutstandingPopover({
   onOpenChange,
   onJumpToFile,
 }: {
-  /** The countdown, off the shell's ONE `CommitPlan`. Never re-folded here. */
+  /** The countdown, off the shell's ONE `CommitPlan`. Never re-folded here. The trigger prints
+   *  `total - decided` — what is LEFT across every file. */
   decided: number;
   total: number;
   /** Every supported file with an unanswered region, in manifest order. */
@@ -114,7 +115,9 @@ export function OutstandingPopover({
         title={OUTSTANDING_TITLE}
         className="flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
       >
-        {decisionsDecided(decided, total)}
+        {/* ⚠ WHAT IS LEFT, NOT WHAT IS DONE — the population and the denominator are the footer's,
+            the direction is the question this control answers. See `allChangesLeft`. */}
+        {allChangesLeft(total - decided, total)}
         <CaretIcon size={11} className="shrink-0 text-gray-500 dark:text-gray-400" />
       </button>
 

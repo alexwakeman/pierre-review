@@ -514,6 +514,66 @@ export function wandSentence(plan: WandPlan): string {
   return `${plural(plan.conflictsLeft, 'conflict', 'conflicts')} left to decide.`;
 }
 
+// ── THE WHOLE-FILE TAKES ─────────────────────────────────────────────────────────────────────
+//
+// "Take your file" / "Take main's file": make the result one branch's version of the WHOLE file,
+// in one press and one undo step.
+//
+// ⚠ THIS IS NOT THE WAND, AND IT DOES NOT BEND THE WAND'S PROMISE. The wand never picks a side
+// because it acts on the reader's behalf; this is the reader picking one, for a whole file, on a
+// button carrying the branch's name. Nothing runs it but that press — it is not an auto-apply.
+//
+// ⚠ "YOUR FILE" IS NOT `'ours'` ON EVERY REGION. `region.allowed` offers a side only where that
+// side has something to bring in, so:
+//   • a region only the OTHER branch changed is, on this side, still the ANCESTOR → `'base'`;
+//   • `both_same` (the identical edit on both branches) offers `['ours', 'base']` and nothing on the
+//     right, so "main's file" takes `'ours'` — the one member carrying main's text too. Falling
+//     through to `'base'` there would silently drop an edit main ALSO made, and the result would
+//     be neither branch's file. `mergeResolver.test.ts` folds every kind through `centreLines` to
+//     pin that the result IS the side's text, not just that some decision was written.
+//
+// ⚠ IT OVERWRITES WHAT THE READER ALREADY DECIDED IN THIS FILE, a hand-typed edit or an accepted
+// suggestion included. It is a whole-file answer; the undo stack takes the whole press back.
+
+export type WholeFileSide = 'ours' | 'theirs';
+
+/** The one decision that makes this region read as `side`'s version of it. Null for `unchanged`
+ *  (nothing to decide) and for a region offering no route to it, which the model never builds. */
+export function wholeFileDecisionFor(
+  region: ConflictRegion,
+  side: WholeFileSide,
+): ConflictDecision | null {
+  if (region.kind === 'unchanged') return null;
+  if (region.allowed.includes(side)) return side;
+  // Both branches made the same edit: `ours` IS the other side's text. See the ⚠ above.
+  if (region.kind === 'both_same' && region.allowed.includes('ours')) return 'ours';
+  // Only the other branch changed this, so this side's version is the ancestor.
+  if (region.allowed.includes('base')) return 'base';
+  return null;
+}
+
+export interface WholeFilePlan {
+  /** Only the regions whose decision CHANGES — an empty list means the file already reads as
+   *  that side's version, and the button has nothing to do. */
+  moves: Array<{ fileIndex: number; regionId: number; decision: ConflictDecision }>;
+}
+
+export function wholeFilePlan(
+  regions: readonly ConflictRegion[],
+  fileIndex: number,
+  decisions: Readonly<Record<string, ConflictDecision>>,
+  side: WholeFileSide,
+): WholeFilePlan {
+  const moves: WholeFilePlan['moves'] = [];
+  for (const region of regions) {
+    const decision = wholeFileDecisionFor(region, side);
+    if (decision == null) continue;
+    if (decisions[regionKey(fileIndex, region.id)] === decision) continue;
+    moves.push({ fileIndex, regionId: region.id, decision });
+  }
+  return { moves };
+}
+
 // ── COUNTERS ─────────────────────────────────────────────────────────────────────────────────
 
 export interface FileTally {

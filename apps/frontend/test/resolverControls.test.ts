@@ -608,6 +608,38 @@ describe('the "Next" button and the list behind the counter', () => {
     expect(stripComments(TOOLBAR)).toMatch(/aria-label=\{FILE_NEXT\}/);
   });
 
+  it('puts the file count beside the all-files count, off the ONE plan', () => {
+    // ⚠ BOTH COUNTS COME FROM THE SHELL'S `CommitPlan`: the file's row and the total. A per-file
+    // number folded anywhere else is how two figures about one file come apart.
+    expect(PANES).toMatch(/const activeRow = plan\.rows\.find\(/);
+    expect(PANES).toMatch(/fileDecided=\{activeRow\?\.decided \?\? null\}/);
+    expect(PANES).toMatch(/fileDecidable=\{activeRow\?\.decidable \?\? null\}/);
+    expect(stripComments(TOOLBAR)).toMatch(/fileChangesLeft\(fileDecidable - fileDecided, fileDecidable\)/);
+    expect(OUTSTANDING).toMatch(/allChangesLeft\(total - decided, total\)/);
+    // And the file menu's trigger no longer prints the same fact a second time.
+    const FILE_MENU = read('../src/components/conflicts/FileMenu.tsx');
+    const trigger = FILE_MENU.slice(
+      FILE_MENU.indexOf('<button'),
+      FILE_MENU.indexOf('</button>', FILE_MENU.indexOf('<button')),
+    );
+    expect(stripComments(trigger)).not.toMatch(/label/);
+  });
+
+  it('takes a whole file from ONE side in one press, with no key bound to it', () => {
+    expect(stripComments(TOOLBAR)).toMatch(/onClick=\{\(\) => onTakeFile\('ours'\)\}/);
+    expect(stripComments(TOOLBAR)).toMatch(/onClick=\{\(\) => onTakeFile\('theirs'\)\}/);
+    // One `apply`, so one undo entry — the wand's rule.
+    const take = PANES.slice(PANES.indexOf('const takeWholeFile = useCallback('));
+    const body = take.slice(0, take.indexOf('[activeFile, decisions, apply'));
+    expect(body.match(/apply\(/g)?.length).toBe(1);
+    // ⚠ NO KEY. A reflex keystroke that rewrites a whole file is not a shortcut.
+    const keys = PANES.slice(PANES.indexOf('const onKeyDown = useCallback('));
+    expect(stripComments(keys.slice(0, keys.indexOf('[decideActive')))).not.toContain('takeWholeFile');
+    // The grain is in the name, so the file take never announces like a gutter arrow.
+    expect(COPY).toMatch(/TAKE_FILE_OURS = 'Take your file'/);
+    expect(COPY).toMatch(/takeFileTheirs = \(baseRef: string\): string => `Take \$\{baseRef\}’s file`/);
+  });
+
   it('keeps the outstanding list reachable from the panes', () => {
     // ⚠ THE REASON THE BUTTON COULD BE GATED AT ALL. "Still to decide" used to be rendered only on
     // the landing step, which is why the old button was deliberately never disabled. It is a press
