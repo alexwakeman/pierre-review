@@ -96,10 +96,19 @@ export default function ForManagers(): JSX.Element {
                   automation did, because agents now author a real share of the pull requests
                   and several vendors comment on every one.
                 </p>
-                <p>
+                <p className="mb-6">
                   The questions beside this are the ones actually asked in a staff meeting.{' '}
                   {SITE_NAME} answers each with a stated population and a stated window, or
                   says why it cannot.
+                </p>
+                {/* ⚠ The ONE place this page describes the board, and it is worded to match
+                    the other two pages' lead ("plan your day", rules each reader sets). The
+                    page itself stays about reporting — this line only says where the
+                    team's morning happens, and that it is free. */}
+                <p>
+                  Your team plans its day on the free Pending board — everything waiting on
+                  them or on the workspace, in six ranked tabs, by rules each person sets.
+                  This page is the same work one grain up: the fortnight, not the morning.
                 </p>
               </div>
               <div>

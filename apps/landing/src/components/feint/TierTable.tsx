@@ -38,10 +38,20 @@ interface Row {
 }
 
 const ROWS: Row[] = [
+  // ⚠ THE PLAN IS FREE; ONLY ITS SENTENCES ARE PRO. The first two rows are the site's
+  // lead promise ("plan your day") and its headline capability (the rules), so each must
+  // say plainly that the paid column adds writing on top and changes neither the order
+  // nor the rules. The app's own Pro button is labelled "Plan my day"; the Pro cell names
+  // it so the two are not mistaken for one another.
   {
-    q: 'What is waiting on me?',
-    free: 'The whole worklist, ranked. My Turn, review requests, red builds, conflicts — across every repository.',
-    pro: 'Same list, with a written reason on each of the top items and a line saying what can safely wait.',
+    q: 'What should I work on today?',
+    free: 'Pending: everything waiting on you or your workspace, across every repository, in six ranked tabs — the top five of each marked Do next.',
+    pro: 'Plan my day: a written headline, a line on what can wait, and a reason on each planned card. The order stays the free one.',
+  },
+  {
+    q: 'Can I change what counts as my turn?',
+    free: 'Yes. Switch card types on or off, move your own work into My turn, set the order, choose how every tab ranks, and mute a repository or a workspace.',
+    pro: 'Everything free does. Your rules are never the paid part.',
   },
   {
     q: 'What happened on this pull request?',
@@ -70,7 +80,7 @@ const ROWS: Row[] = [
   },
   {
     q: 'Is a repository about to bite us?',
-    free: 'Default-branch health across every repository, the commit that broke it, and the pull request that landed it.',
+    free: 'Default-branch health across every repository, the checks failing on it, and the pull request that landed its latest commit.',
     pro: 'Everything free does. Trunk health is never the paid part — it is the thing you need at the worst moment.',
   },
   {
@@ -85,7 +95,7 @@ const ROWS: Row[] = [
   },
   {
     q: 'Can I keep the noise down?',
-    free: 'Bots hidden by default, notifications only for work that is personally yours, and a per-repository mute.',
+    free: 'Bots hidden by default, notifications only for work that is yours, and a mute per repository or per workspace.',
     pro: 'Everything free does, plus a Slack digest per workspace if you would rather read it there.',
   },
   {

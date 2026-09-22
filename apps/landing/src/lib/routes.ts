@@ -53,12 +53,12 @@ export type RouteSeo = {
  */
 export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
-    title: `${SITE_NAME} — shine a light on your software projects`,
-    description: `Your work spans repositories, people and a growing stack of review automation. ${SITE_NAME} lights all of it on one board — whose turn it is, what is stalled, what is ready to land — and measures what the AI review bots on top are actually worth. Free and open core.`,
+    title: `${SITE_NAME} — plan your day across every repository`,
+    description: `${SITE_NAME} opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. It also measures what the review bots on top are worth. Free and open core.`,
   },
   '/for-developers': {
-    title: 'For developers — what to do next, across every repository',
-    description: `A red build on one branch, two reviews waiting on another, six bot comments on the one you thought was done, and a conflict that appeared overnight. All of it is yours and none of it is ordered. ${SITE_NAME} ranks the lot into one list and lets you finish the top of it in place — reply, approve, merge, resolve the conflict. Free, with no repository limit.`,
+    title: 'For developers — plan your day, by your own rules',
+    description: `A red build, two reviews waiting, a reply on a thread you had moved on from, a conflict that appeared overnight. ${SITE_NAME} puts all of it on one board across every repository, ranked, with what to do next at the top. You decide what counts as your turn and how it is ordered, then finish the work in place — reply, approve, merge, resolve the conflict. Free, with no repository limit.`,
   },
   '/for-managers': {
     title: 'For engineering managers — see the whole review loop, people and bots',

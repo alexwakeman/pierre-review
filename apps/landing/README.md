@@ -12,8 +12,8 @@ plus the three legal ones:
 
 | Route | Page | Focus |
 |---|---|---|
-| `/` | `pages/Home.tsx` | The pitch, the numbers, and the split to the two role pages |
-| `/for-developers` | `pages/ForDevelopers.tsx` | The free tier in full, then what Pro adds for an IC |
+| `/` | `pages/Home.tsx` | "Plan your day": the Pending board and the rules behind it first, then the walkthrough, the numbers, and the split to the two role pages |
+| `/for-developers` | `pages/ForDevelopers.tsx` | The free tier in full — led by Pending and its settings — then what Pro adds for an IC |
 | `/for-managers` | `pages/ForManagers.tsx` | The free metrics, then the paid scoreboard and reports |
 | `/how-we-measure` | `pages/HowWeMeasure.tsx` | The two ML models in plain English — what each is for, how it was built, how we know it works |
 | `/contact` | `pages/Contact.tsx` | **Also the purchase path.** Checkout is unwired, so Pro is given free for a month to anyone who asks — every Pro call-to-action on the site points here, and `/pricing` resolves to it. The only page that talks to the backend (`POST /api/contact` → a Slack webhook) |

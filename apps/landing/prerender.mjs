@@ -116,7 +116,9 @@ const { render, ROUTE_SEO, PRERENDER_PATHS, SITE_URL, OG_IMAGE, SITE_NAME } = aw
 const template = readFileSync(join(dist, 'index.html'), 'utf8');
 // Composed from SITE_NAME rather than written out, so the product name lives in
 // exactly one place (src/lib/site.ts) across the whole build.
-const IMAGE_ALT = `The ${SITE_NAME} timeline dashboard showing pull-request activity across a team’s repositories.`;
+// Kept in step with the og:image:alt in index.html: the OG image is the Pending board,
+// not the timeline, so the alt says so.
+const IMAGE_ALT = `The ${SITE_NAME} board showing everything waiting across a team’s repositories, ranked most actionable first.`;
 
 let smallest = Infinity;
 const written = [];

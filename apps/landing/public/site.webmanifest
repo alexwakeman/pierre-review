@@ -1,7 +1,7 @@
 {
-  "name": "Limn — team GitHub activity, at a glance",
+  "name": "Limn — plan your day across every repository",
   "short_name": "Limn",
-  "description": "A timeline-first dashboard for tracking a team's GitHub activity across repositories.",
+  "description": "One ranked board of everything waiting on you across every repository, by rules you set.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FAFAF8",

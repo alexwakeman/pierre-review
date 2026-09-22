@@ -29,7 +29,7 @@ import { TierTable } from '../components/feint/TierTable';
 // here talks about visibility, insights or velocity — that is the manager's
 // page, and only some of it is even true.
 //
-// ⚠ THE MULTI-REPO PROBLEM LEADS AND THE BOTS ARE A PEER SECTION (§05 of seven).
+// ⚠ THE MULTI-REPO PROBLEM LEADS AND THE BOTS ARE A PEER SECTION (§06 of eight).
 // An earlier cut opened with "every pull request is read by three or four review
 // bots", which described the automation as the problem and narrowed the page to
 // readers who already feel they have a bot problem. The larger, plainer truth is
@@ -42,6 +42,14 @@ import { TierTable } from '../components/feint/TierTable';
 // thread to reply to, a conflict to clear), they arrive in no sequence at all, and
 // they are spread across repositories you switch between all day. Narrowing to
 // "what is most relevant to you, right now" is the product.
+//
+// ⚠ THE PROMISE IS NOW SPELLED "PLAN YOUR DAY", AND THE RULES ARE HALF OF IT.
+// The app opens on Pending, so the page leads with it: 01 the day (the problem),
+// 02 Pending (the plan), 03 your rules (what counts as your turn, the order, the
+// mute — all free settings), 04 act in place (finishing the plan), then the
+// threads, the bots, the rest of the free tier and Pro. The rules are a section of
+// their own because a ranked list whose idea of "your turn" you cannot change is
+// somebody else's list. The Story clock times run in page order; keep them so.
 //
 // ⚠ STATE THAT POSITIVELY. A first attempt at the fix ran the H2 "Knowing what's
 // yours was never the hard part", which corrects the reader on something they
@@ -71,21 +79,21 @@ export default function ForDevelopers(): JSX.Element {
           For developers
         </MonoLabel>
         <h1 className="mb-7 max-w-[20ch] text-pretty font-display text-hero-sm font-semibold text-ink type:text-hero">
-          Everything that&rsquo;s yours, in order.
+          Plan your day, by your own rules.
         </h1>
         <p className="mb-[34px] max-w-lede text-pretty text-lede text-ink-soft">
-          A red build on one branch. Two reviews waiting on another. Six bot comments on the
-          pull request you thought was finished, and a conflict that appeared overnight on
-          the one that was ready to land. All of it is yours, and none of it tells you which
-          to do first. {SITE_NAME} ranks the lot across every repository you work in — and
-          lets you finish the top of it without leaving the page.
+          A red build on one branch. Two reviews waiting on another. A reply on a thread you
+          had moved on from, and a conflict that appeared overnight on the one that was ready
+          to land. {SITE_NAME} puts all of it on one board across every repository you work
+          in, ranked, with what to do next at the top. You decide what counts as your turn
+          and how it is ordered — and you finish the work without leaving the page.
         </p>
         <div className="mb-4 flex flex-wrap items-center gap-3.5">
           <InkButton to="/api/auth/login">Sign in with GitHub</InkButton>
           <UnderlineLink to="/for-managers">If you run the team →</UnderlineLink>
         </div>
         <p className="mb-11 max-w-reassure font-mono text-mono-nav text-secondary">
-          Everything in the next six sections is free, with no repository limit. Run it on
+          Everything in the next seven sections is free, with no repository limit. Run it on
           your own machine with <span className="text-ink">{INSTALL_COMMAND}</span> and it
           keeps no credentials at all.
         </p>
@@ -125,7 +133,7 @@ export default function ForDevelopers(): JSX.Element {
                   ))}
                 </ul>
                 <Story moment="Free, always">
-                  everything in sections 01 to 06 is in the open-core tier.
+                  everything in sections 01 to 07 is in the open-core tier.
                 </Story>
               </div>
             </div>
@@ -134,45 +142,57 @@ export default function ForDevelopers(): JSX.Element {
       </Section>
 
       {/* ---------- 02 · Pending ---------- */}
+      {/* ⚠ "PLAN MY DAY" IN THE SCREENSHOT IS THE PRO BUTTON; the plan it sits above
+          is free. The copy says which is which (last paragraph) so the page's promise
+          and the shot's button cannot be read as the same paid thing. Every weight below
+          is a DEFAULT from `packages/shared/src/pending-rules.ts` (Balanced); §03 is
+          where the reader changes them. */}
       <FeatureShot
         rail={{ n: '02', word: 'Pending' }}
         tone="alt"
-        heading="One queue, and the next thing at the top of it."
+        heading="Your day, planned on one board."
         src="/shots/pending-board.png"
         alt="The Pending board across four repositories: ready-to-merge, your-turn and in-your-repos cards, each with its CI state, file counts, reach chip and merge actions"
         caption="limn · pending"
         height={640}
       >
         <p className="mb-6">
-          Review requests, threads somebody answered, red builds on your branches, conflicts
-          you can clear, pull requests sitting green and ready to land — five different kinds
-          of job, from every repository, in one list with the most actionable at the top.
+          Pending is the first screen. Six tabs — My turn, Needs fixing, Waiting on review,
+          Unanswered threads, Ready to land and Dependencies — from every repository in the
+          workspace. Each tab is ranked, and its top five are{' '}
+          <span className="text-ink">Do next</span>.
         </p>
         <p className="mb-6">
-          The ordering is the point, and it is code rather than a model: three numbers, added
-          up. Half the weight is how close the job is to <em>finished</em> — a two-file change
-          outranks a forty-file one, and a conflict or three unanswered threads pushes a job
-          down rather than up. Three tenths is how long it has been sitting, in fixed steps at
-          one, two and four days. The last fifth is how directly it is tied to you: your name
-          on it, a repository you maintain, or neither.
+          The ordering is code rather than a model: three numbers, added up. By default, half
+          the weight is how close the job is to <em>finished</em> — a two-file change outranks
+          a forty-file one, and a conflict or three unanswered threads pushes a job down rather
+          than up. Three tenths is how long it has been sitting, in fixed steps at one, two and
+          four days. The last fifth is how directly it is tied to you: your name on it, a
+          repository you maintain, or neither. Every card shows its working, and a{' '}
+          <span className="text-ink">How Pending works</span> guide explains the rest.
         </p>
         <p className="mb-6">
           An approved pull request that can land comes out top. The same one with nobody&rsquo;s
           approval on it ranks below a plain review request, deliberately: ranked the other way,
-          the head of the board filled with unreviewed dependency bumps. The rank is free on
-          every tier; only the sentence explaining each row is Pro.
+          the head of the board filled with unreviewed dependency bumps.
         </p>
         <p className="mb-6">
           A card exists only while you genuinely owe an action and have not taken it. There
-          is nothing to tick off and nothing to dismiss, because the list is worked out fresh
-          on every read rather than stored: act, and the card leaves on its own.
+          is nothing to tick off, because the list is worked out fresh on every read rather
+          than stored: act, and the card leaves on its own. One you can&rsquo;t act on, you
+          dismiss &mdash; it stays gone until something new happens on it.
         </p>
-        <p>
+        <p className="mb-6">
           The labels are careful about what they claim.{' '}
           <span className="text-ink">Your turn</span> means the work is tied to you.{' '}
           <span className="text-ink">In your repos</span> means somebody opened something on
           ground you maintain — orbit, not ownership. A card will not tell you a
           stranger&rsquo;s pull request is yours.
+        </p>
+        <p>
+          The tabs and the order are free on every tier. The{' '}
+          <span className="text-ink">Plan my day</span> button in the corner is Pro: it adds
+          the written sentences on top (§08).
         </p>
         <Story moment="09:04">
           sixty-one items across five repositories, and the first three are the ones you can
@@ -180,36 +200,82 @@ export default function ForDevelopers(): JSX.Element {
         </Story>
       </FeatureShot>
 
-      {/* ---------- 03 · threads ---------- */}
-      <FeatureShot
-        rail={{ n: '03', word: 'The threads' }}
-        heading="Every review thread already triaged."
-        src="/shots/pr-threads.png"
-        alt="A pull request's thread list: each thread carrying a derived state, the vendor that opened it and a severity badge"
-        caption="limn · threads"
-        height={640}
-      >
-        <p className="mb-6">
-          Each review thread carries a state worked out from the repository itself: resolved,
-          replied but still open, untouched — or{' '}
-          <span className="text-ink">likely addressed</span>, which means a commit touched
-          that file after the comment landed.
-        </p>
-        <p className="mb-6">
-          That last one is a heuristic and the interface says so wherever it appears. A
-          rename or an unrelated edit can trip it. It is offered as a shortcut through forty
-          bot threads, never as a verdict.
-        </p>
-        <p>
-          Bot comments also arrive already graded for severity, by a classifier trained for
-          this one job — free, and never the vendor&rsquo;s own badge, which is stored to be
-          shown and not to be believed.
-        </p>
-        <Story moment="09:11">
-          fifteen threads on one pull request; three still need you, and one button clears
-          the rest.
-        </Story>
-      </FeatureShot>
+      {/* ---------- 03 · your rules ---------- */}
+      {/* ⚠ A PRIMARY OFFERING, NOT A FOOTNOTE — and every claim here is a real, free
+          control: Settings → My Turn (account-wide: `MyTurnSection.tsx`, labels from
+          `MY_TURN_SETTING_LABEL` / `PRESET_LABEL`, defaults from
+          `MY_TURN_SHOW_DEFAULTS`) and Settings → Pending mute (per workspace or per
+          repository: `PendingMuteSection.tsx`). No screenshot, because no capture of
+          either exists; do not borrow an unrelated settings screen to fill a frame.
+
+          ⚠ THE MUTE KEEPS THE CARD. It stops the ownership claim and the notification,
+          never the listing — say "stop claiming your turn", never "hide". A switched-off
+          TYPE, by contrast, really is removed, counts and notifications included. */}
+      <Section>
+        <RailGrid rail={{ n: '03', word: 'Your rules' }}>
+          <div className="rail:col-span-2">
+            <h2 className="mb-6 max-w-[28ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
+              You decide what counts as your turn, and in what order.
+            </h2>
+            <p className="mb-[30px] max-w-[62ch] text-pretty">
+              The rules behind the board are settings. The tabs, the counts and the
+              notifications follow them, and the board explains its order with them. The{' '}
+              <span className="text-ink">Customise</span> link on My turn opens them.
+            </p>
+            <div className="grid gap-grid-gutter rail:grid-cols-2">
+              <div>
+                <h3 className="mb-3 font-display text-h4 font-semibold text-ink">
+                  What counts
+                </h3>
+                <p className="text-list text-ink-body">
+                  Each kind of card has its own switch: review requests, @mentions, replies in
+                  threads you started, replies to your comments elsewhere, new commits since you
+                  reviewed, approvals and activity on your own pull requests. Switch one off and
+                  it leaves My turn, its counts and its notifications together. New pull requests
+                  nobody asked you about start off.
+                </p>
+              </div>
+              <div>
+                <h3 className="mb-3 font-display text-h4 font-semibold text-ink">
+                  What joins it
+                </h3>
+                <p className="text-list text-ink-body">
+                  Your own red builds, merge conflicts, pull requests ready to land and
+                  unanswered threads can move out of their own tabs into My turn. So can a red
+                  default branch, in the repositories you maintain or in all of them. Each of
+                  these starts off.
+                </p>
+              </div>
+              <div>
+                <h3 className="mb-3 font-display text-h4 font-semibold text-ink">
+                  In what order
+                </h3>
+                <p className="text-list text-ink-body">
+                  Put My turn&rsquo;s card types in the order you work through them. Then choose
+                  how every tab ranks: <span className="text-ink">Balanced</span>,{' '}
+                  <span className="text-ink">Mine first</span>,{' '}
+                  <span className="text-ink">Oldest first</span> or{' '}
+                  <span className="text-ink">Quick wins</span> — or set the three weights
+                  yourself.
+                </p>
+              </div>
+              <div>
+                <h3 className="mb-3 font-display text-h4 font-semibold text-ink">
+                  What may interrupt you
+                </h3>
+                <p className="text-list text-ink-body">
+                  Mute a repository, or a whole workspace. Its cards stay on the board, but they
+                  stop saying <span className="text-ink">Your turn</span> and stop notifying you.
+                  Notifications only ever fire for work that is yours.
+                </p>
+              </div>
+            </div>
+            <Story moment="Free">
+              every one of these, on every tier, running locally or hosted.
+            </Story>
+          </div>
+        </RailGrid>
+      </Section>
 
       {/* ---------- 04 · act in place ---------- */}
       <FeatureShot
@@ -235,8 +301,8 @@ export default function ForDevelopers(): JSX.Element {
           from what GitHub returns, and pretending otherwise is how a tool loses your trust.
         </p>
         <p className="mb-6">
-          Conflicts are resolved in the app, hunk by hunk, with no worktree and no free
-          typing anywhere in the flow. Running locally, that is free too.
+          Conflicts are resolved in the app, hunk by hunk: take a side, or edit the result
+          yourself. Free, running locally or hosted.
         </p>
         <p>
           The header carries how far the change reaches — low, medium or high, with the
@@ -244,21 +310,53 @@ export default function ForDevelopers(): JSX.Element {
           file list it will assert &ldquo;high&rdquo; but never &ldquo;low&rdquo;, because a
           truncated list is always a floor.
         </p>
-        <Story moment="09:19">
+        <Story moment="09:11">
           two merged, one armed for when the build finishes, one conflict cleared.
         </Story>
       </FeatureShot>
 
-      {/* ---------- 05 · what the bots said ----------
+      {/* ---------- 05 · threads ---------- */}
+      <FeatureShot
+        rail={{ n: '05', word: 'The threads' }}
+        heading="Every review thread already triaged."
+        src="/shots/pr-threads.png"
+        alt="A pull request's thread list: each thread carrying a derived state, the vendor that opened it and a severity badge"
+        caption="limn · threads"
+        height={640}
+      >
+        <p className="mb-6">
+          Each review thread carries a state worked out from the repository itself: resolved,
+          replied but still open, untouched — or{' '}
+          <span className="text-ink">likely addressed</span>, which means a commit touched
+          that file after the comment landed.
+        </p>
+        <p className="mb-6">
+          That last one is a heuristic and the interface says so wherever it appears. A
+          rename or an unrelated edit can trip it. It is offered as a shortcut through forty
+          bot threads, never as a verdict.
+        </p>
+        <p>
+          Bot comments also arrive already graded for severity, by a classifier trained for
+          this one job — free, and never the vendor&rsquo;s own badge, which is stored to be
+          shown and not to be believed.
+        </p>
+        <Story moment="09:19">
+          fifteen threads on one pull request; three still need you, and one button clears
+          the rest.
+        </Story>
+      </FeatureShot>
+
+      {/* ---------- 06 · what the bots said ----------
           ⚠ THIS SECTION USED TO BE THE DIFF, and it was changed because the
           screenshot could not be taken honestly: the Changes tab hydrates its
           patches from GitHub on demand, so against the seeded demo repositories
           it correctly renders "inline diffs aren't available". Rather than ship a
           picture of an empty state under a paragraph describing a file tree, the
           section now shows the screen that IS real here — and the blast-radius
-          claim moved up to §04, where the chip is visible in the header. */}
+          claim moved to the act-in-place section (§04), where the chip is visible in the header. */}
       <FeatureShot
-        rail={{ n: '05', word: 'The bots' }}
+        rail={{ n: '06', word: 'The bots' }}
+        tone="alt"
         heading="And the bot comments, graded before you read them."
         src="/shots/severity-strip.png"
         alt="What the bots are flagging across the workspace: total findings, the share graded high severity, the share that are nits, and the top categories"
@@ -296,9 +394,9 @@ export default function ForDevelopers(): JSX.Element {
         </Story>
       </FeatureShot>
 
-      {/* ---------- 06 · the rest of the free tier ---------- */}
-      <Section tone="alt">
-        <RailGrid rail={{ n: '06', word: 'Also free' }}>
+      {/* ---------- 07 · the rest of the free tier ---------- */}
+      <Section>
+        <RailGrid rail={{ n: '07', word: 'Also free' }}>
           <div className="rail:col-span-2">
             <h2 className="mb-[30px] max-w-[30ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
               And the rest of it, still without paying.
@@ -309,14 +407,15 @@ export default function ForDevelopers(): JSX.Element {
                   The stream
                 </h3>
                 <p className="text-list text-ink-body">
-                  One chronological feed across every repository in the workspace, with
-                  automated accounts left out until you ask for them. Lenses for red builds
-                  and for the kinds of pull-request event you care about.
+                  One chronological feed across every repository in the workspace, under a
+                  daily brief of counts, each line a link to what it counts. Automated
+                  accounts are left out until you ask for them, with lenses for red builds and
+                  for the kinds of pull-request event you care about.
                 </p>
               </div>
               <div>
                 <h3 className="mb-3 font-display text-h4 font-semibold text-ink">
-                  Search and the board
+                  Search and the timeline
                 </h3>
                 <p className="text-list text-ink-body">
                   Full-text search over titles, bodies and comments in every repository you
@@ -325,13 +424,16 @@ export default function ForDevelopers(): JSX.Element {
                 </p>
               </div>
               <div>
+                {/* This column was "Quiet by default" (notifications + the mute). Both moved up
+                    into §03, where the rules live, so it now carries the one free screen the
+                    page did not name: trunk status (`BranchStatusPanel`). */}
                 <h3 className="mb-3 font-display text-h4 font-semibold text-ink">
-                  Quiet by default
+                  Trunk health
                 </h3>
                 <p className="text-list text-ink-body">
-                  Notifications fire only for work that is personally yours, and a repository
-                  you do not want claiming your turn can be muted without changing what
-                  anybody else sees.
+                  Whether each repository&rsquo;s default branch is green, the checks that are
+                  failing on it, and what landed there last — above the feed, for every
+                  repository in the workspace.
                 </p>
               </div>
             </div>
@@ -343,30 +445,31 @@ export default function ForDevelopers(): JSX.Element {
           caption="limn · feed"
           height={520}
           fit="cover"
-          strong
           className="mt-10"
         />
       </Section>
 
-      {/* ---------- 07 · what Pro adds ---------- */}
-      <Section divider="ink">
-        <RailGrid rail={{ n: '07', word: 'Pro' }}>
+      {/* ---------- 08 · what Pro adds ---------- */}
+      <Section divider="ink" tone="alt">
+        <RailGrid rail={{ n: '08', word: 'Pro' }}>
           <div>
             <MonoLabel className="mb-4 text-signal-text">Pro · $25 per user</MonoLabel>
             <h2 className="mb-6 max-w-[26ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
               The reading, when the list gets long.
             </h2>
             <p className="mb-6 max-w-[58ch] text-pretty">
-              Pro does not unlock an action. Everything you can do to a pull request you can
-              already do for nothing, and that is deliberate — a tool that held back the
+              Pro does not unlock an action. Everything you can do to a pull
+              request, and every rule behind Pending, you already get for nothing, and that is deliberate — a tool that held back the
               merge button would be holding your work hostage.
             </p>
             <p className="mb-6 max-w-[58ch] text-pretty">
-              What it adds is writing. A short summary at the top of a long pull request. A
-              read on what a red build actually broke, rather than a link to a log. A reason
-              on each of the top items in your worklist and a line saying what can wait. A
-              check on whether a review comment was really addressed, judged from the commits
-              since the thread started rather than from whether somebody clicked resolve.
+              What it adds is writing. On Pending, <span className="text-ink">Plan my day</span>{' '}
+              writes a headline for the day, a line on what can wait, and one line on each
+              planned card saying why it comes now — it never changes the order. A short
+              summary at the top of a long pull request. A read on what a red build actually
+              broke, rather than a link to a log. A check on whether a review comment was
+              really addressed, judged from the commits since the thread started rather than
+              from whether somebody clicked resolve.
             </p>
             <p className="max-w-[58ch] text-pretty">
               On a quiet week you will not miss it. On the week you come back to two hundred
@@ -379,6 +482,7 @@ export default function ForDevelopers(): JSX.Element {
             caption="limn · one card"
             height={300}
             fit="contain"
+            strong
             note="Free ranks the list. Pro writes the reason on it."
           />
         </RailGrid>
