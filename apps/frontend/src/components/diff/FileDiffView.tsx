@@ -21,7 +21,7 @@ import {
   splitDiffMarker,
   type DiffRow,
 } from '../../lib/diff.js';
-import { languageForPath } from '../../lib/hljsLines.js';
+import { MAX_FILE_DIFF_HIGHLIGHT_LINES, languageForPath } from '../../lib/hljsLines.js';
 import { DERIVED_STATE_META, relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
 import { CheckIcon, ChevronIcon, ExternalLinkIcon } from '../Icons.js';
 import { MentionTextarea } from '../MentionTextarea.js';
@@ -847,13 +847,20 @@ function FileDiffBlock({
   //
   // ⚠ GATED ON `expanded`, AND THAT IS WHY IT IS DECLARED DOWN HERE RATHER THAN BESIDE `rows`.
   // The diff table is behind `{expanded && …}`, and `startsCollapsed` fires at
-  // `LARGE_PATCH_LINES` (250) while `highlightDiffRows` only refuses past `MAX_HIGHLIGHT_LINES`
+  // `LARGE_PATCH_LINES` (250) while `highlightDiffRows` only refused past `MAX_HIGHLIGHT_LINES`
   // (400) PER RECONSTRUCTED SIDE — so every file in the 251-to-~800-row band, `pnpm-lock.yaml`
   // included, was fully lexed on mount for output nobody could see. MEASURED at ~17-20ms per file
   // at the gate, and `fetchPrFilesWithPatch` caps the list at 100 blocks with no windowing. The
   // memo re-runs when the reader opens the file, which is the moment the work is first needed.
+  //
+  // ⚠ AND THAT GATE IS WHY THIS SITE HAS ITS OWN LINE LIMIT (`MAX_FILE_DIFF_HIGHLIGHT_LINES`, not
+  // the shared 400): with the lex paid once per click, the 400 bought nothing here and left every
+  // ADDED file past 400 lines — whose patch is all new side — completely uncoloured.
   const html = useMemo(
-    () => (expanded ? highlightDiffRows(rows, languageForPath(file.path)) : null),
+    () =>
+      expanded
+        ? highlightDiffRows(rows, languageForPath(file.path), MAX_FILE_DIFF_HIGHLIGHT_LINES)
+        : null,
     [expanded, rows, file.path],
   );
 

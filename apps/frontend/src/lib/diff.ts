@@ -1,5 +1,5 @@
 import type { PrFileDiffStatus, ThreadStateCounts } from '@pierre-review/shared';
-import { highlightLines } from './hljsLines.js';
+import { MAX_HIGHLIGHT_LINES, highlightLines } from './hljsLines.js';
 
 // A tiny pure parser for a single file's unified-diff `patch` string (as GitHub
 // returns it on the REST `files` endpoint): header-less, starting at the first
@@ -161,10 +161,14 @@ export function splitDiffMarker(row: DiffRow): { marker: string; body: string } 
  *
  * ⚠ ONE SIDE REFUSING REFUSES BOTH. Half a coloured file reads as a rendering bug, not as a
  * deliberate limit.
+ *
+ * `maxLines` is the line gate PER SIDE, passed straight to `highlightLines`; only the Changes tab
+ * raises it (`MAX_FILE_DIFF_HIGHLIGHT_LINES`).
  */
 export function highlightDiffRows(
   rows: readonly DiffRow[],
   language: string | null,
+  maxLines: number = MAX_HIGHLIGHT_LINES,
 ): (string | null)[] | null {
   if (language == null || rows.length === 0) return null;
   const oldLines: string[] = [];
@@ -190,8 +194,8 @@ export function highlightDiffRows(
       newLines.push(body);
     }
   }
-  const oldHtml = oldLines.length === 0 ? [] : highlightLines(oldLines, language);
-  const newHtml = newLines.length === 0 ? [] : highlightLines(newLines, language);
+  const oldHtml = oldLines.length === 0 ? [] : highlightLines(oldLines, language, maxLines);
+  const newHtml = newLines.length === 0 ? [] : highlightLines(newLines, language, maxLines);
   if (oldHtml == null || newHtml == null) return null;
   return rows.map((_row, i) => {
     const n = newAt[i];

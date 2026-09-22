@@ -43,9 +43,25 @@ import hljs from 'highlight.js';
  * gates a whole Changes-tab FILE, which is a bigger thing — but a file past 400 patch lines already
  * starts collapsed (`LARGE_PATCH_LINES` = 250 in FileDiffView) and is something a reader scrolls
  * rather than reads. If a real case turns up where colour visibly drops out, give THAT call site
- * its own limit rather than raising this one for every surface at once.
+ * its own limit rather than raising this one for every surface at once — the Changes tab now has
+ * (`MAX_FILE_DIFF_HIGHLIGHT_LINES`).
  */
 export const MAX_HIGHLIGHT_LINES = 400;
+
+/**
+ * Gate 2 for ONE call site: a whole file in the Changes tab (`FileDiffView`), counted per
+ * reconstructed SIDE like every diff.
+ *
+ * ⚠ THE REAL CASE THE COMMENT ABOVE WAITED FOR. A newly-ADDED 412-line `.js` file rendered
+ * entirely plain, because its whole patch is its new side and 412 > 400 — and so did every added
+ * file past 400 lines, which is most of the new code in a feature PR. The 400 was never about this
+ * surface's cost: the lex here runs ONCE, when the reader opens the file (the memo is gated on
+ * `expanded`, and a >250-line patch starts collapsed), not on mount. MEASURED on real JS at
+ * ~8ms / 412 lines, ~15ms / 1,000, ~30ms / 2,000 — one click's worth, paid only by the reader who
+ * asked. Past this a file is something nobody reads line by line, and the rows themselves cost more
+ * to lay out than the colour does.
+ */
+export const MAX_FILE_DIFF_HIGHLIGHT_LINES = 2000;
 
 /**
  * Extension → highlight.js language name. Deliberately a short, explicit table rather than
@@ -155,10 +171,15 @@ export function splitHighlighted(html: string): string[] {
 /**
  * One highlighted HTML string per input line, or null when any gate says render it plain.
  * The returned array is ALWAYS the same length as `lines` — a caller zips the two.
+ * `maxLines` is gate 2; only a call site with its own measured budget passes one.
  */
-export function highlightLines(lines: string[], language: string | null): string[] | null {
+export function highlightLines(
+  lines: string[],
+  language: string | null,
+  maxLines: number = MAX_HIGHLIGHT_LINES,
+): string[] | null {
   if (language == null) return null;
-  if (lines.length === 0 || lines.length > MAX_HIGHLIGHT_LINES) return null;
+  if (lines.length === 0 || lines.length > maxLines) return null;
   if (hljs.getLanguage(language) == null) return null;
   let html: string;
   try {

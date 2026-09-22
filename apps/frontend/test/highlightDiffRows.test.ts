@@ -20,7 +20,7 @@ import {
   splitDiffMarker,
   type DiffRow,
 } from '../src/lib/diff.js';
-import { MAX_HIGHLIGHT_LINES } from '../src/lib/hljsLines.js';
+import { MAX_FILE_DIFF_HIGHLIGHT_LINES, MAX_HIGHLIGHT_LINES } from '../src/lib/hljsLines.js';
 
 /** Strip the markup back out, so a test can assert on the TEXT the reader ends up seeing. */
 const textOf = (html: string): string =>
@@ -134,6 +134,30 @@ describe('highlightDiffRows', () => {
       ...Array.from({ length: MAX_HIGHLIGHT_LINES + 10 }, (_, i) => ` const x${i} = ${i};`),
     ].join('\n');
     expect(highlightDiffRows(parsePatch(many), 'typescript')).toBeNull();
+  });
+
+  it('colours an ADDED file past the shared gate when the call site passes its own limit', () => {
+    // The real case: a newly-added 412-line .js file rendered wholly plain in the Changes tab,
+    // because an added file's whole patch is its NEW side and 412 > MAX_HIGHLIGHT_LINES.
+    const n = MAX_HIGHLIGHT_LINES + 12;
+    const added = [
+      `@@ -0,0 +1,${n} @@`,
+      ...Array.from({ length: n }, (_, i) => `+const x${i} = ${i};`),
+    ].join('\n');
+    const rows = parsePatch(added);
+    expect(highlightDiffRows(rows, 'javascript')).toBeNull();
+    const html = highlightDiffRows(rows, 'javascript', MAX_FILE_DIFF_HIGHLIGHT_LINES)!;
+    expect(html).toHaveLength(rows.length);
+    expect(html[n]).toContain('hljs-keyword');
+    expect(textOf(html[n]!)).toBe(`const x${n - 1} = ${n - 1};`);
+    // …and the raised limit is still a limit.
+    const tooMany = [
+      '@@ -0,0 +1,1 @@',
+      ...Array.from({ length: MAX_FILE_DIFF_HIGHLIGHT_LINES + 1 }, (_, i) => `+const x${i} = ${i};`),
+    ].join('\n');
+    expect(
+      highlightDiffRows(parsePatch(tooMany), 'javascript', MAX_FILE_DIFF_HIGHLIGHT_LINES),
+    ).toBeNull();
   });
 
   it('gives a context row the NEW side’s entry', () => {
