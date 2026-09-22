@@ -49,6 +49,7 @@ const {
   mlCommentLabels,
   prMentions,
   pendingMutedRepos,
+  myTurnDismissals,
   repoFileCoupling,
 } = schema;
 
@@ -133,6 +134,12 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx
       .delete(pendingMutedRepos)
       .where(eq(pendingMutedRepos.accountId, accountId))
+      .execute();
+    // My Turn dismissals (migration 0069 / pg 0056). Both composite FKs cascade and the repo loop
+    // has normally taken every row; explicit for the same dialect-agnostic reason.
+    await tx
+      .delete(myTurnDismissals)
+      .where(eq(myTurnDismissals.accountId, accountId))
       .execute();
     await tx.delete(workspaces).where(eq(workspaces.accountId, accountId)).execute();
 
@@ -247,6 +254,8 @@ export function accountScopedTables(): {
     // COLUMN on `workspaces`, already on this checklist, so there is nothing separate to count
     // for it — the row it lives on is deleted.
     { name: 'pendingMutedRepos', col: pendingMutedRepos.accountId, table: pendingMutedRepos },
+    // My Turn dismissals (migration 0069 / pg 0056) — one timestamp per dismissed PR or red branch.
+    { name: 'myTurnDismissals', col: myTurnDismissals.accountId, table: myTurnDismissals },
     // The blast-radius co-change index (migration 0063 / pg 0050). Purely DERIVED — erasing it
     // loses nothing but a rebuild — and it is on the checklist anyway, because the rule is "does
     // the table carry an accountId", not "is the data precious". A derived table left behind

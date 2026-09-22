@@ -2718,6 +2718,34 @@ feed. (`FeedView.tsx` + `useFeedAutoInsert` in `hooks/useConsolidatedFeed.ts`.)
 - Rules pinned in `apps/frontend/test/feedNewCohorts.test.ts` (run by hand — that directory is
   not in CI).
 
+## Dismissing a My Turn entry, and one card per PR
+
+**Every my_turn card carries "Dismiss"** (`MyTurnActions` in `Activity/AttentionCards.tsx`, the
+trunk card included) — for the item the reader cannot act on now, or ever. The rule is the server's
+(docs/BACKEND.md § My Turn — dismissals and one card per PR); the SPA asks, re-reads and offers a way
+back:
+
+- ⚠ **Keyed on the SUBJECT, never the card** — `{kind: 'pr', id: prId}`, or `{kind: 'repo', id}` for
+  a red branch. The board lists ONE card per PR, so a card-keyed dismissal would surface the PR's
+  next job in its place and read as "Dismiss did nothing".
+- ⚠ **NOTHING IS SPLICED OUT LOCALLY** (`hooks/useMyTurnDismiss.ts`). The mutation stays pending
+  ("Dismissing…") until `['my-turn']`, `['attention-cards']`, `['daily-brief']` and `['work-plan']`
+  have refetched — the My Turn settings save's list — so the card and every count move in one frame
+  and `capFor`'s `shown === count` pairing never sees a half-updated board. Per-target mutation key.
+- **Two ways back**: `MyTurnDismissToast` (a plain card in the ONE bottom-right toast column, 10s,
+  "Undo"), and the **Dismissed** disclosure under the My turn tab (`MyTurnDismissedList`, shut by
+  default, fed by `AttentionCardsResponse.myTurnDismissed`, each row "Bring back"). Its count is its
+  own length and appears in no tab badge, chip or lens.
+- ⚠ **A RESTORE MUST NOT RING.** A restored entry comes back with its OLD clock and a new id in the
+  notification watcher's diff, so `useRestoreMyTurn` sets a one-shot flag
+  (`consumeMyTurnRebaseline`) and `useMyTurnNotifications` re-baselines instead of firing. A
+  dismissal needs no flag (items only disappear), and a dismissal VOIDED by new activity must notify,
+  which is why this is a client flag and not a `configKey` term: rows are also deleted by discharge
+  on a read, and a key over the rows would swallow that same poll's real arrivals.
+- **One card per PR is the server's** (`onePerPr` inside `getMyTurn`, for the board's fold only) —
+  the SPA renders what it is sent and must not dedupe again. The browser notification keeps
+  per-item granularity because `GET /api/my-turn` is not deduplicated.
+
 ## Per-workspace "My Turn" — the banner, the dropdown badge and the one deep-link
 
 You can have work on your plate in a workspace you are not currently in. Three surfaces say so,

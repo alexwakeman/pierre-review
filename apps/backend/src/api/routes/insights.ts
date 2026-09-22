@@ -159,6 +159,8 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
       // The weights and My turn type order the scores and the order above were built with — what
       // the board's explanations print, so they describe THIS reader's ranking.
       rules: board.rules,
+      // Out of every tab and count — listed under My turn with a way back.
+      myTurnDismissed: insights.myTurnDismissed ?? [],
     };
   });
 

@@ -34,6 +34,7 @@ import {
 import { relativeTime } from '../../lib/ui.js';
 import { CheckCircleIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { AttentionCards, KIND_LABEL } from './AttentionCards.js';
+import { MyTurnDismissedList } from './MyTurnDismissedList.js';
 import { PendingGuideModal, PendingOrderInfo } from './PendingInfo.js';
 import { capSentence } from './pendingExplain.js';
 
@@ -782,6 +783,11 @@ export function AttentionView(): JSX.Element {
               </p>
             )}
           </>
+        )}
+        {/* Out of every count above — see MyTurnDismissedList. Rendered after the list whatever
+            it holds, so an empty My turn still shows what was set aside. */}
+        {tabKey === 'my_turn' && !isLoading && !isError && (data?.myTurnDismissed?.length ?? 0) > 0 && (
+          <MyTurnDismissedList items={data!.myTurnDismissed!} />
         )}
       </div>
       {guideOpen && <PendingGuideModal onClose={closeGuide} rules={data?.rules} />}

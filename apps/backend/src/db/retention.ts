@@ -80,6 +80,12 @@ async function deletePrSubtree(
   // parent-last by hand on both dialects and a mention row outliving its PR would go on claiming
   // a deleted PR is personally relevant.
   await tx.delete(prMentions).where(inArray(prMentions.prId, prIds)).execute();
+  // My Turn dismissals of these PRs (migration 0069 / pg 0056) — the composite FK cascades, but this
+  // sweep runs parent-last by hand on both dialects.
+  await tx
+    .delete(schema.myTurnDismissals)
+    .where(inArray(schema.myTurnDismissals.prId, prIds))
+    .execute();
   // Claude review runs + findings FK these PRs — clear findings (via reviewId) then runs.
   const reviewIdRows = await tx
     .select({ id: claudeReviews.id })

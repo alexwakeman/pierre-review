@@ -114,6 +114,8 @@ import type {
   PrMergeOptions,
   UpdateBranchBody,
   UpdateBranchResult,
+  MyTurnDismissResponse,
+  MyTurnDismissTarget,
   MyTurnResponse,
   ActivityResponse,
   InsightsResponse,
@@ -1162,6 +1164,16 @@ export const api = {
   logout: (): Promise<Response> =>
     fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }),
   myTurn: () => get<MyTurnResponse>('/api/my-turn'),
+  // Take one My Turn subject off the plate until something newer happens on it, and bring it back.
+  // A PR, or a repository for a red default branch; the id is in the path.
+  dismissMyTurn: (target: MyTurnDismissTarget) =>
+    fetch(`/api/my-turn/dismissals/${target.kind}/${target.id}`, jsonBody('PUT')).then((r) =>
+      handle<MyTurnDismissResponse>(r),
+    ),
+  restoreMyTurn: (target: MyTurnDismissTarget) =>
+    fetch(`/api/my-turn/dismissals/${target.kind}/${target.id}`, jsonBody('DELETE')).then((r) =>
+      handle<void>(r),
+    ),
   // ⚠ `myTurn` is the ONLY my-turn call. Its three siblings — `myTurnDone`, `dismissMyTurn`,
   // `undismissMyTurn` — are deleted with the `my_turn_dismissals` table and its routes: an item
   // leaves this inbox when you ACT on the PR, so there is nothing to mark seen and nothing to

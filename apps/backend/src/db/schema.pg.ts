@@ -274,6 +274,10 @@ export const pullRequests = pgTable(
       t.number,
     ),
     nodeUx: uniqueIndex('pr_account_node').on(t.accountId, t.githubNodeId),
+    // NOT a lookup index (`id` is the primary key). It exists solely as the PARENT KEY of
+    // `my_turn_dismissals`' composite FK `(pr_id, account_id) → pull_requests(id, account_id)` —
+    // the `repos_id_account` trick, for a PR id that arrives in a request path.
+    idAccountUx: uniqueIndex('pull_requests_id_account').on(t.id, t.accountId),
   }),
 );
 
@@ -1015,6 +1019,35 @@ export const pendingMutedRepos = pgTable(
     // nothing live.
     repoAccountFk: foreignKey({
       name: 'pending_muted_repos_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- My Turn dismissals — see schema.sqlite.ts for the contract. ----
+export const myTurnDismissals = pgTable(
+  'my_turn_dismissals',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    prId: integer('pr_id'),
+    repoId: integer('repo_id'),
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => ({
+    accountPrUx: uniqueIndex('my_turn_dismissals_account_pr').on(t.accountId, t.prId),
+    accountRepoUx: uniqueIndex('my_turn_dismissals_account_repo').on(t.accountId, t.repoId),
+    // NAMED, so the hand-written migration's CONSTRAINT names match what is live.
+    prAccountFk: foreignKey({
+      name: 'my_turn_dismissals_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'my_turn_dismissals_repo_account_fk',
       columns: [t.repoId, t.accountId],
       foreignColumns: [repos.id, repos.accountId],
     }).onDelete('cascade'),

@@ -6,6 +6,8 @@ import type {
   LargePrThresholdBody,
   LargePrThresholdResponse,
   MeResponse,
+  MyTurnDismissResponse,
+  MyTurnDismissTarget,
   MyTurnSettingsBody,
   MyTurnSettingsResponse,
 } from '@pierre-review/shared';
@@ -32,6 +34,7 @@ import { getAuthNotices } from '../../sync/auth-notices.js';
 import { isSeverityApiConfigured } from '../../ml/severity-client.js';
 import { getMyTurn } from '../../db/queries.js';
 import { clearDailyBriefCountsFor } from '../../db/daily-brief.js';
+import { dismissMyTurn, restoreMyTurn } from '../../db/my-turn-dismissals.js';
 
 const benchmarkConsentSchema = {
   body: {
@@ -432,10 +435,53 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // THE ONE my-turn ROUTE. Its three siblings — POST /dismiss, GET /done, POST /undismiss — are
-  // deleted along with the `my_turn_dismissals` table: an item leaves this inbox when the viewer
-  // ACTS on the PR, so there is nothing to mark seen, nothing to list as "done" and nothing to
-  // restore. Unscoped on purpose (see `getMyTurn`): the browser-notification watcher reads exactly
-  // this call.
+  // The account-wide inbox. Unscoped on purpose (see `getMyTurn`): the browser-notification
+  // watcher reads exactly this call — and without `onePerPr`, which is the board's rule.
   app.get('/api/my-turn', async (req) => getMyTurn(accountIdOf(req)));
+
+  // DISMISS / BRING BACK one My Turn subject — a pull request (`pr`) or, for a red default branch,
+  // a repository (`repo`). ⚠ NOT the "Done" routes 0060 deleted: a dismissal lasts only until
+  // something newer happens on the subject, and a subject that leaves your plate discharges it
+  // (db/my-turn-dismissals.ts). DB-only, both modes, free.
+  //
+  // The id is in the PATH; ownership is checked (→ 404, so the family is no existence oracle) and
+  // the composite FK refuses a cross-account pair in the database regardless.
+  app.put('/api/my-turn/dismissals/:kind/:id', async (req, reply) => {
+    const target = parseDismissTarget(req.params);
+    if (target == null) {
+      return reply.code(400).send({ error: 'BadRequest', message: 'Unknown My Turn entry.' });
+    }
+    const accountId = accountIdOf(req);
+    const at = await dismissMyTurn(accountId, target);
+    if (at == null) return reply.code(404).send({ error: 'NotFound', message: 'Not found' });
+    // The brief's roll-up counts are cached for five minutes; a dismissed item must not go on
+    // being counted in the "Elsewhere" lines until the TTL runs out.
+    clearDailyBriefCountsFor(accountId);
+    const body: MyTurnDismissResponse = { target, dismissedAt: at.toISOString() };
+    return body;
+  });
+
+  app.delete('/api/my-turn/dismissals/:kind/:id', async (req, reply) => {
+    const target = parseDismissTarget(req.params);
+    if (target == null) {
+      return reply.code(400).send({ error: 'BadRequest', message: 'Unknown My Turn entry.' });
+    }
+    const accountId = accountIdOf(req);
+    // Scoped on the row itself, so another account's id deletes nothing — and answers 404.
+    if (!(await restoreMyTurn(accountId, target))) {
+      return reply.code(404).send({ error: 'NotFound', message: 'Not found' });
+    }
+    clearDailyBriefCountsFor(accountId);
+    return reply.code(204).send();
+  });
+}
+
+/** `:kind/:id` → a target, or null for anything else (a non-integer id, an unknown kind). */
+export function parseDismissTarget(params: unknown): MyTurnDismissTarget | null {
+  const p = (params ?? {}) as { kind?: unknown; id?: unknown };
+  if (p.kind !== 'pr' && p.kind !== 'repo') return null;
+  const raw = typeof p.id === 'string' ? p.id : '';
+  if (!/^[1-9][0-9]{0,15}$/.test(raw)) return null;
+  const id = Number(raw);
+  return Number.isSafeInteger(id) ? { kind: p.kind, id } : null;
 }

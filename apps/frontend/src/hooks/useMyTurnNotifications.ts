@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useMyTurn } from './useTriage.js';
+import { consumeMyTurnRebaseline } from './useMyTurnDismiss.js';
 import { useRepos } from './useTimeline.js';
 import { useWorkspaces } from './useWorkspaces.js';
 import { dateTime } from '../lib/ui.js';
@@ -166,6 +167,10 @@ export function useMyTurnNotifications(enabled: boolean): void {
       configRef.current = configKey;
       return;
     }
+    // ⚠ A RESTORED DISMISSAL RE-BASELINES TOO. The entry comes back with its old clock and a
+    // fresh id in this diff, and announcing something the reader just brought back themselves is
+    // a notification about their own click. Set by `useRestoreMyTurn`, consumed once.
+    if (consumeMyTurnRebaseline()) return;
     if (!enabled) return;
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
 

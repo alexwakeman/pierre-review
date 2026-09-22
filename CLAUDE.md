@@ -248,7 +248,7 @@ communicating that uncertainty.
 
 ### Data model
 
-`db/schema.sqlite.ts` + `schema.pg.ts` are authoritative (29 tables). **Per-table contracts and
+`db/schema.sqlite.ts` + `schema.pg.ts` are authoritative (30 tables). **Per-table contracts and
 the automation vocabulary (`ReviewerRole` — SIX members, EXACTLY ONE of which, `'review'`, is
 the reviewer cohort · `AutomatedReviewerKind` · `AUTOMATION_VENDORS`, the ONE table every
 per-family login set is DERIVED from · `REVIEW_BOT_KINDS`) live in
@@ -483,9 +483,17 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   invent an ownership claim on screen. ⚠ `?attnPersonal=1` is retired but still PARSED (as
   `'mine'`) — it shipped, so it is in bookmarks and in history entries Back replays; `?attnRel=` is
   the only key emitted.
-- **MY TURN IS THE BALL RULE — STATE-DERIVED, NOTHING STORED.** A my_turn card exists only while
+- **MY TURN IS THE BALL RULE — STATE-DERIVED.** A my_turn card exists only while
   the reader owes an action and has not taken it since the last RELATED thing that happened.
-  Recomputed every read: no dismissal, no tombstone, no "done"; per-account settings
+  Recomputed every read: no tombstone, no "done". ⚠ **The one stored thing is a DISMISSAL, and it
+  is NOT the retired Done button** (`my_turn_dismissals`, sqlite `0069` / pg `0056`,
+  `db/my-turn-dismissals.ts`): ONE timestamp per SUBJECT (a PR, or a red branch's repo — never a
+  card), applied INSIDE `getMyTurn`. An item whose own clock is LATER than it shows again (only
+  that item), and a subject with no item left DISCHARGES its row — so it can never outlive the thing
+  it dismissed, which is what got 0060's table deleted. ⚠ **The board lists ONE card per PR**
+  (`getMyTurn(…, { onePerPr: true })`, passed only by `getWorkspaceInsights`): the reader's highest
+  type, then the longest wait. `GET /api/my-turn` keeps every item and its fixed-precedence claim,
+  because the notification watcher diffs ids. Per-account settings
   (`accounts.my_turn_settings`, overrides only) switch whole types off INSIDE `getMyTurn`, and a
   promoted card MOVES (the home builders drop its id). Full contract:
   [docs/BACKEND.md](docs/BACKEND.md) § My Turn — the ball rule. Without opening it:
@@ -1295,7 +1303,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0055` and plugin `0034` are NOT replayed.
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0056` and plugin `0034` are NOT replayed.
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence

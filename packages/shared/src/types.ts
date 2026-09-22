@@ -5673,6 +5673,45 @@ export interface ClaudeReviewToAction {
   muted?: boolean;
 }
 
+// ── Dismissing a My Turn entry (Pending → My turn → "Dismiss") ──
+//
+// ⚠ A DISMISSAL IS NOT THE RETIRED "Done" BUTTON. That one never expired, so a PR whose ball came
+// back stayed hidden behind it for weeks. This one lasts only while nothing new happens: an item
+// on the dismissed subject whose clock is LATER than the dismissal shows again (and only that
+// item), and a subject that leaves your plate on its own — you acted, it closed, the request was
+// withdrawn — discharges the dismissal outright, so the next summons starts fresh.
+//
+// The SUBJECT is a pull request, or a repository for a red default branch. Never a card: one PR
+// can hold several My Turn jobs, and dismissing the one on screen must not surface the next.
+export type MyTurnDismissKind = 'pr' | 'repo';
+export interface MyTurnDismissTarget {
+  kind: MyTurnDismissKind;
+  /** `pull_requests.id` for 'pr', `repos.id` for 'repo'. */
+  id: number;
+}
+
+/** A subject the reader dismissed that is still on their plate with nothing new — listed under
+ *  the My turn tab so it can be brought back. */
+export interface MyTurnDismissedItem {
+  target: MyTurnDismissTarget;
+  repoFullName: string;
+  /** The PR's number; null for a red default branch. */
+  prNumber: number | null;
+  /** The PR's title, or the branch name for a red default branch; null when neither is known. */
+  title: string | null;
+  /** The highest-priority job the hidden entry holds, in the reader's type order. */
+  reason: MyTurnCardReason;
+  githubUrl: string;
+  /** ISO. */
+  dismissedAt: string;
+}
+
+/** PUT /api/my-turn/dismissals/:kind/:id */
+export interface MyTurnDismissResponse {
+  target: MyTurnDismissTarget;
+  dismissedAt: string;
+}
+
 export interface MyTurnResponse {
   awaitingReview: AwaitingReviewItem[];
   yourPrs: YourPrActivityItem[];
@@ -5717,6 +5756,9 @@ export interface MyTurnResponse {
    *  order or the weights. The notification watcher re-baselines on it, or switching a type on
    *  would announce its whole existing backlog. */
   configKey: string;
+  /** Subjects hidden by a live dismissal in this fold (see `MyTurnDismissedItem`). Trailing
+   *  optional: a response predating dismissals has none. */
+  dismissed?: MyTurnDismissedItem[];
 }
 
 // ---- my turn: activity Feed (the account's repos, last 14 days) ----
@@ -8133,6 +8175,9 @@ export interface WorkspaceInsightsResponse {
    *  population, never the capped cards. The daily brief's red-trunk line leaves these out, so a
    *  trunk the reader promoted into My Turn is counted once, there. Trailing optional. */
   myTurnTrunkRepoIds?: number[];
+  /** The my_turn fold's dismissed subjects — `MyTurnResponse.dismissed`, scoped the same way.
+   *  Trailing optional. */
+  myTurnDismissed?: MyTurnDismissedItem[];
 }
 
 // The attention cards (your turn / red builds / stalled reviews / untouched threads / reviewer
@@ -8168,6 +8213,10 @@ export interface AttentionCardsResponse {
    *  order. Every explanation prints these, never the product constants. Trailing optional: a
    *  response predating the field explains with `DO_NEXT_RULES.weights`. */
   rules?: PendingRankRules;
+  /** Entries the reader dismissed from My turn that are still on their plate with nothing new —
+   *  the tab lists them under "Dismissed" with a way back. NOT counted in any tab, chip or lens:
+   *  a dismissed subject is out of the inbox. Trailing optional. */
+  myTurnDismissed?: MyTurnDismissedItem[];
 }
 
 /** The ranking the server actually used for one /api/attention response (Settings → My Turn,

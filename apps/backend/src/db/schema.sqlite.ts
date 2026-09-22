@@ -367,6 +367,10 @@ export const pullRequests = sqliteTable(
       t.number,
     ),
     nodeUx: uniqueIndex('pr_account_node').on(t.accountId, t.githubNodeId),
+    // NOT a lookup index (`id` is the primary key). It exists solely as the PARENT KEY of
+    // `my_turn_dismissals`' composite FK `(pr_id, account_id) → pull_requests(id, account_id)` —
+    // the `repos_id_account` trick, for a PR id that arrives in a request path.
+    idAccountUx: uniqueIndex('pull_requests_id_account').on(t.id, t.accountId),
   }),
 );
 
@@ -1350,6 +1354,49 @@ export const pendingMutedRepos = sqliteTable(
     // name; Postgres quotes it in the violation message, SQLite stores it but never reports it.
     repoAccountFk: foreignKey({
       name: 'pending_muted_repos_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- My Turn dismissals (CORE, free, both modes) ----
+// "Take this off my plate for now." One row per dismissed SUBJECT — a pull request, or a repo for a
+// red default branch — never per card: a PR can hold several My Turn jobs, and dismissing the one
+// on screen must not surface the next. Read ONLY inside `getMyTurn` (db/my-turn-dismissals.ts).
+//
+// ⚠ NOT THE TABLE MIGRATION 0060 DROPPED, though it has the same name. That one backed a "Done"
+// button that NEVER EXPIRED — a PR whose ball came back stayed hidden behind it for weeks. This one
+// holds one timestamp and the fold does the rest: an item whose clock is LATER than `dismissed_at`
+// shows again, and a subject with no My Turn item at all (acted on, closed, request withdrawn)
+// discharges its row, so the next summons starts fresh. It never outlives the thing it dismissed.
+//
+// Exactly one of `pr_id` / `repo_id` is set (the writer's rule; both routes name one). Both are
+// COMPOSITE FKs against `(id, account_id)`, so a cross-account pair fails in the database.
+export const myTurnDismissals = sqliteTable(
+  'my_turn_dismissals',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // No single-column FKs: both are the COMPOSITE declarations below.
+    prId: integer('pr_id'),
+    repoId: integer('repo_id'),
+    dismissedAt: integer('dismissed_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    // The upsert targets — one row per subject. NULLs are distinct in both dialects, so a trunk row
+    // (pr_id NULL) never collides with another trunk row on the PR index, and vice versa.
+    accountPrUx: uniqueIndex('my_turn_dismissals_account_pr').on(t.accountId, t.prId),
+    accountRepoUx: uniqueIndex('my_turn_dismissals_account_repo').on(t.accountId, t.repoId),
+    prAccountFk: foreignKey({
+      name: 'my_turn_dismissals_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'my_turn_dismissals_repo_account_fk',
       columns: [t.repoId, t.accountId],
       foreignColumns: [repos.id, repos.accountId],
     }).onDelete('cascade'),

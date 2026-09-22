@@ -211,10 +211,51 @@ of either does not have to find this doc first.
 **MY TURN = the reader owes an action on this PR, and nothing they have done since the last RELATED
 event discharges it.** Derived on every read from `reviews`, `review_comments`, `pr_comments`,
 `commits` and the mention scanner's `pr_mentions` (plus, for the promotions below, the PR's own
-merge and CI columns and `repos`' default-branch columns). Nothing about a card is stored: there is
-no dismissal table, no "done" state, no tombstone. A card appears when the state says so and
-vanishes when the state says so. What IS stored is the reader's choice of which TYPES exist
-(§ Settings: gates and promotions), never a verdict on one card.
+merge and CI columns and `repos`' default-branch columns). Nothing about a CARD is stored: there is
+no "done" state and no tombstone. A card appears when the state says so and vanishes when the state
+says so. What IS stored is the reader's choice of which TYPES exist (§ Settings: gates and
+promotions) and — since sqlite `0069` / pg `0056` — a per-SUBJECT dismissal whose only power is to
+hide what happened BEFORE it (§ Dismissals and one card per PR).
+
+### Dismissals and one card per PR (`db/my-turn-dismissals.ts`)
+
+**A dismissal sets a subject down until something new happens on it** — for the item the reader
+cannot act on now, or ever. It is built so that it cannot repeat the retired Done button's failure
+(below), which stored "I dealt with this" and never expired:
+
+- The SUBJECT is a pull request, or a repository for a red default branch — never a card: one PR can
+  hold several jobs, and dismissing the one on screen must not surface the next.
+- `getMyTurn` passes EVERY candidate item through `MyTurnDismissalFilter.keep` BEFORE anything else
+  looks at it — in particular before the fixed-precedence claim, or a dismissed review request would
+  claim the PR and swallow the newer mention that should bring it back. An item is hidden only while
+  its OWN clock (the section's `since`; a thread's `lastReplyAt`; a Claude run's `finishedAt`; a red
+  branch's `observedAt`, never its `since`, whose fallback is the fold time) is at or before
+  `dismissed_at`. Anything later shows, ALONE: a new reply comes back as a reply, not as the review
+  request that was set down. An item with no clock cannot prove it is newer and stays hidden.
+- ⚠ **A subject with NO item at all DISCHARGES its row** (`dischargeable`, then
+  `dischargeMyTurnDismissals`) — you acted, it closed, the request was withdrawn. So a later summons
+  starts fresh. Without it, a re-requested review (clocked by the PR's FIRST request, which never
+  moves) would arrive already dismissed — exactly the weeks-long hiding 0060 cites. Only subjects the
+  read could have seen are discharged (a workspace fold has not looked at other workspaces' repos);
+  a closed PR is dead wherever it lives. ⚠ A GET therefore sometimes DELETEs — bounded, indexed, and
+  only when there is something to drop.
+- Everything downstream reads the result, so the board, the brief's counts, the badges, the browser
+  notification and the CLI all stop showing a dismissed item together. A dismissed PROMOTION goes
+  back to its home tab (the promoted sets are built from the filtered sections) — the job still
+  exists; it is only off the reader's plate. `MyTurnResponse.dismissed` lists subjects wholly hidden
+  by a live dismissal (a subject with a newer item showing is back on the plate, and is not listed).
+
+**One card per PR, on the board only** (`onePerPr`, `getMyTurn(…, { onePerPr: true })`, passed only
+by `getWorkspaceInsights`). With it the fixed claim is skipped, every section is built in full, and
+each PR keeps ONE item: the lowest index in the reader's type order, then the OLDEST clock (the
+scorer's pick too — same PR and type means the same proximity and relevance, so the longer wait
+scores higher and wins `compareScored`'s age tie-break), then the item's own id. Applied before the
+promoted sets, so a promotion that loses to another job on its PR stays on its home tab. Red branches
+are repo-grained and never collide. ⚠ **`GET /api/my-turn` does NOT pass it** and keeps the fixed
+precedence: the notification watcher diffs item ids, and a deduplicated list would flip the winner
+whenever a PR's top job cleared, announcing the runner-up as "new". A consequence the reader chose:
+which card represents a PR now depends on the type order, so reordering can change a card's reason
+(pinned in `my-turn-settings.test.ts`).
 
 ### What the predecessor did, and why it was wrong
 

@@ -23,7 +23,7 @@ fixture tests (see Conventions).
 
 ### Data model (`src/db/schema.sqlite.ts` + its `schema.pg.ts` twin are authoritative)
 
-29 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
+30 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
 `users` + `commitFiles` global). The core entities:
 
 - **`accounts`** — a tenant. Local mode has exactly one (`id 1`, `isLocal=true`,
@@ -424,6 +424,22 @@ side and again on the server's. Every reader resolves through `resolveMyTurnSett
 Per ACCOUNT, not per workspace: one account is one reader. Written only by
 `PUT /api/me/my-turn-settings`; exported with the account; erased with the `accounts` row. Contract:
 [BACKEND.md](BACKEND.md) § My Turn — Settings: gates and promotions.
+
+## `my_turn_dismissals` (CORE, free — Pending → My turn → "Dismiss")
+
+One row per dismissed SUBJECT — `pr_id` for a pull request, `repo_id` for a red default branch;
+exactly one is set (the writer's rule). One column of substance, `dismissed_at`, stored ROUNDED UP
+to the whole second (`dismissalInstant` — SQLite keeps whole seconds, and a truncated write would
+land up to 999ms early and fail to hide an item from just before the press). Unique
+`(account_id, pr_id)` and `(account_id, repo_id)` are the upsert targets; both ids are COMPOSITE FKs
+against `(id, account_id)` — `pull_requests_id_account` was added in the same migration solely as
+that parent key — so a cross-account pair fails in the database. ⚠ **Same name as the table 0060
+dropped, different contract**: read ONLY inside `getMyTurn`, where an item is hidden only while its
+own clock is at or before `dismissed_at`, and a subject with no My Turn item left DISCHARGES its row
+(`MyTurnDismissalFilter.dischargeable` — only for subjects the read's scope covers; a closed PR
+anywhere). Written by `PUT`/`DELETE /api/my-turn/dismissals/:kind/:id`; deleted by both delete paths
+and `eraseAccountData`; in `accountScopedTables()`. Not in the account export, like the Pending mute.
+Contract: [BACKEND.md](BACKEND.md) § My Turn — dismissals and one card per PR.
 
 ## `pr_mentions` (CORE, free — "@you was mentioned on this PR")
 

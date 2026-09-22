@@ -248,6 +248,15 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('PUT', '/api/me/my-turn-settings')).not.toContain('ai');
   });
 
+  // PUT / DELETE /api/my-turn/dismissals/:kind/:id — dismiss or bring back a My Turn entry. DB-only.
+  it('keeps My Turn dismissals on read', () => {
+    for (const m of ['PUT', 'DELETE']) {
+      expect(tiers(m, '/api/my-turn/dismissals/pr/12')).toEqual(['read']);
+      expect(tiers(m, '/api/my-turn/dismissals/repo/3')).toEqual(['read']);
+    }
+    expect(tiers('PUT', '/api/my-turn/dismissals/pr/12')).not.toContain('github_write');
+  });
+
   // PUT /api/workspaces/:id/pending-mute — the Pending mute. One boolean UPDATE plus a bounded
   // delete/insert over `pending_muted_repos`, all inside the workspace's own membership: no
   // GitHub, no model. It takes `read` through the workspace-CRUD line, which is the DECIDED

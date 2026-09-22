@@ -2572,6 +2572,42 @@ check(
   );
 }
 
+// ── MY TURN DISMISSALS (db/my-turn-dismissals.ts) ──────────────────────────────
+// Two id-addressed writes whose ids arrive in a request PATH, and a read every My Turn fold makes.
+// Checked non-vacuously: the positive direction first, so a writer that refused EVERYTHING would
+// fail rather than pass the cross-tenant half by accident.
+{
+  const { dismissMyTurn, readMyTurnDismissals, restoreMyTurn } = await import(
+    '../src/db/my-turn-dismissals.js'
+  );
+  check(
+    'dismissMyTurn(B, A’s PR) refuses (IDOR blocked)',
+    (await dismissMyTurn(2, { kind: 'pr', id: A.prId })) === null,
+  );
+  check(
+    'dismissMyTurn(B, A’s repo) refuses (IDOR blocked)',
+    (await dismissMyTurn(2, { kind: 'repo', id: A.repoId })) === null,
+  );
+  check(
+    'dismissMyTurn(A, A’s PR) accepts',
+    (await dismissMyTurn(1, { kind: 'pr', id: A.prId })) !== null,
+  );
+  check(
+    'readMyTurnDismissals(B) does not see A’s dismissal',
+    (await readMyTurnDismissals(2)).length === 0 && (await readMyTurnDismissals(1)).length === 1,
+  );
+  check(
+    'restoreMyTurn(B, A’s PR) deletes nothing (IDOR blocked)',
+    (await restoreMyTurn(2, { kind: 'pr', id: A.prId })) === false &&
+      (await readMyTurnDismissals(1)).length === 1,
+  );
+  check(
+    'restoreMyTurn(A, A’s PR) deletes A’s row',
+    (await restoreMyTurn(1, { kind: 'pr', id: A.prId })) === true &&
+      (await readMyTurnDismissals(1)).length === 0,
+  );
+}
+
 // ── BLAST RADIUS (db/file-coupling.ts + db/blast-radius-query.ts) ─────────────
 // Two id-addressed getters that live OUTSIDE db/queries.ts, so this script cannot see them
 // unless they are imported by name.

@@ -895,13 +895,25 @@ describe('the board ranks by the reader\'s rules', () => {
   });
 
   it('a custom order swaps two groups, whatever their scores', async () => {
-    const before = reasonsInOrder(await board());
+    const prsInOrder = (b: Awaited<ReturnType<typeof board>>) => {
+      const byId = new Map(b.cards.map((c: InsightCard) => [c.id, c]));
+      const myTurn = b.tabs.find((t: { key: string }) => t.key === 'my_turn')!;
+      return myTurn.cardIds.map((id: string) => (byId.get(id) as MyTurnCard).prId);
+    };
+    const b0 = await board();
+    const before = reasonsInOrder(b0);
     expect(before.indexOf('mention')).toBeLessThan(before.indexOf('pushed_since'));
     await withSettings({ order: ['pushed_since', 'mention'] }, async () => {
-      const after = reasonsInOrder(await board());
+      const b1 = await board();
+      const after = reasonsInOrder(b1);
       expect(after.indexOf('pushed_since')).toBeLessThan(after.indexOf('mention'));
-      // Nothing but the order moved.
-      expect([...after].sort()).toEqual([...before].sort());
+      // The same PRs, one card each. ⚠ NOT the same REASONS: the board lists ONE card per PR, the
+      // reader's highest type (db/my-turn-dismissals.ts § ONE CARD PER PR), so reordering may pick
+      // a different job to represent a PR that holds two — which is the point of the order.
+      const p0 = prsInOrder(b0);
+      const p1 = prsInOrder(b1);
+      expect([...p1].sort()).toEqual([...p0].sort());
+      expect(new Set(p1).size).toBe(p1.length);
     });
   });
 

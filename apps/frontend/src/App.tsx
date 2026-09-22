@@ -28,6 +28,7 @@ import { SettingsModal } from './components/settings/SettingsModal.js';
 import { useSettingsModal } from './store/settingsModal.js';
 import { ConflictResolverOverlay } from './components/conflicts/ConflictResolverOverlay.js';
 import { ClosedResolverToast } from './components/conflicts/ClosedResolverToast.js';
+import { MyTurnDismissToast } from './components/Activity/MyTurnDismissToast.js';
 import { SignInGate } from './components/SignInGate.js';
 import { AuthNoticeBanner } from './components/AuthNoticeBanner.js';
 import { UserMenu } from './components/UserMenu.js';
@@ -576,6 +577,8 @@ export default function App(): JSX.Element {
             store. The resolver has no URL and no history entry, so this card is the ONLY route
             back; it files nothing after a commit, when the pins have already moved. */}
         <ClosedResolverToast />
+        {/* Undo for the My Turn entry just dismissed from the Pending board. */}
+        <MyTurnDismissToast />
         <AutoMergeBanner />
         {/* Ambient heavy-work indicator (full-mode backfills + ML bot-comment scoring).
             An indicator, not a dialog: non-dismissible, no click target. */}

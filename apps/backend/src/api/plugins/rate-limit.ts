@@ -180,6 +180,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // EXACT `===` for the same near-miss.
   if (path === '/api/me/my-turn-settings') return [TIERS.read];
 
+  // PUT / DELETE /api/my-turn/dismissals/:kind/:id — dismiss or bring back one My Turn entry. One
+  // ownership read and one upsert/delete on a tiny table; no GitHub call, no model call. Recorded
+  // rather than inherited, and spelled with the `/`-terminated prefix: `/api/my-turn` itself (the
+  // inbox GET) is a sibling that must keep its own decision.
+  if (path.startsWith('/api/my-turn/dismissals/')) return [TIERS.read];
+
   // ---- Bot Tuning Advisor (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
   // "Follow the token": most advisor routes are DB-only reads/writes, but the generic
   // /api/pro/ branch below puts every mutating POST on the 20/min AI bucket — which would

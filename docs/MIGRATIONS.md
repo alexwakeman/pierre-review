@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0055` and plugin `0034` are NOT (written 2026-09-19 with the Postgres down; see the
+  ⚠ pg `0052`–`0056` and plugin `0034` are NOT (written 2026-09-19/21 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -715,12 +715,26 @@ Three nullable columns, no backfill in SQL:
 Both twins share `when` `1789783200000` (one day after `0067`/`0054`). The pg file uses
 `ADD COLUMN IF NOT EXISTS`, so a half-applied replay can re-run.
 
-⚠ **NONE OF THE FIVE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0055` and plugin `0034`). The
+### `0069_my_turn_dismissals` (pg `0056`)
+
+A unique index `pull_requests_id_account` on `pull_requests (id, account_id)` — never a lookup (`id`
+is the primary key), only the parent key of the new composite FK — and the `my_turn_dismissals`
+table: `account_id` (FK accounts, cascade), nullable `pr_id` + `repo_id` with NAMED composite FKs
+`my_turn_dismissals_pr_account_fk` / `_repo_account_fk` against `(id, account_id)`, `dismissed_at`
+NOT NULL, and two unique indexes `(account_id, pr_id)` / `(account_id, repo_id)`. A composite FK
+with a NULL member is not checked (MATCH SIMPLE), which is what lets one table carry both subject
+kinds. ⚠ Same table NAME as the one `0060`/pg `0047` dropped, different contract — see the file's
+header and docs/DATA-MODEL.md. No backfill. Twins share `when` `1789869600000`.
+
+⚠ **NONE OF THE SIX PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0056` and plugin `0034`). The
 standing Postgres was not running when they were written (2026-09-19); the SQLite halves ran through
 the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain — core
-should reach **56 applied = 56 journal entries** and the plugin **34** — and check
+should reach **57 applied = 57 journal entries** and the plugin **34** — and check
 `review_request_events` carries both FKs and its unique index, that `workspaces.flow_settings`,
 `pull_requests.advisory_ids` and `accounts.my_turn_settings` are `jsonb`, and that
 `security_checked_at` and `pr_mentions.mentioned_at` are `timestamp with time zone`. ⚠ `0055` is
 worth one WITH-DATA step: run the scanner's `ON CONFLICT (account_id, pr_id) DO UPDATE` against an
-existing row and check the row was restamped, not duplicated.
+existing row and check the row was restamped, not duplicated. `0056` is worth one too: dismiss the
+same PR twice through `dismissMyTurn` (`ON CONFLICT (account_id, pr_id) DO UPDATE`) and check one row
+survives with the second timestamp, and that inserting a pair whose `pr_id` belongs to another
+account raises `my_turn_dismissals_pr_account_fk`.

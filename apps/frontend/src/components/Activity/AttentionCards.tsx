@@ -26,7 +26,7 @@ import type {
   UpdateBranchCard,
   User,
 } from '@pierre-review/shared';
-import type { MergeVerdictInfo } from '@pierre-review/shared';
+import type { MergeVerdictInfo, MyTurnDismissTarget } from '@pierre-review/shared';
 import { usePr, useThread } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import {
@@ -35,6 +35,7 @@ import {
   useRequestReviewers,
 } from '../../hooks/usePrWrites.js';
 import { usePrArmedIntent, usePrStoppedIntent } from '../../hooks/useAutoMerge.js';
+import { useDismissMyTurn } from '../../hooks/useMyTurnDismiss.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
 import {
@@ -1121,24 +1122,45 @@ function RoutingReviewers({
   );
 }
 
-// The actions row of a my_turn card. It holds ONE thing now: a hint on 'your_pr', the one section
-// whose clearing rule is not "act on the PR". Every other reason renders nothing at all.
+// The actions row of a my_turn card: the 'your_pr' hint (the one section whose clearing rule is not
+// "act on the PR"), then Dismiss.
 //
-// The "Done" button that used to live here is GONE, with the `my_turn_dismissals` table behind it.
-// It existed because the fold could not tell that you had already reviewed, replied or pushed, so
-// the card kept claiming your turn and the only way out was to tell the app you were finished.
-// The fold can tell now, and a stored acknowledgement that never expired was the wrong answer
-// anyway: it hid work that had come back.
+// ⚠ DISMISS IS NOT THE "Done" BUTTON THAT USED TO LIVE HERE. That one stored an acknowledgement
+// that never expired, so it hid work that had come back. This one sets the entry down only until
+// something newer happens on it, and the server drops the dismissal once the PR leaves your plate
+// (db/my-turn-dismissals.ts). Acting on the PR is still what clears a card; Dismiss is for the one
+// you cannot act on now — or ever. It is keyed on the SUBJECT (the PR, or a red branch's repo),
+// never the card: the board lists one card per PR, and dismissing it must not surface the next.
 //
 // The 'your_pr' copy promises "as soon as you come back", not "on the next refresh", because
 // `markViewed.onSuccess` invalidates ['attention-cards'] + ['daily-brief'] at the prefix — the
 // board is already refetching while the user is still in the PR. If that invalidation is ever
 // dropped, this sentence becomes a lie with a 60s staleTime behind it.
-function MyTurnActions({ card }: { card: MyTurnCard }): JSX.Element | null {
-  if (card.reason !== 'your_pr') return null;
+function MyTurnActions({ card }: { card: MyTurnCard | MyTurnTrunkCard }): JSX.Element {
+  const target: MyTurnDismissTarget =
+    card.reason === 'trunk_red' ? { kind: 'repo', id: card.repoId } : { kind: 'pr', id: card.prId };
+  const label =
+    card.reason === 'trunk_red' ? card.repoFullName : `${card.repoFullName} #${card.prNumber}`;
+  const dismiss = useDismissMyTurn(target, label);
   return (
-    <div className="mt-2 text-[11px] italic text-gray-400">
-      Opening the PR marks it seen — this card clears as soon as you come back.
+    <div className="mt-2 flex flex-wrap items-baseline gap-2">
+      {card.reason === 'your_pr' && (
+        <span className="text-[11px] italic text-gray-500 dark:text-gray-400">
+          Opening the PR marks it seen — this card clears as soon as you come back.
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={() => dismiss.mutate()}
+        disabled={dismiss.isPending}
+        title="Take this off My turn until something new happens on it"
+        className="ml-auto rounded px-1.5 py-0.5 text-[12px] text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-60 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+      >
+        {dismiss.isPending ? 'Dismissing…' : 'Dismiss'}
+      </button>
+      {dismiss.isError && (
+        <span className="text-[12px] text-red-600 dark:text-red-400">Couldn’t dismiss it.</span>
+      )}
     </div>
   );
 }
@@ -2155,8 +2177,9 @@ export function AttentionCards({
 
   // The VIEWER'S OWN inbox as cards — the same population GET /api/my-turn serves, and the list the
   // daily brief's "N need your review or reply" line counts. Clicking opens the PR (or, for a
-  // thread-grained type, the thread on the PR's Threads tab); ACTING on the PR is what clears it —
-  // there is no "mark as seen" control and no dismissal table behind one.
+  // thread-grained type, the thread on the PR's Threads tab); ACTING on the PR is what clears it.
+  // "Dismiss" (`MyTurnActions`) sets one down until something new happens on it — never a
+  // "mark as seen". ONE card per PR: the server's `onePerPr` already chose it.
   //
   // ⚠ Deliberately LEANER than the untouched-thread card: no embedded ThreadCard and no
   // InsightPrSummary. This kind carries its own much larger cap (MY_TURN_CARD_CAP = 50 vs 15 for the
@@ -2227,6 +2250,7 @@ export function AttentionCards({
           onOpenPr={open}
           chip={myTurnReasonLabel(card)}
         />
+        <MyTurnActions card={card} />
       </CardShell>
     );
   };
@@ -2236,7 +2260,7 @@ export function AttentionCards({
       // The VIEWER'S OWN inbox as cards — the same population GET /api/my-turn serves, and the
       // list the daily brief's "N need your review or reply" line counts. Clicking opens the PR
       // (or, for a thread, the thread on the PR's Threads tab); ACTING on the PR is what clears
-      // it — there is no "mark as seen" control and no dismissal table behind one.
+      // it, and "Dismiss" sets one down until something new happens on it.
       //
       // ⚠ Deliberately LEANER than the untouched-thread card: no embedded ThreadCard and no
       // InsightPrSummary. This kind carries its own much larger cap (MY_TURN_CARD_CAP = 50 vs 15
