@@ -647,6 +647,27 @@ Review finding deep-link. Do not add a third.
   `fileInDiff`. The jump is a `<button>`, never an `<a href="#…">` (a hash navigation would write
   to the URL `useUrlState` owns), with a small `↗` beside it keeping the GitHub diff-line escape.
 
+#### Line wrap in the diff (`useDiffWrap`, `FileDiffView`'s `DiffTable`)
+
+**No line may leave its box, in either mode.** The table used to be `w-full` under AUTO layout with
+a `whitespace-pre` code cell, so the longest line set the table's minimum width and the code ran out
+past the pane's right edge while the file header stopped at it. Now:
+
+- **Wrap ON (the default)** — `table-fixed` plus a `<colgroup>`, so the pane decides the columns and
+  the content never does; the code cell is `whitespace-pre-wrap` + `overflow-wrap: anywhere` (a URL
+  or a minified line has no space to break at). ⚠ **The `<colgroup>` is load-bearing**: fixed layout
+  takes widths from the FIRST ROW, which is often a `colSpan={4}` thread pill — four equal columns.
+  The gutters are sized in `ch` off the file's largest line number, never narrower than the old `w-9`.
+- **Wrap OFF** — the table is `w-max min-w-full` inside its OWN `overflow-x-auto` box, so a long line
+  scrolls inside the diff. That box is a size container (`container-type: inline-size`) so the
+  full-width rows (inline threads, the comment box) can be pinned to the VISIBLE width in CSS
+  (`FullWidthCell`: `sticky` + `100cqw`) — without it a thread card is as wide as the file's longest
+  line, off-screen to the right.
+- **One value for every mount**: `hooks/useDiffWrap.ts` is a `useSyncExternalStore` over
+  localStorage (`pierre:diffWrap`), not `useLocalStorage` — that hook is per-INSTANCE, and the toggle
+  (`DiffWrapToggle`, in the Changes tab header and beside both AI Fix diffs) is not the component
+  that reads it. Never the filter store: a filter reset must not move the furniture.
+
 #### Inline thread indicators in the diff + per-file state rollups
 
 Every review thread — **resolved included** — renders inside the diff as a one-line collapsed

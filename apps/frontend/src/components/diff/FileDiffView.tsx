@@ -8,6 +8,7 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { useAddReviewComment } from '../../hooks/usePrWrites.js';
+import { useDiffWrap } from '../../hooks/useDiffWrap.js';
 import { ApiError } from '../../api/client.js';
 import {
   anchorRowFor,
@@ -40,6 +41,21 @@ import { SELECTED_BORDER, STATUS_META, UNSELECTED_BORDER } from './status.js';
 // — two passes over the reconstructed old and new sides, because a unified diff is not valid
 // source). ⚠ The add/del signal is carried by `ROW_BG`'s TINT alone, which is why no row here
 // has ever had an add/del text colour to lose.
+//
+// ⚠ NO LINE MAY LEAVE ITS BOX, IN EITHER WRAP MODE (`useDiffWrap`, ON by default). The table used
+// to be `w-full` under AUTO layout with a `whitespace-pre` code cell, so one long line set the
+// table's minimum width and the whole diff ran out past the pane's right edge — the file header
+// stopped at the pane, the code did not. Now:
+//   • WRAP ON: `table-fixed` + a `<colgroup>`, so the columns are decided by the pane's width and
+//     never by the content, and the code cell breaks anywhere (`overflow-wrap: anywhere` — a long
+//     URL or a minified line has no spaces to break at).
+//   • WRAP OFF: the table is `w-max min-w-full` inside its OWN `overflow-x-auto` box, so a long
+//     line scrolls INSIDE the diff. The full-width rows (inline threads, the comment box) are
+//     pinned to the visible width (`FullWidthCell`), or a thread card would be as wide as the
+//     longest line in the file.
+// ⚠ THE `<colgroup>` IS LOAD-BEARING UNDER `table-fixed`: fixed layout takes its widths from the
+// FIRST ROW, and the first row is often a `colSpan={4}` thread pill, which would split the table
+// into four equal columns.
 
 // One changed file with its unified-diff patch. A superset of the Changes tab's
 // PrFileDiff and the AI-Fix `parseGitPatch` output (githubUrl optional).
@@ -138,6 +154,7 @@ function DiffLine({
   onClose,
   focused,
   focusNonce,
+  wrap,
 }: {
   row: DiffRow;
   /** This row's highlighted body, or null to render it as plain text — see the render below. */
@@ -155,6 +172,8 @@ function DiffLine({
   focused: boolean;
   // Changes on every focus request so re-focusing the SAME row re-fires the effect.
   focusNonce: number | null;
+  /** Wrap long lines to the pane (the default) or keep them on one line and scroll. */
+  wrap: boolean;
 }): JSX.Element {
   const target = commenting ? commentTarget(row) : null;
   // `splitDiffMarker` rather than a bare `slice(1)`: an unmarked context row (a patch whose first
@@ -187,10 +206,11 @@ function DiffLine({
           flash ? 'bg-amber-300/40 dark:bg-amber-400/25' : ROW_BG[row.kind]
         }`}
       >
-        <td className="w-9 select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
+        {/* Widths come from the table's `<colgroup>` (see `DiffColumns`), never from these cells. */}
+        <td className="select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
           {row.kind === 'hunk' ? '' : gutterText(row.oldLine)}
         </td>
-        <td className="w-9 select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
+        <td className="select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
           {row.kind === 'hunk' ? '' : gutterText(row.newLine)}
         </td>
         <td className="select-none px-1 align-top">
@@ -209,7 +229,11 @@ function DiffLine({
             )}
           </div>
         </td>
-        <td className="w-full whitespace-pre px-2 align-top">
+        <td
+          className={`px-2 align-top ${
+            wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre'
+          }`}
+        >
           {/* ⚠ THE MARKER STAYS OUTSIDE THE HIGHLIGHTED SPAN. It is diff notation, not code — a
               lexer handed `-foo` reads a minus operator — so `highlightDiffRows` strips it and it
               is printed here, plain, in both branches. */}
@@ -231,15 +255,17 @@ function DiffLine({
       {open && commenting && target && (
         <tr>
           <td colSpan={4} className="px-2 py-1.5">
-            <InlineCommentBox
-              prId={commenting.prId}
-              filePath={filePath}
-              fileUrl={fileUrl}
-              line={target.line}
-              side={target.side}
-              onPosted={onPosted}
-              onClose={onClose}
-            />
+            <FullWidthCell wrap={wrap}>
+              <InlineCommentBox
+                prId={commenting.prId}
+                filePath={filePath}
+                fileUrl={fileUrl}
+                line={target.line}
+                side={target.side}
+                onPosted={onPosted}
+                onClose={onClose}
+              />
+            </FullWidthCell>
           </td>
         </tr>
       )}
@@ -452,6 +478,7 @@ function InlineThreadRow({
   fileChip,
   focusNonce,
   consumedFocus,
+  wrap,
 }: {
   thread: ThreadDetail;
   ctx: DiffThreadContext;
@@ -459,20 +486,123 @@ function InlineThreadRow({
   fileChip?: boolean;
   focusNonce?: number | null;
   consumedFocus?: MutableRefObject<number | null>;
+  wrap: boolean;
 }): JSX.Element {
   return (
     <tr>
       <td colSpan={4} className="bg-gray-50 px-2 py-1 dark:bg-gray-900/40">
-        <InlineThread
-          thread={thread}
-          ctx={ctx}
-          approximate={approximate}
-          fileChip={fileChip}
-          focusNonce={focusNonce}
-          consumedFocus={consumedFocus}
-        />
+        <FullWidthCell wrap={wrap}>
+          <InlineThread
+            thread={thread}
+            ctx={ctx}
+            approximate={approximate}
+            fileChip={fileChip}
+            focusNonce={focusNonce}
+            consumedFocus={consumedFocus}
+          />
+        </FullWidthCell>
       </td>
     </tr>
+  );
+}
+
+/**
+ * The content of a `colSpan={4}` row — a thread or the comment box — sized to the VISIBLE diff.
+ *
+ * Wrapping, the table is the pane's width already and this is a plain box. Not wrapping, the
+ * table is as wide as its longest line, so the row is too: the box is pinned to the left edge of
+ * the horizontal scroller (`sticky`) and held to its width (`100cqw` of the scroller, which is a
+ * size container for exactly this — see the ⚠ on `DiffTable`). Without it a review thread on a
+ * file with one 400-character line renders 400 characters wide, off-screen to the right.
+ */
+function FullWidthCell({
+  wrap,
+  children,
+}: {
+  wrap: boolean;
+  children: React.ReactNode;
+}): JSX.Element {
+  if (wrap) return <>{children}</>;
+  // `1rem` is the cell's own `px-2`, both sides.
+  return (
+    <div className="sticky left-2" style={{ width: 'calc(100cqw - 1rem)' }}>
+      {children}
+    </div>
+  );
+}
+
+/** Wide enough for the file's longest line number, and never narrower than the old `w-9`. */
+function gutterWidth(rows: readonly DiffRow[]): string {
+  let max = 0;
+  for (const r of rows) {
+    if (r.oldLine != null && r.oldLine > max) max = r.oldLine;
+    if (r.newLine != null && r.newLine > max) max = r.newLine;
+  }
+  const digits = Math.max(4, String(max).length);
+  // `ch` resolves against the table's monospace font; `0.5rem` is the cell's `px-1`, `1px` its
+  // right border.
+  return `calc(${digits}ch + 0.5rem + 1px)`;
+}
+
+/**
+ * The diff table, in both wrap modes.
+ *
+ * ⚠ THE SCROLLER IS A SIZE CONTAINER (`container-type: inline-size`) so `FullWidthCell` can say
+ * "the visible width" in CSS (`100cqw`) instead of measuring it. It is safe here because the box
+ * takes its width from its parent anyway — containment only stops its CONTENT from widening it,
+ * which is the whole point.
+ */
+function DiffTable({
+  rows,
+  wrap,
+  children,
+}: {
+  rows: readonly DiffRow[];
+  wrap: boolean;
+  children: React.ReactNode;
+}): JSX.Element {
+  const gutter = gutterWidth(rows);
+  const table = (
+    <table
+      className={`border-collapse font-mono text-[12px] leading-[1.45] ${
+        wrap ? 'w-full table-fixed' : 'w-max min-w-full'
+      }`}
+    >
+      <colgroup>
+        <col style={{ width: gutter }} />
+        <col style={{ width: gutter }} />
+        {/* The comment button's column: `w-4` + the cell's `px-1`. */}
+        <col style={{ width: '1.5rem' }} />
+        <col />
+      </colgroup>
+      <tbody>{children}</tbody>
+    </table>
+  );
+  if (wrap) return table;
+  return (
+    <div className="overflow-x-auto" style={{ containerType: 'inline-size' }}>
+      {table}
+    </div>
+  );
+}
+
+/**
+ * The wrap switch. Rendered by the viewer's CALLERS (the Changes tab's header, the AI Fix tab's
+ * file count), because `FileDiffView` is a list of blocks with no header of its own — every mount
+ * reads the same `useDiffWrap` value, so one press repaints them all.
+ */
+export function DiffWrapToggle(): JSX.Element {
+  const [wrap, setWrap] = useDiffWrap();
+  return (
+    <label className="inline-flex cursor-pointer select-none items-center gap-1.5 text-[12px] text-gray-600 dark:text-gray-300">
+      <input
+        type="checkbox"
+        checked={wrap}
+        onChange={(e) => setWrap(e.target.checked)}
+        className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
+      />
+      Wrap lines
+    </label>
   );
 }
 
@@ -662,6 +792,7 @@ function FileDiffBlock({
   threads,
   threadCtx,
   focus,
+  wrap,
 }: {
   file: DiffFile;
   commenting: { prId: number } | null;
@@ -670,6 +801,7 @@ function FileDiffBlock({
   threadCtx: DiffThreadContext | null;
   // Non-null ONLY when this block is the focus target (FileDiffView does the matching).
   focus: DiffFocusTarget | null;
+  wrap: boolean;
 }): JSX.Element {
   const rows = useMemo(() => parsePatch(file.patch), [file.patch]);
   // Anchor each thread to a diff row via the shared ladder (`anchorRowFor`: live line, else
@@ -863,8 +995,7 @@ function FileDiffBlock({
               No textual diff for this file.
             </div>
           ) : (
-            <table className="w-full border-collapse font-mono text-[12px] leading-[1.45]">
-              <tbody>
+            <DiffTable rows={rows} wrap={wrap}>
                 {threadCtx &&
                   unanchored.map((t) => (
                     <InlineThreadRow
@@ -876,6 +1007,7 @@ function FileDiffBlock({
                         focus != null && focus.threadId === t.id ? focus.nonce : null
                       }
                       consumedFocus={consumedThreadFocus}
+                      wrap={wrap}
                     />
                   ))}
                 {rows.map((row, i) => (
@@ -892,6 +1024,7 @@ function FileDiffBlock({
                       onClose={() => setOpenRow(null)}
                       focused={focusRow === i}
                       focusNonce={focus?.nonce ?? null}
+                      wrap={wrap}
                     />
                     {threadCtx &&
                       byRow.get(i)?.map((a) => (
@@ -906,12 +1039,12 @@ function FileDiffBlock({
                               : null
                           }
                           consumedFocus={consumedThreadFocus}
+                          wrap={wrap}
                         />
                       ))}
                   </Fragment>
                 ))}
-              </tbody>
-            </table>
+            </DiffTable>
           )}
         </div>
       )}
@@ -939,6 +1072,7 @@ export function FileDiffView({
   // expands the file (FileDiffBlock's hasFocus effect), scrolls the row into view and rings
   // it, then fades. A caller-supplied deep-link focus always wins over it.
   const [postedThreadId, setPostedThreadId] = useState<number | null>(null);
+  const [wrap] = useDiffWrap();
   const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -990,6 +1124,7 @@ export function FileDiffView({
           threads={threadCtx?.threadsByPath.get(f.path) ?? []}
           threadCtx={effectiveCtx}
           focus={focus != null && f.path === focusedBlockPath ? focus : null}
+          wrap={wrap}
         />
       ))}
     </div>

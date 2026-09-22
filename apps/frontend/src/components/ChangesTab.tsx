@@ -6,6 +6,7 @@ import { buildFileTree, indexThreadsByPath, type FileTreeEntry } from '../lib/di
 import { useResizablePane } from '../hooks/useResizablePane.js';
 import { indexUsers } from '../lib/ui.js';
 import {
+  DiffWrapToggle,
   FileDiffView,
   type DiffFocusTarget,
   type DiffThreadContext,
@@ -77,9 +78,18 @@ function MetaFileRow({ file }: { file: PrFileChange }): JSX.Element {
   );
 }
 
-function Header({ pr, extra }: { pr: PrDetail; extra?: JSX.Element }): JSX.Element {
+function Header({
+  pr,
+  extra,
+  wrapToggle = false,
+}: {
+  pr: PrDetail;
+  extra?: JSX.Element;
+  /** Only once there are patches to wrap — the metadata fallback list has no code in it. */
+  wrapToggle?: boolean;
+}): JSX.Element {
   return (
-    <div className="flex items-center gap-3 border-b border-gray-200 px-4 py-2 text-xs dark:border-gray-800">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-gray-200 px-4 py-2 text-xs dark:border-gray-800">
       <span className="font-semibold text-gray-600 dark:text-gray-300">
         {pr.changedFilesCount} file{pr.changedFilesCount === 1 ? '' : 's'} changed
       </span>
@@ -90,14 +100,17 @@ function Header({ pr, extra }: { pr: PrDetail; extra?: JSX.Element }): JSX.Eleme
         −{pr.deletions.toLocaleString()}
       </span>
       {extra}
-      <a
-        href={`${pr.githubUrl}/files`}
-        target="_blank"
-        rel="noreferrer noopener"
-        className="ml-auto text-blue-500 hover:underline"
-      >
-        Files changed <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
-      </a>
+      <span className="ml-auto flex items-center gap-3">
+        {wrapToggle && <DiffWrapToggle />}
+        <a
+          href={`${pr.githubUrl}/files`}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="text-blue-500 hover:underline"
+        >
+          Files changed <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
+        </a>
+      </span>
     </div>
   );
 }
@@ -297,6 +310,7 @@ export function ChangesTab({
     <div>
       <Header
         pr={pr}
+        wrapToggle
         extra={
           // The PR-grain version of the file-header read: count + the 4-state mix. Over
           // `pr.threads` (not the indexed map), so the aggregate never under-reports a

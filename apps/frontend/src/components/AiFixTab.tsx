@@ -43,7 +43,7 @@ import {
 } from '../store/aiFixComments.js';
 import { Markdown } from './Markdown.js';
 import { WarningIcon } from './Icons.js';
-import { FileDiffView, type DiffFile } from './diff/FileDiffView.js';
+import { DiffWrapToggle, FileDiffView, type DiffFile } from './diff/FileDiffView.js';
 import { parseGitPatch } from '../lib/diff.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
@@ -418,9 +418,12 @@ function FixResult({
         </p>
       ) : (
         <>
-          <div className="mb-1 mt-2 text-[11px] text-gray-500 dark:text-gray-400">
-            {fix.filesChanged.length} file
-            {fix.filesChanged.length === 1 ? '' : 's'} changed
+          <div className="mb-1 mt-2 flex items-center justify-between gap-3 text-[11px] text-gray-500 dark:text-gray-400">
+            <span>
+              {fix.filesChanged.length} file
+              {fix.filesChanged.length === 1 ? '' : 's'} changed
+            </span>
+            <DiffWrapToggle />
           </div>
           <div className="overflow-hidden rounded border border-gray-200 text-gray-800 dark:border-gray-800 dark:text-gray-200">
             <FileDiffView files={diffFiles} />
@@ -618,9 +621,12 @@ function ResolvedReview({
           : ' No conflicts.'}{' '}
         Review the result below, then push.
       </div>
-      <div className="text-[11px] text-gray-500 dark:text-gray-400">
-        {resolved.filesChanged.length} file
-        {resolved.filesChanged.length === 1 ? '' : 's'} in the rebased result
+      <div className="flex items-center justify-between gap-3 text-[11px] text-gray-500 dark:text-gray-400">
+        <span>
+          {resolved.filesChanged.length} file
+          {resolved.filesChanged.length === 1 ? '' : 's'} in the rebased result
+        </span>
+        <DiffWrapToggle />
       </div>
       <div className="overflow-hidden rounded border border-gray-200 text-gray-800 dark:border-gray-800 dark:text-gray-200">
         <FileDiffView files={files} />
