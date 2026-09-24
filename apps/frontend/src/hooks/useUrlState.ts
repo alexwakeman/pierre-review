@@ -39,6 +39,9 @@ import {
   usePinnedTabs,
   type ActiveTab,
 } from '../store/pinnedTabs.js';
+// Pure (it imports the store as a TYPE only), so no runtime cycle — the same derivation the board
+// renders with decides what the URL says is on screen.
+import { effectiveMyTurnView, effectivePendingTab } from '../components/Activity/pendingTabs.js';
 
 const PRESETS: RangePreset[] = ['7d', '14d', '30d', '90d', 'custom'];
 // The attention board's isolation kinds. A local list because `InsightKind` ships no runtime
@@ -46,8 +49,8 @@ const PRESETS: RangePreset[] = ['7d', '14d', '30d', '90d', 'custom'];
 // board to a kind no card has.
 //
 // ⚠ HAND-WRITTEN, SO NOTHING COMPILES WHEN THE UNION GROWS. A kind missing here is silently
-// UN-SEATABLE: `?attn=<kind>` is discarded, which means the daily-brief line that counts it opens
-// an un-isolated board and a browser Back cannot return to the narrowed one. EXPORTED purely so
+// UN-SEATABLE: `?attn=<kind>` is discarded, which means a `?attn=<kind>` link opens an
+// un-isolated board and a browser Back cannot return to the narrowed one. EXPORTED purely so
 // `test/ciFailingCard.test.ts` can compare it against `KIND_LABEL` — whose exhaustiveness the
 // compiler DOES enforce — turning that silent omission into a failing test.
 export const INSIGHT_KINDS: readonly InsightKind[] = [
@@ -99,6 +102,8 @@ const NAV_KEYS = [
   'attnRel',
   // The Pending TAB the reader picked — a screen they moved to, so Back must leave it.
   'attnTab',
+  // My turn's view (Cards | Default branches and open PRs) — a screen the reader moved to.
+  'attnView',
   // ⚠ RETIRED BUT STILL LISTED. `?attnPersonal=1` shipped, so history entries and bookmarks carry
   // it; it is parsed (as `attnRel=mine`) and never emitted. It stays a NAV key because leaving one
   // of those legacy entries — the emitted URL drops `attnPersonal` and gains `attnRel` — is a real
@@ -344,10 +349,10 @@ export function readFromUrl(): Partial<FilterState> {
     }
   }
 
-  // The **Pending** board's single-KIND isolation — the daily brief's lines. THE reason
-  // this key exists: a reader clicks "3 PRs stalled awaiting review", lands on a narrowed board,
-  // and presses Back. Before the board AND its narrowing were both addressable, that Back left
-  // the app entirely, because the whole session had exactly one history entry.
+  // The **Pending** board's single-KIND isolation. THE reason this key exists: a reader clicked
+  // a count (the since-deleted daily brief's "3 PRs stalled awaiting review"), landed on a
+  // narrowed board, and pressed Back. Before the board AND its narrowing were both addressable,
+  // that Back left the app entirely, because the whole session had exactly one history entry.
   const attn = p.get('attn');
   if (attn && (INSIGHT_KINDS as readonly string[]).includes(attn)) {
     out.attentionIsolation = attn as InsightKind;
@@ -359,6 +364,10 @@ export function readFromUrl(): Partial<FilterState> {
   // The Pending tab. Only a real tab key seats it; anything else means the default (My turn).
   const attnTab = p.get('attnTab');
   if (PENDING_TABS.some((t) => t.key === attnTab)) out.attentionTab = attnTab as PendingTabKey;
+  // My turn's view. Only the literal seats it; anything else means Cards. RAW seat — the render
+  // derives (`effectiveMyTurnView`), never a corrected value.
+  const attnView = p.get('attnView');
+  if (attnView === 'branches') out.attentionMyTurnView = 'branches';
   const attnRel = p.get('attnRel');
   if (attnRel === 'mine' || attnRel === 'others') out.attentionRelevance = attnRel;
   // ⚠ BACK-COMPAT, ONE DIRECTION ONLY. `?attnPersonal=1` is the retired boolean spelling and it is
@@ -585,6 +594,17 @@ export function writeToUrl(s: FilterState): void {
     // filter above names its own tab, so the two together are never contradictory: the kind wins.
     if (s.activityRepoId === 'attention' && s.attentionTab != null) {
       p.set('attnTab', s.attentionTab);
+    }
+    // My turn's view — emitted only where it is ON SCREEN (the attention rail, effective tab My
+    // turn), and ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT: only 'branches' is ever written.
+    if (
+      s.activityRepoId === 'attention' &&
+      effectiveMyTurnView(
+        effectivePendingTab(s.attentionIsolation, s.attentionTab),
+        s.attentionMyTurnView,
+      ) === 'branches'
+    ) {
+      p.set('attnView', 'branches');
     }
     // Emitted independently of `attn` — the two lenses are orthogonal, and a relevance-lensed
     // board showing every kind is a real (if uncommon) view. Same rail gate as its twin: a lens

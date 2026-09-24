@@ -1,4 +1,4 @@
-import type { PrFileDiffStatus, ThreadStateCounts } from '@pierre-review/shared';
+import type { DerivedState, PrFileDiffStatus, ThreadStateCounts } from '@pierre-review/shared';
 import { MAX_HIGHLIGHT_LINES, highlightLines } from './hljsLines.js';
 
 // A tiny pure parser for a single file's unified-diff `patch` string (as GitHub
@@ -326,6 +326,51 @@ export function indexThreadsByPath<T extends { path: string }>(
     out.set(key, bucket);
   }
   return out;
+}
+
+/**
+ * Whether an inline review-thread pill in the Changes tab starts OPEN — the ONE place that decides.
+ *
+ * The reader's own decision, remembered per thread id (`DiffThreadContext.openMemory`, owned by
+ * PrDetail), wins in BOTH directions. A thread nobody has decided about starts from its CURRENT
+ * state: OPEN unless resolved. `untouched`, `replied_unresolved` and `likely_addressed` are live
+ * discussion — the last is a heuristic, so its card (with the confidence badge) is exactly what a
+ * reader should see — and GitHub's own Files-changed view opens unresolved conversations and folds
+ * resolved ones the same way. Only DECISIONS are ever recorded, never this default, so a thread
+ * resolved elsewhere comes back shut.
+ */
+export function inlineThreadStartsOpen(
+  thread: { id: number; derivedState: DerivedState },
+  decided?: ReadonlyMap<number, boolean> | null,
+): boolean {
+  return decided?.get(thread.id) ?? thread.derivedState !== 'resolved';
+}
+
+/**
+ * Whether a reveal (`DiffFocusTarget`) landing in a file block must scroll that block's HEADER —
+ * the fallback for when nothing inside the block will scroll itself. Two things do: the diff row
+ * the reveal addresses (`focusRow`, DiffLine's own effect), and the TARGET THREAD's inline pill,
+ * which scrolls its own header when the reveal names it (`focus.threadId`) — at a row, at file
+ * grain, or in the no-textual-diff list.
+ *
+ * ⚠ WHEN THE PILL IS THE TARGET, THE PILL OWNS THE SCROLL. Both are smooth `scrollIntoView` calls,
+ * a later one cancels an earlier one, and React runs passive effects CHILD-FIRST — so the block's
+ * header scroll ran after the pill's and won. That was invisible while every pill started shut
+ * (~26px each above the target). With unresolved pills starting OPEN (~300px each) the reader
+ * landed on the file header while the ringed target flashed below the fold: MEASURED on a PR with
+ * four file-grain threads, the fourth one's header sat 1,274px under the top of a 297px pane.
+ *
+ * `renderedThreads` must be the threads the block actually renders as pills — none without a
+ * thread context — or a reveal would scroll nothing at all.
+ */
+export function revealScrollsFileHeader(
+  focus: { threadId?: number | null },
+  focusRow: number | null,
+  renderedThreads: readonly { id: number }[],
+): boolean {
+  if (focusRow != null) return false;
+  const target = focus.threadId;
+  return target == null || !renderedThreads.some((t) => t.id === target);
 }
 
 // ---- changed-file tree (the Changes tab's navigation rail) ----

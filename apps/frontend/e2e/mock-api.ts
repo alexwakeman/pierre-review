@@ -3,6 +3,8 @@ import type {
   AttentionCardsResponse,
   AttentionLivenessResponse,
   AwaitingReviewItem,
+  BranchStatusResponse,
+  BranchTrendsResponse,
   ConsolidatedFeedItem,
   ConsolidatedFeedResponse,
   ActivityResponse,
@@ -264,7 +266,7 @@ const DETECTED_REVIEWERS: DetectedReviewersResponse = {
 
 // ---- Three account-wide reads App.tsx mounts UNCONDITIONALLY ---------------------------------
 //
-// The counts strip + Workspace badge (daily-brief), the auto-merge banner's armed intents, and
+// The Workspace badge + welcome-back banner (daily-brief), the auto-merge banner's armed intents, and
 // the global loading bar's full-mode walk feed. Every spec in this suite pays for all three, and
 // ⚠ NONE of them may fall through to the catch-all `{}`: each consumer reads a field off the
 // response that an empty object does not have — `counts.myTurnPersonal`, `requests.some`,
@@ -273,8 +275,8 @@ const DETECTED_REVIEWERS: DetectedReviewersResponse = {
 // the symptom is not an error message: the Activity overlay paints, then the page goes blank a
 // beat later and every locator times out.
 //
-// The brief is all zeros — these fixtures exercise the FEED, and a zero strip leaves the
-// overlay's only `<ul>` the feed list the specs count.
+// The brief is all zeros — nothing on the Activity console renders these counts now (the Feed's
+// daily-brief strip was deleted), and zero keeps the banner quiet.
 const DAILY_BRIEF: DailyBriefResponse = {
   workspaceId: WORKSPACE.id,
   counts: {
@@ -285,12 +287,32 @@ const DAILY_BRIEF: DailyBriefResponse = {
     resolveBacklog: 0,
     botAnomalies: [],
     trunkRed: [],
-    // The Dependencies tab's security chip. Zero, so the strip stays empty (see above) — the two
-    // Dependencies cards below sit on the board, not in the brief.
+    // The Dependencies tab's security figure. Zero — the two Dependencies cards below sit on the
+    // board, not in the brief.
     security: 0,
   },
   generatedAt: iso(0),
 };
+
+// ── DEFAULT-BRANCH STATUS ────────────────────────────────────────────────────────────────────────
+// The Activity rail reads `/api/branch-status` at BOOT (its third line), so this was a boot-time
+// route falling through to the untyped `{}`. One synced, green repo: the strip under Pending → My
+// turn → "Default branches and open PRs" renders (collapsed, "all green").
+const BRANCH_STATUS: BranchStatusResponse = {
+  repos: [
+    {
+      repoId: REPO.id,
+      branchName: 'main',
+      headSha: 'abc1234',
+      ciStatus: 'success',
+      lastCommitAt: iso(1),
+      failingChecks: [],
+      mergedPrs: [],
+    },
+  ],
+};
+// Defensive: an EXPANDED branch row reads `daily`, and a `{}` there would blank the page.
+const BRANCH_TRENDS: BranchTrendsResponse = { repoId: REPO.id, daily: [] };
 
 // ── THE PENDING BOARD — THE DEFAULT LANDING ─────────────────────────────────────────────────────
 // The app opens on Pending, so EVERY spec's first paint calls `GET /api/attention`. Left to the
@@ -754,6 +776,8 @@ export async function installMockApi(page: Page): Promise<void> {
       // and `.repoIds` off it.
       if (path.endsWith('/api/bot-reviewers')) return json(route, DETECTED_REVIEWERS);
       if (path.endsWith('/api/daily-brief')) return json(route, DAILY_BRIEF);
+      if (path.endsWith('/api/branch-status')) return json(route, BRANCH_STATUS);
+      if (path.endsWith('/api/branch-trends')) return json(route, BRANCH_TRENDS);
       if (path.endsWith('/api/auto-merge')) return json(route, ARMED_MERGES);
       if (path.endsWith('/api/sync-activity')) return json(route, SYNC_ACTIVITY);
       if (path.endsWith('/api/my-turn')) return json(route, MY_TURN);
@@ -788,4 +812,6 @@ export const fixtures = {
   ACTIVITY,
   WORKSPACE,
   ATTENTION,
+  DAILY_BRIEF,
+  BRANCH_STATUS,
 };

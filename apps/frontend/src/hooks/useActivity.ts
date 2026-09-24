@@ -24,16 +24,15 @@ export const ACTIVITY_QUERY_KEYS = [
   // it alongside everything else.
   'branch-status',
   // ⚠ THESE TWO MUST STAY TOGETHER AND MUST STAY IN THIS LIST. They are one fold read twice:
-  // 'daily-brief' carries the strip's "N items need your review or reply", 'attention-cards' is
-  // the board that line CLICKS INTO, and both are getWorkspaceInsights over the same scope. Sweep
+  // 'daily-brief' carries the banner/badge figures, 'attention-cards' is the board those figures
+  // open, and both are getWorkspaceInsights over the same scope. Sweep
   // one without the other (or leave them out, as this list used to) and a sync that changes the
   // fold moves the list while the headline keeps the old number — the exact "5 items" over a
   // board of 3 the server-side cache split fixed. Invalidated here, they refetch IN PHASE.
   'attention-cards',
   'daily-brief',
-  // ⚠ AND THE WORK PLAN IS THE THIRD READ OF THAT SAME FOLD. It renders directly beneath the
-  // brief strip and its whole claim is that the two agree, so leaving it out reproduced the bug
-  // the note above describes — one panel refetching on the sync cadence while the panel under it
+  // ⚠ AND THE WORK PLAN IS THE THIRD READ OF THAT SAME FOLD. Its whole claim is that it agrees
+  // with the board, so leaving it out reproduced the bug the note above describes — one panel refetching on the sync cadence while the panel under it
   // froze at its first fetch, still listing PRs that had since merged.
   'work-plan',
 ] as const;

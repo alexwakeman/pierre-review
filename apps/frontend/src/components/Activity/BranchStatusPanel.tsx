@@ -269,8 +269,8 @@ function BranchTrends({
     );
   }
 
-  // The cross-repo Feed strip lives in a max-h-64 scroll box — same chart, caption instead of
-  // a card.
+  // The cross-repo strip (Pending → My turn) lives in a max-h-64 scroll box — same chart,
+  // caption instead of a card.
   return (
     <div className="mb-1 border-b border-gray-100 pb-1 dark:border-gray-800/60">
       <div className="text-[10px] text-gray-400">
@@ -374,6 +374,12 @@ function BranchRow({
   );
 }
 
+/** Has any repo in scope been branch-synced? The panel hides until one has — and
+ *  BranchesAndOpenPrsView says so in its place, from this same predicate. */
+export function anyBranchSynced(rows: readonly RepoBranchStatus[]): boolean {
+  return rows.some((r) => r.branchName != null);
+}
+
 /**
  * The cross-repo default-branch strip: every repo in scope, its trunk CI state, and (on
  * expand) what recently landed there with who wrote it.
@@ -410,7 +416,7 @@ export function BranchStatusPanel({
   // "—" rows on a fresh account is noise, so the whole panel hides until at least one repo has
   // real branch data; individual unsynced repos still get a row once any of them does (the row
   // count must match the repo list, so a partially-synced scope isn't silently shortened).
-  const anySynced = rows.some((r) => r.branchName != null);
+  const anySynced = anyBranchSynced(rows);
   if (!anySynced) return null;
 
   const failing = rows.filter(
@@ -419,8 +425,9 @@ export function BranchStatusPanel({
 
   // ── COLLAPSE WHEN NOTHING IS RED ──────────────────────────────────────────────────────────
   //
-  // The cross-repo Feed shows this panel above the stream, where a twelve-repo workspace spends
-  // most of its life rendering twelve green rows nobody reads. Collapsed, it is the header line
+  // The cross-repo mount (Pending → My turn → Default branches and open PRs) lists every repo in
+  // the workspace, where a twelve-repo workspace spends most of its life rendering twelve green
+  // rows nobody reads. Collapsed, it is the header line
   // alone — still always expandable, and `useBranchTrends` is lazy per row, so a collapsed strip
   // issues ZERO extra requests.
   //
@@ -478,17 +485,17 @@ export function BranchStatusPanel({
           Default branches
         </span>
         {!expanded && allGreen && (
-          <span className="text-[10px] text-gray-400">all green</span>
+          <span className="text-[11px] text-gray-500 dark:text-gray-400">all green</span>
         )}
         {failing > 0 && (
           <span
-            className="rounded bg-red-500/15 px-1 text-[10px] font-semibold text-red-600 dark:text-red-400"
+            className="rounded bg-red-500/15 px-1 text-[11px] font-semibold text-red-600 dark:text-red-400"
             title="Default branches whose latest CI is failing"
           >
             {failing} failing
           </span>
         )}
-        <span className="ml-auto text-[10px] text-gray-400">
+        <span className="ml-auto text-[11px] text-gray-500 dark:text-gray-400">
           {rows.length} repo{rows.length === 1 ? '' : 's'}
         </span>
       </div>
@@ -503,8 +510,8 @@ export function BranchStatusPanel({
             showRepoName={!compact}
             // INVERTED from `compact` on purpose: the `compact` panel is the per-repo console
             // header, which has the vertical room for full ChartCards; the non-compact panel is
-            // the cross-repo Feed strip whose rows live in the max-h-64 scroll box above and get
-            // the two-line compact strips instead.
+            // the cross-repo strip on Pending → My turn, whose rows live in the max-h-64 scroll
+            // box above and get the two-line compact strips instead.
             fullTrends={compact}
           />
         ))}

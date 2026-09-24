@@ -12,6 +12,7 @@ import {
   prepWorktree,
   removeWorktreeLocked,
 } from '../review/clone-manager.js';
+import { sdkModelOptions } from '../review/model-options.js';
 import { estimateCostUsd } from '../review/pricing.js';
 import {
   recordUsage,
@@ -98,12 +99,9 @@ const RESOLVE_TOOLS = [
 ];
 const RESOLVE_DISALLOWED_TOOLS = ['Bash', 'NotebookEdit'];
 
-// Models that accept the `effort` option (Haiku 4.5 rejects it — the API 400s).
-const EFFORT_CAPABLE_MODELS: ReadonlySet<string> = new Set([
-  'claude-sonnet-5',
-  'claude-opus-4-8',
-  'claude-sonnet-4-6',
-]);
+// Per-model effort + thinking options: ONE table in review/model-options.ts, shared with the
+// review agent (Haiku 4.5 rejects `effort`; Opus 5.5 gets explicit adaptive thinking and 400s on
+// disabled thinking / a thinking budget / a forced tool_choice, none of which is sent here).
 const ACTIVITY_LOG_CAP = 25;
 
 type SdkMcpServer = ReturnType<typeof createSdkMcpServer>;
@@ -174,9 +172,8 @@ export async function runAgentInWorktree(
   if (model === 'claude-haiku-4-5') {
     maxTurns = Math.ceil(maxTurns * config.reviewHaikuTurnMultiplier);
   }
-  const effort = EFFORT_CAPABLE_MODELS.has(model)
-    ? config.reviewEffort
-    : undefined;
+  // 'worktree' ⇒ config.reviewEffort, exactly the effort this path always used.
+  const modelOptions = sdkModelOptions(model, 'worktree');
 
   // Advanced-AI credential: ambient session preferred, else the local BYO key. Restored below.
   const restoreEnv = applyClaudeReviewAuth(true);
@@ -185,7 +182,7 @@ export async function runAgentInWorktree(
     prompt: opts.prompt,
     options: {
       model,
-      ...(effort ? { effort } : {}),
+      ...modelOptions,
       ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
       cwd: opts.worktreePath,
       permissionMode: 'bypassPermissions',

@@ -173,7 +173,11 @@ fixture tests (see Conventions).
   `(prId, headSha)`); Claude's `summary`/`verdict` read-only, the user's
   `userBody`/`userVerdict` are what post. Each run records its `reviewMode`/`routeReason`;
   findings carry `anchored`/`included` + the agent's wording. **Not** in the lean timeline;
-  loaded on demand.
+  loaded on demand. Three JSON columns (migration `0070` / pg `0057`): `ticket` (the optional user
+  story, stored at QUEUE time, with its AC1..n split), `ticketAssessment` and `followUp` (what the
+  run found about the previous succeeded review's comments). `claudeReviewFindings.priorFindingId`
+  is a SOFT reference (no FK, always the same PR) to the earlier finding a finding re-raises.
+  Contracts: docs/CLAUDE-REVIEW.md.
 - **`autoMergeRequests`** — one standing "merge when ready" intent per `(accountId, prId)`
   (that pair is the unique/upsert target, so re-arming OVERWRITES — this is current state, not a
   log; disarm DELETEs rather than adding a "cancelled" state). Carries `mergeMethod`,

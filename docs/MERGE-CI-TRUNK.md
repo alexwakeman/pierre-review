@@ -886,7 +886,8 @@ step described under **Sync pipeline**). It exists because everything else in th
 PR-shaped, while a broken default branch invalidates every open PR's CI at once — and because it
 **cannot come from the existing `commits` table, which is PR-scoped: a squash-merged PR never
 appears there under the SHA that landed on trunk**. Deliberately informational: it feeds no
-attention count, no badge, no My Turn.
+attention count, no badge, no My Turn (its panel sits inside the My turn TAB as a view, which is
+none of those).
 
 > **ONE EXPLICIT EXCEPTION, added with `trunk_ci_status_events` (migration `0052` / pg `0039`):
 > a trunk CI FAILURE can appear as a row in the Activity Feed** — but only behind the Feed's
@@ -933,7 +934,8 @@ attention count, no badge, no My Turn.
   the FIRST thing eaten, so the chip would otherwise sit next to a dangling `(#2…`.
 - UI: `Activity/BranchStatusChip` (rail row: dot + branch + age; a HOLLOW dot for "no CI
   observed", unlike the PR surfaces which render nothing for `unknown`) and
-  `Activity/BranchStatusPanel` (cross-repo strip on the Feed entry, `compact` per-repo variant in
+  `Activity/BranchStatusPanel` (cross-repo strip on Pending → My turn → "Default branches and open
+  PRs", mounted only while that view is open and COUNT-FREE; `compact` per-repo variant in
   `RepoFeedHeader`). **The expanded row lists MERGED PRs, not commits** (`mergedPrs`, ≤10 in
   merge order): each row consolidates its retained trunk commits, whose sha + headline list is
   the row's `title` TOOLTIP (capped at 20 lines; the visible "N commits" count is the hint it's
@@ -970,7 +972,7 @@ attention count, no badge, no My Turn.
   Behaviour **"Daily coverage" layout verbatim** (`DayStrip`: red failure cells + the thin
   merged-PRs line band above) in BOTH panel variants — the per-repo console (`compact` panel
   prop — note the deliberate inversion, `fullTrends={compact}`) wraps it in the same
-  `ChartCard` composition as `BotBehaviourPanel`; the cross-repo Feed strip (a `max-h-64`
+  `ChartCard` composition as `BotBehaviourPanel`; the cross-repo strip (a `max-h-64`
   scroll box) gets the bare captioned strip. Two honest caveats stored nowhere else:
   per-commit `ciStatus` is upserted in place on re-sync, so a re-run that goes green
   retroactively erases a past failure from the chart (backfilled rows below the live window

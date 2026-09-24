@@ -49,8 +49,8 @@ export function useSearchOpenPrs() {
   });
 }
 
-// Every open PR in the ACTIVE WORKSPACE — the ACTIVITY-side open-PR source (the Feed's open-PR
-// panel, the isolation banner's PR lookup, the 'feed'-scoped drill-down).
+// Every open PR in the ACTIVE WORKSPACE — the ACTIVITY-side open-PR source (the open-PRs panel on
+// Pending → My turn, the isolation banner's PR lookup, the 'feed'-scoped drill-down).
 //
 // It exists because `useSearchOpenPrs` narrows by `filters.repoIds`, which is a TIMELINE-board
 // filter: its picker is not mounted while Activity is the active tab, so an Activity list scoped

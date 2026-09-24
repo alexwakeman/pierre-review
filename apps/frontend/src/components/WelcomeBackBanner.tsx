@@ -27,9 +27,8 @@ import { CloseIcon } from './Icons.js';
 // list: "12 new items" opened a feed pill, not twelve things.
 //
 // It now counts the STANDING `my_turn` CARDS per workspace — the things actually on your plate —
-// through `useMyTurnByWorkspace`, which is the same fold the **Pending** board paints and
-// the daily brief's my-turn line counts. Banner line, dropdown badge, brief line and destination
-// board are one population and one number.
+// through `useMyTurnByWorkspace`, which is the same fold the **Pending** board paints.
+// Banner line, dropdown badge and destination board are one population and one number.
 //
 // ── AND THE POPULATION IS THE PERSONAL ONE ───────────────────────────────────────────────────
 // This banner NOTIFIES, so it counts `myTurnPersonal`: reviews requested of you, your PRs,
@@ -61,8 +60,9 @@ import { CloseIcon } from './Icons.js';
 //
 // Dismissal is component-local and therefore lasts the session (this is mounted once, in App).
 // That is the only mute there is now: the population is standing work, so nothing "marks it seen".
-// Hidden while you are already on the Activity console, where the daily-brief strip says it
-// better. My Turn is CORE / free, so this shows on every tier.
+// Hidden while you are already on the Activity console: the Pending board is the list itself, and
+// the Workspace picker lists every workspace's count. My Turn is CORE / free, so this shows on
+// every tier.
 /**
  * How many workspace chips ride the headline before the rest collapse into "+N more".
  * Four fits comfortably beside the headline at a narrow window; beyond that the row would
@@ -78,7 +78,7 @@ export function WelcomeBackBanner(): JSX.Element | null {
   const [dismissed, setDismissed] = useState(false);
 
   if (dismissed || !me?.user) return null;
-  // Already in the Activity console → no nag; the brief strip covers it there.
+  // Already in the Activity console → no nag; the Pending board is the list there.
   if (activeTab === 'activity') return null;
   // Empty while the workspace is unresolved (the hook holds itself idle) — nothing to say.
   if (lines.length === 0) return null;

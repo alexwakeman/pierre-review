@@ -672,7 +672,7 @@ export function prActivityVolume(pr: TimelinePr): number {
 //   3. volume of activity (prActivityVolume, most first),
 //   4. PR number desc — a stable final tiebreak.
 // Returns a sorted COPY (never mutates the input). Both Activity open-PR lists share this
-// so the cross-repo Feed panel and the per-repo list order identically.
+// so the workspace panel (Pending → My turn) and the per-repo list order identically.
 export function sortOpenPrsByActivity(
   prs: TimelinePr[],
   isMaintainerAuthor: (pr: TimelinePr) => boolean,

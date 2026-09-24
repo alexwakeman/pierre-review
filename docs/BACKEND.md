@@ -408,7 +408,7 @@ same settings apply in every workspace.
   Settings form the old value in local mode.
 - **A type switched off is REMOVED, not hidden.** The gate runs inside `getMyTurn`, and a
   switched-off section is not computed at all (its queries are skipped). So the list, every count,
-  the brief lines, the browser notifications and the CLI shrink together, in the scoped and the
+  the daily-brief counts, the browser notifications and the CLI shrink together, in the scoped and the
   unscoped call alike. A switched-off type claims nothing, so a PR it would have held falls through
   to the next shown type in the precedence above. Defaults: every summons on except S2
   (`watched_repo_pr`); every promotion off.
@@ -451,7 +451,7 @@ same settings apply in every workspace.
 - **The brief counts a promoted red trunk once**: `trunkRed` leaves out
   `WorkspaceInsightsResponse.myTurnTrunkRepoIds` before its cap, and `ciFailing` counts only the
   `ci_failing` cards that were not promoted. A save drops the account's cached roll-up counts
-  (`clearDailyBriefCountsFor`), so "Elsewhere" lines never count a type the reader just removed.
+  (`clearDailyBriefCountsFor`), so the banner and Workspace badges never count a type the reader just removed.
 - On the dev account (an observer with no PRs of its own) the defaults leave ONE card on My turn —
   three.js #34066, a `comment_reply` — where it held 551 before. With the app now opening on
   Pending, that account's cold open is an almost empty My turn.

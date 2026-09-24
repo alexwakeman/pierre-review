@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useMutation,
+  useMutationState,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query';
 import type {
   AddReviewCommentBody,
   MergeMethod,
@@ -6,6 +12,7 @@ import type {
   UpdateBranchBody,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { reviewerRequestView, type ReviewerRequestView } from '../lib/reviewerRequest.js';
 
 // PR write mutations. The PR-detail query is staleTime:Infinity +
 // IndexedDB-persisted, so every write to the open PR MUST invalidate ['pr', prId]
@@ -89,8 +96,8 @@ export function useApprovePr(prId: number) {
       // card stops being true, and until now the click left it sitting there — the route's
       // server half now clears the viewer's `review_requests` row AND re-reads the PR from
       // GitHub, so a refetch here is what turns the card into a `merge` card (or retires it).
-      // Both keys together: the brief strip counts these very cards and the cap disclosure
-      // divides one by the other, so they must come from ONE snapshot.
+      // Both keys together: `/api/daily-brief` (the Welcome-back banner, the Workspace badges)
+      // counts these very cards, so the two must come from ONE snapshot.
       void qc.invalidateQueries({ queryKey: ['attention-cards'] });
       void qc.invalidateQueries({ queryKey: ['daily-brief'] });
       // The THIRD read of that same fold. All three move together or the plan's `stale` chip —
@@ -144,7 +151,7 @@ export function useMergePr(prId: number) {
       void qc.invalidateQueries({ queryKey: ['activity'] });
       void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
       // The Pending board can now MERGE — so the `merge` card the click came from has to leave it,
-      // and the daily-brief strip that counts the same cards has to agree. ⚠ An INVALIDATION, not
+      // and the daily brief that counts the same cards has to agree. ⚠ An INVALIDATION, not
       // a local edit: each tab's ORDER is the server's score order, and a mutation response has
       // no business re-ranking it.
       void qc.invalidateQueries({ queryKey: ['attention-cards'] });
@@ -301,28 +308,65 @@ export function useAddReviewComment(prId: number) {
   });
 }
 
-// Request reviewers on a PR (the Insights "Assign reviewers" action). GitHub drops the
-// request once a review lands, and reviewRequests are re-derived each sync, so the
-// routing card that prompted this leaves the board on the next refresh — invalidate
-// ['workspace-insights'] (+ the PR detail, whose Requested list changes) to reflect it.
+// ---- Requesting reviewers: ONE REVIEWER PER REQUEST, from both callers ------------------------
+// The PR pane's Suggested row (ChecksTab) and the Pending card's per-suggestion Assign
+// (AttentionCards `RoutingReviewerRow`); the card's old "Assign all" asked every suggestion at once.
 //
-// ⚠ Both keys below are owned by OTHER files (useWorkspaceInsights, useAttentionCards) and written
-// here as bare literals, so a rename there fails silently here — the mutation succeeds and the
-// card just doesn't clear. They are PREFIXES, so they still sweep every `['<name>', 'ws:<id>']`
-// entry, which matters because a user can have more than one workspace cached at a time.
-export function useRequestReviewers(prId: number) {
-  const qc = useQueryClient();
-  return useMutation({
+// ⚠ EXPLICIT KEYS — the two-mounts rule (see mergePrMutationKey). A Pending tab switch REMOUNTS the
+// card, so a row reads its state off the cache (useReviewerRequestState), never a per-mount
+// isPending/isSuccess: those forget an open request (inviting a second POST) and offer "Assign" for
+// someone already asked. The PR key is a PREFIX of every row key, so
+// isMutating({ mutationKey: requestReviewersMutationKey(prId) }) counts every request open on that PR.
+export function requestReviewersMutationKey(prId: number, reviewerKey?: string): unknown[] {
+  return reviewerKey == null
+    ? ['request-reviewers', prId]
+    : ['request-reviewers', prId, reviewerKey];
+}
+
+// Split out of the hook so the refresh rule is testable with a bare QueryClient (no React).
+//
+// ⚠ THE BOARD REFRESH WAITS FOR THE LAST REQUEST ON THE PR, AND ONLY A SUCCESS TRIGGERS IT. The route
+// stamps the request locally, so refetching the board RETIRES the card (the orphan rule is "nobody was
+// asked") and takes every other row's outcome with it. While a sibling is still in flight the board is
+// left alone; that sibling refreshes it when it lands. isMutating still counts THIS request here
+// (TanStack marks it settled only after the callbacks run), hence `> 1`. A failure refreshes nothing:
+// nothing changed on GitHub, and the card must stay to show the words and offer the retry. A held
+// board catches up on its own (focus / the 5-minute interval).
+//
+// ⚠ ['attention-cards'], ['daily-brief'], ['work-plan'] MOVE TOGETHER — one fold read three times
+// (useAttentionCards). All are PREFIXES owned by other files, written here as literals, so a rename
+// there fails silently here (the request succeeds and the card just doesn't clear); they still sweep
+// every `['<name>', 'ws:<id>']` entry, which matters with more than one workspace cached.
+export function requestReviewersOptions(qc: QueryClient, prId: number, reviewerKey?: string) {
+  return {
+    mutationKey: requestReviewersMutationKey(prId, reviewerKey),
     mutationFn: (body: RequestReviewersBody) => api.requestReviewers(prId, body),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['workspace-insights'] });
-      // The CORE **Pending** rail entry renders the same routing card from a different query key —
-      // refresh it too so an Assign there also clears the card.
-      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
-      // The assign route stamps review_requests locally, so refetching the detail now shows
-      // the requested reviewer, and the (live) suggestions query re-gates to empty.
+      // The PR's own reads, always: the detail is staleTime:Infinity + persisted (this file's rule),
+      // and the live suggestions query re-gates to empty once anyone is requested.
       void qc.invalidateQueries({ queryKey: ['pr', prId] });
       void qc.invalidateQueries({ queryKey: ['suggested-reviewers', prId] });
+      if (qc.isMutating({ mutationKey: requestReviewersMutationKey(prId) }) > 1) return;
+      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
+      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
+      void qc.invalidateQueries({ queryKey: ['work-plan'] });
+      // The capped fold's copy of the same card (useWorkspaceInsights).
+      void qc.invalidateQueries({ queryKey: ['workspace-insights'] });
     },
+  };
+}
+
+export function useRequestReviewers(prId: number, reviewerKey?: string) {
+  const qc = useQueryClient();
+  return useMutation(requestReviewersOptions(qc, prId, reviewerKey));
+}
+
+/** One suggestion row's request state, read off the shared key, so it survives a remount (and outlives
+ *  it by TanStack's 5-minute mutation gcTime). The latest attempt wins. */
+export function useReviewerRequestState(prId: number, reviewerKey: string): ReviewerRequestView {
+  const attempts = useMutationState({
+    filters: { mutationKey: requestReviewersMutationKey(prId, reviewerKey) },
+    select: (m) => ({ status: m.state.status, error: m.state.error }),
   });
+  return reviewerRequestView(attempts);
 }

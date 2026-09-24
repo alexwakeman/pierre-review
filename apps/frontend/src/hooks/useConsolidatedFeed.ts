@@ -59,7 +59,8 @@ function feedSearch(
   if (workspaceId != null) p.set('workspace', String(workspaceId));
   if (repoIds) p.set('repoIds', repoIds.join(','));
   if (userIds && userIds.length > 0) p.set('userIds', userIds.join(','));
-  // Isolate to a single PR (the Feed "open PRs" panel). Only emitted when set.
+  // Isolate to a single PR (`feedIsolatedPrId`, set by PrDetail's "Show in the Activity feed").
+  // Only emitted when set.
   if (prId != null) p.set('prId', String(prId));
   // Mirror the timeline: only emit when hiding bots (default false keeps the key clean).
   if (excludeBots) {

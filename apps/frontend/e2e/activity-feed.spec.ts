@@ -5,7 +5,9 @@ import { fixtures, installMockApi } from './mock-api.js';
 //   • the app lands on the ACTIVITY console, on the Pending rail entry (timeline is secondary);
 //     an empty workspace lands on the guidance to move repos in
 //   • the rail reads Pending, Feed, Bots, Reports
-//   • a Feed link names `?activityRepo=feed`, and the consolidated stream renders there, flat
+//   • a Feed link names `?activityRepo=feed`, and the consolidated stream renders there, flat —
+//     the stream ALONE (no daily brief, no trunk strip, no open-PR panel)
+//   • Pending's My turn tab has two views: its cards, and the default branches + open PRs
 //   • the legacy My Turn / Feed header pills are GONE
 //   • each item is a real activity event flagged isMyTurn (participation) — My-Turn items
 //     get a yellow-bordered card + badge; there is no "seen/Done" control
@@ -154,6 +156,71 @@ test.describe('Activity Feed / click-to-detail flows', () => {
   test('the feed has no Done/seen control', async ({ page }) => {
     await gotoFeed(page);
     await expect(overlay(page).getByRole('button', { name: /Mark seen/i })).toHaveCount(0);
+  });
+
+  test('My turn opens on its cards; its second view holds the default branches and open PRs', async ({
+    page,
+  }) => {
+    await gotoActivity(page);
+    const board = page.getByTestId('attention-view');
+    await expect(board.getByRole('tab', { name: /My turn/ })).not.toContainText('…');
+    const cards = board.getByRole('tab', { name: 'Cards', exact: true });
+    await expect(cards).toHaveAttribute('aria-selected', 'true');
+
+    await board.getByRole('tab', { name: 'Default branches and open PRs', exact: true }).click();
+    await expect(page).toHaveURL(/attnView=branches/);
+    await expect(board.getByTestId('branch-status-panel')).toBeVisible();
+    await expect(board.getByTestId('open-prs-panel')).toBeVisible();
+    // The view's labels carry no figure (trunk status is informational).
+    await expect(board.getByRole('tablist', { name: 'My turn views' })).not.toContainText(/\d/);
+
+    // A view is a screen the reader moved to: Back returns to the cards. ⚠ Both reads are CACHED
+    // now, so a panel still mounted on the Cards view would render at once — the absence below is
+    // a real check, not a race against a fetch.
+    await page.goBack();
+    await expect(cards).toHaveAttribute('aria-selected', 'true');
+    await expect(page).not.toHaveURL(/attnView=/);
+    await expect(page.getByTestId('branch-status-panel')).toHaveCount(0);
+    await expect(page.getByTestId('open-prs-panel')).toHaveCount(0);
+    // …and Forward restores the view.
+    await page.goForward();
+    await expect(page).toHaveURL(/attnView=branches/);
+    await expect(board.getByTestId('branch-status-panel')).toBeVisible();
+  });
+
+  test('the Feed is the stream alone: no daily brief, no trunk strip, no open-PR panel', async ({
+    page,
+  }) => {
+    await installMockApi(page);
+    // A non-zero brief, so the deleted strip WOULD have rendered. Registered after the mock, so it
+    // wins.
+    await page.route(
+      (url) => url.pathname.endsWith('/api/daily-brief'),
+      (route) =>
+        route.fulfill({
+          json: {
+            ...fixtures.DAILY_BRIEF,
+            counts: { ...fixtures.DAILY_BRIEF.counts, stalled: 3 },
+          },
+        }),
+    );
+    const brief = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith('/api/daily-brief'));
+    // ⚠ ABSENCE NEEDS THE DATA FIRST. `toHaveCount(0)` passes the instant nothing is there, so on a
+    // cold Feed load it passes before any of the three reads lands. Land where both panels render
+    // (the brief is read at boot by the header), THEN open the Feed: every read is cached, so a
+    // panel still mounted there would paint in the Feed's first render.
+    await page.goto('/app/?attnView=branches');
+    const board = page.getByTestId('attention-view');
+    await expect(board.getByTestId('branch-status-panel')).toBeVisible();
+    await expect(board.getByTestId('open-prs-panel')).toBeVisible();
+    await (await brief).finished();
+
+    await railButton(page, 'Feed').click();
+    await expect(page.getByTestId('feed-view')).toBeVisible();
+    // Soft, so a regression reports every panel that came back, not just the first.
+    await expect.soft(page.getByTestId('brief-strip')).toHaveCount(0);
+    await expect.soft(page.getByTestId('branch-status-panel')).toHaveCount(0);
+    await expect.soft(page.getByTestId('open-prs-panel')).toHaveCount(0);
   });
 
   test('the Activity | Timeline tabs toggle the board', async ({ page }) => {

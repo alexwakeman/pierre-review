@@ -1,19 +1,20 @@
 // The "Needs attention" single-KIND isolation (`attentionIsolation`) and the ordering rule every
 // caller of it has to obey.
 //
-// The daily brief's four workspace lines each count ONE card kind, so each must land the reader
-// on that kind's cards — not on an undifferentiated board. The lens that does it is transient by
-// design, and there is exactly one way to set it wrong:
+// Every entry point that opens the board narrowed — `openMyTurnInWorkspace` (the banner), a kind
+// chip, a `?attn=<kind>` link — must land the reader on that kind's cards, not on an
+// undifferentiated board. The lens that does it is transient by design, and there is exactly one
+// way to set it wrong:
 //
 //   ⚠ `setActivityRepo` CLEARS the isolation, and RETURNS AN EMPTY PATCH when the rail id is
 //     unchanged. So a caller that isolates FIRST and switches SECOND is wiped on the click that
 //     actually changes rail and works on every click that doesn't — i.e. it looks correct the
-//     second time you press it, and only ever fails when the click starts on another rail entry —
-//     the Feed's brief lines are exactly that. That asymmetry is what makes this worth a test
-//     rather than a comment: both orders "work" in the common case.
+//     second time you press it, and only ever fails when the click starts on another rail entry
+//     (the banner, clicked from the Timeline, is exactly that). That asymmetry is what makes this
+//     worth a test rather than a comment: both orders "work" in the common case.
 //
 // The rest is the transience contract. `attentionIsolation` must stay OUT of FilterDefaults —
-// persisting a lens set by one click of a brief line would restore a filtered board on a fresh
+// persisting a lens set by one click would restore a filtered board on a fresh
 // tab with no memory of why — which also means no FILTER_STORAGE_VERSION bump was owed for it.
 //
 // Run from the workspace that HAS vitest:
@@ -26,7 +27,6 @@ import {
   type FilterState,
 } from '../src/store/filters.js';
 import { usePinnedTabs } from '../src/store/pinnedTabs.js';
-import { openBriefLine } from '../src/components/Activity/BriefStrip.js';
 
 describe('attentionIsolation', () => {
   beforeEach(() => {
@@ -173,17 +173,16 @@ describe('attentionIsolation', () => {
 
   // ── the RELEVANCE lens: the sibling field, and the divergence rule it enforces ─────────────
   //
-  // The welcome-back banner, the Workspace badges and the brief's "Elsewhere" rows count the
-  // PERSONAL subset of my_turn (`myTurnPersonal` = direct + maintained); the brief's second
-  // my-turn line counts the REST (`myTurnOther`); the board holds every card. A line reading 4
-  // whose click opened a board of 50 would be the "the strip says 5, the board lists 3" defect
-  // (747c9c9) in a new place — so every one of those surfaces navigates through a gesture that
-  // seats ITS OWN half.
+  // The welcome-back banner and the Workspace badges count the PERSONAL subset of my_turn
+  // (`myTurnPersonal` = direct + maintained); the wire also carries the REST (`myTurnOther`); the
+  // board holds every card. A line reading 4 whose click opened a board of 50 would be the "the
+  // strip says 5, the board lists 3" defect (747c9c9) in a new place — so every surface navigates
+  // through a gesture that seats ITS OWN half.
   //
   // ⚠ THREE-VALUED, NOT A BOOLEAN. It shipped as `attentionPersonalOnly: boolean`, which can say
-  // "what involves me" but has no way to say "the rest" — so the two mutually exclusive brief
-  // lines could not both land on a board filtered to their own number. Two lines + the un-lensed
-  // board is three views; a boolean has two states.
+  // "what involves me" but has no way to say "the rest" — so the (since-deleted) daily brief's two
+  // mutually exclusive lines could not both land on a board filtered to their own number. Two
+  // halves + the un-lensed board is three views; a boolean has two states.
   //
   // ⚠ IT IS A SIBLING OF `attentionIsolation`, NOT A MEMBER OF IT: that field is compared against
   // `card.kind`, and these two predicates are orthogonal.
@@ -280,12 +279,12 @@ describe('attentionIsolation', () => {
       expect('attentionRelevance' in restored).toBe(false);
     });
 
-    // ── the brief strip's two mutually exclusive lines, rendered as the strip renders them ────
+    // ── entry-point seating: each gesture seats its own value, `null` included ────────────────
     //
-    // Each line SEATS its own value — including `null` for the whole-kind lines — because
+    // Each entry point SEATS its own value — including `null` for a whole-kind entry — because
     // `setActivityRepo` returns an empty patch when the rail is already 'attention', so a lens
     // left over from an earlier click would survive and open a different list than the number.
-    it('the "need your attention" line seats MINE', () => {
+    it('an entry point for the personal half seats MINE over a leftover OTHERS', () => {
       useFilters.setState({ activityRepoId: 'attention', attentionRelevance: 'others' });
       const s = useFilters.getState();
       s.setActivityRepo('attention'); // empty patch — the trap
@@ -296,7 +295,7 @@ describe('attentionIsolation', () => {
       expect(after.attentionIsolation).toBe('my_turn');
     });
 
-    it('the "need review or reply" line seats OTHERS — the two lines are exclusive', () => {
+    it('an entry point for the other half seats OTHERS over a leftover MINE — the halves are exclusive', () => {
       useFilters.setState({ activityRepoId: 'attention', attentionRelevance: 'mine' });
       const s = useFilters.getState();
       s.setActivityRepo('attention');
@@ -307,9 +306,9 @@ describe('attentionIsolation', () => {
       expect(after.attentionIsolation).toBe('my_turn');
     });
 
-    it('a WHOLE-KIND entry point clears it explicitly — the brief strip’s other rule', () => {
-      // The strip's non-my-turn lines count a whole kind, so they must widen the board rather than
-      // inherit whichever half was last seated.
+    it('a WHOLE-KIND entry point clears it explicitly', () => {
+      // An entry point for a whole kind must widen the board rather than inherit whichever half
+      // was last seated.
       useFilters.setState({ activityRepoId: 'attention', attentionRelevance: 'mine' });
       const s = useFilters.getState();
       s.setActivityRepo('attention'); // empty patch — the trap
@@ -372,29 +371,75 @@ describe('attentionIsolation', () => {
       expect(useFilters.getState().attentionRelevance).toBe('mine');
     });
 
-    it('⚠ a brief line seats All too, even when the rail is ALREADY attention', () => {
-      useFilters.setState({ activityRepoId: 'attention', attentionAuthorLens: 'people', attentionRelevance: 'mine' });
-      openBriefLine('security');
-      const after = useFilters.getState();
-      expect(after.attentionAuthorLens).toBeNull();
-      expect(after.attentionIsolation).toBe('security');
-      expect(after.attentionRelevance).toBeNull();
-    });
-
-    it('…and a brief line from ANOTHER rail lands with its kind and lens seated', () => {
-      useFilters.setState({ activityRepoId: 'feed', attentionAuthorLens: 'people' });
-      openBriefLine('my_turn', 'others');
-      const after = useFilters.getState();
-      expect(after.activityRepoId).toBe('attention');
-      expect(after.attentionIsolation).toBe('my_turn');
-      expect(after.attentionRelevance).toBe('others');
-      expect(after.attentionAuthorLens).toBeNull();
-    });
-
     it('is NOT persisted with the filter bar (so no FILTER_STORAGE_VERSION bump is owed)', () => {
       useFilters.setState({ attentionAuthorLens: 'people' });
       const persisted = pickFilterBarState(useFilters.getState()) as Record<string, unknown>;
       expect('attentionAuthorLens' in persisted).toBe(false);
+    });
+  });
+
+  // ── My turn's VIEW (Cards | Default branches and open PRs) ─────────────────────────────────
+  //
+  // A client view inside the `my_turn` tab. Transient like its siblings; cleared by a rail change
+  // AND by a tab click (a tab opens its cards); SEATED to Cards by the banner's gesture, because
+  // the banner counts cards and `setActivityRepo`'s empty patch would otherwise let it survive.
+  describe("My turn's view (attentionMyTurnView)", () => {
+    beforeEach(() => {
+      useFilters.setState({
+        workspaceId: 3,
+        activityRepoId: 'attention',
+        attentionMyTurnView: null,
+        attentionTab: null,
+      });
+      usePinnedTabs.setState({ activeTab: 'timeline' });
+    });
+
+    it('defaults to null (Cards), holds branches, and stores Cards as null', () => {
+      expect(useFilters.getState().attentionMyTurnView).toBeNull();
+      useFilters.getState().setAttentionMyTurnView('branches');
+      expect(useFilters.getState().attentionMyTurnView).toBe('branches');
+      useFilters.getState().setAttentionMyTurnView('cards');
+      expect(useFilters.getState().attentionMyTurnView).toBeNull();
+    });
+
+    it('a rail switch clears it', () => {
+      useFilters.setState({ attentionMyTurnView: 'branches' });
+      useFilters.getState().setActivityRepo('feed');
+      expect(useFilters.getState().attentionMyTurnView).toBeNull();
+    });
+
+    it('picking a tab clears it — My turn included (a tab click opens its cards)', () => {
+      useFilters.setState({ attentionMyTurnView: 'branches' });
+      useFilters.getState().setAttentionTab('fixing');
+      expect(useFilters.getState().attentionMyTurnView).toBeNull();
+      useFilters.setState({ attentionMyTurnView: 'branches' });
+      useFilters.getState().setAttentionTab('my_turn');
+      expect(useFilters.getState().attentionMyTurnView).toBeNull();
+    });
+
+    it('⚠ openMyTurnInWorkspace lands on Cards even when the rail is ALREADY attention', () => {
+      useFilters.setState({ attentionMyTurnView: 'branches' });
+      useFilters.getState().openMyTurnInWorkspace(3);
+      const after = useFilters.getState();
+      expect(after.attentionMyTurnView).toBeNull();
+      expect(after.attentionIsolation).toBe('my_turn');
+      expect(after.attentionRelevance).toBe('mine');
+    });
+
+    it('a workspace switch does NOT clear it (the view is not a narrowing of the data)', () => {
+      useFilters.setState({ attentionMyTurnView: 'branches' });
+      useFilters.getState().setWorkspace(9, null);
+      expect(useFilters.getState().attentionMyTurnView).toBe('branches');
+    });
+
+    it('is NOT persisted with the filter bar, and a restored blob drops it', () => {
+      useFilters.setState({ attentionMyTurnView: 'branches' });
+      const persisted = pickFilterBarState(useFilters.getState()) as Record<string, unknown>;
+      expect('attentionMyTurnView' in persisted).toBe(false);
+      const restored = sanitizePersistedFilters({
+        attentionMyTurnView: 'branches',
+      } as unknown as Partial<FilterState>) as Record<string, unknown>;
+      expect('attentionMyTurnView' in restored).toBe(false);
     });
   });
 

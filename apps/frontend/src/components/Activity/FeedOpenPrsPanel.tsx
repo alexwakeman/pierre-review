@@ -16,7 +16,7 @@ interface PrGroup {
 }
 
 // Bucket the scope's open PRs by the REPO they belong to — one section per repo, so the
-// cross-repo Feed's open work reads as "which repo has what open" (the per-repo console shows a
+// workspace's open work reads as "which repo has what open" (the per-repo console shows a
 // single repo; this Workspace-wide feed spans them). The PR set is exactly what
 // useWorkspaceOpenPrs returns (every repo in the active workspace); grouping is purely
 // presentational. Within a section the caller preserves the activity-sort; sections are ordered
@@ -35,14 +35,16 @@ function groupOpenPrsByRepo(prs: TimelinePr[], reposById: Map<number, Repo>): Pr
   }));
 }
 
-// A collapsible panel atop the cross-repo Feed listing the scope's open PRs, grouped into a
-// section PER REPO (see groupOpenPrsByRepo). Collapsed by default (persisted). Clicking a PR opens
+// A collapsible panel on Pending → My turn → Default branches and open PRs (it sat atop the
+// cross-repo Feed until the Feed became the stream alone; the name predates the move and is kept,
+// as is the store key), listing the scope's open PRs, grouped into a section PER REPO (see
+// groupOpenPrsByRepo). Open by default; the reader's choice is remembered. Clicking a PR opens
 // its own pr-detail tab (its Show/Focus links then drive the timeline / feed); a section's
 // "Show all" opens the sortable all-open-PRs drill-down scoped to that repo.
 export function FeedOpenPrsPanel(): JSX.Element | null {
   // Every open PR in the ACTIVE WORKSPACE. Members AND the FilterBar's repo picker are both
-  // TIMELINE-only filters, so neither narrows this panel — the Feed always spans its whole
-  // workspace, and you narrow it by picking a repo in the Activity rail.
+  // TIMELINE-only filters, so neither narrows this panel — this panel always spans its whole
+  // workspace; a single repo's open PRs live in that repo's console in the Activity rail.
   const { data: openPrs } = useWorkspaceOpenPrs();
   const { data: repos } = useRepos();
   const { data: users } = useUsers();
@@ -78,14 +80,15 @@ export function FeedOpenPrsPanel(): JSX.Element | null {
     return g;
   }, [prs, reposById, maintainersByRepo]);
 
-  // Nothing to show → no panel (keeps the Feed header clean when there's no open work).
+  // Nothing to show → no panel; BranchesAndOpenPrsView prints 'No open PRs in this workspace.' in
+  // its place.
   if (prs.length === 0) return null;
 
   const draftCount = prs.reduce((n, p) => n + (p.isDraft ? 1 : 0), 0);
   const openCount = prs.length - draftCount;
 
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-800">
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800" data-testid="open-prs-panel">
       <button
         type="button"
         onClick={toggleCollapsed}
@@ -112,7 +115,7 @@ export function FeedOpenPrsPanel(): JSX.Element | null {
           {groups.map((g) => (
             <div key={g.repoId}>
               {/* One section per repo — the "include the repo the PR belongs to" header. */}
-              <div className="bg-gray-50/70 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:bg-gray-900/40">
+              <div className="bg-gray-50/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-900/40 dark:text-gray-400">
                 {g.repoName}
                 <span className="font-normal"> · {g.prs.length}</span>
               </div>

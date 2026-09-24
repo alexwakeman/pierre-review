@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PrDetail, PrFileChange } from '@pierre-review/shared';
 import { usePrFiles } from '../hooks/usePr.js';
 import { useUsers } from '../hooks/useTimeline.js';
@@ -119,6 +119,7 @@ export function ChangesTab({
   pr,
   focus: externalFocus,
   onOpenThread,
+  threadOpenMemory,
 }: {
   pr: PrDetail;
   // An outside-in reveal request (today: a Claude Review finding's code anchor, and a thread
@@ -127,25 +128,52 @@ export function ChangesTab({
   focus?: DiffFocusTarget | null;
   /** The return leg: open one of these inline threads in the Threads tab. */
   onOpenThread?: (threadId: number) => void;
+  /**
+   * The inline pills' open/shut DECISIONS, keyed by thread id — owned by PrDetail so they survive
+   * this tab remounting (the Changes → Threads → Changes round trip). See
+   * DiffThreadContext.openMemory.
+   */
+  threadOpenMemory: Map<number, boolean>;
 }): JSX.Element {
   const { data, isLoading, isError } = usePrFiles(pr.id);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
-  // EVERY thread, resolved included (each renders as a collapsed pill — see InlineThread; the
-  // old `.filter((t) => !t.isResolved)` made 40% of threads invisible here). ONE rename-aware
-  // fold, built once and shared by the diff blocks, the tree rollups and the header mix: it
-  // keys threads on the RENDERED file path, so a thread written before a rename lands under
-  // the file's current path instead of silently vanishing from Changes.
+  // EVERY thread, resolved included (each renders as a pill — unresolved open, resolved shut;
+  // see InlineThread; the old `.filter((t) => !t.isResolved)` made 40% of threads invisible
+  // here). ONE rename-aware fold, built once and shared by the diff blocks, the tree rollups and
+  // the header mix: it keys threads on the RENDERED file path, so a thread written before a
+  // rename lands under the file's current path instead of silently vanishing from Changes.
   const threadsByPath = useMemo(
     () => indexThreadsByPath(pr.threads, data?.files ?? []),
     [pr.threads, data?.files],
   );
-  const threadCtx: DiffThreadContext = {
-    threadsByPath,
-    usersById,
-    prUrl: pr.githubUrl,
-    onOpenThread,
-  };
+  // The caller's callback is read through a ref, so its IDENTITY never reaches `threadCtx`: a
+  // caller closing over something that churns (PrDetail's used to close over the whole `pr`,
+  // which every CI or merge-state refetch replaces) would otherwise defeat the memo below on each
+  // such tick while nothing in the diff changed. Only whether there IS one is a dependency — it
+  // decides whether each ThreadCard offers "In Threads" at all.
+  const onOpenThreadRef = useRef(onOpenThread);
+  useLayoutEffect(() => {
+    onOpenThreadRef.current = onOpenThread;
+  }, [onOpenThread]);
+  const canOpenThread = onOpenThread != null;
+  const openThread = useCallback((threadId: number) => onOpenThreadRef.current?.(threadId), []);
+  // Memoised, like `commenting` below: FileDiffView is memo'd (see the ⚠ there), and a fresh
+  // literal here would repaint every diff row — and every open thread card — on each poll tick
+  // and rail-drag frame. Every input is data or stable by construction; keep it that way.
+  const threadCtx = useMemo<DiffThreadContext>(
+    () => ({
+      threadsByPath,
+      usersById,
+      prUrl: pr.githubUrl,
+      onOpenThread: canOpenThread ? openThread : undefined,
+      openMemory: threadOpenMemory,
+    }),
+    [threadsByPath, usersById, pr.githubUrl, canOpenThread, openThread, threadOpenMemory],
+  );
+  // Stable for the same reason: FileDiffView is memo'd, and an inline `{ prId }` literal would
+  // defeat it on every render.
+  const commenting = useMemo(() => ({ prId: pr.id }), [pr.id]);
 
   // The focus target is STICKY (never cleared once shown): it doubles as the rail's selected
   // row AND marks the file's block in the diff with the same sky border, both for as long as
@@ -398,7 +426,7 @@ export function ChangesTab({
           )}
           <FileDiffView
             files={files}
-            commenting={{ prId: pr.id }}
+            commenting={commenting}
             threadCtx={threadCtx}
             focus={focus}
           />

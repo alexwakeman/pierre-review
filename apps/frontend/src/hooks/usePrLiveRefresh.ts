@@ -111,8 +111,8 @@ export function usePrLiveRefresh(prId: number, enabled: boolean): PrLiveRefresh 
     // a PR that merged, closed or went behind while its pane was open is already stale in the
     // DB's own terms, and the board behind the pane went on rendering the card for up to five
     // minutes (its refetchInterval) with no GitHub call able to fix it. These three keys are ONE
-    // FOLD READ THREE TIMES (getWorkspaceInsights): the board, the brief strip whose count the
-    // board's cap disclosure divides by, and the ranked plan under it. Sweep them TOGETHER or
+    // FOLD READ THREE TIMES (getWorkspaceInsights): the board, the daily-brief counts (banner +
+    // badges) whose count the cap disclosure divides by, and the ranked plan. Sweep them TOGETHER or
     // `capFor`'s `shown === count` guard compares two snapshots and the "50 of 148" line
     // silently vanishes — the same rule ACTIVITY_QUERY_KEYS keeps for a landing sync.
     //

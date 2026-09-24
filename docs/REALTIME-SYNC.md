@@ -344,8 +344,8 @@ adaptive scheduler next walked that repo — 2 min hot, 15 min cold. `sync/pr-li
   is written but not counted.
 - ⚠ **THE CLIENT REFETCHES; IT NEVER SPLICES.** The response carries counts, never cards —
   structurally, so that "the probe proved this card is dead" cannot be implemented as a local
-  removal. Each tab's count and its list come from one server response (and the brief's lines say
-  the same figures), so dropping one card locally would make a tab list fewer cards than its count
+  removal. Each tab's count and its list come from one server response (and `/api/daily-brief`
+  returns the same figures), so dropping one card locally would make a tab list fewer cards than its count
   claims. On `changed > 0` the SPA invalidates
   `['attention-cards']` + `['daily-brief']` + `['work-plan']` together.
 - **One sweep per ACCOUNT at a time** (a synchronous in-flight claim released in `finally` on

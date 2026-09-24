@@ -67,7 +67,6 @@ import { Markdown } from '../Markdown.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
 import { StateBadge } from '../StateBadge.js';
 import { ThreadCard } from '../ThreadView/index.js';
-import { FeedOpenPrsPanel } from './FeedOpenPrsPanel.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { UserName } from '../UserName.js';
@@ -261,12 +260,12 @@ export function FeedView({
   repoId?: number;
   // The Bots pane's bot-only feed: hard-filters to automated-reviewer activity and swaps the
   // normal pill row for review-thread derived-state pills (Untouched / Replied / Likely
-  // addressed / Resolved). Also drops the open-PRs panel + the cross-repo "seen" marker.
+  // addressed / Resolved). Also drops the cross-repo "seen" marker.
   botsMode?: boolean;
   // Scope the feed to specific ACTORS (the per-contributor activity tab). Like botsMode this
   // is an Activity-native scope, filtered server-side before the cap — NOT the Timeline's
-  // Members filter, which the feed still never sends. Also drops the open-PRs panel + the
-  // cross-repo "seen" marker (a person's feed isn't "the feed" being caught up on).
+  // Members filter, which the feed still never sends. Also drops the cross-repo "seen" marker
+  // (a person's feed isn't "the feed" being caught up on).
   userIds?: number[] | null;
 }): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
@@ -449,13 +448,12 @@ export function FeedView({
         }. Last synced ${formatBehind(staleMs)} ago.`
       : null;
 
-  // Single-PR isolation applies to BOTH the cross-repo feed (the repo-grouped "open PRs"
-  // panel) and a per-repo console (its RepoOpenPrList rows) — clicking a PR in either filters
-  // the feed to that PR. `setActivityRepo` clears it when switching rails, so it never leaks
-  // across repos.
+  // Single-PR isolation applies to BOTH the cross-repo feed and a per-repo console; it is set
+  // from PrDetail's "Show in Activity feed" or a drill-down row. `setActivityRepo` clears it when
+  // switching rails, so it never leaks across repos.
   // Scopes the feed query to a single PR when set. The "Showing only #N" banner itself renders
   // in the surrounding panel (FeedIsolationBanner — under the repo/bots summary header), not
-  // here; when isolated, this view also drops its own cross-repo Open-PRs panel (below).
+  // here.
   const isolatedPrId = feedIsolatedPrId;
 
   // THE ONE PREDICATE that says "this mount is *the* feed". FeedView has five mounts sharing one
@@ -1483,12 +1481,6 @@ export function FeedView({
 
       {/* The AI repo-summary (digest) collection now lives in the Insights panel — one home
           for every AI summary, with a single unified Refresh. It's no longer atop the Feed. */}
-
-      {/* Cross-repo only: a collapsible panel of the Workspace's open PRs grouped by REPO;
-          clicking a PR opens its detail tab. Not in the Bots pane (a pure activity stream). */}
-      {repoId == null && !botsMode && userIds == null && isolatedPrId == null && (
-        <FeedOpenPrsPanel />
-      )}
 
       {/* Filter pills, two rows. Row 1 branches: the Bots pane gets a per-VENDOR row (one per
           distinct bot, so the in-house bots isolate separately) replacing the normal

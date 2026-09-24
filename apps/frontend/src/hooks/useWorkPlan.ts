@@ -50,10 +50,10 @@ export function useWorkPlan(workspaceId: number | null, enabled = true) {
     queryFn: workspaceId == null ? skipToken : () => api.workPlan(requestParams(workspaceId)),
     enabled: enabled && workPlan,
     staleTime: 60_000,
-    // ⚠ THE SAME CADENCE AS `useDailyBrief` AND `useAttentionCards`, DELIBERATELY. This panel sits
-    // directly beneath the brief strip and its entire claim is that the two describe one
-    // population — so a panel that refetches on a different clock from the strip above it will
-    // eventually disagree with it on screen, which is the one thing it may not do. (`work-plan` is
+    // ⚠ THE SAME CADENCE AS `useDailyBrief` AND `useAttentionCards`, DELIBERATELY. The plan's
+    // entire claim is that it describes the same population as the board and the daily-brief
+    // counts (banner + badges) — so a plan that refetches on a different clock from them will
+    // eventually disagree with them on screen, which is the one thing it may not do. (`work-plan` is
     // also in ACTIVITY_QUERY_KEYS, so a landing sync sweeps all three in phase; this interval
     // covers the quiet stretches between syncs.)
     refetchInterval: 5 * 60_000,

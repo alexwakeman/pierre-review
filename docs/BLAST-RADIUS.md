@@ -235,8 +235,11 @@ resolved config. Three consequences, each of which is why it is not a server fie
   else; moving the sensitivity dial re-runs a fold over rows already in memory. A server count
   would have to invalidate `['workspace-metrics']` too, and a stale cached response would draw one
   distribution while every chip on screen drew another.
-- **It costs no extra request once the Feed has been opened** — the Feed's open-PR panel holds that
-  exact cache entry. Opening Reports first pays one `/api/open-prs`.
+- **It shares a cache entry, not a guaranteed free read.** The open-PRs panel (Pending → My turn →
+  Default branches and open PRs), `FeedIsolationBanner`, the People report's picker and the
+  workspace-wide open-PRs drill-down (`OpenPrsDetail`) read the same `useWorkspaceOpenPrs` entry, so
+  the card costs nothing only after one of those has loaded it. The Feed and the default Pending
+  view no longer load it, so opening Reports first usually pays one `/api/open-prs`.
 
 ⚠ **IT READS `useWorkspaceOpenPrs`, NEVER `useSearchOpenPrs`.** The latter narrows by
 `filters.repoIds`, the TIMELINE board's picker, which is not mounted on Reports.

@@ -17,7 +17,12 @@ import type {
   User,
 } from '@pierre-review/shared';
 import type { LearningMatch, ReviewAction } from '@pierre-review/shared';
-import { CLAUDE_REVIEW_MODELS, CLAUDE_REVIEW_MODEL_LABELS } from '@pierre-review/shared';
+import {
+  CLAUDE_REVIEW_MODELS,
+  CLAUDE_REVIEW_MODEL_LABELS,
+  DEFAULT_CLAUDE_REVIEW_MODEL,
+  followUpSentence,
+} from '@pierre-review/shared';
 import { formatDate, safeExternalUrl, usdToCredits } from '../lib/ui.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
@@ -51,6 +56,25 @@ import {
   WarningIcon,
 } from './Icons.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
+import {
+  ClaudeReviewFollowUpSection,
+  ClaudeReviewTicketPanel,
+  ClaudeReviewTicketResults,
+} from './ClaudeReviewFollowUp.js';
+import {
+  ALREADY_POSTED_CHIP,
+  RERAISED_CHIP,
+  SEVERITY_CLASS,
+  alreadyPostedReraiseIds,
+  checkTicketDraft,
+  createTicketDraftStore,
+  reraisedStatusByFindingId,
+  resolveTicketDraft,
+  sortFindingsForDisplay,
+  ticketRequestFromCheck,
+  type ReraisedStatus,
+  type TicketDraft,
+} from '../lib/claudeReviewFollowUp.js';
 
 // "Show this finding in the Changes tab" — supplied by PrDetail, which owns the tab state.
 // Optional everywhere below so the tab still renders (link-only, as before) if it is ever
@@ -144,21 +168,8 @@ const SEVERITY_ORDER: ClaudeFindingSeverity[] = [
   'praise',
 ];
 
-const SEVERITY_RANK: Record<ClaudeFindingSeverity, number> = {
-  blocker: 0,
-  warning: 1,
-  nit: 2,
-  question: 3,
-  praise: 4,
-};
-
-const SEVERITY_CLASS: Record<ClaudeFindingSeverity, string> = {
-  blocker: 'bg-red-500/10 text-red-700 dark:text-red-400',
-  warning: 'bg-orange-500/10 text-orange-700 dark:text-orange-400',
-  nit: 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-500',
-  question: 'bg-blue-500/10 text-blue-700 dark:text-blue-400',
-  praise: 'bg-green-500/10 text-green-700 dark:text-green-400',
-};
+// The rank + pill palette live in lib/claudeReviewFollowUp.ts, shared with the previous-review
+// list so an earlier comment's severity paints the same pill as a current finding's.
 
 function metaLine(review: ClaudeReview): string {
   const parts: string[] = [review.model];
@@ -482,6 +493,8 @@ function FindingRow({
   posting,
   postError,
   inChangeset,
+  priorStatus,
+  alreadyPosted = false,
   onOpenInChanges,
   onToggle,
   onReword,
@@ -502,6 +515,12 @@ function FindingRow({
   // show. false ⇒ nothing local to reveal, keep the GitHub link (a deep review reads files
   // the PR never touched).
   inChangeset: boolean;
+  // Set when this finding raises a comment from the previous review again: what became of that
+  // comment (only the two still-open statuses get a chip).
+  priorStatus?: ReraisedStatus;
+  // It repeats an earlier comment already posted on this same commit (the server saved it
+  // ignored, so Post review does not put it on GitHub twice). The chip says why.
+  alreadyPosted?: boolean;
   onOpenInChanges?: OpenInChanges;
   onToggle: (included: boolean) => void;
   onReword: (editedBody: string) => Promise<unknown>;
@@ -651,6 +670,8 @@ function FindingRow({
 
   return (
     <li
+      // The previous-review list's "Raised again below" scrolls to this id.
+      id={`claude-finding-${finding.id}`}
       className={`rounded border border-gray-100 px-3 py-2 text-sm dark:border-gray-800 ${
         ignored ? 'opacity-50' : ''
       }`}
@@ -664,6 +685,22 @@ function FindingRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold">{finding.title}</span>
+            {priorStatus != null && (
+              <span
+                className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${RERAISED_CHIP[priorStatus].cls}`}
+                title="Raised in the previous review"
+              >
+                {RERAISED_CHIP[priorStatus].label}
+              </span>
+            )}
+            {alreadyPosted && (
+              <span
+                className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${ALREADY_POSTED_CHIP.cls}`}
+                title={ALREADY_POSTED_CHIP.title}
+              >
+                {ALREADY_POSTED_CHIP.label}
+              </span>
+            )}
             {isPosted &&
               (commentUrl != null ? (
                 <a
@@ -1000,9 +1037,13 @@ function ClaudesReview({
   onRewordFinding: (findingId: number, editedBody: string) => Promise<unknown>;
   onPostFinding: (findingId: number) => Promise<unknown>;
 }): JSX.Element {
-  const findings = [...review.findings].sort(
-    (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
-  );
+  // Severity first; within a severity, the findings that raise an earlier comment again lead.
+  const findings = sortFindingsForDisplay(review.findings);
+  const priorStatusById = reraisedStatusByFindingId(review);
+  const alreadyPostedIds = alreadyPostedReraiseIds(review);
+  // TEMPLATED from the server-validated statuses (a code-derived figure) — Claude's own
+  // explanations are shown per comment in the Previous review section, labelled as Claude's.
+  const followUpLine = followUpSentence(review.followUp);
   // Pin blob links to the reviewed commit so line numbers stay correct; fall back
   // to the PR's current head when the run didn't record a SHA.
   const headSha = review.headSha ?? prHeadSha;
@@ -1042,10 +1083,27 @@ function ClaudesReview({
       </div>
       <div className="text-xs text-gray-500 dark:text-gray-400">{metaLine(review)}</div>
       <UsageBreakdown review={review} />
+      {followUpLine != null && <div className="text-sm font-medium">{followUpLine}</div>}
       {review.summary != null && review.summary !== '' && (
         <div className="text-sm">
           <Markdown>{review.summary}</Markdown>
         </div>
+      )}
+      {review.followUp != null && (
+        <ClaudeReviewFollowUpSection
+          followUp={review.followUp}
+          findings={review.findings}
+          changedPaths={changedPaths}
+          onOpenInChanges={onOpenInChanges}
+        />
+      )}
+      {review.ticket != null && (
+        <ClaudeReviewTicketResults
+          ticket={review.ticket}
+          assessment={review.ticketAssessment ?? null}
+          changedPaths={changedPaths}
+          onOpenInChanges={onOpenInChanges}
+        />
       )}
       {findings.length > 0 ? (
         <ul className="space-y-2">
@@ -1068,6 +1126,8 @@ function ClaudesReview({
               inChangeset={
                 changedPaths.size > 0 ? changedPaths.has(f.path) : f.fileInDiff
               }
+              priorStatus={priorStatusById.get(f.id)}
+              alreadyPosted={alreadyPostedIds.has(f.id)}
               onOpenInChanges={onOpenInChanges}
               onToggle={(included) => onToggleFinding(f.id, included)}
               onReword={(editedBody) => onRewordFinding(f.id, editedBody)}
@@ -1507,6 +1567,10 @@ function GenerateFixFromReview({
   );
 }
 
+// The reader's half-typed user stories, per PR, for this session (survives a tab switch or a PR
+// change). A PR with an entry was TOUCHED, and a stored ticket never overwrites it.
+const ticketDrafts = createTicketDraftStore();
+
 export function ClaudeReviewTab({
   pr,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1540,10 +1604,32 @@ export function ClaudeReviewTab({
     return set;
   }, [pr.files, pr.id, qc]);
 
-  // Model picker (defaults to the last run's model, else the best-value default).
-  const [model, setModel] = useState<ClaudeReviewModel>(
-    review?.model ?? 'claude-sonnet-5',
+  // Model picker. ALWAYS opens on the default (Claude Opus 5.5) — never seeded from the stored
+  // run, or every already-reviewed PR would keep reopening on its old model, and a stored
+  // 'claude-opus-4-8' would become a select value with no option. A pick stays until remount.
+  const [model, setModel] = useState<ClaudeReviewModel>(DEFAULT_CLAUDE_REVIEW_MODEL);
+
+  // The optional user story or task. The reader's own draft wins; otherwise it prefills from the
+  // LATEST run's stored ticket — stored at queue time, so a failed or cancelled run still
+  // prefills the re-run. Checked by the SAME shared function the route runs (caps, split).
+  const [ticketDraft, setTicketDraftState] = useState<TicketDraft>(() =>
+    resolveTicketDraft(ticketDrafts.get(pr.id), review?.ticket),
   );
+  const ticketSeedKey = useRef<string | null>(null);
+  useEffect(() => {
+    const key = `${pr.id}:${review?.id ?? 'none'}`;
+    if (ticketSeedKey.current === key) return;
+    ticketSeedKey.current = key;
+    setTicketDraftState(resolveTicketDraft(ticketDrafts.get(pr.id), review?.ticket));
+  }, [pr.id, review?.id, review?.ticket]);
+  const setTicketDraft = (d: TicketDraft): void => {
+    ticketDrafts.set(pr.id, d);
+    setTicketDraftState(d);
+  };
+  const ticketCheck = useMemo(() => checkTicketDraft(ticketDraft), [ticketDraft]);
+  const ticketBlockedTitle = ticketCheck.ok
+    ? undefined
+    : `Fix the user story first: ${ticketCheck.message}`;
 
   // Review depth. 'auto' lets the deterministic router decide from the diff; the
   // user can override to force a Quick (diff-only) or Deep (worktree) review.
@@ -1596,7 +1682,6 @@ export function ClaudeReviewTab({
     setUserBody(review.userBody ?? '');
     setUserVerdict(review.userVerdict ?? 'COMMENT');
     setSelectedReviewId(review.id);
-    setModel(review.model);
     setPreview(null);
     setPostResult(null);
     setConfirmPost(false);
@@ -1637,6 +1722,9 @@ export function ClaudeReviewTab({
     review?.status === 'succeeded' && review.headSha === pr.headSha;
 
   const runGenerate = (): void => {
+    // An invalid user story never starts a run — including from the same-commit "Run anyway"
+    // path, which lands here too. The route would 400 it anyway; this says why before a request.
+    if (!ticketCheck.ok) return;
     // Create/resume the AudioContext now, during this user gesture, so the
     // completion chime can play later without one (browsers gate WebAudio behind
     // a gesture). No-op / swallowed if WebAudio is unavailable.
@@ -1644,7 +1732,11 @@ export function ClaudeReviewTab({
     setConfirmRerun(false);
     setPreview(null);
     setPostResult(null);
-    generate.mutate({ model, mode: reviewModeChoice });
+    generate.mutate({
+      model,
+      mode: reviewModeChoice,
+      ticket: ticketRequestFromCheck(ticketCheck),
+    });
   };
 
   const onRunClick = (): void => {
@@ -1756,7 +1848,8 @@ export function ClaudeReviewTab({
             <button
               type="button"
               onClick={onRunClick}
-              disabled={isRunning || generate.isPending}
+              disabled={isRunning || generate.isPending || !ticketCheck.ok}
+              title={ticketBlockedTitle}
               className="rounded border border-gray-300 px-2 py-1 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
             >
               {review == null ? 'Run review' : 'Re-review'}
@@ -1780,6 +1873,14 @@ export function ClaudeReviewTab({
                 : 'Deep: clones the repo and explores callers/dependents — slower, thorough.'}
           </div>
 
+          {/* The optional user story or task — collapsed by default; its header says when it
+              holds something (or needs a fix), so a closed panel never hides what Run sends. */}
+          <ClaudeReviewTicketPanel
+            value={ticketDraft}
+            onChange={setTicketDraft}
+            check={ticketCheck}
+          />
+
           {/* Same-SHA warn-but-allow confirmation. */}
           {confirmRerun && (
             <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-300">
@@ -1792,7 +1893,9 @@ export function ClaudeReviewTab({
                 <button
                   type="button"
                   onClick={runGenerate}
-                  className="rounded border border-amber-400 px-2 py-0.5 text-xs hover:bg-amber-100 dark:border-amber-600 dark:hover:bg-amber-900/40"
+                  disabled={!ticketCheck.ok}
+                  title={ticketBlockedTitle}
+                  className="rounded border border-amber-400 px-2 py-0.5 text-xs hover:bg-amber-100 disabled:opacity-50 dark:border-amber-600 dark:hover:bg-amber-900/40"
                 >
                   Run anyway
                 </button>

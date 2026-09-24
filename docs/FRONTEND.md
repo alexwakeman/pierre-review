@@ -277,8 +277,8 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   KEY carries the userId, so a stale key can never show the wrong person; `Tab.userMeta` carries
   the chip's label/avatar. It renders `UserActivityDetail` → `<FeedView userIds={[id]}/>`, which
   is a real ACTOR filter (`inArray(events.actorId, …)`); `getConsolidatedFeed` skips the
-  actor-less Claude-run items whenever `userIds` is set, and FeedView drops its cross-repo
-  Open-PRs panel + the My-Turn "seen" marker under that scope. **Merge/close rows are recorded
+  actor-less Claude-run items whenever `userIds` is set, and FeedView drops the My-Turn "seen"
+  marker under that scope. **Merge/close rows are recorded
   against the PR's AUTHOR** (`sync/upsert.ts` writes `actorId: authorId`), so on this tab they
   mean "a PR they authored was merged" — the header caption says so rather than implying they
   pressed merge. **Row click across ALL these list surfaces (the drill-down TABLES
@@ -510,6 +510,8 @@ Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claud
   (`isLockFile` in `lib/diff.ts`, exact-basename list, deliberately not `*.lock`), which ALWAYS
   start collapsed even with threads** (the header badge still advertises them; a deep-linked
   thread still auto-expands). The rule rides the shared component into the AI Fix tab too.
+  Inline review threads start OPEN unless resolved, and the reader's toggle is remembered per
+  thread — see *Inline thread indicators* below.
   A **navigation rail** (`diff/FileTree.tsx`) sits to its left — see below.
 - **Bot activity** (`PrBotBehaviourTab.tsx`, EXPERIMENTAL, CORE) — shown only when a bot touched
   the PR (`hasBots`: `reviews.automatedKind` or a bot thread-opener/commenter). Per bot: its on-PR
@@ -677,16 +679,59 @@ past the pane's right edge while the file header stopped at it. Now:
 
 #### Inline thread indicators in the diff + per-file state rollups
 
-Every review thread — **resolved included** — renders inside the diff as a one-line collapsed
-**pill** (`InlineThread` in `FileDiffView.tsx`): state dot, author, age, `~` when approximate,
-reply count, plain-text excerpt, chevron. Clicking expands the full `ThreadCard` IN PLACE with
-the pill as its collapse header. One mechanism for all four states — resolved is merely quieter
-(no coloured left border, dimmed, `✓` for the dot) — because the alternative failure modes are
-both real: filtering resolved out hid 40% of threads and made settled lines look undiscussed,
-while rendering every thread as a full card at ~200–600px each buried the diff (a 47-thread PR
-rendered ~47 cards interleaved in the hunks). Pills use **no hooks beyond local expand state**;
-`ThreadCard`, with its shared per-PR annotation/ML queries, mounts only on expand. Expansion is
-EPHEMERAL component state — no store field, no URL (the "derived, never written back" rule).
+Every review thread — **resolved included** — renders inside the diff as a **pill**
+(`InlineThread` in `FileDiffView.tsx`): state dot, author, age, `~` when approximate, reply count,
+plain-text excerpt and chevron. Opened, the pill becomes the full `ThreadCard`'s collapse header
+("Hide thread"). **Unresolved threads — `untouched`, `replied_unresolved`, `likely_addressed` —
+START OPEN; only `resolved` starts SHUT** (dimmed, `✓` for the dot, no coloured border). That is
+GitHub's own Files-changed default, and one pure helper decides it: `inlineThreadStartsOpen`
+(`lib/diff.ts`, pinned by `test/inlineThreadOpen.test.ts`). It used to be every thread shut,
+because full cards at ~200–600px buried the diff (a 47-thread PR rendered ~47 cards). That is now
+bounded by resolved staying shut, a one-click Hide remembered per thread, the file chevron, and
+lock files, which start collapsed whatever they hold. There is deliberately NO count cap (an
+invisible threshold is the rail's lesson). MEASURED on the dev DB's open PRs (2026-09-24): 2,777
+of 4,127 threads are unresolved; of 581 PRs with threads, 361 carry 1–5, 23 carry more than 20,
+and the most is 532 (29 files, one bot comment each). The Threads tab already mounts a full card
+for every one of those (`FileGroup` opens any file holding an unresolved thread), so this default
+is bounded by a screen that already exists. An open pill fetches nothing of its own: ThreadCard's
+ML and annotation queries are one per PR, and its reaction bars batch per tick (`useReactions`, 60
+targets a request, a cache shared with the Threads tab — 532 threads is 9 lookups).
+
+- ⚠ **THE OPEN STATE IS THE READER'S, REMEMBERED PER THREAD ID — AND ONLY THEIR DECISIONS ARE.**
+  - How it works: every open/close (the pill click, a thread reveal, the posted-comment
+    self-focus) goes through the pill's `decide`. That sets its local state AND writes
+    `DiffThreadContext.openMemory`, a plain `Map<threadId, boolean>` owned by **PrDetail**
+    (`threadOpenMemory`) and read ONCE, when a pill mounts. A pill with no entry starts from its
+    thread's CURRENT state.
+  - A pill REMOUNTS far more often than it looks: collapsing and re-expanding its file; the Wrap
+    toggle (`DiffTable`/`FullWidthCell` change the tree's shape); a push moving the anchor row or
+    dropping the thread to file grain; and the Changes → Threads → Changes round trip, which
+    remounts ChangesTab. Without the memory, each of those undid the reader's choice.
+  - A MOUNTED pill never moves on its own (`useState` latches), so the ~5s poll resolving a
+    thread under the reader does not snap it shut.
+  - The default is never recorded, so a thread resolved elsewhere (a bulk resolve in Threads)
+    comes back SHUT.
+  - ⚠ It lives in PrDetail, not ChangesTab (the round trip), and not the store: the store is not
+    keyed by PR (the `threadStateFilter` landmine), and persistence and reset share one list. Both
+    PrDetail mounts are keyed by `prId`, so it lives exactly as long as this PR's pane — no store
+    field, no URL.
+  - ⚠ It is a mutable Map, not lifted state: a click must re-render one pill, never every diff
+    row.
+- ⚠ **`FileDiffView` is `memo`'d, and ChangesTab memoises what it builds (`threadCtx`,
+  `commenting`).** PrDetail re-renders at least twice per ~5s poll tick (`isRefreshing` flips) and
+  ChangesTab on every rail-drag frame. Unmemoised, each of those repainted every diff row and, once
+  unresolved threads started open, every open ThreadCard. A new unstable prop from ChangesTab
+  switches the guard off silently. Cost accepted: a shut pill's "3h ago" refreshes on the next
+  data change, not on the poll tick.
+  - ⚠ **A caller's callback must not reach `threadCtx` by identity.** PrDetail's
+    `openThreadInThreads` closed over the whole `pr`, and every `['pr', prId]` refetch that changes
+    ANY field (a CI check finishing, a merge-state move) returns a new `pr` even when `pr.threads`
+    keeps its identity. So the memo missed on exactly the ticks that carry data: MEASURED
+    1.3–1.5s of long tasks on a 532-thread PR, for a change that touched nothing in the diff. Two
+    fixes, each enough alone: the callback keys on `prId`, and ChangesTab reads `onOpenThread`
+    through a ref (only whether one EXISTS is a dependency). `test/inlineThreadOpen.test.ts` pins
+    `threadCtx`'s dependencies as an ALLOW-list from source, so a new one fails a test instead of
+    getting slow.
 
 - **ONE rename-aware fold, built once per PR.** `indexThreadsByPath` (`lib/diff.ts`, pinned by
   `test/threadsByPath.test.ts`) buckets threads by the **RENDERED** file path and re-homes a
@@ -703,8 +748,18 @@ EPHEMERAL component state — no store field, no URL (the "derived, never writte
   "outdated" / "line not in this diff" prefix. **A thread never disappears.** Rung 1 never falls
   through to the hunk: a live line absent from the visible patch means the hunks moved on, and a
   reconstruction would contradict stored truth. Known asymmetry: the jump has no side and assumes
-  RIGHT, so a live line matching only a LEFT (del) row anchors the pill here while the jump falls
-  back to the file header (the pill still opens and rings; only the scroll target diverges).
+  RIGHT, so a live line matching only a LEFT (del) row anchors the pill while the jump's
+  `focusRow` is null. That no longer moves the scroll: the target pill scrolls to its own header.
+- ⚠ **WHEN A REVEAL NAMES A THREAD THE BLOCK RENDERS, THE PILL OWNS THE SCROLL**
+  (`revealScrollsFileHeader`, `lib/diff.ts`, pinned in `test/inlineThreadOpen.test.ts`). The block
+  scrolls its file header only when neither the addressed row nor the target pill will scroll
+  itself. Both are smooth `scrollIntoView` calls, a later one cancels an earlier one, and React runs
+  passive effects child-first, so the block's header scroll used to run after the pill's and win.
+  That was invisible while pills started shut (~26px each above the target). With unresolved pills
+  open (~300px each), a jump to the fourth of four file-grain threads landed on the file header
+  with the ringed target 1,274px below the top of a 297px pane. The two no-table branches (binary,
+  and an empty textual diff) list their threads as pills too, because the rule assumes every thread
+  in the block has one.
 - ⚠ **`consumedFocus` lives on the BLOCK, not the pill.** `DiffFocusTarget` gained an optional
   `threadId` so a thread-card jump opens and flashes the matching pill as part of the same
   reveal, consumed per `nonce`. The focus target is STICKY in `ChangesTab` and collapsing a file
@@ -714,7 +769,11 @@ EPHEMERAL component state — no store field, no URL (the "derived, never writte
   a nulled prop: the mounted pill's props must stay stable mid-flash or any re-render (the ~5s PR
   poll) would trip the reset branch and cut the ring short. Focus also **LATCHES** the pill open
   rather than gating `expanded = open || focused`, so the 6s self-focus timer expiring does not
-  snap shut a card the reader is midway through.
+  snap shut a card the reader is midway through. The two records answer different questions and
+  neither replaces the other: `consumedFocus` stops a remount RE-DELIVERING a reveal (the re-open
+  AND the teleport); `openMemory` restores what the reader chose. Both scrolls target the pill's
+  HEADER, not the card: an open card can be taller than the pane, and `block: 'center'` on the
+  whole card put the header above the fold.
 - **Per-file and per-directory state rollups.** `ThreadCountChips` is now THE one renderer of the
   `DERIVED_STATE_META` palette (the byte-identical `ThreadDots` in `StateBadge.tsx` was deleted —
   rationale recorded at `ThreadCountChips.tsx`), and gained a `compact` dots-only mode for the
@@ -765,10 +824,10 @@ one deliberate exception that orders the two correctly.
 **Changes → Threads.** `ChangesTab` now passes **every** thread into `DiffThreadContext`, not
 `.filter((t) => !t.isResolved)`. That filter hid 40.3% of threads: a diff line carrying a settled
 discussion looked undiscussed, and the round trip was one-way for exactly those. Resolved threads
-render as a **collapsed one-line stub** (`✓ Resolved thread · N comments · <first line>`) so the
-diff isn't buried under closed conversations — the filter existed for volume, not relevance.
-`focused` always overrides the stub, so a deep link lands on the thread rather than on something
-the reader must then find and open.
+start as a **shut pill** (`✓`, dimmed) so the diff isn't buried under closed conversations — the
+filter existed for volume, not relevance — while unresolved ones start open. A reveal always opens
+its target, so a deep link lands on an OPEN thread rather than on something the reader must then
+find and open.
 
 Two counters had to stop being `threads.length`, which silently changed meaning once resolved
 threads joined the array: the amber `N 💬` header badge still counts UNRESOLVED only (with a
@@ -897,24 +956,22 @@ The `'comments'` AI-Fix seed's two UI halves. Backend contract:
 its top entry is what opens. `activityRepoId` defaults to `'attention'`, the ONE rail value
 omitted from the URL; `'feed'` is EMITTED and PARSED (`?activityRepo=feed`) so a Feed link
 survives. An unknown or legacy value (`compare`, garbage) and a URL naming no console land on
-Pending — including bookmarks from before this change. The Feed is still the stream with
-**`BriefStrip`** on top; the brief's lines deep-link INTO Pending. (The landing was the Feed from
+Pending — including bookmarks from before this change. The Feed is the stream alone
+(`FeedView`). (The landing was the Feed from
 P3.1 until this change; the older one-shot "auto-select Insights when Pro is on" effect,
 `insightsDefaultApplied` + `suppressInsightsDefault()`, is deleted.) The Insights rail entry is
 relabelled **"Reports"** — ⚠ LABEL-ONLY: the store/URL token stays `activityRepoId ===
 'insights'` (it is wire/URL-visible across `useUrlState`, FilterBar; renaming it buys nothing
 but broken deep links).
 
-- **`BriefStrip`** (`Activity/BriefStrip.tsx`, rendered inline at the top of the Feed branch —
-  no new fixed element, the one-toast-column rule): one compact line per thing that needs the
-  viewer, each DEEP-LINKING to the surface that owns its number (the strip grows no drill-downs
-  of its own), plus an "Elsewhere" line of per-workspace counts (`?rollup=1`). FREE = templated
-  count lines from `GET /api/daily-brief`; PRO (`activityDigest`) = the synthesis seam's
-  ORDERING mode (`kind:'brief'`/`'rollup'`) — the model orders and phrases lines DIGIT-FREE, the
-  FIGURES always come from the counts response (D4). A missing/failed narration renders the
-  templated lines exactly; the strip never waits on AI. Generation is lazy-on-read: at most one
-  auto-POST per stale scope per mount; ⚠ it fires the brief + rollup POSTs in ONE render cycle,
-  which is why the server's in-flight guard is claimed synchronously. Self-hides at all-zero.
+- **The daily-brief strip is DELETED** (it duplicated Pending line for line). What stays:
+  `GET /api/daily-brief` + `useDailyBrief` (the Welcome-back banner and the Workspace badges read
+  it through `useMyTurnByWorkspace`; it still refetches in lockstep with `['attention-cards']` /
+  `['work-plan']`). Gone with it: `openBriefLine`, the "Elsewhere" roll-up,
+  `myTurnOtherCapDisclosure`, `ciFailingCapDisclosure`, and the Feed's bot-anomaly / red-trunk
+  lines (red trunks show under Pending → My turn; bot anomalies on Bots). The Pro synthesis seam's
+  `kind:'brief'`/`'rollup'` ordering narration is still served and validated by the plugin, but
+  no SPA surface requests it: dormant, not removed.
 - **`BotTriageCard`** (`components/BotTriageCard.tsx`, CORE/free): the per-PR verdict sentence —
   "N bot comments: X real issues · Y likely addressed · Z nit-flagged — [Resolve]". The "real
   issues" segment is the PRO fold (stored validity/addressed annotations behind `prSummary`;
@@ -1824,8 +1881,8 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   there the cut is the LAST GROUPS, which can outscore what is shown (`capSentence`).
 - **Every view's count is its own population**: tab → `tab.total`, chip → `tab.kindTotals[kind]`,
   lens → `tab.relevanceTotals[lens]`, author lens → `tab.authorTotals` / `kindAuthorTotals[kind]` /
-  `relevanceAuthorTotals[lens]`. The daily brief's lines say the same figures and each opens its
-  tab with its own chip / lens seated, so the number clicked is the list landed on.
+  `relevanceAuthorTotals[lens]`. `GET /api/daily-brief` returns the same figures (the banner and
+  badges show the my-turn ones).
 - **The People / Automation lens** (`attentionAuthorLens`: null = everyone, `'people'`,
   `'automation'`; `?attnBy=`, a NAV key). The side is the server's `pendingAuthorSideOf` — automation
   iff the card's PR has `automation` set — so the list and every figure beside it are one
@@ -1837,17 +1894,35 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   yours" each count their own lensed side. ⚠ It PERSISTS across tab switches (`setAttentionTab`
   does not clear it; it is a question about the whole board), is cleared by a rail or scope change,
   and is SEATED to `null` by every entry point that opens the board from a count
-  (`openMyTurnInWorkspace`, `BriefStrip`'s `openBriefLine`) — `setActivityRepo` early-returns on an
+  (`openMyTurnInWorkspace`) — `setActivityRepo` early-returns on an
   unchanged rail. Transient, never in `FilterDefaults`.
 - **An emptied view says what emptied it** (`pendingEmptyNote`): "Nothing from automation in
   Waiting on review right now." with a "Show all", "Nothing under Bumps right now.", or the tab's
   own sentence. ⚠ The review-load strip counts REVIEWERS, so no PR narrowing hides it: a narrowed
   view with no cards puts the note ABOVE the strip, or the reader got the strip and no word that
   the lens had hidden every card.
-- **The tab on screen is DERIVED** (`effectivePendingTab`): a kind (`attentionIsolation`, seated by a
-  brief line) names its own tab and wins; else the picked `attentionTab` (`?attnTab=`, a NAV key);
-  else My turn. Clicking a tab is ONE write that seats the tab and clears the kind
-  (`setAttentionTab`). Old `?attn=<kind>` links land on the right tab with that chip selected.
+- **The tab on screen is DERIVED** (`effectivePendingTab`): a kind (`attentionIsolation`, seated by
+  `openMyTurnInWorkspace`, a chip or `?attn=`) names its own tab and wins; else the picked
+  `attentionTab` (`?attnTab=`, a NAV key); else My turn. Clicking a tab is ONE write that seats the
+  tab and clears the kind (`setAttentionTab`). Old `?attn=<kind>` links land on the right tab with
+  that chip selected.
+- **My turn has TWO VIEWS** (`MY_TURN_VIEWS` / `effectiveMyTurnView`, `pendingTabs.ts`): **Cards**
+  (the default; everything this section describes) and **Default branches and open PRs**
+  (`BranchesAndOpenPrsView`: `BranchStatusPanel` + `FeedOpenPrsPanel`, moved off the Feed). The
+  state is `attentionMyTurnView` (`'cards'|'branches'|null`; the setter stores 'cards' as null). It
+  is transient, `freshDefaults()` only, not in `FilterDefaults` (no storage bump) and in
+  `UrlOwnedState`. It is cleared by a rail change and by `setAttentionTab` (a tab click opens its
+  cards). `?attnView=branches` is a NAV key, emitted only on the attention rail while the EFFECTIVE
+  tab is My turn; the default is omitted and only the literal seats it. ⚠ **Nothing on the default
+  view fetches for it**: the panels mount only while the view is open, both reads share existing
+  cache entries (the rail's `useBranchStatus()`, the workspace-wide open-PRs key), and trends stay
+  lazy per row. ⚠ **COUNT-FREE**: trunk status is informational, so neither label carries a figure,
+  and nothing the panels read reaches a badge, `myTurn`, the scorer, the liveness sweep or a
+  notification. ⚠ `openMyTurnInWorkspace` SEATS Cards (`setAttentionMyTurnView(null)`, after
+  `setActivityRepo`, never conditional). Each slot is a placeholder while pending (idle included),
+  "Couldn’t load …" on failure, a sentence on an answered empty ("No default branch has synced
+  yet.", "No open PRs in this workspace."), else its panel. Open PRs now opens by default; the
+  choice is remembered (`pierre:feedOpenPrsPanel`, a name kept on purpose).
 - **Removed with the cross-kind head**: `doNextIds`, the "already in Do next" chip, the header "My turn"
   pill (the tab replaces it), `AttentionIsolationBanner` (the selected tab and chip say the same
   thing on the board itself) and the spread/superseded explanations. The Pro plan still picks its
@@ -1866,11 +1941,11 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   fallback for a response predating `rules`. ⚠ **There is deliberately no "resolved settings" hook
   for the board**: between a Settings save and the board's refetch the two differ, and an
   explanation must describe the list on screen.
-- **"Customise"** (My turn only) opens Settings on its My Turn section
+- **"Customise"** (My turn's Cards view only) opens Settings on its My Turn section
   (`useSettingsModal().openSettings('my-turn')`, `store/settingsModal.ts`). It sits at the right end
   of the controls row, after the People / Automation pills, inside ONE right-aligned wrapper — two
-  `ml-auto` siblings would split the free space between them. The row always renders on My turn,
-  empty or not, so the way into Settings is there when the tab holds nothing.
+  `ml-auto` siblings would split the free space between them. The row always renders on My turn's
+  Cards view, empty or not, so the way into Settings is there when the tab holds nothing.
 - **A promoted card keeps its home card's controls**, through pure adapters in `AttentionCards.tsx`
   (pinned in `pendingCardControls.test.ts`): `own_ready` → `PendingMergeActions` (`asForwardCard`),
   `own_conflicts` → `PendingConflictActions` (`asConflictsCard`), `trunk_red` → the `ci_failing`
@@ -2043,6 +2118,39 @@ rows has to arrive with the rows.
 - ⚠ `REVIEW_STATE_META` (`lib/ui.ts`) is the ONE table for a reviewer's mark, ink, chip and word,
   shared by the card's chips and the pane's Reviews row. `icon` is a COMPONENT reference
   (`lib/ui.ts` is `.ts` and holds no JSX) — render `<m.icon size={12} />`.
+
+### Suggested reviewers on a `reviewer_routing` card — one Assign per suggestion
+
+- Each suggestion row carries its OWN Assign, asking just that reviewer (`RoutingReviewerRow` in
+  `AttentionCards.tsx`; the body is `reviewerRequestBody` in `lib/reviewerRequest.ts`: a synced user
+  by id — the path the route STAMPS locally — an unsynced one by login, a GitHub team by its slug).
+  "Assign all" is gone: picking WHO is the action. Both callers of `POST /api/prs/:id/request-reviewers`
+  now send one reviewer per request (the PR pane's Suggested row already did).
+- HIDE, never disable. No button when the row names nobody addressable (body `null`) or
+  `card.viewerCanPush` is false — the WRITE/MAINTAIN/ADMIN set (`writableRepoIds`) the route
+  re-checks, folded server-side because the board may not fetch on mount. Measured: 703 of 714
+  orphans sat in repos the viewer only READS, so without it nearly every button was a certain 403.
+  The suggestion itself still shows. A card with no suggestions (every card past `routingSuggestCap`)
+  renders no block at all. The block is `data-noactivate`, so a near-miss click does not open the PR
+  mid-request. The only `disabled` is the transient in-flight state.
+- ⚠ **Row state is read off the MUTATION CACHE**, never a per-mount `isPending`/`isSuccess`:
+  `useReviewerRequestState` → `useMutationState` over `requestReviewersMutationKey(prId, rowKey)`,
+  latest attempt wins (`reviewerRequestView`). A Pending tab switch remounts the card; a per-mount
+  flag would forget an open request (inviting a second POST) and offer "Assign" for someone already
+  asked. Two rows are two mutations and may be in flight together.
+- ⚠ **The board refresh waits for the LAST request on the PR, and only a success triggers it**
+  (`requestReviewersOptions`; `isMutating` still counts the settling request inside `onSuccess`,
+  hence `> 1`). The route stamps the request, so a board refetch RETIRES the card and every sibling
+  row's outcome with it. A failure refreshes nothing, so the card stays with its words and the retry.
+  `['attention-cards']` + `['daily-brief']` + `['work-plan']` move together (plus
+  `['workspace-insights']`, the capped fold's copy); the PR's own `['pr', id]` and
+  `['suggested-reviewers', id]` are refreshed on every success.
+- The card LEAVES after the first stamped request, and that is its job done: routing a PR to A
+  reviewer. An unsynced login is not stamped, so its card stays until the next sync, reading
+  "Requested" from the cache for up to TanStack's 5-minute mutation `gcTime`.
+- Pinned by `test/reviewerRequest.test.ts` (pure half + the refresh rule), `e2e/pending-assign-reviewer.spec.ts`
+  (per-row independence, hidden-when-read-only, remount keeps "Requested") and
+  `pending-tabs.test.ts` (`viewerCanPush` on both folds).
 
 ### The Pending board's LIVENESS sweep (`useAttentionLiveness`)
 
@@ -2798,17 +2906,17 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
 
 - **ONE POPULATION EVERYWHERE — standing `my_turn` CARDS, not "new since you looked".** The
   number is a `DailyBriefCounts` my-turn figure, i.e. literally how many `my_turn` cards
-  `GET /api/attention` paints for that workspace. So the banner line, the dropdown badge, the
-  daily-brief strip line and the board a click opens are the same list and the same figure.
+  `GET /api/attention` paints for that workspace. So the banner line, the dropdown badge and the
+  board a click opens are the same list and the same figure.
 - ⚠ **A SURFACE THAT NOTIFIES COUNTS `myTurnPersonal`; A SURFACE YOU OPEN COUNTS `myTurn`.**
-  The welcome-back banner, the Workspace-dropdown badges, `BriefStrip`'s "Elsewhere" rows and the
+  The welcome-back banner, the Workspace-dropdown badges and the
   browser notification reach FOR the reader, so they count only what personally involves them
   (`MyTurnCard.personal` — every type that names you: reviews requested of you, @-mentions,
   replies to you, pushes since your review, your PRs, any type you added in Settings, and — only if
   you switched "New PRs" on — new PRs in repos you MAINTAIN). Adding a repo you have never touched
   used to put every open PR in it on the banner — 425 of 459 items on the reporter's account; "New
   PRs" is now off by default as well. The
-  "Needs attention" BOARD and the strip's own lines keep the BROAD `myTurn`: that work is real,
+  Pending BOARD keeps the BROAD `myTurn`: that work is real,
   it is just not yours, and hiding it would delete work rather than route it.
   ⚠ Absent narrow fields (a response predating the narrowing) ⇒ fall back to `myTurn` /
   `myTurnTotal`. Over-notifying is the safe direction.
@@ -2821,24 +2929,26 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   visually distinguished (filled dot + "this Workspace") because the others are the ones the
   reader cannot see from where they are. Dismissal is component-local and therefore lasts the
   session — that is the only mute there is now, since standing work is never "marked seen".
-  Hidden on the Activity console, where `BriefStrip` says it better.
-- **`useFilters.openMyTurnInWorkspace(workspaceId)` is THE deep-link — used by BOTH
-  cross-workspace surfaces**: the `WelcomeBackBanner` lines and `BriefStrip`'s collapsed
-  "Elsewhere" roll-up. ⚠ A bare `setWorkspace` in either place HALF-navigates — it re-scopes and
+  Hidden on the Activity console: the Pending board is the list itself, and the picker lists every
+  workspace's count.
+- **`useFilters.openMyTurnInWorkspace(workspaceId)` is THE deep-link** — used by the
+  `WelcomeBackBanner` lines (the strip's "Elsewhere" roll-up went with the strip). ⚠ A bare
+  `setWorkspace` there HALF-navigates — it re-scopes and
   then leaves the reader on that workspace's Feed, hunting for the cards the line just counted.
   It exists as a store action because the sequence is order-sensitive twice over: `setWorkspace(id, null)` **first**
   (it clears `repoIds` / `feedIsolatedPrId` / `attentionIsolation`, and the `null` also stops
   `useWorkspaceSync`'s case-2 branch writing a second `setWorkspace` that would wipe what comes
   next), then `showActivity()`, then `setActivityRepo('attention')`, then
   `setAttentionIsolation('my_turn')`, then `setAttentionRelevance('mine')`, then
-  `setAttentionAuthorLens(null)` (the figure clicked counts every author). The workspace write is
+  `setAttentionAuthorLens(null)` (the figure clicked counts every author), then
+  `setAttentionMyTurnView(null)` (the banner counts cards). The workspace write is
   **skipped when already there** so a Timeline repo narrowing survives. Pinned in
   `apps/frontend/test/attentionIsolation.test.ts`.
 - ⚠ **THE DIVERGENCE RULE: A NARROW COUNT MAY ONLY NAVIGATE THROUGH ITS OWN LENS.** A banner
   line reading 4 that opened a board of 50 is the "the strip says 5, the board lists 3" defect
   (747c9c9) in a new place — which is why `openMyTurnInWorkspace` seats
-  **`attentionRelevance: 'mine'`** as its last step, why the brief's "review or reply" line seats
-  `'others'`, and why every whole-kind line seats **`null`**. Seating is not optional and a
+  **`attentionRelevance: 'mine'`** (the deleted brief's "review or reply" line seated `'others'`,
+  and its whole-kind lines **`null`**, for the same reason). Seating is not optional and a
   conditional seat is not enough: `setActivityRepo` early-returns an empty patch when the rail is
   already `attention`, so a lens left over from an earlier click survives the click that was
   supposed to change it.
@@ -2848,7 +2958,7 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   `FILTER_STORAGE_VERSION` bump**, cleared by any rail/scope change) and the same URL contract: it
   is a NAV key, `?attnRel=mine|others`, emitted only on the attention rail, parsed only for those
   two literals, and in `UrlOwnedState` so a pop onto a URL that omits it CLEARS it.
-  ⚠ **IT IS THREE-VALUED BECAUSE THE BRIEF HAS TWO MY-TURN LINES.** It shipped (8b8a2b1) as
+  ⚠ **IT IS THREE-VALUED BECAUSE THE (NOW DELETED) BRIEF HAD TWO MY-TURN LINES.** It shipped (8b8a2b1) as
   `attentionPersonalOnly: boolean`, which can express "what involves me" but not "the rest" — two
   mutually exclusive lines plus the un-lensed board is three views, and a boolean has two states.
   ⚠ **`?attnPersonal=1` IS STILL PARSED**, as `'mine'`, and never emitted: it shipped, so it is in
@@ -2861,15 +2971,15 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   who asked only to see the backlog. ⚠ The two halves are **not exact complements over
   unclassifiable rows**: `'mine'` reads `personal` (which the server writes on every row, so it
   survives a pre-split response) and `'others'` reads `relevance === 'none'`, so an old response
-  paints an EMPTY `'others'` board rather than a mislabelled full one — and the brief does not
-  offer that line on such a response, so nobody lands there.
+  paints an EMPTY `'others'` board rather than a mislabelled full one — and `'others'` is now
+  reachable only from a `?attnRel=others` link.
   ⚠ **`merge` AND `update_branch` ARE EXEMPT TOO, even though they DO carry `relevance`.** They
   carry it for the RANKER's weight, not as an ownership claim — a PR being ready to land says
-  nothing about whose turn it is — and filtering them would stop the brief's two my-turn lines
-  partitioning the lensed board, which is the one job this predicate has.
+  nothing about whose turn it is — and filtering them would stop the two lenses partitioning the
+  board, which is the one job this predicate has.
 - **The board's order, counts and narrowings are the tabs** — see § The Pending tabs. The
   cross-kind "Do next" head, its `head ∪ tail` partition, the head's suppression under an isolation
-  and `AttentionIsolationBanner` are gone with it: a daily-brief line or `openMyTurnInWorkspace`
+  and `AttentionIsolationBanner` are gone with it: `openMyTurnInWorkspace` or a link
   now lands on its tab with its chip / lens visibly selected on the board itself, reversible there
   ("All", or pressing "Only yours" again / "Show everyone's" on an emptied lens). ⚠ ONE
   `<AttentionCards>` MOUNT still — the people strip, Do next and Everything else are sections of one
@@ -2888,13 +2998,11 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   a narrow count fails the equality on exactly the workspaces the narrowing exists for — the line
   silently loses its "of N" — and had it passed it would have printed a narrow numerator over a
   broad denominator. A `myTurnPersonal` with no `myTurnPersonalTotal` discloses NOTHING rather
-  than borrowing the broad total. The "review or reply" half has its OWN rule too —
-  `myTurnOtherCapDisclosure` (`myTurnOther` / `myTurnOtherTotal`) — and ⚠ **it may never be spelled
-  `myTurn - myTurnPersonal`**: the arithmetic agrees, but a subtracted figure has no denominator of
-  its own, and `capFor` gates the "of N" on `shown === count`, so the line silently loses its cap.
-  ⚠ Unlike the personal twin it does **not** fall back to the broad pair — nothing displays an
-  "other" figure on a pre-split response, so there is nothing to qualify. All four rules share one
-  `capFor` body; extend it, never fork it.
+  than borrowing the broad total. The "review or reply" half rides the wire as its own population
+  (`myTurnOther` / `myTurnOtherTotal`), and ⚠ **`myTurnOther` is never `myTurn - myTurnPersonal`**:
+  the arithmetic agrees, but a subtracted figure has no denominator of its own, and `capFor` gates
+  the "of N" on `shown === count`, so any line built on it silently loses its cap. Both rules share
+  one `capFor` body; extend it, never fork it.
   Pinned in `apps/frontend/test/myTurnCapDisclosure.test.ts`. The ROLL-UP cap (`ROLLUP_WORKSPACE_CAP`, server
   side) surfaces as `uncounted`: those rows render a dim "—" rather than a zero, plus a footer
   line in the dropdown and a line in the banner. ⚠ **Absence is not zero** — do not "tidy" a
@@ -2902,8 +3010,8 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
 - ⚠ **The dropdown badge is INFORMATIONAL.** A row's click still means "switch scope" and nothing
   more: `WorkspaceSelector` is mounted on every board, so a badged row that also hijacked the rail
   would teleport someone who only wanted to re-scope the Timeline.
-- ⚠ **COST.** The hook rides the EXISTING daily-brief key (shared with `BriefStrip` and the
-  attention board's cap disclosure), but mounting it in the always-visible FilterBar and banner
+- ⚠ **COST.** The hook rides the EXISTING daily-brief key (the one key the banner and badges
+  share), but mounting it in the always-visible FilterBar and banner
   means the Timeline now pays one `search`-tier request per stale window where it paid none.
   Never add a second query key for these numbers.
 - **`useMyTurnNotifications` stays ACCOUNT-WIDE** — an OS notification is read outside the app,
@@ -2925,7 +3033,7 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   every prefix is a word, so `startsWith('p:')` never matches `push:`. `w:` now counts untouched New
   PRs only.
 
-## `MyTurnRelevance` — three labels, two brief lines, one split banner
+## `MyTurnRelevance` — three labels, one split banner
 
 `MyTurnCard.personal` shipped as a boolean and **conflated two different relationships**: "this is
 tied to me" (I wrote it, it was requested of me, someone replied to my thread, I was @-mentioned)
@@ -2941,15 +3049,8 @@ that boolean un-collapsed: `'direct'` · `'maintained'` · `'none'`. Wire contra
   That is the opposite of the wire's tolerance rule (absent ⇒ personal, because over-notifying is
   the safe direction), deliberately: a missing field may never invent an ownership claim ON SCREEN.
   The only way to see it is a server too old to send the field, where the neutral label is true.
-- **TWO MUTUALLY EXCLUSIVE BRIEF LINES** replace the single my-turn line (`BriefStrip`):
-  "N need your attention" (`myTurnPersonal` = direct + maintained, lens `'mine'`) and "M need
-  review or reply" (`myTurnOther`, lens `'others'`). ⚠ **Each line pairs with its OWN total and
-  seats its OWN lens** — that pairing is the whole point of splitting the line, and handing the
-  broad `counts` object to a narrow line both mixes populations and silently drops the "of N".
-  ⚠ **Both halves or neither**: a response missing either field degrades to the single broad line
-  (`counts.myTurn`, `myTurnCapDisclosure`, no lens) rather than rendering one half and implying
-  the other is zero. `'myTurnOther'` is its own `ScalarKey`, because the Pro ordering map keys on
-  that string and a shared key would let one phrase reword both lines.
+- The brief's two my-turn lines went with the strip; the wire still carries both halves
+  (`myTurnPersonal`/`myTurnOther` + totals) and both lenses stay seatable (`?attnRel=`).
 - **THE WELCOME-BACK BANNER HEADLINE SHOWS THE SPLIT** — "2 yours · 3 in your repos" instead of a
   bare 5 (`useMyTurnByWorkspace.totalSplit`). ⚠ **The POPULATION is unchanged**: the chips, the
   dropdown badges and `useMyTurnNotifications` all still count the sum, and the click still opens
@@ -2965,7 +3066,7 @@ that boolean un-collapsed: `'direct'` · `'maintained'` · `'none'`. Wire contra
 - ⚠ **`relevance` IS ALSO THE CARRIER OF THE PENDING MUTE.** Muting a workspace or a repo
   (Settings → Workspace → Pending mute) forces every one of its my-turn rows to `'none'` inside
   `getMyTurn`, so all of the above follows with no client change: the card relabels to the neutral
-  string, the row moves from the "need your attention" line to the "need review or reply" line, the
+  string, the row leaves "Only yours", the
   banner split and the dropdown badges drop it, and `useMyTurnNotifications` stops firing for it.
   Nothing on the client tests for a mute. The one visible addition is a `muted` chip on the card —
   **DISPLAY ONLY**, off `MyTurnCard.muted`, so a card the reader last saw as theirs does not demote
@@ -2973,7 +3074,7 @@ that boolean un-collapsed: `'direct'` · `'maintained'` · `'none'`. Wire contra
   a second classifier beside `relevance` is exactly the drift the single server-side fold exists to
   prevent.
 
-## `ci_failing` — the red-build card, and the three SILENT lists a new InsightKind must reach
+## `ci_failing` — the red-build card, and the two SILENT lists a new InsightKind must reach
 
 A `ci_failing` card is a red build the viewer is on the hook for: `arm: 'your_pr'` (an open PR they
 authored whose head CI is red) or `arm: 'trunk'` (the default branch of a repo they MAINTAIN is red
@@ -2990,22 +3091,17 @@ now). Server contract + the two things it deliberately does NOT compute:
 - **The `viewerMerged` caveat is ON THE CARD** ("Trunk is red at this commit — not necessarily
   because of it"). We store no per-commit CI transition history, so nothing here can name the
   commit that broke trunk; saying so is cheaper than being asked.
-- **The cap is DISCLOSED** (`ciFailingCapDisclosure`, `AttentionView`), unlike the survey kinds
-  that share `INSIGHT_CARD_CAP`. Pair narrow with narrow: it reads `counts.ciFailing` /
-  `ciFailingTotal` and never borrows `myTurnTotal`.
+- The board states its cut with `capSentence`; the brief-line disclosure went with the strip.
 
-⚠ **THREE OF THE FOUR CLIENT TOUCH POINTS ARE SILENT — only `KIND_LABEL` is compiler-enforced:**
+⚠ **TWO OF THE THREE CLIENT TOUCH POINTS ARE SILENT — only `KIND_LABEL` is compiler-enforced:**
 
 1. `renderCard`'s `switch` in `AttentionCards.tsx`. Its `default: return null` means a kind the
    brief COUNTS but the switch cannot RENDER simply vanishes — "header 5, list 3" with no server
    involved. That is exactly how `my_turn` shipped invisible.
 2. `INSIGHT_KINDS` in `hooks/useUrlState.ts`, a hand-written runtime array. A kind missing there
-   makes `?attn=<kind>` a no-op, so the brief line that counts it opens an UN-isolated board and a
+   makes `?attn=<kind>` a no-op, so a `?attn=<kind>` link opens an UN-isolated board and a
    browser Back cannot return to the narrowed one. **`test/ciFailingCard.test.ts` now compares that
    array against `KIND_LABEL`**, forwarding the compiler's exhaustiveness onto it.
-3. `BriefStrip`'s `hasAnything` — the strip self-hides when every figure is zero, so a kind left
-   out of it can hide a line the strip has something to say on (a red build on your own PR leaves
-   `trunkRed` empty).
 
 ## The sync round — a transient store slice with ONE driver (`syncRound` / `managerOpen`)
 

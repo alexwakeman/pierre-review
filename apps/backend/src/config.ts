@@ -38,7 +38,7 @@ function floatFromEnv(key: string, fallback: number): number {
 // The Claude Agent SDK `effort` levels (guides thinking depth + overall token
 // spend). Lower effort → fewer/cheaper thinking tokens + terser output. NOTE:
 // `effort` is rejected by Haiku 4.5 — only models that accept it get it (see
-// review/agent.ts EFFORT_CAPABLE_MODELS).
+// review/model-options.ts EFFORT_CAPABLE_MODELS).
 const REVIEW_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ReviewEffort = (typeof REVIEW_EFFORTS)[number];
 function effortFromEnv(key: string, fallback: ReviewEffort): ReviewEffort {

@@ -1528,7 +1528,8 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // Request reviewers on a PR (powers the Insights "Assign reviewers" action). Server
+  // Request reviewers on a PR (powers each Pending routing card's per-suggestion "Assign"
+  // button, one reviewer per request — contract row in docs/API.md). Server
   // re-checks write access (WRITE/MAINTAIN/ADMIN — push-style, no author exclusion:
   // an author may request reviewers on their own PR). The given user ids are resolved
   // to GitHub logins (the PR author + bots + unknown ids dropped); GitHub itself gates

@@ -7,12 +7,7 @@ import {
   tool,
   type SDKResultMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { ClaudeFindingSide } from '@pierre-review/shared';
-import type {
-  ReviewFinding,
-  RunReviewArgs,
-  RunReviewResult,
-} from '../pro/contract.js';
+import type { RunReviewArgs, RunReviewResult } from '../pro/contract.js';
 import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
 import { applyClaudeReviewAuth } from './auth.js';
@@ -22,8 +17,9 @@ import {
   prepWorktree,
   removeWorktreeLocked,
 } from './clone-manager.js';
-import { buildAnchorIndex, extractHunk, isFindingAnchored } from './post-review.js';
+import { sdkModelOptions } from './model-options.js';
 import { estimateCostUsd } from './pricing.js';
+import { mapSubmittedReview } from './submit-map.js';
 import {
   recordUsage,
   sumModelUsage,
@@ -67,13 +63,9 @@ const WORKTREE_TOOLS = ['Read', 'Glob', 'Grep', 'mcp__review__submit_review'];
 // A DIFF-ONLY review is tool-less: the agent has the full diff in its prompt and no
 // repository to explore, so submit_review is the only tool it gets.
 const DIFF_ONLY_TOOLS = ['mcp__review__submit_review'];
-// Models that accept the `effort` option. Haiku 4.5 rejects it (the API 400s), so it runs
-// without an effort hint — its low per-token price is its cost lever instead.
-const EFFORT_CAPABLE_MODELS: ReadonlySet<string> = new Set([
-  'claude-sonnet-5',
-  'claude-opus-4-8',
-  'claude-sonnet-4-6',
-]);
+// Per-model effort + thinking options live in ./model-options.ts (ONE table, shared with
+// coding/agent.ts). ⚠ Opus 5.5 400s on disabled thinking, a thinking budget and a forced
+// tool_choice — none of which this run sends.
 // Deny list. `Bash` is denied OUTRIGHT rather than by command pattern — see WORKTREE_TOOLS
 // above for why a per-command blocklist is not a security boundary when the model's input is
 // attacker-authored. Belt and braces: Bash is also absent from the allow list, so this is the
@@ -159,12 +151,9 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       maxTurns = Math.ceil(maxTurns * config.reviewHaikuTurnMultiplier);
     }
     // Effort guides thinking depth + token spend — the dominant cost knob. Per-mode, and only
-    // for models that accept it (Haiku rejects `effort`; it runs unset).
-    const effort = EFFORT_CAPABLE_MODELS.has(model)
-      ? mode === 'diff_only'
-        ? config.reviewDiffOnlyEffort
-        : config.reviewEffort
-      : undefined;
+    // for models that accept it (Haiku rejects `effort`; it runs unset). Opus 5.5 also gets an
+    // explicit adaptive-thinking config (see model-options.ts).
+    const modelOptions = sdkModelOptions(model, mode);
 
     // Establish this run's auth (prefer ambient, strip an explicit key). The plugin decides
     // whether it's safe to mutate process.env (its concurrency === 1); restored in finally.
@@ -192,7 +181,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       prompt: args.prompt,
       options: {
         model,
-        ...(effort ? { effort } : {}),
+        ...modelOptions,
         systemPrompt: args.systemPrompt,
         cwd,
         permissionMode: 'bypassPermissions',
@@ -253,34 +242,13 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       return fail(reason, false);
     }
 
-    // ---- anchor ----
+    // ---- anchor (+ carry priorRef / followUp / ticket through verbatim) ----
     const payload: SubmitReviewPayload = captured;
-    const index = buildAnchorIndex(args.strippedDiff);
-    const findings: ReviewFinding[] = payload.findings.map((f) => {
-      const side: ClaudeFindingSide = f.side === 'LEFT' ? 'LEFT' : 'RIGHT';
-      const line = f.line ?? null;
-      return {
-        path: f.path,
-        line,
-        side,
-        severity: f.severity,
-        title: f.title,
-        body: f.body,
-        suggestion: f.suggestion ?? null,
-        diffHunk: extractHunk(args.strippedDiff, f.path, line, side),
-        anchored: isFindingAnchored(index, f.path, line, side),
-        // Whether the file is part of the PR diff at all — distinguishes an unanchored
-        // finding that posts inline on the file's first change from one that posts PR-level.
-        fileInDiff: index.has(f.path),
-      };
-    });
+    const mapped = mapSubmittedReview(payload, args.strippedDiff);
 
     return {
       submitted: true,
-      scope: payload.scopeUsed,
-      summary: payload.summary,
-      verdict: payload.verdict,
-      findings,
+      ...mapped,
       ...telemetry(),
       aborted: false,
     };

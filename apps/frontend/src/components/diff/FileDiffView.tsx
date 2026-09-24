@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type {
@@ -14,10 +14,12 @@ import {
   anchorRowFor,
   commentTarget,
   highlightDiffRows,
+  inlineThreadStartsOpen,
   isLockFile,
   lineRowIndex,
   parsePatch,
   patchLineCount,
+  revealScrollsFileHeader,
   splitDiffMarker,
   type DiffRow,
 } from '../../lib/diff.js';
@@ -35,7 +37,7 @@ import { SELECTED_BORDER, STATUS_META, UNSELECTED_BORDER } from './status.js';
 // commenting + the GitHub links are OPTIONAL: the AI-Fix changeset's files don't exist
 // on GitHub yet, so it passes neither. The Changes tab additionally passes its review
 // threads (`threadCtx`, resolved included) so they render inline at their diff line as
-// collapsed pills, like GitHub.
+// pills — unresolved open, resolved shut, like GitHub.
 //
 // The code is syntax-highlighted per file, language resolved from the PATH (`highlightDiffRows`
 // — two passes over the reconstructed old and new sides, because a unified diff is not valid
@@ -84,6 +86,15 @@ export interface DiffThreadContext {
   onThreadShown?: () => void;
   /** The return leg — open a thread in the Threads tab. Absent outside PrDetail's Changes tab. */
   onOpenThread?: (threadId: number) => void;
+  /**
+   * The reader's open/shut DECISIONS for the inline pills, keyed by thread id — a plain Map owned
+   * by PrDetail (`threadOpenMemory`), written by every open/close (click, reveal, posted
+   * self-focus) and read ONCE, when a pill mounts. Only decisions are recorded, never the default
+   * (`inlineThreadStartsOpen`). Mutated in place, never replaced: a click must re-render one pill,
+   * not the diff. It outlives the pill because a pill remounts on a file collapse, the Wrap toggle,
+   * an anchor move and the Changes → Threads → Changes round trip.
+   */
+  openMemory: Map<number, boolean>;
 }
 
 // THE outside-in "reveal this file/line" signal. There are exactly TWO focus grains in this
@@ -102,11 +113,11 @@ export interface DiffFocusTarget {
   // Which side of the diff the line number belongs to. Defaults to RIGHT (the new file).
   side?: 'LEFT' | 'RIGHT';
   // The review thread this reveal came FROM (a thread card's "In Changes"): the matching
-  // inline pill opens + flashes as part of the same reveal — every thread renders collapsed
-  // now, and a jump that lands beside a shut pill reads as a broken link. Consumed per
-  // `nonce`, never persistently: the focus target is STICKY in ChangesTab, and a sticky
-  // thread focus would yank the view back here after every posted-comment fade. Optional —
-  // file/line reveals (tree clicks, Claude Review findings) carry none.
+  // inline pill opens + flashes as part of the same reveal — a resolved thread starts shut, and
+  // the reader may have shut any other; a jump that lands beside a shut pill reads as a broken
+  // link. Consumed per `nonce`, never persistently: the focus target is STICKY in ChangesTab,
+  // and a sticky thread focus would yank the view back here after every posted-comment fade.
+  // Optional — file/line reveals (tree clicks, Claude Review findings) carry none.
   threadId?: number | null;
   nonce: number;
 }
@@ -273,16 +284,17 @@ function DiffLine({
   );
 }
 
-// One review thread rendered inline in the diff — EVERY thread starts as a one-line
-// collapsed pill (state dot + author + age + excerpt) that expands to the full ThreadCard in
-// place, the pill staying as the collapse header. One mechanism for all four states, resolved
-// merely quieter (no coloured border, dimmed, ✓ for the dot): the file-block auto-expand
-// already flags live discussion at file grain, the pill's state colour carries urgency at
-// line grain, and full cards at ~200–600px each are exactly the "eats the diff" failure this
-// replaces (a 47-unresolved-thread PR rendered ~47 cards interleaved in the hunks). Pills use
-// no hooks beyond local expand state — ThreadCard, with its shared per-PR annotation/ML
-// queries, mounts only on expand. Expansion is EPHEMERAL component state on purpose (no
-// store/URL field — the "derived, never written back" rule).
+// One review thread rendered inline in the diff: a one-line pill (state dot + author + age +
+// excerpt) that discloses the full ThreadCard in place, the pill staying as its collapse header.
+// UNRESOLVED threads (untouched / replied / likely addressed) start OPEN and RESOLVED ones start
+// SHUT (`inlineThreadStartsOpen`), so live discussion reads in place while settled ones stay out
+// of the way. It used to be every thread shut, against a 47-card wall. The volume guard is now:
+// resolved stays shut, a one-click Hide remembered per thread, the file chevron, and lock files,
+// which start collapsed whatever they hold. The OPEN STATE is the READER's (`ctx.openMemory`):
+// read once at mount, latched while mounted (a refetch that resolves the thread under the reader
+// does not snap it shut), and every open/close is written through so a remount restores it.
+// ThreadCard mounts only while open; its ML/annotation queries are one per PR and its reaction
+// bars batch per tick, so an open pill fetches nothing of its own. No store field, no URL.
 function InlineThread({
   thread,
   ctx,
@@ -309,9 +321,24 @@ function InlineThread({
    */
   consumedFocus?: MutableRefObject<number | null>;
 }): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null);
+  // The pill's HEADER is the scroll target, not the card: an open card can be taller than the
+  // pane, and `block: 'center'` on the whole card put its header above the fold.
+  const headerRef = useRef<HTMLButtonElement>(null);
   const focused = ctx.focusThreadId != null && ctx.focusThreadId === thread.id;
-  const [open, setOpen] = useState(false);
+  const memory = ctx.openMemory;
+  // Read ONCE, at mount — the reader's remembered decision, else the thread's CURRENT state.
+  const [open, setOpen] = useState(() => inlineThreadStartsOpen(thread, memory));
+  // EVERY open/close is a DECISION, written through so a remount restores it. Stable for the
+  // pill's life (PrDetail's one Map + this key's id) — and deliberately NOT in the reveal
+  // effect's deps: a re-run there hits the `consumed` early return AFTER its cleanup cancelled
+  // the fade timer, leaving the ring stuck on.
+  const decide = useCallback(
+    (next: boolean): void => {
+      setOpen(next);
+      memory.set(thread.id, next);
+    },
+    [memory, thread.id],
+  );
   // The deep-link flash (thread card → "In Changes"): timed like the diff-row flash, never
   // persistent — the focus target is sticky in ChangesTab, and a persistent thread focus
   // would yank the view back here after every later posted-comment fade.
@@ -321,8 +348,8 @@ function InlineThread({
   // must not snap shut when the highlight fades. Ring + scroll behaviour unchanged.
   useEffect(() => {
     if (!focused) return;
-    setOpen(true);
-    ref.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    decide(true);
+    headerRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     ctx.onThreadShown?.();
     // Only re-run when this thread becomes the focus target.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -334,15 +361,17 @@ function InlineThread({
       setFlash(false);
       return;
     }
-    // Already delivered — this is a REMOUNT (the file was collapsed and re-expanded), not a
-    // new reveal. Do nothing: the pill starts closed and unringed, exactly as the user left it.
+    // Already delivered — this is a REMOUNT, not a new reveal. Do nothing: the pill starts as
+    // the reader left it (openMemory), unringed.
     if (consumedFocus?.current === focusNonce) return;
     if (consumedFocus != null) consumedFocus.current = focusNonce;
-    setOpen(true);
-    ref.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    decide(true);
+    headerRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     setFlash(true);
     const t = setTimeout(() => setFlash(false), FOCUS_HIGHLIGHT_MS);
     return () => clearTimeout(t);
+    // `decide` is stable for the pill's life and deliberately left out (see its comment).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNonce, consumedFocus]);
 
   const meta = DERIVED_STATE_META[thread.derivedState];
@@ -362,10 +391,11 @@ function InlineThread({
   const ringed = focused || flash;
 
   return (
-    <div ref={ref} className={`rounded font-sans ${ringed ? 'ring-2 ring-amber-400/70' : ''}`}>
+    <div className={`rounded font-sans ${ringed ? 'ring-2 ring-amber-400/70' : ''}`}>
       <button
+        ref={headerRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => decide(!open)}
         // A disclosure, like the tree's dir rows: the ⌄/⌃ glyph is visual-only, so without
         // this a screen reader hears a state description on a button whose action is unstated.
         aria-expanded={open}
@@ -841,7 +871,9 @@ function FileDiffBlock({
 
   // Language-aware colouring for the whole file's rows, in ONE two-pass lexer run (see
   // `highlightDiffRows`). Memoised beside `rows` because it is the expensive part: the inline
-  // comment box opening, a thread pill expanding and the ~5s PR poll all re-render this block.
+  // comment box opening and a data refetch re-render this block (a pill toggle re-renders only
+  // the pill; a ~5s poll tick that leaves the threads alone no longer reaches here, see the memo
+  // on FileDiffView).
   // Null — an unlisted extension, a patch past the line gate, a lexer that threw — means every row
   // renders as plain text, which is what this diff looked like before.
   //
@@ -880,11 +912,16 @@ function FileDiffBlock({
     if (focus == null) return;
     setExpanded(true);
     // No addressable row (file-level target, a line that isn't in the current diff, or a
-    // binary/too-large file) ⇒ reveal the FILE. Never do nothing.
-    if (focusRow == null) {
+    // binary/too-large file) ⇒ reveal the FILE. Never do nothing. EXCEPT when the reveal names a
+    // thread this block renders: its pill scrolls its own header (in this commit, or on mount in
+    // the next if the file was shut), and this effect runs AFTER the pill's (child-first), so a
+    // header scroll here would cancel it — see `revealScrollsFileHeader`. That also makes a
+    // same-nonce re-run (a new `focus` object, same reveal) a no-op rather than a jump back up.
+    if (revealScrollsFileHeader(focus, focusRow, threadCtx != null ? threads : [])) {
       blockRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
-    // focusRow is derived from `focus`; re-running on it would double-scroll.
+    // focusRow is derived from `focus`; re-running on it would double-scroll. `threads` and
+    // `threadCtx` are read as they stand when the reveal arrives — a refetch is not a reveal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus]);
 
@@ -898,6 +935,27 @@ function FileDiffBlock({
   const meta = STATUS_META[file.status];
   const path = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
   const githubUrl = file.githubUrl ?? null;
+
+  // The two no-table branches (binary / too large, and an empty textual diff) still list every
+  // thread — the same pill unit as the table path, in a <div> instead of a row. A thread never
+  // disappears, and `revealScrollsFileHeader` relies on it: it hands the scroll to the target's
+  // pill whenever the thread belongs to this block, so a branch that dropped the pills would turn
+  // an "In Changes" jump into no scroll at all.
+  const fileGrainPills =
+    threadCtx && threads.length > 0 ? (
+      <div className="mt-2 space-y-1 text-left">
+        {threads.map((t) => (
+          <InlineThread
+            key={t.id}
+            thread={t}
+            ctx={threadCtx}
+            fileChip
+            focusNonce={focus != null && focus.threadId === t.id ? focus.nonce : null}
+            consumedFocus={consumedThreadFocus}
+          />
+        ))}
+      </div>
+    ) : null;
 
   return (
     // The same 2px sky line the rail's selected row carries, so a click marks the file in the
@@ -978,28 +1036,12 @@ function FileDiffBlock({
               ) : (
                 'Binary file — no textual diff.'
               )}
-              {/* Even without a textual diff, surface any threads so they aren't lost — the
-                  same collapsed pill as the table path, wrapped in a <div> instead of a row. */}
-              {threadCtx && threads.length > 0 && (
-                <div className="mt-2 space-y-1 text-left">
-                  {threads.map((t) => (
-                    <InlineThread
-                      key={t.id}
-                      thread={t}
-                      ctx={threadCtx}
-                      fileChip
-                      focusNonce={
-                        focus != null && focus.threadId === t.id ? focus.nonce : null
-                      }
-                      consumedFocus={consumedThreadFocus}
-                    />
-                  ))}
-                </div>
-              )}
+              {fileGrainPills}
             </div>
           ) : rows.length === 0 ? (
             <div className="px-3 py-3 text-center text-xs text-gray-500 dark:text-gray-400">
               No textual diff for this file.
+              {fileGrainPills}
             </div>
           ) : (
             <DiffTable rows={rows} wrap={wrap}>
@@ -1061,8 +1103,17 @@ function FileDiffBlock({
 
 // Render a list of changed files. Pass `commenting:{prId}` to enable the Changes-tab
 // inline-comment affordances (omit it — AI Fix — for a read-only view), and `threadCtx`
-// to render review threads inline at their diff line as collapsed pills.
-export function FileDiffView({
+// to render review threads inline at their diff line as pills (unresolved open, resolved shut).
+//
+// ⚠ MEMOISED, and ChangesTab keeps every prop it passes stable (`threadCtx`, `commenting`,
+// `focus`, `files`). PrDetail re-renders at least twice per ~5s poll tick (`isRefreshing` flips)
+// and ChangesTab on every rail-drag frame. Unmemoised, each of those repainted every diff row and,
+// since unresolved threads start open, every open ThreadCard (532 on the largest real PR). A new
+// unstable prop silently switches this off. Nothing fails; it just gets slow — which is why
+// `test/inlineThreadOpen.test.ts` pins `threadCtx`'s dependencies from source (it once missed on
+// every CI/merge-state refetch through a caller callback closing over the whole `pr`: 1.3–1.5s of
+// long tasks per tick). The AI Fix tab's two mounts pass only `files`; memo is harmless there.
+export const FileDiffView = memo(function FileDiffView({
   files,
   commenting,
   threadCtx,
@@ -1136,4 +1187,4 @@ export function FileDiffView({
       ))}
     </div>
   );
-}
+});

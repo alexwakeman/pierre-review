@@ -135,7 +135,7 @@ active workspace's repos**:
 
 ```
 ⚠ Pending             always (CORE/free) — THE default landing, the ranked worklist
-✦ Feed                always — BriefStrip on top; a Feed link carries ?activityRepo=feed
+✦ Feed                always — the stream alone; a Feed link carries ?activityRepo=feed
 🤖 Bots               always (CORE/free)
 ◈ Reports             always — FREE flow metrics above the PRO period report
 ── repos ──           flat: no grouping headers, no colour dots, no "Other" bucket
@@ -195,8 +195,7 @@ set from PrDetail's "Show in Activity feed" button or a drill-down, dismissible 
 console, under the "Review bots" header in `BotsView` (bot-only "Show in feed" lands there), and in
 the empty-workspace fallback branch — so it's present in every context isolation can reach (never
 sticky; scrolls with content). When isolated, that view also **hides the repo-wide charts +
-open-PR list**: RepoConsole drops `RepoInsightsPanel`/`RepoOpenPrList`, and `FeedView` drops its own
-cross-repo `FeedOpenPrsPanel`. `FeedView` still reads `feedIsolatedPrId` only to scope its query.
+open-PR list**: RepoConsole drops `RepoInsightsPanel`/`RepoOpenPrList`. `FeedView` still reads `feedIsolatedPrId` only to scope its query.
 The feed-wide **"New activity — Refresh" banner is GONE**: newly-arrived items are spliced into
 the list as they land, each marked with a per-card "New" chip until the reader has seen it
 (`feedNewCohorts` — the rules live in [FRONTEND](FRONTEND.md) § "The Activity Feed auto-inserts").
@@ -895,7 +894,7 @@ set" grain — per-feature endpoints are exactly what the plan's D3 forbids. The
   completely unparseable output **502s** — the deterministic list stays primary and the spend is
   already on the ledger. **ORDERING mode never 502s on a weak parse**: each item is an input ref
   + a phrase that must be **DIGIT-FREE** (regex-validated); an invalid item (unknown/repeated
-  ref, any digit) is dropped and its strip line renders TEMPLATED; an entirely unparseable
+  ref, any digit) is dropped and its line renders TEMPLATED; an entirely unparseable
   output is an empty list, STORED so the click doesn't loop-bill. `'person'` swaps only the
   system prompt (prep-not-scoring register) — brief/rollup prompts stay byte-identical, no
   `SYNTHESIS_PROMPT_VERSION` churn. **SECTIONS mode never 502s either** (see § "The People
@@ -922,7 +921,8 @@ set" grain — per-feature endpoints are exactly what the plan's D3 forbids. The
 - **Cost discipline + the TOCTOU fix.** The digest/themes stack: per-account in-flight guard →
   min-interval → credit gate → payload-hash $0 cache → `recordAiUsage` on real generation only.
   ⚠ **The in-flight slot is claimed SYNCHRONOUSLY — no `await` may sit between the `has()` and
-  the `add()`.** `BriefStrip` fires the brief + rollup POSTs in one render cycle; with an await
+  the `add()`.** Two POSTs can land in one render cycle (the deleted `BriefStrip` fired the brief +
+  rollup pair); with an await
   in that gap both pass the check, both miss the not-yet-written hash cache, and both bill. The
   credit check therefore runs INSIDE the `try/finally` (a blocked call holds the guard only for
   that one lookup; the `finally` releases on every path). The min-interval is armed only when
@@ -969,6 +969,7 @@ default-branch head columns, and a NARROW volume-only anomaly slice (deliberatel
 behaviour compute — that is priced for an explicit Pro tab open, not an every-morning free
 strip). Never a re-derivation that can disagree with the surface it links to. Rate tier
 `search`, pinned. The Pro narration is the synthesis seam's ordering kinds (`'brief'`/`'rollup'`)
+— DORMANT since the Feed's strip was deleted: the plugin still serves them, no SPA surface asks
 — this route never touches AI and never carries cost/money (§8.18: the rollup loops per
 workspace).
 
@@ -1014,11 +1015,9 @@ addition, so **`apiVersion` stays 21** and an older plugin simply never reads th
   Counted after the 50-card slice any of them would be bounded by 50 and stop being a total.
 - **The split is MUTUALLY EXCLUSIVE and EXHAUSTIVE**, at both grains:
   `direct + maintained + other === myTurn(Total)` and `direct + maintained === myTurnPersonal
-  (Total)`. So the daily brief renders **TWO lines that never double-count** — "N need your
-  attention" (`myTurnPersonal`, the interrupting population) and "M need review or reply"
-  (`myTurnOther`) — and each opens a board filtered to ITS OWN number. Notifications keep counting
-  `myTurnPersonal`; the banner shows the split ("2 yours · 3 in your repos") off `myTurnDirect` and
-  `myTurnMaintained`.
+  (Total)`. Notifications and the Workspace badges count `myTurnPersonal`; the banner shows the
+  split ("2 yours · 3 in your repos") off `myTurnDirect` and `myTurnMaintained`. (`myTurnOther` was
+  the deleted Feed brief strip's "M need review or reply" line; it is still sent, with no reader.)
 - ⚠ **THE PAIR MUST BE NARROW-WITH-NARROW, AND NO COUNT MAY BE A SUBTRACTION.**
   `myTurnCapDisclosure` fires only when the displayed figure EQUALS the count it qualifies, so a
   narrow line borrowing `myTurnTotal` as its denominator would both mix two populations in one row
@@ -1066,15 +1065,17 @@ card. **TWO ARMS, carried on one kind by `CiFailingCard.arm`:**
   trunk red"* — trunk CI is non-monotone, 21% of `branch_commits` rows are ciStatus `unknown`, and
   chronically-red repos have no streak start, so honest transition attribution needs a NEW
   append-only per-commit table plus a sync step.
-- ⚠ **`ciFailing` AND `trunkRed` ARE TWO LINES, NOT ONE.** `trunkRed` names EVERY red trunk in the
-  workspace and each of its lines opens that repo's console; `ciFailing` counts the subset that is
-  YOURS plus your own red PRs and opens the board isolated to `ci_failing`. Folding either into the
-  other gives one of them a list its number does not match. What the reader PROMOTED into My Turn
+- ⚠ **`ciFailing` AND `trunkRed` ARE TWO POPULATIONS, NOT ONE.** `trunkRed` names EVERY red trunk
+  in the workspace; `ciFailing` counts the subset that is YOURS plus your own red PRs (the
+  `ci_failing` cards). Folding either into the other gives one of them a number its list does not
+  match. (Both are still sent on the daily brief with no SPA reader since its Feed strip was
+  deleted.) What the reader PROMOTED into My Turn
   (Settings → My Turn) leaves them: a promoted red build leaves `ciFailing`, a promoted red trunk
   leaves both (`trunkRed` drops `myTurnTrunkRepoIds` before its cap), and each is counted once, in
   `myTurn`.
 - **Cap:** it shares `INSIGHT_CARD_CAP` (15) with the survey kinds but, like `my_turn`, DISCLOSES
-  it (`ciFailingTotal` + `ciFailingCapDisclosure`) — a worklist the viewer clears may not be
+  it (`ciFailingTotal`; the board states its cut with `capSentence` — the brief-line rule was
+  deleted with the strip) — a worklist the viewer clears may not be
   silently capped. Everything is trailing-optional, so **`apiVersion` stays 21**.
 - **The plugin side:** `insightsHash` gets an explicit `ci:<arm>:<repoId>:<sha|prId>` case, and the
   sprint-report payload loop an explicit `continue`. ⚠ That `continue` is load-bearing — falling
@@ -1220,13 +1221,35 @@ straight back on the 404. Serving the files is the only ground truth; it is spel
 ⚠ `FRONTEND_PORT` is read by `apps/frontend/vite.config.ts` TOO, so the dev server's port and the
 link move together — `scripts/demo-stack.mjs` passes it (`:5273`) for the same reason. Pinned by
 `apps/backend/src/config-app-web-url.test.ts` (6 cases, mutation-checked: 4 go red if the
-`serverServesSpa` branch is removed). The message carries a header
-workspace link (`?view=activity&workspace=<id>`) and per-repo section links
-(`&activityRepo=<repoId>`); absent the seam every builder returns null and the digest simply has no
-app links. ⚠ **The per-PR references stay github.com links** (`slack/format.ts`) — a per-PR app link
-needs a LOCAL pr id, and format.ts holds only `repoFullName` + `prNumber`, which resolves to a
-local id only within `(accountId, repoId)`. They also serve a reader with no app account, which is
-most of a Slack channel.
+`serverServesSpa` branch is removed). The message carries a footer workspace link
+(`?view=activity&workspace=<id>&activityRepo=feed`), per-repo heading links
+(`&activityRepo=<repoId>`) and per-PR links. **Every link in the message points into Limn.** A PR
+reference is `?workspace=<id>&view=pr-detail%3A<prId>`: the SPA's own tab-key vocabulary, built from
+the LOCAL `prId` the resolved ref carries, and pinned by a source scan in `slack-pr-links.test.ts`.
+The github.com rule was reversed at the user's request. A reader with no access to this Limn gets
+its sign-in page (cloud) or an unreachable host (local). Absent the seam every builder returns null
+and every link is plain text — never a GitHub fallback.
+
+⚠ **Resolution stays repo-aware.** A qualified `owner/name#N` resolves by exact key only. A bare
+`#N` resolves only within the section's repo or the current `**owner/name**` heading, never across
+repos. Sprint refs are narrowed to the workspace's repos.
+
+The first mention of a PR in a line reads `#123 Title by @login`. The repo prefix is dropped under
+the PR's own heading. The title is capped at 80 characters and not repeated if the line already has
+it. A repeat mention in the same line is a bare link. ⚠ A line naming FOUR or more titled PRs
+(`LIST_MIN_REFS`) keeps its numbers as plain text and lists each PR on its own indented
+`◦ <url|#N Title> by @login` line beneath it: the digest prompt puts a whole theme on one bullet,
+and twenty inline references made a line longer than a Slack section, which was cut mid-list and
+pushed the next bullet out of the repo's two sections. The list lets a split fall between
+references. An unknown part is omitted. With no base URL
+or no local id the reference is plain text. Digest sections re-resolve with
+`resolvePrRefs(…, {includeClosed: true})`, because the open-only filter is the SPA table's rule.
+Titles and authors are read at send time and never enter a payload hash.
+
+Model text and titles are Slack-escaped, and every mrkdwn object is `verbatim: true`. Any github.com
+URL the model writes is rewritten: a PR or issue URL becomes its `owner/name#N` token, and anything
+else becomes plain text. Sections split at line boundaries (`fitSections`): up to 3 for the sprint
+and 2 per repo, inside a 48-block budget. A cut never lands inside a link.
 
 **Rate limits, erasure, secrets.** `PUT`/`DELETE /api/pro/slack/target` is a SETTINGS WRITE on
 `read` (one upsert or one delete, no model, no GitHub) and `POST /api/pro/slack/test` stays on

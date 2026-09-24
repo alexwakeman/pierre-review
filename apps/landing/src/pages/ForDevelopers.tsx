@@ -407,8 +407,7 @@ export default function ForDevelopers(): JSX.Element {
                   The stream
                 </h3>
                 <p className="text-list text-ink-body">
-                  One chronological feed across every repository in the workspace, under a
-                  daily brief of counts, each line a link to what it counts. Automated
+                  One chronological feed across every repository in the workspace. Automated
                   accounts are left out until you ask for them, with lenses for red builds and
                   for the kinds of pull-request event you care about.
                 </p>
@@ -432,8 +431,8 @@ export default function ForDevelopers(): JSX.Element {
                 </h3>
                 <p className="text-list text-ink-body">
                   Whether each repository&rsquo;s default branch is green, the checks that are
-                  failing on it, and what landed there last — above the feed, for every
-                  repository in the workspace.
+                  failing on it, and what landed there last, for every repository in the
+                  workspace.
                 </p>
               </div>
             </div>

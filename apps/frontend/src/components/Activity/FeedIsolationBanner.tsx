@@ -10,7 +10,8 @@ import { FilterIcon } from '../Icons.js';
 export function FeedIsolationBanner(): JSX.Element | null {
   const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
   const setFeedIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
-  // WORKSPACE-WIDE open-PRs cache (shared with FeedOpenPrsPanel) resolves the isolated PR's number
+  // WORKSPACE-WIDE open-PRs cache (shared with FeedOpenPrsPanel on Pending → My turn, and
+  // OpenPrsDetail) resolves the isolated PR's number
   // + title for the label. Deliberately NOT the timeline-scoped `useSearchOpenPrs`: Members AND
   // the repo picker are both Timeline-only filters, and a board narrowed to other repos would hide
   // the very PR this banner is naming — leaving it stuck on the generic "the selected PR".

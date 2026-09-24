@@ -6630,6 +6630,8 @@ export async function getWorkspaceInsights(
         ...prRef(p, standingsByPr.get(p.id)),
         topPaths: (p.files ?? []).map((f) => f.path).slice(0, 5),
         suggestedReviewers: [],
+        // VISIBILITY gate for the per-suggestion Assign (the route re-checks) — the merge cards' rule.
+        viewerCanPush: writableRepoIds.has(p.repoId),
       });
     }
     return finish();
@@ -6649,6 +6651,7 @@ export async function getWorkspaceInsights(
         ...prRef(p, standingsByPr.get(p.id)),
         topPaths: paths.slice(0, 5),
         suggestedReviewers: suggestions,
+        viewerCanPush: writableRepoIds.has(p.repoId),
       });
     }
   }

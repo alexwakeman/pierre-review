@@ -508,6 +508,44 @@ export interface ReviewFinding {
   diffHunk: string | null;
   anchored: boolean;
   fileInDiff: boolean;
+  // The ref ('P1'…) of the previous-review finding this one RE-RAISES, verbatim from the model
+  // (the plugin validates it against the refs it sent). Absent/null otherwise.
+  // ⚠ OPTIONAL, SO apiVersion STAYS 21.
+  priorRef?: string | null;
+}
+
+// ---- Follow-up + user-story reports (host→plugin RESULT fields) ----
+// ⚠ OPTIONAL, SO apiVersion STAYS 21. These are host→plugin result fields; an older host omits
+// them and the plugin records every item not_checked. They are passed through VERBATIM from the
+// model's submit_review payload — the plugin validates coverage (each ref once, unknown refs
+// dropped, missing refs 'not_checked', never an invented 'addressed').
+export interface ReviewFollowUpReport {
+  ref: string;
+  status: 'addressed' | 'partly_addressed' | 'not_addressed' | 'no_longer_applies';
+  explanation: string;
+}
+
+export interface ReviewTicketItemReport {
+  ref: string;
+  status: 'met' | 'partly_met' | 'not_met' | 'unclear';
+  explanation: string;
+  path?: string | null;
+  line?: number | null;
+}
+
+export interface ReviewTicketGapReport {
+  title: string;
+  explanation: string;
+  path?: string | null;
+  line?: number | null;
+}
+
+export interface ReviewTicketReport {
+  alignment: 'aligned' | 'partly_aligned' | 'not_aligned' | 'unclear';
+  summary: string;
+  criteria?: ReviewTicketItemReport[];
+  missing?: ReviewTicketGapReport[];
+  notRequested?: ReviewTicketGapReport[];
 }
 
 export interface RunReviewArgs {
@@ -542,6 +580,10 @@ export interface RunReviewResult {
   cacheCreationTokens: number;
   numTurns: number | null;
   aborted: boolean;
+  // ⚠ OPTIONAL, SO apiVersion STAYS 21 (see ReviewFollowUpReport). Present only when the model
+  // reported them — i.e. when the prompt carried a "Previous review" / "User story or task" block.
+  followUp?: ReviewFollowUpReport[];
+  ticket?: ReviewTicketReport;
 }
 
 // The ticked findings the plugin hands to postReview (the plugin read them from the core
@@ -1051,8 +1093,8 @@ export interface ProContext {
     deploymentMode: 'local' | 'cloud';
     isCloud: boolean;
     // WHERE A HUMAN'S BROWSER REACHES THE SPA, no trailing slash (core config.ts `appWebUrl`).
-    // The plugin builds DEEP LINKS back into the SPA from it — today, the workspace + per-repo
-    // links in the Slack digest.
+    // The plugin builds DEEP LINKS back into the SPA from it — today, EVERY link in the Slack
+    // digest and sprint report: the workspace, each repo heading and each PR.
     //
     // ⚠ THIS IS `appWebUrl`, NOT `appBaseUrl`, AND THE DIFFERENCE IS LOAD-BEARING. `appBaseUrl`
     // is the API origin: it builds the OAuth `redirect_uri` and is the exact CORS allowlist entry

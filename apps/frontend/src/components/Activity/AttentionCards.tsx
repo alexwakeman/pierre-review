@@ -18,6 +18,7 @@ import type {
   MyTurnTrunkCard,
   PrAutomation,
   ReviewerRoutingCard,
+  ReviewerSuggestion,
   ReviewStanding,
   SecurityAlert,
   SecurityCard,
@@ -33,7 +34,13 @@ import {
   mergePrMutationKey,
   updateBranchMutationKey,
   useRequestReviewers,
+  useReviewerRequestState,
 } from '../../hooks/usePrWrites.js';
+import {
+  reviewerRequestBody,
+  reviewerSuggestionKey,
+  reviewerSuggestionLabel,
+} from '../../lib/reviewerRequest.js';
 import { usePrArmedIntent, usePrStoppedIntent } from '../../hooks/useAutoMerge.js';
 import { useDismissMyTurn } from '../../hooks/useMyTurnDismiss.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
@@ -214,8 +221,8 @@ export function pendingQueueBadge(
  * in words — 'direct' ("Your turn") and 'maintained' ("In your repos") are drawn heavier and
  * darker, everything else keeps the quiet kind label.
  *
- * ⚠ BOTH TIERS, TOGETHER. `myTurnPersonal`, the Workspace badges, the "Elsewhere" rows and the
- * browser notification all count `relevance !== 'none'` — direct AND maintained as ONE population.
+ * ⚠ BOTH TIERS, TOGETHER. `myTurnPersonal`, the Workspace badges and the browser notification
+ * all count `relevance !== 'none'` — direct AND maintained as ONE population.
  * Emphasising only 'direct' would put a different population on screen from the one every badge
  * counts, which is the count-vs-list mismatch this whole feature family exists to prevent.
  *
@@ -1045,9 +1052,12 @@ function InsightThread({ card }: { card: UntouchedThreadCard }): JSX.Element {
   return <ThreadCard thread={thread} usersById={usersById} prUrl={prUrl} repoId={card.repoId} />;
 }
 
-// Suggested reviewers + rationale + a single "Assign" button that requests them on the PR
-// (server-gated on write access; drops the author + bots). Once requested, ['workspace-insights'] +
-// ['attention-cards'] are invalidated → the card leaves the board on the next refresh.
+// Suggested reviewers + rationale, each row with its OWN Assign that requests just that reviewer (the
+// old "Assign all" asked everyone at once; picking WHO is the action). HIDE, never disable: no button
+// where the row names nobody addressable or the viewer cannot push (`card.viewerCanPush`, the WRITE set
+// the route re-checks). Row state lives in the MUTATION CACHE (useReviewerRequestState), because a
+// Pending tab switch remounts the card; the board refresh waits for the last request on the PR
+// (requestReviewersOptions) so one row's success cannot retire the card under a sibling in flight.
 //
 // ⚠ EVERY "team" BELOW IS GITHUB'S OWN, not a Limn Workspace: `ReviewerSuggestion.kind === 'team'`
 // carries an `@org/team` slug that addresses GitHub's review-request API. The word must NOT be
@@ -1058,67 +1068,94 @@ function RoutingReviewers({
 }: {
   card: ReviewerRoutingCard;
   usersById: Map<number, User>;
-}): JSX.Element {
-  const request = useRequestReviewers(card.prId);
+}): JSX.Element | null {
   const suggestions = card.suggestedReviewers;
-  const userIds = suggestions
-    .filter((s) => s.kind === 'user' && s.userId != null)
-    .map((s) => s.userId as number);
-  const logins = suggestions
-    .filter((s) => s.kind === 'user' && s.userId == null && s.login != null)
-    .map((s) => s.login as string);
-  const teamSlugs = suggestions
-    .filter((s) => s.kind === 'team' && s.teamSlug != null)
-    .map((s) => s.teamSlug as string);
-  const done = request.isSuccess;
-  const keyOf = (s: (typeof suggestions)[number]): string =>
-    s.kind === 'team' ? `team:${s.teamSlug}` : `user:${s.login ?? s.userId}`;
+  // Past routingSuggestCap nobody was looked up, and a lookup can find nobody — either way there is
+  // nothing to show (the guide states the cap). The old empty header + disabled button is gone.
+  if (suggestions.length === 0) return null;
   return (
-    <div className="mt-1.5 space-y-1.5">
-      <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-        <span className="font-medium">Suggested reviewers</span>
-        <button
-          type="button"
-          onClick={() => request.mutate({ userIds, logins, teamSlugs })}
-          disabled={request.isPending || done || suggestions.length === 0}
-          className="rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
-          title="Request these reviewers on GitHub"
-        >
-          {done ? (
-            <>
-              <CheckIcon size={11} className="inline-block align-[-0.1em]" /> Requested
-            </>
-          ) : request.isPending ? (
-            'Assigning…'
-          ) : (
-            `Assign${suggestions.length > 1 ? ' all' : ''}`
-          )}
-        </button>
+    // data-noactivate: CardShell opens the PR on any other click; a click that just misses a button
+    // here must not navigate away mid-request (the PendingMergeActions rule).
+    <div className="mt-1.5 space-y-1" data-noactivate>
+      <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+        Suggested reviewers
       </div>
       <ul className="space-y-1">
         {suggestions.map((s) => (
-          <li key={keyOf(s)} className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-            {s.kind === 'team' ? (
-              <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium">
-                @{s.teamName}
-              </span>
-            ) : s.userId != null ? (
-              <UserChip id={s.userId} usersById={usersById} />
-            ) : (
-              <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px]">
-                @{s.login}
-              </span>
-            )}
-            <span className="text-gray-400">{s.reason}</span>
-          </li>
+          <RoutingReviewerRow
+            key={reviewerSuggestionKey(s)}
+            prId={card.prId}
+            suggestion={s}
+            viewerCanPush={card.viewerCanPush}
+            usersById={usersById}
+          />
         ))}
       </ul>
-      {request.isError && (
-        <div className="text-[11px] text-red-500">
-          {(request.error as Error)?.message ?? 'Couldn’t request reviewers.'}
-        </div>
-      )}
     </div>
+  );
+}
+
+// ONE suggestion: chip, reason, and an Assign that asks this reviewer and nobody else. Its own mutation
+// instance, so two rows may be in flight at once; its state read back off the shared row key.
+function RoutingReviewerRow({
+  prId,
+  suggestion: s,
+  viewerCanPush,
+  usersById,
+}: {
+  prId: number;
+  suggestion: ReviewerSuggestion;
+  viewerCanPush: boolean;
+  usersById: Map<number, User>;
+}): JSX.Element {
+  const reviewerKey = reviewerSuggestionKey(s);
+  const body = viewerCanPush ? reviewerRequestBody(s) : null; // null ⇒ no button at all
+  const request = useRequestReviewers(prId, reviewerKey); // this row's own mutation
+  const state = useReviewerRequestState(prId, reviewerKey); // read off the shared key
+  const who = reviewerSuggestionLabel(s, usersById);
+  return (
+    <li
+      data-testid="suggested-reviewer"
+      className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400"
+    >
+      {s.kind === 'team' ? (
+        <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium">
+          @{s.teamName}
+        </span>
+      ) : s.userId != null ? (
+        <UserChip id={s.userId} usersById={usersById} />
+      ) : (
+        <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px]">
+          @{s.login}
+        </span>
+      )}
+      <span>{s.reason}</span>
+      {body != null &&
+        (state.status === 'success' ? (
+          <span
+            role="status"
+            className="ml-auto inline-flex items-center gap-1 font-medium text-green-700 dark:text-green-400"
+          >
+            <CheckIcon size={11} className="inline-block align-[-0.1em]" /> Requested
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => request.mutate(body)}
+            disabled={state.status === 'pending'}
+            aria-label={state.status === 'pending' ? `Assigning ${who}` : `Assign ${who}`}
+            title={`Ask ${who} to review this PR on GitHub`}
+            className="ml-auto rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
+          >
+            {state.status === 'pending' ? 'Assigning…' : 'Assign'}
+          </button>
+        ))}
+      {body != null && state.status === 'error' && (
+        <span role="alert" className="basis-full text-[12px] text-red-600 dark:text-red-400">
+          {state.error}
+        </span>
+      )}
+    </li>
   );
 }
 

@@ -27,7 +27,8 @@ const OPEN_PRS_PAGE = 10;
 
 // One open-PR row: CI dot · ⚠ needs-attention · #number title · author · draft / approval /
 // merge chips · thread-state bar · my-turn reason or updated-time. Shared by the single-repo
-// RepoOpenPrList and the Feed's repo-grouped "open PRs" panel, so both read identically.
+// RepoOpenPrList and the workspace's repo-grouped "Open PRs" panel (Pending → My turn), so both
+// read identically.
 // Clicking the row opens the PR's own full-height pr-detail tab (its Show/Focus links then
 // drive the timeline; a PR-detail button isolates the feed if wanted).
 export function OpenPrRow({
@@ -91,8 +92,11 @@ export function OpenPrRow({
             end: on a real list "Jason Grout" started 130px right of "Benedict Chacko", and the
             status chips never lined up with each other at all. Ten rows of that reads as noise.
             A cell renders EMPTY rather than collapsing (the status column especially, which most
-            rows do not fill) — that is what holds the columns still. */}
-        <span className="flex w-36 shrink-0 items-center gap-1.5 overflow-hidden">
+            rows do not fill) — that is what holds the columns still.
+            ⚠ The author column hides below `sm`, like the time column: at phone width the pinned
+            cells (144 + 112 + the bar) left the flexible title ZERO pixels, so every row read as
+            an author and a chip with no PR in it. */}
+        <span className="hidden w-36 shrink-0 items-center gap-1.5 overflow-hidden sm:flex">
           <Avatar user={author} size={16} />
           <span
             className="truncate text-gray-500 dark:text-gray-400"
@@ -150,7 +154,7 @@ export function OpenPrRow({
 }
 
 // A <ul> of the first OPEN_PRS_PAGE open-PR rows, shared by the per-repo list and the
-// cross-repo Feed panel (one instance per repo group). `prs` must ALREADY be sorted by the
+// workspace panel on Pending → My turn (one instance per repo group). `prs` must ALREADY be sorted by the
 // caller (sortOpenPrsByActivity). Anything beyond the first page lives in the all-open-PRs
 // drill-down tab — the footer's "Show all N" calls `onShowAll` (the caller opens the tab with
 // its own scope). Clicking a row opens the PR's own pr-detail tab. `keyPrefix` keeps React
@@ -227,8 +231,10 @@ export function OpenPrRows({
 }
 
 // A compact, at-a-glance list of a repo's OPEN PRs, shown ABOVE the repo's activity feed.
-// COLLAPSED BY DEFAULT (persisted, mirroring the cross-repo Feed panel) — the repo view
-// opens on its feed with this list one click away. Ordered by sortOpenPrsByActivity
+// COLLAPSED BY DEFAULT (persisted) because it sits ABOVE the repo's feed: the repo view opens on
+// its feed with this list one click away. ⚠ Deliberately NOT the workspace panel's default — that
+// one is OPEN, because it is the whole content of a view the reader chose to open (see
+// store/digestCollapse.ts). Do not make the two match. Ordered by sortOpenPrsByActivity
 // (maintainer-authored first, then recency, then volume) and paginated (OpenPrRows).
 // Clicking a PR opens its own pr-detail tab.
 export function RepoOpenPrList({

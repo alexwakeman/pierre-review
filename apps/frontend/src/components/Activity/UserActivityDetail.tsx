@@ -101,8 +101,8 @@ export function UserActivityDetail(): JSX.Element {
           workspace has never seen this person act. */}
       <PersonPeriodSection userId={userId} />
 
-      {/* The feed itself — the shared FeedView, scoped to this one actor. It drops its
-          cross-repo Open-PRs panel and the "seen" marker under a userIds scope. */}
+      {/* The feed itself — the shared FeedView, scoped to this one actor. It skips the
+          server "seen" marker, the new-item auto-insert and the "New" marker under a userIds scope. */}
       <UserFeed userId={userId} />
     </div>
   );

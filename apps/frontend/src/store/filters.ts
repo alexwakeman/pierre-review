@@ -256,11 +256,16 @@ export interface SyncRoundState {
 //              PRs in repos you maintain.
 //   'others' — `relevance === 'none'`: the review-or-reply backlog nobody named you for.
 //
-// ⚠ THE TWO VALUES PARTITION `my_turn`, so the daily brief's two lines are MUTUALLY EXCLUSIVE
-// and each opens a board filtered to ITS OWN number. That is the entire reason this is not a
+// ⚠ THE TWO VALUES PARTITION `my_turn` (the deleted daily-brief strip's two lines were MUTUALLY
+// EXCLUSIVE, each opening a board filtered to ITS OWN number). That is the entire reason this is not a
 // boolean: "personal only" and "not personal only" are not expressible as one flag plus its
 // negation while `null` (show everything) also has to be a state.
 export type AttentionRelevanceLens = 'mine' | 'others';
+
+// My turn's two VIEWS on the Pending board: 'cards' (the My turn list) and 'branches' (the
+// workspace's default-branch strip + its open PRs, moved off the Feed). A client view inside the
+// `my_turn` tab — NOT a PENDING_TABS member and not an InsightKind.
+export type MyTurnView = 'cards' | 'branches';
 
 // ── The Feed's "new since you looked away" cohorts ────────────────────────────────────────────
 //
@@ -471,7 +476,8 @@ export interface FilterState {
   // and is read back never.
   feedCiLens: FeedCiLens;
   // Activity "Feed" single-PR isolation: null (default) → every PR in scope; a pr id →
-  // the consolidated Feed shows ONLY that PR's items. Driven by the Feed "open PRs" panel.
+  // the consolidated Feed shows ONLY that PR's items. Set from PrDetail's "Show in Activity feed"
+  // and the bot-only PR drill-down.
   // Transient (never persisted); cleared on rail / scope changes.
   //
   // ⚠ URL-SERIALIZED (`?feedPr=<id>`) and a NAVIGATION key, for the same reason as
@@ -479,17 +485,16 @@ export interface FilterState {
   // leave it. URL-visible ≠ persisted — a fresh tab still opens the un-isolated feed.
   feedIsolatedPrId: number | null;
   // Activity **Pending** single-KIND isolation: null (default) → every attention card in
-  // scope; an InsightKind → the board shows ONLY that kind. Set by the daily brief's lines, each
-  // of which is ABOUT one kind ("3 PRs stalled awaiting review" → the stalled cards), so the
-  // number the user clicked and the list they land on are the same population. Cleared on rail /
-  // scope changes.
+  // scope; an InsightKind → the board shows ONLY that kind. Seated by `openMyTurnInWorkspace`, a
+  // kind chip, or a `?attn=` link, so the number the user clicked and the list they land on are
+  // the same population. Cleared on rail / scope changes.
   //
   // ⚠ It is NOT in FilterDefaults / freshFilterDefaults / pickFilterBarState — a lens set by one
-  // click of a brief line is not a standing preference, so it must not persist or need a
+  // click is not a standing preference, so it must not persist or need a
   // FILTER_STORAGE_VERSION bump. It lives in freshDefaults() only.
   //
-  // ⚠ IT IS, HOWEVER, URL-SERIALIZED (`?attn=<kind>`) and it is a NAVIGATION key: clicking a
-  // brief line is the one gesture that takes a reader from "the board" to "this narrowed board",
+  // ⚠ IT IS, HOWEVER, URL-SERIALIZED (`?attn=<kind>`) and it is a NAVIGATION key: seating it is
+  // a gesture that takes a reader from "the board" to "this narrowed board",
   // and before it was addressable the browser's Back left the app entirely (the reader's actual
   // complaint). URL-visible and PERSISTED are different questions — a link may name the narrowed
   // board; a fresh tab must not restore it from a stale blob. See hooks/useUrlState.
@@ -510,13 +515,13 @@ export interface FilterState {
   // two predicates are orthogonal anyway (you can want a relevance-lensed board of every kind).
   //
   // ⚠ IT EXISTS TO KEEP A NOTIFICATION AND ITS DESTINATION THE SAME POPULATION. The welcome-back
-  // banner, the Workspace-dropdown badges and the "Elsewhere" lines count the PERSONAL subset
+  // banner and the Workspace-dropdown badges count the PERSONAL subset
   // (`DailyBriefCounts.myTurnPersonal` = direct + maintained) — otherwise they nag you about a
   // stranger's PR in a repo you have never touched. A banner reading 4 whose click opened a board
   // of 50 would be the "the strip says 5, the board lists 3" defect in a new place, so the ONE
   // gesture that opens the board from those counts (`openMyTurnInWorkspace`) seats `'mine'` as
-  // its last step — and the brief's "M need review or reply" line seats `'others'` for exactly
-  // the same reason, in the opposite direction.
+  // its last step (the deleted brief's "M need review or reply" line seated `'others'` for exactly
+  // the same reason, in the opposite direction; `?attnRel=others` still seats it).
   //
   // Transient, exactly like `attentionIsolation`: NOT in FilterDefaults / freshFilterDefaults /
   // pickFilterBarState (so no FILTER_STORAGE_VERSION bump is owed), cleared by any rail or scope
@@ -540,20 +545,34 @@ export interface FilterState {
   // Transient like its siblings: NOT in FilterDefaults / freshFilterDefaults / pickFilterBarState
   // (no FILTER_STORAGE_VERSION bump is owed), cleared by a rail or scope change — and SEATED
   // explicitly, `null` included, by every entry point that opens the board from a count
-  // (`openMyTurnInWorkspace`, the daily brief's lines), because `setActivityRepo` early-returns `{}`
+  // (`openMyTurnInWorkspace`), because `setActivityRepo` early-returns `{}`
   // on an unchanged rail. URL-SERIALIZED (`?attnBy=people|automation`) and a NAVIGATION key.
   attentionAuthorLens: PendingAuthorLens | null;
   // Activity **Pending** TAB the reader picked (`PENDING_TABS`), or null for the default (My turn).
   //
   // ⚠ THE VISIBLE TAB IS DERIVED, NEVER WRITTEN BACK: a kind filter (`attentionIsolation`, seated
-  // by a daily-brief line) names its own tab and wins; otherwise this; otherwise My turn — see
-  // `effectivePendingTab`. So a brief line needs to seat only the kind, and clicking a tab seats the
-  // tab AND clears the kind in one write (`setAttentionTab`), never two.
+  // by a chip, a link or the banner) names its own tab and wins; otherwise this; otherwise My turn
+  // — see `effectivePendingTab`. So an entry point seats only the kind, and clicking a tab seats
+  // the tab AND clears the kind in one write (`setAttentionTab`), never two.
   //
   // Transient like its siblings: not in FilterDefaults (no FILTER_STORAGE_VERSION bump), cleared by
   // a rail change, URL-SERIALIZED (`?attnTab=`) and a NAVIGATION key — a tab is a screen the reader
   // moved to, so Back must be able to leave it.
   attentionTab: PendingTabKey | null;
+  // Which of My turn's two views the reader picked: null = 'cards' (the setter stores 'cards' as
+  // null, so the default has one spelling), 'branches' = "Default branches and open PRs".
+  //
+  // ⚠ DERIVED FOR RENDER by `effectiveMyTurnView` — any other tab shows its cards whatever this
+  // holds — and never written back.
+  //
+  // Transient like its siblings (freshDefaults only, NOT in FilterDefaults, so no
+  // FILTER_STORAGE_VERSION bump). Cleared by a rail change AND by `setAttentionTab` (a tab click
+  // opens that tab's cards), and SEATED to null by `openMyTurnInWorkspace`. URL-SERIALIZED as
+  // `?attnView=branches` (a NAVIGATION key), only on the attention rail while the effective tab is
+  // My turn, with the default omitted.
+  //
+  // ⚠ IT CARRIES NO COUNT: the branches view is trunk status, which is informational.
+  attentionMyTurnView: MyTurnView | null;
   // The cross-repo Feed's "New" markers — see FeedNewCohorts above. Transient, URL-silent,
   // and written ONLY by FeedView's auto-insert path (a batch landed) and its scroll handler
   // (the reader is at the top). Read as a flat id set; never recomputed defensively on render.
@@ -957,10 +976,11 @@ export interface FilterState {
   // (`ci=only` / `ci=1`; the 'off' default is omitted).
   cycleFeedCiLens: () => void;
   setFeedCiLens: (v: FeedCiLens) => void;
-  // Isolate the Feed to a single PR (or clear with null) — the Feed "open PRs" panel.
+  // Isolate the Feed to a single PR (or clear with null) — set from PrDetail's "Show in Activity
+  // feed" and the bot-only PR drill-down.
   setFeedIsolatedPrId: (id: number | null) => void;
-  // Isolate the **Pending** board to one card kind (or clear with null) — the daily
-  // brief's lines.
+  // Isolate the **Pending** board to one card kind (or clear with null) — a kind chip or
+  // `openMyTurnInWorkspace`.
   //
   // ⚠ ORDERING: `setActivityRepo` CLEARS this (and early-returns `{}` when the rail id is
   // unchanged), so a caller that wants to both switch to the board AND isolate it must call
@@ -973,8 +993,8 @@ export interface FilterState {
    *
    * ⚠ SAME ORDERING TRAP AS `setAttentionIsolation`, and one more: `setActivityRepo` clears this
    * too AND early-returns `{}` on an unchanged rail, so a caller that wants a DIFFERENT lens (or
-   * none) while already standing on the board must set it EXPLICITLY. The daily brief's lines all
-   * do: each seats its own value, `null` included, because relying on the rail switch to clear
+   * none) while already standing on the board must set it EXPLICITLY. `openMyTurnInWorkspace`
+   * does: it seats its own value, `null` included, because relying on the rail switch to clear
    * works only when the rail actually changes.
    */
   setAttentionRelevance: (lens: AttentionRelevanceLens | null) => void;
@@ -987,9 +1007,12 @@ export interface FilterState {
   /**
    * Show one Pending tab, optionally narrowed to one of its card kinds (a kind chip). ONE write, so
    * the tab and the kind can never disagree for a render: picking a tab clears any kind filter,
-   * and picking a chip names both.
+   * and picking a chip names both. The same write clears My turn's view, so picking a tab — My
+   * turn included — opens its cards.
    */
   setAttentionTab: (tab: PendingTabKey, kind?: InsightKind | null) => void;
+  /** Show one of My turn's two views. 'cards' is stored as null (one spelling of the default). */
+  setAttentionMyTurnView: (view: MyTurnView | null) => void;
   /**
    * THE ONE "show me my turn — over there" navigation, in ONE gesture.
    *
@@ -1008,11 +1031,11 @@ export interface FilterState {
    *  2. `setActivityRepo` also clears the isolation, AND early-returns an empty patch when the
    *     rail id is unchanged — the asymmetry that makes a wrong-ordered caller work on every
    *     second click. (Pinned by attentionIsolation.test.ts.)
-   *  3. Only then are the two lenses seated.
+   *  3. Only then are the lenses and My turn's view seated.
    *
    * ⚠ IT SEATS `attentionRelevance: 'mine'` TOO, and that is not decoration. Every caller of this
    * action is a NOTIFICATION surface whose figure is the PERSONAL count (banner line, dropdown
-   * badge, the brief's "Elsewhere" rows) — direct + maintained, which is exactly what 'mine'
+   * badge) — direct + maintained, which is exactly what 'mine'
    * paints. Landing them on the broad board would put back the defect 747c9c9 fixed — a line that
    * says 4 opening a list of 50.
    *
@@ -1488,6 +1511,7 @@ function freshDefaults(): FilterData {
     // Every author, like the relevance lens: a lens is only ever seated by a reader's own click.
     attentionAuthorLens: null,
     attentionTab: null,
+    attentionMyTurnView: null,
     // No batch has landed yet — a freshly-opened feed is all equally new, so nothing is marked.
     feedNewCohorts: { scopeKey: null, cohorts: [] },
     botAnalyticsWindow: 'rolling_14',
@@ -1580,6 +1604,7 @@ export type UrlOwnedState = Pick<
   | 'attentionRelevance'
   | 'attentionAuthorLens'
   | 'attentionTab'
+  | 'attentionMyTurnView'
   | 'feedIsolatedPrId'
   | 'prDetailTab'
   | 'feedInnerTab'
@@ -1600,6 +1625,7 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
     attentionRelevance: d.attentionRelevance,
     attentionAuthorLens: d.attentionAuthorLens,
     attentionTab: d.attentionTab,
+    attentionMyTurnView: d.attentionMyTurnView,
     feedIsolatedPrId: d.feedIsolatedPrId,
     prDetailTab: d.prDetailTab,
     feedInnerTab: d.feedInnerTab,
@@ -1697,7 +1723,9 @@ export const useFilters = create<FilterState>((set, get) => ({
   setAttentionRelevance: (lens) => set({ attentionRelevance: lens }),
   // ⚠ NOT cleared by `setAttentionTab` below — the lens is a question about the whole board.
   setAttentionAuthorLens: (lens) => set({ attentionAuthorLens: lens }),
-  setAttentionTab: (tab, kind = null) => set({ attentionTab: tab, attentionIsolation: kind }),
+  setAttentionTab: (tab, kind = null) =>
+    set({ attentionTab: tab, attentionIsolation: kind, attentionMyTurnView: null }),
+  setAttentionMyTurnView: (view) => set({ attentionMyTurnView: view === 'cards' ? null : view }),
   // See the declaration above for the two ordering traps this sequence exists to encapsulate.
   // It deliberately calls the PUBLIC setters rather than one fused `set({...})`: a fused write
   // would be a second definition of what a workspace switch clears, free to drift from
@@ -1718,6 +1746,10 @@ export const useFilters = create<FilterState>((set, get) => ({
     // every author, so a People or Automation lens left on from an earlier visit would open a
     // smaller list than the number. Last, like the two above it.
     s.setAttentionAuthorLens(null);
+    // …and My turn's view, seated to Cards: the banner counts CARDS, and `setActivityRepo`'s
+    // empty patch on an unchanged rail would otherwise let the branches view survive the click.
+    // Never conditional.
+    s.setAttentionMyTurnView(null);
   },
   pushFeedNewCohort: (scopeKey, ids, atTop) =>
     set((s) => {
@@ -2082,6 +2114,7 @@ export const useFilters = create<FilterState>((set, get) => ({
             attentionRelevance: null,
             attentionAuthorLens: null,
             attentionTab: null,
+            attentionMyTurnView: null,
           },
     ),
   setActivityThreadFilter: (st) =>

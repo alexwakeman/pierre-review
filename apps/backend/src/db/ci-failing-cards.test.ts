@@ -399,8 +399,8 @@ describe('ci_failing cards', () => {
     const { counts } = await brief.getDailyBriefEntry(1, scope.workspaceId);
     expect(counts.ciFailing).toBe(cards.length);
     // ⚠ The PRE-CAP fold. Below INSIGHT_CARD_CAP the two agree, which is what makes this a
-    // same-snapshot check rather than a cap check — the cap rule itself is pinned by
-    // ciFailingCapDisclosure's own test on the client.
+    // same-snapshot check rather than a cap check — the board states its cut with the client's
+    // `capSentence`.
     expect(counts.ciFailingTotal).toBe(insights.ciFailingTotal);
     expect(insights.ciFailingTotal).toBe(cards.length);
   });

@@ -26,6 +26,9 @@ import type {
   BlastRadiusConfig,
   BranchCheckRun,
   CheckRun,
+  ClaudeReviewFollowUpRecord,
+  ClaudeReviewTicket,
+  ClaudeTicketAssessment,
   FlowSettings,
   Label,
   MyTurnSettings,
@@ -1055,7 +1058,15 @@ export const claudeReviews = sqliteTable(
       enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
     }).notNull(),
     model: text('model', {
-      enum: ['claude-sonnet-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+      // 'claude-opus-4-8' is no longer offered but stays readable for stored runs. Plain text in
+      // the database (no CHECK, no pg enum), so this list needs no migration.
+      enum: [
+        'claude-opus-5-5',
+        'claude-sonnet-5',
+        'claude-opus-4-8',
+        'claude-sonnet-4-6',
+        'claude-haiku-4-5',
+      ],
     }).notNull(),
     // Null until the agent decides whether it explored the worktree.
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),
@@ -1098,6 +1109,17 @@ export const claudeReviews = sqliteTable(
       .notNull()
       .default(sql`(unixepoch())`),
     finishedAt: integer('finished_at', { mode: 'timestamp' }),
+    // The optional user story or task the run was given — stored at QUEUE time so a failed or
+    // cancelled run still prefills the panel. `criteria` is the server's split (AC1..n). Null when
+    // none was given. Migration 0070 (pg 0057).
+    ticket: text('ticket', { mode: 'json' }).$type<ClaudeReviewTicket>(),
+    // The server-validated assessment against `ticket` (every criterion answered once; a skipped
+    // one is 'not_checked'). Null without a ticket or on a run that did not succeed.
+    ticketAssessment: text('ticket_assessment', { mode: 'json' }).$type<ClaudeTicketAssessment>(),
+    // What this run found about the PREVIOUS succeeded review's findings (addressed / partly /
+    // not / no longer applies / not checked), with the prior review id + head. Null when there was
+    // no earlier review with findings to check.
+    followUp: text('follow_up', { mode: 'json' }).$type<ClaudeReviewFollowUpRecord>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -1151,6 +1173,13 @@ export const claudeReviewFindings = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
+    // When this finding RE-RAISES a still-open finding from the previous review: that finding's
+    // id. ⚠ A SOFT REFERENCE, NO FK, ON PURPOSE: it always points at a finding of the SAME PR, and
+    // retention.ts + deleteRepo (queries.ts) delete a PR's findings in ONE
+    // `inArray(reviewId, …)` statement — an FK would add delete-ordering risk for no safety the
+    // writer (the plugin, which only links ids it just loaded for this PR) does not already give.
+    // Migration 0070 (pg 0057).
+    priorFindingId: integer('prior_finding_id'),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );

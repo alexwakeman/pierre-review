@@ -25,7 +25,6 @@ import type { DailyBriefCounts } from '@pierre-review/shared';
 import type { InsightCard } from '@pierre-review/shared';
 import {
   myTurnCapDisclosure,
-  myTurnOtherCapDisclosure,
   myTurnPersonalCapDisclosure,
   personalMyTurnCount,
 } from '../src/components/Activity/AttentionView.js';
@@ -125,10 +124,9 @@ describe('myTurnCapDisclosure', () => {
     expect(myTurnCapDisclosure(50, counts({ myTurn: 50, myTurnTotal: 148 }))).not.toBeNull();
   });
 
-  it('the brief strip passes its own figure as both sides — one response, one snapshot', () => {
-    // BriefStrip calls myTurnCapDisclosure(counts.myTurn, counts): the equality is an identity
-    // there, so the strip's rule reduces to the honest one — "is the total bigger than what I am
-    // about to print".
+  it('a surface passing its own figure as both sides — one response, one snapshot', () => {
+    // A caller passing counts.myTurn as shown: the equality is an identity there, so the rule
+    // reduces to the honest one — "is the total bigger than what I am about to print".
     const c = counts({ myTurn: 50, myTurnTotal: 148 });
     expect(myTurnCapDisclosure(c.myTurn, c)?.total).toBe(148);
     const uncapped = counts({ myTurn: 9, myTurnTotal: 9 });
@@ -173,7 +171,7 @@ describe('workspaceCapDisclosure (the per-workspace badge and banner lines)', ()
 
 // ── The NARROW twin: the notification surfaces' pair ─────────────────────────────────────────
 //
-// The welcome-back banner, the Workspace-dropdown badges and the brief's "Elsewhere" rows count
+// The welcome-back banner and the Workspace-dropdown badges count
 // `myTurnPersonal` — the my_turn cards that personally involve the viewer — because a badge that
 // lit up for a stranger's PR in a repo you only read is a summons to nothing. The BOARD keeps the
 // broad population.
@@ -266,15 +264,16 @@ describe('workspaceCapDisclosure reads the NARROW pair (badge + banner)', () => 
   });
 });
 
-// ── The "review or reply" twin: the OTHER half of the same split ─────────────────────────────
+// ── The my_turn halves on the wire: `myTurnPersonal` / `myTurnOther` ─────────────────────────
 //
-// The brief's second my-turn line counts `myTurnOther` and opens a board filtered to it, so it
-// needs its own pair for exactly the reasons the personal twin does — plus one of its own:
+// The server folds the OTHER half (`myTurnOther` / `myTurnOtherTotal`) as its own population, and
+// the `'others'` lens (`?attnRel=others`) paints it. (The deleted daily-brief strip's second
+// my-turn line displayed it, with its own cap rule; both went with the strip.) One rule survives:
 //
 //   ⚠ IT MAY NEVER BE `myTurn - myTurnPersonal`. The arithmetic agrees; the disclosure does not.
 //     `capFor` gates the "of N" on `shown === count`, so a subtracted figure has no denominator of
-//     its own to compare against and the line silently loses its cap.
-describe('myTurnOtherCapDisclosure', () => {
+//     its own to compare against and any line built on it silently loses its cap.
+describe('the my_turn halves on the wire (myTurnPersonal / myTurnOther)', () => {
   const split = counts({
     myTurn: 50,
     myTurnTotal: 148,
@@ -282,21 +281,6 @@ describe('myTurnOtherCapDisclosure', () => {
     myTurnPersonalTotal: 30,
     myTurnOther: 38,
     myTurnOtherTotal: 118,
-  });
-
-  it('discloses the OTHER total, never the broad or the personal one', () => {
-    const cap = myTurnOtherCapDisclosure(38, split);
-    expect(cap?.shown).toBe(38);
-    expect(cap?.total).toBe(118);
-    expect(cap?.title).toContain('118');
-    expect(cap?.title).not.toContain('148');
-    expect(cap?.title).not.toContain('30');
-  });
-
-  it('the broad rule would have said NOTHING about the same line', () => {
-    // 38 !== counts.myTurn (50), so the shared guard rejects it — the "+" would vanish silently.
-    expect(myTurnCapDisclosure(38, split)).toBeNull();
-    expect(myTurnOtherCapDisclosure(38, split)).not.toBeNull();
   });
 
   it('the SUBTRACTED spelling would have disclosed nothing at all — the rule’s whole point', () => {
@@ -309,40 +293,11 @@ describe('myTurnOtherCapDisclosure', () => {
     expect(myTurnPersonalCapDisclosure(subtracted, split)).toBeNull();
   });
 
-  it('stays silent when the other population is fully painted', () => {
-    expect(
-      myTurnOtherCapDisclosure(38, counts({ myTurnOther: 38, myTurnOtherTotal: 38 })),
-    ).toBeNull();
-  });
-
-  it('keeps the same-snapshot guard', () => {
-    expect(myTurnOtherCapDisclosure(30, split)).toBeNull();
-  });
-
-  it('⚠ does NOT fall back to the broad pair, unlike its personal twin', () => {
-    // The personal fallback exists because a pre-split response made the notification surfaces
-    // DISPLAY the broad figure. Nothing displays an "other" figure on such a response — the brief
-    // renders its single broad line instead — so there is nothing to qualify.
-    const old = counts({ myTurn: 50, myTurnTotal: 148 });
-    expect(myTurnOtherCapDisclosure(50, old)).toBeNull();
-    expect(myTurnPersonalCapDisclosure(50, old)?.total).toBe(148);
-  });
-
-  it('does NOT borrow a total when only the OTHER count is missing its own', () => {
-    expect(myTurnOtherCapDisclosure(38, counts({ myTurn: 50, myTurnTotal: 148, myTurnOther: 38 })))
-      .toBeNull();
-  });
-
-  it('says nothing while the brief is still loading', () => {
-    expect(myTurnOtherCapDisclosure(38, undefined)).toBeNull();
-    expect(myTurnOtherCapDisclosure(38, null)).toBeNull();
-  });
-
-  // ── the invariant the two lines rest on ───────────────────────────────────────────────────
-  it('the two lines are DISJOINT and EXHAUSTIVE over the same population', () => {
-    // The TOTALS always partition the population. The displayed figures are each line's own list
+  // ── the invariant the two halves rest on ──────────────────────────────────────────────────
+  it('the two halves are DISJOINT and EXHAUSTIVE over the same population', () => {
+    // The TOTALS always partition the population. The displayed figures are each half's own list
     // size — min(total, the board's list cap) — so they sum to `myTurn` only while nothing is
-    // capped, which is this fixture; past the cap each line carries its own "of N" instead.
+    // capped, which is this fixture; past the cap each half carries its own total instead.
     expect((split.myTurnPersonal as number) + (split.myTurnOther as number)).toBe(split.myTurn);
     expect((split.myTurnPersonalTotal as number) + (split.myTurnOtherTotal as number)).toBe(
       split.myTurnTotal,
@@ -452,7 +407,7 @@ describe('passesLens — the "others" half (review or reply, not tied to you)', 
     // The two lenses are deliberately not exact complements over unclassifiable rows: 'mine'
     // keeps an unknown card (over-showing beats hiding work) and 'others' simply never claims it.
     // A pre-split response therefore paints an EMPTY 'others' board rather than a mislabelled
-    // full one — and the brief does not offer the line on such a response, so nobody lands there.
+    // full one — and `'others'` is now reachable only from a `?attnRel=others` link.
     expect(passesLens(card({ relevance: undefined, personal: false }), 'others')).toBe(false);
   });
 
@@ -465,7 +420,7 @@ describe('passesLens — the "others" half (review or reply, not tied to you)', 
   });
 });
 
-describe('passesLens (the one predicate the tabs, the server cap and the brief share)', () => {
+describe('passesLens (the one predicate the tabs, the server cap and /api/daily-brief share)', () => {
   const card = (over: Partial<InsightCard>): InsightCard =>
     ({ kind: 'my_turn', ...over }) as InsightCard;
 
@@ -479,8 +434,8 @@ describe('passesLens (the one predicate the tabs, the server cap and the brief s
       const c = card({ relevance: rel, personal: rel !== 'none' });
       const mine = passesLens(c, 'mine');
       const others = passesLens(c, 'others');
-      // Exactly one half claims each card — which is what makes the brief's two lines mutually
-      // exclusive on the board as well as in the strip.
+      // Exactly one half claims each card — which is what makes the two lenses mutually
+      // exclusive on the board as well as in the server's counts.
       expect(mine !== others).toBe(true);
     }
   });
@@ -508,7 +463,6 @@ describe('passesLens (the one predicate the tabs, the server cap and the brief s
     });
     expect(myTurnCapDisclosure(board.length, c)?.total).toBe(70);
     expect(myTurnPersonalCapDisclosure(mine, c)?.total).toBe(60);
-    expect(myTurnOtherCapDisclosure(others, c)?.total).toBe(10);
   });
 });
 

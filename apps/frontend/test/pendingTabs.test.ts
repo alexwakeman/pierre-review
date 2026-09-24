@@ -2,9 +2,9 @@
 //
 // WHAT THIS PINS, and why each is worth a test rather than a comment:
 //
-//   1. THE TAB ON SCREEN IS DERIVED. A daily-brief line seats only a KIND; its tab follows from it.
+//   1. THE TAB ON SCREEN IS DERIVED. An entry point seats only a KIND; its tab follows from it.
 //      Clicking a tab seats the tab and clears the kind. Writing the derived tab back would make
-//      the two disagree the first time either changed.
+//      the two disagree the first time either changed. My turn's VIEW is derived the same way.
 //   2. THE ORDER IS THE SERVER'S. The view filters and caps; it never re-sorts. Do next is the
 //      first `PENDING_DO_NEXT_SIZE` of whatever is on screen.
 //   3. EVERY VIEW'S COUNT IS ITS OWN POPULATION. The whole tab says `tab.total`, a kind chip says
@@ -33,7 +33,10 @@ import {
 import { shouldShowDivider } from '../src/components/Activity/AttentionCards.js';
 import {
   buildPendingView,
+  effectiveMyTurnView,
   effectivePendingTab,
+  MY_TURN_VIEW_LABEL,
+  MY_TURN_VIEWS,
   offerAuthorLens,
   offerOnlyYours,
   passesAuthorLens,
@@ -70,7 +73,7 @@ describe('the tab on screen', () => {
     expect(effectivePendingTab(null, 'land')).toBe('land');
   });
 
-  it('is the kind filter’s own tab, whatever was picked — a brief line seats only the kind', () => {
+  it('is the kind filter’s own tab, whatever was picked — an entry point seats only the kind', () => {
     expect(effectivePendingTab('stalled_review', null)).toBe('review');
     expect(effectivePendingTab('reviewer_routing', 'land')).toBe('review');
     expect(effectivePendingTab('conflicts', null)).toBe('fixing');
@@ -79,6 +82,33 @@ describe('the tab on screen', () => {
 
   it('ignores a kind that belongs to no tab', () => {
     expect(effectivePendingTab('bot_signal', 'threads')).toBe('threads');
+  });
+});
+
+// My turn's two views — a client view inside the `my_turn` tab, derived exactly like the tab.
+describe('the view on screen inside My turn', () => {
+  it('is branches only on My turn with branches picked', () => {
+    expect(effectiveMyTurnView('my_turn', 'branches')).toBe('branches');
+  });
+
+  it('is Cards by default, and on every other tab whatever the store holds', () => {
+    expect(effectiveMyTurnView('my_turn', null)).toBe('cards');
+    expect(effectiveMyTurnView('my_turn', 'cards')).toBe('cards');
+    // A hand-edited `?attnTab=deps&attnView=branches` seats both raw; the render derives.
+    expect(effectiveMyTurnView('deps', 'branches')).toBe('cards');
+  });
+
+  it('lists the two views in strip order', () => {
+    expect(MY_TURN_VIEWS).toEqual(['cards', 'branches']);
+  });
+
+  it('⚠ no label carries a figure or says "My turn"', () => {
+    // Count-free: the branches view is trunk status, which is informational. And the e2e suite's
+    // `/My turn/` tab locator must stay unique.
+    for (const label of Object.values(MY_TURN_VIEW_LABEL)) {
+      expect(label).not.toMatch(/\d/);
+      expect(label).not.toMatch(/my turn/i);
+    }
   });
 });
 
@@ -251,7 +281,7 @@ describe('the Dependencies tab', () => {
     ]);
   });
 
-  it('is where a brief line isolating `security` lands', () => {
+  it('is where a `?attn=security` link lands', () => {
     expect(effectivePendingTab('security', null)).toBe('deps');
     expect(effectivePendingTab('dependency_bump', 'my_turn')).toBe('deps');
     const v = buildPendingView(data, 'deps', 'security', null, null);

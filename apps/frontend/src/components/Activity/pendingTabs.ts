@@ -12,7 +12,7 @@ import {
   type PendingTab,
   type PendingTabKey,
 } from '@pierre-review/shared';
-import type { AttentionRelevanceLens } from '../../store/filters.js';
+import type { AttentionRelevanceLens, MyTurnView } from '../../store/filters.js';
 
 // THE PENDING BOARD'S VIEW MODEL — which tab is on screen, which cards it lists, where Do next
 // ends, and the counts. Pure and JSX-free so `test/pendingTabs.test.ts` can pin it.
@@ -33,8 +33,9 @@ export const TAB_LABEL: Record<PendingTabKey, string> = {
 };
 
 /**
- * THE TAB ON SCREEN — derived, never written back. A kind filter (seated by a daily-brief line)
- * names its own tab and wins; otherwise the tab the reader picked; otherwise My turn.
+ * THE TAB ON SCREEN — derived, never written back. A kind filter (seated by
+ * `openMyTurnInWorkspace`, a chip, or a `?attn=` link) names its own tab and wins; otherwise the
+ * tab the reader picked; otherwise My turn.
  */
 export function effectivePendingTab(
   isolation: InsightKind | null,
@@ -47,9 +48,23 @@ export function effectivePendingTab(
   return picked ?? 'my_turn';
 }
 
+/** My turn's two views, in strip order. ⚠ NO FIGURE ON EITHER LABEL: the second view is trunk
+ *  status + open PRs, and trunk status is a readout, never an alert channel (CLAUDE.md). */
+export const MY_TURN_VIEWS: readonly MyTurnView[] = ['cards', 'branches'];
+export const MY_TURN_VIEW_LABEL: Record<MyTurnView, string> = {
+  cards: 'Cards',
+  branches: 'Default branches and open PRs',
+};
+
+/** THE VIEW ON SCREEN inside My turn — derived, never written back. Any other tab shows its
+ *  cards whatever the store holds (a hand-edited `?attnTab=deps&attnView=branches` seats both raw). */
+export function effectiveMyTurnView(tab: PendingTabKey, picked: MyTurnView | null): MyTurnView {
+  return tab === 'my_turn' && picked === 'branches' ? 'branches' : 'cards';
+}
+
 /** Does this card survive My turn's "Only yours" ('mine') or its complement ('others')?
- *  ⚠ The SAME two predicates the server caps by (pending-tabs.ts `listGroupOf`) and the brief counts
- *  by: 'mine' keeps a card unless it is EXPLICITLY not personal; 'others' is exactly
+ *  ⚠ The SAME two predicates the server caps by (pending-tabs.ts `listGroupOf`) and `/api/daily-brief`
+ *  counts by: 'mine' keeps a card unless it is EXPLICITLY not personal; 'others' is exactly
  *  `relevance === 'none'`. Only `my_turn` cards are ever narrowed. */
 export function passesLens(card: InsightCard, lens: AttentionRelevanceLens | null): boolean {
   if (lens == null || card.kind !== 'my_turn') return true;

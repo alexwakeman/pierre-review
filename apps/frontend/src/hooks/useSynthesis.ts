@@ -161,8 +161,8 @@ export function useSynthesisGenerating(
 /**
  * LAZY-ON-READ narration for the ORDERING grains ('brief'/'rollup'/'person'): the cached
  * synthesis when present, plus at most ONE auto-generation attempt per (scope identity +
- * staleness observation). Moved here from BriefStrip so the 1:1 section reuses the exact same
- * guard rather than a second spelling of it — the digest pattern, per-scope.
+ * staleness observation). (Written for the deleted daily-brief strip; the 1:1 section reuses the
+ * exact same guard rather than a second spelling of it — the digest pattern, per-scope.)
  *
  * The guard ref keys on the stored generatedAt: a served cache hit doesn't re-fire, while a NEW
  * staleness (the content hash moved) allows exactly one fresh attempt. Silent about failure by

@@ -55,9 +55,11 @@ export default {
 
   scenes: [
     // ---- 1. the stream ----------------------------------------------------
-    // The feed rows are ~560px below the fold on load (the brief strip and the
-    // trunk-status panel come first), so `before` puts them in the frame rather
-    // than the clip spending three seconds scrolling to them.
+    // The feed rows WERE ~560px below the fold on load (the brief strip and the
+    // trunk-status panel came first; both have since left the Feed), so `before`
+    // puts them in the frame rather than the clip spending three seconds scrolling
+    // to them. ⚠ The 1950 offset below was tuned with those ~560px of panels above
+    // the stream — RE-MEASURE it at the next capture; do not guess a number.
     {
       id: 'feed',
       title: 'Feed',

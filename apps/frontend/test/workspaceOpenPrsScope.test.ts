@@ -2,9 +2,9 @@
 //
 // `filters.repoIds` is the FilterBar's per-repo show/hide. Its picker is mounted ONLY while the
 // Timeline board is the active tab, and it narrows ONLY that board. Every Activity surface — the
-// Feed's open-PR panel, the "Showing only #N" isolation banner, the 'feed'-scoped open-PRs
-// drill-down — covers the WHOLE active workspace, and you narrow those by clicking a repo in the
-// Activity rail instead.
+// open-PRs panel on Pending → My turn, the "Showing only #N" isolation banner, the 'feed'-scoped
+// open-PRs drill-down — covers the WHOLE active workspace, and you narrow those by clicking a repo
+// in the Activity rail instead.
 //
 // So the two open-PR readers must disagree exactly once: when the board is narrowed.
 //

@@ -10,11 +10,9 @@ import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
 import { BotIcon, SparkleIcon, TimerIcon, WarningIcon, WorkspaceIcon } from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { BranchStatusChip } from './BranchStatusChip.js';
-import { BranchStatusPanel } from './BranchStatusPanel.js';
 import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { RepoInsightsPanel } from './RepoInsightsPanel.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
-import { BriefStrip } from './BriefStrip.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { HumanThemesPanel } from './HumanThemesPanel.js';
@@ -24,7 +22,7 @@ import { BotsView } from './BotsView.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
 
 // DEFAULT LANDING = PENDING, for every tier. The rail's top entry is what opens: Pending is the
-// ranked worklist, and the Feed (brief on top) is one click below it. The store's plain
+// ranked worklist, and the Feed (the stream alone) is one click below it. The store's plain
 // 'attention' default IS the landing, and it is the one rail value `useUrlState` leaves out of
 // the URL. (The landing was the Feed from plan P3.1 until this change; before that a one-shot
 // effect auto-selected Insights for Pro accounts — that apparatus is gone.)
@@ -213,7 +211,7 @@ export function ActivityView(): JSX.Element {
   const activityRepoId = useFilters((s) => s.activityRepoId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
   const { workspaceInsights, activityDigest } = useProCapabilities();
-  // The cross-repo Feed's inner sub-tab: 'feed' (metrics + consolidated feed) vs the Pro
+  // The cross-repo Feed's inner sub-tab: 'feed' (the consolidated stream) vs the Pro
   // "Discussion themes" AI summary. The Themes tab only appears when the AI-summary tier is on.
   // ('compare' is NOT a member — cross-workspace comparison is Reports' "By workspace" axis.)
   const feedInnerTab = useFilters((s) => s.feedInnerTab);
@@ -230,7 +228,8 @@ export function ActivityView(): JSX.Element {
   // Default-branch status for the SAME scope. `useBranchStatus` reads the workspace from the store
   // and narrows ONLY on an explicit argument, so an argument-less call here is the whole workspace
   // by construction and can never drift from useActivity's scope. Purely informational: it feeds
-  // the rail's third line and the Feed strip, and nothing else — not the sort, not attentionCount,
+  // the rail's third line; the strip under Pending → My turn reads this SAME cache entry (an
+  // argument-less call there too), and nothing else reads it — not the sort, not attentionCount,
   // not any badge.
   const { data: branchData } = useBranchStatus();
   const branchByRepo = useMemo(
@@ -571,7 +570,7 @@ export function ActivityView(): JSX.Element {
           // The CORE/free **Pending** board — the tabs in `PENDING_TABS`, each a scored list with
           // its own count. The default landing. Renders on every tier, before repo data loads (its
           // own empty/loading states); the Pro narration decorates it and is never required for it
-          // to be complete. Its narrowings (a brief line's kind, a notification's "Only yours")
+          // to be complete. Its narrowings (a seated kind, the banner's "Only yours")
           // show as the selected tab and chip on the board itself, so no banner sits above it.
           // ⚠ `!noRepos`: an EMPTY workspace falls through to the "move some in" guidance below.
           // Pending is where the app opens, so without it a workspace just made in "Manage repos &
@@ -587,15 +586,13 @@ export function ActivityView(): JSX.Element {
               : 'Detecting the repos you work on…'}
           </div>
         ) : showingFeed ? (
-          // The workspace Feed — a STREAM, and now only a stream. With Pro on, a "Discussion
-          // themes" sub-tab (the human sibling of Bots → Themes) sits beside it.
+          // The workspace Feed — a STREAM and nothing else. With Pro on, a "Discussion themes"
+          // sub-tab (the human sibling of Bots → Themes) sits beside it.
           //
-          // ⚠ TWO PANELS LEFT THIS BRANCH and neither was deleted; do not re-add either here.
-          // The "Plan for today" card became the Pending board's ranked head (one population, one
-          // surface), and the flow-metric header moved to Reports, where analytics belongs and
-          // where the period framing gives the numbers a denominator. What is left is the brief
-          // strip, the trunk chip and the feed — which is the point: three panels of survey above
-          // a stream is not a feed.
+          // ⚠ Every survey panel has left it and none may come back: the work plan (the Pending
+          // head), flow metrics (Reports), the daily-brief strip (DELETED — every line duplicated a
+          // Pending tab) and the trunk + open-PR panels (Pending → My turn → Default branches and
+          // open PRs). Panels of survey above a stream is not a feed.
           <div className="space-y-3">
             {feedTabs.length > 1 && (
               <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
@@ -626,23 +623,7 @@ export function ActivityView(): JSX.Element {
                 })}
               </div>
             )}
-            {effectiveFeedTab === 'themes' ? (
-              <HumanThemesPanel />
-            ) : (
-              <>
-                {/* The daily brief (P3.1/P3.3) — the morning's "what needs me" in one strip,
-                    each line deep-linking to its owning surface. THE one mount (this branch
-                    renders exactly once — the numeric-fallback FeedView below deliberately
-                    doesn't carry it, and per-repo consoles never do). Self-hides at all-zero. */}
-                <BriefStrip />
-                {/* "Is trunk green?" across every repo in scope — a red default branch
-                    invalidates every open PR's CI at once and is the first thing worth knowing.
-                    Read-only; self-hides until branch-synced, and collapses to a one-line chip
-                    while every branch is clear. */}
-                <BranchStatusPanel />
-                <FeedView />
-              </>
-            )}
+            {effectiveFeedTab === 'themes' ? <HumanThemesPanel /> : <FeedView />}
           </div>
         ) : isLoading && data == null ? (
           <div className="space-y-3">

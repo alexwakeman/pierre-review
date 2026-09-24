@@ -227,6 +227,12 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   in a QUERY resolved by `resolveRequestWorkspaceId` rather than in a request BODY as a list — one
   fewer place a client-supplied id reaches a write — with the named composite FK
   `workspace_slack_targets_workspace_account_fk` still the structural backstop beneath it.
+- **Slack digest text is escaped and verbatim (plugin).** `&`, `<` and `>` are escaped in model
+  output, PR titles and the workspace name (all attacker- or user-influenced), so none of them can
+  forge a link or write `<!channel>`. Every mrkdwn object is `verbatim: true`, so Slack does not
+  auto-link bare URLs or parse `@here`/`@channel`/`#channel` in that text. Every `href` in the
+  message is one that `slack/links.ts` built from `appWebUrl` plus integer ids; model-emitted URLs
+  never survive as links.
 - **The Slack webhook URL is stored PLAINTEXT — a decision re-made when the count went from one
   per account to N** (plugin migration 0030's header carries the full argument). Short form: it is
   write-only capability to one channel the account owner chose, granting no read of Slack and

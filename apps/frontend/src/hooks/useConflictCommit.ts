@@ -31,7 +31,7 @@ export function conflictCommitMutationKey(prId: number): unknown[] {
  *
  * ⚠ `['attention-cards']`, `['daily-brief']` AND `['work-plan']` GO TOGETHER, ALWAYS. They are the
  * only three keys that opt out of the app-wide `refetchOnWindowFocus: false` and they do it as a
- * set: the board's `conflicts` card must leave, the brief strip counts the same fold, and the
+ * set: the board's `conflicts` card must leave, the daily-brief counts read the same fold, and the
  * plan's chip reads it a third time. INVALIDATE, never splice — a local edit kills `capFor`'s
  * `shown === count` guard and takes the "50 of 148" disclosure with it.
  *

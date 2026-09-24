@@ -77,18 +77,21 @@ export const useInsightsDigestExpand = create<InsightsDigestExpandState>((set, g
 // (`useSprintReportUi` — the Sprint report card's persisted collapse chrome, localStorage key
 // 'pierre:sprintReportUi' — was REMOVED with `SprintReportCard` on the C7 cut list.)
 
-// The Feed's "Open PRs" panel (the workspace's open PRs, grouped PER REPO, above the feed). COLLAPSED
-// BY DEFAULT — it's a filter affordance, not primary content — and its open/closed choice is
-// persisted so it survives navigating away from the Feed and back, and across reloads.
+// The "Open PRs" panel (Pending → My turn → Default branches and open PRs; it lived above the Feed
+// until the Feed became the stream alone). OPEN BY DEFAULT now: it is the content of a view the
+// reader chose to open, not a filter affordance above a stream. The open/closed choice is still
+// remembered, and a stored choice wins.
+// ⚠ The key `pierre:feedOpenPrsPanel` keeps its old name on purpose: renaming it resets every
+// reader's stored choice.
 const FEED_OPEN_PRS_KEY = 'pierre:feedOpenPrsPanel';
 
 function loadFeedOpenPrsCollapsed(): boolean {
   try {
     const raw = localStorage.getItem(FEED_OPEN_PRS_KEY);
-    if (raw == null) return true; // default: collapsed
+    if (raw == null) return false; // default: OPEN
     return JSON.parse(raw) === true;
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -121,9 +124,9 @@ export const useFeedOpenPrsPanel = create<FeedOpenPrsPanelState>((set, get) => {
 });
 
 // The single-repo console's "Open PRs" list (above that repo's activity feed). COLLAPSED
-// BY DEFAULT — same treatment as the cross-repo Feed panel above — so the repo view opens
-// on its feed, with the open-PR list one click away. Its own persisted key, so collapsing
-// the repo list doesn't move the Feed panel and vice versa.
+// BY DEFAULT so the repo view opens on its feed, with the open-PR list one click away. Its
+// own persisted key, so collapsing the repo list doesn't move the workspace panel and vice
+// versa.
 const REPO_OPEN_PRS_KEY = 'pierre:repoOpenPrsPanel';
 
 function loadRepoOpenPrsCollapsed(): boolean {

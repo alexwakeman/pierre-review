@@ -369,9 +369,10 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
 - **The repo picker (`RepoSelectPanel`) is Timeline-ONLY.** Activity, Feed, Bots and Reports
   always cover every repo in the workspace — never let the picker scope a screen that doesn't
   render it.
-- **The Feed is a STREAM: `BriefStrip` → `BranchStatusPanel` → `FeedView`, and nothing else.** Two
-  survey panels were removed from above it — the work plan (now the Pending head) and the
-  flow-metric header (now `WorkspaceFlowMetrics` on Reports). Do not re-add either. ⚠ **The Reports
+- **The Feed is a STREAM: `FeedView`, and nothing else.** Every survey panel left it — the work
+  plan (Pending head), flow metrics (`WorkspaceFlowMetrics`, Reports), the daily-brief strip
+  (DELETED) and the trunk + Open PRs panels (Pending → My turn's second view). Do not re-add
+  any. ⚠ **The Reports
   rail entry is UNGATED on every tier** precisely because those free metrics live there now; the
   pane gates its Pro half internally — `PeriodReportsPanel`, Track usage, **and now the Chronology
   sub-tab**, each as a visible-but-locked pane. The same rule holds on the **Bots** rail: the entry
@@ -454,29 +455,30 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   its own true top. Every OTHER consumer keeps the default caps (Pro chat / sprint report / Slack
   inputs and hashes must not grow) — except the Pro work plan, which folds uncapped and may name
   ONLY a card the tabs list (`listedCardIds`). ⚠ **EACH COUNT IS ITS OWN POPULATION**: a tab shows `tab.total`,
-  a chip its kind's `kindTotals`, the lenses `relevanceTotals` / `authorTotals` — and the daily
-  brief's lines say the SAME figures (survey lines = `kindTotals`; my_turn / ci lines =
-  min(total, 50)), because each line opens its tab with its own chip or lens.
+  a chip its kind's `kindTotals`, the lenses `relevanceTotals` / `authorTotals` — and
+  `/api/daily-brief` returns the SAME figures (survey = `kindTotals`; my_turn / ci = min(total,
+  50)) for the banner and Workspace badges.
   ⚠ `kindTotals.reviewer_routing` is EVERY orphan, suggestion or not; suggestions are looked up
   (network) for the top `routingSuggestCap` (15) only, AFTER ranking. ⚠ **THE TABS ARE AN
   ALLOW-LIST** — a new `InsightKind` with no tab is folded, counted and never listed (a
   compiler-checked test in work-plan.test.ts fails first). ⚠ The visible tab is DERIVED
-  (`effectivePendingTab`: a brief line's kind names its tab, else the picked `attentionTab`, else My
-  turn). ⚠ "Pending" is a LABEL-ONLY rename of "Needs attention" — the store/URL literal stays
+  (`effectivePendingTab`: a seated kind names its tab, else the picked `attentionTab`, else My
+  turn; My turn's second view mounts ONLY while open, count-free). ⚠ "Pending" is a LABEL-ONLY
+  rename of "Needs attention" — the store/URL literal stays
   `'attention'`. ⚠ **The board EXPLAINS its own order** (header + per-card info popovers, "How
   Pending works" modal), so every admission floor, cap, colour threshold and Do next preset lives
   ONCE in `packages/shared/src/pending-rules.ts`, read by the folds AND the copy (which prints the
   response's `rules`) — never retype one as a literal in either ([docs/FRONTEND.md](docs/FRONTEND.md)
   § The Pending tabs).
 - **A surface that NOTIFIES counts `myTurnPersonal`; a surface you OPEN counts `myTurn`** (banner,
-  Workspace badges, "Elsewhere" rows, browser notification vs the Pending board). ⚠ A
+  Workspace badges, browser notification vs the Pending board). ⚠ A
   narrow count may only navigate through ITS OWN lens — `attentionRelevance` is THREE-VALUED
   (`'mine'` = direct + maintained = the retired `personal`; `'others'` = `relevance === 'none'`;
   `null` = everything), and every entry point SEATS its value, `null` included, because
   `setActivityRepo` early-returns `{}` on an unchanged rail. ⚠ Pair narrow with narrow in the cap
-  disclosure (`myTurnPersonalCapDisclosure` / `myTurnOtherCapDisclosure`), or the "+" silently
+  disclosure (`myTurnPersonalCapDisclosure`), or the "+" silently
   vanishes — and **`myTurnOther` is never `myTurn - myTurnPersonal`** (a subtraction has no
-  denominator, so `capFor`'s `shown === count` guard drops the disclosure).
+  denominator of its own).
 - **`MyTurnCard.relevance` writes THREE card labels** — `'direct'` → "Your turn", `'maintained'` →
   "In your repos" (orbit, not ownership), `'none'` → the neutral kind label. ⚠ An ABSENT
   `relevance` renders the NEUTRAL label even when `personal === true`: a missing field may never
@@ -536,7 +538,8 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   pinned, not emergent. ⚠ It is also why the Settings **Workspace heading is no longer Pro-gated**: a free
   workspace section must never sit below the `/api/pro/settings` gate, which 404s with no plugin.
 - **Visible sub-tabs are DERIVED, never written back** (`feedInnerTab`, `botsInnerTab`,
-  `insightsTab` — Reports' Overview/Bottlenecks — and the Pending tab, `effectivePendingTab`) —
+  `insightsTab` — Reports' Overview/Bottlenecks — the Pending tab, `effectivePendingTab`, and My
+  turn's view, `effectiveMyTurnView`) —
   compute an `effectiveTab` for the render only; a corrective `set…` permanently forgets the
   choice.
 - **BLAST RADIUS is ONE resolver, `blastRadius()` in `lib/ui.ts`** — Pending cards, the Feed's
@@ -743,7 +746,8 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 - CI logs are live ranged reads of the signed Actions blob URL — server-side only, **NEVER
   returned to a client** (it is unauthenticated).
 - Trunk status (`/api/branch-status`) is **informational only** — no attention counts, badges
-  or My Turn. Its detail columns follow the partial-response write policy (Conventions); the
+  or My Turn items (its Pending → My turn view is count-free). Its detail columns follow the
+  partial-response write policy (Conventions); the
   commit→PR map keys on `(repoId, number)`.
 
 ---
@@ -784,7 +788,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   only when the query runs. Grep, don't trust the compiler.
 - Tiers — **free gets the per-PR truth, paid gets the cross-team roll-up**: **core** is free and
   AI-free (feed/timeline/My Turn, per-COMMENT ML severity badges, Settings classification, the
-  bot-only caution + `TuningSuggestions`, the daily-brief COUNTS strip, the `BotTriageCard` grade);
+  bot-only caution + `TuningSuggestions`, the `BotTriageCard` grade);
   **pro** adds `botDepth` (NON-AI depth **and the WHOLE Bots → ROI panel** — vendor table,
   keep/tune/noisy verdicts, the Inflation column *counts included*, ML flagging, volume, seat
   prices), `activityDigest`, and `periodReports` (period reports + by-workspace axis + the People
@@ -1306,7 +1310,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0056` and plugin `0034` are NOT replayed.
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0057` and plugin `0034` are NOT replayed.
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence

@@ -8,6 +8,7 @@ import type {
   ClaudeReviewResponse,
   ClaudeReviewStatusResponse,
   ClaudeReviewStreamEvent,
+  ClaudeReviewTicketInput,
   ClaudeReviewVerdict,
   RequestedReviewMode,
 } from '@pierre-review/shared';
@@ -98,8 +99,12 @@ export function useClaudeReviewStream(
 export function useGenerateReview(prId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { model: ClaudeReviewModel; mode: RequestedReviewMode }) =>
-      api.generateClaudeReview(prId, vars.model, vars.mode),
+    mutationFn: (vars: {
+      model: ClaudeReviewModel;
+      mode: RequestedReviewMode;
+      // The optional user story; undefined sends none.
+      ticket?: ClaudeReviewTicketInput;
+    }) => api.generateClaudeReview(prId, vars.model, vars.mode, vars.ticket),
     onSuccess: () => {
       // Tell the global banner a run is in flight, so it starts polling.
       useFilters.getState().bumpClaudeReviewKickoff();

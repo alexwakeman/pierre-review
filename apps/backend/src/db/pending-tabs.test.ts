@@ -11,6 +11,9 @@
 //      MUTATION-TESTED: with the brief reading its card count again, test 2 fails (1 vs 17).
 //   2. THE BOARD LISTS EVERY ORPHAN and looks suggestions up for only `routingSuggestCap` of them —
 //      the lookup is network-backed per PR, so a 173-card tab must not mean 173 lookups.
+//   3. A ROUTING CARD CARRIES `viewerCanPush` from `writableRepoIds` (the WRITE/MAINTAIN/ADMIN set the
+//      request-reviewers route re-checks), on BOTH folds — the card's per-suggestion Assign buttons are
+//      hidden without it, and 703 of 714 real orphans sit in repos the viewer only reads.
 //
 // work-plan.test.ts cannot hold these: its fixture keeps every PR under the 4-hour orphan floor on
 // purpose, so nothing there ever reaches the network-backed suggester. Here the suggester's
@@ -66,6 +69,10 @@ let brief: any;
 let tabs: any;
 let closeDb: (() => Promise<void>) | undefined;
 let scope: any;
+let dbRef: any;
+let schemaRef: any;
+let eqRef: any;
+let repoId: number;
 const ORPHANS = PENDING_LIMITS.routingSuggestCap + 2;
 const prIds: number[] = [];
 
@@ -109,6 +116,10 @@ beforeAll(async () => {
     .execute();
   const author = authorRow!;
   const repo = repoRow!;
+  dbRef = db;
+  schemaRef = schema;
+  eqRef = eq;
+  repoId = repo.id;
   for (let i = 0; i < ORPHANS; i++) {
     // Older PRs first, so the ranker (longer wait wins a tie) has a deterministic order.
     const openedAt = new Date(now - (48 + i) * HOUR);
@@ -197,6 +208,40 @@ describe('the board lists every orphan and suggests for the top few', () => {
     // …and every card past the cap carries none, because nobody looked.
     for (const c of listed.slice(PENDING_LIMITS.routingSuggestCap)) {
       expect(c.suggestedReviewers).toEqual([]);
+    }
+  });
+});
+
+describe('a routing card says whether the viewer may request reviewers', () => {
+  // VISIBILITY ONLY — POST /api/prs/:id/request-reviewers re-checks the same column and 403s.
+  const routingOf = (r: { cards: { kind: string }[] }) =>
+    r.cards.filter((c) => c.kind === 'reviewer_routing') as ReviewerRoutingCard[];
+  const both = async (): Promise<ReviewerRoutingCard[]> => [
+    ...routingOf(await q.getWorkspaceInsights(1, undefined, scope)),
+    ...routingOf(await q.getWorkspaceInsights(1, undefined, scope, { uncapped: true })),
+  ];
+  const setPermission = (viewerPermission: string) =>
+    dbRef
+      .update(schemaRef.repos)
+      .set({ viewerPermission })
+      .where(eqRef(schemaRef.repos.id, repoId))
+      .execute();
+
+  it('is false on a repo the viewer only reads, on both folds', async () => {
+    const cards = await both();
+    // Anti-vacuity: the capped fold's one suggestable card + every orphan on the board's fold.
+    expect(cards).toHaveLength(1 + ORPHANS);
+    for (const c of cards) expect(c.viewerCanPush).toBe(false);
+  });
+
+  it('is true once the viewer can push', async () => {
+    await setPermission('WRITE');
+    try {
+      const cards = await both();
+      expect(cards).toHaveLength(1 + ORPHANS);
+      for (const c of cards) expect(c.viewerCanPush).toBe(true);
+    } finally {
+      await setPermission('READ');
     }
   });
 });

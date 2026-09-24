@@ -676,6 +676,14 @@ export function PrDetail({
   // `selectedPrId === prId` guard to remember. `nonce` makes re-clicking the same finding
   // re-scroll (an effect keyed on a boolean cannot re-fire).
   const [changesFocus, setChangesFocus] = useState<DiffFocusTarget | null>(null);
+  // The Changes tab's inline-thread OPEN/SHUT decisions, keyed by thread id — the reader's clicks
+  // and the reveals that opened a pill, NEVER the default (an undecided pill starts from its
+  // thread's CURRENT state: open unless resolved). LOCAL here for the same reason as
+  // `changesFocus`: both mounts key PrDetail by prId, so this lives exactly as long as this PR's
+  // pane — and it must outlive ChangesTab, which the Changes → Threads → Changes round trip
+  // remounts. A plain Map mutated in place and read only when a pill MOUNTS, so a click re-renders
+  // one pill and never this component.
+  const [threadOpenMemory] = useState(() => new Map<number, boolean>());
   /**
    * THE ONLY WAY TO CHANGE TABS — every path below goes through this, and the reason is
    * `changesFocus`.
@@ -719,8 +727,9 @@ export function PrDetail({
     line: number | null,
     side: 'LEFT' | 'RIGHT',
     // Set only by the thread → Changes leg: the target thread's inline pill opens + flashes
-    // as part of the reveal (every thread renders collapsed there, and a jump landing beside
-    // a shut pill reads as a broken link). Claude Review anchors carry none.
+    // as part of the reveal (a resolved thread starts shut there and the reader may have shut
+    // any other; a jump landing beside a shut pill reads as a broken link). Claude Review
+    // anchors carry none.
     threadId?: number,
   ): void => {
     // THE ONE DELIBERATE EXCEPTION to `goToTab`, and the ordering is the whole point: this path
@@ -792,14 +801,20 @@ export function PrDetail({
    * thread a moment ago — would not re-fire and the tab would not move. `selectThread` is still
    * called, because it also clears the state/severity pill presets that could otherwise filter the
    * target thread out of the list entirely.
+   *
+   * ⚠ Keyed on `prId`, NEVER the `pr` object: it reaches the memo'd FileDiffView through
+   * ChangesTab's `threadCtx`, and every refetch of `['pr', prId]` that changes ANY field (a CI
+   * check finishing, a merge-state move) hands back a new `pr` even when `pr.threads` keeps its
+   * identity. Closing over `pr` re-rendered every diff block and every open thread card on each
+   * such tick — MEASURED 1.3–1.5s of long tasks on a 532-thread PR. `prId` is the id `pr.id`
+   * would give (this pane only renders once `usePr(prId)` has loaded it).
    */
   const openThreadInThreads = useCallback(
     (threadId: number) => {
-      if (pr == null) return;
-      useFilters.getState().selectThread(pr.id, threadId);
+      useFilters.getState().selectThread(prId, threadId);
       goToTab('threads');
     },
-    [pr, goToTab],
+    [prId, goToTab],
   );
   const openPrFocused = useFilters((s) => s.openPrFocused);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
@@ -1366,7 +1381,12 @@ export function PrDetail({
             onConsumed={consumeActivityFocus}
           />
         ) : effectiveTab === 'changes' ? (
-          <ChangesTab pr={pr} focus={changesFocus} onOpenThread={openThreadInThreads} />
+          <ChangesTab
+            pr={pr}
+            focus={changesFocus}
+            onOpenThread={openThreadInThreads}
+            threadOpenMemory={threadOpenMemory}
+          />
         ) : effectiveTab === 'bot_activity' ? (
           <PrBotBehaviourTab pr={pr} />
         ) : effectiveTab === 'ai_fix' ? (

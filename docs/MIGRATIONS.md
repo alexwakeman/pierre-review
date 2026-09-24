@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0056` and plugin `0034` are NOT (written 2026-09-19/21 with the Postgres down; see the
+  ⚠ pg `0052`–`0057` and plugin `0034` are NOT (written 2026-09-19/24 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -726,10 +726,22 @@ with a NULL member is not checked (MATCH SIMPLE), which is what lets one table c
 kinds. ⚠ Same table NAME as the one `0060`/pg `0047` dropped, different contract — see the file's
 header and docs/DATA-MODEL.md. No backfill. Twins share `when` `1789869600000`.
 
-⚠ **NONE OF THE SIX PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0056` and plugin `0034`). The
-standing Postgres was not running when they were written (2026-09-19); the SQLite halves ran through
-the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain — core
-should reach **57 applied = 57 journal entries** and the plugin **34** — and check
+### `0070_claude_review_follow_up_ticket` (pg `0057`)
+
+Four nullable columns, no backfill: `claude_reviews.ticket`, `.ticket_assessment` and `.follow_up`
+(sqlite `text` json / pg `jsonb`) and `claude_review_findings.prior_finding_id` (`integer`). The
+last is a SOFT reference with NO FK on purpose — it always points at a finding of the same PR, and
+`retention.ts` + `deleteRepo` delete a PR's findings in one `inArray(reviewId, …)` statement, so an
+FK would only add delete-ordering risk. `claude_reviews.model` needed nothing for the new
+`claude-opus-5-5` id: it is plain `text` in both dialects (no CHECK, no pg enum). Claude Review is
+local-only, so the pg columns exist for parity. Twins share `when` `1789956000000`; the pg file
+uses `ADD COLUMN IF NOT EXISTS`. `src/db/claude-review-follow-up-columns.test.ts` runs the sqlite
+half through the real migrator in CI. Contracts: docs/CLAUDE-REVIEW.md.
+
+⚠ **NONE OF THE SEVEN PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0057` and plugin `0034`). The
+standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
+through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
+core should reach **58 applied = 58 journal entries** and the plugin **34** — and check
 `review_request_events` carries both FKs and its unique index, that `workspaces.flow_settings`,
 `pull_requests.advisory_ids` and `accounts.my_turn_settings` are `jsonb`, and that
 `security_checked_at` and `pr_mentions.mentioned_at` are `timestamp with time zone`. ⚠ `0055` is

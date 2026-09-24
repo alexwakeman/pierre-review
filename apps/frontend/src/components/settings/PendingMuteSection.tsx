@@ -53,7 +53,7 @@ function sameSet(a: readonly number[], b: ReadonlySet<number>): boolean {
  * A muted repo's items STAY ON THE PENDING BOARD. What stops is the ownership claim: the server
  * downgrades those rows to the neutral relevance, so the card reads "Review or reply" instead of
  * "Your turn"/"In your repos", the browser notification stops firing, and the "N need your
- * attention" figures (the welcome-back banner, the workspace badges, the brief strip) drop it
+ * attention" figures (the welcome-back banner, the workspace badges) drop it
  * into the broader "review or reply" count. "The work is real, it is just not yours" is the rule
  * the whole board is built on — a control that HID the work would be a different, worse feature,
  * and a reader who thinks that is what this does will not use it. Hence the description says so

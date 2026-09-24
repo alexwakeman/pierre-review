@@ -30,6 +30,9 @@ import type {
   BlastRadiusConfig,
   BranchCheckRun,
   CheckRun,
+  ClaudeReviewFollowUpRecord,
+  ClaudeReviewTicket,
+  ClaudeTicketAssessment,
   FlowSettings,
   Label,
   MyTurnSettings,
@@ -812,7 +815,15 @@ export const claudeReviews = pgTable(
       enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
     }).notNull(),
     model: text('model', {
-      enum: ['claude-sonnet-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+      // 'claude-opus-4-8' is no longer offered but stays readable for stored runs. Plain text in
+      // the database (no CHECK, no pg enum), so this list needs no migration.
+      enum: [
+        'claude-opus-5-5',
+        'claude-sonnet-5',
+        'claude-opus-4-8',
+        'claude-sonnet-4-6',
+        'claude-haiku-4-5',
+      ],
     }).notNull(),
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),
     // Deterministic router decision + inputs, recorded before the agent runs. See
@@ -847,6 +858,11 @@ export const claudeReviews = pgTable(
       .notNull()
       .defaultNow(),
     finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+    // User story / its assessment / the follow-up on the previous review. See the
+    // schema.sqlite.ts twin for the contracts. Migration pg 0057 (sqlite 0070).
+    ticket: jsonb('ticket').$type<ClaudeReviewTicket>(),
+    ticketAssessment: jsonb('ticket_assessment').$type<ClaudeTicketAssessment>(),
+    followUp: jsonb('follow_up').$type<ClaudeReviewFollowUpRecord>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -893,6 +909,9 @@ export const claudeReviewFindings = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),
+    // A SOFT reference (no FK, same PR) to the previous-review finding this one re-raises. See
+    // the schema.sqlite.ts twin for why there is no FK. Migration pg 0057 (sqlite 0070).
+    priorFindingId: integer('prior_finding_id'),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );

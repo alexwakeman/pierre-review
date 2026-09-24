@@ -3469,8 +3469,8 @@ export interface CiRerunResult {
 
 // Request reviewers on a PR (POST /api/prs/:id/request-reviewers). userIds are
 // resolved to GitHub logins server-side (bots + the PR author dropped); requires repo
-// write access (re-checked server-side). Powers the Insights "Assign reviewers" action
-// AND the CORE PR-detail "Suggested reviewers" assign. At least one of the three arrays
+// write access (re-checked server-side). Both callers send ONE reviewer per request: the
+// Pending card's per-suggestion Assign and the PR pane's Suggested row. At least one of the three arrays
 // must be non-empty. `userIds` are resolved to logins; `logins` are sent through as-is
 // (for suggested reviewers we haven't synced as users); `teamSlugs` become team review
 // requests (`team_reviewers`) — a CODEOWNERS `@org/team` requestable without expanding
@@ -3993,7 +3993,7 @@ export interface ProCapabilities {
   // ROI cost overlay. The compute behind these surfaces is CORE; this flag gates the surfaces.
   botDepth: boolean;
   // The work plan (paid, gated like workspaceInsights/periodReports): the prioritised
-  // "what should I work on today" worklist under the Activity daily-brief strip, plus its
+  // "what should I work on today" worklist over the Pending tabs, plus its
   // optional Haiku narration. Gates the WHOLE panel, both halves — the deterministic worklist is
   // CORE compute (db/work-plan.ts) but has no free surface, and the narration is the billed POST.
   // The ranked rows render with or without a plan, so this flag is the panel's only gate.
@@ -5994,30 +5994,39 @@ export interface TimelineQuery {
 // PR and returns structured findings. Claude's output is read-only reference; the
 // user authors their own review body/verdict and ticks which findings to post.
 
+// Every model id a STORED run may carry. ⚠ Wider than the OFFERED list below:
+// 'claude-opus-4-8' stays in the union (and in the labels, the price table and both schemas'
+// text enum) ONLY so runs stored with it still render. It is not offered in the picker and the
+// generate route 400s it.
 export type ClaudeReviewModel =
+  | 'claude-opus-5-5'
   | 'claude-sonnet-5'
   | 'claude-opus-4-8'
   | 'claude-sonnet-4-6'
   | 'claude-haiku-4-5';
 
-// Runtime list for the model picker (frontend bundles shared; the backend keeps a
-// local copy and only `import type`s from here — shared isn't shipped at runtime).
-// Ordered by recommendation (the DEFAULT first): Sonnet 5 is near-Opus quality at
-// Sonnet cost — the best-value default; Opus 4.8 stays for the hardest runs; Sonnet
-// 4.6 for continuity; Haiku 4.5 is the cheap fast option — ideal for a quick pass on
-// a small/bounded diff; it does not accept the `effort` knob, so it runs at the
-// model's own default thinking depth.
+// The OFFERED list: what the picker shows and what `POST /api/prs/:id/claude-review` accepts.
+// A real runtime value, read by the SPA AND the plugin's route schema (shared is vendored into
+// the release, so both halves read this one spelling). DEFAULT FIRST: Opus 5.5 is the most
+// thorough reviewer and the default; Sonnet 5 is the best-value option; Sonnet 4.6 for
+// continuity; Haiku 4.5 is the cheap fast pass (it takes no `effort` knob). AI Fix reuses this
+// list but keeps its own Sonnet 5 default.
 export const CLAUDE_REVIEW_MODELS: ClaudeReviewModel[] = [
+  'claude-opus-5-5',
   'claude-sonnet-5',
-  'claude-opus-4-8',
   'claude-sonnet-4-6',
   'claude-haiku-4-5',
 ];
 
-// Friendly labels (with a short cost/quality hint) for the model picker.
+// The model a Claude Review run uses when the request names none, and the picker's opening
+// value. Always `CLAUDE_REVIEW_MODELS[0]` (a test pins it).
+export const DEFAULT_CLAUDE_REVIEW_MODEL: ClaudeReviewModel = 'claude-opus-5-5';
+
+// Friendly labels (with a short cost/quality hint) for the model picker, and for stored runs.
 export const CLAUDE_REVIEW_MODEL_LABELS: Record<ClaudeReviewModel, string> = {
+  'claude-opus-5-5': 'Claude Opus 5.5 (most thorough)',
   'claude-sonnet-5': 'Claude Sonnet 5 (best value)',
-  'claude-opus-4-8': 'Claude Opus 4.8 (most thorough)',
+  'claude-opus-4-8': 'Claude Opus 4.8 (no longer offered)',
   'claude-sonnet-4-6': 'Claude Sonnet 4.6',
   'claude-haiku-4-5': 'Claude Haiku 4.5 (fast, cheap)',
 };
@@ -6133,7 +6142,142 @@ export interface ClaudeFinding {
   // (#discussion_r vs #issuecomment).
   postedCommentKind: 'inline' | 'pr_comment' | null;
   createdAt: string;
+  // Set when this finding RE-RAISES a finding from the previous review that is still not (or
+  // only partly) addressed: that earlier finding's id. A soft reference (same PR, no FK). The SPA
+  // shows a "Not addressed since last review" chip from it. Absent/null on ordinary findings and
+  // on runs from before follow-ups existed.
+  priorFindingId?: number | null;
 }
+
+// ---- Claude Review: the user story or task (optional input) ----
+// Three free-text fields the person running a review may paste. Caps and the criteria split live
+// ONCE in `claude-review.ts` (`CLAUDE_REVIEW_TICKET_LIMITS`, `splitAcceptanceCriteria`,
+// `checkClaudeReviewTicket`), read by the route AND the SPA.
+
+// What the SPA sends (every field optional; all blank ⇒ no ticket).
+export interface ClaudeReviewTicketInput {
+  title?: string;
+  description?: string;
+  acceptanceCriteria?: string;
+}
+
+// What is STORED on the run (at queue time, so a failed or cancelled run still prefills the
+// panel). `criteria` is the server's split of `acceptanceCriteria`, numbered AC1..n in order —
+// stored so the numbers never drift if the split rule changes later.
+export interface ClaudeReviewTicket {
+  title: string | null;
+  description: string | null;
+  acceptanceCriteria: string | null;
+  criteria: string[];
+}
+
+// 'not_checked' is written ONLY by the server (Claude never reported on it); the model's own
+// vocabulary is the other members.
+export type ClaudeTicketAlignment =
+  | 'aligned'
+  | 'partly_aligned'
+  | 'not_aligned'
+  | 'unclear'
+  | 'not_checked';
+
+export type ClaudeTicketCriterionStatus =
+  | 'met'
+  | 'partly_met'
+  | 'not_met'
+  | 'unclear'
+  | 'not_checked';
+
+// One acceptance criterion's verdict. `ref` is 'AC1'…, `index` is 0-based into
+// `ClaudeReviewTicket.criteria`, `text` is the stored criterion (never model text).
+// `explanation`/`path`/`line` are Claude's.
+export interface ClaudeTicketCriterionResult {
+  ref: string;
+  index: number;
+  text: string;
+  status: ClaudeTicketCriterionStatus;
+  explanation: string | null;
+  path: string | null;
+  line: number | null;
+}
+
+// Something asked for but not done ("missing"), or done but not asked for ("notRequested").
+// All text is Claude's.
+export interface ClaudeTicketGap {
+  title: string;
+  explanation: string | null;
+  path: string | null;
+  line: number | null;
+}
+
+// The server-validated assessment of a run against its ticket. `criteria` holds EXACTLY one row
+// per stored criterion, in AC order (a criterion Claude skipped is 'not_checked').
+export interface ClaudeTicketAssessment {
+  alignment: ClaudeTicketAlignment;
+  summary: string | null;
+  criteria: ClaudeTicketCriterionResult[];
+  missing: ClaudeTicketGap[];
+  notRequested: ClaudeTicketGap[];
+}
+
+// ---- Claude Review: follow-up on the previous review ----
+// 'not_checked' is written ONLY by the server — Claude never reported on it, or it was over the
+// cap and never sent. The server NEVER invents 'addressed'.
+export type ClaudeFollowUpStatus =
+  | 'addressed'
+  | 'partly_addressed'
+  | 'not_addressed'
+  | 'no_longer_applies'
+  | 'not_checked';
+
+// One earlier finding and what this run found about it, as STORED (`claude_reviews.follow_up`).
+export interface ClaudeFollowUpItemRecord {
+  // 'P1'…, the ref Claude saw. null ⇒ over the cap, never shown to Claude (then `sent` is false).
+  ref: string | null;
+  // The earlier finding's id (claude_review_findings.id, same PR).
+  priorFindingId: number;
+  sent: boolean;
+  // true ⇒ it came from an OLDER review than the previous one: it was not checked last time, or it
+  // is still open, already posted, and its reminder was left out — either way, carried forward.
+  carried: boolean;
+  status: ClaudeFollowUpStatus;
+  // Claude's one- or two-sentence explanation. null when not reported.
+  explanation: string | null;
+  // The earlier finding's anchor (lines are from the head of the review that raised it).
+  path: string;
+  line: number | null;
+  side: ClaudeFindingSide;
+  severity: ClaudeFindingSeverity;
+  title: string;
+  // The head of the review that RAISED this finding differs from this run's head. PER ITEM: a
+  // carried finding was raised at an older head than the previous review's, so the record-level
+  // `headMoved` is wrong for it. Absent on rows from before the field ⇒ read the record's.
+  headMoved?: boolean;
+  // The earlier finding was already posted to GitHub. With `headMoved === false` a re-raise would
+  // repeat a comment already on this commit, so it is saved left out of the review. Absent ⇒ false.
+  priorPosted?: boolean;
+}
+
+// The wire shape adds `reraisedFindingId`, DERIVED on read: the id of this run's finding that
+// raises the earlier one again (its `priorFindingId` matches), else null.
+export interface ClaudeFollowUpItem extends ClaudeFollowUpItemRecord {
+  reraisedFindingId: number | null;
+}
+
+export interface ClaudeReviewFollowUpRecord {
+  priorReviewId: number;
+  priorHeadSha: string;
+  // The previous review's head differs from this run's head. A CARRIED item may have been raised
+  // at an older head still — read the item's own `headMoved` first.
+  headMoved: boolean;
+  // A "changes since the previous review" diff was in the prompt (compare succeeded, non-empty).
+  changesSinceShown: boolean;
+  // Sent items first (in P order), then the ones over the cap.
+  items: ClaudeFollowUpItemRecord[];
+}
+
+export type ClaudeReviewFollowUp = Omit<ClaudeReviewFollowUpRecord, 'items'> & {
+  items: ClaudeFollowUpItem[];
+};
 
 // One review run (re-review = a new run; history kept, keyed by head SHA).
 export interface ClaudeReview {
@@ -6174,6 +6318,15 @@ export interface ClaudeReview {
   createdAt: string;
   finishedAt: string | null;
   findings: ClaudeFinding[];
+  // The user story or task this run was given (stored at queue time), or null. Absent on runs
+  // from before the field existed.
+  ticket?: ClaudeReviewTicket | null;
+  // The server-validated assessment against `ticket`; null when there was no ticket or the run
+  // did not succeed.
+  ticketAssessment?: ClaudeTicketAssessment | null;
+  // What this run found about the PREVIOUS succeeded review's findings; null when there was no
+  // earlier review with findings to check (or this run skipped).
+  followUp?: ClaudeReviewFollowUp | null;
 }
 
 // A lighter run row for the history selector (no findings).
@@ -6355,10 +6508,15 @@ export interface PostCommentResult {
 // ---- request payloads (Claude review) ----
 
 export interface GenerateReviewBody {
-  model: ClaudeReviewModel;
+  // One of CLAUDE_REVIEW_MODELS (the offered list). Omitted ⇒ DEFAULT_CLAUDE_REVIEW_MODEL.
+  // A model that is not offered (e.g. 'claude-opus-4-8') is a 400.
+  model?: ClaudeReviewModel;
   // Review depth. Omitted / 'auto' lets the deterministic router decide; an explicit
   // 'diff_only' or 'worktree' forces that mode, overriding the router's metrics.
   mode?: RequestedReviewMode;
+  // The optional user story or task. Over a cap in CLAUDE_REVIEW_TICKET_LIMITS ⇒ 400
+  // { error: 'TicketInvalid', field, message } — never truncated. All blank ⇒ no ticket.
+  ticket?: ClaudeReviewTicketInput;
 }
 
 // Saves the user's authored draft; never mutates Claude's summary/verdict.
@@ -7785,6 +7943,13 @@ export interface ReviewerRoutingCard extends InsightCardBase, InsightPrRef {
   // @org/team suggestions), built by the shared enrichReviewerSuggestions pipeline, so bots are
   // structurally impossible and CODEOWNERS/teams are first-class here too.
   suggestedReviewers: ReviewerSuggestion[];
+  /** May the viewer REQUEST reviewers here — the repo's WRITE/MAINTAIN/ADMIN set (`writableRepoIds`,
+   *  the same `repos.viewer_permission` POST /api/prs/:id/request-reviewers re-checks). A VISIBILITY
+   *  gate for the card's per-suggestion Assign buttons, never the authority: the route 403s.
+   *  ⚠ Measured 2026-09-24: 703 of 714 open non-draft PRs nobody was asked to review sit in repos the
+   *  viewer only READS — without this nearly every button on the tab is a guaranteed 403. Rides the
+   *  card because the board may not fetch on mount (MergeReadyCard.viewerCanPush, same field). */
+  viewerCanPush: boolean;
 }
 
 // Per-vendor rollup carried by the bot_signal card.
@@ -10334,7 +10499,8 @@ export type ReactionWriteResponse = ReactionState;
 // summarise a different population than the receipt list below it.
 
 /** The P2.1 drill-down grains plus the ORDERING grains: 'brief' (the daily-brief narration,
- *  N1), 'rollup' (the cross-workspace "Elsewhere" line, N5) and 'person' (the 1:1-prep
+ *  N1), 'rollup' (the cross-workspace roll-up, N5 — both DORMANT: still served, but no SPA
+ *  surface requests them since the Feed's brief strip was deleted) and 'person' (the 1:1-prep
  *  narration, N4 — one digit-free phrase per person-vector line), plus the SECTIONS grain
  *  'person_report' (the People report's per-person narrative — digit-free prose per fixed
  *  section id over the person vector + its evidence rows; see SynthesisSectionItem). Every
@@ -10542,10 +10708,10 @@ export interface SynthesisResponse {
 //
 // A deterministic, computed-on-read fold of "what needs me this morning" for ONE workspace —
 // COUNTS ONLY, free tier, no storage, no AI (the Pro narration rides the synthesis seam's
-// ordering mode above and never touches these shapes). Every line REUSES the fold of the surface
-// it deep-links to (the consolidated feed's my-turn facet, the /api/attention cards, the
-// resolvable-backlog listing, the repos head columns), so the strip's number and the surface it
-// opens cannot disagree. ⚠ NO cost/money fields anywhere here — the roll-up especially must
+// ordering mode above and never touches these shapes). Every figure REUSES the fold of the surface
+// that shows the same population (the /api/attention cards, the resolvable-backlog listing, the
+// repos head columns), so the two cannot disagree. Readers today: the Welcome-back banner and the
+// Workspace badges (`useMyTurnByWorkspace`); the Feed strip that drew one line per figure is gone. ⚠ NO cost/money fields anywhere here — the roll-up especially must
 // never invite summing cost across workspaces (§8.18).
 
 /** One anomalous review bot this week (a narrow volume-only self-baseline — see
@@ -10609,10 +10775,9 @@ export interface DailyBriefCounts {
    *  when every personal item fits on the list, so they always add up to `myTurnPersonal`; past the
    *  cap they are absent and the badge shows the total alone.
    *
-   *  The brief renders TWO lines off this — "N need your attention" (`myTurnPersonal`, the
-   *  interrupting population, unchanged) and "M need review or reply" (`myTurnOther`) — and each
-   *  must open a board filtered to ITS OWN number. `myTurnDirect`/`myTurnMaintained` are the
-   *  banner's split ("2 yours · 3 in your repos").
+   *  Readers today: the banner and the Workspace badges show `myTurnPersonal` (the interrupting
+   *  population) and its `myTurnDirect`/`myTurnMaintained` split ("2 yours · 3 in your repos").
+   *  `myTurnOther` lost its only reader with the Feed's brief strip; it is still sent.
    *
    *  ⚠ NOT ONE OF THESE MAY BE A SUBTRACTION. `myTurn - myTurnPersonal` would be arithmetically
    *  right and STILL wrong: it has no total of its own, and `capFor` gates the "of N" disclosure
@@ -10663,7 +10828,8 @@ export interface DailyBriefCounts {
   trunkRed: DailyBriefTrunkRepo[];
 }
 
-/** One workspace's line in the roll-up ("Elsewhere") — counts only, never cost. */
+/** One OTHER workspace's counts in the roll-up (read by the Workspace badges and the Welcome-back
+ *  banner through `useMyTurnByWorkspace`) — counts only, never cost. */
 export interface DailyBriefWorkspaceLine {
   workspaceId: number;
   name: string;
@@ -10909,14 +11075,14 @@ export interface AutomationOutputResponse {
 // ---- The work plan (Pro): "what should I work on today" ----------------------------------
 //
 // A prioritised worklist for ONE workspace, plus an optional Haiku-written narration of it.
-// It sits directly under the daily-brief strip, and the relationship between the two is the
-// whole design constraint:
+// Its population is the daily brief's (`/api/daily-brief`), and the relationship between the two
+// is the whole design constraint:
 //
 //   THE BRIEF SAYS HOW MUCH. THE PLAN SAYS IN WHAT ORDER. THEY ARE ONE POPULATION.
 //
 // `WorkPlanEvidence` is folded from the SAME `/api/attention` cards `computeBriefCounts` counts
 // (plus two signals the cards never carried — "can land now" and "behind trunk"), so a plan that
-// disagreed with the strip above it would be a bug in one fold, not two opinions. `counts` below
+// disagreed with the brief's counts would be a bug in one fold, not two opinions. `counts` below
 // is carried on the wire precisely so that agreement is ASSERTABLE rather than assumed.
 //
 // ── THE DIVISION OF LABOUR, WHICH IS THE SAFETY PROPERTY ─────────────────────────────────────

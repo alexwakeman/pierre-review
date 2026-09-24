@@ -52,8 +52,8 @@ import { useWorkspaces } from './useWorkspaces.js';
  * any list renders.
  *
  * ── NO SILENT CAPS, IN EITHER DIRECTION ───────────────────────────────────────────────────────
- *  • The CARD cap (50) is disclosed through the ONE `myTurnCapDisclosure` rule, so a badge and the
- *    brief and the board cannot phrase the same cap three ways. `count` always stays the CARD
+ *  • The CARD cap (50) is disclosed through the ONE `myTurnCapDisclosure` rule, so a badge, the
+ *    banner and the board cannot phrase the same cap three ways. `count` always stays the CARD
  *    count — the list a click opens — never the uncapped total.
  *  • The ROLL-UP cap (the route returns at most N other workspaces) is surfaced as `uncounted`.
  *    A badge whose entire purpose is "you have work you cannot see from here" must not itself
@@ -64,8 +64,8 @@ import { useWorkspaces } from './useWorkspaces.js';
  * then, so everything here is empty and NOTHING claims a workspace is uncounted while the brief
  * has not landed — "we haven't asked yet" must never render as "we asked and it wasn't there".
  *
- * ⚠ COST: this rides the EXISTING `['daily-brief', ws:<id>]` key, so the Feed's BriefStrip and the
- * attention board's cap disclosure share one request with it. Mounting it in the always-visible
+ * ⚠ COST: this rides the EXISTING `['daily-brief', ws:<id>]` key, so the banner and the badges
+ * share one request. Mounting it in the always-visible
  * FilterBar/banner does mean the Timeline now pays for one `search`-tier request per staleTime
  * window where it previously paid none — a counts-only fold, and the price of the badge being
  * visible from the board you are actually on. Never add a second query key for these numbers.

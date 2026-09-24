@@ -31,6 +31,7 @@ import type {
   CiRerunResult,
   FailingCheckInput,
   GenerateFixBody,
+  GenerateReviewBody,
   PrSummaryResponse,
   ClaudeReview,
   ClaudeReviewListResponse,
@@ -38,6 +39,7 @@ import type {
   RequestedReviewMode,
   ClaudeReviewResponse,
   ClaudeReviewStatusResponse,
+  ClaudeReviewTicketInput,
   ClaudeReviewVerdict,
   ReviewBudgetResponse,
   CreatePrCommentBody,
@@ -816,7 +818,8 @@ export const api = {
       jsonBody('POST', body),
     ).then((r) => handle<AttentionLivenessResponse>(r)),
   // The daily brief (CORE/free, counts only — plan P3.1/P3.3). `rollup` adds the per-workspace
-  // "Elsewhere" count lines; the Pro narration is a SEPARATE synthesis fetch, never this route.
+  // counts (the Workspace badges read them); the Pro narration is a SEPARATE synthesis fetch,
+  // never this route.
   dailyBrief: (workspaceId: number, rollup: boolean) =>
     get<DailyBriefResponse>(
       withQuery('/api/daily-brief', workspaceParam(workspaceId), rollup ? 'rollup=1' : undefined),
@@ -1211,14 +1214,18 @@ export const api = {
     ),
   claudeReviewById: (reviewId: number) =>
     get<ClaudeReview>(`/api/claude-reviews/${reviewId}`),
+  // `ticket` is the optional user story, already checked by `checkClaudeReviewTicket` (the route
+  // runs the same check and 400s `TicketInvalid` over a cap). Omitted entirely when there is none.
   generateClaudeReview: (
     prId: number,
     model: ClaudeReviewModel,
     mode: RequestedReviewMode,
+    ticket?: ClaudeReviewTicketInput,
   ) =>
-    fetch(`/api/prs/${prId}/claude-review`, jsonBody('POST', { model, mode })).then(
-      (r) => handle<{ reviewId: number; status: string }>(r),
-    ),
+    fetch(
+      `/api/prs/${prId}/claude-review`,
+      jsonBody('POST', { model, mode, ...(ticket ? { ticket } : {}) } satisfies GenerateReviewBody),
+    ).then((r) => handle<{ reviewId: number; status: string }>(r)),
   claudeReviewStatus: (prId: number) =>
     get<ClaudeReviewStatusResponse>(`/api/prs/${prId}/claude-review/status`),
   cancelClaudeReview: (prId: number) =>
