@@ -526,7 +526,8 @@ export interface ReviewFollowUpReport {
 }
 
 export interface ReviewTicketItemReport {
-  ref: string;
+  // The criterion as Claude read it from the acceptance-criteria text (Claude enumerates them).
+  text: string;
   status: 'met' | 'partly_met' | 'not_met' | 'unclear';
   explanation: string;
   path?: string | null;

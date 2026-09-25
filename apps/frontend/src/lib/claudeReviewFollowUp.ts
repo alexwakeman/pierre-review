@@ -7,7 +7,6 @@
 // retyped here either — they live once in `@pierre-review/shared` (`claude-review.ts`).
 import {
   checkClaudeReviewTicket,
-  splitAcceptanceCriteria,
   CLAUDE_REVIEW_TICKET_LIMITS,
 } from '@pierre-review/shared';
 import type {
@@ -280,10 +279,6 @@ export function ticketRequestFromCheck(
   return out;
 }
 
-export function criteriaCountLabel(n: number): string {
-  return `${n} acceptance ${n === 1 ? 'criterion' : 'criteria'}`;
-}
-
 /**
  * What the COLLAPSED panel's header adds, so a closed panel never hides that a user story will be
  * sent — or that one is blocking the run. '' when empty.
@@ -291,8 +286,7 @@ export function criteriaCountLabel(n: number): string {
 export function ticketPanelHint(d: TicketDraft, check: ClaudeReviewTicketCheck): string {
   if (!ticketDraftHasContent(d)) return '';
   if (!check.ok) return ' · needs a fix';
-  const n = splitAcceptanceCriteria(d.acceptanceCriteria).length;
-  return n > 0 ? ` · ${criteriaCountLabel(n)}` : ' · added';
+  return ' · added';
 }
 
 const FIELD_CAP: Record<ClaudeReviewTicketField, number> = {

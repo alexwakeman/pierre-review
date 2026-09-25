@@ -283,16 +283,9 @@ describe('the user story draft', () => {
       ticketPanelHint(d, checkClaudeReviewTicket(d));
     expect(hint(EMPTY_TICKET_DRAFT)).toBe('');
     expect(hint({ ...EMPTY_TICKET_DRAFT, title: 'T' })).toBe(' · added');
-    expect(hint({ ...EMPTY_TICKET_DRAFT, acceptanceCriteria: '- a\n- b\n- c' })).toBe(
-      ' · 3 acceptance criteria',
-    );
-    expect(hint({ ...EMPTY_TICKET_DRAFT, acceptanceCriteria: 'only one' })).toBe(
-      ' · 1 acceptance criterion',
-    );
-    const many = Array.from(
-      { length: CLAUDE_REVIEW_TICKET_LIMITS.acceptanceCriteriaItems + 1 },
-      (_, i) => `- item ${i}`,
-    ).join('\n');
+    // No code-side split any more: criteria text in any format is just "added".
+    expect(hint({ ...EMPTY_TICKET_DRAFT, acceptanceCriteria: '- a\n- b\n- c' })).toBe(' · added');
+    const many = 'x'.repeat(CLAUDE_REVIEW_TICKET_LIMITS.acceptanceCriteriaChars + 1);
     expect(hint({ ...EMPTY_TICKET_DRAFT, acceptanceCriteria: many })).toBe(' · needs a fix');
   });
 

@@ -123,10 +123,10 @@ describe('submitReviewSchema — follow-up and user-story fields', () => {
         alignment: 'partly_aligned',
         summary: 'Mostly.',
         criteria: [
-          { ref: 'AC1', status: 'met', explanation: 'Yes.', path: 'a.ts', line: 4 },
-          { ref: 'AC2', status: 'not_met', explanation: 'No.', path: null, line: null },
-          { ref: 'AC3', status: 'unclear', explanation: '?' },
-          { ref: 'AC4', status: 'partly_met', explanation: 'Some.' },
+          { text: 'Criterion 1', status: 'met', explanation: 'Yes.', path: 'a.ts', line: 4 },
+          { text: 'Criterion 2', status: 'not_met', explanation: 'No.', path: null, line: null },
+          { text: 'Criterion 3', status: 'unclear', explanation: '?' },
+          { text: 'Criterion 4', status: 'partly_met', explanation: 'Some.' },
         ],
         missing: [{ title: 'Expiry', explanation: 'No expiry.' }],
         notRequested: [{ title: 'Extra flag', explanation: 'Adds a flag.', path: 'c.ts', line: 9 }],
@@ -149,7 +149,7 @@ describe('submitReviewSchema — follow-up and user-story fields', () => {
     const p = {
       ...base,
       findings: [],
-      ticket: { alignment: 'aligned', summary: 's', criteria: [{ ref: 'AC1', status: 'not_checked', explanation: 'x' }] },
+      ticket: { alignment: 'aligned', summary: 's', criteria: [{ text: 'Criterion 1', status: 'not_checked', explanation: 'x' }] },
     };
     expect(submitReviewSchema.safeParse(p).success).toBe(false);
   });
@@ -158,7 +158,16 @@ describe('submitReviewSchema — follow-up and user-story fields', () => {
     const p = {
       ...base,
       findings: [],
-      ticket: { alignment: 'aligned', summary: 's', criteria: [{ ref: 'AC1', status: 'met', explanation: 'x', line: 2.5 }] },
+      ticket: { alignment: 'aligned', summary: 's', criteria: [{ text: 'Criterion 1', status: 'met', explanation: 'x', line: 2.5 }] },
+    };
+    expect(submitReviewSchema.safeParse(p).success).toBe(false);
+  });
+
+  it('rejects a criterion with no text — Claude must name the criterion it enumerated', () => {
+    const p = {
+      ...base,
+      findings: [],
+      ticket: { alignment: 'aligned', summary: 's', criteria: [{ status: 'met', explanation: 'x' }] },
     };
     expect(submitReviewSchema.safeParse(p).success).toBe(false);
   });

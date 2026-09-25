@@ -434,8 +434,8 @@ export function BranchStatusPanel({
   // ⚠ "GREEN" IS NOT A BOOLEAN. `CiStatus` has six members, and `pending`/`expected`/`unknown`
   // are neither red nor green (CiDot paints `unknown` as a HOLLOW grey dot). The rule is: collapse
   // unless some repo is `failure|error` — a pending build is not a call to action — and the
-  // caption claims "all green" ONLY when every repo is `success`. Anything else gets the neutral
-  // count with no verdict attached.
+  // header says "all N green" ONLY when every repo is `success`; otherwise it shows one pill per
+  // state that exists (green / failing / running) and `unknown` gets none.
   //
   // ⚠ CROSS-REPO MOUNT ONLY. `RepoFeedHeader` mounts this `compact` for a SINGLE repo, where the
   // panel IS the trunk line; collapsing there would hide that repo's status inside its own
@@ -455,50 +455,81 @@ export function BranchStatusPanel({
   const collapsible = !compact;
   const expanded = !collapsible || (userExpanded ?? failing > 0);
 
+  // The status pills, one per state that EXISTS (never a "0 running"): green, failing, running.
+  // "Running" is `pending | expected` — a build GitHub is still waiting on. `unknown` (no checks)
+  // gets no pill; the repo count on the right still counts it, so the pills need not total it.
+  const green = rows.filter((r) => r.ciStatus === 'success').length;
+  const running = rows.filter((r) => r.ciStatus === 'pending' || r.ciStatus === 'expected').length;
+  const header = (
+    <>
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        Default branches
+      </span>
+      {green > 0 && (
+        <span
+          className="rounded bg-green-500/15 px-1 text-[11px] font-semibold text-green-700 dark:text-green-400"
+          title="Default branches whose latest CI passed"
+        >
+          {allGreen && green > 1 ? `all ${green} green` : `${green} green`}
+        </span>
+      )}
+      {failing > 0 && (
+        <span
+          className="rounded bg-red-500/15 px-1 text-[11px] font-semibold text-red-600 dark:text-red-400"
+          title="Default branches whose latest CI is failing"
+        >
+          {failing} failing
+        </span>
+      )}
+      {running > 0 && (
+        <span
+          className="rounded bg-amber-500/15 px-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400"
+          title="Default branches whose latest CI is still running"
+        >
+          {running} running
+        </span>
+      )}
+      <span className="ml-auto text-[11px] text-gray-500 dark:text-gray-400">
+        {rows.length} repo{rows.length === 1 ? '' : 's'}
+      </span>
+    </>
+  );
+
   return (
     <section
       className="rounded-lg border border-gray-200 dark:border-gray-800"
       data-testid="branch-status-panel"
     >
-      <div
-        className={`flex items-center gap-2 px-2 py-1 ${
-          expanded ? 'border-b border-gray-100 dark:border-gray-800/60' : ''
-        }`}
-      >
-        {collapsible && (
-          <button
-            type="button"
-            // ⚠ `!expanded`, NOT a `(v) => !v` updater. The updater would read the THREE-state
-            // flag, and `!null` is `true` — so the first click on a panel already open by its
-            // red-trunk default would "toggle" it to open, doing nothing visible. Negating the
-            // RESOLVED state is what guarantees every click flips what the reader can see, and it
-            // is also what seats the explicit choice that retires the default.
-            onClick={() => setUserExpanded(!expanded)}
-            aria-expanded={expanded}
-            className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-            title={expanded ? 'Hide the per-repo rows' : 'Show the per-repo rows'}
-          >
-            <ChevronIcon dir={expanded ? 'down' : 'right'} size={10} />
-          </button>
-        )}
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-          Default branches
-        </span>
-        {!expanded && allGreen && (
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">all green</span>
-        )}
-        {failing > 0 && (
-          <span
-            className="rounded bg-red-500/15 px-1 text-[11px] font-semibold text-red-600 dark:text-red-400"
-            title="Default branches whose latest CI is failing"
-          >
-            {failing} failing
-          </span>
-        )}
-        <span className="ml-auto text-[11px] text-gray-500 dark:text-gray-400">
-          {rows.length} repo{rows.length === 1 ? '' : 's'}
-        </span>
-      </div>
+      {/* The WHOLE header bar is the toggle on the cross-repo mount (the Open PRs panel beside it
+          works the same way), so a collapsed strip is one big target, not a 10px chevron. It holds
+          no links, so it can be one <button>. The compact per-repo mount never collapses, so its
+          header is a plain row. */}
+      {collapsible ? (
+        <button
+          type="button"
+          // ⚠ `!expanded`, NOT a `(v) => !v` updater. The updater would read the THREE-state
+          // flag, and `!null` is `true` — so the first click on a panel already open by its
+          // red-trunk default would "toggle" it to open, doing nothing visible. Negating the
+          // RESOLVED state is what guarantees every click flips what the reader can see, and it
+          // is also what seats the explicit choice that retires the default.
+          onClick={() => setUserExpanded(!expanded)}
+          aria-expanded={expanded}
+          className={`flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40 ${
+            expanded ? 'border-b border-gray-100 dark:border-gray-800/60' : ''
+          }`}
+        >
+          <ChevronIcon dir={expanded ? 'down' : 'right'} size={10} className="shrink-0 text-gray-400" />
+          {header}
+        </button>
+      ) : (
+        <div
+          className={`flex items-center gap-2 px-2 py-1 ${
+            expanded ? 'border-b border-gray-100 dark:border-gray-800/60' : ''
+          }`}
+        >
+          {header}
+        </div>
+      )}
       <ul className={`${compact ? '' : 'max-h-64 overflow-y-auto'}${expanded ? '' : ' hidden'}`}>
         {rows.map((r) => (
           <BranchRow

@@ -1,5 +1,4 @@
-// The shared Claude Review module — the ONE spelling of the user-story caps, the acceptance-criteria
-// split, the ticket validator and the templated follow-up / criteria sentences. It lives in
+// The shared Claude Review module — the ONE spelling of the user-story caps, the ticket validator and the templated follow-up / criteria sentences. It lives in
 // packages/shared (which has no test runner), so it is pinned here, where `pnpm test` runs it.
 import { describe, expect, it } from 'vitest';
 import {
@@ -10,152 +9,11 @@ import {
   checkClaudeReviewTicket,
   followUpCounts,
   followUpSentence,
-  splitAcceptanceCriteria,
   ticketCriteriaSentence,
   type ClaudeFollowUpStatus,
   type ClaudeReviewModel,
   type ClaudeTicketCriterionStatus,
 } from '@pierre-review/shared';
-
-describe('splitAcceptanceCriteria', () => {
-  it('one item per plain line, blank lines dropped', () => {
-    expect(splitAcceptanceCriteria('first\n\n  second  \nthird\n')).toEqual(['first', 'second', 'third']);
-  });
-
-  it('strips every supported marker', () => {
-    const text = [
-      '- dash',
-      '* star',
-      '• bullet',
-      '1. one',
-      '2) two',
-      '(3) three',
-      'a) letter',
-      '- [ ] open box',
-      '[x] done box',
-    ].join('\n');
-    expect(splitAcceptanceCriteria(text)).toEqual([
-      'dash',
-      'star',
-      'bullet',
-      'one',
-      'two',
-      'three',
-      'letter',
-      'open box',
-      'done box',
-    ]);
-  });
-
-  it('joins a plain continuation line onto the previous marker item', () => {
-    expect(splitAcceptanceCriteria('- A user can reset\n  their password\n- The link expires')).toEqual([
-      'A user can reset their password',
-      'The link expires',
-    ]);
-  });
-
-  it('a plain line before the first marker is its own item', () => {
-    expect(splitAcceptanceCriteria('Intro line\n- one\n- two')).toEqual(['Intro line', 'one', 'two']);
-  });
-
-  it('handles CRLF and lone CR', () => {
-    expect(splitAcceptanceCriteria('- a\r\n- b\r- c')).toEqual(['a', 'b', 'c']);
-  });
-
-  it('does not treat "e.g." or "1.5 s" as markers', () => {
-    expect(splitAcceptanceCriteria('e.g. the button is blue\n1.5 s load time')).toEqual([
-      'e.g. the button is blue',
-      '1.5 s load time',
-    ]);
-  });
-
-  it('null / blank / whitespace ⇒ []', () => {
-    expect(splitAcceptanceCriteria(null)).toEqual([]);
-    expect(splitAcceptanceCriteria(undefined)).toEqual([]);
-    expect(splitAcceptanceCriteria('')).toEqual([]);
-    expect(splitAcceptanceCriteria('  \n \t\n')).toEqual([]);
-  });
-
-  it('drops a marker line with nothing after it', () => {
-    expect(splitAcceptanceCriteria('- [ ]\n- real')).toEqual(['real']);
-  });
-
-  // The server numbers criteria AC1..n by position, and the model reports by that ref. A pasted
-  // label left in the text would be a SECOND number in the criterion fenced as AC1, so a verdict
-  // could land on the wrong row. The person's own text survives verbatim in acceptanceCriteria.
-  it('strips a pasted AC label as a marker, alone or after a bullet / number / checkbox', () => {
-    expect(splitAcceptanceCriteria('AC2: user can log out\nAC3: session expires after 1h')).toEqual([
-      'user can log out',
-      'session expires after 1h',
-    ]);
-    expect(
-      splitAcceptanceCriteria('- AC1: one\n- **AC2:** two\n- **AC3**: three\n1. AC-4. four\n- [ ] ac 5) five\nAC6 - six'),
-    ).toEqual(['one', 'two', 'three', 'four', 'five', 'six']);
-    // Not a label: no separator, or not a number.
-    expect(splitAcceptanceCriteria('AC 220 volts supply\nAC power stays on')).toEqual([
-      'AC 220 volts supply',
-      'AC power stays on',
-    ]);
-  });
-
-  it('drops section headings instead of making them criteria', () => {
-    expect(splitAcceptanceCriteria('Acceptance Criteria:\n- Reset link emailed\n- Link expires after 1h')).toEqual([
-      'Reset link emailed',
-      'Link expires after 1h',
-    ]);
-    expect(splitAcceptanceCriteria('**Acceptance Criteria**\n* a')).toEqual(['a']);
-    expect(splitAcceptanceCriteria('__Acceptance criteria:__\n* a')).toEqual(['a']);
-    expect(splitAcceptanceCriteria('# AC\n- a\n## Non-functional\n- b')).toEqual(['a', 'b']);
-    // A colon line between lists is a sub-heading when a marker follows it.
-    expect(splitAcceptanceCriteria('- a\n- b\nNon-functional:\n- c')).toEqual(['a', 'b', 'c']);
-    // …but a marker line ending in a colon is a criterion, and its continuation joins it.
-    expect(splitAcceptanceCriteria('- The error reads:\n  "Invalid password"')).toEqual([
-      'The error reads: "Invalid password"',
-    ]);
-    // With no markers, only a LEADING colon line is a heading.
-    expect(splitAcceptanceCriteria('Acceptance criteria:\nUser can log in\nUser can log out')).toEqual([
-      'User can log in',
-      'User can log out',
-    ]);
-    // A text made only of headings keeps them: a one-line criterion is never lost.
-    expect(splitAcceptanceCriteria('Must support SSO:')).toEqual(['Must support SSO:']);
-    expect(splitAcceptanceCriteria('# Must support SSO')).toEqual(['# Must support SSO']);
-  });
-
-  it('a Gherkin scenario is ONE criterion', () => {
-    expect(splitAcceptanceCriteria('Given a user\nWhen they ask\nThen a link is sent\nAnd it is logged')).toEqual([
-      'Given a user When they ask Then a link is sent And it is logged',
-    ]);
-    expect(
-      splitAcceptanceCriteria('Scenario: reset\nGiven a user\nThen a link is sent\nScenario: expiry\nGiven a link\nThen it expires'),
-    ).toEqual(['Scenario: reset Given a user Then a link is sent', 'Scenario: expiry Given a link Then it expires']);
-    expect(splitAcceptanceCriteria('- Given a user\n- When they ask\n- Then a link is sent')).toEqual([
-      'Given a user When they ask Then a link is sent',
-    ]);
-    // A list whose items merely START with When / And is not a scenario.
-    expect(splitAcceptanceCriteria('- When offline, show a banner\n- When online, sync\n- And log it')).toEqual([
-      'When offline, show a banner',
-      'When online, sync',
-      'And log it',
-    ]);
-  });
-
-  it('Roman numerals are markers (a valid numeral in one case only)', () => {
-    expect(splitAcceptanceCriteria('I. first\nII. second\nIII. third\niv) fourth')).toEqual([
-      'first',
-      'second',
-      'third',
-      'fourth',
-    ]);
-    // "mix." is not a numeral and "Ii." is mixed case: both are plain text.
-    expect(splitAcceptanceCriteria('mix. the batter\nIi. two')).toEqual(['mix. the batter', 'Ii. two']);
-  });
-
-  it('the headline denominator counts real criteria only (the Jira paste)', () => {
-    const r = checkClaudeReviewTicket({ acceptanceCriteria: 'Acceptance Criteria:\n- Reset link emailed\n- Link expires after 1h' });
-    expect(r.ok && r.ticket?.criteria).toEqual(['Reset link emailed', 'Link expires after 1h']);
-  });
-});
 
 describe('checkClaudeReviewTicket', () => {
   const L = CLAUDE_REVIEW_TICKET_LIMITS;
@@ -169,11 +27,11 @@ describe('checkClaudeReviewTicket', () => {
     });
   });
 
-  it('trims each field and stores the split', () => {
+  it('trims each field and stores the criteria text as pasted, unsplit', () => {
     const r = checkClaudeReviewTicket({ title: '  Reset password ', acceptanceCriteria: '- a\n- b\n' });
     expect(r).toEqual({
       ok: true,
-      ticket: { title: 'Reset password', description: null, acceptanceCriteria: '- a\n- b', criteria: ['a', 'b'] },
+      ticket: { title: 'Reset password', description: null, acceptanceCriteria: '- a\n- b' },
     });
   });
 
@@ -195,24 +53,22 @@ describe('checkClaudeReviewTicket', () => {
     });
   });
 
-  it('acceptance criteria: 4000 characters ok, 4001 refused', () => {
+  it('acceptance criteria: 8000 characters ok, 8001 refused', () => {
     expect(checkClaudeReviewTicket({ acceptanceCriteria: 'x'.repeat(L.acceptanceCriteriaChars) }).ok).toBe(true);
     expect(checkClaudeReviewTicket({ acceptanceCriteria: 'x'.repeat(L.acceptanceCriteriaChars + 1) })).toEqual({
       ok: false,
       field: 'acceptanceCriteria',
-      message: 'Acceptance criteria is 4001 characters; the limit is 4000.',
+      message: 'Acceptance criteria is 8001 characters; the limit is 8000.',
     });
   });
 
-  it('acceptance criteria: 30 items ok, 31 refused with the items message', () => {
-    const lines = (n: number): string => Array.from({ length: n }, (_, i) => `- item ${i + 1}`).join('\n');
-    const ok = checkClaudeReviewTicket({ acceptanceCriteria: lines(30) });
-    expect(ok.ok && ok.ticket?.criteria.length).toBe(30);
-    expect(checkClaudeReviewTicket({ acceptanceCriteria: lines(31) })).toEqual({
-      ok: false,
-      field: 'acceptanceCriteria',
-      message: 'Acceptance criteria has 31 items; the limit is 30.',
-    });
+  it('any shape of acceptance criteria is accepted — there is no item cap and no split', () => {
+    const many = Array.from({ length: 80 }, (_, i) => `- item ${i + 1}`).join('\n');
+    expect(checkClaudeReviewTicket({ acceptanceCriteria: many }).ok).toBe(true);
+    const gherkin = '| role | can |\n|---|---|\n| admin | delete |\nScenario: x\n  Given a\n  Then b';
+    const r = checkClaudeReviewTicket({ acceptanceCriteria: gherkin });
+    expect(r.ok && r.ticket?.acceptanceCriteria).toBe(gherkin.trim());
+    expect(r.ok && r.ticket && 'criteria' in r.ticket).toBe(false);
   });
 
   it('refuses a control character but allows tab and newline', () => {
@@ -225,11 +81,6 @@ describe('checkClaudeReviewTicket', () => {
     expect(checkClaudeReviewTicket({ description: 'a\tb\nc\r\nd' }).ok).toBe(true);
   });
 
-  it('stored criteria equal the split', () => {
-    const text = '1. one\n2. two\n   continued\n3) three';
-    const r = checkClaudeReviewTicket({ acceptanceCriteria: text });
-    expect(r.ok && r.ticket?.criteria).toEqual(splitAcceptanceCriteria(text));
-  });
 });
 
 describe('templated sentences', () => {

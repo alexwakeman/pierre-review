@@ -68,7 +68,7 @@ posts **one** GitHub review (inline + body + verdict).
   - **Model picker** opens on `DEFAULT_CLAUDE_REVIEW_MODEL` and is NEVER re-seeded from the
     stored run (a stored `claude-opus-4-8` would otherwise be a select value with no option).
   - **"User story or task (optional)"** sits under the depth hint, COLLAPSED by default. Its
-    header adds " · 3 acceptance criteria" / " · added" / " · needs a fix", so a closed panel
+    header adds " · added" / " · needs a fix", so a closed panel
     never hides what Run will send. It runs the SAME `checkClaudeReviewTicket` the route runs:
     per-field counter past 80% of the cap (trimmed length, as the check measures), the check's
     message under the field, and Re-review plus the same-commit "Run anyway" are disabled while
@@ -223,31 +223,30 @@ comments and says, for each one, whether the current code deals with it.
 Optional title, description and acceptance criteria the person running the review may paste.
 
 - **ONE shared module** (`packages/shared/src/claude-review.ts`): `CLAUDE_REVIEW_TICKET_LIMITS`
-  (title ≤ 300 characters, description ≤ 8000, criteria ≤ 4000 characters and ≤ 30 items),
-  `splitAcceptanceCriteria` and `checkClaudeReviewTicket`, read by the route AND the SPA — never
-  retype a cap.
-- **The split**, deterministic: one item per non-blank line; when any line starts with a bullet,
-  number, Roman numeral (i–xxxix, one case), letter, checkbox or pasted `AC2:` label marker (each
-  needing whitespace after it, so `e.g.` and `1.5 s` are not markers), marker lines start items and
-  plain lines join the previous one. Section headings are dropped (a Markdown `#` heading, a wholly
-  bold line, a plain `Acceptance criteria:` line before the first marker or right before one; with
-  no markers, only leading colon lines), and a Gherkin scenario (`Given` / `When` / `Then` / `And`
-  / `But`, optionally under `Scenario:`) is one item. The split is STORED as `criteria` (AC1..n),
-  so the numbering never drifts if the rule changes. ⚠ A pasted `AC3:` label is STRIPPED: the
-  server numbers by position and the model reports by the fence's ref, so a label left in the text
-  of the block fenced AC1 was a second, competing number and a verdict could land on the wrong row
-  (the prompt and the schema also say the fence's ref wins). The person's text is kept verbatim
-  in `acceptanceCriteria`, which prefills the panel.
+  (title ≤ 300 characters, description ≤ 8000, criteria ≤ 8000 characters),
+  `CLAUDE_REVIEW_TICKET_MAX_CRITERIA` (40 rows kept) and `checkClaudeReviewTicket`, read by the
+  route AND the SPA — never retype a cap.
+- ⚠ **CLAUDE WORKS OUT THE CRITERIA; THERE IS NO CODE-SIDE SPLIT.** The first cut split the text
+  deterministically (bullets, numbers, Roman numerals, pasted `AC2:` labels, headings, Gherkin) and
+  made the model answer per server-numbered item. Real tickets arrive in more shapes than any rule
+  set (nested sub-bullets, tables, Given/When/Then blocks, prose with numbered clauses), and every
+  mis-split was a wrong row on screen. Now the whole text is fenced as ONE
+  `ACCEPTANCE CRITERIA` block and the model enumerates the criteria itself, best effort, reporting
+  each with its own one-sentence `text`. The person's text is kept verbatim in
+  `acceptanceCriteria`, which prefills the panel. `ClaudeReviewTicket.criteria` is LEGACY (old
+  rows only; never written).
 - **The 400 contract.** `POST /api/prs/:id/claude-review` declares `ticket` in its body schema
   (ajv's `removeAdditional` would strip it otherwise) with no `maxLength`; over a cap it answers
   `400 { error: 'TicketInvalid', field, message }` and starts nothing. Never truncated. Control
   characters (other than tab/newline) are refused (pg jsonb cannot hold `\u0000`).
 - **Stored at QUEUE time** on `claude_reviews.ticket`, so a failed or cancelled run still prefills
   the panel for the re-run. Fenced in the prompt (`---BEGIN TICKET TITLE <nonce>---`,
-  `… DESCRIPTION …`, one `ACCEPTANCE CRITERION AC<n>` block per criterion).
-- **Reconcile** (`ticket.ts` `reconcileTicketAssessment`): exactly one row per stored criterion,
-  carrying the stored text; unknown refs dropped, first report wins, a skipped criterion is
-  `not_checked`; alignment `not_checked` when Claude reported nothing. Gap lists ("Asked for but
+  `… DESCRIPTION …`, `… ACCEPTANCE CRITERIA …`).
+- **Reconcile** (`ticket.ts` `reconcileTicketAssessment`): Claude's list in its order, renumbered
+  AC1..n, rows with no text or an unknown status dropped, capped at 40, text clipped to 500. If
+  criteria text was sent and Claude reported none, ONE `not_checked` row carries the pasted text —
+  never an invented `met`, never a silent empty list; alignment `not_checked` when Claude reported
+  nothing. Gap lists ("Asked for but
   not done", "Added but not asked for") are capped at 20 and clipped. Stored on
   `claude_reviews.ticket_assessment`.
 - **Shown in the app only, not posted.** The prompt tells the model to ALSO raise any concrete

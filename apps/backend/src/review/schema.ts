@@ -61,9 +61,9 @@ export const submitReviewShape = {
       criteria: z
         .array(
           z.object({
-            ref: z
+            text: z
               .string()
-              .describe("The ref on the criterion's block, e.g. 'AC1' — never a number written inside its text."),
+              .describe('The criterion in one short sentence, as you read it from the acceptance criteria.'),
             status: z.enum(['met', 'partly_met', 'not_met', 'unclear']),
             explanation: z.string(),
             path: z.string().nullable().optional(),
@@ -71,7 +71,9 @@ export const submitReviewShape = {
           }),
         )
         .optional()
-        .describe('One entry per numbered acceptance criterion, each ref exactly once.'),
+        .describe(
+          'Every distinct acceptance criterion you find in the acceptance-criteria text, in the order it appears, each once. Leave it out when there is no acceptance-criteria text.',
+        ),
       missing: z
         .array(ticketGap)
         .optional()

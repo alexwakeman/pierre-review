@@ -6150,9 +6150,11 @@ export interface ClaudeFinding {
 }
 
 // ---- Claude Review: the user story or task (optional input) ----
-// Three free-text fields the person running a review may paste. Caps and the criteria split live
-// ONCE in `claude-review.ts` (`CLAUDE_REVIEW_TICKET_LIMITS`, `splitAcceptanceCriteria`,
-// `checkClaudeReviewTicket`), read by the route AND the SPA.
+// Three free-text fields the person running a review may paste. Caps and the validator live ONCE
+// in `claude-review.ts` (`CLAUDE_REVIEW_TICKET_LIMITS`, `checkClaudeReviewTicket`), read by the
+// route AND the SPA. The acceptance criteria are NOT split by code: tickets arrive in every shape
+// (Gherkin, nested bullets, tables, prose), so Claude reads the text and enumerates the criteria
+// itself, best effort.
 
 // What the SPA sends (every field optional; all blank ⇒ no ticket).
 export interface ClaudeReviewTicketInput {
@@ -6162,13 +6164,13 @@ export interface ClaudeReviewTicketInput {
 }
 
 // What is STORED on the run (at queue time, so a failed or cancelled run still prefills the
-// panel). `criteria` is the server's split of `acceptanceCriteria`, numbered AC1..n in order —
-// stored so the numbers never drift if the split rule changes later.
+// panel). `criteria` is LEGACY: runs from before Claude enumerated the criteria itself stored a
+// code-side split here. It is never written now and nothing reads it.
 export interface ClaudeReviewTicket {
   title: string | null;
   description: string | null;
   acceptanceCriteria: string | null;
-  criteria: string[];
+  criteria?: string[];
 }
 
 // 'not_checked' is written ONLY by the server (Claude never reported on it); the model's own
@@ -6187,9 +6189,9 @@ export type ClaudeTicketCriterionStatus =
   | 'unclear'
   | 'not_checked';
 
-// One acceptance criterion's verdict. `ref` is 'AC1'…, `index` is 0-based into
-// `ClaudeReviewTicket.criteria`, `text` is the stored criterion (never model text).
-// `explanation`/`path`/`line` are Claude's.
+// One acceptance criterion's verdict. `ref` is 'AC1'…, `index` is 0-based in Claude's order.
+// `text` is the criterion as Claude read it out of the ticket (runs from before that stored the
+// code-side split here). `explanation`/`path`/`line` are Claude's.
 export interface ClaudeTicketCriterionResult {
   ref: string;
   index: number;
@@ -6209,8 +6211,10 @@ export interface ClaudeTicketGap {
   line: number | null;
 }
 
-// The server-validated assessment of a run against its ticket. `criteria` holds EXACTLY one row
-// per stored criterion, in AC order (a criterion Claude skipped is 'not_checked').
+// The server-validated assessment of a run against its ticket. `criteria` is the list Claude
+// enumerated from the acceptance-criteria text, in its order and renumbered AC1..n by the server.
+// If the ticket had criteria text and Claude reported none, it is ONE 'not_checked' row carrying
+// the pasted text, so the gap shows instead of silently vanishing.
 export interface ClaudeTicketAssessment {
   alignment: ClaudeTicketAlignment;
   summary: string | null;

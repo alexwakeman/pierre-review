@@ -18,7 +18,6 @@ import {
   FOLLOW_UP_STATUS_LABEL,
   TICKET_ALIGNMENT_LABEL,
   TICKET_CRITERION_STATUS_LABEL,
-  splitAcceptanceCriteria,
   ticketCriteriaSentence,
 } from '@pierre-review/shared';
 import type {
@@ -41,7 +40,6 @@ import {
   TICKET_ALIGNMENT_CLASS,
   TICKET_CRITERION_STATUS_CLASS,
   anchorLabel,
-  criteriaCountLabel,
   fieldCounter,
   followUpAnchor,
   notCheckedReason,
@@ -159,10 +157,6 @@ export function ClaudeReviewTicketPanel({
   const [open, setOpen] = useState(false);
   const baseId = useId();
   const hint = ticketPanelHint(value, check);
-  const criteriaCount = useMemo(
-    () => splitAcceptanceCriteria(value.acceptanceCriteria).length,
-    [value.acceptanceCriteria],
-  );
   const errorFor = (f: ClaudeReviewTicketField): string | null =>
     !check.ok && check.field === f ? check.message : null;
   const set = (field: ClaudeReviewTicketField, v: string): void =>
@@ -240,11 +234,7 @@ export function ClaudeReviewTicketPanel({
             field="acceptanceCriteria"
             value={value.acceptanceCriteria}
             error={errorFor('acceptanceCriteria')}
-            helper={
-              value.acceptanceCriteria.trim() !== ''
-                ? `${criteriaCountLabel(criteriaCount)} found`
-                : null
-            }
+            helper="Any format. Claude works out the individual criteria."
           >
             <textarea
               id={ids.acceptanceCriteria}
@@ -252,7 +242,7 @@ export function ClaudeReviewTicketPanel({
               value={value.acceptanceCriteria}
               onChange={(e) => set('acceptanceCriteria', e.target.value)}
               placeholder={
-                'One per line, for example:\n- A user can reset their password from the sign-in page\n- The reset link expires after one hour'
+                'Paste them as they are in the ticket, for example:\nGiven a signed-out user\nWhen they ask to reset their password\nThen a reset link is emailed and expires after one hour'
               }
               aria-invalid={errorFor('acceptanceCriteria') != null}
               aria-describedby={describedBy('acceptanceCriteria')}

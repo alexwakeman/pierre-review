@@ -1134,7 +1134,7 @@ function RoutingReviewerRow({
         (state.status === 'success' ? (
           <span
             role="status"
-            className="ml-auto inline-flex items-center gap-1 font-medium text-green-700 dark:text-green-400"
+            className="inline-flex items-center gap-1 font-medium text-green-700 dark:text-green-400"
           >
             <CheckIcon size={11} className="inline-block align-[-0.1em]" /> Requested
           </span>
@@ -1145,7 +1145,7 @@ function RoutingReviewerRow({
             disabled={state.status === 'pending'}
             aria-label={state.status === 'pending' ? `Assigning ${who}` : `Assign ${who}`}
             title={`Ask ${who} to review this PR on GitHub`}
-            className="ml-auto rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
+            className="rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
           >
             {state.status === 'pending' ? 'Assigning…' : 'Assign'}
           </button>
