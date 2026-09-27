@@ -743,7 +743,10 @@ half through the real migrator in CI. Contracts: docs/CLAUDE-REVIEW.md.
 Four nullable `text` columns on `pro_workspace_settings` — `jira_email`, `jira_token` (a
 CREDENTIAL: `sealed:v1:…` / `plain:…`, see SECURITY.md), `jira_ac_field_id`, `jira_ac_field_name`.
 No backfill (NULL = no Jira API access), no new erasure entry (the table is already erased with the
-account), tenancy unchanged (0029's composite FK). The sqlite file is bare `ADD COLUMN` (run-once
+account), tenancy unchanged (0029's composite FK). ⚠ **`jira_ac_field_id` / `jira_ac_field_name` went DORMANT one
+release later** — the acceptance-criteria field moved to the Claude Review panel, per ticket
+(docs/CLAUDE-REVIEW.md). They stay in the table and are undeclared in both schema modules; do not
+drop them. The sqlite file is bare `ADD COLUMN` (run-once
 via `pro_migrations`); the pg twin uses `ADD COLUMN IF NOT EXISTS`. ⚠ Every hand-built test DB
 that replays `0029`/`0031`/`0032` and then touches the store must replay `0035` too — the store now
 SELECTs the four columns (`workspace-settings.test.ts`, `settings-route-schema.test.ts`,

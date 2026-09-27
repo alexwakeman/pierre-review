@@ -37,7 +37,18 @@ import type {
   TicketRef,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
-import { applyJiraTicket, fillableJiraTickets, jiraFillNote } from '../lib/jiraTicket.js';
+import {
+  acCandidateLabel,
+  applyAcCandidate,
+  applyJiraTicket,
+  browserAcMemory,
+  defaultAcCandidate,
+  fillableJiraTickets,
+  jiraFillNote,
+  jiraSiteOf,
+  readRememberedAcField,
+  rememberAcField,
+} from '../lib/jiraTicket.js';
 import {
   EMPTY_TICKET_DRAFT,
   FOLLOW_UP_STATUS_CLASS,
@@ -277,8 +288,11 @@ export function ClaudeReviewTicketPanel({
 /**
  * "Fill from KEY" — one button per Jira ticket DETECTED on this PR whose workspace has a saved
  * token (`TicketRef.canFetchDetails`). Nothing renders otherwise: no ticket detected, not Jira, or
- * no token. CLICK-GATED — nothing is fetched on mount. A fill REPLACES the fields' text; the
- * reader can still edit everything afterwards.
+ * no token. CLICK-GATED — nothing is fetched on mount. A fill REPLACES the title and description,
+ * then offers "Acceptance criteria from": every custom text field on THAT ticket (the right one
+ * varies by site and issue type), preselected from the viewer's remembered choice for the issue
+ * type, else the best name match, else blank. Choosing refills the box client-side, no refetch.
+ * Everything stays editable.
  */
 function JiraFillButtons({
   prId,
@@ -292,21 +306,45 @@ function JiraFillButtons({
   onChange: (next: TicketDraft) => void;
 }): JSX.Element | null {
   const fillable = fillableJiraTickets(tickets);
-  // The draft as it is when the answer lands, not when the button was pressed.
+  const selectId = useId();
+  // The draft as it is when the answer lands (or the dropdown changes), not when a button was
+  // pressed — the reader may type in between.
   const latest = useRef(value);
   latest.current = value;
-  const [note, setNote] = useState<string | null>(null);
+  // The last fill, kept for its candidates so the dropdown refills the box with NO refetch.
+  const [filled, setFilled] = useState<{
+    prId: number;
+    details: JiraTicketDetails;
+    site: string | null;
+  } | null>(null);
+  const [chosen, setChosen] = useState('');
   const fill = useMutation<JiraTicketDetails, Error, string>({
     mutationFn: (key) => api.jiraTicket(prId, key),
-    onMutate: () => setNote(null),
-    onSuccess: (details) => {
-      onChange(applyJiraTicket(latest.current, details));
-      setNote(jiraFillNote(details));
+    onSuccess: (details, key) => {
+      const ref = fillable.find((t) => t.key === key);
+      const site = ref ? jiraSiteOf(ref.url) : null;
+      const remembered = readRememberedAcField(browserAcMemory(), site, details.issueType?.id);
+      const pick = defaultAcCandidate(details.candidates, remembered);
+      // Title + description replaced; the criteria only when a field is preselected.
+      onChange(applyAcCandidate(applyJiraTicket(latest.current, details), details.candidates, pick));
+      setFilled({ prId, details, site });
+      setChosen(pick);
     },
   });
   if (fillable.length === 0) return null;
+  const shown = filled != null && filled.prId === prId ? filled : null;
+
+  const choose = (id: string): void => {
+    if (shown == null) return;
+    setChosen(id);
+    // An EXPLICIT choice is remembered for this issue type on this Jira site (blank forgets).
+    rememberAcField(browserAcMemory(), shown.site, shown.details.issueType?.id, id);
+    onChange(applyAcCandidate(latest.current, shown.details.candidates, id));
+  };
+  const note = shown != null ? jiraFillNote(shown.details, chosen) : null;
+
   return (
-    <div>
+    <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
         {fillable.map((t) => {
           const busy = fill.isPending && fill.variables === t.key;
@@ -322,10 +360,42 @@ function JiraFillButtons({
             </button>
           );
         })}
-        <span className={`text-xs ${MUTED}`}>Replaces the text below.</span>
+        <span className={`text-xs ${MUTED}`}>Replaces the title and description below.</span>
       </div>
-      {fill.isError && <p className={`mt-1 text-xs ${ERROR_TEXT}`}>{fill.error.message}</p>}
-      {note != null && !fill.isError && <p className={`mt-1 text-xs ${MUTED}`}>{note}</p>}
+      {fill.isError && <p className={`text-xs ${ERROR_TEXT}`}>{fill.error.message}</p>}
+      {shown != null && !fill.isError && shown.details.candidates.length > 0 && (
+        <div>
+          <label htmlFor={selectId} className="text-xs font-medium text-gray-700 dark:text-gray-200">
+            Acceptance criteria from
+            {shown.details.issueType != null && (
+              <span className={`font-normal ${MUTED}`}>
+                {' '}
+                ({shown.details.key}, {shown.details.issueType.name})
+              </span>
+            )}
+          </label>
+          <select
+            id={selectId}
+            value={chosen}
+            onChange={(e) => choose(e.target.value)}
+            className={INPUT}
+          >
+            <option value="">None of these</option>
+            {shown.details.candidates.map((c) => (
+              <option key={c.id} value={c.id}>
+                {acCandidateLabel(c)}
+              </option>
+            ))}
+          </select>
+          {shown.details.omittedCandidates > 0 && (
+            <p className={`mt-0.5 text-xs ${MUTED}`}>
+              {shown.details.omittedCandidates} more{' '}
+              {shown.details.omittedCandidates === 1 ? 'field' : 'fields'} with text not listed.
+            </p>
+          )}
+        </div>
+      )}
+      {note != null && !fill.isError && <p className={`text-xs ${MUTED}`}>{note}</p>}
     </div>
   );
 }

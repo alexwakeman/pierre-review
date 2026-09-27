@@ -1,23 +1,32 @@
-// JIRA API ACCESS in the SPA: the pure half.
+// JIRA "FILL FROM KEY" in the Claude Review panel: the pure half.
 //
 //   1. THE BUTTON ONLY EXISTS FOR A DETECTED JIRA TICKET WITH A SAVED TOKEN — `canFetchDetails`
-//      from the server, never inferred from the provider alone (and absent reads as false).
-//   2. A FILL REPLACES title + description, and replaces the criteria ONLY when the workspace maps
-//      a criteria field — otherwise Jira was never asked, and the reader's paste is kept.
-//   3. The AC picker still shows the SAVED field before the list is loaded.
-//   4. The button is click-gated: the panel never calls the ticket route on mount.
+//      from the server, never inferred from the provider alone (absent reads as false).
+//   2. A FILL REPLACES title + description; the criteria box changes only through a CHOSEN
+//      candidate, and the blank option leaves it as it is.
+//   3. THE DEFAULT CHOICE: the viewer's remembered field for this issue type when THIS ticket has
+//      it; else the best STRONG name match (exact "Acceptance Criteria" first; weak matches never preselect); else
+//      blank.
+//   4. THE MEMORY is per Jira site + issue type, and every storage failure means "nothing
+//      remembered" — never a throw.
+//   5. Click-gated: the panel never calls the ticket route on mount.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/jiraTicket.test.ts
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { JiraTicketDetails, TicketRef } from '@pierre-review/shared';
+import type { JiraAcCandidate, JiraTicketDetails, TicketRef } from '@pierre-review/shared';
 import {
-  acFieldName,
-  acFieldOptions,
+  acCandidateLabel,
+  applyAcCandidate,
   applyJiraTicket,
+  defaultAcCandidate,
   fillableJiraTickets,
   jiraFillNote,
+  jiraSiteOf,
+  readRememberedAcField,
+  rememberAcField,
+  type AcMemoryStore,
 } from '../src/lib/jiraTicket.js';
 
 const jira = (key: string, canFetchDetails?: boolean): TicketRef => ({
@@ -25,6 +34,13 @@ const jira = (key: string, canFetchDetails?: boolean): TicketRef => ({
   url: `https://acme.atlassian.net/browse/${key}`,
   provider: 'jira',
   ...(canFetchDetails === undefined ? {} : { canFetchDetails }),
+});
+
+const cand = (id: string, name: string, match: JiraAcCandidate['match'], text = `${name} text`) => ({
+  id,
+  name,
+  text,
+  match,
 });
 
 describe('fillableJiraTickets', () => {
@@ -43,61 +59,136 @@ describe('fillableJiraTickets', () => {
   });
 });
 
+const candidates: JiraAcCandidate[] = [
+  cand('customfield_2', 'Acceptance criteria (Bug)', 'strong'),
+  cand('customfield_1', 'Acceptance Criteria', 'strong'),
+  cand('customfield_3', 'Definition of Done', 'weak'),
+  cand('customfield_4', 'Notes', null),
+];
+
 const details = (over: Partial<JiraTicketDetails> = {}): JiraTicketDetails => ({
   prId: 1,
   key: 'ENG-1',
   title: 'Reset password',
   description: 'As a user…',
-  acceptanceCriteria: '- Link emailed',
-  acField: { id: 'customfield_10400', name: 'Acceptance Criteria' },
+  issueType: { id: '10001', name: 'Story' },
+  candidates,
+  omittedCandidates: 0,
   ...over,
 });
 
-describe('applyJiraTicket', () => {
+describe('applying a fill', () => {
   const draft = { title: 'old', description: 'old', acceptanceCriteria: 'my paste' };
-  it('replaces all three when a criteria field is mapped', () => {
+  it('replaces title and description, never the criteria', () => {
     expect(applyJiraTicket(draft, details())).toEqual({
       title: 'Reset password',
       description: 'As a user…',
-      acceptanceCriteria: '- Link emailed',
+      acceptanceCriteria: 'my paste',
     });
   });
-  it('replaces the criteria with "" when the mapped field is empty on this ticket', () => {
-    expect(applyJiraTicket(draft, details({ acceptanceCriteria: '' })).acceptanceCriteria).toBe('');
-  });
-  it('keeps the reader’s criteria when no field is mapped', () => {
-    expect(
-      applyJiraTicket(draft, details({ acField: null, acceptanceCriteria: '' })).acceptanceCriteria,
-    ).toBe('my paste');
-  });
-});
-
-describe('jiraFillNote', () => {
-  it('says so in one line when no criteria field is set', () => {
-    expect(jiraFillNote(details({ acField: null }))).toMatch(/No acceptance criteria field/);
-  });
-  it('names the field when the ticket has nothing in it', () => {
-    expect(jiraFillNote(details({ acceptanceCriteria: '  ' }))).toBe(
-      'ENG-1 has nothing in Acceptance Criteria.',
+  it('a chosen candidate fills the criteria box; blank leaves it as it is', () => {
+    expect(applyAcCandidate(draft, candidates, 'customfield_3').acceptanceCriteria).toBe(
+      'Definition of Done text',
     );
-  });
-  it('says nothing on a full fill', () => {
-    expect(jiraFillNote(details())).toBeNull();
+    expect(applyAcCandidate(draft, candidates, '')).toBe(draft);
+    expect(applyAcCandidate(draft, candidates, 'customfield_999')).toBe(draft);
   });
 });
 
-describe('the acceptance-criteria picker', () => {
-  const saved = { id: 'customfield_10400', name: 'Acceptance Criteria' };
-  it('shows the saved field before the list is loaded', () => {
-    expect(acFieldOptions(saved, null)).toEqual([
-      { id: 'customfield_10400', label: 'Acceptance Criteria (customfield_10400)' },
-    ]);
+describe('defaultAcCandidate', () => {
+  it('a remembered field wins when THIS ticket has it', () => {
+    expect(defaultAcCandidate(candidates, 'customfield_4')).toBe('customfield_4');
   });
-  it('does not duplicate it once loaded', () => {
-    const loaded = [{ id: 'customfield_10400', name: 'Acceptance Criteria', custom: true, type: 'string' }];
-    expect(acFieldOptions(saved, loaded)).toHaveLength(1);
-    expect(acFieldName('customfield_10400', saved, loaded)).toBe('Acceptance Criteria');
-    expect(acFieldName('', saved, loaded)).toBeNull();
+  it('a remembered field this ticket lacks falls through to the name match', () => {
+    expect(defaultAcCandidate(candidates, 'customfield_777')).toBe('customfield_1');
+  });
+  it('among several strong matches the exact "Acceptance Criteria" name wins', () => {
+    expect(defaultAcCandidate(candidates, null)).toBe('customfield_1');
+  });
+  it('no exact name → the first strong match in the server’s order', () => {
+    const c = [cand('customfield_8', 'AC (legacy) acceptance criteria', 'strong'), cand('customfield_9', 'Story acceptance criteria', 'strong')];
+    expect(defaultAcCandidate(c, null)).toBe('customfield_8');
+  });
+  it('only weak matches → blank (a weak match is listed, never preselected)', () => {
+    expect(defaultAcCandidate([cand('customfield_3', 'Definition of Done', 'weak'), cand('customfield_4', 'Notes', null)], null)).toBe('');
+  });
+  it('no name match → blank, so the box is left alone', () => {
+    expect(defaultAcCandidate([cand('customfield_4', 'Notes', null)], null)).toBe('');
+    expect(defaultAcCandidate([], null)).toBe('');
+  });
+});
+
+const memory = (): AcMemoryStore & { data: Map<string, string> } => {
+  const data = new Map<string, string>();
+  return {
+    data,
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => void data.set(k, v),
+    removeItem: (k) => void data.delete(k),
+  };
+};
+
+describe('the remembered choice', () => {
+  it('is keyed by Jira site AND issue type', () => {
+    const m = memory();
+    rememberAcField(m, 'acme.atlassian.net', '10001', 'customfield_2');
+    expect(readRememberedAcField(m, 'acme.atlassian.net', '10001')).toBe('customfield_2');
+    expect(readRememberedAcField(m, 'acme.atlassian.net', '10004')).toBeNull();
+    expect(readRememberedAcField(m, 'other.atlassian.net', '10001')).toBeNull();
+  });
+  it('choosing blank forgets it', () => {
+    const m = memory();
+    rememberAcField(m, 'acme.atlassian.net', '10001', 'customfield_2');
+    rememberAcField(m, 'acme.atlassian.net', '10001', '');
+    expect(readRememberedAcField(m, 'acme.atlassian.net', '10001')).toBeNull();
+  });
+  it('a remembered choice drives the default end to end', () => {
+    const m = memory();
+    rememberAcField(m, jiraSiteOf(jira('ENG-1').url), '10001', 'customfield_2');
+    const remembered = readRememberedAcField(m, 'acme.atlassian.net', '10001');
+    expect(defaultAcCandidate(candidates, remembered)).toBe('customfield_2');
+  });
+  it('no store, no site or no issue type → nothing remembered, nothing written', () => {
+    const m = memory();
+    rememberAcField(m, null, '10001', 'x');
+    rememberAcField(m, 'acme.atlassian.net', null, 'x');
+    expect(m.data.size).toBe(0);
+    expect(readRememberedAcField(null, 'acme.atlassian.net', '10001')).toBeNull();
+  });
+  it('a throwing store (blocked site data) never throws out', () => {
+    const broken: AcMemoryStore = {
+      getItem: () => {
+        throw new Error('SecurityError');
+      },
+      setItem: () => {
+        throw new Error('QuotaExceeded');
+      },
+      removeItem: () => {
+        throw new Error('SecurityError');
+      },
+    };
+    expect(readRememberedAcField(broken, 'acme.atlassian.net', '10001')).toBeNull();
+    expect(() => rememberAcField(broken, 'acme.atlassian.net', '10001', 'x')).not.toThrow();
+  });
+  it('the site is the ticket link’s host', () => {
+    expect(jiraSiteOf('https://Acme.Atlassian.net/browse/ENG-1')).toBe('acme.atlassian.net');
+    expect(jiraSiteOf('http://jira.lan:8080/jira/browse/ENG-1')).toBe('jira.lan:8080');
+    expect(jiraSiteOf('not a url')).toBeNull();
+  });
+});
+
+describe('labels and the note', () => {
+  it('"Name (id) — preview", preview on one line and cut for display only', () => {
+    const long = cand('customfield_1', 'Acceptance Criteria', 'strong', `Given a user\n${'x'.repeat(100)}`);
+    const label = acCandidateLabel(long);
+    expect(label.startsWith('Acceptance Criteria (customfield_1) — Given a user x')).toBe(true);
+    expect(label.endsWith('…')).toBe(true);
+    expect(long.text).toHaveLength(113); // the candidate itself is untouched
+  });
+  it('says so when there are no candidates, and asks for a pick when nothing is chosen', () => {
+    expect(jiraFillNote(details({ candidates: [] }), '')).toMatch(/no other fields with text/);
+    expect(jiraFillNote(details(), '')).toMatch(/Pick the field/);
+    expect(jiraFillNote(details(), 'customfield_1')).toBeNull();
   });
 });
 

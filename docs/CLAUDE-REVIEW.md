@@ -253,15 +253,27 @@ Optional title, description and acceptance criteria the person running the revie
 - **Fill from Jira** (plugin `jira/`, migration `0035`). When the PR carries a Jira ticket the
   existing detection found AND its workspace has a saved Jira token, `PrDetail.tickets[i]
   .canFetchDetails` is true and the EXPANDED panel shows one "Fill from KEY" button per such
-  ticket. Click-gated (nothing fetches on mount): `GET /api/pro/prs/:id/jira-ticket?key=` returns
-  summary, description and the workspace's acceptance-criteria custom field as plain text (REST v2;
-  wiki markup kept verbatim, Atlassian Document Format flattened), and the panel REPLACES title and
-  description — and the criteria only when a criteria field is mapped, otherwise the reader's paste
-  is kept and one line says so. Manual entry is unchanged and everything stays editable. The same
-  caps apply: nothing is truncated on the way in. ⚠ The route re-runs detection and refuses a key
-  the PR does not carry, so the saved token can read only tickets this workspace's PRs name. The
-  settings, token storage and SSRF rules: [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md)
-  § Jira API access and [SECURITY.md](SECURITY.md).
+  ticket. Click-gated (nothing fetches on mount): `GET /api/pro/prs/:id/jira-ticket?key=` reads the
+  issue with every field (REST v2, `fields=*all&expand=names,schema`; wiki markup kept verbatim,
+  ADF flattened) and the panel REPLACES title and description. Manual entry is unchanged and
+  everything stays editable; nothing is truncated on the way in.
+- ⚠ **THE ACCEPTANCE-CRITERIA FIELD IS CHOSEN PER TICKET, IN THE PANEL — not in Settings.** A
+  site-wide picker shipped first and was unusable: real sites carry several fields named
+  "Acceptance Criteria" and the one in use varies by issue type. The route returns `candidates` —
+  every custom field with text on THIS ticket, strong name matches first (`/acceptance criteria/`),
+  then weak ("AC", "definition of done"), then by name, capped at 50 — and the panel shows
+  "Acceptance criteria from" (`Name (customfield_123) — preview`, blank first). The DEFAULT
+  (`defaultAcCandidate`, `lib/jiraTicket.ts`): the viewer's remembered field for this issue type on
+  this Jira site, when this ticket has it; else the best STRONG name match (an exact
+  "Acceptance Criteria" first — a weak "AC" / "Definition of Done" match is listed near the top but
+  never preselected, because a wrong prefill is worse than a blank); else blank, leaving the box untouched. A preselected field fills the
+  box at once; changing the dropdown refills it client-side with no refetch, and an EXPLICIT choice
+  is remembered (blank forgets). The memory is per-viewer localStorage keyed
+  `limn:jira-ac-field:v1:<site host>:<issue type id>`, every access wrapped — a convenience, never
+  state anyone else sees. ⚠ The route re-runs detection and refuses a key the PR does not carry,
+  so the saved token can read only tickets this workspace's PRs name. Settings, token storage and
+  SSRF rules: [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § Jira API access and
+  [SECURITY.md](SECURITY.md).
 - **Shown in the app only, not posted.** The prompt tells the model to ALSO raise any concrete
   defect behind an unmet criterion as a normal finding, and findings are postable.
 - **Vocabularies** (shared): criteria Met / Partly met / Not met / Can't tell from the code /

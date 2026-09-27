@@ -3,7 +3,6 @@ import { useMutation } from '@tanstack/react-query';
 import type { JiraFieldListResponse, WorkspaceJiraApiSettings } from '@pierre-review/shared';
 import { api } from '../../api/client.js';
 import { useUpdateWorkspaceProSettings } from '../../hooks/useWorkspaceProSettings.js';
-import { acFieldName, acFieldOptions } from '../../lib/jiraTicket.js';
 import { Field, SaveButton, inputCls } from './ui.js';
 
 const SECONDARY_BTN =
@@ -14,12 +13,16 @@ const SECONDARY_BTN =
  * workspace's SAVED tracker is Jira. It lets Claude Review fill a detected ticket's title,
  * description and acceptance criteria.
  *
+ * ⚠ THERE IS NO ACCEPTANCE-CRITERIA FIELD PICKER HERE ANY MORE. A site can carry several fields
+ * named "Acceptance Criteria" and the one in use varies by issue type, so the field is chosen per
+ * ticket in the Claude Review panel, from that ticket's own fields.
+ *
  * ⚠ THE TOKEN IS WRITE-ONLY. The server never returns it (`hasToken` only), so the input starts
  * empty every time; a saved token shows "Saved" with Replace / Remove. Saving without typing a
  * token keeps the saved one.
  *
- * ⚠ THE FIELD LIST IS CLICK-GATED. Loading it calls the customer's Jira with the SAVED token, so it
- * is also the connection test — and it never fires just because Settings opened.
+ * ⚠ THE CONNECTION CHECK IS CLICK-GATED. It calls the customer's Jira with the SAVED token (the
+ * field-list route) and never fires just because Settings opened.
  */
 export function JiraApiAccess({
   workspaceId,
@@ -33,45 +36,31 @@ export function JiraApiAccess({
     mutationFn: () => api.jiraFields(workspaceId),
   });
   const loaded = fields.data?.workspaceId === workspaceId ? fields.data.fields : null;
-  const ids = { email: useId(), token: useId(), field: useId() };
+  const ids = { email: useId(), token: useId() };
 
-  const savedFieldId = jira.acceptanceCriteriaField?.id ?? '';
   const [email, setEmail] = useState(jira.email ?? '');
   const [token, setToken] = useState('');
   const [replacing, setReplacing] = useState(false);
-  const [fieldId, setFieldId] = useState(savedFieldId);
 
   // Re-seeded on the STORED values (not the response object — a background refetch must not
   // revert a half-typed email). The token input is cleared after every save.
-  const signature = `${workspaceId}:${jira.email ?? ''}:${jira.hasToken}:${savedFieldId}`;
+  const signature = `${workspaceId}:${jira.email ?? ''}:${jira.hasToken}`;
   useEffect(() => {
     setEmail(jira.email ?? '');
     setToken('');
     setReplacing(false);
-    setFieldId(savedFieldId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
 
-  // Once the list arrives with nothing chosen yet, pre-select the field named "acceptance criteria".
-  const suggested = fields.data?.suggestedFieldId ?? null;
-  useEffect(() => {
-    if (suggested != null && fieldId === '' && savedFieldId === '') setFieldId(suggested);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [suggested]);
-
   const typedToken = token.trim();
-  const dirty =
-    email.trim() !== (jira.email ?? '') || typedToken !== '' || fieldId !== savedFieldId;
+  const dirty = email.trim() !== (jira.email ?? '') || typedToken !== '';
   const showTokenInput = !jira.hasToken || replacing;
-  const options = acFieldOptions(jira.acceptanceCriteriaField, loaded);
 
   const save = (): void =>
     mutation.mutate({
       jira: {
         email: email.trim() === '' ? null : email.trim(),
         ...(typedToken !== '' ? { token: typedToken } : {}),
-        acceptanceCriteriaFieldId: fieldId === '' ? null : fieldId,
-        acceptanceCriteriaFieldName: acFieldName(fieldId, jira.acceptanceCriteriaField, loaded),
       },
     });
 
@@ -83,7 +72,8 @@ export function JiraApiAccess({
         </h4>
         <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
           Lets Claude Review fill in a detected ticket’s title, description and acceptance
-          criteria. A saved token is never shown again.
+          criteria. You pick the criteria field per ticket there. A saved token is never shown
+          again.
         </p>
       </div>
       <Field
@@ -139,25 +129,6 @@ export function JiraApiAccess({
           </div>
         </div>
       )}
-      <Field
-        label="Acceptance criteria field"
-        htmlFor={ids.field}
-        hint="Jira has no standard field for acceptance criteria, so pick the one your site uses."
-      >
-        <select
-          id={ids.field}
-          className={inputCls}
-          value={fieldId}
-          onChange={(e) => setFieldId(e.target.value)}
-        >
-          <option value="">None — criteria are in the description</option>
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      </Field>
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -165,7 +136,7 @@ export function JiraApiAccess({
           disabled={!jira.hasToken || fields.isPending}
           onClick={() => fields.mutate()}
         >
-          {fields.isPending ? 'Checking…' : 'Check connection and load fields'}
+          {fields.isPending ? 'Checking…' : 'Check connection'}
         </button>
         {!jira.hasToken && (
           <span className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -174,7 +145,7 @@ export function JiraApiAccess({
         )}
         {loaded != null && (
           <span className="text-[11px] text-emerald-700 dark:text-emerald-400">
-            Connected. {loaded.length} custom {loaded.length === 1 ? 'field' : 'fields'} loaded.
+            Connected. Jira accepted the saved token.
           </span>
         )}
       </div>

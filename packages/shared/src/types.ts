@@ -4664,12 +4664,12 @@ export interface WorkspaceJiraApiSettings {
   // sent as a Bearer personal access token (Jira Server / Data Center).
   email: string | null;
   hasToken: boolean;
-  // The custom field that holds acceptance criteria on this Jira site, or null when the criteria
-  // are written inside the description. Field ids (`customfield_10042`) differ per site.
-  acceptanceCriteriaField: { id: string; name: string | null } | null;
+  // (NO acceptance-criteria field. It was a per-workspace choice in the first cut and moved to the
+  // Claude Review panel, per ticket: real sites carry several fields named "Acceptance Criteria"
+  // and the right one varies by issue type. `jira_ac_field_*` are dormant columns.)
 }
 
-// One field from Jira's `GET /rest/api/2/field`, for the acceptance-criteria picker.
+// One field from Jira's `GET /rest/api/2/field` (the Settings connection check).
 export interface JiraFieldOption {
   id: string;
   name: string;
@@ -4678,26 +4678,42 @@ export interface JiraFieldOption {
   type: string | null;
 }
 
-// GET /api/pro/jira/fields?workspace=<id> — uses the SAVED token, so it doubles as a connection
-// test. Custom fields only (acceptance criteria is never a system field), sorted by name.
+// GET /api/pro/jira/fields?workspace=<id> — the Settings CONNECTION CHECK: uses the SAVED token
+// and lists the site's custom fields, sorted by name.
 export interface JiraFieldListResponse {
   workspaceId: number;
   fields: JiraFieldOption[];
-  // The first field whose name reads "acceptance criteria", or null.
-  suggestedFieldId: string | null;
 }
 
-// GET /api/pro/prs/:id/jira-ticket?key=<KEY> — one detected ticket's text, as plain strings.
-// NEVER truncated here: the Claude Review panel's own `checkClaudeReviewTicket` flags anything over
-// the caps. `acField` null = no acceptance-criteria field is set for the workspace, so
-// `acceptanceCriteria` is '' because it was not looked up, not because the ticket has none.
+// How a candidate field's NAME reads as acceptance criteria. `strong` = /acceptance criteria/,
+// `weak` = "AC" or "definition of done", null = neither. Computed server-side, once.
+export type JiraAcMatch = 'strong' | 'weak' | null;
+
+// One custom field on THIS ticket that holds text — a place its acceptance criteria might live.
+export interface JiraAcCandidate {
+  id: string; // customfield_10042
+  name: string; // the site's display name for it
+  text: string; // the field's whole value as plain text — NEVER truncated
+  match: JiraAcMatch;
+}
+
+// GET /api/pro/prs/:id/jira-ticket?key=<KEY> — one detected ticket, as plain strings, NEVER
+// truncated (the panel's own `checkClaudeReviewTicket` flags anything over the caps).
+//
+// Acceptance criteria is not a standard Jira field, and one site can carry several fields named
+// for it, differing by issue type. So the server does not pick one: it returns every custom field
+// with text on THIS ticket as a `candidates` list — strong name matches first, then weak, then the
+// rest by name — and the reader picks in the panel (the SPA preselects, see lib/jiraTicket.ts).
 export interface JiraTicketDetails {
   prId: number;
   key: string;
   title: string;
   description: string;
-  acceptanceCriteria: string;
-  acField: { id: string; name: string | null } | null;
+  issueType: { id: string; name: string } | null;
+  // At most `JIRA_AC_CANDIDATE_CAP` (plugin, 50). `omittedCandidates` counts the text fields the
+  // cap cut, lowest-ranked first, so the list can say it is not everything.
+  candidates: JiraAcCandidate[];
+  omittedCandidates: number;
 }
 
 /**
@@ -4752,9 +4768,8 @@ export interface WorkspaceProSettingsUpdate {
     token?: string;
     // true removes the saved token (ignored when `token` is sent in the same patch).
     clearToken?: boolean;
-    // null = the criteria are in the description.
-    acceptanceCriteriaFieldId?: string | null;
-    acceptanceCriteriaFieldName?: string | null;
+    // (No acceptance-criteria field — chosen per ticket in the Claude Review panel now. A stale
+    // client still sending `acceptanceCriteriaFieldId` has it stripped by the PUT schema, 200.)
   };
 }
 

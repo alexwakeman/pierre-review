@@ -1329,21 +1329,28 @@ a customer's internal tracker hostname: infrastructure disclosure, not just a nu
 
 ### Jira API access, per workspace (plugin migration 0035)
 
-Lets Claude Review fill its user story from a ticket the detection above already found. Four
-nullable columns on the same `pro_workspace_settings` row — `jira_email`, `jira_token`,
-`jira_ac_field_id`, `jira_ac_field_name` — written through the same partial patch
+Lets Claude Review fill its user story from a ticket the detection above already found. Two LIVE
+nullable columns on the same `pro_workspace_settings` row — `jira_email`, `jira_token` — written
+through the same partial patch
 (`WorkspaceProSettingsUpdate.jira`) and seeded in `mergeWorkspace` like every neighbour, so an
 unrelated cadence Save cannot wipe a credential. `apiVersion` **STAYS 21**: the only seam change is
 the OPTIONAL `host.sealSecret` / `host.openSecret` pair. Code: `src/jira/` (`client.ts`,
-`fetch.ts`, `text.ts`, `secret.ts`, `routes.ts`); detection is shared with the enricher through ONE
+`candidates.ts`, `fetch.ts`, `text.ts`, `secret.ts`, `routes.ts`); detection is shared with the enricher through ONE
 function, `detectPrTickets` (`issue-links/enricher.ts`).
 
-- **The fields are not all static.** `summary` and `description` are system fields. Acceptance
-  criteria is NOT: it is a custom field whose id (`customfield_NNNNN`) differs per Jira site, or it
-  is written inside the description. So the field is CHOSEN per workspace in Settings from
-  `GET /api/pro/jira/fields` (Jira's `/rest/api/2/field`, custom fields only), pre-selected by name
-  (`/acceptance\s*criteria/i`, exact name and text type win), with "None — criteria are in the
-  description" as a real choice.
+- **The fields are not all static, and ONE WORKSPACE ANSWER WAS UNUSABLE.** `summary` and
+  `description` are system fields. Acceptance criteria is NOT: it is a custom field whose id
+  differs per site — and a real site carried SEVERAL fields named "Acceptance Criteria", the one in
+  use varying by issue type. The first cut chose one field per workspace in Settings; it could not
+  be made to work. Now the choice is PER TICKET, in the Claude Review panel: the ticket route reads
+  the issue with `fields=*all&expand=names,schema` and returns every custom text field on it as a
+  ranked, capped (50) `candidates` list (`candidates.ts` — what counts as text, the exclusion list,
+  the ranking), and the SPA preselects (remembered choice per site + issue type, else the best name
+  match, else blank). Contract: [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § User story or task.
+  ⚠ **`jira_ac_field_id` / `jira_ac_field_name` ARE DORMANT** — added by 0035, still in the table
+  (plugin migrations are additive), undeclared in both schema modules, never selected or written.
+  A stale client's `acceptanceCriteriaField*` keys are stripped by the PUT schema and still 200.
+  `GET /api/pro/jira/fields` survives as the Settings CONNECTION CHECK only.
 - **Auth follows the email.** Email set → HTTP Basic `email:apiToken` (Jira Cloud). No email →
   `Bearer <personal access token>` (Server / Data Center). REST **v2** everywhere, because it works
   on both and returns `description` as a wiki-markup string; ADF values are still flattened.

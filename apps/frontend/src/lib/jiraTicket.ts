@@ -1,71 +1,134 @@
-import type {
-  JiraFieldOption,
-  JiraTicketDetails,
-  TicketRef,
-  WorkspaceJiraApiSettings,
-} from '@pierre-review/shared';
+import type { JiraAcCandidate, JiraTicketDetails, TicketRef } from '@pierre-review/shared';
 import type { TicketDraft } from './claudeReviewFollowUp.js';
 
-// Pure helpers for Jira API access: the Claude Review panel's "Fill from KEY" buttons and the
-// Settings acceptance-criteria picker. Kept out of the components so they are testable.
+// Pure helpers for the Claude Review panel's "Fill from KEY" and its "Acceptance criteria from"
+// dropdown. Kept out of the component so they are testable.
+//
+// ⚠ THE ACCEPTANCE-CRITERIA FIELD IS CHOSEN PER TICKET, HERE — not in Settings. A Jira site can
+// carry several fields named "Acceptance Criteria" and the one in use varies by issue type, so the
+// server returns every custom text field on the ticket (`details.candidates`, strong name matches
+// first) and the reader picks. The choice is remembered PER VIEWER, per Jira site + issue type, in
+// localStorage — a convenience only, so every read and write is wrapped and a missing store simply
+// means "nothing remembered".
 
 /**
  * The detected tickets the panel may offer a "Fill from" button for: Jira tickets the server
  * marked `canFetchDetails` (Jira + a token saved for the PR's workspace). Nothing when the PR has
- * no detected ticket — the button never appears for a ticket Limn did not find, because the server
- * would refuse it anyway.
+ * no detected ticket — the button never appears for a ticket Limn did not find.
  */
 export function fillableJiraTickets(tickets: readonly TicketRef[] | null | undefined): TicketRef[] {
   if (!tickets) return [];
   return tickets.filter((t) => t.provider === 'jira' && t.canFetchDetails === true);
 }
 
-/**
- * The draft after filling from a ticket. Title and description are REPLACED. Acceptance criteria
- * are replaced only when the workspace maps a criteria field — otherwise Jira was never asked for
- * them, and wiping what the reader pasted would lose it for nothing.
- */
+/** The draft after a fill: title and description REPLACED; the criteria are left for the picker. */
 export function applyJiraTicket(draft: TicketDraft, details: JiraTicketDetails): TicketDraft {
-  return {
-    title: details.title,
-    description: details.description,
-    acceptanceCriteria: details.acField != null ? details.acceptanceCriteria : draft.acceptanceCriteria,
-  };
+  return { ...draft, title: details.title, description: details.description };
 }
 
-/** The one short line shown after a fill, or null when there is nothing to say. */
-export function jiraFillNote(details: JiraTicketDetails): string | null {
-  if (details.acField == null)
-    return 'No acceptance criteria field is set for this workspace in Settings, so those were left as they were.';
-  if (details.acceptanceCriteria.trim() === '')
-    return `${details.key} has nothing in ${details.acField.name ?? details.acField.id}.`;
-  return null;
+/** The draft after choosing a candidate. '' (the blank option) leaves the box as it is. */
+export function applyAcCandidate(
+  draft: TicketDraft,
+  candidates: readonly JiraAcCandidate[],
+  id: string,
+): TicketDraft {
+  if (id === '') return draft;
+  const c = candidates.find((x) => x.id === id);
+  return c ? { ...draft, acceptanceCriteria: c.text } : draft;
 }
+
+// ── the remembered choice (per viewer, per Jira site + issue type) ─────────────────────────────
+
+export type AcMemoryStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+/** localStorage, or null where it is unavailable (private window, blocked site data, previews). */
+export function browserAcMemory(): AcMemoryStore | null {
+  try {
+    return typeof window !== 'undefined' && window.localStorage ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The Jira site a ticket link points at (host + port, lowercase), or null. */
+export function jiraSiteOf(ticketUrl: string): string | null {
+  try {
+    return new URL(ticketUrl).host.toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
+const memoryKey = (site: string, issueTypeId: string): string =>
+  `limn:jira-ac-field:v1:${site}:${issueTypeId}`;
+
+export function readRememberedAcField(
+  store: AcMemoryStore | null,
+  site: string | null,
+  issueTypeId: string | null | undefined,
+): string | null {
+  if (store == null || site == null || issueTypeId == null) return null;
+  try {
+    const v = store.getItem(memoryKey(site, issueTypeId));
+    return v != null && v !== '' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remember an EXPLICIT choice; the blank option forgets, so the name match decides next time. */
+export function rememberAcField(
+  store: AcMemoryStore | null,
+  site: string | null,
+  issueTypeId: string | null | undefined,
+  fieldId: string,
+): void {
+  if (store == null || site == null || issueTypeId == null) return;
+  try {
+    if (fieldId === '') store.removeItem(memoryKey(site, issueTypeId));
+    else store.setItem(memoryKey(site, issueTypeId), fieldId);
+  } catch {
+    /* a convenience: a full or blocked store just means nothing is remembered */
+  }
+}
+
+// ── the default choice ─────────────────────────────────────────────────────────────────────────
+
+const EXACT_AC = /^\s*acceptance[\s_-]*criteria\s*$/i;
 
 /**
- * The picker's options: the loaded fields, plus the SAVED field when it is not among them (before
- * the list is loaded, or after the field was renamed/removed in Jira) so the select can still show
- * what is stored.
+ * The field to preselect, or '' for the blank option:
+ *   1. the viewer's remembered field for this issue type, when THIS ticket has it with text;
+ *   2. else the best STRONG name match (an "acceptance criteria" name) — an exact "Acceptance
+ *      Criteria" beats one that merely contains it, then the server's order. A WEAK match ("AC",
+ *      "Definition of Done") is ranked near the top of the list but never preselected: a
+ *      definition of done is not the ticket's acceptance criteria, and a wrong prefill is worse
+ *      than a blank the reader fills;
+ *   3. else '' — the reader picks, and the box is left as it is.
+ * Every candidate has text by construction (the server drops empty fields).
  */
-export function acFieldOptions(
-  saved: WorkspaceJiraApiSettings['acceptanceCriteriaField'],
-  loaded: readonly JiraFieldOption[] | null,
-): { id: string; label: string }[] {
-  const out = (loaded ?? []).map((f) => ({ id: f.id, label: `${f.name} (${f.id})` }));
-  if (saved != null && !out.some((o) => o.id === saved.id)) {
-    out.unshift({ id: saved.id, label: saved.name != null ? `${saved.name} (${saved.id})` : saved.id });
-  }
-  return out;
+export function defaultAcCandidate(
+  candidates: readonly JiraAcCandidate[],
+  remembered: string | null,
+): string {
+  if (remembered != null && candidates.some((c) => c.id === remembered)) return remembered;
+  const hits = candidates.filter((c) => c.match === 'strong');
+  return (hits.find((c) => EXACT_AC.test(c.name)) ?? hits[0])?.id ?? '';
 }
 
-/** The display name to store beside a chosen field id. */
-export function acFieldName(
-  id: string,
-  saved: WorkspaceJiraApiSettings['acceptanceCriteriaField'],
-  loaded: readonly JiraFieldOption[] | null,
-): string | null {
-  if (id === '') return null;
-  const hit = loaded?.find((f) => f.id === id);
-  if (hit) return hit.name;
-  return saved?.id === id ? saved.name : null;
+const PREVIEW_CHARS = 60;
+
+/** The dropdown's option text: "Name (customfield_123) — first words of the value…". */
+export function acCandidateLabel(c: JiraAcCandidate): string {
+  const flat = c.text.replace(/\s+/g, ' ').trim();
+  const preview = flat.length > PREVIEW_CHARS ? `${flat.slice(0, PREVIEW_CHARS).trimEnd()}…` : flat;
+  return `${c.name} (${c.id}) — ${preview}`;
+}
+
+/** The one short line under the dropdown, or null. */
+export function jiraFillNote(details: JiraTicketDetails, chosenId: string): string | null {
+  if (details.candidates.length === 0)
+    return `${details.key} has no other fields with text, so the acceptance criteria were left as they were.`;
+  if (chosenId === '') return 'Pick the field that holds the acceptance criteria. The box is unchanged until you do.';
+  return null;
 }
