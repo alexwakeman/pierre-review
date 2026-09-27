@@ -29,6 +29,7 @@ import { useProCapabilities } from '../hooks/useTriage.js';
 import { useReviewLearnings } from '../hooks/useReviewLearnings.js';
 import { useReviewActions } from '../hooks/useReviewActions.js';
 import { useFilters } from '../store/filters.js';
+import { useWorkspaces } from '../hooks/useWorkspaces.js';
 import {
   useCancelReview,
   useClaudeReview,
@@ -1627,6 +1628,10 @@ export function ClaudeReviewTab({
     setTicketDraftState(d);
   };
   const ticketCheck = useMemo(() => checkTicketDraft(ticketDraft), [ticketDraft]);
+  // The workspace that OWNS this PR's repo — its Jira token is the one "Fill from KEY" uses, which
+  // need not be the workspace being viewed. Named in the panel when that workspace has no token.
+  const { data: workspaces } = useWorkspaces();
+  const prWorkspaceName = workspaces?.find((w) => w.repoIds.includes(pr.repoId))?.name ?? null;
   const ticketBlockedTitle = ticketCheck.ok
     ? undefined
     : `Fix the user story first: ${ticketCheck.message}`;
@@ -1881,6 +1886,7 @@ export function ClaudeReviewTab({
             check={ticketCheck}
             prId={pr.id}
             tickets={pr.tickets}
+            prWorkspaceName={prWorkspaceName}
           />
 
           {/* Same-SHA warn-but-allow confirmation. */}

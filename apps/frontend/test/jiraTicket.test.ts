@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import type { JiraAcCandidate, JiraTicketDetails, TicketRef } from '@pierre-review/shared';
 import {
   acCandidateLabel,
+  unfillableJiraTickets,
   applyAcCandidate,
   applyJiraTicket,
   defaultAcCandidate,
@@ -181,9 +182,24 @@ describe('labels and the note', () => {
   it('"Name (id) — preview", preview on one line and cut for display only', () => {
     const long = cand('customfield_1', 'Acceptance Criteria', 'strong', `Given a user\n${'x'.repeat(100)}`);
     const label = acCandidateLabel(long);
-    expect(label.startsWith('Acceptance Criteria (customfield_1) — Given a user x')).toBe(true);
+    expect(label.startsWith('★ Acceptance Criteria (customfield_1) — Given a user x')).toBe(true);
     expect(label.endsWith('…')).toBe(true);
     expect(long.text).toHaveLength(113); // the candidate itself is untouched
+  });
+  it('stars strong acceptance-criteria matches only', () => {
+    expect(acCandidateLabel(cand('customfield_2', 'Definition of Done', 'weak', 'x'))).toBe(
+      'Definition of Done (customfield_2) — x',
+    );
+    expect(acCandidateLabel(cand('customfield_3', 'Notes', null, 'y'))).toBe('Notes (customfield_3) — y');
+  });
+  it('a detected Jira ticket without a token is listed as unfillable, never as fillable', () => {
+    const t = [
+      { key: 'BMD-1', url: 'https://x.atlassian.net/browse/BMD-1', provider: 'jira' as const, canFetchDetails: false },
+      { key: 'BMD-2', url: 'https://x.atlassian.net/browse/BMD-2', provider: 'jira' as const, canFetchDetails: true },
+      { key: 'ENG-3', url: 'https://linear.app/x/issue/ENG-3', provider: 'linear' as const },
+    ];
+    expect(unfillableJiraTickets(t).map((r) => r.key)).toEqual(['BMD-1']);
+    expect(fillableJiraTickets(t).map((r) => r.key)).toEqual(['BMD-2']);
   });
   it('says so when there are no candidates, and asks for a pick when nothing is chosen', () => {
     expect(jiraFillNote(details({ candidates: [] }), '')).toMatch(/no other fields with text/);

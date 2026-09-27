@@ -21,6 +21,16 @@ export function fillableJiraTickets(tickets: readonly TicketRef[] | null | undef
   return tickets.filter((t) => t.provider === 'jira' && t.canFetchDetails === true);
 }
 
+/**
+ * Jira tickets detected on the PR that CANNOT be filled — the PR's own workspace (the one that
+ * owns its repo, not the workspace being viewed) has no Jira token. The panel names that
+ * workspace instead of silently showing no button.
+ */
+export function unfillableJiraTickets(tickets: readonly TicketRef[] | null | undefined): TicketRef[] {
+  if (!tickets) return [];
+  return tickets.filter((t) => t.provider === 'jira' && t.canFetchDetails !== true);
+}
+
 /** The draft after a fill: title and description REPLACED; the criteria are left for the picker. */
 export function applyJiraTicket(draft: TicketDraft, details: JiraTicketDetails): TicketDraft {
   return { ...draft, title: details.title, description: details.description };
@@ -119,10 +129,19 @@ export function defaultAcCandidate(
 const PREVIEW_CHARS = 60;
 
 /** The dropdown's option text: "Name (customfield_123) — first words of the value…". */
+// ⚠ A CHARACTER, NOT AN Icons.tsx COMPONENT: an <option>'s content is plain text and cannot hold
+// an SVG (CLAUDE.md's listed exception for strings that cannot hold one).
+export const AC_MATCH_STAR = '★';
+
+/**
+ * The dropdown's option text: "★ Name (customfield_123) — first words of the value…". The star
+ * marks a STRONG match (an "acceptance criteria" name) — the same fields the default may pick.
+ */
 export function acCandidateLabel(c: JiraAcCandidate): string {
   const flat = c.text.replace(/\s+/g, ' ').trim();
   const preview = flat.length > PREVIEW_CHARS ? `${flat.slice(0, PREVIEW_CHARS).trimEnd()}…` : flat;
-  return `${c.name} (${c.id}) — ${preview}`;
+  const star = c.match === 'strong' ? `${AC_MATCH_STAR} ` : '';
+  return `${star}${c.name} (${c.id}) — ${preview}`;
 }
 
 /** The one short line under the dropdown, or null. */

@@ -266,9 +266,13 @@ Optional title, description and acceptance criteria the person running the revie
   (`defaultAcCandidate`, `lib/jiraTicket.ts`): the viewer's remembered field for this issue type on
   this Jira site, when this ticket has it; else the best STRONG name match (an exact
   "Acceptance Criteria" first — a weak "AC" / "Definition of Done" match is listed near the top but
-  never preselected, because a wrong prefill is worse than a blank); else blank, leaving the box untouched. A preselected field fills the
+  never preselected, because a wrong prefill is worse than a blank); strong matches carry a ★ in the
+  dropdown; else blank, leaving the box untouched. A preselected field fills the
   box at once; changing the dropdown refills it client-side with no refetch, and an EXPLICIT choice
-  is remembered (blank forgets). The memory is per-viewer localStorage keyed
+  is remembered (blank forgets). ⚠ **The token that counts is the one on the workspace that OWNS the
+  PR's repo**, not the workspace being viewed (`?workspace=` is only the viewer's scope): when a Jira
+  ticket is detected but that workspace has no token, the panel names it ("add a Jira API token in
+  Settings for the BNG workspace") instead of silently showing no button. The memory is per-viewer localStorage keyed
   `limn:jira-ac-field:v1:<site host>:<issue type id>`, every access wrapped — a convenience, never
   state anyone else sees. ⚠ The route re-runs detection and refuses a key the PR does not carry,
   so the saved token can read only tickets this workspace's PRs name. Settings, token storage and

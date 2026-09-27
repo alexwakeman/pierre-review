@@ -44,6 +44,7 @@ import {
   browserAcMemory,
   defaultAcCandidate,
   fillableJiraTickets,
+  unfillableJiraTickets,
   jiraFillNote,
   jiraSiteOf,
   readRememberedAcField,
@@ -167,12 +168,15 @@ export function ClaudeReviewTicketPanel({
   check,
   prId,
   tickets,
+  prWorkspaceName,
 }: {
   value: TicketDraft;
   onChange: (next: TicketDraft) => void;
   check: ClaudeReviewTicketCheck;
   prId: number;
   tickets: readonly TicketRef[] | null | undefined;
+  // The workspace that OWNS this PR's repo — the one whose Jira token is used. null = unknown.
+  prWorkspaceName?: string | null;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const baseId = useId();
@@ -214,7 +218,13 @@ export function ClaudeReviewTicketPanel({
             Paste the user story or task. Claude checks the change against it and lists what is
             missing or was not asked for.
           </p>
-          <JiraFillButtons prId={prId} tickets={tickets} value={value} onChange={onChange} />
+          <JiraFillButtons
+            prId={prId}
+            tickets={tickets}
+            value={value}
+            onChange={onChange}
+            prWorkspaceName={prWorkspaceName ?? null}
+          />
           <TicketField
             id={ids.title}
             label="Title"
@@ -299,13 +309,16 @@ function JiraFillButtons({
   tickets,
   value,
   onChange,
+  prWorkspaceName,
 }: {
   prId: number;
   tickets: readonly TicketRef[] | null | undefined;
   value: TicketDraft;
   onChange: (next: TicketDraft) => void;
+  prWorkspaceName: string | null;
 }): JSX.Element | null {
   const fillable = fillableJiraTickets(tickets);
+  const unfillable = unfillableJiraTickets(tickets);
   const selectId = useId();
   // The draft as it is when the answer lands (or the dropdown changes), not when a button was
   // pressed — the reader may type in between.
@@ -331,7 +344,18 @@ function JiraFillButtons({
       setChosen(pick);
     },
   });
-  if (fillable.length === 0) return null;
+  if (fillable.length === 0) {
+    // A ticket WAS detected but its workspace has no token: say where to add one rather than
+    // render nothing. (The token belongs to the workspace that owns the PR's repo, which need not
+    // be the workspace being viewed.)
+    if (unfillable.length === 0) return null;
+    return (
+      <p className={`text-xs ${MUTED}`}>
+        To fill this from {unfillable.map((t) => t.key).join(', ')}, add a Jira API token in Settings for
+        the {prWorkspaceName != null ? `${prWorkspaceName} workspace` : 'workspace this repository is in'}.
+      </p>
+    );
+  }
   const shown = filled != null && filled.prId === prId ? filled : null;
 
   const choose = (id: string): void => {
