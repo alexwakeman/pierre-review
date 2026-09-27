@@ -1327,6 +1327,45 @@ are pinned in `packages/pro/test/workspace-settings.test.ts`.
 `0031` added no entry — which is exactly why it is easy to stop thinking about. The row now carries
 a customer's internal tracker hostname: infrastructure disclosure, not just a number.
 
+### Jira API access, per workspace (plugin migration 0035)
+
+Lets Claude Review fill its user story from a ticket the detection above already found. Four
+nullable columns on the same `pro_workspace_settings` row — `jira_email`, `jira_token`,
+`jira_ac_field_id`, `jira_ac_field_name` — written through the same partial patch
+(`WorkspaceProSettingsUpdate.jira`) and seeded in `mergeWorkspace` like every neighbour, so an
+unrelated cadence Save cannot wipe a credential. `apiVersion` **STAYS 21**: the only seam change is
+the OPTIONAL `host.sealSecret` / `host.openSecret` pair. Code: `src/jira/` (`client.ts`,
+`fetch.ts`, `text.ts`, `secret.ts`, `routes.ts`); detection is shared with the enricher through ONE
+function, `detectPrTickets` (`issue-links/enricher.ts`).
+
+- **The fields are not all static.** `summary` and `description` are system fields. Acceptance
+  criteria is NOT: it is a custom field whose id (`customfield_NNNNN`) differs per Jira site, or it
+  is written inside the description. So the field is CHOSEN per workspace in Settings from
+  `GET /api/pro/jira/fields` (Jira's `/rest/api/2/field`, custom fields only), pre-selected by name
+  (`/acceptance\s*criteria/i`, exact name and text type win), with "None — criteria are in the
+  description" as a real choice.
+- **Auth follows the email.** Email set → HTTP Basic `email:apiToken` (Jira Cloud). No email →
+  `Bearer <personal access token>` (Server / Data Center). REST **v2** everywhere, because it works
+  on both and returns `description` as a wiki-markup string; ADF values are still flattened.
+- **The API root has ONE derivation**, `jiraApiRoot(issue_base_url)`: scheme + host + port + the
+  context path, with everything from `/browse`, `/rest` or `/secure` onwards stripped.
+- ⚠ **THE TOKEN IS WRITE-ONLY AND BELONGS TO ONE SITE.** No route returns it (`hasToken` only);
+  saving without a token keeps it; `clearToken` removes it; and changing the tracker's base URL to a
+  different HOST removes it (`jiraSiteOf` in `mergeWorkspace`), so a token typed for one Jira is
+  never sent to whatever the URL says next. Storage format and the SSRF guard:
+  [SECURITY.md](SECURITY.md).
+- **`TicketRef.canFetchDetails`** (optional, additive) is set by the enricher on Jira tickets:
+  true when a token is saved for the PR's workspace — including one that can no longer be opened,
+  so the click says "save it again" instead of the button silently vanishing. Saving the `jira`
+  section invalidates `['pr']`, like the tracker section.
+- **Gates.** The two Jira-calling routes register with the enricher (`issueLinks`, the summary
+  tier) and sit on the `search` rate tier. The Settings block is shown only when the SAVED tracker
+  is Jira with a base URL AND the `claudeReview` capability is on — Claude Review is its only
+  consumer and is local-only, so cloud accounts are never asked for a token nothing uses. The
+  server half is still cloud-safe (sealed storage, the cloud SSRF rules).
+- **Erasure** needs no new entry (the table is already in `registerAccountErasure`); the core
+  account export never reads plugin tables, so the token cannot reach it.
+
 ### The Bots ROI panel is paid — the whole panel, and where the free line falls
 
 `BotRoiPanel` used to be CORE/FREE with three cost surfaces cut out of it on `botDepth` (the

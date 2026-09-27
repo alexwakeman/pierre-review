@@ -47,6 +47,7 @@ import {
   MAX_REVIEW_BUDGET_USD,
 } from '../review/local-settings.js';
 import { getAccessToken, getAccountById } from '../auth/account.js';
+import { decryptToken, encryptToken, sealingAvailable } from '../auth/crypto.js';
 import {
   createIssue,
   createPullRequest,
@@ -133,6 +134,11 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       // Vite serves it on :5173. Handing the plugin `appBaseUrl` here is what made the Slack
       // digest's deep links 404 locally.
       appWebUrl: config.appWebUrl,
+      // AES-256-GCM sealing for a secret the PLUGIN stores (today: the per-workspace Jira token).
+      // Present only when ENCRYPTION_KEY is a valid 32-byte key — always in cloud, and locally when
+      // the operator set one. Absent, the plugin stores the secret plain and says so; that is the
+      // same trust as the local `gh` token on the same machine.
+      ...(sealingAvailable() ? { sealSecret: encryptToken, openSecret: decryptToken } : {}),
     },
     accountIdOf,
     db,

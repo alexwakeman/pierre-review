@@ -4,6 +4,8 @@ import {
   useUpdateWorkspaceProSettings,
   useWorkspaceProSettings,
 } from '../../hooks/useWorkspaceProSettings.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
+import { JiraApiAccess } from './JiraApiAccess.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
@@ -41,6 +43,8 @@ export function IssueLinksSection(): JSX.Element {
   const query = useWorkspaceProSettings(workspaceId != null, workspaceId);
   const mutation = useUpdateWorkspaceProSettings(workspaceId);
   const data = query.data;
+  // Jira API access feeds Claude Review only, so it is offered only where Claude Review runs.
+  const claudeReview = useProCapabilities().claudeReview;
 
   // Re-seeded on the resolved workspace / STORED VALUE: an uncontrolled seed would leave the
   // previous workspace's tracker in the inputs after a switch, and Save would write it here.
@@ -106,7 +110,7 @@ export function IssueLinksSection(): JSX.Element {
             label="Base URL"
             hint={
               provider === 'jira'
-                ? 'Tickets link to {base}/browse/KEY-123.'
+                ? `Tickets link to {base}/browse/KEY-123.${data.jira?.hasToken ? ' Moving to a different Jira site removes the saved API token.' : ''}`
                 : 'Tickets link to {base}/issue/KEY-123.'
             }
           >
@@ -171,6 +175,13 @@ export function IssueLinksSection(): JSX.Element {
       {mutation.isError && (
         <p className="text-[11px] text-red-500">{(mutation.error as Error).message}</p>
       )}
+      {/* Offered once Jira is the SAVED tracker with a base URL — the field list and the ticket
+          reads call the saved site, so an unsaved URL in the box above would be the wrong one. */}
+      {claudeReview &&
+        saved.provider === 'jira' &&
+        provider === 'jira' &&
+        (saved.baseUrl ?? '') !== '' &&
+        data.jira != null && <JiraApiAccess workspaceId={workspaceId} jira={data.jira} />}
     </SectionShell>
   );
 }

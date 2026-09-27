@@ -244,6 +244,31 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   apply are enforced in code and must stay: **never returned by any route** (`configured` only),
   **never logged** (the cron and the test route log account + workspace ids), and every write
   through the allowlist. REVISIT if core grows a mode-independent secret-sealing seam.
+- **The per-workspace Jira token (plugin 0035) IS SEALED, unlike the Slack webhook** — different
+  in KIND: it READS the team's whole tracker. Core now offers the "mode-independent sealing seam"
+  the webhook note asks for, as far as it can: the OPTIONAL `host.sealSecret` / `host.openSecret`
+  (core `auth/crypto.ts` AES-256-GCM), present whenever `ENCRYPTION_KEY` is a valid 32-byte key —
+  always in cloud, locally only if the operator set one. Stored as `sealed:v1:<iv:tag:ct>`, or
+  `plain:<token>` on a local install with no key (the same trust as that machine's `gh` token and
+  SQLite file). This ACCEPTS the two-format cost the webhook note rejected, because a read
+  credential is worth it and the prefix makes both forms readable: a `sealed:` value the host cannot
+  open (key removed or rotated) reads as UNREADABLE, is never sent, and the SPA says "save it again". **Never returned by any route** (`hasToken` only), **never
+  logged** (the Jira routes log account, workspace and an error CODE — not the error object), and
+  **not in the account export** (core's export never reads plugin tables). Changing the tracker's
+  base URL to another host REMOVES the saved token, so it cannot be redirected to a new site.
+- **Jira SSRF (plugin `jira/fetch.ts`) — the base URL is customer-typed, so every Jira call is a
+  server-side request to a place they chose.** ONE helper, `jiraGetJson`, makes every call: GET
+  only, 10s timeout, 5 MB body cap, JSON only, and **NO REDIRECTS** — any 3xx is an error, so the
+  Authorization header is never forwarded to a host nobody chose. In CLOUD additionally: https
+  only, and the host must resolve to PUBLIC addresses — loopback, RFC1918, CGNAT, link-local
+  (incl. 169.254.169.254), unique-local, multicast, reserved, unspecified and v4-mapped/NAT64 forms
+  of those are refused, an IP literal up front and a NAME **at connect time through the socket's own
+  `lookup`** (refusing if ANY answer is private), so there is no second resolution for DNS
+  rebinding to exploit. LOCAL allows http and LAN hosts (on-prem Jira; the operator is the only
+  caller). A failure answers `502` with a sentence we wrote — never Jira's body. The ticket route
+  additionally refuses any key the PR's own detection did not find, so the saved token cannot be
+  used as a general Jira reader. Pinned in `packages/pro/test/jira-fetch.test.ts` (real sockets)
+  and `jira-routes.test.ts`.
 - **`resolution-check` fan-out (plugin)**: `MAX_TARGETS_PER_BATCH` 50 + per-account in-flight set
   + 30s interval + abort wiring on the JSON twin. One billed LLM call per thread, uncapped, on an
   app built for bot-flooded PRs.

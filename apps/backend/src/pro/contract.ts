@@ -1117,6 +1117,15 @@ export interface ProContext {
     // that demands a bump, and a bump is four literals across TWO REPOS whose half-application
     // degrades the ENTIRE plugin to OSS mode with nothing thrown.
     appWebUrl?: string;
+    // SEAL / OPEN a secret the plugin stores at rest (AES-256-GCM, core `auth/crypto.ts`). Present
+    // ONLY when the host has a valid ENCRYPTION_KEY — always in cloud, locally only if the operator
+    // set one. The plugin must work without them (it stores the secret plain, prefixed so both
+    // forms stay readable) and must NEVER log, return or export either form.
+    //
+    // ⚠ OPTIONAL, SO apiVersion STAYS 21 — the same narrow "additive" test as `appWebUrl` above: a
+    // trailing optional field. An older host simply has no sealing, which is the no-key case.
+    sealSecret?: (plain: string) => string;
+    openSecret?: (sealed: string) => string;
   };
   accountIdOf(req: FastifyRequest): number; // the single scoping seam
   // node-postgres-TYPED drizzle instance → a stray .get()/.all()/.run() is a

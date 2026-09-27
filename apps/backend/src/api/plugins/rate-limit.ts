@@ -435,6 +435,18 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path === '/api/pro/slack/target') return [TIERS.read];
   if (mutating && path === '/api/pro/slack/test') return [TIERS.ai, TIERS.aiHourly];
 
+  // ---- Jira API reads (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
+  // GET /api/pro/jira/fields and GET /api/pro/prs/:id/jira-ticket each make ONE outbound call to
+  // the customer's own Jira with the workspace's saved token — a THIRD-PARTY quota (Jira Cloud rate
+  // limits per user) and up to a 10s wait on this process. Following the token: it is theirs, not
+  // ours, so the catch-all's 600/min GET→read branch is wrong; they take the 60/min `search`
+  // bucket, the "one upstream call per request" tier. Anchored on exact paths (the ticket route by
+  // a both-ends regex), so a sibling `/api/pro/prs/:id/*` route is not swept in.
+  if (!mutating && path === '/api/pro/jira/fields') return [TIERS.search, TIERS.read];
+  if (!mutating && /^\/api\/pro\/prs\/[^/]+\/jira-ticket$/.test(path)) {
+    return [TIERS.search, TIERS.read];
+  }
+
   // ---- AI generation ----
   // ⚠ RE-DECIDED, not inherited: `POST /api/pro/prs/:id/annotations/run` now spends GITHUB quota
   // as well as model tokens — one PR_DETAIL_QUERY per uncached PR for the anchor hunks

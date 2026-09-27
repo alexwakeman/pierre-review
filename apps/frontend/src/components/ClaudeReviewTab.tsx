@@ -1879,6 +1879,8 @@ export function ClaudeReviewTab({
             value={ticketDraft}
             onChange={setTicketDraft}
             check={ticketCheck}
+            prId={pr.id}
+            tickets={pr.tickets}
           />
 
           {/* Same-SHA warn-but-allow confirmation. */}

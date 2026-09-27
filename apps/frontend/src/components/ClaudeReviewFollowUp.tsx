@@ -13,7 +13,8 @@
 //    are shown separately and labelled as Claude's.
 //  - Chips are 11px or larger, sentences 12px or larger, no uppercase-with-tracking labels, and
 //    every muted colour is paired for both themes (`textContrast.test.ts`).
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import {
   FOLLOW_UP_STATUS_LABEL,
   TICKET_ALIGNMENT_LABEL,
@@ -32,7 +33,11 @@ import type {
   ClaudeTicketAssessment,
   ClaudeTicketCriterionResult,
   ClaudeTicketGap,
+  JiraTicketDetails,
+  TicketRef,
 } from '@pierre-review/shared';
+import { api } from '../api/client.js';
+import { applyJiraTicket, fillableJiraTickets, jiraFillNote } from '../lib/jiraTicket.js';
 import {
   EMPTY_TICKET_DRAFT,
   FOLLOW_UP_STATUS_CLASS,
@@ -149,10 +154,14 @@ export function ClaudeReviewTicketPanel({
   value,
   onChange,
   check,
+  prId,
+  tickets,
 }: {
   value: TicketDraft;
   onChange: (next: TicketDraft) => void;
   check: ClaudeReviewTicketCheck;
+  prId: number;
+  tickets: readonly TicketRef[] | null | undefined;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const baseId = useId();
@@ -194,6 +203,7 @@ export function ClaudeReviewTicketPanel({
             Paste the user story or task. Claude checks the change against it and lists what is
             missing or was not asked for.
           </p>
+          <JiraFillButtons prId={prId} tickets={tickets} value={value} onChange={onChange} />
           <TicketField
             id={ids.title}
             label="Title"
@@ -260,6 +270,62 @@ export function ClaudeReviewTicketPanel({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * "Fill from KEY" — one button per Jira ticket DETECTED on this PR whose workspace has a saved
+ * token (`TicketRef.canFetchDetails`). Nothing renders otherwise: no ticket detected, not Jira, or
+ * no token. CLICK-GATED — nothing is fetched on mount. A fill REPLACES the fields' text; the
+ * reader can still edit everything afterwards.
+ */
+function JiraFillButtons({
+  prId,
+  tickets,
+  value,
+  onChange,
+}: {
+  prId: number;
+  tickets: readonly TicketRef[] | null | undefined;
+  value: TicketDraft;
+  onChange: (next: TicketDraft) => void;
+}): JSX.Element | null {
+  const fillable = fillableJiraTickets(tickets);
+  // The draft as it is when the answer lands, not when the button was pressed.
+  const latest = useRef(value);
+  latest.current = value;
+  const [note, setNote] = useState<string | null>(null);
+  const fill = useMutation<JiraTicketDetails, Error, string>({
+    mutationFn: (key) => api.jiraTicket(prId, key),
+    onMutate: () => setNote(null),
+    onSuccess: (details) => {
+      onChange(applyJiraTicket(latest.current, details));
+      setNote(jiraFillNote(details));
+    },
+  });
+  if (fillable.length === 0) return null;
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        {fillable.map((t) => {
+          const busy = fill.isPending && fill.variables === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => fill.mutate(t.key)}
+              disabled={fill.isPending}
+              className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+            >
+              {busy ? `Filling from ${t.key}…` : `Fill from ${t.key}`}
+            </button>
+          );
+        })}
+        <span className={`text-xs ${MUTED}`}>Replaces the text below.</span>
+      </div>
+      {fill.isError && <p className={`mt-1 text-xs ${ERROR_TEXT}`}>{fill.error.message}</p>}
+      {note != null && !fill.isError && <p className={`mt-1 text-xs ${MUTED}`}>{note}</p>}
     </div>
   );
 }

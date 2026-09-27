@@ -738,6 +738,18 @@ local-only, so the pg columns exist for parity. Twins share `when` `178995600000
 uses `ADD COLUMN IF NOT EXISTS`. `src/db/claude-review-follow-up-columns.test.ts` runs the sqlite
 half through the real migrator in CI. Contracts: docs/CLAUDE-REVIEW.md.
 
+### Plugin `0035_workspace_jira_api`
+
+Four nullable `text` columns on `pro_workspace_settings` — `jira_email`, `jira_token` (a
+CREDENTIAL: `sealed:v1:…` / `plain:…`, see SECURITY.md), `jira_ac_field_id`, `jira_ac_field_name`.
+No backfill (NULL = no Jira API access), no new erasure entry (the table is already erased with the
+account), tenancy unchanged (0029's composite FK). The sqlite file is bare `ADD COLUMN` (run-once
+via `pro_migrations`); the pg twin uses `ADD COLUMN IF NOT EXISTS`. ⚠ Every hand-built test DB
+that replays `0029`/`0031`/`0032` and then touches the store must replay `0035` too — the store now
+SELECTs the four columns (`workspace-settings.test.ts`, `settings-route-schema.test.ts`,
+`jira-routes.test.ts`; `isolation.test.ts` replays the whole folder). ⚠ **The pg twin is NOT
+replayed** — the plugin should reach **35** there.
+
 ⚠ **NONE OF THE SEVEN PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0057` and plugin `0034`). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —

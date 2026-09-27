@@ -6,22 +6,12 @@ import { config } from '../config.js';
 import { sdkModelOptions } from './model-options.js';
 
 describe('sdkModelOptions', () => {
-  it('Opus 5.5 gets the per-mode effort EXPLICITLY plus adaptive thinking', () => {
-    expect(sdkModelOptions('claude-opus-5-5', 'diff_only')).toEqual({
-      effort: config.reviewDiffOnlyEffort,
-      thinking: { type: 'adaptive' },
-    });
-    expect(sdkModelOptions('claude-opus-5-5', 'worktree')).toEqual({
-      effort: config.reviewEffort,
-      thinking: { type: 'adaptive' },
-    });
-  });
-
-  it('gives Opus 5.5 exactly the effort Sonnet 5 gets on the same path', () => {
+  it("Opus 5.5 is pinned to 'medium' on BOTH paths, plus adaptive thinking", () => {
     for (const mode of ['diff_only', 'worktree'] as const) {
-      expect(sdkModelOptions('claude-opus-5-5', mode).effort).toBe(
-        sdkModelOptions('claude-sonnet-5', mode).effort,
-      );
+      expect(sdkModelOptions('claude-opus-5-5', mode)).toEqual({
+        effort: 'medium',
+        thinking: { type: 'adaptive' },
+      });
     }
   });
 

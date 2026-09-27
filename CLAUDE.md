@@ -784,6 +784,10 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   SPA↔plugin WIRE type is not `ProContext` at all.
 - **A stale `packages/pro/dist` shadows `src` in dev.** `bind.ts` prefers `src/index.ts` outside
   production and LOGS the entry it bound — check that first when a Pro route unexpectedly 404s.
+- ⚠ **The per-workspace Jira token (plugin 0035) is WRITE-ONLY and sealed via the OPTIONAL
+  `host.sealSecret`**; every call to the customer-typed Jira host goes through `jira/fetch.ts`
+  (no redirects, cloud refuses private addresses at connect time) — never a bare `fetch`.
+  [SECURITY.md](docs/SECURITY.md).
 - `ctx.schema` is `Record<string, any>` — a leftover `ctx.schema.teams` type-checks and throws
   only when the query runs. Grep, don't trust the compiler.
 - Tiers — **free gets the per-PR truth, paid gets the cross-team roll-up**: **core** is free and

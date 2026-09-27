@@ -94,6 +94,25 @@ describe('tierFor — Slack digest', () => {
   });
 });
 
+// The Jira API reads spend the CUSTOMER'S Jira quota (one outbound call each, up to a 10s wait),
+// so they take `search`, not the catch-all's 600/min GET→read branch.
+describe('tierFor — Jira API reads', () => {
+  it('the field list and the ticket read are on `search`', () => {
+    expect(tiers('GET', '/api/pro/jira/fields')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/pro/prs/42/jira-ticket')).toEqual(['search', 'read']);
+  });
+
+  it('the ticket line is anchored — siblings under /api/pro/prs/:id keep their own tiers', () => {
+    expect(tiers('GET', '/api/pro/prs/42/annotations')).toEqual(['read']);
+    expect(tiers('GET', '/api/pro/prs/42/jira-ticket/extra')).toEqual(['read']);
+    expect(tiers('GET', '/api/pro/jira/fields-export')).toEqual(['read']);
+  });
+
+  it('saving the token is a settings write, not generation', () => {
+    expect(tiers('PUT', '/api/pro/settings/workspace')).toEqual(['read']);
+  });
+});
+
 // The advisor block sits ABOVE the /api/pro/ catch-all, and every path family is spelled
 // exactly (the five-silent-routes lesson: the catch-all is silently wrong for anything it
 // swallows — a DB-only dismiss would ride the 20/min AI bucket, a GitHub-writing config-PR

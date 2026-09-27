@@ -75,7 +75,9 @@ export function useUpdateWorkspaceProSettings(workspaceId: number | null) {
       // is IndexedDB-persisted with staleTime:Infinity, so a provider / base-URL / key-list /
       // match-scope change would NOT appear on already-viewed PRs without an explicit
       // invalidation. (It moved here with the setting, from the retired account-patch hook.)
-      if (patch.issue) {
+      // `patch.jira` too: a saved or removed token flips each Jira ticket's `canFetchDetails`,
+      // which is what shows Claude Review's "Fill from" button.
+      if (patch.issue || patch.jira) {
         void qc.invalidateQueries({ queryKey: ['pr'] });
         void qc.invalidateQueries({ queryKey: ['thread'] });
       }

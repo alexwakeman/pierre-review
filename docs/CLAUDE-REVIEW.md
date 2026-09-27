@@ -119,9 +119,10 @@ posts **one** GitHub review (inline + body + verdict).
   both schemas' `model` text enum, so the stored runs render and price. The generate route's
   schema enum is the OFFERED list, so a POST naming it is a 400. `claude_reviews.model` is plain
   `text` in both dialects (no CHECK, no pg enum), so the enum change needed no migration.
-- **Effort is passed EXPLICITLY for Opus 5.5** — its API default is `medium`, one below Opus 5's
-  `high`. It gets exactly what Sonnet 5 gets on the same path (`REVIEW_DIFF_ONLY_EFFORT`, default
-  low, for a Quick review; `REVIEW_EFFORT`, default medium, otherwise). It also always gets
+- **Opus 5.5's effort is PINNED to `medium` on every path** (`PINNED_EFFORT` in
+  `review/model-options.ts`) — a product decision. `REVIEW_DIFF_ONLY_EFFORT` (default low) and
+  `REVIEW_EFFORT` (default medium) still drive the other effort-capable models, never this one.
+  It is passed explicitly rather than left to the API default. It also always gets
   `thinking: { type: 'adaptive' }`, which overrides any `MAX_THINKING_TOKENS=0` the environment
   might carry. ⚠ **Opus 5.5 400s on `thinking: {type:'disabled'}`, on a thinking budget
   (`budget_tokens` / `maxThinkingTokens`) and on a forced `tool_choice`** — nothing in the review,
@@ -249,6 +250,18 @@ Optional title, description and acceptance criteria the person running the revie
   nothing. Gap lists ("Asked for but
   not done", "Added but not asked for") are capped at 20 and clipped. Stored on
   `claude_reviews.ticket_assessment`.
+- **Fill from Jira** (plugin `jira/`, migration `0035`). When the PR carries a Jira ticket the
+  existing detection found AND its workspace has a saved Jira token, `PrDetail.tickets[i]
+  .canFetchDetails` is true and the EXPANDED panel shows one "Fill from KEY" button per such
+  ticket. Click-gated (nothing fetches on mount): `GET /api/pro/prs/:id/jira-ticket?key=` returns
+  summary, description and the workspace's acceptance-criteria custom field as plain text (REST v2;
+  wiki markup kept verbatim, Atlassian Document Format flattened), and the panel REPLACES title and
+  description — and the criteria only when a criteria field is mapped, otherwise the reader's paste
+  is kept and one line says so. Manual entry is unchanged and everything stays editable. The same
+  caps apply: nothing is truncated on the way in. ⚠ The route re-runs detection and refuses a key
+  the PR does not carry, so the saved token can read only tickets this workspace's PRs name. The
+  settings, token storage and SSRF rules: [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md)
+  § Jira API access and [SECURITY.md](SECURITY.md).
 - **Shown in the app only, not posted.** The prompt tells the model to ALSO raise any concrete
   defect behind an unmet criterion as a normal finding, and findings are postable.
 - **Vocabularies** (shared): criteria Met / Partly met / Not met / Can't tell from the code /

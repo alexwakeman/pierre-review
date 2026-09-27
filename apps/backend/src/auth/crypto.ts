@@ -40,3 +40,12 @@ export function decryptToken(enc: string): string {
     decipher.final(),
   ]).toString('utf8');
 }
+
+// Whether sealing is available on this process: ENCRYPTION_KEY is set and is 32 bytes. Always true
+// in cloud (`assertCloudConfig` refuses to boot otherwise); true locally only when the operator set
+// a key. The Pro plugin's optional `host.sealSecret` / `host.openSecret` seam is wired from this, so
+// a plugin-stored secret (the per-workspace Jira token) is sealed wherever a key exists and stored
+// plain only on a local install without one — the same trust as that machine's `gh` token.
+export function sealingAvailable(): boolean {
+  return Buffer.from(config.encryptionKey, 'hex').length === 32;
+}

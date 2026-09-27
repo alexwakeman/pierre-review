@@ -159,6 +159,8 @@ import type {
   ProSettings,
   WorkspaceProSettings,
   WorkspaceProSettingsUpdate,
+  JiraFieldListResponse,
+  JiraTicketDetails,
   WorkspaceSlackTargetResponse,
   WorkspaceSlackTargetUpdate,
   Repo,
@@ -1127,6 +1129,17 @@ export const api = {
       withQuery('/api/pro/settings/workspace', workspaceParam(workspaceId)),
       jsonBody('PUT', patch),
     ).then((r) => handle<WorkspaceProSettings>(r)),
+
+  // ---- Jira API reads (Pro, `issueLinks`) — both use the workspace's SAVED token ----
+  // The acceptance-criteria field picker; doubles as the Settings connection test. Click-gated.
+  jiraFields: (workspaceId: number) =>
+    get<JiraFieldListResponse>(withQuery('/api/pro/jira/fields', workspaceParam(workspaceId))),
+  // One ticket's title / description / criteria for Claude Review's panel. The server refuses a
+  // key it did not itself detect on this PR, so this is not a general Jira lookup.
+  jiraTicket: (prId: number, key: string) =>
+    get<JiraTicketDetails>(
+      `/api/pro/prs/${prId}/jira-ticket?key=${encodeURIComponent(key)}`,
+    ),
 
   // ---- The PER-WORKSPACE Slack digest (packages/pro `workspace_slack_targets`) ----
   // ⚠ ONE WORKSPACE PER CALL — THE ONE IN `?workspace=`. The plural list endpoints

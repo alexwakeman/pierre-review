@@ -15,9 +15,10 @@
 // `thinking: { type: 'adaptive' }` explicitly, which also overrides a `MAX_THINKING_TOKENS=0` the
 // environment might carry into the SDK's child process.
 //
-// ⚠ EFFORT IS PASSED EXPLICITLY FOR OPUS 5.5. Its API default is 'medium' (one below Opus 5's
-// 'high'), so leaving it unset would not mean "the same as the other models". It gets exactly the
-// effort Sonnet 5 gets on the same path.
+// ⚠ EFFORT IS PASSED EXPLICITLY FOR OPUS 5.5, AND IT IS PINNED TO 'medium' ON EVERY PATH — a
+// product decision: the diff-only 'low' default that suits Sonnet 5 is not used for it, and
+// REVIEW_EFFORT / REVIEW_DIFF_ONLY_EFFORT do not move it. (Its API default is also 'medium', but
+// we never rely on an API default staying put.)
 import { config, type ReviewEffort } from '../config.js';
 
 // Models that accept the `effort` option. Haiku 4.5 rejects it (the API 400s), so it runs
@@ -30,6 +31,9 @@ export const EFFORT_CAPABLE_MODELS: ReadonlySet<string> = new Set([
   'claude-sonnet-4-6',
 ]);
 
+// Models whose effort is PINNED regardless of mode or env (see the header).
+export const PINNED_EFFORT: Readonly<Record<string, ReviewEffort>> = { 'claude-opus-5-5': 'medium' };
+
 // Models that are always given `thinking: { type: 'adaptive' }` (see the header).
 export const ALWAYS_ADAPTIVE_THINKING_MODELS: ReadonlySet<string> = new Set(['claude-opus-5-5']);
 
@@ -41,12 +45,13 @@ export interface SdkModelOptions {
 /**
  * The model-dependent `query()` options for one run. `mode` picks the effort: a diff-only review
  * uses `config.reviewDiffOnlyEffort` (low by default), everything else `config.reviewEffort`
- * (medium by default). A model outside both sets gets `{}`.
+ * (medium by default), unless the model's effort is PINNED. A model outside both sets gets `{}`.
  */
 export function sdkModelOptions(model: string, mode: 'diff_only' | 'worktree'): SdkModelOptions {
   const out: SdkModelOptions = {};
   if (EFFORT_CAPABLE_MODELS.has(model)) {
-    out.effort = mode === 'diff_only' ? config.reviewDiffOnlyEffort : config.reviewEffort;
+    out.effort =
+      PINNED_EFFORT[model] ?? (mode === 'diff_only' ? config.reviewDiffOnlyEffort : config.reviewEffort);
   }
   if (ALWAYS_ADAPTIVE_THINKING_MODELS.has(model)) out.thinking = { type: 'adaptive' };
   return out;

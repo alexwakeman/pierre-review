@@ -4651,6 +4651,53 @@ export interface WorkspaceProSettings {
   // sprint-position comparison. Reading the two off different grains is how one setting produced
   // two window shapes with nothing on screen saying which you got.
   comparisonMode: SprintComparisonMode;
+  // Jira API access for this workspace (plugin migration 0035), used to fill Claude Review's user
+  // story from a detected ticket. OPTIONAL on the wire so an older plugin still type-checks here;
+  // the current plugin always sends it.
+  jira?: WorkspaceJiraApiSettings;
+}
+
+// ⚠ THE TOKEN IS NEVER ON THE WIRE. A Jira token reads the team's whole tracker, so no route
+// returns it — not sealed, not masked, not its length. `hasToken` is the only trace of it.
+export interface WorkspaceJiraApiSettings {
+  // Jira Cloud signs in with email + API token (HTTP Basic). null = no email, so the token is
+  // sent as a Bearer personal access token (Jira Server / Data Center).
+  email: string | null;
+  hasToken: boolean;
+  // The custom field that holds acceptance criteria on this Jira site, or null when the criteria
+  // are written inside the description. Field ids (`customfield_10042`) differ per site.
+  acceptanceCriteriaField: { id: string; name: string | null } | null;
+}
+
+// One field from Jira's `GET /rest/api/2/field`, for the acceptance-criteria picker.
+export interface JiraFieldOption {
+  id: string;
+  name: string;
+  custom: boolean;
+  // Jira's `schema.type` (`string`, `array`, `option`, …), or null when Jira sends none.
+  type: string | null;
+}
+
+// GET /api/pro/jira/fields?workspace=<id> — uses the SAVED token, so it doubles as a connection
+// test. Custom fields only (acceptance criteria is never a system field), sorted by name.
+export interface JiraFieldListResponse {
+  workspaceId: number;
+  fields: JiraFieldOption[];
+  // The first field whose name reads "acceptance criteria", or null.
+  suggestedFieldId: string | null;
+}
+
+// GET /api/pro/prs/:id/jira-ticket?key=<KEY> — one detected ticket's text, as plain strings.
+// NEVER truncated here: the Claude Review panel's own `checkClaudeReviewTicket` flags anything over
+// the caps. `acField` null = no acceptance-criteria field is set for the workspace, so
+// `acceptanceCriteria` is '' because it was not looked up, not because the ticket has none.
+export interface JiraTicketDetails {
+  prId: number;
+  key: string;
+  title: string;
+  description: string;
+  acceptanceCriteria: string;
+  acField: { id: string; name: string | null } | null;
 }
 
 /**
@@ -4697,6 +4744,18 @@ export interface WorkspaceProSettingsUpdate {
   // explicit ask, which would make a mode-only patch impossible to express. Omitted = unchanged;
   // there is no "clear" — the mode always has a value, and writing `'rolling_14'` IS the default.
   comparisonMode?: SprintComparisonMode;
+  // Jira API access (plugin migration 0035). Every key is optional: an omitted key is unchanged.
+  jira?: {
+    // '' or null clears it (→ Bearer auth).
+    email?: string | null;
+    // WRITE-ONLY. Omitted keeps the saved token; there is no way to read it back.
+    token?: string;
+    // true removes the saved token (ignored when `token` is sent in the same patch).
+    clearToken?: boolean;
+    // null = the criteria are in the description.
+    acceptanceCriteriaFieldId?: string | null;
+    acceptanceCriteriaFieldName?: string | null;
+  };
 }
 
 /**
@@ -5191,6 +5250,11 @@ export interface TicketRef {
   key: string; // e.g. "PROJ-123"
   url: string; // deep link into the configured Jira/Linear workspace
   provider: IssueProvider;
+  // True when Limn can read this ticket's title, description and acceptance criteria through the
+  // Jira API (`GET /api/pro/prs/:id/jira-ticket?key=`): the provider is Jira AND a token is saved
+  // for the PR's workspace. The Claude Review panel shows its "Fill from KEY" button only then.
+  // OPTIONAL so the contract stays additive — absent (an older plugin, or Linear) reads as false.
+  canFetchDetails?: boolean;
 }
 
 // Where ONE reviewer stands on a pull request — the wire shape of the server's canonical fold
