@@ -129,9 +129,12 @@ posts **one** GitHub review (inline + body + verdict).
   coding or llm paths sends any of them (the review relies on the model CHOOSING `submit_review`).
   One table, `review/model-options.ts`, holds the effort-capable and adaptive sets for both
   `review/agent.ts` and `coding/agent.ts`.
-- The bundled Agent SDK is 0.3.162 (maps `thinking` → `--thinking adaptive`, `effort` →
-  `--effort`). If a real Opus 5.5 run fails with an API 400, the contingency is to bump
-  `@anthropic-ai/claude-agent-sdk` (regenerating `pnpm-lock.yaml` under the pinned pnpm).
+- ⚠ **The Agent SDK BUNDLES ITS OWN Claude Code, and the API gates new models on THAT version** —
+  the user's own `claude` CLI being current is irrelevant. SDK `0.3.N` ships Claude Code `2.1.N`;
+  on 0.3.162 every Opus 5.5 run failed with `400 Claude Code 2.1.162 does not support this model;
+  version 2.1.280 or newer is required`. It is now `^0.3.283`. A new model in the picker needs a
+  matching SDK bump (regenerate `pnpm-lock.yaml` under the pinned pnpm) and a restart of the
+  backend — a running `tsx watch` keeps the old SDK loaded.
 - **AI Fix inherits the offered list** (Opus 5.5 listed, Opus 4.8 gone from its picker) but keeps
   its own `claude-sonnet-5` default; a stored AI Fix row naming Opus 4.8 still re-runs (its route
   validates no model, and 4.8 stays effort-capable).
