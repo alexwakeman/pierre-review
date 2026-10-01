@@ -203,8 +203,10 @@ Mechanics: [docs/BACKEND.md](docs/BACKEND.md) · [docs/SYNC.md](docs/SYNC.md) ·
 
 - **Adaptive polling is the PRIMARY sync strategy in BOTH modes** (`syncAdaptive` defaults
   `true`): the cron is a *tick* (`*/1`), `isDue()` gates each repo by activity bucket, and a
-  30-min floor forces a re-walk (CI-finish / thread-resolve never bump `updatedAt`). ⚠ **An
-  explicitly-set `SYNC_CRON` wins** — pinning `*/5` silently negates the hot bucket.
+  30-min floor re-walks — ⚠ over the SAME `since` window, blind to updatedAt-SILENT changes (CI
+  finishing, mergeability, a thread resolve); `sync/unsettled-prs.ts` re-reads the first two after
+  every walk. ⚠ **An explicitly-set `SYNC_CRON` wins** — pinning `*/5` silently negates the hot
+  bucket.
 - **Webhooks are ADDITIVE, cloud-only**, and need all three of the secret env var, event
   subscriptions and the App installed — or they silently deliver nothing.
 - **A VIEWED PR gets its own live cadence** — the SPA polls `POST /api/prs/:id/refresh` every
@@ -353,7 +355,10 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   (`users.isBot` ∪ `github_type='Bot'` ∪ vendor logins ∪ the workspace's automated reviewers; a
   manual "human" judgement wins BOTH directions); the Feed lens `'hide'` rides the SERVER's
   `excludeBots`, excluded before the page cap. ⚠ `useSearchTimeline` and `rosterTimelineSearch`
-  always send `excludeBots=false` — the Members dropdown's bot listing depends on it.
+  always send `excludeBots=false` — the Members dropdown's bot listing depends on it. A PR Focus
+  tab (Events + Hide bots only) filters CLIENT-SIDE (`Timeline/isolateFilter.ts`, its OWN
+  workspace's union): ⚠ no filter in `buildTimelineSearch`'s `prIds` branch (re-keys the tab,
+  judges bots by Default), and never idle the board's `useTimeline()` in Focus.
 - **`workspaceId === null` means "not resolved yet"** — nothing may render workspace-scoped data
   while null, and `?workspace=` is omitted while null (an unconditional `p.set` writes the
   literal `?workspace=null` on every bare load).
@@ -371,7 +376,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   render it.
 - **The Feed is a STREAM: `FeedView`, and nothing else.** Every survey panel left it — the work
   plan (Pending head), flow metrics (`WorkspaceFlowMetrics`, Reports), the daily-brief strip
-  (DELETED) and the trunk + Open PRs panels (Pending → My turn's second view). Do not re-add
+  (DELETED) and the trunk + Open PRs panels (now My turn's head: the trunk strip + an Open PRs button). Do not re-add
   any. ⚠ **The Reports
   rail entry is UNGATED on every tier** precisely because those free metrics live there now; the
   pane gates its Pro half internally — `PeriodReportsPanel`, Track usage, **and now the Chronology
@@ -417,9 +422,11 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   merge state. HIDE, never disable. Mid-merge is THREE layers on one row: a live manual merge (read
   off the SHARED `mergePrMutationKey`/`updateBranchMutationKey` via `useIsMutating`, never a
   per-mount `isPending`), then the armed intent's `armedPhaseHeadline`, then the synced verdict.
-  ⚠ **`conflicts` is a THIRD merge-state-derived kind carrying EXACTLY ONE action, the resolver
-  entry** — `ResolveConflictsButton`, never a merge (the old "it carries no action, GitHub offers no
-  resolve button either" is retired). It is minted ONLY in repos the viewer can PUSH to —
+  ⚠ **A QUEUED PR shows its queue status + "Remove from queue", NEVER Merge** (card and pane):
+  `mergeQueueStatus()` (`Activity/pendingLabels.ts`) believes the NEWER of the synced row and a
+  CACHED merge-options answer, so a remount cannot resurrect Merge. ⚠ **`conflicts` is a THIRD
+  merge-state-derived kind carrying EXACTLY ONE action, the resolver entry** —
+  `ResolveConflictsButton`, never a merge. It is minted ONLY in repos the viewer can PUSH to —
   `writableRepoIds`, or 470 of 474 real conflicting PRs are strangers' branches — so it carries no
   `viewerCanPush` at all and must not grow one.
 - **The board's freshness against GITHUB is ONE batched sweep, `POST /api/attention/liveness`** —
@@ -432,6 +439,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   + `['daily-brief']` (+ `['work-plan']`) together - a local splice kills `capFor`'s
   `shown === count` guard and the "50 of 148" disclosure with it. Those same three keys are the
   ONLY ones that opt out of the app-wide `refetchOnWindowFocus: false`, and they do it TOGETHER.
+  ⚠ `sync/unsettled-prs.ts` reuses this read server-side (same guards; never advances `updatedAt`).
 - **`InsightPrRef.authorIsBot`/`authorBotKind` say who opened a PR**, built in the ONE `prRef`
   builder. WARN The resolution is NOT the login: a manual workspace judgement wins BOTH
   directions, then `users.isBot`, then the login seeds a vendor - the same resolution the
@@ -454,7 +462,9 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   (kind × My turn's "Only yours" side × who opened it), so every view — tab, kind chip, lens — is
   its own true top. Every OTHER consumer keeps the default caps (Pro chat / sprint report / Slack
   inputs and hashes must not grow) — except the Pro work plan, which folds uncapped and may name
-  ONLY a card the tabs list (`listedCardIds`). ⚠ **EACH COUNT IS ITS OWN POPULATION**: a tab shows `tab.total`,
+  ONLY a card the tabs list (`listedCardIds`). ⚠ Only `/api/attention` passes `withFailingChecks`
+  (red cards' failing check names; never in a `detail`, plan fact or hash). ⚠ **EACH COUNT IS ITS
+  OWN POPULATION**: a tab shows `tab.total`,
   a chip its kind's `kindTotals`, the lenses `relevanceTotals` / `authorTotals` — and
   `/api/daily-brief` returns the SAME figures (survey = `kindTotals`; my_turn / ci = min(total,
   50)) for the banner and Workspace badges.
@@ -463,7 +473,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   ALLOW-LIST** — a new `InsightKind` with no tab is folded, counted and never listed (a
   compiler-checked test in work-plan.test.ts fails first). ⚠ The visible tab is DERIVED
   (`effectivePendingTab`: a seated kind names its tab, else the picked `attentionTab`, else My
-  turn; My turn's second view mounts ONLY while open, count-free). ⚠ "Pending" is a LABEL-ONLY
+  turn; My turn ALONE is headed by an "Open PRs · N" button + the trunk strip, count-free). ⚠ "Pending" is a LABEL-ONLY
   rename of "Needs attention" — the store/URL literal stays
   `'attention'`. ⚠ **The board EXPLAINS its own order** (header + per-card info popovers, "How
   Pending works" modal), so every admission floor, cap, colour threshold and Do next preset lives
@@ -538,8 +548,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   pinned, not emergent. ⚠ It is also why the Settings **Workspace heading is no longer Pro-gated**: a free
   workspace section must never sit below the `/api/pro/settings` gate, which 404s with no plugin.
 - **Visible sub-tabs are DERIVED, never written back** (`feedInnerTab`, `botsInnerTab`,
-  `insightsTab` — Reports' Overview/Bottlenecks — the Pending tab, `effectivePendingTab`, and My
-  turn's view, `effectiveMyTurnView`) —
+  `insightsTab` — Reports' Overview/Bottlenecks — and the Pending tab, `effectivePendingTab`) —
   compute an `effectiveTab` for the render only; a corrective `set…` permanently forgets the
   choice.
 - **BLAST RADIUS is ONE resolver, `blastRadius()` in `lib/ui.ts`** — Pending cards, the Feed's
@@ -642,22 +651,21 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   must agree, or the triage queue and the PR disagree.
 - **`blocked` is the ONE verdict GitHub refuses to explain, so it is the ONE that carries a
   ranked `blockers[]`** (`deriveMergeBlockers`, PR-DETAIL ONLY — a `blockers[]` needs the PR's
-  THREAD COUNTS, which the Pending board's cards do not carry and MUST NOT FETCH to find out. ⚠
-  The board's cards DO now carry review standing — `reviewDecision`, `reviewApprovals`,
-  `reviewChangesRequested`, `reviewers`, `reviewerCount` on `InsightPrRef`, plus
-  `inMergeQueue`/`mergeQueueEntryState`, all SYNCED columns folded server-side — so the old
-  shorthand "the cards carry no review status" is false. THE FETCH HALF IS ABSOLUTE AND
-  UNCHANGED). ⚠ **EVERY ENTRY IS MARKED `proven` OR
+  THREAD COUNTS, which the Pending board's cards do not carry and MUST NOT FETCH. They DO carry
+  review standing and queue membership, as SYNCED columns folded server-side on `InsightPrRef`).
+  ⚠ **EVERY ENTRY IS MARKED `proven` OR
   `inferred`, and only `reviewDecision` can be proven** — nothing else on GitHub's payload names
   a rule, and `branchProtectionRule` is ADMIN-ONLY (its null is indistinguishable from "you may
   not look", so it is deliberately NOT synced). ⚠ **NEVER ASSERT UNRESOLVED THREADS ARE THE
   BLOCKER**: only 89 of 572 blocked PRs have any. ⚠ The blocker count is `!isResolved` and
   INCLUDES `likely_addressed`, so it is a THIRD population next to the Bots chips' "need a look"
   and triage's `untouched` — each names itself on screen. ⚠ `approved` REMOVES a row, never adds
-  one (the predecessor asserted "required checks aren’t passing" on green-CI PRs).
+  one.
   [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md) § Why a blocked PR is blocked.
-- The merge queue is GraphQL-only (presence is not inferable from REST) and nothing is synced —
-  state rides the lazy `GET …/merge-options` fetch.
+- **GitHub's merge queue** (GraphQL-only): membership + entry state are SYNCED, and every path
+  holding a POSITIVE answer stamps them via `db/pr-merge-queue-stamp.ts` (⚠ NOT `db/merge-queue.ts`,
+  Limn's landing order), which calls `notePrChanged` on a change (a stamp silences the liveness
+  sweep). Position/ETA are live-only (`GET …/merge-options`).
 - **Auto-merge ("merge when ready", `merge/auto-merge-runner.ts`) is consent-anchored.** It
   deliberately does NOT use GitHub's `enablePullRequestAutoMerge` (422s on exactly the PRs it
   exists for). Arming pins `expectedHeadOid` — consent to merge THE CODE THE USER SAW;
@@ -721,9 +729,8 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   "Commit and push" (entry vs press, told apart by their ACCESSIBLE NAMES) and both read
   `commitBlockedReason(plan, headMoved)`, null exactly when `canCommit && !headMoved`; `Enter` on
   the panes is the same door with the same lock, and `headMoved` stays OUT of `canCommit` (a fact
-  about GitHub, not about the reader's decisions). The old "Continue is never disabled because it is
-  the only route to the list that explains the block" is REVERSED, so that list moved: it is a
-  popover off the toolbar's "N of M changes decided" counter, with the same per-file jump rows.
+  about GitHub, not about the reader's decisions). What blocks it is listed in a popover off the
+  toolbar's "N of M changes decided" counter, with per-file jump rows.
   ⚠ **"Next" walks OUTSTANDING files and WRAPS** (`nextOutstandingFile`), and is ABSENT — never
   disabled — once there is nowhere to jump, including when the only outstanding file is the one you
   are in; the chevrons still page the manifest ("Next file in the list") and `n`/`p` still walk
@@ -746,7 +753,7 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 - CI logs are live ranged reads of the signed Actions blob URL — server-side only, **NEVER
   returned to a client** (it is unauthenticated).
 - Trunk status (`/api/branch-status`) is **informational only** — no attention counts, badges
-  or My Turn items (its Pending → My turn view is count-free). Its detail columns follow the
+  or My Turn items (its strip atop Pending → My turn is count-free). Its detail columns follow the
   partial-response write policy (Conventions); the
   commit→PR map keys on `(repoId, number)`.
 
@@ -832,19 +839,20 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   mixes them.
 - **AI Fix has FOUR seeds** (`AiFixSeed`); ⚠ the newest, `'comments'`, WIDENS the
   attacker-authored channel to every comment dragged in (fencing is the mitigation) and must
-  never get its own queue/slot — the worktree is keyed on the SHA alone.
+  never get its own queue/slot — the worktree is keyed on the SHA alone. ⚠ A finished fix PUSHES
+  AS-IS; the trunk-reconciliation seams were DELETED at apiVersion 21, so host, plugin and gitlink
+  land together ([docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § AI Fix pushes
+  as-is).
 - ⚠ **THE FIX AGENT HAS NO SHELL** — `FIX_TOOLS` is Read/Glob/Grep + Write/Edit/MultiEdit +
-  `submit_fix`, and `DISALLOWED_TOOLS` is `['Bash','NotebookEdit']`, matching the conflict
-  resolver and Claude Review. It reads and edits; **it installs nothing, builds nothing and runs
+  `submit_fix`, and `DISALLOWED_TOOLS` is `['Bash','NotebookEdit']` (Claude Review denies `Bash`
+  too). It reads and edits; **it installs nothing, builds nothing and runs
   no tests** — and the SPA says exactly that beside the diff ("Not built or tested here.",
   TEMPLATED, never in the model's summary). ⚠ **IT STOPS THERE AND DOES NOT PROMISE CI.**
   `ciStatusFrom(null)` is `'unknown'` for a PR with no check rollup at all and whole repos here are
   like that (62 of 63 PRs on one, 1,014 of 9,544 overall), so "CI will run on push" invents the
-  verification the sentence exists to deny. The old `Bash(git commit *)`-style blocklist is gone: it was five literal
-  prefixes over an attacker-authored input channel, and its builds/tests were read by nothing
-  (success = a captured diff under `aiFixPatchMaxBytes`) while holding the ONE global job slot
-  (`MAX_CONCURRENT = 1`) against `aiFixMaxTurns`/`aiFixBudgetUsd` with no wall clock. ⚠ **The
-  prompt and the tool list change together** — `WORKTREE_RULES` (one constant, both fix prompts)
+  verification the sentence exists to deny. Why, and the blocklist it replaced:
+  [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § The fix agent has no shell.
+  ⚠ **The prompt and the tool list change together** — `WORKTREE_RULES` (one constant, both fix prompts)
   and the CI-analysis capability sentence, whose answer is stored raw and RENDERED. ⚠ **AND THE
   CAPABILITY SENTENCE IS A TERM OF THE CACHE KEY EVEN THOUGH THE PROMPT IS NOT**: the payload hash
   is `v3|head|diff|check logs`, so a prompt edit alone leaves every stored row asserting a shell and
@@ -854,10 +862,8 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   ⚠ The read-time Pierre→Limn patch is bounded to those same pre-epoch rows — the prompt names no
   brand now, so a `Pierre` in a fresh answer is the REPOSITORY's own content (three people in this
   account's `users` table are called Pierre) and rewriting it corrupts both the card and the agent's
-  task. ⚠ The
-  `verifying` phase is a FALSE FRIEND: rebase/merge-path only, and its body is `git diff` +
-  `git format-patch` — it never ran tests. Cost accepted: a fix wanting a codegen step, a
-  formatter or `git log` must write the edit by hand or decline.
+  task. Cost accepted: a fix wanting a codegen step, a formatter or `git log` must write the edit
+  by hand or decline.
 - **Bot Tuning Advisor** (Pro, `botAdvisor`): CORE computes the evidence cells, the PLUGIN
   emits. Non-negotiables — recommendation text is TEMPLATED, never model-generated (the ONE LLM
   touchpoint sits behind a diff-guard `llm-isolation.test.ts` pins unreachable); **a cell with
@@ -1208,12 +1214,16 @@ auth plumbing, or any AI route.** Two zero-dependency core plugins own the postu
   `read` bucket is silently wrong for an LLM call or a GraphQL walk. ⚠ Spell the route's
   **EXACT path segment** into `hitsGithub`: a near-miss (plural `comments` vs the real
   `/comment`) parks a GitHub-write route on `read`, and nothing errors.
-- **A new GitHub-write route must either stamp its row locally or resync-and-verify.** A write
-  is not done when GitHub 201s: the SPA re-reads from the local DB, so anything the sync hasn't
-  observed is invisible. Most write routes stamp the affected row themselves; the one that
-  CAN'T (`POST /api/prs/:id/review-comment` — REST returns no thread node id) runs the tail in
-  `sync/resync-after-write.ts` and reports a `visible` flag. The tail costs an extra GitHub
-  round trip, so it is a per-route latency decision, not a blanket rule.
+- **A new GitHub-write route must STAMP or SETTLE-AND-VERIFY, THEN CASCADE.** A write is not done
+  when GitHub 201s: the SPA reads the local DB, and GitHub finishes a push, mergeability or CI
+  seconds later WITHOUT bumping `updatedAt`. Stamp the row, or `settlePrAfterWrite`
+  (`sync/resync-after-write.ts`: reports `visible`, then the `sync/pr-settle.ts` ladder) — ⚠
+  STATING the effect (`headSha`/`headNot`/`notConflicting`/`mergeStateNot`/`ciNot`): a stale
+  DIRTY/BLOCKED/FAILURE is KNOWN, so an expectation-free ladder stops on it at once. A merge calls
+  `noteMergeLanded`. The SPA hook then refetches through ONE helper, `invalidateAfterPrWrite`
+  (`hooks/prCacheSync.ts`); later re-reads arrive via `Repo.lastPrChangeAt` — ⚠ NEVER a
+  `sync_state` cursor (the walk's `since`). [docs/REALTIME-SYNC.md](docs/REALTIME-SYNC.md) §
+  Post-write settle.
   - ⚠ **The `visible`/`threadId` copy contract is a safety rule, not cosmetics.**
     `visible:false` with a NON-NULL `commentId` means the comment IS on GitHub and we merely
     couldn't confirm it locally — the copy must say "it'll show up here shortly", never "it
@@ -1233,8 +1243,8 @@ auth plumbing, or any AI route.** Two zero-dependency core plugins own the postu
   (it only console-warns) and check-run `details_url` etc. are third-party-supplied — go
   through `safeExternalUrl()` in `lib/ui.ts`.
 - **Anything an agent reads from a PR is UNTRUSTED input.** Don't widen an agent's tool surface
-  — ALL THREE agentic runs now deny `Bash` outright (`review/agent.ts`, and `coding/agent.ts` for
-  both the fixer and the conflict resolver), and a per-command blocklist is no substitute.
+  — BOTH agentic runs deny `Bash` outright (`review/agent.ts` and `coding/agent.ts`'s fixer),
+  and a per-command blocklist is no substitute.
 - **Heuristics get fixture tests.** Before changing `derive-thread-state.ts`, add a sample to
   `src/sync/__fixtures__/threads/` (README has the JSON shape).
 - **Idempotency is load-bearing.** New entities upsert on their GitHub node ID — the conflict
@@ -1315,7 +1325,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0057` and plugin `0034` are NOT replayed.
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0058` and plugin `0034`–`0036` are NOT replayed.
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence
@@ -1324,9 +1334,6 @@ how you work:
     everywhere else. Measured identical across all 4,561 real logins, and zero of them carry
     `[bot]` anywhere but the end — which is the only place GitHub puts it. Do not "fix" one to
     match the other; each is idiomatic for its dialect.
-- ⚠ **AI Fix's conflict-resolver paths (`rebaseResolve` / `mergeResolveAndPush`) GATE on credits
-  but never CHARGE them** — only `saveFixSuccess` calls `recordAiUsage`, so a fix ending in a
-  rebase-resolve under-bills. (Recorded only here; no topic doc carries it.)
 - **The E2E API FIXTURES ARE A WIRE CONTRACT, AND THEY ARE NOW TYPECHECKED.**
   `apps/frontend/e2e/mock-api.ts` answers every `/api/**` call the suite makes, annotated with
   the real shared types — but it sat outside every tsconfig, so the annotations were never

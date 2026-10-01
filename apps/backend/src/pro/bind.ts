@@ -32,6 +32,7 @@ import { getWorkPlan } from '../db/work-plan.js';
 import { getFlowPointerEvidence } from '../db/flow-pointers.js';
 import { getBlastSignalsForPr } from '../db/blast-radius-query.js';
 import { dormantBotUserIds } from '../db/bot-dormancy.js';
+import { getPendingBoardSnapshot } from '../db/pending-tabs.js';
 import { forecastNext } from '../db/forecast.js';
 import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
 import { aiCreditStatus } from '../db/credits.js';
@@ -262,6 +263,13 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       // repoIds narrowing. The seam member is OPTIONAL (see contract.ts); THIS host implements it.
       dormantBotUserIds: (accountId, workspaceId, candidateUserIds) =>
         dormantBotUserIds(accountId, workspaceId, candidateUserIds),
+      // The configuring account's Pending board for the Slack digest — the /api/attention fold
+      // (`buildPendingBoard`) without its live extras. Optional on the contract; always present here.
+      getPendingBoard: (accountId, workspaceId) => getPendingBoardSnapshot(accountId, workspaceId),
+      // Auto Claude review's candidate PRs (core db/queries.ts). Optional on the contract; always
+      // present here. The workspace-aware human test lives in core, beside the resolver it reuses.
+      getAutoReviewCandidates: (accountId, workspaceId, opts) =>
+        hostQueries.getAutoReviewCandidates(accountId, workspaceId, opts),
     },
     recordAiUsage: (row) => recordAiUsage(row),
     aiCredits: {
@@ -344,16 +352,8 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         (await import('../coding/agent.js')).runCodingAgent(fixArgs),
       applyAndPush: (pushArgs) => applyAndPush(pushArgs),
       commitFilesAndOpenPr: (prArgs) => commitFilesAndOpenPr(prArgs),
-      // Trunk-conflict handling lives in coding/merge.ts; also lazy so the SDK loads
-      // only when a resolution actually runs.
-      mergePreview: async (a) =>
-        (await import('../coding/merge.js')).mergePreview(a),
-      rebaseResolve: async (a) =>
-        (await import('../coding/merge.js')).rebaseResolve(a),
-      mergeResolveAndPush: async (a) =>
-        (await import('../coding/merge.js')).mergeResolveAndPush(a),
-      pushResolved: async (a) =>
-        (await import('../coding/merge.js')).pushResolved(a),
+      // No trunk-reconciliation seams: AI Fix pushes as-is (see the note on CodingSeam in
+      // contract.ts — removed without an apiVersion bump, so host + plugin land together).
     },
     // Claude Review infra: diff prep + the SDK run + the GitHub review POST. Lazy so the
     // Agent SDK (agent.js) loads only when a review actually runs, not at every boot.

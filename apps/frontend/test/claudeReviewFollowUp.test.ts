@@ -10,8 +10,9 @@
 //   3. NOT CHECKED IS GREY, NOT AMBER — unknown is not "not addressed".
 //   4. THE REQUEST SENDS ONLY A VALID, NON-EMPTY USER STORY, normalised by the SAME shared check
 //      the route runs; the collapsed panel's header says when one will be sent or needs a fix.
-//   5. THE PICKER OPENS ON THE DEFAULT and is never re-seeded from a stored run (a stored
-//      'claude-opus-4-8' would otherwise be a select value with no option).
+//   5. THE PICKER OPENS ON THE DEFAULT and is never re-seeded from a stored run (a run stored
+//      under a retired id, such as the old Opus 4.8, would otherwise be a select value with no
+//      option).
 //   6. EACH NEW COMPONENT IS MOUNTED EXACTLY ONCE (CLAUDE.md: "grep for the mount").
 //
 // Run from the workspace that HAS vitest:

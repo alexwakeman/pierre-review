@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
-import type { MergeBlockFacts, MergeMethod } from '@pierre-review/shared';
+import { useIsMutating } from '@tanstack/react-query';
+import type { MergeBlockFacts, MergeMethod, MergeQueueEntryState } from '@pierre-review/shared';
 import {
+  mergeQueueMutationKey,
   useDequeueMergeQueue,
   useEnqueueMergeQueue,
   useMergeOptions,
@@ -8,6 +10,8 @@ import {
   useUpdatePrBranch,
 } from '../hooks/usePrWrites.js';
 import { useDisarmAutoMerge } from '../hooks/useAutoMerge.js';
+import { useQueueDisagreementRepair } from '../hooks/useMergeQueueStatus.js';
+import { mergeQueueStatus, type MergeQueueStatus } from './Activity/pendingLabels.js';
 import { dateTime, MERGE_TONE_CLASS, mergeVerdict, relativeTime, toMergeStateStatus } from '../lib/ui.js';
 import { ApiError } from '../api/client.js';
 import { CaretIcon, ExternalLinkIcon, MergeIcon, WarningIcon } from './Icons.js';
@@ -19,11 +23,18 @@ import type { ResolverTarget } from '../store/conflictResolver.js';
 // button; expanding fetches the repo's allowed merge methods + GitHub's live mergeability
 // (lazily, so the hot PR-detail path stays fast).
 //
-// It resolves THREE ways, in this order — they are mutually exclusive by construction:
+// It resolves FOUR ways, in this order — they are mutually exclusive by construction:
 //
+//   0. GITHUB'S MERGE QUEUE HOLDS THE PR  → the queue's status line ("In the merge queue ·
+//      position 2 · running checks · ~12 min") and "Remove from queue", and NOTHING ELSE — no
+//      "Merge ▾" trigger, no method picker, open or not. This used to exist only inside the
+//      expanded panel, whose `open` is per-mount state, so the moment the reader navigated away
+//      and came back the control remounted collapsed and offered "Merge ▾" for a PR GitHub was
+//      already landing. Membership comes from the NEWER of the caller's synced facts and the live
+//      answer (`mergeQueueStatus`), so the row survives a remount and needs no fetch to say it.
 //   1. the base branch has a MERGE QUEUE  → "Add to merge queue" replaces Merge entirely.
 //      GitHub won't accept a direct merge on a queued branch, so offering one would only
-//      produce a confusing 405. Position/ETA + "Remove from queue" render while queued.
+//      produce a confusing 405.
 //   2. it can merge now                   → merge / squash / rebase (whichever the repo allows).
 //   3. it can't merge YET                 → the verdict line says why. ARMING lives in the
 //      sibling MergeWhenReadyControl (the ONE way to arm — it also covers clean-but-behind,
@@ -51,6 +62,10 @@ export function MergeControl({
   label = 'Merge',
   blockFacts,
   resolverTarget,
+  inMergeQueue,
+  mergeQueueEntryState,
+  syncedAt,
+  showQueuePosition = true,
 }: {
   prId: number;
   githubUrl: string;
@@ -83,14 +98,57 @@ export function MergeControl({
    * can never be read.
    */
   resolverTarget?: ResolverTarget;
+  /**
+   * GitHub's merge-queue MEMBERSHIP as the caller's synced row has it — `PrDetail.inMergeQueue`
+   * on the PR pane, the card's own field on the Pending board. Three-state: `null` is "not
+   * observed" and claims nothing. This is what lets the queued row render with the control
+   * COLLAPSED, which is the only state a remount can produce — and on the board it must, because
+   * nothing there may fetch on mount.
+   */
+  inMergeQueue?: boolean | null;
+  /** The entry's state, for the status line's words (same synced row). */
+  mergeQueueEntryState?: MergeQueueEntryState | null;
+  /** When that row was read — its query's `dataUpdatedAt` (epoch ms). The live merge-options
+   *  answer wins only when it is NEWER; without this a merge-options answer cached minutes ago
+   *  would outvote a card that has since been stamped. */
+  syncedAt?: number;
+  /**
+   * Put the queue POSITION and time in the queued row. The PR pane does (its merge-options query
+   * is kept live beside this control). The Pending board passes false: nothing there refetches the
+   * answer, so a cached position is an old one printed as current, and the row's words would
+   * depend on whether one happened to be cached. See `mergeQueueStatus`.
+   */
+  showQueuePosition?: boolean;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
-  const { data: options, isLoading, isError } = useMergeOptions(prId, open);
+  // ⚠ STILL `open`-GATED. A disabled query returns whatever is CACHED — which is why the board
+  // turns the position off (`showQueuePosition`): there it would be an earlier click's answer.
+  // The membership and entry state it carries still count, newer-wins, and nothing is fetched.
+  const {
+    data: options,
+    isLoading,
+    isError,
+    dataUpdatedAt: optionsAt,
+  } = useMergeOptions(prId, open);
   const merge = useMergePr(prId);
   const update = useUpdatePrBranch(prId);
   const enqueue = useEnqueueMergeQueue(prId);
   const dequeue = useDequeueMergeQueue(prId);
   const disarm = useDisarmAutoMerge(prId);
+  // The queue verbs' in-flight state off the SHARED key, never the per-mount `isPending`: the PR
+  // pane and a Pending card can both mount this control, and a card re-keys when its kind changes.
+  const queueBusy = useIsMutating({ mutationKey: mergeQueueMutationKey(prId) }) > 0;
+  const removing = useIsMutating({ mutationKey: mergeQueueMutationKey(prId, 'dequeue') }) > 0;
+  const queueing = useIsMutating({ mutationKey: mergeQueueMutationKey(prId, 'enqueue') }) > 0;
+
+  const queueStatus = mergeQueueStatus(
+    { inMergeQueue, mergeQueueEntryState, observedAt: syncedAt ?? 0 },
+    { info: options?.mergeQueue, observedAt: optionsAt },
+    { withPosition: showQueuePosition },
+  );
+  // A newer live answer that says something else: the server has already stamped it, so re-read
+  // the synced side (the PR row, the board) — once per answer.
+  useQueueDisagreementRepair(prId, inMergeQueue, syncedAt ?? 0, options?.mergeQueue, optionsAt);
 
   // The chosen method — default to the repo's first allowed once options load.
   const [method, setMethod] = useState<MergeMethod | null>(null);
@@ -112,6 +170,20 @@ export function MergeControl({
     const n = options.behindBy;
     return `${n > 0 ? n : 'Some'} commit${n === 1 ? '' : 's'} behind ${options.baseRef}`;
   }, [options]);
+
+  // 0. GitHub's queue holds it — open or not, this is the whole control.
+  const queued = queueStatus != null;
+  if (queueStatus != null) {
+    return (
+      <QueuedRow
+        status={queueStatus}
+        busy={queueBusy}
+        removing={removing}
+        error={queueError}
+        onRemove={() => dequeue.mutate()}
+      />
+    );
+  }
 
   if (!open) {
     return (
@@ -164,7 +236,10 @@ export function MergeControl({
         ? 'mergeable'
         : 'unknown',
     mergeStateStatus: toMergeStateStatus(options.mergeStateStatus),
-    inMergeQueue: queue?.inQueue ?? false,
+    // The RESOLVED membership (synced vs live, newer wins) — never `queue?.inQueue` alone, which
+    // is whatever this cache entry said when it was fetched. The queue branch runs FIRST in
+    // `mergeVerdict`; a queued PR has already returned above, so here it is always false.
+    inMergeQueue: queued,
     queuePosition: queue?.position ?? null,
     behindBy: options.behindBy,
     // The blocked-reason facts. This panel used to build its verdict from the live merge state
@@ -200,7 +275,7 @@ export function MergeControl({
 
   const hasMethods = options.allowedMethods.length > 0;
   const canMergeNow = verdict.canMerge && hasMethods;
-  const busy = merge.isPending || enqueue.isPending || dequeue.isPending;
+  const busy = merge.isPending || queueBusy;
 
   return (
     <div className="w-full space-y-2">
@@ -324,38 +399,20 @@ export function MergeControl({
         </div>
       )}
 
-      {/* Action row. A merge queue REPLACES the merge button (GitHub won't take a direct merge). */}
+      {/* Action row. A merge queue REPLACES the merge button (GitHub won't take a direct merge).
+          A PR already IN the queue never reaches here — the queued row above is the whole
+          control — so the only queue verb left is adding it. */}
       <div className="flex flex-wrap items-center gap-2">
         {queue?.enabled ? (
-          queue.inQueue ? (
-            <>
-              <span className="text-xs text-gray-600 dark:text-gray-300">
-                In the merge queue
-                {queue.position != null && ` · position ${queue.position}`}
-                {queue.state && ` · ${queue.state.toLowerCase().replace(/_/g, ' ')}`}
-                {queue.estimatedTimeToMergeMs != null &&
-                  ` · ~${Math.max(1, Math.round(queue.estimatedTimeToMergeMs / 60000))} min`}
-              </span>
-              <button
-                type="button"
-                onClick={() => dequeue.mutate()}
-                disabled={busy}
-                className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
-              >
-                {dequeue.isPending ? 'Removing…' : 'Remove from queue'}
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => enqueue.mutate(effectiveMethod)}
-              disabled={busy}
-              className="whitespace-nowrap rounded border border-violet-500 px-2 py-0.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
-              title="This branch uses a merge queue — GitHub merges it in turn"
-            >
-              {enqueue.isPending ? 'Queueing…' : 'Add to merge queue'}
-            </button>
-          )
+          <button
+            type="button"
+            onClick={() => enqueue.mutate(effectiveMethod)}
+            disabled={busy}
+            className="whitespace-nowrap rounded border border-violet-500 px-2 py-0.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
+            title="This branch uses a merge queue — GitHub merges it in turn"
+          >
+            {queueing ? 'Queueing…' : 'Add to merge queue'}
+          </button>
         ) : (
           <>
             {options.allowedMethods.length > 1 && (
@@ -402,6 +459,55 @@ export function MergeControl({
         {queueError && <span className="text-xs text-red-500">{queueError}</span>}
         {armError && <span className="text-xs text-red-500">{armError}</span>}
       </div>
+    </div>
+  );
+}
+
+/**
+ * THE QUEUED ROW — what the merge control IS while GitHub's merge queue holds the PR: the status
+ * line and the one verb still worth offering. The same words the expanded panel showed right after
+ * an enqueue, now on every mount, collapsed or not.
+ *
+ * ⚠ NO MERGE TRIGGER, NO METHOD PICKER, NO CANCEL. There is nothing to merge (GitHub lands it) and
+ * nothing to collapse. Only a reader who can push ever gets here — both mounts gate the whole
+ * control on push access (HIDE, never disable) — so "Remove from queue" needs no gate of its own.
+ */
+function QueuedRow({
+  status,
+  busy,
+  removing,
+  error,
+  onRemove,
+}: {
+  status: MergeQueueStatus;
+  busy: boolean;
+  removing: boolean;
+  error: string | null;
+  onRemove: () => void;
+}): JSX.Element {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span
+        className={`text-xs ${
+          status.tone === 'bad' ? 'text-red-700 dark:text-red-300' : 'text-gray-600 dark:text-gray-300'
+        }`}
+        title={status.title}
+      >
+        {/* Only the ejection earns a mark — it is the one state that needs the reader. */}
+        {status.tone === 'bad' && (
+          <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
+        )}
+        {status.line}
+      </span>
+      <button
+        type="button"
+        onClick={onRemove}
+        disabled={busy}
+        className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+      >
+        {removing ? 'Removing…' : 'Remove from queue'}
+      </button>
+      {error && <span className="text-xs text-red-500">{error}</span>}
     </div>
   );
 }

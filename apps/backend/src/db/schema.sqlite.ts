@@ -291,11 +291,12 @@ export const pullRequests = sqliteTable(
     //
     // WHY THIS HAD TO BECOME STORED. GitHub's MergeStateStatus enum has NO QUEUED member
     // (github/mutations.ts records the same fact where it explains why the queue verbs fork to
-    // GraphQL), so a queued PR reports `mergeStateStatus: 'blocked'` — byte-identical to one
-    // held up by unmet branch protection. That was survivable while the only reader was the
-    // click-gated merge control, which fetches live. The Pending board is NOT allowed to fetch
-    // on mount (fifty cards resolving their own state is ~150 GitHub calls to paint a screen),
-    // so a card can only know a PR is queued if a column says so.
+    // GraphQL), so a queued PR reports its underlying state ('clean' and 'unknown' have both been
+    // seen on live queued PRs) and nothing in that status says "queued". That was survivable
+    // while the only reader was the click-gated merge control, which fetches live. The Pending
+    // board is NOT allowed to fetch on mount (fifty cards resolving their own state is ~150
+    // GitHub calls to paint a screen), so a card can only know a PR is queued if a column says
+    // so.
     inMergeQueue: integer('in_merge_queue', { mode: 'boolean' }),
     // GitHub's MergeQueueEntryState, lowercased like every other stored enum on this table.
     // Null when the PR has no entry (a positive `inMergeQueue: false` clears it) and null when
@@ -1057,17 +1058,12 @@ export const claudeReviews = sqliteTable(
     status: text('status', {
       enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
     }).notNull(),
-    model: text('model', {
-      // 'claude-opus-4-8' is no longer offered but stays readable for stored runs. Plain text in
-      // the database (no CHECK, no pg enum), so this list needs no migration.
-      enum: [
-        'claude-opus-5-5',
-        'claude-sonnet-5',
-        'claude-opus-4-8',
-        'claude-sonnet-4-6',
-        'claude-haiku-4-5',
-      ],
-    }).notNull(),
+    // The model id the run was stored with. Deliberately NO drizzle `enum:` — the column has
+    // always been plain text in the database (no CHECK, no pg enum), and a TS-only enum made the
+    // row type lie about rows from a RETIRED model (the old Opus 4.8's runs are still here). The
+    // offered list lives once, in packages/shared `CLAUDE_REVIEW_MODELS`, which the generate route
+    // validates against; retiring a model no longer edits either schema. Twin: schema.pg.ts.
+    model: text('model').notNull(),
     // Null until the agent decides whether it explored the worktree.
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),
     // The deterministic router's decision (skip/diff_only/worktree) + its inputs,
@@ -1120,6 +1116,11 @@ export const claudeReviews = sqliteTable(
     // not / no longer applies / not checked), with the prior review id + head. Null when there was
     // no earlier review with findings to check.
     followUp: text('follow_up', { mode: 'json' }).$type<ClaudeReviewFollowUpRecord>(),
+    // WHO STARTED THE RUN: 'manual' (a click) or 'auto' (the Pro per-workspace auto-review sweeper,
+    // for a newly opened human PR). Core because `getUnactionedClaudeReviews` carries it to the My
+    // Turn card's "Auto review" label (an auto run is owned like a manual one). Migration 0071
+    // (pg 0058); existing rows are 'manual'.
+    trigger: text('trigger', { enum: ['manual', 'auto'] }).notNull().default('manual'),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),

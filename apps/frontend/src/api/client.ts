@@ -17,10 +17,8 @@ import type {
   AddReviewCommentResult,
   RequestReviewersBody,
   RequestReviewersResult,
-  AiFixMergePreview,
   AiFixPushBody,
   AiFixPushResult,
-  AiFixRebaseBody,
   AiFixResponse,
   AiFixStatusResponse,
   ApprovePrBody,
@@ -38,6 +36,8 @@ import type {
   ClaudeReviewModel,
   RequestedReviewMode,
   ClaudeReviewResponse,
+  ClaudeReviewStatesBody,
+  ClaudeReviewStatesResponse,
   ClaudeReviewStatusResponse,
   ClaudeReviewTicketInput,
   ClaudeReviewVerdict,
@@ -200,6 +200,8 @@ class ApiError extends Error {
     // Seconds from a 429's Retry-After header (null when absent) — lets a poller honor
     // the server's own backoff instead of guessing (see usePrLiveRefresh).
     public retryAfterSeconds: number | null = null,
+    // The body's machine-readable `error` (e.g. 'AutoReviewInProgress'), when it sent one.
+    public code: string | null = null,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -209,14 +211,16 @@ class ApiError extends Error {
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
+    let code: string | null = null;
     try {
-      const body = (await res.json()) as { message?: string };
+      const body = (await res.json()) as { message?: string; error?: unknown };
       if (body.message) message = body.message;
+      if (typeof body.error === 'string') code = body.error;
     } catch {
       /* non-JSON error body */
     }
     const ra = res.headers.get('retry-after');
-    throw new ApiError(res.status, message, ra && /^\d+$/.test(ra) ? Number(ra) : null);
+    throw new ApiError(res.status, message, ra && /^\d+$/.test(ra) ? Number(ra) : null, code);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -1239,6 +1243,13 @@ export const api = {
       `/api/prs/${prId}/claude-review`,
       jsonBody('POST', { model, mode, ...(ticket ? { ticket } : {}) } satisfies GenerateReviewBody),
     ).then((r) => handle<{ reviewId: number; status: string }>(r)),
+  // The Open PRs table's "Claude review" column: the LATEST run for each listed PR, ONE request
+  // for the whole table. DB-only; at most CLAUDE_REVIEW_STATES_MAX_IDS ids (the route 400s over).
+  claudeReviewStates: (prIds: number[]) =>
+    fetch(
+      '/api/claude-review/states',
+      jsonBody('POST', { prIds } satisfies ClaudeReviewStatesBody),
+    ).then((r) => handle<ClaudeReviewStatesResponse>(r)),
   claudeReviewStatus: (prId: number) =>
     get<ClaudeReviewStatusResponse>(`/api/prs/${prId}/claude-review/status`),
   cancelClaudeReview: (prId: number) =>
@@ -1305,31 +1316,10 @@ export const api = {
     fetch(`/api/pro/prs/${prId}/ai-fix/cancel`, jsonBody('POST')).then((r) =>
       handle<{ status: string }>(r),
     ),
-  // Push a fix. `plain` resolves to the full result (200); `merge`/`rebase` resolve to
-  // a `{ fixId, status:'queued' }` 202 — the caller then subscribes to …/push/stream.
+  // Push a fix as-is (synchronous, never a force push) → the full result.
   pushAiFix: (fixId: number, body: AiFixPushBody) =>
     fetch(`/api/pro/ai-fixes/${fixId}/push`, jsonBody('POST', body)).then((r) =>
-      handle<AiFixPushResult | { fixId: number; status: string; strategy: string }>(
-        r,
-      ),
-    ),
-  // Preview the fix branch vs the trunk (behind/ahead + conflicts).
-  aiFixMergePreview: (fixId: number) =>
-    fetch(`/api/pro/ai-fixes/${fixId}/merge-preview`, jsonBody('POST')).then((r) =>
-      handle<AiFixMergePreview>(r),
-    ),
-  // Start a rebase-resolve job (stores a reviewable artifact) → { fixId }.
-  startAiFixRebase: (fixId: number, body: AiFixRebaseBody) =>
-    fetch(`/api/pro/ai-fixes/${fixId}/rebase`, jsonBody('POST', body)).then((r) =>
-      handle<{ fixId: number; status: string }>(r),
-    ),
-  cancelAiFixRebase: (fixId: number) =>
-    fetch(`/api/pro/ai-fixes/${fixId}/rebase/cancel`, jsonBody('POST')).then((r) =>
-      handle<{ status: string }>(r),
-    ),
-  cancelAiFixPush: (fixId: number) =>
-    fetch(`/api/pro/ai-fixes/${fixId}/push/cancel`, jsonBody('POST')).then((r) =>
-      handle<{ status: string }>(r),
+      handle<AiFixPushResult>(r),
     ),
 
   // ---- Bot triage (CORE, deterministic, no AI) ----

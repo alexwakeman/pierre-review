@@ -1,8 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Repo, SyncStatus as SyncStatusT } from '@pierre-review/shared';
 import { api, ApiError } from '../api/client.js';
 import { ACTIVITY_QUERY_KEYS } from '../hooks/useActivity.js';
+import {
+  FAST_POLL_INTERVAL_MS,
+  absorbedSweep,
+  decidePrChangeSweep,
+  fastPollUntilMs,
+  fastPollWindowOpen,
+  invalidateAfterServerPrChange,
+  prChangeMap,
+  prChangeSignature,
+  repoWorkspaceMap,
+  subscribeFastPollWindow,
+} from '../hooks/prCacheSync.js';
 import {
   registerSyncRoundActions,
   useFilters,
@@ -104,10 +116,19 @@ export function SyncStatus(): JSX.Element | null {
 
   // Dedicated observer on the shared ['repos'] cache that polls for fresh
   // sync timestamps.
+  //
+  // ⚠ AND, FOR 150s AFTER A LOCAL WRITE, EVERY 5s. The server keeps re-reading a PR after a write
+  // answers (GitHub attaches a push and recomputes mergeability and CI seconds later), and the
+  // only way that news reaches this tab is `Repo.lastPrChangeAt` on this poll. At 30s the
+  // conflicts card outlived the resolver by half a minute. `noteLocalPrWrite` (prCacheSync.ts)
+  // opens the window; subscribing re-renders here so the new interval applies at once, and the
+  // function form lets the window lapse on the next fetch without a re-render.
+  useSyncExternalStore(subscribeFastPollWindow, fastPollUntilMs);
   const { data: repos } = useQuery<Repo[]>({
     queryKey: ['repos'],
     queryFn: api.listRepos,
-    refetchInterval: round.syncing ? 3000 : 30000,
+    refetchInterval: () =>
+      round.syncing ? 3000 : fastPollWindowOpen() ? FAST_POLL_INTERVAL_MS : 30000,
   });
 
   // Per-repo running state, polled only while a manual sync is in flight, so
@@ -212,6 +233,48 @@ export function SyncStatus(): JSX.Element | null {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSync]);
+
+  // ── A PR CHANGED ON THE SERVER OUTSIDE A WALK ──────────────────────────────────────────────
+  // A webhook sync, a post-write settle re-read, the backstop or the liveness sweep moves a PR
+  // without advancing any sync timestamp, so the effect above never hears of it. The server
+  // stamps `Repo.lastPrChangeAt` instead; when a repo's stamp moves forward, refetch the same
+  // workspace set a write refetches, plus the detail and merge control of PRs this tab just wrote
+  // to in THAT repo (their `updatedAt` does not move for a mergeability-only or CI-only change,
+  // so nothing else would). `invalidateAfterServerPrChange` says which PRs, and why so few.
+  //
+  // ⚠ ITS OWN VALUE AND ITS OWN EFFECT, never folded into `mostRecentSync`: that one prints
+  // "Last synced HH:MM", and a PR change is not a sync.
+  // ⚠ The FIRST observation after mount only records — it is not news, it is the baseline.
+  // ⚠ Declared AFTER the walk effect so both run in one commit in this order: when a walk and a
+  // PR change land on the same poll (a walk stamps both), the walk has already swept the
+  // workspace keys and only the PR-scoped ones are left.
+  // ⚠ A local write reads `['repos']` BEFORE the rest of its set, so the stamps in that answer are
+  // already on the board it reads next; `decidePrChangeSweep` skips the workspace half for those
+  // (`absorbedSweep`), by stamp, never by how soon the answer arrived.
+  // ⚠ The stamps are ACCOUNT-wide and the workspace half is the VIEWED workspace's screens, so a
+  // move in another workspace's repo refetches none of them (`otherWorkspaceIds`).
+  const viewedWorkspaceId = useFilters((s) => s.workspaceId);
+  const prChanges = prChangeMap(repos);
+  const prChangeSig = prChangeSignature(prChanges);
+  const seenPrChanges = useRef<Map<number, number> | null>(null);
+  const prChangeLastSync = useRef<string | null>(lastSync);
+  useEffect(() => {
+    if (!Array.isArray(repos)) return;
+    const prev = seenPrChanges.current;
+    seenPrChanges.current = prChanges;
+    const walkSwept = prChangeLastSync.current !== lastSync;
+    prChangeLastSync.current = lastSync;
+    const sweep = decidePrChangeSweep({
+      prev,
+      next: prChanges,
+      walkSwept,
+      absorbed: absorbedSweep(qc),
+      repoWorkspaces: repoWorkspaceMap(repos),
+      currentWorkspaceId: viewedWorkspaceId,
+    });
+    if (sweep != null) void invalidateAfterServerPrChange(qc, sweep);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prChangeSig, lastSync, repos === undefined]);
 
   // Two-phase first sync handoff: the instant the fast foreground window is done,
   // close the progress UI and refresh the (now-populated) recent board so the

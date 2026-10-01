@@ -66,7 +66,8 @@ posts **one** GitHub review (inline + body + verdict).
   mount each, pinned by `test/claudeReviewFollowUp.test.ts`) over the pure
   `lib/claudeReviewFollowUp.ts` (ordering, anchors, the draft ↔ request mapping, chip palette):
   - **Model picker** opens on `DEFAULT_CLAUDE_REVIEW_MODEL` and is NEVER re-seeded from the
-    stored run (a stored `claude-opus-4-8` would otherwise be a select value with no option).
+    stored run (a run stored under a retired id, such as the old Opus 4.8, would otherwise be a
+    select value with no option).
   - **"User story or task (optional)"** sits under the depth hint, COLLAPSED by default. Its
     header adds " · added" / " · needs a fix", so a closed panel
     never hides what Run will send. It runs the SAME `checkClaudeReviewTicket` the route runs:
@@ -97,10 +98,11 @@ posts **one** GitHub review (inline + body + verdict).
   submit-review schemas) are **NOT** curated runtime deps in `build-release.mjs`; a guardrail
   assert fails the build if any leak into `release/package.json`. Every module that pulls one
   is reached **only** through a dynamic `await import()` — from the private `@pierre/pro`
-  plugin's seams (`review/agent`, `coding/agent`, `coding/merge`, `review/prepare`,
-  `review/post-seam`) or lazily inside `review/llm.ts` — so the SDKs load **only when the
-  plugin is present** (author/dev checkout), **never from npm** and **never in cloud** (`bind.ts`
-  returns before any AI import when `!config.proEnabled`). The compiled-but-inert AI `.js`
+  plugin's seams (`review/agent`, `coding/agent`, `review/prepare`, `review/post-seam`; since AI
+  Fix's trunk reconciliation was removed, `coding/merge` imports no SDK) or lazily inside
+  `review/llm.ts` — so the SDKs load **only when the plugin is present** (author/dev checkout),
+  **never from npm** and **never in cloud** (`bind.ts` returns before any AI import when
+  `!config.proEnabled`). The compiled-but-inert AI `.js`
   files still ship as dead code (harmless — nothing loads them). `@pierre-review/shared` is
   VENDORED into the release (`release/dist/shared`), so both core and the plugin may VALUE-import
   it — the plugin's generate route reads `CLAUDE_REVIEW_MODELS` and `checkClaudeReviewTicket`
@@ -114,11 +116,15 @@ posts **one** GitHub review (inline + body + verdict).
   (`CLAUDE_REVIEW_MODELS[0] === DEFAULT_CLAUDE_REVIEW_MODEL`, pinned by a test). The picker always
   opens on it — it is NOT seeded from the stored run, or every already-reviewed PR would keep
   reopening on its old model. A request with no `model` runs it.
-- **Opus 4.8 is no longer offered but stays READABLE**: it is still in the `ClaudeReviewModel`
-  union, `CLAUDE_REVIEW_MODEL_LABELS` ("Claude Opus 4.8 (no longer offered)"), the price table and
-  both schemas' `model` text enum, so the stored runs render and price. The generate route's
-  schema enum is the OFFERED list, so a POST naming it is a 400. `claude_reviews.model` is plain
-  `text` in both dialects (no CHECK, no pg enum), so the enum change needed no migration.
+- **Opus 4.8 (`claude-opus-4-8`) is REMOVED, not just unoffered.** It is gone from the
+  `ClaudeReviewModel` union, `CLAUDE_REVIEW_MODEL_LABELS`, the price table (`review/pricing.ts`
+  `RATES`) and `EFFORT_CAPABLE_MODELS`. `claude_reviews.model` has NO drizzle `enum:` in either
+  core schema — it was always plain `text` in both dialects (no CHECK, no pg enum), so no migration —
+  and `ClaudeReview.model` / `ClaudeReviewSummary.model` are typed `string`. Stored 4.8 rows
+  therefore read back verbatim and the SPA prints the raw id (labels are looked up only for the
+  offered list). Nothing re-prices a stored run; an id outside `RATES` falls back to Sonnet 5 rates
+  in the live estimate. Both generate routes (Claude Review and AI Fix) answer 400 for it.
+  Retiring a model is now a shared-types + pricing + model-options edit, never a schema edit.
 - **Opus 5.5's effort is PINNED to `medium` on every path** (`PINNED_EFFORT` in
   `review/model-options.ts`) — a product decision. `REVIEW_DIFF_ONLY_EFFORT` (default low) and
   `REVIEW_EFFORT` (default medium) still drive the other effort-capable models, never this one.
@@ -135,9 +141,19 @@ posts **one** GitHub review (inline + body + verdict).
   version 2.1.280 or newer is required`. It is now `^0.3.283`. A new model in the picker needs a
   matching SDK bump (regenerate `pnpm-lock.yaml` under the pinned pnpm) and a restart of the
   backend — a running `tsx watch` keeps the old SDK loaded.
-- **AI Fix inherits the offered list** (Opus 5.5 listed, Opus 4.8 gone from its picker) but keeps
-  its own `claude-sonnet-5` default; a stored AI Fix row naming Opus 4.8 still re-runs (its route
-  validates no model, and 4.8 stays effort-capable).
+- **AI Fix inherits the offered list and opens on `DEFAULT_AI_FIX_MODEL` = `claude-opus-5-5`**
+  (`packages/shared`, ONE spelling), read by the fixer picker (`AiFixTab`), the CI card's "Fix it"
+  (`CiAnalysisCard`) and the plugin start route. "On medium" is the `PINNED_EFFORT` pin above,
+  reached through `coding/agent.ts` → `sdkModelOptions(model, 'worktree')`; the constant carries no
+  effort of its own. `POST /api/pro/prs/:id/ai-fix` checks `model` IN THE HANDLER — there is no ajv
+  body schema, because `removeAdditional` would strip `seed`/`reviewText`/`commentTargets`: absent or
+  null → the default; a string in `CLAUDE_REVIEW_MODELS` → that model; anything else →
+  `400 {error:'ModelNotOffered'}`. No stored fix row's model is ever re-run. Only the FIXER moved:
+  the pane's summary and CI analysis stay on Haiku. Opus 5.5 is about 1.33× Sonnet 5's
+  per-token price, so `aiFixBudgetUsd` went from $3 to **$5**: the heaviest succeeded Sonnet 5 fix
+  in the dev DB cost $2.34, about $3.12 at Opus 5.5 rates for the same tokens. An explicit
+  `AI_FIX_BUDGET_USD` still beats the default. Pinned by `review/claude-review-ticket.test.ts`,
+  `packages/pro/test/ai-fix-routes.test.ts` and `apps/frontend/test/aiFixModelDefault.test.ts`.
 - Price (live estimate only; the recorded cost is the SDK's own): Opus 5.5 is $4 in / $20 out per
   MTok, cache write $5, cache read $0.20.
 
@@ -222,6 +238,43 @@ comments and says, for each one, whether the current code deals with it.
   each follow-up item carries a DERIVED `reraisedFindingId` (the finding whose `priorFindingId`
   matches), and findings carry `priorFindingId`.
 
+## Starting from the Open PRs tab
+
+The Open PRs table (`OpenPrsTable`, the pinned "Open PRs" tab) carries a **Claude review** column
+when — and only when — the `claudeReview` capability is on; without it there is no column and no
+request.
+
+- **ONE read for the whole table**: `POST /api/claude-review/states` with the listed PR ids
+  (`useClaudeReviewStates`), never a request per row. It polls every 5s only while a listed PR is
+  queued or running; a start, and the tab's SSE `done`, invalidate it.
+- **Cells** (`lib/claudeReviewColumn.ts` `reviewCellFor`): no run → **Review**; queued → disabled
+  **Queued**; running → disabled **Reviewing…**; succeeded → the verdict in words, a link that
+  opens the PR's Claude Review tab (`openClaudeReview`), plus **Re-review** when the PR has new
+  commits since that run; failed / cancelled → **Review** again. Every control stops propagation
+  (the row opens the PR). Sortable, needs-a-review first.
+- **A click starts a run through the SAME route and queue as the tab** (`POST
+  /api/prs/:id/claude-review`, default model, `auto` mode, no picker): `REVIEW_CONCURRENCY` run at
+  once and the rest queue, so many clicks are many queued runs. ⚠ **ONE MUTATION KEY PER PR**
+  (`claudeReviewStartKey`) for both surfaces, read through `useClaudeReviewStarting`, so the button
+  disables the moment it is pressed and the tab sees the list's start in flight (and the reverse).
+  Both starts bump `claudeReviewKickoff`, so the same "Claude reviews" toast appears. A `409`
+  (already running, queue full) or any error shows under the button and re-enables it.
+- **The user story, on click only** (`resolveListTicket`): a RE-REVIEW reuses the previous run's
+  stored ticket; otherwise the PR's first FILLABLE Jira ticket (`PrDetail.tickets`, read through the
+  shared `['pr', id]` cache entry) is fetched and filled exactly as the panel's "Fill from KEY" does —
+  ONE helper, `fillDraftFromJira` (title + description, then the criteria field remembered for this
+  issue type on this site, else the best strong name match, else none). ⚠ **The run starts EITHER
+  WAY**: no ticket, no token, a Jira error, or a draft over a cap sends no story and the cell says
+  so for a few seconds.
+- **Auto review in the column.** The states route folds the manager's live hold over the stored
+  runs, so a PR whose auto review waits in its lane (no row yet) reads **Queued** and an auto run in
+  flight reads **Queued** / **Reviewing…** — no button either way, even over a start in flight
+  (`heldByAutoReview`); the poll keeps running while any is queued. Queued, running and finished
+  auto runs carry a small "Auto review" marker. A click that races the hold gets `409
+  AutoReviewInProgress`: the start stays pending until the column has re-read (`onError` returns the
+  invalidation), so the button never comes back while the hold lasts, and the message shows under
+  the cell only for as long as the hold does.
+
 ## User story or task
 
 Optional title, description and acceptance criteria the person running the review may paste.
@@ -288,4 +341,56 @@ Optional title, description and acceptance criteria the person running the revie
   Not checked; follow-up Addressed / Partly addressed / Not addressed / No longer applies /
   Not checked. `'not_checked'` is in no model-facing enum: only the server writes it.
 
+## Auto review (per workspace)
 
+Settings → Workspace → **Auto Claude review** (shown only when the `claudeReview` capability is
+on). When a workspace switches it on, Claude reviews each **human-authored, non-draft PR OPENED at
+or after that moment** — once per PR, ever — with the same model (`DEFAULT_CLAUDE_REVIEW_MODEL`) and
+per-review budget as the Review button. Storage: `pro_workspace_settings.auto_review_enabled` +
+`auto_review_enabled_at` (plugin `0036`); `enabled_at` is re-stamped on every off → on and cleared on
+off, so nothing opened while it was off is picked up. Runs carry `claude_reviews.trigger = 'auto'`
+(core `0071` / pg `0058`; `'manual'` is the default).
+
+- **A PULL SWEEPER, NOT A HOOK** (`packages/pro/src/claude-review/auto.ts`, every minute on the host
+  scheduler). `sync/upsert.ts` runs inside a transaction and sees every PR of a first sync or a
+  90-day backfill as new, so it is the wrong place. Each tick asks core
+  `ProHostQueries.getAutoReviewCandidates` (OPTIONAL seam, apiVersion stays 21): open, not draft,
+  `opened_at >= enabled_at`, the author a PERSON under the workspace's own judgement
+  (`hiddenBotUserIds`, the resolver behind `InsightPrRef.authorIsBot`; an unmapped author is
+  skipped), and **no `claude_reviews` row of any kind** (manual, auto, failed). The DB is the queue:
+  a waiting auto item has no row, so a restart loses nothing.
+- **THE LANE** (`manager.ts`). Auto items wait in their own FIFO, capped by
+  `PRO_REVIEW_AUTO_MAX_QUEUED` (default 20), and launch only when no manual item waits. The ONE
+  `PRO_REVIEW_CONCURRENCY` is shared and unchanged. ⚠ Auto work can never make a click answer
+  `busy` (the manual cap is untouched). The row is written when a slot opens, through the same
+  `startReview` steps. ⚠ **Switching a workspace OFF drops its WAITING items** (`dropAutoReviews`,
+  called by the settings PUT and again by every sweep against the roster): they have no row, so
+  nothing is lost, and otherwise a full lane would still be reviewed and billed after the switch. A
+  run that already started keeps its Stop.
+- ⚠ **MANUAL IS LOCKED WHILE AUTO HOLDS THE PR.** While an auto review is waiting in the lane (or
+  mid-start) or running, `startReview` refuses with `auto_in_progress` and the route answers
+  `409 {error:'AutoReviewInProgress', auto:'queued'|'running'}` (it used to let the click take the
+  item over). The SPA knows from `ClaudeReviewResponse.autoReview` (`autoReviewHold`), re-reads the
+  pane every 5s while it is `'queued'` (no row exists to tell it otherwise; a start refused with the
+  409 re-reads the pane, so a stale pane learns of the hold), and disables Run /
+  Re-review / Run anyway beside "Auto review queued" / "Auto review running". Once the auto run
+  ends — success or failure — a manual run is allowed again. The status route answers a waiting item
+  as `{status:'queued', reviewId:null, trigger:'auto'}` and `GET /api/claude-reviews/active` lists it
+  the same way. A waiting item has no Stop (cancel would not stick — the sweeper re-finds a PR with
+  no row); a RUNNING auto run keeps the ordinary Stop. The Open PRs column shows the same hold (§
+  Starting from the Open PRs tab).
+- **THE COST GUARD**: `AUTO_REVIEW_DAILY_CAP` = 20 auto runs per workspace per **UTC** day, counting
+  today's auto rows plus items still waiting in the lane. Past it, PRs wait for the next day. An
+  account whose agent credits are spent sits the tick out.
+- ⚠ **IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF.** `autoReviewAvailable` = the pro+ flag AND a local
+  host; in cloud the job is never registered and the settings PUT drops the switch.
+- **Who hears about it.** ⚠ **OWNERSHIP IS PRIMARY**: an auto run raises the My Turn "Claude
+  review ready" card for the account whose workspace switched it on, exactly like a manual run —
+  there is NO author / requested-reviewer audience test (an earlier cut had one and dropped auto
+  runs with no viewer). The ball rule still clears it (docs/BACKEND.md § the ball rule). The progress
+  banner ignores auto runs (`ActiveReview.trigger`).
+- **It says it was auto.** "Auto review" is printed on the Pending card's chip
+  (`MyTurnCard.trigger`, `AUTO_REVIEW_LABEL` in `Activity/pendingLabels.ts`), the Slack Pending line
+  (`pending-blocks.ts`), the Open PRs column's marker (`ClaudeReviewPrState.trigger`), and in the
+  Claude Review tab's header, running row and History options
+  (`ClaudeReview`/`ClaudeReviewSummary.trigger`). The Feed's Claude item is not labelled.

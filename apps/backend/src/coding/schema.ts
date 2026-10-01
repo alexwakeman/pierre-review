@@ -48,16 +48,3 @@ export const submitFixShape = {
 export const submitFixSchema = z.object(submitFixShape);
 
 export type SubmitFixPayload = z.infer<typeof submitFixSchema>;
-
-// The structured-output contract for the in-process `submit_resolution` MCP tool.
-// The agent edits the conflicted files in a mid-merge/mid-rebase worktree to remove
-// every conflict, then calls this ONCE. As with submit_fix, the actual resolution is
-// derived from `git` (unmerged paths / leftover markers), never the agent's word —
-// this is only a short human-readable note of how the conflicts were reconciled.
-export const submitResolutionShape = {
-  summary: z.string(),
-};
-
-export const submitResolutionSchema = z.object(submitResolutionShape);
-
-export type SubmitResolutionPayload = z.infer<typeof submitResolutionSchema>;

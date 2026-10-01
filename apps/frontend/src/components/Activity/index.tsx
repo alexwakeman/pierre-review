@@ -591,8 +591,9 @@ export function ActivityView(): JSX.Element {
           //
           // ⚠ Every survey panel has left it and none may come back: the work plan (the Pending
           // head), flow metrics (Reports), the daily-brief strip (DELETED — every line duplicated a
-          // Pending tab) and the trunk + open-PR panels (Pending → My turn → Default branches and
-          // open PRs). Panels of survey above a stream is not a feed.
+          // Pending tab) and the trunk + open-PR panels (the default-branch strip now heads Pending →
+          // My turn, beside an "Open PRs" button into the drill-down). Panels of survey above a
+          // stream is not a feed.
           <div className="space-y-3">
             {feedTabs.length > 1 && (
               <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">

@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0057` and plugin `0034` are NOT (written 2026-09-19/24 with the Postgres down; see the
+  ⚠ pg `0052`–`0058` and plugin `0034`–`0036` are NOT (written 2026-09-19/24 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -555,6 +555,19 @@ other seed.
   cleared.
 - ⚠ The pg twin has not been replayed against a real Postgres.
 
+⚠ **Plugin `0003`'s eight `ai_fixes` columns are DORMANT**: `resolved_strategy`, `resolved_patch`,
+`resolved_diff`, `resolved_base_sha`, `resolved_files_changed`, `resolved_conflict_files`,
+`resolved_at`, `resolve_error`. They held AI Fix's stored rebase artifact, and that
+trunk-reconciliation path was removed (docs/PRO-PLUGIN-AND-ACTIVITY.md § AI Fix pushes as-is). They
+are undeclared in both `packages/pro/src/ai-fix/schema.{sqlite,pg}.ts` (a comment there names the
+set), so drizzle never selects or writes them — which also stopped the getters reading the stored
+mbox/diff blobs on every tab load. Old rows keep their values (2 on the dev database) until retention
+or erasure removes the whole row. Do NOT drop them in an ad-hoc migration: a failed plugin migration
+drops the whole plugin to OSS mode, and the plugin's pg twins from `0034` on are unreplayed. None is
+indexed, so a later batched `DROP COLUMN` is possible. (Same batch, core side: `claude_reviews.model`
+lost its TypeScript-only drizzle `enum:` in both schemas. The column was always plain `text` with no
+CHECK and no pg enum, so there is no migration; see docs/CLAUDE-REVIEW.md § Models.)
+
 ## `0053` / pg `0040` — re-derive `workspace_reviewers.role` against five vocabularies
 
 Five `UPDATE`s, one per non-review role, over rows whose `source <> 'manual'`. No schema change —
@@ -753,10 +766,28 @@ SELECTs the four columns (`workspace-settings.test.ts`, `settings-route-schema.t
 `jira-routes.test.ts`; `isolation.test.ts` replays the whole folder). ⚠ **The pg twin is NOT
 replayed** — the plugin should reach **35** there.
 
-⚠ **NONE OF THE SEVEN PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0057` and plugin `0034`). The
+### `0071_claude_review_trigger` (pg `0058`)
+
+One column, `claude_reviews.trigger` — `text NOT NULL DEFAULT 'manual'`, `'manual' | 'auto'` (who
+started the run; `'auto'` = the plugin's per-workspace auto-review sweeper). The default makes every
+existing row a click, which is what it was. CORE, not a plugin table, because a CORE read needs it:
+`getUnactionedClaudeReviews` carries it to the My Turn card, which labels an auto run "Auto review".
+Twins share `when` `1790042400000`; the pg file uses `ADD COLUMN IF NOT
+EXISTS`. `src/db/my-turn-claude-review.test.ts` runs the sqlite half through the real migrator.
+⚠ **The pg twin is NOT replayed.**
+
+### Plugin `0036_workspace_auto_review`
+
+Two nullable columns on `pro_workspace_settings`: `auto_review_enabled` (sqlite integer / pg
+boolean) and `auto_review_enabled_at` (sqlite integer / pg `timestamptz`) — the switch-on moment the
+sweeper reviews from. No backfill (NULL = off). ⚠ Like `0035`, every hand-built test DB that touches
+the store must replay it (the store SELECTs both columns): `workspace-settings.test.ts`,
+`settings-route-schema.test.ts`, `jira-routes.test.ts`. ⚠ **The pg twin is NOT replayed.**
+
+⚠ **NONE OF THE TEN PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0058` and plugin `0034`–`0036`). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
-core should reach **58 applied = 58 journal entries** and the plugin **34** — and check
+core should reach **59 applied = 59 journal entries** and the plugin **36** — and check
 `review_request_events` carries both FKs and its unique index, that `workspaces.flow_settings`,
 `pull_requests.advisory_ids` and `accounts.my_turn_settings` are `jsonb`, and that
 `security_checked_at` and `pr_mentions.mentioned_at` are `timestamp with time zone`. ⚠ `0055` is

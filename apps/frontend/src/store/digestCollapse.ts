@@ -77,10 +77,10 @@ export const useInsightsDigestExpand = create<InsightsDigestExpandState>((set, g
 // (`useSprintReportUi` — the Sprint report card's persisted collapse chrome, localStorage key
 // 'pierre:sprintReportUi' — was REMOVED with `SprintReportCard` on the C7 cut list.)
 
-// The "Open PRs" panel (Pending → My turn → Default branches and open PRs; it lived above the Feed
-// until the Feed became the stream alone). OPEN BY DEFAULT now: it is the content of a view the
-// reader chose to open, not a filter affordance above a stream. The open/closed choice is still
-// remembered, and a stored choice wins.
+// The repo-grouped "Open PRs" panel (`FeedOpenPrsPanel`). ⚠ NOT MOUNTED ANYWHERE NOW: it lived above
+// the Feed, then in Pending → My turn's retired second view ("Default branches and open PRs"); My
+// turn now carries an "Open PRs · N" button into the drill-down instead. Kept, with its stored
+// choice, in case the panel returns. OPEN BY DEFAULT; a stored choice wins.
 // ⚠ The key `pierre:feedOpenPrsPanel` keeps its old name on purpose: renaming it resets every
 // reader's stored choice.
 const FEED_OPEN_PRS_KEY = 'pierre:feedOpenPrsPanel';

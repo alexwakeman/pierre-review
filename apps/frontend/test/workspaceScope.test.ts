@@ -226,4 +226,48 @@ describe('the wire — buildOpenPrsSearch / buildTimelineSearch', () => {
     );
     expect(q).toBe('prIds=101');
   });
+
+  // ⚠ THE FOCUS TAB'S FILTERS ARE CLIENT-SIDE, SO THIS STRING MUST NOT CARRY ONE. Focus shows Events
+  // + Bots and applies them over this unfiltered payload (components/Timeline/isolateFilter.ts). A
+  // param here would re-key the query and refetch the PR on every toggle, and a server-side
+  // excludeBots would judge bots by the account's DEFAULT workspace — the request names none — not
+  // the PR's own.
+  it('the prIds override path carries no filter, whatever the filters say', () => {
+    const q = buildTimelineSearch(
+      state({
+        workspaceId: 5,
+        repoIds: [4],
+        userIds: [7, 8],
+        categories: ['commits'],
+        reviewStates: ['approved'],
+        excludeBots: true,
+        allowedBotIds: [42],
+        derivedStates: ['untouched'],
+        prStatuses: ['open'],
+        excludeStale: true,
+        preset: '7d',
+      }),
+      true,
+      true,
+      true,
+      true,
+      Date.now() - 90 * 24 * 60 * 60 * 1000,
+      true,
+      [101],
+    );
+    expect(q).toBe('prIds=101');
+    // Bots SHOWN is a filter value too — still nothing on the wire.
+    expect(
+      buildTimelineSearch(
+        state({ excludeBots: false, categories: [], reviewStates: [] }),
+        true,
+        true,
+        true,
+        true,
+        null,
+        true,
+        [101],
+      ),
+    ).toBe('prIds=101');
+  });
 });

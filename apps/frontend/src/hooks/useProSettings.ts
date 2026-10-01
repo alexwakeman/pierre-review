@@ -56,7 +56,8 @@ export function useHasProSettings(): boolean {
 // (`activityDigest` came off earlier, with the "AI summary updates" policy section.)
 export function useHasProWorkspaceSettings(): boolean {
   const caps = useProCapabilities();
-  return caps.workspaceInsights || caps.slackDigest || caps.issueLinks;
+  // `claudeReview`: the Auto Claude review switch lives on the same workspace row.
+  return caps.workspaceInsights || caps.slackDigest || caps.issueLinks || caps.claudeReview;
 }
 
 // Per-account Pro settings. ⚠ WHAT IS LEFT ON THIS ROUTE IS THE COMPARISON-WINDOW MODE AND THE BOT

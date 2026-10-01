@@ -41,8 +41,10 @@ export function useTimeline(override?: {
   dropMembers?: boolean;
   fromMs?: number | null;
   // A pr-focus tab passes its subject PR's id so the isolated fetch returns exactly that PR
-  // (+ its events), bypassing the board filters — the PR loads even when its repo/date isn't
-  // on the board.
+  // (+ ALL its events), bypassing the board filters — the PR loads even when its repo/date isn't
+  // on the board. ⚠ The key stays `prIds=<id>` and NOTHING else, on purpose: Focus's own filters
+  // (Events + Bots) are applied CLIENT-side over this payload (components/Timeline/
+  // isolateFilter.ts), so a toggle refetches nothing and a date can never churn the key.
   prIds?: number[];
 }) {
   // Selector returns a stable query string; re-runs the query only when it changes.
@@ -66,6 +68,11 @@ export function useTimeline(override?: {
   // would only fragment one answer across N slots AND (via the gate below) refuse to load the tab
   // until the workspaces query lands, which is a regression on a surface that never needed it.
   const isolated = (override?.prIds?.length ?? 0) > 0;
+  // ⚠ The SHARED board's query stays LIVE while a PR Focus tab holds the board slot, even though
+  // a Focus Events/Bots toggle then refetches it for a board nobody is looking at. Its app-level
+  // observer (useKeyboard) keeps the board payload cached for the way OUT of Focus: App re-keys the
+  // board slot on return, and a board-bound deep link (the pane's "Show on timeline") needs that
+  // payload on the fresh board's first render. Idled here, the link landed on nothing.
   return useQuery<TimelineResponse>({
     // The `ws:` segment is NOT redundant with `workspace=` inside `search`: it is the half that
     // fixes the CACHE. Two workspaces on `repoIds = null` would otherwise be one slot.
@@ -88,13 +95,17 @@ export function useTimeline(override?: {
 // by DEFAULT — its query string differs from useTimeline's on every fresh load: one
 // permanent extra lean fetch, accepted so the bot listing stays complete. The strings
 // still share a cache entry while the user is showing bots.
-export function useSearchTimeline() {
+//
+// `enabled: false` idles it where nothing reads it — a pr-focus tab, where the shared board is not
+// mounted and the Members fold is not shown. The string carries `types`, so without the gate every
+// Events toggle in Focus would refetch this board-window payload for nobody.
+export function useSearchTimeline(opts?: { enabled?: boolean }) {
   const search = useFilters((s) => buildTimelineSearch(s, false, false, false, false, null, false));
   const workspaceId = useFilters((s) => s.workspaceId);
   return useQuery<TimelineResponse>({
     queryKey: ['timeline', workspaceKey(workspaceId), search],
     queryFn: () => api.timeline(search),
-    enabled: workspaceId != null,
+    enabled: workspaceId != null && (opts?.enabled ?? true),
     placeholderData: (prev) => prev,
   });
 }

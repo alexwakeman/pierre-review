@@ -38,7 +38,7 @@ import {
   type PendingBoardState,
 } from './pendingExplain.js';
 import { AUTHOR_ROLE_CHIP, KIND_LABEL, MY_TURN_REASON_LABEL } from './pendingLabels.js';
-import { MY_TURN_VIEW_LABEL, TAB_LABEL } from './pendingTabs.js';
+import { TAB_LABEL } from './pendingTabs.js';
 import { WEIGHT_LABEL, weightPhrase } from '../settings/myTurnSettingsForm.js';
 
 // THE PENDING BOARD'S "WHY IS IT ORDERED LIKE THIS" LAYER — an info button in the board header, one
@@ -509,9 +509,9 @@ export function PendingGuideModal({
               the list narrow it to one.
             </p>
             <p>
-              {TAB_LABEL.my_turn} has a second view, <strong>{MY_TURN_VIEW_LABEL.branches}</strong>:
-              every default branch and every open PR in the workspace. None of it is scored or
-              counted in a tab.
+              {TAB_LABEL.my_turn} also shows every default branch in the workspace above its cards,
+              and an <strong>Open PRs</strong> button that lists every open PR. Neither is scored
+              or counted in a tab.
             </p>
           </GuideSection>
 

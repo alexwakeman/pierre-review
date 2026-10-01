@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { CiRerunMode } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { invalidateAfterPrWrite } from './prCacheSync.js';
 
 export interface RerunOutcome {
   mode: CiRerunMode;
@@ -13,8 +14,10 @@ export interface RerunOutcome {
 // `allSettled` (not `all`) so a partial failure (e.g. GitHub 403s a run that's too old
 // or has no failed jobs) still reports the runs that DID queue rather than reporting
 // the whole action as failed. Rejects only when EVERY run failed. The refreshed check
-// states arrive on the next sync (GitHub runs asynchronously), so on success we
-// invalidate the PR query to keep it honest; the UI shows a transient confirmation.
+// states arrive later (GitHub runs asynchronously): the success refetches the ONE write set
+// now (a `ci_failing` card and the CI dot read the same column), and the fast `['repos']`
+// poll it opens carries the server's later re-reads to every screen; the UI shows a transient
+// confirmation.
 export function useRerunCi(prId: number) {
   const qc = useQueryClient();
   return useMutation<RerunOutcome, Error, { runIds: number[]; mode: CiRerunMode }>({
@@ -34,6 +37,6 @@ export function useRerunCi(prId: number) {
       }
       return { mode, queued, failed };
     },
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['pr', prId] }),
+    onSuccess: () => void invalidateAfterPrWrite(qc, prId),
   });
 }

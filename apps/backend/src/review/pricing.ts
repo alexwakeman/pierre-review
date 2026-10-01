@@ -20,14 +20,13 @@ interface Rate {
 }
 
 const RATES: Record<ClaudeReviewModel, Rate> = {
-  // Opus 5.5 — the Claude Review default. $4 in / $20 out; cache write $5 (1.25×), read $0.20.
+  // Opus 5.5 — the Claude Review AND AI Fix default. $4 in / $20 out; cache write $5 (1.25×),
+  // read $0.20.
   'claude-opus-5-5': { input: 4, output: 20, cacheWrite: 5, cacheRead: 0.2 },
   'claude-haiku-4-5': { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 },
   'claude-sonnet-4-6': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
-  // Sonnet 5 (≤200K tier) — Sonnet pricing, near-Opus quality. AI Fix's default model.
+  // Sonnet 5 (≤200K tier) — Sonnet pricing, near-Opus quality.
   'claude-sonnet-5': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
-  // Opus 4.8 (≤200K tier). No longer offered; kept so a stored run's estimate still prices.
-  'claude-opus-4-8': { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
 };
 
 /** A running USD estimate from accumulated turn usage. Falls back to Sonnet rates. */

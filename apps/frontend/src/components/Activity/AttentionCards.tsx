@@ -9,7 +9,6 @@ import type {
   InsightPrRef,
   InsightReviewer,
   InsightSeverity,
-  MergeQueueEntryState,
   MergeReadyCard,
   MergeStateStatus,
   MyTurnCard,
@@ -33,9 +32,12 @@ import { useUsers } from '../../hooks/useTimeline.js';
 import {
   mergePrMutationKey,
   updateBranchMutationKey,
+  useMergeOptions,
   useRequestReviewers,
   useReviewerRequestState,
 } from '../../hooks/usePrWrites.js';
+import { useQueryDataUpdatedAt } from '../../hooks/useMergeQueueStatus.js';
+import { workspaceKey } from '../../hooks/useActivity.js';
 import {
   reviewerRequestBody,
   reviewerSuggestionKey,
@@ -48,6 +50,7 @@ import { useFilters } from '../../store/filters.js';
 import {
   advisoryUrl,
   automatedReviewerMeta,
+  CHECK_STATE_META,
   CI_META,
   dateTime,
   indexUsers,
@@ -86,11 +89,16 @@ import { BlastRadiusChip } from './BlastRadiusChip.js';
 import {
   AUTHOR_ROLE_CHIP,
   cardKindLabel,
-  DEP_STATE_LABEL,
+  depStateChip,
   depStateSentence,
   KIND_LABEL,
+  mergeQueueStatus,
   myTurnReasonLabel,
+  myTurnTypeChip,
+  pendingCardDetail,
+  pendingQueueBadge,
   SECURITY_ALERT_SOURCE_LABEL,
+  type PendingQueueBadge,
 } from './pendingLabels.js';
 import { CardPlacementInfo, PendingBoardContext, type PendingBoardInfo } from './PendingInfo.js';
 
@@ -111,7 +119,7 @@ const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
 
 // The kind and card labels live in `pendingLabels.ts` (the Pending info popovers read them too, and
 // importing them from here would be a cycle); re-exported so existing importers keep one path.
-export { cardKindLabel, KIND_LABEL, myTurnReasonLabel };
+export { cardKindLabel, KIND_LABEL, myTurnReasonLabel, myTurnTypeChip };
 
 /** GitHub's protection-aware merge state, as a short chip label. Transplanted from the deleted
  *  WorkPlanCard — `lib/ui.ts` carries `MERGE_STATE_STATUSES` and `mergeVerdict()` but no label
@@ -142,78 +150,40 @@ const MERGE_STATE_LABEL: Record<MergeStateStatus, string | null> = {
  *
  * ⚠ DO NOT ROUTE THIS THROUGH `mergeVerdict()` INSTEAD. Its queue branch runs first, so a
  * conflicting PR sitting in GitHub's merge queue would report 'queued' and LOSE the conflict
- * statement — and the queue is already stated by `pendingQueueBadge` in the header row.
+ * statement — and the queue is already stated by the card's queue chip (or its merge row).
  */
 export function conflictsStateChip(card: Pick<ConflictsCard, 'mergeStateStatus'>): string | null {
   if (card.mergeStateStatus == null || card.mergeStateStatus === 'dirty') return null;
   return MERGE_STATE_LABEL[card.mergeStateStatus];
 }
 
-/** The header chip for GitHub's own merge queue. */
-export interface PendingQueueBadge {
-  label: string;
-  title: string;
-  /** 'ok' — the queue holds it and is working through it. 'bad' — GitHub is taking it back out. */
-  tone: 'ok' | 'bad';
-}
-
-/** ONE label per entry state, so a new GitHub member forces a decision here rather than rendering
- *  a raw enum. Each says what the QUEUE is doing, because that is the part the reader cannot see
- *  from anything else on the card. */
-const QUEUE_STATE_LABEL: Record<MergeQueueEntryState, string> = {
-  queued: 'In the merge queue',
-  awaiting_checks: 'Merge queue · running checks',
-  mergeable: 'Merge queue · lands next',
-  locked: 'Merge queue · held',
-  // ⚠ THE ONE THAT EARNS THE FIELD. GitHub ejects an entry whose checks failed against the merged
-  // result, and this chip is the only warning a reader gets before the PR silently reappears
-  // un-queued. It is the whole payload of the reported bug — visible WITHOUT clicking Merge.
-  unmergeable: 'Leaving the merge queue',
-};
-
-const QUEUE_STATE_TITLE: Record<MergeQueueEntryState, string> = {
-  queued: 'This pull request is waiting its turn in GitHub’s merge queue.',
-  awaiting_checks:
-    'It is at the front of GitHub’s merge queue, running the queue’s checks against the merged result.',
-  mergeable: 'The queue’s checks passed. GitHub lands this pull request next.',
-  locked: 'GitHub is holding this entry while an earlier one in the same batch settles.',
-  unmergeable:
-    'GitHub is taking this pull request out of the merge queue — the queued merge failed its checks, or it no longer applies. Fix it and queue it again.',
-};
-
 /**
- * THE QUEUE CHIP, decided from the card's OWN synced fields — pure, and never a fetch.
+ * A `merge` / `update_branch` card's state chip ("clean", "behind trunk"…), or nothing.
  *
- * ⚠ `inMergeQueue: null` IS "NOT OBSERVED" AND RENDERS NOTHING. A card that said "not queued" on
- * no evidence would be a false claim, and `false` — a positive statement from GitHub — has nothing
- * to say either: "this PR is not in a queue" is true of nearly every PR in the world. So the chip
- * is POSITIVE-CLAIM-ONLY, exactly like `authorSourceLabel` above.
- *
- * ⚠ AND IT IS NOT PART OF THE MERGE-ACTIONS BLOCK. That block returns null for a reader without
- * push access, and "GitHub is already landing this" is arguably the MORE useful fact for someone
- * who has no button either way. It belongs to the card's identity, in the header row.
- *
- * The entry state is read only for the WORDING; membership is `inMergeQueue`, per the wire's own
- * rule that the state is never the thing to test for "is it queued?".
+ * ⚠ NOTHING WHILE GITHUB'S QUEUE HOLDS THE PR (a POSITIVE `inMergeQueue`; null claims nothing). A
+ * queued PR can read 'clean' (the status has no QUEUED member), so the card is minted like any
+ * ready one — and "clean" beside "In the merge queue · running checks" is two answers to one
+ * question. The queue chip, or the merge row where it prints the queue, carries it.
  */
-export function pendingQueueBadge(
-  pr: Partial<Pick<InsightPrRef, 'inMergeQueue' | 'mergeQueueEntryState'>>,
-): PendingQueueBadge | null {
-  if (pr.inMergeQueue !== true) return null;
-  const state = pr.mergeQueueEntryState ?? null;
-  if (state == null) {
-    return {
-      label: 'In the merge queue',
-      title: 'This pull request is in GitHub’s merge queue.',
-      tone: 'ok',
-    };
-  }
-  return {
-    label: QUEUE_STATE_LABEL[state],
-    title: QUEUE_STATE_TITLE[state],
-    tone: state === 'unmergeable' ? 'bad' : 'ok',
-  };
+export function forwardStateChip(
+  card: Pick<MergeReadyCard | UpdateBranchCard, 'mergeStateStatus' | 'inMergeQueue'>,
+): string | null {
+  if (card.inMergeQueue === true) return null;
+  return MERGE_STATE_LABEL[card.mergeStateStatus];
 }
+
+// GitHub's merge-queue chip and the merge row's status line live in `pendingLabels.ts` now —
+// `MergeControl` names the queue too, and it is mounted from THIS file, so importing the words from
+// here would be a cycle. Re-exported so existing importers keep one path.
+export {
+  mergeQueueStatus,
+  pendingCardDetail,
+  pendingQueueBadge,
+  QUEUE_STATE_LABEL,
+  QUEUE_STATE_TITLE,
+  type MergeQueueStatus,
+  type PendingQueueBadge,
+} from './pendingLabels.js';
 
 
 /**
@@ -493,6 +463,10 @@ export type PrMetaFields = Pick<
   | 'codeLoc'
   | 'codeLocIsLowerBound'
   | 'blast'
+  // WHICH CHECKS ARE FAILING — optional on the wire too, so the search card (which never has
+  // them) renders the CI label alone, exactly as before.
+  | 'failingChecks'
+  | 'failingCheckTotal'
 > &
   Partial<PrSourceRef> &
   // The byline's two inputs — OPTIONAL here for the source pair's reason: the search card never had
@@ -646,6 +620,114 @@ export function PrByline({
   );
 }
 
+// ── WHICH CHECKS ARE FAILING ──────────────────────────────────────────────────────────────────
+//
+// A red CI label names the checks that failed: "CI failing: build (ubuntu-latest), clippy and 2
+// more". The names ride the card, folded server-side from stored rows, so nothing here fetches.
+// ⚠ They are THIRD-PARTY text (a CI vendor picks them): plain text nodes, never markup, never a
+// link. ⚠ The "and N more" is WORDS on the card, never only a tooltip (no touch, no keyboard), and
+// its N comes from the server's own total — never a subtraction from anything else.
+// ⚠ No names is NOT "0 failing" (a cancelled-only failure records none): render the label alone.
+
+/** Red is the pair — the server's `isRedCiStatus`, spelled for the renderer. */
+function isRedCi(ci: string | null | undefined): boolean {
+  return ci === 'failure' || ci === 'error';
+}
+
+/** The names half and the "and N more" half of the list. */
+export interface FailingChecksParts {
+  names: string;
+  more: string | null;
+}
+
+/** The names half and the "and N more" half, APART — a renderer may truncate the first and must
+ *  never truncate the second. Comma-joined, no "and" between names (a check is often called
+ *  "Build and test"). null when there are no names. */
+export function failingChecksParts(
+  names: readonly string[] | null | undefined,
+  total: number | null | undefined,
+): FailingChecksParts | null {
+  const shown = (names ?? []).filter((n) => n.length > 0);
+  if (shown.length === 0) return null;
+  const extra = Math.max(0, (total ?? shown.length) - shown.length);
+  return { names: shown.join(', '), more: extra > 0 ? `and ${extra} more` : null };
+}
+
+/** The names, then "and N more" — the ONE rendering both lines below share. Two spans, so the
+ *  names truncate and the remainder never does. ⚠ A REAL SPACE between them, not just the parent's
+ *  flex `gap`: a gap is paint, not text, so copied text and a screen reader joining the runs read
+ *  "lintand 2 more". A whitespace-only run between flex items is not rendered, so the layout is
+ *  unchanged. */
+function FailingCheckNames({ parts }: { parts: FailingChecksParts }): JSX.Element {
+  return (
+    <>
+      <span className="min-w-0 truncate" title={parts.names}>
+        {parts.names}
+      </span>
+      {parts.more != null && (
+        <>
+          {' '}
+          <span className="shrink-0">{parts.more}</span>
+        </>
+      )}
+    </>
+  );
+}
+
+/** The meta row's CI half: the dot, the label and — beside a RED label only, which is the only time
+ *  the server sends names — the failing checks: "CI failing: build, clippy, lint and 2 more". */
+export function CiStatusWithChecks({
+  pr,
+}: {
+  pr: Pick<PrMetaFields, 'ciStatus' | 'failingChecks' | 'failingCheckTotal'>;
+}): JSX.Element {
+  const ci = pr.ciStatus ? CI_META[pr.ciStatus] : null;
+  const failing = isRedCi(pr.ciStatus)
+    ? failingChecksParts(pr.failingChecks, pr.failingCheckTotal)
+    : null;
+  return (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1" title={ci?.label ?? 'no checks'}>
+      <span
+        className="inline-block h-2 w-2 shrink-0 rounded-full"
+        style={ci ? { background: ci.color } : { boxShadow: 'inset 0 0 0 1px #9ca3af' }}
+        aria-hidden
+      />
+      <span className="shrink-0">
+        {ci?.label ?? 'no checks'}
+        {failing != null && ':'}
+      </span>
+      {failing != null && (
+        <>
+          {' '}
+          <FailingCheckNames parts={failing} />
+        </>
+      )}
+    </span>
+  );
+}
+
+/** The `ci_failing` body's names line (a promoted red trunk reaches it through `asCiFailingCard`):
+ *  the PR checks UI's failure mark (aria-hidden — the words carry it) and the names in red ink,
+ *  12px. Nothing at all when no names are known — never "0 failing". */
+export function FailingChecksLine({
+  card,
+}: {
+  card: Pick<CiFailingCard, 'ciStatus' | 'failingChecks' | 'failingCheckTotal'>;
+}): JSX.Element | null {
+  const failing = isRedCi(card.ciStatus)
+    ? failingChecksParts(card.failingChecks, card.failingCheckTotal)
+    : null;
+  if (failing == null) return null;
+  const FailedIcon = CHECK_STATE_META.failure.icon;
+  return (
+    <div className="mt-1 flex min-w-0 items-center gap-1 text-xs text-red-600 dark:text-red-400">
+      <FailedIcon size={12} className="shrink-0" />
+      <span className="sr-only">Failing checks: </span>
+      <FailingCheckNames parts={failing} />
+    </div>
+  );
+}
+
 // At-a-glance CI dot + files-changed count + a green/red LOC delta + WHO OPENED IT — mirrors the
 // PR-detail size label (ChangesTab / PrDetail). One row, one place, so a new card kind that renders
 // it gets the byline without remembering to.
@@ -661,21 +743,15 @@ export function PrMetaRow({
   pr: PrMetaFields;
   usersById?: Map<number, User>;
 }): JSX.Element {
-  const ci = pr.ciStatus ? CI_META[pr.ciStatus] : null;
   const byline = usersById != null && 'automation' in pr;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
       {byline && (
         <PrByline pr={{ authorId: pr.authorId ?? null, automation: pr.automation }} usersById={usersById} />
       )}
-      <span className="inline-flex items-center gap-1" title={ci?.label ?? 'no checks'}>
-        <span
-          className="inline-block h-2 w-2 rounded-full"
-          style={ci ? { background: ci.color } : { boxShadow: 'inset 0 0 0 1px #9ca3af' }}
-          aria-hidden
-        />
-        {ci?.label ?? 'no checks'}
-      </span>
+      {/* The CI label, naming the failing checks when it is red. The names truncate so the row
+          never overflows; "and N more" never does. */}
+      <CiStatusWithChecks pr={pr} />
       <span>
         {pr.changedFiles} file{pr.changedFiles === 1 ? '' : 's'}
       </span>
@@ -1220,13 +1296,17 @@ export interface PendingMergeGate {
    */
   verdictLine: boolean;
   /**
-   * GitHub'S MERGE QUEUE HOLDS THIS PR RIGHT NOW — a POSITIVE observation only (`inMergeQueue`
-   * null is "not observed" and false is GitHub's "no"; neither claims the queue).
+   * GitHub'S MERGE QUEUE HOLDS THIS PR, ON THE CARD'S OWN WORD — a POSITIVE observation only
+   * (`inMergeQueue` null is "not observed" and false is GitHub's "no"; neither claims the queue).
    *
    * While it is true, GitHub owns the landing: Merge and Merge-when-ready are HIDDEN (pressing
-   * either is meaningless, and a direct merge on a queued branch is a 405), and the row keeps the
-   * one thing still worth doing — taking it back out. The verdict line is suppressed too, because
-   * the header's queue chip already says it, in better words.
+   * either is meaningless, and a direct merge on a queued branch is a 405), and the merge row is
+   * the queue's status line plus the one thing still worth doing — taking it back out. The
+   * verdict line is suppressed, because that status line says it.
+   *
+   * ⚠ THE ROW ITSELF RESOLVES AGAINST THE NEWER OF THIS AND A CACHED LIVE ANSWER
+   * (`mergeQueueStatus`, inside `PendingMergeActions` and `MergeControl`). This field is the
+   * card's half of that, and the pure half the tests pin.
    */
   queued: boolean;
 }
@@ -1266,9 +1346,9 @@ export function pendingMergeGate(
     // null it, because a state is what mints them. Same honest input as `mergeable` above.
     mergeStateStatus: card.mergeStateStatus ?? 'unknown',
     // ⚠ THE QUEUE IS WHY THIS FIELD RIDES THE CARD. GitHub's MergeStateStatus enum has no QUEUED
-    // member, so a queued PR reports `blocked` — and a board reading the status alone would offer
-    // a Merge button GitHub refuses. `mergeVerdict`'s queue branch runs FIRST, which is what makes
-    // `canMerge` false and, through it, drops `action` to null on BOTH kinds below.
+    // member, so the status alone cannot tell a queued PR apart — and a board reading it alone
+    // would offer a Merge button GitHub refuses. `mergeVerdict`'s queue branch runs FIRST, which is
+    // what makes `canMerge` false and, through it, drops `action` to null on BOTH kinds below.
     inMergeQueue: queued,
   });
   // HIDDEN, not disabled. `viewerCanPush` is the synced `repos.viewerPermission` and a VISIBILITY
@@ -1304,6 +1384,120 @@ export function pendingMergeGate(
   return { show: true, action, verdict, verdictLine, queued };
 }
 
+/** The cards that carry a merge row (`PendingMergeActions`). */
+type MergeRowCard = MergeReadyCard | UpdateBranchCard | SecurityCard | DependencyBumpCard;
+
+/**
+ * THE CARD WHOSE MERGE ROW THIS CARD RENDERS, or null when it renders none. Pure, and it MIRRORS
+ * the renderers below — `merge`/`update_branch` mount `PendingMergeActions` on themselves,
+ * `DependencyActions` mounts it except on a person's flagged PR and on a conflict (the resolver
+ * entry instead), and a My turn card mounts it on `asForwardCard` for your own ready PR. The header
+ * chip reads it to know whether the row below will state the queue; were the two to disagree the
+ * chip would be hidden over a row that says nothing, so `pendingCardControls.test.ts` pins it.
+ */
+export function mergeRowCardOf(card: InsightCard): MergeRowCard | null {
+  switch (card.kind) {
+    case 'merge':
+    case 'update_branch':
+      return card;
+    case 'security':
+    case 'dependency_bump':
+      if (card.kind === 'security' && !card.dependencyUpdate) return null;
+      return card.depState === 'conflicts' ? null : card;
+    case 'my_turn':
+      if (card.reason === 'trunk_red') return null;
+      return card.own?.kind === 'ready' ? asForwardCard(card, card.own) : null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * IS THE QUEUE HOLDING THIS CARD'S PR, as its merge row decides it: the card's synced word against a
+ * live answer somebody already paid for (a click on this card, or the PR pane), NEWER WINS. Both
+ * reads are the cache's: `false` keeps the merge-options query disabled, and the board's own
+ * timestamp is read, not observed. ONE hook for the row and the header chip, so the two cannot
+ * reach different answers from the same cache.
+ */
+function useMergeRowQueued(card: MergeRowCard): { queued: boolean; cardsAt: number } {
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const cardsAt = useQueryDataUpdatedAt(['attention-cards', workspaceKey(workspaceId)]);
+  const { data: cachedOptions, dataUpdatedAt: optionsAt } = useMergeOptions(card.prId, false);
+  const queued =
+    mergeQueueStatus(
+      {
+        inMergeQueue: card.inMergeQueue,
+        mergeQueueEntryState: card.mergeQueueEntryState,
+        observedAt: cardsAt,
+      },
+      { info: cachedOptions?.mergeQueue, observedAt: optionsAt },
+    ) != null;
+  return { queued, cardsAt };
+}
+
+/** Does this card's merge row print the queue's status line? Exactly when `PendingMergeActions`
+ *  mounts `MergeControl` on a queued PR: the row shows at all, and no armed intent owns it. */
+function useMergeRowStatesQueue(card: MergeRowCard): boolean {
+  const gate = pendingMergeGate(card);
+  const armed = usePrArmedIntent(card.prId);
+  const { queued } = useMergeRowQueued(card);
+  return gate.show && armed == null && queued;
+}
+
+/** The queue chip's look — see `PendingQueueChip`. */
+function QueueChip({ queue }: { queue: PendingQueueBadge }): JSX.Element {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium normal-case tracking-normal ${
+        queue.tone === 'bad'
+          ? 'bg-red-500/10 text-red-700 dark:text-red-300'
+          : 'bg-gray-500/10 text-gray-600 dark:text-gray-300'
+      }`}
+      title={queue.title}
+    >
+      {queue.tone === 'bad' ? <WarningIcon size={11} /> : <MergeIcon size={11} />}
+      {queue.label}
+    </span>
+  );
+}
+
+/**
+ * GITHUB'S MERGE QUEUE, in the card's header — IDENTITY, not an action. It stays there for a
+ * reader without push access (the merge row is hidden outright for them, and "it is already
+ * landing" is if anything MORE useful to someone who has no button either way) and while an armed
+ * intent owns the row.
+ *
+ * ⚠ BUT NOT TWICE. Where the card's merge row prints the queue's status line — the words that
+ * replace the Merge button — this chip would say the same thing a few lines up, in the same words
+ * (`QUEUE_STATE_LABEL` IS that line on the board). The row wins, because it is where the reader
+ * looks for "can I merge this?" and it carries "Remove from queue". Decided by
+ * `useMergeRowStatesQueue`, the row's own read, never a second guess.
+ */
+function PendingQueueChip({ card }: { card: InsightCard }): JSX.Element | null {
+  // ⚠ PURE, AND OFF THE CARD'S OWN FIELDS. A `ci_failing` card does not extend `InsightPrRef` at
+  // all — its subject can be a repo's TRUNK, which is not a pull request and must never be
+  // described as one — and neither does `reviewer_load`. The `in` test is what keeps this a
+  // compiler-checked narrowing rather than a cast that would let one through.
+  const queue = 'inMergeQueue' in card ? pendingQueueBadge(card) : null;
+  if (queue == null) return null;
+  const rowCard = mergeRowCardOf(card);
+  return rowCard == null ? (
+    <QueueChip queue={queue} />
+  ) : (
+    <QueueChipBesideMergeRow card={rowCard} queue={queue} />
+  );
+}
+
+function QueueChipBesideMergeRow({
+  card,
+  queue,
+}: {
+  card: MergeRowCard;
+  queue: PendingQueueBadge;
+}): JSX.Element | null {
+  return useMergeRowStatesQueue(card) ? null : <QueueChip queue={queue} />;
+}
+
 /**
  * MERGE ACTIONS ON A PENDING CARD — the two FORWARD kinds and a dependency update, because those
  * are exactly the rows where the thing to do is "land it" — and your own ready PR moved into My
@@ -1314,7 +1508,10 @@ export function pendingMergeGate(
  *   • `usePrArmedIntent` is a SELECTOR over the account-wide armed list the app already polls —
  *     one query for the whole board, not one per card.
  *   • `MergeControl` is collapsed and its `useMergeOptions(prId, open)` is disabled until the
- *     reader opens it.
+ *     reader opens it. This row's own `useMergeOptions(prId, false)` is a CACHE READ, never a
+ *     fetch, and so is the board's `dataUpdatedAt` (`useQueryDataUpdatedAt`).
+ *   • While GitHub's merge queue holds the PR, `MergeControl` IS the queue's status line and
+ *     "Remove from queue", collapsed — the card's synced `inMergeQueue` says so with no request.
  *   • `MergeWhenReadyControl` is mounted with `eager={false}`, which is what that prop exists
  *     for: the armed chip + Cancel stay free, and the GitHub call waits for a click. (Its query
  *     key is shared with MergeControl's, so opening either warms the other for nothing.)
@@ -1357,13 +1554,24 @@ function PendingMergeActions({
   //
   // ⚠ STILL NOTHING FETCHES ON MOUNT. Both reads are cache reads. GitHub's native merge-queue
   // MEMBERSHIP and entry state now ride the card itself (`inMergeQueue` / `mergeQueueEntryState`,
-  // drawn by `pendingQueueBadge` in the header and read by the gate below); its POSITION still
+  // drawn by `PendingQueueChip` in the header and read by the gate below); its POSITION still
   // does not, because it is volatile and unsynced and the only route to it is the click-gated
   // merge-options call — fifty cards making that call is the ~200-upstream-calls-to-paint-a-board
   // failure this row is built to avoid.
   const merging = useIsMutating({ mutationKey: mergePrMutationKey(card.prId) }) > 0;
   const updating = useIsMutating({ mutationKey: updateBranchMutationKey(card.prId) }) > 0;
   const inFlight = merging ? 'Merging…' : updating ? 'Updating the branch…' : null;
+  // IS THE QUEUE HOLDING IT — `useMergeRowQueued`, the same read the card's header chip makes to
+  // decide whether this row already says so. The SAME three facts go to the two controls below,
+  // which resolve them the same way.
+  const { queued, cardsAt } = useMergeRowQueued(card);
+  // ⚠ THE VERB AND THE VERDICT FOLLOW THE RESOLVED MEMBERSHIP, NOT THE CARD'S. When a NEWER cached
+  // answer overrules the card (it says queued, the answer says it has left), `gate` was computed
+  // queued — no verb, no verdict line — and the row would offer a bare "Merge ▾" on a PR whose own
+  // merge state may be blocked. Re-deriving from the card's facts with the resolved membership
+  // puts the right verb (or the verdict saying why there is none) back, until the board refetch
+  // the disagreement repair fires brings the card itself up to date.
+  const row = queued === gate.queued ? gate : pendingMergeGate({ ...card, inMergeQueue: queued });
   if (!gate.show) return null;
   return (
     // ⚠ `data-noactivate` ON THE WHOLE ROW. `CardShell.onActivate` opens the PR unless the click
@@ -1380,9 +1588,15 @@ function PendingMergeActions({
       ) : armed != null ? (
         // ONE SPELLING of where a live intent stands, shared with the AutoMergeBanner stack. The
         // repo is not named because `PrLine` above already prints `owner/name #number`.
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">
-          {armedPhaseHeadline(armed)}
-        </span>
+        //
+        // ⚠ EXCEPT ONCE THE WATCHER HAS QUEUED IT. The headline would read "In the merge queue"
+        // beside the armed chip below, which says exactly that (with "Cancel & dequeue"), under a
+        // header queue chip saying it a third time. The chip and its verb carry it.
+        armed.phase === 'queued' && armed.enqueuedAt != null ? null : (
+          <span className="text-[11px] text-gray-500 dark:text-gray-400">
+            {armedPhaseHeadline(armed)}
+          </span>
+        )
       ) : stopped != null ? (
         // AN INTENT THE WATCHER GAVE UP ON. Ranked BELOW a live intent and a live write (both
         // describe now; this describes something that already finished) and ABOVE the merge
@@ -1395,20 +1609,18 @@ function PendingMergeActions({
           {TERMINAL_LABEL[stopped.state] ?? 'Auto-merge stopped'}
           {stopped.lastReason != null && <span className="ml-1">— {stopped.lastReason}</span>}
         </span>
-      ) : gate.queued ? (
-        // NOTHING. The queue chip in the header row already said it — and said it better, with
-        // the entry's own state. A second "in merge queue" on the row below is the same fact
-        // twice, on the one board where every line has to earn its width.
+      ) : queued ? (
+        // NOTHING HERE: `MergeControl` below IS the queue's status line while the queue holds it.
         null
-      ) : gate.action == null && gate.verdictLine ? (
+      ) : row.action == null && row.verdictLine ? (
         // No button, but never a silent row: the verdict IS the answer to "why can't I merge
         // this?", and it is the same sentence PrDetail leads its merge panel with. (A Dependencies
         // card's state row has already said it — `verdictLine` is false there.)
-        <span className={`text-[11px] font-medium ${MERGE_TONE_CLASS[gate.verdict.tone]}`}>
-          {gate.verdict.label}
-          {gate.verdict.detail != null && (
+        <span className={`text-[11px] font-medium ${MERGE_TONE_CLASS[row.verdict.tone]}`}>
+          {row.verdict.label}
+          {row.verdict.detail != null && (
             <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">
-              — {gate.verdict.detail}
+              — {row.verdict.detail}
             </span>
           )}
         </span>
@@ -1416,18 +1628,26 @@ function PendingMergeActions({
       {/* Collapsed = zero requests. Expanding buys the live merge state ONCE and unlocks the real
           method picker, so the board can never promise a merge method the repo forbids.
 
-          ⚠ A QUEUED CARD STILL MOUNTS IT, UNDER A DIFFERENT VERB. `gate.action` is null while the
-          queue holds the PR — Merge and Update branch are both meaningless there — but this panel
-          is ALSO the only way to `Remove from queue`, and taking it away would leave a reader who
-          queued a PR by mistake with nothing to press. The trigger says "Merge queue", not
-          "Merge", so the verb never promises something GitHub would 405. */}
-      {armed == null && (gate.action != null || gate.queued) && (
+          ⚠ A QUEUED CARD STILL MOUNTS IT, AND IT IS NO LONGER A MERGE TRIGGER. While the queue
+          holds the PR the control renders the queue's status line ("In the merge queue ·
+          running checks") and "Remove from queue" — the PR pane's row without its live position,
+          from the card's own synced fields, with no click and no fetch (and the header chip steps
+          aside, `PendingQueueChip`). It used to mount a "Merge queue ▾"
+          trigger whose status text lived only in the expanded panel, so a reader who queued a PR
+          and came back found a Merge button. Mounted on the RESOLVED word — the card's, or a newer
+          cached answer's — so a queue the card has not heard about yet still gets its row, and a
+          queue a newer answer says it has left gets its verb back rather than a bare trigger. */}
+      {armed == null && (row.action != null || queued) && (
         <MergeControl
           prId={card.prId}
           githubUrl={card.githubUrl}
-          label={
-            gate.queued ? 'Merge queue' : gate.action === 'update_branch' ? 'Update branch' : 'Merge'
-          }
+          label={row.action === 'update_branch' ? 'Update branch' : 'Merge'}
+          inMergeQueue={card.inMergeQueue}
+          mergeQueueEntryState={card.mergeQueueEntryState}
+          syncedAt={cardsAt}
+          // The board never refetches the merge-options answer, so its position would be an old
+          // click's; the row says the chip's words, the same every time. The PR pane has it live.
+          showQueuePosition={false}
         />
       )}
       {/* ⚠ HIDDEN WHILE QUEUED, AND ONLY THEN — except when something is already armed, because
@@ -1435,7 +1655,15 @@ function PendingMergeActions({
           once its blockers clear; while GitHub's queue owns the landing there is nothing for that
           watcher to wait out, so the button would arm a race. An ARMED intent renders its own
           chip and its Cancel (or Cancel & dequeue) from this same component. */}
-      {(!gate.queued || armed != null) && <MergeWhenReadyControl prId={card.prId} eager={false} />}
+      {(!queued || armed != null) && (
+        <MergeWhenReadyControl
+          prId={card.prId}
+          eager={false}
+          inMergeQueue={card.inMergeQueue}
+          mergeQueueEntryState={card.mergeQueueEntryState}
+          syncedAt={cardsAt}
+        />
+      )}
     </div>
   );
 }
@@ -1774,11 +2002,6 @@ function CardShell({
   // than threaded through every kind's case (which is how most kinds ended up never showing it).
   const board = useContext(PendingBoardContext);
   const whyLine = why ?? board?.whyById?.get(card.id);
-  // ⚠ PURE, AND OFF THE CARD'S OWN FIELDS. A `ci_failing` card does not extend `InsightPrRef` at
-  // all — its subject can be a repo's TRUNK, which is not a pull request and must never be
-  // described as one — and neither does `reviewer_load`. The `in` test is what keeps this a
-  // compiler-checked narrowing rather than a cast that would let one through.
-  const queue = 'inMergeQueue' in card ? pendingQueueBadge(card) : null;
   // "opened 3d", or null when this kind has no single open PR to date (ci_failing's trunk arm,
   // reviewer_load) or the value is unreadable. See `openedAgeLabel`.
   const age = openedAgeLabel(openedAt);
@@ -1816,22 +2039,9 @@ function CardShell({
         >
           {cardKindLabel(card)}
         </span>
-        {/* GitHub's merge queue — IDENTITY, not an action, which is why it sits here and not in
-            the merge row: that row is hidden outright for a reader without push access, and "it is
-            already landing" is if anything MORE useful to someone who has no button either way. */}
-        {queue != null && (
-          <span
-            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium normal-case tracking-normal ${
-              queue.tone === 'bad'
-                ? 'bg-red-500/10 text-red-700 dark:text-red-300'
-                : 'bg-gray-500/10 text-gray-600 dark:text-gray-300'
-            }`}
-            title={queue.title}
-          >
-            {queue.tone === 'bad' ? <WarningIcon size={11} /> : <MergeIcon size={11} />}
-            {queue.label}
-          </span>
-        )}
+        {/* GitHub's merge queue — IDENTITY, not an action; left to the merge row where that row
+            already prints it. See `PendingQueueChip`. */}
+        <PendingQueueChip card={card} />
         {/* ⚠ EXPLANATION, NOT ARITHMETIC. `muted` says WHY this card carries the neutral label
             instead of "Your turn" — the reader muted this repo (or its workspace) in Settings, and
             a card that silently demoted itself is a smaller version of the "where did my work go"
@@ -1994,6 +2204,8 @@ function CiFailingBody({
         </span>
         {card.headSha != null && <span className="font-mono">{card.headSha.slice(0, 7)}</span>}
       </div>
+      {/* WHICH CHECKS FAILED — renders nothing when the server knows none (never "0 failing"). */}
+      <FailingChecksLine card={card} />
       {hasPr && (
         // ⚠ RENDERED ONLY WHEN THERE IS ONE. On the 'trunk' arm a missing PR is ORDINARY — ~11% of
         // red heads are direct pushes to the default branch — so the card says trunk is red and
@@ -2117,6 +2329,9 @@ export function asCiFailingCard(t: MyTurnTrunkCard): CiFailingCard {
     authorIsBot: t.authorIsBot,
     authorBotKind: t.authorBotKind,
     automation: t.automation,
+    // The red head's failing checks — copied, or the promoted card silently loses its names.
+    failingChecks: t.failingChecks,
+    failingCheckTotal: t.failingCheckTotal,
   };
 }
 
@@ -2227,6 +2442,13 @@ export function AttentionCards({
   // for a PR ready to land, the resolver entry for a conflict, the bot pill on an unanswered thread.
   const renderMyTurnPr = (card: MyTurnCard): JSX.Element => {
     const own = card.own;
+    // Null on your own ready PR while GitHub's queue holds it — "Ready to merge" beside "In the
+    // merge queue…" is the contradiction the other two ready cards already drop.
+    const typeChip = myTurnTypeChip(card);
+    // Null for your own queued PR's "In the merge queue…" sentence — the queue chip or the merge
+    // row says it (`pendingCardDetail`).
+    const detail = pendingCardDetail(card);
+    const botPill = own?.kind === 'thread' && own.botKind != null ? own.botKind : null;
     return (
       <CardShell
         key={card.id}
@@ -2248,13 +2470,17 @@ export function AttentionCards({
         <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
         <PrMetaRow pr={card} usersById={usersById} />
         <PrReviewRow pr={card} usersById={usersById} />
-        <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-          <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
-            {myTurnReasonLabel(card)}
-          </span>
-          <span className="min-w-0">{card.detail}</span>
-          {own?.kind === 'thread' && own.botKind != null && <BotVendorPill kind={own.botKind} />}
-        </div>
+        {(typeChip != null || detail != null || botPill != null) && (
+          <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+            {typeChip != null && (
+              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
+                {typeChip}
+              </span>
+            )}
+            {detail != null && <span className="min-w-0">{detail}</span>}
+            {botPill != null && <BotVendorPill kind={botPill} />}
+          </div>
+        )}
         {own?.kind === 'ready' && <PendingMergeActions card={asForwardCard(card, own)} />}
         {own?.kind === 'conflicts' && <PendingConflictActions card={asConflictsCard(card, own)} />}
         <MyTurnActions card={card} />
@@ -2477,7 +2703,9 @@ export function AttentionCards({
       // about GitHub's merge state would be hiding the world, not an item.
       case 'merge':
       case 'update_branch': {
-        const state = MERGE_STATE_LABEL[card.mergeStateStatus];
+        const state = forwardStateChip(card);
+        // Null for "In the merge queue…" — the queue chip or the merge row says it.
+        const detail = pendingCardDetail(card);
         return (
           <CardShell
             key={card.id}
@@ -2498,16 +2726,18 @@ export function AttentionCards({
             <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
             <PrMetaRow pr={card} usersById={usersById} />
             <PrReviewRow pr={card} usersById={usersById} />
-            <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-              {state != null && (
-                <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
-                  {state}
-                </span>
-              )}
-              {/* CODE-WRITTEN, and the ONE spelling — `mergeCardDetail` on the server also writes
-                  the ranked row's `reason`. */}
-              <span className="min-w-0">{card.detail}</span>
-            </div>
+            {(state != null || detail != null) && (
+              <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                {state != null && (
+                  <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
+                    {state}
+                  </span>
+                )}
+                {/* CODE-WRITTEN, and the ONE spelling — `mergeCardDetail` on the server also writes
+                    the ranked row's `reason`. */}
+                {detail != null && <span className="min-w-0">{detail}</span>}
+              </div>
+            )}
             {/* ⚠ ONLY THE TWO FORWARD KINDS GET THESE. They are the rows where the work IS the
                 landing; a "review or reply" card is not one click from merged and must not
                 pretend to be. Nothing here fetches on mount — see `PendingMergeActions`. */}
@@ -2557,7 +2787,9 @@ export function AttentionCards({
       // kind, and the tab would count cards it never paints.
       case 'security':
       case 'dependency_bump': {
-        const stateChip = card.depState != null ? DEP_STATE_LABEL[card.depState] : null;
+        // Nothing while GitHub's queue holds it — the queue chip or the merge row says that
+        // (and `depStateSentence` leaves the server's queue sentence off for the same reason).
+        const stateChip = depStateChip(card);
         const stateSentence = depStateSentence(card);
         return (
           <CardShell

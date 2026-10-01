@@ -18,6 +18,7 @@ import {
   setReviewThreadResolved,
 } from '../../github/mutations.js';
 import { hydrateThreadDetail } from '../../sync/hydrate-detail.js';
+import { notePrChangedForPr } from '../../sync/pr-settle.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 const idParamSchema = {
@@ -84,6 +85,10 @@ export async function threadRoutes(app: FastifyInstance): Promise<void> {
         // Bump the parent thread off 'untouched' so its badge reflects the reply
         // before the next sync re-derives.
         await stampThreadRepliedState(id);
+        // The stamp moved a board-visible fact (the thread's state, so the Pending thread
+        // cards): raise the SPA change signal BEFORE replying, so the write's own ordered
+        // `['repos']` read already sees it (sync/pr-settle.ts). Never throws.
+        await notePrChangedForPr(accountId, ctx.prId);
         const result: ReplyResult = {
           id: rowId,
           authorId,
@@ -128,6 +133,8 @@ export async function threadRoutes(app: FastifyInstance): Promise<void> {
         );
         // Ownership already confirmed above, so the stamp is non-null.
         const derivedState = await stampThreadResolved(id, resolved, accountId);
+        // Same as the reply: the stamp is board-visible, so signal it before replying.
+        await notePrChangedForPr(accountId, ctx.prId);
         const result: ResolveThreadResult = {
           threadId: id,
           isResolved: gh.isResolved,

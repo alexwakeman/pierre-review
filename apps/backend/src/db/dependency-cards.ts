@@ -18,7 +18,7 @@ import type {
   PrReviewDecision,
   ReviewerRole,
 } from '@pierre-review/shared';
-import { DEPENDENCY_STATE_BASE, REVIEW_BOT_KINDS } from '@pierre-review/shared';
+import { DEPENDENCY_STATE_BASE, MERGE_QUEUE_CARD_DETAIL, REVIEW_BOT_KINDS } from '@pierre-review/shared';
 import { reviewBotKind, roleForBotLogin } from '../sync/bot-detection.js';
 import { canonicalAdvisoryId } from '../sync/security-detect.js';
 import { isConflicting, isRedCiStatus } from './pending-classify.js';
@@ -105,19 +105,35 @@ export function dependencyPrState(p: {
   return 'unknown';
 }
 
+// THE ONE SENTENCE a Pending card says while GitHub's merge queue holds its PR. It lives in
+// `packages/shared` (pending-rules.ts, with its reasons) because the SPA recognises it to leave it
+// off a card whose queue chip or merge row already says so; re-exported here for this module's
+// callers and tests.
+export { MERGE_QUEUE_CARD_DETAIL };
+
 /** The state as a sentence. CODE-WRITTEN, TIME-FREE (the forward-card rule — it is hashed nowhere
  *  today, but it is the ranker's `reason` shape), and it says what the state chip beside it cannot.
- *  `readyDetail` is the caller's `mergeCardDetail('merge', mss, 0)`, so a ready dependency PR and a
- *  `merge` card say the same sentence. */
+ *  `readyDetail` is the caller's `mergeCardDetail('merge', mss, 0, inMergeQueue)`, so a ready
+ *  dependency PR and a `merge` card say the same sentence.
+ *
+ *  ⚠ WHILE GITHUB'S QUEUE HOLDS THE PR (`inMergeQueue === true`, a positive observation — null is
+ *  "not observed" and claims nothing), every state the queue settles by itself says
+ *  `MERGE_QUEUE_CARD_DETAIL` instead: "behind", "needs review" and "blocked" are all things the
+ *  queue has already accepted the PR past. `conflicts` and `ci_red` keep their own sentences — a
+ *  real fault the queue will eject the entry for is still news. */
 export function dependencyStateDetail(
   state: DependencyPrState,
   p: {
     baseRefName: string | null;
     mergeStateStatus: MergeStateStatus | null;
     reviewDecision: PrReviewDecision | null;
+    inMergeQueue?: boolean | null;
   },
   readyDetail: string,
 ): string {
+  if (p.inMergeQueue === true && state !== 'conflicts' && state !== 'ci_red') {
+    return MERGE_QUEUE_CARD_DETAIL;
+  }
   switch (state) {
     case 'conflicts':
       return `Conflicts with ${p.baseRefName ?? 'the base branch'}`;

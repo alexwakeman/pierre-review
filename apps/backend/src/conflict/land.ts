@@ -22,7 +22,11 @@ import { disarmAutoMerge, getPrWriteContext, WRITE_PERMISSIONS } from '../db/que
 import { ghRestGetText } from '../github/client.js';
 import { createPullRequest, fetchPrHeadInfo } from '../github/mutations.js';
 import { cleanupCloneCache, ensureClone, withRepoLock } from '../review/clone-manager.js';
-import { resyncPrAfterWrite } from '../sync/resync-after-write.js';
+import {
+  asSyncLogger,
+  settlePrAfterWrite,
+  syncNewPrBesideAfterWrite,
+} from '../sync/resync-after-write.js';
 import { git, gitTry } from './git.js';
 import { conflictModelHash } from './hash.js';
 import { allowedDecisions, buildConflictModel } from './model.js';
@@ -106,7 +110,7 @@ export interface LandArgs {
   signal: AbortSignal;
   /**
    * ⚠ NOT IN THE BUILD PLAN'S SIGNATURE, and required rather than optional on purpose:
-   * `resyncPrAfterWrite` takes a logger, and the confirming tail is the difference between
+   * `settlePrAfterWrite` takes a logger, and the confirming tail is the difference between
    * `visible: true` and a copy contract about a push the reader cannot see yet. A route has
    * `req.log`; a caller that has to invent one is a caller that should be asking why.
    */
@@ -407,6 +411,7 @@ export async function landConflictResolution(args: LandArgs): Promise<ConflictCo
 
     let branch: string;
     let compareUrl: string | null = null;
+    let openedNumber: number | null = null;
     if (target.kind === 'pr_branch') {
       branch = info.headRef;
       if (body.strategy === 'rebase') {
@@ -437,16 +442,45 @@ export async function landConflictResolution(args: LandArgs): Promise<ConflictCo
           title: `Resolve conflicts with ${model.baseRef} for #${model.number}`,
           body: `Conflict resolution for #${model.number}.`,
         }).catch(() => null);
-        if (opened) compareUrl = opened.url;
+        if (opened) {
+          compareUrl = opened.url;
+          openedNumber = opened.number;
+        }
       }
     }
 
+    // ⚠ CONFIRMING VERIFIES THE HEAD, and says what the push implies about the conflict.
+    // A bare resync here reported `visible: true` on ANY successful persist — including a read
+    // taken before GitHub attached the push, or one carrying GitHub's still-stale CONFLICTING /
+    // DIRTY for the new head — and the Pending board then re-served the "Conflicts" card this
+    // resolution had just cleared. Now `visible` means the pushed commit IS the stored head, and
+    // anything unsettled (the head, a stale conflict verdict, an unknown merge state) goes to the
+    // background settle ladder. The inline wait is deadline-bounded, so the SIGTERM drain that
+    // waits on this job is never held by it.
+    //
+    // `notConflicting` ONLY for a FULL resolution pushed to the PR's OWN branch (the rebase path
+    // is full by construction). A partial resolution, or a push to a new branch, legitimately
+    // leaves the original PR conflicting — expecting otherwise would run the ladder for nothing.
     args.onPhase('confirming');
-    const visible = await resyncPrAfterWrite({
+    const slog = asSyncLogger(args.log);
+    const { visible } = await settlePrAfterWrite({
       prId: args.prId,
       accountId: args.accountId,
-      log: args.log,
+      log: slog,
+      expect: toPrBranch
+        ? { headSha: built.commitSha, ...(plan.full ? { notConflicting: true } : {}) }
+        : {},
     });
+    // A NEW branch that opened a PR: sync THAT PR too, so it exists locally before the reader is
+    // told about it. Its number resolves only inside the original PR's (account, repo).
+    if (target.kind === 'new_branch' && openedNumber != null) {
+      await syncNewPrBesideAfterWrite({
+        accountId: args.accountId,
+        prId: args.prId,
+        number: openedNumber,
+        log: slog,
+      });
+    }
 
     return {
       strategy: body.strategy,

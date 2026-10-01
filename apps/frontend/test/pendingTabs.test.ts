@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PENDING_DO_NEXT_SIZE,
   PENDING_LIMITS,
+  PENDING_TABS,
   type AttentionCardsResponse,
   type PrAutomation,
   type DailyBriefCounts,
@@ -33,11 +34,11 @@ import {
 import { shouldShowDivider } from '../src/components/Activity/AttentionCards.js';
 import {
   buildPendingView,
-  effectiveMyTurnView,
   effectivePendingTab,
-  MY_TURN_VIEW_LABEL,
-  MY_TURN_VIEWS,
   offerAuthorLens,
+  openPrsButtonCount,
+  openPrsButtonLabel,
+  showsMyTurnHead,
   offerOnlyYours,
   passesAuthorLens,
   passesLens,
@@ -85,30 +86,31 @@ describe('the tab on screen', () => {
   });
 });
 
-// My turn's two views — a client view inside the `my_turn` tab, derived exactly like the tab.
-describe('the view on screen inside My turn', () => {
-  it('is branches only on My turn with branches picked', () => {
-    expect(effectiveMyTurnView('my_turn', 'branches')).toBe('branches');
-  });
-
-  it('is Cards by default, and on every other tab whatever the store holds', () => {
-    expect(effectiveMyTurnView('my_turn', null)).toBe('cards');
-    expect(effectiveMyTurnView('my_turn', 'cards')).toBe('cards');
-    // A hand-edited `?attnTab=deps&attnView=branches` seats both raw; the render derives.
-    expect(effectiveMyTurnView('deps', 'branches')).toBe('cards');
-  });
-
-  it('lists the two views in strip order', () => {
-    expect(MY_TURN_VIEWS).toEqual(['cards', 'branches']);
-  });
-
-  it('⚠ no label carries a figure or says "My turn"', () => {
-    // Count-free: the branches view is trunk status, which is informational. And the e2e suite's
-    // `/My turn/` tab locator must stay unique.
-    for (const label of Object.values(MY_TURN_VIEW_LABEL)) {
-      expect(label).not.toMatch(/\d/);
-      expect(label).not.toMatch(/my turn/i);
+// My turn's head — the "Open PRs" button and the default-branch strip above its cards. It replaced
+// My turn's second view ("Default branches and open PRs"), so it belongs to My turn alone.
+describe("My turn's head", () => {
+  it('heads My turn, and no other tab', () => {
+    expect(showsMyTurnHead('my_turn')).toBe(true);
+    for (const t of PENDING_TABS) {
+      if (t.key !== 'my_turn') expect(showsMyTurnHead(t.key)).toBe(false);
     }
+  });
+
+  it('counts NON-DRAFT open PRs', () => {
+    const prs = [{ isDraft: false }, { isDraft: true }, { isDraft: false }];
+    expect(openPrsButtonCount({ prs }, false)).toBe(2);
+    expect(openPrsButtonLabel(openPrsButtonCount({ prs }, false))).toBe('Open PRs · 2');
+  });
+
+  it('⚠ unknown is never zero: no answer, or the previous workspace’s placeholder, has no figure', () => {
+    expect(openPrsButtonCount(undefined, false)).toBeNull();
+    expect(openPrsButtonCount({ prs: [{ isDraft: false }] }, true)).toBeNull();
+    expect(openPrsButtonLabel(null)).toBe('Open PRs');
+  });
+
+  it('an answered empty workspace is a real 0, and a missing array reads as nothing', () => {
+    expect(openPrsButtonLabel(openPrsButtonCount({ prs: [] }, false))).toBe('Open PRs · 0');
+    expect(openPrsButtonCount({}, false)).toBe(0);
   });
 });
 

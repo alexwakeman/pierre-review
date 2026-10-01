@@ -53,6 +53,35 @@ export const PENDING_LIMITS = {
 } as const;
 
 /**
+ * How many failing check names a Pending card names beside its red CI label — "CI failing: build,
+ * lint and 2 more". The server slices to this and sends the count of every name STORED for that
+ * head (`failingCheckTotal`), so the "and N more" has a denominator of its own. ⚠ Storage has
+ * bounds of its own: a trunk commit keeps at most 20 (the writer's `MAX_FAILING_CHECKS_PER_COMMIT`)
+ * and a PR's sync reads at most 100 contexts, so a total AT a bound is a floor. MEASURED: three
+ * names cover 91% of red PR heads on real data.
+ */
+export const FAILING_CHECKS_SHOWN = 3;
+
+/**
+ * THE ONE SENTENCE a Pending card's detail says while GitHub's merge queue holds its PR — on a
+ * `merge` / `update_branch` card and your own ready PR in My turn (`mergeCardDetail`), on a
+ * Dependencies card (`dependencyStateDetail`), and as the Do next row's `reason`, which the same
+ * two functions build.
+ *
+ * ⚠ A QUEUED PR STAYS ON Ready to land AND Dependencies, and that is why it needs its own words.
+ * GitHub has no QUEUED merge state, so a queued PR reads like any other ('clean' and 'unknown' have
+ * both been seen here); a clean one is minted exactly as before and used to say "Nothing is
+ * blocking this — it can land now" beside the card's queue chip. Time-free, like every card
+ * sentence.
+ *
+ * ⚠ SHARED BECAUSE THE SPA DOES NOT PRINT IT. The card's queue chip (or, for a reader who can push,
+ * its merge row) already says the PR is queued, so the card leaves this sentence out and keeps it
+ * for the ranker (`pendingCardDetail`, Activity/pendingLabels.ts — the `ci_red` precedent). The
+ * SPA recognises it by value, so the value lives here, once.
+ */
+export const MERGE_QUEUE_CARD_DETAIL = 'In the merge queue. GitHub merges it from here.';
+
+/**
  * THE COLOUR RULES — where a kind's severity comes from a threshold rather than a fixed value.
  * `high` renders red, `warn` amber, anything below `warn` blue.
  */

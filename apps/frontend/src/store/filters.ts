@@ -262,11 +262,6 @@ export interface SyncRoundState {
 // negation while `null` (show everything) also has to be a state.
 export type AttentionRelevanceLens = 'mine' | 'others';
 
-// My turn's two VIEWS on the Pending board: 'cards' (the My turn list) and 'branches' (the
-// workspace's default-branch strip + its open PRs, moved off the Feed). A client view inside the
-// `my_turn` tab — NOT a PENDING_TABS member and not an InsightKind.
-export type MyTurnView = 'cards' | 'branches';
-
 // ── The Feed's "new since you looked away" cohorts ────────────────────────────────────────────
 //
 // The cross-repo Activity Feed INSERTS newly-arrived items as they arrive (there is no
@@ -559,20 +554,6 @@ export interface FilterState {
   // a rail change, URL-SERIALIZED (`?attnTab=`) and a NAVIGATION key — a tab is a screen the reader
   // moved to, so Back must be able to leave it.
   attentionTab: PendingTabKey | null;
-  // Which of My turn's two views the reader picked: null = 'cards' (the setter stores 'cards' as
-  // null, so the default has one spelling), 'branches' = "Default branches and open PRs".
-  //
-  // ⚠ DERIVED FOR RENDER by `effectiveMyTurnView` — any other tab shows its cards whatever this
-  // holds — and never written back.
-  //
-  // Transient like its siblings (freshDefaults only, NOT in FilterDefaults, so no
-  // FILTER_STORAGE_VERSION bump). Cleared by a rail change AND by `setAttentionTab` (a tab click
-  // opens that tab's cards), and SEATED to null by `openMyTurnInWorkspace`. URL-SERIALIZED as
-  // `?attnView=branches` (a NAVIGATION key), only on the attention rail while the effective tab is
-  // My turn, with the default omitted.
-  //
-  // ⚠ IT CARRIES NO COUNT: the branches view is trunk status, which is informational.
-  attentionMyTurnView: MyTurnView | null;
   // The cross-repo Feed's "New" markers — see FeedNewCohorts above. Transient, URL-silent,
   // and written ONLY by FeedView's auto-insert path (a batch landed) and its scroll handler
   // (the reader is at the top). Read as a flat id set; never recomputed defensively on render.
@@ -1007,12 +988,9 @@ export interface FilterState {
   /**
    * Show one Pending tab, optionally narrowed to one of its card kinds (a kind chip). ONE write, so
    * the tab and the kind can never disagree for a render: picking a tab clears any kind filter,
-   * and picking a chip names both. The same write clears My turn's view, so picking a tab — My
-   * turn included — opens its cards.
+   * and picking a chip names both.
    */
   setAttentionTab: (tab: PendingTabKey, kind?: InsightKind | null) => void;
-  /** Show one of My turn's two views. 'cards' is stored as null (one spelling of the default). */
-  setAttentionMyTurnView: (view: MyTurnView | null) => void;
   /**
    * THE ONE "show me my turn — over there" navigation, in ONE gesture.
    *
@@ -1031,7 +1009,7 @@ export interface FilterState {
    *  2. `setActivityRepo` also clears the isolation, AND early-returns an empty patch when the
    *     rail id is unchanged — the asymmetry that makes a wrong-ordered caller work on every
    *     second click. (Pinned by attentionIsolation.test.ts.)
-   *  3. Only then are the lenses and My turn's view seated.
+   *  3. Only then are the lenses seated.
    *
    * ⚠ IT SEATS `attentionRelevance: 'mine'` TOO, and that is not decoration. Every caller of this
    * action is a NOTIFICATION surface whose figure is the PERSONAL count (banner line, dropdown
@@ -1043,6 +1021,19 @@ export interface FilterState {
    * throw away a repo narrowing the user chose on the Timeline for no reason at all.
    */
   openMyTurnInWorkspace: (workspaceId: number) => void;
+  /**
+   * A pick in the WorkspaceSelector dropdown: switch to `workspaceId` AND go to Activity → Pending,
+   * landing on My turn. Clears the Timeline's selected PR (it belongs to the workspace
+   * being left); pinned PR / Focus tabs stay. Re-picking the current workspace navigates too.
+   *
+   * ⚠ ONLY the dropdown calls this. `setWorkspace` itself must never navigate: URL hydrate,
+   * Back/Forward, `useWorkspaceSync`'s corrections, PrDetail's "Show in Activity feed" and the
+   * WorkspaceManager all call it and must stay where they are.
+   * ⚠ Every write is synchronous in this one call, so useUrlState pushes ONE history entry.
+   * ⚠ The tab is seated EXPLICITLY: `setActivityRepo` is a no-op when the rail is already
+   * Pending, which would let "Needs fixing" survive.
+   */
+  switchWorkspaceToPending: (workspaceId: number) => void;
   /**
    * Record ONE auto-inserted batch of feed items as a "new" cohort, under `scopeKey`.
    *
@@ -1511,7 +1502,6 @@ function freshDefaults(): FilterData {
     // Every author, like the relevance lens: a lens is only ever seated by a reader's own click.
     attentionAuthorLens: null,
     attentionTab: null,
-    attentionMyTurnView: null,
     // No batch has landed yet — a freshly-opened feed is all equally new, so nothing is marked.
     feedNewCohorts: { scopeKey: null, cohorts: [] },
     botAnalyticsWindow: 'rolling_14',
@@ -1604,7 +1594,6 @@ export type UrlOwnedState = Pick<
   | 'attentionRelevance'
   | 'attentionAuthorLens'
   | 'attentionTab'
-  | 'attentionMyTurnView'
   | 'feedIsolatedPrId'
   | 'prDetailTab'
   | 'feedInnerTab'
@@ -1625,7 +1614,6 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
     attentionRelevance: d.attentionRelevance,
     attentionAuthorLens: d.attentionAuthorLens,
     attentionTab: d.attentionTab,
-    attentionMyTurnView: d.attentionMyTurnView,
     feedIsolatedPrId: d.feedIsolatedPrId,
     prDetailTab: d.prDetailTab,
     feedInnerTab: d.feedInnerTab,
@@ -1724,8 +1712,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   // ⚠ NOT cleared by `setAttentionTab` below — the lens is a question about the whole board.
   setAttentionAuthorLens: (lens) => set({ attentionAuthorLens: lens }),
   setAttentionTab: (tab, kind = null) =>
-    set({ attentionTab: tab, attentionIsolation: kind, attentionMyTurnView: null }),
-  setAttentionMyTurnView: (view) => set({ attentionMyTurnView: view === 'cards' ? null : view }),
+    set({ attentionTab: tab, attentionIsolation: kind }),
   // See the declaration above for the two ordering traps this sequence exists to encapsulate.
   // It deliberately calls the PUBLIC setters rather than one fused `set({...})`: a fused write
   // would be a second definition of what a workspace switch clears, free to drift from
@@ -1746,10 +1733,17 @@ export const useFilters = create<FilterState>((set, get) => ({
     // every author, so a People or Automation lens left on from an earlier visit would open a
     // smaller list than the number. Last, like the two above it.
     s.setAttentionAuthorLens(null);
-    // …and My turn's view, seated to Cards: the banner counts CARDS, and `setActivityRepo`'s
-    // empty patch on an unchanged rail would otherwise let the branches view survive the click.
-    // Never conditional.
-    s.setAttentionMyTurnView(null);
+  },
+  // See the declaration. Public setters, like openMyTurnInWorkspace, so what a workspace switch
+  // clears stays defined once (in setWorkspace).
+  switchWorkspaceToPending: (workspaceId) => {
+    const s = get();
+    s.setWorkspace(workspaceId, null);
+    usePinnedTabs.getState().showActivity();
+    s.setActivityRepo('attention');
+    // null = My turn (the board's default tab), the same value a rail change seats.
+    set({ attentionTab: null });
+    s.clearSelection();
   },
   pushFeedNewCohort: (scopeKey, ids, atTop) =>
     set((s) => {
@@ -2114,8 +2108,7 @@ export const useFilters = create<FilterState>((set, get) => ({
             attentionRelevance: null,
             attentionAuthorLens: null,
             attentionTab: null,
-            attentionMyTurnView: null,
-          },
+                  },
     ),
   setActivityThreadFilter: (st) =>
     set((s) => ({ activityThreadFilter: s.activityThreadFilter === st ? null : st })),
@@ -2154,8 +2147,9 @@ export const useFilters = create<FilterState>((set, get) => ({
     set((s) => ({ expandedDiffHunks: toggle(s.expandedDiffHunks, threadId) })),
   resetAllFilters: () =>
     // Reset only the user-set filters (selection / focus state is preserved);
-    // bumping rangeResetSignal snaps the window back to the default range. The
-    // FilterBar disables this control during focus, so it never runs mid-focus.
+    // bumping rangeResetSignal snaps the window back to the default range. Its one
+    // control ("Clear filters") shows on the Timeline board only — never on a PR Focus
+    // tab, whose bar carries just Events + Bots.
     //
     // ⚠ `workspaceId` is PRESERVED, structurally: it is not in freshFilterDefaults(), and this
     // set() writes a PARTIAL, so the active workspace is untouched. Adding it to
@@ -2270,6 +2264,11 @@ export function buildTimelineSearch(
   // isolate tab must load its subject PR even when the board's scope would hide it), so naming
   // a workspace could not change the response — it would only churn the key, and the request is
   // still bound by accountId. A scope bypass, never a tenancy one.
+  // ⚠ NEVER ADD A FILTER OR DATE PARAM HERE. The Focus tab's Events + Bots controls are applied
+  // CLIENT-side over this unfiltered payload (components/Timeline/isolateFilter.ts): a param would
+  // re-key the query and refetch the PR on every toggle, and a server-side excludeBots would judge
+  // bots by the account's DEFAULT workspace (this request names none), not the PR's own. Pinned by
+  // test/workspaceScope.test.ts.
   if (prIdsOverride && prIdsOverride.length > 0) {
     return `prIds=${prIdsOverride.join(',')}`;
   }

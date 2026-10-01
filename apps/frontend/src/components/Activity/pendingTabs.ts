@@ -12,7 +12,7 @@ import {
   type PendingTab,
   type PendingTabKey,
 } from '@pierre-review/shared';
-import type { AttentionRelevanceLens, MyTurnView } from '../../store/filters.js';
+import type { AttentionRelevanceLens } from '../../store/filters.js';
 
 // THE PENDING BOARD'S VIEW MODEL — which tab is on screen, which cards it lists, where Do next
 // ends, and the counts. Pure and JSX-free so `test/pendingTabs.test.ts` can pin it.
@@ -48,18 +48,28 @@ export function effectivePendingTab(
   return picked ?? 'my_turn';
 }
 
-/** My turn's two views, in strip order. ⚠ NO FIGURE ON EITHER LABEL: the second view is trunk
- *  status + open PRs, and trunk status is a readout, never an alert channel (CLAUDE.md). */
-export const MY_TURN_VIEWS: readonly MyTurnView[] = ['cards', 'branches'];
-export const MY_TURN_VIEW_LABEL: Record<MyTurnView, string> = {
-  cards: 'Cards',
-  branches: 'Default branches and open PRs',
-};
+/** Does this tab open with the My turn HEAD — the "Open PRs" button and the default-branch strip
+ *  above the cards? My turn only; every other tab opens straight onto its own controls and cards.
+ *  (My turn used to split these into a second view, retired with `?attnView=`.) */
+export function showsMyTurnHead(tab: PendingTabKey): boolean {
+  return tab === 'my_turn';
+}
 
-/** THE VIEW ON SCREEN inside My turn — derived, never written back. Any other tab shows its
- *  cards whatever the store holds (a hand-edited `?attnTab=deps&attnView=branches` seats both raw). */
-export function effectiveMyTurnView(tab: PendingTabKey, picked: MyTurnView | null): MyTurnView {
-  return tab === 'my_turn' && picked === 'branches' ? 'branches' : 'cards';
+/** The figure on My turn's "Open PRs" button: the workspace's NON-DRAFT open PRs — the same figure
+ *  the repo-grouped open-PRs panel printed. ⚠ UNKNOWN IS NEVER ZERO: no answer yet, or a
+ *  placeholder carried over from the PREVIOUS workspace (`placeholderData: prev`), is `null`. */
+export function openPrsButtonCount(
+  data: { prs?: readonly { isDraft: boolean }[] } | undefined,
+  isPlaceholderData: boolean,
+): number | null {
+  if (data == null || isPlaceholderData) return null;
+  // `?? []` — a response missing the array reads as "nothing", never a throw (no error boundary).
+  return (data.prs ?? []).reduce((n, p) => n + (p.isDraft ? 0 : 1), 0);
+}
+
+/** "Open PRs · 12", or just "Open PRs" while the count is unknown. */
+export function openPrsButtonLabel(count: number | null): string {
+  return count == null ? 'Open PRs' : `Open PRs · ${count}`;
 }
 
 /** Does this card survive My turn's "Only yours" ('mine') or its complement ('others')?

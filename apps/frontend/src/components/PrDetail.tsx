@@ -26,9 +26,11 @@ import {
   dateTime,
   indexUsers,
   PR_STATE_META,
+  prHeaderCi,
   relativeTime,
   safeExternalUrl,
 } from '../lib/ui.js';
+import { CiDot } from './Activity/BranchStatusChip.js';
 import { Avatar } from './CommentCard.js';
 import { CopyButton } from './CopyButton.js';
 import { UserName } from './UserName.js';
@@ -612,6 +614,8 @@ function PrDetailSkeleton(): JSX.Element {
       <div className="border-b border-gray-200 px-4 py-2 dark:border-gray-800">
         <div className="flex items-center gap-2">
           <SkeletonLine className="h-4 w-12" />
+          {/* The header's CI readout (dot + word) — open PRs, the common case here. */}
+          <SkeletonLine className="h-3.5 w-20" />
           <SkeletonLine className="h-4 w-2/5" />
         </div>
         <div className="mt-2 flex items-center gap-2">
@@ -641,12 +645,24 @@ function PrDetailSkeleton(): JSX.Element {
 const EMPTY_THREAD_STATE_FILTER: Set<DerivedState> = new Set();
 const EMPTY_THREAD_SEVERITY_FILTER: Set<MlSeverity> = new Set();
 
+// Every icon button right of the title wears the TITLE's ink, per theme — one class, so the
+// cluster reads as one set. Refresh's amber stale state is the one exception (it means
+// something). DetailPane's close ✕ wears the same ink.
+export const PR_HEADER_ICON_BTN =
+  'shrink-0 rounded p-0.5 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800';
+
 export function PrDetail({
   prId,
   selectedThreadId,
+  placement,
 }: {
   prId: number;
   selectedThreadId: number | null;
+  /** WHERE it is mounted, decided by the mount site (never re-derived from `activeTab`: the pane
+   *  can stay mounted under an overlay for another PR). `'pane'` = the bottom pane under the
+   *  shared Timeline or a Focus tab; `'fullscreen'` = the pinned PR tab. Required on purpose, so a
+   *  new mount cannot silently inherit the pane's "open full-screen" controls. */
+  placement: 'pane' | 'fullscreen';
 }): JSX.Element {
   const { data: pr, isLoading, error } = usePr(prId);
   // The large-PR flag's two numbers. ⚠ They ride the LEAN LIST payloads, not `/api/prs/:id` — the
@@ -684,6 +700,11 @@ export function PrDetail({
   // remounts. A plain Map mutated in place and read only when a pill MOUNTS, so a click re-renders
   // one pill and never this component.
   const [threadOpenMemory] = useState(() => new Map<number, boolean>());
+  // The header CI readout's "show me" — a nonce ChecksTab consumes by scrolling its Status row
+  // into view, so the click lands there even when Overview is already the tab on screen (the tab
+  // body's scroll container is shared by every tab and never reset). Consumed, not sticky: a
+  // later return to Overview through the tab bar must not re-scroll.
+  const [statusFocus, setStatusFocus] = useState<number | null>(null);
   /**
    * THE ONLY WAY TO CHANGE TABS — every path below goes through this, and the reason is
    * `changesFocus`.
@@ -941,6 +962,8 @@ export function PrDetail({
       // useDailyBrief) so every cached workspace refreshes.
       void qc.invalidateQueries({ queryKey: ['attention-cards'] });
       void qc.invalidateQueries({ queryKey: ['daily-brief'] });
+      // …and the THIRD read of that fold: the three move together (prCacheSync.ts).
+      void qc.invalidateQueries({ queryKey: ['work-plan'] });
     },
   });
   const markedRef = useRef<number | null>(null);
@@ -1039,12 +1062,18 @@ export function PrDetail({
   }
 
   const stateMeta = PR_STATE_META[pr.state];
+  const headerCi = prHeaderCi(pr.state, pr.ciStatus);
   const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
 
   return (
     <PrFocusMetaContext.Provider value={pinnedMetaOf(pr, usersById)}>
     <div className="flex h-full flex-col">
-      <div className="border-b border-gray-200 px-4 py-2 pr-28 dark:border-gray-800">
+      {/* pr-28 leaves room for DetailPane's close ✕; the full-screen tab has none. */}
+      <div
+        className={`border-b border-gray-200 px-4 py-2 dark:border-gray-800 ${
+          placement === 'pane' ? 'pr-28' : ''
+        }`}
+      >
         <div className="flex items-center gap-2">
           <span
             className="rounded px-1.5 py-0.5 text-xs font-semibold text-white"
@@ -1052,40 +1081,78 @@ export function PrDetail({
           >
             {pr.isDraft ? 'Draft' : stateMeta.label}
           </span>
-          {/* The title + the ↗ icon both open this PR full-screen as its own (focused)
-              tab. Opening a tab IS pinning it, so there's no separate pin control. */}
-          <button
-            type="button"
-            onClick={() => openPrDetailTab(pinnedMetaOf(pr, usersById))}
-            className="min-w-0 truncate text-left text-sm font-semibold hover:underline"
-            title="Open full-screen in its own tab"
-          >
-            <span className="text-gray-400">#{pr.number}</span> {pr.title}
-          </button>
-          <button
-            type="button"
-            onClick={() => openPrDetailTab(pinnedMetaOf(pr, usersById))}
-            className="shrink-0 rounded p-0.5 text-blue-500 hover:text-blue-600"
-            title="Open full-screen — this PR in its own tab"
-            aria-label="Open this PR full-screen in its own tab"
-          >
-            <ExternalLinkIcon size={13} />
-          </button>
+          {/* CI, visible from EVERY tab because it lives in the header. It reads `pr.ciStatus` —
+              the synced rollup the Status row, the Timeline bar and the Pending cards read, never
+              the live `checkRuns` — and stays fresh through usePrLiveRefresh's ['pr', prId]
+              invalidation (no fetch of its own). Open PRs only: see `prHeaderCi`. shrink-0, so
+              the title truncates and this never does. The word is an AA grey pair, never the CI
+              hex (yellow on white is 1.92:1); the dot's ring gives green/yellow an edge on white. */}
+          {headerCi != null && (
+            <button
+              type="button"
+              data-testid="pr-header-ci"
+              onClick={() => {
+                goToTab('overview');
+                setStatusFocus((n) => (n ?? 0) + 1);
+              }}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+              title="Show CI status in Overview"
+              aria-label={`${headerCi.label} — show CI status`}
+            >
+              <CiDot
+                status={headerCi.status}
+                size={12}
+                title="Show CI status in Overview"
+                className={
+                  headerCi.status === 'unknown' ? '' : 'ring-1 ring-black/15 dark:ring-white/20'
+                }
+              />
+              {headerCi.label}
+            </button>
+          )}
+          {/* In the PANE, the title + the ↗ icon both open this PR full-screen as its own
+              (focused) tab. Opening a tab IS pinning it, so there's no separate pin control.
+              FULL-SCREEN already is that tab: the title is a plain heading and ↗ is absent. */}
+          {placement === 'pane' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => openPrDetailTab(pinnedMetaOf(pr, usersById))}
+                className="min-w-0 truncate text-left text-sm font-semibold hover:underline"
+                title="Open full-screen in its own tab"
+              >
+                <span className="text-gray-400">#{pr.number}</span> {pr.title}
+              </button>
+              <button
+                type="button"
+                onClick={() => openPrDetailTab(pinnedMetaOf(pr, usersById))}
+                className={PR_HEADER_ICON_BTN}
+                title="Open full-screen — this PR in its own tab"
+                aria-label="Open this PR full-screen in its own tab"
+              >
+                <ExternalLinkIcon size={13} />
+              </button>
+            </>
+          ) : (
+            <h2 className="min-w-0 truncate text-sm font-semibold" title={pr.title}>
+              <span className="text-gray-400">#{pr.number}</span> {pr.title}
+            </h2>
+          )}
           {/* Show on the shared timeline (centre + glow; distinct from Focus Mode). */}
           <button
             type="button"
             onClick={() => openPrFocused(pr.id)}
-            className="shrink-0 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            className={PR_HEADER_ICON_BTN}
             title="Show this PR on the timeline"
             aria-label="Show this PR on the timeline"
           >
             <TimelineIcon size={15} />
           </button>
-          {/* Focus — a blue magnifier that opens this PR's own isolated timeline tab. */}
+          {/* Focus — a magnifier that opens this PR's own isolated timeline tab. */}
           <button
             type="button"
             onClick={() => openPrFocusTab(pinnedMetaOf(pr, usersById))}
-            className="shrink-0 rounded p-0.5 text-blue-500 hover:text-blue-600"
+            className={PR_HEADER_ICON_BTN}
             title="Focus — open this PR in its own isolated timeline tab (the close button on the tab closes it)"
             aria-label="Focus this PR in its own timeline tab"
           >
@@ -1109,7 +1176,7 @@ export function PrDetail({
               setFeedIsolatedPrId(pr.id);
               showActivity();
             }}
-            className="shrink-0 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            className={PR_HEADER_ICON_BTN}
             title="Show this PR in its repo's Activity feed (filtered to this PR)"
             aria-label="Show this PR in the Activity feed"
           >
@@ -1125,11 +1192,11 @@ export function PrDetail({
             type="button"
             onClick={refreshNow}
             disabled={isRefreshing}
-            className={`shrink-0 rounded p-0.5 disabled:opacity-60 ${
+            className={
               isStale
-                ? 'text-amber-500 hover:text-amber-600'
-                : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-            }`}
+                ? 'shrink-0 rounded p-0.5 text-amber-500 hover:text-amber-600 disabled:opacity-60'
+                : `${PR_HEADER_ICON_BTN} disabled:opacity-60`
+            }
             title={
               isStale
                 ? "Couldn't refresh from GitHub — showing the last synced state. Click to retry."
@@ -1144,7 +1211,7 @@ export function PrDetail({
             href={pr.githubUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="shrink-0 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            className={PR_HEADER_ICON_BTN}
             title="Open this PR on GitHub"
             aria-label="Open this PR on GitHub"
           >
@@ -1329,6 +1396,8 @@ export function PrDetail({
               usersById={usersById}
               onShowBotActivity={botTabVisible ? () => goToTab('bot_activity') : undefined}
               onOpenThreads={() => goToTab('threads')}
+              statusFocus={statusFocus}
+              onStatusFocusConsumed={() => setStatusFocus(null)}
             />
             <div className="border-t border-gray-200 dark:border-gray-800">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-1 pt-2">

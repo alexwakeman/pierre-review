@@ -228,8 +228,8 @@ export const pullRequests = pgTable(
     }),
     // GitHub's native merge queue as a SYNCED fact — the pg twin of schema.sqlite.ts, which
     // carries the full argument. In short: MergeStateStatus has no QUEUED member, so a queued
-    // PR is indistinguishable from a protection-blocked one, and the Pending board may not
-    // fetch on mount to find out. ⚠ NULL MEANS "NOT OBSERVED", NOT "NOT QUEUED" — `false` is a
+    // PR reads like any other (its underlying state — 'clean' and 'unknown' have both been seen),
+    // and the Pending board may not fetch on mount to find out. ⚠ NULL MEANS "NOT OBSERVED", NOT "NOT QUEUED" — `false` is a
     // positive statement from GitHub and null is the absence of one. Position and
     // estimatedTimeToMerge stay live-only (volatile, and only the merge control renders them).
     inMergeQueue: boolean('in_merge_queue'),
@@ -814,17 +814,9 @@ export const claudeReviews = pgTable(
     status: text('status', {
       enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
     }).notNull(),
-    model: text('model', {
-      // 'claude-opus-4-8' is no longer offered but stays readable for stored runs. Plain text in
-      // the database (no CHECK, no pg enum), so this list needs no migration.
-      enum: [
-        'claude-opus-5-5',
-        'claude-sonnet-5',
-        'claude-opus-4-8',
-        'claude-sonnet-4-6',
-        'claude-haiku-4-5',
-      ],
-    }).notNull(),
+    // Plain text, NO drizzle `enum:` — a stored run from a retired model keeps its id. See the
+    // schema.sqlite.ts twin.
+    model: text('model').notNull(),
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),
     // Deterministic router decision + inputs, recorded before the agent runs. See
     // the schema.sqlite.ts twin for the full rationale.
@@ -863,6 +855,8 @@ export const claudeReviews = pgTable(
     ticket: jsonb('ticket').$type<ClaudeReviewTicket>(),
     ticketAssessment: jsonb('ticket_assessment').$type<ClaudeTicketAssessment>(),
     followUp: jsonb('follow_up').$type<ClaudeReviewFollowUpRecord>(),
+    // 'manual' | 'auto' — who started the run. Twin of schema.sqlite.ts. Migration pg 0058 (sqlite 0071).
+    trigger: text('trigger', { enum: ['manual', 'auto'] }).notNull().default('manual'),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),

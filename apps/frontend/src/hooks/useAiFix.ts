@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  AiFixMergePreview,
   AiFixPushBody,
-  AiFixRebaseBody,
-  AiFixResolveStatusResponse,
-  AiFixResolveStreamEvent,
   AiFixResponse,
   AiFixStatusResponse,
   AiFixStreamEvent,
@@ -16,6 +12,7 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
+import { invalidateAfterPrWrite } from './prCacheSync.js';
 
 // Query/mutation hooks for the Pro AI Fix tab. Mirrors useClaudeReview; every query's
 // `enabled` is gated on the relevant Pro capability by the caller.
@@ -100,81 +97,12 @@ export function usePushFix(prId: number) {
   return useMutation({
     mutationFn: (vars: { fixId: number; body: AiFixPushBody }) =>
       api.pushAiFix(vars.fixId, vars.body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
-  });
-}
-
-// ---- trunk reconciliation (merge-preview / rebase-resolve / async push) ----
-
-export function useMergePreview() {
-  return useMutation<AiFixMergePreview, unknown, number>({
-    mutationFn: (fixId: number) => api.aiFixMergePreview(fixId),
-  });
-}
-
-export function useStartRebase() {
-  return useMutation({
-    mutationFn: (vars: { fixId: number; body: AiFixRebaseBody }) =>
-      api.startAiFixRebase(vars.fixId, vars.body),
-  });
-}
-
-export function useCancelRebase() {
-  return useMutation({ mutationFn: (fixId: number) => api.cancelAiFixRebase(fixId) });
-}
-
-export function useCancelPush() {
-  return useMutation({ mutationFn: (fixId: number) => api.cancelAiFixPush(fixId) });
-}
-
-// Live progress for a rebase-resolve or async-push job (SSE keyed by fixId). On the
-// terminal `done`, invalidates the ai-fix query so the stored result reloads.
-export function useAiFixJobStream(
-  prId: number | null,
-  fixId: number | null,
-  kind: 'rebase' | 'push',
-  active: boolean,
-): { status: AiFixResolveStatusResponse | null } {
-  const qc = useQueryClient();
-  const [status, setStatus] = useState<AiFixResolveStatusResponse | null>(null);
-
-  useEffect(() => {
-    if (prId == null || fixId == null || !active) {
-      setStatus(null);
-      return;
-    }
-    const ac = new AbortController();
-    let settled = false;
-    const settle = (): void => {
-      if (settled) return;
-      settled = true;
+    onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['ai-fix', prId] });
-    };
-    void sseStream<AiFixResolveStreamEvent>(
-      `/api/pro/ai-fixes/${fixId}/${kind}/stream`,
-      {
-        signal: ac.signal,
-        onEvent: (e) => {
-          if (e.type === 'done') {
-            settle();
-            setStatus({
-              status: e.status,
-              fixId: e.fixId,
-              progress: null,
-              error: e.error ?? null,
-            });
-          } else {
-            setStatus({ status: e.status, fixId: e.fixId, progress: e.progress });
-          }
-        },
-      },
-    ).catch(() => {
-      /* aborted or network error — the ai-fix query still reflects DB state */
-    });
-    return () => ac.abort();
-  }, [prId, fixId, kind, active, qc]);
-
-  return { status };
+      // A push moves the PR's head, CI and mergeability: THE ONE WRITE SET (prCacheSync.ts).
+      void invalidateAfterPrWrite(qc, prId);
+    },
+  });
 }
 
 // Live progress via SSE — pushes each phase/activity change, then a terminal `done`

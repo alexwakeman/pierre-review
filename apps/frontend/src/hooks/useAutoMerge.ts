@@ -1,7 +1,14 @@
 import { useSyncExternalStore } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ArmMergeBody, ArmedMergeListResponse, ArmedMergeRequest } from '@pierre-review/shared';
-import { api } from '../api/client.js';
+import type {
+  ArmMergeBody,
+  ArmedMergeListResponse,
+  ArmedMergeRequest,
+  PrMergeOptions,
+} from '@pierre-review/shared';
+import { api, ApiError } from '../api/client.js';
+import { invalidateAfterPrWrite } from './prCacheSync.js';
+import { ARMED_MERGES_KEY } from './queryKeys.js';
 
 // ---- Auto-merge ("merge when ready") -----------------------------------------------------
 //
@@ -9,7 +16,9 @@ import { api } from '../api/client.js';
 // watcher lands the PR when the blockers clear. The watcher only runs WHILE THE SERVER IS
 // RUNNING, which every surface here says out loud rather than implying a cloud guarantee.
 
-export const ARMED_MERGES_KEY = ['auto-merge'] as const;
+// Defined in the leaf `queryKeys.ts` (prCacheSync.ts needs it too, and this file imports
+// prCacheSync.ts); re-exported so existing importers keep their path.
+export { ARMED_MERGES_KEY };
 
 // How often the cross-PR list is re-read when NOTHING is armed — the query still has to exist
 // (it is what notices a fresh arm from another tab), but nothing is moving.
@@ -221,8 +230,6 @@ export function useArmAutoMerge(prId: number) {
     // longer merely fails to tidy up: it would strand the row in `confirming` forever, behind an
     // armed chip, with an "Arm auto-merge" button offering to arm it a second time.
     onSuccess: (armed) => {
-      // merge-options carries `autoMerge.armed`, which is what the merge control renders.
-      void qc.invalidateQueries({ queryKey: ['merge-options', prId] });
       // SEED the list from the POST's own response — it is the full row, identity and
       // `phase: 'pending_first_check'` included. Without this the progress card only appears
       // on the next poll, i.e. the surface that exists to say "I heard you" would be up to a
@@ -233,14 +240,12 @@ export function useArmAutoMerge(prId: number) {
           ? { requests: [armed] }
           : { requests: [armed, ...prev.requests.filter((r) => r.prId !== armed.prId)] },
       );
-      void qc.invalidateQueries({ queryKey: ARMED_MERGES_KEY });
-      // ⚠ ['attention-cards'] IS DELIBERATELY ABSENT, even though the Pending board now arms from
-      // its own rows. Arming changes nothing that board's response carries — the PR is still
-      // merge-ready and still on it — and the armed row it draws reads `usePrArmedIntent`, a
-      // selector over the list seeded three lines up, so the card updates on the click either way.
-      // `/api/attention` is on the `search` rate tier (it folds getWorkspaceInsights); spending a
-      // round trip there to re-render an unchanged list is a cost with no observable effect. The
-      // MERGE itself does invalidate it — see useMergePr — because that really does retire a card.
+      // THE ONE WRITE SET (prCacheSync.ts), armed list and merge-options (which carries
+      // `autoMerge.armed`) included. The board is in it now too: it used to be left out because
+      // arming changes nothing on the card, but on a merge-queue repo the runner ENQUEUES
+      // shortly after, and every write refetching one set is what keeps the screens agreeing.
+      // Only ACTIVE queries refetch, so a board nobody is looking at costs nothing.
+      void invalidateAfterPrWrite(qc, prId, { armed: true });
       //
       // ⚠ LAST, AFTER THE SEED, AND THE ORDER IS THE POINT. `armControlPhase` reads the intent
       // first and the draft last, so seeding then clearing hands the row straight from the
@@ -248,6 +253,26 @@ export function useArmAutoMerge(prId: number) {
       // and the list has not been seeded yet — the un-pressed button, one render after a
       // successful arm.
       dispatchArmDraft(prId, { type: 'settled' });
+    },
+    // ⚠ A 409 CAN BE A STAMP. The arm route probes the merge queue and, when GitHub says the PR is
+    // already queued, refuses with AlreadyQueued AFTER writing that membership onto the PR row — the
+    // reader pressed "Merge when ready" precisely because their screen did not know. Re-read the
+    // write set so the queue status line replaces the button now, rather than on the next poll.
+    // (The other 409s — StaleBase, NotOpen — cost one harmless refetch.)
+    //
+    // ⚠ AND ONCE THE QUEUE IS SHOWN TO HOLD IT, THE DRAFT GOES. The queue row replaces this control
+    // (hidden on the board, ineligible on the pane), so a draft left at `confirming` would outlive
+    // the button it belongs to and pop "Arm auto-merge" back open on its own the moment GitHub
+    // lets go of the PR — and on the board, a non-idle draft enables the merge-options fetch on
+    // mount. Settled only on the refetched answer's word, never on the 409 alone: StaleBase's
+    // message lives in the confirm panel and must stay readable.
+    onError: (err) => {
+      if (!(err instanceof ApiError) || err.status !== 409) return;
+      void invalidateAfterPrWrite(qc, prId).then(() => {
+        if (qc.getQueryData<PrMergeOptions>(['merge-options', prId])?.mergeQueue?.inQueue === true) {
+          dispatchArmDraft(prId, { type: 'settled' });
+        }
+      });
     },
   });
 }
@@ -258,13 +283,15 @@ export function useDisarmAutoMerge(prId: number) {
   return useMutation({
     mutationFn: () => api.disarmAutoMerge(prId),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['merge-options', prId] });
       // The DELETE removes the row outright (no terminal state to observe), so drop it here
       // too: the progress card must go on the click, not linger until the refetch lands.
       qc.setQueryData<ArmedList>(ARMED_MERGES_KEY, (prev) =>
         prev == null ? prev : { requests: prev.requests.filter((r) => r.prId !== prId) },
       );
-      void qc.invalidateQueries({ queryKey: ARMED_MERGES_KEY });
+      // Disarming also takes a queued PR back out of GitHub's merge queue, which the board shows:
+      // the route stamps `in_merge_queue: false` after that dequeue, so this refetch (the PR row,
+      // the merge control's live read and the board's three reads) is what clears the queue row.
+      void invalidateAfterPrWrite(qc, prId, { armed: true });
       // The chip is going away this render, so any draft hiding behind it must go with it —
       // otherwise cancelling an intent armed in ANOTHER TAB (which reached this one through the
       // polled list, leaving this tab's half-finished draft underneath) replaces the chip with a

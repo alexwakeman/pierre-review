@@ -567,14 +567,16 @@ export const config = {
   // Concurrency is 1: the fixer relies on ambient Claude auth WITHOUT mutating
   // process.env (which would race the review manager), so only one fix runs at once.
   aiFixMaxTurns: intFromEnv('AI_FIX_MAX_TURNS', 40),
-  aiFixBudgetUsd: floatFromEnv('AI_FIX_BUDGET_USD', 3),
+  aiFixBudgetUsd: floatFromEnv('AI_FIX_BUDGET_USD', 5),
   aiFixConcurrency: intFromEnv('AI_FIX_CONCURRENCY', 1),
   // Refuse a fix whose captured patch exceeds this (a runaway diff shouldn't bloat a
   // DB row). ~1 MiB of unified diff is already a very large change.
   aiFixPatchMaxBytes: intFromEnv('AI_FIX_PATCH_MAX_BYTES', 1024 * 1024),
-  // Cap the per-commit conflict-resolution loop during a rebase onto the trunk: each
-  // rebased commit that conflicts gets one resolver pass, up to this many steps, then
-  // we abort the rebase rather than loop forever on a pathological history.
+  // Cap the continue/skip loop of CORE "Update branch from trunk"'s rebase
+  // (coding/merge.ts): a stop with no conflicted file (a commit that became empty) is
+  // continued or skipped up to this many times, then the rebase is aborted rather than
+  // looping forever on a pathological history. Any real conflict aborts at once. The
+  // AI_FIX_ name is historical — it once also bounded AI Fix's (removed) resolver.
   aiFixRebaseMaxSteps: intFromEnv('AI_FIX_REBASE_MAX_STEPS', 10),
 } as const;
 

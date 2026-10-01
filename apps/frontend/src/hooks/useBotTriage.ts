@@ -15,6 +15,7 @@ import type {
 import { api } from '../api/client.js';
 import { ACTIVITY_GC_TIME, workspaceKey } from './useActivity.js';
 import { useProCapabilities } from './useTriage.js';
+import { invalidateAfterPrWrite } from './prCacheSync.js';
 
 // Per-request cap on the workspace-wide resolve: the client chunks a larger reviewed selection into
 // sequential POSTs so a hundreds-of-threads resolve streams progress instead of one multi-minute
@@ -455,17 +456,12 @@ export function useScopeResolveBotThreads() {
       // Same reason for the flagging drill-down: its comment cards and its cluster members both
       // render `derivedState`.
       void qc.invalidateQueries({ queryKey: ['bot-flagging'] });
-      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
-      // Mirror the per-PR resolve hook (usePrWrites.useResolveBotThreads): the Activity
-      // console's acted-on stats, the triage queue, and each affected PR's cached detail
-      // (+ its thread queries) all shift when threads resolve.
-      void qc.invalidateQueries({ queryKey: ['activity'] });
-      void qc.invalidateQueries({ queryKey: ['my-turn'] });
-      void qc.invalidateQueries({ queryKey: ['me'] });
-      void qc.invalidateQueries({ queryKey: ['thread'] });
-      for (const prId of vars.prIds ?? []) {
-        void qc.invalidateQueries({ queryKey: ['pr', prId] });
-      }
+      // Then THE ONE WRITE SET (prCacheSync.ts), the same as the per-PR resolve hook: every
+      // affected PR's own keys, the threads that were ticked (named, because their PRs' details
+      // may not be cached), and the workspace screens (the board's "Unanswered threads" tab
+      // included) swept ONCE for the whole run, not once per PR. On settle, not success — a run
+      // stopped or failed part-way has still resolved the chunks before it.
+      void invalidateAfterPrWrite(qc, vars.prIds ?? null, { threadIds: vars.threadIds });
     },
   });
 }

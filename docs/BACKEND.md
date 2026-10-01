@@ -41,10 +41,13 @@ incremental, fetch loop, cancel, rate limits). In brief:
   `config.syncAdaptive` defaults to **`true` everywhere**). The cron is a **tick**, not a
   cadence — `isDue()` gates each repo by activity bucket (hot <1h→120s, warm <6h→300s,
   cold→900s), and incremental syncs run a conditional REST probe first (a `304` costs no rate
-  limit), with a 30-min floor forcing a re-walk so CI-finish / thread-resolve (which never
-  bump `updatedAt`) stay fresh. **`syncCron`'s default keys off `syncAdaptive`: `*/1`
-  adaptive, `*/5` not** — a `*/5` tick would pin every repo to 5 min and negate the hot
-  bucket, so the two MUST move together. **Landmine: an explicitly-set `SYNC_CRON` wins**, so
+  limit), with a 30-min floor forcing a re-walk. ⚠ The floor walk uses the same `since`
+  window, so it does NOT refresh changes that leave `updatedAt` alone (CI finishing,
+  mergeability computed, a thread resolve); the first two are re-read by the unsettled-PR
+  backstop (`sync/unsettled-prs.ts`, docs/REALTIME-SYNC.md § Post-write settle).
+  **`syncCron`'s default keys off `syncAdaptive`: `*/1` adaptive, `*/5` not** — a `*/5` tick
+  would pin every repo to 5 min and negate the hot bucket, so the two MUST move together.
+  **Landmine: an explicitly-set `SYNC_CRON` wins**, so
   a deployment pinning `*/5` silently keeps the old cadence with adaptive on.
 - **Webhooks are ADDITIVE on top, cloud only** (`POST /api/webhooks/github` →
   `enqueuePrSync`/`syncOnePr`, targeted, seconds). They are NOT the cloud default because an
@@ -103,9 +106,37 @@ substantive-review detection). Only the truly bulky, regenerable text stays
 kept too. That gated text (per-tenant-duplicated) is **hydrated on demand** when a
 PR/thread opens (`sync/hydrate-detail.ts` → `PR_DETAIL_QUERY`, matched by node id/sha) and
 **browser-cached** in IndexedDB (`PersistQueryClientProvider`; `pr`/`thread` queries
-`staleTime:Infinity`; `useDetailCache.ts` invalidates only on a newer feed `updatedAt`).
+`staleTime:Infinity`; `useDetailCache.ts` invalidates on a newer feed `updatedAt`, or when a
+feed fetched AFTER the cached detail reports a different `ciStatus` — CI finishing never bumps
+`updatedAt`. The pass is `reconcileDetailCache(qc)` and the CI test is `ciDetailOutdated`, whose
+time condition is what makes it settle instead of refetching on every feed event; a CI-only change
+invalidates `['pr', id]` but never the PR's threads. Pinned against a real QueryClient in
+`apps/frontend/test/prHeaderCi.test.ts`).
 Migration `0010` makes the two `body` columns nullable (they're now written non-null on
 every sync).
+
+**Post-write settle and the PR change signal.** GitHub finishes a write after it answers: a push
+is attached to its PR asynchronously, mergeability and CI settle later, and none of it bumps
+`updatedAt`. Three in-memory modules close that gap; the contract is
+[docs/REALTIME-SYNC.md § Post-write settle](REALTIME-SYNC.md#post-write-settle):
+
+- `sync/pr-settle.ts` — `schedulePrSettle`, the per-PR re-read ladder (~5/15/45/120s) with the
+  writer's expectations (`headSha`, `headNot`, `notConflicting`, `mergeStateNot`, `ciNot`), and
+  `notePrChangedForPr(s)`, which write routes AWAIT before replying. Its front door for a push is
+  `settlePrAfterWrite` in `sync/resync-after-write.ts` (resync, verify the head inside ~7s, hand
+  off the rest).
+- `sync/unsettled-prs.ts` — the backstop after every walk (merge state stored unknown, CI stuck
+  `pending`) and `noteMergeLanded`'s trunk-moved recheck of a repo's other open PRs.
+- `sync/pr-change-signal.ts` — `notePrChanged`, surfaced as `Repo.lastPrChangeAt` on
+  `GET /api/repos`. Never a `sync_state` cursor.
+
+`persistPr`'s `prev` read now also selects `headSha`, `ciStatus`, `mergeable`, `mergeStateStatus`,
+`reviewDecision`, `inMergeQueue`, `mergeQueueEntryState` and `updatedAt`, and the exported
+`boardVisibleMoved` decides from it whether to call `notePrChanged` once the transaction commits.
+Two rules: ⚠ a first sighting counts ONLY for an OPEN PR (the deep backfill's merged PRs would
+otherwise cascade a refetch on every SPA poll), and ⚠ a moved `updatedAt` counts (it stands in for
+new reviews, comments, replies and commits, which are child rows). The merge-queue pair counts
+only when the response carried it.
 
 ---
 
@@ -286,7 +317,7 @@ author id that is known, is not you, and is not in the global automation set (be
 | S3b | You had the last human word in a thread you opened, and it has gone **`likely_addressed`** | `thread` (`awaitingKind: 'likely_addressed'`) | your comment |
 | S3c | A human **commit** after your last action — new code makes your review stale | `pushed_since` · `pushedSince` (`NewPrBall.kind === 'commits_after'`) | that commit |
 | S3d | In a thread SOMEBODY ELSE opened that you commented in, the newest human comment is someone else's, after your newest comment there, unresolved | `thread_reply` · `threadReplies` (`getThreadTurns`) | that comment |
-| S4 | A finished Claude review with an un-posted actionable finding | `claude_review` · `claudeReviewsToAction` | when the run finished |
+| S4 | A finished Claude review with an un-posted actionable finding, and NO action of yours on the PR since it finished (the ball rule, over the seeds). An AUTO run counts exactly like a manual one | `claude_review` · `claudeReviewsToAction` | when the run finished |
 | S5 | Your newest action on the PR is a **PR-level comment**, and a human commented at PR level after it | `comment_reply` · `commentReplies` | the FIRST such comment (when the ball came back) |
 | S6 | A human **@-mentioned** you on an open PR after your last action on it | `mention` · `mentions` | `pr_mentions.mentioned_at` |
 
@@ -380,6 +411,17 @@ per-finding post route stamps `claude_review_findings.posted_at` and never the p
 test makes the card immortal. Measured: 96 runs / 2 stamped, 287 findings / 62 stamped. Fixed
 CORE-side, because the plugin-side fix heals no already-unstamped run.
 
+⚠ **The Claude card obeys the ball rule too, and it did not until 2026-09-30.** It retired only on
+Claude-Review-internal stamps, so approving the PR (in the pane or on github.com) left it up — real
+cases: PR #335 approved a minute after run 110 finished, PR #19 whose findings were posted as five
+review comments while one ticked finding stayed unposted. `getMyTurn` now filters the SEED rows
+with `lastActionClocks`: a review of any state, review comment, PR comment or own commit at or after
+`finishedAt` discharges it; a bot action never does; a newer run re-summons by its later
+`finishedAt`. The posted-findings rule above still applies as well. An AUTO run (`claude_reviews.trigger
+= 'auto'`) follows the SAME rule as a manual one: the row is account-scoped and the account's own
+workspace setting started it, so there is no author / requested-reviewer test. `trigger` rides the
+card (`MyTurnCard.trigger`) for the "Auto review" chip only — see docs/CLAUDE-REVIEW.md § Auto review.
+
 ### The card must explain itself
 
 "New PR from @x" is true only of S2. A row kept by S3c reads **"You approved · @robin-dunn pushed 2
@@ -434,7 +476,11 @@ same settings apply in every workspace.
   - **`trunk_red` is `direct` in both scopes** (the reader asked for it, so it notifies); `maintained`
     is a display fact that picks the sentence. The landing PR resolves through the same
     `resolveTrunkCommitPrs` as the `ci_failing` trunk arm, and `MyTurnTrunkCard` carries the same
-    four author fields, so the People / Automation lens puts it on exactly one side. It is
+    four author fields, so the People / Automation lens puts it on exactly one side. It also carries
+    the same failing-check pair as the `ci_failing` trunk arm (`failingChecks` /
+    `failingCheckTotal`, read from the red head's `branch_commits` row through
+    `trunkHeadFailingChecks`; null when unknown), looked up by the red head itself, so a direct push
+    with no landing PR is still named. It is
     REPO-grained: `kind === 'my_turn'` no longer implies a PR, and every consumer branches on
     `reason === 'trunk_red'` before treating one as a PR (the scorer, the card renderer, the Pro
     sprint report).
@@ -502,7 +548,13 @@ Card facts, all read off the synced row:
   OBSERVED and fall to `unknown`, never to `ready`. ⚠ **A red build GitHub would still merge is
   `ready`**, not `ci_red`: `unstable` means only NON-required checks are red, and `unstable` is
   mergeable (`READY_MERGE_STATES`, `mergeVerdict`). So a ready dependency PR and a person's `merge`
-  card print one sentence for one state: the `ready` detail IS `mergeCardDetail('merge', mss, 0)`.
+  card print one sentence for one state: the `ready` detail IS
+  `mergeCardDetail('merge', mss, 0, inMergeQueue)`. ⚠ While GitHub's merge queue holds the PR
+  (`inMergeQueue === true`; null claims nothing), every state except `conflicts` and `ci_red` says
+  `MERGE_QUEUE_CARD_DETAIL` ("In the merge queue. GitHub merges it from here.") — the same sentence
+  `mergeCardDetail` gives a queued `merge` / `update_branch` card. Its 4th argument is REQUIRED at
+  every caller (the card emitters, My Turn's `own_ready` seed, this `readyDetail` and both
+  work-plan `reason` sites), or a queued PR's card and its ranked row say different things.
 - `severity`: `high` when a tool's marker or alert names an advisory, `warn` for Dependabot's
   inferred fix with no alert behind it, `info` for a bump.
 - `relevance` (direct / maintained / none, the merge block's three tiers) feeds the ranker weight
@@ -548,6 +600,17 @@ Dependencies-tab membership, so the three cannot disagree. It is read ONCE per f
 - `ci_failing` carries the same four author fields: the viewer on `your_pr`, the LANDING PR's
   author on `trunk`, and none (the people side) when no PR resolved. So the lens has ONE predicate
   for every card, `pendingAuthorSideOf` in `packages/shared/src/pending-rules.ts`.
+- ⚠ **The review standings and the failing-check names are ONE fold** (`foldPrFacts`, which
+  replaced `foldStandings`), called at BOTH sites — the my_turn seed rows (drafts and ultra-stale
+  PRs included) and `openPrs` — so no card can gain one fact and miss the other. The PR-side names
+  come from the newest `ci_status_events` row for the PR's CURRENT head (`db/failing-checks.ts`),
+  used only when that row is red. `prRef` spreads `failingChecks` / `failingCheckTotal` only while
+  the row is red AND its `headSha` equals the head the names were read at; the head itself never
+  reaches the card. The names fold runs only under `{ withFailingChecks: true }`, which
+  `GET /api/attention` alone passes: the daily brief (×12 under rollup), the work plan and the Pro
+  payloads pay for no extra read, and the names never enter a `detail`, a work-plan fact or
+  `insightsHash`. `getBranchStatus` and the trunk arms share ONE trunk reader,
+  `trunkHeadFailingChecks` (`db/branch-queries.ts`).
 - ⚠ **Pending and Reports can disagree on an actor.** The kind seed reaches `resolveActorLanes`
   (measured: 7 events moved lane, from ImgBotApp and orbisai0security), but `github_type = 'Bot'`
   does not, so Copilot's coding agent and `cdp-github-action` are automation on Pending and people

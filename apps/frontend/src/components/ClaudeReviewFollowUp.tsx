@@ -40,9 +40,8 @@ import { api } from '../api/client.js';
 import {
   acCandidateLabel,
   applyAcCandidate,
-  applyJiraTicket,
   browserAcMemory,
-  defaultAcCandidate,
+  fillDraftFromJira,
   fillableJiraTickets,
   unfillableJiraTickets,
   jiraFillNote,
@@ -337,9 +336,10 @@ function JiraFillButtons({
       const ref = fillable.find((t) => t.key === key);
       const site = ref ? jiraSiteOf(ref.url) : null;
       const remembered = readRememberedAcField(browserAcMemory(), site, details.issueType?.id);
-      const pick = defaultAcCandidate(details.candidates, remembered);
-      // Title + description replaced; the criteria only when a field is preselected.
-      onChange(applyAcCandidate(applyJiraTicket(latest.current, details), details.candidates, pick));
+      // Title + description replaced; the criteria only when a field is preselected. The same
+      // fill the Open PRs table's click-to-review runs (`fillDraftFromJira`).
+      const { draft, chosen: pick } = fillDraftFromJira(latest.current, details, remembered);
+      onChange(draft);
       setFilled({ prId, details, site });
       setChosen(pick);
     },

@@ -18,6 +18,56 @@ const { repos, users, branchCommits, pullRequests } = schema;
 // cache); if it ever matters, the fix is a per-repo windowed subquery, not a lower sync window.
 const READ_PR_CAP = 10;
 
+/** The key `trunkHeadFailingChecks` answers under: a sha is unique only WITHIN a repo. */
+export function trunkHeadKey(repoId: number, sha: string): string {
+  return `${repoId}:${sha}`;
+}
+
+/**
+ * THE ONE READER OF A DEFAULT-BRANCH HEAD'S FAILING CHECKS — `/api/branch-status` and the Pending
+ * board's red-trunk cards (ci_failing's trunk arm, the promoted `trunk_red` my_turn card) both read
+ * through it, so the two surfaces cannot name different checks for one red head.
+ *
+ * The head's own `branch_commits` row holds them (written by the branch snapshot in the same
+ * transaction as `repos.defaultBranchCiStatus`). Matched by SHA, NEVER by position: the commit
+ * window is ordered by committer date, and a backdated committer date (a rebase, or a cherry-pick
+ * with --committer-date-is-author-date) can sort the head anywhere in it.
+ *
+ * Account-scoped, one query over the `(accountId, repoId, sha)` unique. The `inArray × inArray`
+ * predicate over-matches (repo A's row for a sha only repo B asked about), so the result is keyed
+ * by the PAIR (`trunkHeadKey`) and only requested pairs are kept. A head with no row — outside the
+ * stored window, or not synced yet — or a green one (NULL) is simply absent: "no names", never
+ * "nothing failed".
+ */
+export async function trunkHeadFailingChecks(
+  accountId: number,
+  heads: { repoId: number; sha: string }[],
+): Promise<Map<string, BranchCheckRun[]>> {
+  const out = new Map<string, BranchCheckRun[]>();
+  if (heads.length === 0) return out;
+  const wanted = new Set(heads.map((h) => trunkHeadKey(h.repoId, h.sha)));
+  const rows = await db
+    .select({
+      repoId: branchCommits.repoId,
+      sha: branchCommits.sha,
+      failingChecks: branchCommits.failingChecks,
+    })
+    .from(branchCommits)
+    .where(
+      and(
+        eq(branchCommits.accountId, accountId),
+        inArray(branchCommits.repoId, [...new Set(heads.map((h) => h.repoId))]),
+        inArray(branchCommits.sha, [...new Set(heads.map((h) => h.sha))]),
+      ),
+    )
+    .execute();
+  for (const r of rows) {
+    const key = trunkHeadKey(r.repoId, r.sha);
+    if (r.failingChecks != null && wanted.has(key)) out.set(key, r.failingChecks);
+  }
+  return out;
+}
+
 /**
  * Default-branch health for every repo in scope: the stored head snapshot plus that branch's
  * recent commits.
@@ -68,7 +118,6 @@ export async function getBranchStatus(
       messageHeadline: branchCommits.messageHeadline,
       committedAt: branchCommits.committedAt,
       ciStatus: branchCommits.ciStatus,
-      failingChecks: branchCommits.failingChecks,
       prNumber: branchCommits.prNumber,
     })
     .from(branchCommits)
@@ -134,18 +183,12 @@ export async function getBranchStatus(
       });
   }
 
-  // The HEAD commit's failing checks, keyed by `(repoId, sha)` over the UNCAPPED rows. Matching by
-  // SHA rather than by position is load-bearing: `commits` below is ordered by committer date and
-  // then CAPPED, and a backdated committer date (a rebase, or a cherry-pick with
-  // --committer-date-is-author-date) can sort the head commit outside the cap — which would give
-  // an empty summary on a repo whose ciStatus says failure. Built from `commitRows` for that
-  // reason, never from the capped list.
-  const failingByRepoSha = new Map<string, BranchCheckRun[]>();
-  for (const c of commitRows) {
-    if (c.failingChecks != null) {
-      failingByRepoSha.set(`${c.repoId}:${c.sha}`, c.failingChecks);
-    }
-  }
+  // The HEAD commit's failing checks, through THE ONE READER the Pending cards use too — matched by
+  // SHA, never by position (see `trunkHeadFailingChecks`).
+  const failingByRepoSha = await trunkHeadFailingChecks(
+    accountId,
+    repoRows.flatMap((r) => (r.headSha != null ? [{ repoId: r.id, sha: r.headSha }] : [])),
+  );
 
   // Consolidate each repo's retained trunk commits into their MERGED PRs. Rows arrive newest
   // first, so groups form in most-recent-commit order; the final per-repo list is then ordered
@@ -215,10 +258,10 @@ export async function getBranchStatus(
         headSha: r.headSha,
         ciStatus: (r.ciStatus ?? 'unknown') as CiStatus,
         // Derived, not a second stored copy: the head commit's own row already holds its failures.
-        // Matched by SHA against the uncapped rows (see failingByRepoSha); no match — a trimmed
-        // head, or nothing synced yet — degrades to the CI label alone.
+        // Matched by SHA (see trunkHeadFailingChecks); no match — a trimmed head, or nothing
+        // synced yet — degrades to the CI label alone.
         failingChecks:
-          r.headSha != null ? (failingByRepoSha.get(`${r.id}:${r.headSha}`) ?? []) : [],
+          r.headSha != null ? (failingByRepoSha.get(trunkHeadKey(r.id, r.headSha)) ?? []) : [],
         lastCommitAt: lastCommitAtByRepo.get(r.id)?.toISOString() ?? null,
         mergedPrs,
       };

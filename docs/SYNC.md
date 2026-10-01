@@ -142,6 +142,17 @@ nothing and stays on the worklist — retried on a later walk, bounded by the pe
 loop. It writes through the same `securityColumnsFor` as `persistPr`, and fills `head_ref_name`
 only where the walk never stored one.
 
+### Unsettled-PR backstop (after EVERY walk, user or scheduled)
+
+`sync/unsettled-prs.ts` `runUnsettledPrBackstop`, fire-and-forget (it never holds the repo's
+slot and never delays the next repo on the scheduled loop), skipped after a cancel. It re-reads
+up to 25 open non-draft PRs whose `mergeable` or `merge_state_status` is stored unknown/NULL
+through the Pending board's batched liveness path (1 point), with one second read ~10s later for
+any still UNKNOWN, and hands at most 5 PRs whose CI has sat `pending` for over 20 minutes to the
+settle ladder. Both changes leave `updatedAt` alone, so no walk would ever re-read them. Free
+when nothing is unsettled; budget-aware; strictly non-fatal. Cooldowns, caps and the reasoning:
+[REALTIME-SYNC.md § Post-write settle](REALTIME-SYNC.md#post-write-settle).
+
 ## Incremental updates (every subsequent sync)
 
 A repo **with** a `lastIncrementalSyncAt` is planned as `mode: 'incremental'`, with
@@ -149,11 +160,15 @@ A repo **with** a `lastIncrementalSyncAt` is planned as `mode: 'incremental'`, w
 re-fetches a small trailing window so events that landed *during* the previous sync
 aren't missed; idempotent upserts make the re-fetch duplicate-free.
 
-> **Why re-walk instead of short-circuiting on `updatedAt`?** GitHub does **not**
-> bump a PR's `updatedAt` for every signal we care about (e.g. a CI run finishing,
-> a review thread being resolved). A naive "skip PRs not updated since last sync"
-> would freeze those signals, so sync deliberately re-walks the whole `since` window
-> each run and lets the idempotent upserts reconcile.
+> ⚠ **The `since` window does not catch changes that leave `updatedAt` alone.** GitHub
+> does **not** bump a PR's `updatedAt` for every signal we care about (a CI run finishing,
+> GitHub finishing its mergeability computation, a review thread being resolved). The walk
+> stops at the first PR with `updatedAt < since`, so a PR whose only change is one of those
+> is never re-read by a walk — the 30-min re-walk floor included, since it uses the same
+> window. Those signals arrive another way: the unsettled-PR backstop after every walk
+> (merge state and stale CI, below), the post-write settle ladder, webhooks on installed
+> repos, and the open PR pane's live refresh
+> ([REALTIME-SYNC.md § Post-write settle](REALTIME-SYNC.md#post-write-settle)).
 
 ---
 
@@ -254,6 +269,10 @@ what `planSync` reads to decide full vs incremental.
   `GET /api/repos/:id/sync-status`.
 - (in `github/rate-budget.ts`) the per-account **rate budget** — `remaining`/`resetAt`
   from the last walk page + any observed hard-limit window.
+- (in `sync/pr-change-signal.ts`) the **PR change signal** — one `lastPrChangeAt` per
+  `(account, repo)`, surfaced on `GET /api/repos`. ⚠ Never a `sync_state` cursor: bumping
+  `lastIncrementalSyncAt` for a targeted change would make the next walk skip every PR updated
+  in between ([REALTIME-SYNC.md § Post-write settle](REALTIME-SYNC.md#post-write-settle)).
 
 ---
 
@@ -292,8 +311,9 @@ resumed on the next sync for an existing repo).
     thrown errors) for the resume time. A classified page failure notes the limit,
     waits via the same gate, then **retries the same page** (cursor unchanged), up to 5
     waits per page before falling through to the real error path. Commit-file fetches
-    stop fanning out on a limited error; adaptive probes and the PR-detail refresh skip
-    cheaply while `isLimited`.
+    stop fanning out on a limited error; adaptive probes, the PR-detail refresh and the
+    unsettled-PR backstop skip cheaply while `isLimited`, and a post-write settle step
+    re-arms 60s later instead of running.
   - **The paused contract**: while waiting, `SyncProgress.paused =
     { reason: 'rate_limit', resumeAt }` rides the normal progress plumbing — status
     stays `running`, and the flag clears the moment the walk moves again.
@@ -338,7 +358,7 @@ All via env (see `config.ts`); defaults in parentheses.
 | `SYNC_CRON` | `*/1` (`*/5` if adaptive is off) | Scheduler **tick**. Under adaptive polling this is not the per-repo cadence — it's how often the due-check runs; the bucket intervals decide what actually syncs. Setting it explicitly overrides the adaptive default, which keeps the old cadence. |
 | `SYNC_ADAPTIVE` | `true` (both modes) | Adaptive cadence + conditional probe ([REALTIME-SYNC.md](REALTIME-SYNC.md) Phase 2) — the primary strategy everywhere, since webhooks only cover repos the App is installed on. `false` restores the fixed-clock re-walk. |
 | `SYNC_HOT/WARM/COLD_INTERVAL_SEC` | `120` / `300` / `900` | Min seconds between attempts per activity bucket (adaptive only). |
-| `SYNC_FLOOR_INTERVAL_SEC` | `1800` | Force a full re-walk this often even when the probe says unchanged — catches CI-finish / thread-resolve, which never bump `updatedAt`. |
+| `SYNC_FLOOR_INTERVAL_SEC` | `1800` | Force a re-walk this often even when the probe says unchanged — bounds how long a quiet repo goes unwalked. ⚠ It uses the same `since` window, so it does NOT catch changes that leave `updatedAt` alone (CI finishing, mergeability computed); the unsettled-PR backstop ([REALTIME-SYNC.md § Post-write settle](REALTIME-SYNC.md#post-write-settle)) does. |
 | `COMMIT_FILE_CONCURRENCY` | `10` | Concurrent commit-file REST fetches per page. |
 | `CI_HISTORY_BACKFILL` | `true` | The one-time post-full-sync CI-history backfill (trunk trend window + synthesized PR CI events). `false` disables both halves. |
 | `DISABLE_SCHEDULER` | `false` | Turn the cron loop off (scripts/tests). |

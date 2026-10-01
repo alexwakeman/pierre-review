@@ -26,6 +26,8 @@
 import {
   PENDING_LIMITS,
   PENDING_TABS,
+  type AttentionCardsResponse,
+  type PendingBoardSnapshot,
   pendingAuthorSideOf,
   type InsightCard,
   type MyTurnCardReason,
@@ -36,9 +38,15 @@ import {
   type ReviewerRoutingCard,
   type User,
 } from '@pierre-review/shared';
-import { inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { db, schema } from './client.js';
-import { mapUser, suggestRoutingReviewers, type BotScope, type getWorkspaceInsights } from './queries.js';
+import {
+  getWorkspaceInsights,
+  mapUser,
+  resolveWorkspaceScope,
+  suggestRoutingReviewers,
+  type BotScope,
+} from './queries.js';
 import { scoreCards, type ScoredCard } from './work-plan.js';
 import { getMyTurnSettings, rankRulesOf } from './my-turn-settings.js';
 
@@ -158,6 +166,9 @@ export async function rankPendingTabs(
   scope: BotScope,
   insights: Awaited<ReturnType<typeof getWorkspaceInsights>>,
   now: number = Date.now(),
+  /** `suggestReviewers: false` skips the CODEOWNERS lookup for the top "Needs a reviewer" cards —
+   *  the Slack digest's path, which must spend no GitHub budget on a cron. Default: on. */
+  opts: { suggestReviewers?: boolean } = {},
 ): Promise<PendingBoard> {
   const byId = new Map(insights.cards.map((c) => [c.id, c]));
   // The reader's weights and type order, read once for the whole board.
@@ -227,7 +238,9 @@ export async function rankPendingTabs(
 
   // Suggested reviewers for the top "Needs a reviewer" cards only — mutates those cards in place.
   const known = new Set(insights.users.map((u) => u.id));
-  const suggested = (await suggestRoutingReviewers(accountId, routingTop)).filter(
+  const suggested = (
+    opts.suggestReviewers === false ? [] : await suggestRoutingReviewers(accountId, routingTop)
+  ).filter(
     (id) => !known.has(id),
   );
   const extraUsers =
@@ -238,4 +251,63 @@ export async function rankPendingTabs(
       : [];
 
   return { tabs, cards: listed, extraUsers, scores, rules: rankRulesOf(settings) };
+}
+
+// ── THE ONE PENDING-BOARD FOLD ──────────────────────────────────────────────────────────────
+//
+// `GET /api/attention` and the Pro Slack digest (`ProHostQueries.getPendingBoard`) both call THIS,
+// so the board a reader opens and the board posted to their channel cannot be two folds:
+// `resolveWorkspaceScope` → `getWorkspaceInsights` UNCAPPED → `rankPendingTabs`.
+//
+// `live: true` is the route: it names the failing checks on red cards and looks up suggested
+// reviewers for the top "Needs a reviewer" cards (a network-backed CODEOWNERS read). The Slack path
+// leaves it off — a cron send may not spend GitHub budget, and neither extra is in its message.
+//
+// ⚠ LIVE STATE, NOT WINDOW-PURE: nothing returned here may enter any payload hash (the sprint
+// report's included), or a send would re-bill every time a card moved.
+export async function buildPendingBoard(
+  accountId: number,
+  workspace: string | number | undefined | null,
+  opts: { live?: boolean; now?: number } = {},
+): Promise<AttentionCardsResponse & { workspaceId: number }> {
+  const live = opts.live === true;
+  const scope = await resolveWorkspaceScope(accountId, workspace);
+  // ⚠ THE UNCAPPED FOLD — the board ranks every card by its Do next score and THEN lists the top
+  // of each kind, so it must see the whole population. `kindTotals` is the same either way, which
+  // keeps each tab's count and the daily brief's line for it one number.
+  const insights = await getWorkspaceInsights(accountId, undefined, scope, {
+    uncapped: true,
+    withFailingChecks: live,
+  });
+  const board = await rankPendingTabs(accountId, scope, insights, opts.now ?? Date.now(), {
+    suggestReviewers: live,
+  });
+  return {
+    workspaceId: scope.workspaceId,
+    cards: board.cards,
+    users: [...insights.users, ...board.extraUsers],
+    tabs: board.tabs,
+    scores: board.scores,
+    // The weights and My turn type order the scores and the order above were built with — what
+    // the board's explanations print, so they describe THIS reader's ranking.
+    rules: board.rules,
+    // Out of every tab and count — listed under My turn with a way back.
+    myTurnDismissed: insights.myTurnDismissed ?? [],
+  };
+}
+
+/** The Pro seam's shape (`ProHostQueries.getPendingBoard`): the board, never live-enriched, plus
+ *  the configuring account's login so a channel reader knows whose "My turn" it is. */
+export async function getPendingBoardSnapshot(
+  accountId: number,
+  workspaceId: number,
+): Promise<PendingBoardSnapshot> {
+  const board = await buildPendingBoard(accountId, workspaceId);
+  const rows = await db
+    .select({ login: schema.accounts.githubLogin })
+    .from(schema.accounts)
+    .where(eq(schema.accounts.id, accountId))
+    .limit(1)
+    .execute();
+  return { ...board, viewerLogin: rows[0]?.login ?? null };
 }

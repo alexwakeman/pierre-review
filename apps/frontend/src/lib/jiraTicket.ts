@@ -126,6 +126,21 @@ export function defaultAcCandidate(
   return (hits.find((c) => EXACT_AC.test(c.name)) ?? hits[0])?.id ?? '';
 }
 
+/**
+ * A whole fill, the ONE way both callers do it — the panel's "Fill from KEY" (over the reader's
+ * current draft) and the Open PRs table's click-to-review (over an empty one): title and
+ * description replaced, then the criteria from the preselected field (`defaultAcCandidate`), or
+ * left as they were when nothing is preselected. `chosen` is that field's id, '' for none.
+ */
+export function fillDraftFromJira(
+  draft: TicketDraft,
+  details: JiraTicketDetails,
+  remembered: string | null,
+): { draft: TicketDraft; chosen: string } {
+  const chosen = defaultAcCandidate(details.candidates, remembered);
+  return { draft: applyAcCandidate(applyJiraTicket(draft, details), details.candidates, chosen), chosen };
+}
+
 const PREVIEW_CHARS = 60;
 
 /** The dropdown's option text: "Name (customfield_123) — first words of the value…". */

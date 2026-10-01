@@ -144,7 +144,9 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
 ### UI regions (`App.tsx`)
 
 - **FilterBar** — the scope row is **`WorkspaceSelector` + `GlobalSearch`, which show on EVERY
-  view**; everything else, `RepoSelectPanel` included, is Timeline-only.
+  view**; everything else, `RepoSelectPanel` included, is Timeline-only — with ONE exception: a
+  pr-focus tab also shows exactly two controls, Events (`EventSelectPanel`: categories + review
+  verdicts) and a "Hide bots" pill (see below).
   - **`WorkspaceSelector`** (was `TeamSelector`) is a **single-select RADIO list** — no "All
     repos", no "All Teams", no "No team", no checkboxes, no `toggleTeam`. Default first (badged
     "Default"), then the rest by name, each with its repo count; the trigger label is the active
@@ -184,7 +186,22 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
     (`isTimeline = activeTab === 'timeline'`): Members (auto-scoped, exclude-bots toggle), range
     presets (7/14/30/90d/custom) + a **Now** action (`timelineCenterAt`), event categories,
     derived-state tags, and the right-hand Clear-filters cluster. Activity, Insights,
-    PR-detail/focus tabs and every drill-down keep just the scope row. The filter STATE persists
+    PR-DETAIL tabs and every drill-down keep just the scope row. A **pr-focus tab** adds EXACTLY
+    TWO controls: Events (`EventSelectPanel`) and a **"Hide bots"** pill, bound to the shared
+    `excludeBots` with `aria-pressed` = bots hidden (the same polarity as the Members panel's
+    "Exclude bots" checkbox). While `allowedBotIds` is non-empty it reads "Hide bots (except N)",
+    because Focus honours the allow-list. Whether they show is decided by `boardSlotMode(activeTab,
+    tabs)` (`store/pinnedTabs.ts`, pinned in `test/isolateFilter.test.ts`), the SAME resolver App
+    uses for the board slot, so a stale focus key never shows Focus controls over the board. They
+    are the SHARED store fields and URL keys (a choice made in Focus applies on the board, and
+    back), and the isolate Timeline applies them CLIENT-SIDE over its unfiltered `prIds=<id>`
+    payload (`components/Timeline/isolateFilter.ts`; see *Focus is a TAB* below). Nothing else
+    renders in Focus: Repos, Status and Range cannot change a single-PR view, Members and Threads
+    are not applied there, and Now would leave the tab. In Focus the FilterBar's and the isolate
+    instance's `useSearchTimeline` are idle (`enabled`). ⚠ The shared board's `useTimeline()`
+    stays LIVE in Focus on purpose: `useKeyboard`'s observer keeps the board payload cached for the
+    way out. Idling it made the pane's "Show on timeline" from Focus land on nothing after any
+    toggle. The filter STATE persists
     (reachable again from the Timeline tab); the Activity console's queries never send
     `userIds` or the FilterBar's exclude-bots toggle/allow-list anyway (its bot control is the
     feed's bot-lens pills — whose 'hide', the DEFAULT, rides the feed route's own `excludeBots`
@@ -262,7 +279,10 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   URL/localStorage-persisted; a reload drops them): `metrics-detail`, `bot-prs`, `open-prs`
   (**THE consolidated open-PR view** — the shared `OpenPrsTable` over `GET /api/open-prs`:
   age/author/LoC/untouched-threads/CI/approval columns, drafts included with a "· N drafts"
-  callout. Reached from BOTH the Feed pane's per-repo "Show all" footers (repo scope) AND the
+  callout; plus a **Claude review** column ONLY with the `claudeReview` capability — one batched
+  `POST /api/claude-review/states` for every listed row, click-gated starts sharing the tab's
+  mutation key, every control `stopPropagation` ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Starting
+  from the Open PRs tab). Reached from BOTH the Feed pane's per-repo "Show all" footers (repo scope) AND the
   Flow-metrics "Open PRs" tile (`openOpenPrsDetail('feed')` = whole workspace, "All repos"
   chip, plus a LOCAL `MetricRepoFilter` that must never write `filters.repoIds`) — the old
   `MetricsDetail` `open_prs` sub-tab is GONE. Its fetch goes through `scopedOpenPrsSearch`,
@@ -338,8 +358,28 @@ Key behaviors to know about:
   chip. **Landmine:** an isolate-tab
   range-preset/window effect must be inert (`if (embeddedPrId != null) return`) or a date-preset
   click overrides the
-  boot fit. **Known gap:** a PR merged >90d ago is outside the isolate fetch window → can't
-  isolate (the boot `selectPr`s it so the pane still shows).
+  boot fit. The by-id fetch has NO date window (`buildTimelineSearch` sends `prIds` alone and
+  `getTimeline`'s pr-scoped branch has no date predicate), so a PR of any age isolates.
+  **Focus filters are client-side.** `isolateEvents` (`Timeline/index.tsx`) is a constant `null` on
+  the shared board, so the board never rebuilds extra. On a Focus tab it is the subject PR's events
+  that pass `makeIsolateEventFilter`: categories via `categoriesToTypes`; a narrowed `reviewStates`
+  drops a `review_submitted` whose `reviewState` is null or unselected (the server's `EXISTS`);
+  `excludeBots` drops a bot actor under the UNION verdict of the PR's OWN workspace
+  (`lib/unionBot.ts` + `hooks/useUnionBotVerdict.ts`, enabled only in isolate), keeps NULL actors,
+  and honours `allowedBotIds`. It drives the rows (`rowEvents`), the markers (`rebuildMarkers`
+  skips its category gate on this path) and the PR bar's comment glyph. A toggle re-applies ONLY
+  through the heavy rebuild's scroll-anchor capture/restore: no `setWindow`, no scroll write, no
+  re-entry into `enterPrFocus`. The boot fit spans ALL events, so a toggle never refits.
+  ⚠ The keep-set (`isolateKeepGroupIds`) is RECOMPUTED on every rebuild via
+  `focusSubgroups` + `focusRows` and always contains the author's row, so it is never empty
+  (`applyContext` reads empty as "no focus"); the old boot-once keep-set hid anyone who first
+  appeared after boot, your own reply included. ⚠ **The magnifier-targeted event ALWAYS shows.**
+  `timelineFocusEvent` is SUBSCRIBED and resolved during render by `matchFocusEvent` (the same
+  resolver the `timelineFocusPr` consumer uses), then LATCHED for the tab's life, so the rebuild
+  draws its marker in the commit the consumer centres and glows it. ⚠ The `timelineFocusPr`
+  consumer waits for the first payload in BOTH modes, and on the board, when the PR is not in
+  `data`, for the member-agnostic search payload's first answer: a board re-keyed out of a Focus
+  tab can mount either one cold, and consuming then threw the focus away.
 - **Vertical scroll is GATED — route every programmatic scroll through it.** vis
   virtualizes rows (`timeline.focus()` can't reach off-screen stubs), so all programmatic
   scrolling drives the `.vis-vertical-scroll` panel via `setVisScrollTop`. Several
@@ -418,11 +458,42 @@ Key behaviors to know about:
   overlay (passive `scroll` listener + `timeline.on('changed')` + `resize`, all torn down
   on unmount); hides when the real header is already visible (no double header).
 - The timeline endpoint stays lean — the selected PR is never filtered out (force-shown if a
-  filter would hide it); detail loads only on selection.
+  filter would hide it); detail loads only on selection. On a pr-focus tab the same rule holds one
+  level down: the Focus filters never hide the event a magnifier deep-linked to.
 
 ### PR detail (`PrDetail.tsx`)
 
-Header carries **Show** + **Focus** links (drive the timeline). Tabs (Overview / Threads /
+**`placement: 'pane' | 'fullscreen'` is a REQUIRED prop**, set by the mount site (DetailPane →
+`'pane'`, the `pinned-pr-overlay` in App.tsx → `'fullscreen'`), never re-derived from `activeTab`
+(the pane can sit mounted under an overlay for another PR). Only the pane (shared Timeline AND a
+Focus tab) offers "open full-screen": the ↗ button and the clickable title. Full-screen renders the
+title as a plain `<h2>`. Every icon button right of the title (↗, Show on timeline, Focus, Feed,
+Refresh, GitHub) and DetailPane's ✕ wear ONE ink, `PR_HEADER_ICON_BTN` (gray-900 / dark gray-100,
+the title's colour); Refresh's amber stale state and the Stalled / Auto-merge / new-since chips keep
+their colours because they mean something. Pinned in `test/prDetailPlacement.test.ts`.
+
+**Overview → Branch** (`PrBranchLine` in ChecksTab, just above Ticket): the head branch in
+monospace, a muted `→ base`, and a `CopyButton` for the HEAD name only (bare, no fork owner — sync
+does not know the owner). `PrDetail.headRefName`/`baseRefName` come from synced columns; a null head
+omits the row. Long names `break-all`. Pinned in `test/prBranchRow.test.ts`.
+
+Header carries **Show** + **Focus** links (drive the timeline) and, on OPEN PRs only, a **CI
+readout**: a 12px `CiDot` plus its word (`prHeaderCi(state, ciStatus)` in `lib/ui.ts`, pinned by
+`test/prHeaderCi.test.ts`: the `CI_META` label, or a hollow ring with "No checks" for `unknown`).
+It sits between the state chip and the title, `shrink-0`, so it shows on every tab and the title
+truncates first. ⚠ It reads `pr.ciStatus`, the synced rollup the Status row, the Timeline bar and
+the Pending cards read, never the live `checkRuns`. ⚠ Merged/closed PRs get nothing, because
+`ci_status` is FROZEN at the merge instant (real merged rows still say `pending`). The word is an
+AA grey pair, never the CI hex; filled dots get a thin edge ring so green and yellow hold on white.
+It is a `<button>` (`data-testid="pr-header-ci"`): the click runs `goToTab('overview')`, then
+scrolls Overview's Status row into view AND moves focus to it (a `tabIndex={-1}` wrapper with a
+focus-visible ring, so a keyboard or screen-reader user lands where the button said). That goes
+through a one-shot `statusFocus` nonce that `ChecksTab` uses once and clears, so coming back to
+Overview later does not jump. It adds no fetch of its own: it stays fresh through
+`usePrLiveRefresh`'s `['pr', prId]` invalidation, and `useDetailCacheReconciler` now also
+invalidates `['pr', id]` (never its threads) when the most recently fetched timeline/open-PRs feed
+carries a different `ciStatus` and was fetched after the detail (`ciDetailOutdated`) — CI finishing
+never bumps `updatedAt`. Tabs (Overview / Threads /
 Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claude Review / AI):
 - **Overview** — `ChecksTab.tsx`: CI/checks (each Actions check expands into the inline log
   viewer — see **Merge, CI logs & trunk status**), the **merge verdict** line (open PRs only,
@@ -674,7 +745,7 @@ past the pane's right edge while the file header stopped at it. Now:
   line, off-screen to the right.
 - **One value for every mount**: `hooks/useDiffWrap.ts` is a `useSyncExternalStore` over
   localStorage (`pierre:diffWrap`), not `useLocalStorage` — that hook is per-INSTANCE, and the toggle
-  (`DiffWrapToggle`, in the Changes tab header and beside both AI Fix diffs) is not the component
+  (`DiffWrapToggle`, in the Changes tab header and beside the AI Fix diff) is not the component
   that reads it. Never the filter store: a filter reset must not move the furniture.
 
 #### Inline thread indicators in the diff + per-file state rollups
@@ -1770,10 +1841,50 @@ says it, and the verdict line printed it a second time. `DependencyActions` rout
 state to `PendingConflictActions`, which reads the CARD's own `viewerCanPush` (a Dependencies card
 is not write-gated, unlike the `conflicts` kind), and everything else to `PendingMergeActions`.
 
-⚠ **A QUEUED CARD IS THE ONE EXCEPTION, AND IT SUBTRACTS.** When the card's synced `inMergeQueue`
-is `true`, GitHub owns the landing: Merge and Merge-when-ready are HIDDEN (pressing either is
-meaningless), `MergeControl` is relabelled "Merge queue" so **Remove-from-queue survives**, and the
-verdict line is suppressed — the header's queue chip already said it.
+⚠ **A QUEUED CARD IS THE ONE EXCEPTION, AND IT SUBTRACTS.** When GitHub's merge queue holds the
+PR, GitHub owns the landing: Merge and Merge-when-ready are HIDDEN (pressing either is meaningless)
+and `MergeControl` renders the queue STATUS LINE ("In the merge queue · running checks";
+"Leaving the merge queue" for an ejection) and "Remove from queue", COLLAPSED, with no Merge
+trigger. ⚠ **On the board the line carries NO position or time** (`showQueuePosition={false}` →
+`mergeQueueStatus(…, {withPosition: false})`): nothing there refetches merge-options, so a cached
+position is an earlier click's answer printed as current, and whether one was cached decided
+whether the card read "position 2 · ~12 min" or not — the same card said different things before
+and after a reload. The PR pane keeps position and time (its answer is live).
+
+- **Membership is RESOLVED, not read off the card.** `mergeQueueStatus` (`Activity/pendingLabels.ts`)
+  weighs the card's synced `inMergeQueue`/`mergeQueueEntryState` (timed by the board query's
+  `dataUpdatedAt`) against the CACHED merge-options answer (never a fetch); the newer wins, a tie
+  goes to the live answer, and a synced `null` claims nothing. The row's verb and verdict follow
+  that resolved membership (`pendingMergeGate` re-run with it when it overrules the card). The
+  verdict line is suppressed.
+- ⚠ **THE CARD SAYS IT ONCE.** It used to say it three times in two vocabularies: the header chip
+  ("Merge queue · running checks"), the server's sentence ("In the merge queue. GitHub merges it
+  from here.") and the row ("In the merge queue · awaiting checks"). Now: ONE word table
+  (`QUEUE_STATE_WORDS` → `QUEUE_STATE_LABEL`, so on the board the row's line IS the chip's label);
+  the sentence is left off the card (`pendingCardDetail` / `depStateSentence` — the server keeps it
+  for the Do next `reason`, the `ci_red` precedent); and the header chip (`PendingQueueChip`) steps
+  aside where the card's merge row prints the line (`useMergeRowStatesQueue`, the row's OWN read via
+  `useMergeRowQueued`). It stays for a reader without push access (no row) and while an armed intent
+  owns the row. `mergeRowCardOf` names the card whose row a card renders and MUST mirror the
+  renderers (pinned in `pendingCardControls.test.ts`), or the chip would vanish over a row that says
+  nothing. The type/state chips are suppressed on a queued card (`forwardStateChip`,
+  `depStateChip`, and `myTurnTypeChip` on an `own_ready` My Turn card). An armed intent the runner
+  has already queued shows no armed headline: the armed chip beside it ("In the merge queue" +
+  "Cancel & dequeue") says it.
+- ⚠ **The old relabelled "Merge queue ▾" trigger kept its status text inside the EXPANDED panel**,
+  and whether the panel is open is per-mount state, so any remount (navigate away and back) showed
+  a Merge button — the reported bug. The queued row now renders whether or not the panel is open.
+- `MergeControl` and `MergeWhenReadyControl` take `inMergeQueue` / `mergeQueueEntryState` /
+  `syncedAt` on BOTH mounts (`ChecksTab` passes `pr.*` + `useQueryDataUpdatedAt(['pr', id])`, a
+  cache read that adds no observer; pinned by a source scan and a render test in
+  `test/mergeControlQueued.test.ts`). A newer live answer that disagrees fires
+  `useQueueDisagreementRepair` once per answer: `['pr', id]` plus the workspace sweep only
+  (`skipPrIds` covers this PR and every recently written one). Enqueue and dequeue share
+  `mergeQueueMutationKey(prId, verb?)`, so "Removing…" shows on both mounts. An AlreadyQueued 409 on
+  arm refetches the write set and settles the arm draft once the refetched merge-options says
+  queued.
+
+The rest of the row, queued or not:
 
 - ⚠ **NOTHING ON THE BOARD FETCHES ON MOUNT.** `MergeWhenReadyControl` fetches merge-options
   EAGERLY (`useMergeOptions(prId, true)`, ~3 GitHub calls per PR); fifty cards mounting it is 150
@@ -1803,10 +1914,10 @@ verdict line is suppressed — the header's queue chip already said it.
   (2) an ARMED intent, whose live phase is `armedPhaseHeadline` (all thirteen `ArmedMergePhase`
   members, `queued` ≠ `queued_local`); (3) the synced verdict, as before. The manual line OUTRANKS
   the armed one: an armed intent describes what will happen later, a live POST describes now.
-  ⚠ Both new reads are CACHE reads — GitHub's merge-queue POSITION and ETA stay off the card,
-  because those two are still unsynced by design (they change minute to minute) and reachable only
-  through the click-gated merge-options call. MEMBERSHIP and ENTRY STATE are a different matter:
-  see below.
+  ⚠ Both new reads are CACHE reads — GitHub's merge-queue POSITION and ETA stay off the card's
+  wire, because those two are still unsynced by design (they change minute to minute) and reachable
+  only through the click-gated merge-options call; the queued row prints them only when that answer
+  is already cached. MEMBERSHIP and ENTRY STATE are a different matter: see below.
 
 ### The `conflicts` card — the third merge-state kind, and the one with exactly one button
 
@@ -1906,23 +2017,25 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   `attentionTab` (`?attnTab=`, a NAV key); else My turn. Clicking a tab is ONE write that seats the
   tab and clears the kind (`setAttentionTab`). Old `?attn=<kind>` links land on the right tab with
   that chip selected.
-- **My turn has TWO VIEWS** (`MY_TURN_VIEWS` / `effectiveMyTurnView`, `pendingTabs.ts`): **Cards**
-  (the default; everything this section describes) and **Default branches and open PRs**
-  (`BranchesAndOpenPrsView`: `BranchStatusPanel` + `FeedOpenPrsPanel`, moved off the Feed). The
-  state is `attentionMyTurnView` (`'cards'|'branches'|null`; the setter stores 'cards' as null). It
-  is transient, `freshDefaults()` only, not in `FilterDefaults` (no storage bump) and in
-  `UrlOwnedState`. It is cleared by a rail change and by `setAttentionTab` (a tab click opens its
-  cards). `?attnView=branches` is a NAV key, emitted only on the attention rail while the EFFECTIVE
-  tab is My turn; the default is omitted and only the literal seats it. ⚠ **Nothing on the default
-  view fetches for it**: the panels mount only while the view is open, both reads share existing
-  cache entries (the rail's `useBranchStatus()`, the workspace-wide open-PRs key), and trends stay
-  lazy per row. ⚠ **COUNT-FREE**: trunk status is informational, so neither label carries a figure,
-  and nothing the panels read reaches a badge, `myTurn`, the scorer, the liveness sweep or a
-  notification. ⚠ `openMyTurnInWorkspace` SEATS Cards (`setAttentionMyTurnView(null)`, after
-  `setActivityRepo`, never conditional). Each slot is a placeholder while pending (idle included),
-  "Couldn’t load …" on failure, a sentence on an answered empty ("No default branch has synced
-  yet.", "No open PRs in this workspace."), else its panel. Open PRs now opens by default; the
-  choice is remembered (`pierre:feedOpenPrsPanel`, a name kept on purpose).
+- **My turn's HEAD — My turn ONLY** (`showsMyTurnHead`, `pendingTabs.ts`; `Activity/MyTurnHead.tsx`):
+  an **"Open PRs · N"** button (`OpenPrsButton`) at the top left, then the default-branch strip
+  (`DefaultBranchesSlot` → `BranchStatusPanel`), then the tab's controls and cards. No other tab
+  renders either. It REPLACED My turn's second view ("Default branches and open PRs",
+  `attentionMyTurnView` / `effectiveMyTurnView` / `MY_TURN_VIEWS` — all DELETED, 2026-10-01). The
+  button's N is the workspace's NON-DRAFT open PRs off `useWorkspaceOpenPrs`
+  (`openPrsButtonCount`); ⚠ **unknown is never zero** — no answer yet, or the PREVIOUS workspace's
+  `placeholderData`, prints "Open PRs" with no figure. A click runs `openOpenPrsDetail('feed')`, the
+  workspace-wide drill-down. The repo-grouped `FeedOpenPrsPanel` is **NOT MOUNTED** anywhere now (the
+  file and its `pierre:feedOpenPrsPanel` choice are kept). ⚠ **NO NEW REQUEST**: the strip's
+  argument-less `useBranchStatus()` is the SAME cache entry the rail reads at boot, and the open-PRs
+  key is shared with `FeedIsolationBanner` / `OpenPrsDetail`; it mounts once per board, never per
+  card, and trends stay lazy per row. ⚠ **COUNT-FREE**: nothing it reads reaches a badge, `myTurn`,
+  the scorer, the liveness sweep or a notification. The strip's slot is a placeholder while pending
+  (idle included), "Couldn’t load the default branches." on failure, "No default branch has synced
+  yet." on an answered empty, else the panel. ⚠ **`?attnView=branches` shipped**: it is still
+  parsed and IGNORED (lands on My turn, or on whatever `attnTab` names), never emitted, and is no
+  longer a NAV key — dropping it from a legacy URL replaces the entry. Never persisted, so no
+  storage bump (`attentionIsolation.test.ts` pins a blob carrying it still restoring).
 - **Removed with the cross-kind head**: `doNextIds`, the "already in Do next" chip, the header "My turn"
   pill (the tab replaces it), `AttentionIsolationBanner` (the selected tab and chip say the same
   thing on the board itself) and the spread/superseded explanations. The Pro plan still picks its
@@ -1979,13 +2092,29 @@ card passes no map and keeps the old positive-claim-only chip. A branded chip ta
 `vendorInk`. On a `ci_failing` trunk card the landing-PR line carries the byline of the landing PR
 (`landingPrByline`).
 
+**A red CI label names the failing checks.** `PrMetaRow` draws CI through `CiStatusWithChecks`
+(the dot, the label and, beside a RED label only, the names): "CI failing: build, clippy, lint and
+2 more". Names come from the card's optional `failingChecks` / `failingCheckTotal`, comma-joined
+with no "and" between names (a check is often called "Build and test"). The names span truncates
+(`min-w-0`); "and N more" never does and is never only a tooltip. They are third-party text,
+rendered as plain text nodes. `FailingChecksLine` (the `ci_failing` body, below) and
+`CiStatusWithChecks` draw the names through one private `FailingCheckNames`, with the pure
+`failingChecksParts` beneath. ⚠ **REAL SPACES between the runs**: the label, the names span and
+the "and N more" span each have a `{' '}` text node between them. A flex `gap` is paint, not text,
+so without it copied text and screen readers read "CI failing:build" / "lintand 2 more"; a
+whitespace-only run between flex items is not rendered, so the layout is unchanged.
+`test/failingChecksText.test.ts` pins the rendered textContent of both components, not a helper
+string. No names is NOT "0 failing": the label renders alone. The Search card's hand-adapted
+`PrMetaFields` carries neither optional field and renders the label alone.
+
 **A Dependencies card** (`renderCard`'s `case 'security': case 'dependency_bump':`): the header
 label (`cardKindLabel`: "Security fix", "Likely security fix" for Dependabot's INFERRED fix — never
 "Security fix" above a card that cannot back it, and it carries no fix sentence either, the why lives
 in the info popover — "Security alert", "Dependency update"), the meta row with its byline, the
 review row, the state chip (`DEP_STATE_LABEL`; none for `conflicts` or `needs_review`, whose sentence
 already says it, `ci_red`, or `unknown`) with the state sentence (`depStateSentence`; none for
-`ci_red`, which the meta row's CI dot already says), then, on a `security` card, `SecurityDetail`:
+`ci_red`: the meta row already says CI failing and, when it knows them, names the failing checks),
+then, on a `security` card, `SecurityDetail`:
 
 - the fix sentence and each alert row ("Socket flagged GHSA-… and 2 more"), behind a `ShieldIcon`.
   ⚠ **EACH ADVISORY ID IS WRITTEN ONCE**: an id a sentence names is linked INSIDE that sentence
@@ -2081,20 +2210,32 @@ nobody has touched a PR since it appeared, because the ball arrived when it open
 
 ### What the card carries about the merge queue and the review
 
-Both were added because the board **may not fetch on mount** — a fact the reader needs on fifty
-rows has to arrive with the rows.
+These ride the card because the board **may not fetch on mount** — a fact the reader needs on
+fifty rows has to arrive with the rows.
 
 - **`inMergeQueue` + `mergeQueueEntryState` are SYNCED columns** (`InsightPrRef`, and `PrDetail`
   for the pane). Position and estimated-time-to-merge are NOT, and stay on the lazy
   `…/merge-options` fetch. ⚠ **THREE STATES**: `true` / `false` are positive statements from
   GitHub; `null` is NOT OBSERVED and renders NOTHING — never "not queued". They exist because
-  GitHub's `MergeStateStatus` enum has no QUEUED member, so a queued PR reports `blocked` and every
-  merge surface without these two offers a button GitHub will refuse.
+  GitHub's `MergeStateStatus` enum has no QUEUED member, so a queued PR reads like any other merge
+  state ('clean' and 'unknown' have both been seen here), and every merge surface without these
+  two offers a button GitHub will refuse.
 - ⚠ **`unmergeable` is the member that earns the state column**: GitHub is EJECTING the entry, the
   thing a reader could previously only discover by pressing Merge and reading the failure.
-  `pendingQueueBadge()` (exported from `Activity/AttentionCards.tsx`) is the ONE place those five
-  sentences live — the PR pane's Overview row IMPORTS it. Two copies is how one screen calls an
-  ejection "in the merge queue".
+  `pendingQueueBadge()`, `QUEUE_STATE_LABEL`/`QUEUE_STATE_TITLE` and the merge-row resolver
+  `mergeQueueStatus()` (all in `Activity/pendingLabels.ts`, re-exported from `AttentionCards` —
+  moved to break the `MergeControl` ↔ `AttentionCards` cycle) are the ONE place those sentences
+  live — the PR pane's Overview row imports `pendingQueueBadge`, and both merge controls import
+  `mergeQueueStatus`. Two copies is how one screen calls an ejection "in the merge queue".
+- A queued card's server detail is `MERGE_QUEUE_CARD_DETAIL` (now in `packages/shared`
+  `pending-rules.ts`, because the SPA recognises it to leave it off), and the same sentence is the
+  Do next `reason`: one builder, `mergeCardDetail(…, inMergeQueue)`, whose `inMergeQueue` argument
+  is REQUIRED so a new caller cannot forget it. A Dependencies card's server sentence says it too
+  (`dependencyStateDetail`), except for `conflicts` and `ci_red`.
+- **Failing check names** — every `InsightPrRef` on `/api/attention` also carries OPTIONAL
+  `failingChecks` (≤ `FAILING_CHECKS_SHOWN` = 3, bare names, alphabetical) and `failingCheckTotal`
+  while its `ciStatus` is red. They are absent when no names are known, and absent on every other
+  consumer's fold. Rendering: see the `PrMetaRow` paragraph above and § `ci_failing`.
 - **The card carries REVIEW STANDING**: `reviewDecision` (GitHub's verdict) beside our own
   `reviewApprovals` / `reviewChangesRequested` / `reviewers` / `reviewerCount`, folded by
   `computeReviewStandingsByPr`. ⚠ `reviewDecision: null` means THIS REPO REQUIRES NO REVIEW (~90%
@@ -2142,9 +2283,11 @@ rows has to arrive with the rows.
   (`requestReviewersOptions`; `isMutating` still counts the settling request inside `onSuccess`,
   hence `> 1`). The route stamps the request, so a board refetch RETIRES the card and every sibling
   row's outcome with it. A failure refreshes nothing, so the card stays with its words and the retry.
+  The last request runs the ONE write set (`invalidateAfterPrWrite`, § The cascading sync), so
   `['attention-cards']` + `['daily-brief']` + `['work-plan']` move together (plus
-  `['workspace-insights']`, the capped fold's copy); the PR's own `['pr', id]` and
-  `['suggested-reviewers', id]` are refreshed on every success.
+  `['workspace-insights']`, the capped fold's copy); a request with a sibling still in flight
+  refreshes only the PR's own `['pr', id]`, and `['suggested-reviewers', id]` is refreshed on every
+  success.
 - The card LEAVES after the first stamped request, and that is its job done: routing a PR to A
   reviewer. An unsynced login is not stamped, so its card stays until the next sync, reading
   "Requested" from the cache for up to TanStack's 5-minute mutation `gcTime`.
@@ -2195,6 +2338,89 @@ frozen at whatever it fetched before you switched to GitHub and retired half of 
 - The shared `staleTime: 60_000` bounds it: rapid tab flipping refetches at most once a minute,
   well inside `/api/attention`'s 60/min `search` tier.
 
+### The cascading sync — ONE write set (`hooks/prCacheSync.ts`)
+
+Every write used to pick its own refetch list (thirteen lists, no two alike), so a write could land
+on GitHub and leave a screen on the old state. The worst case was the resolver: it pushed, and the
+Pending `conflicts` card stayed until something unrelated refetched the board. The server half
+(settle ladder, `Repo.lastPrChangeAt`) is in [REALTIME-SYNC.md](REALTIME-SYNC.md).
+
+- **Every PR write refetches through `invalidateAfterPrWrite(qc, prId | prId[] | null, {merged?,
+  armed?, threadIds?})`**, from the mutation's HOOK-LEVEL `onSuccess` (`onSettled` for the chunked
+  workspace bot-thread resolve), never a `mutate()` callback and never a hand-picked key list.
+  Callers: every `usePrWrites` mutation (reply, resolve, per-PR bot-thread resolve, PR comment,
+  approve, merge `{merged}`, enqueue, dequeue, close, reopen, update branch, review comment, and
+  request-reviewers, which keeps its `isMutating > 1` guard); `useArmAutoMerge` (and its 409
+  `onError`) / `useDisarmAutoMerge` `{armed}`; `AutoMergeBanner`'s landed rows `{merged}`, as ONE
+  array; `useRerunCi`; `usePushFix`; `invalidateAfterConflictCommit` and the resolver shell's close
+  `{armed}`; `useScopeResolveBotThreads`; Claude Review's `usePostFinding` / `usePostReview` (not
+  on a dry run). Enqueue and dequeue RETURN the promise, so their spinner holds until the refetch
+  lands. `test/prWriteCascadeGuard.test.ts` is a source guard over those modules; its exempt set is
+  EMPTY.
+- **The set, in read order**: `['repos']` FIRST; then the PR-scoped keys (`['pr', id]`, the
+  `['thread', id]` keys the cached detail lists plus `threadIds`, `['merge-options', id]`,
+  `['ml-labels', id]`, `['pr-bot-behaviour', id]` — the Bot activity tab's "acted on" counts move
+  on a resolve or reply); then every `ACTIVITY_QUERY_KEYS` entry plus `['timeline']`, `['open-prs']`,
+  `['my-turn']`, `['me']`. `merged` adds `['mergers']` and `['branch-status']`; `armed` adds
+  `ARMED_MERGES_KEY` (now in the leaf `hooks/queryKeys.ts`, re-exported from `useAutoMerge`, which
+  breaks the `prCacheSync` ↔ `useAutoMerge` cycle). The set is DE-DUPLICATED (invalidating a key
+  twice cancels the first refetch and sends it again), and a write that touches several PRs passes
+  them as one array so the workspace keys are swept once.
+- ⚠ **NEVER `prRefreshKey`** (invalidating it fires a POST that walks the PR) **and NEVER
+  `['attention-liveness']`** (it spends GitHub quota).
+- ⚠ **NOR `['pr-files', id]` — THE CHANGES TAB'S DIFF FOLLOWS THE HEAD INSTEAD.** It is a live
+  GitHub read kept at `staleTime: Infinity` and persisted, and nothing refetched it, so after the
+  resolver, AI Fix or Update branch pushed, the tab showed the pre-push patches for the session.
+  `GET /api/prs/:id/files` now says which stored head it read at (`headSha`), and `usePrFiles`
+  refetches the diff when the `['pr', id]` it observes was read AFTER the diff and names another
+  head (`prFilesOutdated`; once per detail read, so a failing refetch cannot loop). Every path that
+  moves a head ends in a fresh detail read, so this covers them all, including a push made outside
+  the app; a reply or a resolve moves no head and re-reads no diff. A cached diff read while the
+  tab is closed is corrected when the tab next mounts. Pinned by `test/prFilesHead.test.ts` and
+  `api/routes/pr-files-head.test.ts`.
+- ⚠ The three board keys ride in together through `ACTIVITY_QUERY_KEYS`. `PrDetail`'s `markViewed`
+  now refetches all three too. `usePrLiveRefresh` deliberately keeps its own narrower list: its 30s
+  forced floor walk always reports `changed: true`, and the full set would put every workspace
+  screen on a 30s timer.
+- ⚠ **THE WORKSPACE HALF IS THROTTLED**: at most one sweep per `WORKSPACE_SWEEP_MIN_GAP_MS` (5s)
+  per QueryClient, because `/api/attention`, `/api/daily-brief` and `/api/pro/work-plan` share the
+  60/min `search` tier. The first write sweeps at once. Writes and server-change sweeps inside the
+  gap refetch their own PR keys at once and share ONE trailing sweep carrying the union of their
+  extras. Sweeps never overlap. During a burst the board catches up at the end of the gap.
+- ⚠ **ABSORBED BY ORDER, NOT BY TIME.** A write's sweep reads `['repos']` before any other read and
+  records `AbsorbedSweep {stamps, prIds}` (`absorbedSweep(qc)`): every stamp in that answer predates
+  the board read, so the board already shows it. SyncStatus's pure `decidePrChangeSweep({prev,
+  next, walkSwept, absorbed})` skips the workspace half only when EVERY moved stamp is at or before
+  the recorded ones, and then skips the PR keys that same ordered read covered. A later stamp is
+  always swept; a partial absorb, or an effect that runs before the record exists, sweeps again (a
+  duplicate, never a lost change). This replaced a 3-second window, which dropped any change landing
+  between the write's board read and its `['repos']` read.
+- **The fast-poll window**: `invalidateAfterPrWrite` calls `noteLocalPrWrite(now, prIds)`. For
+  `FAST_POLL_WINDOW_MS` (150s) SyncStatus polls `['repos']` every `FAST_POLL_INTERVAL_MS` (5s)
+  instead of 30s (3s during a sync round), and those PRs count as `recentlyWrittenPrIds`. The
+  window covers the server's settle ladder (~5, 15, 45, 120s after a write).
+- **A server change** (`Repo.lastPrChangeAt` moved) is handled in SyncStatus's OWN effect, never in
+  `mostRecentSync`; the first observation only records. It calls `invalidateAfterServerPrChange(qc,
+  {repoIds, workspaceSwept, skipPrIds})`: the workspace half goes through the throttle, and the
+  PR-scoped half is DELIBERATELY NARROW — (a) `['pr', id]` + `['merge-options', id]` of PRs this tab
+  wrote to inside the window, active or not, when their repo moved or is unknown; (b) any other OPEN
+  (`type: 'active'`) merge control in a KNOWN moved repo whose PR has no active `['pr-refresh', id]`
+  observer. Nothing else: the Feed, Search and theme folds cache many details, and each re-read can
+  hydrate from GitHub. An open pane's own `usePrLiveRefresh` re-reads its PR, and an `updatedAt`
+  change reaches a cached detail through `useDetailCacheReconciler`. ⚠ It never opens the fast-poll
+  window. ⚠ `prChangeMap` never throws (no error boundary). `useQueueDisagreementRepair` is its one
+  other caller (§ The Pending board's merge row).
+- ⚠ **THE STAMPS ARE ACCOUNT-WIDE; THE WORKSPACE HALF IS THE VIEWED WORKSPACE'S.** When EVERY moved
+  repo sits in another workspace (`decidePrChangeSweep`'s `repoWorkspaces` from the same listing +
+  the store's `workspaceId` → `otherWorkspaceIds`), the throttled sweep does not run: those
+  workspaces' cached screens are marked stale with `refetchType: 'none'` (they refetch when the
+  reader switches), and only the two reads that name no workspace refetch — `['my-turn']` (the
+  notification watcher) and a Focus tab's `['timeline', 'prIds=…']`. A repo the listing cannot
+  place, or an unresolved workspace, keeps the full sweep.
+- Tests (run by hand): `test/prCacheSync.test.ts` (key set, ordered read, throttle, narrowed server
+  sweep, the other-workspace case, `decidePrChangeSweep`) and `test/prWriteCascadeGuard.test.ts` (it treats every top-level
+  declaration as a slice boundary, so a const-arrow hook cannot pass on its neighbour's call).
+
 ### The per-repo landing queue on screen
 
 A waiting intent reads **"Waiting its turn — N of M on this repo"**, from the trailing-optional
@@ -2235,6 +2461,30 @@ landmines:
   once there is work to lose; `popstate` closes because it cannot be cancelled; a click on the
   overlay's own chrome is ignored; a reload is caught by `beforeunload`, the one gesture the store
   cannot survive.
+- ⚠ **AFTER A PUSH, EVERY WAY OUT IS `'committed'` AND REFETCHES AGAIN.** A push may have landed
+  when `pushMayHaveLanded(commit, commitMutation)` (`store/conflictResolver.ts`) says so: the stream
+  says done; OR the commit POST is still on the wire (checked BEFORE `failed`, so a retry is covered
+  while the last failure still shows); OR the 202 arrived, or the stream says running, and the
+  stream has not said failed; OR `LandingStep`'s outcome-unknown close fires. Every way out (header
+  Close, Escape direct or through the confirm bar, `popstate`, the result panel, `LandingStep`'s
+  close) then files `closeReasonAfterPush(…)` = `'committed'`, so `ClosedResolverToast` ("nothing
+  pushed") is never offered after a push; a refusal still offers it. The shell's unmount effect
+  re-runs `invalidateAfterPrWrite(qc, prId, {armed: true})` whenever a push was EVER possibly sent
+  in this shell (a sticky ref; one extra refetch is cheap). The reason: GitHub attaches a push and
+  recomputes mergeability seconds later, so the one refetch at "done" can still read conflicting,
+  and the Pending `conflicts` card used to outlive the resolver. Pinned by
+  `test/resolverPushClose.test.ts`.
+- ⚠ **THE HEAD-MOVED GUARD GOES QUIET ONCE A PUSH IS SENT**: `headMoved = useHeadMoved(…) &&
+  !pushSent`. Our own push comes back as `pr.headSha`, off both the pin and the anchor; with the
+  shell polling the PR, that would put the head-moved warning next to "Confirming…".
+- ⚠ **THE SHELL POLLS THE PR ITSELF, BUT NEVER AS A SECOND POLLER.** `ResolverLivePoll` mounts
+  `usePrLiveRefresh(prId, true)` only while `useLivePollOwner` says no OTHER enabled observer of
+  `['pr-refresh', prId]` exists, counted through a query-cache subscription. Ownership is state set
+  BEFORE the poller mounts, so its own observer is already accounted for (deriving it from
+  registration races and can mount/unmount in a loop). Opened from the PR pane, PrDetail's poll
+  carries on under the overlay; opened from a Pending card, the shell polls, which keeps
+  `useHeadMoved` live and lets the post-push state arrive. It pauses in a hidden tab and does not
+  poll a PR that is not open.
 - ⚠ **ONE SCROLLER, ONE GRID, FIVE TRACKS.** `minmax(0,1fr) 1.75rem minmax(0,1fr) 1.75rem
   minmax(0,1fr)`, every region emitting its five cells straight into it via `display: contents`. A
   row's height is its tallest cell and the browser stretches the rest, so the panes line up with no
@@ -2940,8 +3190,7 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   `useWorkspaceSync`'s case-2 branch writing a second `setWorkspace` that would wipe what comes
   next), then `showActivity()`, then `setActivityRepo('attention')`, then
   `setAttentionIsolation('my_turn')`, then `setAttentionRelevance('mine')`, then
-  `setAttentionAuthorLens(null)` (the figure clicked counts every author), then
-  `setAttentionMyTurnView(null)` (the banner counts cards). The workspace write is
+  `setAttentionAuthorLens(null)` (the figure clicked counts every author). The workspace write is
   **skipped when already there** so a Timeline repo narrowing survives. Pinned in
   `apps/frontend/test/attentionIsolation.test.ts`.
 - ⚠ **THE DIVERGENCE RULE: A NARROW COUNT MAY ONLY NAVIGATE THROUGH ITS OWN LENS.** A banner
@@ -3007,9 +3256,15 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   side) surfaces as `uncounted`: those rows render a dim "—" rather than a zero, plus a footer
   line in the dropdown and a line in the banner. ⚠ **Absence is not zero** — do not "tidy" a
   missing line into a 0.
-- ⚠ **The dropdown badge is INFORMATIONAL.** A row's click still means "switch scope" and nothing
-  more: `WorkspaceSelector` is mounted on every board, so a badged row that also hijacked the rail
-  would teleport someone who only wanted to re-scope the Timeline.
+- ⚠ **The dropdown badge is INFORMATIONAL; the ROW is a navigation** (reversed 2026-09-30). A pick
+  — the current workspace included — runs `useFilters.switchWorkspaceToPending(id)`:
+  `setWorkspace(id, null)` → `showActivity()` → `setActivityRepo('attention')` → seat
+  `attentionTab: null` (My turn) EXPLICITLY (the rail setter
+  no-ops on an unchanged rail) → `clearSelection()` (the Timeline's selected PR belonged to the
+  workspace left). Pinned PR / Focus tabs stay. All writes are synchronous in one handler, so
+  `useUrlState` pushes ONE history entry. ⚠ `setWorkspace` itself NEVER navigates — URL hydrate,
+  Back/Forward, `useWorkspaceSync`'s corrections, PrDetail's "Show in Activity feed" and the
+  `WorkspaceManager` call it and must stay put. Pinned in `test/switchWorkspaceToPending.test.ts`.
 - ⚠ **COST.** The hook rides the EXISTING daily-brief key (the one key the banner and badges
   share), but mounting it in the always-visible FilterBar and banner
   means the Timeline now pays one `search`-tier request per stale window where it paid none.
@@ -3092,6 +3347,15 @@ now). Server contract + the two things it deliberately does NOT compute:
   because of it"). We store no per-commit CI transition history, so nothing here can name the
   commit that broke trunk; saying so is cheaper than being asked.
 - The board states its cut with `capSentence`; the brief-line disclosure went with the strip.
+- **It names the failing checks.** `FailingChecksLine` draws a 12px red line
+  (`text-red-600 dark:text-red-400`, `CHECK_STATE_META.failure.icon` aria-hidden, an sr-only
+  "Failing checks:") under the CI-dot/sha row, from the card's REQUIRED `failingChecks` /
+  `failingCheckTotal` (null = no names known: nothing renders, never "0 failing"). The names
+  truncate; "and N more" never does and is never only a tooltip. A promoted red trunk reaches this
+  body through `asCiFailingCard`, which COPIES both fields (pinned in `pendingCardControls.test.ts`).
+  Names are bare check/job names, never workflow-prefixed, unlike `BranchStatusPanel`'s
+  `checkLabel` ("workflow / name"): the PR side stores no workflow name, so the cards keep one
+  vocabulary. Shared rendering with the meta row: see *Every PR card names who opened it* above.
 
 ⚠ **TWO OF THE THREE CLIENT TOUCH POINTS ARE SILENT — only `KIND_LABEL` is compiler-enforced:**
 
@@ -3116,6 +3380,10 @@ shared between the header sync button and the WorkspaceManager's embedded progre
   `['sync-status']` + `['ml-status']` polls, the completion effects and every invalidation, and
   it is the **only writer** of the slice. Everything else consumes state and calls the actions
   `SyncStatus` registers.
+- `SyncStatus` ALSO owns the post-write fast `['repos']` poll (5s for 150s after
+  `noteLocalPrWrite`) and the per-repo `Repo.lastPrChangeAt` effect. That is a separate effect
+  declared AFTER the walk effect, never folded into `mostRecentSync`, and its decision is the pure
+  `decidePrChangeSweep`. See § The cascading sync.
 - **The actions ride a MODULE-LEVEL registry** (`registerSyncRoundActions` /
   `getSyncRoundActions` — `{cancel, syncAllShallow, syncAllDeep, syncOneDeep, dismiss}`),
   deliberately **not store state**: they are per-render closures, and putting them in the store

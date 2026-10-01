@@ -5,7 +5,7 @@ import { useMergers, useRepos, useSearchTimeline, useUsers } from '../hooks/useT
 import { useSearchOpenPrs } from '../hooks/useTriage.js';
 import { useWorkspaces, workspaceRepoIds } from '../hooks/useWorkspaces.js';
 import { useFilters, type RangePreset } from '../store/filters.js';
-import { usePinnedTabs } from '../store/pinnedTabs.js';
+import { boardSlotMode, usePinnedTabs } from '../store/pinnedTabs.js';
 import { EventSelectPanel } from './EventSelectPanel.js';
 import { RepoSelectPanel } from './RepoSelectPanel.js';
 import { StatusSelectPanel } from './StatusSelectPanel.js';
@@ -13,7 +13,7 @@ import { WorkspaceSelector } from './WorkspaceSelector.js';
 import { GlobalSearch } from './Search/GlobalSearch.js';
 import { ThreadStateSelectPanel } from './ThreadStateSelectPanel.js';
 import { UserSelectPanel } from './UserSelectPanel.js';
-import { CloseIcon } from './Icons.js';
+import { BotIcon, CloseIcon } from './Icons.js';
 
 const PRESETS: Exclude<RangePreset, 'custom'>[] = ['7d', '14d', '30d', '90d'];
 
@@ -100,14 +100,6 @@ export function FilterBar(): JSX.Element {
   const { data: repos } = useRepos();
   const { data: workspaces } = useWorkspaces();
   const { data: users } = useUsers();
-  // Member-AGNOSTIC, repo-scoped activity (ignores the member filter, so the
-  // option list never collapses to just the already-selected members). When a
-  // repo filter is active these payloads already contain only the selected repos.
-  const { data: searchTimeline } = useSearchTimeline();
-  const { data: searchOpenPrs } = useSearchOpenPrs();
-  const { data: mergers } = useMergers();
-
-  const f = useFilters();
 
   // ⚠ ONLY THE WORKSPACE SELECTOR (+ the global search) SHOWS ON EVERY VIEW. Everything else in
   // this bar — the per-repo show/hide panel, Members, Status, Events, Threads, Range and the
@@ -120,14 +112,40 @@ export function FilterBar(): JSX.Element {
   // selected workspace, and you narrow Activity by clicking a repo row in its rail), so a picker
   // left on those views would silently scope screens that cannot see it — the worst kind of
   // filter, one whose control is visible and whose effect is not.
+  //
+  // ⚠ THE ONE EXCEPTION IS A PR FOCUS TAB, AND IT IS EXACTLY TWO CONTROLS: Events (categories +
+  // review verdicts) and a Bots on/off toggle. Both are the SHARED store fields (same URL keys —
+  // a choice made in Focus also applies on the board, and back), and the isolate Timeline
+  // honours them CLIENT-side over its unfiltered `prIds=<id>` payload
+  // (components/Timeline/isolateFilter.ts). Nothing else shows there: Repos / Status / Range
+  // cannot change a single-PR view, Members and Threads are not applied in Focus, and "Now"
+  // (centerTimelineNow → showTimeline()) would pull the user out of the tab.
+  //
+  // The FilterBar is always fully live — PR-isolation focus is a separate TAB (its own keyed
+  // <Timeline>), so it never disables or fades the board filters. Repo/workspace MANAGEMENT
+  // (add/remove/move) lives in the WorkspaceManager modal, reached from inside the
+  // WorkspaceSelector dropdown below; the FilterBar itself carries the SCOPE (which workspace,
+  // everywhere) and — on the Timeline, plus the two Focus controls — the board filters.
   const activeTab = usePinnedTabs((s) => s.activeTab);
+  const tabs = usePinnedTabs((s) => s.tabs);
   const isTimeline = activeTab === 'timeline';
-  // The ONE non-Timeline surface with a bar control (see the Range section below). Both halves
-  // The FilterBar is always fully live now — PR-isolation / My-Turn focus is a separate
-  // TAB (its own keyed <Timeline>), so it no longer disables or fades the board filters.
-  // Repo/workspace MANAGEMENT (add/remove/move) lives in the WorkspaceManager modal, reached from
-  // inside the WorkspaceSelector dropdown below; the FilterBar itself carries the SCOPE (which
-  // workspace, everywhere) and — on the Timeline only — the board filters, `repoIds` among them.
+  // The SAME resolver App uses to mount the board slot, so a stale focus key can never show
+  // Focus controls over the shared board.
+  const isFocus = boardSlotMode(activeTab, tabs) != null;
+  const showEvents = isTimeline || isFocus;
+
+  // Member-AGNOSTIC, repo-scoped activity (ignores the member filter, so the
+  // option list never collapses to just the already-selected members). When a
+  // repo filter is active these payloads already contain only the selected repos.
+  // Idle on a Focus tab, which shows no Members panel: the shared board is not mounted there,
+  // and the string carries `types`, so every Events toggle would refetch it for nobody.
+  const { data: searchTimeline } = useSearchTimeline({ enabled: !isFocus });
+  const { data: searchOpenPrs } = useSearchOpenPrs();
+  const { data: mergers } = useMergers();
+
+  const f = useFilters();
+  // Bots the board's Members panel keeps visible under "Exclude bots" — Focus honours them too.
+  const keptBotCount = f.allowedBotIds?.length ?? 0;
 
   // ── The workspace's repos ────────────────────────────────────────────────────────────────────
   // RepoSelectPanel lists ONLY the active workspace's repos, never the account's: `repoIds = null`
@@ -203,9 +221,11 @@ export function FilterBar(): JSX.Element {
       repoScoped,
       selectedIds: f.userIds ?? [],
       allowedBotIds: f.allowedBotIds ?? [],
-      // The Timeline board's bot verdict is the global flag alone (the union verdict is the
-      // Feed/Reports rule — this dropdown's Bots half must keep listing exactly what the
-      // board's excludeBots hides).
+      // ⚠ This fold's Bots half uses the global flag alone, but the board's excludeBots hides
+      // the server's UNION set (getTimeline → hiddenBotUserIds: users.isBot ∪ the workspace's
+      // automated reviewers, a manual "human" winning both ways). So a bot known only to the
+      // union lists among the people here although the board hides it — a known gap, not the
+      // rule (lib/unionBot.ts holds the union verdict the Focus tab uses).
       isBot: (u: User) => u.isBot,
       includeRosterRemainder: true,
     });
@@ -278,8 +298,9 @@ export function FilterBar(): JSX.Element {
           </Section>
         )}
 
-        {/* Status / Events / Threads / Range are timeline-only — shown only on the Timeline
-            board; every other tab keeps just the workspace selector + global search. */}
+        {/* Status / Threads / Range are timeline-only — shown only on the Timeline board;
+            Events also shows on a PR Focus tab (below). Every other tab keeps just the
+            workspace selector + global search. */}
         {isTimeline && (
           <Section>
             <StatusSelectPanel
@@ -292,7 +313,9 @@ export function FilterBar(): JSX.Element {
           </Section>
         )}
 
-        {isTimeline && (
+        {/* Events shows on the Timeline AND on a PR Focus tab (the isolate Timeline applies it
+            client-side there). */}
+        {showEvents && (
           <Section>
             <EventSelectPanel
               categories={f.categories}
@@ -302,6 +325,37 @@ export function FilterBar(): JSX.Element {
               onToggleReviewState={(s) => f.toggleReviewState(s)}
               onSetReviewStates={(s) => f.setReviewStates(s)}
             />
+          </Section>
+        )}
+
+        {/* Focus-only: hide bots. The board keeps this inside the Members panel as the
+            "Exclude bots" checkbox; Focus has no Members panel, so the same shared `excludeBots`
+            gets a toggle with the SAME polarity (pressed = bots hidden, like checked there).
+            The allow-list (`allowedBotIds`, ticked in the board's Members panel) still keeps
+            those bots visible while it is on, so the label says so rather than claiming every
+            bot is hidden. */}
+        {isFocus && (
+          <Section>
+            <button
+              type="button"
+              aria-pressed={f.excludeBots}
+              onClick={() => f.setExcludeBots(!f.excludeBots)}
+              title={
+                !f.excludeBots
+                  ? 'Bot activity is shown'
+                  : keptBotCount > 0
+                    ? `Bot activity is hidden, except ${keptBotCount} ${keptBotCount === 1 ? 'bot' : 'bots'} you chose to keep`
+                    : 'Bot activity is hidden'
+              }
+              className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs transition ${
+                f.excludeBots
+                  ? 'border-transparent bg-blue-600 text-white'
+                  : 'border-gray-300 text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500'
+              }`}
+            >
+              <BotIcon size={12} />
+              {f.excludeBots && keptBotCount > 0 ? `Hide bots (except ${keptBotCount})` : 'Hide bots'}
+            </button>
           </Section>
         )}
 

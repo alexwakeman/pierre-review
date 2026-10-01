@@ -412,11 +412,9 @@ interface RestPullMergeable {
 }
 
 // GitHub's OWN mergeability for a PR — a NEAR-INSTANT trunk-conflict signal (one, or
-// two, REST calls) used to offer the rebase/merge/push options without cloning. GitHub
-// computes `mergeable` asynchronously and can briefly return null; we retry once. The
-// `compare` call adds behind/ahead counts + the trunk tip. This reflects the PR as it
-// stands on GitHub (not the not-yet-pushed fix) — a fast approximation; the actual
-// rebase/merge job does the authoritative, with-fix resolution.
+// two, REST calls), read without cloning by the PR merge / update-branch routes
+// (api/routes/prs.ts). GitHub computes `mergeable` asynchronously and can briefly return
+// null; we retry once. The `compare` call adds behind/ahead counts + the trunk tip.
 export async function fetchMergeability(
   token: string,
   owner: string,
@@ -973,10 +971,14 @@ export async function rerunWorkflowRun(
 // House style in this file is REST-first. The merge queue forks to GraphQL because it has to:
 // `enqueuePullRequest` / `dequeuePullRequest` are GA GraphQL mutations with NO REST
 // equivalent, and queue presence is not inferable from anything REST returns — in particular
-// `MergeStateStatus` has no QUEUED value, so a queued PR looks like any other blocked one.
+// `MergeStateStatus` has no QUEUED value, so a queued PR looks like any other (queued PRs here
+// have read 'clean' and 'unknown').
 //
-// Nothing here is synced. Queue position changes minute to minute and only the merge control
-// renders it, so it is fetched live in GET /api/prs/:id/merge-options and never stored.
+// MEMBERSHIP AND ENTRY STATE ARE SYNCED (`pull_requests.in_merge_queue` +
+// `merge_queue_entry_state`): the sync walk writes them, and every caller of the three functions
+// below that holds a positive answer stamps them through `db/pr-merge-queue-stamp.ts`. POSITION
+// and ETA are not: they change minute to minute and only the merge control renders them, so they
+// are fetched live in GET /api/prs/:id/merge-options and never stored.
 
 // `MergeQueueEntry.estimatedTimeToMerge` is an Int of SECONDS in the GitHub schema; the wire
 // type (PrMergeQueueInfo.estimatedTimeToMergeMs) is milliseconds, so it is scaled here — the
@@ -1032,9 +1034,9 @@ export interface MergeQueueState {
   // reads it because a fast queue can merge within a tick, before the sync observes it.
   prState: string;
   // GitHub's PullRequestReviewDecision (APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED), null
-  // when the base requires no reviews. The review half of branch protection is the part that
-  // BLOCKS an enqueue (checks don't — AWAITING_CHECKS is a normal entry state), so the watcher
-  // waits on it by name instead of hammering the mutation.
+  // when the base requires no reviews. The review half of branch protection BLOCKS an enqueue by
+  // name, so the watcher waits on it instead of hammering the mutation. (Checks can block entry
+  // too, on a branch that requires them BEFORE the queue — see `isWaitableEnqueueRefusal`.)
   reviewDecision: string | null;
 }
 

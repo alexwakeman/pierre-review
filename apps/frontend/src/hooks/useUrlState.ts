@@ -41,7 +41,6 @@ import {
 } from '../store/pinnedTabs.js';
 // Pure (it imports the store as a TYPE only), so no runtime cycle — the same derivation the board
 // renders with decides what the URL says is on screen.
-import { effectiveMyTurnView, effectivePendingTab } from '../components/Activity/pendingTabs.js';
 
 const PRESETS: RangePreset[] = ['7d', '14d', '30d', '90d', 'custom'];
 // The attention board's isolation kinds. A local list because `InsightKind` ships no runtime
@@ -102,8 +101,9 @@ const NAV_KEYS = [
   'attnRel',
   // The Pending TAB the reader picked — a screen they moved to, so Back must leave it.
   'attnTab',
-  // My turn's view (Cards | Default branches and open PRs) — a screen the reader moved to.
-  'attnView',
+  // ⚠ `attnView` IS NOT HERE ANY MORE. `?attnView=branches` named My turn's retired second view;
+  // it is still PARSED (and ignored — see readFromUrl), and dropping it from a legacy URL changes
+  // no screen, so the rewrite REPLACES that entry rather than pushing a new one.
   // ⚠ RETIRED BUT STILL LISTED. `?attnPersonal=1` shipped, so history entries and bookmarks carry
   // it; it is parsed (as `attnRel=mine`) and never emitted. It stays a NAV key because leaving one
   // of those legacy entries — the emitted URL drops `attnPersonal` and gains `attnRel` — is a real
@@ -364,10 +364,10 @@ export function readFromUrl(): Partial<FilterState> {
   // The Pending tab. Only a real tab key seats it; anything else means the default (My turn).
   const attnTab = p.get('attnTab');
   if (PENDING_TABS.some((t) => t.key === attnTab)) out.attentionTab = attnTab as PendingTabKey;
-  // My turn's view. Only the literal seats it; anything else means Cards. RAW seat — the render
-  // derives (`effectiveMyTurnView`), never a corrected value.
-  const attnView = p.get('attnView');
-  if (attnView === 'branches') out.attentionMyTurnView = 'branches';
+  // ⚠ `?attnView=branches` IS RETIRED AND DELIBERATELY IGNORED. It shipped (My turn's "Default
+  // branches and open PRs" view) and lives in bookmarks and history. My turn has one view now, with
+  // the default-branch strip at its top, so the key seats nothing: the link lands on My turn (or on
+  // whatever `attnTab` names), and the serializer never emits it. Pinned by urlHistory.test.ts.
   const attnRel = p.get('attnRel');
   if (attnRel === 'mine' || attnRel === 'others') out.attentionRelevance = attnRel;
   // ⚠ BACK-COMPAT, ONE DIRECTION ONLY. `?attnPersonal=1` is the retired boolean spelling and it is
@@ -594,17 +594,6 @@ export function writeToUrl(s: FilterState): void {
     // filter above names its own tab, so the two together are never contradictory: the kind wins.
     if (s.activityRepoId === 'attention' && s.attentionTab != null) {
       p.set('attnTab', s.attentionTab);
-    }
-    // My turn's view — emitted only where it is ON SCREEN (the attention rail, effective tab My
-    // turn), and ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT: only 'branches' is ever written.
-    if (
-      s.activityRepoId === 'attention' &&
-      effectiveMyTurnView(
-        effectivePendingTab(s.attentionIsolation, s.attentionTab),
-        s.attentionMyTurnView,
-      ) === 'branches'
-    ) {
-      p.set('attnView', 'branches');
     }
     // Emitted independently of `attn` — the two lenses are orthogonal, and a relevance-lensed
     // board showing every kind is a real (if uncommon) view. Same rail gate as its twin: a lens

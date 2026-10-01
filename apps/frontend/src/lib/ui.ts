@@ -703,6 +703,24 @@ export const CI_META: Record<
   unknown: null,
 };
 
+// The PR-detail HEADER's CI readout: which dot to draw and the word beside it, or null for none.
+//
+// ⚠ OPEN PRs ONLY. `pull_requests.ci_status` is FROZEN at the merge instant (a merged PR is never
+// re-walked), so on a merged or closed PR it is history, not state — real rows carry a merged
+// "CI running" that will never change. The header speaks in the present tense on every tab, so it
+// says nothing there; the Overview Status row still states the last result.
+// ⚠ `unknown` is a hollow ring and the words "No checks", matching the Pending card and the
+// Status row the click lands on — never nothing, or the header and that row disagree about
+// whether CI exists on a quarter of open PRs.
+export function prHeaderCi(
+  state: PrState,
+  ciStatus: CiStatus,
+): { status: CiStatus; label: string } | null {
+  if (state !== 'open') return null;
+  const meta = CI_META[ciStatus];
+  return { status: ciStatus, label: meta?.label ?? 'No checks' };
+}
+
 // Should the PR Overview's "Checks" row render at all?
 //
 // Two independent reasons to show it, and the gate must not fire without one of them — `Row`
@@ -864,9 +882,14 @@ export interface MergeVerdictInput {
   // `MergeBlockFacts` for why presence itself is the signal. Absent (every compact surface,
   // which is fed a lean TimelinePr) → the blocked reason stays generic, never invented.
   blockFacts?: MergeBlockFacts;
-  // Out-of-band states only the live merge-options fetch knows about.
+  // GitHub's merge queue. MEMBERSHIP is synced (the PR row and every Pending card carry
+  // `inMergeQueue`) and stamped by every write path; a merge control passes the membership
+  // `mergeQueueStatus` resolved from the NEWER of that and its live merge-options answer. Pass
+  // `true` only for a POSITIVE observation — null ("not observed") is `false` here. POSITION is
+  // live-only (merge-options), so most callers have none.
   inMergeQueue?: boolean;
   queuePosition?: number | null;
+  // Out-of-band: an armed "merge when ready" intent (Limn's own watcher, not a GitHub fact).
   autoMergeArmed?: boolean;
   // Commits behind the base, when known — turns "behind" into "3 commits behind".
   behindBy?: number;

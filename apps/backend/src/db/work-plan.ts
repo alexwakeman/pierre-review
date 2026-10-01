@@ -615,7 +615,12 @@ export async function scoreCards(
         // The SAME builder the card used — but with the real untouched-thread count, which only
         // this fold has. One function, so the card's `detail` and the row's `reason` cannot drift
         // into two different sentences about one PR.
-        reason: mergeCardDetail(c.kind, c.mergeStateStatus, facts.untouchedThreads ?? 0),
+        reason: mergeCardDetail(
+          c.kind,
+          c.mergeStateStatus,
+          facts.untouchedThreads ?? 0,
+          c.inMergeQueue,
+        ),
       });
       continue;
     }
@@ -692,7 +697,13 @@ export async function scoreCards(
           githubUrl: c.githubUrl,
           relevance: c.relevance ?? 'none',
           facts,
-          reason: mergeCardDetail(own.forward, own.mergeStateStatus, facts.untouchedThreads ?? 0),
+          // The card's own `inMergeQueue` (prRef), so a queued PR's row says what its card says.
+          reason: mergeCardDetail(
+            own.forward,
+            own.mergeStateStatus,
+            facts.untouchedThreads ?? 0,
+            c.inMergeQueue,
+          ),
         });
         continue;
       }

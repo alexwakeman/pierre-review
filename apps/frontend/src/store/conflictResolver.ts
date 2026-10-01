@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ConflictDecision } from '@pierre-review/shared';
+import type { ConflictCommitState, ConflictDecision } from '@pierre-review/shared';
 
 // ── THE MERGE-CONFLICT RESOLVER'S CLIENT STATE ───────────────────────────────────────────────
 //
@@ -73,6 +73,34 @@ export interface ResolverSession {
 /** Why the overlay closed. The reopen toast offers a way back for the first two ONLY — after a
  *  commit there is nothing left to reopen onto, because the pins have moved. */
 export type ResolverCloseReason = 'user' | 'navigated' | 'committed';
+
+/**
+ * Could a push from this resolver have landed on GitHub?
+ *
+ * Yes once the stream says done; yes while the commit POST is still on the wire (the server may
+ * push a body it accepted after the reader left); yes after the 202 or while the stream says
+ * running, unless the stream has since said it failed. A refusal is a known outcome — nothing was
+ * pushed — so it is the one case that answers no.
+ */
+export function pushMayHaveLanded(
+  commit: Pick<ConflictCommitState, 'status'> | null | undefined,
+  request: { isPending: boolean; isSuccess: boolean },
+): boolean {
+  if (commit?.status === 'done') return true;
+  // Before the 'failed' check: a retry's POST can be in flight while the session still shows the
+  // previous attempt's failure.
+  if (request.isPending) return true;
+  return commit?.status !== 'failed' && (commit?.status === 'running' || request.isSuccess);
+}
+
+/** The reason a way out files. After a push every way out is `'committed'`: the reopen toast ends
+ *  "nothing pushed", which is then false. */
+export function closeReasonAfterPush(
+  pushed: boolean,
+  fallback: 'user' | 'navigated',
+): ResolverCloseReason {
+  return pushed ? 'committed' : fallback;
+}
 
 /** What the reopen toast needs. Held apart from `target` so closing genuinely clears the
  *  overlay's own state rather than leaving it half-open. */

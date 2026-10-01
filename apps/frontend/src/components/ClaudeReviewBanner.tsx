@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ClaudeReviewPhase } from '@pierre-review/shared';
+import type { ActiveReview, ClaudeReviewPhase } from '@pierre-review/shared';
 import { useActiveClaudeReviews } from '../hooks/useClaudeReview.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import { useNotificationPref } from '../hooks/useNotificationPref.js';
@@ -95,7 +95,16 @@ export function ClaudeReviewBanner(): JSX.Element | null {
     if (kickoff > 0) setPolling(true);
   }, [kickoff]);
 
-  const { data, dataUpdatedAt } = useActiveClaudeReviews(enabled && polling);
+  const { data: raw, dataUpdatedAt } = useActiveClaudeReviews(enabled && polling);
+  // Runs a person started only. An AUTO run (Settings → Workspace) was asked for by nobody, so it
+  // gets no banner, chime or notification — its result waits on the PR's Claude Review tab.
+  // (A waiting auto item is the only entry with no reviewId; the filter drops it with the rest.)
+  const data = raw && {
+    ...raw,
+    reviews: raw.reviews.filter(
+      (r): r is ActiveReview & { reviewId: number } => r.trigger !== 'auto' && r.reviewId != null,
+    ),
+  };
 
   useEffect(() => {
     if (polling && (data?.reviews.length ?? 0) === 0) setPolling(false);

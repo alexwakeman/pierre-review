@@ -1,18 +1,23 @@
 import type { CiStatus, RepoBranchStatus } from '@pierre-review/shared';
 import { CI_META, relativeTime } from '../../lib/ui.js';
 
-// CI_META is null for `unknown` (the PR surfaces deliberately render NOTHING rather than a
-// "no idea" dot). Trunk is different: the row exists per repo whether or not we have a rollup,
-// so a hollow grey dot is the honest rendering of "no CI observed" — it keeps the row's shape
-// stable and is visibly distinct from green/red.
+// CI_META is null for `unknown`, and this dot draws it as a hollow grey ring: visibly distinct
+// from green/red, and it keeps the row's shape stable. Most PR surfaces SAY "no checks" for it
+// rather than drawing nothing (the Pending card, the open-PR lists, the Overview Status row, the
+// PR-detail header); only the Timeline bar and the Feed's opened-PR line leave it blank.
+// `className` is ADDITIVE (the header adds an edge ring so green/yellow keep a visible edge on
+// white). The span always carries a `title`, so a control wrapping the dot passes its OWN title
+// here, or hovering the dot and hovering the control's words show two different tooltips.
 export function CiDot({
   status,
   size = 6,
   title,
+  className = '',
 }: {
   status: CiStatus;
   size?: number;
   title?: string;
+  className?: string;
 }): JSX.Element {
   const meta = CI_META[status];
   const label = title ?? meta?.label ?? 'No CI reported';
@@ -20,7 +25,7 @@ export function CiDot({
     <span
       aria-hidden="true"
       title={label}
-      className="inline-block shrink-0 rounded-full"
+      className={`inline-block shrink-0 rounded-full ${className}`}
       style={
         meta
           ? { width: size, height: size, background: meta.color }

@@ -24,6 +24,10 @@
 //      only quiet repos: with everything in Default, `mine`'s open PRs keep the population
 //      non-empty and a block moved below the guard would still pass.
 //   6. `ciFailingTotal` is the PRE-CAP fold, exactly like `myTurnTotal`.
+//   7. WHICH CHECKS ARE FAILING, on both arms, and only on the board's fold. 'your_pr' reads the
+//      newest `ci_status_events` row for the PR's CURRENT head (an older head's row is ignored);
+//      'trunk' reads the head's `branch_commits` row whatever the landing-PR resolution says — a
+//      direct push is named too. Every other consumer's fold carries null.
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
@@ -58,9 +62,10 @@ const prIdByKey = new Map<string, number>();
 let viewerId = 0;
 let aliceId = 0;
 
-/** Every ci_failing card the board would paint right now, in the given workspace scope. */
-async function ciCards(s: any = scope): Promise<CiFailingCard[]> {
-  const insights = await q.getWorkspaceInsights(1, undefined, s);
+/** Every ci_failing card the board would paint right now, in the given workspace scope. The
+ *  default fold unless `opts` says otherwise — `GET /api/attention` passes `withFailingChecks`. */
+async function ciCards(s: any = scope, opts: any = undefined): Promise<CiFailingCard[]> {
+  const insights = await q.getWorkspaceInsights(1, undefined, s, opts);
   return (insights.cards as InsightCard[]).filter(
     (c): c is CiFailingCard => c.kind === 'ci_failing',
   );
@@ -77,7 +82,7 @@ beforeAll(async () => {
   q = await import('./queries.js');
   brief = await import('./daily-brief.js');
 
-  const { accounts, branchCommits, events, repos, pullRequests, users } = schema;
+  const { accounts, branchCommits, ciStatusEvents, events, repos, pullRequests, users } = schema;
   const { eq } = await import('drizzle-orm');
 
   // Migration 0008 seeds account 1 with an EMPTY github_login, which makes getAccountUserId
@@ -174,9 +179,28 @@ beforeAll(async () => {
     isDraft: false,
     authorId: viewerId,
     ciStatus: 'failure',
+    headSha: 'h-my-red',
     lastCommitAt: new Date(now - 2 * DAY),
   });
   await touch(mine, prIdByKey.get('my-red')!);
+  // Its CI transition log: an OLDER head's failure (code the PR no longer holds), then the current
+  // head's, naming four checks — one more than a card shows.
+  const csRow = async (key: string, headSha: string, names: string[], at: number): Promise<void> => {
+    await db
+      .insert(ciStatusEvents)
+      .values({
+        accountId: 1,
+        repoId: mine,
+        prId: prIdByKey.get(key)!,
+        headSha,
+        status: 'failure',
+        failingChecks: names,
+        observedAt: new Date(at),
+      })
+      .execute();
+  };
+  await csRow('my-red', 'h-my-red-old', ['stale-check'], now - 3 * DAY);
+  await csRow('my-red', 'h-my-red', ['test', 'build', 'lint', 'e2e'], now - 2 * DAY);
   // The OTHER half of the red pair, on the arm that tests it row by row. `error` is GitHub's
   // infrastructure/permissions failure and a fold spelled `=== 'failure'` type-checks perfectly
   // while dropping it — this row is the only thing that notices.
@@ -185,9 +209,12 @@ beforeAll(async () => {
     isDraft: false,
     authorId: viewerId,
     ciStatus: 'error',
+    headSha: 'h-my-errored',
     lastCommitAt: new Date(now - 3 * DAY),
   });
   await touch(mine, prIdByKey.get('my-errored')!);
+  // Only a row for the head BEFORE the current one: no names for the current head.
+  await csRow('my-errored', 'h-my-errored-old', ['old-infra-check'], now - 4 * DAY);
   // NEGATIVE: someone ELSE's red PR in a repo the viewer maintains. That is a REVIEW, not the
   // viewer's build — the arm is authorship, not repo ownership.
   await insertPr(mine, 'alice-red', {
@@ -224,6 +251,10 @@ beforeAll(async () => {
       messageHeadline: 'the commit trunk is red at',
       committedAt: new Date(now - 4 * DAY),
       ciStatus: 'failure',
+      // The head's failing jobs — what the card names, through /api/branch-status's own reader.
+      failingChecks: [
+        { name: 'deploy-preview', state: 'failure', url: null, runId: 1, jobId: 2, workflowName: 'CI' },
+      ],
       // The stored association the card's PR half is resolved through.
       prNumber: (
         await db.select().from(pullRequests).where(eq(pullRequests.id, landed)).execute()
@@ -264,7 +295,25 @@ beforeAll(async () => {
     baseRefName: 'main',
     mergedAt: new Date(now - 6 * DAY),
   });
-  // ⚠ NO branch_commits row for this repo's head: the DIRECT-PUSH case. The card must still ship.
+  // ⚠ The DIRECT-PUSH case: the head's branch_commits row carries NO PR number, so no landing PR
+  // resolves. The card must still ship — and still name its failing checks. (A head with NO
+  // branch_commits row at all is pinned in failing-checks.test.ts: a second red repo here would
+  // break the Quiet workspace's one-card count.)
+  await db
+    .insert(branchCommits)
+    .values({
+      accountId: 1,
+      repoId: noOpen,
+      sha: 'ccccccc3333333333333333333333333333333ef',
+      messageHeadline: 'pushed straight to main',
+      committedAt: new Date(now - 7200_000),
+      ciStatus: 'error',
+      failingChecks: [
+        { name: 'smoke', state: 'error', url: null, runId: null, jobId: null, workflowName: null },
+      ],
+      prNumber: null,
+    })
+    .execute();
 
   // ── repo 'green': maintained, trunk green. The silent control.
   await insertRepo('green', {
@@ -390,6 +439,46 @@ describe('ci_failing cards', () => {
     // `lastCommitAt`, not openedAt — the head commit is what the CI verdict is about.
     expect(card?.observedAt).toBe(new Date(now - 2 * DAY).toISOString());
     expect(card?.githubUrl).toContain('/pull/');
+  });
+
+  // ── which checks are failing ───────────────────────────────────────────────────────────────
+  it('the your_pr card names its CURRENT head’s failing checks, capped at three, with the total', async () => {
+    const cards = await ciCards(scope, { uncapped: true, withFailingChecks: true });
+    const card = cards.find((c) => c.prId === prIdByKey.get('my-red'));
+    expect(card?.failingChecks).toEqual(['build', 'e2e', 'lint']);
+    expect(card?.failingCheckTotal).toBe(4);
+    // …and never in its sentence.
+    expect(card?.detail).not.toContain('build');
+  });
+
+  it('a red PR whose only row is for an older head names nothing — null, never 0', async () => {
+    const cards = await ciCards(scope, { uncapped: true, withFailingChecks: true });
+    const card = cards.find((c) => c.prId === prIdByKey.get('my-errored'));
+    expect(card).toBeDefined();
+    expect(card?.failingChecks).toBeNull();
+    expect(card?.failingCheckTotal).toBeNull();
+  });
+
+  it('the trunk card names the head’s failing jobs beside its landing PR', async () => {
+    const cards = await ciCards(scope, { uncapped: true, withFailingChecks: true });
+    const card = cards.find((c) => c.repoId === repoIdByKey.get('mine') && c.arm === 'trunk');
+    expect(card?.prId).toBe(prIdByKey.get('landed'));
+    expect(card?.failingChecks).toEqual(['deploy-preview']);
+    expect(card?.failingCheckTotal).toBe(1);
+  });
+
+  it('a DIRECT PUSH’s trunk card names its failing checks with no landing PR', async () => {
+    const [card] = await ciCards(quietScope, { uncapped: true, withFailingChecks: true });
+    expect(card?.prId).toBeNull();
+    expect(card?.failingChecks).toEqual(['smoke']);
+    expect(card?.failingCheckTotal).toBe(1);
+  });
+
+  it('every other consumer’s fold carries null on both arms', async () => {
+    for (const card of [...(await ciCards()), ...(await ciCards(quietScope))]) {
+      expect(card.failingChecks, card.id).toBeNull();
+      expect(card.failingCheckTotal, card.id).toBeNull();
+    }
   });
 
   // ── the count pair ─────────────────────────────────────────────────────────────────────────

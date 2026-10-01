@@ -299,9 +299,9 @@ export async function prepWorktree(
  * Prepare a worktree checked out at the tip of an arbitrary REF (e.g. the trunk
  * branch), under the per-repo lock. Fetches `ref` via an explicit tokenized URL (never
  * the token-less origin), resolves FETCH_HEAD, and adds a detached worktree there.
- * Used by the AI-Fix trunk-reconciliation path (coding/merge.ts pushResolved) which
- * needs a checkout at the trunk tip rather than the PR head. Returns the resolved sha
- * too. Throws if the ref can't be fetched.
+ * Used by the Bot Tuning Advisor's config-PR primitive (coding/git-ops.ts
+ * commitFilesAndOpenPr), which needs a checkout at the default branch rather than the
+ * PR head. Returns the resolved sha too. Throws if the ref can't be fetched.
  */
 export async function prepWorktreeAtRef(
   owner: string,

@@ -29,6 +29,7 @@ import {
   requestReviewersMutationKey,
   requestReviewersOptions,
 } from '../src/hooks/usePrWrites.js';
+import { prWriteKeys } from '../src/hooks/prCacheSync.js';
 
 const user = (login: string | null, userId: number | null): ReviewerSuggestion => ({
   kind: 'user',
@@ -139,8 +140,13 @@ describe('request keys', () => {
 });
 
 describe('the board refresh waits for the last request on the PR, and only on success', () => {
+  // The last request refreshes through THE ONE WRITE SET (prCacheSync.ts), which carries the board's
+  // three reads together plus the capped fold's copy of the card; a request with a sibling still in
+  // flight refreshes the PR's own detail only.
   const BOARD = [['attention-cards'], ['daily-brief'], ['work-plan'], ['workspace-insights']];
-  const PR_READS = [['pr', 7], ['suggested-reviewers', 7]];
+  const SUGGESTIONS = [['suggested-reviewers', 7]];
+  const PR_READS = [...SUGGESTIONS, ['pr', 7]];
+  const WRITE_SET = (qc: QueryClient): unknown[] => [...SUGGESTIONS, ...prWriteKeys(qc, 7)];
 
   function deferred(): { promise: Promise<unknown>; resolve: () => void; reject: (e: Error) => void } {
     let resolve!: () => void;
@@ -171,15 +177,16 @@ describe('the board refresh waits for the last request on the PR, and only on su
   afterEach(() => vi.restoreAllMocks());
 
   it('one success refreshes the PR and the board, with the three board reads together', async () => {
-    const { invalidated, start } = harness();
+    const { qc, invalidated, start } = harness();
     const a = start('user:alice');
     a.resolve();
     await a.done;
-    expect(invalidated()).toEqual([...PR_READS, ...BOARD]);
+    expect(invalidated()).toEqual(WRITE_SET(qc));
+    expect(invalidated()).toEqual(expect.arrayContaining([['pr', 7], ...BOARD]));
   });
 
   it('a success with a sibling in flight holds the board; the last one refreshes it, once', async () => {
-    const { invalidated, spy, start } = harness();
+    const { qc, invalidated, spy, start } = harness();
     const a = start('user:alice');
     const b = start('user:carol');
     a.resolve();
@@ -188,7 +195,7 @@ describe('the board refresh waits for the last request on the PR, and only on su
     spy.mockClear();
     b.resolve();
     await b.done;
-    expect(invalidated()).toEqual([...PR_READS, ...BOARD]);
+    expect(invalidated()).toEqual(WRITE_SET(qc));
   });
 
   it('a failure refreshes nothing, so the card stays to show the words and the retry', async () => {

@@ -107,8 +107,12 @@ export function OpenPrRow({
         </span>
 
         {/* Status: draft / approval standing / merge warning. Right-aligned so whatever a row
-            carries sits against the bar, and all three can co-occur. */}
-        <span className="flex w-28 shrink-0 items-center justify-end gap-1 overflow-hidden">
+            carries sits against the bar, and all three can co-occur.
+            ⚠ A MINIMUM width, never a fixed one: at a pinned `w-28` + `overflow-hidden`, "approved"
+            beside "Checks failing" overflowed and the right-justified run clipped the LEFT pill —
+            the approval, the half of the row a reader most needs. A row that needs more room
+            takes it from the flexible title instead; every other row keeps the column still. */}
+        <span className="flex min-w-28 shrink-0 items-center justify-end gap-1 whitespace-nowrap">
           {pr.isDraft && (
             <span className="shrink-0 rounded bg-gray-500/15 px-1 text-[10px] font-medium text-gray-500 dark:text-gray-400">
               draft
@@ -124,7 +128,7 @@ export function OpenPrRow({
           )}
           {warn != null && (
             <span
-              className={`shrink-0 truncate rounded px-1 text-[10px] font-medium ${MERGE_TONE_CHIP[warn.tone]}`}
+              className={`shrink-0 rounded px-1 text-[10px] font-medium ${MERGE_TONE_CHIP[warn.tone]}`}
               title={warn.detail ?? warn.label}
             >
               {warn.label}

@@ -1,6 +1,8 @@
 import { useIsMutating } from '@tanstack/react-query';
-import type { MergeBlockFacts } from '@pierre-review/shared';
+import type { MergeBlockFacts, MergeQueueEntryState } from '@pierre-review/shared';
 import { useMergeOptions } from '../hooks/usePrWrites.js';
+import { useQueueDisagreementRepair } from '../hooks/useMergeQueueStatus.js';
+import { mergeQueueStatus } from './Activity/pendingLabels.js';
 import {
   armAutoMergeMutationKey,
   armControlPhase,
@@ -49,8 +51,20 @@ export function MergeWhenReadyControl({
   prId,
   eager = true,
   blockFacts,
+  inMergeQueue,
+  mergeQueueEntryState,
+  syncedAt,
 }: {
   prId: number;
+  /**
+   * GitHub's merge-queue membership from the caller's SYNCED row, with when that row was read —
+   * the same three facts `MergeControl` takes, resolved by the same `mergeQueueStatus`. The live
+   * probe used to be the only source here, so a probe that failed (or an answer cached before the
+   * PR was queued) could offer "Merge when ready" on a PR GitHub was already landing.
+   */
+  inMergeQueue?: boolean | null;
+  mergeQueueEntryState?: MergeQueueEntryState | null;
+  syncedAt?: number;
   /**
    * The PR facts that let a `blocked` verdict say WHY — supplied by PrDetail's Overview, absent
    * on the Pending board. ⚠ The board's cards DO carry review standing now; what they do not
@@ -76,7 +90,18 @@ export function MergeWhenReadyControl({
   // for this PR they keep it, exactly as MergeControl's `open` does — now for the PR's lifetime on
   // screen rather than for a DOM lifetime the reader cannot see. Nothing they have NOT clicked
   // ever fetches, which is the invariant that keeps fifty cards off GitHub.
-  const { data: options } = useMergeOptions(prId, eager || draft !== 'idle');
+  const { data: options, dataUpdatedAt: optionsAt } = useMergeOptions(
+    prId,
+    eager || draft !== 'idle',
+  );
+  // ONE resolver with MergeControl beside it: membership from the NEWER of the synced row and the
+  // live answer, so the two controls can never disagree about whether the queue holds this PR.
+  const queued =
+    mergeQueueStatus(
+      { inMergeQueue, mergeQueueEntryState, observedAt: syncedAt ?? 0 },
+      { info: options?.mergeQueue, observedAt: optionsAt },
+    ) != null;
+  useQueueDisagreementRepair(prId, inMergeQueue, syncedAt ?? 0, options?.mergeQueue, optionsAt);
   const armedIntent = usePrArmedIntent(prId);
   const arm = useArmAutoMerge(prId);
   const disarm = useDisarmAutoMerge(prId);
@@ -145,6 +170,9 @@ export function MergeWhenReadyControl({
   // click — MergeControl shares the query key, so opening it warms this control for free.
   if (options == null) {
     if (eager) return null;
+    // Queued on the synced row's word, with no live answer to say otherwise: nothing to arm, and
+    // a trigger here would invite the click that 409s AlreadyQueued.
+    if (queued) return null;
     if (draft === 'idle') {
       return (
         <button
@@ -171,7 +199,10 @@ export function MergeWhenReadyControl({
         ? 'mergeable'
         : 'unknown',
     mergeStateStatus: toMergeStateStatus(options.mergeStateStatus),
-    inMergeQueue: queue?.inQueue ?? false,
+    // The RESOLVED membership, never `queue?.inQueue ?? false`: a failed probe (`mergeQueue: null`)
+    // used to read as "not queued" and made a queued PR eligible to arm. The queue branch runs
+    // FIRST in `mergeVerdict`, so `queued` makes the verdict 'queued' and eligibility false.
+    inMergeQueue: queued,
     queuePosition: queue?.position ?? null,
     behindBy: options.behindBy,
     // Same composition as MergeControl's, and for the same reason — the two controls sit side

@@ -24,14 +24,16 @@ import {
   safeExternalUrl,
   vendorInk,
 } from '../lib/ui.js';
-// The queue chip's wording, IMPORTED from the Pending board rather than re-spelled here. The
-// board and this pane describe one PR's queue entry, and "Leaving the merge queue" is the whole
+// The queue chip's wording, IMPORTED from the Pending board's labels rather than re-spelled here.
+// The board and this pane describe one PR's queue entry, and "Leaving the merge queue" is the whole
 // point of the field — a second copy of those five sentences is how one surface ends up calling
 // an ejection "in the merge queue".
-import { pendingQueueBadge } from './Activity/AttentionCards.js';
+import { pendingQueueBadge } from './Activity/pendingLabels.js';
+import { useQueryDataUpdatedAt } from '../hooks/useMergeQueueStatus.js';
 import { useFilters } from '../store/filters.js';
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
+import { CopyButton } from './CopyButton.js';
 import { Markdown } from './Markdown.js';
 import { ApproveControl } from './ApproveControl.js';
 import { MergeControl } from './MergeControl.js';
@@ -69,6 +71,28 @@ function Row({
         {label}
       </span>
       <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+/** The Overview's Branch row body: the head branch in monospace, "→ base" muted, and a copy
+ *  button for the HEAD name only (what you would `git checkout`). Long names wrap (break-all). */
+export function PrBranchLine({
+  headRefName,
+  baseRefName,
+}: {
+  headRefName: string;
+  baseRefName: string | null;
+}): JSX.Element {
+  return (
+    <div className="flex items-start gap-1.5">
+      <span className="min-w-0 break-all" data-testid="pr-branch">
+        <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{headRefName}</span>
+        {baseRefName != null && (
+          <span className="text-xs text-gray-500 dark:text-gray-400"> → {baseRefName}</span>
+        )}
+      </span>
+      <CopyButton text={headRefName} what="branch name" />
     </div>
   );
 }
@@ -339,6 +363,8 @@ export function ChecksTab({
   usersById,
   onShowBotActivity,
   onOpenThreads,
+  statusFocus,
+  onStatusFocusConsumed,
 }: {
   pr: PrDetailT;
   usersById: Map<number, User>;
@@ -349,11 +375,31 @@ export function ChecksTab({
   // the reader can go and resolve them. Optional for the same reason onShowBotActivity is: the
   // owner of the tab state is PrDetail, and a caller that has no tabs renders plain text.
   onOpenThreads?: () => void;
+  // PrDetail's header CI readout asks for the Status row: a nonce (null = nothing asked) that is
+  // consumed after one scroll, so a later remount of this tab does not jump back to it.
+  statusFocus?: number | null;
+  onStatusFocusConsumed?: () => void;
 }): JSX.Element {
+  const statusRowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (statusFocus == null) return;
+    const row = statusRowRef.current;
+    row?.scrollIntoView({ block: 'nearest' });
+    // …and move focus there, so a keyboard or screen-reader user lands where the button said
+    // ("show CI status") instead of staying on the header. PrDetail's own scroll container — not
+    // the gated Timeline scroll.
+    row?.focus({ preventScroll: true });
+    onStatusFocusConsumed?.();
+    // Keyed on the nonce alone: the callback is a fresh closure every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFocus]);
   // Suggested reviewers are a LIVE query (not part of the cached detail), so they stay fresh —
   // they empty the instant a reviewer is requested. Merge any CODEOWNERS-resolved users the
   // detail didn't carry into the lookup map so their avatars/links render.
   const { data: sugg } = useSuggestedReviewers(pr.id);
+  // When THIS PR row was read — the merge controls weigh its synced queue membership against their
+  // live merge-options answer by age (`mergeQueueStatus`). A cache read, not a second observer.
+  const prSyncedAt = useQueryDataUpdatedAt(['pr', pr.id]);
   // The Checks row's fallback branch (red ciStatus, no hydrated checkRuns) has no content
   // without the Pro CI-failure card — see checksRowVisible.
   const prSummary = useProCapabilities().prSummary;
@@ -415,9 +461,9 @@ export function ChecksTab({
     mergeStateStatus: pr.mergeStateStatus,
     isDraft: pr.isDraft,
     // ⚠ THE QUEUE OUTRANKS EVERYTHING ELSE ON THIS LINE, and until now it never reached it.
-    // GitHub's MergeStateStatus enum has no QUEUED member, so a queued PR reports `blocked` —
-    // and this row, fed the synced status alone, answered "can this land?" with a list of
-    // protection reasons for a pull request GitHub was already landing. `inMergeQueue` collapses
+    // GitHub's MergeStateStatus enum has no QUEUED member, so the status alone cannot tell a
+    // queued PR apart — and this row, fed the synced status alone, answered "can this land?"
+    // with a list of protection reasons for a pull request GitHub was already landing. `inMergeQueue` collapses
     // that to the `queued` verdict, which carries no blockers, so the Blocked row below empties
     // itself for the same reason.
     //
@@ -551,7 +597,13 @@ export function ChecksTab({
         </div>
       )}
       <div className="divide-y divide-gray-100 py-1 dark:divide-gray-800">
-        {/* Status = CI + mergeability on one row (the two are one "can this ship?" fact). */}
+        {/* Status = CI + mergeability on one row (the two are one "can this ship?" fact). The
+            wrapper is the scroll + focus target for PrDetail's header CI readout. */}
+        <div
+          ref={statusRowRef}
+          tabIndex={-1}
+          className="outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500"
+        >
         <Row label="Status">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             {ci ? (
@@ -666,6 +718,7 @@ export function ChecksTab({
             )}
           </div>
         </Row>
+        </div>
 
         {/* CONFLICTS — the one merge state a reader can act on right now, promoted out of the
             Status row's wrapping chip line, where it was a red word between a CI count and a
@@ -956,6 +1009,11 @@ export function ChecksTab({
                   prId={pr.id}
                   githubUrl={pr.githubUrl}
                   blockFacts={blockFacts}
+                  // The synced queue facts, so a queued PR's control is the queue status line +
+                  // "Remove from queue" from the first paint, collapsed or not — never "Merge ▾".
+                  inMergeQueue={pr.inMergeQueue}
+                  mergeQueueEntryState={pr.mergeQueueEntryState}
+                  syncedAt={prSyncedAt}
                   resolverTarget={{
                     prId: pr.id,
                     repoId: pr.repoId,
@@ -965,7 +1023,13 @@ export function ChecksTab({
                     githubUrl: pr.githubUrl,
                   }}
                 />
-                <MergeWhenReadyControl prId={pr.id} blockFacts={blockFacts} />
+                <MergeWhenReadyControl
+                  prId={pr.id}
+                  blockFacts={blockFacts}
+                  inMergeQueue={pr.inMergeQueue}
+                  mergeQueueEntryState={pr.mergeQueueEntryState}
+                  syncedAt={prSyncedAt}
+                />
               </>
             )}
             {pr.viewerCanClose && pr.state === 'open' && armedIntent == null && (
@@ -995,6 +1059,15 @@ export function ChecksTab({
               </div>
             )}
           </div>
+        </Row>
+      )}
+
+      {/* The head branch (what you would `git checkout`) and its base. Bare name, no fork owner.
+          Null = not synced yet, so the row is omitted rather than shown empty. Sits above
+          Ticket because the ticket key is usually read off the branch name. */}
+      {pr.headRefName != null && (
+        <Row label="Branch">
+          <PrBranchLine headRefName={pr.headRefName} baseRefName={pr.baseRefName} />
         </Row>
       )}
 

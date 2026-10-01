@@ -712,6 +712,8 @@ function prDetailFor(id: number): PrDetail {
     reviewStandings: [],
     reviewerCount: 0,
     tickets: [],
+    headRefName: 'feature/e2e-branch',
+    baseRefName: 'main',
     inMergeQueue: null,
     mergeQueueEntryState: null,
     viewerCanApprove: false,

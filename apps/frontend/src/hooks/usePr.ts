@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   MentionCandidate,
   PrDetail,
@@ -26,8 +27,10 @@ export const DETAIL_GC_TIME = 1000 * 60 * 45;
 // it `staleTime: Infinity` so an already-fetched detail is NEVER refetched on its
 // own — unchanged text is served from the browser with zero network. Freshness is
 // driven instead by useDetailCacheReconciler(), which invalidates a PR's detail
-// only when the lean feed reports a newer updatedAt. (Explicit invalidations —
-// mark-viewed, etc. — still force a refetch regardless of staleTime.)
+// when the lean feed reports a newer updatedAt, or a different CI rollup from a
+// feed fetched after the detail (ciDetailOutdated) — CI moves without bumping
+// updatedAt. (Explicit invalidations — mark-viewed, every PR write through
+// invalidateAfterPrWrite, etc. — still force a refetch regardless of staleTime.)
 export function usePr(id: number | null) {
   return useQuery<PrDetail>({
     queryKey: ['pr', id],
@@ -78,12 +81,67 @@ export function useSuggestedReviewers(id: number | null, enabled = true) {
 
 // The Changes-tab file diffs are hydrated on demand and persisted to IndexedDB
 // (same staleTime/gc policy as PR detail).
+//
+// ⚠ …AND THEY FOLLOW THE PR'S HEAD, NOT THE WRITE SET. Nothing else ever refetches this key, so
+// after a push (the conflict resolver, AI Fix, Update branch, or a commit made anywhere else) the
+// tab went on showing the old patches for the whole session while the header moved on. Every
+// one of those paths ends in a fresh `['pr', id]` read, so the rule sits here, once: when the
+// detail was read AFTER the diff and names a different head, refetch the diff
+// (`prFilesOutdated`). A reply or a resolve does not move the head, so it re-reads nothing — which
+// is why `['pr-files', id]` is deliberately NOT in `invalidateAfterPrWrite`'s set.
+//
+// `usePr(id)` here adds an observer to a query the pane already holds (the Changes tab only
+// mounts inside a loaded PrDetail), so it costs no request.
 export function usePrFiles(id: number | null) {
-  return useQuery<PrFilesResponse>({
+  const qc = useQueryClient();
+  const files = useQuery<PrFilesResponse>({
     queryKey: ['pr-files', id],
     queryFn: () => api.prFiles(id as number),
     enabled: id != null,
     staleTime: Infinity,
     gcTime: DETAIL_GC_TIME,
   });
+  const detail = usePr(id);
+  const detailAt = detail.dataUpdatedAt;
+  const outdated =
+    id != null &&
+    files.data != null &&
+    detail.data != null &&
+    prFilesOutdated(
+      { headSha: files.data.headSha, at: files.dataUpdatedAt },
+      { headSha: detail.data.headSha, at: detailAt },
+    );
+  const fetching = files.isFetching;
+  // Once per detail read: a refetch that FAILS keeps the old diff and its old timestamp, so without
+  // this the effect would re-fire every time the failed fetch settled.
+  const firedFor = useRef(0);
+  useEffect(() => {
+    if (!outdated || fetching || id == null || firedFor.current === detailAt) return;
+    firedFor.current = detailAt;
+    void qc.invalidateQueries({ queryKey: ['pr-files', id], exact: true });
+  }, [outdated, fetching, id, detailAt, qc]);
+  return files;
+}
+
+/**
+ * Is a cached diff behind the PR? True when the PR detail was read AFTER the diff and names a
+ * different head than the one the diff was read at. Pure.
+ *
+ * ⚠ THE TIME TEST IS WHAT MAKES IT SETTLE. The diff's head is the STORED head at its read, and
+ * GitHub can be a push ahead of the database, so a diff can carry a head the detail has not
+ * caught up with (or the reverse). Comparing heads alone would refetch forever; requiring the
+ * detail to be the NEWER read means one refetch per detail read at most, after which the diff is
+ * the newer one and this is false until the detail moves again.
+ *
+ * A diff with no head (`null`: no stored head, or GitHub failed and the diff is the empty
+ * fallback; absent: cached before the field existed) refetches once a newer detail with a head
+ * arrives. A detail with no head says nothing.
+ */
+export function prFilesOutdated(
+  files: { headSha?: string | null; at: number },
+  detail: { headSha: string | null; at: number },
+): boolean {
+  if (detail.headSha == null) return false;
+  if (!(detail.at > files.at)) return false;
+  return (files.headSha ?? null) !== detail.headSha;
 }

@@ -13,12 +13,15 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { reviewerRequestView, type ReviewerRequestView } from '../lib/reviewerRequest.js';
+import { invalidateAfterPrWrite } from './prCacheSync.js';
 
-// PR write mutations. The PR-detail query is staleTime:Infinity +
-// IndexedDB-persisted, so every write to the open PR MUST invalidate ['pr', prId]
-// (the backend optimistically stamps the local DB, so the refetch shows the change
-// immediately). Triage queues (['my-turn'], ['me']) and feeds (['timeline'],
-// ['open-prs']) are invalidated where a write can change them.
+// PR write mutations. The backend stamps the local DB before it answers, so a refetch shows the
+// change at once — and EVERY write refetches through ONE set, `invalidateAfterPrWrite`
+// (prCacheSync.ts): the PR's own detail/threads/merge control, every workspace screen, and the
+// Pending board's three reads together. A write that hand-picks its own keys is how a card
+// outlives the fact that retired it. The helper also opens SyncStatus's fast `['repos']` poll, so
+// the server's follow-up re-reads (GitHub computes mergeability and CI seconds later) reach the
+// screen too.
 
 export function useReplyToThread() {
   const qc = useQueryClient();
@@ -26,12 +29,8 @@ export function useReplyToThread() {
     mutationFn: (vars: { prId: number; threadId: number; body: string }) =>
       api.replyToThread(vars.threadId, { body: vars.body }),
     onSuccess: (_data, vars) => {
-      void qc.invalidateQueries({ queryKey: ['pr', vars.prId] });
-      void qc.invalidateQueries({ queryKey: ['thread', vars.threadId] });
-      void qc.invalidateQueries({ queryKey: ['my-turn'] });
-      void qc.invalidateQueries({ queryKey: ['me'] });
-      // The Activity feed can be acted on inline (thread cards), so refresh it too.
-      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
+      // A reply can end "Unanswered threads" and move the my_turn ball, so the board moves too.
+      void invalidateAfterPrWrite(qc, vars.prId, { threadIds: [vars.threadId] });
     },
   });
 }
@@ -42,11 +41,7 @@ export function useResolveThread() {
     mutationFn: (vars: { prId: number; threadId: number; resolved: boolean }) =>
       api.resolveThread(vars.threadId, { resolved: vars.resolved }),
     onSuccess: (_data, vars) => {
-      void qc.invalidateQueries({ queryKey: ['pr', vars.prId] });
-      void qc.invalidateQueries({ queryKey: ['thread', vars.threadId] });
-      void qc.invalidateQueries({ queryKey: ['my-turn'] });
-      void qc.invalidateQueries({ queryKey: ['me'] });
-      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
+      void invalidateAfterPrWrite(qc, vars.prId, { threadIds: [vars.threadId] });
     },
   });
 }
@@ -59,11 +54,7 @@ export function useResolveBotThreads() {
     mutationFn: (vars: { prId: number; threadIds: number[] }) =>
       api.resolveBotThreads(vars.prId, { threadIds: vars.threadIds }),
     onSuccess: (_data, vars) => {
-      void qc.invalidateQueries({ queryKey: ['pr', vars.prId] });
-      void qc.invalidateQueries({ queryKey: ['my-turn'] });
-      void qc.invalidateQueries({ queryKey: ['me'] });
-      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
-      void qc.invalidateQueries({ queryKey: ['activity'] });
+      void invalidateAfterPrWrite(qc, vars.prId, { threadIds: vars.threadIds });
     },
   });
 }
@@ -72,12 +63,8 @@ export function useCreatePrComment(prId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: string) => api.createPrComment(prId, { body }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['pr', prId] });
-      void qc.invalidateQueries({ queryKey: ['my-turn'] });
-      void qc.invalidateQueries({ queryKey: ['me'] });
-      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
-    },
+    // A PR comment can hand the my_turn ball back, so the board is part of this set too.
+    onSuccess: () => void invalidateAfterPrWrite(qc, prId),
   });
 }
 
@@ -86,30 +73,18 @@ export function useApprovePr(prId: number) {
   return useMutation({
     mutationFn: (body?: string) =>
       api.approvePr(prId, body !== undefined ? { body } : undefined),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['pr', prId] });
-      void qc.invalidateQueries({ queryKey: ['timeline'] });
-      void qc.invalidateQueries({ queryKey: ['open-prs'] });
-      void qc.invalidateQueries({ queryKey: ['my-turn'] });
-      void qc.invalidateQueries({ queryKey: ['me'] });
-      // ⚠ THE BOARD, TOO. Approving is the single most common way a Pending "Review or reply"
-      // card stops being true, and until now the click left it sitting there — the route's
-      // server half now clears the viewer's `review_requests` row AND re-reads the PR from
-      // GitHub, so a refetch here is what turns the card into a `merge` card (or retires it).
-      // Both keys together: `/api/daily-brief` (the Welcome-back banner, the Workspace badges)
-      // counts these very cards, so the two must come from ONE snapshot.
-      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
-      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
-      // The THIRD read of that same fold. All three move together or the plan's `stale` chip —
-      // whose whole job is to say "the list has moved on since this was written" — stays false
-      // for up to five minutes after the write that moved it.
-      void qc.invalidateQueries({ queryKey: ['work-plan'] });
-    },
+    // Approving is the most common way a Pending "Review or reply" card stops being true: the
+    // route clears the viewer's `review_requests` row and re-reads the PR, so the refetch turns
+    // the card into a `merge` card or retires it. GitHub's blocked → clean flip usually lands a
+    // few seconds later, and reaches the board through the fast `['repos']` poll.
+    onSuccess: () => void invalidateAfterPrWrite(qc, prId),
   });
 }
 
 // The merge control's options (allowed methods + live mergeability). Fetched lazily — enable it
 // only when the control is open, so the hot PR-detail path isn't slowed by a live GitHub call.
+// A DISABLED observer still reads the cache: that is how the Pending board's merge row borrows a
+// queue position somebody already paid for, without fetching one itself.
 export function useMergeOptions(prId: number, enabled: boolean) {
   return useQuery({
     queryKey: ['merge-options', prId],
@@ -141,126 +116,87 @@ export function useMergePr(prId: number) {
   return useMutation({
     mutationKey: mergePrMutationKey(prId),
     mutationFn: (method: MergeMethod) => api.mergePr(prId, { method }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['pr', prId] });
-      void qc.invalidateQueries({ queryKey: ['merge-options', prId] });
-      void qc.invalidateQueries({ queryKey: ['timeline'] });
-      void qc.invalidateQueries({ queryKey: ['open-prs'] });
-      void qc.invalidateQueries({ queryKey: ['my-turn'] });
-      void qc.invalidateQueries({ queryKey: ['me'] });
-      void qc.invalidateQueries({ queryKey: ['activity'] });
-      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
-      // The Pending board can now MERGE — so the `merge` card the click came from has to leave it,
-      // and the daily brief that counts the same cards has to agree. ⚠ An INVALIDATION, not
-      // a local edit: each tab's ORDER is the server's score order, and a mutation response has
-      // no business re-ranking it.
-      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
-      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
-      // The THIRD read of that same fold. All three move together or the plan's `stale` chip —
-      // whose whole job is to say "the list has moved on since this was written" — stays false
-      // for up to five minutes after the write that moved it.
-      void qc.invalidateQueries({ queryKey: ['work-plan'] });
-      // The viewer's first merge in a repo grants them merge rights → refresh the shield.
-      void qc.invalidateQueries({ queryKey: ['mergers'] });
-    },
+    // The `merge` card the click came from has to leave the board. ⚠ An INVALIDATION, not a
+    // local edit: each tab's ORDER is the server's score order. `merged` adds the maintainer
+    // shield (a first merge grants merge rights) and the trunk strip (the PR just landed on it).
+    onSuccess: () => void invalidateAfterPrWrite(qc, prId, { merged: true }),
   });
 }
 
 // ---- GitHub's native merge queue ----
 // When the base branch has a queue, enqueuing IS the merge action (GitHub won't take a direct
-// merge), so these invalidate the same surfaces as a merge would EXCEPT the PR-state ones —
-// the PR isn't merged yet, it's queued. merge-options carries the live queue position.
-// ⚠ THESE TWO AWAIT THEIR merge-options INVALIDATION, AND IT IS THE ONLY PLACE IN THIS FILE
-// THAT DOES. The button these mutations sit behind renders from `useMergeOptions`, whose
-// `inQueue` is the very fact the mutation just changed — and a fire-and-forget invalidation
-// leaves `isPending` false while the cache still holds the PRE-CLICK payload. The button
-// therefore snapped back to "Add to merge queue" and STAYED there for the whole refetch, which
-// is a live GitHub call: seconds, not a flicker, and clickable throughout, so a second click
-// could enqueue twice. React Query v5 keeps a mutation pending until an `onSuccess` promise
-// settles, so awaiting exactly this one query carries the spinner across the gap.
+// merge). Membership is SYNCED now and stamped by both routes, so a queue write moves the same
+// screens any other PR write moves — the Pending card's queue chip and merge row, the PR pane's
+// merge-state row, the card's sentence — and goes through the ONE write set.
 //
-// The other invalidations stay `void`: nothing on this control reads them, and awaiting a
-// refetch nobody is looking at would just hold the spinner open for longer.
+// ⚠ EXPLICIT, SHARED KEYS (the two-mounts rule — see `mergePrMutationKey`). "Remove from queue"
+// renders on the COLLAPSED merge row of a Pending card AND on the PR pane, and a card re-keys when
+// its kind changes, so a per-mount `isPending` would forget a removal in flight and offer the
+// button again. Both verbs share the `['merge-queue', prId]` PREFIX, so `useIsMutating` on
+// `mergeQueueMutationKey(prId)` answers "is anything happening to this PR's queue entry?" and the
+// verb-specific key says which.
+export function mergeQueueMutationKey(prId: number, verb?: 'enqueue' | 'dequeue'): unknown[] {
+  return verb == null ? ['merge-queue', prId] : ['merge-queue', prId, verb];
+}
+
+// ⚠ THESE TWO AWAIT THEIR REFETCH, AND THE REASON IS SPINNER CONTINUITY. The control decides what
+// to draw from THREE reads — the live `['merge-options', prId]`, the synced `['pr', prId]` (PR pane)
+// and `['attention-cards']` (the board) — whichever answered LAST (`mergeQueueStatus`). A
+// fire-and-forget invalidation drops `isPending` while all three still hold the PRE-CLICK answer,
+// so the row snapped back to "Add to merge queue" (or "Remove from queue") for the whole refetch
+// — a live GitHub call, seconds long, and clickable throughout, so a second click could enqueue
+// twice. React Query v5 keeps a mutation pending until an `onSuccess` promise settles, so awaiting
+// the write set carries "Queueing…" / "Removing…" across the gap. The set refetches only ACTIVE
+// queries and puts `['repos']` first; inside the sweep throttle it waits for the trailing sweep,
+// which is the board read the row is waiting for anyway.
+//
+// The old comment here said "nothing on this control reads" the board. It was wrong the day the
+// card's queue chip shipped, and the board kept offering Merge after a queue click until its own
+// 60-second staleTime ran out.
 export function useEnqueueMergeQueue(prId: number) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: mergeQueueMutationKey(prId, 'enqueue'),
     mutationFn: (method?: MergeMethod) =>
       api.enqueueMergeQueue(prId, method ? { method } : undefined),
-    onSuccess: async () => {
-      void qc.invalidateQueries({ queryKey: ['pr', prId] });
-      await qc.invalidateQueries({ queryKey: ['merge-options', prId] });
-    },
+    onSuccess: () => invalidateAfterPrWrite(qc, prId),
   });
 }
 
 export function useDequeueMergeQueue(prId: number) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: mergeQueueMutationKey(prId, 'dequeue'),
     mutationFn: () => api.dequeueMergeQueue(prId),
-    onSuccess: async () => {
-      void qc.invalidateQueries({ queryKey: ['pr', prId] });
-      await qc.invalidateQueries({ queryKey: ['merge-options', prId] });
-    },
+    onSuccess: () => invalidateAfterPrWrite(qc, prId),
   });
 }
 
-// Close the PR without merging (reversible on GitHub). Like useMergePr it moves the PR out of
-// the open set, so invalidate every surface that shows open-PR state (timeline, open-PRs,
-// triage queues, the feeds, the Activity console). The backend optimistically stamps closed.
+// Close the PR without merging (reversible on GitHub). `markPrClosedLocally` sets state='closed',
+// which removes the PR from the fold every Pending card is built from — the card is gone
+// server-side and the refetch is what stops the client drawing it.
 export function useClosePr(prId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.closePr(prId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['pr', prId] });
-      void qc.invalidateQueries({ queryKey: ['timeline'] });
-      void qc.invalidateQueries({ queryKey: ['open-prs'] });
-      void qc.invalidateQueries({ queryKey: ['my-turn'] });
-      void qc.invalidateQueries({ queryKey: ['me'] });
-      void qc.invalidateQueries({ queryKey: ['activity'] });
-      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
-      // `markPrClosedLocally` sets state='closed', which removes the PR from the openPrs fold
-      // every Pending card is built from — so the card IS gone server-side and only the client
-      // was still drawing it. Same pair, same reason, as the merge mutation above.
-      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
-      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
-      // The THIRD read of that same fold. All three move together or the plan's `stale` chip —
-      // whose whole job is to say "the list has moved on since this was written" — stays false
-      // for up to five minutes after the write that moved it.
-      void qc.invalidateQueries({ queryKey: ['work-plan'] });
-    },
+    onSuccess: () => void invalidateAfterPrWrite(qc, prId),
   });
 }
 
-// Reopen a closed PR. The mirror image of useClosePr: it moves the PR back INTO the open set, so
-// every surface that shows open-PR state has to be re-read — the SAME nine keys, for the same
-// reasons, including the three that are ONE FOLD read three times.
+// Reopen a closed PR. The mirror image of useClosePr: the PR is back in the open set, so a card
+// may now exist that the client is not drawing.
 export function useReopenPr(prId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.reopenPr(prId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['pr', prId] });
-      void qc.invalidateQueries({ queryKey: ['timeline'] });
-      void qc.invalidateQueries({ queryKey: ['open-prs'] });
-      void qc.invalidateQueries({ queryKey: ['my-turn'] });
-      void qc.invalidateQueries({ queryKey: ['me'] });
-      void qc.invalidateQueries({ queryKey: ['activity'] });
-      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
-      // `markPrReopenedLocally` sets state='open', which puts the PR BACK into the openPrs fold
-      // every Pending card is built from — so a card may now exist that the client is not
-      // drawing. Same three keys, same rule, as the close mutation above: they are one fold read
-      // three times (board / brief count / ranked plan) and must move together or `capFor`'s
-      // `shown === count` guard compares two snapshots and drops the "50 of 148" disclosure.
-      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
-      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
-      void qc.invalidateQueries({ queryKey: ['work-plan'] });
-    },
+    onSuccess: () => void invalidateAfterPrWrite(qc, prId),
   });
 }
 
-// Update the PR branch from trunk (rebase/merge). Re-fetch mergeability afterwards so the merge
-// control reflects the now-up-to-date branch.
+// Update the PR branch from trunk (rebase/merge). An `update_branch` card exists BECAUSE
+// `mergeStateStatus === 'behind'`; the update retires it (or turns it into a `merge` card) once
+// GitHub has attached the new head — usually a few seconds after this answers, which is what the
+// fast `['repos']` poll the helper opens is for.
 export function useUpdatePrBranch(prId: number) {
   const qc = useQueryClient();
   return useMutation({
@@ -269,21 +205,7 @@ export function useUpdatePrBranch(prId: number) {
     // POST is open, and it is mounted separately from the `MergeControl` that fires it.
     mutationKey: updateBranchMutationKey(prId),
     mutationFn: (body?: UpdateBranchBody) => api.updatePrBranch(prId, body),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['pr', prId] });
-      void qc.invalidateQueries({ queryKey: ['merge-options', prId] });
-      void qc.invalidateQueries({ queryKey: ['timeline'] });
-      void qc.invalidateQueries({ queryKey: ['open-prs'] });
-      // An `update_branch` card exists BECAUSE `mergeStateStatus === 'behind'`; a successful
-      // update is the fact that retires it (or turns it into a `merge` card). Same invalidate-
-      // don't-edit rule as the merge mutation above.
-      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
-      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
-      // The THIRD read of that same fold. All three move together or the plan's `stale` chip —
-      // whose whole job is to say "the list has moved on since this was written" — stays false
-      // for up to five minutes after the write that moved it.
-      void qc.invalidateQueries({ queryKey: ['work-plan'] });
-    },
+    onSuccess: () => void invalidateAfterPrWrite(qc, prId),
   });
 }
 
@@ -291,20 +213,11 @@ export function useAddReviewComment(prId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: AddReviewCommentBody) => api.addReviewComment(prId, body),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['pr', prId] });
-      void qc.invalidateQueries({ queryKey: ['my-turn'] });
-      // A new inline comment is a new `review_comment` event, not just a thread on this PR:
-      // it changes the FYI badge, shows up as a feed card, and draws a marker on the board.
-      // Reaching those is what makes this hook match `useReplyToThread`, which writes the same
-      // kind of row. Deliberately NOT ['pr-files', prId] — the patches are unchanged, and
-      // dropping that cache entry would re-fetch every diff in the PR for nothing. ['users'] is
-      // left alone too: the Members roster only changes when a NEW actor appears, and the actor
-      // here is the signed-in viewer, who is already in it.
-      void qc.invalidateQueries({ queryKey: ['me'] });
-      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
-      void qc.invalidateQueries({ queryKey: ['timeline'] });
-    },
+    // A new inline comment is a new `review_comment` event: FYI badge, feed card, board marker.
+    // Deliberately NOT ['pr-files', prId] (the patches are unchanged; dropping it re-fetches
+    // every diff) and NOT ['users'] (the actor is the viewer, already in the roster) — neither is
+    // in the helper's set.
+    onSuccess: () => void invalidateAfterPrWrite(qc, prId),
   });
 }
 
@@ -334,24 +247,23 @@ export function requestReviewersMutationKey(prId: number, reviewerKey?: string):
 // board catches up on its own (focus / the 5-minute interval).
 //
 // ⚠ ['attention-cards'], ['daily-brief'], ['work-plan'] MOVE TOGETHER — one fold read three times
-// (useAttentionCards). All are PREFIXES owned by other files, written here as literals, so a rename
-// there fails silently here (the request succeeds and the card just doesn't clear); they still sweep
-// every `['<name>', 'ws:<id>']` entry, which matters with more than one workspace cached.
+// (useAttentionCards) — and they arrive together through `invalidateAfterPrWrite`, alongside the
+// capped fold's copy of the same card (['workspace-insights']).
 export function requestReviewersOptions(qc: QueryClient, prId: number, reviewerKey?: string) {
   return {
     mutationKey: requestReviewersMutationKey(prId, reviewerKey),
     mutationFn: (body: RequestReviewersBody) => api.requestReviewers(prId, body),
     onSuccess: () => {
-      // The PR's own reads, always: the detail is staleTime:Infinity + persisted (this file's rule),
-      // and the live suggestions query re-gates to empty once anyone is requested.
-      void qc.invalidateQueries({ queryKey: ['pr', prId] });
+      // The live suggestions query re-gates to empty once anyone is requested. Not in the shared
+      // set: only this write changes it.
       void qc.invalidateQueries({ queryKey: ['suggested-reviewers', prId] });
-      if (qc.isMutating({ mutationKey: requestReviewersMutationKey(prId) }) > 1) return;
-      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
-      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
-      void qc.invalidateQueries({ queryKey: ['work-plan'] });
-      // The capped fold's copy of the same card (useWorkspaceInsights).
-      void qc.invalidateQueries({ queryKey: ['workspace-insights'] });
+      // A sibling still in flight: refresh the PR's own detail only (staleTime:Infinity +
+      // persisted), and leave the board to whichever request lands last.
+      if (qc.isMutating({ mutationKey: requestReviewersMutationKey(prId) }) > 1) {
+        void qc.invalidateQueries({ queryKey: ['pr', prId] });
+        return;
+      }
+      void invalidateAfterPrWrite(qc, prId);
     },
   };
 }

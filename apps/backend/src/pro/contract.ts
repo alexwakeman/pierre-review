@@ -17,6 +17,7 @@ import type {
   SynthesisScope,
   BlastSignals,
   FlowPointerEvidence,
+  PendingBoardSnapshot,
   WorkPlanEvidence,
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../github/compare.js';
@@ -93,23 +94,15 @@ export interface ProCapabilities {
 // the plugin through these two seams; the plugin supplies only prompts + model and
 // owns the product workflow. Inert in OSS (nothing calls it), exactly like llm.
 
-// Progress emitted while the fixer / resolver / push jobs run (mirrors
-// ClaudeReviewProgress). A superset covering the fix run and the merge/rebase/push
-// jobs; the plugin maps it to AiFixProgress / AiFixResolveProgress on the wire.
+// Progress emitted while a fix run goes (mirrors ClaudeReviewProgress). The plugin maps it
+// straight onto AiFixProgress on the wire, so the two phase unions are the same five members.
 export interface CodingProgress {
   phase:
     | 'fetching_diff'
     | 'cloning'
     | 'fixing'
     | 'capturing'
-    | 'persisting'
-    | 'applying_fix'
-    | 'fetching_trunk'
-    | 'rebasing'
-    | 'merging'
-    | 'resolving_conflicts'
-    | 'verifying'
-    | 'pushing';
+    | 'persisting';
   message?: string;
   recentActivity?: string[];
   usage?: {
@@ -214,100 +207,14 @@ export interface ApplyAndPushResult {
   prUrl?: string;
 }
 
-// ---- trunk-conflict handling (mergePreview / rebaseResolve / merge / pushResolved) ----
-
-// How a completed fix is reconciled with the trunk before pushing.
-export type CodingStrategy = 'plain' | 'merge' | 'rebase';
-
-// A completed push that may have reconciled with the trunk (merge/rebase). Extends
-// the plain push result with what actually happened.
-export interface ApplyResolveResult extends ApplyAndPushResult {
-  strategy: CodingStrategy;
-  resolvedConflicts: boolean;
-  conflictFilesResolved: string[];
-  forcePushed: boolean; // only ever true for rebase onto the PR's own branch
-}
-
-export interface MergePreviewArgs {
-  accountId: number;
-  owner: string;
-  name: string;
-  prNumber: number;
-  baseSha: string;
-  patch: string;
-  trunk: string; // the base branch to compare against
-}
-
-export interface MergePreviewResult {
-  trunk: string;
-  trunkSha: string | null; // null if the trunk fetch failed
-  behindBy: number;
-  aheadBy: number;
-  clean: boolean;
-  conflictFiles: string[];
-}
-
-// Shared knobs for the two agentic-resolution seams.
-interface ResolveCommonArgs {
-  accountId: number;
-  owner: string;
-  name: string;
-  prNumber: number;
-  baseSha: string;
-  patch: string;
-  commitMessage: string;
-  trunk: string;
-  autoResolve: boolean; // run the conflict-resolution agent
-  model: string;
-  resolverSystemPrompt?: string; // plugin-supplied static guidance
-  maxTurns?: number;
-  maxBudgetUsd?: number;
-  abortController: AbortController;
-  onProgress: (p: CodingProgress) => void;
-}
-
-// rebaseResolve: apply the fix, rebase onto the trunk (agentically resolving), and
-// capture a reviewable diff + a `git am` mbox — WITHOUT pushing.
-export type RebaseResolveArgs = ResolveCommonArgs;
-
-export interface RebaseResolveResult {
-  diff: string; // unified `git diff <trunk>..HEAD` for review
-  mbox: string; // `git format-patch` mbox for a deterministic replay at push
-  filesChanged: string[];
-  conflictFiles: string[];
-  resolvedConflicts: boolean;
-  trunkSha: string;
-  aborted: boolean;
-}
-
-// mergeResolveAndPush: apply the fix, merge the trunk in (agentically resolving),
-// verify, and push the merge commit (never force-pushes). One step.
-export interface MergeResolveAndPushArgs extends ResolveCommonArgs {
-  target: ApplyAndPushTarget;
-}
-
-// pushResolved: replay a previously-resolved rebase mbox onto the CURRENT trunk tip and
-// push (force-with-lease on the existing branch; plain for a new branch). Re-fetches
-// `trunk` fresh; `resolvedBaseSha` is the tip it was reviewed against (moved-detection).
-export interface PushResolvedArgs {
-  accountId: number;
-  owner: string;
-  name: string;
-  prNumber: number;
-  trunk: string; // the base branch to replay onto (re-fetched fresh)
-  resolvedBaseSha: string; // the trunk tip the mbox was generated against
-  resolvedConflicts: boolean; // whether the stored resolution involved conflicts
-  mbox: string;
-  target: ApplyAndPushTarget;
-  onProgress?: (p: CodingProgress) => void;
-}
-
-// applyAndPush / the resolve seams throw an Error carrying `.code` on the expected
-// failures, so the plugin's routes can map them to HTTP status without importing a
-// host class:
+// The coding seams (applyAndPush, commitFilesAndOpenPr) and core's own update-from-trunk throw
+// an Error carrying `.code` on the expected failures, so the plugin's routes can map them to HTTP
+// status without importing a host class. Every member stays even where no seam throws it any
+// more: core's `updatePrBranchFromTrunk` throws the trunk ones, `coding/git.ts`'s `codedError` is
+// typed by this union, and the Bot Tuning Advisor's routes match TRUNK_FETCH_FAILED.
 //   'HEAD_MOVED'           — existing-branch push and the live head !== baseSha (→ 409)
 //   'PUSH_DENIED'          — the account lacks write / an un-pushable fork (→ 422)
-//   'APPLY_FAILED'         — a stored patch/mbox didn't apply cleanly (→ 422)
+//   'APPLY_FAILED'         — a stored patch didn't apply cleanly (→ 422)
 //   'CONFLICTS_UNRESOLVED' — merge/rebase left conflicts we won't push (→ 422)
 //   'MERGE_FAILED'         — the merge failed for a non-conflict reason (→ 422)
 //   'REBASE_FAILED'        — the rebase failed for a non-conflict reason (→ 422)
@@ -443,11 +350,17 @@ export interface CodingSeam {
   // The advisor's config-PR primitive: worktree at the DEFAULT branch → write files →
   // commit → push a NEW branch (never force) → open the PR → syncOnePr visibility tail.
   commitFilesAndOpenPr(args: CommitFilesAndOpenPrArgs): Promise<CommitFilesAndOpenPrResult>;
-  // Trunk-conflict handling (all per-account, cloud-ready; inert in OSS).
-  mergePreview(args: MergePreviewArgs): Promise<MergePreviewResult>;
-  rebaseResolve(args: RebaseResolveArgs): Promise<RebaseResolveResult>;
-  mergeResolveAndPush(args: MergeResolveAndPushArgs): Promise<ApplyResolveResult>;
-  pushResolved(args: PushResolvedArgs): Promise<ApplyResolveResult>;
+  // ⚠ FOUR MEMBERS WERE DELETED OUTRIGHT HERE — the AI Fix trunk-reconciliation seams
+  // (`mergePreview`, `rebaseResolve`, `mergeResolveAndPush`, `pushResolved`), with their arg /
+  // result types and the rebase/merge/push `CodingProgress` phases. A fix now pushes as-is
+  // through `applyAndPush`. That FAILS the "narrow additive" test (a removed member is not a
+  // trailing optional field), and apiVersion deliberately STAYS 21 anyway — the `setLocalKey`
+  // precedent on ReviewSeam below: bumping would turn "a few dead routes throw against a lagging
+  // submodule" into "the ENTIRE plugin goes dark, silently".
+  // ⚠ THE PRICE IS A LANDING REQUIREMENT: this host is NOT runtime-compatible with a plugin
+  // commit that still registers the merge-preview / rebase / merge-push routes — the version gate
+  // passes and those routes throw `ctx.coding.X is not a function`. Host commit, plugin commit
+  // and GITLINK MOVE land together. The new SPA calls none of them.
 }
 
 // ---- Claude Review seam (agentic PR review) -----------------------------------
@@ -1085,6 +998,29 @@ export interface ProHostQueries {
     workspaceId: number,
     candidateUserIds: number[],
   ): Promise<number[]>;
+
+  // AUTO CLAUDE REVIEW (core db/queries.ts `getAutoReviewCandidates`): the PRs one workspace's
+  // auto-review sweeper may start a run on - open, not draft, opened at or after `openedSinceMs`,
+  // authored by a PERSON under THIS workspace's bot judgement (the resolver behind
+  // `InsightPrRef.authorIsBot`), with no `claude_reviews` row at all - oldest first, at most
+  // `limit`; plus how many AUTO runs this workspace started at or after `dayStartMs`. null = the
+  // workspace is not the account's.
+  // ⚠ OPTIONAL ON PURPOSE - apiVersion STAYS 21, the `getWorkPlan` precedent verbatim. Absent, the
+  // sweeper does nothing.
+  getAutoReviewCandidates?(
+    accountId: number,
+    workspaceId: number,
+    opts: { openedSinceMs: number; dayStartMs: number; limit: number },
+  ): Promise<{ prIds: number[]; autoToday: number } | null>;
+
+  // THE PENDING BOARD (core db/pending-tabs.ts `getPendingBoardSnapshot`): the configuring
+  // account's own six tabs for one workspace — the SAME fold `GET /api/attention` serves
+  // (`buildPendingBoard`), so the Slack digest and the board cannot list different cards. It skips
+  // the route's two live extras (failing-check names, suggested reviewers): a cron send may not
+  // spend GitHub budget. ⚠ LIVE STATE — never part of a payload hash (the sprint report's
+  // included), or every send re-bills. ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the
+  // `getWorkPlan` precedent: an older host leaves it undefined and the Pending sections are absent.
+  getPendingBoard?(accountId: number, workspaceId: number): Promise<PendingBoardSnapshot>;
 }
 
 export interface ProContext {

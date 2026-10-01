@@ -1,13 +1,13 @@
-import { useMemo } from 'react';
-import type { Repo, TimelinePr } from '@pierre-review/shared';
-import { useWorkspaceOpenPrs } from '../../hooks/useTriage.js';
-import { useRepos, useUsers } from '../../hooks/useTimeline.js';
-import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
-import { useFilters } from '../../store/filters.js';
-import { useFeedOpenPrsPanel } from '../../store/digestCollapse.js';
-import { indexUsers, sortOpenPrsByActivity } from '../../lib/ui.js';
-import { ChevronIcon } from '../Icons.js';
-import { OpenPrRows } from './RepoOpenPrList.js';
+import { useMemo } from "react";
+import type { Repo, TimelinePr } from "@pierre-review/shared";
+import { useWorkspaceOpenPrs } from "../../hooks/useTriage.js";
+import { useRepos, useUsers } from "../../hooks/useTimeline.js";
+import { useMaintainersByRepo } from "../../hooks/useMaintainers.js";
+import { useFilters } from "../../store/filters.js";
+import { useFeedOpenPrsPanel } from "../../store/digestCollapse.js";
+import { indexUsers, sortOpenPrsByActivity } from "../../lib/ui.js";
+import { ChevronIcon } from "../Icons.js";
+import { OpenPrRows } from "./RepoOpenPrList.js";
 
 interface PrGroup {
   repoId: number;
@@ -21,7 +21,10 @@ interface PrGroup {
 // useWorkspaceOpenPrs returns (every repo in the active workspace); grouping is purely
 // presentational. Within a section the caller preserves the activity-sort; sections are ordered
 // most-recently-active first.
-function groupOpenPrsByRepo(prs: TimelinePr[], reposById: Map<number, Repo>): PrGroup[] {
+function groupOpenPrsByRepo(
+  prs: TimelinePr[],
+  reposById: Map<number, Repo>,
+): PrGroup[] {
   const byRepo = new Map<number, TimelinePr[]>();
   for (const p of prs) {
     const arr = byRepo.get(p.repoId);
@@ -88,27 +91,41 @@ export function FeedOpenPrsPanel(): JSX.Element | null {
   const openCount = prs.length - draftCount;
 
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-800" data-testid="open-prs-panel">
-      <button
-        type="button"
-        onClick={toggleCollapsed}
-        aria-expanded={!collapsed}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/40"
-      >
-        <ChevronIcon
-          dir={collapsed ? 'right' : 'down'}
-          className="shrink-0 text-gray-400"
-        />
-        Open PRs · {openCount}
-        {draftCount > 0 && (
-          <span className="font-normal normal-case text-gray-400">
-            · {draftCount} draft{draftCount === 1 ? '' : 's'}
+    <div
+      className="rounded-lg border border-gray-200 dark:border-gray-800"
+      data-testid="open-prs-panel"
+    >
+      <div className="flex items-stretch">
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-expanded={!collapsed}
+          className="flex min-w-0 flex-1 items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/40"
+        >
+          <ChevronIcon
+            dir={collapsed ? "right" : "down"}
+            className="shrink-0 text-gray-400"
+          />
+          Open PRs · {openCount}
+          {draftCount > 0 && (
+            <span className="font-normal normal-case text-gray-400">
+              · {draftCount} draft{draftCount === 1 ? "" : "s"}
+            </span>
+          )}
+          <span className="ml-auto hidden font-normal normal-case text-gray-400 sm:inline">
+            click a PR to open it
           </span>
-        )}
-        <span className="ml-auto font-normal normal-case text-gray-400">
-          click a PR to open it
-        </span>
-      </button>
+        </button>
+        {/* The workspace-wide Open PRs tab — the same one Reports → Flow metrics' Open PRs tile
+          opens ('feed' scope). A sibling of the toggle, never inside it: a button can't nest. */}
+        <button
+          type="button"
+          onClick={() => openOpenPrsDetail("feed")}
+          className="shrink-0 px-3 py-1.5 text-[11px] font-medium text-sky-600 hover:bg-gray-50 dark:text-sky-400 dark:hover:bg-gray-800/40"
+        >
+          Open PRs tab
+        </button>
+      </div>
 
       {!collapsed && (
         <div className="border-t border-gray-200 dark:border-gray-800">

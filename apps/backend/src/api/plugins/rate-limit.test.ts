@@ -53,6 +53,10 @@ describe('tierFor — AI generation', () => {
     // Anthropic key is retired, so there is nothing left to tier. `/budget` is the surviving
     // config write on this prefix and carries the same property.)
     expect(tiers('PUT', '/api/claude-review/budget')).toEqual(['read']);
+    // The Open PRs column's batched latest-run read is a POST (a list of ids) but DB-only.
+    expect(tiers('POST', '/api/claude-review/states')).toEqual(['read']);
+    // …and only that exact path: a sibling POST under the family still bills.
+    expect(tiers('POST', '/api/claude-review/states/x')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('PUT', '/api/pro/settings')).toEqual(['read']);
     // ⚠ AND EVERY SETTINGS WRITE BENEATH IT. The per-workspace sprint cadence is one DB upsert —
     // no model, no GitHub quota — but its path does not END in `/settings`, so the catch-all's

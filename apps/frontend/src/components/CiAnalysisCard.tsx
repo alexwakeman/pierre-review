@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
-import type {
-  AiConfidence,
-  FailingCheckInput,
-  PrDetail,
+import {
+  DEFAULT_AI_FIX_MODEL,
+  type AiConfidence,
+  type FailingCheckInput,
+  type PrDetail,
 } from '@pierre-review/shared';
 import { ApiError } from '../api/client.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
@@ -240,7 +241,9 @@ export function CiAnalysisCard({ pr }: { pr: PrDetail }): JSX.Element | null {
                       prNumber: pr.number,
                       prTitle: pr.title,
                     });
-                    startFix.mutate({ model: 'claude-sonnet-5', seed: 'ci_analysis' });
+                    // The fixer's shared default (Opus 5.5, effort medium) — the same constant
+                    // the AI Fix picker opens on, so the pane's two start buttons agree.
+                    startFix.mutate({ model: DEFAULT_AI_FIX_MODEL, seed: 'ci_analysis' });
                   }}
                   title="Launch an agent to fix the CI failure"
                 >

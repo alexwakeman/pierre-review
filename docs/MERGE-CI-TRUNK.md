@@ -241,7 +241,10 @@ observed. ⚠ **`Enter` on the panes container is the same door and carries the 
 announces the reason instead of landing, because a gated button with an ungated keystroke beside it
 is a bypass, not a shortcut. ⚠ The landing step keeps two clauses of its own — the branch-name
 refusal (which prints beside the field it is about) and a push already in flight — and the toolbar,
-which has neither, must not be shut by them.
+which has neither, must not be shut by them. ⚠ **The head-moved guard goes quiet once the reader's
+own push is sent** (`headMoved && !pushSent`, `ConflictResolverOverlay.tsx`): the push itself moves
+the head, and the guard only ever existed to stop a commit before it is sent. Without it the landing
+step said "This pull request moved on GitHub while you were here" beside its own "Confirming…".
 
 ⚠ **THIS REVERSES "Continue is deliberately NOT disabled"**, which held because pressing it was the
 only route to the list explaining the block. The list moved: the toolbar's "N of M changes decided"
@@ -442,6 +445,24 @@ sent and names where the answer is, it NEVER says it failed, and it offers **no 
 retry is a second push**. Closing from that state closes as *committed*, so the reopen toast cannot
 say "nothing pushed".
 
+**`confirming` VERIFIES THE HEAD.** It used to be a bare resync whose `visible` meant "a sync ran".
+A read taken before GitHub attached the push, or one carrying GitHub's still-stale
+CONFLICTING/DIRTY for the new head, reported `visible: true` while the Pending board showed the
+Conflicts card again — the reported "the conflict indicator stays after I resolved and pushed".
+GitHub finishing its mergeability check does not move the PR's `updatedAt`, so no walk re-read it
+either. Now `settlePrAfterWrite` (`sync/resync-after-write.ts`) expects `headSha` = the pushed
+commit, plus `notConflicting` ONLY for a FULL resolution pushed to the PR's own branch (the rebase
+path is full by construction; a partial resolution or a push to a new branch legitimately leaves the
+PR conflicting). It waits inline within a ~7s deadline counted from the start of the step, each
+re-read raced against the time left, so the 120s SIGTERM drain below is never held for long, and
+`visible` now means the pushed commit IS the stored head. Anything unsettled — the head, a stale
+conflict verdict, an unknown merge state — goes to the background settle ladder
+([docs/REALTIME-SYNC.md](REALTIME-SYNC.md) § Post-write settle). A new branch that opened a PR also
+syncs that PR, by number inside the original PR's `(account, repo)`. `ConflictCommitResult` keeps
+its shape. The SPA half — the write set refetched again when the resolver closes after a push, and
+the shell running the PR's live poll itself when no other mount does — is in
+[docs/FRONTEND.md](FRONTEND.md).
+
 **A redeploy must not kill a push in flight.** The process's one `SIGTERM` handler (`index.ts`)
 refuses new claims, waits for running jobs to reach zero or 120s (the timeout on a single git
 subprocess), then closes. ⚠ **It exists for the in-flight push and nothing else** — it does not
@@ -484,7 +505,8 @@ clone-cache hardening it rests on: [docs/SECURITY.md](SECURITY.md).
 one place `github/mutations.ts` **forks from its REST house style**, and it has to:
 `enqueuePullRequest`/`dequeuePullRequest` are GraphQL-only with no REST equivalent, and queue
 presence is not inferable from REST at all — `MergeStateStatus` has no QUEUED value, so a queued
-PR looks like any other blocked one.
+PR reads like any other merge state (`clean` and `unknown` have both been seen on queued PRs here;
+the old "a queued PR reports `blocked`" was wrong).
 
 **MEMBERSHIP AND ENTRY STATE ARE NOW SYNCED COLUMNS; POSITION AND ETA STAY LIVE-ONLY.**
 `pull_requests.in_merge_queue` + `merge_queue_entry_state` ride the normal walk (and the
@@ -494,13 +516,46 @@ GitHub will refuse on a PR it is already landing. ⚠ **THREE STATES**: `true` /
 positive statements from GitHub) and `null` = NOT OBSERVED, which may never render as "not
 queued". ⚠ `unmergeable` is the member that earns the state column — GitHub is EJECTING the entry,
 which is what a reader could previously only discover by pressing Merge and reading the failure;
-`pendingQueueBadge` (exported from `Activity/AttentionCards.tsx`) is the ONE place those five
-sentences are written, and the PR pane imports it rather than re-wording them. Position and
-`estimatedTimeToMerge` genuinely do change minute to minute and stay on the lazy `merge-options`
-fetch, which is why the queue chip states neither. When a queue
-exists the control REPLACES "Merge" with "Add to merge queue" — GitHub refuses a direct merge on
-a queued branch, so offering one only produces a confusing 405. `estimatedTimeToMerge` is SECONDS
-in GitHub's schema; the ×1000 lives in the single `SECONDS_TO_MS` constant, applied at the two
+`pendingQueueBadge` (now in `Activity/pendingLabels.ts`, re-exported from `AttentionCards.tsx`) is
+the ONE place those five sentences are written, and the PR pane imports it rather than re-wording
+them. Position and `estimatedTimeToMerge` genuinely do change minute to minute and stay on the lazy
+`merge-options` fetch, which is why the queue chip states neither.
+
+**EVERY WRITE PATH THAT HOLDS AN ANSWER STAMPS IT** (`db/pr-merge-queue-stamp.ts`). A walk alone
+left an enqueue invisible until the next walk (up to fifteen minutes on a cold repo), and the board
+may not fetch to find out. The stampers: POST and DELETE `/merge-queue`, GET `/merge-options` when
+its probe answered, the arm route's probe (the `AlreadyQueued` 409 included), the disarm route's
+dequeue, and the runner's enqueue plus its per-tick probe. ⚠ **Positive answers only**: a non-null
+`fetchMergeQueueState` result or a mutation GitHub accepted, never a best-effort probe's `null`.
+⚠ Routes call `stampPrMergeQueueStateNonFatal` — a failed local write is logged, never a 502,
+because once GitHub has accepted an enqueue or dequeue the route may not fail; the runner has its
+own non-fatal wrapper. ⚠ A stamp that CHANGES the row calls `notePrChanged`: the liveness sweep
+compares GitHub against the row, so once a route has written the new value the sweep sees nothing
+to repaint, and the change signal is what reaches the SPA instead. The sync's own three-state fold
+(`sync/upsert.ts`) does NOT go through the stamp — a walk that did not carry the selection must be
+able to OMIT the keys. `markPrMergedLocally` clears both columns. ⚠ **DELETE `/merge-queue` asks
+GitHub first**, because "Remove from queue" now renders from synced columns that can be minutes
+old: GitHub says not queued ⇒ stamp `false` and succeed with no dequeue; not queued because the PR
+is MERGED while the local row is still open ⇒ `markPrMergedLocally(id, accountId, null)` (the merger
+is unknown until the next walk) + `noteMergeLanded`, so the refetch retires the card instead of
+offering Merge. A probe that fails falls through to the dequeue, as before.
+
+**While queued, the merge row is the status line + "Remove from queue" on every mount, collapsed or
+not** — "In the merge queue · position N · running checks · ~M min" on the PR pane, position and
+ETA only when a live answer that agrees is cached; on the Pending board the same line WITHOUT
+position and time, because nothing there refetches the answer (a cached position would be an old
+click's, and the card's words would change with the cache). The words are the card's queue chip's
+(one table, `QUEUE_STATE_LABEL`), and the chip steps aside where the row prints them. It used to
+live inside the expanded panel, whose `open` is
+per-mount state, so any remount (navigate away and back) came back as the "Merge ▾" trigger. The
+pure `mergeQueueStatus(synced, live)` (`Activity/pendingLabels.ts`) takes whichever observation is
+newer by `dataUpdatedAt`; a synced `null` makes no claim. `PrMergeQueueInfo.entryState` carries the
+state normalised on the server, so the client never re-spells GitHub's raw enum. The SPA half is in
+[docs/FRONTEND.md](FRONTEND.md).
+
+When a queue exists the control REPLACES "Merge" with "Add to merge queue" — GitHub refuses a direct
+merge on a queued branch, so offering one only produces a confusing 405. `estimatedTimeToMerge` is
+SECONDS in GitHub's schema; the ×1000 lives in the single `SECONDS_TO_MS` constant, applied at the two
 call sites that read the field (`fetchMergeQueueState` + `enqueuePullRequestOnQueue`).
 `fetchMergeQueueState` also carries the PR's LIVE `state` (OPEN/CLOSED/MERGED — a fast queue can
 merge inside one watcher tick, before the sync observes it) and `reviewDecision` (the review half
@@ -591,7 +646,16 @@ which honours "update before merging" exactly ONCE. A local rebase (`coding/merg
 nothing we didn't produce. On success the runner stamps the PR merged locally (like the
 interactive route) and sets `merged`; a merge/close that happened outside Pierre becomes
 `disarmed_blocked`, NOT `merged` — the latter means "the watcher did it" and would raise a false
-toast. `MAX_CONSECUTIVE_FAILURES` 3, counted in memory so a restart errs towards retrying.
+toast. `MAX_CONSECUTIVE_FAILURES` 8 (rule 5b), counted in memory so a restart errs towards retrying.
+
+**The runner keeps the stored rows current after its own writes.** It calls `schedulePrSettle`
+after its rebase update (`headSha` = the sha it pushed), after GitHub's native update (`headNot` =
+the pinned oid — that update is asynchronous and hands back no sha) and after an enqueue (no
+expectation). After a direct landing, and after a merge-queue landing (ours or one outside
+auto-merge), it calls `noteMergeLanded`, which raises the change signal and re-reads the repo's
+other open PRs at ~30s and ~90s: the trunk moved, so their merge states did too. The runner's own
+decisions still read GitHub live; the settle only keeps the stored rows, and so the board and the PR
+pane, current. Mechanics: [docs/REALTIME-SYNC.md](REALTIME-SYNC.md) § Post-write settle.
 
 #### The per-repo landing queue — rule 8 (`db/merge-queue.ts`)
 
@@ -822,14 +886,24 @@ last-seen map is now seeded from `localStorage` (armed states only; a terminal s
 would let the fold believe it had already reported an outcome it never showed). An empty read
 degrades to the original silent-first-poll behaviour, which is what a genuinely first visit wants.
 
-⚠ **`useEnqueueMergeQueue`/`useDequeueMergeQueue` AWAIT their `merge-options` invalidation**, and
-they are the only mutations in `usePrWrites.ts` that await anything. The button renders from that
-query's `inQueue` — the very fact the mutation just changed — so a fire-and-forget invalidation
-dropped `isPending` while the cache still held the pre-click payload: the button snapped back to
-"Add to merge queue" and stayed there for the whole refetch, which is a live GitHub call. Seconds,
-not a flicker, and clickable throughout. React Query v5 keeps a mutation pending until an
-`onSuccess` promise settles, so awaiting exactly that one query carries the spinner across the gap;
-the other invalidations stay `void` because nothing on the control reads them. `useArmedMerges` polls `GET /api/auto-merge` foreground-only
+⚠ **`useEnqueueMergeQueue`/`useDequeueMergeQueue` AWAIT THE WHOLE WRITE SET** — their hook-level
+`onSuccess` returns `invalidateAfterPrWrite(qc, prId)` — and they are the only mutations in
+`usePrWrites.ts` that await anything. The set is the PR-scoped keys (`['merge-options', id]` and
+`['pr', id]` among them) plus the workspace half (`['attention-cards']` / `['daily-brief']` /
+`['work-plan']`), and inside the sweep throttle it includes the one trailing workspace sweep. The
+reason: the control resolves membership from THREE reads — the live merge-options, `['pr']` and the
+board — whichever is newer, so a fire-and-forget invalidation dropped `isPending` while all three
+still held the pre-click answer: the row snapped back to "Add to merge queue" (or "Remove from
+queue") for the whole refetch, a live GitHub call, seconds long and clickable throughout. React
+Query v5 keeps a mutation pending until an `onSuccess` promise settles, so awaiting the set carries
+"Queueing…" / "Removing…" across the gap. (The old "the other invalidations stay `void` because
+nothing on the control reads them" became false the day the card's queue chip shipped.) Both carry
+the shared mutation keys `mergeQueueMutationKey(prId, 'enqueue' | 'dequeue')` (prefix
+`['merge-queue', prId]`), read through `useIsMutating`, so the Pending card and the PR pane both show
+the in-flight word — the two-mounts rule. ⚠ `useArmAutoMerge` refetches the write set on a **409**
+too, because `AlreadyQueued` has just stamped the row; when the refetched merge-options says queued
+it settles the arm draft, so no stranded "confirming" panel reopens later. `StaleBase` keeps its
+panel and message. `useArmedMerges` polls `GET /api/auto-merge` foreground-only
 on an ADAPTIVE cadence — 8s while any row is `armed`, 45s otherwise, because an account with
 nothing armed must not pay a per-8s request for a card that renders nothing.
 
@@ -887,7 +961,9 @@ PR-shaped, while a broken default branch invalidates every open PR's CI at once 
 **cannot come from the existing `commits` table, which is PR-scoped: a squash-merged PR never
 appears there under the SHA that landed on trunk**. Deliberately informational: it feeds no
 attention count, no badge, no My Turn (its panel sits inside the My turn TAB as a view, which is
-none of those).
+none of those). The Pending board's red-trunk cards read `repos.default_branch_ci_status` for
+themselves, not this route; the one thing they share with it is the head's failing-check NAMES,
+read through the same reader (below) and only displayed — nothing counts them.
 
 > **ONE EXPLICIT EXCEPTION, added with `trunk_ci_status_events` (migration `0052` / pg `0039`):
 > a trunk CI FAILURE can appear as a row in the Activity Feed** — but only behind the Feed's
@@ -916,8 +992,15 @@ none of those).
   every check suite on the commit and does not collapse to latest-per-name the way GitHub's PR UI
   does. `workflowName` is null for a legacy StatusContext and for a non-Actions suite; nothing may
   require it. The repo-level `failingChecks` is DERIVED from the commit whose sha is `headSha`
-  (one writer, one reader), matched by SHA and not by position — a backdated committer date can
-  sort the head outside the read cap.
+  (one writer, ONE READER FUNCTION), matched by SHA and not by position — a backdated committer
+  date can sort the head outside the read cap. That reader is `trunkHeadFailingChecks(accountId,
+  heads)` in `db/branch-queries.ts`, keyed by `trunkHeadKey(repoId, sha)` and shared by
+  `getBranchStatus` and the Pending board's red-trunk cards (the `ci_failing` trunk arm and the
+  promoted `trunk_red` My Turn card, through `db/failing-checks.ts`, which maps to bare names). One
+  account-scoped query over the `(accountId, repoId, sha)` unique; the `inArray × inArray` predicate
+  over-matches, so only REQUESTED pairs are kept. ⚠ The writer's `MAX_FAILING_CHECKS_PER_COMMIT`
+  = 20 cap reaches the cards too: a trunk card's `failingCheckTotal` of 20 is a floor and its "and
+  17 more" may undercount — as does `BranchStatusPanel`'s older "+N".
 - **Commit → PR link.** `pickAssociatedPrNumber` stores exactly ONE number from
   `associatedPullRequests` under a 0/1/many contract, ranked (merged into THIS default branch) >
   (merged anywhere) > (open) with the lowest number as tiebreak — determinism is the point, since
@@ -934,8 +1017,8 @@ none of those).
   the FIRST thing eaten, so the chip would otherwise sit next to a dangling `(#2…`.
 - UI: `Activity/BranchStatusChip` (rail row: dot + branch + age; a HOLLOW dot for "no CI
   observed", unlike the PR surfaces which render nothing for `unknown`) and
-  `Activity/BranchStatusPanel` (cross-repo strip on Pending → My turn → "Default branches and open
-  PRs", mounted only while that view is open and COUNT-FREE; `compact` per-repo variant in
+  `Activity/BranchStatusPanel` (cross-repo strip at the top of Pending → My turn, ONLY on that tab and
+  COUNT-FREE; `compact` per-repo variant in
   `RepoFeedHeader`). **The expanded row lists MERGED PRs, not commits** (`mergedPrs`, ≤10 in
   merge order): each row consolidates its retained trunk commits, whose sha + headline list is
   the row's `title` TOOLTIP (capped at 20 lines; the visible "N commits" count is the hint it's

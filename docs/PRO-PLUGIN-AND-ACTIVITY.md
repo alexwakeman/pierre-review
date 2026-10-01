@@ -1077,6 +1077,23 @@ card. **TWO ARMS, carried on one kind by `CiFailingCard.arm`:**
   it (`ciFailingTotal`; the board states its cut with `capSentence` — the brief-line rule was
   deleted with the strip) — a worklist the viewer clears may not be
   silently capped. Everything is trailing-optional, so **`apiVersion` stays 21**.
+- **Which checks are failing.** `CiFailingCard` and `MyTurnTrunkCard` carry REQUIRED
+  `failingChecks: string[] | null` + `failingCheckTotal: number | null`; `InsightPrRef` carries
+  them OPTIONAL, absent when there are no names (never `[]`, never `0`). Bare names, deduped,
+  alphabetical, at most `FAILING_CHECKS_SHOWN` (3, `packages/shared/src/pending-rules.ts`), with
+  the uncapped total behind them. `'your_pr'`: the newest `ci_status_events` row for the PR's
+  CURRENT head, used only when that row is red. `'trunk'` and the promoted `trunk_red`: the head's
+  `branch_commits` row, through `trunkHeadFailingChecks` (MERGE-CI-TRUNK.md § Default-branch
+  status), looked up by the red head itself, so a direct push is named too. ⚠ **null is "no names",
+  never "0 failing"** — render the CI label alone. ⚠ **The total counts every STORED name, not every
+  failure**: a trunk head's row keeps at most `MAX_FAILING_CHECKS_PER_COMMIT` (20) and a PR's sync
+  reads at most 100 contexts, so a total AT a bound is a floor (one stored trunk row sits at 20; the
+  PR side peaks at 38). ⚠ **Only `GET /api/attention` folds them** — `getWorkspaceInsights(…, {
+  withFailingChecks: true })`; the daily brief, the work plan's uncapped fold and every plugin
+  consumer (sprint report, chat, preset prompts, Slack, `/api/pro/insights`) get null or absent and
+  pay nothing for them. ⚠ **DISPLAY ONLY**: never in `detail`, `insightsHash`, `WorkPlanFacts` or
+  any model payload, so no stored report or plan re-bills. `apiVersion` stays 21 — these are
+  `packages/shared` wire types, not `ProContext`.
 - **The plugin side:** `insightsHash` gets an explicit `ci:<arm>:<repoId>:<sha|prId>` case, and the
   sprint-report payload loop an explicit `continue`. ⚠ That `continue` is load-bearing — falling
   through would count the card into the repo's importance ranking (`cards × 3`) and add a PR ref
@@ -1138,6 +1155,33 @@ the named composite FK `workspace_slack_targets_workspace_account_fk` against co
 **A ROW IS A DELIVERY TARGET.** It exists ⇒ that workspace's digest is generated on this schedule
 and posted to this channel; no row ⇒ nothing.
 
+**WHAT THE MESSAGE SAYS — the configuring account's own Pending board** (`slack/pending-blocks.ts`),
+then a SHORT AI sprint summary (one section), then the optional bot block, then the footer link.
+The per-repo AI digests are no longer sent. The board comes from the OPTIONAL host seam
+`ProHostQueries.getPendingBoard(accountId, workspaceId)` → `PendingBoardSnapshot` (core
+`getPendingBoardSnapshot` over `buildPendingBoard`, the ONE fold `GET /api/attention` also calls, so
+the two cannot list different cards; `apiVersion` stays 21 — an older host leaves it undefined and
+the Pending sections are simply absent). The seam runs WITHOUT the route's two live extras
+(failing-check names, suggested reviewers): a cron send spends no GitHub budget.
+- Sections follow `PENDING_TABS` — "My turn (@login)" (a channel reads ONE person's board, so it
+  says whose), Needs fixing, Waiting on review, Unanswered threads, Ready to land, Dependencies.
+  Empty sections are skipped; the review-load people strip is not a PR and is left out.
+- ⚠ **A PR IS MENTIONED ONCE**, in the first tab (board order) that lists it; a red default branch
+  likewise, keyed by repo. A later tab neither lists nor counts it.
+- Top `PENDING_DO_NEXT_SIZE` (5) per section in the board's own order (`tab.cardIds`), then
+  "and N more" linking to that tab (`?view=activity&workspace=<id>&activityRepo=attention&attnTab=<key>`).
+  N is the tab's `total` less what this section listed and what an earlier section already named;
+  cards past `boardListCap` cannot be de-duplicated, so N can over-count a PR that also sits in an
+  earlier tab beyond its cap.
+- Card wording is a small server-side map (`pendingCardText`, `MY_TURN_REASON_TEXT`) — a SECOND
+  copy of the SPA's `pendingLabels.ts`, which the plugin cannot import. It reads only fields the
+  card carries; `test/slack-pending-blocks.test.ts` fails on a kind or reason with no wording.
+- ⚠ **LIVE STATE**: nothing from the board enters any payload hash (the sprint report's included).
+- Block budget: header 1 + 6 tabs × ≤ 2 sections + 2 dividers + sprint 1 + bot 1 + footer 1 = 18,
+  well under Slack's 50; the `SLACK_MAX_BLOCKS` (48) backstop stays and never drops the footer.
+  Every mrkdwn object stays `verbatim: true` (PR titles are attacker-authored) and every link goes
+  through `links.ts`.
+
 ⚠ **THE "REVIEW BOTS" BLOCK IS PART OF THE DELIVERY, NOT AN ACCOUNT PREFERENCE (plugin migration
 0033).** `bot_digest` on this row replaces `pro_settings.bot_slack_digest`, whose account grain was
 justified as "a 'do I want this block at all' preference, not a per-team fact". **That premise died
@@ -1184,10 +1228,8 @@ marker is the only thing preventing a duplicate first send, are pinned in
 
 **THE COST STORY — this feature REVERSED a documented reduction, on purpose, capped.** Only the
 SPRINT REPORT multiplies (keyed (account, workspace); $0 for a workspace whose insights have not
-moved). The per-repo digests do NOT: `runRefresh` is throttled and cached per ACCOUNT and is still
-called account-wide, and `buildSlackReport` narrows the result for **display** only — ⚠ do not pass
-a workspace's repo ids as `requested`, which would narrow the GENERATION plan and bill per
-workspace. The bound is `SLACK_TARGET_WORKSPACE_CAP` (12), and ⚠ **it survived the picker with a
+moved). The Pending sections are a DB fold and cost nothing; the per-repo AI digests are no longer
+sent. The bound is `SLACK_TARGET_WORKSPACE_CAP` (12), and ⚠ **it survived the picker with a
 different job**: the sweep's population is now *every workspace that HAS a row* rather than a
 user's submitted selection, so the cap is what stands between "add a Slack channel", repeated, and
 N billed report generations per send. It is enforced on the write that would ADD a row past it
@@ -2331,7 +2373,7 @@ forward is the transcript, not stale data), and the answer may end in a `FOLLOWU
 
 The AI Fix tab gains a picker: the PR's comments and threads on the right, a **fix scope** basket on
 the left, drag either way. Launching runs the SAME agentic worktree fixer as every other seed — one
-run, one commit, the existing push/rebase flow untouched — but the prompt is a numbered list of the
+run, one commit, the existing push flow untouched — but the prompt is a numbered list of the
 chosen comments and the agent is told to **judge each comment before fixing it** and to report per
 comment. The output is the usual diff + summary PLUS a per-comment verdict card, and where the agent
 disagrees it writes an argued **pushback** that the user can send as a reply with one click.
@@ -2426,9 +2468,9 @@ is still the captured git diff.
 
 `Bash` is gone from the fixer's tool surface. `FIX_TOOLS` (`apps/backend/src/coding/agent.ts`) is
 Read/Glob/Grep + Write/Edit/MultiEdit + `submit_fix`, and `DISALLOWED_TOOLS` is
-`['Bash','NotebookEdit']` — the same pair the conflict resolver has always had, and the same call
-Claude Review made (the comment above `WORKTREE_TOOLS` in `apps/backend/src/review/agent.ts` is the
-long version of the argument, and this is the identical input shape). The fixer reads and edits. It
+`['Bash','NotebookEdit']` — the same call Claude Review made (the comment above `WORKTREE_TOOLS` in
+`apps/backend/src/review/agent.ts` is the long version of the argument, and this is the identical
+input shape). The fixer reads and edits. It
 installs nothing, builds nothing and runs no tests.
 
 **Why.** Two reasons, either sufficient.
@@ -2442,10 +2484,10 @@ installs nothing, builds nothing and runs no tests.
 - **Speed and cost.** The builds and tests it ran were read by NOTHING: `runCodingAgent`'s success
   criterion is a captured diff under `aiFixPatchMaxBytes`, `launchFix` marks the row succeeded the
   moment the seam returns un-aborted, and no column on the fix row records a verification. The bill
-  was real — `aiFixMaxTurns` (40) and `aiFixBudgetUsd` ($3) are the only stoppers, there is **no
+  was real — `aiFixMaxTurns` (40) and `aiFixBudgetUsd` ($5) are the only stoppers, there is **no
   wall-clock timeout**, a suite's output returns as a `tool_result` billed as input on the next
-  turn, and `MAX_CONCURRENT = 1` (`coding/manager.ts`) is ONE global slot, so one account's test run
-  queued every other account's fix, rebase and push behind it. CI runs the tests on push.
+  turn, and `MAX_CONCURRENT = 1` (`packages/pro/src/ai-fix/manager.ts`) is ONE global slot, so one
+  account's test run queued every other account's fix behind it.
 
 ⚠ **THOSE `Bash(git …)` ENTRIES WERE THE MECHANICAL HALF OF "THE HOST OWNS THE COMMIT".** The rule
 is unchanged and now strictly harder — a denied shell cannot run git at all — but the grep-able
@@ -2464,20 +2506,55 @@ reader through `<Markdown>`, as well as setting the Fixability badge. `packages/
 pins all of it; `apps/backend/src/coding/tool-surface.test.ts` pins the tool lists and
 mutation-tests its own scan.
 
-⚠ **`verifying` IS A FALSE FRIEND — do not delete it while "removing verification".** It is emitted
-only on the rebase/merge path (`coding/merge.ts`) and its body is `git diff` + `git format-patch`
-+ `git diff --name-only`. It never ran tests. Its SPA label is `AiFixTab.tsx`'s
-"Verifying the result", which is about the rebase producing a clean patch, not about a suite.
-
 **What the reader is told.** One templated line beside the diff, above the Push controls:
-*"Not built or tested — CI will run on push."* ⚠ **Not in the model's summary** — a product fact is
-not model prose (the Bot Tuning Advisor precedent). Nothing had to be retracted: the fixer never
-made a verification claim on screen.
+*"Not built or tested here."* It promises no CI: whole repos here report no checks at all, so "CI
+will run on push" would invent the verification the sentence exists to deny. ⚠ **Not in the model's
+summary** — a product fact is not model prose (the Bot Tuning Advisor precedent). Nothing had to be
+retracted: the fixer never made a verification claim on screen. (The `verifying` phase this section
+once warned about went with the rebase path below — its only emitter and its SPA label are gone.)
 
 **What this costs, honestly.** A fix that wanted a codegen step, a formatter, or `git log` for
 context must now write the edit by hand or decline. Accepted, for the reason Claude Review accepted
 it. The way back is a container/VM boundary, or `canUseTool` under a non-bypass permission mode —
 **not** re-adding `Bash` with a longer blocklist.
+
+### AI Fix pushes as-is (trunk reconciliation removed)
+
+**What went.** When the tab loaded, a succeeded fix POSTed `…/merge-preview`: two or three GitHub
+REST calls plus a token from the `ai`/`ai_hourly` buckets (the `/api/pro/` mutating catch-all) on
+EVERY tab load, including every revisit of an already-pushed fix — all 9 real pushes were to the
+PR's own branch, so each one re-rendered "Reconcile with the trunk". And its answer described the
+PR as it stood on GitHub, not the unpushed fix. Removed with it: "Checking against the trunk…",
+Re-check trunk, "Rebase onto X" / "Merge X in", "Let Claude resolve conflicts", `ResolvedReview`
+(the rebased diff + "Push rebased (force-with-lease)"), the `…/rebase` (+ `/stream`, `/cancel`)
+and `…/push/stream` / `/push/cancel` routes, the manager's resolve/push jobs, the agentic conflict
+resolver (`coding/agent.ts` `runConflictResolver`, `RESOLVE_TOOLS`, `submit_resolution`; the
+plugin's `buildResolverSystemPrompt`), and the `CodingSeam` members `mergePreview` /
+`rebaseResolve` / `mergeResolveAndPush` / `pushResolved`.
+
+**Why.** A product decision: a fix is pushed as it is, and a conflict with the trunk shows on
+GitHub like any other. Two defects went with the removed path: `pushResolved` leased on the
+CURRENT remote head rather than the fix's `baseSha`, so commits pushed after generation would have
+been force-overwritten; and the resolver paths gated on credits but never charged them.
+
+**What remains.** `POST /api/pro/ai-fixes/:fixId/push` is synchronous and never forced. An existing
+branch is guarded by `HEAD_MOVED` (409 — the branch moved since the fix was generated) and
+`PUSH_DENIED` (422); a new branch opens a PR against the base. A pushed fix, to either target,
+renders `PushedCard` only. ⚠ A body naming a `strategy` other than `'plain'` (a tab still on the old
+bundle) → `400 {error:'UnsupportedStrategy', message:'Reload the page to push this fix.'}` — never a
+quiet plain push the reader did not click; `autoResolve` and `model` are ignored.
+
+- **Accepted behaviour change:** a PR branch that moved since generation has no in-app rebase
+  escape. Push to a new branch, or regenerate.
+- ⚠ **`apiVersion` stays 21** although four seam members were deleted (the `setLocalKey`
+  precedent): bumping would turn "a few dead routes throw against a lagging submodule" into "the
+  whole plugin goes dark". The price is a LANDING REQUIREMENT — host commit, plugin commit and
+  gitlink move land together (the note on `CodingSeam` in both contract halves).
+- **CORE "Update branch from trunk" is unaffected** (`coding/merge.ts` `updatePrBranchFromTrunk`,
+  the PR route and the auto-merge runner): any conflict aborts with `CONFLICTS_UNRESOLVED`, and
+  `aiFixRebaseMaxSteps` still bounds the continue/skip loop. Every `CodingErrorCode` member is kept.
+- The eight `ai_fixes.resolved_*` / `resolve_error` columns are DORMANT — see
+  [docs/MIGRATIONS.md](MIGRATIONS.md).
 
 ### The evidence window anchors on the ROOT comment (`t3|` → `t4|`)
 

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type {
   ConflictCommitBody,
   ConflictDecision,
@@ -13,11 +14,16 @@ import {
 } from '../../hooks/useConflictCommit.js';
 import { usePr } from '../../hooks/usePr.js';
 import { usePrArmedIntent } from '../../hooks/useAutoMerge.js';
+import { invalidateAfterPrWrite } from '../../hooks/prCacheSync.js';
+import { prRefreshKey, usePrLiveRefresh } from '../../hooks/usePrLiveRefresh.js';
 import {
   resolverSessionKey,
   useConflictResolverStore,
   useResolverSession,
   useResolverTarget,
+  closeReasonAfterPush,
+  pushMayHaveLanded,
+  type ResolverCloseReason,
   type ResolverTarget,
 } from '../../store/conflictResolver.js';
 import { CloseIcon, ExternalLinkIcon } from '../Icons.js';
@@ -144,16 +150,57 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
   // ── The commit ──────────────────────────────────────────────────────────────────────────────
   const commitMutation = useConflictCommit(target.prId);
   const commit = session?.commit ?? null;
-  // The three-key refetch, fired once when the STREAM says the push finished — never at the 202.
+  // The write set's refetch, fired once when the STREAM says the push finished — never at the 202.
   useConflictCommitInvalidation(target.prId, commit);
   const committed = commit?.status === 'done' && commit.result != null;
 
-  // ⚠ THE ONLY OTHER READ OF "HAS THIS MOVED?". `usePrLiveRefresh` already re-reads the PR every
-  // ~5s while its pane is open, and `PrDetail.headSha` is what it writes; the pin is on the
-  // session. A second, independent comparison is how two surfaces come to disagree about the same
-  // fact.
+  // ⚠ "A PUSH MAY HAVE LANDED": the stream said done, or the commit was sent and has not been
+  // refused. Two things hang off it. (1) Every way out after it files as `'committed'`, so the
+  // reopen toast — whose sentence ends "nothing pushed" — is never offered. (2) Closing the shell
+  // refetches the write set AGAIN: GitHub attaches a push and recomputes mergeability seconds
+  // after it, so the one refetch at `done` can still read "conflicting", and the Pending card
+  // that opened this outlived the resolver. The unmount effect covers EVERY way out (Close,
+  // Escape, the result panel, the landing step's outcome-unknown close, Back) in one place.
+  // `pushMayHaveLanded` counts the POST still on the wire too: the server can push a body it has
+  // accepted after the reader has gone.
+  const pushSent = pushMayHaveLanded(commit, commitMutation);
+  const pushSentRef = useRef(false);
+  // Sticky, for the close-time refetch only: a commit that went `running` and then failed may still
+  // have pushed, and one extra refetch is cheap. The CLOSE REASON reads the live value, so a
+  // refusal still offers the reopen toast (its "nothing pushed" is then true).
+  const everSentRef = useRef(false);
+  useEffect(() => {
+    pushSentRef.current = pushSent;
+    if (pushSent) everSentRef.current = true;
+  }, [pushSent]);
+  const closeReason = useCallback(
+    (fallback: 'user' | 'navigated'): ResolverCloseReason =>
+      closeReasonAfterPush(pushSentRef.current, fallback),
+    [],
+  );
+  const qc = useQueryClient();
+  useEffect(
+    () => () => {
+      if (everSentRef.current) void invalidateAfterPrWrite(qc, target.prId, { armed: true });
+    },
+    [qc, target.prId],
+  );
+
+  // ⚠ THE ONLY OTHER READ OF "HAS THIS MOVED?". `usePrLiveRefresh` re-reads the PR every ~5s,
+  // and `PrDetail.headSha` is what it writes; the pin is on the session. A second, independent
+  // comparison is how two surfaces come to disagree about the same fact.
+  // ⚠ AND IT GOES QUIET ONCE A PUSH IS SENT. The push moves the head itself, so the next re-read
+  // brings OUR commit back as `pr.headSha` — off the pin and off the anchor — and without this the
+  // landing step would say "This pull request moved on GitHub while you were here" beside its own
+  // "Confirming…". The guard exists to stop a commit; once one is sent there is nothing to stop.
   const { data: pr } = usePr(target.prId);
-  const headMoved = useHeadMoved(session?.headSha ?? null, pr?.headSha);
+  const headMoved = useHeadMoved(session?.headSha ?? null, pr?.headSha) && !pushSent;
+
+  // ⚠ AND THE SHELL KEEPS THAT POLL RUNNING ITSELF when nobody else does. Opened from the PR pane,
+  // PrDetail's own poll carries on under the overlay; opened from a Pending card, nothing re-read
+  // the PR at all — so the head-moved guard above was dead, and after the push nothing noticed
+  // GitHub finish. One poller per PR: two observers of one key are two independent 5s timers.
+  const livePollOwner = useLivePollOwner(target.prId, pr == null || pr.state === 'open');
 
   // A live "merge when ready" row, off the account-wide list the app already polls — zero new
   // requests. The landing step says out loud that the push will disarm it, BEFORE the button.
@@ -195,20 +242,20 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
         setConfirming(true);
         return;
       }
-      close({ reason: 'user' });
+      close({ reason: closeReason('user') });
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [close, confirming, setConfirming, atRisk]);
+  }, [close, closeReason, confirming, setConfirming, atRisk]);
 
   // Back / Forward. ⚠ CLOSES AND PUSHES NOTHING — see the ⚠ in the module header. A pop cannot be
   // cancelled, so the honest behaviour is to get out of the way and leave the decisions in the
   // store for the reopen toast.
   useEffect(() => {
-    const onPop = (): void => close({ reason: 'navigated' });
+    const onPop = (): void => close({ reason: closeReason('navigated') });
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, [close]);
+  }, [close, closeReason]);
 
   // ⚠ RELOAD IS THE ONE GESTURE THE STORE CANNOT SURVIVE. Every other way out keeps the decisions
   // (which is why the footer says so); a reload takes the module store with it, so this is the
@@ -274,10 +321,11 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
           </a>
         )}
         {/* ⚠ CLOSES OUTRIGHT, NO CONFIRM. A deliberate press on a control labelled "Close" is not
-            an accident; the reopen toast is the way back from it. */}
+            an accident; the reopen toast is the way back from it — except after a push, when
+            there is nothing to go back to. */}
         <button
           type="button"
-          onClick={() => close({ reason: 'user' })}
+          onClick={() => close({ reason: closeReason('user') })}
           className="flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
           title="Close"
           aria-label="Close"
@@ -285,6 +333,8 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
           <CloseIcon size={16} />
         </button>
       </header>
+
+      {livePollOwner && <ResolverLivePoll prId={target.prId} />}
 
       {stranded && (
         <div className="shrink-0 border-b border-gray-200 px-4 py-1.5 text-[12px] text-gray-700 dark:border-gray-800 dark:text-gray-200">
@@ -318,9 +368,15 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
           commitError={commitMutation.error?.message ?? null}
           onCommit={(body: ConflictCommitBody) => commitMutation.mutate(body)}
           onResetCommit={() => commitMutation.reset()}
-          onClose={(committedNow: boolean) =>
-            close({ reason: committedNow ? 'committed' : 'user' })
-          }
+          onClose={(committedNow: boolean) => {
+            // The landing step knows a push was sent even before the 202 is in hand; its word
+            // is enough for the close-time refetch too.
+            if (committedNow) {
+              pushSentRef.current = true;
+              everSentRef.current = true;
+            }
+            close({ reason: committedNow ? 'committed' : 'user' });
+          }}
         />
       </div>
 
@@ -329,7 +385,7 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
           decided={plan?.decidedTotal ?? 0}
           total={plan?.decidableTotal ?? 0}
           onKeep={() => setConfirming(false)}
-          onClose={() => close({ reason: 'user' })}
+          onClose={() => close({ reason: closeReason('user') })}
         />
       )}
 
@@ -354,6 +410,49 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
       </footer>
     </div>
   );
+}
+
+/** The live ~5s poll, as a component so the shell can mount it only while it owns the poll. */
+function ResolverLivePoll({ prId }: { prId: number }): null {
+  usePrLiveRefresh(prId, true);
+  return null;
+}
+
+/**
+ * Should the shell run the PR's live poll itself? Yes while the PR is open and no OTHER mounted
+ * observer is polling its key (PrDetail's, when the resolver was opened from the PR pane).
+ *
+ * ⚠ OWNERSHIP IS STATE, FLIPPED IN AN EFFECT, and the count subtracts our own observer only while
+ * we own the poll. Deriving "am I polling?" from whether our observer has registered yet races the
+ * registration and can mount and unmount the poller in a loop; `owner` is set BEFORE the poller
+ * mounts, so its observer is always already accounted for when it appears in the count.
+ * Hidden tabs need nothing here: `usePrLiveRefresh` polls with `refetchIntervalInBackground:
+ * false`.
+ */
+function useLivePollOwner(prId: number, prOpen: boolean): boolean {
+  const qc = useQueryClient();
+  const cache = qc.getQueryCache();
+  const subscribe = useCallback(
+    (onChange: () => void) =>
+      cache.subscribe((event) => {
+        const key = event.query.queryKey;
+        if (key[0] === 'pr-refresh' && key[1] === prId) onChange();
+      }),
+    [cache, prId],
+  );
+  const readPollers = useCallback((): number => {
+    const q = cache.find({ queryKey: prRefreshKey(prId), exact: true });
+    const observers = Array.isArray(q?.observers) ? q.observers : [];
+    return observers.filter((o) => o.options.enabled !== false).length;
+  }, [cache, prId]);
+  const pollers = useSyncExternalStore(subscribe, readPollers, readPollers);
+  const [owner, setOwner] = useState(false);
+  const others = pollers - (owner ? 1 : 0);
+  useEffect(() => {
+    if (owner && (!prOpen || others > 0)) setOwner(false);
+    else if (!owner && prOpen && others <= 0) setOwner(true);
+  }, [owner, prOpen, others]);
+  return owner;
 }
 
 /**

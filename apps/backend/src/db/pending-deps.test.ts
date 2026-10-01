@@ -699,3 +699,64 @@ describe('the brief', () => {
     expect(counts.security).toBe(insights.kindTotals.security);
   });
 });
+
+// ── GitHub's merge queue on a READY card ────────────────────────────────────────────────────────
+//
+// A queued PR can read 'clean' (GitHub has no QUEUED merge state), so it stays on Ready to land /
+// Dependencies — and used to say "Nothing is blocking this — it can land now" under a header chip
+// reading "Merge queue · running checks". The card's sentence and the Do next row's `reason` come from ONE builder
+// (`mergeCardDetail`), so both must say the queue, together. Membership, tab and rank do not move.
+describe('a ready PR in GitHub’s merge queue says so', () => {
+  it('⚠ on the merge card, the Dependencies card AND the ranked row — and nowhere else changes', async () => {
+    const { eq } = await import('drizzle-orm');
+    const { MERGE_QUEUE_CARD_DETAIL } = await import('./dependency-cards.js');
+    const wp = await import('./work-plan.js');
+    const { getMyTurnSettings } = await import('./my-turn-settings.js');
+    const setQueued = async (keys: string[], v: boolean | null): Promise<void> => {
+      for (const k of keys) {
+        await db
+          .update(schema.pullRequests)
+          .set({ inMergeQueue: v, mergeQueueEntryState: v ? 'awaiting_checks' : null })
+          .where(eq(schema.pullRequests.id, pr(k)))
+          .execute();
+      }
+    };
+    const reasons = async (cards: InsightCard[]): Promise<Map<string, string>> => {
+      const { weights } = await getMyTurnSettings(1);
+      const { candidates } = await wp.scoreCards(1, cards, Date.now(), weights);
+      return new Map(candidates.map((c: any) => [c.item.id, c.item.reason]));
+    };
+    const mergeId = `wp:merge:${pr('human-unstable')}`;
+    const depId = `deps:${pr('dep-ready')}`;
+
+    // CONTROL: unqueued, the sentences are the ready ones — so the swap below is productive.
+    const before = await board();
+    expect(card<InsightCard & { detail: string }>(before.insights.cards, mergeId).detail).toContain(
+      'Can land now',
+    );
+    expect(card<DependencyBumpCard>(before.insights.cards, depId).detail).toBe(
+      'Nothing is blocking this — it can land now',
+    );
+    const tabsBefore = before.tabs.map((t) => [t.key, t.total]);
+
+    await setQueued(['human-unstable', 'dep-ready'], true);
+    try {
+      const after = await board();
+      const merge = card<InsightCard & { detail: string; inMergeQueue: boolean | null }>(
+        after.insights.cards,
+        mergeId,
+      );
+      expect(merge.inMergeQueue).toBe(true);
+      expect(merge.detail).toBe(MERGE_QUEUE_CARD_DETAIL);
+      expect(card<DependencyBumpCard>(after.insights.cards, depId).detail).toBe(
+        MERGE_QUEUE_CARD_DETAIL,
+      );
+      // The ranked row reads the same builder with the same flag — the card and the plan agree.
+      expect((await reasons(after.insights.cards)).get(mergeId)).toBe(MERGE_QUEUE_CARD_DETAIL);
+      // ⚠ NO MEMBERSHIP CHANGE: the same tabs hold the same number of cards.
+      expect(after.tabs.map((t) => [t.key, t.total])).toEqual(tabsBefore);
+    } finally {
+      await setQueued(['human-unstable', 'dep-ready'], null);
+    }
+  });
+});

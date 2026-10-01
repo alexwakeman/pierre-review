@@ -30,7 +30,7 @@ const FEEDBACK_MS = 1600;
  * API is simply `undefined`. The textarea + `execCommand` path is deprecated and still the
  * only thing that works there, so it stays as a fallback rather than the primary.
  */
-async function writeClipboard(text: string): Promise<boolean> {
+export async function writeClipboard(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);

@@ -40,7 +40,7 @@ import { useMyTurnNotifications } from './hooks/useMyTurnNotifications.js';
 import { useNotificationPref } from './hooks/useNotificationPref.js';
 import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
-import { usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
+import { boardSlotMode, usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
 import { ApiError, api } from './api/client.js';
 import { initAnalytics, trackPageView } from './lib/analytics.js';
 import { CookieBanner } from './components/CookieBanner.js';
@@ -141,10 +141,9 @@ export default function App(): JSX.Element {
   const userActivityActive = activeTabObj?.kind === 'user-activity';
   const botDetailActive = activeTabObj?.kind === 'bot-detail';
   const peopleReportActive = activeTabObj?.kind === 'people-report';
-  const boardMode: TimelineMode | null =
-    activeTabObj?.kind === 'pr-focus'
-      ? { kind: 'isolate', prId: activeTabObj.prId }
-      : null; // full board
+  // null = the full board. The ONE resolver the FilterBar also reads (store/pinnedTabs.ts), so the
+  // bar's Focus controls and this slot can never disagree about a stale key.
+  const boardMode: TimelineMode | null = boardSlotMode(activeTab, tabs);
   // A full-main overlay (a pr-detail PR, the Activity console, or a drill-down: metrics /
   // bot-PRs) covers the warm full board. Drives the `inert` a11y treatment. pr-focus is NOT
   // an overlay — it replaces the board slot, so it doesn't set this.
@@ -417,6 +416,7 @@ export default function App(): JSX.Element {
               // A feed thread click opens this tab AND selects the thread — deep-link the
               // Threads tab to it (only when the selection is for THIS PR).
               selectedThreadId={selectedPrId === prDetailId ? selectedThreadId : null}
+              placement="fullscreen"
             />
           </div>
         )}

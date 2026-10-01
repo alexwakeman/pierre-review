@@ -88,11 +88,20 @@ describe('claude_reviews ticket / ticket_assessment / follow_up + findings.prior
       notRequested: [{ title: 'Extra flag', explanation: null, path: 'b.ts', line: null }],
     };
 
+    // A run stored under a RETIRED model id, on purpose: the old Opus 4.8 left the model union and
+    // the column's (TS-only) enum, but its rows are still in real databases. The column is plain
+    // text, so the id must come back exactly as written — never rejected, never rewritten.
     const [earlier] = await db
       .insert(claudeReviews)
       .values({ accountId: 1, prId, headSha: 'aaa', status: 'succeeded', model: 'claude-opus-4-8' })
       .returning()
       .execute();
+    const [earlierRead] = await db
+      .select({ model: claudeReviews.model })
+      .from(claudeReviews)
+      .where(eq(claudeReviews.id, earlier.id))
+      .execute();
+    expect(earlierRead.model).toBe('claude-opus-4-8');
     const [priorFinding] = await db
       .insert(claudeReviewFindings)
       .values({ reviewId: earlier.id, path: 'a.ts', line: 3, severity: 'warning', title: 't', body: 'b' })

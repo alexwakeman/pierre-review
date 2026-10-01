@@ -155,6 +155,21 @@ export function parseBotDetailKey(key: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/**
+ * What the BOARD SLOT renders for this active tab: a pr-focus tab's isolated Timeline, or null for
+ * the full shared board. A 'pr-focus:<id>' key only counts while that tab is still in `tabs` — a
+ * stale/closed key falls back to the board.
+ *
+ * ⚠ ONE resolver, read by App (which mounts the slot) and the FilterBar (which shows the Focus
+ * controls), so the two cannot disagree about a stale key: a bar showing Focus controls over the
+ * shared board would be a set of controls with no effect. Pinned in test/isolateFilter.test.ts.
+ */
+export function boardSlotMode(activeTab: ActiveTab, tabs: readonly Tab[]): TimelineMode | null {
+  if (activeTab === 'timeline' || activeTab === 'activity') return null;
+  const t = tabs.find((x) => x.key === activeTab);
+  return t?.kind === 'pr-focus' ? { kind: 'isolate', prId: t.prId } : null;
+}
+
 /** Parse a Tab.key back into its kind + PR id (null for unknown). */
 export function parseTabKey(key: string): { kind: TabKind; prId: number } | null {
   const m = /^(pr-detail|pr-focus):(\d+)$/.exec(key);

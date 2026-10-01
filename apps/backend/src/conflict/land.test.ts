@@ -109,18 +109,54 @@ interface PushCall {
   protect: string[];
   leaseSha?: string;
 }
-const pushRef = vi.fn(async (_t: PushCall) => {});
-const pushForceWithLease = vi.fn(async (_t: PushCall) => {});
+/** The commit the most recent push carried — what GitHub would attach to the PR. */
+let lastPushedSha: string | null = null;
+const pushRef = vi.fn(async (t: PushCall) => {
+  lastPushedSha = t.committish;
+});
+const pushForceWithLease = vi.fn(async (t: PushCall) => {
+  lastPushedSha = t.committish;
+});
 vi.mock('../coding/git.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   pushRef,
   pushForceWithLease,
 }));
 
-const resyncPrAfterWrite = vi.fn(async () => true);
-vi.mock('../sync/resync-after-write.js', async (importOriginal) => ({
+/**
+ * What the stubbed targeted sync "reads from GitHub" for PR #7 after the push — the three cases
+ * the confirming step has to tell apart, because GitHub attaches a push and computes
+ * mergeability ASYNCHRONOUSLY:
+ *   'pushed-head'                — the pushed commit is the head and GitHub has recomputed.
+ *   'stale-head'                 — GitHub has not attached the push yet: the old head, CONFLICTING.
+ *   'pushed-head-stale-conflict' — the new head, but GitHub still reports CONFLICTING / DIRTY.
+ * The settle-and-verify tail is REAL (sync/resync-after-write.ts + the facts read); only the
+ * GitHub fetch and the background ladder's scheduler are stubbed.
+ */
+type GithubView = 'pushed-head' | 'stale-head' | 'pushed-head-stale-conflict';
+let githubView: GithubView = 'pushed-head';
+const syncOnePr = vi.fn(async (_repoId: number, number: number, _log?: unknown, _o?: unknown) => {
+  // The resolver's "new branch + open a PR" syncs PR #99 — nothing in this DB to write.
+  if (number !== 7) return true;
+  const set: Record<string, unknown> =
+    githubView === 'stale-head'
+      ? { mergeable: 'conflicting', mergeStateStatus: 'dirty' }
+      : githubView === 'pushed-head-stale-conflict'
+        ? { mergeable: 'conflicting', mergeStateStatus: 'dirty' }
+        : { mergeable: 'mergeable', mergeStateStatus: 'clean' };
+  if (githubView !== 'stale-head' && lastPushedSha) set.headSha = lastPushedSha;
+  await db.update(schema.pullRequests).set(set).where(eq(schema.pullRequests.id, prId)).execute();
+  return true;
+});
+vi.mock('../sync/sync-one-pr.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  resyncPrAfterWrite,
+  syncOnePr,
+}));
+
+const schedulePrSettle = vi.fn();
+vi.mock('../sync/pr-settle.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  schedulePrSettle,
 }));
 
 /* ─────────────────────────────── real git fixtures ─────────────────────────────── */
@@ -364,6 +400,10 @@ beforeAll(async () => {
   ({ hasConflictMarkers } = await import('../coding/merge.js'));
   ({ foldFile, foldToText } = await import('@pierre-review/shared'));
   ({ CONFLICT_GIT_ENV } = await import('./git.js'));
+  // The inline head wait is ~7s of wall clock in production; a stale-head case must not cost a
+  // test that. The SHAPE (bounded re-reads, then hand off) is what is under test, not the gaps.
+  const { __setSettleInlineTiming } = await import('../sync/resync-after-write.js');
+  __setSettleInlineTiming({ delaysMs: [5, 5, 5], budgetMs: 1_000 });
 
   const { accounts, repos, pullRequests, users } = schema;
   // Migration 0008 seeds account 1 with an EMPTY github_login, and the committer ident falls
@@ -422,12 +462,22 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   pushRef.mockClear();
   pushForceWithLease.mockClear();
   createPullRequest.mockClear();
   ghRestGetText.mockClear();
   ghRestGetText.mockResolvedValue({ status: 404, ok: false, text: '' });
+  syncOnePr.mockClear();
+  schedulePrSettle.mockClear();
+  githubView = 'pushed-head';
+  lastPushedSha = null;
+  // The stored row as a conflicting PR looks before any push.
+  await db
+    .update(schema.pullRequests)
+    .set({ headSha: 'unused', mergeable: 'conflicting', mergeStateStatus: 'dirty' })
+    .where(eq(schema.pullRequests.id, prId))
+    .execute();
 });
 
 /* ─────────────────────────────── the tests ─────────────────────────────── */
@@ -956,6 +1006,79 @@ describe('landConflictResolution — the refusals', () => {
     expect(pushRef.mock.calls[0]![0].remoteBranch).toBe('resolve/7-2');
     expect(createPullRequest).toHaveBeenCalledTimes(1);
     expect(res.compareUrl).toBe('https://example.test/pr/99');
+    // The PR it opened is synced too, by number INSIDE the original PR's repo — so it exists
+    // locally before the reader is pointed at it.
+    expect(syncOnePr).toHaveBeenCalledWith(repoId, 99, expect.anything());
+  });
+});
+
+describe('landConflictResolution — confirming verifies the head', () => {
+  // ⚠ THE BUG THIS PINS: confirming used to be a bare resync whose `visible` was "a sync ran".
+  // GitHub attaches a push, and recomputes mergeability, asynchronously — so that read could
+  // store the OLD head (or the new one with a stale CONFLICTING) and still say `visible: true`,
+  // and the Pending board re-served the "Conflicts" card the reader had just resolved.
+
+  it('the pushed commit is the stored head: visible, and nothing left to settle', async () => {
+    const f = oneFileFixture();
+    use(f);
+    const model = await openModel();
+    const res = await land(model, bodyFor(model, [resolutionFor(model, 'a.txt', () => 'ours')]));
+    expect(res.visible).toBe(true);
+    expect(schedulePrSettle).not.toHaveBeenCalled();
+    const [row] = await db
+      .select()
+      .from(schema.pullRequests)
+      .where(eq(schema.pullRequests.id, prId))
+      .execute();
+    expect(row.headSha).toBe(res.commitSha);
+  });
+
+  it('a stale head is NOT visible — bounded re-reads, then the settle ladder takes over', async () => {
+    const f = oneFileFixture();
+    use(f);
+    githubView = 'stale-head';
+    const model = await openModel();
+    const res = await land(model, bodyFor(model, [resolutionFor(model, 'a.txt', () => 'ours')]));
+    expect(res.visible).toBe(false);
+    // The resync plus the inline re-reads — bounded, never a loop.
+    expect(syncOnePr.mock.calls.length).toBeGreaterThan(1);
+    expect(syncOnePr.mock.calls.length).toBeLessThanOrEqual(4);
+    // A FULL resolution pushed to the PR's own branch: the ladder must not stop on the stale
+    // CONFLICTING/DIRTY — a KNOWN value, which "both merge columns known" alone would accept.
+    expect(schedulePrSettle).toHaveBeenCalledTimes(1);
+    expect(schedulePrSettle).toHaveBeenCalledWith(1, prId, expect.anything(), {
+      headSha: res.commitSha,
+      notConflicting: true,
+    });
+  });
+
+  it('the new head with a stale CONFLICTING verdict is visible, and still hands off', async () => {
+    const f = oneFileFixture();
+    use(f);
+    githubView = 'pushed-head-stale-conflict';
+    const model = await openModel();
+    const res = await land(model, bodyFor(model, [resolutionFor(model, 'a.txt', () => 'ours')]));
+    expect(res.visible).toBe(true);
+    expect(schedulePrSettle).toHaveBeenCalledWith(1, prId, expect.anything(), {
+      headSha: res.commitSha,
+      notConflicting: true,
+    });
+  });
+
+  it('a PARTIAL resolution never expects the conflict to clear', async () => {
+    const f = twoFileFixture();
+    use(f);
+    githubView = 'pushed-head-stale-conflict';
+    const model = await openModel();
+    const res = await land(
+      model,
+      bodyFor(model, [resolutionFor(model, 'a.txt', (_r, i) => (i === 0 ? 'theirs' : 'ours'))]),
+    );
+    expect(res.stillConflicting).toBe(true);
+    expect(res.visible).toBe(true);
+    // Head met, both merge columns known, and CONFLICTING is the honest answer for a partial —
+    // nothing to wait for.
+    expect(schedulePrSettle).not.toHaveBeenCalled();
   });
 });
 

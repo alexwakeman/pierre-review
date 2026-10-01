@@ -143,14 +143,15 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
   shell that is RCE on the developer's machine via a stranger's PR. The old
   `Bash(rm *)`-style blocklist was never a boundary. Both review prompts + the AI-Fix prompt
   gained explicit **untrusted-input / prompt-injection** instructions.
-- **`coding/agent.ts`**: **the AI-Fix agent followed**, and all three agentic runs are now
-  shell-free. `FIX_TOOLS` lost `Bash`; `DISALLOWED_TOOLS` is `['Bash','NotebookEdit']`, matching
-  `RESOLVE_DISALLOWED_TOOLS`. Same input shape as a review, and WIDER on the `'comments'` seed,
+- **`coding/agent.ts`**: **the AI-Fix agent followed**, and both agentic runs are now shell-free
+  (AI Fix's agentic conflict resolver, which never had a shell, was removed with its
+  trunk-reconciliation path). `FIX_TOOLS` lost `Bash`; `DISALLOWED_TOOLS` is
+  `['Bash','NotebookEdit']`. Same input shape as a review, and WIDER on the `'comments'` seed,
   whose whole payload is comment bodies. The five `Bash(rm *)`/`Bash(git …)` prefixes it replaced
   were the same non-boundary. ⚠ The `Bash(git commit *)`/`Bash(git push *)` pair also encoded
   "the host owns the commit" — still true, and now enforced harder, but say so in prose because
-  the grep no longer finds it. The fixer's build/test capability went with the shell; CI runs on
-  push, and the SPA says so beside the diff (see
+  the grep no longer finds it. The fixer's build/test capability went with the shell, and the SPA
+  says "Not built or tested here." beside the diff — it promises no CI (see
   [docs/PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § The fix agent has no shell).
 
 **The local clone cache (`~/.pierre-review/clones`) — five fixes, and the standing invariant.**
@@ -179,10 +180,14 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   `HEAD`), and a **case-insensitive** `protect` comparison. `pushRef` takes a `PushTarget` options
   object whose `protect` is REQUIRED, never optional, so a new call site must type `[]`
   deliberately; `pushForceWithLease` MOVED here from `merge.ts` — it is the dangerous half and it
-  used to bypass everything. The refusal fires BEFORE any push is spawned. ⚠ **`git-ops.ts`'s
-  branch-name regex stays exactly where it is** and must not be "de-duplicated" into `pushRef`: it
-  is a stricter convention on names the advisor INVENTS, while `pushRef` is called with real head
-  refs — `feature/#123`, `user's-branch`, `a+b`, `ünicode/x` are all valid GitHub branches.
+  used to bypass everything. The refusal fires BEFORE any push is spawned. Two callers remain, both
+  leasing on a PINNED sha (`coding/merge.ts` `updatePrBranchFromTrunk` on the head it cloned, and the
+  conflict resolver's rebase land on the session's `expectedHeadSha`); AI Fix's `pushResolved`,
+  which leased on the CURRENT remote head and so could overwrite commits pushed after the fix was
+  generated, was removed with its rebase path. ⚠ **`git-ops.ts`'s branch-name regex stays exactly
+  where it is** and must not be "de-duplicated" into `pushRef`: it is a stricter convention on
+  names the advisor INVENTS, while `pushRef` is called with real head refs — `feature/#123`,
+  `user's-branch`, `a+b`, `ünicode/x` are all valid GitHub branches.
 - **A bounded startup sweep + an age-paired LRU** (`sweepCloneCache`, awaited in `index.ts` between
   the event cleanup and `ensureLocalAccount` — the credential repair must finish before
   `bindProPlugin` can start a fix that reuses a clone). Per clone: clean origin → tighten perms →

@@ -32,9 +32,8 @@ import type {
   UpdateBranchBody,
   UpdateBranchResult,
 } from '@pierre-review/shared';
-import { and, eq } from 'drizzle-orm';
 import { config } from '../../config.js';
-import { db, schema } from '../../db/client.js';
+import { stampPrMergeQueueStateNonFatal } from '../../db/pr-merge-queue-stamp.js';
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
 import { fetchActionsJobLog } from '../../github/actions-logs.js';
 import {
@@ -97,9 +96,17 @@ import { hydratePrDetail } from '../../sync/hydrate-detail.js';
 import { mergeQueueEntryStateFrom, reviewDecisionFrom } from '../../sync/upsert.js';
 import { refreshPrFromGitHub } from '../../sync/refresh-pr.js';
 import {
+  asSyncLogger,
   confirmPostedReviewComment,
   resyncPrAfterWrite,
+  settlePrAfterWrite,
 } from '../../sync/resync-after-write.js';
+import {
+  getPrSettleFacts,
+  notePrChangedForPr,
+  schedulePrSettle,
+} from '../../sync/pr-settle.js';
+import { noteMergeLanded } from '../../sync/unsettled-prs.js';
 import { resolveThreadsOnGitHub } from '../../bot-triage/resolve.js';
 import { accountIdOf } from '../plugins/auth.js';
 
@@ -107,44 +114,6 @@ import { accountIdOf } from '../plugins/auth.js';
 // path (matches db/queries.ts + hydrate-detail.ts's diffAnchorId).
 function diffAnchorId(path: string): string {
   return createHash('sha256').update(path, 'utf8').digest('hex');
-}
-
-/**
- * Stamp a PR's synced merge-queue columns from a LIVE observation.
- *
- * A GitHub write is not done when GitHub 201s: the SPA re-reads from the local DB, so an
- * enqueue nobody has stamped is invisible until the next adaptive walk — up to fifteen minutes
- * on a cold repo — and the Pending board is forbidden from fetching to find out. Both queue
- * verbs below therefore stamp what they just proved, exactly like `markPrMergedLocally` does
- * after a merge. The next sync reconciles.
- *
- * It lives here rather than in db/queries.ts because these two routes are its only callers and
- * the sync path writes the same columns through its own three-state fold (sync/upsert.ts) — a
- * shared helper would invite that fold to be routed through an unconditional setter, which is
- * precisely the write the partial-response rule forbids. Every caller here is holding a
- * POSITIVE answer from GitHub, so an unconditional write is correct at these two call sites and
- * only at these two.
- */
-async function stampMergeQueueState(
-  prId: number,
-  accountId: number,
-  inQueue: boolean,
-  entryState: string | null,
-): Promise<void> {
-  await db
-    .update(schema.pullRequests)
-    .set({
-      inMergeQueue: inQueue,
-      // Out of the queue means no entry — never carry a stale `queued` past a dequeue.
-      mergeQueueEntryState: inQueue ? mergeQueueEntryStateFrom(entryState) : null,
-    })
-    .where(
-      and(
-        eq(schema.pullRequests.id, prId),
-        eq(schema.pullRequests.accountId, accountId),
-      ),
-    )
-    .execute();
 }
 
 // How long an armed auto-merge intent stays live before the watcher expires it. A hard stop
@@ -527,7 +496,10 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       // not an error (the helper short-circuits before any token fetch). Status stays 200 even
       // on partial failure; the body carries per-thread outcomes.
       const eligible = await getResolvableBotThreads(id, accountId, threadIds);
-      return resolveThreadsOnGitHub(accountId, eligible);
+      return resolveThreadsOnGitHub(
+        accountId,
+        eligible.map((t) => ({ ...t, prId: id })),
+      );
     },
   );
 
@@ -558,6 +530,10 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         );
         const authorId = await getAccountUserId(accountId);
         const rowId = await upsertLocalPrComment(ctx.prId, authorId, gh);
+        // The stamp moves what the board reads (My Turn's ball rule reads your comments), and no
+        // walk reports a local stamp: raise the SPA change signal BEFORE replying, so the write's
+        // own ordered `['repos']` read already covers it (sync/pr-settle.ts). Never throws.
+        await notePrChangedForPr(accountId, ctx.prId);
         const result: CreatePrCommentResult = {
           id: rowId,
           authorId,
@@ -641,6 +617,18 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         //    board's own focus/interval refetch picks the flip up later. Stamp 1 has already made
         //    the card honest, so nothing here is load-bearing for correctness.
         await resyncPrAfterWrite({ prId: ctx.prId, accountId, log: req.log });
+        // 3. …AND KEEP LOOKING. "Often not recomputed by the time we ask" is the norm, and the
+        //    flip is updatedAt-silent — no walk would ever re-read it. The settle ladder
+        //    (sync/pr-settle.ts) re-reads at ~5/15/45/120s until the merge state is known AND no
+        //    longer `blocked` (a stale BLOCKED is a known value, so without `mergeStateNot` the
+        //    ladder would stop on it at its first read). An approval that does not satisfy
+        //    protection stays blocked and simply costs the ladder's four reads. The change signal
+        //    tells every OTHER screen that the local stamps above moved — AWAITED, so it is raised
+        //    before the reply and the write's own ordered `['repos']` read covers it.
+        schedulePrSettle(accountId, ctx.prId, asSyncLogger(req.log), {
+          mergeStateNot: 'blocked',
+        });
+        await notePrChangedForPr(accountId, ctx.prId);
         const result: ApprovePrResult = {
           id: rowId,
           authorId: viewerUserId,
@@ -687,6 +675,15 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         // without a second request.
         resolveArmedQueues(accountId, armedQueueMarks()),
       ]);
+      // THE PROBE ANSWERED, SO THE ROW LEARNS IT. The merge control resolves membership from the
+      // NEWER of this answer and the synced columns; without the stamp, a PR queued or dequeued
+      // on GitHub would keep contradicting this answer on every other screen until the next walk.
+      // Only a non-null answer is a statement — the `.catch(() => null)` above is "we never
+      // asked", and it writes nothing. NON-FATAL: this route was read-only, and a failed local
+      // write must not turn the merge control into "Couldn't load merge status".
+      if (queue) {
+        await stampPrMergeQueueStateNonFatal(id, accountId, queue.inQueue, queue.state, req.log);
+      }
       const allowedMethods = (['merge', 'squash', 'rebase'] as const).filter((meth) =>
         meth === 'merge'
           ? cfg.allowMergeCommit
@@ -718,6 +715,8 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
                 inQueue: queue.inQueue,
                 position: queue.position,
                 state: queue.state,
+                // The ONE normaliser's reading, so the client never re-spells the raw enum.
+                entryState: queue.inQueue ? mergeQueueEntryStateFrom(queue.state) : null,
                 estimatedTimeToMergeMs: queue.estimatedTimeToMergeMs,
               }
             : null,
@@ -803,6 +802,11 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       }
       const viewerUserId = await getAccountUserId(accountId);
       await markPrMergedLocally(id, accountId, viewerUserId);
+      // The trunk just moved: every OTHER open PR's merge verdict is now about a base that no
+      // longer exists, and none of them bumped `updatedAt`. Re-read them at ~30s/~90s, and
+      // raise the change signal for the stamp above — awaited, so it is raised BEFORE the reply
+      // (the re-reads themselves stay in the background). Never throws.
+      await noteMergeLanded(accountId, id, asSyncLogger(req.log));
       const result: MergePrResult = { merged: true, sha: out.sha, state: 'merged' };
       return result;
     } catch (err) {
@@ -840,7 +844,9 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       // including the "no queue configured" 400 below, where `inQueue:false` is exactly the
       // fact that clears a stale `true` off the row. `null` means the PR could not be read at
       // all, so it stamps nothing.
-      if (queue) await stampMergeQueueState(id, accountId, queue.inQueue, queue.state);
+      if (queue) {
+        await stampPrMergeQueueStateNonFatal(id, accountId, queue.inQueue, queue.state, req.log);
+      }
       if (!queue || !queue.enabled) {
         // 400, not a silent no-op: enqueuing where there is no queue would otherwise fail
         // deep inside GraphQL with an opaque message.
@@ -863,7 +869,9 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       // GitHub has accepted the enqueue, so membership is true even when the mutation's
       // nullable payload gave us no entry state (it can 200 with a null entry — see
       // GqlEnqueueResponse). `null` there stores "queued, state unknown", never "not queued".
-      await stampMergeQueueState(id, accountId, true, entry.state);
+      // ⚠ NON-FATAL: GitHub has ACCEPTED the enqueue, so this route may not fail from here on —
+      // a 502 would tell the reader it did not happen and invite a second enqueue.
+      await stampPrMergeQueueStateNonFatal(id, accountId, true, entry.state, req.log);
       const result: MergeQueueResult = {
         inQueue: true,
         position: entry.position,
@@ -876,7 +884,8 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  // Dequeue. Idempotent: removing a PR that isn't queued reports the already-out state.
+  // Dequeue. Idempotent: removing a PR that isn't queued reports the already-out state — and it
+  // ASKS FIRST rather than trusting GitHub's mutation to be a no-op on a PR it does not hold.
   app.delete('/api/prs/:id/merge-queue', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
     const accountId = accountIdOf(req);
@@ -896,11 +905,48 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       const token = await getAccessToken(accountId);
+      // ⚠ PROBE BEFORE THE MUTATION. "Remove from queue" now renders on the COLLAPSED merge row,
+      // decided from synced columns that can be minutes old, so the click can arrive for a PR
+      // GitHub has already landed, ejected or seen dequeued elsewhere. What
+      // `dequeuePullRequest` does with a PR that is not queued is GitHub's business and
+      // unverified here; asking first makes that case a plain success that also CORRECTS the
+      // stale row. A probe that fails or cannot read the PR (null) falls through to the
+      // mutation, which then speaks for itself — the old behaviour, never a new refusal.
+      const queue = await fetchMergeQueueState(token, ctx.owner, ctx.name, ctx.number).catch(
+        () => null,
+      );
+      if (queue && !queue.inQueue) {
+        if (queue.prState === 'MERGED' && ctx.state === 'open') {
+          // ⚠ THE QUEUE ALREADY LANDED IT — the likeliest reason a queued row's "Remove from
+          // queue" meets a PR GitHub no longer holds. Stamping only "not queued" would leave an
+          // OPEN row out of the queue, and the refetch this answer triggers would offer "Merge ▾"
+          // for a PR that has merged. Record the landing instead (which also clears both queue
+          // columns), as the watcher does when it sees the same probe say MERGED. The merger is
+          // not known here (the queue merged it, on whoever's enqueue), so it stays null until
+          // the next walk reads it. Only over an OPEN row: one the sync has already marked merged
+          // carries the real merge time and merger, and must not be overwritten with guesses.
+          // Non-fatal: GitHub's answer stands whatever the DB does.
+          try {
+            await markPrMergedLocally(id, accountId, null);
+            await noteMergeLanded(accountId, id, asSyncLogger(req.log));
+          } catch (err) {
+            req.log.warn(
+              { err, prId: id },
+              'merge queue: could not record the landing on the PR row',
+            );
+          }
+        } else {
+          await stampPrMergeQueueStateNonFatal(id, accountId, false, null, req.log);
+        }
+        const out: MergeQueueResult = { inQueue: false, position: null, state: null };
+        return out;
+      }
       await dequeuePullRequestFromQueue(token, ctx.prNodeId);
       // Stamped for the same reason the enqueue is, and it matters more here: without it the
       // row keeps claiming `queued` until the next walk, so the SPA re-reads the PR it just
-      // removed and offers "Remove from queue" again.
-      await stampMergeQueueState(id, accountId, false, null);
+      // removed and offers "Remove from queue" again. ⚠ NON-FATAL: GitHub has accepted the
+      // dequeue, so a failed local write may not turn this into a 502.
+      await stampPrMergeQueueStateNonFatal(id, accountId, false, null, req.log);
       const result: MergeQueueResult = { inQueue: false, position: null, state: null };
       return result;
     } catch (err) {
@@ -966,6 +1012,13 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       const queue = await fetchMergeQueueState(token, ctx.owner, ctx.name, ctx.number).catch(
         () => null,
       );
+      // An answer is an answer, whichever way this route then goes — and the AlreadyQueued 409
+      // below is the case that matters: the reader pressed "Merge when ready" because their
+      // screen did not know the PR was queued, and the row is what every screen reads.
+      // NON-FATAL: a failed local copy of GitHub's answer must not refuse the arm.
+      if (queue) {
+        await stampPrMergeQueueStateNonFatal(id, accountId, queue.inQueue, queue.state, req.log);
+      }
       if (queue?.inQueue) {
         // Already in the queue ⇒ landing is already arranged; an armed intent could only
         // duplicate or contradict it.
@@ -1020,15 +1073,21 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     const intent = await getAutoMergeRequest(accountId, id);
     await disarmAutoMerge(accountId, id);
     if (intent?.state === 'armed' && intent.enqueuedAt != null) {
+      let dequeued = false;
       try {
         const token = await getAccessToken(accountId);
         await dequeuePullRequestFromQueue(token, ctx.prNodeId);
+        dequeued = true;
       } catch (err) {
         req.log.warn(
           { err, prId: id },
           'auto-merge: disarmed, but could not remove the PR from the merge queue',
         );
       }
+      // A dequeue GitHub accepted is a positive "not queued" — stamp it like the queue verbs do,
+      // or every screen keeps drawing the queue status line for a PR we just took out. Outside the
+      // dequeue's try, so its log line only ever reports a dequeue that really failed.
+      if (dequeued) await stampPrMergeQueueStateNonFatal(id, accountId, false, null, req.log);
     }
     reply.status(204);
     return null;
@@ -1102,6 +1161,8 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         };
       }
       await markPrClosedLocally(id, accountId);
+      // A closed PR leaves every Pending tab: signal the stamp before replying. Never throws.
+      await notePrChangedForPr(accountId, id);
       const result: ClosePrResult = { closed: true, state: 'closed' };
       return result;
     } catch (err) {
@@ -1169,6 +1230,8 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       }
       // ⚠ Takes the viewer id the permission check already resolved — no second lookup.
       await markPrReopenedLocally(id, accountId, viewerUserId);
+      // The reopened PR re-enters the board: signal the stamp before replying. Never throws.
+      await notePrChangedForPr(accountId, id);
       const result: ReopenPrResult = { reopened: true, state: 'open' };
       return result;
     } catch (err) {
@@ -1230,11 +1293,23 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
             ? { error: 'HeadMoved', headMoved: true, message: out.message }
             : { error: 'Conflicts', conflicts: true, message: out.message };
         }
+        // ⚠ SETTLE, THEN ANSWER. This route used to stamp nothing and resync nothing, so the
+        // SPA's board refetch re-read `behind` and the old head and the Update-branch card came
+        // straight back. GitHub merges the base in ASYNCHRONOUSLY (202, no sha), so the only
+        // expectation we can state is "the head moved off the one we updated from"; the inline
+        // wait is deadline-bounded and the rest goes to the settle ladder. Never throws.
+        await settlePrAfterWrite({
+          accountId,
+          prId: ctx.prId,
+          log: asSyncLogger(req.log),
+          expect: { headNot: info.headSha },
+        });
         const result: UpdateBranchResult = { ok: true, headSha: null, strategy: 'merge' };
         return result;
       }
 
-      // Local: clone-based rebase (default) or merge from trunk, autoResolve:false. Dynamic
+      // Local: clone-based rebase (default) or merge from trunk. Nothing on this path resolves a
+      // conflict: any conflict aborts with CONFLICTS_UNRESOLVED (→ the 409 below). Dynamic
       // import so the clone/git machinery is only loaded on this path (never in cloud).
       const strat = strategy === 'merge' ? 'merge' : 'rebase';
       const { updatePrBranchFromTrunk } = await import('../../coding/merge.js');
@@ -1247,6 +1322,14 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         headSha: info.headSha,
         trunk: info.baseRef,
         strategy: strat,
+      });
+      // The push LANDED — settle-and-verify against the exact sha it pushed (an already-current
+      // branch returns its unchanged head, which is then trivially met). Never throws.
+      await settlePrAfterWrite({
+        accountId,
+        prId: ctx.prId,
+        log: asSyncLogger(req.log),
+        expect: { headSha: out.headSha },
       });
       const result: UpdateBranchResult = { ok: true, headSha: out.headSha, strategy: out.strategy };
       return result;
@@ -1366,6 +1449,10 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
           githubNodeId: gh.nodeId,
           log: req.log,
         });
+        // A new thread is a board-visible move whether or not the resync confirmed it (the resync
+        // raises the signal itself only when it stored something). Before the reply, like every
+        // other write route; never throws, so the "may not fail after the 201" rule holds.
+        await notePrChangedForPr(accountId, ctx.prId);
 
         const result: AddReviewCommentResult = {
           commentId: gh.databaseId,
@@ -1404,6 +1491,10 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
 
   // Changes tab: per-file diff patches, loaded on demand. Degrades to an empty
   // list on a GitHub fetch error (never 500s) so the tab fails gracefully.
+  //
+  // `headSha` is the STORED head at this read, so the SPA (which keeps the diff indefinitely)
+  // can refetch it once a newer PR detail names another head. The empty fallback sends null, so
+  // a failed read is retried on the next newer detail rather than kept as "no files" for good.
   app.get('/api/prs/:id/files', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
     const accountId = accountIdOf(req);
@@ -1432,11 +1523,11 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         githubUrl: `${ctx.prUrl}/files#diff-${diffAnchorId(f.filename)}`,
         blobUrl: f.blob_url,
       }));
-      const result: PrFilesResponse = { files: mapped, truncated };
+      const result: PrFilesResponse = { files: mapped, truncated, headSha: ctx.headSha };
       return result;
     } catch {
       // Graceful degrade — the Changes tab shows "no files" rather than 500ing.
-      const result: PrFilesResponse = { files: [], truncated: false };
+      const result: PrFilesResponse = { files: [], truncated: false, headSha: null };
       return result;
     }
   });
@@ -1514,8 +1605,28 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       }
 
       try {
+        // The stored CI verdict the rerun is meant to clear, read BEFORE asking GitHub so a sync
+        // racing the rerun cannot hand us the post-rerun value as the "before". Advisory: a failed
+        // read just means the ladder gets no CI expectation.
+        const ciBefore = await getPrSettleFacts(ctx.prId, accountId).then(
+          (f) => f?.ciStatus ?? null,
+          () => null,
+        );
         const token = await getAccessToken(accountId);
         await rerunWorkflowRun(token, ctx.owner, ctx.name, runId, mode);
+        // CI moves asynchronously and never bumps the PR's `updatedAt`, so without this nothing
+        // re-reads the PR until a walk happens to — the red card stays up after the rerun began.
+        // ⚠ `ciNot`: a stale FAILURE is a KNOWN value, so a ladder with no expectation would stop
+        // on it at its first read (~5s) if GitHub had not queued the new attempt yet. With it the
+        // ladder keeps reading (≤4 reads, to ~120s) until the red status moves. It does NOT follow
+        // the rerun to its finish — a run takes minutes; the stale-CI backstop and the open PR
+        // pane's live poll read that. Fire-and-forget.
+        schedulePrSettle(
+          accountId,
+          ctx.prId,
+          asSyncLogger(req.log),
+          ciBefore === 'failure' || ciBefore === 'error' ? { ciNot: ciBefore } : {},
+        );
         const result: CiRerunResult = { status: 'queued', runId, mode };
         return result;
       } catch (err) {
@@ -1593,6 +1704,8 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
           resolved.map((r) => r.userId),
           teams.map((slug) => `${ctx.owner}/${slug}`),
         );
+        // The stamp moves the routing card; signal it before replying. Never throws.
+        await notePrChangedForPr(accountId, ctx.prId);
         const result: RequestReviewersResult = {
           status: 'ok',
           requestedLogins: logins,

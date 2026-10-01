@@ -2880,6 +2880,8 @@ export interface Repo {
   // judgements while the server re-derives from the PR's workspace Y — an offer the server refuses,
   // i.e. a dead button with an unchanged count.
   workspaceId: number;
+  // Server-side time (ISO) any board-visible PR column in this repo last changed; in-memory, so absent after a restart.
+  lastPrChangeAt?: string;
 }
 
 // ---- Workspaces (CORE) ----
@@ -3764,6 +3766,10 @@ export interface PrMergeQueueInfo {
   inQueue: boolean;
   position: number | null;
   state: string | null; // GitHub's MergeQueueEntry state (QUEUED / AWAITING_CHECKS / MERGEABLE / UNMERGEABLE / LOCKED)
+  /** `state`, through the server's ONE normaliser (the same one the synced column is written by),
+   *  so the client never re-spells the raw enum. Null when not queued, or when GitHub sent a state
+   *  the app does not model. Optional on the wire: an older server omits it. */
+  entryState?: MergeQueueEntryState | null;
   estimatedTimeToMergeMs: number | null;
 }
 
@@ -4655,6 +4661,21 @@ export interface WorkspaceProSettings {
   // story from a detected ticket. OPTIONAL on the wire so an older plugin still type-checks here;
   // the current plugin always sends it.
   jira?: WorkspaceJiraApiSettings;
+  // Auto Claude review of new human PRs in this workspace (plugin migration 0036). OPTIONAL on the
+  // wire so an older plugin still type-checks; absent = off.
+  autoReview?: WorkspaceAutoReviewSettings;
+}
+
+// Auto Claude review, per workspace. When on, the plugin reviews each human-authored, non-draft
+// PR OPENED at or after `enabledAt` (a draft once it is marked ready), once per PR, with the same
+// model and budget as a manual run, at most `dailyCap` a day (UTC days). Turning it off and on
+// again moves `enabledAt`, so nothing opened while it was off is reviewed.
+export interface WorkspaceAutoReviewSettings {
+  enabled: boolean;
+  // ISO; when it was last switched on. null while off (or never on).
+  enabledAt: string | null;
+  // Auto reviews started per workspace per UTC day; later PRs wait for the next day.
+  dailyCap: number;
 }
 
 // ⚠ THE TOKEN IS NEVER ON THE WIRE. A Jira token reads the team's whole tracker, so no route
@@ -4771,6 +4792,9 @@ export interface WorkspaceProSettingsUpdate {
     // (No acceptance-criteria field — chosen per ticket in the Claude Review panel now. A stale
     // client still sending `acceptanceCriteriaFieldId` has it stripped by the PUT schema, 200.)
   };
+  // Auto Claude review (plugin migration 0036). Switching it on (off -> on) stamps `enabledAt` =
+  // now; sending `enabled: true` while already on keeps the stored moment.
+  autoReview?: { enabled: boolean };
 }
 
 /**
@@ -5306,6 +5330,10 @@ export interface PrDetail {
   //   []   → provider configured but no ticket key found (render a muted "No ticket found")
   //   [..] → render a link chip per detected ticket
   tickets: TicketRef[] | null;
+  /** The head branch as synced (bare name, never `owner:branch` for a fork) and the branch it
+   *  targets. Null = not synced yet; the Overview's Branch row is then omitted. */
+  headRefName: string | null;
+  baseRefName: string | null;
   authorId: number | null;
   state: PrState;
   isDraft: boolean;
@@ -5360,9 +5388,14 @@ export interface PrDetail {
   //   true  — GitHub says this PR is in its base branch's merge queue
   //   false — GitHub says it is not (the repo may have no queue at all)
   //   null  — nothing observed: synced before the field existed, or the walk never carried it.
-  // Null must never be rendered as "not queued". It is stored because a queued PR reports
-  // `mergeStateStatus: 'blocked'` — GitHub's enum has no QUEUED member — so without this every
-  // merge surface offers a Merge button GitHub will refuse.
+  // Null must never be rendered as "not queued". It is stored because GitHub's MergeStateStatus
+  // enum has no QUEUED member — a queued PR reads like any other ('clean' and 'unknown' have both
+  // been seen here) — so without this every merge surface offers a Merge button for a PR the
+  // queue is already landing.
+  //
+  // Written by the sync walk AND stamped by every write path holding a positive answer (the queue
+  // verbs, GET merge-options, the arm route's AlreadyQueued, the disarm dequeue, the auto-merge
+  // runner). Position and ETA stay live-only on `PrMergeOptions.mergeQueue`.
   inMergeQueue: boolean | null;
   // The entry's state, or null when there is no entry / nothing observed. `unmergeable` is the
   // one that earns the field: GitHub ejects an entry whose checks failed, and it is the only
@@ -5638,6 +5671,10 @@ export interface OwnReadyItem extends MyTurnPr {
   lastCommitAt: string | null;
   /** See MergeReadyCard.viewerCanPush — a visibility gate, never the authority. */
   viewerCanPush: boolean;
+  /** GitHub's merge-queue membership (three-state — see `InsightPrRef.inMergeQueue`). It moves
+   *  the card's SENTENCE only (a queued PR says so instead of "it can land now"); it does not move
+   *  the item in or out of My Turn. Optional on the wire, additive. */
+  inMergeQueue?: boolean | null;
 }
 
 /** Promotion: a review thread on your own PR with no reply and no later commit, older than
@@ -5750,6 +5787,9 @@ export interface ClaudeReviewToAction {
   relevance?: MyTurnRelevance;
   /** See `MyTurnPr.muted`. DISPLAY ONLY; no counter reads it. */
   muted?: boolean;
+  /** Who started the run. Label only: an `'auto'` run reaches My Turn exactly like a manual one
+   *  (the account's own workspace switched it on). Absent on older servers = `'manual'`. */
+  trigger?: ClaudeReviewTrigger;
 }
 
 // ── Dismissing a My Turn entry (Pending → My turn → "Dismiss") ──
@@ -6073,14 +6113,14 @@ export interface TimelineQuery {
 // PR and returns structured findings. Claude's output is read-only reference; the
 // user authors their own review body/verdict and ticks which findings to post.
 
-// Every model id a STORED run may carry. ⚠ Wider than the OFFERED list below:
-// 'claude-opus-4-8' stays in the union (and in the labels, the price table and both schemas'
-// text enum) ONLY so runs stored with it still render. It is not offered in the picker and the
-// generate route 400s it.
+// Every model id the app can RUN, and the key of the labels, the price table and the effort
+// table. A retired id is removed from here outright (the old Opus 4.8 went this way): a run
+// STORED with one keeps its id string — the `claude_reviews.model` / `ai_fixes.model`
+// columns are plain text, `ClaudeReview.model` and `AiFix.model` are typed `string`, and the SPA
+// prints a stored run's model raw, never through the labels — and both generate routes 400 it.
 export type ClaudeReviewModel =
   | 'claude-opus-5-5'
   | 'claude-sonnet-5'
-  | 'claude-opus-4-8'
   | 'claude-sonnet-4-6'
   | 'claude-haiku-4-5';
 
@@ -6089,7 +6129,7 @@ export type ClaudeReviewModel =
 // the release, so both halves read this one spelling). DEFAULT FIRST: Opus 5.5 is the most
 // thorough reviewer and the default; Sonnet 5 is the best-value option; Sonnet 4.6 for
 // continuity; Haiku 4.5 is the cheap fast pass (it takes no `effort` knob). AI Fix reuses this
-// list but keeps its own Sonnet 5 default.
+// list and opens on DEFAULT_AI_FIX_MODEL (below, with the AI Fix types).
 export const CLAUDE_REVIEW_MODELS: ClaudeReviewModel[] = [
   'claude-opus-5-5',
   'claude-sonnet-5',
@@ -6101,11 +6141,11 @@ export const CLAUDE_REVIEW_MODELS: ClaudeReviewModel[] = [
 // value. Always `CLAUDE_REVIEW_MODELS[0]` (a test pins it).
 export const DEFAULT_CLAUDE_REVIEW_MODEL: ClaudeReviewModel = 'claude-opus-5-5';
 
-// Friendly labels (with a short cost/quality hint) for the model picker, and for stored runs.
+// Friendly labels (with a short cost/quality hint) for the two model pickers. A stored run's
+// model is printed raw, never looked up here, so a retired id needs no label.
 export const CLAUDE_REVIEW_MODEL_LABELS: Record<ClaudeReviewModel, string> = {
   'claude-opus-5-5': 'Claude Opus 5.5 (most thorough)',
   'claude-sonnet-5': 'Claude Sonnet 5 (best value)',
-  'claude-opus-4-8': 'Claude Opus 4.8 (no longer offered)',
   'claude-sonnet-4-6': 'Claude Sonnet 4.6',
   'claude-haiku-4-5': 'Claude Haiku 4.5 (fast, cheap)',
 };
@@ -6368,7 +6408,9 @@ export interface ClaudeReview {
   prId: number;
   headSha: string;
   status: ClaudeReviewStatus;
-  model: ClaudeReviewModel;
+  // The model id the run was STORED with. `string`, not ClaudeReviewModel: a run from a model
+  // that has since been retired keeps its id, and the SPA prints it raw.
+  model: string;
   scope: ClaudeReviewScope | null;
   // The deterministic routing decision: the mode this run actually used, and the
   // metrics behind it. Null on pre-routing rows (older runs / not yet decided).
@@ -6410,14 +6452,21 @@ export interface ClaudeReview {
   // What this run found about the PREVIOUS succeeded review's findings; null when there was no
   // earlier review with findings to check (or this run skipped).
   followUp?: ClaudeReviewFollowUp | null;
+  // Who started the run. Absent on older servers = 'manual'.
+  trigger?: ClaudeReviewTrigger;
 }
+
+// Who started a Claude review run: a person pressing Review, or the per-workspace auto-review
+// sweeper (Settings -> Workspace) for a newly opened human PR. `claude_reviews.trigger`.
+export type ClaudeReviewTrigger = 'manual' | 'auto';
 
 // A lighter run row for the history selector (no findings).
 export interface ClaudeReviewSummary {
   id: number;
   headSha: string;
   status: ClaudeReviewStatus;
-  model: ClaudeReviewModel;
+  // Stored id, possibly a retired model — see ClaudeReview.model.
+  model: string;
   scope: ClaudeReviewScope | null;
   reviewMode: ReviewMode | null;
   verdict: ClaudeReviewVerdict | null;
@@ -6426,6 +6475,8 @@ export interface ClaudeReviewSummary {
   postedAt: string | null;
   createdAt: string;
   finishedAt: string | null;
+  // Who started the run. Absent on older servers = 'manual'.
+  trigger?: ClaudeReviewTrigger;
 }
 
 // One entry in the cross-PR "prior Claude reviews" list (GET /api/claude-reviews):
@@ -6474,6 +6525,9 @@ export interface ClaudeReviewResponse {
   review: ClaudeReview | null;
   // All prior runs for the PR (newest first), lighter shape.
   history: ClaudeReviewSummary[];
+  // An AUTO review holds this PR: 'queued' (waiting in the auto lane, no row yet) or 'running'.
+  // While set, starting a manual review answers 409 AutoReviewInProgress. null/absent = free.
+  autoReview?: 'queued' | 'running' | null;
 }
 
 // ⚠ `SetClaudeKeyBody` / `ClaudeKeyResponse` / `ClaudeKeyStatusResponse` ARE DELETED, along with
@@ -6528,8 +6582,11 @@ export interface ClaudeReviewProgress {
 
 export interface ClaudeReviewStatusResponse {
   status: ClaudeReviewStatus | 'idle';
+  // null while idle, and for an AUTO review still waiting in its lane (it has no row yet).
   reviewId: number | null;
   progress: ClaudeReviewProgress | null;
+  // Who started the in-flight run (running / queued only). Absent on older servers.
+  trigger?: ClaudeReviewTrigger;
 }
 
 // Server-Sent-Events payload streamed by GET /api/prs/:id/claude-review/stream.
@@ -6592,7 +6649,7 @@ export interface PostCommentResult {
 
 export interface GenerateReviewBody {
   // One of CLAUDE_REVIEW_MODELS (the offered list). Omitted ⇒ DEFAULT_CLAUDE_REVIEW_MODEL.
-  // A model that is not offered (e.g. 'claude-opus-4-8') is a 400.
+  // A model that is not offered (e.g. a retired id) is a 400.
   model?: ClaudeReviewModel;
   // Review depth. Omitted / 'auto' lets the deterministic router decide; an explicit
   // 'diff_only' or 'worktree' forces that mode, overriding the router's metrics.
@@ -6619,17 +6676,55 @@ export interface UpdateFindingBody {
 // A review currently in flight, for the global progress banner. Surfaced from the
 // review manager's in-memory state joined with the PR's coordinates.
 export interface ActiveReview {
-  reviewId: number;
+  // null for an AUTO review waiting in its lane (status 'queued'): it has no row until it starts.
+  reviewId: number | null;
   prId: number;
   repoFullName: string;
   prNumber: number;
   prTitle: string;
   status: ClaudeReviewStatus;
   phase: ClaudeReviewPhase | null;
+  // Who started it. The progress banner follows only 'manual' runs: an auto run was asked for by
+  // nobody, so announcing it would interrupt everyone for every teammate's PR.
+  trigger?: ClaudeReviewTrigger;
 }
 
 export interface ActiveReviewsResponse {
   reviews: ActiveReview[];
+}
+
+// ---- The Open PRs table's "Claude review" column: ONE batched read of the LATEST run per PR ----
+// `POST /api/claude-review/states` — DB-only (no GitHub, no model), account-scoped. A PR with no
+// run, or one the caller does not own, is simply ABSENT from `states`. Over the cap is a 400,
+// never a silent truncation.
+export const CLAUDE_REVIEW_STATES_MAX_IDS = 1000;
+
+export interface ClaudeReviewStatesBody {
+  prIds: number[];
+}
+
+export interface ClaudeReviewPrState {
+  prId: number;
+  /** The PR's LATEST run, whatever its status. null = an AUTO review still waiting in its lane:
+   *  it has no row yet, and is reported as `status: 'queued'`, `trigger: 'auto'`. */
+  reviewId: number | null;
+  status: ClaudeReviewStatus;
+  verdict: ClaudeReviewVerdict | null;
+  /** The head commit that run reviewed. null for an auto review still waiting in its lane. */
+  reviewedHeadSha: string | null;
+  finishedAt: string | null; // ISO-8601
+  /** The user story stored on that run (at queue time), or null. A re-review reuses it. */
+  ticket: ClaudeReviewTicket | null;
+  /** The PR's synced head is a DIFFERENT commit from `reviewedHeadSha`. False when the synced
+   *  head is unknown — no reading is never "moved". */
+  headMoved: boolean;
+  /** Who started that run. `'auto'` on a queued or running entry means an auto review holds the
+   *  PR, and a manual start answers 409 AutoReviewInProgress. Absent on older servers = 'manual'. */
+  trigger?: ClaudeReviewTrigger;
+}
+
+export interface ClaudeReviewStatesResponse {
+  states: ClaudeReviewPrState[];
 }
 
 export interface PostReviewBody {
@@ -6641,11 +6736,19 @@ export interface PostReviewBody {
 // failure analysis via Haiku) plus an Agent-SDK run that MODIFIES files in a cloned
 // worktree, captures a unified-diff patch, and — with repo write access — pushes to
 // the PR's head branch or a new branch (opening a PR). All wire types mirror the
-// Claude Review shapes above; the backend keeps local `import type`s (shared isn't
-// shipped at runtime).
+// Claude Review shapes above. Value exports here (DEFAULT_AI_FIX_MODEL, the model list) are
+// read at runtime by the SPA AND the plugin's routes — shared is vendored into the release.
 
 // The fixer reuses the Claude Review model set.
 export type AiFixModel = ClaudeReviewModel;
+
+// The model an AI Fix run uses when the request names none, and the fixer picker's opening
+// value — ONE spelling, read by the picker (AiFixTab), the CI card's "Fix it" (CiAnalysisCard)
+// and the plugin's start route. Opus 5.5 runs at effort MEDIUM with adaptive thinking on every
+// agentic path, pinned in apps/backend/src/review/model-options.ts (PINNED_EFFORT) — so this
+// constant is "Opus 5.5 on medium" with no effort field of its own. Only the FIXER reads it: the
+// pane's summary and CI analysis are separate, cheap Haiku calls.
+export const DEFAULT_AI_FIX_MODEL: AiFixModel = 'claude-opus-5-5';
 
 // ---- read-only analyses (aiAnalysis capability) ----
 
@@ -6864,9 +6967,6 @@ export interface AiFix {
   filesChanged: string[];
   // The base commit the patch applies onto (the live PR head at generate time).
   baseSha: string | null;
-  // A stored, reviewable rebase resolution (the fix replayed onto the trunk with
-  // conflicts resolved), or null. Only rebase produces this reviewable artifact.
-  resolved: AiFixResolved | null;
   // The Claude review this fix was seeded from, if any.
   sourceReviewId: number | null;
   // seed === 'comments' only: the comments the run was given, in the order the prompt
@@ -6935,7 +7035,9 @@ export type AiFixStreamEvent =
 
 // Start a fix run.
 export interface GenerateFixBody {
-  model: AiFixModel;
+  // One of CLAUDE_REVIEW_MODELS. Omitted ⇒ DEFAULT_AI_FIX_MODEL. Anything else (a retired id
+  // such as the old Opus, or a non-string) is a 400 { error: 'ModelNotOffered' }.
+  model?: AiFixModel;
   seed?: AiFixSeed;
   // When seed === 'review', the review text to seed the prompt with.
   reviewText?: string;
@@ -6959,21 +7061,17 @@ export interface GenerateFixBody {
 // without re-measuring the other two.
 export const AI_FIX_MAX_COMMENT_TARGETS = 25;
 
-// Push a completed fix. `target` is which branch to push onto; a 'new' branch also
-// opens a PR against the base branch.
+// Push a completed fix, as-is: synchronous, never a force push, and no trunk step before it (a
+// fix that conflicts with the trunk pushes as it is and the PR shows as conflicted). `target` is
+// which branch to push onto; a 'new' branch also opens a PR against the base branch.
+//
+// The rebase / merge / "let Claude resolve conflicts" strategies were REMOVED. A request that
+// still names `strategy: 'merge' | 'rebase'` (a tab running an old bundle) is a 400
+// { error: 'UnsupportedStrategy' }; `strategy: 'plain'`, `autoResolve` and `model` are ignored.
 export interface AiFixPushBody {
   target: 'existing' | 'new';
   // Required when target === 'new' — the branch name to create.
   branch?: string;
-  // How to reconcile with the trunk before pushing. 'plain' (default) pushes the
-  // fix as-is (never force-pushes; may leave the PR conflicted). 'merge' merges the
-  // trunk in as a merge commit (never force-pushes). 'rebase' pushes the previously
-  // resolved+reviewed rebase artifact (force-with-lease on the existing branch).
-  strategy?: AiFixPushStrategy;
-  // For 'merge': let Claude resolve any conflicts as part of the push job.
-  autoResolve?: boolean;
-  // Model for the conflict-resolution agent (defaults like the fixer).
-  model?: AiFixModel;
 }
 
 export interface AiFixPushResult {
@@ -6982,98 +7080,6 @@ export interface AiFixPushResult {
   // Set when target === 'new' (a PR was opened).
   prNumber?: number;
   prUrl?: string;
-  strategy: AiFixPushStrategy;
-  // Whether any conflict resolution happened during this push.
-  resolvedConflicts: boolean;
-  // Whether the push rewrote history (force-with-lease). Only ever true for a rebase
-  // onto the PR's own existing branch.
-  forcePushed: boolean;
-}
-
-// ---- trunk-conflict handling (rebase / merge before push) ----
-
-export type AiFixPushStrategy = 'plain' | 'merge' | 'rebase';
-
-// The state of the fix branch (baseSha + patch) relative to the PR's trunk (its base
-// branch), computed by a local trial merge before offering resolution options.
-export interface AiFixMergePreview {
-  // True when the tool is available (aiFix on + a stored, pushable fix).
-  available: boolean;
-  trunk: string; // the base branch name compared against
-  trunkSha: string | null; // its current tip (null if the fetch failed)
-  behindBy: number; // commits on trunk not in the fix branch
-  aheadBy: number; // commits on the fix branch not in trunk
-  clean: boolean; // merges cleanly (no conflicts)
-  conflictFiles: string[];
-}
-
-// Progress phases for the async resolve / merge / push jobs. Shared with the fixer's
-// CodingProgress on the backend; a superset covering both.
-export type AiFixResolvePhase =
-  | 'cloning'
-  | 'applying_fix'
-  | 'fetching_trunk'
-  | 'rebasing'
-  | 'merging'
-  | 'resolving_conflicts'
-  | 'verifying'
-  | 'pushing';
-
-export interface AiFixResolveProgress {
-  phase: AiFixResolvePhase;
-  message?: string;
-  // Newest-last rolling log of the resolver agent's tool calls / text (live-only).
-  recentActivity?: string[];
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    cacheCreationTokens: number;
-    estCostUsd: number;
-  };
-}
-
-export interface AiFixResolveStatusResponse {
-  status: AiFixStatus | 'idle';
-  fixId: number | null;
-  progress: AiFixResolveProgress | null;
-  // Set on a terminal failure (e.g. unresolved conflicts).
-  error?: string | null;
-}
-
-export type AiFixResolveStreamEvent =
-  | {
-      type: 'snapshot' | 'progress';
-      status: AiFixStatus | 'idle';
-      fixId: number | null;
-      progress: AiFixResolveProgress | null;
-    }
-  | {
-      type: 'done';
-      status: AiFixStatus | 'idle';
-      fixId: number | null;
-      error?: string | null;
-    };
-
-// The stored, reviewable result of a rebase resolution (the fix replayed onto the
-// trunk with conflicts resolved). The `git am` mbox that reproduces it is kept
-// server-side; the client sees only the reviewable unified diff + metadata.
-export interface AiFixResolved {
-  strategy: AiFixPushStrategy; // 'rebase' — the only strategy with a reviewable artifact
-  diff: string; // unified `git diff <trunk>..HEAD` for FileDiffView
-  filesChanged: string[];
-  conflictFiles: string[]; // files whose conflicts Claude resolved
-  resolvedConflicts: boolean; // whether any conflict resolution happened
-  trunk: string;
-  trunkSha: string;
-  at: string; // ISO timestamp
-}
-
-// Start a rebase-resolve job (rebase the fix onto the trunk, agentically resolving
-// conflicts, and store a reviewable artifact — no push yet).
-export interface AiFixRebaseBody {
-  autoResolve?: boolean;
-  model?: AiFixModel;
 }
 
 // ---- PR write actions (review threads, comments, approve, inline review comments) ----
@@ -7204,6 +7210,15 @@ export interface PrFilesResponse {
   files: PrFileDiff[];
   // true ⇒ the PR has more files than the server's fetch cap; not all are listed.
   truncated: boolean;
+  /**
+   * The PR's STORED head (`pull_requests.head_sha`) when the server read these patches. The SPA
+   * keeps the diff at `staleTime: Infinity` and persists it, so this is how it knows a push has
+   * made the diff old: a PR detail read AFTER the diff that names another head refetches it
+   * (`prFilesOutdated`, hooks/usePr.ts). `null` = no stored head, or the GitHub read failed and
+   * `files` is the empty fallback (so the next newer detail retries it). ABSENT on a diff cached
+   * before this field existed, which is treated like `null`.
+   */
+  headSha?: string | null;
 }
 
 // ---- Activity tab (Workstream 1; CORE, always-on, no AI) ----
@@ -7689,9 +7704,9 @@ export interface InsightPrRef {
   // ── GitHub's native merge queue ────────────────────────────────────────────────────────────
   //
   // Carried on the card because the Pending board MAY NOT FETCH ON MOUNT, and a queued PR is
-  // indistinguishable from a protection-blocked one without it: GitHub's MergeStateStatus enum
-  // has no QUEUED member, so a queued PR reports `mergeStateStatus: 'blocked'`. Without these two
-  // the board offers a Merge button GitHub will refuse.
+  // indistinguishable from any other without it: GitHub's MergeStateStatus enum has no QUEUED
+  // member, so a queued PR reads like any other ('clean' and 'unknown' have both been seen here).
+  // Without these two the board offers a Merge button for a PR the queue is already landing.
   //
   // ⚠ `inMergeQueue: null` IS "NOT OBSERVED", NEVER "NOT QUEUED" — the PR was synced before the
   // columns existed, or the walk did not carry the selection. `false` is a positive statement
@@ -7749,6 +7764,22 @@ export interface InsightPrRef {
   // the signals ride the card, folded server-side from columns already on the row.
   // ⚠ Absent = UNKNOWN, never "low". Trailing optional for the same reason as `codeLoc` above.
   blast?: BlastSignals | null;
+  // ── WHICH CHECKS ARE FAILING — set only while `ciStatus` is red ────────────────────────────
+  //
+  // The newest `ci_status_events` row for the PR's CURRENT head, when that row is red. BARE check
+  // names (GitHub's job/check name, never workflow-prefixed — the PR side stores no workflow),
+  // deduped, alphabetical, each at most 200 characters, at most `FAILING_CHECKS_SHOWN`.
+  // `failingCheckTotal` counts every name that row stored, so the "and N more" has a denominator
+  // of its own (the PR sync reads at most 100 contexts, so a total of 100 is a floor).
+  //
+  // ⚠ ABSENT IS "NO NAMES", NEVER "0 FAILING": a red head whose only failure was a CANCELLED job
+  // (recorded as neutral), a tolerant response that nulled the contexts, or a fold that did not ask
+  // (only `GET /api/attention` folds these). Render the CI label alone.
+  // ⚠ Third-party text (a CI vendor picks the name): render as a text node. ⚠ DISPLAY ONLY — never
+  // in a card's `detail`, a work-plan fact, or any hashed or model payload.
+  // Trailing optional — Search's hand-adapted `PrMetaFields` and the e2e fixtures carry neither.
+  failingChecks?: string[];
+  failingCheckTotal?: number;
 }
 
 // A CORE suggested reviewer (used by BOTH the PR-detail "Suggested reviewers" row and the
@@ -7850,6 +7881,9 @@ export interface MyTurnCard extends InsightCardBase, InsightPrRef {
    *  the same controls (the merge row, the resolver button) — a promoted card moves, it does not
    *  lose its actions. */
   own?: MyTurnOwnWork;
+  /** Set ONLY on `claude_review` cards: who started the run. `'auto'` makes the chip read
+   *  "Auto review". A label only — an auto run is owned exactly like a manual one. */
+  trigger?: ClaudeReviewTrigger;
 }
 
 /** The home-kind facts a promoted My Turn card carries — see `MyTurnCard.own`. */
@@ -7916,6 +7950,12 @@ export interface MyTurnTrunkCard extends InsightCardBase {
   authorIsBot: boolean;
   authorBotKind: AutomatedReviewerKind | null;
   automation: PrAutomation | null;
+  /** The red head's failing check names and the count of every name stored for it —
+   *  `CiFailingCard`'s pair, read from the SAME stored row (`branch_commits` at `headSha`). ⚠ That
+   *  row keeps at most 20 (`MAX_FAILING_CHECKS_PER_COMMIT`), so a total of 20 is a floor.
+   *  null = no names known. */
+  failingChecks: string[] | null;
+  failingCheckTotal: number | null;
 }
 
 // Which relationship puts a red build on the viewer's plate. TWO ARMS, and they are two different
@@ -7981,6 +8021,18 @@ export interface CiFailingCard extends InsightCardBase {
   /** The PR page on 'your_pr'; the COMMIT page on 'trunk' — a trunk run's checks live on the
    *  commit, the same rule the trunk_ci_failed feed item follows. Render via safeExternalUrl. */
   githubUrl: string;
+  /** WHICH CHECKS ARE FAILING — bare names, alphabetical, at most `FAILING_CHECKS_SHOWN`.
+   *  'your_pr': the newest `ci_status_events` row for the PR's current head. 'trunk': the
+   *  `branch_commits` row at `headSha` (the one reader `/api/branch-status` uses), whether or not a
+   *  landing PR resolved. ⚠ null = NO NAMES KNOWN, never "0 failing" — render the CI label alone.
+   *  REQUIRED (not optional) so every builder, and the promoted trunk card's adapter, must say.
+   *  ⚠ Display only: never in `detail`, a work-plan fact, or any hashed or model payload. */
+  failingChecks: string[] | null;
+  /** Every name stored for that head, behind `failingChecks` — the "and N more" denominator. null
+   *  with it. ⚠ Storage bounds it: a trunk commit's row keeps at most 20
+   *  (`MAX_FAILING_CHECKS_PER_COMMIT`) and a PR's sync reads at most 100 contexts, so a total AT a
+   *  bound is a floor. */
+  failingCheckTotal: number | null;
 }
 
 export interface StalledReviewCard extends InsightCardBase, InsightPrRef {
@@ -8465,6 +8517,17 @@ export interface AttentionCardsResponse {
    *  the tab lists them under "Dismissed" with a way back. NOT counted in any tab, chip or lens:
    *  a dismissed subject is out of the inbox. Trailing optional. */
   myTurnDismissed?: MyTurnDismissedItem[];
+}
+
+/** One account's Pending board for one workspace, as the Pro Slack digest reads it
+ *  (`ProHostQueries.getPendingBoard`): the SAME fold as `GET /api/attention` (core
+ *  `buildPendingBoard`), minus the two live extras (failing-check names, suggested reviewers) —
+ *  a cron send spends no GitHub budget. ⚠ Live state: never part of a payload hash. */
+export interface PendingBoardSnapshot extends AttentionCardsResponse {
+  /** The workspace the board was resolved to (a foreign or unknown id falls back to Default). */
+  workspaceId: number;
+  /** The account's GitHub login — whose "My turn" this is. null when the account row is missing. */
+  viewerLogin: string | null;
 }
 
 /** The ranking the server actually used for one /api/attention response (Settings → My Turn,

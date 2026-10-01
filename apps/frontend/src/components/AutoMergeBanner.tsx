@@ -6,6 +6,7 @@ import type {
   ArmedMergeState,
 } from '@pierre-review/shared';
 import { useArmedMerges, useDisarmAutoMerge } from '../hooks/useAutoMerge.js';
+import { invalidateAfterPrWrite } from '../hooks/prCacheSync.js';
 import { usePinnedTabs, type TabMeta } from '../store/pinnedTabs.js';
 import { CheckIcon, WarningIcon } from './Icons.js';
 
@@ -471,18 +472,11 @@ export function AutoMergeBanner(): JSX.Element | null {
       return [...fresh, ...kept].slice(0, 5);
     });
     if (landed) {
-      // The PR really did change state on GitHub — refresh every surface that shows open-PR
-      // state, exactly as the interactive merge mutation does.
-      for (const key of [
-        ['timeline'],
-        ['open-prs'],
-        ['activity'],
-        ['consolidated-feed'],
-        ['my-turn'],
-        ['me'],
-      ]) {
-        void qc.invalidateQueries({ queryKey: key });
-      }
+      // The PR really did merge on GitHub — the SAME set the interactive merge refetches
+      // (prCacheSync.ts): its own detail, the board, the trunk strip, the maintainer shield.
+      // Swept ONCE for every PR that landed between two polls.
+      const landedIds = fresh.filter((o) => o.state === 'merged').map((o) => o.prId);
+      void invalidateAfterPrWrite(qc, landedIds, { merged: true });
     }
   }, [requests, qc]);
 

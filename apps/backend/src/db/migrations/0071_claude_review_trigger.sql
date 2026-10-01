@@ -1,0 +1,11 @@
+-- CLAUDE REVIEW: WHO STARTED THE RUN (local-only feature).
+--
+-- claude_reviews.trigger: 'manual' (a person pressed Review) or 'auto' (the per-workspace auto
+-- review sweeper in the Pro plugin started it for a newly opened human PR). NOT NULL DEFAULT
+-- 'manual', so every existing row reads as what it was: a click.
+--
+-- It is a CORE column, not a plugin table, because a CORE read needs it: `getUnactionedClaudeReviews`
+-- carries it to the My Turn "Claude review ready" card, which labels an AUTO run "Auto review".
+-- The row is core-owned already; a side table would be a second place to join for one enum.
+-- The Postgres twin is migrations-pg/0058_claude_review_trigger.sql.
+ALTER TABLE `claude_reviews` ADD `trigger` text DEFAULT 'manual' NOT NULL;

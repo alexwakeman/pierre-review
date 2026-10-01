@@ -1,26 +1,42 @@
 import { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query';
 import type {
   ActiveReviewsResponse,
   ClaudeReview,
   ClaudeReviewListResponse,
   ClaudeReviewModel,
+  ClaudeReviewPrState,
   ClaudeReviewResponse,
+  ClaudeReviewStatesResponse,
   ClaudeReviewStatusResponse,
   ClaudeReviewStreamEvent,
   ClaudeReviewTicketInput,
   ClaudeReviewVerdict,
   RequestedReviewMode,
 } from '@pierre-review/shared';
-import { api } from '../api/client.js';
+import { CLAUDE_REVIEW_STATES_MAX_IDS, DEFAULT_CLAUDE_REVIEW_MODEL } from '@pierre-review/shared';
+import { api, ApiError } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { useFilters } from '../store/filters.js';
+import { invalidateAfterPrWrite } from './prCacheSync.js';
+import { anyReviewInFlight, resolveListTicket, type ListTicketResult } from '../lib/claudeReviewColumn.js';
+import { browserAcMemory } from '../lib/jiraTicket.js';
 
 export function useClaudeReview(prId: number | null) {
   return useQuery<ClaudeReviewResponse>({
     queryKey: ['claude-review', prId],
     queryFn: () => api.claudeReview(prId as number),
     enabled: prId != null,
+    // While an AUTO review waits in its lane it has no row, so nothing else tells this pane when
+    // it starts: re-read until it does (then the row's own running state + the SSE stream take
+    // over). Idle otherwise.
+    refetchInterval: (q) => (q.state.data?.autoReview === 'queued' ? 5000 : false),
   });
 }
 
@@ -69,6 +85,8 @@ export function useClaudeReviewStream(
       if (settled) return;
       settled = true;
       void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
+      // The Open PRs table's column reads the same runs.
+      void qc.invalidateQueries({ queryKey: CLAUDE_REVIEW_STATES_KEY });
     };
     void sseStream<ClaudeReviewStreamEvent>(
       `/api/prs/${prId}/claude-review/stream`,
@@ -96,22 +114,119 @@ export function useClaudeReviewStream(
   return { status };
 }
 
+// ⚠ ONE MUTATION KEY PER PR FOR EVERY WAY A RUN IS STARTED — the Claude Review tab's Run button
+// and the Open PRs table's Review button both use it, so `useIsMutating` makes each surface see the
+// other's start in flight (a per-mount `isPending` resets on a tab switch mid-request).
+export const claudeReviewStartKey = (prId: number): readonly unknown[] => ['claude-review-start', prId];
+
+// The column's query-key PREFIX (the full key appends the sorted id list).
+export const CLAUDE_REVIEW_STATES_KEY = ['claude-review-states'] as const;
+
+/** True while a start request for this PR is in flight, from ANY surface. */
+export function useClaudeReviewStarting(prId: number): boolean {
+  return useIsMutating({ mutationKey: claudeReviewStartKey(prId) }) > 0;
+}
+
+// What every successful start does, whichever surface pressed it: wake the global banner (the
+// "review started" toast polls only after a kickoff) and refetch both readers of the run.
+// ⚠ RETURNED, so the mutation stays pending until the readers show the queued run: a void
+// invalidate re-enabled the Review button on the STALE state for one round trip, and a second
+// click there got "already running" back from the server.
+function afterReviewStarted(qc: QueryClient, prId: number): Promise<unknown> {
+  useFilters.getState().bumpClaudeReviewKickoff();
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ['claude-review', prId] }),
+    qc.invalidateQueries({ queryKey: ['claude-review-status', prId] }),
+    qc.invalidateQueries({ queryKey: CLAUDE_REVIEW_STATES_KEY }),
+  ]);
+}
+
 export function useGenerateReview(prId: number) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: claudeReviewStartKey(prId),
     mutationFn: (vars: {
       model: ClaudeReviewModel;
       mode: RequestedReviewMode;
       // The optional user story; undefined sends none.
       ticket?: ClaudeReviewTicketInput;
     }) => api.generateClaudeReview(prId, vars.model, vars.mode, vars.ticket),
-    onSuccess: () => {
-      // Tell the global banner a run is in flight, so it starts polling.
-      useFilters.getState().bumpClaudeReviewKickoff();
-      void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
-      void qc.invalidateQueries({ queryKey: ['claude-review-status', prId] });
-    },
+    onSuccess: () => afterReviewStarted(qc, prId),
+    // 409 AutoReviewInProgress: the pane's reading was stale (it polls only while it already
+    // knows of a queued hold). Re-read it, so the hold shows and its 5s poll starts — otherwise
+    // the button comes back and every click is refused again.
+    onError: (err) =>
+      isAutoReviewHoldError(err)
+        ? Promise.all([
+            qc.invalidateQueries({ queryKey: ['claude-review', prId] }),
+            qc.invalidateQueries({ queryKey: CLAUDE_REVIEW_STATES_KEY }),
+          ])
+        : undefined,
   });
+}
+
+/**
+ * The Open PRs table's "Claude review" column: the LATEST run for each listed PR, ONE request for
+ * the whole list, never one per row. Enabled only with the Claude Review capability. Polls every
+ * 5s only while one of the listed PRs is queued or running. The list is capped at the route's
+ * limit; rows past it get no reading (the caller renders nothing for them).
+ */
+export function useClaudeReviewStates(prIds: readonly number[], enabled: boolean) {
+  const ids = [...new Set(prIds)].sort((a, b) => a - b).slice(0, CLAUDE_REVIEW_STATES_MAX_IDS);
+  return useQuery<ClaudeReviewStatesResponse>({
+    queryKey: [...CLAUDE_REVIEW_STATES_KEY, ids.join(',')],
+    queryFn: () => api.claudeReviewStates(ids),
+    enabled: enabled && ids.length > 0,
+    refetchInterval: (q) => (anyReviewInFlight(q.state.data?.states) ? 5000 : false),
+  });
+}
+
+/**
+ * Start a review from the Open PRs table: the defaults (model, 'auto' mode), no picker, through
+ * the SAME start route and queue as the tab. The user story is resolved ON CLICK only
+ * (`resolveListTicket`): a re-review reuses the previous run's stored ticket, otherwise the PR's
+ * first fillable Jira ticket is fetched and filled the panel's way. The run starts either way; the
+ * returned note says when it went without a story.
+ */
+export function useStartReviewFromList(prId: number) {
+  const qc = useQueryClient();
+  return useMutation<ListTicketResult, Error, { previous: ClaudeReviewPrState | undefined }>({
+    mutationKey: claudeReviewStartKey(prId),
+    mutationFn: async ({ previous }) => {
+      const story = await resolveListTicket({
+        previous: previous?.ticket ?? null,
+        // PrDetail carries the detected tickets; the SAME cache entry the PR pane reads.
+        loadTickets: async () =>
+          (
+            await qc.fetchQuery({
+              queryKey: ['pr', prId],
+              queryFn: () => api.pr(prId),
+              staleTime: Infinity,
+            })
+          ).tickets,
+        loadDetails: (key) => api.jiraTicket(prId, key),
+        memory: browserAcMemory(),
+      });
+      await api.generateClaudeReview(prId, DEFAULT_CLAUDE_REVIEW_MODEL, 'auto', story.ticket);
+      return story;
+    },
+    onSuccess: () => afterReviewStarted(qc, prId),
+    // 409 AutoReviewInProgress: the table's reading was stale (an auto review took the PR since
+    // the last poll). RETURNED, so the mutation stays pending until the column re-reads and shows
+    // the hold — the button must not come back in between.
+    onError: (err) =>
+      isAutoReviewHoldError(err)
+        ? Promise.all([
+            qc.invalidateQueries({ queryKey: CLAUDE_REVIEW_STATES_KEY }),
+            qc.invalidateQueries({ queryKey: ['claude-review', prId] }),
+          ])
+        : undefined,
+  });
+}
+
+/** The start route's refusal while an auto review holds the PR (409 AutoReviewInProgress). */
+export function isAutoReviewHoldError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409 && err.code === 'AutoReviewInProgress';
 }
 
 // Post a single finding as a standalone comment. The server auto-routes it: inline
@@ -122,8 +237,11 @@ export function usePostFinding(prId: number) {
   return useMutation({
     mutationFn: (vars: { findingId: number }) =>
       api.postClaudeFinding(vars.findingId),
-    onSuccess: () =>
-      void qc.invalidateQueries({ queryKey: ['claude-review', prId] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
+      // A comment on GitHub like any other: THE ONE WRITE SET (prCacheSync.ts).
+      void invalidateAfterPrWrite(qc, prId);
+    },
   });
 }
 
@@ -226,6 +344,9 @@ export function usePostReview(prId: number) {
     onSuccess: (_data, vars) => {
       if (!vars.dryRun) {
         void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
+        // A real review with a verdict (approve / request changes) moves the PR's review
+        // standing and the board: THE ONE WRITE SET (prCacheSync.ts). A dry run wrote nothing.
+        void invalidateAfterPrWrite(qc, prId);
       }
     },
   });

@@ -72,6 +72,15 @@
 //     multiply getWorkspaceInsights by workspace count on every Feed mount — the cost this route
 //     is on the `search` tier for. A My Turn settings save drops the account's entries
 //     (`clearDailyBriefCountsFor`), because it changes WHICH cards exist, not just how many.
+//     So does the SPA change signal (sync/pr-change-signal.ts `onPrChanged`, registered below):
+//     every write route, settle re-read, webhook sync and liveness sweep that moves a
+//     board-visible column raises it, and the SPA refetches the strip on it — a roll-up line
+//     still answering from before the change would then disagree with the Pending tabs it
+//     counts for up to COUNTS_TTL_MS. It drops the whole ACCOUNT (the signal names a repo, and
+//     mapping it to its workspace would be a query inside a synchronous listener). ⚠ This does
+//     NOT weaken the narration's cost gate below: the TTL still absorbs READ churn, and a
+//     narration regenerates only on a click (POST /api/pro/synthesis) whose payload hash really
+//     did move — a figure that changed is exactly what a regeneration is for.
 //
 // ⚠ THEREFORE `generatedAt` DESCRIBES TWO COMPUTATION TIMES, and the honest one is the tighter:
 // it stamps the COUNTS (now == the request), while `botAnomalies` inside the same object may be
@@ -84,6 +93,7 @@ import { and, eq, gte, inArray } from 'drizzle-orm';
 import type { DailyBriefBotAnomaly, DailyBriefCounts, DailyBriefTrunkRepo } from '@pierre-review/shared';
 import { PENDING_LIMITS } from '@pierre-review/shared';
 import { db, schema } from './client.js';
+import { onPrChanged } from '../sync/pr-change-signal.js';
 import {
   automatedReviewerUserIds,
   classificationKindForUser,
@@ -140,12 +150,17 @@ export function clearDailyBriefCache(): void {
 
 /** Drop ONE account's roll-up counts, so a My Turn settings save cannot leave "Elsewhere" lines
  *  counting a type the reader just switched off for the rest of the five-minute window. The anomaly
- *  slice is untouched: settings do not move it. Called by PUT /api/me/my-turn-settings. */
+ *  slice is untouched: settings do not move it. Called by PUT /api/me/my-turn-settings, and by
+ *  the PR change signal's listener below. */
 export function clearDailyBriefCountsFor(accountId: number): void {
   for (const k of [...countsCache.keys()]) {
     if (k.startsWith(`${accountId}:`)) countsCache.delete(k);
   }
 }
+
+// A board-visible PR change drops the account's roll-up counts too (see the header). Registered at
+// module load, so the cache and its invalidation exist together or not at all.
+onPrChanged((accountId) => clearDailyBriefCountsFor(accountId));
 
 // The narrow volume-only anomaly slice (see the module header for why it is NOT the behaviour
 // compute). Returns at most ANOMALY_CAP bots, most-anomalous first.

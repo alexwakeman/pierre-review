@@ -138,7 +138,12 @@ fixture tests (see Conventions).
   `DRAFT` value (it maps to `unknown`): draft-ness is already `isDraft`, and folding it in
   would leave a draft reporting `draft` with no idea whether it is otherwise clean. Four small
   derived columns say whether it is a dependency tool's PR and whether it fixes a known advisory —
-  see **`pull_requests` — dependency + security signals** below.
+  see **`pull_requests` — dependency + security signals** below. `inMergeQueue` +
+  `mergeQueueEntryState` are GitHub's merge-queue membership, THREE-state (`null` = not observed,
+  never "not queued"). They have two writers: the walk's own fold, which OMITS the keys when a
+  response did not carry the selection, and `db/pr-merge-queue-stamp.ts`, which every merge-queue
+  write path calls with a positive answer and which raises the PR change signal when it changes
+  the row. `markPrMergedLocally` clears both. Contract: docs/MERGE-CI-TRUNK.md § Merge queue.
 - **`reviews`** — submitted reviews (`state`: approved / changes_requested / commented /
   dismissed / pending). A reviewer's *standing* decision is their latest non-`commented` review.
 - **`reviewThreads`** + **`reviewComments`** — inline threads (stored `derivedState`) +
@@ -177,7 +182,9 @@ fixture tests (see Conventions).
   story, stored at QUEUE time, with its AC1..n split), `ticketAssessment` and `followUp` (what the
   run found about the previous succeeded review's comments). `claudeReviewFindings.priorFindingId`
   is a SOFT reference (no FK, always the same PR) to the earlier finding a finding re-raises.
-  Contracts: docs/CLAUDE-REVIEW.md.
+  `model` is plain `text` with NO drizzle `enum:` in either schema, so a run from a retired model
+  (the old Opus 4.8) reads back with its id intact; the offered list lives only in `packages/shared`
+  `CLAUDE_REVIEW_MODELS`. Contracts: docs/CLAUDE-REVIEW.md.
 - **`autoMergeRequests`** — one standing "merge when ready" intent per `(accountId, prId)`
   (that pair is the unique/upsert target, so re-arming OVERWRITES — this is current state, not a
   log; disarm DELETEs rather than adding a "cancelled" state). Carries `mergeMethod`,
@@ -210,6 +217,23 @@ fixture tests (see Conventions).
   re-sync, and a real FK would drag this table into both delete paths). In
   `accountScopedTables()` + explicitly erased; NOT in the Art. 15 export (unlike
   `autoMergeRequests`) — if that was a decision rather than an omission it isn't recorded anywhere.
+  The head row's `failingChecks` has ONE reader function, `trunkHeadFailingChecks`
+  (`db/branch-queries.ts`), shared by `/api/branch-status` and the Pending red-trunk cards. A row
+  keeps at most 20 failing runs (`MAX_FAILING_CHECKS_PER_COMMIT`), so a count read from it is a
+  floor at 20.
+- **`ciStatusEvents`** — the per-PR CI **transition log** (`accountId` denormalized; bare-name
+  `failingChecks: string[]`), written by `persistPr` in the same transaction as
+  `pull_requests.ci_status` and NOT lean-gated (it reads the fresh GraphQL contexts, not the stored
+  `checkRuns`). ⚠ **A log, not a snapshot.** Its one current-state reader (`prFailingChecks`,
+  `db/failing-checks.ts`, the Pending cards' failing-check names) takes the NEWEST row whose
+  `headSha` equals the PR's CURRENT head — `observedAt` desc, then `id` desc, because the CI-history
+  backfill synthesizes rows at commit time — and uses it only when that row is red. It keys on the
+  `(prId, headSha)` pair in JS, because the `IN × IN` query over-matches. Two caveats:
+  `checkContextState` maps CANCELLED to neutral, so a cancelled-only failure stores `[]`; and the
+  writer does not follow the partial-response policy, so a tolerant response with nulled contexts
+  but a red rollup also writes `[]`. Both degrade to "no names", never "0 failing" — and a cloud
+  GitHub App token without checks read may therefore show no names at all. The number of names a
+  row holds is bounded by the sync's `contexts(first: 100)` read.
 - **`trunkCiStatusEvents`** — the default-branch CI **transition log** (`accountId` denormalized;
   migration `0052` / pg `0039`), the trunk twin of `ciStatusEvents`. It has to exist because
   `branchCommits.ciStatus` is updated IN PLACE by the snapshot's idempotent upsert, so a commit

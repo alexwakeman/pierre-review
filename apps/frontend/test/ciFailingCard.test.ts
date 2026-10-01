@@ -66,6 +66,8 @@ describe('the landing PR’s byline on a trunk card', () => {
     detail: 'Trunk is red in a repo you maintain',
     observedAt: '2026-09-01T00:00:00.000Z',
     githubUrl: 'https://github.com/acme/api/commit/a1b2c3d4',
+    failingChecks: null,
+    failingCheckTotal: null,
     ...over,
   });
 

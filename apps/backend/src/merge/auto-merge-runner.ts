@@ -115,6 +115,13 @@ import {
   type MergeQueueState,
   type PrMergeSnapshot,
 } from '../github/mutations.js';
+// The post-write cascade (docs/REALTIME-SYNC.md § Post-write settle): every write this runner makes
+// is acknowledged by GitHub before GitHub has finished with it, and none of the aftermath bumps a
+// PR's `updatedAt`. The settle ladder re-reads the PR; a landing re-reads the repo's other PRs.
+import { asSyncLogger } from '../sync/resync-after-write.js';
+import { schedulePrSettle } from '../sync/pr-settle.js';
+import { noteMergeLanded } from '../sync/unsettled-prs.js';
+import { stampPrMergeQueueState } from '../db/pr-merge-queue-stamp.js';
 
 // Cron for the watcher. NOT in `config` on purpose: it is not a deployment knob (the whole
 // feature is "it lands within a couple of minutes of going green"), and a misconfigured value
@@ -337,6 +344,35 @@ async function isOurUpdateMerge(
 }
 
 /**
+ * Write a live merge-queue observation onto the PR row (`pull_requests.in_merge_queue` +
+ * `merge_queue_entry_state`) — the columns every screen reads, including the Pending board, which
+ * may not fetch. Without this the runner's own enqueue stayed invisible to them until the next
+ * walk, and the board kept offering a Merge trigger for a PR the queue was already landing.
+ *
+ * Only a POSITIVE answer reaches it (a non-null probe, an accepted enqueue). The helper raises
+ * the SPA's change signal when the stored value moves, because the stamp itself would otherwise
+ * silence the board's liveness sweep (it compares GitHub against this row).
+ *
+ * ⚠ NEVER FATAL. A failed stamp is a stale screen, not a reason to strike an intent the queue is
+ * handling perfectly well — so it logs and the tick carries on.
+ */
+async function stampQueueObservation(
+  work: ArmedMergeWork,
+  inQueue: boolean,
+  rawEntryState: string | null,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  try {
+    await stampPrMergeQueueState(work.prId, work.accountId, inQueue, rawEntryState);
+  } catch (err) {
+    log.warn(
+      { err, prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
+      'auto-merge: could not record the merge-queue state on the PR row',
+    );
+  }
+}
+
+/**
  * Merge-queue intents, part 1: settle an intent whose PR is already through (or in, or thrown
  * out of) the queue. Returns true when the tick is done with this intent; false only when the
  * PR is simply not in the queue and we never put it there — the caller then walks the shared
@@ -373,6 +409,9 @@ async function settleQueuedIntent(
     } else {
       await resolve(work.id, 'disarmed_blocked', 'the PR was merged outside auto-merge');
     }
+    // Either way the trunk moved: re-read the repo's other open PRs (~30s/~90s) and raise the
+    // SPA change signal. Fire-and-forget, never throws.
+    void noteMergeLanded(work.accountId, work.prId, asSyncLogger(log));
     return true;
   }
   if (queue.prState === 'CLOSED') {
@@ -522,6 +561,9 @@ async function enqueueWhenReady(
     return;
   }
   awaitingChecksForEnqueue.delete(work.id);
+  // GitHub ACCEPTED the enqueue, so membership is true even when the mutation's nullable payload
+  // gave no entry state (stored as "queued, state unknown", never "not queued").
+  await stampQueueObservation(work, true, entry.state, log);
   await updateAutoMergeState(work.id, {
     enqueuedAt: new Date(),
     lastReason:
@@ -534,6 +576,9 @@ async function enqueueWhenReady(
     { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
     'auto-merge: added the PR to the merge queue',
   );
+  // Queue membership moves the card, and GitHub's own merge state for a queued PR settles
+  // asynchronously — re-read it on the settle ladder. Fire-and-forget.
+  schedulePrSettle(work.accountId, work.prId, asSyncLogger(log));
 }
 
 /**
@@ -730,6 +775,9 @@ async function processOne(
   let queue: MergeQueueState | null = null;
   if (work.viaMergeQueue) {
     queue = await fetchMergeQueueState(token, work.owner, work.name, work.number);
+    // A non-null probe is a statement about membership whatever the branch below does with it —
+    // including a disabled queue (`inQueue: false`) and a PR the queue just landed.
+    if (queue) await stampQueueObservation(work, queue.inQueue, queue.state, log);
     if (queue && queue.enabled) {
       // The queue answered for itself, so any earlier "it's gone" observation is stale.
       queueDisabledIntents.delete(work.id);
@@ -821,6 +869,9 @@ async function processOne(
         lastReason: `rebased onto ${m.baseRef} — waiting for checks`,
         phase: 'awaiting_checks',
       });
+      // The rebase force-pushed `out.headSha`: settle the PR row against exactly that commit so
+      // the board stops offering "Update branch" on the old head. Fire-and-forget.
+      schedulePrSettle(work.accountId, work.prId, asSyncLogger(log), { headSha: out.headSha });
       return;
     }
     const upd = await updatePullRequestBranch(
@@ -853,6 +904,9 @@ async function processOne(
       lastReason: `merging ${m.baseRef} in — waiting for GitHub to finish the update`,
       phase: 'updating_merge',
     });
+    // GitHub merges the base in asynchronously and returns no sha, so the only expectation is
+    // "the head moved off the pinned one". Fire-and-forget.
+    schedulePrSettle(work.accountId, work.prId, asSyncLogger(log), { headNot: pinnedOid });
     return;
   }
 
@@ -978,6 +1032,9 @@ async function processOne(
       { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
       'auto-merge landed',
     );
+    // The trunk moved: re-read the repo's other open PRs (~30s/~90s) and raise the SPA change
+    // signal for the stamp above. Fire-and-forget, never throws.
+    void noteMergeLanded(work.accountId, work.prId, asSyncLogger(log));
     return;
   }
   if (out.reason === 'head_moved') {

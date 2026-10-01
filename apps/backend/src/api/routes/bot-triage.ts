@@ -1445,7 +1445,7 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     );
     const result = await resolveThreadsOnGitHub(
       accountId,
-      eligible.map((t) => ({ id: t.threadId, threadNodeId: t.threadNodeId })),
+      eligible.map((t) => ({ id: t.threadId, threadNodeId: t.threadNodeId, prId: t.prId })),
     );
     req.log.info(
       {

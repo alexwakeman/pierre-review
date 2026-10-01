@@ -25,12 +25,7 @@ import type {
   GenerateFixArgs,
   GenerateFixResult,
 } from '../pro/contract.js';
-import {
-  submitFixShape,
-  submitResolutionShape,
-  type SubmitFixPayload,
-  type SubmitResolutionPayload,
-} from './schema.js';
+import { submitFixShape, type SubmitFixPayload } from './schema.js';
 import { captureWorktreeDiff } from './git.js';
 import { describeAssistantBlocks } from './activity.js';
 
@@ -61,10 +56,10 @@ import { describeAssistantBlocks } from './activity.js';
 // SPEED — the shell's real use here was running builds and tests, and nothing downstream ever
 // read the answer: runCodingAgent's success criterion is a captured diff under
 // `aiFixPatchMaxBytes`, and no column on the fix row records whether anything was verified. The
-// cost was real: a suite runs against `aiFixMaxTurns` (40) and `aiFixBudgetUsd` ($3) with NO
+// cost was real: a suite runs against `aiFixMaxTurns` (40) and `aiFixBudgetUsd` ($5) with NO
 // wall-clock limit, returns its output as a tool_result billed as input on the next turn, and
-// holds the single global job slot (MAX_CONCURRENT = 1, coding/manager.ts) that every other
-// account's fix, rebase and push queues behind. CI runs the tests on push.
+// holds the single global job slot (MAX_CONCURRENT = 1, packages/pro/src/ai-fix/manager.ts) that
+// every other account's fix queues behind.
 //
 // ⚠ What this costs, stated plainly: a fix that wanted a codegen step, a formatter, or `git log`
 // for context must now write the edit by hand or decline. That is the accepted trade — Claude
@@ -82,22 +77,6 @@ const FIX_TOOLS = [
 // Denied OUTRIGHT rather than by command pattern, for the reasons above. Belt and braces: Bash is
 // also absent from the allow list, so there are two independent reasons it cannot run.
 const DISALLOWED_TOOLS = ['Bash', 'NotebookEdit'];
-
-// The conflict-resolver's tool surface: no Bash either — it has never had one — and the reason
-// is its own, on top of the fixer's. This agent runs in a worktree that is ALREADY mid-merge or
-// mid-rebase, so a shell could tamper with the operation in flight (`git add`, `--continue`,
-// `--abort`). It only reads + edits the conflicted files and reports via submit_resolution; the
-// host stages and continues the operation.
-const RESOLVE_TOOLS = [
-  'Read',
-  'Glob',
-  'Grep',
-  'Write',
-  'Edit',
-  'MultiEdit',
-  'mcp__resolve__submit_resolution',
-];
-const RESOLVE_DISALLOWED_TOOLS = ['Bash', 'NotebookEdit'];
 
 // Per-model effort + thinking options: ONE table in review/model-options.ts, shared with the
 // review agent (Haiku 4.5 rejects `effort`; Opus 5.5 gets explicit adaptive thinking and 400s on
@@ -150,10 +129,11 @@ interface AgentRunOutcome {
 }
 
 /**
- * The shared Claude Agent SDK run core used by BOTH the fixer and the conflict
- * resolver: it OWNS the sandbox config (`permissionMode:'bypassPermissions'`,
- * `settingSources:[]`, budget/turn caps, whitelisted tools) and streams activity, but
- * knows nothing about worktree prep, diff capture, or git — the callers own those.
+ * The Claude Agent SDK run core behind the fixer (runCodingAgent): it OWNS the sandbox
+ * config (`permissionMode:'bypassPermissions'`, `settingSources:[]`, budget/turn caps,
+ * whitelisted tools) and streams activity, but knows nothing about worktree prep, diff
+ * capture, or git — the caller owns those. (It also used to run AI Fix's agentic conflict
+ * resolver; that path was removed with the rest of AI Fix's trunk reconciliation.)
  *
  * Auth: prefers the ambient Claude session, else falls back to the user's local BYO
  * Anthropic key — the SAME advanced-AI credential policy as Claude Review
@@ -388,95 +368,4 @@ export async function runCodingAgent(
       });
     }
   }
-}
-
-export interface ConflictResolverArgs {
-  // A worktree that is ALREADY mid-merge/mid-rebase (conflict markers present). The
-  // caller (coding/merge.ts) owns its lifecycle + all git writes.
-  worktreePath: string;
-  model: string;
-  systemPrompt?: string;
-  // The currently-conflicted files (from `git diff --name-only --diff-filter=U`).
-  conflictFiles: string[];
-  // Optional one-line context (e.g. the PR title / the fix intent) to steer the merge.
-  contextNote?: string;
-  maxTurns?: number;
-  maxBudgetUsd?: number;
-  abortController: AbortController;
-  onActivity?: (activity: string[]) => void;
-}
-
-export interface ConflictResolverResult {
-  summary: string;
-  usage: LiveUsage;
-  costUsd: number | null;
-  aborted: boolean;
-}
-
-/**
- * Run the conflict-resolution agent in an already-prepared, mid-merge/rebase worktree.
- * The agent edits the conflicted files to remove every marker (preserving both sides'
- * intent) and reports via submit_resolution. It has NO Bash/git access, so it cannot
- * touch the in-progress operation — the host stages + continues + verifies afterward.
- */
-export async function runConflictResolver(
-  args: ConflictResolverArgs,
-): Promise<ConflictResolverResult> {
-  let captured: { summary: string } | null = null;
-  const server = createSdkMcpServer({
-    name: 'resolve',
-    version: '1.0.0',
-    tools: [
-      tool(
-        'submit_resolution',
-        'Report how you resolved the conflicts. Call this EXACTLY once, at the very end, after every conflict marker is gone.',
-        submitResolutionShape,
-        async (a) => {
-          const p = a as unknown as SubmitResolutionPayload;
-          captured = { summary: p.summary };
-          return { content: [{ type: 'text', text: 'Resolution recorded.' }] };
-        },
-      ),
-    ],
-  });
-
-  const fileList = args.conflictFiles.map((f) => `- ${f}`).join('\n');
-  const prompt = [
-    'You are resolving Git merge/rebase conflicts in this repository.',
-    'The working tree has conflict markers (<<<<<<<, =======, >>>>>>>) in these files:',
-    fileList || '(git reports conflicted files)',
-    '',
-    args.contextNote ? `Context: ${args.contextNote}` : '',
-    '',
-    'For EACH conflicted file: open it, resolve every conflict by preserving the',
-    'intent of BOTH sides (combine them correctly — do not just pick one blindly',
-    'unless one side is clearly obsolete), and remove ALL conflict markers. Do not',
-    'change code outside the conflict regions. Do not run any git commands.',
-    'When every marker in every file is gone, call submit_resolution with a short',
-    'summary of how you reconciled them.',
-  ]
-    .filter((l) => l !== '')
-    .join('\n');
-
-  const outcome = await runAgentInWorktree({
-    worktreePath: args.worktreePath,
-    model: args.model,
-    systemPrompt: args.systemPrompt,
-    prompt,
-    allowedTools: RESOLVE_TOOLS,
-    disallowedTools: RESOLVE_DISALLOWED_TOOLS,
-    mcpServers: { resolve: server },
-    maxTurns: args.maxTurns ?? config.aiFixMaxTurns,
-    maxBudgetUsd: args.maxBudgetUsd ?? config.aiFixBudgetUsd,
-    abortController: args.abortController,
-    onActivity: (activity) => args.onActivity?.(activity),
-  });
-
-  const res = captured as { summary: string } | null;
-  return {
-    summary: res?.summary ?? 'Resolved merge conflicts.',
-    usage: outcome.usage,
-    costUsd: outcome.costUsd,
-    aborted: outcome.aborted || args.abortController.signal.aborted,
-  };
 }

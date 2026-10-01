@@ -98,6 +98,7 @@ import type {
   ClaudeReviewSummary,
   ClaudeReviewListItem,
   ClaudeReviewToAction,
+  ClaudeReviewTrigger,
   ActivityResponse,
   ActivityRepo,
   ActivityRepoStats,
@@ -276,11 +277,20 @@ import {
   authorAutomationFor,
   dependencyPrState,
   dependencyStateDetail,
+  MERGE_QUEUE_CARD_DETAIL,
   securityFixDetail,
   unionAdvisoryIds,
   type AuthorAutomationInputs,
 } from './dependency-cards.js';
 import { deriveSecurityAlerts } from './security-alerts.js';
+import {
+  failingChecksFields,
+  prFailingChecks,
+  trunkFailingChecks,
+  trunkFailingFor,
+  type FailingChecksSummary,
+  type PrFailingChecks,
+} from './failing-checks.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
 // timestamptz (drizzle binds the Date through the codec), whereas SQLite columns
@@ -3792,7 +3802,17 @@ export function mergeCardDetail(
   kind: 'merge' | 'update_branch',
   mergeStateStatus: MergeStateStatus,
   untouchedThreads: number,
+  /** GitHub's merge-queue membership, three-state. Only a POSITIVE `true` changes the sentence
+   *  (null is "not observed" and claims nothing). EVERY caller passes it — the card emitters, My
+   *  Turn's `own_ready` seed, the Dependencies `readyDetail` and both work-plan `reason` sites —
+   *  or a queued PR's card and its ranked row say two different things. REQUIRED for that
+   *  reason: an optional parameter is one a new caller forgets. */
+  inMergeQueue: boolean | null,
 ): string {
+  // The queue first, for both kinds: while GitHub's queue holds the PR, "it can land now" and
+  // "blocks the merge until the branch is updated" are both false — the queue lands it, and it
+  // tests the merged result itself. See MERGE_QUEUE_CARD_DETAIL.
+  if (inMergeQueue === true) return MERGE_QUEUE_CARD_DETAIL;
   if (kind === 'update_branch') {
     return 'Behind trunk — GitHub blocks the merge until the branch is updated';
   }
@@ -4624,9 +4644,17 @@ export async function getWorkspaceInsights(
   // consumer (the daily brief, the Pro insights pane, chat, the sprint report, Slack) keeps the
   // default caps: their inputs, prompt sizes and payload hashes must not grow because the board
   // changed (the plan's hash covers only its ≤12 rows). `kindTotals` is identical either way.
-  opts: { uncapped?: boolean } = {},
+  //
+  // ⚠ `withFailingChecks` IS THE BOARD'S ALONE — `GET /api/attention` passes it and nothing else
+  // does (NOT the work plan, which also asks for `uncapped`). It folds WHICH CHECKS ARE FAILING onto
+  // every red card (`failingChecks` / `failingCheckTotal`, db/failing-checks.ts): two more reads
+  // that the daily brief (×12 under `?rollup=1`), the work plan and every Pro payload would pay for
+  // and never render. The names are display-only third-party text — never in a `detail`, a
+  // work-plan fact or a hash.
+  opts: { uncapped?: boolean; withFailingChecks?: boolean } = {},
 ): Promise<WorkspaceInsightsResponse> {
   const uncapped = opts.uncapped === true;
+  const withFailingChecks = opts.withFailingChecks === true;
   const now = Date.now();
   const generatedAt = new Date(now);
   // The Insights window: the configured SPRINT when provided (its `to` may be in the future for
@@ -4837,8 +4865,33 @@ export async function getWorkspaceInsights(
   // its ids would ship "nobody has reviewed this" on a PR three people approved, and nothing would
   // error. A seventh kind has to type `standingsByPr.get(p.id)` and notice this block.
   const standingsByPr = new Map<number, PrReviewStandings>();
-  const foldStandings = async (prIds: number[]): Promise<void> => {
-    for (const [id, v] of await computeReviewStandingsByPr(prIds)) standingsByPr.set(id, v);
+  // WHICH CHECKS ARE FAILING on each red PR's current head — the board's names line. Folded by the
+  // SAME call as the standings, over the SAME rows, so no set of cards can gain one fact and miss
+  // the other (a my_turn seed on a draft is in the first call and not the second). Empty unless the
+  // caller asked (`withFailingChecks`); read by `prRef` only while the row's head is the one the
+  // names were read at.
+  const failingByPr = new Map<number, PrFailingChecks>();
+  const foldPrFacts = async (
+    prs: readonly { id: number; headSha: string | null; ciStatus: CiStatus | null }[],
+  ): Promise<void> => {
+    for (const [id, v] of await computeReviewStandingsByPr(prs.map((p) => p.id)))
+      standingsByPr.set(id, v);
+    if (withFailingChecks)
+      for (const [id, v] of await prFailingChecks(accountId, prs)) failingByPr.set(id, v);
+  };
+  // A red row's names, or nothing. ⚠ Only the two fields — never the `headSha` they were read at —
+  // and only while THIS row is red at THAT head: a PR whose head moved between the fold and the
+  // card says nothing rather than naming checks that failed on code it no longer holds.
+  const failingFor = (p: {
+    id: number;
+    headSha: string | null;
+    ciStatus: CiStatus | null;
+  }): FailingChecksSummary | undefined => {
+    if (!isRedCiStatus(p.ciStatus)) return undefined;
+    const f = failingByPr.get(p.id);
+    return f != null && f.headSha === p.headSha
+      ? { failingChecks: f.failingChecks, failingCheckTotal: f.failingCheckTotal }
+      : undefined;
   };
 
   // The chip cap. Five is what a card row holds without wrapping; everything beyond it travels as
@@ -4990,6 +5043,9 @@ export async function getWorkspaceInsights(
       // folded from columns already on the row precisely because THE BOARD MAY NOT FETCH ON
       // MOUNT. ⚠ null is UNKNOWN, never "low".
       blast: blastSignalsFor(p, hubReadingFor(p.files, insightsCoupling.get(p.repoId))),
+      // WHICH CHECKS ARE FAILING, while the build is red — absent otherwise ("no names", never
+      // "0 failing"). Trailing optional on the wire; see `failingByPr`.
+      ...failingFor(p),
     };
   };
 
@@ -5057,6 +5113,8 @@ export async function getWorkspaceInsights(
       /** `MyTurnCard.own` — set only on the four PR-grained promotions, carrying exactly the facts
        *  the card's HOME kind carried, so the board can render the same controls on it. */
       own?: MyTurnOwnWork;
+      /** `MyTurnCard.trigger` — set only on `claude_review` rows, for the "Auto review" chip. */
+      trigger?: ClaudeReviewTrigger;
       threadId: number | null;
       severity: InsightSeverity;
       detail: string;
@@ -5307,8 +5365,8 @@ export async function getWorkspaceInsights(
         refId: i.prId,
         threadId: null,
         severity: MY_TURN_SEVERITY.own_ready,
-        // The Ready to land card's own sentence, from the ONE builder both use.
-        detail: mergeCardDetail(i.forward, i.mergeStateStatus, 0),
+        // The Ready to land card's own sentence, from the ONE builder both use — queue included.
+        detail: mergeCardDetail(i.forward, i.mergeStateStatus, 0, i.inMergeQueue ?? null),
         since: sinceOf(i),
         prId: i.prId,
         relevance: relevanceOf(i),
@@ -5360,6 +5418,7 @@ export async function getWorkspaceInsights(
         prId: i.prId,
         relevance: relevanceOf(i),
         muted: mutedOf(i),
+        trigger: i.trigger ?? 'manual',
         extraActorIds: [],
       });
     }
@@ -5375,6 +5434,14 @@ export async function getWorkspaceInsights(
       mt.redTrunks.flatMap((t) => (t.headSha != null ? [{ repoId: t.repoId, sha: t.headSha }] : [])),
     );
     await learnLogins([...trunkLanding.values()].map((l) => l.authorId));
+    // The red heads' failing checks, through the one reader /api/branch-status uses — keyed by the
+    // head, so a direct push (no landing PR) is named as readily as a merge.
+    const trunkFailing = withFailingChecks
+      ? await trunkFailingChecks(
+          accountId,
+          mt.redTrunks.map((t) => ({ repoId: t.repoId, sha: t.headSha })),
+        )
+      : new Map<string, FailingChecksSummary>();
     const trunkAuthor = (
       t: RedTrunkItem,
     ): Pick<MyTurnTrunkCard, 'authorId' | 'authorIsBot' | 'authorBotKind' | 'automation'> => {
@@ -5425,9 +5492,9 @@ export async function getWorkspaceInsights(
               .execute();
       const prRowById = new Map(prRows.map((p) => [p.id, p]));
       await learnLogins(prRows.map((p) => p.authorId));
-      // Call ONE of the fold's two calls — see `standingsByPr`. These ids are the my_turn seeds,
+      // Call ONE of the fold's two calls — see `standingsByPr`. These rows are the my_turn seeds,
       // which include PRs the open-PR select below deliberately drops (drafts, ultra-stale).
-      await foldStandings(seedPrIds);
+      await foldPrFacts(prRows);
 
       // Every seed already carries its own clock (`sinceOf` above, or the thread/run timestamp);
       // openedAt is only the floor for a row that carries none. The per-reason resolution lives
@@ -5547,6 +5614,8 @@ export async function getWorkspaceInsights(
             muted: t.muted ? true : undefined,
             threadId: null,
             ...author,
+            // Display only — the `detail` above never names a check.
+            ...failingChecksFields(trunkFailingFor(trunkFailing, t.repoId, t.headSha)),
           };
           cards.push(card);
           continue;
@@ -5567,6 +5636,8 @@ export async function getWorkspaceInsights(
           ball: s.ball,
           // Only the four promotions set it — see `MyTurnCard.own`.
           own: s.own,
+          // Only `claude_review` rows set it — see `MyTurnCard.trigger`.
+          trigger: s.trigger,
           threadId: s.threadId,
           detail: s.detail,
           since: since.toISOString(),
@@ -5735,7 +5806,9 @@ export async function getWorkspaceInsights(
       baseRefName: pullRequests.baseRefName,
       // GitHub's own review verdict, carried beside OUR fold of the review rows (`prRef` reads
       // both and keeps them apart) — and the merge-queue pair, which is the only way a card can
-      // know a PR is queued without fetching: `mergeStateStatus` reads 'blocked' either way.
+      // know a PR is queued without fetching: `mergeStateStatus` has no QUEUED member, so a queued PR
+      // reads like any other ('clean' and 'unknown' have both been seen here) and a clean one is
+      // minted as a merge card like any other.
       reviewDecision: pullRequests.reviewDecision,
       inMergeQueue: pullRequests.inMergeQueue,
       // Required by `prRef` — the comments-only cap needs all three or none, because
@@ -5779,7 +5852,7 @@ export async function getWorkspaceInsights(
   // The fold's second call (see `standingsByPr`). It covers every remaining `prRef` caller: the
   // two forward kinds, stalled_review, reviewer_routing, and the untouched_thread rows — whose
   // PRs are constrained to `openPrIds` by their own join.
-  await foldStandings(openPrIds);
+  await foldPrFacts(openPrs);
   await learnLogins(openPrs.map((p) => p.authorId));
 
   // ── WHICH OPEN PRs ARE DEPENDENCY AUTOMATION (decisions §5) ──────────────────────────────────
@@ -5888,6 +5961,8 @@ export async function getWorkspaceInsights(
             detail: 'You opened this PR — its head commit is red',
             observedAt: at.toISOString(),
             githubUrl: ghUrl(p.repoId, p.number),
+            // `openPrs` was folded above (`foldPrFacts`). Display only — never in `detail`.
+            ...failingChecksFields(failingFor(p)),
           },
         });
       }
@@ -5934,6 +6009,14 @@ export async function getWorkspaceInsights(
       myRedTrunks.flatMap((r) => (r.headSha != null ? [{ repoId: r.id, sha: r.headSha }] : [])),
     );
     await learnLogins([...landingPrs.values()].map((l) => l.authorId));
+    // …and their failing checks, in one read, INDEPENDENT of the landing PR above: a direct push
+    // to trunk fails checks too.
+    const redTrunkFailing = withFailingChecks
+      ? await trunkFailingChecks(
+          accountId,
+          myRedTrunks.map((r) => ({ repoId: r.id, sha: r.headSha })),
+        )
+      : new Map<string, FailingChecksSummary>();
     for (const r of myRedTrunks) {
       // ⚠ A MISS HERE IS ORDINARY, NOT A GAP. ~11% of red heads are DIRECT PUSHES to the default
       // branch (a legitimate steady state), and others simply have no association observed yet or
@@ -5982,6 +6065,8 @@ export async function getWorkspaceInsights(
             r.headSha != null
               ? `https://github.com/${full}/commit/${r.headSha}`
               : `https://github.com/${full}`,
+          // Display only — the `detail` above never names a check.
+          ...failingChecksFields(trunkFailingFor(redTrunkFailing, r.id, r.headSha)),
         },
       });
     }
@@ -6081,14 +6166,19 @@ export async function getWorkspaceInsights(
               mergeStateStatus: 'behind',
               // The ranker re-derives this sentence with the real untouched-thread count; this
               // fold does not have one, so it passes 0. ONE function, so the two cannot drift.
-              detail: mergeCardDetail('update_branch', 'behind', 0),
+              detail: mergeCardDetail('update_branch', 'behind', 0, p.inMergeQueue),
             }
           : {
               ...base,
               id: `wp:merge:${p.id}`,
               kind: 'merge',
               mergeStateStatus: p.mergeStateStatus as MergeStateStatus,
-              detail: mergeCardDetail('merge', p.mergeStateStatus as MergeStateStatus, 0),
+              detail: mergeCardDetail(
+                'merge',
+                p.mergeStateStatus as MergeStateStatus,
+                0,
+                p.inMergeQueue,
+              ),
             };
       mergeSeeds.push({ sortAt: at.getTime(), card });
     }
@@ -6250,8 +6340,13 @@ export async function getWorkspaceInsights(
         depState != null
           ? dependencyStateDetail(
               depState,
-              { baseRefName: p.baseRefName, mergeStateStatus: mss, reviewDecision: p.reviewDecision },
-              mergeCardDetail('merge', mss ?? 'unknown', 0),
+              {
+                baseRefName: p.baseRefName,
+                mergeStateStatus: mss,
+                reviewDecision: p.reviewDecision,
+                inMergeQueue: p.inMergeQueue,
+              },
+              mergeCardDetail('merge', mss ?? 'unknown', 0, p.inMergeQueue),
             )
           : null;
       const shared = {
@@ -8014,6 +8109,9 @@ export async function getMyTurn(
             // A VISIBILITY gate for the card's merge row, never the authority (the merge routes
             // re-check permission, head oid and live state).
             viewerCanPush: writable.has(p.repoId),
+            // Passed through, never defaulted — null is "not observed". It changes the card's
+            // sentence (`mergeCardDetail`) and nothing else: membership and ranking are unmoved.
+            inMergeQueue: p.inMergeQueue ?? null,
           },
         ];
       })
@@ -8366,10 +8464,26 @@ export async function getMyTurn(
       : { threadsAwaiting: [], threadReplies: [] };
 
   // S4 — completed Claude reviews you have not acted on (local-only feature; empty otherwise).
-  const claudeRows: ClaudeReviewToAction[] =
+  // ⚠ THE BALL RULE APPLIES HERE TOO, ON THE SEEDS: a run is yours only until you act on its PR.
+  // Any action of yours at or after the run FINISHED — a review of any state, a review comment, a
+  // PR comment, your own push — discharges it, wherever you did it (the panel, the PR pane or
+  // github.com; the data cannot tell them apart). A bot's action never counts: `mineLast` is the
+  // viewer's own clock. A newer run has a later `finishedAt`, so it re-summons on its own. The
+  // posted-findings rule inside `getUnactionedClaudeReviews` still retires a card as well.
+  const claudeSeeds: ClaudeReviewToAction[] =
     show.claude_review && getProCapabilities().claudeReview
       ? await getUnactionedClaudeReviews(accountId, scopedRepoIds)
       : [];
+  const claudeClocks = await lastActionClocks(
+    localUserId,
+    [...new Set(claudeSeeds.map((c) => c.prId))],
+    bots,
+  );
+  const claudeRows = claudeSeeds.filter((c) => {
+    const mine = claudeClocks.get(c.prId)?.mineLast ?? null;
+    if (mine == null || c.finishedAt == null) return true;
+    return mine.getTime() < Date.parse(c.finishedAt);
+  });
 
   // ⚠ THESE SECTIONS HAVE NO `repoId` IN HAND. `ThreadAwaitingItem` and `ClaudeReviewToAction`
   // carry `repoFullName` (a rendering field) and `prId`, not a repo id — and a Claude review's PR
@@ -9305,6 +9419,10 @@ export async function getPrDetail(
     updatedAt: pr.updatedAt.toISOString(),
     githubUrl: prUrl,
     headSha: pr.headSha,
+    // The branch names, as synced. null = not synced yet (a row from before the columns existed),
+    // never "no branch" - the pane hides the row rather than print an empty one.
+    headRefName: pr.headRefName ?? null,
+    baseRefName: pr.baseRefName ?? null,
     ciStatus: (pr.ciStatus ?? 'unknown') as CiStatus,
     mergeable: (pr.mergeable ?? 'unknown') as Mergeable,
     mergeStateStatus: (pr.mergeStateStatus ?? 'unknown') as MergeStateStatus,
@@ -9782,6 +9900,16 @@ export async function listClaudeReviewsByRepo(
 //     An unticked leftover is a triage decision, not an outstanding task.
 // In both branches `severity: 'praise'` is skipped: it is the one value in the enum that asks for
 // no change, so it can never be the reason a card survives.
+//
+// ⚠ AN AUTO RUN IS OWNED LIKE A MANUAL ONE. A run the Pro auto-review sweeper started
+// (`trigger = 'auto'`) was switched on by THIS account's workspace setting, and the row is
+// account-scoped, so it is kept exactly as a manual run is: whoever the PR belongs to. There is no
+// author / requested-reviewer audience test; `trigger` rides the result for the label only.
+//
+// ⚠ THIS IS ONLY HALF THE DISCHARGE. The other half is the BALL RULE, applied by `getMyTurn` over
+// these rows' SEEDS: any action of the viewer's on the PR (a review of any state, a review
+// comment, a PR comment, their own commit) at or after `finishedAt` retires the card too. It is
+// not applied here because this read has no clocks; `getMyTurn` already batches them.
 export async function getUnactionedClaudeReviews(
   accountId: number,
   // Optional workspace repo narrowing (same contract as getThreadsAwaiting's): null/undefined =
@@ -9801,6 +9929,7 @@ export async function getUnactionedClaudeReviews(
       postedAt: claudeReviews.postedAt,
       reviewHead: claudeReviews.headSha,
       prHead: pullRequests.headSha,
+      trigger: claudeReviews.trigger,
     })
     .from(claudeReviews)
     .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
@@ -9879,9 +10008,101 @@ export async function getUnactionedClaudeReviews(
       finishedAt: iso(r.finishedAt),
       headStale: r.reviewHead !== r.prHead,
       githubUrl: `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}`,
+      trigger: r.trigger === 'auto' ? 'auto' : 'manual',
     });
   }
   return out;
+}
+
+// ---- Auto Claude review: which PRs the Pro sweeper may start a run on ----
+// The plugin's per-workspace auto-review sweeper (packages/pro/src/claude-review/auto.ts) is PULL
+// based: every tick it asks this read which PRs qualify, so the DATABASE is the queue and a restart
+// loses nothing. A PR qualifies when it is, in ONE workspace:
+//   - OPEN and NOT A DRAFT (a draft qualifies once it is marked ready, if it was opened late enough);
+//   - OPENED at or after `openedSinceMs` - the moment the workspace switched the feature on. That
+//     floor is what makes a first sync, a 90-day backfill or adding a repo safe: none of them can
+//     make an OLD PR look new;
+//   - by a PERSON. The workspace-aware resolver `hiddenBotUserIds` - the SAME set that decides
+//     `InsightPrRef.authorIsBot` and the "hide bots" lens, a manual workspace judgement winning both
+//     ways - never the global set alone. An unmapped author (`author_id` NULL) is not a proven
+//     person and is skipped;
+//   - with NO `claude_reviews` row at all, whatever its head, status or trigger: ONE review per PR,
+//     ever, from auto. A manual run (or a failed auto one) settles it too.
+// `autoToday` counts this workspace's AUTO runs created at or after `dayStartMs`, for the daily cap.
+// Returns null when the workspace is not this account's - never another workspace's answer (the
+// request-side resolver's "fall back to Default" would review the wrong repos here).
+export async function getAutoReviewCandidates(
+  accountId: number,
+  workspaceId: number,
+  opts: { openedSinceMs: number; dayStartMs: number; limit: number },
+): Promise<{ prIds: number[]; autoToday: number } | null> {
+  const owned = (
+    await db
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(and(eq(workspaces.id, workspaceId), eq(workspaces.accountId, accountId)))
+      .limit(1)
+      .execute()
+  )[0];
+  if (!owned) return null;
+  const repoIds = await getWorkspaceRepoIds(workspaceId, accountId);
+  if (repoIds.length === 0) return { prIds: [], autoToday: 0 };
+
+  const autoRows = await db
+    .select({ id: claudeReviews.id })
+    .from(claudeReviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
+    .where(
+      and(
+        eq(claudeReviews.accountId, accountId),
+        eq(claudeReviews.trigger, 'auto'),
+        gte(claudeReviews.createdAt, new Date(opts.dayStartMs)),
+        inArray(pullRequests.repoId, repoIds),
+      ),
+    )
+    .execute();
+  const autoToday = autoRows.length;
+  if (opts.limit <= 0) return { prIds: [], autoToday };
+
+  const open = await db
+    .select({ id: pullRequests.id, authorId: pullRequests.authorId, openedAt: pullRequests.openedAt })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.repoId, repoIds),
+        eq(pullRequests.state, 'open'),
+        eq(pullRequests.isDraft, false),
+        gte(pullRequests.openedAt, new Date(opts.openedSinceMs)),
+      ),
+    )
+    .orderBy(asc(pullRequests.openedAt), asc(pullRequests.id))
+    .execute();
+  if (open.length === 0) return { prIds: [], autoToday };
+
+  const [bots, reviewed] = await Promise.all([
+    hiddenBotUserIds(accountId, workspaceId),
+    db
+      .select({ prId: claudeReviews.prId })
+      .from(claudeReviews)
+      .where(
+        and(
+          eq(claudeReviews.accountId, accountId),
+          inArray(
+            claudeReviews.prId,
+            open.map((r) => r.id),
+          ),
+        ),
+      )
+      .execute(),
+  ]);
+  const botSet = new Set(bots);
+  const hasRun = new Set(reviewed.map((r) => r.prId));
+  const prIds = open
+    .filter((r) => r.authorId != null && !botSet.has(r.authorId) && !hasRun.has(r.id))
+    .slice(0, opts.limit)
+    .map((r) => r.id);
+  return { prIds, autoToday };
 }
 
 // ---- PR write-action contexts (reply / resolve / comment / approve / inline) ----
@@ -10333,6 +10554,11 @@ export async function markPrMergedLocally(
       mergedAt: new Date(),
       mergedById,
       mergeStateStatus: 'unknown',
+      // A merged PR is out of every queue. Only its landing can say so before the next walk,
+      // and a merge that came THROUGH the queue would otherwise keep `in_merge_queue` set on a
+      // closed row (harmless to the merge controls, which gate on 'open', but a false fact).
+      inMergeQueue: false,
+      mergeQueueEntryState: null,
     })
     .where(and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)))
     .execute();
@@ -10435,6 +10661,9 @@ export interface PrFilesContext {
   name: string;
   number: number;
   prUrl: string;
+  /** The stored head when the files were asked for. The route echoes it as
+   *  `PrFilesResponse.headSha` so the SPA can tell a diff read before a push. */
+  headSha: string | null;
 }
 
 // Subset of getPrWriteContext for the Changes-tab files fetch (owner/name/number
@@ -10446,7 +10675,13 @@ export async function getPrFilesContext(
 ): Promise<PrFilesContext | null> {
   const ctx = await getPrWriteContext(prId, accountId);
   if (!ctx) return null;
-  return { owner: ctx.owner, name: ctx.name, number: ctx.number, prUrl: ctx.prUrl };
+  return {
+    owner: ctx.owner,
+    name: ctx.name,
+    number: ctx.number,
+    prUrl: ctx.prUrl,
+    headSha: ctx.headSha,
+  };
 }
 
 // ---- optimistic local stamps (write actions) ----

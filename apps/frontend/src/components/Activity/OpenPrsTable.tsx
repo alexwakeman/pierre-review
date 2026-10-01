@@ -1,7 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import type { TimelinePr, User } from '@pierre-review/shared';
+import type { ClaudeReviewPrState, TimelinePr, User } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
+import { useFilters } from '../../store/filters.js';
+import { reviewCellFor, reviewCellRank } from '../../lib/claudeReviewColumn.js';
 import {
   CI_META,
   indexUsers,
@@ -12,6 +16,7 @@ import {
 import { Avatar } from '../CommentCard.js';
 import { CheckCircleIcon } from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
+import { ClaudeReviewCell } from './ClaudeReviewCell.js';
 import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
 
 // THE open-PR table — the ONE component every open-PR list surface renders (the OpenPrsDetail
@@ -20,6 +25,10 @@ import { SortHeader, type SortState, compare, nextSort } from './sortableTable.j
 // approval — over TimelinePr rows from /api/open-prs; drafts are included (marked with a badge).
 // Owns its sort state; default order = sortOpenPrsByActivity (the same order the inline lists
 // use). Rows are WHOLE-ROW clickable — the caller decides what a click opens (onOpenPr).
+//
+// The "Claude review" column renders ONLY with the Claude Review capability (local + Pro+); without
+// it there is no column and no request. With it, ONE batched states request covers every listed
+// row (never one per row), and each cell's controls stop propagation so a click never opens the row.
 
 type SortCol =
   | 'pr'
@@ -30,7 +39,8 @@ type SortCol =
   | 'loc'
   | 'threads'
   | 'ci'
-  | 'approval';
+  | 'approval'
+  | 'claude';
 
 // Each column's "natural" first-click direction (a second click flips it): text columns read
 // A→Z, time/size/backlog columns lead with the most pressing end (longest-open, most-recently
@@ -45,6 +55,7 @@ const DEFAULT_DIR: Record<SortCol, 'asc' | 'desc'> = {
   threads: 'desc',
   ci: 'asc',
   approval: 'asc',
+  claude: 'asc', // needs a review first (reviewCellRank)
 };
 
 // CI rollup → a sortable rank (failing first under 'asc').
@@ -71,6 +82,7 @@ function sortValue(
   col: SortCol,
   usersById: Map<number, User>,
   repoNameById: Map<number, string>,
+  claudeStates: Map<number, ClaudeReviewPrState>,
 ): number | string {
   switch (col) {
     case 'pr':
@@ -96,6 +108,9 @@ function sortValue(
       return CI_RANK[pr.ciStatus];
     case 'approval':
       return approvalRank(pr);
+    case 'claude':
+      // Sorts on the stored state, not a click in flight (a sort must not jump under the cursor).
+      return reviewCellRank(reviewCellFor(claudeStates.get(pr.id), false));
   }
 }
 
@@ -191,6 +206,31 @@ export function OpenPrsTable({
     [repos],
   );
 
+  // The Claude review column: capability-gated, ONE request for every listed PR.
+  const claudeOn = useProCapabilities().claudeReview;
+  const prIds = useMemo(() => prs.map((p) => p.id), [prs]);
+  const { data: claudeData } = useClaudeReviewStates(prIds, claudeOn);
+  const claudeStates = useMemo(
+    () => new Map((claudeData?.states ?? []).map((st) => [st.prId, st])),
+    [claudeData],
+  );
+  const openClaudeReview = useFilters((s) => s.openClaudeReview);
+  const openReview = (pr: TimelinePr): void => {
+    const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
+    openClaudeReview(
+      {
+        id: pr.id,
+        number: pr.number,
+        title: pr.title,
+        repoFullName: repoNameById.get(pr.repoId) ?? '',
+        authorLogin: u?.githubLogin ?? null,
+        authorDisplayName: u?.displayName ?? null,
+        authorAvatarUrl: u?.avatarUrl ?? null,
+      },
+      { fromActivity: true },
+    );
+  };
+
   // null = the default activity order (sortOpenPrsByActivity — same as the inline lists).
   const [sort, setSort] = useState<SortState<SortCol> | null>(null);
   const onSort = (col: SortCol): void => setSort((cur) => nextSort(cur, col, DEFAULT_DIR));
@@ -207,11 +247,11 @@ export function OpenPrsTable({
       (a, b) =>
         mul *
           compare(
-            sortValue(a, sort.col, usersById, repoNameById),
-            sortValue(b, sort.col, usersById, repoNameById),
+            sortValue(a, sort.col, usersById, repoNameById, claudeStates),
+            sortValue(b, sort.col, usersById, repoNameById, claudeStates),
           ) || b.number - a.number, // stable final tiebreak
     );
-  }, [prs, sort, maintainersByRepo, usersById, repoNameById]);
+  }, [prs, sort, maintainersByRepo, usersById, repoNameById, claudeStates]);
 
   if (isLoading) {
     return (
@@ -248,6 +288,9 @@ export function OpenPrsTable({
             <SortHeader col="threads" label="Threads" sort={sort} onSort={onSort} title="Untouched review threads + the state mix" />
             <SortHeader col="ci" label="CI" sort={sort} onSort={onSort} />
             <SortHeader col="approval" label="Approval" sort={sort} onSort={onSort} />
+            {claudeOn && (
+              <SortHeader col="claude" label="Claude review" sort={sort} onSort={onSort} />
+            )}
           </tr>
         </thead>
         <tbody>
@@ -306,6 +349,15 @@ export function OpenPrsTable({
                 <td className="py-1.5 pr-3">
                   <ApprovalCell pr={pr} />
                 </td>
+                {claudeOn && (
+                  <td className="py-1.5 pr-3">
+                    <ClaudeReviewCell
+                      prId={pr.id}
+                      state={claudeStates.get(pr.id)}
+                      onOpenReview={() => openReview(pr)}
+                    />
+                  </td>
+                )}
               </tr>
             );
           })}

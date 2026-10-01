@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { hasConflictMarkers } from './merge.js';
 
-// Exercises (a) the exported conflict-marker verifier and (b) the exact git mechanics
-// coding/merge.ts relies on — `format-patch`→`git am` (rebase artifact replay), the
-// trial-merge conflict probe, the `merge-base --is-ancestor` up-to-date short-circuit,
-// and `--force-with-lease` — against REAL throwaway repos, so a git-behaviour or
+// Exercises (a) the exported conflict-marker verifier (the in-app resolver in src/conflict/
+// imports it) and (b) the exact git mechanics coding/merge.ts's update-from-trunk relies on —
+// the trial-merge conflict probe + abort, the `merge-base --is-ancestor` up-to-date
+// short-circuit, and `--force-with-lease` — against REAL throwaway repos, so a git-behaviour or
 // version regression is caught locally (no network).
 
 let dir: string;
@@ -56,36 +56,6 @@ describe('hasConflictMarkers', () => {
   it('does not false-positive on a bare ======= divider (real markdown/rst)', () => {
     expect(hasConflictMarkers('Title\n=======\n\nbody text\n')).toBe(false);
     expect(hasConflictMarkers('const x = 1;\n')).toBe(false);
-  });
-});
-
-describe('format-patch → git am round-trip (the rebase artifact replay)', () => {
-  it('replays the PR commits onto a MOVED trunk, preserving them', () => {
-    // Two "PR" commits on top of base.
-    const base = git(['rev-parse', 'HEAD']).trim();
-    commit(dir, 'a.txt', 'line1\nline2 CHANGED\nline3\n', 'pr: edit line2');
-    commit(dir, 'feature.txt', 'new feature\n', 'pr: add feature');
-
-    // The mbox artifact = the PR commits, exactly as coding/merge.ts captures it.
-    const mbox = git(['format-patch', '--stdout', `${base}..HEAD`]);
-    expect(mbox).toContain('pr: edit line2');
-    expect(mbox).toContain('pr: add feature');
-
-    // Advance the trunk with a NON-conflicting change, then replay the artifact onto it.
-    git(['checkout', '-q', base]);
-    commit(dir, 'trunk.txt', 'trunk moved\n', 'trunk: unrelated advance');
-    const movedTrunk = git(['rev-parse', 'HEAD']).trim();
-
-    const mboxFile = join(dir, 'series.mbox');
-    writeFileSync(mboxFile, mbox);
-    git(['am', '--3way', mboxFile]);
-
-    // The replayed tip contains BOTH PR commits (preserved) on top of the moved trunk.
-    const log = git(['log', '--format=%s', `${movedTrunk}..HEAD`]);
-    expect(log).toContain('pr: edit line2');
-    expect(log).toContain('pr: add feature');
-    // …and the moved-trunk file is present (we're based on it).
-    expect(git(['cat-file', '-t', `HEAD:trunk.txt`]).trim()).toBe('blob');
   });
 });
 

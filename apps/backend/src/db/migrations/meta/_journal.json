@@ -498,6 +498,13 @@
       "when": 1789956000000,
       "tag": "0070_claude_review_follow_up_ticket",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1790042400000,
+      "tag": "0071_claude_review_trigger",
+      "breakpoints": true
     }
   ]
 }

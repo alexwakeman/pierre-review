@@ -483,6 +483,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
       !path.endsWith('/cancel') &&
       !path.endsWith('/key') &&
       !path.endsWith('/budget') &&
+      // The Open PRs table's batched latest-run read: a POST only because a list of ids does not
+      // fit a query string. One DB query, no model, no GitHub — so `read`, exact path only.
+      path !== '/api/claude-review/states' &&
       !isSettingsWrite;
     if (generates) return [TIERS.ai, TIERS.aiHourly];
     return [TIERS.read];

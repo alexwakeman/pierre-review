@@ -11,13 +11,12 @@ import type {
 import {
   getInsights,
   getRepoAnalytics,
-  getWorkspaceInsights,
   getWorkspaceMetricsDetail,
   getWorkspaceMetricsForScope,
   resolveWorkspaceScope,
 } from '../../db/queries.js';
 import { getWorkspaceRepoActivity } from '../../db/repo-activity.js';
-import { rankPendingTabs } from '../../db/pending-tabs.js';
+import { buildPendingBoard } from '../../db/pending-tabs.js';
 import {
   PR_LIVENESS_MAX_IDS,
   sweepPrLiveness,
@@ -135,33 +134,17 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
   // ⚠ THE TABS ARE AN ALLOW-LIST (`PENDING_TABS`), so a NEW InsightKind reaches this board only
   // once it is given a tab — otherwise it is folded, counted and never listed. pending-tabs.test.ts
   // fails when a non-bot kind has no tab, rather than letting it vanish quietly.
-  //
-  // It passes the whole `BotScope`, not just the repo ids: getWorkspaceInsights needs the
-  // workspaceId to know who counts as an automated reviewer for its bot cards. Those two cards are
-  // filtered out here, but the scope is what the getter's signature is about and splitting it would
-  // put a second, differently-shaped answer to "which workspace" on this route.
   app.get('/api/attention', async (req): Promise<AttentionCardsResponse> => {
     const q = req.query as { workspace?: string };
-    const accountId = accountIdOf(req);
-    const scope = await resolveWorkspaceScope(accountId, q.workspace);
-    // ⚠ THE UNCAPPED FOLD — the board ranks every card by its Do next score and THEN lists the
-    // top of each kind, so it must see the whole population. Every other consumer of this fold
-    // (the daily brief included) keeps the default caps; `kindTotals` is the same either way, which
-    // is what keeps each tab's count and the brief line that opens it one number.
-    const insights = await getWorkspaceInsights(accountId, undefined, scope, { uncapped: true });
-    // ONE FOLD, RANKED into the six tabs. The two bot cards belong to no tab and never reach here.
-    const board = await rankPendingTabs(accountId, scope, insights);
-    return {
-      cards: board.cards,
-      users: [...insights.users, ...board.extraUsers],
-      tabs: board.tabs,
-      scores: board.scores,
-      // The weights and My turn type order the scores and the order above were built with — what
-      // the board's explanations print, so they describe THIS reader's ranking.
-      rules: board.rules,
-      // Out of every tab and count — listed under My turn with a way back.
-      myTurnDismissed: insights.myTurnDismissed ?? [],
-    };
+    // THE ONE FOLD (`buildPendingBoard`, db/pending-tabs.ts) — the Pro Slack digest reads the same
+    // function through `ProHostQueries.getPendingBoard`, so the two cannot drift. `live: true` is
+    // THIS route only: failing-check names on red cards (the brief, the work plan and the Pro
+    // payloads render no names, and must not pay for them or hash them) and suggested reviewers
+    // for the top "Needs a reviewer" cards.
+    const { workspaceId: _ws, ...board } = await buildPendingBoard(accountIdOf(req), q.workspace, {
+      live: true,
+    });
+    return board;
   });
 
   // POST /api/attention/liveness — THE BOARD'S ONE GITHUB QUESTION.

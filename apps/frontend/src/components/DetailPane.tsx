@@ -39,7 +39,7 @@ export function DetailPane(): JSX.Element {
             type="button"
             data-testid="detail-clear"
             onClick={clearSelection}
-            className="flex items-center rounded px-2 py-0.5 text-xs text-gray-400 hover:text-gray-600"
+            className="flex items-center rounded px-2 py-0.5 text-xs text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
             aria-label="Clear selection (Esc)"
             title="Clear selection (Esc)"
           >
@@ -53,6 +53,7 @@ export function DetailPane(): JSX.Element {
           key={bodyPrId}
           prId={bodyPrId as number}
           selectedThreadId={selectedThreadId}
+          placement="pane"
         />
       ) : (
         <div className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-400">

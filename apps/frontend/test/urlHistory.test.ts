@@ -142,7 +142,6 @@ beforeEach(() => {
     attentionRelevance: null,
     attentionAuthorLens: null,
     attentionTab: null,
-    attentionMyTurnView: null,
     feedIsolatedPrId: null,
     feedInnerTab: 'feed',
     botsInnerTab: 'roi',
@@ -554,73 +553,38 @@ describe('the People / Automation lens on Pending', () => {
   });
 });
 
-describe("My turn's two views on Pending", () => {
-  it('PUSHES, and round-trips through Back and Forward', () => {
-    gesture(() => useFilters.getState().setActivityRepo('attention'));
-    gesture(() => useFilters.getState().setAttentionMyTurnView('branches'));
-    expect(location.search).toContain('attnView=branches');
-    expect(entries).toHaveLength(3);
-    back();
-    // ⚠ Gone, not merely off-screen: the popped URL says nothing about it.
-    expect(useFilters.getState().attentionMyTurnView).toBeNull();
-    expect(location.search).not.toContain('attnView');
-    forward();
-    expect(useFilters.getState().attentionMyTurnView).toBe('branches');
-  });
-
-  it('the default is OMITTED', () => {
-    gesture(() => useFilters.getState().setActivityRepo('attention'));
-    gesture(() => useFilters.getState().setAttentionMyTurnView('cards'));
-    expect(location.search).not.toContain('attnView');
-    // Even a raw 'cards' in the store (the setter never writes one) emits nothing.
-    useFilters.setState({ attentionMyTurnView: 'cards' });
-    writeToUrl(useFilters.getState());
-    expect(location.search).not.toContain('attnView');
-  });
-
-  it('is emitted only where it is on screen — My turn on the attention rail', () => {
-    useFilters.setState({
-      activityRepoId: 'attention',
-      attentionTab: 'deps',
-      attentionMyTurnView: 'branches',
-    });
-    writeToUrl(useFilters.getState());
-    expect(location.search).not.toContain('attnView');
-
-    useFilters.setState({ attentionTab: null });
-    gesture(() => useFilters.getState().setAttentionMyTurnView('branches'));
-    expect(location.search).toContain('attnView=branches');
-    gesture(() => useFilters.getState().setActivityRepo('feed'));
-    expect(location.search).not.toContain('attnView');
-    expect(useFilters.getState().attentionMyTurnView).toBeNull();
-  });
-
-  it('only the literal seats it — anything else means Cards; the seat is RAW', () => {
-    for (const v of ['cards', 'Branches', '1', '']) {
-      seat(`/app/?workspace=5&view=activity&attnView=${v}`);
-      applyUrlToStores();
-      expect(useFilters.getState().attentionMyTurnView).toBeNull();
-    }
-    seat('/app/?workspace=5&view=activity&attnView=branches');
+describe("My turn's retired second view (`?attnView=branches`)", () => {
+  // My turn had a second view, "Default branches and open PRs", addressed as `?attnView=branches`.
+  // It is gone (its strip heads My turn's cards), but the key shipped and lives in bookmarks and
+  // in history entries Back replays — so it must still PARSE, seat nothing, and never come back out.
+  it('a legacy link lands on My turn, and the rewrite REPLACES the entry (no extra Back step)', () => {
+    entries = ['/app/?workspace=5&view=activity&attnView=branches'];
+    cursor = 0;
+    seat(entries[0] as string);
     applyUrlToStores();
-    expect(useFilters.getState().attentionMyTurnView).toBe('branches');
-    // Beside another tab it still seats — the render derives Cards, the store is never corrected.
+    const f = useFilters.getState();
+    expect(f.activityRepoId).toBe('attention');
+    expect(f.attentionTab).toBeNull();
+    expect('attentionMyTurnView' in f).toBe(false);
+    writeToUrl(f);
+    expect(location.search).not.toContain('attnView');
+    expect(entries).toHaveLength(1);
+  });
+
+  it('beside another tab, the tab wins and the key is still dropped', () => {
     seat('/app/?workspace=5&view=activity&attnTab=deps&attnView=branches');
     applyUrlToStores();
-    expect(useFilters.getState().attentionMyTurnView).toBe('branches');
     expect(useFilters.getState().attentionTab).toBe('deps');
+    writeToUrl(useFilters.getState());
+    expect(location.search).toContain('attnTab=deps');
+    expect(location.search).not.toContain('attnView');
   });
 
-  it('the banner gesture lands on Cards, in ONE entry', () => {
+  it('is never emitted', () => {
     gesture(() => useFilters.getState().setActivityRepo('attention'));
-    gesture(() => useFilters.getState().setAttentionMyTurnView('branches'));
-    const before = entries.length;
+    gesture(() => useFilters.getState().setAttentionTab('my_turn'));
     gesture(() => useFilters.getState().openMyTurnInWorkspace(5));
-    expect(location.search).not.toContain('attnView');
-    expect(useFilters.getState().attentionMyTurnView).toBeNull();
-    expect(entries).toHaveLength(before + 1);
-    back();
-    expect(useFilters.getState().attentionMyTurnView).toBe('branches');
+    expect(entries.some((e) => e.includes('attnView'))).toBe(false);
   });
 });
 

@@ -459,3 +459,49 @@ describe('the daily brief counts what the click opens', () => {
     expect(Object.keys(counts).some((k) => /bump|dependenc/i.test(k))).toBe(false);
   });
 });
+
+// ── The ROLL-UP cache and the PR change signal ────────────────────────────────────────────────
+// `getDailyBriefCounts` (the "Elsewhere" lines + the Pro narration inputs) keeps a 5-minute TTL on
+// purpose — see the module header. But the SPA refetches the strip the moment the server raises
+// the PR change signal, so a line still answering from before the change would disagree with the
+// Pending tabs it counts for up to five minutes. The signal therefore drops the ACCOUNT's cached
+// counts (registered by daily-brief.ts itself, so pr-change-signal.ts imports nothing), and only
+// that account's.
+describe('the roll-up counts cache drops on the PR change signal', () => {
+  it('serves the cached count until THIS account’s signal fires, then the fresh one', async () => {
+    const { notePrChanged } = await import('../sync/pr-change-signal.js');
+    const { reviews } = schema;
+    const { eq } = await import('drizzle-orm');
+    brief.clearDailyBriefCache();
+    const cached = await brief.getDailyBriefCounts(1, scope.workspaceId);
+    expect(cached.myTurn).toBeGreaterThan(0); // non-vacuous: there is a card left to retire
+
+    // Act on the last "New PR" card, exactly as the first test does.
+    const target = prIdByKey.get('new-3')!;
+    await db
+      .insert(reviews)
+      .values({
+        githubNodeId: 'RV_brief_signal',
+        prId: target,
+        authorId: viewerUserId,
+        state: 'commented',
+        submittedAt: new Date(now),
+      })
+      .execute();
+    try {
+      // The cache still answers from before the change…
+      expect((await brief.getDailyBriefCounts(1, scope.workspaceId)).myTurn).toBe(cached.myTurn);
+      // …and ANOTHER account's signal does not touch this account's entry.
+      notePrChanged(2, scope.repoIds[0]);
+      expect((await brief.getDailyBriefCounts(1, scope.workspaceId)).myTurn).toBe(cached.myTurn);
+      // This account's signal drops it: the next read is the live fold.
+      notePrChanged(1, scope.repoIds[0]);
+      const fresh = await brief.getDailyBriefCounts(1, scope.workspaceId);
+      expect(fresh.myTurn).toBe(cached.myTurn - 1);
+      expect(fresh.myTurn).toBe((await brief.getDailyBriefEntry(1, scope.workspaceId)).counts.myTurn);
+    } finally {
+      await db.delete(reviews).where(eq(reviews.githubNodeId, 'RV_brief_signal')).execute();
+      brief.clearDailyBriefCache();
+    }
+  });
+});

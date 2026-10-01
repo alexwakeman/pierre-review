@@ -1,6 +1,7 @@
 // The LIVE cost estimate's price table (the persisted cost is the SDK's own figure). Sonnet 5 is
 // deliberately NOT pinned here: the plugin's llm/seam.ts carries its own copy of that price, and
 // the two must move together if it ever changes.
+import type { ClaudeReviewModel } from '@pierre-review/shared';
 import { describe, expect, it } from 'vitest';
 import { estimateCostUsd } from './pricing.js';
 
@@ -15,7 +16,14 @@ describe('estimateCostUsd', () => {
     expect(estimateCostUsd('claude-opus-5-5', { ...zero, cacheCreationTokens: M })).toBeCloseTo(5, 10);
   });
 
-  it('still prices a stored Opus 4.8 run', () => {
-    expect(estimateCostUsd('claude-opus-4-8', { ...zero, inputTokens: M, outputTokens: M })).toBeCloseTo(30, 10);
+  it('prices an id outside the table at Sonnet 5 rates rather than throwing', () => {
+    // coding/agent.ts casts its `model: string` to ClaudeReviewModel, so an id with no row (a
+    // retired model) can reach this at runtime. The live estimate must not NaN or throw.
+    // Compared against Sonnet 5's own estimate, not a number, so this does not pin that price.
+    const unknown = 'claude-not-in-the-table' as ClaudeReviewModel;
+    const u = { ...zero, inputTokens: M, outputTokens: M };
+    const got = estimateCostUsd(unknown, u);
+    expect(Number.isFinite(got)).toBe(true);
+    expect(got).toBe(estimateCostUsd('claude-sonnet-5', u));
   });
 });

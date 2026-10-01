@@ -15,8 +15,8 @@ describe('sdkModelOptions', () => {
     }
   });
 
-  it('Sonnet 5 / Opus 4.8 / Sonnet 4.6 get effort only', () => {
-    for (const m of ['claude-sonnet-5', 'claude-opus-4-8', 'claude-sonnet-4-6']) {
+  it('Sonnet 5 / Sonnet 4.6 get effort only', () => {
+    for (const m of ['claude-sonnet-5', 'claude-sonnet-4-6']) {
       expect(sdkModelOptions(m, 'worktree')).toEqual({ effort: config.reviewEffort });
       expect(sdkModelOptions(m, 'diff_only')).toEqual({ effort: config.reviewDiffOnlyEffort });
     }
@@ -28,7 +28,7 @@ describe('sdkModelOptions', () => {
   });
 
   it('never hands any model disabled thinking or a thinking budget', () => {
-    for (const m of ['claude-opus-5-5', 'claude-sonnet-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5']) {
+    for (const m of ['claude-opus-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5']) {
       for (const mode of ['diff_only', 'worktree'] as const) {
         const o = sdkModelOptions(m, mode) as Record<string, unknown>;
         expect(JSON.stringify(o)).not.toMatch(/disabled|budget/i);

@@ -25,6 +25,7 @@ import {
   useUsers,
 } from '../../hooks/useTimeline.js';
 import { useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
+import { useUnionBotVerdict } from '../../hooks/useUnionBotVerdict.js';
 import { categoriesToTypes, resolveRange, useFilters } from '../../store/filters.js';
 import {
   usePinnedTabs,
@@ -38,6 +39,11 @@ import { CHEVRON_DOWN_SVG, CHEVRON_RIGHT_SVG, renderUserLabel } from './userRow.
 import { UserProfilePopover } from '../UserProfilePopover.js';
 import { buildMarkerItems } from './clustering.js';
 import { assignPrLanes, prGroupId } from './lanes.js';
+import {
+  filterIsolateEvents,
+  isolateKeepGroupIds,
+  matchFocusEvent,
+} from './isolateFilter.js';
 import {
   MarkerPopover,
   type ContextFocus,
@@ -357,12 +363,17 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     states: [],
   });
   // The active event-category selection, mirrored into a ref so rebuildMarkers (which
-  // also runs standalone on a zoom recluster, and in an isolate tab where the fetch
-  // bypasses the server-side `types` filter) can drop markers for toggled-off
+  // also runs standalone on a zoom recluster) can drop markers for toggled-off
   // categories. On the shared board this is a redundant no-op (the server already
-  // filters via the `types` query param); it's load-bearing ONLY on the prIds-scoped
-  // focus/isolate path, which fetches every event type regardless of the header toggles.
+  // filters via the `types` query param). An isolate tab does NOT use it: its markers come
+  // pre-filtered from `isolateEventsRef` (below), which applies the categories itself AND
+  // exempts the deep-linked event — this gate would strip that event again.
   const categoriesRef = useRef<EventCategory[]>([]);
+  // ISOLATE (pr-focus) TAB ONLY: the subject PR's events that survive the Focus filters
+  // (Events + Bots, applied client-side — see isolateFilter.ts), plus the magnifier's forced
+  // event. It drives BOTH the rows (the heavy rebuild's `rowEvents`) and the markers
+  // (rebuildMarkers), so the two always agree. ALWAYS null on the shared board.
+  const isolateEventsRef = useRef<TimelineEvent[] | null>(null);
   // The PR bar currently glowing as the "linked" partner of an open marker
   // modal, so we can clear it when the modal closes or moves to another PR.
   const highlightedPrRef = useRef<number | null>(null);
@@ -498,22 +509,34 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   // window it's here, so we force-show its bar in place; an old open PR found
   // only here widens the range like the strip does. Dedupes with the filtered
   // queries when no member filter is active (identical key → no extra fetch).
-  const { data: searchData } = useSearchTimeline();
+  // Idle on an isolate tab: its payload is a by-id fetch that always holds its PR, and the
+  // search string carries `types`, so every Events toggle in Focus would otherwise refetch a
+  // board-window payload nothing on that tab reads.
+  const { data: searchData, isPending: searchPending } = useSearchTimeline({
+    enabled: embeddedPrId == null,
+  });
   const { data: searchOpenPrsData } = useSearchOpenPrs();
   const { data: repos } = useRepos();
   const { data: users } = useUsers();
   const { data: mergers } = useMergers();
   const queryClient = useQueryClient();
   const derivedStates = useFilters((s) => s.derivedStates);
-  // Event-category toggles (Commits is off by default). Drives the client-side marker
-  // gate in rebuildMarkers so a focus/isolate tab — whose prIds fetch has no server
-  // `types` filter — still honours the header toggles (was: commits always showed there).
+  // Event-category toggles (Commits is off by default). On the shared board the server
+  // filters by `types`; on an isolate tab (whose prIds fetch carries no filter) they are
+  // applied client-side through `isolateEvents` below.
   const categories = useFilters((s) => s.categories);
+  // The other Focus controls (Events' review verdicts, and Bots). On the shared board they are
+  // server-side params already in the query key, so reading them here only re-renders; the
+  // isolate tab applies them client-side (see `isolateEvents`).
+  const reviewStates = useFilters((s) => s.reviewStates);
+  const excludeBots = useFilters((s) => s.excludeBots);
+  const allowedBotIds = useFilters((s) => s.allowedBotIds);
 
   // Member filter: when set, the timeline collapses to just these contributors'
-  // rows (see the PR filter in the rebuild effect). Events are already actor-
-  // filtered server-side, so restricting which PR bars render is enough to drop
-  // every non-selected author's row.
+  // rows (see the PR filter in the rebuild effect). On the shared board events are
+  // already actor-filtered server-side, so restricting which PR bars render is enough
+  // to drop every non-selected author's row. (Not applied on an isolate tab — Focus
+  // shows no Members control; see isolateFilter.ts.)
   const userIds = useFilters((s) => s.userIds);
   const selectPr = useFilters((s) => s.selectPr);
   const selectedPrId = useFilters((s) => s.selectedPrId);
@@ -598,6 +621,77 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     return m;
   }, [data]);
   prsByIdRef.current = prsById;
+
+  // ── Focus (isolate tab) filters ────────────────────────────────────────────────────────────
+  // The FilterBar shows Events + Bots on a pr-focus tab. They are the SHARED store fields, but
+  // the tab's `prIds=<id>` fetch carries no filter at all (isolateFilter.ts says why), so they
+  // are applied here, client-side, over the unfiltered payload. Everything below is inert on the
+  // shared board: `isolateEvents` is a constant null there, so the heavy rebuild — which lists
+  // it as a dep — never runs an extra time on a large board.
+  //
+  // The deep-link target (timelineFocusPr/At/Event — a magnifier in ShowOnTimeline, the Feed,
+  // PrDetail or a thread card). SUBSCRIBED, not read through getState() in an effect, so the
+  // forced event is known DURING RENDER: the rebuild (declared before the consumer effect)
+  // then draws its marker in the same commit the consumer centres + glows it. Deriving it from
+  // an effect would land one render late — marker drawn, never centred.
+  const timelineFocusPr = useFilters((s) => s.timelineFocusPr);
+  const timelineFocusAt = useFilters((s) => s.timelineFocusAt);
+  const timelineFocusEvent = useFilters((s) => s.timelineFocusEvent);
+  const pendingForcedEventId =
+    embeddedPrId != null &&
+    data != null &&
+    timelineFocusPr === embeddedPrId &&
+    timelineFocusEvent != null
+      ? (matchFocusEvent(data.events, embeddedPrId, timelineFocusEvent, timelineFocusAt)?.id ??
+        null)
+      : null;
+  // LATCHED for the tab's life: the consumer effect consumes the focus signal in the same
+  // commit, and the event must not vanish again on the next render. (setState during render,
+  // guarded by a changed check — React's "adjust state while rendering" pattern.) A later
+  // magnifier into the same tab replaces it.
+  const [latchedForcedEventId, setLatchedForcedEventId] = useState<number | null>(null);
+  if (pendingForcedEventId != null && pendingForcedEventId !== latchedForcedEventId) {
+    setLatchedForcedEventId(pendingForcedEventId);
+  }
+  const forcedEventId = pendingForcedEventId ?? latchedForcedEventId;
+
+  // "Hide bots" is the UNION verdict for the PR's OWN workspace (its repo's `workspaceId`),
+  // never the selected one — the server's hiddenBotUserIds rule, mirrored. The reviewer listing
+  // is not fetched at all on the shared board (enabled = isolate only).
+  const subjectRepoId = embeddedPrId != null ? prsById.get(embeddedPrId)?.repoId ?? null : null;
+  const subjectWorkspaceId =
+    subjectRepoId != null ? reposById.get(subjectRepoId)?.workspaceId ?? null : null;
+  const isUnionBot = useUnionBotVerdict(subjectWorkspaceId, usersById, embeddedPrId != null);
+
+  // Reused when the surviving list is element-for-element identical (e.g. the reviewer listing
+  // landed and changed no verdict, or the forced event already passed the filters), so a no-op
+  // input change never costs a rebuild.
+  const isolateEventsPrevRef = useRef<TimelineEvent[] | null>(null);
+  const isolateEvents = useMemo<TimelineEvent[] | null>(() => {
+    if (embeddedPrId == null || !data) return null;
+    const next = filterIsolateEvents(
+      data.events,
+      embeddedPrId,
+      { categories, reviewStates, excludeBots, allowedBotIds },
+      isUnionBot,
+      forcedEventId,
+    );
+    const prev = isolateEventsPrevRef.current;
+    return prev != null && prev.length === next.length && prev.every((e, i) => e === next[i])
+      ? prev
+      : next;
+  }, [
+    embeddedPrId,
+    data,
+    categories,
+    reviewStates,
+    excludeBots,
+    allowedBotIds,
+    isUnionBot,
+    forcedEventId,
+  ]);
+  isolateEventsPrevRef.current = isolateEvents;
+  isolateEventsRef.current = isolateEvents;
 
   // Glow the PR band a marker concerns while its modal is open. The class lives
   // on the DataSet item, so the highlight survives pan/zoom/restack natively.
@@ -864,14 +958,17 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     const px = container.clientWidth || 1000;
     const msPerPx = rangeMs / px;
 
-    // In the sticky PR-isolation focus, only this PR's events get markers — the
-    // shared `cross` band can't be trimmed per-PR via subgroups, so we filter here
-    // so a contributor row shows only their activity on the focused PR. The full
-    // set is restored when the focus tears down (applyContext(null) → rebuild).
+    // An isolate (pr-focus) tab's events arrive PRE-FILTERED: only its subject PR's events
+    // (the shared `cross` band can't be trimmed per-PR via subgroups, so a contributor row
+    // shows only their activity on this PR), with Events + Bots applied client-side and the
+    // deep-linked event exempt — from the tab's very first rebuild, before the boot marks
+    // focus active. Non-null ONLY on an isolate tab, which is also the only place PR focus
+    // is ever entered (enterPrFocus runs from the isolate boot alone), so the board takes
+    // the branch below.
     let events: TimelineEvent[];
-    if (prFocusActiveRef.current && prFocusPrIdRef.current != null) {
-      // The sticky PR-isolation focus overrides the board filters: just this PR.
-      events = cur.events.filter((e) => e.prId === prFocusPrIdRef.current);
+    const preFiltered = isolateEventsRef.current;
+    if (preFiltered != null) {
+      events = preFiltered;
     } else {
       // Outside focus the "Threads" thread-state filter narrows the markers.
       events = cur.events;
@@ -895,12 +992,15 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     }
     // Category gate: drop markers for toggled-off categories (Commits is off by
     // default). On the shared board the server already filtered via `types`, so this
-    // is a no-op there; on a prIds-scoped focus/isolate tab — which fetches EVERY
-    // event type — this is what actually enforces the header toggles (the fix for
-    // commits, and any other category, always showing on a focused PR). Reuses the
-    // same category→type mapping the server uses (lifecycle + reviews always included).
-    const allowedTypes = new Set(categoriesToTypes(categoriesRef.current));
-    events = events.filter((e) => allowedTypes.has(e.type));
+    // is a no-op there. SKIPPED on an isolate tab: `isolateEvents` already applied the
+    // categories, and it exempts the event a magnifier deep-linked to — re-gating here
+    // would strip that event again (a commit link would land on a row with no marker).
+    // Reuses the same category→type mapping the server uses (lifecycle + reviews always
+    // included).
+    if (preFiltered == null) {
+      const allowedTypes = new Set(categoriesToTypes(categoriesRef.current));
+      events = events.filter((e) => allowedTypes.has(e.type));
+    }
     const { items, clusterMembers } = buildMarkerItems(
       events,
       groupOf,
@@ -1413,9 +1513,6 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       // Close it here. Callers that DO want a popover in focus (a cross-user marker
       // click / a marker double-click) re-open it right after, anchored on the PR.
       setPopover(null);
-      const repoId = pr.repoId;
-      const contributors = new Set<number>();
-      if (pr.authorId != null) contributors.add(pr.authorId);
       let minT = Infinity;
       let maxT = -Infinity;
       const span = (ms: number): void => {
@@ -1427,12 +1524,18 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       // so the fitted window below covers the whole bar (Number.isFinite always
       // holds with this + openedAt seeded).
       span(prBarEndMs(pr));
+      // The FIT spans ALL the PR's events, filtered or not, so a Focus filter toggle can never
+      // refit or shift the window (the fit happens here, once, at boot).
       for (const e of cur.events) {
         if (e.prId !== prId) continue;
-        if (e.actorId != null) contributors.add(e.actorId);
         span(new Date(e.occurredAt).getTime());
       }
-      const keepGroupIds = [...contributors].map((uid) => `repo:${repoId}:user:${uid}`);
+      // The kept ROWS are the author's plus every actor of the events the Focus filters let
+      // through (isolateEventsRef) — the same keep-set the heavy rebuild recomputes on every
+      // later rebuild. Never empty: the author's row (or the repo row, for an unknown author)
+      // is always in it. (isolateEventsRef is non-null here: this runs only from the isolate
+      // boot, after the first payload. The `?? []` is a type guard, not a second rule.)
+      const keepGroupIds = isolateKeepGroupIds(pr, isolateEventsRef.current ?? []);
 
       // Fit the window to the PR's activity span so the PR FILLS the viewport — the
       // whole point of a focus tab, and what makes a short-lived PR's events legible
@@ -2317,8 +2420,11 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       states: derivedStates,
     };
     // Keep the category gate current whenever a full rebuild runs (e.g. on a data
-    // refetch). A pure category toggle is handled by the dedicated marker-only effect
-    // below — `categories` is deliberately NOT a dep of this heavy effect.
+    // refetch). On the shared board a pure category toggle is handled by the dedicated
+    // marker-only effect below — `categories` is deliberately NOT a dep of this heavy
+    // effect. On an isolate tab it is the other way round: a category toggle changes
+    // `isolateEvents` (which IS a dep), so this rebuild re-applies it, and the marker-only
+    // effect stands down.
     categoriesRef.current = categories;
 
     const evMap = new Map<number, TimelineEvent>();
@@ -2328,8 +2434,11 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     // PRs with at least one comment (review-thread or issue-level), derived
     // straight from the lean timeline events — no extra fetch, keeps the
     // endpoint lean. Drives the small comment glyph on each PR bar.
+    // On an isolate tab it reads the Focus-filtered list, so the glyph never claims a comment
+    // (e.g. a bot's, with bots hidden) that no marker shows — the board's payload is already
+    // server-filtered the same way.
     const prsWithComments = new Set<number>();
-    for (const ev of data.events) {
+    for (const ev of isolateEvents ?? data.events) {
       if (
         ev.prId != null &&
         (ev.type === 'review_comment' || ev.type === 'pr_comment')
@@ -2361,13 +2470,16 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     // Which events drive the contributor ROWS. When the client-side Threads filter is
     // active we collapse the board to just the people in the surviving events — otherwise
     // every actor in the payload keeps an (empty) row, which defeats the filter. Mirrors
-    // rebuildMarkers' non-focus filtering so rows and markers agree. Left as the full set
-    // under PR-isolation focus, which owns its own row collapse and must keep every
-    // contributor row available to re-show.
+    // rebuildMarkers' non-focus filtering so rows and markers agree.
     let rowEvents = data.events;
-    // An isolate tab keeps ALL its subject PR's events driving the rows — never narrowed by the
-    // board's Threads filter (and it must hold on the FIRST rebuild, before focus is marked active).
-    if (embeddedPrId == null && !prFocusActiveRef.current && derivedActive) {
+    if (isolateEvents != null) {
+      // An isolate tab's rows come from the SAME filtered list as its markers (Events + Bots,
+      // applied client-side; the deep-linked event exempt) — from the FIRST rebuild, before
+      // focus is marked active. A person whose every event a filter hides loses the row rather
+      // than keeping an empty one. Never narrowed by the board's Threads filter: Focus shows no
+      // Threads control.
+      rowEvents = isolateEvents;
+    } else if (embeddedPrId == null && !prFocusActiveRef.current && derivedActive) {
       const sel = new Set(derivedStates);
       rowEvents = data.events.filter(
         (e) =>
@@ -2616,7 +2728,25 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       highlightedPrRef.current = null; // reset so highlightPr re-adds the class
       highlightPr(hp);
     }
-    if (focusedGroupIdsRef.current) {
+    const isolateSubject =
+      embeddedPrId != null &&
+      isolateEvents != null &&
+      prFocusActiveRef.current &&
+      prFocusPrIdRef.current === embeddedPrId
+        ? data.prs.find((p) => p.id === embeddedPrId) ?? null
+        : null;
+    if (isolateSubject != null && isolateEvents != null) {
+      // An isolate tab RECOMPUTES its keep-set on every rebuild instead of re-asserting the one
+      // the boot computed: a Focus filter toggle changes who has events, and a participant who
+      // first appears after boot (a sync, your own reply from the pane) must get a visible row,
+      // not one focusRows hides at once. Written straight through focusSubgroups + focusRows
+      // (focusRows stores focusedGroupIdsRef) — NEVER back through enterPrFocus/applyContext,
+      // which would refit the window and re-select. No scroll write here: this rebuild's own
+      // captureScrollAnchor/restoreScrollAnchor pair owns the vertical position.
+      const keep = isolateKeepGroupIds(isolateSubject, isolateEvents);
+      focusSubgroups(keep, isolateSubject.id);
+      focusRows(keep);
+    } else if (focusedGroupIdsRef.current) {
       focusRows(focusedGroupIdsRef.current); // re-assert collapse after rebuild
     }
     if (prFocusActiveRef.current && prFocusPrIdRef.current != null) {
@@ -2669,8 +2799,12 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     mergersByRepo,
     forceShowNonce,
     laneNonce,
+    // Constant null on the shared board (no extra board rebuilds); on an isolate tab this is how
+    // a Focus filter toggle re-applies — through this rebuild's scroll-anchor capture/restore.
+    isolateEvents,
     rebuildMarkers,
     highlightPr,
+    focusSubgroups,
     focusRows,
     isolatePrBars,
     setRowCollapsed,
@@ -2684,13 +2818,16 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   // on the SHARED board a toggle changes the timeline query key → a refetch, and the heavy
   // effect runs once when new `data` lands; running it here too would double the rebuild on
   // a large board. This lightweight pass gives instant marker feedback (esp. a "hide"
-  // toggle, which the stale placeholder data can satisfy immediately) and — crucially — is
-  // the ONLY re-apply path on an isolate/focus tab, whose `prIds` fetch never refetches on
-  // a category change.
+  // toggle, which the stale placeholder data can satisfy immediately).
+  // NOT on an isolate/focus tab: there a category toggle changes `isolateEvents`, and the heavy
+  // rebuild above (declared first, so already run) re-applies rows AND markers inside its
+  // scroll-anchor capture/restore. A second, bare rebuildMarkers here would re-add every marker
+  // outside that guard.
   useEffect(() => {
     categoriesRef.current = categories;
+    if (embeddedPrId != null) return;
     if (timelineRef.current && dataRef.current) rebuildMarkers();
-  }, [categories, rebuildMarkers]);
+  }, [categories, rebuildMarkers, embeddedPrId]);
 
   // Reflect the active PR selection without disturbing the view. Selecting a PR
   // — clicking its bar, j/k cycling, a marker's "open in detail" — is a purely
@@ -2734,11 +2871,11 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     if (embeddedPrId == null || bootedRef.current) return;
     const tl = timelineRef.current;
     if (!tl || !dataRef.current) return; // wait for vis + the first payload/rebuild
-    // Select the PR up front so its detail pane populates even if it turns out to be
-    // outside this tab's ~90-day window (an old merged PR reached via the PrDetail
-    // "Focus" link) and can't be isolated on the board — graceful degradation instead
-    // of a bare un-isolated board. Respects a caller's pre-selected thread (only sets
-    // when the PR isn't already the selection).
+    // Select the PR up front so its detail pane populates even if the payload turns out
+    // not to carry it — graceful degradation instead of a bare un-isolated board. (The
+    // by-id fetch has no date window, so a PR of any age loads; only one missing from the
+    // database is absent.) Respects a caller's pre-selected thread (only sets when the PR
+    // isn't already the selection).
     if (useFilters.getState().selectedPrId !== embeddedPrId) {
       useFilters.getState().selectPr(embeddedPrId);
     }
@@ -2805,22 +2942,24 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   // (a fresh keyed <Timeline mode>), never entered from here — so this
   // effect no longer has any focus / overlay / history branches. (These setters call
   // showTimeline() first, so this runs on the base board.)
-  const timelineFocusPr = useFilters((s) => s.timelineFocusPr);
-  const timelineFocusAt = useFilters((s) => s.timelineFocusAt);
+  // (`timelineFocusPr` / `timelineFocusAt` are subscribed further up, beside the Focus filters,
+  // which need the deep-link target during render to force-show it.)
   useEffect(() => {
     if (timelineFocusPr == null) return;
     const tl = timelineRef.current;
     if (!tl) return;
-    // An ISOLATE tab's payload is a by-id fetch of exactly this PR, and a freshly keyed
-    // mount has nothing cached — so on its FIRST render `data` is undefined and every
-    // recovery branch below misses, ending at the "fail gracefully" consume: the focus
-    // is thrown away before the tab has even booted, losing the event centring + glow
-    // the caller asked for. (Worse, the range-widening branch calls setCustomRange,
-    // which would mutate the SHARED board's date filter from inside an isolate tab, and
-    // force-showing is meaningless when the fetch is by id.) Wait one render for the
-    // payload — `data` resolves exactly once, so this cannot strand the focus; if the
-    // PR genuinely isn't in it, the graceful consume still runs on that pass.
-    if (embeddedPrId != null && data == null) return;
+    // Wait for the FIRST payload, in BOTH modes. A freshly keyed mount can have nothing
+    // cached — an isolate tab always (a by-id fetch), and the shared board when App re-keys
+    // the slot on the way out of a Focus tab onto a key nobody kept warm (e.g. a minute
+    // boundary moved the window) — so on its first render `data` is undefined and every
+    // recovery branch below misses, ending at the "fail gracefully" consume: the focus is
+    // thrown away before anything could land it. (Worse, on an isolate tab the range-widening
+    // branch would call setCustomRange, mutating the SHARED board's date filter, and
+    // force-showing is meaningless when the fetch is by id.) `data` resolves once and
+    // placeholderData keeps it thereafter, so only a FAILED first fetch leaves the focus
+    // pending (the error shows instead); if the PR genuinely isn't in the payload, the
+    // graceful consume still runs on that pass.
+    if (data == null) return;
 
     const inWindow = data?.prs.find((p) => p.id === timelineFocusPr);
     if (inWindow) {
@@ -2835,16 +2974,9 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
         // Among events matching (pr, type, refId), prefer the one at the requested
         // instant: review-comment replies share their thread's refId, so occurredAt is
         // what distinguishes a specific reply's marker. Falls back to the first match.
-        const candidates = data.events.filter(
-          (e) =>
-            e.prId === timelineFocusPr &&
-            e.type === focusEv.type &&
-            (focusEv.refId == null || e.refId === focusEv.refId),
-        );
-        const match =
-          (timelineFocusAt != null &&
-            candidates.find((e) => e.occurredAt === timelineFocusAt)) ||
-          candidates[0];
+        // The SAME resolver the isolate tab's force-show uses, so the event it exempted from
+        // the Focus filters is exactly the one centred + glowed here.
+        const match = matchFocusEvent(data.events, timelineFocusPr, focusEv, timelineFocusAt);
 
         const actorId = match?.actorId ?? inWindow.authorId;
         const hasMarker =
@@ -2927,6 +3059,12 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       useFilters.getState().consumeTimelineFocus();
     };
 
+    // The member-agnostic payload below is what finds a PR the member filter hides, and a
+    // board re-keyed out of a Focus tab mounts it COLD (the FilterBar idles it in Focus). On
+    // the board, wait for its first answer instead of consuming the focus as unreachable
+    // while it loads. (An errored fetch is no longer pending, so this cannot strand it.)
+    if (embeddedPrId == null && searchData == null && searchPending) return;
+
     // Hidden by the member filter but present in the member-agnostic search payload —
     // force its bar in place (no range change; an open/overlapping bar spans the window).
     const hiddenByMember =
@@ -2967,6 +3105,7 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     data,
     openPrsData,
     searchData,
+    searchPending,
     searchOpenPrsData,
     centerShowTarget,
     highlightEvent,

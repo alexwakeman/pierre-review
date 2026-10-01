@@ -1,0 +1,313 @@
+// THE OPEN PRs TABLE'S "Claude review" COLUMN — the pure half.
+//
+//   1. THE CELL: no run → Review; a start in flight → disabled "Starting…"; queued / running →
+//      disabled; succeeded → the verdict as a link, plus Re-review only when the head moved;
+//      failed / cancelled → Review again.
+//   2. THE SORT RANK leads with the rows that still need a review.
+//   3. THE FILL: one helper (`fillDraftFromJira`) for the panel and the list.
+//   4. THE LIST'S USER STORY: a re-review reuses the stored ticket; else the first FILLABLE Jira
+//      ticket is filled the panel's way; the run starts EITHER WAY, with a note, never a throw.
+//   5. THE WIRING: the column is capability-gated and every cell control stops propagation.
+//   6. AUTO REVIEW: a queued (in its lane, no row) or running auto review HOLDS the PR — no button,
+//      even over a start in flight — the column keeps polling while one is queued, every auto run
+//      carries the "Auto review" marker, and a 409 AutoReviewInProgress keeps the button shut.
+//
+//   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/claudeReviewColumn.test.ts
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  CLAUDE_REVIEW_TICKET_LIMITS,
+  type ClaudeReviewPrState,
+  type JiraAcCandidate,
+  type JiraTicketDetails,
+  type TicketRef,
+} from '@pierre-review/shared';
+import {
+  NO_STORY_NOTE,
+  anyReviewInFlight,
+  heldByAutoReview,
+  resolveListTicket,
+  reviewCellFor,
+  reviewCellRank,
+} from '../src/lib/claudeReviewColumn.js';
+import { fillDraftFromJira, type AcMemoryStore } from '../src/lib/jiraTicket.js';
+import { EMPTY_TICKET_DRAFT } from '../src/lib/claudeReviewFollowUp.js';
+
+const st = (over: Partial<ClaudeReviewPrState> = {}): ClaudeReviewPrState => ({
+  prId: 1,
+  reviewId: 10,
+  status: 'succeeded',
+  verdict: 'APPROVE',
+  reviewedHeadSha: 'a'.repeat(40),
+  finishedAt: '2026-09-30T10:00:00.000Z',
+  ticket: null,
+  headMoved: false,
+  ...over,
+});
+
+describe('the cell', () => {
+  it('no run ⇒ Review', () => {
+    expect(reviewCellFor(undefined, false)).toEqual({ kind: 'start' });
+  });
+  it('a start in flight wins over any stored state', () => {
+    expect(reviewCellFor(undefined, true)).toEqual({ kind: 'starting' });
+    expect(reviewCellFor(st(), true)).toEqual({ kind: 'starting' });
+  });
+  it('queued / running ⇒ their own disabled states', () => {
+    expect(reviewCellFor(st({ status: 'queued', verdict: null }), false)).toEqual({ kind: 'queued' });
+    expect(reviewCellFor(st({ status: 'running', verdict: null }), false)).toEqual({ kind: 'running' });
+  });
+  it('succeeded ⇒ the verdict in words, Re-review only when the head moved', () => {
+    expect(reviewCellFor(st(), false)).toEqual({
+      kind: 'done',
+      reviewId: 10,
+      verdictLabel: 'Approve',
+      headMoved: false,
+    });
+    expect(reviewCellFor(st({ verdict: 'REQUEST_CHANGES', headMoved: true }), false)).toMatchObject({
+      verdictLabel: 'Request changes',
+      headMoved: true,
+    });
+    expect(reviewCellFor(st({ verdict: null }), false)).toMatchObject({ verdictLabel: 'Reviewed' });
+  });
+  it('failed / cancelled ⇒ Review again (never Re-review)', () => {
+    expect(reviewCellFor(st({ status: 'failed', headMoved: true }), false)).toEqual({ kind: 'start' });
+    expect(reviewCellFor(st({ status: 'cancelled' }), false)).toEqual({ kind: 'start' });
+  });
+});
+
+describe('auto review in the cell', () => {
+  // What the states route sends for a PR whose auto review still waits in its lane.
+  const lane = st({
+    reviewId: null,
+    status: 'queued',
+    verdict: null,
+    reviewedHeadSha: null,
+    finishedAt: null,
+    trigger: 'auto',
+  });
+
+  it('queued (in its lane, no row) and running auto runs hold the PR: no button, marked auto', () => {
+    expect(reviewCellFor(lane, false)).toEqual({ kind: 'queued', auto: true });
+    expect(reviewCellFor(st({ status: 'running', verdict: null, trigger: 'auto' }), false)).toEqual({
+      kind: 'running',
+      auto: true,
+    });
+    expect(heldByAutoReview(lane)).toBe(true);
+    expect(heldByAutoReview(st({ status: 'running', trigger: 'auto' }))).toBe(true);
+  });
+
+  it('⚠ the hold wins over a start in flight (that start is about to be refused)', () => {
+    expect(reviewCellFor(lane, true)).toEqual({ kind: 'queued', auto: true });
+    // A manual run in flight does not hold anything: the start shows as usual.
+    expect(reviewCellFor(st({ status: 'queued', trigger: 'manual' }), true)).toEqual({ kind: 'starting' });
+  });
+
+  it('a finished auto run is a normal result, marked auto; it holds nothing', () => {
+    expect(reviewCellFor(st({ trigger: 'auto', headMoved: true }), false)).toEqual({
+      kind: 'done',
+      reviewId: 10,
+      verdictLabel: 'Approve',
+      headMoved: true,
+      auto: true,
+    });
+    expect(heldByAutoReview(st({ trigger: 'auto' }))).toBe(false);
+    expect(heldByAutoReview(st({ status: 'failed', trigger: 'auto' }))).toBe(false);
+    expect(heldByAutoReview(undefined)).toBe(false);
+  });
+
+  it('a manual or older-server run carries no marker', () => {
+    expect(reviewCellFor(st({ trigger: 'manual' }), false)).not.toHaveProperty('auto');
+    expect(reviewCellFor(st({ status: 'queued' }), false)).toEqual({ kind: 'queued' });
+  });
+
+  it('keeps the column polling while an auto review waits in its lane', () => {
+    expect(anyReviewInFlight([st(), lane])).toBe(true);
+  });
+});
+
+describe('the sort rank and the poll', () => {
+  it('needs-a-review first, reviewed-at-head last', () => {
+    const ranks = [
+      reviewCellRank({ kind: 'start' }),
+      reviewCellRank(reviewCellFor(st({ headMoved: true }), false)),
+      reviewCellRank({ kind: 'queued' }),
+      reviewCellRank({ kind: 'running' }),
+      reviewCellRank(reviewCellFor(st(), false)),
+    ];
+    expect([...ranks].sort((a, b) => a - b)).toEqual(ranks);
+  });
+  it('polls only while something is queued or running', () => {
+    expect(anyReviewInFlight(undefined)).toBe(false);
+    expect(anyReviewInFlight([st(), st({ status: 'failed' })])).toBe(false);
+    expect(anyReviewInFlight([st(), st({ status: 'queued' })])).toBe(true);
+    expect(anyReviewInFlight([st({ status: 'running' })])).toBe(true);
+  });
+});
+
+const cand = (id: string, name: string, match: JiraAcCandidate['match'], text = `${name} text`) => ({
+  id,
+  name,
+  text,
+  match,
+});
+const details = (over: Partial<JiraTicketDetails> = {}): JiraTicketDetails => ({
+  prId: 1,
+  key: 'ACME-1',
+  title: 'Reset password',
+  description: 'As a user…',
+  issueType: { id: '10001', name: 'Story' },
+  candidates: [
+    cand('customfield_1', 'Acceptance Criteria', 'strong', 'Given… When… Then…'),
+    cand('customfield_2', 'Notes', 'none', 'notes'),
+  ],
+  omittedCandidates: 0,
+  ...over,
+});
+const mem = (entries: Record<string, string> = {}): AcMemoryStore => {
+  const m = new Map(Object.entries(entries));
+  return {
+    getItem: (k) => m.get(k) ?? null,
+    setItem: (k, v) => void m.set(k, v),
+    removeItem: (k) => void m.delete(k),
+  };
+};
+const jira = (key: string, canFetchDetails: boolean): TicketRef => ({
+  key,
+  url: `https://acme.atlassian.net/browse/${key}`,
+  provider: 'jira',
+  canFetchDetails,
+});
+
+describe('fillDraftFromJira — the one fill', () => {
+  it('replaces title + description and preselects the best strong match', () => {
+    const r = fillDraftFromJira({ ...EMPTY_TICKET_DRAFT, acceptanceCriteria: 'old' }, details(), null);
+    expect(r.chosen).toBe('customfield_1');
+    expect(r.draft).toEqual({
+      title: 'Reset password',
+      description: 'As a user…',
+      acceptanceCriteria: 'Given… When… Then…',
+    });
+  });
+  it('a remembered field wins; nothing preselected leaves the criteria as they were', () => {
+    expect(fillDraftFromJira(EMPTY_TICKET_DRAFT, details(), 'customfield_2').draft.acceptanceCriteria).toBe(
+      'notes',
+    );
+    const none = fillDraftFromJira(
+      { ...EMPTY_TICKET_DRAFT, acceptanceCriteria: 'kept' },
+      details({ candidates: [cand('customfield_2', 'Notes', 'none')] }),
+      null,
+    );
+    expect(none.chosen).toBe('');
+    expect(none.draft.acceptanceCriteria).toBe('kept');
+  });
+});
+
+describe("resolveListTicket — the list's user story", () => {
+  const never = async (): Promise<never> => {
+    throw new Error('must not be called');
+  };
+
+  it('a re-review reuses the stored ticket and fetches nothing', async () => {
+    const r = await resolveListTicket({
+      previous: { title: 'Stored', description: null, acceptanceCriteria: '- a' },
+      loadTickets: never,
+      loadDetails: never,
+      memory: null,
+    });
+    expect(r).toEqual({ ticket: { title: 'Stored', acceptanceCriteria: '- a' }, note: null });
+  });
+
+  it('no stored ticket ⇒ the first FILLABLE Jira ticket, filled the panel way', async () => {
+    const asked: string[] = [];
+    const r = await resolveListTicket({
+      previous: { title: null, description: null, acceptanceCriteria: null },
+      loadTickets: async () => [jira('ACME-9', false), jira('ACME-1', true), jira('ACME-2', true)],
+      loadDetails: async (key) => {
+        asked.push(key);
+        return details({ key });
+      },
+      memory: mem({ 'limn:jira-ac-field:v1:acme.atlassian.net:10001': 'customfield_2' }),
+    });
+    expect(asked).toEqual(['ACME-1']);
+    expect(r.note).toBeNull();
+    expect(r.ticket).toEqual({ title: 'Reset password', description: 'As a user…', acceptanceCriteria: 'notes' });
+  });
+
+  it('no ticket, no token, a failed lookup or a failed fetch ⇒ starts without, with a note', async () => {
+    const base = { previous: null, loadDetails: never, memory: null };
+    expect(await resolveListTicket({ ...base, loadTickets: async () => null })).toEqual({
+      ticket: undefined,
+      note: NO_STORY_NOTE,
+    });
+    expect(await resolveListTicket({ ...base, loadTickets: async () => [jira('ACME-1', false)] })).toEqual({
+      ticket: undefined,
+      note: NO_STORY_NOTE,
+    });
+    expect((await resolveListTicket({ ...base, loadTickets: never })).ticket).toBeUndefined();
+    const failed = await resolveListTicket({
+      previous: null,
+      memory: null,
+      loadTickets: async () => [jira('ACME-1', true)],
+      loadDetails: async () => {
+        throw new Error('401');
+      },
+    });
+    expect(failed.ticket).toBeUndefined();
+    expect(failed.note).toContain('without a user story');
+  });
+
+  it('a Jira ticket over a cap ⇒ starts without it and says why', async () => {
+    const r = await resolveListTicket({
+      previous: null,
+      memory: null,
+      loadTickets: async () => [jira('ACME-1', true)],
+      loadDetails: async () => details({ title: 'x'.repeat(CLAUDE_REVIEW_TICKET_LIMITS.titleChars + 1) }),
+    });
+    expect(r.ticket).toBeUndefined();
+    expect(r.note).toMatch(/^Started without ACME-1: Title is/);
+  });
+});
+
+describe('the wiring', () => {
+  const src = (p: string) => readFileSync(join(__dirname, '..', 'src', p), 'utf8');
+
+  it('the column and its request are gated on the Claude Review capability', () => {
+    const table = src('components/Activity/OpenPrsTable.tsx');
+    expect(table).toMatch(/const claudeOn = useProCapabilities\(\)\.claudeReview;/);
+    expect(table).toMatch(/useClaudeReviewStates\(prIds, claudeOn\)/);
+    expect(table).toMatch(/\{claudeOn && \(\s*<SortHeader col="claude"/);
+  });
+
+  it('every cell control stops propagation (the row opens the PR)', () => {
+    const cell = src('components/Activity/ClaudeReviewCell.tsx');
+    const onClicks = cell.match(/onClick=\{[^}]*\}?/g) ?? [];
+    expect(onClicks.length).toBeGreaterThan(0);
+    for (const c of onClicks) expect(c).toMatch(/onClick=\{(run|stop|\(e\) => \{)/);
+    expect(cell).toMatch(/const run = \(e: MouseEvent\): void => \{\s*e\.stopPropagation\(\);/);
+  });
+
+  it('the cell marks auto runs and shows a 409 AutoReviewInProgress only while the hold lasts', () => {
+    const cell = src('components/Activity/ClaudeReviewCell.tsx');
+    expect(cell).toMatch(/AUTO_REVIEW_LABEL/);
+    expect((cell.match(/\{cell\.auto && <AutoMark \/>\}/g) ?? []).length).toBe(3);
+    expect(cell).toMatch(/held \|\| !isAutoReviewHoldError\(start\.error\)/);
+  });
+
+  it('a 409 AutoReviewInProgress from the list re-reads the column BEFORE the button can return', () => {
+    const hooks = src('hooks/useClaudeReview.ts');
+    expect(hooks).toMatch(
+      /onError: \(err\) =>\s*isAutoReviewHoldError\(err\)\s*\? Promise\.all\(\[\s*qc\.invalidateQueries\(\{ queryKey: CLAUDE_REVIEW_STATES_KEY \}\)/,
+    );
+    expect(hooks).toMatch(/err\.status === 409 && err\.code === 'AutoReviewInProgress'/);
+    // The client carries the body's `error` code onto the ApiError.
+    expect(src('api/client.ts')).toMatch(/if \(typeof body\.error === 'string'\) code = body\.error;/);
+  });
+
+  it('the tab and the list share ONE start mutation key', () => {
+    const hooks = src('hooks/useClaudeReview.ts');
+    expect(hooks.match(/mutationKey: claudeReviewStartKey\(prId\),\n/g)).toHaveLength(2);
+    expect(src('components/ClaudeReviewTab.tsx')).toMatch(/disabled=\{isRunning \|\| starting/);
+  });
+});

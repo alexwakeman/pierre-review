@@ -175,13 +175,14 @@ export function SlackSection(): JSX.Element {
       title="Slack digest"
       desc={
         <>
-          Deliver a sprint + repo digest for this workspace to a Slack channel on a schedule. The
-          message covers only this workspace’s repos and links back into the app.{' '}
+          Posts your Pending board for this workspace to a Slack channel on a schedule: your
+          turn, then each Pending tab, top 5 each, every PR once. A short sprint summary follows.
+          Links open the app.{' '}
           <span className="font-medium">
-            Every workspace with a digest generates its own report on every send
+            Every workspace with a digest writes its own sprint summary on every send
           </span>
-          , so at most {data.cap} can have one. Reports are generated fresh at send time and cost
-          nothing for a workspace whose activity has not changed.
+          , so at most {data.cap} can have one. A summary costs nothing when the workspace’s
+          activity has not changed.
         </>
       }
     >

@@ -378,69 +378,20 @@ describe('attentionIsolation', () => {
     });
   });
 
-  // ── My turn's VIEW (Cards | Default branches and open PRs) ─────────────────────────────────
+  // ── My turn's retired VIEW (`attentionMyTurnView`) ─────────────────────────────────────────
   //
-  // A client view inside the `my_turn` tab. Transient like its siblings; cleared by a rail change
-  // AND by a tab click (a tab opens its cards); SEATED to Cards by the banner's gesture, because
-  // the banner counts cards and `setActivityRepo`'s empty patch would otherwise let it survive.
-  describe("My turn's view (attentionMyTurnView)", () => {
-    beforeEach(() => {
-      useFilters.setState({
-        workspaceId: 3,
-        activityRepoId: 'attention',
-        attentionMyTurnView: null,
-        attentionTab: null,
-      });
-      usePinnedTabs.setState({ activeTab: 'timeline' });
-    });
-
-    it('defaults to null (Cards), holds branches, and stores Cards as null', () => {
-      expect(useFilters.getState().attentionMyTurnView).toBeNull();
-      useFilters.getState().setAttentionMyTurnView('branches');
-      expect(useFilters.getState().attentionMyTurnView).toBe('branches');
-      useFilters.getState().setAttentionMyTurnView('cards');
-      expect(useFilters.getState().attentionMyTurnView).toBeNull();
-    });
-
-    it('a rail switch clears it', () => {
-      useFilters.setState({ attentionMyTurnView: 'branches' });
-      useFilters.getState().setActivityRepo('feed');
-      expect(useFilters.getState().attentionMyTurnView).toBeNull();
-    });
-
-    it('picking a tab clears it — My turn included (a tab click opens its cards)', () => {
-      useFilters.setState({ attentionMyTurnView: 'branches' });
-      useFilters.getState().setAttentionTab('fixing');
-      expect(useFilters.getState().attentionMyTurnView).toBeNull();
-      useFilters.setState({ attentionMyTurnView: 'branches' });
-      useFilters.getState().setAttentionTab('my_turn');
-      expect(useFilters.getState().attentionMyTurnView).toBeNull();
-    });
-
-    it('⚠ openMyTurnInWorkspace lands on Cards even when the rail is ALREADY attention', () => {
-      useFilters.setState({ attentionMyTurnView: 'branches' });
-      useFilters.getState().openMyTurnInWorkspace(3);
-      const after = useFilters.getState();
-      expect(after.attentionMyTurnView).toBeNull();
-      expect(after.attentionIsolation).toBe('my_turn');
-      expect(after.attentionRelevance).toBe('mine');
-    });
-
-    it('a workspace switch does NOT clear it (the view is not a narrowing of the data)', () => {
-      useFilters.setState({ attentionMyTurnView: 'branches' });
-      useFilters.getState().setWorkspace(9, null);
-      expect(useFilters.getState().attentionMyTurnView).toBe('branches');
-    });
-
-    it('is NOT persisted with the filter bar, and a restored blob drops it', () => {
-      useFilters.setState({ attentionMyTurnView: 'branches' });
-      const persisted = pickFilterBarState(useFilters.getState()) as Record<string, unknown>;
-      expect('attentionMyTurnView' in persisted).toBe(false);
-      const restored = sanitizePersistedFilters({
-        attentionMyTurnView: 'branches',
-      } as unknown as Partial<FilterState>) as Record<string, unknown>;
-      expect('attentionMyTurnView' in restored).toBe(false);
-    });
+  // My turn had a second view ("Default branches and open PRs"); it is gone, and its strip heads My
+  // turn's cards. The store key is gone with it. It was never persisted, but a blob from any build
+  // that carried it must still restore — and drop it.
+  it("My turn's retired view is gone from the store, and a blob carrying it still restores", () => {
+    expect('attentionMyTurnView' in useFilters.getState()).toBe(false);
+    expect('setAttentionMyTurnView' in useFilters.getState()).toBe(false);
+    const restored = sanitizePersistedFilters({
+      attentionMyTurnView: 'branches',
+      excludeBots: false,
+    } as unknown as Partial<FilterState>) as Record<string, unknown>;
+    expect('attentionMyTurnView' in restored).toBe(false);
+    expect(restored.excludeBots).toBe(false);
   });
 
   it('survives "Clear filters", exactly like feedIsolatedPrId', () => {

@@ -246,10 +246,11 @@ beforeAll(async () => {
   // reviewer stands, and a chip for it would name someone who has not spoken.
   await addReview(rankedId, carolId, 'pending', now - 1 * HOUR);
 
-  // ── (2) `queued` — in GitHub's merge queue and being EJECTED. A queued PR reports
-  // `mergeStateStatus: 'blocked'` (GitHub's enum has no QUEUED member), which is why the columns
-  // had to become stored at all — and why this PR emits an untouched_thread card rather than a
-  // merge one.
+  // ── (2) `queued` — in GitHub's merge queue and being EJECTED. GitHub's MergeStateStatus enum
+  // has no QUEUED member, so a queued PR reports its underlying state ('clean' and 'unknown' have
+  // both been seen live) and nothing in it says "queued" — which is why the columns had to become
+  // stored at all. This fixture stores 'blocked' so the PR emits an untouched_thread card rather
+  // than a merge one.
   const queuedId = await insertPr('queued', bobId, {
     mergeStateStatus: 'blocked',
     inMergeQueue: true,

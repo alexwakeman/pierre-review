@@ -5,15 +5,16 @@ import {
   CLAUDE_REVIEW_MODEL_LABELS,
   CLAUDE_REVIEW_MODELS,
   CLAUDE_REVIEW_TICKET_LIMITS,
+  DEFAULT_AI_FIX_MODEL,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   checkClaudeReviewTicket,
   followUpCounts,
   followUpSentence,
   ticketCriteriaSentence,
   type ClaudeFollowUpStatus,
-  type ClaudeReviewModel,
   type ClaudeTicketCriterionStatus,
 } from '@pierre-review/shared';
+import { PINNED_EFFORT, sdkModelOptions } from './model-options.js';
 
 describe('checkClaudeReviewTicket', () => {
   const L = CLAUDE_REVIEW_TICKET_LIMITS;
@@ -164,16 +165,24 @@ describe('the model list', () => {
     expect(CLAUDE_REVIEW_MODELS[0]).toBe(DEFAULT_CLAUDE_REVIEW_MODEL);
   });
 
-  it('Opus 4.8 is no longer offered, but every stored id still has a label', () => {
+  it('the old Opus 4.8 is gone: not offered and not labelled', () => {
+    // A stored run keeps its id and the SPA prints it raw, so a retired id needs no label.
     expect(CLAUDE_REVIEW_MODELS).not.toContain('claude-opus-4-8');
-    const all: ClaudeReviewModel[] = [
-      'claude-opus-5-5',
-      'claude-sonnet-5',
-      'claude-opus-4-8',
-      'claude-sonnet-4-6',
-      'claude-haiku-4-5',
-    ];
-    for (const m of all) expect(CLAUDE_REVIEW_MODEL_LABELS[m]).toBeTruthy();
+    expect(Object.keys(CLAUDE_REVIEW_MODEL_LABELS)).not.toContain('claude-opus-4-8');
+    // Every offered model has a label, and nothing else does.
+    expect(Object.keys(CLAUDE_REVIEW_MODEL_LABELS).sort()).toEqual([...CLAUDE_REVIEW_MODELS].sort());
     expect(CLAUDE_REVIEW_MODEL_LABELS['claude-opus-5-5']).toBe('Claude Opus 5.5 (most thorough)');
+  });
+
+  it('AI Fix opens on Opus 5.5, on effort medium', () => {
+    // ONE spelling, read by the fixer picker, the CI card's "Fix it" and the plugin's start route.
+    expect(DEFAULT_AI_FIX_MODEL).toBe('claude-opus-5-5');
+    expect(CLAUDE_REVIEW_MODELS).toContain(DEFAULT_AI_FIX_MODEL);
+    // "On medium" is not a field of the default — it is the pin every agentic path reads.
+    expect(PINNED_EFFORT[DEFAULT_AI_FIX_MODEL]).toBe('medium');
+    expect(sdkModelOptions(DEFAULT_AI_FIX_MODEL, 'worktree')).toEqual({
+      effort: 'medium',
+      thinking: { type: 'adaptive' },
+    });
   });
 });

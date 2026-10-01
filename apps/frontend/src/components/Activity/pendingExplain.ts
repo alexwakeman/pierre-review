@@ -249,7 +249,7 @@ export function whyHere(card: InsightCard): string {
         case 'own_thread':
           return `A review comment on your PR has had no reply and no later commit for ${agePhrase(hoursSince(card.since))}.`;
         case 'claude_review':
-          return 'A Claude review finished with findings you have not posted. It goes away when you post them.';
+          return 'A Claude review finished with findings you have not posted. It goes away when you post them or act on the PR.';
         case 'watched_repo_pr':
           return 'A new PR you have not reviewed, commented on or pushed to. It goes away when you do one of those.';
         default: {

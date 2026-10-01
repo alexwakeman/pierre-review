@@ -1,4 +1,6 @@
-// THE FIX AGENT HAS NO SHELL — and neither does the conflict resolver.
+// THE FIX AGENT HAS NO SHELL. (AI Fix's agentic conflict resolver, which this file also used to
+// pin, was removed with the rest of AI Fix's trunk reconciliation — the fixer is the only agent
+// left in coding/agent.ts.)
 //
 // Why a SOURCE SCAN and not an import: `coding/agent.ts` reaches `db/client.ts`, which opens the
 // real SQLite file at import time, and the Agent SDK, which has no business being loaded by a unit
@@ -43,7 +45,7 @@ const isShell = (tool: string): boolean => /^Bash\b|^Bash\(/.test(tool);
 // A `(` in a DENY entry means someone is enumerating commands again, which is not a boundary.
 const isPattern = (tool: string): boolean => tool.includes('(');
 
-describe('the coding agents run without a shell', () => {
+describe('the coding agent runs without a shell', () => {
   it('the fixer can edit but cannot reach Bash', () => {
     const allowed = toolList('FIX_TOOLS');
     // Sanity: the scan is reading a real list, and the run is still a WRITE run.
@@ -57,11 +59,6 @@ describe('the coding agents run without a shell', () => {
     const denied = toolList('DISALLOWED_TOOLS');
     expect(denied).toContain('Bash');
     expect(denied.filter(isPattern)).toEqual([]);
-  });
-
-  it('the conflict resolver still has none either', () => {
-    expect(toolList('RESOLVE_TOOLS').filter(isShell)).toEqual([]);
-    expect(toolList('RESOLVE_DISALLOWED_TOOLS')).toContain('Bash');
   });
 });
 

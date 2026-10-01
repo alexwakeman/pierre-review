@@ -1130,6 +1130,98 @@ check(
   (await getPrSyncTarget(A.prId, 2)) === null,
 );
 
+// ── The post-write settle's facts read (getPrSettleFacts, sync/pr-settle.ts) ────
+// Outside db/queries.ts, so named here. Every write route's settle tail, the background settle
+// ladder, the merge-landed follow-up and the change-signal helper resolve a local PR id through
+// it — and its answer decides whether this account's token is spent re-reading that PR from
+// GitHub. Without the accountId predicates one tenant's write could aim a settle (and its token)
+// at another's PR id, or read its head sha and merge state.
+const { getPrSettleFacts } = await import('../src/sync/pr-settle.js');
+const settleOwn = await getPrSettleFacts(A.prId, 1);
+check(
+  'getPrSettleFacts(A, A’s PR) resolves it',
+  settleOwn != null && settleOwn.repoId === A.repoId && settleOwn.number === 1,
+);
+check(
+  'getPrSettleFacts(B, A’s PR) returns null (IDOR blocked)',
+  (await getPrSettleFacts(A.prId, 2)) === null,
+);
+
+// ── The change signal's id-LIST read (getPrRepoIds, sync/pr-settle.ts) ──────────
+// Every write route raises the SPA change signal through it, and the workspace-wide bot-thread
+// resolve hands it PR ids derived from a request body's thread ids. Its answer names which
+// repo's `lastPrChangeAt` moves — keyed by the CALLER's accountId — so without the accountId
+// predicates B could read A's repo ids (and stamp a signal under B for a repo B does not own).
+const { getPrRepoIds } = await import('../src/sync/pr-settle.js');
+check(
+  'getPrRepoIds(A, [A’s PR]) resolves A’s repo',
+  JSON.stringify(await getPrRepoIds(1, [A.prId])) === JSON.stringify([A.repoId]),
+);
+check(
+  'getPrRepoIds(B, [A’s PR]) returns nothing (IDOR blocked)',
+  (await getPrRepoIds(2, [A.prId])).length === 0,
+);
+
+// ── The unsettled-PR backstop / trunk-moved recheck selection (sync/unsettled-prs.ts) ──
+// REPO-addressed rather than PR-addressed, and every row it returns is re-read from GitHub on
+// this account's token and then WRITTEN BACK — so `(accountId, repoId)` both bind. A's seeded PR
+// is open, non-draft and has a NULL merge state, so both directions are non-vacuous: drop the
+// accountId predicate and the cross-account check FAILS rather than quietly returning nothing.
+const { getRepoMergeStateTargets } = await import('../src/sync/unsettled-prs.js');
+check(
+  'getRepoMergeStateTargets(A, A’s repo, unsettled) resolves A’s PR',
+  (await getRepoMergeStateTargets(1, A.repoId, 'unsettled')).some((t) => t.prId === A.prId),
+);
+check(
+  'getRepoMergeStateTargets(B, A’s repo, unsettled) returns nothing (IDOR blocked)',
+  (await getRepoMergeStateTargets(2, A.repoId, 'unsettled')).length === 0,
+);
+check(
+  'getRepoMergeStateTargets(B, A’s repo, open) returns nothing (IDOR blocked)',
+  (await getRepoMergeStateTargets(2, A.repoId, 'open')).length === 0,
+);
+
+// ── The stale-CI nudge (nudgeStaleCiPending, sync/unsettled-prs.ts) ──────────────
+// Repo-addressed like the selection above, and every PR it picks is handed to the settle ladder,
+// i.e. re-read from GitHub on this account's token. A throwaway stale-`pending` PR of A's (no
+// `ci_status_events` row = stale) makes both directions non-vacuous; B is asked FIRST so A's
+// per-PR cooldown cannot be what makes B's answer 0. The ladders it arms are dropped straight
+// after (their timers would otherwise try a GitHub read on these fake accounts).
+{
+  const { nudgeStaleCiPending } = await import('../src/sync/unsettled-prs.js');
+  const { __resetPrSettle } = await import('../src/sync/pr-settle.js');
+  const quiet = { info: () => {}, warn: () => {}, error: () => {} };
+  const [stalePending] = await db
+    .insert(pullRequests)
+    .values({
+      githubNodeId: 'PR_A_ci_pending',
+      accountId: 1,
+      repoId: A.repoId,
+      number: 2,
+      title: 'stale CI pending',
+      state: 'open',
+      isDraft: false,
+      ciStatus: 'pending',
+      openedAt: now,
+      updatedAt: now,
+    })
+    .returning()
+    .execute();
+  try {
+    check(
+      'nudgeStaleCiPending(B, A’s repo) nudges nothing (IDOR blocked)',
+      (await nudgeStaleCiPending(2, A.repoId, quiet)) === 0,
+    );
+    check(
+      'nudgeStaleCiPending(A, A’s repo) nudges A’s stale-pending PR',
+      (await nudgeStaleCiPending(1, A.repoId, quiet)) === 1,
+    );
+  } finally {
+    __resetPrSettle();
+    await db.delete(pullRequests).where(eq(pullRequests.id, stalePending!.id)).execute();
+  }
+}
+
 // ── The Pending board's liveness resolve (db/pr-liveness.ts) ────────────────────
 // The ONLY id-LIST-addressed read in the codebase whose ids arrive in a REQUEST BODY and are then
 // spent on GitHub quota: POST /api/attention/liveness hands it whatever PR ids the client claims

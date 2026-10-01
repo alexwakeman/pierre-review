@@ -374,8 +374,8 @@ function BranchRow({
   );
 }
 
-/** Has any repo in scope been branch-synced? The panel hides until one has — and
- *  BranchesAndOpenPrsView says so in its place, from this same predicate. */
+/** Has any repo in scope been branch-synced? The panel hides until one has — and My turn's
+ *  `DefaultBranchesSlot` (MyTurnHead.tsx) says so in its place, from this same predicate. */
 export function anyBranchSynced(rows: readonly RepoBranchStatus[]): boolean {
   return rows.some((r) => r.branchName != null);
 }
@@ -425,7 +425,7 @@ export function BranchStatusPanel({
 
   // ── COLLAPSE WHEN NOTHING IS RED ──────────────────────────────────────────────────────────
   //
-  // The cross-repo mount (Pending → My turn → Default branches and open PRs) lists every repo in
+  // The cross-repo mount (the top of Pending → My turn) lists every repo in
   // the workspace, where a twelve-repo workspace spends most of its life rendering twelve green
   // rows nobody reads. Collapsed, it is the header line
   // alone — still always expandable, and `useBranchTrends` is lazy per row, so a collapsed strip

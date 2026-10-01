@@ -672,6 +672,17 @@ describe('the auto-merge watcher on a merge-queue repo', () => {
     const rows = await db.select().from(schema.autoMergeRequests).execute();
     return rows.find((r: any) => r.prId === prId);
   };
+  // The PR ROW's synced queue pair — what every screen (the Pending board included, which may not
+  // fetch) reads to decide between the queue status line and a Merge button.
+  const prQueue = async (prId: number): Promise<{ inMergeQueue: unknown; state: unknown }> => {
+    const { eq } = await import('drizzle-orm');
+    const [r] = await db
+      .select()
+      .from(schema.pullRequests)
+      .where(eq(schema.pullRequests.id, prId))
+      .execute();
+    return { inMergeQueue: r.inMergeQueue, state: r.mergeQueueEntryState };
+  };
 
   beforeAll(async () => {
     runner = await import('../merge/auto-merge-runner.js');
@@ -695,7 +706,7 @@ describe('the auto-merge watcher on a merge-queue repo', () => {
     const { eq } = await import('drizzle-orm');
     await db
       .update(schema.pullRequests)
-      .set({ state: 'open' })
+      .set({ state: 'open', inMergeQueue: null, mergeQueueEntryState: null })
       .where(eq(schema.pullRequests.id, prC))
       .execute();
   });
@@ -722,6 +733,46 @@ describe('the auto-merge watcher on a merge-queue repo', () => {
     expect(row.enqueuedAt).not.toBeNull();
     expect(row.lastReason).toContain('position 2');
     expect(row.phase).toBe('queued');
+    // ⚠ AND THE PR ROW KNOWS. The runner's own enqueue used to update only the intent, so the
+    // board kept offering a Merge trigger for a PR the queue was landing until the next walk.
+    expect(await prQueue(prC)).toEqual({ inMergeQueue: true, state: 'queued' });
+  });
+
+  it('stamps what each tick’s live probe says — including a positive "not queued"', async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('qp1'), viaMergeQueue: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'qp1' }));
+    gh.enqueuePullRequestOnQueue.mockResolvedValue({
+      position: 1,
+      state: 'QUEUED',
+      estimatedTimeToMergeMs: null,
+    });
+    gh.fetchMergeQueueState.mockResolvedValue(queueState());
+    await runner.runAutoMergeTick(log);
+    // Tick 2: the queue is running its checks — the entry state moves on the row too.
+    gh.fetchMergeQueueState.mockResolvedValue(
+      queueState({ inQueue: true, position: 1, state: 'AWAITING_CHECKS' }),
+    );
+    await runner.runAutoMergeTick(log);
+    expect(await prQueue(prC)).toEqual({ inMergeQueue: true, state: 'awaiting_checks' });
+    // Tick 3: thrown out. The intent stands down AND the row stops claiming the queue.
+    gh.fetchMergeQueueState.mockResolvedValue(queueState());
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).state).toBe('disarmed_blocked');
+    expect(await prQueue(prC)).toEqual({ inMergeQueue: false, state: null });
+  });
+
+  it('⚠ a probe that could not read the PR (null) stamps nothing', async () => {
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(schema.pullRequests)
+      .set({ inMergeQueue: true, mergeQueueEntryState: 'queued' })
+      .where(eq(schema.pullRequests.id, prC))
+      .execute();
+    await q.armAutoMerge(A, prC, { ...armArgs('qn1'), viaMergeQueue: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'qn1' }));
+    gh.fetchMergeQueueState.mockResolvedValue(null);
+    await runner.runAutoMergeTick(log);
+    expect(await prQueue(prC)).toEqual({ inMergeQueue: true, state: 'queued' });
   });
 
   it('waits to enqueue while required reviews are missing — and says so by name', async () => {

@@ -7,6 +7,7 @@ import { searchText } from '../db/search.js';
 import { ensureDefaultWorkspace } from '../db/queries.js';
 import { config } from '../config.js';
 import { isLikelyBot } from './bot-detection.js';
+import { notePrChanged } from './pr-change-signal.js';
 import {
   classifyPrSecurity,
   type DependencyMarkerVendor,
@@ -715,6 +716,9 @@ export async function persistPr(
           bodyText: pr.bodyText,
         })
       : {};
+  // Set inside the transaction from the `prev` read; the SPA change signal is raised only AFTER
+  // the commit, so it can never announce a row a reader cannot see yet.
+  let boardMoved = false;
   await runTransaction(async (tx) => {
     const authorId = await resolver.resolve(tx, pr.author);
     // The actual merger (null for non-merged PRs / when GitHub omits the actor).
@@ -793,10 +797,25 @@ export async function persistPr(
     // The PR's prior draft/state, read BEFORE the upsert below, so we can emit the
     // lifecycle transitions GitHub doesn't expose as discrete events (draft → ready,
     // reopened). null on first sight of a PR → no transition event.
+    //
+    // The board-visible columns ride the same read so the SPA's change signal
+    // (sync/pr-change-signal.ts) fires only when one of them actually MOVED — a walk that
+    // restates what is stored must not cascade a refetch over every screen.
     const prev =
       (
         await tx
-          .select({ isDraft: pullRequests.isDraft, state: pullRequests.state })
+          .select({
+            isDraft: pullRequests.isDraft,
+            state: pullRequests.state,
+            headSha: pullRequests.headSha,
+            ciStatus: pullRequests.ciStatus,
+            mergeable: pullRequests.mergeable,
+            mergeStateStatus: pullRequests.mergeStateStatus,
+            reviewDecision: pullRequests.reviewDecision,
+            inMergeQueue: pullRequests.inMergeQueue,
+            mergeQueueEntryState: pullRequests.mergeQueueEntryState,
+            updatedAt: pullRequests.updatedAt,
+          })
           .from(pullRequests)
           .where(
             and(
@@ -806,6 +825,17 @@ export async function persistPr(
           )
           .execute()
       )[0] ?? null;
+    boardMoved = boardVisibleMoved(prev, {
+      state: prState(pr.state),
+      isDraft: pr.isDraft,
+      headSha,
+      ciStatus,
+      mergeable,
+      mergeStateStatus,
+      reviewDecision,
+      updatedAt: new Date(pr.updatedAt),
+      ...queueObserved,
+    });
 
     const prRow = (
       await tx
@@ -1335,4 +1365,78 @@ export async function persistPr(
         .execute();
     }
   });
+  if (boardMoved) notePrChanged(accountId, repoId);
+}
+
+/** The PR columns the Pending board, the timeline bar and the PR header render — the ONLY
+ *  columns whose movement is worth a cascade of SPA refetches — plus GitHub's `updatedAt`, the
+ *  proxy for everything that lives in a CHILD table (a review, a comment, a reply, a commit). */
+interface BoardVisibleFacts {
+  state: string;
+  isDraft: boolean;
+  headSha: string | null;
+  ciStatus: string | null;
+  mergeable: string | null;
+  mergeStateStatus: string | null;
+  reviewDecision: string | null;
+  updatedAt?: Date;
+  inMergeQueue?: boolean | null;
+  mergeQueueEntryState?: string | null;
+}
+
+/**
+ * Did this write move anything a reader can see?
+ *
+ * • A first sighting (`prev === null`) counts ONLY for an OPEN PR — a new card. A merged or
+ *   closed PR first seen by the 90-day deep backfill (hundreds of them, minutes apart) changes no
+ *   board, and counting it cascaded a whole-app refetch on every SPA poll of a backfill; the
+ *   walk's own completion stamp covers the history it brings in.
+ * • `updatedAt` MOVING counts. GitHub bumps it for every new review, comment, reply and commit —
+ *   the rows the My turn / Unanswered threads / Waiting on review tabs fold — and a webhook or
+ *   settle sync that stored them otherwise raised nothing. It stays DIFF-GATED: a walk restating
+ *   an unchanged PR (the overlap window) carries the same `updatedAt`. What it cannot see is an
+ *   updatedAt-SILENT change (a thread resolve, CI finishing, mergeability computed) — the explicit
+ *   columns cover the last two.
+ * • The merge-queue pair is compared ONLY when this response observed it (the three-state
+ *   `queueObserved` rule: an absent key wrote nothing, so it cannot have moved).
+ * Exported for its unit test.
+ */
+export function boardVisibleMoved(
+  prev: {
+    state: string;
+    isDraft: boolean;
+    headSha: string | null;
+    ciStatus: string | null;
+    mergeable: string | null;
+    mergeStateStatus: string | null;
+    reviewDecision: string | null;
+    inMergeQueue: boolean | null;
+    mergeQueueEntryState: string | null;
+    updatedAt?: Date | null;
+  } | null,
+  next: BoardVisibleFacts,
+): boolean {
+  if (prev == null) return next.state === 'open';
+  if (
+    next.updatedAt !== undefined &&
+    (prev.updatedAt == null || prev.updatedAt.getTime() !== next.updatedAt.getTime())
+  ) {
+    return true;
+  }
+  if (
+    prev.state !== next.state ||
+    prev.isDraft !== next.isDraft ||
+    prev.headSha !== next.headSha ||
+    prev.ciStatus !== next.ciStatus ||
+    prev.mergeable !== next.mergeable ||
+    prev.mergeStateStatus !== next.mergeStateStatus ||
+    prev.reviewDecision !== next.reviewDecision
+  ) {
+    return true;
+  }
+  if (next.inMergeQueue !== undefined) {
+    if (prev.inMergeQueue !== next.inMergeQueue) return true;
+    if (prev.mergeQueueEntryState !== (next.mergeQueueEntryState ?? null)) return true;
+  }
+  return false;
 }

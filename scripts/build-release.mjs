@@ -214,8 +214,8 @@ const manifest = {
   // Anthropic/MCP SDK (@anthropic-ai/claude-agent-sdk, @anthropic-ai/sdk,
   // @modelcontextprotocol/sdk, and zod — used only by the AI tools' submit-review
   // schemas) is reached ONLY through a dynamic `await import()` in the private
-  // @pierre/pro plugin's seams (review/agent, coding/agent, coding/merge,
-  // review/prepare, review/post-seam) or lazily inside review/llm.ts. The plugin
+  // @pierre/pro plugin's seams (review/agent, coding/agent, review/prepare,
+  // review/post-seam) or lazily inside review/llm.ts. The plugin
   // is never in this release (author/dev checkout only), so those imports never
   // execute from npm and their deps are not required. The compiled-but-inert AI
   // .js files still ship as dead code — that's fine; nothing loads them. See the

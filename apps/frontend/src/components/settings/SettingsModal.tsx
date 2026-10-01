@@ -4,6 +4,7 @@ import { useHasProWorkspaceSettings, useProSettings } from '../../hooks/useProSe
 import { SprintSection } from './SprintSection.js';
 import { SlackSection } from './SlackSection.js';
 import { IssueLinksSection } from './IssueLinksSection.js';
+import { AutoReviewSection } from './AutoReviewSection.js';
 import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
 import { LargePrThresholdSection } from './LargePrThresholdSection.js';
 import { BlastRadiusSection } from './BlastRadiusSection.js';
@@ -276,6 +277,9 @@ export function SettingsModal({
                     feature: the enricher's input is a PR, and a PR's repo belongs to exactly one
                     workspace. */}
                 {proReady && caps.issueLinks && <IssueLinksSection />}
+                {/* Auto Claude review of new human PRs in THIS workspace (plugin migration 0036).
+                    Claude Review is local-only, so this appears only where it can run. */}
+                {proReady && caps.claudeReview && <AutoReviewSection />}
               </div>
             )}
           </section>

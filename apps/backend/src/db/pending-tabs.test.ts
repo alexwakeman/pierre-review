@@ -245,3 +245,41 @@ describe('a routing card says whether the viewer may request reviewers', () => {
     }
   });
 });
+
+// THE SLACK SEAM AND THE ROUTE ARE ONE FOLD (`buildPendingBoard`). `GET /api/attention` and
+// `ProHostQueries.getPendingBoard` (the Pro Slack digest) must list the same tabs in the same order,
+// and the seam must make NO network call — the suggestion lookup is the route's alone.
+describe('the Slack seam and GET /api/attention list the same board', () => {
+  it('same tab keys, totals and card order; the seam names the account and looks nothing up', async () => {
+    const { default: Fastify } = await import('fastify');
+    const { registerAccountContext } = await import('../api/plugins/auth.js');
+    const { insightsRoutes } = await import('../api/routes/insights.js');
+    const app = Fastify({ logger: false });
+    registerAccountContext(app);
+    await app.register(insightsRoutes);
+    try {
+      const res = await app.inject({ method: 'GET', url: `/api/attention?workspace=${scope.workspaceId}` });
+      expect(res.statusCode).toBe(200);
+      const route = res.json();
+      expect(route.workspaceId).toBeUndefined();
+
+      enrichCalls.length = 0;
+      const seam = await tabs.getPendingBoardSnapshot(1, scope.workspaceId);
+      expect(enrichCalls).toHaveLength(0);
+      expect(seam.workspaceId).toBe(scope.workspaceId);
+      expect(seam.viewerLogin).toBe('viewer-me');
+
+      const shape = (t: { key: string; total: number; cardIds: string[] }[]) =>
+        t.map(({ key, total, cardIds }) => ({ key, total, cardIds }));
+      expect(shape(seam.tabs)).toEqual(shape(route.tabs));
+      expect(seam.tabs.find((t: { key: string }) => t.key === 'review').cardIds).toHaveLength(ORPHANS);
+      // The route's live extra is the only difference: its top routing card carries the suggestion.
+      const routeThree = route.cards.find((c: ReviewerRoutingCard) => c.prNumber === 3);
+      const seamThree = seam.cards.find((c: ReviewerRoutingCard) => c.prNumber === 3);
+      expect(routeThree.suggestedReviewers).toHaveLength(1);
+      expect(seamThree.suggestedReviewers).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+});

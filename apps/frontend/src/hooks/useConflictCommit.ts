@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type { ConflictCommitBody, ConflictCommitState, ConflictSession } from '@pierre-review/shared';
 import { api } from '../api/client.js';
-import { ARMED_MERGES_KEY } from './useAutoMerge.js';
+import { invalidateAfterPrWrite } from './prCacheSync.js';
 
 // ── THE COMMIT ───────────────────────────────────────────────────────────────────────────────
 //
@@ -27,37 +27,20 @@ export function conflictCommitMutationKey(prId: number): unknown[] {
 }
 
 /**
- * Every key a landed conflict resolution moves.
+ * Every key a landed conflict resolution moves: THE ONE WRITE SET (`invalidateAfterPrWrite`,
+ * prCacheSync.ts), so the board's `conflicts` card, its counts and the plan move together.
  *
- * ⚠ `['attention-cards']`, `['daily-brief']` AND `['work-plan']` GO TOGETHER, ALWAYS. They are the
- * only three keys that opt out of the app-wide `refetchOnWindowFocus: false` and they do it as a
- * set: the board's `conflicts` card must leave, the daily-brief counts read the same fold, and the
- * plan's chip reads it a third time. INVALIDATE, never splice — a local edit kills `capFor`'s
- * `shown === count` guard and takes the "50 of 148" disclosure with it.
+ * `armed`: the push disarms any "merge when ready" intent on this PR (the landing step says so
+ * before the reader presses the button), so the armed list is stale the moment it lands. Not
+ * `merged` — nothing merged.
  *
- * Deliberately absent: `['mergers']` (nothing merged) and `prRefreshKey(prId)` — invalidating that
- * one fires a POST walk, and the commit route already resyncs server-side while
- * `usePrLiveRefresh`'s own ~5s cadence picks the open pane up.
+ * ⚠ GitHub attaches the push and recomputes mergeability a few seconds AFTER the push, so this
+ * one refetch can still read "conflicting". The helper opens SyncStatus's fast `['repos']` poll,
+ * which carries the server's follow-up re-reads here; the resolver shell also calls this again
+ * when it closes, and polls the PR while it is open.
  */
 export function invalidateAfterConflictCommit(qc: QueryClient, prId: number): void {
-  for (const key of [
-    ['pr', prId],
-    ['merge-options', prId],
-    ['timeline'],
-    ['open-prs'],
-    ['my-turn'],
-    ['me'],
-    ['activity'],
-    ['consolidated-feed'],
-    // The push disarms any "merge when ready" intent on this PR (the landing step says so before
-    // the reader presses the button), so the armed list is stale the moment it lands.
-    ARMED_MERGES_KEY as unknown as unknown[],
-  ]) {
-    void qc.invalidateQueries({ queryKey: key });
-  }
-  for (const key of [['attention-cards'], ['daily-brief'], ['work-plan']]) {
-    void qc.invalidateQueries({ queryKey: key });
-  }
+  void invalidateAfterPrWrite(qc, prId, { armed: true });
 }
 
 /** Hand the commit body over. Resolves at the 202 with the session in `commit.status: 'running'`;

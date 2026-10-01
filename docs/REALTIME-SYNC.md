@@ -26,7 +26,9 @@
 > delivers nothing but the `ping`, which is what kept the receiver silently idle until
 > 2026-07-25.
 >
-> Phase 0 (the shared targeted-sync core) is called only by Phase 1/2.
+> Phase 0 (the shared targeted-sync core) is called by the webhook receiver, the live PR-pane
+> refresh, the post-write resync and the post-write settle ladder
+> ([§ Post-write settle](#post-write-settle)).
 
 ## The problem
 
@@ -35,7 +37,8 @@ per repo and walks pages of the `since` window every tick (`sync/sync-manager.ts
 `syncRepo`). It deliberately re-walks the whole window rather than short-circuiting on
 `updatedAt`, because **GitHub doesn't bump a PR's `updatedAt` for every signal we care
 about** (CI finishing, a review thread being resolved) — see SYNC.md
-"Incremental updates".
+"Incremental updates". (The `since` window does not catch those either; see
+[§ Post-write settle](#post-write-settle).)
 
 Two consequences:
 
@@ -245,12 +248,20 @@ genuinely-idle repo is skipped almost free; a `200` also refreshes `lastChangeAt
 active repo climbs to a faster cadence and a quiet one decays). A probe error → walk anyway
 (never skip on uncertainty). First backfills (`mode:'full'`) always walk.
 
-**The blind-spot floor (honest caveat).** `updatedAt` doesn't move for CI-finish or
-thread-resolve, so the probe can't detect those. A **re-walk floor**
-(`SYNC_FLOOR_INTERVAL_SEC`, 1800s) forces a full walk at least that often even on a `304`,
-so those signals still refresh. This is exactly the gap webhooks close for free — locally
-it's the right trade: near-real-time for the common signals, bounded staleness for
-CI/thread-resolve on quiet repos.
+**The re-walk floor, and what it does NOT catch.** `updatedAt` doesn't move for CI finishing,
+GitHub finishing its mergeability computation, or a thread resolve, so the probe can't detect
+those. A **re-walk floor** (`SYNC_FLOOR_INTERVAL_SEC`, 1800s) forces a walk at least that often
+even on a `304` — but ⚠ **the forced walk uses the SAME `since = lastIncrementalSyncAt −
+SYNC_OVERLAP_MINUTES` window**, so a PR whose only change left `updatedAt` alone falls outside it
+and is NOT re-read. The floor bounds how long a quiet repo goes unwalked; it never refreshed
+those signals. Reproduced on real data (2026-09): open PRs stored `unknown` merge state, and CI
+stored `pending` for more than two hours, while GitHub reported a known value with the same
+`updatedAt`. A raw count of stored-`unknown` rows overstates the problem: 63 of the 132 first
+counted sat in one repo whose walks were FAILING (a different fault), and GitHub answers
+UNKNOWN on the first request anyway. The fix is the **unsettled-PR backstop** that runs after
+every walk ([§ Post-write settle](#post-write-settle)). Webhooks close the same gap for free on
+installed repos; a thread resolved on github.com still waits for the PR's next `updatedAt` bump,
+a webhook, or an open PR pane.
 
 **Net:** near-real-time where activity actually is, *lower* total API on quiet repos — the
 opposite of naïvely dropping `SYNC_CRON`.
@@ -275,10 +286,12 @@ looking at RIGHT NOW any fresher than its repo's bucket. `sync/refresh-pr.ts` +
   in-memory ETag map (bounded FIFO, like the hydrate cache) + `ghRestGetConditional` on
   `/repos/{o}/{n}/pulls/{number}`. A 304 inside the floor window answers
   `{synced:true, changed:false}` at zero GitHub cost — an idle open pane costs ~nothing.
-- **A ~30s forced-walk floor** (`WALK_FLOOR_MS`) — the same blind-spot fix as Phase 2's
+- **A ~30s forced-walk floor** (`WALK_FLOOR_MS`) — the PR-grain counterpart of Phase 2's
   1800s repo floor, much shorter because a human is watching: CI-finish/thread-resolve
   never bump `updated_at`, so a floor-forced walk is reported `changed:true`
-  ("potentially-changed for checks") even when `updated_at` held still.
+  ("potentially-changed for checks") even when `updated_at` held still. Unlike the repo floor,
+  this one DOES refresh those signals: it is a targeted `syncOnePr` of the viewed PR, with no
+  `since` window to fall outside.
 - **Any walk busts hydration BEFORE responding** (the resync-after-write order rule) —
   in lean mode checkRuns render only from the hydration overlay, so a walk that didn't
   bust it would hand the client's refetch a ≤60s-old snapshot.
@@ -347,7 +360,9 @@ adaptive scheduler next walked that repo — 2 min hot, 15 min cold. `sync/pr-li
   removal. Each tab's count and its list come from one server response (and `/api/daily-brief`
   returns the same figures), so dropping one card locally would make a tab list fewer cards than its count
   claims. On `changed > 0` the SPA invalidates
-  `['attention-cards']` + `['daily-brief']` + `['work-plan']` together.
+  `['attention-cards']` + `['daily-brief']` + `['work-plan']` together. The same diff raises the
+  PR change signal once per repo that moved (below), so every OTHER screen and tab catches up
+  too, not just the board that asked.
 - **One sweep per ACCOUNT at a time** (a synchronous in-flight claim released in `finally` on
   every bail path, thrown lookups included). Two tabs, or an interval overlapping its own focus
   refetch, report a no-op rather than paying twice.
@@ -365,13 +380,150 @@ adaptive scheduler next walked that repo — 2 min hot, 15 min cold. `sync/pr-li
 
 ---
 
+<a id="post-write-settle"></a>
+
+## Post-write settle, the unsettled-PR backstop and the PR change signal ✅ BUILT
+
+**Why.** GitHub acknowledges a write before it has finished with it. A push is attached to its
+PR asynchronously, mergeability is computed only when somebody asks (UNKNOWN, or the old head's
+verdict, for seconds to a minute), and CI moves later still. None of this changes the PR's
+`updatedAt`, so no walk re-reads it. The conflict resolver's confirming step reported
+`visible:true` on a row carrying the pushed head with GitHub's stale CONFLICTING/DIRTY, and the
+Pending board showed the Conflicts card again. The server half is three modules below; the SPA
+half (one write key set, a 5s `['repos']` poll for 150s after a write) is in
+[FRONTEND.md](FRONTEND.md).
+
+### `settlePrAfterWrite` — resync, verify, hand off (`sync/resync-after-write.ts`)
+
+- A ~7s deadline starts at the call. The resync runs first, awaited in full (it queues behind a
+  sync already in flight — the old resync contract), then the account-scoped `getPrSettleFacts`
+  read (named in `verify-isolation.ts`).
+- For a HEAD expectation only, up to 3 inline re-reads (gaps 1s / 1.5s / 2.5s) with no
+  `waitForInFlight`, each RACED against the time left — a slow read carries on in the
+  background. It stops early while rate-limited. Mergeability is never waited for inline.
+- `visible` = the head expectation was met; with no head expectation it keeps the old meaning,
+  "a resync ran".
+- It hands off to the ladder when anything is unmet, a merge column is unknown, or a
+  no-expectation resync failed. Never throws; `visible:false` keeps its copy contract (it will
+  show up shortly, never a retry — a retry double-pushes).
+- `resyncPrAfterWrite` keeps its signature and behaviour; the two share one body.
+
+### `schedulePrSettle` — the ladder (`sync/pr-settle.ts`)
+
+- One ladder per `(account, PR)`, re-reading at ~5s, 15s, 45s and 120s after the call.
+- A newer call merges expectations and restarts the ladder: a newer head expectation replaces
+  the old one, `notConflicting` stays set, and `mergeStateNot` / `ciNot` stay set unless the
+  newer call restates them.
+- **It stops** when the PR is no longer open, or when every expectation is met AND `mergeable` +
+  `merge_state_status` are known (a draft needs only `mergeable`: its `merge_state_status` is
+  `unknown` for ever).
+- Expectations: `headSha` (the stored head must BE it), `headNot` (must differ from it),
+  `notConflicting` (no stored CONFLICTING / DIRTY), `mergeStateNot` (an approval → `blocked`),
+  `ciNot` (a rerun → the red status it re-ran). ⚠ **A stale DIRTY, BLOCKED or FAILURE is a KNOWN
+  value**, so a ladder with no expectation stops on it at its first read. That is why the last
+  three exist: a writer whose effect GitHub reflects late must STATE it, or it gets one read.
+- A step that sees the head, verdict or CI move busts the PR-detail hydration cache.
+- While `isLimited`, a step waits 60s and tries again (at most 70 times, then the entry is
+  released) — never an error. At most 500 entries, oldest dropped first; every entry is released
+  on every exit path, including a thrown lookup; timers are `unref`'d.
+- No `waitForInFlight`, never `enqueuePrSync` (its debounce would swallow the cadence), and
+  `refresh-pr.ts` is untouched.
+
+**Who passes what:**
+
+| Writer | Call | Expectation |
+|---|---|---|
+| Conflict resolver commit (`conflict/land.ts`) | `settlePrAfterWrite` | PR branch: `headSha` = the pushed commit, plus `notConflicting` ONLY for a FULL resolution (rebase is always full). New branch: none, and with `openPr` the new PR is synced by number inside the original PR's `(account, repo)` |
+| `POST …/update-branch` | `settlePrAfterWrite`, awaited | local: `headSha` = the pushed sha; cloud: `headNot` = the previous head (GitHub returns no sha) |
+| `POST …/approve` | resync, then `schedulePrSettle` | `mergeStateNot: 'blocked'` (an approval that does not satisfy protection costs the ladder's four reads) |
+| `POST …/ci/rerun` | `schedulePrSettle` | `ciNot` = the stored status when it was `failure`/`error`. It follows the red status off for ≤120s, NOT the run to its finish — the stale-CI backstop or the open PR pane's poll reads that |
+| AI Fix push (`coding/git-ops.ts` `applyAndPush`) | `settlePrAfterWrite`, NOT awaited | existing branch: `headSha` = the pushed commit, only when the pushed repo IS the PR's head repo (a fork PR's head can never become it). New branch: a targeted sync of the new PR. Not awaited because the plugin records the push only after `applyAndPush` returns |
+| Auto-merge runner | `schedulePrSettle` | enqueue: none; rebase update: `headSha`; native update: `headNot` = the pinned oid |
+
+### The trunk-moved recheck (`sync/unsettled-prs.ts`)
+
+`noteMergeLanded` runs after every merge we land — the merge route, the runner's direct landing,
+the runner's merge-queue landing (ours or outside auto-merge), and `DELETE …/merge-queue` finding
+the PR already merged. It raises the change signal and re-reads up to 25 open non-draft PRs of the
+repo at ~30s and ~90s, because each one's verdict now describes a base that no longer exists. A
+burst of merges restarts both timers. PRs are ranked by `rankForMergeStatePass` (forward cards
+first) and read through `fetchPrLivenessForNodes(withMergeState)` + `applyPrLiveness`, guards
+unchanged (an observed unknown never demotes a known value); the 90s pass is the 30s pass's
+second read. A route awaits `noteMergeLanded`, so the signal is raised before the reply; the
+re-reads stay in the background.
+
+### The unsettled-PR backstop (`runUnsettledPrBackstop`)
+
+Fire-and-forget after every successful walk — the scheduled loop AND the manual `runSyncForRepo`
+tail, never after a cancel:
+
+- Up to 25 of up to 100 open non-draft PRs whose `mergeable` or `merge_state_status` is unknown or
+  NULL, most recently updated first. PRs in their cooldown are excluded in the SQL, so they cannot
+  crowd out the rest.
+- Any answer still UNKNOWN gets ONE second read ~10s later: GitHub starts the computation on the
+  first request (measured: UNKNOWN, then MERGEABLE/CLEAN ~8s later, same `updatedAt`).
+- A PR still unsettled after two reads running — answered UNKNOWN, answered without the merge
+  fields, or not answered — is skipped for 30 min. A read that fails with anything but a rate
+  limit makes the backstop skip the repo for 15 min.
+- CI `pending` whose latest `ci_status_events` row is older than 20 min (or absent) goes to the
+  settle ladder: at most 5 per walk, a 20-min cooldown per PR. The liveness query carries no CI
+  status and deliberately was not given one (it would change its measured point cost).
+- Free — no token, no call — when nothing is unsettled; one recheck per `(account, repo)` at a
+  time (a synchronous claim).
+- ⚠ **IT NEVER ADVANCES `updatedAt`.** An observed newer `updatedAt` means activity the walk has
+  not stored yet; stamping it early would hide that activity from the SPA's "newer `updatedAt` →
+  refetch the PR detail" rule once the walk stores it.
+
+⚠ **Deliberately NOT head-aware.** `PR_LIVENESS_NODES_QUERY` still omits `headRefOid` (`head_sha`
+comes from `commits(last:1)`, a different source), and `persistPr` still writes UNKNOWN
+unconditionally: a head-aware keep-known guard would keep a stale `clean` after a BASE move, which
+is a Merge button that 405s.
+
+### The PR change signal (`sync/pr-change-signal.ts`)
+
+The SPA learnt about changes only from a finished WALK (`sync_state` on the `['repos']` poll).
+Everything outside a walk — a webhook sync, a settle re-read, the backstop, the liveness sweep, a
+write route's local stamp — was invisible to every screen but the one that made it.
+
+- `notePrChanged(accountId, repoId)` keeps one timestamp per `(account, repo)` in memory: at most
+  5000 entries, strictly increasing. Surfaced as the optional `Repo.lastPrChangeAt` on
+  `GET /api/repos` ([API.md](API.md)); lost on restart, which is harmless.
+- **`persistPr` raises it** (on every path: walk, webhook, resync, settle) only after its
+  transaction commits, and only when a board-visible column moved — `state`, `isDraft`,
+  `headSha`, `ciStatus`, `mergeable`, `mergeStateStatus`, `reviewDecision`, and the merge-queue
+  pair only when the response carried it — OR GitHub's `updatedAt` moved (new reviews, comments,
+  replies and commits are child rows). A first sighting counts ONLY for an OPEN PR: the deep
+  backfill's hundreds of merged PRs would otherwise cascade a refetch on every SPA poll. The
+  decision is `boardVisibleMoved` (`sync/upsert.ts`, exported for its test), over the `prev` read
+  the transitions already made. It cannot see a thread resolved on github.com (`updatedAt` does
+  not move).
+- **Also raised by** the liveness sweep and the recheck (once per repo that moved), the
+  merge-queue stamp when the stored value moved, merge landings, and the local stamps of the
+  write routes (comment, review comment, approve, close, reopen, request reviewers, thread reply
+  and resolve, both bot-thread resolves) through `notePrChangedForPr(s)`. ⚠ **A ROUTE AWAITS IT
+  BEFORE REPLYING**: the SPA's write sweep reads `['repos']` first and treats the stamps it saw as
+  covered, so a stamp raised after the reply would buy a second full refetch.
+- ⚠ **NEVER A `sync_state` CURSOR.** `last_incremental_sync_at` is the walk cursor `planSync`
+  derives `since` from; bumping it for a targeted change would make the next walk skip every PR
+  updated in between.
+- ⚠ **DIFF-GATED BY EVERY CALLER** — a bump costs the SPA a cascade of refetches, three of them on
+  the `search` tier, so it must mean "something visible moved", never "a row was written".
+- Server caches subscribe through `onPrChanged`: `db/daily-brief.ts` drops the account's roll-up
+  counts, so an "Elsewhere" line cannot keep counting the old board for its 5-min TTL.
+
+**Cost.** A write costs at most 1 resync, ≤3 inline re-reads and ≤4 ladder reads (~1 point
+each). A landed merge costs 2 liveness merge-state reads (1 point each, ~5s). A walk costs nothing
+extra when no PR is unsettled, otherwise 1-2 points plus ≤5 single-PR syncs for stale CI.
+
+---
+
 ## Cross-cutting
 
 | Item | Detail |
 |---|---|
 | **Config** (`config.ts`) | `GITHUB_APP_WEBHOOK_SECRET`; `WEBHOOK_DEBOUNCE_MS`; `SYNC_ADAPTIVE` (defaults `!isCloud`) + hot/warm/cold/floor interval knobs. `SYNC_CRON`'s default keys off `syncAdaptive` (`*/1` vs `*/5`) — the two must move together, so change them in one place. |
-| **Schema** | **None** — Phase 1 routes by `(owner,name)` over existing `repos` rows; Phase 2 keeps cadence + `ETag` state **in-memory** (chosen over a `repos.lastChangeAt` column: lost on restart just means one immediate attempt after boot, harmless). No migration in either phase. |
-| **Isolation** | Targeted sync is `accountId`-scoped via the repo row. No new id-addressed *read* route, so exposure is minimal; still run `verify:isolation`. |
+| **Schema** | **None** — Phase 1 routes by `(owner,name)` over existing `repos` rows; Phase 2 keeps cadence + `ETag` state **in-memory** (chosen over a `repos.lastChangeAt` column: lost on restart just means one immediate attempt after boot, harmless). No migration in either phase. The settle ladder, the backstop's cooldowns and the PR change signal are in-memory too, on the same reasoning. |
+| **Isolation** | Targeted sync is `accountId`-scoped via the repo row. No new id-addressed *read* route, so exposure is minimal; still run `verify:isolation`. The settle and backstop reads outside `db/queries.ts` (`getPrSettleFacts`, `getPrRepoIds`, `getRepoMergeStateTargets`) are named in `verify-isolation.ts`, and the change signal is keyed by `accountId`. |
 | **Tests** | signature-verify unit; payload → `enqueuePrSync` routing/fan-out to N accounts; debounce-coalesce; `syncOnePr` idempotency vs a fixture PR; conditional-probe 304-skip. |
 | **Idempotency** | Everything routes through `persistPr`, so webhook + backstop + adaptive poll firing on the same PR never duplicate — the load-bearing guarantee in SYNC.md is preserved. |
 

@@ -477,6 +477,21 @@ export async function runSyncForRepo(
         );
       }
 
+      // The UNSETTLED-PR BACKSTOP (sync/unsettled-prs.ts): re-read merge state stored unknown and
+      // CI stuck `pending` — GitHub finishing either never bumps `updatedAt`, so the walk's own
+      // `since` window can never see it again. FIRE-AND-FORGET (never holds this repo's slot),
+      // budget-aware, never throws; free when the repo has no such PRs.
+      if (!walk.cancelled && !cancelRequested.has(repoId)) {
+        try {
+          const { runUnsettledPrBackstop } = await import('./unsettled-prs.js');
+          void runUnsettledPrBackstop({ accountId: repo.accountId, repoId, log });
+        } catch (err) {
+          log.warn(
+            `unsettled-PR backstop ${repo.owner}/${repo.name} failed to start (non-fatal): ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      }
+
       // The BLAST-RADIUS co-change index for this repo. Purely LOCAL — one indexed read of the
       // repo's merged pull requests, an in-memory fold and one upsert; it makes NO GitHub call
       // and spends no rate-limit budget, so unlike the backfill above it needs no gate and no
@@ -771,6 +786,20 @@ export async function syncAllRepos(log: Logger): Promise<void> {
         log.warn(
           `security backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
         );
+      }
+      // The unsettled-PR backstop, as on the manual tail: merge state stored unknown and CI stuck
+      // `pending` are updatedAt-silent, so the 30-min floor walk's `since` window cannot see them.
+      // FIRE-AND-FORGET — this loop is sequential per tick, and a ~5s merge-state read must not
+      // delay every other repo's walk. Never throws; free when there is nothing to re-read.
+      if (!cancelRequested.has(r.id)) {
+        try {
+          const { runUnsettledPrBackstop } = await import('./unsettled-prs.js');
+          void runUnsettledPrBackstop({ accountId: repo.accountId, repoId: r.id, log });
+        } catch (err) {
+          log.warn(
+            `unsettled-PR backstop ${repo.owner}/${repo.name} failed to start (non-fatal): ${err instanceof Error ? err.message : err}`,
+          );
+        }
       }
     } catch (err) {
       // Health backoff: a repo we cannot read must not be retried at the cadence of a

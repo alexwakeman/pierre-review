@@ -17,6 +17,7 @@ import {
   dependencyPrState,
   dependencyProximityBase,
   dependencyStateDetail,
+  MERGE_QUEUE_CARD_DETAIL,
   securityFixDetail,
   unionAdvisoryIds,
   type AuthorAutomationInputs,
@@ -105,6 +106,18 @@ describe('dependencyStateDetail', () => {
     expect(dependencyStateDetail('unknown', p, 'x')).toBe(
       'GitHub has not worked out if it can merge this yet',
     );
+  });
+  it('⚠ says the merge queue while GitHub holds the PR — except for a fault the queue will eject', () => {
+    const queued = { ...p, inMergeQueue: true };
+    for (const state of ['ready', 'behind', 'needs_review', 'blocked', 'unknown'] as const) {
+      expect(dependencyStateDetail(state, queued, 'x'), state).toBe(MERGE_QUEUE_CARD_DETAIL);
+    }
+    // Real faults stay news.
+    expect(dependencyStateDetail('conflicts', queued, 'x')).toBe('Conflicts with main');
+    expect(dependencyStateDetail('ci_red', queued, 'x')).toBe('CI is failing');
+    // ⚠ null is NOT OBSERVED and claims nothing.
+    expect(dependencyStateDetail('ready', { ...p, inMergeQueue: null }, 'ready!')).toBe('ready!');
+    expect(dependencyStateDetail('ready', { ...p, inMergeQueue: false }, 'ready!')).toBe('ready!');
   });
 });
 

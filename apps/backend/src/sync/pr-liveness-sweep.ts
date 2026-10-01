@@ -31,6 +31,7 @@ import {
   rankForMergeStatePass,
   type PrLivenessTarget,
 } from '../db/pr-liveness.js';
+import { notePrChanged } from './pr-change-signal.js';
 
 /**
  * The hard cap on how many PRs one sweep will look at.
@@ -168,6 +169,10 @@ export async function sweepPrLiveness(args: {
     // share one write lock, and the loop is bounded at 90.
     let changed = 0;
     let leftOpenSet = 0;
+    // Repos whose board-visible state moved — raised ONCE each on the SPA change signal after the
+    // loop, so every OTHER screen (and every other tab) cascades too, not just the board that
+    // asked. Diff-gated exactly like `changed`: a quiet sweep raises nothing.
+    const movedRepos = new Set<number>();
     for (const [nodeId, obs] of observed) {
       const target = byNode.get(nodeId);
       // A node id GitHub answered that we did not ask about cannot happen, but the map lookup is
@@ -175,9 +180,13 @@ export async function sweepPrLiveness(args: {
       if (!target) continue;
       const diff = await applyPrLiveness(accountId, target, obs);
       if (diff == null) continue;
-      if (diff.movedOnBoard) changed += 1;
+      if (diff.movedOnBoard) {
+        changed += 1;
+        movedRepos.add(target.repoId);
+      }
       if (diff.leftOpenSet) leftOpenSet += 1;
     }
+    for (const repoId of movedRepos) notePrChanged(accountId, repoId);
 
     return {
       checked: targets.length,

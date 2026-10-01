@@ -88,7 +88,13 @@ import {
   pendingReviewLead,
   landingPrByline,
   myTurnReasonLabel,
+  myTurnTypeChip,
+  forwardStateChip,
+  mergeRowCardOf,
+  pendingCardDetail,
+  QUEUE_STATE_LABEL,
 } from '../src/components/Activity/AttentionCards.js';
+import { MERGE_QUEUE_CARD_DETAIL } from '@pierre-review/shared';
 import {
   armControlPhase,
   armDraftFor,
@@ -99,8 +105,12 @@ import { advisoryUrl } from '../src/lib/ui.js';
 import {
   AUTHOR_ROLE_CHIP,
   DEP_STATE_LABEL,
+  depStateChip,
   depStateSentence,
+  mergeQueueStatus,
   SECURITY_ALERT_SOURCE_LABEL,
+  type MergeQueueLive,
+  type MergeQueueSynced,
 } from '../src/components/Activity/pendingLabels.js';
 
 /** The `InsightPrRef` half every PR-bearing card carries, with the source pair varied per test. */
@@ -361,10 +371,10 @@ describe('viewerCanPush', () => {
 
 // ── THE MERGE QUEUE ──────────────────────────────────────────────────────────────────────────
 //
-// GitHub's MergeStateStatus enum has NO queued member, so a PR sitting in the merge queue reports
-// `mergeStateStatus: 'blocked'` and is indistinguishable from a protection-blocked one. The board
-// may not fetch to find out, so the membership rides the card — and everything below is what the
-// card is then allowed to say about it.
+// GitHub's MergeStateStatus enum has NO queued member, so a PR sitting in the merge queue is
+// indistinguishable from any other by its merge state (queued PRs here have read 'clean' and
+// 'unknown'). The board may not fetch to find out, so the membership rides the card — and
+// everything below is what the card is then allowed to say about it.
 
 /** The card fields the queue badge reads, and nothing else — the resolver takes a Partial so a
  *  surface that never had them (a `ci_failing` card, whose subject can be a repo's trunk) answers
@@ -463,6 +473,224 @@ describe('a queued card keeps its cancel', () => {
   });
 });
 
+// ── THE MERGE ROW WHILE QUEUED ───────────────────────────────────────────────────────────────
+//
+// The reported bug: queue a PR, navigate away, come back — and the merge control offers "Merge ▾"
+// again. The queue's status line lived only inside the expanded panel (per-mount `open` state) and
+// read only the live merge-options answer. `mergeQueueStatus` is now the ONE decision both merge
+// controls and the Pending row make, from the synced row AND the live answer, NEWER WINS.
+
+const T_OLD = 1_000;
+const T_NEW = 2_000;
+
+function synced(
+  inMergeQueue: boolean | null,
+  mergeQueueEntryState: MergeQueueEntryState | null = null,
+  observedAt = T_NEW,
+): MergeQueueSynced {
+  return { inMergeQueue, mergeQueueEntryState, observedAt };
+}
+
+function live(
+  info: {
+    inQueue: boolean;
+    position?: number | null;
+    entryState?: MergeQueueEntryState | null;
+    etaMs?: number | null;
+  } | null,
+  observedAt = T_NEW,
+): MergeQueueLive {
+  return {
+    info:
+      info == null
+        ? null
+        : {
+            enabled: true,
+            inQueue: info.inQueue,
+            position: info.position ?? null,
+            state: info.entryState != null ? info.entryState.toUpperCase() : null,
+            entryState: info.entryState ?? null,
+            estimatedTimeToMergeMs: info.etaMs ?? null,
+          },
+    observedAt,
+  };
+}
+
+const NO_LIVE: MergeQueueLive = { info: undefined, observedAt: 0 };
+
+describe('the merge row while GitHub’s merge queue holds the PR', () => {
+  it('⚠ a synced "queued" alone is enough — the row needs no click and no fetch', () => {
+    // THE REPORTED CASE: the card was stamped queued, the control remounted collapsed, and no live
+    // answer exists. It must still say the queue, never offer Merge.
+    const status = mergeQueueStatus(synced(true, 'awaiting_checks'), NO_LIVE);
+    expect(status).not.toBeNull();
+    expect(status!.line).toBe('In the merge queue · running checks');
+    expect(status!.source).toBe('synced');
+  });
+
+  it('⚠ the canonical line is the one the panel showed right after an enqueue — every part', () => {
+    // "In the merge queue · position N · <state words> · ~M min": the state words are the queue
+    // chip's own (`QUEUE_STATE_LABEL`), so the chip and the row never use two vocabularies.
+    const status = mergeQueueStatus(
+      synced(true, 'queued', T_OLD),
+      live({ inQueue: true, position: 2, entryState: 'awaiting_checks', etaMs: 12 * 60_000 }),
+    );
+    expect(status!.line).toBe('In the merge queue · position 2 · running checks · ~12 min');
+    // A sub-minute estimate still reads as a minute, never "~0 min".
+    expect(
+      mergeQueueStatus(synced(true), live({ inQueue: true, etaMs: 5_000 }))!.line,
+    ).toBe('In the merge queue · ~1 min');
+    // No state, no position, no ETA: the bare words.
+    expect(mergeQueueStatus(synced(true), NO_LIVE)!.line).toBe('In the merge queue');
+  });
+
+  it('never prints a raw enum for any entry state', () => {
+    for (const state of QUEUE_STATES) {
+      const line = mergeQueueStatus(synced(true, state), NO_LIVE)!.line;
+      expect(line, state).not.toContain('_');
+      expect(line, state).not.toMatch(/[A-Z]{3,}/);
+    }
+  });
+
+  it('⚠ a STALE live "not queued" loses to a NEWER synced "queued"', () => {
+    // The board reads merge-options from cache only. An answer fetched before the PR was queued
+    // must not outvote a card the sync has since stamped — that is the "Merge again" bug by
+    // another road.
+    const status = mergeQueueStatus(synced(true, 'queued', T_NEW), live({ inQueue: false }, T_OLD));
+    expect(status).not.toBeNull();
+    expect(status!.source).toBe('synced');
+  });
+
+  it('⚠ a STALE live "queued" loses to a NEWER synced "not queued"', () => {
+    // Dequeued (or landed, or ejected) since the reader last opened the control: no status line,
+    // and above all no "Remove from queue" for a PR that is not there.
+    expect(
+      mergeQueueStatus(synced(false, null, T_NEW), live({ inQueue: true, position: 1 }, T_OLD)),
+    ).toBeNull();
+  });
+
+  it('a NEWER live answer wins either way', () => {
+    expect(mergeQueueStatus(synced(false, null, T_OLD), live({ inQueue: true }, T_NEW))?.source).toBe(
+      'live',
+    );
+    expect(mergeQueueStatus(synced(true, 'queued', T_OLD), live({ inQueue: false }, T_NEW))).toBeNull();
+  });
+
+  it('⚠ a synced NULL makes no claim — it neither queues nor un-queues', () => {
+    // Not observed is not "not queued": with no live answer there is nothing to say…
+    expect(mergeQueueStatus(synced(null), NO_LIVE)).toBeNull();
+    // …and it does not outvote a live answer, however old that answer is.
+    expect(mergeQueueStatus(synced(null, null, T_NEW), live({ inQueue: true }, T_OLD))?.source).toBe(
+      'live',
+    );
+    // A missing live answer (`mergeQueue: null` — no queue, or a failed probe) claims nothing too.
+    expect(mergeQueueStatus(synced(true), { info: null, observedAt: T_NEW })?.source).toBe('synced');
+  });
+
+  it('⚠ position and ETA come ONLY from a live answer that agrees', () => {
+    // An older live answer that ALSO says queued still knows this PR's place in line.
+    const agreeing = mergeQueueStatus(
+      synced(true, 'queued', T_NEW),
+      live({ inQueue: true, position: 3, etaMs: 60_000 }, T_OLD),
+    );
+    expect(agreeing!.position).toBe(3);
+    expect(agreeing!.line).toContain('position 3');
+    // A live answer that says NOT queued has no position to lend, even a leftover one.
+    const disagreeing = mergeQueueStatus(
+      synced(true, 'queued', T_NEW),
+      { info: { ...live({ inQueue: false }).info!, position: 4, estimatedTimeToMergeMs: 60_000 }, observedAt: T_OLD },
+    );
+    expect(disagreeing!.position).toBeNull();
+    // `queued` adds no words: "In the merge queue · queued" said it twice.
+    expect(disagreeing!.line).toBe('In the merge queue');
+  });
+
+  it('the deciding observation names the state; the other only fills a gap', () => {
+    // Synced is newer and knows the state: its words win over an older live state.
+    expect(
+      mergeQueueStatus(
+        synced(true, 'mergeable', T_NEW),
+        live({ inQueue: true, entryState: 'queued' }, T_OLD),
+      )!.entryState,
+    ).toBe('mergeable');
+    // Live is newer but carried no state (an older server): the synced state fills in.
+    expect(
+      mergeQueueStatus(synced(true, 'locked', T_OLD), live({ inQueue: true }, T_NEW))!.entryState,
+    ).toBe('locked');
+  });
+
+  it('⚠ an ejection leads with the header chip’s own word — never "In" under "Leaving"', () => {
+    const line = mergeQueueStatus(synced(true, 'unmergeable'), NO_LIVE)!.line;
+    expect(line).toBe(QUEUE_STATE_LABEL.unmergeable);
+    expect(line).toBe('Leaving the merge queue');
+    expect(line.startsWith(pendingQueueBadge({ inMergeQueue: true, mergeQueueEntryState: 'unmergeable' })!.label)).toBe(true);
+    // Every other state keeps the canonical "In the merge queue" lead.
+    for (const state of QUEUE_STATES.filter((q) => q !== 'unmergeable')) {
+      expect(mergeQueueStatus(synced(true, state), NO_LIVE)!.line, state).toMatch(/^In the merge queue/);
+    }
+  });
+
+  it('⚠ an ejection is the one state drawn as bad', () => {
+    expect(mergeQueueStatus(synced(true, 'unmergeable'), NO_LIVE)!.tone).toBe('bad');
+    for (const state of QUEUE_STATES.filter((q) => q !== 'unmergeable')) {
+      expect(mergeQueueStatus(synced(true, state), NO_LIVE)!.tone, state).toBe('ok');
+    }
+  });
+
+  it('⚠ ONE VOCABULARY: without a position, the row\'s line IS the chip\'s label, for every state', () => {
+    // The card used to say "Merge queue · running checks" in its header over a row saying "In the
+    // merge queue · awaiting checks" — one fact, two vocabularies.
+    for (const state of [...QUEUE_STATES, null]) {
+      const line = mergeQueueStatus(synced(true, state), NO_LIVE)!.line;
+      const chip = pendingQueueBadge({ inMergeQueue: true, mergeQueueEntryState: state })!.label;
+      expect(line, String(state)).toBe(chip);
+    }
+    expect(QUEUE_STATE_LABEL.awaiting_checks).toBe('In the merge queue · running checks');
+  });
+
+  it('⚠ `withPosition: false` (the board) drops a cached position and time, so the line never varies', () => {
+    // The board never refetches merge-options: a position it holds is an old click's answer, and
+    // whether it holds one at all depends on the cache. It says the chip's words every time.
+    const cached = live({ inQueue: true, position: 2, entryState: 'awaiting_checks', etaMs: 12 * 60_000 });
+    const board = mergeQueueStatus(synced(true, 'awaiting_checks', T_OLD), cached, {
+      withPosition: false,
+    });
+    expect(board!.line).toBe(QUEUE_STATE_LABEL.awaiting_checks);
+    expect(board!.position).toBeNull();
+    // Membership and the entry state still come from the newer answer.
+    expect(board!.source).toBe('live');
+    expect(
+      mergeQueueStatus(synced(false, null, T_OLD), live({ inQueue: true, position: 1 }, T_NEW), {
+        withPosition: false,
+      })!.line,
+    ).toBe('In the merge queue');
+    // Same words with no cached answer at all — the reload case.
+    expect(
+      mergeQueueStatus(synced(true, 'awaiting_checks'), NO_LIVE, { withPosition: false })!.line,
+    ).toBe(board!.line);
+    // The pane (default) keeps them.
+    expect(mergeQueueStatus(synced(true, 'awaiting_checks', T_OLD), cached)!.line).toContain(
+      'position 2',
+    );
+  });
+});
+
+describe('a queued card does not also say it is ready', () => {
+  it('⚠ drops the "clean" chip on a queued merge card — the queue chip says what is happening', () => {
+    expect(forwardStateChip(mergeCard({ mergeStateStatus: 'clean', inMergeQueue: true }))).toBeNull();
+    expect(forwardStateChip(mergeCard({ mergeStateStatus: 'clean', inMergeQueue: null }))).toBe('clean');
+    expect(forwardStateChip(mergeCard({ mergeStateStatus: 'clean', inMergeQueue: false }))).toBe('clean');
+    expect(forwardStateChip(updateBranchCard({ inMergeQueue: true }))).toBeNull();
+    expect(forwardStateChip(updateBranchCard())).toBe('behind trunk');
+  });
+
+  it('⚠ drops "Ready to merge" on a queued Dependencies card, and only there', () => {
+    expect(depStateChip(bumpCard({ inMergeQueue: true }))).toBeNull();
+    expect(depStateChip(bumpCard({ inMergeQueue: null }))).toBe(DEP_STATE_LABEL.ready);
+    expect(depStateChip(bumpCard({ depState: 'blocked', mergeStateStatus: 'blocked' }))).toBe('Blocked');
+  });
+});
+
 // ── RELEVANCE EMPHASIS ───────────────────────────────────────────────────────────────────────
 
 function myTurnCard(
@@ -472,6 +700,7 @@ function myTurnCard(
     reason?: MyTurnCard['reason'];
     ball?: MyTurnCard['ball'];
     own?: MyTurnOwnWork;
+    inMergeQueue?: boolean | null;
   } = {},
 ): MyTurnCard {
   return {
@@ -517,6 +746,8 @@ function trunkCard(over: Partial<MyTurnTrunkCard> = {}): MyTurnTrunkCard {
     authorIsBot: true,
     authorBotKind: 'dependabot',
     automation: { role: 'dependency', kind: 'dependabot', source: 'account' },
+    failingChecks: ['Run Journey Tests / Run Journey Tests', 'build (ubuntu-latest)', 'lint'],
+    failingCheckTotal: 5,
     ...over,
   };
 }
@@ -530,6 +761,16 @@ describe('the type chip names what you are being asked to do', () => {
     expect(
       myTurnReasonLabel(myTurnCard({ reason: 'watched_repo_pr', ball: { kind: 'untouched' } })),
     ).toBe('New PR');
+  });
+
+  it('says "Auto review" on a Claude review the workspace started, "Claude review" on a clicked one', () => {
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review', trigger: 'auto' }))).toBe(
+      'Auto review',
+    );
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review', trigger: 'manual' }))).toBe(
+      'Claude review',
+    );
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review' }))).toBe('Claude review');
   });
 
   it('says which kind of ready a promoted PR is — the words its home tab uses', () => {
@@ -546,6 +787,32 @@ describe('the type chip names what you are being asked to do', () => {
     );
     expect(myTurnReasonLabel(myTurnCard({ reason: 'own_ready', own: ready('update_branch') }))).toBe(
       KIND_LABEL.update_branch,
+    );
+  });
+
+  it('⚠ prints NO type chip on your own ready PR while GitHub’s queue holds it', () => {
+    // "Ready to merge" beside "In the merge queue. GitHub merges it from here." under a header
+    // queue chip — the contradiction the Ready to land and Dependencies cards already drop. My
+    // turn is the default tab, so this is where the reader's own queued PR shows up first.
+    const own: MyTurnOwnWork = {
+      kind: 'ready',
+      forward: 'merge',
+      mergeStateStatus: 'clean',
+      mergeable: 'mergeable',
+      lastCommitAt: null,
+      viewerCanPush: true,
+    };
+    expect(myTurnTypeChip(myTurnCard({ reason: 'own_ready', own, inMergeQueue: true }))).toBeNull();
+    // Not queued, or not observed: the chip is the one map's word, as before.
+    expect(myTurnTypeChip(myTurnCard({ reason: 'own_ready', own, inMergeQueue: false }))).toBe(
+      KIND_LABEL.merge,
+    );
+    expect(myTurnTypeChip(myTurnCard({ reason: 'own_ready', own, inMergeQueue: null }))).toBe(
+      KIND_LABEL.merge,
+    );
+    // Only your own READY PR: a review request on a queued PR still says what it asks of you.
+    expect(myTurnTypeChip(myTurnCard({ reason: 'review_request', inMergeQueue: true }))).toBe(
+      'Review requested',
     );
   });
 
@@ -629,6 +896,16 @@ describe('a promoted card, rebuilt as its home card', () => {
     expect(landingPrByline(c)).toEqual({ authorId: 9, automation: t.automation });
     expect(c.authorIsBot).toBe(true);
     expect(c.authorBotKind).toBe('dependabot');
+    // …and the failing checks are COPIED, both halves — or a promoted red trunk silently loses the
+    // names its home card shows.
+    expect(c.failingChecks).toEqual(t.failingChecks);
+    expect(c.failingCheckTotal).toBe(5);
+  });
+
+  it('carries "no names known" through as null, never an empty list or a zero', () => {
+    const c = asCiFailingCard(trunkCard({ failingChecks: null, failingCheckTotal: null }));
+    expect(c.failingChecks).toBeNull();
+    expect(c.failingCheckTotal).toBeNull();
   });
 
   it('names no landing PR when the red head resolved to none — a direct push', () => {
@@ -1721,5 +1998,107 @@ describe('an alert, as a sentence', () => {
     expect(
       securityAlertSentence(alert({ source: 'reviewer', vendorKind: 'in_house', authorId: 13 }), USERS),
     ).toBe('erxes-dev-agent flagged GHSA-9qr9-h5gf-34mp');
+  });
+});
+
+// ── A QUEUED CARD STATES THE QUEUE ONCE ─────────────────────────────────────────────────────────
+//
+// A queued card used to say it three times in two vocabularies: the header chip ("Merge queue ·
+// running checks"), the server's sentence ("In the merge queue. GitHub merges it from here.") and
+// the merge row ("In the merge queue · awaiting checks"). The words are now one table
+// (QUEUE_STATE_LABEL, pinned above), the sentence is left off the card (`pendingCardDetail`), and
+// the chip steps aside where the card's merge row prints the line — decided through
+// `mergeRowCardOf`, which must mirror the renderers or the chip would vanish over a row that says
+// nothing.
+describe('the queue sentence on a card', () => {
+  it('⚠ is left off a queued card — the chip or the merge row already says it', () => {
+    expect(pendingCardDetail({ detail: MERGE_QUEUE_CARD_DETAIL, inMergeQueue: true })).toBeNull();
+    expect(
+      pendingCardDetail({ ...mergeCard({ inMergeQueue: true }), detail: MERGE_QUEUE_CARD_DETAIL }),
+    ).toBeNull();
+  });
+
+  it('⚠ is kept unless the card itself says queued — never dropped from a card that says nothing else', () => {
+    for (const inMergeQueue of [null, false, undefined]) {
+      expect(
+        pendingCardDetail({ detail: MERGE_QUEUE_CARD_DETAIL, inMergeQueue }),
+        String(inMergeQueue),
+      ).toBe(MERGE_QUEUE_CARD_DETAIL);
+    }
+  });
+
+  it('leaves every other sentence alone, queued or not, and prints nothing for an empty one', () => {
+    expect(pendingCardDetail({ detail: 'Conflicts with main', inMergeQueue: true })).toBe(
+      'Conflicts with main',
+    );
+    expect(pendingCardDetail(mergeCard())).toBe('approved and clean');
+    expect(pendingCardDetail({ detail: '', inMergeQueue: false })).toBeNull();
+  });
+
+  it('a queued Dependencies card prints no state sentence; a conflict on one still does', () => {
+    expect(depStateSentence({ ...bumpCard({ inMergeQueue: true }), detail: MERGE_QUEUE_CARD_DETAIL })).toBeNull();
+    expect(
+      depStateSentence({
+        ...securityCard({ inMergeQueue: true }),
+        stateDetail: MERGE_QUEUE_CARD_DETAIL,
+      }),
+    ).toBeNull();
+    expect(
+      depStateSentence({
+        ...bumpCard({ inMergeQueue: true, depState: 'conflicts' }),
+        detail: 'Conflicts with main',
+      }),
+    ).toBe('Conflicts with main');
+  });
+});
+
+describe('mergeRowCardOf — which cards carry a merge row', () => {
+  const ready: MyTurnOwnWork = {
+    kind: 'ready',
+    forward: 'merge',
+    mergeStateStatus: 'clean',
+    mergeable: 'mergeable',
+    lastCommitAt: '2026-08-27T09:00:00.000Z',
+    viewerCanPush: true,
+  };
+
+  it('the two forward kinds carry their own', () => {
+    const m = mergeCard();
+    expect(mergeRowCardOf(m)).toBe(m);
+    const u = updateBranchCard();
+    expect(mergeRowCardOf(u)).toBe(u);
+  });
+
+  it('a dependency update does, except on a conflict (the resolver entry) — as DependencyActions', () => {
+    const b = bumpCard();
+    expect(mergeRowCardOf(b)).toBe(b);
+    expect(mergeRowCardOf(bumpCard({ depState: 'conflicts' }))).toBeNull();
+    const sec = securityCard();
+    expect(mergeRowCardOf(sec)).toBe(sec);
+    expect(mergeRowCardOf(securityCard({ depState: 'conflicts' }))).toBeNull();
+  });
+
+  it('a person\'s PR a security tool flagged carries none', () => {
+    expect(mergeRowCardOf(securityCard({ dependencyUpdate: false }))).toBeNull();
+  });
+
+  it('a My turn card carries one only for your own ready PR, as the Ready to land card', () => {
+    const own = mergeRowCardOf(myTurnCard({ reason: 'own_ready', own: ready, inMergeQueue: true }));
+    expect(own?.kind).toBe('merge');
+    expect(own?.inMergeQueue).toBe(true);
+    expect(mergeRowCardOf(myTurnCard())).toBeNull();
+    expect(
+      mergeRowCardOf(
+        myTurnCard({
+          reason: 'own_conflicts',
+          own: { kind: 'conflicts', mergeStateStatus: 'dirty', mergeable: 'conflicting' },
+        }),
+      ),
+    ).toBeNull();
+    expect(mergeRowCardOf(trunkCard())).toBeNull();
+  });
+
+  it('every other kind carries none', () => {
+    expect(mergeRowCardOf(conflictsCard())).toBeNull();
   });
 });

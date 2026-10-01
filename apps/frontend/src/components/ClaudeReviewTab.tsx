@@ -35,7 +35,9 @@ import {
   useClaudeReview,
   useClaudeReviewById,
   useClaudeReviewStream,
+  useClaudeReviewStarting,
   useGenerateReview,
+  isAutoReviewHoldError,
   usePostFinding,
   usePostReview,
   useSetReviewBudget,
@@ -44,6 +46,7 @@ import {
 } from '../hooks/useClaudeReview.js';
 import { highlightBlock, languageForPath } from '../lib/hljsLines.js';
 import { hunkLineMarker, useHunkHighlight } from './DiffHunk.js';
+import { writeClipboard } from './CopyButton.js';
 import { Markdown } from './Markdown.js';
 import { MentionTextarea } from './MentionTextarea.js';
 import {
@@ -57,6 +60,7 @@ import {
   WarningIcon,
 } from './Icons.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
+import { AUTO_REVIEW_LABEL } from './Activity/pendingLabels.js';
 import {
   ClaudeReviewFollowUpSection,
   ClaudeReviewTicketPanel,
@@ -546,14 +550,12 @@ function FindingRow({
   const hasReword =
     finding.editedBody != null && finding.editedBody.trim() !== '';
   // A reword the user has typed but not yet saved (editor still open) takes
-  // priority — posting and Copy use it.
+  // priority — posting uses it (Copy never does: it copies Claude's original).
   const pendingReword =
     rewording && draft.trim() !== '' && draft !== (finding.editedBody ?? '')
       ? draft
       : null;
   const willPostReword = pendingReword != null || hasReword;
-  const effectiveBody =
-    pendingReword ?? (hasReword ? (finding.editedBody as string) : finding.body);
 
   const anchorLabel =
     finding.line != null ? `${finding.path}:${finding.line}` : finding.path;
@@ -612,15 +614,20 @@ function FindingRow({
   // can't post, and that surfaces as an error on the attempt.
   const canPostComment = editable;
 
+  // Copy is CLAUDE'S ORIGINAL COMMENT, as its markdown SOURCE — never the reader's reword
+  // (that is theirs, already in their own editor), and never the rendered DOM, so fences,
+  // lists and links paste intact. The title goes in bold so the whole paste stays markdown.
   const copy = (): void => {
-    let text = `${finding.title}\n\n${effectiveBody}`;
-    if (finding.suggestion != null && finding.suggestion !== '') {
+    let text = `**${finding.title}**\n\n${finding.body}`;
+    if (finding.suggestion != null && finding.suggestion.trim() !== '') {
       text += `\n\n\`\`\`suggestion\n${finding.suggestion}\n\`\`\``;
     }
-    void navigator.clipboard.writeText(text);
-    setCopied(true);
-    if (copyTimer.current != null) clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopied(false), 1500);
+    void writeClipboard(text).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      if (copyTimer.current != null) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 1500);
+    });
   };
 
   const saveReword = (): void => {
@@ -1053,6 +1060,11 @@ function ClaudesReview({
     <div className="space-y-2 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
         Claude&apos;s review
+        {review.trigger === 'auto' && (
+          <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs font-normal text-gray-500 dark:text-gray-400">
+            {AUTO_REVIEW_LABEL}
+          </span>
+        )}
         {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
         {review.reviewMode != null && (
           <span
@@ -1606,8 +1618,9 @@ export function ClaudeReviewTab({
   }, [pr.files, pr.id, qc]);
 
   // Model picker. ALWAYS opens on the default (Claude Opus 5.5) — never seeded from the stored
-  // run, or every already-reviewed PR would keep reopening on its old model, and a stored
-  // 'claude-opus-4-8' would become a select value with no option. A pick stays until remount.
+  // run, or every already-reviewed PR would keep reopening on its old model, and a run stored
+  // under a retired id (the old Opus 4.8) would become a select value with no option. A pick
+  // stays until remount.
   const [model, setModel] = useState<ClaudeReviewModel>(DEFAULT_CLAUDE_REVIEW_MODEL);
 
   // The optional user story or task. The reader's own draft wins; otherwise it prefills from the
@@ -1657,6 +1670,8 @@ export function ClaudeReviewTab({
   const [confirmPost, setConfirmPost] = useState(false);
 
   const generate = useGenerateReview(pr.id);
+  // A start in flight from ANY surface (this tab or the Open PRs table) — one shared mutation key.
+  const starting = useClaudeReviewStarting(pr.id);
   const cancel = useCancelReview(pr.id);
   const updateReview = useUpdateReview(pr.id);
   const updateFinding = useUpdateFinding(pr.id);
@@ -1693,6 +1708,10 @@ export function ClaudeReviewTab({
   }, [review]);
 
   const isRunning = review?.status === 'running' || review?.status === 'queued';
+  // An AUTO review holds this PR (waiting in its lane, or running): the manual start is locked
+  // until it ends — the server answers 409 AutoReviewInProgress otherwise.
+  const autoHold: 'queued' | 'running' | null =
+    data?.autoReview ?? (isRunning && review?.trigger === 'auto' ? 'running' : null);
   // Live progress over SSE — pushes each phase/activity/usage change in real time
   // and self-invalidates the full review on the terminal `done` (so the finished
   // result loads without a poll).
@@ -1823,7 +1842,7 @@ export function ClaudeReviewTab({
             <select
               value={model}
               onChange={(e) => setModel(e.target.value as ClaudeReviewModel)}
-              disabled={isRunning || generate.isPending}
+              disabled={isRunning || starting}
               className="rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
             >
               {CLAUDE_REVIEW_MODELS.map((m) => (
@@ -1840,7 +1859,7 @@ export function ClaudeReviewTab({
               onChange={(e) =>
                 setReviewModeChoice(e.target.value as RequestedReviewMode)
               }
-              disabled={isRunning || generate.isPending}
+              disabled={isRunning || starting}
               title="How deep to review: Auto decides from the diff; Quick reviews the diff only (fast, no repository access); Deep clones the repo and explores callers/dependents."
               className="rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
             >
@@ -1853,12 +1872,17 @@ export function ClaudeReviewTab({
             <button
               type="button"
               onClick={onRunClick}
-              disabled={isRunning || generate.isPending || !ticketCheck.ok}
+              disabled={isRunning || starting || autoHold != null || !ticketCheck.ok}
               title={ticketBlockedTitle}
               className="rounded border border-gray-300 px-2 py-1 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
             >
               {review == null ? 'Run review' : 'Re-review'}
             </button>
+            {autoHold != null && (
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {autoHold === 'running' ? 'Auto review running' : 'Auto review queued'}
+              </span>
+            )}
             <span
               className="font-mono text-xs text-gray-400"
               title={pr.headSha ?? undefined}
@@ -1901,7 +1925,7 @@ export function ClaudeReviewTab({
                 <button
                   type="button"
                   onClick={runGenerate}
-                  disabled={!ticketCheck.ok}
+                  disabled={!ticketCheck.ok || autoHold != null}
                   title={ticketBlockedTitle}
                   className="rounded border border-amber-400 px-2 py-0.5 text-xs hover:bg-amber-100 disabled:opacity-50 dark:border-amber-600 dark:hover:bg-amber-900/40"
                 >
@@ -1918,7 +1942,9 @@ export function ClaudeReviewTab({
             </div>
           )}
 
-          {generate.isError && (
+          {/* An auto-review refusal is shown by the "Auto review queued/running" note instead,
+              and is history once the hold ends. */}
+          {generate.isError && !isAutoReviewHoldError(generate.error) && (
             <div className="mt-2 text-xs text-red-500">
               {(generate.error as Error)?.message ?? 'Failed to start review.'}
             </div>
@@ -1952,6 +1978,11 @@ export function ClaudeReviewTab({
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500" />
             <span>{phaseLabel}…</span>
+            {review?.trigger === 'auto' && (
+              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-500 dark:text-gray-400">
+                {AUTO_REVIEW_LABEL}
+              </span>
+            )}
             {status?.progress?.reviewMode != null && (
               <span
                 className="rounded bg-blue-500/10 px-1.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400"
@@ -2039,6 +2070,7 @@ export function ClaudeReviewTab({
               <option key={h.id} value={h.id}>
                 {shortSha(h.headSha)} · {h.model} · {h.status} ·{' '}
                 {formatDate(h.createdAt)}
+                {h.trigger === 'auto' ? ` · ${AUTO_REVIEW_LABEL}` : ''}
                 {h.id === review?.id ? ' (latest)' : ''}
               </option>
             ))}

@@ -3,12 +3,9 @@ import { useIsMutating } from '@tanstack/react-query';
 import {
   CLAUDE_REVIEW_MODELS,
   CLAUDE_REVIEW_MODEL_LABELS,
+  DEFAULT_AI_FIX_MODEL,
   type AiFix,
-  type AiFixMergePreview,
   type AiFixModel,
-  type AiFixPushStrategy,
-  type AiFixResolved,
-  type AiFixResolveStatusResponse,
   type AiFixSeed,
   type AiFixStatus,
   type AiFixSummary,
@@ -24,15 +21,10 @@ import { useFilters } from '../store/filters.js';
 import {
   aiFixStartMutationKey,
   useAiFix,
-  useAiFixJobStream,
   useAiFixStream,
   useCancelFix,
-  useCancelPush,
-  useCancelRebase,
-  useMergePreview,
   usePushFix,
   useStartFix,
-  useStartRebase,
 } from '../hooks/useAiFix.js';
 import { CiAnalysisCard, errText } from './CiAnalysisCard.js';
 import { CommentPicker } from './AiFix/CommentPicker.js';
@@ -42,7 +34,6 @@ import {
   useAiFixSelection,
 } from '../store/aiFixComments.js';
 import { Markdown } from './Markdown.js';
-import { WarningIcon } from './Icons.js';
 import { DiffWrapToggle, FileDiffView, type DiffFile } from './diff/FileDiffView.js';
 import { parseGitPatch } from '../lib/diff.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
@@ -53,44 +44,6 @@ const BTN_PRIMARY =
   'whitespace-nowrap rounded border border-blue-400 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
 const BTN_SECONDARY =
   'whitespace-nowrap rounded border border-gray-300 px-2.5 py-1 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
-
-const RESOLVE_PHASE_LABEL: Record<string, string> = {
-  cloning: 'Checking out the code',
-  applying_fix: 'Applying the fix',
-  fetching_trunk: 'Fetching the trunk',
-  rebasing: 'Rebasing onto the trunk',
-  merging: 'Merging the trunk in',
-  resolving_conflicts: 'Resolving conflicts with Claude',
-  verifying: 'Verifying the result',
-  pushing: 'Pushing',
-};
-
-// Map the resolve/merge/push phases to a determinate 0–100 reading.
-function resolveProgressPct(status: AiFixResolveStatusResponse | null): number | null {
-  if (!status || status.status === 'idle') return null;
-  if (status.status === 'queued') return 6;
-  const p = status.progress;
-  if (!p) return 10;
-  switch (p.phase) {
-    case 'cloning':
-      return 15;
-    case 'applying_fix':
-      return 25;
-    case 'fetching_trunk':
-      return 35;
-    case 'rebasing':
-    case 'merging':
-      return 45;
-    case 'resolving_conflicts':
-      return Math.min(90, 55 + (p.recentActivity?.length ?? 0) * 3);
-    case 'verifying':
-      return 92;
-    case 'pushing':
-      return 96;
-    default:
-      return 20;
-  }
-}
 
 function SectionTitle({ children }: { children: React.ReactNode }): JSX.Element {
   return (
@@ -191,7 +144,9 @@ function FixerSection({
   onSeedConsumed: () => void;
 }): JSX.Element {
   const { data, isLoading } = useAiFix(pr.id, true);
-  const [model, setModel] = useState<AiFixModel>('claude-sonnet-5');
+  // Opens on the shared default (Opus 5.5, effort pinned to medium server-side) — the same
+  // constant the CI card's "Fix it" sends and the start route falls back to.
+  const [model, setModel] = useState<AiFixModel>(DEFAULT_AI_FIX_MODEL);
   const startFix = useStartFix(pr.id);
   const cancelFix = useCancelFix(pr.id);
 
@@ -535,128 +490,11 @@ function FixHistory({
   );
 }
 
-// The fix branch's state vs the trunk, once the preview lands.
-function TrunkStatus({
-  preview,
-  loading,
-}: {
-  preview: AiFixMergePreview | null;
-  loading: boolean;
-}): JSX.Element | null {
-  if (loading) {
-    return (
-      <p className="text-[11px] text-gray-400">Checking against the trunk…</p>
-    );
-  }
-  if (!preview || !preview.available || !preview.trunkSha) return null;
-  if (!preview.clean) {
-    const files = preview.conflictFiles;
-    return (
-      <div className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-700 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
-        <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
-        Conflicts with <span className="font-mono">{preview.trunk}</span>
-        {files.length > 0 ? (
-          <>
-            {' in '}
-            {files.length} file{files.length === 1 ? '' : 's'}
-            <span className="text-amber-600/90 dark:text-amber-400/90">
-              {': '}
-              {files.slice(0, 6).join(', ')}
-              {files.length > 6 ? '…' : ''}
-            </span>
-          </>
-        ) : null}
-        . Resolving before you push avoids a conflicted PR.
-      </div>
-    );
-  }
-  if (preview.behindBy > 0) {
-    return (
-      <p className="text-[11px] text-gray-500 dark:text-gray-400">
-        <span className="font-mono">{preview.trunk}</span> is {preview.behindBy}{' '}
-        commit{preview.behindBy === 1 ? '' : 's'} ahead — the fix merges cleanly.
-      </p>
-    );
-  }
-  return (
-    <p className="text-[11px] text-green-600 dark:text-green-400">
-      Up to date with <span className="font-mono">{preview.trunk}</span> — no
-      conflicts.
-    </p>
-  );
-}
-
-// The reviewable result of a rebase resolution: shown before the force-with-lease push.
-function ResolvedReview({
-  resolved,
-  target,
-  pushing,
-  onPush,
-  onRedo,
-  disabled,
-}: {
-  resolved: AiFixResolved;
-  target: 'existing' | 'new';
-  pushing: boolean;
-  onPush: () => void;
-  onRedo: () => void;
-  disabled: boolean;
-}): JSX.Element {
-  const files = useMemo<DiffFile[]>(
-    () => parseGitPatch(resolved.diff),
-    [resolved.diff],
-  );
-  return (
-    <div className="mt-2 space-y-2">
-      <div className="rounded border border-green-200 bg-green-50 p-2 text-[11px] text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-300">
-        Rebased onto <span className="font-mono">{resolved.trunk}</span>.
-        {resolved.resolvedConflicts
-          ? ` Claude resolved conflicts in ${resolved.conflictFiles.length} file${
-              resolved.conflictFiles.length === 1 ? '' : 's'
-            }${
-              resolved.conflictFiles.length
-                ? `: ${resolved.conflictFiles.join(', ')}`
-                : ''
-            }.`
-          : ' No conflicts.'}{' '}
-        Review the result below, then push.
-      </div>
-      <div className="flex items-center justify-between gap-3 text-[11px] text-gray-500 dark:text-gray-400">
-        <span>
-          {resolved.filesChanged.length} file
-          {resolved.filesChanged.length === 1 ? '' : 's'} in the rebased result
-        </span>
-        <DiffWrapToggle />
-      </div>
-      <div className="overflow-hidden rounded border border-gray-200 text-gray-800 dark:border-gray-800 dark:text-gray-200">
-        <FileDiffView files={files} />
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          className={BTN_PRIMARY}
-          disabled={pushing || disabled}
-          onClick={onPush}
-        >
-          {pushing
-            ? 'Pushing…'
-            : target === 'new'
-              ? 'Push rebased + open PR'
-              : 'Push rebased (force-with-lease)'}
-        </button>
-        <button
-          type="button"
-          className={BTN_SECONDARY}
-          disabled={pushing}
-          onClick={onRedo}
-        >
-          Re-rebase
-        </button>
-      </div>
-    </div>
-  );
-}
-
+// Push a finished fix as it is: onto the PR's own branch, or onto a new branch with a PR opened.
+// There is no trunk step — no check against the trunk on mount, no rebase or merge, and no
+// "let Claude resolve conflicts". A fix that conflicts with the trunk pushes as-is and the PR
+// shows as conflicted on GitHub. The server never force-pushes this and refuses a push to the
+// PR's own branch if that branch moved since the fix was generated.
 function PushControls({
   pr,
   fix,
@@ -669,21 +507,13 @@ function PushControls({
   viewerCanPush: boolean;
 }): JSX.Element {
   const push = usePushFix(pr.id);
-  const startRebase = useStartRebase();
-  const cancelRebase = useCancelRebase();
-  const cancelPush = useCancelPush();
-  const previewM = useMergePreview();
 
   const canPushSameBranch = headInfo?.canPushSameBranch ?? false;
   const [target, setTarget] = useState<'existing' | 'new'>(
     canPushSameBranch ? 'existing' : 'new',
   );
   const [branch, setBranch] = useState(headInfo?.suggestedBranch ?? '');
-  const [autoResolve, setAutoResolve] = useState(true);
-  const [mode, setMode] = useState<'idle' | 'rebasing' | 'pushing'>('idle');
-  const [jobError, setJobError] = useState<string | null>(null);
   const branchRef = useRef(false);
-  const previewRef = useRef(false);
 
   useEffect(() => {
     if (!branchRef.current && headInfo?.suggestedBranch) {
@@ -693,125 +523,37 @@ function PushControls({
     }
   }, [headInfo]);
 
-  const pushed = fix.pushedAt != null;
-  // A fix pushed to the PR's OWN head branch (no new PR opened) can be reconciled
-  // against a moved trunk in place — a rebase force-with-lease replaces the branch tip.
-  // A fix pushed to a NEW branch lives on its own PR; the merge-preview (bound to the
-  // original PR) wouldn't describe it and a non-force re-push would be rejected, so we
-  // don't offer reconciliation there — just the pushed record.
-  const pushedToOwnBranch = pushed && fix.pushedPrNumber == null;
-  const showReconcile = !pushed || pushedToOwnBranch;
-
-  // Auto-check the trunk once the push panel first renders — INCLUDING after a push to
-  // the PR's own branch, so a fix pushed a while ago is re-evaluated against a trunk
-  // that may have moved (the "do I need to rebase/merge again?" case). A manual
-  // Re-check button re-runs it.
-  useEffect(() => {
-    if (!previewRef.current && viewerCanPush && showReconcile) {
-      previewRef.current = true;
-      previewM.mutate(fix.id);
-    }
-  }, [viewerCanPush, showReconcile, fix.id]);
-  const preview = previewM.data ?? null;
-
-  const { status: rebaseStatus } = useAiFixJobStream(
-    pr.id,
-    fix.id,
-    'rebase',
-    mode === 'rebasing',
-  );
-  const { status: pushStatus } = useAiFixJobStream(
-    pr.id,
-    fix.id,
-    'push',
-    mode === 'pushing',
-  );
-
-  useEffect(() => {
-    if (
-      mode === 'rebasing' &&
-      rebaseStatus &&
-      rebaseStatus.status !== 'running' &&
-      rebaseStatus.status !== 'queued'
-    ) {
-      setMode('idle');
-      if (rebaseStatus.error) setJobError(rebaseStatus.error);
-    }
-  }, [mode, rebaseStatus]);
-
-  useEffect(() => {
-    if (
-      mode === 'pushing' &&
-      pushStatus &&
-      pushStatus.status !== 'running' &&
-      pushStatus.status !== 'queued'
-    ) {
-      setMode('idle');
-      if (pushStatus.error) setJobError(pushStatus.error);
-    }
-  }, [mode, pushStatus]);
+  // A pushed fix — to the PR's own branch or to a new one — is a record, nothing more.
+  if (fix.pushedAt != null) return <PushedCard fix={fix} />;
 
   if (!viewerCanPush) {
-    return pushed ? (
-      <PushedCard fix={fix} />
-    ) : (
+    return (
       <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
         You need write access to this repository to push this fix.
       </p>
     );
   }
 
-  // Pushed to a new branch → just the record; reconciliation doesn't apply (above).
-  if (pushed && !pushedToOwnBranch) return <PushedCard fix={fix} />;
-
   const branchInvalid = target === 'new' && branch.trim().length === 0;
-  const busy = mode !== 'idle' || push.isPending || startRebase.isPending;
-  const model = fix.model as AiFixModel;
-  // After a push, the trunk may be clean+current — nothing left to reconcile.
-  const nothingToReconcile =
-    pushed && !!preview && preview.available && preview.clean && preview.behindBy === 0;
+  const busy = push.isPending;
 
-  const doPush = (strategy: AiFixPushStrategy): void => {
-    setJobError(null);
-    push.mutate(
-      {
-        fixId: fix.id,
-        body: {
-          target,
-          branch: target === 'new' ? branch.trim() : undefined,
-          strategy,
-          autoResolve,
-          model,
-        },
+  const doPush = (): void => {
+    push.mutate({
+      fixId: fix.id,
+      body: {
+        target,
+        branch: target === 'new' ? branch.trim() : undefined,
       },
-      {
-        onSuccess: (res) => {
-          // plain resolves to the full result; merge/rebase resolve to a queued job.
-          if (!('pushedBranch' in res)) setMode('pushing');
-        },
-      },
-    );
+    });
   };
-
-  const doRebase = (): void => {
-    setJobError(null);
-    startRebase.mutate(
-      { fixId: fix.id, body: { autoResolve, model } },
-      { onSuccess: () => setMode('rebasing') },
-    );
-  };
-
-  const activeStatus = mode === 'rebasing' ? rebaseStatus : pushStatus;
-  const resolved = fix.resolved;
 
   return (
     <div className="mt-3 rounded border border-gray-200 p-2 dark:border-gray-800">
-      {pushed && <PushedCard fix={fix} />}
       <div className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">
-        {pushed ? 'Reconcile with the trunk' : 'Push this fix'}
+        Push this fix
       </div>
 
-      {!pushed && fix.commitMessage && (
+      {fix.commitMessage && (
         <div className="mb-2 rounded bg-gray-50 p-2 text-[11px] dark:bg-gray-900">
           <span className="uppercase tracking-wide text-gray-400">
             Commit message
@@ -864,151 +606,18 @@ function PushControls({
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <TrunkStatus preview={preview} loading={previewM.isPending} />
-        </div>
         <button
           type="button"
-          className={BTN_SECONDARY}
-          disabled={previewM.isPending || busy}
-          onClick={() => previewM.mutate(fix.id)}
-          title="Re-check this fix against the current trunk"
+          className={BTN_PRIMARY}
+          disabled={busy || branchInvalid}
+          onClick={doPush}
         >
-          {previewM.isPending ? 'Checking…' : 'Re-check trunk'}
+          {busy ? 'Pushing…' : target === 'new' ? 'Push + open PR' : 'Push'}
         </button>
-        {previewM.isError && !previewM.isPending && (
-          <span className="text-[11px] text-red-500">
-            Couldn't check the trunk — try again.
-          </span>
-        )}
       </div>
 
-      {mode !== 'idle' ? (
-        <div className="mt-2">
-          <RegenProgressBar
-            active
-            label={mode === 'rebasing' ? 'Rebasing & resolving' : 'Pushing'}
-            value={resolveProgressPct(activeStatus)}
-            timeConstantSec={40}
-          />
-          <div className="mt-1 flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-            <span>
-              {RESOLVE_PHASE_LABEL[activeStatus?.progress?.phase ?? ''] ??
-                'Working…'}
-            </span>
-            <button
-              type="button"
-              className={BTN_SECONDARY}
-              onClick={() =>
-                mode === 'rebasing'
-                  ? cancelRebase.mutate(fix.id)
-                  : cancelPush.mutate(fix.id)
-              }
-            >
-              Cancel
-            </button>
-          </div>
-          {activeStatus?.progress?.recentActivity &&
-            activeStatus.progress.recentActivity.length > 0 && (
-              <pre className="mt-1 max-h-32 overflow-auto rounded bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400 dark:bg-gray-900">
-                {activeStatus.progress.recentActivity.slice(-8).join('\n')}
-              </pre>
-            )}
-        </div>
-      ) : resolved ? (
-        <ResolvedReview
-          resolved={resolved}
-          target={target}
-          pushing={push.isPending}
-          disabled={branchInvalid}
-          onPush={() => doPush('rebase')}
-          onRedo={doRebase}
-        />
-      ) : nothingToReconcile ? (
-        <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
-          No trunk changes to reconcile — the pushed fix is up to date with{' '}
-          <span className="font-mono">{preview?.trunk}</span>.
-        </p>
-      ) : (
-        <div className="mt-2 space-y-2">
-          {preview && preview.available && !preview.clean && (
-            <div className="text-[11px] text-gray-500 dark:text-gray-400">
-              Recommended: rebase onto{' '}
-              <span className="font-mono">{preview.trunk}</span> — Claude resolves
-              the conflicts and you review the result before it pushes.
-            </div>
-          )}
-          <label className="flex items-center gap-2 text-[11px] text-gray-600 dark:text-gray-300">
-            <input
-              type="checkbox"
-              checked={autoResolve}
-              onChange={(e) => setAutoResolve(e.target.checked)}
-            />
-            Let Claude resolve conflicts
-          </label>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className={preview && !preview.clean ? BTN_PRIMARY : BTN_SECONDARY}
-              disabled={busy || branchInvalid}
-              onClick={doRebase}
-              title="Rebase the fix onto the trunk; Claude resolves conflicts and you review before a force-with-lease push"
-            >
-              Rebase onto {preview?.trunk ?? 'trunk'}
-            </button>
-            {/* Merge + plain push rebuild history from baseSha and push WITHOUT force,
-                so they only make sense before the first push — after a push the branch
-                head already carries the fix commit and a non-force push would be
-                rejected as non-fast-forward. Post-push, only Rebase (force-with-lease)
-                can safely reconcile with a moved trunk. */}
-            {!pushed && (
-              <button
-                type="button"
-                className={BTN_SECONDARY}
-                disabled={busy || branchInvalid}
-                onClick={() => doPush('merge')}
-                title="Merge the trunk into the fix branch (a merge commit; never force-pushes)"
-              >
-                Merge {preview?.trunk ?? 'trunk'} in
-              </button>
-            )}
-            {!pushed && (
-              <button
-                type="button"
-                className={
-                  !preview || preview.clean ? BTN_PRIMARY : BTN_SECONDARY
-                }
-                disabled={busy || branchInvalid}
-                onClick={() => doPush('plain')}
-                title="Push the fix as-is (never force-pushes). If it conflicts with the trunk, the PR will show as conflicted."
-              >
-                {target === 'new' ? 'Push + open PR' : 'Push'}
-                {preview && !preview.clean ? ' anyway' : ''}
-              </button>
-            )}
-          </div>
-          {pushed && (
-            <p className="text-[11px] text-gray-400">
-              Rebasing replays the fix onto{' '}
-              <span className="font-mono">{preview?.trunk ?? 'the trunk'}</span>{' '}
-              and force-pushes (with lease) onto the PR branch — the safe way to
-              reconcile an already-pushed fix.
-            </p>
-          )}
-          {target === 'existing' && (
-            <p className="text-[11px] text-gray-400">
-              Rebase force-pushes (with lease) onto{' '}
-              <span className="font-mono">{headInfo?.headRef}</span>; merge and
-              push do not.
-            </p>
-          )}
-        </div>
-      )}
-
-      {(jobError || push.isError || startRebase.isError) && (
-        <div className="mt-2 text-[11px] text-red-500">
-          {jobError ?? errText(push.error ?? startRebase.error)}
-        </div>
+      {push.isError && (
+        <div className="mt-2 text-[11px] text-red-500">{errText(push.error)}</div>
       )}
     </div>
   );
