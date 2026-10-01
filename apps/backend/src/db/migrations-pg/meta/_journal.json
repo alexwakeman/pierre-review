@@ -414,6 +414,20 @@
       "when": 1790042400000,
       "tag": "0058_claude_review_trigger",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1790128800000,
+      "tag": "0059_commit_message_headline",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1790215200000,
+      "tag": "0060_claude_review_chat",
+      "breakpoints": true
     }
   ]
 }

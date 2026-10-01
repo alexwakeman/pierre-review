@@ -319,7 +319,7 @@ Optional title, description and acceptance criteria the person running the revie
   every custom field with text on THIS ticket, strong name matches first (`/acceptance criteria/`),
   then weak ("AC", "definition of done"), then by name, capped at 50 — and the panel shows
   "Acceptance criteria from" (`Name (customfield_123) — preview`, blank first). The DEFAULT
-  (`defaultAcCandidate`, `lib/jiraTicket.ts`): the viewer's remembered field for this issue type on
+  (`defaultAcCandidate`, in `packages/shared/src/claude-review.ts` so the server's auto review picks by the SAME rule): the viewer's remembered field for this issue type on
   this Jira site, when this ticket has it; else the best STRONG name match (an exact
   "Acceptance Criteria" first — a weak "AC" / "Definition of Done" match is listed near the top but
   never preselected, because a wrong prefill is worse than a blank); strong matches carry a ★ in the
@@ -379,6 +379,16 @@ off, so nothing opened while it was off is picked up. Runs carry `claude_reviews
   the same way. A waiting item has no Stop (cancel would not stick — the sweeper re-finds a PR with
   no row); a RUNNING auto run keeps the ordinary Stop. The Open PRs column shows the same hold (§
   Starting from the Open PRs tab).
+- ⚠ **AN AUTO RUN ALWAYS TRIES JIRA** (`packages/pro/src/jira/resolve-ticket.ts`,
+  `resolveAutoReviewTicket`, called by `startAutoItem` before the row is written). No browser is
+  there to "Fill from KEY", so the server does the same fill: the PR's FIRST detected key (the one
+  detection path, so the token still reads only tickets this workspace's PRs name), fetched through
+  `jiraCall` → `jira/fetch.ts`, criteria from `defaultAcCandidate(candidates, null)` — a strong name
+  match or none, never a weak one. Each field is CUT to its cap (and unstorable characters dropped)
+  instead of refused: nobody is there to trim. It NEVER throws — no tracker, no token or a Jira
+  error is `ticket: null` and the review runs without a story; a Jira failure logs account,
+  workspace, PR and the error code only. Before this every auto run went out with no ticket. The
+  manual paths are unchanged (an empty panel on a click still means "no story").
 - **THE COST GUARD**: `AUTO_REVIEW_DAILY_CAP` = 20 auto runs per workspace per **UTC** day, counting
   today's auto rows plus items still waiting in the lane. Past it, PRs wait for the next day. An
   account whose agent credits are spent sits the tick out.
@@ -394,3 +404,47 @@ off, so nothing opened while it was off is picked up. Runs carry `claude_reviews
   (`pending-blocks.ts`), the Open PRs column's marker (`ClaudeReviewPrState.trigger`), and in the
   Claude Review tab's header, running row and History options
   (`ClaudeReview`/`ClaudeReviewSummary.trigger`). The Feed's Claude item is not labelled.
+
+## Chat about a review
+
+After a review **succeeds**, the reader can ask Claude about it: one **general thread** per review
+("Ask Claude about this review", under the findings) and one **thread per finding** (the finding's
+**Ask Claude** button). Pro+ and local-only like the rest of Claude Review. Host:
+`review/chat-agent.ts` behind the OPTIONAL seam `ctx.review.chat` (apiVersion stays 21). Plugin:
+`packages/pro/src/claude-review/chat.ts`. SPA: `components/ClaudeReviewChat.tsx` +
+`hooks/useClaudeReviewChat.ts`. Table: `claude_review_chat_messages` (core `0073` / pg `0060`).
+
+- **AN AGENT THAT MIRRORS THE REVIEW'S MODE.** A worktree review's questions are answered with
+  Read/Glob/Grep on a worktree checked out at the **REVIEWED** head (`review.headSha`), never the
+  PR's current one; a diff-only review's are answered with **no tools**. The SDK's `tools` base set,
+  `allowedTools` and the deny list all say the same thing, and **Bash is denied outright**
+  (`chat-agent.test.ts` pins it). Same model as the review (a retired model falls back to the
+  default), same credential ladder (`applyClaudeReviewAuth`; env mutation only under the review's
+  own concurrency-1 rule AND no review in flight — `chatMayApplyAuthEnv`), its own per-turn budget
+  `REVIEW_CHAT_BUDGET_USD` (default $1) and low turn caps (`REVIEW_CHAT_MAX_TURNS` 8,
+  `REVIEW_CHAT_DIFF_ONLY_MAX_TURNS` 2). The answer is free text — no MCP tool.
+- **THE GROUNDING IS THE WHOLE REVIEW, FENCED.** PR title + description, verdict + summary, every
+  finding (severity, file, line, body, the reader's reword, suggestion, hunk), the user story and its
+  assessment, the follow-up record, the diff (`ctx.review.prepareReview`, cached 10 minutes per
+  review) and the thread's earlier turns — each block inside a per-turn nonce fence
+  (`pickReviewNonce`). A finding thread names its finding (`F3`) and carries only its own turns.
+- ⚠ **THE TRANSCRIPT IS REBUILT SERVER-SIDE FROM STORED ROWS.** The client sends only the new
+  question, so it cannot inject an earlier "assistant" turn. At most 8 prior turns and 40k
+  characters, oldest dropped first (`trimmedTurns` on the answer); the grounding is never trimmed.
+- ⚠ **A MOVED HEAD.** `gh pr diff` reads the CURRENT head, so once the PR has moved past
+  `review.headSha` no diff is sent: the findings' own hunks (and, in worktree mode, the files at the
+  reviewed commit) are what the answer reads, and the thread shows one line: "Answers are about the
+  reviewed commit; the PR has moved on."
+- **COST GATES** (the sprint-chat pattern): one answer per ACCOUNT at a time, the slot claimed
+  SYNCHRONOUSLY before the first await (`409 Busy` otherwise), a process cap of 2, the
+  `agentBlocked` credit check inside the try/finally, `recordAiUsage({seam:'agent', feature:
+  'claude_review_chat'})` for any turn that cost money — answered or not. Nothing is stored unless an
+  answer came back; then the question and the answer are stored together.
+- **Never carried across reviews**: a new review of the same PR starts with empty threads; an older
+  review's threads stay readable when that review is picked from history.
+- **SPA.** Nothing fetches until a thread is opened. ⚠ Every thread of a review shares ONE mutation
+  key (`claudeReviewChatAskKey(reviewId)`) read through `useIsMutating`/`useMutationState`, so a tab
+  switch mid-answer cannot offer a second billed POST, and the completed turn is written into the
+  thread's cache in the hook-level `onSuccess`, never a `mutate()` callback. A thread reopened while
+  the server is still answering polls every 4s until the answer lands.
+

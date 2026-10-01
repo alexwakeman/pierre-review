@@ -235,10 +235,10 @@ resolved config. Three consequences, each of which is why it is not a server fie
   else; moving the sensitivity dial re-runs a fold over rows already in memory. A server count
   would have to invalidate `['workspace-metrics']` too, and a stale cached response would draw one
   distribution while every chip on screen drew another.
-- **It shares a cache entry, not a guaranteed free read.** Pending → My turn's "Open PRs · N"
-  button, `FeedIsolationBanner`, the People report's picker and the
-  workspace-wide open-PRs drill-down (`OpenPrsDetail`) read the same `useWorkspaceOpenPrs` entry, so
-  the card costs nothing only after one of those has loaded it. The Feed no longer loads it, so opening Reports first usually pays one `/api/open-prs`.
+- **It shares a cache entry, and it is now always warm.** The fixed Open PRs tab's chip
+  ("Open PRs · N", mounted with the tab strip), `FeedIsolationBanner`, the People report's picker
+  and the Open PRs view itself (`OpenPrsDetail`) read the same `useWorkspaceOpenPrs` entry, so the
+  card normally rides a read the tab strip already made.
 
 ⚠ **IT READS `useWorkspaceOpenPrs`, NEVER `useSearchOpenPrs`.** The latter narrows by
 `filters.repoIds`, the TIMELINE board's picker, which is not mounted on Reports.

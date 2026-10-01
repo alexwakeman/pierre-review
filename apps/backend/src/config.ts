@@ -537,6 +537,13 @@ export const config = {
   // Give it proportionally more turns in both modes. Its low per-token price means
   // the extra turns are cheap, and maxBudgetUsd is still the real spend guard.
   reviewHaikuTurnMultiplier: floatFromEnv('REVIEW_HAIKU_TURN_MULTIPLIER', 2),
+  // ---- Claude Review chat (one answered question about a finished review) ----
+  // Each answer is its own agent run over the whole review + diff, so it gets its OWN small spend
+  // cap rather than the review's. Turn caps are low on purpose: a worktree answer may look up a
+  // few files (Read/Glob/Grep), a diff-only answer has no tools and needs one reply.
+  reviewChatBudgetUsd: floatFromEnv('REVIEW_CHAT_BUDGET_USD', 1),
+  reviewChatMaxTurns: intFromEnv('REVIEW_CHAT_MAX_TURNS', 8),
+  reviewChatDiffOnlyMaxTurns: intFromEnv('REVIEW_CHAT_DIFF_ONLY_MAX_TURNS', 2),
 
   // ---- Diff-size cap ----
   // A very large inlined diff is the dominant cost on a big PR (it's the cached

@@ -35,7 +35,7 @@ import { relativeTime } from '../../lib/ui.js';
 import { CheckCircleIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { AttentionCards, KIND_LABEL } from './AttentionCards.js';
 import { MyTurnDismissedList } from './MyTurnDismissedList.js';
-import { DefaultBranchesSlot, OpenPrsButton } from './MyTurnHead.js';
+import { DefaultBranchesSlot } from './MyTurnHead.js';
 import { PendingGuideModal, PendingOrderInfo } from './PendingInfo.js';
 import { capSentence } from './pendingExplain.js';
 
@@ -594,15 +594,10 @@ export function AttentionView(): JSX.Element {
 
       <div id="pending-tabpanel" role="tabpanel" className="space-y-3">
         {showsMyTurnHead(tabKey) && (
-          // My turn's head: the way into every open PR, then the default-branch strip, above the
-          // cards. My turn ONLY — no other tab renders either. See MyTurnHead.tsx for why this
-          // costs no new request (both reads share cache entries the board already has).
-          <>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <OpenPrsButton />
-            </div>
-            <DefaultBranchesSlot />
-          </>
+          // My turn's head: the default-branch strip, above the cards. My turn ONLY. Open PRs is
+          // a fixed tab now (between Activity and Timeline), so there is no button into it here.
+          // See MyTurnHead.tsx for why this costs no new request.
+          <DefaultBranchesSlot />
         )}
         {/* The tab's narrowing controls: kind chips on a two-kind tab, "Only yours" on My
             turn, and — right-aligned — the People / Automation lens wherever it would change

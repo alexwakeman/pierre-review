@@ -63,6 +63,20 @@ export const PENDING_LIMITS = {
 export const FAILING_CHECKS_SHOWN = 3;
 
 /**
+ * How many commits a "Pushed since" My Turn card lists (`NewPrBall.commits`), newest first. The
+ * rest are "and N more", where N = `humanCommitsAfter` − the listed count — the same population,
+ * so the two cannot disagree. A PR with 30 commits pushed since would otherwise fill the board.
+ */
+export const PUSHED_COMMITS_SHOWN = 5;
+
+/**
+ * The longest reply a reply-type My Turn card carries inline (`MyTurnCard.reply`), in characters.
+ * Longer bodies are cut and flagged `truncated`, and the card offers "Open thread". MEASURED on
+ * human review comments: average 262 characters, 44 of 13,200 over 2,000, longest 8,021.
+ */
+export const MY_TURN_REPLY_MAX_CHARS = 1500;
+
+/**
  * THE ONE SENTENCE a Pending card's detail says while GitHub's merge queue holds its PR — on a
  * `merge` / `update_branch` card and your own ready PR in My turn (`mergeCardDetail`), on a
  * Dependencies card (`dependencyStateDetail`), and as the Do next row's `reason`, which the same

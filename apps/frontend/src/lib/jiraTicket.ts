@@ -1,4 +1,5 @@
 import type { JiraAcCandidate, JiraTicketDetails, TicketRef } from '@pierre-review/shared';
+import { defaultAcCandidate } from '@pierre-review/shared';
 import type { TicketDraft } from './claudeReviewFollowUp.js';
 
 // Pure helpers for the Claude Review panel's "Fill from KEY" and its "Acceptance criteria from"
@@ -104,27 +105,9 @@ export function rememberAcField(
 
 // ── the default choice ─────────────────────────────────────────────────────────────────────────
 
-const EXACT_AC = /^\s*acceptance[\s_-]*criteria\s*$/i;
-
-/**
- * The field to preselect, or '' for the blank option:
- *   1. the viewer's remembered field for this issue type, when THIS ticket has it with text;
- *   2. else the best STRONG name match (an "acceptance criteria" name) — an exact "Acceptance
- *      Criteria" beats one that merely contains it, then the server's order. A WEAK match ("AC",
- *      "Definition of Done") is ranked near the top of the list but never preselected: a
- *      definition of done is not the ticket's acceptance criteria, and a wrong prefill is worse
- *      than a blank the reader fills;
- *   3. else '' — the reader picks, and the box is left as it is.
- * Every candidate has text by construction (the server drops empty fields).
- */
-export function defaultAcCandidate(
-  candidates: readonly JiraAcCandidate[],
-  remembered: string | null,
-): string {
-  if (remembered != null && candidates.some((c) => c.id === remembered)) return remembered;
-  const hits = candidates.filter((c) => c.match === 'strong');
-  return (hits.find((c) => EXACT_AC.test(c.name)) ?? hits[0])?.id ?? '';
-}
+// `defaultAcCandidate` lives in shared so the server's auto review picks the field by the SAME
+// rule (with no remembered field). Re-exported for this module's callers and tests.
+export { defaultAcCandidate };
 
 /**
  * A whole fill, the ONE way both callers do it — the panel's "Fill from KEY" (over the reader's

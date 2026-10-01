@@ -244,7 +244,8 @@ const PR_NODE_FIELDS = /* GraphQL */ `
     nodes {
       commit {
         oid
-        committedDate${commitMessageField}
+        committedDate
+        messageHeadline${commitMessageField}
         author {
           user {
             login
@@ -748,6 +749,9 @@ export interface GqlCommitNode {
   commit: {
     oid: string;
     committedDate: string;
+    /** The subject line. ALWAYS selected (not lean-gated); optional because hand-built fixtures
+     *  and tolerant partials may lack it — absent means "not received", never "empty". */
+    messageHeadline?: string | null;
     message: string;
     author: { user: { login: string; id: string } | null } | null;
     committer: { user: { login: string; id: string } | null } | null;
@@ -1313,6 +1317,31 @@ export interface PrSecurityNodesResponse {
     headRefName?: string | null;
     bodyText?: string | null;
     labels?: { nodes: Array<{ name: string } | null> } | null;
+  } | null>;
+  rateLimit?: { remaining?: number | null; resetAt?: string | null; cost?: number | null } | null;
+}
+
+/** The commit-headline backfill (sync/backfill-commit-headlines.ts): the subject line of each of an
+ *  open PR's last 100 commits — the same window the walk's `commits(last: 100)` stores. */
+export const COMMIT_HEADLINE_NODES_QUERY = /* GraphQL */ `
+  query CommitHeadlineNodes($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on PullRequest {
+        id
+        commits(last: 100) { nodes { commit { oid messageHeadline } } }
+      }
+    }
+    rateLimit { remaining resetAt cost }
+  }
+`;
+
+/** Every field optional, for the same reason as `PrSecurityNodesResponse`. */
+export interface CommitHeadlineNodesResponse {
+  nodes: Array<{
+    id?: string;
+    commits?: {
+      nodes: Array<{ commit?: { oid?: string; messageHeadline?: string | null } | null } | null>;
+    } | null;
   } | null>;
   rateLimit?: { remaining?: number | null; resetAt?: string | null; cost?: number | null } | null;
 }

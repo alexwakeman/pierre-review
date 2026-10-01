@@ -61,12 +61,16 @@ export async function writeClipboard(text: string): Promise<boolean> {
 export function CopyButton({
   text,
   what = 'comment',
+  title,
   className = '',
 }: {
   /** The exact string to place on the clipboard — the markdown source, not rendered text. */
   text: string;
   /** Names the target in the tooltip and the accessible name ("Copy comment"). */
   what?: string;
+  /** The idle tooltip, when the default ("…text…, exactly as written") does not fit — a file
+   *  path is not a comment's text. */
+  title?: string;
   className?: string;
 }): JSX.Element | null {
   const [state, setState] = useState<CopyState>('idle');
@@ -105,11 +109,11 @@ export function CopyButton({
       onClick={onCopy}
       title={
         state === 'idle'
-          ? `Copy this ${what}'s text to the clipboard, exactly as written`
+          ? (title ?? `Copy this ${what}'s text to the clipboard, exactly as written`)
           : label
       }
       aria-label={label}
-      className={`inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[10px] font-medium transition-colors ${
+      className={`inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium transition-colors ${
         state === 'copied'
           ? 'text-emerald-600 dark:text-emerald-400'
           : state === 'failed'

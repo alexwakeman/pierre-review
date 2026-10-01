@@ -362,6 +362,9 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       runReview: async (a) => (await import('../review/agent.js')).runReview(a),
       postReview: async (a) => (await import('../review/post-seam.js')).postReview(a),
       postFinding: async (a) => (await import('../review/post-seam.js')).postFinding(a),
+      // One chat turn about a finished review (OPTIONAL member, apiVersion stays 21). Same lazy
+      // import rule: the Agent SDK loads only when someone asks a question.
+      chat: async (a) => (await import('../review/chat-agent.js')).runReviewChat(a),
       // ⚠ BUDGET ONLY. The `hasUserKey` half and the whole `setLocalKey` member went with the
       // stored BYO Anthropic key: local Claude Review authenticates from an ambient Claude session,
       // else the environment's `ANTHROPIC_API_KEY` (review/auth.ts). Nothing here reads or writes

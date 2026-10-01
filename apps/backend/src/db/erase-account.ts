@@ -143,6 +143,12 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .execute();
     await tx.delete(workspaces).where(eq(workspaces.accountId, accountId)).execute();
 
+    // Claude Review chat messages (migration 0073 / pg 0060). The repo loop has normally taken them
+    // with their runs; explicit because each row is text this user typed or paid to have written.
+    await tx
+      .delete(schema.claudeReviewChatMessages)
+      .where(eq(schema.claudeReviewChatMessages.accountId, accountId))
+      .execute();
     // The AI spend ledger (token/credit counts — no prompt text).
     await tx.delete(aiUsage).where(eq(aiUsage.accountId, accountId)).execute();
     // Any aggregate rows contributed to the cross-org benchmark. Consent was the basis for
@@ -209,6 +215,13 @@ export function accountScopedTables(): {
     { name: 'pullRequests', col: pullRequests.accountId, table: pullRequests },
     { name: 'events', col: events.accountId, table: events },
     { name: 'claudeReviews', col: claudeReviews.accountId, table: claudeReviews },
+    // Claude Review chat messages (migration 0073 / pg 0060) — the questions a person typed and the
+    // answers they paid for. deleteRepo takes them with their runs; erased explicitly below too.
+    {
+      name: 'claudeReviewChatMessages',
+      col: schema.claudeReviewChatMessages.accountId,
+      table: schema.claudeReviewChatMessages,
+    },
     { name: 'aiUsage', col: aiUsage.accountId, table: aiUsage },
     // `myTurnDismissals` sat here until migration 0060 / pg 0047 DROPPED the table. It is named
     // rather than silently absent because this list is a checklist, and a checklist that shortens

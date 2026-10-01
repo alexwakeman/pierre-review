@@ -13,7 +13,7 @@ import { fixtures, installMockApi } from './mock-api.js';
 //     get a yellow-bordered card + badge; there is no "seen/Done" control
 //   • clicking ANY feed item opens the full-height PR DETAIL tab (an overlay + a closable
 //     PR tab), NOT an isolated timeline — Show/Focus in the detail then drive the timeline
-//   • Activity + Timeline are permanent, non-closable TABS in the tab strip
+//   • Activity, Open PRs and Timeline are permanent, non-closable TABS in the tab strip
 
 const overlay = (p: Page) => p.getByTestId('activity-overlay');
 const tabs = (p: Page) => p.getByTestId('pinned-tabs');
@@ -158,7 +158,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(overlay(page).getByRole('button', { name: /Mark seen/i })).toHaveCount(0);
   });
 
-  test('My turn heads its cards with an Open PRs button and the default branches; no other tab does', async ({
+  test('My turn heads its cards with the default branches and no Open PRs button; no other tab does', async ({
     page,
   }) => {
     await gotoActivity(page);
@@ -167,23 +167,44 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     // The retired view switch is gone.
     await expect(board.getByRole('tablist', { name: 'My turn views' })).toHaveCount(0);
     await expect(board.getByTestId('branch-status-panel')).toBeVisible();
-    // The figure is the workspace's NON-DRAFT open PRs.
+    // Open PRs is a fixed tab now, so the board carries no button into it. The chip's count has
+    // landed by now (same cached read), so the absence is not a race against a fetch.
     const nonDraft = fixtures.PRS.filter((p) => !p.isDraft).length;
-    const openPrs = board.getByRole('button', { name: `Open PRs · ${nonDraft}`, exact: true });
-    await expect(openPrs).toBeVisible();
+    await expect(tabs(page).getByRole('tab', { name: `Open PRs · ${nonDraft}`, exact: true })).toBeVisible();
+    await expect(board.getByRole('button', { name: /^Open PRs/ })).toHaveCount(0);
     // The repo-grouped open-PR panel is no longer mounted anywhere.
     await expect(board.getByTestId('open-prs-panel')).toHaveCount(0);
 
-    // Another tab opens straight onto its own cards. ⚠ Both reads are CACHED, so a head still
-    // mounted there would render at once — the absence is a real check, not a race against a fetch.
+    // Another tab opens straight onto its own cards. ⚠ The read is CACHED, so a head still mounted
+    // there would render at once — the absence is a real check, not a race against a fetch.
     await board.getByRole('tab', { name: /^Needs fixing/ }).click();
     await expect(board.getByTestId('branch-status-panel')).toHaveCount(0);
-    await expect(board.getByRole('button', { name: /^Open PRs/ })).toHaveCount(0);
+  });
 
-    // Back on My turn, the button opens the workspace-wide Open PRs tab.
-    await board.getByRole('tab', { name: /My turn/ }).click();
-    await board.getByRole('button', { name: `Open PRs · ${nonDraft}`, exact: true }).click();
+  test('Open PRs is a permanent tab between Activity and Timeline', async ({ page }) => {
+    await gotoActivity(page);
+    const strip = tabs(page);
+    const nonDraft = fixtures.PRS.filter((p) => !p.isDraft).length;
+    // The three fixed chips, in order, before any dynamic tab. (Wait for the count to land first:
+    // `allTextContents` does not retry.)
+    await expect(strip.getByRole('tab', { name: `Open PRs · ${nonDraft}`, exact: true })).toBeVisible();
+    const names = await strip.getByRole('tab').allTextContents();
+    expect(names.slice(0, 3).map((n) => n.trim())).toEqual([
+      'Activity',
+      `Open PRs · ${nonDraft}`,
+      'Timeline',
+    ]);
+    // It has no close button: a fixed view is never closed.
+    await expect(strip.getByRole('button', { name: /Close open-PRs tab/i })).toHaveCount(0);
+
+    await strip.getByRole('tab', { name: `Open PRs · ${nonDraft}`, exact: true }).click();
+    await expect(page.getByTestId('open-prs-overlay')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Open PRs', exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/view=open-prs/);
+
+    // Bookmarkable: a reload lands back on it.
+    await page.reload();
+    await expect(page.getByTestId('open-prs-overlay')).toBeVisible();
   });
 
   test('a legacy ?attnView=branches link lands on My turn and is never re-emitted', async ({
@@ -221,7 +242,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await page.goto('/app/');
     const board = page.getByTestId('attention-view');
     await expect(board.getByTestId('branch-status-panel')).toBeVisible();
-    await expect(board.getByRole('button', { name: /^Open PRs · \d/ })).toBeVisible();
+    await expect(tabs(page).getByRole('tab', { name: /^Open PRs · \d/ })).toBeVisible();
     await (await brief).finished();
 
     await railButton(page, 'Feed').click();
@@ -234,7 +255,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
 
   test('the Activity | Timeline tabs toggle the board', async ({ page }) => {
     await gotoActivity(page);
-    // Activity + Timeline are permanent tabs (role=tab) in the tab strip, not a header pill.
+    // Activity, Open PRs and Timeline are permanent tabs (role=tab) in the tab strip, not a header pill.
     await tabs(page).getByRole('tab', { name: 'Timeline' }).click();
     await expect(overlay(page)).toBeHidden();
     await expect(page.locator('.vis-timeline')).toBeVisible();

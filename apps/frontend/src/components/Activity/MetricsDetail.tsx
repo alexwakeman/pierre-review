@@ -18,7 +18,7 @@ import { SortHeader, type SortDir, type SortState, compare, nextSort } from './s
 // the metric-specific figure) so a lead can see WHERE issues cluster. All data comes from a single
 // lazy read (useWorkspaceMetricsDetail); clicking any PR opens its detail tab.
 
-// (No 'open_prs' sub-tab: the "Open PRs" tile routes to the sortable open-PRs drill-down tab —
+// (No 'open_prs' sub-tab: the "Open PRs" tile reveals the fixed Open PRs tab —
 // the ONE open-PR list — not here.)
 const METRIC_META: Record<WorkspaceMetricKey, { label: string; blurb: string }> = {
   merges: { label: 'Merges', blurb: 'Merged this sprint · most-recently-updated first' },

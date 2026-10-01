@@ -77,56 +77,18 @@ export const useInsightsDigestExpand = create<InsightsDigestExpandState>((set, g
 // (`useSprintReportUi` — the Sprint report card's persisted collapse chrome, localStorage key
 // 'pierre:sprintReportUi' — was REMOVED with `SprintReportCard` on the C7 cut list.)
 
-// The repo-grouped "Open PRs" panel (`FeedOpenPrsPanel`). ⚠ NOT MOUNTED ANYWHERE NOW: it lived above
-// the Feed, then in Pending → My turn's retired second view ("Default branches and open PRs"); My
-// turn now carries an "Open PRs · N" button into the drill-down instead. Kept, with its stored
-// choice, in case the panel returns. OPEN BY DEFAULT; a stored choice wins.
-// ⚠ The key `pierre:feedOpenPrsPanel` keeps its old name on purpose: renaming it resets every
-// reader's stored choice.
-const FEED_OPEN_PRS_KEY = 'pierre:feedOpenPrsPanel';
+// (`useFeedOpenPrsPanel` — the unmounted repo-grouped `FeedOpenPrsPanel`'s collapse, localStorage
+// key 'pierre:feedOpenPrsPanel' — was REMOVED with that panel when Open PRs became a fixed tab.)
 
-function loadFeedOpenPrsCollapsed(): boolean {
-  try {
-    const raw = localStorage.getItem(FEED_OPEN_PRS_KEY);
-    if (raw == null) return false; // default: OPEN
-    return JSON.parse(raw) === true;
-  } catch {
-    return false;
-  }
-}
-
-interface FeedOpenPrsPanelState {
+interface OpenPrsPanelState {
   collapsed: boolean;
   setCollapsed: (v: boolean) => void;
   toggle: () => void;
 }
 
-export const useFeedOpenPrsPanel = create<FeedOpenPrsPanelState>((set, get) => {
-  const save = (collapsed: boolean): void => {
-    try {
-      localStorage.setItem(FEED_OPEN_PRS_KEY, JSON.stringify(collapsed));
-    } catch {
-      /* quota / private mode — non-fatal */
-    }
-  };
-  return {
-    collapsed: loadFeedOpenPrsCollapsed(),
-    setCollapsed: (v) => {
-      set({ collapsed: v });
-      save(v);
-    },
-    toggle: () => {
-      const next = !get().collapsed;
-      set({ collapsed: next });
-      save(next);
-    },
-  };
-});
-
 // The single-repo console's "Open PRs" list (above that repo's activity feed). COLLAPSED
 // BY DEFAULT so the repo view opens on its feed, with the open-PR list one click away. Its
-// own persisted key, so collapsing the repo list doesn't move the workspace panel and vice
-// versa.
+// own persisted key.
 const REPO_OPEN_PRS_KEY = 'pierre:repoOpenPrsPanel';
 
 function loadRepoOpenPrsCollapsed(): boolean {
@@ -139,7 +101,7 @@ function loadRepoOpenPrsCollapsed(): boolean {
   }
 }
 
-export const useRepoOpenPrsPanel = create<FeedOpenPrsPanelState>((set, get) => {
+export const useRepoOpenPrsPanel = create<OpenPrsPanelState>((set, get) => {
   const save = (collapsed: boolean): void => {
     try {
       localStorage.setItem(REPO_OPEN_PRS_KEY, JSON.stringify(collapsed));

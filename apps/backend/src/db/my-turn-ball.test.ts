@@ -472,6 +472,11 @@ describe('the ball rule decides which "New PRs" rows survive', () => {
       yourLastAction: 'approved',
       humanCommitsAfter: 2,
       pusherId: aliceId,
+      // The fixture commits carry no headline: "not synced yet", never an empty line.
+      commits: [
+        { sha: 'sha_hca2', headline: null, authorId: aliceId, at: new Date(AFTER_ME + HOUR).toISOString() },
+        { sha: 'sha_hca1', headline: null, authorId: aliceId, at: new Date(AFTER_ME).toISOString() },
+      ],
     });
     // The clock is the PUSH, not `openedAt` — a row dated off the open time says "29d ago" about
     // something that happened an hour after your review.

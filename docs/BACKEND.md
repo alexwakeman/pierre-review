@@ -433,6 +433,38 @@ response must not have "Pushed since" invented over a PR nobody has touched. (S3
 `pushed_since` type with its own chip, so the chip no longer depends on `ball`; `ball` still carries
 the pusher and your last action for the detail line.)
 
+### What the card shows under its detail line (display only)
+
+Two facts ride the card so the reader need not open the PR. Both are folded from data the fold
+already holds or reads in one batched select, so **the board still fetches nothing on mount**, and
+both are **display only**: never in `detail` (Slack prints it), a work-plan fact, a payload hash or
+a model payload.
+
+- **The reply** (`MyTurnCard.reply`) on the three reply-type cards: `thread` (only when somebody
+  replied), `thread_reply` and `comment_reply`. Only the answer, never the thread. ⚠ **Never on a
+  `likely_addressed` thread** — its stored comment is the viewer's OWN, so showing it as "the reply"
+  would be false. The server caps the body at `MY_TURN_REPLY_MAX_CHARS` (1,500; cut on a word
+  boundary by `capMyTurnReply`, flagged `truncated`); the SPA renders it through `Markdown`, clamped
+  to about four lines with a local "Show more", and a cut body offers "Open thread" / "Open PR".
+  `CommentReplyItem.replyBody` carries the capped body for `comment_reply` (the thread sections
+  already carry `lastReplyBody`).
+- **What was pushed** (`NewPrBall.commits`) on `pushed_since`: the newest `PUSHED_COMMITS_SHOWN`
+  (5) of EXACTLY the commits `humanCommitsAfter` counts — `lastActionClocks` keeps those commit ids
+  as it counts them, and `getAddedRepoActionablePrIds` reads `(sha, message_headline, author,
+  committedAt)` for the survivors' newest five in ONE `inArray` select (the wide clocks read stays
+  headline-free). "and N more" is `humanCommitsAfter − commits.length`. ⚠ `headline: null` is "not
+  synced yet" and renders as such, never as an empty line.
+
+`commits.message_headline` (sqlite `0072` / pg `0059`) is GitHub's `messageHeadline`, SELECTED ON
+EVERY WALK (not lean-gated like `message`, which stays the full body for PR detail), capped at 200
+chars and written ONLY when the key was received (`persistPr` spreads `{}` otherwise). Commits
+stored before the column existed are filled by `sync/backfill-commit-headlines.ts` after every walk
+(both the manual and the scheduled tail): open PRs with a headline-less commit, most recently
+active first, 40 per run in `nodes(ids:)` batches of 20 (`commits(last: 100) { oid messageHeadline
+}`, about one point each), writing only rows still NULL. A commit older than a PR's last 100 is never
+returned, so each PR is asked at most once per PROCESS (an in-memory set) — budget-aware and strictly
+non-fatal like its siblings.
+
 ### Settings: gates and promotions
 
 The reader decides which types exist, how My turn orders them and how Pending ranks cards

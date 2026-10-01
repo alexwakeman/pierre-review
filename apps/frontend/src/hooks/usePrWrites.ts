@@ -81,6 +81,17 @@ export function useApprovePr(prId: number) {
   });
 }
 
+export function useRequestChangesPr(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body?: string) =>
+      api.requestChanges(prId, body !== undefined ? { body } : undefined),
+    // The same cascade as approve: the route clears the viewer's review request and re-reads
+    // the PR, so the refetch moves the Pending card and the pane's standing.
+    onSuccess: () => void invalidateAfterPrWrite(qc, prId),
+  });
+}
+
 // The merge control's options (allowed methods + live mergeability). Fetched lazily — enable it
 // only when the control is open, so the hot PR-detail path isn't slowed by a live GitHub call.
 // A DISABLED observer still reads the cache: that is how the Pending board's merge row borrows a

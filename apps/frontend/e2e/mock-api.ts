@@ -721,6 +721,7 @@ function prDetailFor(id: number): PrDetail {
     viewerCanClose: false,
     viewerCanReopen: false,
     viewerHasApprovedStanding: false,
+    viewerReviewStanding: null,
     threads: [],
     reviews: [],
     comments: [],

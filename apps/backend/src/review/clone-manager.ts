@@ -189,6 +189,20 @@ export async function fetchPrHead(
     tokenizedUrl(owner, name, token),
     `pull/${prNumber}/head`,
   ]);
+  if (await hasCommit(repoCloneDir, sha)) return;
+  // The PR has MOVED since `sha` (a force-push or rebase), so its head ref no longer brings the
+  // commit we were asked for — a review chat pins the REVIEWED head, not the current one. GitHub
+  // serves an unadvertised commit by its sha, so ask for it directly. If GitHub has since
+  // garbage-collected it this throws, and the caller's worktree add would have failed anyway.
+  await git([
+    '-C',
+    repoCloneDir,
+    'fetch',
+    '--no-tags',
+    '--force',
+    tokenizedUrl(owner, name, token),
+    sha,
+  ]);
 }
 
 /** True if `sha` resolves to a commit object already in the local store. */

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { PrDetail, PrFileChange } from '@pierre-review/shared';
-import { usePrFiles } from '../hooks/usePr.js';
+import type { PrDetail, PrFileChange, PrFileDiff } from '@pierre-review/shared';
+import { usePrFiles, usePrMoreFiles } from '../hooks/usePr.js';
 import { useUsers } from '../hooks/useTimeline.js';
 import { buildFileTree, indexThreadsByPath, type FileTreeEntry } from '../lib/diff.js';
 import { useResizablePane } from '../hooks/useResizablePane.js';
@@ -14,6 +14,7 @@ import {
 import { FileTree } from './diff/FileTree.js';
 import { ThreadCountChips, rollupCounts } from './ThreadList/ThreadCountChips.js';
 import { ExternalLinkIcon } from './Icons.js';
+import { CopyButton } from './CopyButton.js';
 
 // The "Changes" tab: every file the PR touches with its inline diff hunks and per-line
 // review-comment affordances. The per-file rendering lives in the shared FileDiffView
@@ -55,26 +56,93 @@ function MetaFileRow({ file }: { file: PrFileChange }): JSX.Element {
   const segments = file.path.split('/');
   const fileName = segments.at(-1);
   const dir = segments.slice(0, -1).join('/');
+  // The copy button sits BESIDE the link, never inside it: a <button> inside an <a> is invalid
+  // markup, and a click on it would navigate as well as copy.
   return (
-    <a
-      href={file.githubUrl}
-      target="_blank"
-      rel="noreferrer noopener"
-      className="group flex items-center gap-3 px-4 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-      title={`${file.path} — view this file's diff on GitHub`}
+    <div className="flex items-center pr-3 hover:bg-gray-50 dark:hover:bg-gray-900">
+      <a
+        href={file.githubUrl}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="group flex min-w-0 flex-1 items-center gap-3 px-4 py-1.5 text-sm"
+        title={`${file.path} — view this file's diff on GitHub`}
+      >
+        <code className="min-w-0 flex-1 truncate font-mono text-xs">
+          {dir && <span className="text-gray-400">{dir}/</span>}
+          <span className="font-semibold">{fileName}</span>
+        </code>
+        <span className="shrink-0 font-mono text-xs tabular-nums">
+          <span className="text-green-600 dark:text-green-400">+{file.additions}</span>{' '}
+          <span className="text-red-500 dark:text-red-400">−{file.deletions}</span>
+        </span>
+        <span className="shrink-0 decorative-mark text-gray-300 group-hover:text-blue-500 dark:text-gray-600">
+          <ExternalLinkIcon size={12} />
+        </span>
+      </a>
+      <CopyButton text={file.path} what="file path" title="Copy file path" />
+    </div>
+  );
+}
+
+/**
+ * "Load next 100 files" — the Changes tab's way past the first page of a big PR. One click is one
+ * page (one GitHub call); nothing loads on its own. Past GitHub's 3,000-file listing ceiling it
+ * says so and keeps the GitHub link, which is then the only way to see the rest.
+ */
+function MoreFilesNote({
+  shown,
+  total,
+  canLoadMore,
+  ceilingReached,
+  loading,
+  error,
+  onLoadMore,
+  githubUrl,
+  compact = false,
+}: {
+  shown: number;
+  total: number;
+  canLoadMore: boolean;
+  ceilingReached: boolean;
+  loading: boolean;
+  error: boolean;
+  onLoadMore: () => void;
+  githubUrl: string;
+  /** The rail's narrow version. */
+  compact?: boolean;
+}): JSX.Element {
+  const ofTotal = `${shown.toLocaleString()} of ${Math.max(total, shown).toLocaleString()} shown`;
+  return (
+    <div
+      className={
+        compact
+          ? 'space-y-0.5 px-2 pb-1 pt-0.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400'
+          : 'flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-xs text-gray-500 dark:text-gray-400'
+      }
     >
-      <code className="min-w-0 flex-1 truncate font-mono text-xs">
-        {dir && <span className="text-gray-400">{dir}/</span>}
-        <span className="font-semibold">{fileName}</span>
-      </code>
-      <span className="shrink-0 font-mono text-xs tabular-nums">
-        <span className="text-green-600 dark:text-green-400">+{file.additions}</span>{' '}
-        <span className="text-red-500 dark:text-red-400">−{file.deletions}</span>
-      </span>
-      <span className="shrink-0 decorative-mark text-gray-300 group-hover:text-blue-500 dark:text-gray-600">
-        <ExternalLinkIcon size={12} />
-      </span>
-    </a>
+      {canLoadMore ? (
+        <button
+          type="button"
+          onClick={onLoadMore}
+          disabled={loading}
+          className="rounded border border-blue-400 px-2 py-0.5 text-blue-600 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+        >
+          {loading ? 'Loading files…' : `Load next 100 files (${ofTotal})`}
+        </button>
+      ) : (
+        <span>{ofTotal}.</span>
+      )}
+      {error && <span className="text-amber-700 dark:text-amber-400">Couldn’t load more files.</span>}
+      {ceilingReached && <span>GitHub lists at most 3,000 files.</span>}
+      <a
+        href={`${githubUrl}/files`}
+        target="_blank"
+        rel="noreferrer noopener"
+        className={`text-blue-500 hover:underline ${compact ? 'block' : ''}`}
+      >
+        All on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
+      </a>
+    </div>
   );
 }
 
@@ -136,6 +204,19 @@ export function ChangesTab({
   threadOpenMemory: Map<number, boolean>;
 }): JSX.Element {
   const { data, isLoading, isError } = usePrFiles(pr.id);
+  // Pages 2+ ("Load next 100 files"), click-gated. Appended after page 1, deduplicated by path in
+  // case the listing shifted between clicks (a push re-keys both).
+  const more = usePrMoreFiles(pr.id, data);
+  const allFiles = useMemo((): PrFileDiff[] => {
+    const first = data?.files ?? [];
+    if (more.files.length === 0) return first;
+    const seen = new Set(first.map((f) => f.path));
+    return [...first, ...more.files.filter((f) => !seen.has(f.path))];
+  }, [data?.files, more.files]);
+  // A diff cached before paging existed carries `truncated` but no `nextPage`: say there is more,
+  // with only the GitHub link to offer.
+  const truncated =
+    more.canLoadMore || more.ceilingReached || (data?.truncated === true && data.nextPage === undefined);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
   // EVERY thread, resolved included (each renders as a pill — unresolved open, resolved shut;
@@ -144,8 +225,8 @@ export function ChangesTab({
   // the header mix: it keys threads on the RENDERED file path, so a thread written before a
   // rename lands under the file's current path instead of silently vanishing from Changes.
   const threadsByPath = useMemo(
-    () => indexThreadsByPath(pr.threads, data?.files ?? []),
-    [pr.threads, data?.files],
+    () => indexThreadsByPath(pr.threads, allFiles),
+    [pr.threads, allFiles],
   );
   // The caller's callback is read through a ref, so its IDENTITY never reaches `threadCtx`: a
   // caller closing over something that churns (PrDetail's used to close over the whole `pr`,
@@ -174,6 +255,12 @@ export function ChangesTab({
   // Stable for the same reason: FileDiffView is memo'd, and an inline `{ prId }` literal would
   // defeat it on every render.
   const commenting = useMemo(() => ({ prId: pr.id }), [pr.id]);
+  // Where a block may load more of its own file (a gap's hidden lines, a full diff GitHub would not
+  // send) — every read click-gated inside the block. Stable for the memo, like the two above.
+  const fileSource = useMemo(
+    () => ({ prId: pr.id, headSha: data?.headSha ?? null }),
+    [pr.id, data?.headSha],
+  );
 
   // The focus target is STICKY (never cleared once shown): it doubles as the rail's selected
   // row AND marks the file's block in the diff with the same sky border, both for as long as
@@ -247,7 +334,7 @@ export function ChangesTab({
   }, [data]);
 
   // Computed BEFORE the early returns below — hooks-order rule.
-  const files = data?.files ?? [];
+  const files = allFiles;
   const tree = useMemo(
     () =>
       buildFileTree(
@@ -262,9 +349,8 @@ export function ChangesTab({
           }),
         ),
       ),
-    // `files` is a fresh array each render; the query's data identity is the real input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data?.files, threadsByPath],
+    [allFiles, threadsByPath],
   );
 
   // No changes at all on this PR — same empty state as before.
@@ -288,8 +374,8 @@ export function ChangesTab({
   }
 
   const havePatches = !isError && files.length > 0;
-  // A reveal request for a file this view isn't rendering — the live diff is capped at 100
-  // files, and a Claude Review finding describes the head SHA its run read, not necessarily
+  // A reveal request for a file this view isn't rendering — the live diff loads 100 files a
+  // page, and a Claude Review finding describes the head SHA its run read, not necessarily
   // this one. Say so rather than letting the click land as a silent no-op.
   const focusMissing =
     focus != null &&
@@ -342,7 +428,7 @@ export function ChangesTab({
         extra={
           // The PR-grain version of the file-header read: count + the 4-state mix. Over
           // `pr.threads` (not the indexed map), so the aggregate never under-reports a
-          // thread whose file fell outside the 100-file diff cap.
+          // thread whose file is not loaded yet (100 files a page).
           pr.threads.length > 0 ? (
             <span className="flex items-center gap-2">
               <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 dark:text-gray-300">
@@ -380,19 +466,18 @@ export function ChangesTab({
               railHeight={railMaxH}
               onSelectFile={(path) => setFocus({ path, nonce: Date.now() })}
               note={
-                data?.truncated ? (
-                  <div className="px-2 pb-1 pt-0.5 text-[10px] leading-snug text-amber-600 dark:text-amber-400">
-                    Showing {files.length} of {pr.changedFilesCount} files.{' '}
-                    <a
-                      href={`${pr.githubUrl}/files`}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="text-blue-500 hover:underline"
-                    >
-                      All on GitHub{' '}
-                      <ExternalLinkIcon size={10} className="inline-block align-[-0.1em]" />
-                    </a>
-                  </div>
+                truncated ? (
+                  <MoreFilesNote
+                    compact
+                    shown={files.length}
+                    total={pr.changedFilesCount}
+                    canLoadMore={more.canLoadMore}
+                    ceilingReached={more.ceilingReached}
+                    loading={more.loading}
+                    error={more.error}
+                    onLoadMore={more.loadMore}
+                    githubUrl={pr.githubUrl}
+                  />
                 ) : null
               }
             />
@@ -411,9 +496,10 @@ export function ChangesTab({
         <div className="min-w-0 flex-1">
           {focusMissing && focus != null && (
             <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-700 dark:text-amber-300">
-              <code className="font-mono">{focus.path}</code> isn’t in the diff shown here —
-              it may be outside this PR&apos;s changed files, or beyond the {files.length}-file
-              limit.{' '}
+              <code className="font-mono">{focus.path}</code> isn’t in the diff shown here.
+              {truncated
+                ? ' It may be in the files not loaded yet.'
+                : ' It may be outside this PR’s changed files.'}{' '}
               <a
                 href={`${pr.githubUrl}/files`}
                 target="_blank"
@@ -429,21 +515,21 @@ export function ChangesTab({
             commenting={commenting}
             threadCtx={threadCtx}
             focus={focus}
+            fileSource={fileSource}
           />
         </div>
       </div>
-      {data?.truncated && (
-        <div className="px-4 py-2 text-xs text-gray-400">
-          Large diff — not all files are shown.{' '}
-          <a
-            href={`${pr.githubUrl}/files`}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="text-blue-500 hover:underline"
-          >
-            View all on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
-          </a>
-        </div>
+      {truncated && (
+        <MoreFilesNote
+          shown={files.length}
+          total={pr.changedFilesCount}
+          canLoadMore={more.canLoadMore}
+          ceilingReached={more.ceilingReached}
+          loading={more.loading}
+          error={more.error}
+          onLoadMore={more.loadMore}
+          githubUrl={pr.githubUrl}
+        />
       )}
     </div>
   );

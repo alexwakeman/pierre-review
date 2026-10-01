@@ -45,9 +45,9 @@ export function WorkspaceFlowMetrics(): JSX.Element | null {
       <WorkspaceMetricsPanel
         metrics={data.metrics}
         onOpenMetric={openMetricsDetail}
-        // The Open-PRs tile routes to the SAME sortable open-PRs drill-down the "Show all"
-        // footers open — workspace-wide ('feed'), not a metrics-detail sub-tab.
-        onOpenOpenPrs={() => openOpenPrsDetail('feed')}
+        // The Open-PRs tile reveals the fixed Open PRs tab, every repo (it clears a repo the
+        // "Show all" footer pre-selected) — not a metrics-detail sub-tab.
+        onOpenOpenPrs={() => openOpenPrsDetail()}
       />
       {/* Absent on a response that predates the field, and the component self-hides when nothing
           was opened in the window. */}

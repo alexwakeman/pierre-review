@@ -463,6 +463,10 @@ export const commits = pgTable(
     authorId: integer('author_id').references(() => users.id),
     committerId: integer('committer_id').references(() => users.id),
     message: text('message'),
+    // GitHub's `messageHeadline` (first line, <= 200 chars). Fetched on EVERY walk, not lean-gated,
+    // and written only when received: NULL is "not synced yet". Read by My Turn's "Pushed since"
+    // card (migration 0072 / pg 0059).
+    messageHeadline: text('message_headline'),
     committedAt: timestamp('committed_at', {
       withTimezone: true,
       mode: 'date',
@@ -862,6 +866,9 @@ export const claudeReviews = pgTable(
     prIdx: index('cr_pr_idx').on(t.prId),
     prShaIdx: index('cr_pr_sha_idx').on(t.prId, t.headSha),
     accountIdx: index('cr_account_idx').on(t.accountId),
+    // Parent key of `claude_review_chat_messages`' composite tenancy FK (migration 0073 / pg
+    // 0060). `id` is the primary key, so this is never a lookup index.
+    idAccountUx: uniqueIndex('claude_reviews_id_account').on(t.id, t.accountId),
   }),
 );
 
@@ -908,6 +915,40 @@ export const claudeReviewFindings = pgTable(
     priorFindingId: integer('prior_finding_id'),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
+);
+
+// Claude Review chat messages. Twin of schema.sqlite.ts claudeReviewChatMessages, where the
+// contract lives. Migration pg 0060 (sqlite 0073).
+export const claudeReviewChatMessages = pgTable(
+  'claude_review_chat_messages',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    reviewId: integer('review_id').notNull(),
+    findingId: integer('finding_id').references(() => claudeReviewFindings.id, {
+      onDelete: 'cascade',
+    }),
+    role: text('role', { enum: ['user', 'assistant'] }).notNull(),
+    content: text('content').notNull(),
+    model: text('model'),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    threadIdx: index('crcm_thread_idx').on(t.reviewId, t.findingId, t.id),
+    accountIdx: index('crcm_account_idx').on(t.accountId),
+    reviewAccountFk: foreignKey({
+      name: 'crcm_review_account_fk',
+      columns: [t.reviewId, t.accountId],
+      foreignColumns: [claudeReviews.id, claudeReviews.accountId],
+    }).onDelete('cascade'),
+  }),
 );
 
 // ---- Workspaces (CORE) ----

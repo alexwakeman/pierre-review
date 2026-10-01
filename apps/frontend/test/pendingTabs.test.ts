@@ -36,8 +36,6 @@ import {
   buildPendingView,
   effectivePendingTab,
   offerAuthorLens,
-  openPrsButtonCount,
-  openPrsButtonLabel,
   showsMyTurnHead,
   offerOnlyYours,
   passesAuthorLens,
@@ -86,31 +84,15 @@ describe('the tab on screen', () => {
   });
 });
 
-// My turn's head — the "Open PRs" button and the default-branch strip above its cards. It replaced
-// My turn's second view ("Default branches and open PRs"), so it belongs to My turn alone.
+// My turn's head — the default-branch strip above its cards. It replaced My turn's second view
+// ("Default branches and open PRs"), so it belongs to My turn alone. (Its "Open PRs" button is
+// gone: Open PRs is a fixed tab now — see openPrsTab.test.ts.)
 describe("My turn's head", () => {
   it('heads My turn, and no other tab', () => {
     expect(showsMyTurnHead('my_turn')).toBe(true);
     for (const t of PENDING_TABS) {
       if (t.key !== 'my_turn') expect(showsMyTurnHead(t.key)).toBe(false);
     }
-  });
-
-  it('counts NON-DRAFT open PRs', () => {
-    const prs = [{ isDraft: false }, { isDraft: true }, { isDraft: false }];
-    expect(openPrsButtonCount({ prs }, false)).toBe(2);
-    expect(openPrsButtonLabel(openPrsButtonCount({ prs }, false))).toBe('Open PRs · 2');
-  });
-
-  it('⚠ unknown is never zero: no answer, or the previous workspace’s placeholder, has no figure', () => {
-    expect(openPrsButtonCount(undefined, false)).toBeNull();
-    expect(openPrsButtonCount({ prs: [{ isDraft: false }] }, true)).toBeNull();
-    expect(openPrsButtonLabel(null)).toBe('Open PRs');
-  });
-
-  it('an answered empty workspace is a real 0, and a missing array reads as nothing', () => {
-    expect(openPrsButtonLabel(openPrsButtonCount({ prs: [] }, false))).toBe('Open PRs · 0');
-    expect(openPrsButtonCount({}, false)).toBe(0);
   });
 });
 

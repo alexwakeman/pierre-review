@@ -82,6 +82,12 @@ describe('landingTabFromUrl — the decision table', () => {
     expect(landingTabFromUrl('?workspace=5&view=timeline')).toBe('timeline');
   });
 
+  // The third FIXED view (Activity · Open PRs · Timeline): bookmarkable, and it beats a pr selection.
+  it('?view=open-prs → open-prs', () => {
+    expect(landingTabFromUrl('?view=open-prs')).toBe('open-prs');
+    expect(landingTabFromUrl('?workspace=5&view=open-prs&pr=4123')).toBe('open-prs');
+  });
+
   it('?view=activity → activity', () => {
     expect(landingTabFromUrl('?view=activity')).toBe('activity');
     expect(landingTabFromUrl('?workspace=5&view=activity&activityRepo=bots')).toBe('activity');
@@ -169,6 +175,13 @@ describe('writeToUrl emits the board affirmatively (the round trip)', () => {
     writeToUrl(state({ workspaceId: 5 }));
     expect(location.search).toContain('view=activity');
     expect(landingTabFromUrl(location.search)).toBe('activity');
+  });
+
+  it('emits view=open-prs while the Open PRs tab is active, and that URL lands back on it', () => {
+    usePinnedTabs.setState({ activeTab: 'open-prs' });
+    writeToUrl(state({ workspaceId: 5 }));
+    expect(location.search).toContain('view=open-prs');
+    expect(landingTabFromUrl(location.search)).toBe('open-prs');
   });
 
   // A pinned PR tab IS a view now, and it round-trips: the key is the address. (This used to

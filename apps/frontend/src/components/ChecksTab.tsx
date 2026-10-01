@@ -1001,7 +1001,7 @@ export function ChecksTab({
         <Row label="Actions">
           <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
             {pr.viewerCanApprove && (
-              <ApproveControl prId={pr.id} alreadyApproved={pr.viewerHasApprovedStanding} />
+              <ApproveControl prId={pr.id} standing={pr.viewerReviewStanding} />
             )}
             {pr.viewerCanPush && pr.state === 'open' && !pr.isDraft && (
               <>

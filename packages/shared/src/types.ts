@@ -5440,6 +5440,10 @@ export interface PrDetail {
   // control renders disabled ("Approved") — you've already approved and it still
   // stands. Distinct from viewerCanApprove (the right to approve at all).
   viewerHasApprovedStanding: boolean;
+  // The viewer's standing verdict as a value: 'approved', 'changes_requested', or null (no
+  // decisive review, or it was dismissed). Same fold as viewerHasApprovedStanding; it exists so
+  // a "Changes requested" chip survives a reload.
+  viewerReviewStanding: 'approved' | 'changes_requested' | null;
   threads: ThreadDetail[];
   reviews: ReviewDetail[];
   comments: PrCommentDetail[];
@@ -5610,6 +5614,34 @@ export interface NewPrBall {
   humanCommitsAfter?: number;
   /** who pushed the newest of them; null when sync could not map the commit's author */
   pusherId?: number | null;
+  /** WHAT was pushed — set only for `'commits_after'`: the newest `PUSHED_COMMITS_SHOWN` of
+   *  EXACTLY the commits `humanCommitsAfter` counts (human, not you, not automation), newest first.
+   *  "and N more" is `humanCommitsAfter − commits.length`.
+   *  ⚠ `headline: null` is "not synced yet", never an empty message. ⚠ Third-party text: render as
+   *  a text node, never in a `title=`. ⚠ DISPLAY ONLY — never in `detail`, a hash or a model
+   *  payload. Trailing optional. */
+  commits?: PushedCommit[];
+}
+
+/** One commit on a "Pushed since" card — see `NewPrBall.commits`. */
+export interface PushedCommit {
+  sha: string;
+  /** The commit message's first line (GitHub's `messageHeadline`); null = not synced yet. */
+  headline: string | null;
+  authorId: number | null;
+  /** ISO */
+  at: string;
+}
+
+/** The answer on a reply-type My Turn card — see `MyTurnCard.reply`. */
+export interface MyTurnReply {
+  authorId: number | null;
+  /** Markdown, at most `MY_TURN_REPLY_MAX_CHARS`; render through `Markdown`. */
+  body: string;
+  /** ISO */
+  at: string;
+  /** The stored body was longer than the cap and was cut. */
+  truncated: boolean;
 }
 
 // A new open PR (by someone other than you, non-draft) in one of the account's repos,
@@ -5639,6 +5671,10 @@ export interface CommentReplyItem extends MyTurnPr {
   replyAuthorId: number | null;
   /** First 140 chars of the reply, whitespace collapsed. */
   replyExcerpt: string;
+  /** The reply's markdown, at most `MY_TURN_REPLY_MAX_CHARS` (see `replyTruncated`); null when the
+   *  stored body is missing. Feeds `MyTurnCard.reply`. Trailing optional. */
+  replyBody?: string | null;
+  replyTruncated?: boolean;
 }
 
 /** S6 — a person @-mentioned you on an open PR after your last action on it. `since` is the newest
@@ -6727,6 +6763,45 @@ export interface ClaudeReviewStatesResponse {
   states: ClaudeReviewPrState[];
 }
 
+// ---- Claude Review chat (Pro+, local-only like the rest of Claude Review) ----
+// Questions about ONE succeeded review: a general thread (`findingId: null`) and one thread per
+// finding. Answered by an agent that mirrors the review's mode (worktree → read-only file tools at
+// the REVIEWED commit; diff-only → no tools). The server rebuilds each prompt from the STORED
+// turns, so the client sends only the new question. Never carried across reviews.
+// GET/POST /api/claude-reviews/:reviewId/chat (?findingId= on the GET).
+export const CLAUDE_REVIEW_CHAT_MAX_QUESTION_CHARS = 4000;
+
+export interface ClaudeReviewChatMessage {
+  id: number;
+  findingId: number | null;
+  role: 'user' | 'assistant';
+  content: string; // markdown on an assistant turn
+  createdAt: string;
+}
+
+export interface ClaudeReviewChatResponse {
+  reviewId: number;
+  findingId: number | null;
+  messages: ClaudeReviewChatMessage[];
+  // The PR's head has moved past the reviewed commit: answers still read the reviewed commit.
+  headMoved: boolean;
+  // An answer for this review is being written right now (a second POST answers 409).
+  answering: boolean;
+}
+
+export interface ClaudeReviewChatBody {
+  question: string;
+  findingId?: number | null;
+}
+
+export interface ClaudeReviewChatAnswer {
+  // The stored question and answer, in order.
+  messages: ClaudeReviewChatMessage[];
+  // Earlier turns left out of the prompt to fit (the oldest go first). 0 when nothing was dropped.
+  trimmedTurns: number;
+  headMoved: boolean;
+}
+
 export interface PostReviewBody {
   userVerdict: ClaudeReviewVerdict;
 }
@@ -7128,6 +7203,15 @@ export interface ApprovePrBody {
   body?: string;
 }
 
+// Request changes on the PR. Same permission rule as approve. GitHub refuses a
+// request-changes review with no text, so a blank or absent body is sent as
+// REQUEST_CHANGES_DEFAULT_BODY.
+export interface RequestChangesBody {
+  body?: string;
+}
+
+export const REQUEST_CHANGES_DEFAULT_BODY = 'Changes requested.';
+
 // Add ONE inline review comment, posted immediately as a standalone comment.
 export interface AddReviewCommentBody {
   path: string;
@@ -7152,6 +7236,9 @@ export type CreatePrCommentResult = PrCommentDetail;
 
 // Approve result: the submitted review, in the standard review detail shape.
 export type ApprovePrResult = ReviewDetail;
+
+// Request-changes result: the submitted review (state 'changes_requested').
+export type RequestChangesResult = ReviewDetail;
 
 export interface AddReviewCommentResult {
   commentId: number | null;
@@ -7208,8 +7295,17 @@ export interface PrFileDiff {
 
 export interface PrFilesResponse {
   files: PrFileDiff[];
-  // true ⇒ the PR has more files than the server's fetch cap; not all are listed.
+  // true ⇒ the PR has more files than this response (and the pages before it) listed.
   truncated: boolean;
+  /**
+   * The `?page=` that lists the next 100 files, or null when none is known to exist. One page per
+   * click ("Load next 100 files") — never fetched on mount. ABSENT on a diff cached before paging
+   * existed, which is treated like null.
+   */
+  nextPage?: number | null;
+  /** This page is GitHub's last (the 3,000-file REST ceiling) and it was full: files past it
+   *  exist but GitHub will not list them. */
+  ceilingReached?: boolean;
   /**
    * The PR's STORED head (`pull_requests.head_sha`) when the server read these patches. The SPA
    * keeps the diff at `staleTime: Infinity` and persists it, so this is how it knows a push has
@@ -7219,6 +7315,37 @@ export interface PrFilesResponse {
    * before this field existed, which is treated like `null`.
    */
   headSha?: string | null;
+}
+
+// ---- Changes tab: click-gated whole-file reads ----
+
+/** Why a whole-file read returned no text. `too_large` = past the ~1 MB per-side limit. */
+export type PrFileContentRefusal = 'too_large' | 'binary' | 'missing';
+
+/**
+ * GET /api/prs/:id/files/content?path=&side=head|base — one file's raw text at the PR's stored
+ * head (`side=head`) or the merge base GitHub's diff is taken against (`side=base`). Feeds a gap
+ * marker's "Show N hidden lines". Live, never stored; `sha` is the commit it was read at.
+ */
+export interface PrFileContentResponse {
+  path: string;
+  side: 'head' | 'base';
+  sha: string;
+  /** The file's lines (no trailing newline entries, `\r` stripped), or null when refused. */
+  lines: string[] | null;
+  refused: PrFileContentRefusal | null;
+}
+
+/**
+ * GET /api/prs/:id/files/diff?path=&previousPath= — "Load full diff" for a file GitHub sent no
+ * patch for. Both sides are fetched and diffed server-side into a header-less unified `patch`, the
+ * same shape as `PrFileDiff.patch`. `patch` is null when refused; `''` when the sides are
+ * line-identical.
+ */
+export interface PrFileFullDiffResponse {
+  path: string;
+  patch: string | null;
+  refused: PrFileContentRefusal | null;
 }
 
 // ---- Activity tab (Workstream 1; CORE, always-on, no AI) ----
@@ -7884,6 +8011,13 @@ export interface MyTurnCard extends InsightCardBase, InsightPrRef {
   /** Set ONLY on `claude_review` cards: who started the run. `'auto'` makes the chip read
    *  "Auto review". A label only — an auto run is owned exactly like a manual one. */
   trigger?: ClaudeReviewTrigger;
+  /** THE ANSWER ITSELF, on the reply-type cards: `thread` (only when somebody replied — never on a
+   *  `likely_addressed` row, whose stored comment is YOUR OWN), `thread_reply` and `comment_reply`.
+   *  Only the reply, never the thread. Folded from data `getMyTurn` already loads, so the board
+   *  still fetches nothing on mount.
+   *  ⚠ DISPLAY ONLY — never in `detail` (Slack prints it), a payload hash or a model payload.
+   *  Trailing optional; absent = nothing to show. */
+  reply?: MyTurnReply;
 }
 
 /** The home-kind facts a promoted My Turn card carries — see `MyTurnCard.own`. */

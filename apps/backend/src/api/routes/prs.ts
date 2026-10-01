@@ -5,6 +5,8 @@ import type {
   AddReviewCommentResult,
   ApprovePrBody,
   ApprovePrResult,
+  RequestChangesBody,
+  RequestChangesResult,
   ArmMergeBody,
   ArmedMergeListResponse,
   MergeQueueResult,
@@ -20,6 +22,8 @@ import type {
   PrFileDiff,
   PrFileDiffStatus,
   PrFilesResponse,
+  PrFileContentResponse,
+  PrFileFullDiffResponse,
   PrDetail,
   PrMergeOptions,
   PrRefreshBody,
@@ -32,6 +36,7 @@ import type {
   UpdateBranchBody,
   UpdateBranchResult,
 } from '@pierre-review/shared';
+import { REQUEST_CHANGES_DEFAULT_BODY } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { stampPrMergeQueueStateNonFatal } from '../../db/pr-merge-queue-stamp.js';
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
@@ -92,6 +97,15 @@ import {
   submitPrReview,
   updatePullRequestBranch,
 } from '../../github/mutations.js';
+import {
+  PR_FILES_MAX_PAGE,
+  fetchFileAtRef,
+  fetchPrFilesPage,
+  findPrFileWithPatch,
+  isSafeRepoPath,
+  resolvePrDiffRefs,
+  synthesizeUnifiedPatch,
+} from '../../github/pr-file-content.js';
 import { hydratePrDetail } from '../../sync/hydrate-detail.js';
 import { mergeQueueEntryStateFrom, reviewDecisionFrom } from '../../sync/upsert.js';
 import { refreshPrFromGitHub } from '../../sync/refresh-pr.js';
@@ -146,6 +160,48 @@ const idParamSchema = {
     properties: { id: { type: 'integer' } },
   },
 };
+
+// GET /api/prs/:id/files — `?page=` is the "Load next 100 files" click (GitHub's 3,000-file
+// listing ceiling is page 30).
+const prFilesSchema = {
+  ...idParamSchema,
+  querystring: {
+    type: 'object',
+    properties: { page: { type: 'integer', minimum: 1, maximum: PR_FILES_MAX_PAGE } },
+  },
+};
+
+const prFileContentSchema = {
+  ...idParamSchema,
+  querystring: {
+    type: 'object',
+    required: ['path', 'side'],
+    properties: {
+      path: { type: 'string', minLength: 1, maxLength: 4096 },
+      side: { type: 'string', enum: ['head', 'base'] },
+    },
+  },
+};
+
+const prFileDiffSchema = {
+  ...idParamSchema,
+  querystring: {
+    type: 'object',
+    required: ['path'],
+    properties: {
+      path: { type: 'string', minLength: 1, maxLength: 4096 },
+      previousPath: { type: 'string', minLength: 1, maxLength: 4096 },
+    },
+  },
+};
+
+/** A file body as display lines: no phantom last line for the trailing newline, `\r` stripped. */
+function splitFileLines(text: string): string[] {
+  if (text === '') return [];
+  const lines = text.split('\n');
+  if (lines[lines.length - 1] === '') lines.pop();
+  return lines.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
+}
 
 const checkLogsSchema = {
   params: {
@@ -633,6 +689,79 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
           id: rowId,
           authorId: viewerUserId,
           state: 'approved',
+          body: gh.body,
+          submittedAt: new Date(gh.submittedAt).toISOString(),
+          url: gh.url,
+        };
+        return result;
+      } catch (err) {
+        reply.status(502);
+        return {
+          error: 'GitHubError',
+          message: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+  );
+
+  // Request changes. The SAME permission re-check as approve (GitHub 422s an author who
+  // requests changes on their own PR, so the author exclusion is real, not cosmetic). GitHub
+  // also refuses a REQUEST_CHANGES review with no text, so a blank message is sent as
+  // REQUEST_CHANGES_DEFAULT_BODY — the SPA's placeholder says so.
+  //
+  // Post-write: stamp the review row with its real state, clear the viewer's review request
+  // (GitHub deletes it on any submitted review), re-read the PR once, then raise the change
+  // signal. NO settle ladder: a request-changes review cannot lift `blocked`, `reviewDecision`
+  // is written synchronously by GitHub (the one resync reads it), and pr-settle has no
+  // reviewDecision expectation — an expectation-free ladder would stop on its first read.
+  app.post(
+    '/api/prs/:id/request-changes',
+    { schema: approveSchema },
+    async (req, reply) => {
+      const { id } = req.params as { id: number };
+      const { body } = (req.body ?? {}) as RequestChangesBody;
+      const accountId = accountIdOf(req);
+
+      const ctx = await getPrWriteContext(id, accountId);
+      if (!ctx) {
+        reply.status(404);
+        return { error: 'NotFound', message: `PR ${id} not found` };
+      }
+
+      const viewerUserId = await getAccountUserId(accountId);
+      const canReview =
+        viewerUserId != null &&
+        viewerUserId !== ctx.authorId &&
+        ['WRITE', 'MAINTAIN', 'ADMIN'].includes(ctx.viewerPermission ?? '');
+      if (!canReview) {
+        reply.status(403);
+        return {
+          error: 'NotPermitted',
+          message:
+            'You need write access to this repo and cannot request changes on your own PR.',
+        };
+      }
+
+      const text = body?.trim() ? body : REQUEST_CHANGES_DEFAULT_BODY;
+      try {
+        const token = await getAccessToken(accountId);
+        const gh = await submitPrReview(token, ctx.owner, ctx.name, ctx.number, {
+          event: 'REQUEST_CHANGES',
+          body: text,
+        });
+        const rowId = await upsertLocalReview(
+          ctx.prId,
+          viewerUserId,
+          gh,
+          'changes_requested',
+        );
+        await clearOwnReviewRequest(ctx.prId, accountId, viewerUserId);
+        await resyncPrAfterWrite({ prId: ctx.prId, accountId, log: req.log });
+        await notePrChangedForPr(accountId, ctx.prId);
+        const result: RequestChangesResult = {
+          id: rowId,
+          authorId: viewerUserId,
+          state: 'changes_requested',
           body: gh.body,
           submittedAt: new Date(gh.submittedAt).toISOString(),
           url: gh.url,
@@ -1395,13 +1524,20 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         );
 
         // Find the requested file's REST patch (header-less) to validate anchoring.
-        const { files } = await fetchPrFilesWithPatch(
+        const firstFiles = await fetchPrFilesWithPatch(
           token,
           ctx.owner,
           ctx.name,
           ctx.number,
         );
-        const file = files.find((f) => f.filename === path);
+        // The Changes tab pages past the first 100 files ("Load next 100 files"), so a reader can
+        // comment on file 150: look further only when the first page did not hold it.
+        const file =
+          firstFiles.files.find((f) => f.filename === path) ??
+          (firstFiles.truncated
+            ? await findPrFileWithPatch(token, ctx.owner, ctx.name, ctx.number, path)
+            : null) ??
+          undefined;
         const anchors = buildFileAnchors(path, file?.patch ?? null);
         // A single-file AnchorIndex for the pure helpers.
         const index = new Map([[path, anchors]]);
@@ -1495,8 +1631,12 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
   // `headSha` is the STORED head at this read, so the SPA (which keeps the diff indefinitely)
   // can refetch it once a newer PR detail names another head. The empty fallback sends null, so
   // a failed read is retried on the next newer detail rather than kept as "no files" for good.
-  app.get('/api/prs/:id/files', { schema: idParamSchema }, async (req, reply) => {
+  //
+  // `?page=` (1-30) is the "Load next 100 files" click: ONE REST page per request, `nextPage` says
+  // whether another exists, `ceilingReached` that GitHub's 3,000-file listing ceiling was hit.
+  app.get('/api/prs/:id/files', { schema: prFilesSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
+    const { page = 1 } = req.query as { page?: number };
     const accountId = accountIdOf(req);
 
     const ctx = await getPrFilesContext(id, accountId);
@@ -1507,11 +1647,12 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       const token = await getAccessToken(accountId);
-      const { files, truncated } = await fetchPrFilesWithPatch(
+      const { files, nextPage, ceilingReached } = await fetchPrFilesPage(
         token,
         ctx.owner,
         ctx.name,
         ctx.number,
+        page,
       );
       const mapped: PrFileDiff[] = files.map((f) => ({
         path: f.filename,
@@ -1523,12 +1664,120 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         githubUrl: `${ctx.prUrl}/files#diff-${diffAnchorId(f.filename)}`,
         blobUrl: f.blob_url,
       }));
-      const result: PrFilesResponse = { files: mapped, truncated, headSha: ctx.headSha };
+      const result: PrFilesResponse = {
+        files: mapped,
+        truncated: nextPage != null || ceilingReached,
+        headSha: ctx.headSha,
+        nextPage,
+        ceilingReached,
+      };
       return result;
     } catch {
       // Graceful degrade — the Changes tab shows "no files" rather than 500ing.
       const result: PrFilesResponse = { files: [], truncated: false, headSha: null };
       return result;
+    }
+  });
+
+  // Changes tab, a gap marker's "Show N hidden lines": one file's raw text at the PR's stored
+  // head (`side=head`) or at the merge base (`side=base`, for a deleted file's gaps). CLICK-GATED
+  // in the SPA and never stored. Owner/name come from the account-scoped PR row, so `path` can
+  // only ever name a file in this PR's own repo. Over ~1 MB, binary or absent → `refused`.
+  app.get('/api/prs/:id/files/content', { schema: prFileContentSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const { path, side } = req.query as { path: string; side: 'head' | 'base' };
+    const accountId = accountIdOf(req);
+    if (!isSafeRepoPath(path)) {
+      reply.status(400);
+      return { error: 'BadRequest', message: 'That is not a file path in this repository.' };
+    }
+    const ctx = await getPrFilesContext(id, accountId);
+    if (!ctx) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    try {
+      const token = await getAccessToken(accountId);
+      const refs = await resolvePrDiffRefs(
+        token,
+        accountId,
+        id,
+        ctx.owner,
+        ctx.name,
+        ctx.number,
+        ctx.headSha,
+      );
+      const sha = side === 'base' ? refs.mergeBase : refs.headSha;
+      const got = await fetchFileAtRef(token, ctx.owner, ctx.name, path, sha);
+      const result: PrFileContentResponse = {
+        path,
+        side,
+        sha,
+        lines: got.kind === 'text' ? splitFileLines(got.text) : null,
+        refused: got.kind === 'text' ? null : got.kind,
+      };
+      return result;
+    } catch {
+      reply.status(502);
+      return { error: 'GitHubError', message: 'GitHub did not return this file.' };
+    }
+  });
+
+  // Changes tab, "Load full diff" for a file GitHub sent NO patch for (its diff is too large for
+  // the files listing). Both sides are fetched (`previousPath` for a rename's base) and diffed here
+  // with the resolver's Myers engine into a header-less unified patch — the shape FileDiffView
+  // already renders. A side that 404s is empty (an added or deleted file); both sides missing,
+  // either side binary, or either side past ~1 MB → `refused`, and the GitHub link stays.
+  app.get('/api/prs/:id/files/diff', { schema: prFileDiffSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const { path, previousPath } = req.query as { path: string; previousPath?: string };
+    const accountId = accountIdOf(req);
+    const basePath = previousPath ?? path;
+    if (!isSafeRepoPath(path) || !isSafeRepoPath(basePath)) {
+      reply.status(400);
+      return { error: 'BadRequest', message: 'That is not a file path in this repository.' };
+    }
+    const ctx = await getPrFilesContext(id, accountId);
+    if (!ctx) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    try {
+      const token = await getAccessToken(accountId);
+      const refs = await resolvePrDiffRefs(
+        token,
+        accountId,
+        id,
+        ctx.owner,
+        ctx.name,
+        ctx.number,
+        ctx.headSha,
+      );
+      const [base, head] = await Promise.all([
+        fetchFileAtRef(token, ctx.owner, ctx.name, basePath, refs.mergeBase),
+        fetchFileAtRef(token, ctx.owner, ctx.name, path, refs.headSha),
+      ]);
+      const refusal: PrFileFullDiffResponse['refused'] =
+        base.kind === 'too_large' || head.kind === 'too_large'
+          ? 'too_large'
+          : base.kind === 'binary' || head.kind === 'binary'
+            ? 'binary'
+            : base.kind === 'missing' && head.kind === 'missing'
+              ? 'missing'
+              : null;
+      if (refusal != null) {
+        const result: PrFileFullDiffResponse = { path, patch: null, refused: refusal };
+        return result;
+      }
+      const { patch } = synthesizeUnifiedPatch(
+        base.kind === 'text' ? base.text : '',
+        head.kind === 'text' ? head.text : '',
+      );
+      const result: PrFileFullDiffResponse = { path, patch, refused: null };
+      return result;
+    } catch {
+      reply.status(502);
+      return { error: 'GitHubError', message: 'GitHub did not return this file.' };
     }
   });
 

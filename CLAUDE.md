@@ -376,7 +376,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   render it.
 - **The Feed is a STREAM: `FeedView`, and nothing else.** Every survey panel left it — the work
   plan (Pending head), flow metrics (`WorkspaceFlowMetrics`, Reports), the daily-brief strip
-  (DELETED) and the trunk + Open PRs panels (now My turn's head: the trunk strip + an Open PRs button). Do not re-add
+  (DELETED) and the trunk + Open PRs panels (now My turn's head: the trunk strip; Open PRs is a fixed tab). Do not re-add
   any. ⚠ **The Reports
   rail entry is UNGATED on every tier** precisely because those free metrics live there now; the
   pane gates its Pro half internally — `PeriodReportsPanel`, Track usage, **and now the Chronology
@@ -473,7 +473,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   ALLOW-LIST** — a new `InsightKind` with no tab is folded, counted and never listed (a
   compiler-checked test in work-plan.test.ts fails first). ⚠ The visible tab is DERIVED
   (`effectivePendingTab`: a seated kind names its tab, else the picked `attentionTab`, else My
-  turn; My turn ALONE is headed by an "Open PRs · N" button + the trunk strip, count-free). ⚠ "Pending" is a LABEL-ONLY
+  turn; My turn ALONE is headed by the trunk strip, count-free; Open PRs is a permanent tab between Activity and Timeline). ⚠ "Pending" is a LABEL-ONLY
   rename of "Needs attention" — the store/URL literal stays
   `'attention'`. ⚠ **The board EXPLAINS its own order** (header + per-card info popovers, "How
   Pending works" modal), so every admission floor, cap, colour threshold and Do next preset lives
@@ -764,7 +764,8 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 **Claude Review** (agentic PR review, `src/review/`): opt-in, **LOCAL-ONLY**
 (`ENABLE_CLAUDE_REVIEW=true`; force-disabled in cloud — the routes are not even registered).
 Details: [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md). Non-negotiables: the agent's tools are
-read-only with **`Bash` denied outright**, and **no AI SDK ships in npm** — every AI module is
+read-only with **`Bash` denied outright** (the per-review CHAT, optional seam `ctx.review.chat`,
+mirrors the review's mode under the same rule and rebuilds its transcript server-side), and **no AI SDK ships in npm** — every AI module is
 reached only via dynamic `await import()`, and `build-release.mjs` asserts none leak into the
 release manifest. ⚠ **Its credential ladder is TWO RUNGS and there is NO stored key**: an ambient
 Claude session (preferred — the run STRIPS `ANTHROPIC_API_KEY` so a subscription pays instead of a
@@ -1325,7 +1326,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0058` and plugin `0034`–`0036` are NOT replayed.
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0060` and plugin `0034`–`0036` are NOT replayed.
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence

@@ -1320,6 +1320,12 @@ export async function persistPr(
           : null,
       );
       const committedAt = new Date(c.committedDate);
+      // The subject line, written ONLY when GitHub sent the key (a tolerant partial or an old
+      // fixture omits it) — spreading `{}` leaves a stored headline alone instead of clearing it.
+      const headline =
+        c.messageHeadline === undefined
+          ? {}
+          : { messageHeadline: c.messageHeadline == null ? null : c.messageHeadline.slice(0, 200) };
       // Upsert (not DoNothing) so we always get the row id back to point the
       // timeline event at — the marker modal resolves the commit via ref_id.
       const commitRow = (
@@ -1331,11 +1337,12 @@ export async function persistPr(
           authorId: commitAuthorId,
           committerId,
           message: config.persistBodies ? c.message : null,
+          ...headline,
           committedAt,
         })
         .onConflictDoUpdate({
           target: [commits.sha, commits.prId],
-          set: { message: config.persistBodies ? c.message : null, committedAt },
+          set: { message: config.persistBodies ? c.message : null, ...headline, committedAt },
         })
         .returning({ id: commits.id })
         .execute()

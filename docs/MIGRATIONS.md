@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0058` and plugin `0034`–`0036` are NOT (written 2026-09-19/24 with the Postgres down; see the
+  ⚠ pg `0052`–`0060` and plugin `0034`–`0036` are NOT (written 2026-09-19/24 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -776,6 +776,28 @@ Twins share `when` `1790042400000`; the pg file uses `ADD COLUMN IF NOT
 EXISTS`. `src/db/my-turn-claude-review.test.ts` runs the sqlite half through the real migrator.
 ⚠ **The pg twin is NOT replayed.**
 
+### `0072_commit_message_headline` (pg `0059`)
+
+One nullable column, `commits.message_headline` — GitHub's `messageHeadline` (first line, at most 200
+chars), read by My Turn's "Pushed since" card. NULL is "not synced yet": the walk selects it on every
+pass (not lean-gated) and writes it only when received, and `sync/backfill-commit-headlines.ts` fills
+open PRs' older commits after each walk. Separate from `message` (the lean-gated full body). The pg
+file uses `ADD COLUMN IF NOT EXISTS`. ⚠ **The pg twin is NOT replayed.**
+
+### `0073_claude_review_chat` (pg `0060`)
+
+A new CORE table, `claude_review_chat_messages` — one row per Claude Review chat message (a
+review's general thread when `finding_id` is NULL, else one finding's thread), plus the unique
+index `claude_reviews_id_account (id, account_id)`, which exists only as the parent key of the new
+table's composite tenancy FK `crcm_review_account_fk (review_id, account_id) → claude_reviews(id,
+account_id)` (the `pull_requests_id_account` trick from `0069`). `finding_id` is a plain FK to
+`claude_review_findings`; every FK cascades, and both delete paths (`deleteRepo`, retention's
+`deletePrSubtree`) plus `eraseAccountData` delete the rows explicitly, before the findings and runs.
+CORE because the parents are core tables and only core's delete paths can reach it; the Pro plugin
+writes it through `ctx.schema`. Twins share `when` `1790215200000`. ⚠ **The pg twin is NOT
+replayed** — worth one step: insert a message whose `account_id` does not own its `review_id` and
+check it raises `crcm_review_account_fk`.
+
 ### Plugin `0036_workspace_auto_review`
 
 Two nullable columns on `pro_workspace_settings`: `auto_review_enabled` (sqlite integer / pg
@@ -784,10 +806,10 @@ sweeper reviews from. No backfill (NULL = off). ⚠ Like `0035`, every hand-buil
 the store must replay it (the store SELECTs both columns): `workspace-settings.test.ts`,
 `settings-route-schema.test.ts`, `jira-routes.test.ts`. ⚠ **The pg twin is NOT replayed.**
 
-⚠ **NONE OF THE TEN PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0058` and plugin `0034`–`0036`). The
+⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0060` and plugin `0034`–`0036`). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
-core should reach **59 applied = 59 journal entries** and the plugin **36** — and check
+core should reach **61 applied = 61 journal entries** and the plugin **36** — and check
 `review_request_events` carries both FKs and its unique index, that `workspaces.flow_settings`,
 `pull_requests.advisory_ids` and `accounts.my_turn_settings` are `jsonb`, and that
 `security_checked_at` and `pr_mentions.mentioned_at` are `timestamp with time zone`. ⚠ `0055` is

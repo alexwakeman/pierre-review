@@ -23,6 +23,8 @@ import type {
   AiFixStatusResponse,
   ApprovePrBody,
   ApprovePrResult,
+  RequestChangesBody,
+  RequestChangesResult,
   CheckLogsResponse,
   CiAnalysisResponse,
   CiRerunBody,
@@ -38,6 +40,9 @@ import type {
   ClaudeReviewResponse,
   ClaudeReviewStatesBody,
   ClaudeReviewStatesResponse,
+  ClaudeReviewChatAnswer,
+  ClaudeReviewChatBody,
+  ClaudeReviewChatResponse,
   ClaudeReviewStatusResponse,
   ClaudeReviewTicketInput,
   ClaudeReviewVerdict,
@@ -141,6 +146,8 @@ import type {
   PostReviewResult,
   PrDetail,
   PrFilesResponse,
+  PrFileContentResponse,
+  PrFileFullDiffResponse,
   PrRefreshBody,
   PrRefreshResponse,
   SuggestedReviewersResponse,
@@ -562,6 +569,21 @@ export const api = {
   scopeMentionCandidates: (workspaceId: number) =>
     get<MentionCandidate[]>(withQuery('/api/mention-candidates', workspaceParam(workspaceId))),
   prFiles: (id: number) => get<PrFilesResponse>(`/api/prs/${id}/files`),
+  // "Load next 100 files" — one later page of the same listing (page 2 onward; click-gated).
+  prFilesPage: (id: number, page: number) =>
+    get<PrFilesResponse>(`/api/prs/${id}/files?page=${page}`),
+  // A gap marker's "Show N hidden lines": one file's raw lines at the PR head or merge base.
+  prFileContent: (id: number, path: string, side: 'head' | 'base') =>
+    get<PrFileContentResponse>(
+      `/api/prs/${id}/files/content?path=${encodeURIComponent(path)}&side=${side}`,
+    ),
+  // "Load full diff" for a file GitHub sent no patch for — diffed server-side.
+  prFileFullDiff: (id: number, path: string, previousPath: string | null) =>
+    get<PrFileFullDiffResponse>(
+      `/api/prs/${id}/files/diff?path=${encodeURIComponent(path)}${
+        previousPath ? `&previousPath=${encodeURIComponent(previousPath)}` : ''
+      }`,
+    ),
   // A WINDOW of a failed GitHub Actions check's logs (fetched live, never stored).
   //
   // Two shapes, mirroring the route: pass `tail` for the legacy "last N lines" open, or an
@@ -610,6 +632,12 @@ export const api = {
   approvePr: (prId: number, body?: ApprovePrBody) =>
     fetch(`/api/prs/${prId}/approve`, jsonBody('POST', body ?? {})).then((r) =>
       handle<ApprovePrResult>(r),
+    ),
+  // Request changes. A blank or absent body is sent by the server as "Changes requested."
+  // (GitHub refuses a request-changes review with no text).
+  requestChanges: (prId: number, body?: RequestChangesBody) =>
+    fetch(`/api/prs/${prId}/request-changes`, jsonBody('POST', body ?? {})).then((r) =>
+      handle<RequestChangesResult>(r),
     ),
   // Merge control (CORE / free tier): the repo's allowed methods + live mergeability, the
   // merge itself, and the update-branch-from-trunk.
@@ -1290,6 +1318,16 @@ export const api = {
       jsonBody('POST', { userVerdict }),
     ).then((r) =>
       handle<PostReviewPreview | PostReviewResult>(r),
+    ),
+  // Claude Review chat: one thread per review (findingId null) and one per finding. The server
+  // rebuilds the transcript from stored turns, so only the new question is sent.
+  claudeReviewChat: (reviewId: number, findingId: number | null) =>
+    get<ClaudeReviewChatResponse>(
+      `/api/claude-reviews/${reviewId}/chat${findingId != null ? `?findingId=${findingId}` : ''}`,
+    ),
+  askClaudeReviewChat: (reviewId: number, body: ClaudeReviewChatBody) =>
+    fetch(`/api/claude-reviews/${reviewId}/chat`, jsonBody('POST', body)).then((r) =>
+      handle<ClaudeReviewChatAnswer>(r),
     ),
 
   // ---- AI Fix (Pro) ----

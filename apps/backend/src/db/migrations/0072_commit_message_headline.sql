@@ -1,0 +1,13 @@
+-- MY TURN "PUSHED SINCE": THE FIRST LINE OF EACH COMMIT MESSAGE.
+--
+-- commits.message_headline: GitHub's `messageHeadline` (the subject line), at most 200 chars.
+-- The "Pushed since" card on the Pending board lists what was pushed after your last action, and
+-- the board may not fetch on mount, so the line has to be stored.
+--
+-- It is NOT `message`. `message` is the full body, lean-gated (never fetched or stored unless
+-- PERSIST_BODIES=true) and hydrated on demand for PR detail. The headline is one short line and is
+-- fetched on EVERY walk, in both storage modes. It is written only when GitHub sent it; NULL means
+-- "not synced yet", never "empty" (the backfill in sync/backfill-commit-headlines.ts fills open
+-- PRs after a walk).
+-- The Postgres twin is migrations-pg/0059_commit_message_headline.sql.
+ALTER TABLE `commits` ADD `message_headline` text;

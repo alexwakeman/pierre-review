@@ -20,11 +20,16 @@ process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 process.env.DEPLOYMENT_MODE = 'local';
 
-const fetchPrFilesWithPatch = vi.fn();
-// Spread the real module so every export the routes don't stub still resolves.
-vi.mock('../../github/mutations.js', async (importOriginal) => ({
+const fetchPrFilesPage = vi.fn();
+const resolvePrDiffRefs = vi.fn();
+const fetchFileAtRef = vi.fn();
+// Spread the real module so every export the routes don't stub still resolves (the path guard
+// and the patch synthesiser stay REAL — the routes are tested through them).
+vi.mock('../../github/pr-file-content.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  fetchPrFilesWithPatch,
+  fetchPrFilesPage,
+  resolvePrDiffRefs,
+  fetchFileAtRef,
 }));
 const getAccessToken = vi.fn(async () => 'tok');
 vi.mock('../../auth/account.js', async (importOriginal) => ({
@@ -54,7 +59,8 @@ const oneFile = {
       blob_url: 'https://github.com/acme/files/blob/x/src/a.ts',
     },
   ],
-  truncated: false,
+  nextPage: null,
+  ceilingReached: false,
 };
 
 async function setHead(id: number, headSha: string | null): Promise<void> {
@@ -138,7 +144,8 @@ afterAll(async () => {
 beforeEach(async () => {
   vi.clearAllMocks();
   getAccessToken.mockResolvedValue('tok');
-  fetchPrFilesWithPatch.mockResolvedValue(oneFile);
+  fetchPrFilesPage.mockResolvedValue(oneFile);
+  resolvePrDiffRefs.mockResolvedValue({ headSha: 'head-1', mergeBase: 'base-0' });
   await setHead(prId, 'head-1');
 });
 
@@ -162,7 +169,7 @@ describe('GET /api/prs/:id/files — the head the patches were read at', () => {
   });
 
   it('stamps the empty fallback null, never the head', async () => {
-    fetchPrFilesWithPatch.mockRejectedValueOnce(new Error('502 from GitHub'));
+    fetchPrFilesPage.mockRejectedValueOnce(new Error('502 from GitHub'));
     const res = await app.inject({ method: 'GET', url: `/api/prs/${prId}/files` });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ files: [], truncated: false, headSha: null });
@@ -171,6 +178,126 @@ describe('GET /api/prs/:id/files — the head the patches were read at', () => {
   it("404s another account's PR and never reads GitHub for it", async () => {
     const res = await app.inject({ method: 'GET', url: `/api/prs/${foreignPrId}/files` });
     expect(res.statusCode).toBe(404);
-    expect(fetchPrFilesWithPatch).not.toHaveBeenCalled();
+    expect(fetchPrFilesPage).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/prs/:id/files?page= — one page per click', () => {
+  it('passes the page through and echoes whether another exists', async () => {
+    fetchPrFilesPage.mockResolvedValueOnce({ ...oneFile, nextPage: 3, ceilingReached: false });
+    const res = await app.inject({ method: 'GET', url: `/api/prs/${prId}/files?page=2` });
+    expect(res.statusCode).toBe(200);
+    expect(fetchPrFilesPage).toHaveBeenCalledWith('tok', 'acme', 'files', 12, 2);
+    expect(res.json()).toMatchObject({ truncated: true, nextPage: 3, ceilingReached: false });
+  });
+
+  it('says so when GitHub’s 3,000-file ceiling is reached', async () => {
+    fetchPrFilesPage.mockResolvedValueOnce({ ...oneFile, nextPage: null, ceilingReached: true });
+    const res = await app.inject({ method: 'GET', url: `/api/prs/${prId}/files?page=30` });
+    expect(res.json()).toMatchObject({ truncated: true, nextPage: null, ceilingReached: true });
+  });
+
+  it('refuses a page past the ceiling', async () => {
+    const res = await app.inject({ method: 'GET', url: `/api/prs/${prId}/files?page=31` });
+    expect(res.statusCode).toBe(400);
+    expect(fetchPrFilesPage).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/prs/:id/files/content — a gap marker’s hidden lines', () => {
+  it('reads the file at the stored head and returns its lines', async () => {
+    fetchFileAtRef.mockResolvedValueOnce({ kind: 'text', text: 'a\r\nb\nc\n' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/prs/${prId}/files/content?path=src/a.ts&side=head`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(fetchFileAtRef).toHaveBeenCalledWith('tok', 'acme', 'files', 'src/a.ts', 'head-1');
+    expect(res.json()).toEqual({
+      path: 'src/a.ts',
+      side: 'head',
+      sha: 'head-1',
+      lines: ['a', 'b', 'c'],
+      refused: null,
+    });
+  });
+
+  it('reads the base side at the merge base', async () => {
+    fetchFileAtRef.mockResolvedValueOnce({ kind: 'too_large', bytes: 2_000_000 });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/prs/${prId}/files/content?path=src/a.ts&side=base`,
+    });
+    expect(fetchFileAtRef).toHaveBeenCalledWith('tok', 'acme', 'files', 'src/a.ts', 'base-0');
+    expect(res.json()).toMatchObject({ sha: 'base-0', lines: null, refused: 'too_large' });
+  });
+
+  it('refuses a path that climbs out of the repo, before any GitHub read', async () => {
+    for (const bad of ['../etc/passwd', '/abs', 'a//b', 'a/./b']) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/prs/${prId}/files/content?path=${encodeURIComponent(bad)}&side=head`,
+      });
+      expect(res.statusCode, bad).toBe(400);
+    }
+    expect(fetchFileAtRef).not.toHaveBeenCalled();
+  });
+
+  it("404s another account's PR and never reads GitHub for it", async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/prs/${foreignPrId}/files/content?path=src/a.ts&side=head`,
+    });
+    expect(res.statusCode).toBe(404);
+    expect(resolvePrDiffRefs).not.toHaveBeenCalled();
+    expect(fetchFileAtRef).not.toHaveBeenCalled();
+  });
+
+  it('502s a GitHub failure with a plain message', async () => {
+    fetchFileAtRef.mockRejectedValueOnce(new Error('boom'));
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/prs/${prId}/files/content?path=src/a.ts&side=head`,
+    });
+    expect(res.statusCode).toBe(502);
+  });
+});
+
+describe('GET /api/prs/:id/files/diff — a full diff GitHub would not send', () => {
+  it('diffs the base (previous path) against the head into a unified patch', async () => {
+    fetchFileAtRef.mockImplementation(async (_t: string, _o: string, _n: string, path: string) =>
+      path === 'old.ts'
+        ? { kind: 'text', text: 'one\ntwo\nthree\n' }
+        : { kind: 'text', text: 'one\nTWO\nthree\n' },
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/prs/${prId}/files/diff?path=new.ts&previousPath=old.ts`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      path: 'new.ts',
+      patch: '@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three',
+      refused: null,
+    });
+    expect(fetchFileAtRef).toHaveBeenCalledWith('tok', 'acme', 'files', 'old.ts', 'base-0');
+    expect(fetchFileAtRef).toHaveBeenCalledWith('tok', 'acme', 'files', 'new.ts', 'head-1');
+  });
+
+  it('treats a missing side as empty (an added file)', async () => {
+    fetchFileAtRef.mockImplementation(async (_t: string, _o: string, _n: string, _p: string, ref: string) =>
+      ref === 'base-0' ? { kind: 'missing' } : { kind: 'text', text: 'x\n' },
+    );
+    const res = await app.inject({ method: 'GET', url: `/api/prs/${prId}/files/diff?path=n.ts` });
+    expect(res.json()).toMatchObject({ patch: '@@ -0,0 +1,1 @@\n+x', refused: null });
+  });
+
+  it('refuses past the size limit, and for a binary', async () => {
+    fetchFileAtRef.mockResolvedValue({ kind: 'too_large', bytes: null });
+    let res = await app.inject({ method: 'GET', url: `/api/prs/${prId}/files/diff?path=n.ts` });
+    expect(res.json()).toEqual({ path: 'n.ts', patch: null, refused: 'too_large' });
+    fetchFileAtRef.mockResolvedValue({ kind: 'binary' });
+    res = await app.inject({ method: 'GET', url: `/api/prs/${prId}/files/diff?path=n.ts` });
+    expect(res.json().refused).toBe('binary');
   });
 });

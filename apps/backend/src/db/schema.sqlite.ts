@@ -582,6 +582,10 @@ export const commits = sqliteTable(
     authorId: integer('author_id').references(() => users.id),
     committerId: integer('committer_id').references(() => users.id),
     message: text('message'),
+    // GitHub's `messageHeadline` (first line, <= 200 chars). Fetched on EVERY walk, not lean-gated,
+    // and written only when received: NULL is "not synced yet". Read by My Turn's "Pushed since"
+    // card (migration 0072 / pg 0059).
+    messageHeadline: text('message_headline'),
     committedAt: integer('committed_at', { mode: 'timestamp' }).notNull(),
   },
   (t) => ({
@@ -1126,6 +1130,9 @@ export const claudeReviews = sqliteTable(
     prIdx: index('cr_pr_idx').on(t.prId),
     prShaIdx: index('cr_pr_sha_idx').on(t.prId, t.headSha),
     accountIdx: index('cr_account_idx').on(t.accountId),
+    // Parent key of `claude_review_chat_messages`' composite tenancy FK (migration 0073 / pg
+    // 0060). `id` is the primary key, so this is never a lookup index.
+    idAccountUx: uniqueIndex('claude_reviews_id_account').on(t.id, t.accountId),
   }),
 );
 
@@ -1183,6 +1190,50 @@ export const claudeReviewFindings = sqliteTable(
     priorFindingId: integer('prior_finding_id'),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
+);
+
+// ---- Claude Review chat (CORE table, written by the Pro plugin) ----
+// One row per chat MESSAGE about one succeeded review: a general thread (`finding_id` NULL) and
+// one thread per finding. The transcript a model sees is REBUILT SERVER-SIDE from these rows on
+// every turn, so a client can never inject a prior "assistant" turn. Chat is never carried across
+// reviews: a new review of the same PR starts empty, and an older review's threads stay with it.
+// ⚠ BOTH DELETE PATHS (deleteRepo in queries.ts, deletePrSubtree in retention.ts) delete these
+// rows BEFORE the findings and runs they reference, plus eraseAccountData + accountScopedTables().
+// `review_id` arrives in a request PATH, so tenancy is STRUCTURAL: a composite FK against
+// claude_reviews(id, account_id). Migration 0073 (pg 0060). Twin: schema.pg.ts.
+export const claudeReviewChatMessages = sqliteTable(
+  'claude_review_chat_messages',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    reviewId: integer('review_id').notNull(),
+    // NULL = the review's general thread; else the finding this thread is about (a finding of
+    // THIS review — the route checks it before any write).
+    findingId: integer('finding_id').references(() => claudeReviewFindings.id, {
+      onDelete: 'cascade',
+    }),
+    role: text('role', { enum: ['user', 'assistant'] }).notNull(),
+    content: text('content').notNull(),
+    // Assistant rows only: the model that answered, what the turn cost, its tokens.
+    model: text('model'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    threadIdx: index('crcm_thread_idx').on(t.reviewId, t.findingId, t.id),
+    accountIdx: index('crcm_account_idx').on(t.accountId),
+    reviewAccountFk: foreignKey({
+      name: 'crcm_review_account_fk',
+      columns: [t.reviewId, t.accountId],
+      foreignColumns: [claudeReviews.id, claudeReviews.accountId],
+    }).onDelete('cascade'),
+  }),
 );
 
 // ---- Workspaces (CORE) ----

@@ -60,6 +60,8 @@ import type {
   MyLastAction,
   MyTurnResponse,
   NewPrBall,
+  PushedCommit,
+  MyTurnReply,
   NewSinceLastViewed,
   PrCommentDetail,
   PrDetail,
@@ -182,8 +184,10 @@ import type {
 // literal would let the app explain an order it no longer produces. See pending-rules.ts.
 import {
   automationVendorFor,
+  MY_TURN_REPLY_MAX_CHARS,
   MY_TURN_SEVERITY,
   PENDING_KIND_RANK,
+  PUSHED_COMMITS_SHOWN,
   PENDING_LIMITS,
   PENDING_SEVERITY,
 } from '@pierre-review/shared';
@@ -5115,6 +5119,9 @@ export async function getWorkspaceInsights(
       own?: MyTurnOwnWork;
       /** `MyTurnCard.trigger` — set only on `claude_review` rows, for the "Auto review" chip. */
       trigger?: ClaudeReviewTrigger;
+      /** `MyTurnCard.reply` — set only on the reply-type rows (`thread` when somebody replied,
+       *  `thread_reply`, `comment_reply`). DISPLAY ONLY: never read into `detail`. */
+      reply?: MyTurnReply;
       threadId: number | null;
       severity: InsightSeverity;
       detail: string;
@@ -5179,6 +5186,13 @@ export async function getWorkspaceInsights(
         extraActorIds: [],
       });
     }
+    // The reply a thread card shows inline: the stored body (else the excerpt), capped. Undefined
+    // when there is no text at all — unknown is never an empty box.
+    const threadReplyOf = (i: ThreadAwaitingItem): MyTurnReply | undefined => {
+      const capped = capMyTurnReply(i.lastReplyBody ?? i.lastReplyExcerpt);
+      if (capped == null) return undefined;
+      return { authorId: i.lastReplyAuthorId, at: i.lastReplyAt, ...capped };
+    };
     for (const i of mt.threadsAwaiting) {
       const at = new Date(Date.parse(i.lastReplyAt));
       // TWO EVENTS, TWO SENTENCES — see `ThreadAwaitingItem.awaitingKind`. On a
@@ -5199,6 +5213,8 @@ export async function getWorkspaceInsights(
         prId: i.prId,
         relevance: relevanceOf(i),
         muted: mutedOf(i),
+        // ⚠ Never on a `likely_addressed` row: its stored comment is YOUR OWN, not a reply.
+        reply: addressed ? undefined : threadReplyOf(i),
         // Naming yourself as an actor on your own thread adds nothing to render.
         extraActorIds: addressed ? [] : [i.lastReplyAuthorId],
       });
@@ -5307,6 +5323,7 @@ export async function getWorkspaceInsights(
         prId: i.prId,
         relevance: relevanceOf(i),
         muted: mutedOf(i),
+        reply: i.awaitingKind === 'likely_addressed' ? undefined : threadReplyOf(i),
         extraActorIds: [i.lastReplyAuthorId],
       });
     }
@@ -5323,6 +5340,15 @@ export async function getWorkspaceInsights(
         prId: i.prId,
         relevance: relevanceOf(i),
         muted: mutedOf(i),
+        reply:
+          i.replyBody != null && i.replyBody.trim() !== ''
+            ? {
+                authorId: i.replyAuthorId,
+                body: i.replyBody,
+                at: at.toISOString(),
+                truncated: i.replyTruncated === true,
+              }
+            : undefined,
         extraActorIds: [i.replyAuthorId],
       });
     }
@@ -5638,6 +5664,8 @@ export async function getWorkspaceInsights(
           own: s.own,
           // Only `claude_review` rows set it — see `MyTurnCard.trigger`.
           trigger: s.trigger,
+          // Only the reply-type rows set it — see `MyTurnCard.reply`. DISPLAY ONLY.
+          reply: s.reply,
           threadId: s.threadId,
           detail: s.detail,
           since: since.toISOString(),
@@ -7544,6 +7572,22 @@ function summariseNew(n: NewSinceLastViewed): string {
 // your own work plus red default branches into My Turn. A switched-off type is not computed at
 // all, so it is gone from the list, every count, the brief and the notifications at once.
 
+/** A reply body as a My Turn card carries it: at most `MY_TURN_REPLY_MAX_CHARS`, cut on a
+ *  whitespace boundary when one is near, and flagged when cut. Null for a missing or blank body. */
+export function capMyTurnReply(
+  body: string | null | undefined,
+  max: number = MY_TURN_REPLY_MAX_CHARS,
+): { body: string; truncated: boolean } | null {
+  if (body == null) return null;
+  const text = body.trim();
+  if (text === '') return null;
+  if (text.length <= max) return { body: text, truncated: false };
+  let cut = text.slice(0, max);
+  const space = cut.search(/\s\S*$/);
+  if (space > max * 0.8) cut = cut.slice(0, space);
+  return { body: `${cut.trimEnd()}…`, truncated: true };
+}
+
 /** The channel your newest action on a PR came through. `comment_reply` (S5) needs it: the next
  *  person's PR comment is plausibly an answer to you only when your LAST action was a PR comment. */
 type MineChannel = 'review' | 'review_comment' | 'pr_comment' | 'commit';
@@ -7563,6 +7607,9 @@ interface PrActionClocks {
   humanCommitsAfterMine: number;
   lastHumanCommitAfterMine: Date | null;
   lastHumanCommitAuthorId: number | null;
+  /** The commit ids `humanCommitsAfterMine` counts, unordered — EXACTLY that population, so the
+   *  "Pushed since" list and its count cannot disagree. */
+  humanCommitIdsAfterMine: { id: number; at: Date }[];
 }
 
 /** A surviving "New PRs" seed: why it survived, plus the clock that moment happened on. `ball`
@@ -7603,6 +7650,7 @@ export async function lastActionClocks(
       humanCommitsAfterMine: 0,
       lastHumanCommitAfterMine: null,
       lastHumanCommitAuthorId: null,
+      humanCommitIdsAfterMine: [],
     });
   }
   const bots = botUserIds ?? (await globalAutomationUserIds());
@@ -7626,7 +7674,12 @@ export async function lastActionClocks(
     // The ONE of the four that is not viewer-filtered: it answers both halves — my own pushes
     // (which count as acting) and everyone else's (which are what moves the ball back).
     db
-      .select({ prId: commits.prId, at: commits.committedAt, authorId: commits.authorId })
+      .select({
+        id: commits.id,
+        prId: commits.prId,
+        at: commits.committedAt,
+        authorId: commits.authorId,
+      })
       .from(commits)
       .where(inArray(commits.prId, prIds))
       .execute(),
@@ -7685,6 +7738,7 @@ export async function lastActionClocks(
     }
     if (clocks.mineLast != null && c.at.getTime() > clocks.mineLast.getTime()) {
       clocks.humanCommitsAfterMine += 1;
+      clocks.humanCommitIdsAfterMine.push({ id: c.id, at: c.at });
       if (
         clocks.lastHumanCommitAfterMine == null ||
         c.at.getTime() > clocks.lastHumanCommitAfterMine.getTime()
@@ -7744,6 +7798,52 @@ async function getAddedRepoActionablePrIds(
   if (candidates.length === 0) return out;
 
   const clocks = await lastActionClocks(localUserId, candidates, bots);
+  // WHAT WAS PUSHED, for the "Pushed since" card: the newest `PUSHED_COMMITS_SHOWN` of each
+  // survivor's counted commits, read in ONE batched select (the wide clocks read above carries no
+  // headline on purpose — it spans every commit of every candidate PR).
+  const shownIds: number[] = [];
+  for (const prId of candidates) {
+    const c = clocks.get(prId);
+    if (!c || c.mineLast == null || c.humanCommitsAfterMine === 0) continue;
+    const newest = [...c.humanCommitIdsAfterMine]
+      .sort((a, b) => b.at.getTime() - a.at.getTime() || b.id - a.id)
+      .slice(0, PUSHED_COMMITS_SHOWN);
+    for (const x of newest) shownIds.push(x.id);
+  }
+  const commitById = new Map<number, PushedCommit & { prId: number; ms: number; id: number }>();
+  if (shownIds.length > 0) {
+    const rows = await db
+      .select({
+        id: commits.id,
+        prId: commits.prId,
+        sha: commits.sha,
+        headline: commits.messageHeadline,
+        authorId: commits.authorId,
+        at: commits.committedAt,
+      })
+      .from(commits)
+      .where(inArray(commits.id, shownIds))
+      .execute();
+    for (const r of rows) {
+      commitById.set(r.id, {
+        id: r.id,
+        prId: r.prId,
+        sha: r.sha,
+        headline: r.headline ?? null,
+        authorId: r.authorId,
+        at: r.at.toISOString(),
+        ms: r.at.getTime(),
+      });
+    }
+  }
+  const pushedCommitsFor = (c: PrActionClocks): PushedCommit[] =>
+    c.humanCommitIdsAfterMine
+      .flatMap((x) => {
+        const row = commitById.get(x.id);
+        return row ? [row] : [];
+      })
+      .sort((a, b) => b.ms - a.ms || b.id - a.id)
+      .map(({ sha, headline, authorId, at }) => ({ sha, headline, authorId, at }));
   for (const prId of candidates) {
     const c = clocks.get(prId);
     if (!c) continue;
@@ -7766,6 +7866,8 @@ async function getAddedRepoActionablePrIds(
           yourLastAction: c.mineLastAction,
           humanCommitsAfter: c.humanCommitsAfterMine,
           pusherId: c.lastHumanCommitAuthorId,
+          // DISPLAY ONLY — see `NewPrBall.commits`.
+          commits: pushedCommitsFor(c),
         },
         // The PUSH is the event, so it is the clock — not `openedAt`, which for this row is
         // whenever the PR was raised and has nothing to do with why it is on your plate.
@@ -8385,6 +8487,12 @@ export async function getMyTurn(
         ...toMyTurnPr(t, reply.createdAt),
         replyAuthorId: reply.authorId,
         replyExcerpt: truncate(reply.body ?? '', 140),
+        ...(() => {
+          const capped = capMyTurnReply(reply.body);
+          return capped == null
+            ? { replyBody: null }
+            : { replyBody: capped.body, replyTruncated: capped.truncated };
+        })(),
       });
     }
     commentReplies.push(...newestFirst(claim('comment_reply', found)));
@@ -9373,6 +9481,7 @@ export async function getPrDetail(
   // ASC by submittedAt, so the last decisive entry by the viewer wins. When it's
   // 'approved', the Approve control renders disabled ("already approved").
   let viewerHasApprovedStanding = false;
+  let viewerReviewStanding: 'approved' | 'changes_requested' | null = null;
   if (viewerUserId != null) {
     let standing: string | null = null;
     for (const r of reviewRows) {
@@ -9386,6 +9495,8 @@ export async function getPrDetail(
       }
     }
     viewerHasApprovedStanding = standing === 'approved';
+    viewerReviewStanding =
+      standing === 'approved' || standing === 'changes_requested' ? standing : null;
   }
 
   // Jira/Linear ticket links — compute-on-read via the Pro enricher (inert in OSS → null).
@@ -9452,6 +9563,7 @@ export async function getPrDetail(
     viewerCanClose,
     viewerCanReopen,
     viewerHasApprovedStanding,
+    viewerReviewStanding,
     threads,
     reviews: reviewsOut,
     comments: commentsOut,
@@ -9762,6 +9874,12 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
         .execute();
       const reviewIds = reviewIdRows.map((r) => r.id);
       if (reviewIds.length > 0) {
+        // Claude Review chat messages (migration 0073 / pg 0060) FK both the runs and the
+        // findings, so they go first.
+        await tx
+          .delete(schema.claudeReviewChatMessages)
+          .where(inArray(schema.claudeReviewChatMessages.reviewId, reviewIds))
+          .execute();
         await tx
           .delete(claudeReviewFindings)
           .where(inArray(claudeReviewFindings.reviewId, reviewIds))
@@ -10872,6 +10990,10 @@ export async function upsertLocalReview(
   prId: number,
   authorId: number | null,
   gh: StampGithubReview,
+  // The verdict the viewer just submitted. Approve and Request changes both stamp through here;
+  // a later verdict overwrites the earlier one's row only if GitHub reused the node id (it
+  // never does), so the viewer's standing is the LATEST row, read by getPrDetail.
+  state: 'approved' | 'changes_requested' = 'approved',
 ): Promise<number> {
   // The conflict target is the GitHub node id; if GitHub didn't return one, fall
   // back to the numeric id so the row is still keyed stably for the next sync.
@@ -10884,7 +11006,7 @@ export async function upsertLocalReview(
         githubNodeId: nodeId,
         prId,
         authorId,
-        state: 'approved',
+        state,
         // Review bodies are always persisted now — don't clobber to null under lean.
         body: gh.body ?? null,
         databaseId: String(gh.databaseId),
@@ -10893,7 +11015,7 @@ export async function upsertLocalReview(
       .onConflictDoUpdate({
         target: [reviews.prId, reviews.githubNodeId],
         set: {
-          state: 'approved',
+          state,
           body: gh.body ?? null,
           databaseId: String(gh.databaseId),
           submittedAt,

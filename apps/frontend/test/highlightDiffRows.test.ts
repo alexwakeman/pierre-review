@@ -17,6 +17,8 @@ import {
   highlightDiffRows,
   isNoNewlineRow,
   parsePatch,
+  patchEnd,
+  patchMatchesFile,
   splitDiffMarker,
   type DiffRow,
 } from '../src/lib/diff.js';
@@ -166,5 +168,113 @@ describe('highlightDiffRows', () => {
     const rows = parsePatch(['@@ -1,2 +1,2 @@', '-let a = 1;', ' const b = 2;'].join('\n'));
     const html = highlightDiffRows(rows, 'typescript')!;
     expect(textOf(html[2]!)).toBe('const b = 2;');
+  });
+});
+
+describe('highlightDiffRows — one lex per hunk', () => {
+  it('does not carry an open block comment from one hunk into the next', () => {
+    // THE REAL CASE (DEFRA/bng-metric-backend#426, enrich-baseline-units.js): hunk A ends on a
+    // context `/**` whose `*/` sits in the hidden gap. Lexed as one joined side, the comment never
+    // closed and every row of hunk B came out as one flat comment colour.
+    const rows = parsePatch(
+      [
+        '@@ -40,3 +40,3 @@ function a() {',
+        ' const x = 1;',
+        '-const y = 2;',
+        '+const y = 3;',
+        ' /**',
+        '@@ -98,3 +98,3 @@',
+        ' function enrich(parcel) {',
+        '-  return parcel;',
+        '+  return { ...parcel };',
+        ' }',
+      ].join('\n'),
+    );
+    const html = highlightDiffRows(rows, 'javascript')!;
+    expect(html).not.toBeNull();
+    // Hunk A's trailing `/**` is still a comment…
+    expect(html[4]).toContain('hljs-comment');
+    // …and hunk B is code again, from its first row.
+    for (const i of [6, 7, 8, 9]) {
+      expect(html[i], `row ${i}`).not.toContain('hljs-comment');
+    }
+    expect(html[6]).toContain('hljs-keyword');
+    expect(html[7]).toContain('hljs-keyword');
+  });
+
+  it('blanks only the hunk that refuses, not the whole file', () => {
+    // Two hunks; the per-side gate is counted over the WHOLE file, so a file under it lexes each
+    // hunk on its own and a hunk the lexer refuses would leave the other one coloured. Here both
+    // colour — the pin is that each hunk's output is independent of the other's.
+    const rows = parsePatch(
+      ['@@ -1,1 +1,1 @@', '-let a = `x', '+let a = 1;', '@@ -50,1 +50,1 @@', ' const b = 2;'].join(
+        '\n',
+      ),
+    );
+    const html = highlightDiffRows(rows, 'javascript')!;
+    // The unterminated template literal on hunk 1's OLD side does not reach hunk 2.
+    expect(html[4]).toContain('hljs-keyword');
+    expect(html[4]).not.toContain('hljs-string');
+  });
+
+  it('keeps the whole-file line gate, summed across hunks', () => {
+    const half = MAX_HIGHLIGHT_LINES / 2 + 1;
+    const hunk = (start: number): string[] => [
+      `@@ -${start},${half} +${start},${half} @@`,
+      ...Array.from({ length: half }, (_, i) => ` const x${start + i} = 1;`),
+    ];
+    const rows = parsePatch([...hunk(1), ...hunk(1000)].join('\n'));
+    expect(highlightDiffRows(rows, 'typescript')).toBeNull();
+  });
+});
+
+describe('parsePatch — the gap before each hunk', () => {
+  it('counts the unchanged lines GitHub left out, and carries the function context', () => {
+    const rows = parsePatch(
+      [
+        '@@ -18,3 +18,3 @@ import {',
+        ' a',
+        '-b',
+        '+B',
+        ' z',
+        '@@ -45,2 +45,3 @@ function isReady(feature) {',
+        ' c',
+        '+d',
+        ' e',
+      ].join('\n'),
+    );
+    expect(rows[0]!.gap).toEqual({ count: 17, oldFrom: 1, newFrom: 1, context: 'import {' });
+    // Hunk 1 ends at old 20 / new 20, so 21..44 are hidden on both sides.
+    expect(rows[5]!.gap).toEqual({
+      count: 24,
+      oldFrom: 21,
+      newFrom: 21,
+      context: 'function isReady(feature) {',
+    });
+    expect(patchEnd(rows)).toEqual({ oldNext: 47, newNext: 48 });
+  });
+
+  it('draws no gap before a first hunk that starts at line 1, or for an added file', () => {
+    expect(parsePatch('@@ -1,2 +1,2 @@\n-a\n+b\n c')[0]!.gap?.count).toBe(0);
+    expect(parsePatch('@@ -0,0 +1,2 @@\n+a\n+b')[0]!.gap?.count).toBe(0);
+    expect(parsePatch('@@ -1,2 +0,0 @@\n-a\n-b')[0]!.gap?.count).toBe(0);
+  });
+
+  it('measures a pure-insertion hunk from its new side', () => {
+    // `-10,0` names the line BEFORE the insertion; the new side is the honest count.
+    const rows = parsePatch(['@@ -1,1 +1,1 @@', '-a', '+A', '@@ -10,0 +11,2 @@', '+x', '+y'].join('\n'));
+    expect(rows[3]!.gap).toMatchObject({ count: 9, oldFrom: 2, newFrom: 2 });
+  });
+});
+
+describe('patchMatchesFile — may a loaded file fill the gaps?', () => {
+  const rows = parsePatch(['@@ -2,2 +2,3 @@ fn', ' b', '-c', '+C', '+D'].join('\n'));
+  it('accepts the file the patch was taken from, on either side', () => {
+    expect(patchMatchesFile(rows, ['a', 'b', 'C', 'D', 'e'], 'head')).toBe(true);
+    expect(patchMatchesFile(rows, ['a', 'b', 'c', 'e'], 'base')).toBe(true);
+  });
+  it('refuses a file read at another commit', () => {
+    expect(patchMatchesFile(rows, ['a', 'X', 'b', 'C', 'D'], 'head')).toBe(false);
+    expect(patchMatchesFile(rows, ['a', 'b'], 'head')).toBe(false);
   });
 });

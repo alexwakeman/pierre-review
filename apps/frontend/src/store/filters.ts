@@ -130,10 +130,12 @@ export const PR_DETAIL_TABS: readonly PrDetailTab[] = [
   'claude_review',
   'ai_fix',
 ];
-// The all-open-PRs drill-down's scope: one repo | 'feed' (every repo in the active Workspace —
-// the Flow metrics "Open PRs" tile) | a named repo GROUP (label + the exact repo set behind it —
-// see openPrsScope).
-export type OpenPrsScope = number | 'feed' | { label: string; repoIds: number[] };
+// The fixed Open PRs tab's repo dropdown (see openPrsRepoFilter). Stamped with the workspace it
+// was chosen in, so a switch makes it inert by DERIVATION rather than by a reset effect.
+export interface OpenPrsRepoFilter {
+  workspaceId: number | null;
+  repoIds: number[];
+}
 // One picked subject of the People report (see peopleReportSeed): a human or a bot, with the
 // label metadata the report tab needs captured at open time — `userId` is the `users.id` slot
 // every per-section query keys on; `label` is the display name (humans) / classification label
@@ -736,12 +738,12 @@ export interface FilterState {
   // Bots rail).
   botPrsFocusRepoId: number | null;
 
-  // transient: the scope the all-open-PRs drill-down tab lists — a repoId (that repo's open
-  // PRs), 'feed' (every repo in the active workspace — the Flow metrics "Open PRs" tile), or a
-  // named GROUP (label + the exact repo set behind a FeedOpenPrsPanel group — a repoId list, so
-  // the footer's promised count ≡ the tab).
-  // Read (not consumed) for the tab's lifetime, like botPrsFocusRepoId. null = never opened.
-  openPrsScope: OpenPrsScope | null;
+  // transient: the fixed Open PRs tab's own repo dropdown (null = every repo). The tab always
+  // fetches the WHOLE workspace; this narrows the loaded rows client-side. Seeded by the per-repo
+  // "Show all N open PRs" footer (that repo), cleared by the tab chip and the Flow metrics tile.
+  // ⚠ NOT `repoIds` — that is the Timeline picker, and the repo picker never scopes another screen.
+  // Ignored when its `workspaceId` is not the current one (OpenPrsDetail compares).
+  openPrsRepoFilter: OpenPrsRepoFilter | null;
 
   // transient: the repo the bot-only-PRs drill-down was opened FROM (the per-repo Bots tab).
   // null = the whole active workspace (the cross-repo Bots rail). Read-not-consumed, like above.
@@ -1172,10 +1174,11 @@ export interface FilterState {
   // BotPrsDetail consumes it.
   openBotPrsDetail: (key: string, repoId?: number | null) => void;
   consumeBotPrsFocus: () => void;
-  // Open (or re-focus) the sortable all-open-PRs drill-down tab on a scope (a repoId | the
-  // workspace-wide 'feed' scope | a named repo group). Sets the openPrsScope seed + opens the
-  // singleton tab; OpenPrsDetail reads (never consumes) the seed.
-  openOpenPrsDetail: (scope: OpenPrsScope) => void;
+  // Reveal the fixed Open PRs tab. A repoId pre-selects that repo in the tab's dropdown (the
+  // per-repo footer, which promised that repo's count); no argument clears the dropdown.
+  openOpenPrsDetail: (repoId?: number | null) => void;
+  // The tab's dropdown writes here (null = every repo).
+  setOpenPrsRepoFilter: (repoIds: number[] | null) => void;
   // Open (or re-focus) the bot-only-PRs drill-down tab (the amber "only a bot reviewed
   // these" caption). repoId scopes it to one repo; null = the whole active workspace.
   openBotOnlyDetail: (repoId: number | null) => void;
@@ -1530,7 +1533,7 @@ function freshDefaults(): FilterData {
     metricsFocus: null,
     botPrsFocusKey: null,
     botPrsFocusRepoId: null,
-    openPrsScope: null,
+    openPrsRepoFilter: null,
     botOnlyFocusRepoId: null,
     botThreadsFocusRepoId: null,
     themeThreadsSeed: null,
@@ -1978,10 +1981,12 @@ export const useFilters = create<FilterState>((set, get) => ({
     usePinnedTabs.getState().openBotPrsTab({ fromActivity: true });
   },
   consumeBotPrsFocus: () => set({ botPrsFocusKey: null }),
-  openOpenPrsDetail: (scope) => {
-    set({ openPrsScope: scope });
-    usePinnedTabs.getState().openOpenPrsTab({ fromActivity: true });
+  openOpenPrsDetail: (repoId) => {
+    set({ openPrsRepoFilter: repoId != null ? { workspaceId: get().workspaceId, repoIds: [repoId] } : null });
+    usePinnedTabs.getState().showOpenPrs();
   },
+  setOpenPrsRepoFilter: (repoIds) =>
+    set({ openPrsRepoFilter: repoIds != null ? { workspaceId: get().workspaceId, repoIds } : null }),
   openBotOnlyDetail: (repoId) => {
     set({ botOnlyFocusRepoId: repoId });
     usePinnedTabs.getState().openBotOnlyPrsTab({ fromActivity: true });

@@ -462,6 +462,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // family, which for back-compat kept the pre-plugin paths (/api/prs/:id/
   // claude-review, /api/claude-reviews/*, /api/claude-findings/*) and so does NOT
   // sit under /api/pro/. Both are matched here.
+  // Claude Review CHAT (`/api/claude-reviews/:reviewId/chat`), matched EXPLICITLY so a later edit
+  // to the family rules below cannot quietly move it: every POST is one billed agent turn (`ai`),
+  // the GET is a stored-history read.
+  if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {
+    return mutating ? [TIERS.ai, TIERS.aiHourly] : [TIERS.read];
+  }
   const isClaudeReviewPath =
     path.includes('/claude-review') ||
     path.startsWith('/api/claude-reviews') ||
@@ -614,7 +620,11 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // already-synced rows:
   //   `/merge-options`            repo merge config + mergeability + the merge-queue GraphQL probe
   //                               — up to five upstream calls, strictly MORE than the detail route
-  //   `/files`                    the Changes tab's patches
+  //   `/files`                    the Changes tab's patches (one REST page per `?page=` click)
+  //   `/files/content`            one file's raw text at the PR head or merge base (a gap marker's
+  //                               "Show N hidden lines") — 1 REST call, +2 for the merge base cold
+  //   `/files/diff`               "Load full diff" for a file GitHub sent no patch for: both sides
+  //                               of the file plus the merge base — up to 4 REST calls
   //   `/checks/<jobId>/logs`      an Actions job log: a REST call that 302s to a signed blob we
   //                               then range-fetch, so up to two upstream requests and megabytes
   //   `/suggested-reviewers`      CODEOWNERS via REST (`ghRestGetContentRaw`) + the team-history
@@ -630,7 +640,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // Genuinely DB-only and correctly left on `read`: `/bot-behaviour`, `/bot-dedup`,
   // `/mention-candidates`, `/claude-review` (retrieval), `/annotations` (the cached GET).
   const prGithubGet =
-    /^\/api\/prs\/\d+(\/(merge-options|files|suggested-reviewers|checks\/[^/]+\/logs))?$/;
+    /^\/api\/prs\/\d+(\/(merge-options|files|files\/content|files\/diff|suggested-reviewers|checks\/[^/]+\/logs))?$/;
   if (!mutating && prGithubGet.test(path)) {
     return [TIERS.prDetail, TIERS.read];
   }
@@ -728,7 +738,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
     const hitsGithub =
       path.startsWith('/api/threads/') ||
       path.startsWith('/api/bot-threads/') ||
-      /^\/api\/prs\/\d+\/(review-comment|comments?|approve|close|reopen|ci\/rerun|request-reviewers|merge-queue|merge|auto-merge|update-branch|resolve-bot-threads|reviews)/.test(
+      /^\/api\/prs\/\d+\/(review-comment|comments?|approve|request-changes|close|reopen|ci\/rerun|request-reviewers|merge-queue|merge|auto-merge|update-branch|resolve-bot-threads|reviews)/.test(
         path,
       );
     if (hitsGithub) return [TIERS.githubWrite];

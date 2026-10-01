@@ -754,6 +754,19 @@ export function GripIcon({ size = 11, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// Three dots on one line — lines left out. The Changes tab's gap marker between two hunks
+// ("26 unchanged lines"); it replaced the raw `@@ -a,b +c,d @@` header. Not `GripIcon`: that is a
+// drag handle, and a reader would try to drag this.
+export function EllipsisIcon({ size = 12, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} variant="solid" {...rest}>
+      <circle cx="5" cy="12" r="1.9" />
+      <circle cx="12" cy="12" r="1.9" />
+      <circle cx="19" cy="12" r="1.9" />
+    </IconShell>
+  );
+}
+
 // A bare rule — a NEUTRAL check outcome ("it ran, it decided nothing").
 export function MinusIcon({ size = 12, ...rest }: IconProps): JSX.Element {
   return (

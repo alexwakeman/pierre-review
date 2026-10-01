@@ -568,6 +568,40 @@ export type PostFindingOutcome =
   | { headMoved: true }
   | { headMoved?: false; commentId: string; postedCommentKind: 'inline' | 'pr_comment' };
 
+// ---- Claude Review chat (one answered turn about a SUCCEEDED review) ----
+// ⚠ OPTIONAL ON THE SEAM, SO apiVersion STAYS 21 (`ReviewSeam.chat?`). The plugin builds the whole
+// prompt — the review, every finding, the diff and the prior turns, rebuilt from stored rows and
+// fenced with the review nonce — and core runs ONE agent turn that MIRRORS the review's mode: a
+// worktree review gets Read/Glob/Grep on a worktree at the REVIEWED head (never the PR's current
+// one), a diff-only review is tool-less. Bash is denied outright either way, exactly as for the
+// review. Same model, same credential ladder (`applyClaudeReviewAuth`), its own small per-turn
+// budget (`config.reviewChatBudgetUsd`) and a low turn cap. The answer is free text; no MCP tool.
+export interface ReviewChatArgs {
+  owner: string;
+  name: string;
+  prNumber: number;
+  // The REVIEWED head — the worktree is checked out here even when the PR has moved on.
+  headSha: string;
+  model: ClaudeReviewModel;
+  mode: 'diff_only' | 'worktree';
+  systemPrompt: string;
+  prompt: string;
+  // Same contract as RunReviewArgs.applyAuthEnv: true ONLY when no other run can share the env.
+  applyAuthEnv: boolean;
+  abortController: AbortController;
+}
+
+export interface ReviewChatResult {
+  ok: boolean; // false ⇒ no usable answer (failureReason says why); the turn may still have cost
+  text: string;
+  failureReason?: string;
+  costUsd: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  numTurns: number | null;
+  aborted: boolean;
+}
+
 export interface ReviewSeam {
   // Fetch (gh pr diff) + noise-strip + per-file metrics + cap — everything the plugin needs
   // to route + build the prompt, keeping every diff primitive in core so anchoring is stable.
@@ -607,6 +641,9 @@ export interface ReviewSeam {
   // Set (number, clamped to the max) or clear (null → operator default) the local per-review
   // budget cap; returns the new effective value.
   setReviewBudget(usd: number | null): { reviewBudgetUsd: number };
+  // ONE chat turn about a succeeded review (see ReviewChatArgs). ⚠ OPTIONAL, SO apiVersion STAYS
+  // 21: absent against an older host, and the plugin's chat routes then answer 404.
+  chat?(args: ReviewChatArgs): Promise<ReviewChatResult>;
 }
 
 // An explicit Insights metrics window (epoch millis, inclusive) used to override the default

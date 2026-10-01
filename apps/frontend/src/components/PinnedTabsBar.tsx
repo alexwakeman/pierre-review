@@ -12,7 +12,8 @@ import { usePinnedTabs, type Tab } from '../store/pinnedTabs.js';
 import { useFilters } from '../store/filters.js';
 import { usePeriodReportsList } from '../hooks/usePeriodReports.js';
 import { useRepos } from '../hooks/useTimeline.js';
-import { useProCapabilities } from '../hooks/useTriage.js';
+import { useProCapabilities, useWorkspaceOpenPrs } from '../hooks/useTriage.js';
+import { openPrsTabCount, openPrsTabLabel } from '../lib/openPrsTab.js';
 import { botNarrowLabel, selectorLabel } from '../lib/severityAgreement.js';
 import { periodTitle } from './Activity/periodReportMarkdown.js';
 import {
@@ -22,6 +23,7 @@ import {
   MagnifierIcon,
   PeopleIcon,
   PersonIcon,
+  PullRequestIcon,
   ResolveIcon,
   ThreadsIcon,
 } from './Icons.js';
@@ -32,16 +34,6 @@ const MetricsIcon = (
     <line x1="10" y1="20" x2="10" y2="6" />
     <line x1="16" y1="20" x2="16" y2="14" />
     <line x1="20" y1="20" x2="20" y2="9" />
-  </svg>
-);
-// A git-pull-request glyph for the all-open-PRs drill-down chip.
-const OpenPrsIcon = (
-  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="6" cy="6" r="3" />
-    <circle cx="6" cy="18" r="3" />
-    <line x1="6" y1="9" x2="6" y2="15" />
-    <circle cx="18" cy="18" r="3" />
-    <path d="M18 15V9a3 3 0 0 0-3-3h-3" />
   </svg>
 );
 
@@ -179,7 +171,6 @@ function TabChip({
   const searchSeed = useFilters((s) => s.searchSeed);
   const botFlaggingSeed = useFilters((s) => s.botFlaggingSeed);
   const botVolumeSeed = useFilters((s) => s.botVolumeSeed);
-  const openPrsScope = useFilters((s) => s.openPrsScope);
   const peopleReportSeed = useFilters((s) => s.peopleReportSeed);
   const workspaceId = useFilters((s) => s.workspaceId);
   const { periodReports } = useProCapabilities();
@@ -235,31 +226,6 @@ function TabChip({
             <BotIcon />
           </span>
           <span className={chipLabelClass(active, 'ai')}>Bot Drill-Down</span>
-        </>
-      ),
-    };
-  } else if (tab.kind === 'open-prs') {
-    // A repo/group scope surfaces its name so a scoped tab is easy to track; the workspace-wide
-    // 'feed' scope (the Flow metrics tile) reads "All repos".
-    const scopeName =
-      typeof openPrsScope === 'number'
-        ? repoName(openPrsScope)
-        : openPrsScope != null && typeof openPrsScope === 'object'
-          ? openPrsScope.label
-          : openPrsScope === 'feed'
-            ? 'All repos'
-            : null;
-    cfg = {
-      title: `Open PRs — sortable drill-down${scopeName ? ` · ${scopeName}` : ''}`,
-      closeAria: 'Close open-PRs tab',
-      body: (
-        <>
-          <span aria-hidden="true" className="shrink-0 text-sky-500">
-            {OpenPrsIcon}
-          </span>
-          <span className={chipLabelClass(active, 'sky')}>
-            Open PRs{scopeName ? ` · ${scopeName}` : ''}
-          </span>
         </>
       ),
     };
@@ -705,6 +671,12 @@ export function PinnedTabsBar(): JSX.Element {
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
   const showTimeline = usePinnedTabs((s) => s.showTimeline);
+  const openOpenPrsDetail = useFilters((s) => s.openOpenPrsDetail);
+  // The Open PRs chip's count: the workspace-wide open-PRs key, shared with the tab body, the
+  // Timeline board (picker unset) and FeedIsolationBanner — an extra observer, not a new request.
+  // Disabled while `workspaceId` is null, and blank (never 0) until it answers.
+  const openPrs = useWorkspaceOpenPrs();
+  const openPrsCount = openPrsTabCount(openPrs.data, openPrs.isPlaceholderData);
   const moveTab = usePinnedTabs((s) => s.moveTab);
 
   const stripRef = useRef<HTMLDivElement>(null);
@@ -1021,6 +993,16 @@ export function PinnedTabsBar(): JSX.Element {
         title="Activity — per-repo triage console"
       />
       <FixedChip
+        active={activeTab === 'open-prs'}
+        // Clicking the chip shows every repo: it clears a repo the "Show all N open PRs" footer
+        // pre-selected (store/filters.ts openPrsRepoFilter).
+        onClick={() => openOpenPrsDetail()}
+        onContextMenu={(e) => openMenu(e, null)}
+        icon={<PullRequestIcon />}
+        label={openPrsTabLabel(openPrsCount)}
+        title="Open PRs — every open pull request in this Workspace"
+      />
+      <FixedChip
         active={activeTab === 'timeline'}
         onClick={showTimeline}
         onContextMenu={(e) => openMenu(e, null)}
@@ -1031,7 +1013,7 @@ export function PinnedTabsBar(): JSX.Element {
       {displayTabs.map((t, i) => (
         <Fragment key={t.key}>
           {/* A Chrome-style pipe between adjacent DYNAMIC tabs only — `i > 0`, since index 0 abuts
-              the fixed Timeline chip and the two fixed chips are never separated.
+              the fixed Timeline chip and the three fixed chips are never separated.
               ⚠ It must carry NO `data-tabkey`: `updatePreview` derives the drag drop-slot from
               `strip.querySelectorAll('[data-tabkey]')` midpoints and then maps those elements'
               `dataset.tabkey` into the order committed by `moveTab` — a tagged separator would

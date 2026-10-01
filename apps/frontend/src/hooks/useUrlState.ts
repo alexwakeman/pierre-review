@@ -186,7 +186,8 @@ function namesId(p: URLSearchParams, key: string): boolean {
  * The board is named two ways, and they are checked IN THIS ORDER:
  *
  *  1. `view=` — the AFFIRMATIVE statement, written by `writeToUrl` from the live tab. When it
- *     names a board the app knows, it wins outright. (The read and write halves must always
+ *     names a board the app knows (`timeline`, `activity`, or the fixed `open-prs` tab), it wins
+ *     outright. (The read and write halves must always
  *     change together, or a deliberate switch to the board is undone on the next F5.)
  *  2. `?pr=<id>` / `?thread=<id>`, and ONLY when `view=` said nothing — the board INFERRED from a
  *     selection that only the board can render: the DetailPane mounts solely in the board slot
@@ -220,6 +221,9 @@ export function landingTabFromUrl(search: string): ActiveTab {
   const view = p.get('view');
   if (view === 'timeline') return 'timeline';
   if (view === 'activity') return 'activity';
+  // The third FIXED view (Activity · Open PRs · Timeline). Its repo dropdown is transient and
+  // stays out of the URL: a link to it opens on every repo.
+  if (view === 'open-prs') return 'open-prs';
   if (
     view != null &&
     (parseTabKey(view) != null ||
@@ -582,6 +586,9 @@ export function writeToUrl(s: FilterState): void {
   const activeTab = usePinnedTabs.getState().activeTab;
   if (activeTab === 'timeline') {
     p.set('view', 'timeline');
+  } else if (activeTab === 'open-prs') {
+    // The fixed Open PRs tab — emitted affirmatively like the other two fixed views.
+    p.set('view', 'open-prs');
   } else if (activeTab === 'activity') {
     p.set('view', 'activity');
     // The board's own narrowings, each emitted ONLY on the rail entry that renders it — a lens

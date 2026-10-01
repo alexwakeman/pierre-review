@@ -21,7 +21,6 @@ export type PinnedPr = TabMeta;
 //  - pr-focus:  a PR's OWN isolated Timeline instance (replaces the old overlay focus mode)
 //  - metrics-detail: the flow-metric drill-down (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-prs: the bot-vendor PR drill-down (a singleton, non-PR, EPHEMERAL tab)
-//  - open-prs: the sortable all-open-PRs drill-down (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-only-prs: the bot-only-reviewed PR drill-down (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-threads: the resolvable-bot-threads review & resolve (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-flagging: the ML-strip drill-down ("what the bots are flagging" — a singleton, non-PR,
@@ -36,7 +35,6 @@ export type TabKind =
   | 'pr-focus'
   | 'metrics-detail'
   | 'bot-prs'
-  | 'open-prs'
   | 'bot-only-prs'
   | 'bot-threads'
   | 'bot-flagging'
@@ -78,10 +76,19 @@ export interface Tab {
   botMeta?: TabBotMeta | null; // label meta for bot-detail tabs
 }
 
-// Which "tab" the main area is showing: the standard timeline board, the Activity
-// triage console, or one of the persistent tabs identified by its `Tab.key`.
-// These are ONE axis — only one renders at a time.
-export type ActiveTab = 'timeline' | 'activity' | string;
+// Which "tab" the main area is showing: one of the three FIXED views (the Activity console, the
+// workspace's Open PRs table, the timeline board) or one of the dynamic tabs identified by its
+// `Tab.key`. These are ONE axis — only one renders at a time.
+export type FixedView = 'activity' | 'open-prs' | 'timeline';
+export type ActiveTab = FixedView | string;
+
+// The fixed views, in tab-strip order. ⚠ Every "is this a fixed view?" test goes through
+// `isFixedView`, never a literal pair — a third view was added once already and a hard-coded
+// `'timeline' || 'activity'` is exactly the check that forgets it.
+export const FIXED_VIEWS: readonly FixedView[] = ['activity', 'open-prs', 'timeline'];
+export function isFixedView(tab: ActiveTab): tab is FixedView {
+  return (FIXED_VIEWS as readonly string[]).includes(tab);
+}
 
 // Contract with the Timeline component: the board slot passes this to
 // `<Timeline mode={…}/>`. Absent = today's full shared board.
@@ -97,10 +104,6 @@ export const METRICS_TAB_KEY = 'metrics-detail';
 // driven by the transient `botPrsFocusKey` signal (store/filters.ts), not the key. EPHEMERAL:
 // excluded from persistence (see `persist`) + not matched by parseTabKey, so a reload drops it.
 export const BOT_PRS_TAB_KEY = 'bot-prs';
-// The sortable all-open-PRs drill-down is likewise a SINGLETON, non-PR tab. Which scope it
-// lists (a repo | the FilterBar-visible 'feed' scope) is driven by the transient `openPrsScope`
-// signal (store/filters.ts), not the key. EPHEMERAL like the two above.
-export const OPEN_PRS_TAB_KEY = 'open-prs';
 // Two more SINGLETON, non-PR bot drill-downs, seeded by transient repo-scope signals
 // (store/filters.ts botOnlyFocusRepoId / botThreadsFocusRepoId). EPHEMERAL like the above.
 export const BOT_ONLY_PRS_TAB_KEY = 'bot-only-prs';
@@ -165,7 +168,7 @@ export function parseBotDetailKey(key: string): number | null {
  * shared board would be a set of controls with no effect. Pinned in test/isolateFilter.test.ts.
  */
 export function boardSlotMode(activeTab: ActiveTab, tabs: readonly Tab[]): TimelineMode | null {
-  if (activeTab === 'timeline' || activeTab === 'activity') return null;
+  if (isFixedView(activeTab)) return null;
   const t = tabs.find((x) => x.key === activeTab);
   return t?.kind === 'pr-focus' ? { kind: 'isolate', prId: t.prId } : null;
 }
@@ -208,7 +211,6 @@ interface TabsState {
   openPrFocusTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-focus + activate
   openMetricsTab: (opts?: OpenOpts) => void; // ensure the singleton metrics drill-down + activate
   openBotPrsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-vendor PR drill-down + activate
-  openOpenPrsTab: (opts?: OpenOpts) => void; // ensure the singleton all-open-PRs drill-down + activate
   openBotOnlyPrsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-only-PRs drill-down + activate
   openBotThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-threads resolve tab + activate
   openBotFlaggingTab: (opts?: OpenOpts) => void; // ensure the singleton ML-strip drill-down + activate
@@ -239,6 +241,7 @@ interface TabsState {
   // as "leave this detail for the board", which is a different intent from a rail click.
   showBoardFromDetail: () => void;
   showActivity: () => void; // idempotent → 'activity'
+  showOpenPrs: () => void; // idempotent → 'open-prs' (the fixed workspace Open PRs tab)
   /**
    * Seat the tab a URL names (`useUrlState`'s `view=`), on load AND on every browser Back /
    * Forward. `fromPop` distinguishes the two: only a real pop promotes the pending feed
@@ -389,8 +392,6 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       openTab({ key: METRICS_TAB_KEY, kind: 'metrics-detail', prId: 0, meta: null }, opts),
     openBotPrsTab: (opts) =>
       openTab({ key: BOT_PRS_TAB_KEY, kind: 'bot-prs', prId: 0, meta: null }, opts),
-    openOpenPrsTab: (opts) =>
-      openTab({ key: OPEN_PRS_TAB_KEY, kind: 'open-prs', prId: 0, meta: null }, opts),
     openBotOnlyPrsTab: (opts) =>
       openTab({ key: BOT_ONLY_PRS_TAB_KEY, kind: 'bot-only-prs', prId: 0, meta: null }, opts),
     openBotThreadsTab: (opts) =>
@@ -486,11 +487,8 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
         const tabs = [kept];
         persist(tabs);
         // If the active tab was one of the closed dynamic tabs, land on the survivor;
-        // the two fixed views (and the survivor itself) stay put.
-        const activeTab =
-          s.activeTab === 'timeline' || s.activeTab === 'activity' || s.activeTab === key
-            ? s.activeTab
-            : key;
+        // the fixed views (and the survivor itself) stay put.
+        const activeTab = isFixedView(s.activeTab) || s.activeTab === key ? s.activeTab : key;
         return { tabs, activeTab };
       }),
     closeAllTabs: () =>
@@ -499,8 +497,7 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
         persist([]);
         // Stay on a fixed view; only fall back to the board when the active tab was one
         // of the dynamic tabs just destroyed (mirrors closeTab's fallback).
-        const activeTab =
-          s.activeTab === 'timeline' || s.activeTab === 'activity' ? s.activeTab : 'timeline';
+        const activeTab = isFixedView(s.activeTab) ? s.activeTab : 'timeline';
         return { tabs: [], activeTab };
       }),
     unpin: (id) => get().closeTab(prDetailKey(id)),
@@ -519,6 +516,9 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     },
     showActivity: () => {
       if (get().activeTab !== 'activity') set({ activeTab: 'activity' });
+    },
+    showOpenPrs: () => {
+      if (get().activeTab !== 'open-prs') set({ activeTab: 'open-prs' });
     },
     applyUrlTab: (tab, opts) =>
       set((s) => {

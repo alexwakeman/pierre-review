@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { TimelinePr } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useScopedOpenPrs } from '../../hooks/useTriage.js';
@@ -9,30 +9,18 @@ import { RefreshIcon } from '../Icons.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
 import { OpenPrsTable } from './OpenPrsTable.js';
 
-// The all-open-PRs DRILL-DOWN — a persistent, singleton tab: the "Show all N open PRs" footers
-// under the Activity open-PR lists open it per-repo, and the Flow metrics "Open PRs" tile opens
-// it workspace-wide (the 'feed' scope — this is THE open-PRs view; the metrics drill-down no
-// longer has its own). Resolves the `openPrsScope` seed to a label + repo narrowing and renders
-// the shared sortable OpenPrsTable over /api/open-prs. Clicking a row opens the PR's detail tab.
+// The fixed Open PRs tab — one of the three permanent views (Activity · Open PRs · Timeline), so it
+// is always the WHOLE active workspace: the shared sortable OpenPrsTable over /api/open-prs. Every
+// opener (the tab chip, the Reports → Flow metrics "Open PRs" tile, the per-repo "Show all N open
+// PRs" footer) just reveals it; the footer also pre-selects its repo in the tab's own dropdown.
+// Clicking a row opens the PR's detail tab.
 
 export function OpenPrsDetail(): JSX.Element {
-  // The scope seed — read (not consumed) for the tab's lifetime, like botPrsFocusRepoId. A
-  // stale null (can't normally happen — the tab is ephemeral) falls back to the feed scope.
-  const scope = useFilters((s) => s.openPrsScope);
-  const repoScopeId = typeof scope === 'number' ? scope : null;
-  // A repo GROUP scope (from a FeedOpenPrsPanel group footer): the group's exact repo set,
-  // so the tab reproduces the group and the footer's promised count holds.
-  const groupScope = scope != null && typeof scope === 'object' ? scope : null;
-  // The server-side narrowing: one repo, a group's repo set, or null = the whole ACTIVE
-  // WORKSPACE ('feed'). The workspace is the scope in every branch — useScopedOpenPrs always
-  // sends `workspace=` alongside any `repoIds` (a bare repoIds is intersected against the
-  // DEFAULT workspace's membership) and the null case is byte-identical to the Activity
-  // surfaces' query string, sharing their cache entry. Member-AGNOSTIC and repo-picker-agnostic
-  // (Timeline-only filters — see workspaceOpenPrsScope.test.ts).
-  const scopeRepoIds =
-    repoScopeId != null ? [repoScopeId] : groupScope != null ? groupScope.repoIds : null;
-  const isWorkspaceWide = scopeRepoIds == null;
-  const { data, isLoading, isError, refetch, isFetching } = useScopedOpenPrs(scopeRepoIds);
+  // ALWAYS the workspace-wide key: byte-identical to `useWorkspaceOpenPrs` (the tab chip's count,
+  // FeedIsolationBanner, the Timeline board with its picker unset), so it shares their cache entry.
+  // Member-AGNOSTIC and repo-picker-agnostic (Timeline-only filters — see
+  // workspaceOpenPrsScope.test.ts).
+  const { data, isLoading, isError, refetch, isFetching } = useScopedOpenPrs(null);
 
   const { data: users } = useUsers();
   const { data: repos } = useRepos();
@@ -46,29 +34,27 @@ export function OpenPrsDetail(): JSX.Element {
 
   const prs = useMemo(() => data?.prs ?? [], [data]);
 
-  // The workspace-wide scope gets a repo-filter dropdown — LOCAL state narrowing the loaded rows
-  // client-side (null = all). Deliberately NOT `filters.repoIds` (the Timeline picker) and not a
-  // refetch: the workspace's list is already here. The scoped mounts cover exactly the repos the
-  // opener named, so they render no dropdown.
-  const [repoSel, setRepoSel] = useState<number[] | null>(null);
-  // The tab is a singleton that survives scope re-seeds (another "Show all" footer, the Flow
-  // tile) and workspace switches (pinnedTabs is workspace-unaware) — a narrowing kept across
-  // either would silently filter the new list by repos that may not even be in it, under a
-  // label that promises the whole scope. Reset it.
+  // The repo dropdown narrows the loaded rows client-side (null = all). It lives in the store so
+  // the per-repo footer can seed it, but is deliberately NOT `filters.repoIds` (the Timeline
+  // picker) and not a refetch: the workspace's list is already here. A filter chosen in another
+  // workspace is ignored — derived here, so there is no reset effect to race the seed.
   const workspaceId = useFilters((s) => s.workspaceId);
-  useEffect(() => {
-    setRepoSel(null);
-  }, [scope, workspaceId]);
+  const filter = useFilters((s) => s.openPrsRepoFilter);
+  const setRepoSel = useFilters((s) => s.setOpenPrsRepoFilter);
+  const repoSel = filter != null && filter.workspaceId === workspaceId ? filter.repoIds : null;
   const repoOptions = useMemo(() => {
-    if (!isWorkspaceWide) return [];
     const byId = new Map<number, string>();
     for (const p of prs) byId.set(p.repoId, repoNameById.get(p.repoId) ?? `repo ${p.repoId}`);
+    // Keep a seeded repo listed even if it has no open PR right now, so the dropdown can show
+    // (and clear) the selection it is filtering by.
+    for (const id of repoSel ?? []) {
+      if (!byId.has(id)) byId.set(id, repoNameById.get(id) ?? `repo ${id}`);
+    }
     return [...byId.entries()]
       .map(([id, fullName]) => ({ id, fullName }))
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
-  }, [isWorkspaceWide, prs, repoNameById]);
-  const rows =
-    isWorkspaceWide && repoSel != null ? prs.filter((p) => repoSel.includes(p.repoId)) : prs;
+  }, [prs, repoNameById, repoSel]);
+  const rows = repoSel != null ? prs.filter((p) => repoSel.includes(p.repoId)) : prs;
 
   const openTab = (pr: TimelinePr): void => {
     const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
@@ -85,11 +71,11 @@ export function OpenPrsDetail(): JSX.Element {
   };
 
   const scopeLabel =
-    repoScopeId != null
-      ? repoNameById.get(repoScopeId) ?? `repo ${repoScopeId}`
-      : groupScope != null
-        ? groupScope.label
-        : 'every repo in this Workspace';
+    repoSel == null
+      ? 'every repo in this Workspace'
+      : repoSel.length === 1
+        ? repoNameById.get(repoSel[0] as number) ?? `repo ${repoSel[0]}`
+        : `${repoSel.length} repos`;
   const draftCount = rows.reduce((n, p) => n + (p.isDraft ? 1 : 0), 0);
 
   return (
@@ -105,9 +91,7 @@ export function OpenPrsDetail(): JSX.Element {
           column to sort · click a row to open it
         </span>
         <div className="ml-auto flex items-center gap-2">
-          {isWorkspaceWide && (
-            <MetricRepoFilter repos={repoOptions} selected={repoSel} onChange={setRepoSel} />
-          )}
+          <MetricRepoFilter repos={repoOptions} selected={repoSel} onChange={setRepoSel} />
           <button
             type="button"
             onClick={() => void refetch()}
@@ -127,9 +111,7 @@ export function OpenPrsDetail(): JSX.Element {
         prs={rows}
         isLoading={isLoading}
         isError={isError}
-        // Hidden only for the SINGLE-repo scope: a group scope spans several repos, whose rows
-        // are indistinguishable without the column (isWorkspaceWide keys the dropdown, not this).
-        showRepoColumn={repoScopeId == null}
+        showRepoColumn
         onOpenPr={openTab}
         emptyLabel={
           repoSel != null && prs.length > 0

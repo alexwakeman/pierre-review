@@ -49,10 +49,12 @@ import { hunkLineMarker, useHunkHighlight } from './DiffHunk.js';
 import { writeClipboard } from './CopyButton.js';
 import { Markdown } from './Markdown.js';
 import { MentionTextarea } from './MentionTextarea.js';
+import { ReviewChatSection, ReviewChatThread } from './ClaudeReviewChat.js';
 import {
   ArrowIcon,
   CheckIcon,
   ChevronIcon,
+  CommentIcon,
   ExternalLinkIcon,
   InfoIcon,
   PencilIcon,
@@ -500,6 +502,7 @@ function FindingRow({
   inChangeset,
   priorStatus,
   alreadyPosted = false,
+  chatReviewId = null,
   onOpenInChanges,
   onToggle,
   onReword,
@@ -526,12 +529,16 @@ function FindingRow({
   // It repeats an earlier comment already posted on this same commit (the server saved it
   // ignored, so Post review does not put it on GitHub twice). The chip says why.
   alreadyPosted?: boolean;
+  // The succeeded review this finding belongs to, when it can be asked about (null ⇒ no Ask).
+  chatReviewId?: number | null;
   onOpenInChanges?: OpenInChanges;
   onToggle: (included: boolean) => void;
   onReword: (editedBody: string) => Promise<unknown>;
   onPostComment: () => Promise<unknown>;
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
+  // This finding's own chat thread, closed until asked for (nothing fetches before that).
+  const [asking, setAsking] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -977,6 +984,17 @@ function FindingRow({
                 Ignore
               </button>
             )}
+            {chatReviewId != null && (
+              <button
+                type="button"
+                onClick={() => setAsking((v) => !v)}
+                aria-expanded={asking}
+                className={`${BTN_SECONDARY} inline-flex items-center gap-1`}
+              >
+                <CommentIcon size={12} />
+                {asking ? 'Hide questions' : 'Ask Claude'}
+              </button>
+            )}
             {canPostComment && (
               <span className="text-[11px] text-gray-400">
                 {willPostReword ? 'posts your reworded text' : "posts Claude's text"}
@@ -1005,6 +1023,9 @@ function FindingRow({
           </>
         )}
       </div>
+      {asking && chatReviewId != null && !ignored && (
+        <ReviewChatThread reviewId={chatReviewId} findingId={finding.id} />
+      )}
     </li>
   );
 }
@@ -1055,6 +1076,9 @@ function ClaudesReview({
   // Pin blob links to the reviewed commit so line numbers stay correct; fall back
   // to the PR's current head when the run didn't record a SHA.
   const headSha = review.headSha ?? prHeadSha;
+  // Only a finished review that actually read code can be asked about.
+  const chatReviewId =
+    review.status === 'succeeded' && review.reviewMode !== 'skip' ? review.id : null;
 
   return (
     <div className="space-y-2 px-4 py-3">
@@ -1141,6 +1165,7 @@ function ClaudesReview({
               }
               priorStatus={priorStatusById.get(f.id)}
               alreadyPosted={alreadyPostedIds.has(f.id)}
+              chatReviewId={chatReviewId}
               onOpenInChanges={onOpenInChanges}
               onToggle={(included) => onToggleFinding(f.id, included)}
               onReword={(editedBody) => onRewordFinding(f.id, editedBody)}
@@ -1151,6 +1176,7 @@ function ClaudesReview({
       ) : (
         <div className="text-xs text-gray-400">No line-level findings.</div>
       )}
+      {chatReviewId != null && <ReviewChatSection reviewId={chatReviewId} />}
     </div>
   );
 }

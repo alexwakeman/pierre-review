@@ -476,6 +476,17 @@ export async function runSyncForRepo(
           `security backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
         );
       }
+      // COMMIT HEADLINES for open PRs whose commits were stored before `message_headline` existed
+      // (My Turn's "Pushed since" card lists them; the board may not fetch on mount). Bounded per
+      // run, asked once per PR per process, budget-aware, strictly non-fatal.
+      try {
+        const { backfillCommitHeadlines } = await import('./backfill-commit-headlines.js');
+        await backfillCommitHeadlines(repo.accountId, repoId, log);
+      } catch (err) {
+        log.warn(
+          `commit headline backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
+      }
 
       // The UNSETTLED-PR BACKSTOP (sync/unsettled-prs.ts): re-read merge state stored unknown and
       // CI stuck `pending` — GitHub finishing either never bumps `updatedAt`, so the walk's own
@@ -785,6 +796,17 @@ export async function syncAllRepos(log: Logger): Promise<void> {
       } catch (err) {
         log.warn(
           `security backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
+      }
+      // COMMIT HEADLINES for open PRs whose commits were stored before `message_headline` existed
+      // (My Turn's "Pushed since" card lists them; the board may not fetch on mount). Bounded per
+      // run, asked once per PR per process, budget-aware, strictly non-fatal.
+      try {
+        const { backfillCommitHeadlines } = await import('./backfill-commit-headlines.js');
+        await backfillCommitHeadlines(repo.accountId, r.id, log);
+      } catch (err) {
+        log.warn(
+          `commit headline backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
         );
       }
       // The unsettled-PR backstop, as on the manual tail: merge state stored unknown and CI stuck

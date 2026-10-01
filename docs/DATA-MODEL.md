@@ -185,6 +185,12 @@ fixture tests (see Conventions).
   `model` is plain `text` with NO drizzle `enum:` in either schema, so a run from a retired model
   (the old Opus 4.8) reads back with its id intact; the offered list lives only in `packages/shared`
   `CLAUDE_REVIEW_MODELS`. Contracts: docs/CLAUDE-REVIEW.md.
+- **`claudeReviewChatMessages`** — the Claude Review CHAT (migration `0073` / pg `0060`): one row
+  per message about ONE succeeded run, `role` `'user' | 'assistant'`, `findingId` NULL for the run's
+  general thread or a finding OF THAT RUN. Carries `accountId`, with a composite FK
+  `(reviewId, accountId) → claudeReviews(id, accountId)`. Assistant rows record `model`, `costUsd`
+  and tokens. Never carried across runs. Joins BOTH delete paths, ahead of the findings it FKs.
+  Contract: docs/CLAUDE-REVIEW.md § Chat about a review.
 - **`autoMergeRequests`** — one standing "merge when ready" intent per `(accountId, prId)`
   (that pair is the unique/upsert target, so re-arming OVERWRITES — this is current state, not a
   log; disarm DELETEs rather than adding a "cancelled" state). Carries `mergeMethod`,

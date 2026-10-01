@@ -55,9 +55,10 @@ let keepReviewersBefore: any[] = [];
  * each one is genuinely non-empty for the DOOMED account BEFORE the erasure runs — otherwise
  * "0 rows remain" proves nothing about whether `eraseAccountData` handles it.
  *
- * `claudeReviews` and `benchmarkContributions` are the two checklist entries NOT seeded here:
- * both are written only by features this fixture does not exercise (an agentic review run, an
- * opt-in cross-org contribution). They are covered by the completeness leg, not this one.
+ * `benchmarkContributions` is the checklist entry NOT seeded here: it is written only by an
+ * opt-in cross-org contribution this fixture does not exercise. It is covered by the completeness
+ * leg, not this one. (`claudeReviews` used to sit beside it; it is seeded now because the Claude
+ * Review chat messages hang off a run.)
  */
 const SEEDED_TABLES = [
   'accounts',
@@ -73,6 +74,8 @@ const SEEDED_TABLES = [
   'branchCommits',
   'trunkCiStatusEvents',
   'prMentions',
+  'claudeReviews',
+  'claudeReviewChatMessages',
 ];
 
 /**
@@ -284,6 +287,37 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
   await db
     .insert(s.prMentions)
     .values({ accountId, repoId: repo.id, prId: pr.id, login: `dev-${accountId}` })
+    .execute();
+  // A Claude Review run with one finding and a chat thread about it (migration 0073 / pg 0060).
+  // The chat rows are text this user typed or paid for, so their erasure check must not be vacuous.
+  const [review] = (await db
+    .insert(s.claudeReviews)
+    .values({
+      accountId,
+      prId: pr.id,
+      headSha: `head-${accountId}`,
+      status: 'succeeded',
+      model: 'claude-opus-5-5',
+    })
+    .returning()
+    .execute()) as any[];
+  const [finding] = (await db
+    .insert(s.claudeReviewFindings)
+    .values({
+      reviewId: review.id,
+      path: 'src/a.ts',
+      severity: 'warning',
+      title: 'A finding',
+      body: 'Body',
+    })
+    .returning()
+    .execute()) as any[];
+  await db
+    .insert(s.claudeReviewChatMessages)
+    .values([
+      { accountId, reviewId: review.id, findingId: null, role: 'user', content: 'Why?' },
+      { accountId, reviewId: review.id, findingId: finding.id, role: 'assistant', content: 'Because.' },
+    ])
     .execute();
 }
 

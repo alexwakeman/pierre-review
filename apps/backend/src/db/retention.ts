@@ -94,6 +94,12 @@ async function deletePrSubtree(
     .execute();
   const reviewIds = reviewIdRows.map((r) => r.id);
   if (reviewIds.length > 0) {
+    // Claude Review chat messages (migration 0073 / pg 0060) FK both the runs and the findings —
+    // they go first.
+    await tx
+      .delete(schema.claudeReviewChatMessages)
+      .where(inArray(schema.claudeReviewChatMessages.reviewId, reviewIds))
+      .execute();
     await tx
       .delete(claudeReviewFindings)
       .where(inArray(claudeReviewFindings.reviewId, reviewIds))

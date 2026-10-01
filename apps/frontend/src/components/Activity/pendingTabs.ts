@@ -48,28 +48,11 @@ export function effectivePendingTab(
   return picked ?? 'my_turn';
 }
 
-/** Does this tab open with the My turn HEAD — the "Open PRs" button and the default-branch strip
- *  above the cards? My turn only; every other tab opens straight onto its own controls and cards.
- *  (My turn used to split these into a second view, retired with `?attnView=`.) */
+/** Does this tab open with the My turn HEAD — the default-branch strip above the cards? My turn
+ *  only; every other tab opens straight onto its own controls and cards. (Open PRs is a fixed tab
+ *  between Activity and Timeline, so the head no longer carries a button into it.) */
 export function showsMyTurnHead(tab: PendingTabKey): boolean {
   return tab === 'my_turn';
-}
-
-/** The figure on My turn's "Open PRs" button: the workspace's NON-DRAFT open PRs — the same figure
- *  the repo-grouped open-PRs panel printed. ⚠ UNKNOWN IS NEVER ZERO: no answer yet, or a
- *  placeholder carried over from the PREVIOUS workspace (`placeholderData: prev`), is `null`. */
-export function openPrsButtonCount(
-  data: { prs?: readonly { isDraft: boolean }[] } | undefined,
-  isPlaceholderData: boolean,
-): number | null {
-  if (data == null || isPlaceholderData) return null;
-  // `?? []` — a response missing the array reads as "nothing", never a throw (no error boundary).
-  return (data.prs ?? []).reduce((n, p) => n + (p.isDraft ? 0 : 1), 0);
-}
-
-/** "Open PRs · 12", or just "Open PRs" while the count is unknown. */
-export function openPrsButtonLabel(count: number | null): string {
-  return count == null ? 'Open PRs' : `Open PRs · ${count}`;
 }
 
 /** Does this card survive My turn's "Only yours" ('mine') or its complement ('others')?

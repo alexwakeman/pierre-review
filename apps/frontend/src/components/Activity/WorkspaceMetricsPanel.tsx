@@ -115,7 +115,7 @@ export function WorkspaceMetricsPanel({
   metrics: WorkspaceMetrics;
   onOpenMetric?: (metric: WorkspaceMetricKey) => void;
   // The "Open PRs" tile's drill-in. Separate from `onOpenMetric` because open PRs are NOT a
-  // metrics-detail sub-tab: the tile routes to the sortable open-PRs drill-down (/api/open-prs,
+  // metrics-detail sub-tab: the tile reveals the fixed Open PRs tab (/api/open-prs,
   // workspace-wide). Absent ⇒ the tile is non-clickable (the per-repo console mount).
   onOpenOpenPrs?: () => void;
   // The Open-PRs tile caption. The cross-repo mount keeps the default ("across this workspace" —

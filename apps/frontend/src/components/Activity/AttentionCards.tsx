@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import type {
   AutomatedReviewerKind,
@@ -14,7 +14,9 @@ import type {
   MyTurnCard,
   MyTurnCardReason,
   MyTurnOwnWork,
+  MyTurnReply,
   MyTurnTrunkCard,
+  NewPrBall,
   PrAutomation,
   ReviewerRoutingCard,
   ReviewerSuggestion,
@@ -990,6 +992,113 @@ function ReviewerChip({
       <Avatar user={u} size={13} />
       <UserName user={u} fallbackId={reviewer.userId} />
     </span>
+  );
+}
+
+/**
+ * THE REPLY ITSELF on a reply-type My Turn card (`MyTurnCard.reply`): only the answer, never the
+ * thread. Clamped to about four lines with a local "Show more" (nothing is fetched — the body rode
+ * the attention payload). A body the server cut offers the way to the full text instead.
+ * Third-party markdown goes through `Markdown` (sanitised); images stay hidden while clamped.
+ */
+function MyTurnReplyBody({
+  reply,
+  openLabel,
+  onOpen,
+}: {
+  reply: MyTurnReply;
+  openLabel: string;
+  onOpen: () => void;
+}): JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (el && !expanded) setOverflows(el.scrollHeight > el.clientHeight + 1);
+  }, [reply.body, expanded]);
+  return (
+    <div className="mt-1.5 border-l-2 border-gray-300 pl-2 dark:border-gray-600" data-noactivate>
+      <div
+        ref={boxRef}
+        className={`text-[12px] text-gray-700 dark:text-gray-300 ${
+          expanded ? '' : 'max-h-[4.6rem] overflow-hidden [&_img]:hidden'
+        }`}
+      >
+        <Markdown>{reply.body}</Markdown>
+      </div>
+      {(overflows || expanded || reply.truncated) && (
+        <div className="mt-0.5 flex gap-3 text-[11px]">
+          {(overflows || expanded) && (
+            <button
+              type="button"
+              className="text-gray-600 hover:underline dark:text-gray-300"
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {expanded ? 'Show less' : 'Show more'}
+            </button>
+          )}
+          {reply.truncated && (expanded || !overflows) && (
+            <button
+              type="button"
+              className="text-gray-600 hover:underline dark:text-gray-300"
+              onClick={onOpen}
+            >
+              {openLabel}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * WHAT WAS PUSHED on a "Pushed since" card (`NewPrBall.commits`): one line per commit, newest
+ * first, then "and N more" over the same count the detail states. A headline not synced yet is
+ * never an empty line — the short sha stands alone with a word saying so. The author is named only
+ * when more than one person pushed (the detail already names the newest pusher).
+ */
+function PushedCommitList({
+  ball,
+  usersById,
+}: {
+  ball: NewPrBall;
+  usersById: Map<number, User>;
+}): JSX.Element | null {
+  const list = ball.commits ?? [];
+  if (list.length === 0) return null;
+  const authors = new Set(list.map((c) => c.authorId));
+  const nameAuthors = authors.size > 1;
+  const more = Math.max(0, (ball.humanCommitsAfter ?? list.length) - list.length);
+  return (
+    <ul className="mt-1.5 space-y-0.5 text-[12px] text-gray-700 dark:text-gray-300">
+      {list.map((c) => {
+        const login = c.authorId != null ? usersById.get(c.authorId)?.githubLogin : undefined;
+        return (
+          <li key={c.sha} className="flex min-w-0 items-baseline gap-2">
+            <span className="shrink-0 font-mono text-[11px] text-gray-500 dark:text-gray-400">
+              {c.sha.slice(0, 7)}
+            </span>
+            {c.headline != null ? (
+              <span className="min-w-0 truncate">{c.headline}</span>
+            ) : (
+              <span className="min-w-0 truncate text-gray-500 dark:text-gray-400">
+                Message not synced yet
+              </span>
+            )}
+            {nameAuthors && login != null && (
+              <span className="shrink-0 text-[11px] text-gray-500 dark:text-gray-400">@{login}</span>
+            )}
+          </li>
+        );
+      })}
+      {more > 0 && (
+        <li className="text-[11px] text-gray-500 dark:text-gray-400">
+          and {more} more
+        </li>
+      )}
+    </ul>
   );
 }
 
@@ -2480,6 +2589,21 @@ export function AttentionCards({
             {detail != null && <span className="min-w-0">{detail}</span>}
             {botPill != null && <BotVendorPill kind={botPill} />}
           </div>
+        )}
+        {/* DISPLAY ONLY, and both ride the attention payload — nothing here fetches. */}
+        {card.reply != null && (
+          <MyTurnReplyBody
+            reply={card.reply}
+            openLabel={card.threadId != null ? 'Open thread' : 'Open PR'}
+            onOpen={() =>
+              card.threadId != null
+                ? openThreadOn(card, card.threadId)
+                : open(metaFor(card, usersById), card.id)
+            }
+          />
+        )}
+        {card.reason === 'pushed_since' && card.ball != null && (
+          <PushedCommitList ball={card.ball} usersById={usersById} />
         )}
         {own?.kind === 'ready' && <PendingMergeActions card={asForwardCard(card, own)} />}
         {own?.kind === 'conflicts' && <PendingConflictActions card={asConflictsCard(card, own)} />}

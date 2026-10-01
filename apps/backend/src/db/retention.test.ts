@@ -99,6 +99,22 @@ async function seedPr(tag: string, updatedAt: Date): Promise<number> {
       observedAt: updatedAt,
     })
     .execute();
+  // A Claude Review run, a finding and a chat message on it (migration 0073 / pg 0060): the chat
+  // row FKs BOTH the run and the finding, so the sweep must delete it first.
+  const [review] = await db
+    .insert(schema.claudeReviews)
+    .values({ accountId: 1, prId: pr.id, headSha: `sha_${tag}`, status: 'succeeded', model: 'claude-opus-5-5' })
+    .returning()
+    .execute();
+  const [finding] = await db
+    .insert(schema.claudeReviewFindings)
+    .values({ reviewId: review.id, path: 'a.ts', severity: 'nit', title: 't', body: 'b' })
+    .returning()
+    .execute();
+  await db
+    .insert(schema.claudeReviewChatMessages)
+    .values({ accountId: 1, reviewId: review.id, findingId: finding.id, role: 'user', content: 'q' })
+    .execute();
   return pr.id;
 }
 
@@ -108,6 +124,7 @@ async function countFor(prId: number): Promise<{
   threads: number;
   comments: number;
   ciEvents: number;
+  chat: number;
 }> {
   const { pullRequests, events, reviewThreads, reviewComments, ciStatusEvents } = schema;
   const c = async (t: any, col: any) =>
@@ -118,6 +135,14 @@ async function countFor(prId: number): Promise<{
     threads: await c(reviewThreads, reviewThreads.prId),
     comments: await c(reviewComments, reviewComments.prId),
     ciEvents: await c(ciStatusEvents, ciStatusEvents.prId),
+    chat: (
+      await db
+        .select()
+        .from(schema.claudeReviewChatMessages)
+        .innerJoin(schema.claudeReviews, eq(schema.claudeReviews.id, schema.claudeReviewChatMessages.reviewId))
+        .where(eq(schema.claudeReviews.prId, prId))
+        .execute()
+    ).length,
   };
 }
 
@@ -144,7 +169,7 @@ afterAll(() => closeDb?.());
 describe('pruneOldData', () => {
   it('prunes the old PR + its whole subtree, keeps the recent one', async () => {
     const before = { old: await countFor(oldPrId), recent: await countFor(recentPrId) };
-    expect(before.old).toEqual({ prs: 1, events: 1, threads: 1, comments: 1, ciEvents: 1 });
+    expect(before.old).toEqual({ prs: 1, events: 1, threads: 1, comments: 1, ciEvents: 1, chat: 1 });
 
     const pruned = await pruneOldData(log, 180);
     expect(pruned).toBe(1);
@@ -156,6 +181,7 @@ describe('pruneOldData', () => {
       threads: 0,
       comments: 0,
       ciEvents: 0,
+      chat: 0,
     });
     // Recent PR fully intact.
     expect(await countFor(recentPrId)).toEqual({
@@ -164,6 +190,7 @@ describe('pruneOldData', () => {
       threads: 1,
       comments: 1,
       ciEvents: 1,
+      chat: 1,
     });
   });
 

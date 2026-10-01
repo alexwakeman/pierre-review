@@ -8,6 +8,7 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { useAddReviewComment } from '../../hooks/usePrWrites.js';
+import { usePrFileContent, usePrFileFullDiff } from '../../hooks/usePr.js';
 import { useDiffWrap } from '../../hooks/useDiffWrap.js';
 import { ApiError } from '../../api/client.js';
 import {
@@ -16,16 +17,25 @@ import {
   highlightDiffRows,
   inlineThreadStartsOpen,
   isLockFile,
+  isNoNewlineRow,
   lineRowIndex,
   parsePatch,
+  patchEnd,
   patchLineCount,
+  patchMatchesFile,
   revealScrollsFileHeader,
   splitDiffMarker,
+  type DiffGap,
   type DiffRow,
 } from '../../lib/diff.js';
-import { MAX_FILE_DIFF_HIGHLIGHT_LINES, languageForPath } from '../../lib/hljsLines.js';
+import {
+  MAX_FILE_DIFF_HIGHLIGHT_LINES,
+  highlightLines,
+  languageForPath,
+} from '../../lib/hljsLines.js';
 import { DERIVED_STATE_META, relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
-import { CheckIcon, ChevronIcon, ExternalLinkIcon } from '../Icons.js';
+import { CheckIcon, ChevronIcon, EllipsisIcon, ExternalLinkIcon } from '../Icons.js';
+import { CopyButton } from '../CopyButton.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { ThreadCountChips, rollupCounts } from '../ThreadList/ThreadCountChips.js';
@@ -40,9 +50,14 @@ import { SELECTED_BORDER, STATUS_META, UNSELECTED_BORDER } from './status.js';
 // pills — unresolved open, resolved shut, like GitHub.
 //
 // The code is syntax-highlighted per file, language resolved from the PATH (`highlightDiffRows`
-// — two passes over the reconstructed old and new sides, because a unified diff is not valid
-// source). ⚠ The add/del signal is carried by `ROW_BG`'s TINT alone, which is why no row here
-// has ever had an add/del text colour to lose.
+// — two passes over the reconstructed old and new sides, one hunk at a time, because a unified
+// diff is not valid source). ⚠ The add/del signal is carried by `ROW_BG`'s TINT and the gutters
+// (a removed line has only an old number, an added one only a new number), plus an sr-only
+// "added"/"removed" word — NO DIFF NOTATION IS PRINTED: no `+`/`-` column, no `@@` header and no
+// `\ No newline at end of file`. Each `@@` header is drawn as a GAP MARKER instead ("26 unchanged
+// lines · function foo() {"); in the Changes tab (`fileSource`) the marker expands in place from
+// the file at the PR head, on click. The `hunk` rows stay in `rows` — anchoring addresses rows by
+// index.
 //
 // ⚠ NO LINE MAY LEAVE ITS BOX, IN EITHER WRAP MODE (`useDiffWrap`, ON by default). The table used
 // to be `w-full` under AUTO layout with a `whitespace-pre` code cell, so one long line set the
@@ -69,6 +84,17 @@ export interface DiffFile {
   deletions: number;
   patch: string | null;
   githubUrl?: string | null;
+}
+
+/**
+ * Where a block may load MORE of its own file — the Changes tab only (the AI Fix changeset's files
+ * are not on GitHub yet). Every read is CLICK-GATED inside the block: a gap's "Show N hidden lines"
+ * reads the file at the PR head, a no-patch file's "Load full diff" reads both sides. `headSha` is
+ * the head the patches were read at, so a push re-keys both reads.
+ */
+export interface DiffFileSource {
+  prId: number;
+  headSha: string | null;
 }
 
 // Review threads to render inline in the diff (Changes tab only), pre-bucketed by RENDERED
@@ -190,7 +216,7 @@ function DiffLine({
   // `splitDiffMarker` rather than a bare `slice(1)`: an unmarked context row (a patch whose first
   // line is real code) would otherwise lose its first character, and the plain and highlighted
   // branches must print the same text.
-  const display = row.kind === 'hunk' ? row.text : splitDiffMarker(row).body || ' ';
+  const display = splitDiffMarker(row).body || ' ';
 
   // Scroll-and-flash. Ordinary DOM here (the gated scroll rules are the vis TIMELINE's), so a
   // ref + scrollIntoView is the whole mechanism — never write scrollTop by hand. `block:
@@ -219,10 +245,10 @@ function DiffLine({
       >
         {/* Widths come from the table's `<colgroup>` (see `DiffColumns`), never from these cells. */}
         <td className="select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
-          {row.kind === 'hunk' ? '' : gutterText(row.oldLine)}
+          {gutterText(row.oldLine)}
         </td>
         <td className="select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
-          {row.kind === 'hunk' ? '' : gutterText(row.newLine)}
+          {gutterText(row.newLine)}
         </td>
         <td className="select-none px-1 align-top">
           {/* Fixed-width wrapper reserves the gutter so the +-button revealing on
@@ -245,14 +271,11 @@ function DiffLine({
             wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre'
           }`}
         >
-          {/* ⚠ THE MARKER STAYS OUTSIDE THE HIGHLIGHTED SPAN. It is diff notation, not code — a
-              lexer handed `-foo` reads a minus operator — so `highlightDiffRows` strips it and it
-              is printed here, plain, in both branches. */}
-          {row.kind !== 'hunk' && (
-            <span className="select-none text-gray-400">
-              {row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' '}
-            </span>
-          )}
+          {/* NO `+`/`-` MARKER. It is diff notation, not code, and the row's tint and gutters
+              already say it — so it is neither lexed (`highlightDiffRows` strips it) nor printed.
+              The tint is colour-only, so a screen reader gets the word instead. */}
+          {row.kind === 'add' && <span className="sr-only">added </span>}
+          {row.kind === 'del' && <span className="sr-only">removed </span>}
           {html != null ? (
             // ⚠ ONLY highlight.js OUTPUT REACHES HERE. `highlightDiffRows` escapes through hljs's
             // own emitter and returns null on every gate it cannot clear; the branch below is
@@ -815,6 +838,177 @@ function InlineCommentBox({
   );
 }
 
+/**
+ * A file GitHub sent no patch for — its diff is too large for the files listing, or it is binary,
+ * and the listing does not say which. "Load full diff" asks the server to fetch both sides and
+ * diff them (refused past ~1 MB a side), on click only.
+ */
+function NoPatchNote({
+  status,
+  onLoad,
+  githubUrl,
+}: {
+  status: 'idle' | 'loading' | 'error' | 'too_large' | 'binary' | 'missing';
+  onLoad: () => void;
+  githubUrl: string | null;
+}): JSX.Element {
+  const text =
+    status === 'too_large'
+      ? 'This file is over 1 MB — too large to diff here.'
+      : status === 'binary'
+        ? 'Binary file — no text diff.'
+        : status === 'missing'
+          ? 'This file isn’t on GitHub at either commit.'
+          : status === 'error'
+            ? 'Couldn’t load the full diff.'
+            : 'GitHub didn’t send this diff. It is too large, or a binary file.';
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+      <span>{text}</span>
+      {(status === 'idle' || status === 'loading') && (
+        <button
+          type="button"
+          onClick={onLoad}
+          disabled={status === 'loading'}
+          className="rounded border border-blue-400 px-2 py-0.5 text-blue-600 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+        >
+          {status === 'loading' ? 'Loading full diff…' : 'Load full diff'}
+        </button>
+      )}
+      {githubUrl && (
+        <a
+          href={githubUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="text-blue-500 hover:underline"
+        >
+          View on GitHub
+          <ExternalLinkIcon size={10} className="ml-0.5 inline-block align-[-0.1em]" />
+        </a>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The slim row drawn in place of a `@@` header: the unchanged lines GitHub's patch leaves out,
+ * then the enclosing function git names after the header, muted. With a file source it is a
+ * button that expands those lines in place (one GitHub read per FILE, on the first click).
+ * `status` carries the outcome of that read once the reader has asked.
+ */
+function GapRow({
+  gap,
+  trailing = false,
+  expandable,
+  status,
+  onExpand,
+  wrap,
+}: {
+  gap: DiffGap;
+  /** The lines after the last hunk — counted only once the file is loaded. */
+  trailing?: boolean;
+  expandable: boolean;
+  status: GapLoadStatus;
+  onExpand: () => void;
+  wrap: boolean;
+}): JSX.Element {
+  const n = gap.count.toLocaleString();
+  const lines = gap.count === 1 ? 'line' : 'lines';
+  const label = trailing ? `${n} more unchanged ${lines}` : `${n} unchanged ${lines}`;
+  return (
+    <tr className="bg-sky-500/5">
+      <td colSpan={4} className="px-2 py-0.5">
+        <FullWidthCell wrap={wrap}>
+          <div className="flex min-w-0 items-center gap-1.5 font-sans text-[12px] text-gray-500 dark:text-gray-400">
+            <EllipsisIcon size={12} className="shrink-0" />
+            {expandable && status === 'idle' ? (
+              <button
+                type="button"
+                onClick={onExpand}
+                className="shrink-0 text-blue-600 hover:underline dark:text-blue-400"
+              >
+                Show {n} hidden {lines}
+              </button>
+            ) : (
+              <span className="shrink-0">
+                {status === 'loading' ? 'Loading…' : (GAP_STATUS_TEXT[status] ?? label)}
+              </span>
+            )}
+            {gap.context !== '' && (
+              <>
+                <span aria-hidden className="decorative-mark shrink-0">
+                  ·
+                </span>
+                <code className="min-w-0 truncate font-mono">{gap.context}</code>
+              </>
+            )}
+          </div>
+        </FullWidthCell>
+      </td>
+    </tr>
+  );
+}
+
+type GapLoadStatus = 'idle' | 'loading' | 'error' | 'too_large' | 'binary' | 'missing' | 'moved';
+
+const GAP_STATUS_TEXT: Partial<Record<GapLoadStatus, string>> = {
+  error: 'Couldn’t load these lines.',
+  too_large: 'This file is too large to show here.',
+  binary: 'Binary file.',
+  missing: 'This file isn’t on GitHub at this commit.',
+  moved: 'This file has changed since the diff was loaded.',
+};
+
+/** Unchanged lines expanded into a gap, read from the whole file. Read-only: GitHub only takes an
+ *  inline comment on a line the diff shows. */
+function ExpandedLines({
+  gap,
+  lines,
+  html,
+  side,
+  wrap,
+}: {
+  gap: DiffGap;
+  lines: readonly string[];
+  /** Per-line highlighted HTML for the WHOLE file, or null to render plain. */
+  html: readonly string[] | null;
+  side: 'head' | 'base';
+  wrap: boolean;
+}): JSX.Element {
+  const out: JSX.Element[] = [];
+  for (let k = 0; k < gap.count; k += 1) {
+    const oldLine = gap.oldFrom + k;
+    const newLine = gap.newFrom + k;
+    const at = (side === 'head' ? newLine : oldLine) - 1;
+    const text = lines[at] ?? '';
+    const h = html?.[at] ?? null;
+    out.push(
+      <tr key={k}>
+        <td className="select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
+          {oldLine}
+        </td>
+        <td className="select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
+          {newLine}
+        </td>
+        <td className="select-none px-1 align-top" />
+        <td
+          className={`px-2 align-top ${
+            wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre'
+          }`}
+        >
+          {h != null ? (
+            // ⚠ ONLY highlight.js OUTPUT REACHES HERE (`highlightLines`), as in DiffLine.
+            <span className="code-hl" dangerouslySetInnerHTML={{ __html: h }} />
+          ) : (
+            text || ' '
+          )}
+        </td>
+      </tr>,
+    );
+  }
+  return <>{out}</>;
+}
+
 function FileDiffBlock({
   file,
   commenting,
@@ -823,9 +1017,11 @@ function FileDiffBlock({
   threadCtx,
   focus,
   wrap,
+  fileSource,
 }: {
   file: DiffFile;
   commenting: { prId: number } | null;
+  fileSource: DiffFileSource | null;
   onPosted?: (threadId: number | null) => void;
   threads: ThreadDetail[];
   threadCtx: DiffThreadContext | null;
@@ -833,7 +1029,70 @@ function FileDiffBlock({
   focus: DiffFocusTarget | null;
   wrap: boolean;
 }): JSX.Element {
-  const rows = useMemo(() => parsePatch(file.patch), [file.patch]);
+  // "Load full diff" — a file GitHub sent no patch for (too large) is diffed server-side, on click.
+  const [wantFullDiff, setWantFullDiff] = useState(false);
+  const fullDiff = usePrFileFullDiff(
+    fileSource?.prId ?? null,
+    file.path,
+    file.previousPath ?? null,
+    fileSource?.headSha ?? null,
+    wantFullDiff && file.patch == null && fileSource != null,
+  );
+  const patch = file.patch ?? fullDiff.data?.patch ?? null;
+  const rows = useMemo(() => parsePatch(patch), [patch]);
+
+  // Gap expansion: the whole file, read ONCE per block on the first "Show N hidden lines" click
+  // (never on mount). A deleted file only has its base; everything else reads the head, whose line
+  // numbers the new side of every gap indexes directly.
+  const side: 'head' | 'base' = file.status === 'removed' ? 'base' : 'head';
+  const contentPath = side === 'base' ? (file.previousPath ?? file.path) : file.path;
+  const [wantContent, setWantContent] = useState(false);
+  const content = usePrFileContent(
+    fileSource?.prId ?? null,
+    contentPath,
+    side,
+    fileSource?.headSha ?? null,
+    wantContent && fileSource != null,
+  );
+  // Gap keys: a hunk row's index, or -1 for the lines after the last hunk.
+  const [openGaps, setOpenGaps] = useState<ReadonlySet<number>>(() => new Set());
+  const fileLines = content.data?.lines ?? null;
+  const linesFit = useMemo(
+    () => (fileLines != null ? patchMatchesFile(rows, fileLines, side) : false),
+    [fileLines, rows, side],
+  );
+  const gapStatus: GapLoadStatus = !wantContent
+    ? 'idle'
+    : content.isLoading
+      ? 'loading'
+      : content.isError
+        ? 'error'
+        : content.data?.refused != null
+          ? content.data.refused
+          : fileLines != null && !linesFit
+            ? 'moved'
+            : 'idle';
+  const usableLines = gapStatus === 'idle' && linesFit ? fileLines : null;
+  const expandGap = (key: number): void => {
+    setWantContent(true);
+    setOpenGaps((prev) => new Set(prev).add(key));
+  };
+  // The trailing gap is knowable only once the file is loaded.
+  const trailingGap = useMemo((): DiffGap | null => {
+    if (usableLines == null || rows.length === 0) return null;
+    const end = patchEnd(rows);
+    const next = side === 'head' ? end.newNext : end.oldNext;
+    const count = usableLines.length - (next - 1);
+    return count > 0 ? { count, oldFrom: end.oldNext, newFrom: end.newNext, context: '' } : null;
+  }, [usableLines, rows, side]);
+  // Expanded lines are coloured from the WHOLE file — the one lex that is right everywhere.
+  const fileHtml = useMemo(
+    () =>
+      usableLines != null && openGaps.size > 0
+        ? highlightLines([...usableLines], languageForPath(file.path), MAX_FILE_DIFF_HIGHLIGHT_LINES)
+        : null,
+    [usableLines, openGaps.size, file.path],
+  );
   // Anchor each thread to a diff row via the shared ladder (`anchorRowFor`: live line, else
   // the hunk reconstruction — marked approximate). Threads with no matching row render as
   // FILE-level chips above the diff, so a thread never disappears.
@@ -882,7 +1141,7 @@ function FileDiffBlock({
   // `LARGE_PATCH_LINES` (250) while `highlightDiffRows` only refused past `MAX_HIGHLIGHT_LINES`
   // (400) PER RECONSTRUCTED SIDE — so every file in the 251-to-~800-row band, `pnpm-lock.yaml`
   // included, was fully lexed on mount for output nobody could see. MEASURED at ~17-20ms per file
-  // at the gate, and `fetchPrFilesWithPatch` caps the list at 100 blocks with no windowing. The
+  // at the gate, and a page is 100 blocks with no windowing ("Load next 100 files" adds more). The
   // memo re-runs when the reader opens the file, which is the moment the work is first needed.
   //
   // ⚠ AND THAT GATE IS WHY THIS SITE HAS ITS OWN LINE LIMIT (`MAX_FILE_DIFF_HIGHLIGHT_LINES`, not
@@ -987,6 +1246,9 @@ function FileDiffBlock({
           </span>
           <code className="min-w-0 flex-1 truncate font-mono">{path}</code>
         </button>
+        {/* Beside the name button, never inside it (nested buttons). Copies the CURRENT path —
+            the new one for a rename — not the "old → new" display string. */}
+        <CopyButton text={file.path} what="file path" title="Copy file path" />
         {/* The full 4-state mix with counts — the old binary split (amber `N 💬` + grey `✓N`)
             blended untouched, replied and likely-addressed into one number. Same footprint,
             strictly more information; the `unresolvedCount > 0` auto-expand heuristic below
@@ -1015,9 +1277,23 @@ function FileDiffBlock({
 
       {expanded && (
         <div className="border-b border-gray-100 dark:border-gray-800">
-          {file.patch == null ? (
+          {patch == null ? (
             <div className="px-3 py-3 text-center text-xs text-gray-500 dark:text-gray-400">
-              {githubUrl ? (
+              {fileSource != null ? (
+                <NoPatchNote
+                  status={
+                    !wantFullDiff
+                      ? 'idle'
+                      : fullDiff.isLoading
+                        ? 'loading'
+                        : fullDiff.isError
+                          ? 'error'
+                          : (fullDiff.data?.refused ?? 'idle')
+                  }
+                  onLoad={() => setWantFullDiff(true)}
+                  githubUrl={githubUrl}
+                />
+              ) : githubUrl ? (
                 <>
                   Diff is too large or binary —{' '}
                   <a
@@ -1061,6 +1337,27 @@ function FileDiffBlock({
                   ))}
                 {rows.map((row, i) => (
                   <Fragment key={i}>
+                    {row.kind === 'hunk' ? (
+                      row.gap != null && row.gap.count > 0 ? (
+                        openGaps.has(i) && usableLines != null ? (
+                          <ExpandedLines
+                            gap={row.gap}
+                            lines={usableLines}
+                            html={fileHtml}
+                            side={side}
+                            wrap={wrap}
+                          />
+                        ) : (
+                          <GapRow
+                            gap={row.gap}
+                            expandable={fileSource != null}
+                            status={openGaps.has(i) ? gapStatus : 'idle'}
+                            onExpand={() => expandGap(i)}
+                            wrap={wrap}
+                          />
+                        )
+                      ) : null
+                    ) : isNoNewlineRow(row) ? null : (
                     <DiffLine
                       row={row}
                       html={html?.[i] ?? null}
@@ -1075,6 +1372,7 @@ function FileDiffBlock({
                       focusNonce={focus?.nonce ?? null}
                       wrap={wrap}
                     />
+                    )}
                     {threadCtx &&
                       byRow.get(i)?.map((a) => (
                         <InlineThreadRow
@@ -1093,6 +1391,25 @@ function FileDiffBlock({
                       ))}
                   </Fragment>
                 ))}
+                {trailingGap != null &&
+                  (openGaps.has(-1) ? (
+                    <ExpandedLines
+                      gap={trailingGap}
+                      lines={usableLines ?? []}
+                      html={fileHtml}
+                      side={side}
+                      wrap={wrap}
+                    />
+                  ) : (
+                    <GapRow
+                      gap={trailingGap}
+                      trailing
+                      expandable
+                      status="idle"
+                      onExpand={() => expandGap(-1)}
+                      wrap={wrap}
+                    />
+                  ))}
             </DiffTable>
           )}
         </div>
@@ -1118,12 +1435,15 @@ export const FileDiffView = memo(function FileDiffView({
   commenting,
   threadCtx,
   focus,
+  fileSource,
 }: {
   files: DiffFile[];
   commenting?: { prId: number } | null;
   threadCtx?: DiffThreadContext | null;
   // Optional by contract: the AI Fix tab mounts this component twice with only `files`.
   focus?: DiffFocusTarget | null;
+  /** Changes tab only: lets a block load more of its own file, on click (`DiffFileSource`). */
+  fileSource?: DiffFileSource | null;
 }): JSX.Element {
   // The thread a comment posted from this view just created. Held HERE rather than pushed
   // up to the caller so the focus works from any mount point without extra wiring: it
@@ -1183,6 +1503,7 @@ export const FileDiffView = memo(function FileDiffView({
           threadCtx={effectiveCtx}
           focus={focus != null && f.path === focusedBlockPath ? focus : null}
           wrap={wrap}
+          fileSource={fileSource ?? null}
         />
       ))}
     </div>

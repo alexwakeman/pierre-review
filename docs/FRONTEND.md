@@ -268,27 +268,41 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   context menu** (floating-ui in a `FloatingPortal` — the strip is `overflow-x-auto`, an
   in-flow menu would clip to the 42px bar — virtual reference at the click point): Close this
   tab / Close other tabs / Close all tabs (`closeOtherTabs`/`closeAllTabs` in the store; on
-  the fixed Activity/Timeline chips the menu shows only "Close all tabs"; "close all" keeps
+  the fixed Activity/Open PRs/Timeline chips the menu shows only "Close all tabs"; "close all" keeps
   you on a fixed view if that's where you are, mirroring `closeTab`'s fallback). ⚠ The menu's
   (and an in-flight drag's) Escape MUST `stopPropagation` or `useKeyboard`'s global Escape
   also yanks the user to the Timeline. TabChip is now one shared `ChipShell` — the nine
   per-kind branches collapsed to a config switch, which is what made the drag/menu handlers a
   one-place change; the e2e selectors (`data-testid="pinned-tabs"`, `role="tab"` names, ✕
   aria-labels) are load-bearing and survived.
-  Besides the PR tabs there's a family of **singleton, EPHEMERAL drill-down tabs** (never
-  URL/localStorage-persisted; a reload drops them): `metrics-detail`, `bot-prs`, `open-prs`
-  (**THE consolidated open-PR view** — the shared `OpenPrsTable` over `GET /api/open-prs`:
+  **Open PRs is a THIRD FIXED VIEW** (`activeTab === 'open-prs'`, chip between Activity and
+  Timeline, no ✕, `view=open-prs` in the URL so it is bookmarkable and Back works). Every "is this
+  a fixed view?" test goes through `isFixedView` / `FIXED_VIEWS` (`store/pinnedTabs.ts`) — never a
+  `'timeline' || 'activity'` literal pair, which is exactly what forgets a third. The chip reads
+  **"Open PRs · N"**, N = the workspace's NON-DRAFT open PRs off `useWorkspaceOpenPrs`
+  (`lib/openPrsTab.ts` `openPrsTabCount`; ⚠ **unknown is never zero** — no answer yet, the idle
+  query while `workspaceId` is null, or the PREVIOUS workspace's `placeholderData` prints "Open PRs"
+  with no figure). It is the same cache entry as the tab body and FeedIsolationBanner, so the chip
+  adds an observer, not a request. The view is **THE consolidated open-PR view** — the shared
+  `OpenPrsTable` over `GET /api/open-prs`, ALWAYS workspace-wide:
   age/author/LoC/untouched-threads/CI/approval columns, drafts included with a "· N drafts"
   callout; plus a **Claude review** column ONLY with the `claudeReview` capability — one batched
   `POST /api/claude-review/states` for every listed row, click-gated starts sharing the tab's
   mutation key, every control `stopPropagation` ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Starting
-  from the Open PRs tab). Reached from BOTH the Feed pane's per-repo "Show all" footers (repo scope) AND the
-  Flow-metrics "Open PRs" tile (`openOpenPrsDetail('feed')` = whole workspace, "All repos"
-  chip, plus a LOCAL `MetricRepoFilter` that must never write `filters.repoIds`) — the old
-  `MetricsDetail` `open_prs` sub-tab is GONE. Its fetch goes through `scopedOpenPrsSearch`,
-  byte-identical to `workspaceOpenPrsSearch` when unscoped so the tab shares the Feed's cache
-  entry, and always carrying `workspace=` alongside `repoIds=` — pinned in
-  `workspaceOpenPrsScope.test.ts`), `bot-only-prs`
+  from the Open PRs tab). Every opener just REVEALS it (`openOpenPrsDetail(repoId?)` →
+  `showOpenPrs`): the chip and the Reports → Flow metrics "Open PRs" tile pass nothing and CLEAR
+  the tab's repo dropdown; the per-repo "Show all N open PRs" footer (`RepoOpenPrList`) passes its
+  repo and PRE-SELECTS it, because the footer promised that repo's count. The dropdown
+  (`MetricRepoFilter`) is `filters.openPrsRepoFilter` — transient, URL-silent, stamped with the
+  `workspaceId` it was chosen in and IGNORED under any other (derived in `OpenPrsDetail`, no reset
+  effect to race the seed) — and must never write `filters.repoIds` (the Timeline picker). It
+  narrows client-side; the fetch is `useScopedOpenPrs(null)`, byte-identical to
+  `workspaceOpenPrsSearch` (pinned in `workspaceOpenPrsScope.test.ts`). My turn's old
+  "Open PRs · N" button, the `open-prs` `TabKind`, the `OpenPrsScope` seed (and its group arm) and
+  the never-mounted `FeedOpenPrsPanel` are DELETED; the old `MetricsDetail` `open_prs` sub-tab is
+  GONE too. Pinned in `test/openPrsTab.test.ts` + `landingTab.test.ts`.
+  Besides the PR tabs there's a family of **singleton, EPHEMERAL drill-down tabs** (never
+  URL/localStorage-persisted; a reload drops them): `metrics-detail`, `bot-prs`, `bot-only-prs`
   (sortable + Age/Updated + cross-repo repo-filter dropdown), and `bot-threads` (sortable +
   DESELECT-by-default + Select-all/Clear across pages + Stop + repo-filter + client pagination;
   scope-wide review & resolve). **`user-activity` is the one drill-down keyed PER USER**, not a
@@ -302,7 +316,7 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   against the PR's AUTHOR** (`sync/upsert.ts` writes `actorId: authorId`), so on this tab they
   mean "a PR they authored was merged" — the header caption says so rather than implying they
   pressed merge. **Row click across ALL these list surfaces (the drill-down TABLES
-  + the inline `OpenPrRows`/`FeedOpenPrsPanel` lists) now
+  + the inline `OpenPrRows` lists) now
   opens the PR's own detail TAB** (`openPrDetailTab`) — the old feed-isolation / timeline-focus
   on-click + the ⧉ button were removed; **feed isolation is reached from PrDetail's "Show in
   Activity feed" header button** (`FeedIcon`: `setRepoConsoleTab(repoId,'activity')`→`setActivityRepo`
@@ -313,7 +327,7 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   `store/filters.ts` (`{fromActivity:true}` stamps the feed card to flash on a Back — the entry
   itself is the URL's, see the Back-button note below), a full-`<main>` overlay
   branch in `App.tsx` (MUST join `overlayActive`), and a compact chip in `PinnedTabsBar`. The
-  drill-down TABLES (open-prs / bot-only-prs / bot-threads, **plus `MetricsDetail`** — now
+  drill-down TABLES (the Open PRs view / bot-only-prs / bot-threads, **plus `MetricsDetail`** — now
   retrofitted, per-tab `sortByTab` state) share `Activity/sortableTable.tsx`
   (`SortHeader`/`compare`/`nextSort`; numeric columns MUST return a number from `sortValue`, or
   `compare` localeCompares lexicographically). The rail's per-repo console remembers its Activity|Bots sub-tab in
@@ -530,7 +544,12 @@ Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claud
   **docs/MERGE-CI-TRUNK.md § Why a blocked PR is blocked**), **Reviewers** (all who
   submitted a review, badged by latest state) above **Approvers** (latest decisive review =
   `approved`), then **Merged by**, **Requested** reviewers, labels, meta, an **Actions** row
-  (approve / `MergeControl` / `MergeWhenReadyControl` / `ClosePrControl` / `ReopenPrControl` — the
+  (the review verdicts in `ApproveControl` — **Approve** posts at once with no text box, **Approve
+  with comment** alone opens one and stays shut until something is typed, **Request changes** always
+  opens an optional one and a blank box sends "Changes requested." (GitHub refuses an empty one);
+  after approving, Request changes stays, and the standing chip reads the server's
+  `viewerReviewStanding` so it survives a reload / `MergeControl` / `MergeWhenReadyControl` /
+  `ClosePrControl` / `ReopenPrControl` — the
   two merge controls are handed the same `MergeBlockFacts` this tab built, so the merge button's own
   explanation stops being the worst one on the screen. ⚠ **The Actions row is the ONE row that opens
   on a CLOSED PR**, via `viewerCanReopen && state === 'closed'`: before `ReopenPrControl` its gate
@@ -747,6 +766,39 @@ past the pane's right edge while the file header stopped at it. Now:
   localStorage (`pierre:diffWrap`), not `useLocalStorage` — that hook is per-INSTANCE, and the toggle
   (`DiffWrapToggle`, in the Changes tab header and beside the AI Fix diff) is not the component
   that reads it. Never the filter store: a filter reset must not move the furniture.
+
+#### No diff notation, gap markers, and loading more (Changes tab)
+
+The diff prints CODE, not diff notation: no `+`/`-` column, no `@@ … @@` header row and no
+`\ No newline at end of file`. Added/removed is the row tint plus the gutters (a removed line has
+only an old number, an added one only a new number), with an `sr-only` "added"/"removed" word
+because the tint is colour-only. `DiffHunk.tsx` (a thread's code anchor) is a different surface and
+KEEPS its header — it doubles as the collapse control there.
+
+- ⚠ **`parsePatch` STILL EMITS THE `hunk` ROWS.** They carry the line-number resets, and thread
+  anchoring and the reveal address rows BY INDEX. Each now carries `gap {count, oldFrom, newFrom,
+  context}`, and the renderer draws a slim GAP MARKER in its place (`EllipsisIcon` + "26 unchanged
+  lines" + the function git names after the header, muted). No marker before a first hunk at line 1.
+- ⚠ **HIGHLIGHTING LEXES ONE HUNK AT A TIME** (`highlightDiffRows`). Joining hunks fed the lexer
+  text no file contained: a hunk ending on `/**` whose `*/` sat in the hidden gap turned every row of
+  the next hunk into one flat comment colour. A hunk that refuses blanks only itself; the 2,000-line
+  gate is still counted per side over the whole file. Pinned in `test/highlightDiffRows.test.ts`.
+- **"Show N hidden lines"** (Changes tab only — `fileSource`; the AI Fix tab shows a plain count):
+  the first click reads the WHOLE file once (`GET …/files/content`, head side; base for a deleted
+  file) and expands that gap in place, coloured from the whole file. Once loaded, the lines after the
+  last hunk get a marker too. ⚠ `patchMatchesFile` must agree first — a file read at another commit
+  says "This file has changed since the diff was loaded" instead of splicing wrong lines.
+- **"Load full diff"** on a file GitHub sent no patch for: the server diffs both sides
+  (`GET …/files/diff`), refused past ~1 MB a side.
+- **"Load next 100 files (N of M shown)"** replaces the three "View all on GitHub" notes — one page
+  per click, up to GitHub's 3,000-file ceiling, which is then stated. ⚠ **Page 1 stays the plain,
+  persisted `['pr-files', id]`** (PrDetail and ClaudeReviewTab read it as a `PrFilesResponse`; an
+  `InfiniteData` blob there would crash with no error boundary); pages 2+ are the unpersisted
+  `usePrMoreFiles` infinite query, armed per head.
+- ⚠ **EVERY ONE OF THESE IS CLICK-GATED.** Nothing fetches on mount; the content/diff/more-files keys
+  stay OUT of `shouldDehydrateQuery`.
+- Each file header carries a `CopyButton` for its path (the NEW path on a rename), beside — never
+  inside — the collapse button; the metadata fallback rows carry one too.
 
 #### Inline thread indicators in the diff + per-file state rollups
 
@@ -2018,18 +2070,13 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   tab and clears the kind (`setAttentionTab`). Old `?attn=<kind>` links land on the right tab with
   that chip selected.
 - **My turn's HEAD — My turn ONLY** (`showsMyTurnHead`, `pendingTabs.ts`; `Activity/MyTurnHead.tsx`):
-  an **"Open PRs · N"** button (`OpenPrsButton`) at the top left, then the default-branch strip
-  (`DefaultBranchesSlot` → `BranchStatusPanel`), then the tab's controls and cards. No other tab
-  renders either. It REPLACED My turn's second view ("Default branches and open PRs",
-  `attentionMyTurnView` / `effectiveMyTurnView` / `MY_TURN_VIEWS` — all DELETED, 2026-10-01). The
-  button's N is the workspace's NON-DRAFT open PRs off `useWorkspaceOpenPrs`
-  (`openPrsButtonCount`); ⚠ **unknown is never zero** — no answer yet, or the PREVIOUS workspace's
-  `placeholderData`, prints "Open PRs" with no figure. A click runs `openOpenPrsDetail('feed')`, the
-  workspace-wide drill-down. The repo-grouped `FeedOpenPrsPanel` is **NOT MOUNTED** anywhere now (the
-  file and its `pierre:feedOpenPrsPanel` choice are kept). ⚠ **NO NEW REQUEST**: the strip's
-  argument-less `useBranchStatus()` is the SAME cache entry the rail reads at boot, and the open-PRs
-  key is shared with `FeedIsolationBanner` / `OpenPrsDetail`; it mounts once per board, never per
-  card, and trends stay lazy per row. ⚠ **COUNT-FREE**: nothing it reads reaches a badge, `myTurn`,
+  the default-branch strip (`DefaultBranchesSlot` → `BranchStatusPanel`), then the tab's controls
+  and cards. No other tab renders it. It REPLACED My turn's second view ("Default branches and open
+  PRs", `attentionMyTurnView` / `effectiveMyTurnView` / `MY_TURN_VIEWS` — all DELETED, 2026-10-01).
+  The "Open PRs · N" button that used to sit above the strip is DELETED: Open PRs is a fixed tab
+  between Activity and Timeline and its chip carries the count (see the tab strip above). ⚠ **NO
+  NEW REQUEST**: the strip's argument-less `useBranchStatus()` is the SAME cache entry the rail
+  reads at boot; it mounts once per board, never per card, and trends stay lazy per row. ⚠ **COUNT-FREE**: nothing it reads reaches a badge, `myTurn`,
   the scorer, the liveness sweep or a notification. The strip's slot is a placeholder while pending
   (idle included), "Couldn’t load the default branches." on failure, "No default branch has synced
   yet." on an answered empty, else the panel. ⚠ **`?attnView=branches` shipped**: it is still

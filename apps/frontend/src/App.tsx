@@ -40,7 +40,7 @@ import { useMyTurnNotifications } from './hooks/useMyTurnNotifications.js';
 import { useNotificationPref } from './hooks/useNotificationPref.js';
 import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
-import { boardSlotMode, usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
+import { boardSlotMode, isFixedView, usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
 import { ApiError, api } from './api/client.js';
 import { initAnalytics, trackPageView } from './lib/analytics.js';
 import { CookieBanner } from './components/CookieBanner.js';
@@ -123,15 +123,15 @@ export default function App(): JSX.Element {
   // board slot with its own isolated Timeline instance (keyed remount).
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const tabs = usePinnedTabs((s) => s.tabs);
-  const activeTabObj =
-    activeTab !== 'timeline' && activeTab !== 'activity'
-      ? tabs.find((t) => t.key === activeTab) ?? null // stale/closed key → full board
-      : null;
+  const activeTabObj = !isFixedView(activeTab)
+    ? (tabs.find((t) => t.key === activeTab) ?? null) // stale/closed key → full board
+    : null;
   const inboxActive = activeTab === 'activity';
   const prDetailId = activeTabObj?.kind === 'pr-detail' ? activeTabObj.prId : null;
   const metricsActive = activeTabObj?.kind === 'metrics-detail';
   const botPrsActive = activeTabObj?.kind === 'bot-prs';
-  const openPrsActive = activeTabObj?.kind === 'open-prs';
+  // A FIXED view (Activity · Open PRs · Timeline), not a dynamic tab — no `Tab` object behind it.
+  const openPrsActive = activeTab === 'open-prs';
   const botOnlyActive = activeTabObj?.kind === 'bot-only-prs';
   const botThreadsActive = activeTabObj?.kind === 'bot-threads';
   const botFlaggingActive = activeTabObj?.kind === 'bot-flagging';
@@ -461,7 +461,7 @@ export default function App(): JSX.Element {
           </div>
         )}
 
-        {/* The sortable all-open-PRs drill-down — a sibling full-main overlay over the board. */}
+        {/* The fixed Open PRs tab — a sibling full-main overlay over the board. */}
         {openPrsActive && (
           <div
             data-testid="open-prs-overlay"

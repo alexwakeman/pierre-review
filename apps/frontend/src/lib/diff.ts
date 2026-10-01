@@ -17,40 +17,87 @@ export interface DiffRow {
   oldLine?: number;
   // The line number in the NEW file (present on add + context rows).
   newLine?: number;
+  /**
+   * `hunk` rows only: the unchanged lines GitHub's patch leaves out BEFORE this hunk, which the
+   * Changes tab draws as a gap marker in place of the `@@` header. `count` lines starting at
+   * `oldFrom` / `newFrom` (equal-length on both sides — they are unchanged). `context` is the text
+   * git prints after the second `@@` (usually the enclosing function), or '' when there is none.
+   * `count` is 0 for a first hunk that starts at line 1 — no marker is drawn for it.
+   */
+  gap?: DiffGap;
 }
 
-// Parse `@@ -oldStart,oldCount +newStart,newCount @@ …` → the two start lines.
-// Returns null if the line isn't a hunk header.
-function parseHunkHeader(line: string): { oldStart: number; newStart: number } | null {
-  const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+export interface DiffGap {
+  count: number;
+  oldFrom: number;
+  newFrom: number;
+  context: string;
+}
+
+// Parse `@@ -oldStart,oldCount +newStart,newCount @@ ctx` → the starts, counts and the trailing
+// context text. Returns null if the line isn't a hunk header. An omitted count is 1 (git's rule).
+function parseHunkHeader(
+  line: string,
+): { oldStart: number; oldCount: number; newStart: number; newCount: number; context: string } | null {
+  const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$/.exec(line);
   if (!m) return null;
-  return { oldStart: Number(m[1]), newStart: Number(m[2]) };
+  return {
+    oldStart: Number(m[1]),
+    oldCount: m[2] == null ? 1 : Number(m[2]),
+    newStart: Number(m[3]),
+    newCount: m[4] == null ? 1 : Number(m[4]),
+    context: (m[5] ?? '').trim(),
+  };
 }
 
 // Turn a unified per-file patch into an ordered list of rows. Resilient to a
 // null/empty patch (→ no rows) and to the occasional `\ No newline at end of
 // file` marker GitHub emits (rendered as a context row, consuming no line number).
+//
+// ⚠ THE `hunk` ROWS STAY, though the Changes tab no longer prints the `@@` header: they carry the
+// line-number resets, and thread anchoring and the reveal both address rows BY INDEX. The renderer
+// draws a gap marker (`row.gap`) in their place instead of dropping them.
 export function parsePatch(patch: string | null | undefined): DiffRow[] {
   if (!patch) return [];
   const rows: DiffRow[] = [];
   let oldLine = 0;
   let newLine = 0;
+  // The next line each side would reach with nothing hidden — 1 before the first hunk.
+  let oldNext = 1;
+  let newNext = 1;
 
   for (const text of patch.replace(/\n$/, '').split('\n')) {
     const header = parseHunkHeader(text);
     if (header) {
+      // Measure the gap on a side the hunk actually covers: a count-0 side's start names the line
+      // BEFORE it (a pure insertion / deletion), so it is one short of the truth.
+      const count =
+        header.newCount > 0
+          ? header.newStart - newNext
+          : header.oldCount > 0
+            ? header.oldStart - oldNext
+            : 0;
+      rows.push({
+        kind: 'hunk',
+        text,
+        gap: { count: Math.max(0, count), oldFrom: oldNext, newFrom: newNext, context: header.context },
+      });
       oldLine = header.oldStart;
       newLine = header.newStart;
-      rows.push({ kind: 'hunk', text });
+      // A count-0 side starts AFTER the named line.
+      oldNext = header.oldCount === 0 ? header.oldStart + 1 : header.oldStart;
+      newNext = header.newCount === 0 ? header.newStart + 1 : header.newStart;
       continue;
     }
     const marker = text[0];
     if (marker === '+') {
       rows.push({ kind: 'add', text, newLine });
       newLine += 1;
+      newNext = newLine;
     } else if (marker === '-') {
       rows.push({ kind: 'del', text, oldLine });
       oldLine += 1;
+      oldNext = oldLine;
     } else if (marker === '\\') {
       // "\ No newline at end of file" — annotation, not a real line.
       rows.push({ kind: 'context', text });
@@ -59,9 +106,33 @@ export function parsePatch(patch: string | null | undefined): DiffRow[] {
       rows.push({ kind: 'context', text, oldLine, newLine });
       oldLine += 1;
       newLine += 1;
+      oldNext = oldLine;
+      newNext = newLine;
     }
   }
   return rows;
+}
+
+/**
+ * Where the patch STOPS on each side: the first line after the last hunk. The lines from here to
+ * the end of the file are the trailing gap, whose size is knowable only once the file is loaded.
+ */
+export function patchEnd(rows: readonly DiffRow[]): { oldNext: number; newNext: number } {
+  let oldNext = 1;
+  let newNext = 1;
+  for (const r of rows) {
+    if (r.kind === 'hunk') {
+      const m = parseHunkHeader(r.text);
+      if (m) {
+        oldNext = m.oldCount === 0 ? m.oldStart + 1 : m.oldStart;
+        newNext = m.newCount === 0 ? m.newStart + 1 : m.newStart;
+      }
+      continue;
+    }
+    if (r.oldLine != null) oldNext = r.oldLine + 1;
+    if (r.newLine != null) newNext = r.newLine + 1;
+  }
+  return { oldNext, newNext };
 }
 
 /**
@@ -109,6 +180,30 @@ export function anchorLineFromHunk(
   return null;
 }
 
+/**
+ * Does a whole file (as loaded for a gap expansion) agree with the patch it is filling in? Every
+ * line the patch shows on that side — context, plus add (head) or del (base) — must sit at its own
+ * line number in `lines`. False means the file was read at a different commit than the patch (a
+ * push landed between the two reads), and splicing its lines into the gaps would show code that is
+ * not there; the block says so instead.
+ */
+export function patchMatchesFile(
+  rows: readonly DiffRow[],
+  lines: readonly string[],
+  side: 'head' | 'base',
+): boolean {
+  for (const row of rows) {
+    if (row.kind === 'hunk' || isNoNewlineRow(row)) continue;
+    if (side === 'head' && row.kind === 'del') continue;
+    if (side === 'base' && row.kind === 'add') continue;
+    const n = side === 'head' ? row.newLine : row.oldLine;
+    if (n == null) continue;
+    const body = splitDiffMarker(row).body.replace(/\r$/, '');
+    if (lines[n - 1] !== body) return false;
+  }
+  return true;
+}
+
 // ---- syntax highlighting a diff (every surface in the app that renders one) ----
 
 /**
@@ -126,7 +221,7 @@ export function isNoNewlineRow(row: DiffRow): boolean {
  *
  * ⚠ THE MARKER IS NOT CODE AND MUST NEVER REACH THE LEXER. It is diff notation: a `-` in front of a
  * line is not a minus operator, and highlighting it as one colours a deletion's first token wrong
- * on every row. Renderers print `marker` as plain text and colour `body`.
+ * on every row. Renderers colour `body`; the Changes tab no longer prints `marker` at all (the row tint says it).
  *
  * ⚠ A CONTEXT ROW IS STRIPPED ONLY WHEN IT ACTUALLY HAS A LEADING SPACE. `parsePatch` classifies
  * ANY unmarked line as context — a truncated hunk that opens on real code, or a body that is not a
@@ -162,8 +257,20 @@ export function splitDiffMarker(row: DiffRow): { marker: string; body: string } 
  * ⚠ ONE SIDE REFUSING REFUSES BOTH. Half a coloured file reads as a rendering bug, not as a
  * deliberate limit.
  *
- * `maxLines` is the line gate PER SIDE, passed straight to `highlightLines`; only the Changes tab
- * raises it (`MAX_FILE_DIFF_HIGHLIGHT_LINES`).
+ * ⚠ AND ONE LEX PER HUNK, NEVER ACROSS HUNKS. Two hunks are not adjacent source: the lines between
+ * them are not in the patch, so joining hunk A's tail to hunk B's head is text no version of the
+ * file ever contained. MEASURED on a real PR: hunk 2 ended on a context `/**` whose `*\/` sat in
+ * the hidden gap, the joined lex never closed the comment, and EVERY row of hunk 3 came out as one
+ * flat comment colour — which reads as "no highlighting". So the lexer starts fresh at every `@@`.
+ * (A hunk that OPENS inside a comment still lexes its first lines as code; only the whole file can
+ * fix that, and the gap expansion highlights from the whole file.)
+ *
+ * ⚠ ONE HUNK REFUSING BLANKS ONLY THAT HUNK. The "never half a file" rule above is about the two
+ * SIDES of one stretch of code disagreeing; separate hunks are separate stretches already.
+ *
+ * `maxLines` is the line gate PER SIDE over the WHOLE FILE (every hunk's side lines summed),
+ * checked before any lexing; only the Changes tab raises it (`MAX_FILE_DIFF_HIGHLIGHT_LINES`).
+ * Over it, the whole file renders plain.
  */
 export function highlightDiffRows(
   rows: readonly DiffRow[],
@@ -171,12 +278,52 @@ export function highlightDiffRows(
   maxLines: number = MAX_HIGHLIGHT_LINES,
 ): (string | null)[] | null {
   if (language == null || rows.length === 0) return null;
+  // The whole-file gate first: count each side across every hunk.
+  let oldTotal = 0;
+  let newTotal = 0;
+  for (const row of rows) {
+    if (row.kind === 'hunk' || isNoNewlineRow(row)) continue;
+    if (row.kind !== 'add') oldTotal += 1;
+    if (row.kind !== 'del') newTotal += 1;
+  }
+  if (oldTotal > maxLines || newTotal > maxLines) return null;
+
+  const out: (string | null)[] = rows.map(() => null);
+  let coloured = false;
+  let segStart = 0;
+  const flush = (end: number): void => {
+    if (end > segStart) {
+      const html = highlightSegment(rows, segStart, end, language, maxLines);
+      if (html != null) {
+        coloured = true;
+        for (let i = segStart; i < end; i += 1) out[i] = html[i - segStart] ?? null;
+      }
+    }
+  };
+  rows.forEach((row, i) => {
+    if (row.kind !== 'hunk') return;
+    flush(i);
+    segStart = i + 1;
+  });
+  flush(rows.length);
+  return coloured ? out : null;
+}
+
+/** The two-pass lex (see `highlightDiffRows`) over `rows[from, to)` — ONE hunk. Null = refused. */
+function highlightSegment(
+  rows: readonly DiffRow[],
+  from: number,
+  to: number,
+  language: string,
+  maxLines: number,
+): (string | null)[] | null {
   const oldLines: string[] = [];
   const newLines: string[] = [];
   // Per row: where its text sits in each side's array, or null when that side has no such line.
   const oldAt: (number | null)[] = [];
   const newAt: (number | null)[] = [];
-  for (const row of rows) {
+  for (let i = from; i < to; i += 1) {
+    const row = rows[i]!;
     if (row.kind === 'hunk' || isNoNewlineRow(row)) {
       oldAt.push(null);
       newAt.push(null);
@@ -194,13 +341,14 @@ export function highlightDiffRows(
       newLines.push(body);
     }
   }
+  if (oldLines.length === 0 && newLines.length === 0) return null;
   const oldHtml = oldLines.length === 0 ? [] : highlightLines(oldLines, language, maxLines);
   const newHtml = newLines.length === 0 ? [] : highlightLines(newLines, language, maxLines);
   if (oldHtml == null || newHtml == null) return null;
-  return rows.map((_row, i) => {
-    const n = newAt[i];
+  return oldAt.map((_x, k) => {
+    const n = newAt[k];
     if (n != null) return newHtml[n] ?? null;
-    const o = oldAt[i];
+    const o = oldAt[k];
     if (o != null) return oldHtml[o] ?? null;
     return null;
   });
@@ -300,7 +448,7 @@ export function anchorRowFor(
  * whose path matches no current file but does match a file's `previousPath` was written
  * before a rename and is re-homed under the current path (previously it was invisible in
  * Changes: the fold keyed on `t.path` while blocks looked up `f.path`). A thread matching
- * neither stays out of the map — a file beyond the diff's 100-file cap renders only in the
+ * neither stays out of the map — a file not loaded yet (past the pages shown) renders only in the
  * Threads tab, and the tab-header count reads `pr.threads` so the aggregate never lies.
  */
 export function indexThreadsByPath<T extends { path: string }>(

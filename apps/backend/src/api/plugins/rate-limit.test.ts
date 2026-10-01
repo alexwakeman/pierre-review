@@ -37,6 +37,12 @@ describe('tierFor — AI generation', () => {
     expect(tiers('PATCH', '/api/claude-findings/3')).toEqual(['ai', 'ai_hourly']);
   });
 
+  // Claude Review chat: every POST is one billed agent turn; the GET only reads stored turns.
+  it('bills a Claude Review chat question and reads its history cheaply', () => {
+    expect(tiers('POST', '/api/claude-reviews/7/chat')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/claude-reviews/7/chat')).toEqual(['read']);
+  });
+
   it('treats reads of stored AI results as cheap reads, not generation', () => {
     expect(tiers('GET', '/api/pro/insights')).toEqual(['read']);
     expect(tiers('GET', '/api/prs/42/claude-review')).toEqual(['read']);
@@ -524,6 +530,17 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/prs/42/checks/9876543/logs')).toEqual(['pr_detail', 'read']);
   });
 
+  // The Changes tab's two click-gated file reads: a gap marker's "Show N hidden lines" (one file's
+  // raw text) and "Load full diff" (both sides + the merge base). Spelled with their exact segments
+  // — `files/contents` (GitHub's own plural) or `file/content` must NOT ride the detail bucket.
+  it('puts the Changes tab file-content reads on the detail bucket', () => {
+    expect(tiers('GET', '/api/prs/42/files/content')).toEqual(['pr_detail', 'read']);
+    expect(tiers('GET', '/api/prs/42/files/diff')).toEqual(['pr_detail', 'read']);
+    expect(tiers('GET', '/api/prs/42/files/contents')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/42/file/content')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/42/files/content/x')).toEqual(['read']);
+  });
+
   // The bare id must keep matching, and a sibling that is NOT in the alternation must not be
   // swept in by the optional group — the regex has to stay anchored at both ends.
   it('does not widen the detail bucket beyond the listed sub-routes', () => {
@@ -556,6 +573,8 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/threads/9/reply')).toEqual(['github_write']);
     expect(tiers('POST', '/api/bot-threads/resolve')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/approve')).toEqual(['github_write']);
+    // Spelled out in hitsGithub: `request-reviewers` does NOT prefix-match it.
+    expect(tiers('POST', '/api/prs/42/request-changes')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/merge')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/resolve-bot-threads')).toEqual(['github_write']);
     // Merge queue + Pierre-side auto-merge. Both verbs of each, because a DELETE that fell

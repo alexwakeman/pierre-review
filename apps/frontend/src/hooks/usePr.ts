@@ -1,8 +1,10 @@
-import { useEffect, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   MentionCandidate,
   PrDetail,
+  PrFileContentResponse,
+  PrFileFullDiffResponse,
   PrFilesResponse,
   SuggestedReviewersResponse,
   ThreadDetail,
@@ -121,6 +123,103 @@ export function usePrFiles(id: number | null) {
     void qc.invalidateQueries({ queryKey: ['pr-files', id], exact: true });
   }, [outdated, fetching, id, detailAt, qc]);
   return files;
+}
+
+/**
+ * "Load next 100 files" — the Changes tab's later pages, page 2 onward. CLICK-GATED: nothing is
+ * fetched until `loadMore()` is called, and each later call is one more page (one GitHub call).
+ *
+ * ⚠ A SEPARATE KEY FROM `['pr-files', id]`, NOT AN INFINITE QUERY OVER IT. That key's data is
+ * persisted to IndexedDB and read as a plain `PrFilesResponse` by PrDetail and ClaudeReviewTab;
+ * turning it into `InfiniteData` would hand every persisted blob and both readers a shape they do
+ * not expect, and this app has no error boundary. So page 1 stays where it was and the rest live
+ * here, keyed on the head page 1 was read at — a push that refetches page 1 starts these over —
+ * and deliberately NOT persisted (`main.tsx`'s allowlist), so a reload asks again.
+ */
+export function usePrMoreFiles(id: number | null, first: PrFilesResponse | undefined) {
+  const startPage = first?.nextPage ?? null;
+  const headKey = first?.headSha ?? null;
+  const keyStr = `${id}:${headKey}:${startPage}`;
+  // Armed for ONE key: a head move re-keys the query and must not fetch on its own.
+  const [armedFor, setArmedFor] = useState<string | null>(null);
+  const query = useInfiniteQuery<PrFilesResponse>({
+    queryKey: ['pr-files-more', id, headKey, startPage],
+    queryFn: ({ pageParam }) => api.prFilesPage(id as number, pageParam as number),
+    initialPageParam: startPage ?? 2,
+    getNextPageParam: (last) => last.nextPage ?? undefined,
+    enabled: id != null && startPage != null && armedFor === keyStr,
+    staleTime: Infinity,
+    gcTime: DETAIL_GC_TIME,
+  });
+  const { fetchNextPage, hasNextPage, isFetching, refetch } = query;
+  const hasPages = (query.data?.pages.length ?? 0) > 0;
+  const armed = armedFor === keyStr;
+  const loadMore = useCallback(() => {
+    if (!armed) {
+      setArmedFor(keyStr);
+      return;
+    }
+    if (isFetching) return;
+    // The FIRST page failed: an infinite query with no pages reports `hasNextPage === false`, so
+    // `fetchNextPage` would never run again and the button would be dead until a reload. Retry it.
+    if (!hasPages) void refetch();
+    else if (hasNextPage) void fetchNextPage();
+  }, [armed, keyStr, hasPages, hasNextPage, isFetching, fetchNextPage, refetch]);
+  const pages = useMemo(() => (armed ? (query.data?.pages ?? []) : []), [armed, query.data]);
+  // Memoised: the Changes tab hands these to the memo'd FileDiffView, and a fresh array each
+  // render would repaint every diff row.
+  const files = useMemo(() => pages.flatMap((p) => p.files), [pages]);
+  const last = pages[pages.length - 1];
+  return {
+    files,
+    /** True while another page exists to ask for. */
+    canLoadMore: startPage != null && (pages.length === 0 || last?.nextPage != null),
+    /** GitHub's 3,000-file listing ceiling was reached: files exist past it that it will not list. */
+    ceilingReached: (pages.length === 0 ? first?.ceilingReached : last?.ceilingReached) === true,
+    loading: armed && isFetching,
+    error: armed && query.isError,
+    loadMore,
+  };
+}
+
+/**
+ * One file's raw lines at the PR head (or merge base), for a gap marker's "Show N hidden lines".
+ * `enabled` is the CLICK: the block passes false until the reader asks. Keyed on the head the
+ * diff was read at, so a push asks again. Not persisted.
+ */
+export function usePrFileContent(
+  id: number | null,
+  path: string,
+  side: 'head' | 'base',
+  headSha: string | null,
+  enabled: boolean,
+) {
+  return useQuery<PrFileContentResponse>({
+    queryKey: ['pr-file-content', id, headSha, side, path],
+    queryFn: () => api.prFileContent(id as number, path, side),
+    enabled: id != null && enabled,
+    staleTime: Infinity,
+    gcTime: DETAIL_GC_TIME,
+    retry: false,
+  });
+}
+
+/** "Load full diff" for a file GitHub sent no patch for. Click-gated like the above. */
+export function usePrFileFullDiff(
+  id: number | null,
+  path: string,
+  previousPath: string | null,
+  headSha: string | null,
+  enabled: boolean,
+) {
+  return useQuery<PrFileFullDiffResponse>({
+    queryKey: ['pr-file-diff', id, headSha, path, previousPath],
+    queryFn: () => api.prFileFullDiff(id as number, path, previousPath),
+    enabled: id != null && enabled,
+    staleTime: Infinity,
+    gcTime: DETAIL_GC_TIME,
+    retry: false,
+  });
 }
 
 /**

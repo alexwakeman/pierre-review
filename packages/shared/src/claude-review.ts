@@ -23,6 +23,7 @@ import type {
   ClaudeTicketAlignment,
   ClaudeTicketAssessment,
   ClaudeTicketCriterionStatus,
+  JiraAcCandidate,
 } from './types.js';
 
 // ---- caps ----
@@ -106,6 +107,31 @@ export function checkClaudeReviewTicket(
       acceptanceCriteria: out.acceptanceCriteria,
     },
   };
+}
+
+// ---- the acceptance-criteria field to preselect ----
+
+const EXACT_AC = /^\s*acceptance[\s_-]*criteria\s*$/i;
+
+/**
+ * The Jira field to take the acceptance criteria from, or '' for none. ONE rule for both halves:
+ * the panel's "Fill from KEY" / the Open PRs click (which pass the viewer's remembered field) and
+ * the server's auto review (which passes `null` — it cannot read a browser's memory).
+ *   1. the remembered field for this issue type, when THIS ticket has it with text;
+ *   2. else the best STRONG name match (an "acceptance criteria" name) — an exact "Acceptance
+ *      Criteria" beats one that merely contains it, then the server's order. A WEAK match ("AC",
+ *      "Definition of Done") is never preselected: a definition of done is not the ticket's
+ *      acceptance criteria, and a wrong prefill is worse than a blank;
+ *   3. else ''.
+ * Every candidate has text by construction (the server drops empty fields).
+ */
+export function defaultAcCandidate(
+  candidates: readonly JiraAcCandidate[],
+  remembered: string | null,
+): string {
+  if (remembered != null && candidates.some((c) => c.id === remembered)) return remembered;
+  const hits = candidates.filter((c) => c.match === 'strong');
+  return (hits.find((c) => EXACT_AC.test(c.name)) ?? hits[0])?.id ?? '';
 }
 
 // ---- vocabularies ----

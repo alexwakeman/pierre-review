@@ -301,6 +301,52 @@ describe('PR write routes raise the change signal before replying', () => {
     expectSignalledBeforeReply(repoA);
   });
 
+  it('a request-changes review (a blank message is sent as the default text)', async () => {
+    submitPrReview.mockResolvedValue({
+      databaseId: 43,
+      nodeId: 'PRR_rc',
+      state: 'CHANGES_REQUESTED',
+      body: 'Changes requested.',
+      submittedAt: new Date(now).toISOString(),
+      url: 'https://github.com/r/43',
+      authorLogin: VIEWER_LOGIN,
+    });
+    const res = await inject('POST', `/api/prs/${openPr}/request-changes`, { body: '   ' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().state).toBe('changes_requested');
+    expect(submitPrReview).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      { event: 'REQUEST_CHANGES', body: 'Changes requested.' },
+    );
+    expectSignalledBeforeReply(repoA);
+  });
+
+  it('request-changes on your own PR is refused (403) and signals nothing', async () => {
+    const [own] = await db
+      .insert(schema.pullRequests)
+      .values({
+        githubNodeId: 'PR_sig_own_rc',
+        accountId: 1,
+        repoId: repoA,
+        number: 9001,
+        title: 'own',
+        state: 'open',
+        authorId: viewerUserId,
+        openedAt: new Date(now - 86_400_000),
+        updatedAt: new Date(now - 3600_000),
+        headSha: 'headsha',
+      })
+      .returning()
+      .execute();
+    submitPrReview.mockClear();
+    const res = await inject('POST', `/api/prs/${own.id}/request-changes`, {});
+    expect(res.statusCode).toBe(403);
+    expect(submitPrReview).not.toHaveBeenCalled();
+  });
+
   it('a reviewer request', async () => {
     requestReviewers.mockResolvedValue(undefined);
     const res = await inject('POST', `/api/prs/${openPr}/request-reviewers`, { userIds: [carolId] });

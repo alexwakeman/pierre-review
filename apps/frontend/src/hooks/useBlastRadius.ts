@@ -133,10 +133,9 @@ export function usePrBlast(prId: number | null | undefined): { blast: BlastSigna
 // scoped by it would be silently short with no visible control to widen it. Reports covers every
 // repository in the workspace. (The same landmine is written up in `useTriage.ts`.)
 //
-// It shares that cache entry with Pending → My turn's "Open PRs" button, FeedIsolationBanner, the
-// People picker and the workspace-wide open-PRs drill-down, so it is free only once one of those
-// has loaded it. The Feed no longer does, so opening Reports first usually pays one
-// `/api/open-prs`.
+// It shares that cache entry with the fixed Open PRs tab's chip count (mounted with the tab strip),
+// the Open PRs view itself, FeedIsolationBanner and the People picker, so it is normally already
+// loaded.
 
 /** One repository's currently-open pull requests, split by reach. */
 export interface RepoReach {
