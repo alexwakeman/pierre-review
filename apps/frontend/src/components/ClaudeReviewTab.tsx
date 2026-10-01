@@ -23,9 +23,10 @@ import {
   DEFAULT_CLAUDE_REVIEW_MODEL,
   followUpSentence,
 } from '@pierre-review/shared';
-import { formatDate, safeExternalUrl, usdToCredits } from '../lib/ui.js';
+import { formatDate, formatUsd, safeExternalUrl } from '../lib/ui.js';
 import { unlockReviewSound } from '../lib/sound.js';
-import { useProCapabilities } from '../hooks/useTriage.js';
+import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
+import { AiCloudNote, AiRunGate } from './AiSetup.js';
 import { useReviewLearnings } from '../hooks/useReviewLearnings.js';
 import { useReviewActions } from '../hooks/useReviewActions.js';
 import { useFilters } from '../store/filters.js';
@@ -180,7 +181,7 @@ const SEVERITY_ORDER: ClaudeFindingSeverity[] = [
 
 function metaLine(review: ClaudeReview): string {
   const parts: string[] = [review.model];
-  if (review.costUsd != null) parts.push(`${usdToCredits(review.costUsd)} cr`);
+  if (review.costUsd != null) parts.push(formatUsd(review.costUsd));
   if (review.numTurns != null) parts.push(`${review.numTurns} turns`);
   if (review.excludedFiles.length > 0) {
     parts.push(`${review.excludedFiles.length} noise files excluded`);
@@ -1388,11 +1389,11 @@ function ReviewActionRow({ action }: { action: ReviewAction }): JSX.Element {
   );
 }
 
-// Per-run provenance (Pro): the raw actions THIS review contributed to the reviewer's
+// Per-run provenance: the raw actions THIS review contributed to the reviewer's
 // memory — the drill-down behind the aggregated signals. Feeds future reviews of PRs
-// touching the same files. Lazily fetched only when expanded. Gated on pro.reviewMemory.
+// touching the same files. Lazily fetched only when expanded. Free, local-only (`me.ai`).
 function ReviewActionsLog({ reviewId }: { reviewId: number }): JSX.Element | null {
-  const { reviewMemory } = useProCapabilities();
+  const reviewMemory = useAiCapabilities().enabled;
   const [open, setOpen] = useState(false);
   const { data } = useReviewActions(reviewId, reviewMemory && open);
   if (!reviewMemory) return null;
@@ -1511,12 +1512,12 @@ function LearningMatchRow({ match }: { match: LearningMatch }): JSX.Element {
   );
 }
 
-// Surface 1 (Pro): a collapsible panel of aggregated signals from the reviewer's
+// Surface 1: a collapsible panel of aggregated signals from the reviewer's
 // past reviews in this repo, shown ABOVE the Run/Re-review controls. The same
-// signals are injected into the run as context. Gated on pro.reviewMemory; renders
-// nothing in OSS mode or when there are no matches.
+// signals are injected into the run as context. Free, local-only (`me.ai`); renders
+// nothing in the cloud or when there are no matches.
 function ReviewLearningsPanel({ prId }: { prId: number }): JSX.Element | null {
-  const { reviewMemory } = useProCapabilities();
+  const reviewMemory = useAiCapabilities().enabled;
   const { data } = useReviewLearnings(prId, reviewMemory);
   const [open, setOpen] = useState(false);
   const matches = data?.matches ?? [];
@@ -1579,9 +1580,9 @@ function buildReviewSeed(review: ClaudeReview): string {
   return parts.join('\n\n');
 }
 
-// Surface (Pro, aiFix): hand a completed review to the agentic fixer. Opens the AI
-// Fix tab seeded with the review text. Gated on the aiFix capability; renders nothing
-// otherwise or until a review has succeeded.
+// Surface: hand a completed review to the agentic fixer. Opens the AI Fix tab seeded
+// with the review text. Free, local-only (`me.ai`); renders nothing in the cloud or
+// until a review has succeeded.
 function GenerateFixFromReview({
   prId,
   review,
@@ -1589,7 +1590,7 @@ function GenerateFixFromReview({
   prId: number;
   review: ClaudeReview | null;
 }): JSX.Element | null {
-  const { aiFix } = useProCapabilities();
+  const aiFix = useAiCapabilities().enabled;
   const openAiFixFromReview = useFilters((s) => s.openAiFixFromReview);
   if (!aiFix || review?.status !== 'succeeded') return null;
   return (
@@ -1622,6 +1623,7 @@ export function ClaudeReviewTab({
   // pre-existing GitHub link.
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
+  const ai = useAiCapabilities();
   const { data, isLoading } = useClaudeReview(pr.id);
   const review = data?.review ?? null;
 
@@ -1756,14 +1758,12 @@ export function ClaudeReviewTab({
     return <div className="px-4 py-3 text-sm text-gray-400">Loading…</div>;
   }
 
-  if (data?.enabled === false) {
+  // Off here: the hosted app (one line saying where it runs) or a local kill switch (nothing to
+  // run, nothing to say — the tab is not even listed then; this covers a stale deep link).
+  if (!ai.enabled || data?.enabled === false) {
     return (
       <div className="px-4 py-3">
-        <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300">
-          Claude Review is disabled. Set{' '}
-          <code className="font-mono text-xs">ENABLE_CLAUDE_REVIEW=true</code> to
-          turn it on.
-        </div>
+        <AiCloudNote />
       </div>
     );
   }
@@ -1827,39 +1827,16 @@ export function ClaudeReviewTab({
 
   return (
     <div className="divide-y divide-gray-100 py-1 dark:divide-gray-800">
-      {/* Auth gate — replaces the run controls until Claude auth is set. */}
-      {data?.auth === 'none' ? (
-        <div className="px-4 py-3">
-          <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-300">
-            <div className="font-semibold">Claude authentication needed</div>
-            <div className="mt-1">
-              {data.authMessage ??
-                'Claude is not authenticated. Set up Claude credentials to run a review.'}
-            </div>
-          </div>
-          {/* ⚠ THERE IS NOWHERE IN THE APP TO FIX THIS, AND THE COPY MUST NOT PRETEND OTHERWISE.
-              This line used to read "Add your Anthropic API key in Settings" — true while a BYO
-              key was stored in `~/.pierre-review/config.json`, and a dead end the moment that form
-              and its routes were retired. Local Claude Review now has exactly TWO credential rungs
-              and BOTH are outside the SPA: an ambient Claude session (preferred, so a subscription
-              pays for the run) and the environment's `ANTHROPIC_API_KEY`. Sending a reader to a
-              Settings section that no longer exists costs them the one thing this banner owes
-              them — the next action. */}
-          <div className="mt-2 text-xs text-amber-800 dark:text-amber-300">
-            Sign in to Claude on this machine (a logged-in Claude session is used first, so a
-            subscription covers the run), or start the server with{' '}
-            <code className="rounded bg-amber-100/60 px-1 font-mono dark:bg-amber-900/40">
-              ANTHROPIC_API_KEY
-            </code>{' '}
-            set — then re-run. There is no key to enter in Settings.
-          </div>
-        </div>
-      ) : (
+      {/* The run controls are ALWAYS shown; a missing AI runtime or Claude credential replaces
+          only the Run button (AiRunGate), so past reviews, the story and the budget stay usable.
+          ⚠ THERE IS NOWHERE IN THE APP TO ENTER A KEY, AND THE LINE MUST NOT PRETEND OTHERWISE:
+          both credential rungs (an ambient Claude Code session, then ANTHROPIC_API_KEY) live
+          outside the SPA. */}
         <>
         <div className="px-4 py-3">
-          {/* Surface 1 (Pro): matches from past reviews, injected into this run. */}
+          {/* Surface 1: matches from past reviews, injected into this run. */}
           <ReviewLearningsPanel prId={pr.id} />
-          {/* Pro (aiFix): hand this completed review to the agentic fixer. */}
+          {/* Hand this completed review to the agentic fixer. */}
           <GenerateFixFromReview prId={pr.id} review={review} />
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-xs uppercase tracking-wide text-gray-400">
@@ -1895,6 +1872,7 @@ export function ClaudeReviewTab({
                 </option>
               ))}
             </select>
+            <AiRunGate auth={data?.auth}>
             <button
               type="button"
               onClick={onRunClick}
@@ -1904,6 +1882,7 @@ export function ClaudeReviewTab({
             >
               {review == null ? 'Run review' : 'Re-review'}
             </button>
+            </AiRunGate>
             {autoHold != null && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 {autoHold === 'running' ? 'Auto review running' : 'Auto review queued'}
@@ -1986,7 +1965,6 @@ export function ClaudeReviewTab({
           />
         )}
         </>
-      )}
 
       {/* Running progress. The bar is mounted OUTSIDE the isRunning gate so it observes
           the running→done transition and plays its 100%→fade-out completion (it renders
@@ -2057,9 +2035,9 @@ export function ClaudeReviewTab({
               </span>
               <span
                 className="font-semibold text-gray-600 dark:text-gray-300"
-                title="Estimated usage so far, in credits. The figure recorded when the run finishes is authoritative."
+                title="Estimated cost so far, on your own Claude Code or Anthropic API key. Limn charges nothing. The figure recorded when the run finishes is authoritative."
               >
-                ~{usdToCredits(status.progress.usage.estCostUsd)} cr
+                ~{formatUsd(status.progress.usage.estCostUsd)}
               </span>
             </div>
           )}

@@ -5,7 +5,7 @@ import { usePrSummary, useRefreshSummary } from '../hooks/useAiFix.js';
 import { Markdown } from './Markdown.js';
 
 // The Pro AI-generated PR summary (Haiku), gated on the `prSummary` capability — the cheap
-// SUMMARY tier (on in paid cloud, credit-metered), NOT the pro+ advanced-AI `aiAnalysis` tier.
+// SUMMARY tier (on in paid cloud, credit-metered), never the free, local agentic tools (`me.ai`).
 // Rendered on BOTH the Overview tab and the AI Analysis and Fix tab — the shared React-Query
 // key (`['ai-fix-summary', prId]`) means generating in one place shows the result in the other
 // with no extra wiring. Titled "AI summary" to disambiguate from the Overview's human-written

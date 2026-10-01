@@ -125,7 +125,8 @@ export default function Home(): JSX.Element {
             requests, replies, red builds, conflicts and pull requests ready to land, from
             every repository, ranked, with the next thing at the top. You decide what counts
             as your turn and in what order. It also measures what the review bots on top are
-            worth. Free, open core, and it runs on your machine.
+            worth. Free and open core. Run it on your machine and Claude reviews and fixes
+            pull requests too, on your own Claude.
           </p>
 
           <div className="mb-4 flex flex-wrap items-center gap-3.5">
@@ -435,7 +436,10 @@ export default function Home(): JSX.Element {
       {/* ---------- 06 · local ---------- */}
       {/* ⚠ The conflict resolver is NOT local-only any more — it is CORE in both
           modes (app.ts registers its routes unconditionally), so this section no
-          longer says it "only exists in this mode". */}
+          longer says it "only exists in this mode". Claude Review, its chat and AI Fix
+          ARE local-only (the hosted app does not register them), so "the free tier is
+          identical either way" and "nothing leaving the machine" were cut: the first is
+          false and the second is false the moment Claude reads a diff. */}
       <Section>
         <RailGrid rail={{ n: '06', word: 'Local' }} cols="one">
           <div>
@@ -444,8 +448,9 @@ export default function Home(): JSX.Element {
             </h2>
             <p className="mb-6 max-w-[62ch] text-pretty">
               One command, your existing <span className="text-ink">gh</span> login, a SQLite
-              file on your disk. No hosted backend, no stored credentials, nothing leaving the
-              machine. The free tier is identical either way.
+              file on your disk. No hosted backend and no stored credentials. Claude review and
+              fix run only here, on your own Claude Code or Anthropic API key; the hosted app
+              has everything else.
             </p>
             <p className="max-w-[62ch] font-mono text-mono-row text-ink">{INSTALL_COMMAND}</p>
           </div>

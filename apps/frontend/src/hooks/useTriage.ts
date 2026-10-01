@@ -143,18 +143,15 @@ export function useMe() {
   return q;
 }
 
-// Premium capability flags (mirrors claudeReviewEnabled). All-false until /api/me
-// loads and in OSS mode (no @pierre/pro plugin).
+// Premium capability flags. All-false until /api/me loads and in OSS mode (no @pierre/pro
+// plugin). ⚠ The agentic tools (Claude Review, review memory, AI Fix) are NOT here — they are free
+// and read `me.ai` through `useAiCapabilities`.
 export function useProCapabilities(): ProCapabilities {
   return (
     useMe().data?.pro ?? {
       activityDigest: false,
-      reviewMemory: false,
-      aiAnalysis: false,
       prSummary: false,
-      aiFix: false,
       workspaceInsights: false,
-      claudeReview: false,
       slackDigest: false,
       issueLinks: false,
       botTriage: false,

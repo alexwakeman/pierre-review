@@ -17,6 +17,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -40,8 +41,9 @@ const migrationsPgSrc = join(backendDir, 'src', 'db', 'migrations-pg');
 const releaseDir = join(repoRoot, 'release');
 
 // --with-pro (cloud image ONLY): additionally build the private @pierre/pro plugin into the
-// release + ship the SUMMARY-AI runtime deps the OSS npm package deliberately omits. The public
-// npm publish (release.yml) NEVER passes this, so its zero-AI-deps guarantee is unchanged.
+// release + ship the one SUMMARY-AI dep (@anthropic-ai/sdk) the paid reporting plugin's metered
+// path needs. The public npm publish (release.yml) NEVER passes this, so its no-AI-SDK-in-the-
+// manifest guarantee is unchanged.
 const withPro = process.argv.includes('--with-pro');
 const proDir = join(repoRoot, 'packages', 'pro');
 const proDist = join(proDir, 'dist');
@@ -191,8 +193,74 @@ const backendPkg = JSON.parse(
 );
 const staticVersion = backendPkg.dependencies['@fastify/static'] ?? '^9.1.3';
 
+// ---- The AI runtime pins (`limnAiRuntime`) ----
+//
+// Claude Review, the review chat and AI Fix are FREE and ship in this package — but the four SDKs
+// they run on do NOT. The Agent SDK carries a ~110 MB native binary per platform, so they are
+// installed ON FIRST USE ("Set up AI" in the app, or `limn ai install`) into ~/.limn/ai-runtime
+// by apps/backend/src/ai/runtime.ts, which reads the EXACT versions to download from this field.
+//
+// GENERATED, never typed: each pin is the version the workspace actually installed (what the test
+// suite ran against), asserted to satisfy the range apps/backend/package.json declares. A range or
+// a tag here would let two users download two different SDKs from the same release.
+//
+// ⚠ The field name is spelled once more in ai/runtime.ts (AI_RUNTIME_MANIFEST_FIELD); both must
+// agree, and the assert at the bottom of this file reads it back from the written manifest.
+const AI_RUNTIME_FIELD = 'limnAiRuntime';
+const AI_RUNTIME_PACKAGES = [
+  '@anthropic-ai/claude-agent-sdk',
+  '@anthropic-ai/sdk',
+  '@modelcontextprotocol/sdk',
+  'zod',
+];
+const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
+function parseVersion(v) {
+  const m = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(v);
+  if (!m) return null;
+  return { parts: [Number(m[1]), Number(m[2] ?? 0), Number(m[3] ?? 0)], given: [m[1], m[2], m[3]].filter((x) => x !== undefined).length };
+}
+function cmp(a, b) {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+  return 0;
+}
+// The handful of range forms this repo's package.json actually uses: exact, ^, ~, >=.
+function satisfies(version, range) {
+  const v = parseVersion(version)?.parts;
+  if (!v) return false;
+  const r = range.trim();
+  const op = /^(\^|~|>=)?/.exec(r)[1] ?? '';
+  const base = parseVersion(r.slice(op.length));
+  if (!base) return false;
+  const b = base.parts;
+  if (op === '>=') return cmp(v, b) >= 0;
+  if (op === '') return base.given === 3 ? cmp(v, b) === 0 : v.slice(0, base.given).every((x, i) => x === b[i]);
+  if (cmp(v, b) < 0) return false;
+  if (op === '~') return v[0] === b[0] && (base.given < 2 || v[1] === b[1]);
+  // ^: the left-most non-zero GIVEN part is fixed.
+  if (b[0] !== 0 || base.given === 1) return v[0] === b[0];
+  if (b[1] !== 0 || base.given === 2) return v[0] === 0 && v[1] === b[1];
+  return v[0] === 0 && v[1] === 0 && v[2] === b[2];
+}
+
+const aiRuntimePins = {};
+for (const name of AI_RUNTIME_PACKAGES) {
+  const declared = backendPkg.dependencies?.[name];
+  if (!declared) fail(`apps/backend/package.json does not declare ${name} — the AI runtime pins come from there`);
+  const pkgJson = join(backendDir, 'node_modules', ...name.split('/'), 'package.json');
+  if (!existsSync(pkgJson)) fail(`${name} is not installed in apps/backend/node_modules — run pnpm install`);
+  const installed = JSON.parse(readFileSync(realpathSync(pkgJson), 'utf8')).version;
+  if (!EXACT_VERSION.test(installed)) fail(`${name}: installed version ${installed} is not an exact version`);
+  if (!satisfies(installed, declared)) {
+    fail(`${name}: installed ${installed} does not satisfy apps/backend/package.json's ${declared}`);
+  }
+  aiRuntimePins[name] = installed;
+}
+
 const manifest = {
-  name: 'pierre-review',
+  // Renamed from `pierre-review` (same release that made Claude Review and AI Fix free). The old
+  // package gets a deprecation stub — scripts/deprecated-pierre-review/ — published by hand.
+  name: 'limn-review',
   version: backendPkg.version,
   description:
     "Dashboard for tracking your team's GitHub PR activity across repos — local (SQLite + gh) or self-hosted multi-tenant cloud (Postgres + GitHub App).",
@@ -205,21 +273,24 @@ const manifest = {
   homepage: 'https://github.com/alexwakeman/pierre-review#readme',
   bugs: { url: 'https://github.com/alexwakeman/pierre-review/issues' },
   bin: {
-    pierre: 'dist/cli.js',
-    'pierre-review': 'dist/cli.js',
+    limn: 'dist/cli.js',
+    // ⚠ LOAD-BEARING FOR `npx limn-review`. With more than one bin, npx runs the one named after
+    // the PACKAGE and errors ("could not determine executable to run") when none is — so the
+    // README's and the landing's `npx limn-review` needs this entry, not just `limn`.
+    'limn-review': 'dist/cli.js',
+    // ⚠ NO `pierre-review` BIN HERE. The deprecated alias lives in the forwarding stub
+    // (scripts/deprecated-pierre-review/), which still owns that name. Declaring it here too made
+    // `npm install -g limn-review` fail with EEXIST for everyone who had installed pierre-review
+    // globally: npm refuses to link a global bin another package owns. The CLI still prints the
+    // rename notice when the stub starts it under the old name.
   },
   files: ['dist', 'public', 'public-landing', 'README.md', 'LICENSE'],
   engines: { node: '>=20' },
-  // NO AI runtime deps ship in the npm package. Every module that pulls an
-  // Anthropic/MCP SDK (@anthropic-ai/claude-agent-sdk, @anthropic-ai/sdk,
-  // @modelcontextprotocol/sdk, and zod — used only by the AI tools' submit-review
-  // schemas) is reached ONLY through a dynamic `await import()` in the private
-  // @pierre/pro plugin's seams (review/agent, coding/agent, review/prepare,
-  // review/post-seam) or lazily inside review/llm.ts. The plugin
-  // is never in this release (author/dev checkout only), so those imports never
-  // execute from npm and their deps are not required. The compiled-but-inert AI
-  // .js files still ship as dead code — that's fine; nothing loads them. See the
-  // AI_DEPS guardrail assert below and CLAUDE.md "Packaging & publishing".
+  // NO AI SDK IS A DEPENDENCY. The agentic features ship as code, but the four SDKs they run on
+  // (@anthropic-ai/claude-agent-sdk, @anthropic-ai/sdk, @modelcontextprotocol/sdk, zod) are
+  // installed ON FIRST USE into ~/.limn/ai-runtime, at the exact versions in `limnAiRuntime`
+  // below, and loaded ONLY through dist/ai/runtime.js. See the AI_DEPS and dist-grep guardrails
+  // at the bottom of this file and CLAUDE.md "Packaging & publishing".
   dependencies: {
     '@fastify/cookie': backendPkg.dependencies['@fastify/cookie'],
     '@fastify/cors': backendPkg.dependencies['@fastify/cors'],
@@ -246,6 +317,8 @@ const manifest = {
   // MIT two years after publication. The full text ships as LICENSE (copied below). npm's
   // documented form for a non-SPDX license is "SEE LICENSE IN <file>".
   license: 'SEE LICENSE IN LICENSE',
+  // Not a dependency field: npm ignores it. ai/runtime.ts reads it to know what to download.
+  [AI_RUNTIME_FIELD]: aiRuntimePins,
 };
 
 // --with-pro: the cloud image runs the @pierre/pro summary-AI plugin, so it needs the runtime
@@ -256,11 +329,10 @@ const manifest = {
 // hardcoded here), minus any unpublishable workspace specifier.
 if (withPro) {
   const proPkg = JSON.parse(readFileSync(join(proDir, 'package.json'), 'utf8'));
-  const anthropicVersion =
-    proPkg.devDependencies?.['@anthropic-ai/sdk'] ??
-    proPkg.dependencies?.['@anthropic-ai/sdk'] ??
-    '>=0.93.0';
-  manifest.dependencies['@anthropic-ai/sdk'] = anthropicVersion;
+  // The SAME exact version the local runtime pins, so the cloud image and a local install run one
+  // SDK. ai/runtime.ts's loader falls through to this ordinary dependency when there is no runtime
+  // directory (the cloud image has none: agentic AI is off there).
+  manifest.dependencies['@anthropic-ai/sdk'] = aiRuntimePins['@anthropic-ai/sdk'];
   for (const [name, version] of Object.entries(proPkg.dependencies ?? {})) {
     if (String(version).startsWith('workspace:')) continue; // @pierre-review/shared etc.
     manifest.dependencies[name] = version;
@@ -298,6 +370,8 @@ const mustExist = [
   'dist/auth/crypto.js',
   'dist/api/routes/auth.js',
   'dist/review/agent.js',
+  'dist/ai/runtime.js',
+  'dist/data-dir.js',
   'public/index.html',
   'public-landing/index.html',
 ];
@@ -414,18 +488,70 @@ if (sharedHits.length > 0) {
   fail('shared is vendored at dist/shared and resolved relatively — these would resolve by name');
 }
 
-// No AI runtime dep in the OSS manifest. The npm package must ship zero Anthropic/MCP SDK
-// deps — AI loads only when the private @pierre/pro plugin is present, never from npm. Under
-// --with-pro (cloud image ONLY) we DELIBERATELY ship @anthropic-ai/sdk for the summary raw-
-// metered path, so it's removed from the forbidden list there — but the AGENTIC SDKs
-// (@anthropic-ai/claude-agent-sdk, @modelcontextprotocol/sdk) and zod stay forbidden even in
-// cloud, since agentic AI is off there and shipping them would be dead bloat.
+// ---- No AI SDK in the manifest; installed on first use ----
+//
+// The npm package must carry ZERO AI SDKs in anything npm installs (`dependencies`,
+// `optionalDependencies` — npm installs optional ones by default, and a dependent package cannot
+// switch off its dependency's platform binary under `npx`). They arrive on first use instead, at
+// the pins in `limnAiRuntime`. Under --with-pro (cloud image ONLY) @anthropic-ai/sdk is a
+// deliberate dependency for the paid plugin's metered summary path; the AGENTIC SDKs and zod stay
+// forbidden even there, since agentic AI is off in cloud.
 const AI_DEPS = withPro
   ? ['@anthropic-ai/claude-agent-sdk', '@modelcontextprotocol/sdk', 'zod']
   : ['@anthropic-ai/claude-agent-sdk', '@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'zod'];
-const leakedAiDeps = AI_DEPS.filter((d) => d in manifest.dependencies);
-if (leakedAiDeps.length > 0) {
-  fail(`AI runtime dep(s) leaked into release/package.json: ${leakedAiDeps.join(', ')}`);
+for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
+  const leaked = AI_DEPS.filter((d) => d in (manifest[field] ?? {}));
+  if (leaked.length > 0) fail(`AI SDK(s) leaked into release/package.json ${field}: ${leaked.join(', ')}`);
+}
+
+// The pins must exist, be exact, cover all four, and be what the written manifest actually says.
+const writtenManifest = JSON.parse(readFileSync(join(releaseDir, 'package.json'), 'utf8'));
+const writtenPins = writtenManifest[AI_RUNTIME_FIELD] ?? {};
+for (const name of AI_RUNTIME_PACKAGES) {
+  const v = writtenPins[name];
+  if (typeof v !== 'string' || !EXACT_VERSION.test(v)) {
+    fail(`${AI_RUNTIME_FIELD}.${name} must be an exact version, got ${JSON.stringify(v)}`);
+  }
+  if (v !== aiRuntimePins[name]) fail(`${AI_RUNTIME_FIELD}.${name} does not match the installed workspace version`);
+}
+const runtimeSrc = readFileSync(join(backendDir, 'src', 'ai', 'runtime.ts'), 'utf8');
+if (!runtimeSrc.includes(`AI_RUNTIME_MANIFEST_FIELD = '${AI_RUNTIME_FIELD}'`)) {
+  fail(`apps/backend/src/ai/runtime.ts no longer reads the '${AI_RUNTIME_FIELD}' field this script writes`);
+}
+
+// ONE module may import an AI SDK: dist/ai/runtime.js. Anywhere else, a value import fails with
+// ERR_MODULE_NOT_FOUND on an npm install — and only when somebody clicks the feature. Type-only
+// imports are erased at emit, so any specifier left in the JS is a real one. Subpaths
+// (`zod/v4`, `@anthropic-ai/sdk/resources`) count.
+const AI_SPECIFIER = new RegExp(
+  String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s*)(['"])(?:@anthropic-ai\/claude-agent-sdk|@anthropic-ai\/sdk|@modelcontextprotocol\/sdk|zod)(?:\/[^'"]*)?\1`,
+  'm',
+);
+const runtimeJs = join(releaseDist, 'ai', 'runtime.js');
+const aiImportHits = [];
+const scanAiImports = (d) => {
+  for (const entry of readdirSync(d)) {
+    const full = join(d, entry);
+    if (statSync(full).isDirectory()) {
+      scanAiImports(full);
+      continue;
+    }
+    if (!entry.endsWith('.js') || full === runtimeJs) continue;
+    const text = readFileSync(full, 'utf8');
+    for (const line of text.split('\n')) {
+      if (AI_SPECIFIER.test(line)) aiImportHits.push(`${relative(releaseDir, full)}: ${line.trim()}`);
+    }
+  }
+};
+scanAiImports(releaseDist);
+if (aiImportHits.length > 0) {
+  console.error('AI SDK imported outside dist/ai/runtime.js:');
+  for (const h of aiImportHits) console.error(`  ${h}`);
+  fail('load AI SDKs through apps/backend/src/ai/runtime.ts (loadAgentSdk / loadAnthropicSdk / loadZod)');
+}
+// …and the loader itself must still be the thing that imports them, or the grep proves nothing.
+if (!/import\(specifierFor\(spec\)\)/.test(readFileSync(runtimeJs, 'utf8'))) {
+  fail('dist/ai/runtime.js no longer loads packages the way this guardrail expects — re-check it');
 }
 
 log(`release assembled at ${releaseDir}`);
@@ -433,4 +559,4 @@ console.log('');
 console.log('Next steps (run these yourself — this script never publishes):');
 console.log('  cd release');
 console.log('  npm pack --dry-run   # inspect the tarball contents');
-console.log('  npm publish          # public by default for the unscoped name');
+console.log('  npm publish          # public by default for the unscoped name (limn-review)');

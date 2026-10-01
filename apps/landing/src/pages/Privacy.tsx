@@ -232,7 +232,7 @@ export default function Privacy(): JSX.Element {
             ],
             [
               'Anthropic',
-              'The content sent to the model: diffs, comment text and metrics for the pull requests being summarised or reviewed',
+              'The content sent to the model: diffs, comment text and metrics for the pull requests being summarised or analysed',
               'USA',
               'Only when you use a Pro AI feature (§7)',
             ],
@@ -315,7 +315,8 @@ export default function Privacy(): JSX.Element {
       <LegalSection id="ai" heading="7. AI features">
         <P>
           {SITE_NAME}&apos;s AI features are opt-in and clearly labelled. When you use one — a
-          repository digest, a pull-request summary, team insights, an AI review — the
+          repository digest, a pull-request summary, a read on a failed build, team
+          insights — the
           relevant content is sent to <T>Anthropic</T> to generate the result. That content
           can include source-code diffs, review comments and the names of the people
           involved.
@@ -328,9 +329,11 @@ export default function Privacy(): JSX.Element {
           the button.
         </P>
         <P>
-          On a local install, AI features use <em>your own</em> Anthropic credentials and
-          the content goes from your machine to Anthropic directly — we are not in the path
-          and never see it.
+          On a local install, AI features use <em>your own</em> Claude Code session or
+          Anthropic API key, and the content goes from your machine to Anthropic directly —
+          we are not in the path, never see it, and store no key. Claude review and fix run
+          only there. They send nothing until you press the button, or until you switch on
+          auto review for a workspace.
         </P>
       </LegalSection>
 

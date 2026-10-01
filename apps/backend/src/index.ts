@@ -13,6 +13,9 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   // Cloud mode: fail loud if required env vars are missing/invalid before serving.
   if (config.isCloud) assertCloudConfig();
 
+  // The one-time ~/.pierre-review → ~/.limn move already ran: config.ts does it on import, before it
+  // resolves any path inside the data directory (data-dir.ts).
+
   // Apply any pending migrations before serving.
   await runMigrations();
 
@@ -64,8 +67,13 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     })
     .catch((err) => app.log.warn({ err }, 'search index backfill failed'));
 
-  // (Claude Review moved into @pierre/pro — its crash-orphan reconcile now runs inside
-  // plugin.register during bindProPlugin below, alongside the AI-Fix reconcile.)
+  // The agentic features' process-level half (local only): review-memory capture, the auto-review
+  // sweeper (scheduled below with every other job) and the crash-orphan reconciles for Claude
+  // Review and AI Fix runs. A no-op in cloud or under LIMN_AI_DISABLED.
+  {
+    const { startAgenticBackground } = await import('./review/agentic.js');
+    await startAgenticBackground(app);
+  }
 
   // Bind the optional Pro plugin (dynamic import; no-ops in OSS mode). Same
   // "optional subsystem, degrade gracefully" posture as the scheduler below.

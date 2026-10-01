@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0060` and plugin `0034`–`0036` are NOT (written 2026-09-19/24 with the Postgres down; see the
+  ⚠ pg `0052`–`0061` and plugin `0034`–`0037` are NOT (written 2026-09-19/24 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -806,10 +806,47 @@ sweeper reviews from. No backfill (NULL = off). ⚠ Like `0035`, every hand-buil
 the store must replay it (the store SELECTs both columns): `workspace-settings.test.ts`,
 `settings-route-schema.test.ts`, `jira-routes.test.ts`. ⚠ **The pg twin is NOT replayed.**
 
-⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0060` and plugin `0034`–`0036`). The
+### `0074_adopt_agentic_tables` (pg `0061`) + plugin `0037_auto_review_to_core`
+
+Claude Review, review memory and AI Fix's fixer moved from the plugin into CORE (apiVersion 22), and
+their two tables moved with them — **ADOPTED IN PLACE, never renamed**. `0074` is `CREATE TABLE IF
+NOT EXISTS` + `CREATE [UNIQUE] INDEX IF NOT EXISTS` for `review_learnings` and `ai_fixes` with the
+plugin's FINAL column set and its own index names (`rl_*`, `af_*`), **no foreign keys** (SQLite
+cannot add one to an existing table without a rebuild, so a fresh and an adopted install would
+differ; tenancy is the query layer + `verify:isolation`), plus two plain columns on core
+`workspaces`: `auto_review_enabled` / `auto_review_enabled_at`. On the dev DB and on Railway the
+tables already exist, so the CREATEs are no-ops and the rows stay. The fresh `ai_fixes` omits plugin
+`0003`'s eight dormant `resolved_*` / `resolve_error` columns (nothing declares them; an adopted
+table that still has them reads identically). The pg twin also `ADD COLUMN IF NOT EXISTS`es the two
+comments-seed columns; SQLite cannot, so an install whose plugin stopped before plugin `0024`
+(pre-apiVersion 19) would keep an `ai_fixes` without them — no such install is known.
+
+⚠ **THE PLUGIN'S COPY OF THAT DDL WAS STRIPPED IN THE SAME CHANGE** — plugin `0001` keeps only
+`repo_digests`, `0002` only `ai_pr_analyses`, `0003` and `0024` are COMMENT-ONLY. Core migrations
+run before the plugin binds, so on a FRESH SQLite install core creates the full `ai_fixes` first;
+left as statements, `0003`/`0024`'s bare `ALTER TABLE ai_fixes ADD COLUMN` would throw "duplicate
+column" and the plugin migrator would drop the WHOLE plugin to OSS mode silently. Editing an applied
+plugin file is safe — `pro_migrations` tracks the filename only.
+
+Plugin `0037` copies each workspace's auto-review switch from `pro_workspace_settings` into core
+`workspaces` ONCE: only an ON switch with a floor, only onto the same `(account, workspace)`, and
+never over a value the new core route already wrote (`WHERE auto_review_enabled IS NULL`). It lives
+in the PLUGIN because a core statement naming `pro_workspace_settings` would fail on every install
+that never had the plugin; the pg twin downgrades a failure to a WARNING. The plugin columns are
+dormant (the `0031` precedent). Pinned by `packages/pro/test/auto-review-to-core.test.ts`; every
+hand-built plugin test DB that runs ALL plugin migrations needs the two core columns on its
+`workspaces` stub (`isolation`, `period-report`, `period-month-grain`, `period-cadence-change`).
+Ownership moved with the tables: `deleteRepo`, retention's `deletePrSubtree`, `eraseAccountData` and
+`accountScopedTables()` cover them (before, the plugin had NO deleteRepo hook and both orphaned on a
+repo removal); the plugin's `pruneProByPrIds` / `eraseProByAccountId` no longer name them.
+⚠ **The pg twins are NOT replayed** — worth one step each: run `0061` against a database where the
+plugin already created both tables (every statement must no-op) and against a fresh one; then run
+plugin `0037` with one ON row and check it lands on the right workspace only.
+
+⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0061` and plugin `0034`–`0037`). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
-core should reach **61 applied = 61 journal entries** and the plugin **36** — and check
+core should reach **62 applied = 62 journal entries** and the plugin **37** — and check
 `review_request_events` carries both FKs and its unique index, that `workspaces.flow_settings`,
 `pull_requests.advisory_ids` and `accounts.my_turn_settings` are `jsonb`, and that
 `security_checked_at` and `pr_mentions.mentioned_at` are `timestamp with time zone`. ⚠ `0055` is

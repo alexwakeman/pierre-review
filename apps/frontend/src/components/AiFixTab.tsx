@@ -16,7 +16,8 @@ import { relativeTime, safeExternalUrl } from '../lib/ui.js';
 // The fix run's phase ladder lives in lib/ so this tab and the bottom-right AiFixBanner cannot
 // print two different percentages for one run.
 import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
-import { useProCapabilities } from '../hooks/useTriage.js';
+import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
+import { AiCloudNote, AiRunGate } from './AiSetup.js';
 import { useFilters } from '../store/filters.js';
 import {
   aiFixStartMutationKey,
@@ -54,7 +55,10 @@ function SectionTitle({ children }: { children: React.ReactNode }): JSX.Element 
 }
 
 export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
-  const { aiAnalysis, aiFix } = useProCapabilities();
+  // FREE and local-only (`me.ai`). The tab's two Pro halves — the AI summary and the CI-analysis
+  // card — gate themselves on the Pro `prSummary` capability, so they simply render nothing here
+  // without the plugin.
+  const aiFix = useAiCapabilities().enabled;
   const aiFixTabFocus = useFilters((s) => s.aiFixTabFocus);
   const consumeAiFixTabFocus = useFilters((s) => s.consumeAiFixTabFocus);
 
@@ -68,29 +72,25 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
     }
   }, [aiFixTabFocus, pr.id, consumeAiFixTabFocus]);
 
-  if (!aiAnalysis && !aiFix) {
+  if (!aiFix) {
     return (
-      <div className="p-4 text-sm text-gray-500 dark:text-gray-400">
-        AI Analysis and Fix is not enabled.
+      <div className="p-4">
+        <AiCloudNote />
       </div>
     );
   }
 
   return (
     <div className="pb-6">
-      {aiAnalysis && (
-        <div className="border-b border-gray-200 dark:border-gray-800">
-          <AiSummary pr={pr} />
-        </div>
-      )}
+      <div className="border-b border-gray-200 empty:hidden dark:border-gray-800">
+        <AiSummary pr={pr} />
+      </div>
       <CiStatusSection pr={pr} />
-      {aiFix && (
-        <FixerSection
-          pr={pr}
-          seedReviewText={seedReviewText}
-          onSeedConsumed={() => setSeedReviewText(null)}
-        />
-      )}
+      <FixerSection
+        pr={pr}
+        seedReviewText={seedReviewText}
+        onSeedConsumed={() => setSeedReviewText(null)}
+      />
     </div>
   );
 }
@@ -200,12 +200,7 @@ function FixerSection({
       <div className="px-4">
         {data?.enabled === false ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            The agentic fixer is disabled.
-          </p>
-        ) : data?.auth === 'none' ? (
-          <p className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-700 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
-            {data.authMessage ??
-              'No Claude authentication found. Sign in to Claude or set an API key, then restart.'}
+            The agentic fixer is turned off.
           </p>
         ) : (
           <>
@@ -243,6 +238,9 @@ function FixerSection({
                   Cancel
                 </button>
               ) : (
+                // No AI runtime or no Claude credential: one line (or the one-time setup) in
+                // place of the start button — the picker above stays usable.
+                <AiRunGate auth={data?.auth}>
                 <button
                   type="button"
                   className={BTN_PRIMARY}
@@ -260,6 +258,7 @@ function FixerSection({
                       ? 'Generate new fix'
                       : 'Generate fix'}
                 </button>
+                </AiRunGate>
               )}
               {seed === 'comments' && !isRunning && (
                 <button

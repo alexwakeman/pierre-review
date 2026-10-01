@@ -67,12 +67,16 @@ jobs:
           # version even if main, the tags, and npm have drifted out of sync (e.g. a
           # prior run pushed a tag/commit but its publish failed). This is what makes
           # the pipeline self-heal instead of colliding on an existing tag.
-          NPM_VER="$(npm view pierre-review version 2>/dev/null || echo 0.0.0)"
+          # The package is `limn-review` (renamed from `pierre-review`). The OLD name's latest still
+          # counts toward the highest version, so the new name continues the sequence instead of
+          # restarting it — one version line across the rename.
+          NPM_VER="$(npm view limn-review version 2>/dev/null || echo 0.0.0)"
+          OLD_NPM_VER="$(npm view pierre-review version 2>/dev/null || echo 0.0.0)"
           PKG_VER="$(node -p "require('./package.json').version")"
           TAG_VER="$(git tag --list 'v*' | sed 's/^v//' | sort -V | tail -1)"
           TAG_VER="${TAG_VER:-0.0.0}"
-          BASE="$(printf '%s\n%s\n%s\n' "$NPM_VER" "$PKG_VER" "$TAG_VER" | sort -V | tail -1)"
-          echo "Highest known version: $BASE  (npm=$NPM_VER pkg=$PKG_VER tag=$TAG_VER)"
+          BASE="$(printf '%s\n%s\n%s\n%s\n' "$NPM_VER" "$OLD_NPM_VER" "$PKG_VER" "$TAG_VER" | sort -V | tail -1)"
+          echo "Highest known version: $BASE  (npm=$NPM_VER old-npm=$OLD_NPM_VER pkg=$PKG_VER tag=$TAG_VER)"
           BUMP="${{ github.event.inputs.bump || 'patch' }}"
           npm version "$BASE" --no-git-tag-version --allow-same-version >/dev/null
           NEXT="$(npm version "$BUMP" --no-git-tag-version)"
@@ -107,10 +111,12 @@ jobs:
         run: |
           set -euo pipefail
           VER="${{ steps.bump.outputs.version }}"
+          # The name comes from the manifest build-release.mjs wrote (limn-review), never typed here.
+          NAME="$(node -p "require('./package.json').name")"
           # Idempotent: if this version is already on npm (e.g. a re-run), skip
           # rather than fail the job on the "cannot publish over existing version".
-          if [ -n "$(npm view "pierre-review@$VER" version 2>/dev/null || true)" ]; then
-            echo "pierre-review@$VER is already published — skipping."
+          if [ -n "$(npm view "$NAME@$VER" version 2>/dev/null || true)" ]; then
+            echo "$NAME@$VER is already published — skipping."
             exit 0
           fi
           npm publish --access public

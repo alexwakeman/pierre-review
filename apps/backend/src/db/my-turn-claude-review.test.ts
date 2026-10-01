@@ -124,7 +124,7 @@ beforeAll(async () => {
   await runMigrations();
   q = await import('./queries.js');
   const contract = await import('../pro/contract.js');
-  contract.setProCapabilities({ ...contract.EMPTY_CAPABILITIES, claudeReview: true });
+  contract.setProCapabilities({ ...contract.EMPTY_CAPABILITIES });
 
   const { accounts, repos, users } = schema;
   const { eq } = await import('drizzle-orm');

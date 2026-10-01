@@ -286,7 +286,7 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   adds an observer, not a request. The view is **THE consolidated open-PR view** — the shared
   `OpenPrsTable` over `GET /api/open-prs`, ALWAYS workspace-wide:
   age/author/LoC/untouched-threads/CI/approval columns, drafts included with a "· N drafts"
-  callout; plus a **Claude review** column ONLY with the `claudeReview` capability — one batched
+  callout; plus a **Claude review** column ONLY where agentic AI runs (`me.ai.enabled`) — one batched
   `POST /api/claude-review/states` for every listed row, click-gated starts sharing the tab's
   mutation key, every control `stopPropagation` ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Starting
   from the Open PRs tab). Every opener just REVEALS it (`openOpenPrsDetail(repoId?)` →
@@ -508,7 +508,8 @@ Overview later does not jump. It adds no fetch of its own: it stays fresh throug
 invalidates `['pr', id]` (never its threads) when the most recently fetched timeline/open-PRs feed
 carries a different `ciStatus` and was fetched after the detail (`ciDetailOutdated`) — CI finishing
 never bumps `updatedAt`. Tabs (Overview / Threads /
-Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claude Review / AI):
+Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix, listed whenever
+`me.ai.enabled` — see **The agentic AI surfaces** below):
 - **Overview** — `ChecksTab.tsx`: CI/checks (each Actions check expands into the inline log
   viewer — see **Merge, CI logs & trunk status**), the **merge verdict** line (open PRs only,
   from `mergeVerdict` — this row is where the old "mergeable" lie lived), a **Conflicts** row on
@@ -1011,6 +1012,42 @@ read-only variant — the write gate is GitHub's own `viewerCanReact`.
   Chips carry `stopPropagation` + a `data-noactivate` marker because they sit inside
   click-to-open cards.
 
+### The agentic AI surfaces — free, local, gated on `me.ai` (`useAiCapabilities`)
+
+Claude Review (run, follow-up, ticket check vs a pasted story, auto review, the review chat), review
+memory and AI Fix are **FREE and LOCAL-ONLY**. They run on the reader's own Claude Code session or
+`ANTHROPIC_API_KEY`; Limn stores no key and charges nothing. Every SPA gate reads the TOP-LEVEL
+`MeResponse.ai` through **`hooks/useAiCapabilities.ts`** (pure half: `lib/aiCapabilities.ts`) —
+never `useProCapabilities()`, whose `aiFix`/`claudeReview`/`aiAnalysis`/`reviewMemory` members are
+gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads them off `pro` again.
+
+- **VISIBILITY IS `ai.enabled` ALONE** (`!isCloud && !LIMN_AI_DISABLED`). Locally the tabs, the Open
+  PRs column, the Feed's Claude pill, review memory and the Settings switch ALWAYS render. ⚠ Never
+  hide a surface on `runtime`/`auth`: hiding it until a credential is detected hides it from exactly
+  the people who have not set one up, and the detection is a heuristic (the run is the real check).
+- **What sits in place of a Run button is ONE component, `AiRunGate`** (`components/AiSetup.tsx`),
+  wrapped round Claude Review's Run, the chat's Ask, AI Fix's Generate and the CI card's "Fix it". In
+  order: runtime not `ready` → `AiRuntimeSetup` ("Set up AI (one-time ~110 MB download)", streaming
+  `POST /api/ai/runtime/install` over `sseStream`; `failed` prints its message + Retry); `auth: 'none'`
+  (from `/api/me`, or the surface's own route answer passed as `auth`) → the one line "Sign in to
+  Claude Code or set ANTHROPIC_API_KEY"; else the button. Past reviews, the story panel and the
+  budget stay usable either way. The Open PRs cell has no room for the line, so its Review button
+  OPENS the PR's Claude Review tab while `ai.ready` is false.
+- **The install is ONE per page** — a module-level store in `useAiCapabilities.ts`, so two "Set up
+  AI" buttons show one progress line and cannot start two downloads; an install the SERVER reports
+  (`runtime: 'installing'`, e.g. `limn ai install` in a terminal) is watched by polling `['me']`.
+- **Cloud (`ai.enabled` false, `deploymentMode: 'cloud'`)**: the tabs are not listed and
+  `AiCloudNote` prints "Review and fix run on your machine: npx limn-review" where they were — no
+  `ProBadge`, no upsell, because these are not paid. A local kill switch prints nothing.
+- **Money, not credits.** Local agent runs show US$ (`formatUsd` in `lib/ui.ts`) — a credit figure
+  would invent a Limn price for the reader's own spend. Track usage's agentic row does the same and
+  shows only where `ai.enabled`. Credits stay on the Pro one-shot Haiku features.
+- **The CI-analysis CARD stays Pro** (`prSummary`), as does the AI summary inside the AI Fix tab;
+  both gate themselves and render nothing without the plugin. Only the card's "Fix it" is free.
+- **Auto review** is `AutoReviewSection` over the CORE `GET`/`PUT /api/workspaces/:id/auto-review`
+  (`hooks/useWorkspaceAutoReview.ts`), mounted on `ai.enabled` and NOT behind the plugin's
+  `/api/pro/settings` gate. OFF per workspace until switched on.
+
 ### The AI-Fix comment picker + validity report (`components/AiFix/`)
 
 The `'comments'` AI-Fix seed's two UI halves. Backend contract:
@@ -1022,9 +1059,9 @@ The `'comments'` AI-Fix seed's two UI halves. Backend contract:
   **full-height column down the card's right edge**, not a glyph in the header row: it is the
   PRIMARY way into the scope (drag is the shortcut, not the reverse), it points the way the comment
   travels, and an already-added card shows a tick rather than a greyed-out `+` — down a 60-row list
-  "done" and "broken" must not look alike. It renders inside `FixerSection`, so it is
-  gated on the `aiFix` capability exactly like the launch button (the tab itself is visible under
-  `aiAnalysis || aiFix`, so gating it on the tab would draw a basket with no way to launch).
+  "done" and "broken" must not look alike. It renders inside `FixerSection`, which renders whenever
+  the AI Fix tab does (`me.ai.enabled`); a missing runtime or credential replaces only the launch
+  button (`AiRunGate`), so the basket stays usable while the reader sets AI up.
   `disabled` while a run is in flight rather than hidden — the basket is the record of what that
   run was given.
 - **`lib/aiFixCommentModel.ts` holds every decision** (grouping, ordering, caps, root/reply) as pure
@@ -2737,7 +2774,7 @@ that carried no suffix.
 - ⚠ **THE WORKSPACE HALF'S GATE IS SPLIT, AND THE SPLIT WAS A CORRECTNESS FIX RATHER THAN A LAYOUT
   CHANGE.** It used to be ONE `useHasProWorkspaceSettings()` gate (three PAID caps) with a
   `proReady` wait inside it, so a FREE per-workspace control could not be mounted here at all: with
-  no plugin the heading never rendered — which is the public `npx pierre-review` release — and with
+  no plugin the heading never rendered — which is the public `npx limn-review` release — and with
   a plugin present it would still have waited on `/api/pro/settings`, a request it does not read.
   That is the same defect the global half is built to avoid, one grain over. Now the HEADING renders
   on the scope alone (the free `PendingMuteSection` is what makes it never empty, exactly as
@@ -2759,7 +2796,7 @@ two neighbours. One Save for the section. The server contract is [BACKEND.md](BA
 — Settings: gates and promotions; the route is `PUT /api/me/my-turn-settings`.
 
 - **Four parts**: "Show in My Turn" (a checkbox per summons type, each with a one-line hint;
-  "Finished Claude reviews" only where `claudeReview` is on), "Add to My Turn" (the four own-work
+  "Finished Claude reviews" only where `me.ai.enabled`), "Add to My Turn" (the four own-work
   promotions, plus "Red default branch" as Off · Repos you maintain · Every repo in the workspace),
   "Order of My turn" (an ordered list with up / down buttons) and "How Pending ranks cards" (preset
   pills, three range sliders, Reset). Type names come from the shared `MY_TURN_SETTING_LABEL`, the
@@ -2780,7 +2817,7 @@ two neighbours. One Save for the section. The server contract is [BACKEND.md](BA
   new one. The preset is DERIVED from the weights (`presetOf`), never stored; a "Custom" pill appears
   only when the sliders match no preset, and cannot be clicked. Reset restores the order and the weights and leaves the switches alone.
 - **Reordering is buttons, not drag** — keyboard- and touch-native, no dependency. A hidden type
-  (Claude reviews without the capability) keeps its place and a move steps over it. After a move,
+  (Claude reviews where agentic AI is off) keeps its place and a move steps over it. After a move,
   focus returns to the same button of the moved row (or its other button at an end), and a
   visually hidden `aria-live` line says where it went ("“@mentions of you” moved to 1 of 15"),
   counting only the rows on screen.

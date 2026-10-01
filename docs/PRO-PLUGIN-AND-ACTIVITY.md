@@ -20,26 +20,35 @@ public repo is genuinely public, the premium source must never be committed here
 `packages/pro/node_modules`; when absent the glob skips the empty dir and install still
 succeeds.
 
-**Three tiers.** **core (free)** = plain feed + timeline + **My Turn / "FYI"** (feed participation —
-moved back to core, on every tier; see `feed/my-turn.ts`), no AI. **pro** = AI summaries +
-Insights (on whenever the plugin is active — no env flag, like `workspaceInsights`/`reviewMemory`).
-**pro+** = the expensive advanced-AI features **AI Analysis + AI
-Fix + Claude Review**, all gated together by **one** env flag **`PRO_ADVANCED_AI_ENABLED`**
-(`PRO_CLAUDE_REVIEW_ENABLED` kept as a back-compat alias; the single source of truth is
-`packages/pro/src/tier.ts` `ADVANCED_AI_ENABLED`, read by `index.ts` for the caps AND by each
-feature's route/manager self-gate). The `aiAnalysis`/`aiFix`/`claudeReview` capability fields
-remain distinct but flip together.
+**Two tiers, plus a free local AI set.** **core (free)** = plain feed + timeline + **My Turn /
+"FYI"**, and — LOCALLY, on the user's own Claude Code session or `ANTHROPIC_API_KEY` — the AGENTIC
+features: Claude Review (run, follow-up, ticket check against a pasted story, auto review, chat),
+review memory and AI Fix's fixer. They LEFT this plugin at **apiVersion 22** and live in core
+(`apps/backend/src/review/`, `src/coding/ai-fix/`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)), gated on
+the top-level `MeResponse.ai` and off in cloud by an explicit `isCloud` check. **pro** = every
+ONE-SHOT Haiku feature on the Anthropic API (PR summary, the CI-failure analysis card, comment
+validity / addressed / simplify annotations, the blast impact note, conflict-assist — the
+`prSummary` capability), the Jira tracker, Insights and all the reporting. The old **pro+** tier and
+its flag `PRO_ADVANCED_AI_ENABLED` (alias `PRO_CLAUDE_REVIEW_ENABLED`, `src/tier.ts`) are DELETED.
+
+**The free features' two Pro inputs** ride the OPTIONAL `ctx.registerAgenticProviders` (core
+`review/plugin-providers.ts`), registered in `index.ts`: `resolveReviewTicket` — the Jira fill for
+an AUTO Claude review (`jira/resolve-ticket.ts`, on the tracker tier) — and `readCiAnalysisSeed` —
+AI Fix's `ci_analysis` seed (`ai-fix/analysis.ts`, on the summary tier; the text crosses ALREADY
+STRIPPED of its CONFIDENCE footer). Without them, auto review runs with no story and the
+`ci_analysis` seed is refused as missing; nothing else degrades. The manual "Fill from KEY" path is
+the plugin's own `/api/pro/jira/*` routes, unchanged.
 
 **The plugin boundary.** `src/pro/contract.ts` defines `ProContext` (the host hands the
 plugin `db`/`schema`/`runTransaction`/`isPg`/`accountIdOf`/`llm.complete`/`queries`/
-`reviewEvents`/`registerLearningsProvider`/`registerScheduledJob`/`registerPrDetailEnricher`/`registerMigrations`/`aiCredits`), `ProPlugin
-{apiVersion:16, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
-`/api/me` (`pro:{activityDigest,reviewMemory,aiAnalysis,prSummary,aiFix,workspaceInsights,claudeReview,slackDigest,issueLinks}`)
-exactly like `claudeReviewEnabled`. `src/pro/bind.ts`
+`registerAgenticProviders?`/`registerScheduledJob`/`registerPrDetailEnricher`/`registerMigrations`/`aiCredits`), `ProPlugin
+{apiVersion, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
+`/api/me` (`pro:{activityDigest,prSummary,workspaceInsights,slackDigest,issueLinks,…}` —
+`reviewMemory`/`aiAnalysis`/`aiFix`/`claudeReview` left at apiVersion 22). `src/pro/bind.ts`
 runs in `index.ts` between `buildApp()` and `listen()`: gated on **`config.proEnabled`** — now
 `PRO_DISABLED!=='true' && (!isCloud || PRO_CLOUD_ENABLED==='true')`, so Pro is on locally by default
-AND can run the **paid summary-AI tier in cloud** behind `PRO_CLOUD_ENABLED=true` (agentic AI stays
-off via unset `PRO_ADVANCED_AI_ENABLED`; per-account entitlement via `plan!=='free'` + the
+AND can run the **paid summary-AI tier in cloud** behind `PRO_CLOUD_ENABLED=true` (agentic AI is
+core and never registers in cloud; per-account entitlement via `plan!=='free'` + the
 `/api/pro/* 402` gate). It is **NOT a declared dependency** — instead `bind.ts` resolves the plugin by
 **filesystem path** (`PRO_PLUGIN_PATH` override → then, **ORDER FLIPS BY ENVIRONMENT**:
 `dist/index.js` → `src/index.ts` under `NODE_ENV=production`, `src` FIRST otherwise — a stale
@@ -52,12 +61,18 @@ internals** — everything arrives via `ctx`; `ctx.db` is node-postgres-typed so
 is a compile error in the plugin too. It resolves under **tsx** (dev, `src/index.ts`); a built
 `node dist` run would need `packages/pro/dist` (no build step yet — Pro is local/dev-only). The
 plugin is **never in the release allowlist** (`build-release.mjs`). Plugin owns its **own**
-dual-dialect tables (`review_learnings`, `repo_digests`), migrations
+dual-dialect tables (`repo_digests`, `ai_pr_analyses`, …; `review_learnings` and `ai_fixes`
+were ADOPTED by core migration `0074` / pg `0061` at apiVersion 22), migrations
 (`packages/pro/migrations{,-pg}/*.sql` run via `ctx.registerMigrations` → `src/pro/migrate.ts`,
 the one sanctioned raw-`$client` DDL site + `pro_migrations` bookkeeping), and isolation test.
 
-**`apiVersion` is 21** (bumped from 20 by the tier line — `ProCapabilities` gains `botDepth` and
-`ProHostQueries` gains five members in ONE bump; see § "apiVersion 21" below). 19 → 20 was
+**`apiVersion` is 22** — the agentic features moved to core: `ProCapabilities` lost
+`reviewMemory`/`aiAnalysis`/`aiFix`/`claudeReview`; `ProContext` lost `review`, `reviewEvents` and
+`registerLearningsProvider`, and `CodingSeam` lost `generateFix`/`applyAndPush` (it keeps
+`commitFilesAndOpenPr` for the advisor); it gained the OPTIONAL `registerAgenticProviders`. Removals
+fail the "narrow additive" test, hence the bump; host, plugin and gitlink land together. 20 → 21 was
+the tier line (`ProCapabilities` gains `botDepth` and `ProHostQueries` gains five members in ONE
+bump; see § "apiVersion 21" below). 19 → 20 was
 period-over-period reporting (`getPeriodMetrics`/`getPeriodCoverage`/`getPeriodLanes` +
 `computePeriodForecast`, pro migrations `0025`/`0026`, capability `periodReports`). 18 → 19 was
 "fix from comments" (§ below — `CodingSeam.generateFix` gained optional `commentVerdicts`).
@@ -1409,7 +1424,7 @@ function, `detectPrTickets` (`issue-links/enricher.ts`).
   section invalidates `['pr']`, like the tracker section.
 - **Gates.** The two Jira-calling routes register with the enricher (`issueLinks`, the summary
   tier) and sit on the `search` rate tier. The Settings block is shown only when the SAVED tracker
-  is Jira with a base URL AND the `claudeReview` capability is on — Claude Review is its only
+  is Jira with a base URL AND `MeResponse.ai.enabled` is on — Claude Review is its only
   consumer and is local-only, so cloud accounts are never asked for a token nothing uses. The
   server half is still cloud-safe (sealed storage, the cloud SSRF rules).
 - **Erasure** needs no new entry (the table is already in `registerAccountErasure`); the core
@@ -2370,6 +2385,14 @@ forward is the transcript, not stale data), and the answer may end in a `FOLLOWU
   question, `CHAT_HISTORY_ANSWER_MAX` 4000 for the answer, both surrogate-safe).
 
 ### Fix from comments — the `'comments'` AI-Fix seed (apiVersion 19)
+
+> ⚠ **Since apiVersion 22 the fixer is CORE** (`apps/backend/src/coding/ai-fix/`; its table
+> `ai_fixes` adopted by core migration `0074` / pg `0061`). The sections below keep their history;
+> read `packages/pro/src/ai-fix/{manager,comment-seed,persist,routes}.ts` as
+> `apps/backend/src/coding/ai-fix/…`, and `ctx.coding.generateFix` / `applyAndPush` as core's
+> `AgentContext`. What stayed here is the PR summary + CI-analysis half (`ai-fix/analysis.ts`,
+> `ai-fix/routes.ts` → `registerPrAnalysisRoutes`).
+
 
 The AI Fix tab gains a picker: the PR's comments and threads on the right, a **fix scope** basket on
 the left, drag either way. Launching runs the SAME agentic worktree fixer as every other seed — one

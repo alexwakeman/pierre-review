@@ -1,12 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  createSdkMcpServer,
-  query,
-  tool,
-  type SDKResultMessage,
-} from '@anthropic-ai/claude-agent-sdk';
+import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import { claudeExecutableOptions, loadAgentSdk } from '../ai/runtime.js';
 import type { RunReviewArgs, RunReviewResult } from '../pro/contract.js';
 import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
@@ -160,6 +156,10 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
 
     // ---- run the agent ----
+    // The SDK and zod come from the AI runtime (ai/runtime.ts) — downloaded on first use for an
+    // npm install. A missing runtime throws here and lands in the catch as a readable failure.
+    const { createSdkMcpServer, query, tool } = await loadAgentSdk();
+    const reviewShape = await submitReviewShape();
     let captured: SubmitReviewPayload | null = null;
     const server = createSdkMcpServer({
       name: 'review',
@@ -168,7 +168,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         tool(
           'submit_review',
           'Submit your structured review. Call this EXACTLY once, at the end.',
-          submitReviewShape,
+          reviewShape,
           async (a) => {
             captured = a as unknown as SubmitReviewPayload;
             return { content: [{ type: 'text', text: 'Review recorded.' }] };
@@ -194,6 +194,8 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         settingSources: [],
         mcpServers: { review: server },
         abortController,
+        // LIMN_CLAUDE_PATH → the user's own `claude` instead of the SDK's bundled binary.
+        ...claudeExecutableOptions(),
       },
     });
 

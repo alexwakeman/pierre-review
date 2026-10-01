@@ -1,24 +1,34 @@
 import { useEffect, useState } from 'react';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { AiAuthLine, AiRuntimeSetup } from '../AiSetup.js';
 import {
-  useUpdateWorkspaceProSettings,
-  useWorkspaceProSettings,
-} from '../../hooks/useWorkspaceProSettings.js';
+  useSetWorkspaceAutoReview,
+  useWorkspaceAutoReview,
+} from '../../hooks/useWorkspaceAutoReview.js';
 import { dateTime } from '../../lib/ui.js';
 import { SaveButton, SectionShell } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
 /**
- * AUTO CLAUDE REVIEW for the currently-selected workspace (plugin migration 0036). Mounted only
- * when the `claudeReview` capability is on — i.e. local, with the pro+ flag; the server drops the
- * switch anywhere else, so it could never be a promise the sweeper does not keep.
+ * AUTO CLAUDE REVIEW for the currently-selected workspace — CORE, on the workspace row (migration
+ * 0074 / pg 0061; `GET`/`PUT /api/workspaces/:id/auto-review`). Mounted only where agentic AI runs
+ * (`me.ai.enabled`: local, no kill switch); the route is not registered anywhere else, so the
+ * switch could never be a promise the sweeper does not keep. OFF until someone turns it on: it
+ * spends the reader's own Claude in the background.
  *
  * The copy states the rule and stops: which PRs, how many a day, what it costs to run. Turning it
  * off and on again moves the start, and the "since" line says from when.
+ *
+ * ⚠ While AI is not set up (no runtime, or no Claude credential) the sweeper queues nothing — a
+ * failed run would use up the PR's one automatic review — so the section says so and offers the
+ * same setup control as a Run button. The switch stays usable: turning it on early is fine.
  */
 export function AutoReviewSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
-  const settings = useWorkspaceProSettings(workspaceId != null, workspaceId);
-  const update = useUpdateWorkspaceProSettings(workspaceId);
+  const settings = useWorkspaceAutoReview(true, workspaceId);
+  const update = useSetWorkspaceAutoReview(workspaceId);
+  const ai = useAiCapabilities();
+  const aiReady = ai.ready;
 
   const stored = settings.data?.autoReview ?? null;
   const storedOn = stored?.enabled === true;
@@ -37,7 +47,7 @@ export function AutoReviewSection(): JSX.Element {
   return (
     <SectionShell
       title="Auto Claude review"
-      desc="Claude reviews each new PR a person opens in this workspace, once, with the same model and budget as the Review button."
+      desc="Claude reviews each new PR a person opens in this workspace, once, with the same model and budget as the Review button. It runs on your own Claude Code or Anthropic API key."
     >
       <label className="flex items-start gap-2 text-xs">
         <input
@@ -57,6 +67,12 @@ export function AutoReviewSection(): JSX.Element {
           </span>
         </span>
       </label>
+      {!aiReady && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+          <span>Nothing is reviewed until AI is set up.</span>
+          {ai.runtime !== 'ready' ? <AiRuntimeSetup /> : <AiAuthLine />}
+        </div>
+      )}
       {storedOn && stored?.enabledAt != null && (
         <p className="text-xs text-gray-500 dark:text-gray-400">
           On since {dateTime(stored.enabledAt)}.
@@ -65,7 +81,7 @@ export function AutoReviewSection(): JSX.Element {
       <SaveButton
         dirty={on !== storedOn}
         saving={update.isPending}
-        onClick={() => update.mutate({ autoReview: { enabled: on } })}
+        onClick={() => update.mutate({ enabled: on })}
       />
       {update.isError && (
         <div className="text-xs text-red-500">

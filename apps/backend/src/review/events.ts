@@ -1,9 +1,8 @@
 import type { ClaudeReviewVerdict } from '@pierre-review/shared';
 
-// A tiny typed in-process event bus + a learnings-provider registry. These are
-// the two OSS-core seams the optional @pierre/pro plugin hooks into; with no
-// plugin loaded there are ZERO subscribers and no registered provider, so every
-// emit is a no-op and getLearningsProvider() returns null (fully inert).
+// A tiny typed in-process event bus. Claude Review's routes emit on it; review memory's capture
+// (review/memory/capture.ts, subscribed once at boot by `startAgenticBackground`) turns each event
+// into a review_learnings row. Both are core since apiVersion 22.
 //
 // Events carry IDENTITY + DELTA only — no repoId/path enrichment. A subscriber
 // enriches by reading core tables via ctx.db (scoped by the event's accountId).
@@ -72,20 +71,5 @@ export const reviewEvents: ReviewEventBus = {
   },
 };
 
-export interface LearningsProvider {
-  buildContext(a: {
-    accountId: number;
-    prId: number;
-    headSha: string;
-  }): Promise<string | undefined>;
-}
-
-// Single nullable provider registry. Null in OSS mode ⇒ the review prompt is
-// byte-identical to today (review-manager passes priorReviewContext: undefined).
-let _provider: LearningsProvider | null = null;
-export function registerLearningsProvider(p: LearningsProvider): void {
-  _provider = p;
-}
-export function getLearningsProvider(): LearningsProvider | null {
-  return _provider;
-}
+// (The learnings-provider registry that lived here is gone: Claude Review's memory is core since
+// apiVersion 22, so the manager calls review/memory/retrieval.ts `buildLearningsContext` directly.)

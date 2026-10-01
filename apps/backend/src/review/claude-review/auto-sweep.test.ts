@@ -1,0 +1,196 @@
+// THE AUTO-REVIEW SWEEPER (claude-review/auto.ts) — which PRs it hands the lane, and when it does
+// nothing at all. The population rules (open, not draft, opened after the switch-on, a person, no
+// run yet) are CORE's and are pinned in apps/backend/src/db/my-turn-claude-review.test.ts; this file
+// pins what the sweeper adds on top:
+//
+//   1. the FLOOR it asks with is the workspace's own `enabledAt`, and the day is the UTC day;
+//   2. ⚠ THE DAILY CAP counts runs already started today PLUS items still waiting in the lane;
+//   3. an account whose credits are spent sits the tick out (and its candidates are never read);
+//   4. ⚠ IT NEVER RUNS IN CLOUD, or on a host without the seam;
+//   5. a full lane stops the tick — the rest wait, since the database is the queue;
+//   6. ⚠ while AI is not set up (no runtime / no credential) it queues NOTHING, so no PR gets a
+//      failed row that would use up its one automatic review.
+//
+//   pnpm --filter @pierre-review/backend test claude-review/auto-sweep
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AgentContext as ProContext } from '../agent-context.js';
+
+const enqueued: Array<[number, number]> = [];
+let laneRoom = 20;
+let waiting = new Set<number>();
+let enqueueAnswer: (prId: number) => string = () => 'queued';
+let dropKeep: ((accountId: number, workspaceId: number) => boolean) | null = null;
+vi.mock('./manager.js', () => ({
+  AGENTIC_AI_ENABLED: true,
+  dropAutoReviews: (keep: (accountId: number, workspaceId: number) => boolean) => {
+    dropKeep = keep;
+    return 0;
+  },
+  autoLaneRoom: () => laneRoom,
+  autoPendingPrIds: () => waiting,
+  enqueueAutoReview: (_ctx: unknown, accountId: number, prId: number) => {
+    const r = enqueueAnswer(prId);
+    if (r === 'queued') {
+      enqueued.push([accountId, prId]);
+      laneRoom -= 1;
+    }
+    return r;
+  },
+}));
+
+let aiReady = true;
+vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
+
+let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number }> = [];
+vi.mock('./auto-settings.js', () => ({
+  AUTO_REVIEW_DAILY_CAP: 20,
+  listAutoReviewWorkspaces: async () => roster,
+}));
+
+const { runAutoReviewSweep, utcDayStartMs } = await import('./auto.js');
+
+const NOW = Date.UTC(2026, 8, 30, 15, 30);
+const ids = (n: number, from = 1): number[] => Array.from({ length: n }, (_, i) => from + i);
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+let calls: any[];
+let answers: Map<number, { prIds: number[]; autoToday: number }>;
+let blocked: Set<number>;
+const makeCtx = (over: Record<string, unknown> = {}): ProContext =>
+  ({
+    host: { isCloud: false },
+    log: { info: () => {}, warn: () => {}, error: () => {} },
+    aiCredits: { check: async (a: number) => ({ agentBlocked: blocked.has(a) }) },
+    queries: {
+      getAutoReviewCandidates: async (accountId: number, workspaceId: number, opts: any) => {
+        calls.push({ accountId, workspaceId, ...opts });
+        return answers.get(workspaceId) ?? null;
+      },
+    },
+    ...over,
+  }) as any as ProContext;
+
+beforeEach(() => {
+  enqueued.length = 0;
+  laneRoom = 20;
+  waiting = new Set();
+  enqueueAnswer = () => 'queued';
+  dropKeep = null;
+  aiReady = true;
+  calls = [];
+  answers = new Map();
+  blocked = new Set();
+  roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: NOW - 3_600_000 }];
+});
+
+describe('runAutoReviewSweep', () => {
+  it('asks with the workspace’s own switch-on moment and the UTC day start', async () => {
+    answers.set(7, { prIds: [11, 12], autoToday: 0 });
+    const r = await runAutoReviewSweep(makeCtx(), NOW);
+    expect(calls[0]).toMatchObject({
+      accountId: 1,
+      workspaceId: 7,
+      openedSinceMs: NOW - 3_600_000,
+      dayStartMs: Date.UTC(2026, 8, 30),
+    });
+    expect(utcDayStartMs(NOW)).toBe(Date.UTC(2026, 8, 30));
+    expect(enqueued).toEqual([
+      [1, 11],
+      [1, 12],
+    ]);
+    expect(r.queued).toBe(2);
+  });
+
+  it('⚠ stops at the daily cap, counting today’s runs AND waiting items', async () => {
+    // 17 started today, PR 1 already waiting in the lane ⇒ room for 2 more, not 3.
+    waiting = new Set([1]);
+    answers.set(7, { prIds: ids(10), autoToday: 17 });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued.map(([, p]) => p)).toEqual([2, 3]);
+  });
+
+  it('enqueues nothing once the cap is reached — those PRs wait for tomorrow', async () => {
+    answers.set(7, { prIds: ids(5), autoToday: 20 });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued).toEqual([]);
+  });
+
+  it('skips an account whose credits are spent, without reading its candidates', async () => {
+    roster = [
+      { accountId: 1, workspaceId: 7, enabledAtMs: 0 },
+      { accountId: 2, workspaceId: 8, enabledAtMs: 0 },
+    ];
+    blocked = new Set([1]);
+    answers.set(7, { prIds: [1], autoToday: 0 });
+    answers.set(8, { prIds: [2], autoToday: 0 });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(calls.map((c) => c.workspaceId)).toEqual([8]);
+    expect(enqueued).toEqual([[2, 2]]);
+  });
+
+  it('a full lane stops the tick', async () => {
+    laneRoom = 1;
+    roster = [
+      { accountId: 1, workspaceId: 7, enabledAtMs: 0 },
+      { accountId: 1, workspaceId: 9, enabledAtMs: 0 },
+    ];
+    answers.set(7, { prIds: [1, 2, 3], autoToday: 0 });
+    answers.set(9, { prIds: [4], autoToday: 0 });
+    enqueueAnswer = () => (laneRoom > 0 ? 'queued' : 'full');
+    const r = await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued.map(([, p]) => p)).toEqual([1]);
+    expect(r.stopped).toBe('lane_full');
+    expect(calls.map((c) => c.workspaceId)).toEqual([7]);
+  });
+
+  it('a PR a person already started does not use up the day', async () => {
+    answers.set(7, { prIds: [1, 2, 3], autoToday: 19 });
+    enqueueAnswer = (p) => (p === 1 ? 'already' : 'queued');
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued.map(([, p]) => p)).toEqual([2]);
+  });
+
+  it('⚠ does nothing in cloud', async () => {
+    answers.set(7, { prIds: [1], autoToday: 0 });
+    await runAutoReviewSweep(makeCtx({ host: { isCloud: true } }), NOW);
+    expect(calls).toEqual([]);
+    expect(enqueued).toEqual([]);
+  });
+
+  it('⚠ queues nothing while AI is not set up — those PRs still qualify later', async () => {
+    answers.set(7, { prIds: [1, 2], autoToday: 0 });
+    aiReady = false;
+    const r = await runAutoReviewSweep(makeCtx(), NOW);
+    expect(r.stopped).toBe('ai_not_ready');
+    expect(calls).toEqual([]);
+    expect(enqueued).toEqual([]);
+    aiReady = true;
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued.map(([, p]) => p)).toEqual([1, 2]);
+  });
+
+  it('does nothing on a host without the seam', async () => {
+    await runAutoReviewSweep(makeCtx({ queries: {} }), NOW);
+    expect(enqueued).toEqual([]);
+  });
+
+  it('⚠ drops waiting items of a workspace switched off since they were queued', async () => {
+    roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: 0 }];
+    answers.set(7, { prIds: [], autoToday: 0 });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(dropKeep).not.toBeNull();
+    expect(dropKeep!(1, 7)).toBe(true); // still on: kept
+    expect(dropKeep!(1, 8)).toBe(false); // switched off: dropped
+    expect(dropKeep!(2, 7)).toBe(false); // another account's workspace 7 is not this one
+  });
+
+  it('skips a workspace that is gone (null) and carries on', async () => {
+    roster = [
+      { accountId: 1, workspaceId: 404, enabledAtMs: 0 },
+      { accountId: 1, workspaceId: 7, enabledAtMs: 0 },
+    ];
+    answers.set(7, { prIds: [5], autoToday: 0 });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued).toEqual([[1, 5]]);
+  });
+});

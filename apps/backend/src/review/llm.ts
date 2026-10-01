@@ -13,8 +13,12 @@
 // So the Pro summary passes its own dedicated key (fast, metered) while an OSS/dev
 // caller with no key still works via the ambient session.
 //
-// Both SDK imports are LAZY (inside the function) so merely importing this module
-// needs nothing loaded — only an actual caller pays. In OSS mode nothing calls it.
+// Both SDKs are LOADED LAZILY through ai/runtime.ts (the one module allowed to import them), so
+// merely importing this module needs nothing — only an actual caller pays. On an npm install the
+// Agent SDK exists only once the reader has set AI up; the cloud image ships @anthropic-ai/sdk as a
+// real dependency for the metered summary path, which the loader falls through to.
+
+import { claudeExecutableOptions, loadAgentSdk, loadAnthropicSdk } from '../ai/runtime.js';
 
 export interface CheapCompleteOpts {
   model?: string;
@@ -62,7 +66,7 @@ async function rawComplete(
   model: string,
   opts: CheapCompleteOpts,
 ): Promise<CheapCompleteResult> {
-  const { default: Anthropic } = await import('@anthropic-ai/sdk');
+  const { default: Anthropic } = await loadAnthropicSdk();
   const client = new Anthropic({ apiKey });
   const resp = await client.messages.create({
     model,
@@ -93,7 +97,7 @@ async function agentComplete(
   model: string,
   opts: CheapCompleteOpts,
 ): Promise<CheapCompleteResult> {
-  const { query } = await import('@anthropic-ai/claude-agent-sdk');
+  const { query } = await loadAgentSdk();
 
   // A single-turn, tool-less completion: the system prompt is folded into the user
   // prompt (the SDK's systemPrompt is also passed for models that honour it). No
@@ -113,6 +117,7 @@ async function agentComplete(
       // Don't load the user's ~/.claude settings / MCP servers for a plain
       // completion (mirrors review/agent.ts).
       settingSources: [],
+      ...claudeExecutableOptions(),
     },
   });
 

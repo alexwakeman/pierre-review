@@ -7,28 +7,27 @@
 // that place. Everything user-visible — the wordmark, the SEO titles, the
 // JSON-LD, the footer © line — composes from SITE_NAME.
 //
-// SCOPE OF THE CURRENT RENAME (Pierre → Limn), deliberately staged:
+// SCOPE OF THE RENAME (Pierre → Limn), staged in two tranches:
 //
-//   IN  — every user-visible string: this site, the SPA's chrome, the CLI banner,
-//         and the re-captured screenshots.
-//   OUT — the published/runtime identifiers, which are migrations rather than
-//         text edits and ship separately:
-//           · the npm package `pierre-review` and its `npx` invocation
+//   DONE — every user-visible string: this site, the SPA's chrome, the CLI banner,
+//          and the re-captured screenshots. Then, in the release that made Claude
+//          Review and AI Fix free, the npm package: `pierre-review` → `limn-review`
+//          (bin `limn`, with `pierre-review` kept as a deprecated alias) and the
+//          data dir ~/.pierre-review → ~/.limn (moved once, on first boot).
+//   OUT  — identifiers that are migrations rather than text edits:
 //           · the domain pierre-review.com (Safe Browsing + Search Console
 //             verification is per-domain and non-transferable, and both OAuth
 //             callback URLs are registered against it)
 //           · the `pierre_session` / `pierre_oauth_state` cookies
-//           · ~/.pierre-review/ (holds every local install's DB and API key)
 //           · the ~20 `pierre:*` localStorage keys, one of which is shared with
 //             the SPA bundle to carry cookie consent across the two apps
 //           · the AutomatedReviewerKind `'pierre'` — a persisted DB value AND a
 //             live, 400-validated API path segment
 //           · `<!-- pierre:claude-review v=1 -->`, which is stamped into GitHub
 //             review bodies we do not control, permanently
+//           · the source repository's URL (REPO_URL below)
 //
-// So: while this file says "Limn", `npx pierre-review` remains the true command
-// and is rendered as such. That mismatch is expected until tranche two lands —
-// do not "fix" it by editing the command string in copy.
+// The command in copy is ALWAYS composed from NPM_PACKAGE below, never typed.
 // ---------------------------------------------------------------------------
 
 /** The product name. The one value the identity layer reads. */
@@ -38,7 +37,7 @@ export const SITE_NAME = 'Limn';
  * The published npm package, and therefore the literal command in copy.
  * NOT derived from SITE_NAME on purpose — see the note above.
  */
-export const NPM_PACKAGE = 'pierre-review';
+export const NPM_PACKAGE = 'limn-review';
 
 /** The install command as it appears on the site. */
 export const INSTALL_COMMAND = `npx ${NPM_PACKAGE}`;

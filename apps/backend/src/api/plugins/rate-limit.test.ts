@@ -746,6 +746,19 @@ describe('tierFor — unauthenticated surface', () => {
   });
 });
 
+describe('the AI runtime download', () => {
+  // "Set up AI" spends bandwidth and a child process, not model dollars or GitHub quota, and is
+  // single-flight inside ai/runtime.ts — so it takes the `sync` bucket, spelled exactly.
+  it('puts POST /api/ai/runtime/install on the sync tier', () => {
+    expect(tiers('POST', '/api/ai/runtime/install')).toEqual(['sync']);
+  });
+
+  it('does not sweep a sibling path into it', () => {
+    expect(tiers('POST', '/api/ai/runtime/install-now')).not.toEqual(['sync']);
+    expect(tiers('GET', '/api/ai/runtime')).toEqual(['read']);
+  });
+});
+
 describe('tier limits are ordered sensibly', () => {
   it('AI is the tightest and read the most generous', () => {
     expect(TIERS.ai.limit).toBeLessThan(TIERS.search.limit);

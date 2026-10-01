@@ -951,6 +951,83 @@ export const claudeReviewChatMessages = pgTable(
   }),
 );
 
+// ---- Review memory + AI Fix (CORE since pg 0061 / sqlite 0074) ----
+// Twins of schema.sqlite.ts reviewLearnings / aiFixes, where the contract lives. Adopted in place
+// from the plugin; same index names, no foreign keys.
+export const reviewLearnings = pgTable(
+  'review_learnings',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    sourceReviewId: integer('source_review_id').notNull(),
+    findingId: integer('finding_id'),
+    headSha: text('head_sha').notNull(),
+    kind: text('kind').notNull(),
+    path: text('path'),
+    dirPath: text('dir_path'),
+    ext: text('ext'),
+    category: text('category'),
+    claudeVerdict: text('claude_verdict'),
+    userVerdict: text('user_verdict'),
+    claudeTitle: text('claude_title'),
+    claudeText: text('claude_text'),
+    userText: text('user_text'),
+    postedCommentKind: text('posted_comment_kind'),
+    dedupeKey: text('dedupe_key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    dedupeUx: uniqueIndex('rl_account_dedupe').on(t.accountId, t.dedupeKey),
+    categoryIdx: index('rl_account_repo_category').on(t.accountId, t.repoId, t.category),
+    dirIdx: index('rl_account_repo_dir').on(t.accountId, t.repoId, t.dirPath),
+    sourceReviewIdx: index('rl_account_source_review').on(t.accountId, t.sourceReviewId),
+    createdIdx: index('rl_account_repo_created').on(t.accountId, t.repoId, t.createdAt),
+  }),
+);
+
+export const aiFixes = pgTable(
+  'ai_fixes',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    sourceReviewId: integer('source_review_id'),
+    baseSha: text('base_sha').notNull(),
+    status: text('status').notNull(),
+    model: text('model').notNull(),
+    seed: text('seed').notNull(),
+    prompt: text('prompt'),
+    summary: text('summary'),
+    commitMessage: text('commit_message'),
+    patch: text('patch'),
+    filesChanged: text('files_changed'),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    error: text('error'),
+    pushedBranch: text('pushed_branch'),
+    pushedPrNumber: integer('pushed_pr_number'),
+    pushedPrUrl: text('pushed_pr_url'),
+    pushedAt: timestamp('pushed_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+    commentTargets: text('comment_targets'),
+    commentVerdicts: text('comment_verdicts'),
+  },
+  (t) => ({
+    prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),
+    statusIdx: index('af_account_status').on(t.accountId, t.status),
+  }),
+);
+
 // ---- Workspaces (CORE) ----
 // A named grouping of an account's repos, and the ONE scope this app has — the pg twin of
 // schema.sqlite.ts workspaces. Kept in sync BY HAND (schema-parity.test.ts, which compares
@@ -979,6 +1056,9 @@ export const workspaces = pgTable(
     // Chronology's working hours and wait budgets (migration 0065 / pg 0052) — the pg twin.
     // OVERRIDES ONLY, resolved through `resolveFlowSettings`. Full rationale in the sqlite twin.
     flowSettings: jsonb('flow_settings').$type<FlowSettings>(),
+    // Auto Claude review (migration 0074 / pg 0061) — the pg twin. Full rationale in the sqlite twin.
+    autoReviewEnabled: boolean('auto_review_enabled'),
+    autoReviewEnabledAt: timestamp('auto_review_enabled_at', { withTimezone: true, mode: 'date' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),

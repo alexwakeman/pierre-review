@@ -428,6 +428,13 @@
       "when": 1790215200000,
       "tag": "0060_claude_review_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1790301600000,
+      "tag": "0061_adopt_agentic_tables",
+      "breakpoints": true
     }
   ]
 }

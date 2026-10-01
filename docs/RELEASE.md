@@ -1,8 +1,10 @@
 # Release automation
 
 This repo publishes the single, unscoped, **public** npm package
-[`pierre-review`](https://www.npmjs.com/package/pierre-review) via a GitHub
-Actions workflow (`.github/workflows/release.yml`).
+[`limn-review`](https://www.npmjs.com/package/limn-review) via a GitHub
+Actions workflow (`.github/workflows/release.yml`). It was called `pierre-review`
+until the release that made Claude Review and AI Fix free — see
+[The rename](#the-rename-pierre-review--limn-review).
 
 > **Policy note.** This automation **supersedes** the previous "publishing is the
 > user's job / never publish from CI" policy. Releases now happen automatically
@@ -22,7 +24,8 @@ On every release run it:
    `pnpm install --frozen-lockfile`.
 3. Runs `pnpm typecheck` and `pnpm test` (a failure here aborts the release).
 4. **Computes the next version**, drift-proof: it takes the **highest** of {npm's
-   latest published version, the committed `apps/backend/package.json` version, the
+   latest published `limn-review`, the old name's latest `pierre-review` (so the
+   version line continues across the rename), the committed `apps/backend/package.json` version, the
    newest `vX.Y.Z` git tag} as the base, applies the bump (`npm version <bump>
    --no-git-tag-version`, default `patch`), and then skips forward past any version
    whose tag already exists. So a run never reuses or collides with an existing
@@ -35,7 +38,8 @@ On every release run it:
    plus a `vX.Y.Z` git tag to `main`, in a single **atomic** push
    (`git push --atomic`) — so a rejected push never leaves a dangling tag behind.
 7. **Publishes** `./release` to npm with `npm publish --access public`,
-   **idempotently** — if `pierre-review@X.Y.Z` is already on npm (e.g. a re-run),
+   **idempotently** — if `limn-review@X.Y.Z` is already on npm (e.g. a re-run;
+   the name is read from `release/package.json`, never typed in the workflow),
    it skips instead of failing.
 
 ### When it runs
@@ -61,8 +65,10 @@ Generate New Token**, then pick **one** of:
 
 - **Automation** (classic token) — simplest; works for CI publishing.
 - **Granular access token** — scoped to **Read and write** / publish permission
-  on the **`pierre-review`** package specifically (preferred for least
-  privilege).
+  on the **`limn-review`** package specifically (preferred for least
+  privilege). ⚠ A granular token minted for `pierre-review` cannot publish the
+  new name — re-scope it, or the first automated release after the rename fails
+  at the publish step.
 
 > **2FA note.** If the publishing npm account has **two-factor authentication on
 > publish** enabled, an **Automation token or a Granular token is REQUIRED.**
@@ -200,9 +206,14 @@ and fail with a duplicate-version error — poisoning an innocent merge.
 - **`better-sqlite3` is a native addon.** It is **not bundled** into the release —
   it stays a runtime dependency and is **recompiled on each consumer's machine at
   install time**. This is fine for CI (the publish step ships source/manifest, not
-  a prebuilt binary) and for consumers (`npx pierre-review` triggers the build).
+  a prebuilt binary) and for consumers (`npx limn-review` triggers the build).
 
-- **The unscoped name `pierre-review` must already be owned** (reserved) on npm by
+- **No AI SDK is a dependency.** The manifest carries the exact AI-runtime pins in a
+  non-dependency field, `limnAiRuntime`, which `build-release.mjs` generates and
+  asserts; the SDKs are downloaded on first use into `~/.limn/ai-runtime`
+  ([PACKAGING.md](PACKAGING.md) § No AI SDK in the manifest).
+
+- **The unscoped name `limn-review` must already be owned** (reserved) on npm by
   the publishing account before automation can publish to it.
 
 ### First publish (claiming the name)
@@ -218,6 +229,25 @@ npm publish --access public
 
 Once the name is owned by the account whose `NPM_TOKEN` is configured, subsequent
 releases run entirely through the workflow.
+
+### The rename: `pierre-review` → `limn-review`
+
+The rename shipped in one release with the data-dir move (`~/.pierre-review` →
+`~/.limn`, done once by the app on first start). Two manual steps, both by hand,
+neither ever run by CI:
+
+1. **Claim `limn-review`** with the first-publish recipe above (and re-scope a
+   granular `NPM_TOKEN` to it).
+2. **Retire the old name**, AFTER `limn-review` is live: publish the forwarding
+   stub in `scripts/deprecated-pierre-review/` (it depends on `limn-review` and
+   runs it, so an old `npx pierre-review` keeps working), then
+
+   ```bash
+   npm deprecate pierre-review "Renamed to limn-review. Run: npx limn-review"
+   ```
+
+   The stub's README has the exact checklist (version above the last
+   `pierre-review`, and the optional `@"<0.2.0"` range).
 
 ---
 

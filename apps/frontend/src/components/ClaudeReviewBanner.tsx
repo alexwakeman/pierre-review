@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ActiveReview, ClaudeReviewPhase } from '@pierre-review/shared';
 import { useActiveClaudeReviews } from '../hooks/useClaudeReview.js';
-import { useProCapabilities } from '../hooks/useTriage.js';
+import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { useNotificationPref } from '../hooks/useNotificationPref.js';
 import { useFilters } from '../store/filters.js';
 import { playReviewComplete } from '../lib/sound.js';
@@ -79,7 +79,7 @@ const PHASE_LABEL: Record<string, string> = {
 // you jump straight to a review's Claude Review tab. Renders nothing when there's
 // nothing to show.
 export function ClaudeReviewBanner(): JSX.Element | null {
-  const enabled = useProCapabilities().claudeReview;
+  const enabled = useAiCapabilities().enabled;
   const kickoff = useFilters((s) => s.claudeReviewKickoff);
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
   const [notifEnabled] = useNotificationPref();

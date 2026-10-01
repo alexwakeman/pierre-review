@@ -4,12 +4,11 @@ import {
   readFileSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { config } from '../config.js';
 
 // Local-only settings store for the Claude Review feature, persisted to
-// ~/.pierre-review/config.json (mode 0600). NEVER read or written in cloud mode
+// ~/.limn/config.json (mode 0600; `config.dataDir`). NEVER read or written in cloud mode
 // — the file lives on the user's machine.
 //
 // ⚠ IT NO LONGER HOLDS A CREDENTIAL. The BYO Anthropic key this file existed for is
@@ -29,7 +28,7 @@ import { config } from '../config.js';
 // What is still LIVE is `maxReviewBudgetUsd`, below: the per-review USD ceiling behind
 // ReviewBudgetPanel, PUT /api/claude-review/budget and getEffectiveReviewBudget().
 
-const FILE = join(homedir(), '.pierre-review', 'config.json');
+const FILE = join(config.dataDir, 'config.json');
 
 // Bounds on the user-set per-review budget cap. The MAX is the hard product ceiling the
 // user can never exceed; the MIN keeps them from setting a value so low that every review

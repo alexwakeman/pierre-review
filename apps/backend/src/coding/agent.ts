@@ -1,9 +1,5 @@
-import {
-  createSdkMcpServer,
-  query,
-  tool,
-  type SDKResultMessage,
-} from '@anthropic-ai/claude-agent-sdk';
+import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import { claudeExecutableOptions, loadAgentSdk, type AgentSdk } from '../ai/runtime.js';
 import { config } from '../config.js';
 import { getAccessToken } from '../auth/account.js';
 import { applyClaudeReviewAuth } from '../review/auth.js';
@@ -83,7 +79,7 @@ const DISALLOWED_TOOLS = ['Bash', 'NotebookEdit'];
 // disabled thinking / a thinking budget / a forced tool_choice, none of which is sent here).
 const ACTIVITY_LOG_CAP = 25;
 
-type SdkMcpServer = ReturnType<typeof createSdkMcpServer>;
+type SdkMcpServer = ReturnType<AgentSdk['createSdkMcpServer']>;
 
 interface LiveUsage {
   inputTokens: number;
@@ -158,6 +154,8 @@ export async function runAgentInWorktree(
   // Advanced-AI credential: ambient session preferred, else the local BYO key. Restored below.
   const restoreEnv = applyClaudeReviewAuth(true);
   try {
+  // From the AI runtime (ai/runtime.ts) — downloaded on first use for an npm install.
+  const { query } = await loadAgentSdk();
   const q = query({
     prompt: opts.prompt,
     options: {
@@ -173,6 +171,8 @@ export async function runAgentInWorktree(
       settingSources: [],
       mcpServers: opts.mcpServers,
       abortController: opts.abortController,
+      // LIMN_CLAUDE_PATH → the user's own `claude` instead of the SDK's bundled binary.
+      ...claudeExecutableOptions(),
     },
   });
 
@@ -266,6 +266,8 @@ export async function runCodingAgent(
       token,
     ));
 
+    const { createSdkMcpServer, tool } = await loadAgentSdk();
+    const fixShape = await submitFixShape();
     let captured: SubmitFixPayload | null = null;
     const server = createSdkMcpServer({
       name: 'fix',
@@ -274,7 +276,7 @@ export async function runCodingAgent(
         tool(
           'submit_fix',
           'Report the fix you applied. Call this EXACTLY once, at the very end, after editing files.',
-          submitFixShape,
+          fixShape,
           async (a) => {
             const p = a as unknown as SubmitFixPayload;
             captured = {

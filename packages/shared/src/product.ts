@@ -3,15 +3,16 @@
 //
 // The app is called Limn. It used to be called Pierre, and the rename was staged:
 // every user-visible string moved, while the published/runtime identifiers stayed
-// on the old spelling because they are migrations rather than text edits. The
+// on the old spelling because they are migrations rather than text edits.
+// The npm package (`limn-review`, bin `limn`) and the data dir (`~/.limn`, moved once
+// from `~/.pierre-review` on first boot) have since moved too. The
 // canonical statement of that split lives at apps/landing/src/lib/site.ts (which
 // has its own SITE_NAME and deliberately imports nothing from here — the landing
 // bundle does not depend on this package). Short version of what is STILL
 // `pierre` on purpose, and must never be swept:
 //
-//   · the npm package `pierre-review` and its `npx` invocation
 //   · the domain, the `pierre_session` / `pierre_oauth_state` cookies
-//   · `~/.pierre-review/` and the ~20 `pierre:*` localStorage keys
+//   · the ~20 `pierre:*` localStorage keys
 //   · the AutomatedReviewerKind `'pierre'` — a persisted DB value AND a
 //     400-validated API path segment
 //   · the `refs/pierre/conflict/` git namespace the janitor sweeps by prefix

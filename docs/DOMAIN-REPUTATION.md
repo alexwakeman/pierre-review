@@ -4,7 +4,7 @@ Some visitors — most often on **work / org-managed Chrome profiles** — hit a
 full-page **"Dangerous site"** interstitial (Google Safe Browsing) when signing in
 to `https://pierre-review.com`, while the same flow on a personal profile works
 fine. This doc explains why and how to clear it. It only concerns the **cloud**
-deployment; local mode (`npx pierre-review`) never touches a public domain.
+deployment; local mode (`npx limn-review`) never touches a public domain.
 
 > The matching code-side hardening — the OAuth callback now **redirects** on any
 > failure instead of dumping a raw `{"error":…}` page — lives in

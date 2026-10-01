@@ -1236,6 +1236,103 @@ export const claudeReviewChatMessages = sqliteTable(
   }),
 );
 
+// ---- Review memory + AI Fix (CORE since migration 0074 / pg 0061) ----
+// Both tables were created by the private plugin (plugin migrations 0001 / 0002 / 0003 / 0024) and
+// are ADOPTED IN PLACE by 0074's CREATE … IF NOT EXISTS — same names, same columns, same index
+// names, and NO foreign keys (SQLite cannot add one to an existing table without a rebuild, so a
+// fresh and an adopted install would differ). Tenancy is the query layer's `account_id` predicate
+// plus verify:isolation; no id in either table arrives in a request body. Both delete paths
+// (deleteRepo, retention's deletePrSubtree) and eraseAccountData + accountScopedTables() cover them.
+//
+// reviewLearnings — append-only log of what a reviewer DID with a Claude review (kept / dropped /
+// reworded / posted a finding, changed a verdict). The learnings signal fed back into the next
+// review's prompt (review/memory/).
+export const reviewLearnings = sqliteTable(
+  'review_learnings',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    sourceReviewId: integer('source_review_id').notNull(),
+    findingId: integer('finding_id'),
+    headSha: text('head_sha').notNull(),
+    kind: text('kind').notNull(),
+    path: text('path'),
+    dirPath: text('dir_path'),
+    ext: text('ext'),
+    category: text('category'),
+    claudeVerdict: text('claude_verdict'),
+    userVerdict: text('user_verdict'),
+    claudeTitle: text('claude_title'),
+    claudeText: text('claude_text'),
+    userText: text('user_text'),
+    postedCommentKind: text('posted_comment_kind'),
+    dedupeKey: text('dedupe_key').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    dedupeUx: uniqueIndex('rl_account_dedupe').on(t.accountId, t.dedupeKey),
+    categoryIdx: index('rl_account_repo_category').on(t.accountId, t.repoId, t.category),
+    dirIdx: index('rl_account_repo_dir').on(t.accountId, t.repoId, t.dirPath),
+    sourceReviewIdx: index('rl_account_source_review').on(t.accountId, t.sourceReviewId),
+    createdIdx: index('rl_account_repo_created').on(t.accountId, t.repoId, t.createdAt),
+  }),
+);
+
+// aiFixes — one agentic fix run (history kept; a re-run is a new row). ⚠ An ADOPTED table may
+// carry eight more columns than this declares (plugin 0003's `resolved_*` / `resolve_error`, the
+// removed rebase artifact). Drizzle names only what it knows, so they are never read or written.
+export const aiFixes = sqliteTable(
+  'ai_fixes',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    // The Claude review this fix was seeded from, if any.
+    sourceReviewId: integer('source_review_id'),
+    // The commit the patch applies onto (the live PR head at generate time).
+    baseSha: text('base_sha').notNull(),
+    // 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+    status: text('status').notNull(),
+    model: text('model').notNull(),
+    // AiFixSeed: 'ci_analysis' | 'review' | 'plain' | 'comments'
+    seed: text('seed').notNull(),
+    prompt: text('prompt'),
+    summary: text('summary'),
+    commitMessage: text('commit_message'),
+    // The captured unified-diff patch (includes new files; binary-safe).
+    patch: text('patch'),
+    // JSON string[] of changed paths.
+    filesChanged: text('files_changed'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    error: text('error'),
+    pushedBranch: text('pushed_branch'),
+    pushedPrNumber: integer('pushed_pr_number'),
+    pushedPrUrl: text('pushed_pr_url'),
+    pushedAt: integer('pushed_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    finishedAt: integer('finished_at', { mode: 'timestamp' }),
+    // seed === 'comments' only. JSON, NULL on every other seed: the AiFixCommentTarget[] the run
+    // was given (written at insert, in prompt order) and the AiFixCommentVerdict[] the agent
+    // reported (written on success). `ref` is the join key between the two.
+    commentTargets: text('comment_targets'),
+    commentVerdicts: text('comment_verdicts'),
+  },
+  (t) => ({
+    prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),
+    statusIdx: index('af_account_status').on(t.accountId, t.status),
+  }),
+);
+
 // ---- Workspaces (CORE) ----
 // A named grouping of an account's repos, and the ONE scope this app has. Exactly one row per
 // account carries is_default: it is auto-created, RENAMEABLE, NOT deletable, and new repos land
@@ -1280,6 +1377,14 @@ export const workspaces = sqliteTable(
     // the `accounts.blast_radius_config` precedent. Per WORKSPACE, because two teams in two
     // zones in one account work different hours.
     flowSettings: text('flow_settings', { mode: 'json' }).$type<FlowSettings>(),
+    // ── AUTO CLAUDE REVIEW (migration 0074 / pg 0061; moved off the plugin's
+    // pro_workspace_settings, whose columns are dormant now) ─────────────────────────────────
+    // NULL/false = off. `autoReviewEnabledAt` is when it was last switched ON — the floor the
+    // sweeper reviews from (only PRs OPENED at or after it), so a first sync, a backfill or a new
+    // repo can never make an old PR look new. Re-stamped on every off -> on; cleared on off. The
+    // ONE writer is `setWorkspaceAutoReview` (review/claude-review/auto-settings.ts).
+    autoReviewEnabled: integer('auto_review_enabled', { mode: 'boolean' }),
+    autoReviewEnabledAt: integer('auto_review_enabled_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

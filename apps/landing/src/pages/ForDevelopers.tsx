@@ -29,7 +29,7 @@ import { TierTable } from '../components/feint/TierTable';
 // here talks about visibility, insights or velocity — that is the manager's
 // page, and only some of it is even true.
 //
-// ⚠ THE MULTI-REPO PROBLEM LEADS AND THE BOTS ARE A PEER SECTION (§06 of eight).
+// ⚠ THE MULTI-REPO PROBLEM LEADS AND THE BOTS ARE A PEER SECTION (§07 of nine).
 // An earlier cut opened with "every pull request is read by three or four review
 // bots", which described the automation as the problem and narrowed the page to
 // readers who already feel they have a bot problem. The larger, plainer truth is
@@ -46,8 +46,9 @@ import { TierTable } from '../components/feint/TierTable';
 // ⚠ THE PROMISE IS NOW SPELLED "PLAN YOUR DAY", AND THE RULES ARE HALF OF IT.
 // The app opens on Pending, so the page leads with it: 01 the day (the problem),
 // 02 Pending (the plan), 03 your rules (what counts as your turn, the order, the
-// mute — all free settings), 04 act in place (finishing the plan), then the
-// threads, the bots, the rest of the free tier and Pro. The rules are a section of
+// mute — all free settings), 04 review and fix (Claude Review, Ask Claude and AI
+// Fix — free, local only, on the reader's own Claude), 05 act in place (finishing
+// the plan), then the threads, the bots, the rest of the free tier and Pro. The rules are a section of
 // their own because a ranked list whose idea of "your turn" you cannot change is
 // somebody else's list. The Story clock times run in page order; keep them so.
 //
@@ -86,16 +87,17 @@ export default function ForDevelopers(): JSX.Element {
           had moved on from, and a conflict that appeared overnight on the one that was ready
           to land. {SITE_NAME} puts all of it on one board across every repository you work
           in, ranked, with what to do next at the top. You decide what counts as your turn
-          and how it is ordered — and you finish the work without leaving the page.
+          and how it is ordered — and you finish the work without leaving the page. Claude
+          reviews and fixes pull requests too, on your own Claude, free.
         </p>
         <div className="mb-4 flex flex-wrap items-center gap-3.5">
           <InkButton to="/api/auth/login">Sign in with GitHub</InkButton>
           <UnderlineLink to="/for-managers">If you run the team →</UnderlineLink>
         </div>
         <p className="mb-11 max-w-reassure font-mono text-mono-nav text-secondary">
-          Everything in the next seven sections is free, with no repository limit. Run it on
+          Everything in the next eight sections is free, with no repository limit. Run it on
           your own machine with <span className="text-ink">{INSTALL_COMMAND}</span> and it
-          keeps no credentials at all.
+          keeps no credentials at all. Review and fix run only there.
         </p>
       </header>
 
@@ -133,7 +135,7 @@ export default function ForDevelopers(): JSX.Element {
                   ))}
                 </ul>
                 <Story moment="Free, always">
-                  everything in sections 01 to 07 is in the open-core tier.
+                  everything in sections 01 to 08 is in the open-core tier.
                 </Story>
               </div>
             </div>
@@ -192,7 +194,7 @@ export default function ForDevelopers(): JSX.Element {
         <p>
           The tabs and the order are free on every tier. The{' '}
           <span className="text-ink">Plan my day</span> button in the corner is Pro: it adds
-          the written sentences on top (§08).
+          the written sentences on top (§09).
         </p>
         <Story moment="09:04">
           sixty-one items across five repositories, and the first three are the ones you can
@@ -277,9 +279,103 @@ export default function ForDevelopers(): JSX.Element {
         </RailGrid>
       </Section>
 
-      {/* ---------- 04 · act in place ---------- */}
+      {/* ---------- 04 · review and fix ---------- */}
+      {/* ⚠ FREE, LOCAL ONLY, ON THE READER'S OWN CLAUDE. Claude Review, its chat and AI
+          Fix are core and run through `review/auth.ts`'s two-rung ladder (an ambient
+          Claude Code session, else ANTHROPIC_API_KEY); the hosted app does not register
+          them. Never promise subscription billing or "free AI": the reader's own Claude
+          or key pays, and Limn charges nothing for it.
+
+          ⚠ THE SAFETY LINES ARE TOOL LISTS, NOT ADJECTIVES. The reviewer and the chat
+          deny Write/Edit/Bash/WebFetch/WebSearch (`review/agent.ts`, `chat-agent.ts`);
+          the fixer CAN edit and has no shell (`coding/agent.ts`), so it builds and
+          tests nothing. Never write "read-only agents" (the fixer writes) or "CI will
+          check it" (many repositories have no CI at all).
+
+          No screenshot yet: no capture of the Claude tab, the chat or the fix diff
+          exists. Add a FeatureShot when one is taken — never borrow another screen.
+          The CI-failure read is NOT here: it stays Pro (§09). */}
+      <Section>
+        <RailGrid rail={{ n: '04', word: 'Review and fix' }}>
+          <div className="rail:col-span-2">
+            <h2 className="mb-6 max-w-[28ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
+              Claude reviews it and fixes it. On your own Claude, free.
+            </h2>
+            <p className="mb-[30px] max-w-[62ch] text-pretty">
+              Every pull request has a Claude tab. Claude reads the change and writes up what
+              it finds; you decide what reaches GitHub.
+            </p>
+            <div className="grid gap-grid-gutter rail:grid-cols-3">
+              <div>
+                <h3 className="mb-3 font-display text-h4 font-semibold text-ink">
+                  Claude Review
+                </h3>
+                <p className="text-list text-ink-body">
+                  Findings on the change, each tied to a line. Tick the ones worth keeping and
+                  post them as one GitHub review. Paste in the story and it checks the change
+                  against it. Switch on auto review for a workspace and new pull requests are
+                  reviewed as they arrive.
+                </p>
+              </div>
+              <div>
+                <h3 className="mb-3 font-display text-h4 font-semibold text-ink">
+                  Ask Claude
+                </h3>
+                <p className="text-list text-ink-body">
+                  A chat on the review, and on each finding. Ask why a line was flagged, or
+                  whether it matters here. It reads the same code the review did.
+                </p>
+              </div>
+              <div>
+                <h3 className="mb-3 font-display text-h4 font-semibold text-ink">
+                  AI Fix
+                </h3>
+                <p className="text-list text-ink-body">
+                  Pick the review comments you want fixed. It edits a copy of the branch and
+                  shows you the diff. It pushes only when you click Push.
+                </p>
+              </div>
+            </div>
+            <div className="mt-10 grid gap-grid-gutter rail:grid-cols-2">
+              <div>
+                <h3 className="mb-3 font-display text-h4 font-semibold text-ink">
+                  Your Claude, not ours
+                </h3>
+                <p className="text-list text-ink-body">
+                  It runs on your own Claude Code or Anthropic API key: the Claude Code session
+                  you are signed in to, or <span className="text-ink">ANTHROPIC_API_KEY</span>.{' '}
+                  {SITE_NAME} stores no key and charges nothing for it. The first time, it asks
+                  for a one-time download of about 110 MB. It runs on your machine, with{' '}
+                  <span className="text-ink">{INSTALL_COMMAND}</span>.
+                </p>
+              </div>
+              <div>
+                <h3 className="mb-3 font-display text-h4 font-semibold text-ink">
+                  What it can do
+                </h3>
+                <ul className="flex flex-col gap-3.5">
+                  <DashItem>
+                    The reviewer reads the code. It cannot edit files, run commands or reach
+                    the web.
+                  </DashItem>
+                  <DashItem>
+                    The fixer edits files. It has no shell, so it builds and tests nothing.
+                  </DashItem>
+                  <DashItem>Nothing is posted or pushed until you press the button.</DashItem>
+                </ul>
+              </div>
+            </div>
+            <Story moment="09:07">
+              a review on the pull request you were about to approve; two findings posted, one
+              fixed.
+            </Story>
+          </div>
+        </RailGrid>
+      </Section>
+
+      {/* ---------- 05 · act in place ---------- */}
       <FeatureShot
-        rail={{ n: '04', word: 'Act in place' }}
+        rail={{ n: '05', word: 'Act in place' }}
         tone="alt"
         heading="Reply, approve, merge — from the board."
         src="/shots/pr-detail.png"
@@ -315,9 +411,9 @@ export default function ForDevelopers(): JSX.Element {
         </Story>
       </FeatureShot>
 
-      {/* ---------- 05 · threads ---------- */}
+      {/* ---------- 06 · threads ---------- */}
       <FeatureShot
-        rail={{ n: '05', word: 'The threads' }}
+        rail={{ n: '06', word: 'The threads' }}
         heading="Every review thread already triaged."
         src="/shots/pr-threads.png"
         alt="A pull request's thread list: each thread carrying a derived state, the vendor that opened it and a severity badge"
@@ -346,16 +442,16 @@ export default function ForDevelopers(): JSX.Element {
         </Story>
       </FeatureShot>
 
-      {/* ---------- 06 · what the bots said ----------
+      {/* ---------- 07 · what the bots said ----------
           ⚠ THIS SECTION USED TO BE THE DIFF, and it was changed because the
           screenshot could not be taken honestly: the Changes tab hydrates its
           patches from GitHub on demand, so against the seeded demo repositories
           it correctly renders "inline diffs aren't available". Rather than ship a
           picture of an empty state under a paragraph describing a file tree, the
           section now shows the screen that IS real here — and the blast-radius
-          claim moved to the act-in-place section (§04), where the chip is visible in the header. */}
+          claim moved to the act-in-place section (§05), where the chip is visible in the header. */}
       <FeatureShot
-        rail={{ n: '06', word: 'The bots' }}
+        rail={{ n: '07', word: 'The bots' }}
         tone="alt"
         heading="And the bot comments, graded before you read them."
         src="/shots/severity-strip.png"
@@ -394,9 +490,9 @@ export default function ForDevelopers(): JSX.Element {
         </Story>
       </FeatureShot>
 
-      {/* ---------- 07 · the rest of the free tier ---------- */}
+      {/* ---------- 08 · the rest of the free tier ---------- */}
       <Section>
-        <RailGrid rail={{ n: '07', word: 'Also free' }}>
+        <RailGrid rail={{ n: '08', word: 'Also free' }}>
           <div className="rail:col-span-2">
             <h2 className="mb-[30px] max-w-[30ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
               And the rest of it, still without paying.
@@ -448,17 +544,18 @@ export default function ForDevelopers(): JSX.Element {
         />
       </Section>
 
-      {/* ---------- 08 · what Pro adds ---------- */}
+      {/* ---------- 09 · what Pro adds ---------- */}
       <Section divider="ink" tone="alt">
-        <RailGrid rail={{ n: '08', word: 'Pro' }}>
+        <RailGrid rail={{ n: '09', word: 'Pro' }}>
           <div>
             <MonoLabel className="mb-4 text-signal-text">Pro · $25 per user</MonoLabel>
             <h2 className="mb-6 max-w-[26ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
               The reading, when the list gets long.
             </h2>
             <p className="mb-6 max-w-[58ch] text-pretty">
-              Pro does not unlock an action. Everything you can do to a pull
-              request, and every rule behind Pending, you already get for nothing, and that is deliberate — a tool that held back the
+              Pro does not unlock an action. Everything you can do to a pull request,
+              Claude&rsquo;s review and fix included, and every rule behind Pending, you already
+              get for nothing, and that is deliberate — a tool that held back the
               merge button would be holding your work hostage.
             </p>
             <p className="mb-6 max-w-[58ch] text-pretty">

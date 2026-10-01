@@ -32,6 +32,8 @@ import {
 } from '../../pro/contract.js';
 import { getAuthNotices } from '../../sync/auth-notices.js';
 import { isSeverityApiConfigured } from '../../ml/severity-client.js';
+import { getAiRuntimeStatus } from '../../ai/runtime.js';
+import { detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { getMyTurn } from '../../db/queries.js';
 import { clearDailyBriefCountsFor } from '../../db/daily-brief.js';
 import { dismissMyTurn, restoreMyTurn } from '../../db/my-turn-dismissals.js';
@@ -170,6 +172,29 @@ const deleteAccountSchema = {
   },
 };
 
+/**
+ * `MeResponse.ai`. `enabled` is the ONE agentic switch (config.aiEnabled: local and not
+ * LIMN_AI_DISABLED) — the same value that decides whether `registerAgenticRoutes` registers
+ * anything. `runtime` is the one-time SDK download (ai/runtime.ts). `auth` is `detectClaudeAuth`'s
+ * HEURISTIC (a `~/.claude` directory counts): it decides only whether a Run button or the one
+ * "Sign in to Claude Code or set ANTHROPIC_API_KEY" line shows, never whether the feature is
+ * visible — the run itself is the authoritative check. Disabled ⇒ the other fields are inert.
+ */
+function agenticAiStatus(): MeResponse['ai'] {
+  if (!config.aiEnabled) {
+    return { enabled: false, runtime: 'absent', runtimeMessage: null, auth: 'none', authMessage: null };
+  }
+  const rt = getAiRuntimeStatus();
+  const auth = detectClaudeAuth();
+  return {
+    enabled: true,
+    runtime: rt.runtime,
+    runtimeMessage: rt.runtimeMessage,
+    auth: auth.status === 'ok' ? 'ok' : 'none',
+    authMessage: auth.status === 'ok' ? null : NO_CLAUDE_AUTH_MESSAGE,
+  };
+}
+
 export async function meRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/me', async (req): Promise<MeResponse> => {
     const accountId = accountIdOf(req);
@@ -205,9 +230,12 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // per-workspace and reads standing `my_turn` card counts off the daily brief, so all
       // three had no reader left and were pure per-request work on the SPA's first call.
       // If you need a count here again, prefer the brief's fold over re-adding one.
-      // Claude Review is now the Pro `claudeReview` capability (in `pro` below).
       deploymentMode: config.deploymentMode,
       pro: entitled,
+      // THE AGENTIC FEATURES — Claude Review (+ chat, follow-up, ticket check, auto review),
+      // review memory, AI Fix. CORE, FREE, LOCAL ONLY. TOP-LEVEL and NOT inside `pro`, so
+      // `entitledProCapabilities` can never zero it (the `mlSeverity` argument).
+      ai: agenticAiStatus(),
       // ML severity/category enrichment of bot comments — FREE TIER, so a TOP-LEVEL field and
       // NOT part of `pro` above: `entitledProCapabilities` returns all-false for a cloud
       // account on the free plan, which would hide this from exactly the users it is for.

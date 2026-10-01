@@ -12,10 +12,29 @@ against the selected PR, returns **structured JSON findings** (persisted per hea
 history kept), lets the user author their own review + tick which findings to post, then
 posts **one** GitHub review (inline + body + verdict).
 
-- **Opt-in, off by default, LOCAL-ONLY.** Gated behind `ENABLE_CLAUDE_REVIEW=true`
-  (`config.claudeReviewEnabled`) — it spends real money per run. **Force-disabled in cloud**
-  (`!isCloud && …`): the routes aren't even registered (`app.ts`), so the gh-CLI/clone-manager
-  dep stays unreachable on Railway. When off, the frontend hides the tab (via `/api/me`).
+- **FREE, ON BY DEFAULT, LOCAL-ONLY — and ALWAYS VISIBLE locally.** Since apiVersion 22 Claude
+  Review (with its follow-up, ticket check, auto review and chat), review memory and AI Fix's fixer
+  are CORE again — no plan, no opt-in flag. They run on the user's OWN Claude Code session or
+  `ANTHROPIC_API_KEY`; Limn stores no key and charges nothing for them. ONE switch,
+  `config.aiEnabled` = `!isCloud && LIMN_AI_DISABLED !== 'true'`; `ENABLE_CLAUDE_REVIEW`,
+  `PRO_ADVANCED_AI_ENABLED` and its alias `PRO_CLAUDE_REVIEW_ENABLED` are DELETED as gates (the
+  manager's second-guard constant, once `CLAUDE_REVIEW_ENABLED`, is `AGENTIC_AI_ENABLED` =
+  `config.aiEnabled`).
+  - ⚠ **CLOUD IS OFF BY AN EXPLICIT `isCloud` CHECK**: `registerAgenticRoutes` (`review/agentic.ts`)
+    registers NOTHING there, so the routes 404 (pinned by `review/agentic.test.ts`). It used to
+    rest on an env var being unset. `api/plugins/auth.ts`'s `isProPath` 402 still lists every
+    Claude Review URL and covers the fixer's `/api/pro/` paths — the SECOND guard.
+  - `LIMN_AI_DISABLED=true` is the kill switch for a team that forbids AI tooling: no agentic
+    route registers and `MeResponse.ai.enabled` is false, so every surface hides.
+  - `MeResponse.ai` (TOP-LEVEL, never inside `pro`, so `entitledProCapabilities` cannot zero it):
+    `enabled`, `runtime` (the one-time SDK download, `ai/runtime.ts`), `auth` + `authMessage`
+    (`detectClaudeAuth`'s heuristic). No credential replaces the Run button with ONE line —
+    `NO_CLAUDE_AUTH_MESSAGE`, "Sign in to Claude Code or set ANTHROPIC_API_KEY" — never hides the
+    feature. The run itself is the authoritative check.
+  - Safety facts the copy may state, and nothing more: the reviewer reads code and cannot edit
+    files, run commands or reach the web; the fixer edits files, has no shell, builds and tests
+    nothing; nothing is posted or pushed until the reader presses the button. Never promise
+    subscription billing.
 - **Auth is a TWO-RUNG ladder and there is no stored key** (`review/auth.ts`,
   `applyClaudeReviewAuth`): an **ambient Claude session** (`CLAUDE_CODE_OAUTH_TOKEN` or a
   logged-in `claude` on disk) is PREFERRED — the run STRIPS any `ANTHROPIC_API_KEY` for its
@@ -32,21 +51,31 @@ posts **one** GitHub review (inline + body + verdict).
   per-review BUDGET. Pinned by `review/auth.test.ts`, whose two ⚠ cases are exactly "a stored
   key never makes `detectClaudeAuth` say ok" and "a stored key is never written into the
   environment".
-- **The code is SPLIT between core and the Pro plugin.** CORE `apps/backend/src/review/` owns
-  the security-sensitive half, reached through the `ctx.review.*` seam: `agent.ts` (the SDK run:
-  an in-process MCP `submit_review` tool — `schema.ts` — captures structured output; read-only
-  tools, `cwd` = a worktree, `bypassPermissions`, `settingSources:[]`, `maxTurns`/`maxBudgetUsd`
-  caps, `AbortController` cancel), `submit-map.ts` (anchors the submitted findings and passes
-  `priorRef` / `followUp` / `ticket` through verbatim), `model-options.ts` (per-model effort +
-  thinking, shared with `coding/agent.ts`), `prepare.ts` (`gh pr diff` + `NOISE_GLOBS` stripping +
-  per-file metrics + cap), `clone-manager.ts` (partial clones under `config.cloneDir`, ephemeral
-  per-run worktrees, LRU cleanup), `post-review.ts` + `post-seam.ts` (line-anchoring + the single
-  review POST), `pricing.ts` (the live estimate). The PLUGIN
-  `packages/pro/src/claude-review/` owns the product: `manager.ts` (in-memory queue, one
-  review/PR, `PRO_REVIEW_CONCURRENCY`, startup reconcile of orphaned `running` rows),
-  `routing.ts`, `prompts.ts`, `follow-up.ts`, `ticket.ts`, `persist.ts`, `routes.ts`. The
-  `claude_reviews` / `claude_review_findings` tables stay CORE (both dialects); the plugin writes
-  them through `ctx.db` / `ctx.schema`. (`review-manager.ts` / `prompt.ts` no longer exist in core.)
+- **ALL OF IT IS CORE now** (`apps/backend/src/review/`). The security-sensitive half:
+  `agent.ts` (the SDK run: an in-process MCP `submit_review` tool — `schema.ts` — captures
+  structured output; read-only tools, `cwd` = a worktree, `bypassPermissions`,
+  `settingSources:[]`, `maxTurns`/`maxBudgetUsd` caps, `AbortController` cancel), `submit-map.ts`,
+  `model-options.ts`, `prepare.ts` (`gh pr diff` + `NOISE_GLOBS` stripping + per-file metrics +
+  cap), `clone-manager.ts`, `post-review.ts` + `post-seam.ts`, `pricing.ts`, `chat-agent.ts`. The
+  product half, moved back from the plugin at apiVersion 22 and published under FSL-1.1-MIT:
+  `claude-review/` (`manager.ts` — in-memory queue, one review/PR, `PRO_REVIEW_CONCURRENCY`, the
+  auto lane, startup reconcile; `routing.ts`, `prompts.ts`, `follow-up.ts`, `ticket.ts`,
+  `persist.ts`, `routes.ts`, `chat.ts`, `auto.ts`, `auto-settings.ts`), `memory/` (capture,
+  retrieval, the two UI-data routes) and `../coding/ai-fix/` (the fixer).
+  - ⚠ **They take ONE context argument, `AgentContext`** (`review/agent-context.ts`), built by
+    `buildAgentContext` from DIRECT core imports — `ctx.review.*`, `ctx.coding.generateFix` /
+    `applyAndPush`, `ctx.github.*`, `ctx.reviewEvents`, `ctx.aiCredits`, `ctx.db` / `ctx.schema`.
+    It is not `ProContext`: those seams were DELETED from the plugin contract. The argument stays
+    because the tests pass a fake one and the queues carry it per item. Every SDK-bearing module is
+    still reached through a lazy `await import()` inside the member that runs it.
+  - Registration: routes in `buildApp` via `registerAgenticRoutes`; the process-level half
+    (review-memory capture on the event bus, the auto-review sweeper, the crash-orphan reconciles)
+    once at boot via `startAgenticBackground` (index.ts).
+  - **Two Pro inputs ride an OPTIONAL plugin seam**, `ProContext.registerAgenticProviders?`
+    (`review/plugin-providers.ts`): `resolveReviewTicket` (the Jira fill for an AUTO review — see
+    § Auto review) and `readCiAnalysisSeed` (AI Fix's `ci_analysis` seed — see § AI Fix). Absent,
+    both features run without them.
+  - The URL paths never moved: the SPA client calls exactly what it called before.
 - **Deterministic routing** (`claude-review/routing.ts`, tested): BEFORE the agent runs, a pure
   diff-metrics gate (`config.reviewRouting`) picks a `reviewMode` — `skip` / `diff_only`
   (tool-less, no clone) / `worktree` (full clone as context) — stored on `reviewMode` +
@@ -93,22 +122,12 @@ posts **one** GitHub review (inline + body + verdict).
     ignored. Claude's explanations are prefixed
     "Claude:"; all model and user-story text renders as plain text (no Markdown, no href), and an
     anchor is a `<button>` into the Changes tab only when the file is in the PR.
-- **Packaging (NO AI in npm):** the AI SDKs (`@anthropic-ai/claude-agent-sdk`,
-  `@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`, and `zod` — used only by the AI tools'
-  submit-review schemas) are **NOT** curated runtime deps in `build-release.mjs`; a guardrail
-  assert fails the build if any leak into `release/package.json`. Every module that pulls one
-  is reached **only** through a dynamic `await import()` — from the private `@pierre/pro`
-  plugin's seams (`review/agent`, `coding/agent`, `review/prepare`, `review/post-seam`; since AI
-  Fix's trunk reconciliation was removed, `coding/merge` imports no SDK) or lazily inside
-  `review/llm.ts` — so the SDKs load **only when the plugin is present** (author/dev checkout),
-  **never from npm** and **never in cloud** (`bind.ts` returns before any AI import when
-  `!config.proEnabled`). The compiled-but-inert AI `.js`
-  files still ship as dead code (harmless — nothing loads them). `@pierre-review/shared` is
-  VENDORED into the release (`release/dist/shared`), so both core and the plugin may VALUE-import
-  it — the plugin's generate route reads `CLAUDE_REVIEW_MODELS` and `checkClaudeReviewTicket`
-  from it at runtime. `model-options.ts` and `submit-map.ts` import no SDK (`submit-map.ts` takes
-  the zod payload type with `import type`), and both are reached only from the dynamically
-  imported agents.
+- **Packaging (NO AI SDK in the npm manifest):** the AI SDKs (`@anthropic-ai/claude-agent-sdk`,
+  `@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`, `zod`) are NOT dependencies of the published
+  package; "Set up AI" (`POST /api/ai/runtime/install`, or `limn ai install`) downloads exact
+  pinned versions into `<dataDir>/ai-runtime` on first use, and ONE loader module,
+  `apps/backend/src/ai/runtime.ts`, value-imports them. [PACKAGING.md](PACKAGING.md) owns the
+  details and the guardrail. The product modules import no SDK themselves.
 
 ## Models
 
@@ -143,7 +162,7 @@ posts **one** GitHub review (inline + body + verdict).
   backend — a running `tsx watch` keeps the old SDK loaded.
 - **AI Fix inherits the offered list and opens on `DEFAULT_AI_FIX_MODEL` = `claude-opus-5-5`**
   (`packages/shared`, ONE spelling), read by the fixer picker (`AiFixTab`), the CI card's "Fix it"
-  (`CiAnalysisCard`) and the plugin start route. "On medium" is the `PINNED_EFFORT` pin above,
+  (`CiAnalysisCard`) and the core start route (`coding/ai-fix/routes.ts`). "On medium" is the `PINNED_EFFORT` pin above,
   reached through `coding/agent.ts` → `sdkModelOptions(model, 'worktree')`; the constant carries no
   effort of its own. `POST /api/pro/prs/:id/ai-fix` checks `model` IN THE HANDLER — there is no ajv
   body schema, because `removeAdditional` would strip `seed`/`reviewText`/`commentTargets`: absent or
@@ -241,7 +260,7 @@ comments and says, for each one, whether the current code deals with it.
 ## Starting from the Open PRs tab
 
 The Open PRs table (`OpenPrsTable`, the pinned "Open PRs" tab) carries a **Claude review** column
-when — and only when — the `claudeReview` capability is on; without it there is no column and no
+when — and only when — `MeResponse.ai.enabled` is on; without it there is no column and no
 request.
 
 - **ONE read for the whole table**: `POST /api/claude-review/states` with the listed PR ids
@@ -343,18 +362,24 @@ Optional title, description and acceptance criteria the person running the revie
 
 ## Auto review (per workspace)
 
-Settings → Workspace → **Auto Claude review** (shown only when the `claudeReview` capability is
-on). When a workspace switches it on, Claude reviews each **human-authored, non-draft PR OPENED at
+Settings → Workspace → **Auto Claude review** (shown wherever `MeResponse.ai.enabled` is — local,
+free; **OFF until switched on**, because it spends the user's own Claude in the background). When a
+workspace switches it on, Claude reviews each **human-authored, non-draft PR OPENED at
 or after that moment** — once per PR, ever — with the same model (`DEFAULT_CLAUDE_REVIEW_MODEL`) and
-per-review budget as the Review button. Storage: `pro_workspace_settings.auto_review_enabled` +
-`auto_review_enabled_at` (plugin `0036`); `enabled_at` is re-stamped on every off → on and cleared on
-off, so nothing opened while it was off is picked up. Runs carry `claude_reviews.trigger = 'auto'`
+per-review budget as the Review button. Storage: CORE `workspaces.auto_review_enabled` +
+`auto_review_enabled_at` (core `0074` / pg `0061`; it lived on the plugin's
+`pro_workspace_settings` (plugin `0036`) until Claude Review left the plugin, and plugin `0037`
+copied each ON switch across once — those plugin columns are dormant). Read and written through
+`GET`/`PUT /api/workspaces/:id/auto-review` (`claude-review/auto-settings.ts`, 404 for another
+account's workspace, `enabled` required); `setWorkspaceAutoReview` is the ONE writer. `enabled_at`
+is re-stamped on every off → on (whole seconds, so the echo matches what SQLite stores), KEPT on a
+repeated on, and cleared on off, so nothing opened while it was off is picked up. Runs carry `claude_reviews.trigger = 'auto'`
 (core `0071` / pg `0058`; `'manual'` is the default).
 
-- **A PULL SWEEPER, NOT A HOOK** (`packages/pro/src/claude-review/auto.ts`, every minute on the host
+- **A PULL SWEEPER, NOT A HOOK** (`review/claude-review/auto.ts`, every minute on the core
   scheduler). `sync/upsert.ts` runs inside a transaction and sees every PR of a first sync or a
   90-day backfill as new, so it is the wrong place. Each tick asks core
-  `ProHostQueries.getAutoReviewCandidates` (OPTIONAL seam, apiVersion stays 21): open, not draft,
+  `getAutoReviewCandidates` (db/queries.ts): open, not draft,
   `opened_at >= enabled_at`, the author a PERSON under the workspace's own judgement
   (`hiddenBotUserIds`, the resolver behind `InsightPrRef.authorIsBot`; an unmapped author is
   skipped), and **no `claude_reviews` row of any kind** (manual, auto, failed). The DB is the queue:
@@ -364,7 +389,7 @@ off, so nothing opened while it was off is picked up. Runs carry `claude_reviews
   `PRO_REVIEW_CONCURRENCY` is shared and unchanged. ⚠ Auto work can never make a click answer
   `busy` (the manual cap is untouched). The row is written when a slot opens, through the same
   `startReview` steps. ⚠ **Switching a workspace OFF drops its WAITING items** (`dropAutoReviews`,
-  called by the settings PUT and again by every sweep against the roster): they have no row, so
+  called by the auto-review PUT and again by every sweep against the roster): they have no row, so
   nothing is lost, and otherwise a full lane would still be reviewed and billed after the switch. A
   run that already started keeps its Stop.
 - ⚠ **MANUAL IS LOCKED WHILE AUTO HOLDS THE PR.** While an auto review is waiting in the lane (or
@@ -379,9 +404,12 @@ off, so nothing opened while it was off is picked up. Runs carry `claude_reviews
   the same way. A waiting item has no Stop (cancel would not stick — the sweeper re-finds a PR with
   no row); a RUNNING auto run keeps the ordinary Stop. The Open PRs column shows the same hold (§
   Starting from the Open PRs tab).
-- ⚠ **AN AUTO RUN ALWAYS TRIES JIRA** (`packages/pro/src/jira/resolve-ticket.ts`,
-  `resolveAutoReviewTicket`, called by `startAutoItem` before the row is written). No browser is
-  there to "Fill from KEY", so the server does the same fill: the PR's FIRST detected key (the one
+- ⚠ **AN AUTO RUN TRIES JIRA WHEN THE PLUGIN OFFERS IT.** Jira stays PRO: `startAutoItem` asks the
+  OPTIONAL `resolveReviewTicket` provider (`review/plugin-providers.ts`), which the plugin registers
+  when its tracker tier is on, backed by `packages/pro/src/jira/resolve-ticket.ts`
+  (`resolveAutoReviewTicket`), before the row is written. Without the plugin, free auto review runs
+  with no story (free manual review checks a PASTED story). No browser is there to "Fill from KEY",
+  so the plugin does the same fill: the PR's FIRST detected key (the one
   detection path, so the token still reads only tickets this workspace's PRs name), fetched through
   `jiraCall` → `jira/fetch.ts`, criteria from `defaultAcCandidate(candidates, null)` — a strong name
   match or none, never a weak one. Each field is CUT to its cap (and unstorable characters dropped)
@@ -392,8 +420,9 @@ off, so nothing opened while it was off is picked up. Runs carry `claude_reviews
 - **THE COST GUARD**: `AUTO_REVIEW_DAILY_CAP` = 20 auto runs per workspace per **UTC** day, counting
   today's auto rows plus items still waiting in the lane. Past it, PRs wait for the next day. An
   account whose agent credits are spent sits the tick out.
-- ⚠ **IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF.** `autoReviewAvailable` = the pro+ flag AND a local
-  host; in cloud the job is never registered and the settings PUT drops the switch.
+- ⚠ **IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF.** `autoReviewAvailable` = `config.aiEnabled` AND a
+  local host, checked separately; in cloud (and under LIMN_AI_DISABLED) neither the job nor the
+  auto-review routes are registered.
 - **Who hears about it.** ⚠ **OWNERSHIP IS PRIMARY**: an auto run raises the My Turn "Claude
   review ready" card for the account whose workspace switched it on, exactly like a manual run —
   there is NO author / requested-reviewer audience test (an earlier cut had one and dropped auto
@@ -409,9 +438,9 @@ off, so nothing opened while it was off is picked up. Runs carry `claude_reviews
 
 After a review **succeeds**, the reader can ask Claude about it: one **general thread** per review
 ("Ask Claude about this review", under the findings) and one **thread per finding** (the finding's
-**Ask Claude** button). Pro+ and local-only like the rest of Claude Review. Host:
-`review/chat-agent.ts` behind the OPTIONAL seam `ctx.review.chat` (apiVersion stays 21). Plugin:
-`packages/pro/src/claude-review/chat.ts`. SPA: `components/ClaudeReviewChat.tsx` +
+**Ask Claude** button). Free and local-only like the rest of Claude Review. Host:
+`review/chat-agent.ts`, reached as `ctx.review.chat` on the core `AgentContext`. Product:
+`review/claude-review/chat.ts`. SPA: `components/ClaudeReviewChat.tsx` +
 `hooks/useClaudeReviewChat.ts`. Table: `claude_review_chat_messages` (core `0073` / pg `0060`).
 
 - **AN AGENT THAT MIRRORS THE REVIEW'S MODE.** A worktree review's questions are answered with
@@ -448,3 +477,28 @@ After a review **succeeds**, the reader can ask Claude about it: one **general t
   thread's cache in the hook-level `onSuccess`, never a `mutate()` callback. A thread reopened while
   the server is still answering polls every 4s until the answer lands.
 
+## AI Fix (the agentic fixer)
+
+CORE, free and local-only since apiVersion 22 (`apps/backend/src/coding/ai-fix/`: `manager.ts`,
+`routes.ts`, `comment-seed.ts`, `pr-context.ts`, `prompts.ts`, `persist.ts`; the agent itself is
+`coding/agent.ts`). Its table `ai_fixes` is core since sqlite `0074` / pg `0061`. The PR summary and
+the **CI-failure analysis** stayed PRO (one-shot Haiku, `prSummary`, the plugin's
+`ai-fix/analysis.ts` + `ai_pr_analyses`).
+
+- **The paths kept their historical `/api/pro/` prefix** — `GET|POST /api/pro/prs/:id/ai-fix`,
+  `…/ai-fix/status`, `…/ai-fix/stream`, `…/ai-fix/cancel`, `GET /api/pro/ai-fixes/:fixId`,
+  `POST /api/pro/ai-fixes/:fixId/push` — so the SPA client did not move. Nothing about them is
+  paid; they register only through `registerAgenticRoutes`.
+- **THE FOUR SEEDS** (`AiFixSeed`): `plain` and `review` (the reader's text, or a Claude review's)
+  and `comments` (the basket, resolved server-side in `comment-seed.ts`) are FREE. ⚠ `ci_analysis`
+  is seeded from the Pro CI diagnosis, which core cannot read: it asks the OPTIONAL
+  `readCiAnalysisSeed` provider (the plugin's `ai-fix/analysis.ts`, registered on its summary tier;
+  the text arrives ALREADY STRIPPED of its CONFIDENCE footer). No provider or no stored analysis ⇒
+  `ciSeedDecision` answers `missing` and the route 409s "Analyze the CI failure first, then fix" —
+  never an unseeded run wearing the label. The head pin and the contract epoch
+  (`CI_ANALYSIS_CONTRACT_EPOCH_MS`) are still core's decision (`ci-seed-staleness.test.ts`).
+- **No shell.** `WORKTREE_RULES` (both fix prompts, core) and the tool list change together; the
+  CI-analysis prompt that DESCRIBES the fixer stayed in the plugin, so a change to what the fixer
+  can do is now a two-repo change (`coding/ai-fix/no-shell.test.ts` +
+  `packages/pro/test/ai-fix-no-shell.test.ts`).
+- A finished fix PUSHES AS-IS (no trunk step) and only when the reader presses Push.

@@ -25,6 +25,8 @@ import {
 import { registerRateLimit } from './api/plugins/rate-limit.js';
 import { authRoutes } from './api/routes/auth.js';
 import { healthRoutes } from './api/routes/health.js';
+import { aiRuntimeRoutes } from './api/routes/ai-runtime.js';
+import { registerAgenticRoutes } from './review/agentic.js';
 import { repoRoutes } from './api/routes/repos.js';
 import { workspaceRoutes } from './api/routes/workspaces.js';
 import { userRoutes } from './api/routes/users.js';
@@ -286,9 +288,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   // inert until GITHUB_APP_WEBHOOK_SECRET is set (501s unconfigured). Additive on top of
   // the periodic poll — see docs/REALTIME-SYNC.md.
   await app.register(webhookRoutes);
-  // Claude Review moved into the @pierre/pro plugin (its routes register there, gated on the
-  // `claudeReview` capability). The SDK-run / diff-prep / GitHub-post infra + the tables stay
-  // in core behind the ctx.review seam; nothing to register here.
+  // "Set up AI" — the one-time AI runtime download (ai/runtime.ts). LOCAL ONLY: never registered in
+  // cloud or under LIMN_AI_DISABLED (`config.aiEnabled` is false in both).
+  if (!config.isCloud && config.aiEnabled) await app.register(aiRuntimeRoutes);
+  // The agentic features — Claude Review (+ chat, follow-up, ticket check, auto review), review
+  // memory and AI Fix's fixer. CORE and FREE, LOCAL ONLY: `registerAgenticRoutes` registers
+  // NOTHING in cloud (an explicit `isCloud` check) or under LIMN_AI_DISABLED. review/agentic.ts.
+  registerAgenticRoutes(app);
 
   return app;
 }

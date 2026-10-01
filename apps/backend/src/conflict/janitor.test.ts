@@ -9,7 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 // behind are still there afterwards, and whether the two a LIVE session owns are.
 //
 // ⚠ CLONE_DIR is redirected to a temp tree BEFORE config.js loads (the clone-hygiene.test.ts
-// pattern), or this would run over the developer's own ~/.pierre-review/clones.
+// pattern), or this would run over the developer's own ~/.limn/clones.
 const ROOT = mkdtempSync(join(tmpdir(), 'pierre-janitor-'));
 const CLONE_DIR = join(ROOT, 'clones');
 process.env.CLONE_DIR = CLONE_DIR;
@@ -19,7 +19,7 @@ process.env.DISABLE_SCHEDULER = 'true';
 
 // ⚠ DYNAMIC, IN `beforeAll`, AND THIS IS NOT A STYLE CHOICE. A static `import` is HOISTED above
 // the `process.env.CLONE_DIR` assignment above, so config.js would already hold the developer's
-// real ~/.pierre-review/clones by the time it ran — and the first tick would sweep it. The
+// real ~/.limn/clones by the time it ran — and the first tick would sweep it. The
 // clone-hygiene.test.ts comment says the same thing about the same trap.
 let runConflictJanitorTick: typeof import('./janitor.js').runConflictJanitorTick;
 let sessionIdOfRef: typeof import('./janitor.js').sessionIdOfRef;

@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
 #
-# Cloud (Railway) image for pierre-review. Builds the SPA (base /app/), the
+# Cloud (Railway) image for Limn (npm: limn-review). Builds the SPA (base /app/), the
 # landing page, and the backend, assembles them into ./release via `pnpm package`,
 # installs the release's production deps (compiling better-sqlite3 + pg natively),
 # then runs the single Fastify process in cloud mode (serves /, /app, and /api).
 #
-# Local mode does NOT use this image — it's `npx pierre-review` on your machine.
+# Local mode does NOT use this image — it's `npx limn-review` on your machine.
 
 # ---- build stage: full toolchain (needed to compile native addons) ----
 FROM node:22-bookworm AS build

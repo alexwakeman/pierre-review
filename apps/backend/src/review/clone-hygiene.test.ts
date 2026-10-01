@@ -17,7 +17,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 // record whose directory is gone, a directory older than the TTL.
 //
 // ⚠ CLONE_DIR is redirected to a temp tree BEFORE config.js is loaded (the dynamic import in
-// beforeAll), or the sweep would run over the developer's own ~/.pierre-review/clones.
+// beforeAll), or the sweep would run over the developer's own ~/.limn/clones.
 const ROOT = mkdtempSync(join(tmpdir(), 'pierre-hygiene-'));
 const CLONE_DIR = join(ROOT, 'clones');
 process.env.CLONE_DIR = CLONE_DIR;

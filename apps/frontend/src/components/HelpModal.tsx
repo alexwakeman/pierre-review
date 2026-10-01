@@ -155,11 +155,14 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             <strong>Activity</strong> and <strong>Timeline</strong> plus any PR tabs you open.
           </Section>
 
-          <Section title="Claude Review (opt-in, local)">
-            When enabled, a <strong>Claude Review</strong> tab runs an agentic review of a PR
-            into structured findings. You author your own review and tick which findings to
-            post — Limn posts one GitHub review. It costs real money per run, so it’s off
-            by default and never runs in the hosted mode.
+          <Section title="Claude Review and AI Fix (free, on your machine)">
+            The <strong>Claude Review</strong> tab reviews a PR into findings; you pick which to
+            post as one GitHub review. <strong>AI Fix</strong> edits the branch for you to push.
+            Both run on your own Claude Code or Anthropic API key — Limn stores no key and charges
+            nothing. The reviewer reads code; it cannot edit files, run commands or reach the web.
+            The fixer edits files but has no shell, and builds and tests nothing. Nothing is posted
+            or pushed until you press the button. The hosted app does not run them: use{' '}
+            <code>npx limn-review</code>.
           </Section>
 
           <Section title="Keyboard">

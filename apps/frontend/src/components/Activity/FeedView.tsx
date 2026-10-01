@@ -28,7 +28,7 @@ import {
 } from '../../hooks/useConsolidatedFeed.js';
 import { useDetectedReviewers, useSetWorkspaceReviewer } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useFilters, type FeedBotLens } from '../../store/filters.js';
@@ -299,7 +299,7 @@ export function FeedView({
   const focusEventInTab = useFilters((s) => s.focusEventInTab);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
-  const { claudeReview: claudeReviewEnabled } = useProCapabilities();
+  const claudeReviewEnabled = useAiCapabilities().enabled;
 
   // Detected reviewers for the ACTIVE WORKSPACE (CORE / free) → the actor→row map that lets
   // in-house AI / Pierre actors carry a vendor tag (login-based vendors don't need it).

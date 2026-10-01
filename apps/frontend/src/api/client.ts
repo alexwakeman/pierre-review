@@ -198,6 +198,8 @@ import type {
   User,
   UserContributionStats,
   WorkPlanResponse,
+  SetWorkspaceAutoReviewBody,
+  WorkspaceAutoReviewResponse,
 } from '@pierre-review/shared';
 
 class ApiError extends Error {
@@ -478,6 +480,14 @@ export const api = {
   setWorkspacePendingMute: (id: number, body: WorkspacePendingMuteUpdate) =>
     fetch(`/api/workspaces/${id}/pending-mute`, jsonBody('PUT', body)).then((r) =>
       handle<{ workspace: Workspace }>(r),
+    ),
+  // Auto Claude review for this workspace (CORE, local only — the route is not registered in the
+  // cloud or under LIMN_AI_DISABLED). OFF until switched on; a 404 is "not this account's".
+  workspaceAutoReview: (id: number) =>
+    get<WorkspaceAutoReviewResponse>(`/api/workspaces/${id}/auto-review`),
+  setWorkspaceAutoReview: (id: number, body: SetWorkspaceAutoReviewBody) =>
+    fetch(`/api/workspaces/${id}/auto-review`, jsonBody('PUT', body)).then((r) =>
+      handle<WorkspaceAutoReviewResponse>(r),
     ),
   // Chronology's working hours and wait budgets for this workspace. ⚠ THE BODY IS THE WHOLE
   // OVERRIDE SET: a field left out goes back to its product default, and `{}` resets everything.

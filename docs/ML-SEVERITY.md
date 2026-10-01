@@ -27,7 +27,7 @@ a merge of the two codebases.
 |---|---|---|
 | **cloud** (Railway) | `severity-api` service, private DNS | on |
 | **local dev** (this checkout + the sibling repo) | `127.0.0.1:8799` via `serve_local.sh` | on |
-| **`npx pierre-review`** | none — the published package ships no model | **off** |
+| **`npx limn-review`** | none — the published package ships no model | **off** |
 
 **The gate is one env var: `SEVERITY_API_URL`.** Unset ⇒ no worker is scheduled, `/api/me`
 reports `mlSeverity: false`, and the SPA issues zero ML queries. That is also what keeps it

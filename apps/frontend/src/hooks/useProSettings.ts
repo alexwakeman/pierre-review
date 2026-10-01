@@ -27,8 +27,6 @@ export function useHasProSettings(): boolean {
     caps.workspaceInsights ||
     caps.slackDigest ||
     caps.issueLinks ||
-    caps.claudeReview ||
-    caps.aiFix ||
     caps.botTriage
   );
 }
@@ -52,12 +50,14 @@ export function useHasProSettings(): boolean {
 //     the Slack section (plugin migration 0033). A `botTriage`-only account would otherwise get a
 //     "Workspace" heading with nothing under it.
 //   • `claudeReview` / `aiFix` — the BYO Anthropic-key section is DELETED (the stored key is
-//     retired), and it was account-global anyway, never workspace-scoped.
+//     retired), and both capabilities left `ProCapabilities` when the agentic tier went free
+//     (`me.ai`, apiVersion 22).
 // (`activityDigest` came off earlier, with the "AI summary updates" policy section.)
 export function useHasProWorkspaceSettings(): boolean {
   const caps = useProCapabilities();
-  // `claudeReview`: the Auto Claude review switch lives on the same workspace row.
-  return caps.workspaceInsights || caps.slackDigest || caps.issueLinks || caps.claudeReview;
+  // (`claudeReview` came off when Claude Review went free: the Auto Claude review switch moved to
+  // the CORE workspace row and no longer waits on this plugin gate.)
+  return caps.workspaceInsights || caps.slackDigest || caps.issueLinks;
 }
 
 // Per-account Pro settings. ⚠ WHAT IS LEFT ON THIS ROUTE IS THE COMPARISON-WINDOW MODE AND THE BOT

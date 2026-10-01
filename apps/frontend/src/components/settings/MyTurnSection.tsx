@@ -9,7 +9,8 @@ import {
   type MyTurnCardReason,
   type MyTurnToggle,
 } from '@pierre-review/shared';
-import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
+import { useMe } from '../../hooks/useTriage.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useSetMyTurnSettings } from '../../hooks/useMyTurnSettings.js';
 import { ArrowIcon } from '../Icons.js';
 import { SaveButton } from './ui.js';
@@ -62,7 +63,7 @@ const pill = (on: boolean): string =>
 
 export function MyTurnSection(): JSX.Element {
   const { data: me } = useMe();
-  const { claudeReview } = useProCapabilities();
+  const claudeReview = useAiCapabilities().enabled;
   const save = useSetMyTurnSettings();
   const stored = me?.myTurnSettings ?? null;
 

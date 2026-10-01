@@ -3082,6 +3082,111 @@ check(
   check("getMyTurn(B) has no red trunk of A's", !mtB.redTrunks.some((t) => t.repoId === A.repoId));
 }
 
+// ── THE AGENTIC TABLES (core since migration 0074 / pg 0061) ─────────────────────────────────────
+// review_learnings (Claude Review's memory) and ai_fixes (AI Fix's runs) moved from the plugin with
+// their features; their cases moved from packages/pro/test/isolation.test.ts. Neither table has a
+// foreign key, so the account predicate in every getter is the WHOLE guarantee. Both accounts get a
+// row on the SAME pr id / source review id where the schema allows it, so a dropped predicate would
+// have something to leak — and the MUTATION checks below prove the seed is not vacuous.
+{
+  const { buildAgentContext } = await import('../src/review/agent-context.js');
+  const { getRelevantLearnings } = await import('../src/review/memory/retrieval.js');
+  const fixes = await import('../src/coding/ai-fix/persist.js');
+  const { getFixPrContext } = await import('../src/coding/ai-fix/pr-context.js');
+  const { getFixStatus } = await import('../src/coding/ai-fix/manager.js');
+  const autoSettings = await import('../src/review/claude-review/auto-settings.js');
+  const silent = { info() {}, warn() {}, error() {}, debug() {}, child() { return silent; } };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const actx = buildAgentContext(silent as any);
+  const SHARED_REVIEW = 1000;
+  const learning = (accountId: number, repoId: number, prId: number, key: string) => ({
+    accountId,
+    repoId,
+    prId,
+    sourceReviewId: SHARED_REVIEW,
+    headSha: key,
+    kind: 'finding_dismissed',
+    path: 'src/api/x.ts',
+    dirPath: 'src/api',
+    ext: '.ts',
+    category: 'nit',
+    dedupeKey: key,
+    createdAt: now,
+  });
+  await db
+    .insert(schema.reviewLearnings)
+    .values([learning(1, A.repoId, A.prId, 'LA'), learning(2, B.repoId, B.prId, 'LB')])
+    .execute();
+
+  const ownL = await getRelevantLearnings(actx, { accountId: 1, repoId: A.repoId, changedPaths: ['src/api/z.ts'] });
+  check("getRelevantLearnings(A, A.repo) returns A's learning", ownL.length === 1);
+  check(
+    "getRelevantLearnings(A, B.repo) leaks nothing (another account's repo)",
+    (await getRelevantLearnings(actx, { accountId: 1, repoId: B.repoId, changedPaths: ['src/api/z.ts'] })).length === 0,
+  );
+  check(
+    "getRelevantLearnings(B, A.repo) leaks nothing (another account's id)",
+    (await getRelevantLearnings(actx, { accountId: 2, repoId: A.repoId, changedPaths: ['src/api/z.ts'] })).length === 0,
+  );
+  const rl = schema.reviewLearnings;
+  const byReviewA = await db
+    .select()
+    .from(rl)
+    .where(and(eq(rl.accountId, 1), eq(rl.sourceReviewId, SHARED_REVIEW)))
+    .execute();
+  const byReviewAny = await db.select().from(rl).where(eq(rl.sourceReviewId, SHARED_REVIEW)).execute();
+  check("review actions projection(A, shared review id) holds only A's row", byReviewA.length === 1 && byReviewA[0]!.accountId === 1);
+  check('MUTATION: without the account predicate the shared review id reaches BOTH rows', byReviewAny.length === 2);
+
+  const fixFor = (accountId: number, repoId: number, prId: number, sha: string) =>
+    fixes.insertQueuedFix(actx, {
+      accountId,
+      repoId,
+      prId,
+      baseSha: sha,
+      model: 'm',
+      seed: 'plain',
+      sourceReviewId: SHARED_REVIEW,
+      prompt: 'p',
+    });
+  const fixA = await fixFor(1, A.repoId, A.prId, 'shaA');
+  const fixB = await fixFor(2, B.repoId, B.prId, 'shaB');
+  check("getFixById(A's fix, A) returns it", (await fixes.getFixById(actx, 1, fixA))?.baseSha === 'shaA');
+  check("getFixById(B's fix, A) returns null (IDOR blocked)", (await fixes.getFixById(actx, 1, fixB)) === null);
+  check("getLatestFix(A, B.pr) returns null", (await fixes.getLatestFix(actx, 1, B.prId)) == null);
+  check("listFixHistory(A, B.pr) is empty", (await fixes.listFixHistory(actx, 1, B.prId)).length === 0);
+  check(
+    "listFixHistory(A, A.pr) holds only A's run",
+    (await fixes.listFixHistory(actx, 1, A.prId)).every((r) => r.accountId === 1),
+  );
+  check("getFixPrContext(B.pr, A) returns null", (await getFixPrContext(actx, 1, B.prId)) === null);
+  const stB = await getFixStatus(actx, 1, B.prId);
+  check("getFixStatus(A, B.pr) reports idle with no fix id", stB.status === 'idle' && stB.fixId === null);
+  const af = schema.aiFixes;
+  const anyFix = await db.select().from(af).where(inArray(af.id, [fixA, fixB])).execute();
+  check('MUTATION: without the account predicate both fixes are reachable by id', anyFix.length === 2);
+
+  // The auto-review switch (workspaces.auto_review_enabled[_at]) — id-addressed by a PATH param.
+  check(
+    "readWorkspaceAutoReview(A, B's workspace) is null (→ 404)",
+    (await autoSettings.readWorkspaceAutoReview(actx, 1, defaultB)) === null,
+  );
+  check(
+    "setWorkspaceAutoReview(A, B's workspace) is refused (→ 404)",
+    (await autoSettings.setWorkspaceAutoReview(actx, 1, defaultB, true)) === null,
+  );
+  check(
+    "B's workspace stays OFF after A's attempt",
+    (await autoSettings.readWorkspaceAutoReview(actx, 2, defaultB))?.enabled === false,
+  );
+  await autoSettings.setWorkspaceAutoReview(actx, 1, defaultA, true);
+  const roster = await autoSettings.listAutoReviewWorkspaces(actx);
+  check(
+    'the auto-review roster carries each row with its OWN account',
+    roster.length === 1 && roster[0]!.accountId === 1 && roster[0]!.workspaceId === defaultA,
+  );
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

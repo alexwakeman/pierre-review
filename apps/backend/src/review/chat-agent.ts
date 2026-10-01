@@ -1,7 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { query, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import { claudeExecutableOptions, loadAgentSdk } from '../ai/runtime.js';
 import type { ReviewChatArgs, ReviewChatResult } from '../pro/contract.js';
 import { config } from '../config.js';
 import { applyClaudeReviewAuth } from './auth.js';
@@ -99,6 +100,8 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
     const { allowedTools, disallowedTools } = chatToolsFor(mode);
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
 
+    // From the AI runtime (ai/runtime.ts); a missing one throws into the catch below.
+    const { query } = await loadAgentSdk();
     const q = query({
       prompt: args.prompt,
       options: {
@@ -116,6 +119,7 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
         maxBudgetUsd: config.reviewChatBudgetUsd,
         settingSources: [],
         abortController,
+        ...claudeExecutableOptions(),
       },
     });
 

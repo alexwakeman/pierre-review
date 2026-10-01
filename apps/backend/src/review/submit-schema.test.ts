@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { submitReviewSchema, submitReviewShape } from './schema.js';
+import { buildSubmitReviewShape, submitReviewShape } from './schema.js';
+
+// The schema is BUILT from a zod namespace (ai/runtime.ts supplies the SDK's own in production);
+// the test hands it the workspace's zod, which in dev is the same instance.
+const submitReviewSchema = z.object(buildSubmitReviewShape(z));
 
 describe('submitReviewSchema', () => {
-  it('exposes a shape that assembles into the same object schema', () => {
-    const schema = z.object(submitReviewShape);
+  it('exposes a shape that assembles into the same object schema', async () => {
+    const schema = z.object(await submitReviewShape());
     expect(schema.safeParse({ summary: 'ok', verdict: 'COMMENT', scopeUsed: 'diff_only', findings: [] }).success).toBe(
       true,
     );

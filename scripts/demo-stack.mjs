@@ -65,7 +65,8 @@ const baseEnv = {
   // disabled, so nothing ever actually calls this URL; it only needs to be non-empty.
   SEVERITY_API_URL: 'http://127.0.0.1:8799',
 };
-const proEnv = { PRO_DIGEST_ENABLED: 'true', PRO_ADVANCED_AI_ENABLED: 'true' };
+// (The agentic features are core and on by default locally — no flag; PRO_ADVANCED_AI_ENABLED is gone.)
+const proEnv = { PRO_DIGEST_ENABLED: 'true' };
 const freeEnv = { PRO_DISABLED: 'true' };
 
 // --- helpers -------------------------------------------------------------------

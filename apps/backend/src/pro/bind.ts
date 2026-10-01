@@ -37,16 +37,11 @@ import { forecastNext } from '../db/forecast.js';
 import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
 import { aiCreditStatus } from '../db/credits.js';
 import { makeConflictSeam } from '../conflict/seam.js';
-import { reviewEvents, registerLearningsProvider } from '../review/events.js';
+import { registerAgenticProviders } from '../review/plugin-providers.js';
 import { registerScheduledJob } from '../sync/scheduled-jobs.js';
 import { registerPrDetailEnricher } from '../pr/detail-enricher.js';
 import { cheapComplete } from '../review/llm.js';
 import { detectClaudeAuth } from '../review/auth.js';
-import {
-  getEffectiveReviewBudget,
-  setUserReviewBudget,
-  MAX_REVIEW_BUDGET_USD,
-} from '../review/local-settings.js';
 import { getAccessToken, getAccountById } from '../auth/account.js';
 import { decryptToken, encryptToken, sealingAvailable } from '../auth/crypto.js';
 import {
@@ -59,7 +54,7 @@ import { ghRestGetContentDir, ghRestGetContentRaw } from '../github/client.js';
 import { fetchCompareDiff } from '../github/compare.js';
 import { fetchReviewCommentHunks } from '../sync/hydrate-detail.js';
 import { fetchActionsJobLog } from '../github/actions-logs.js';
-import { applyAndPush, commitFilesAndOpenPr } from '../coding/git-ops.js';
+import { commitFilesAndOpenPr } from '../coding/git-ops.js';
 import { registerRetentionHandler } from '../db/retention.js';
 import { registerAccountErasureHandler } from '../db/erase-account.js';
 import { runPluginMigrations } from './migrate.js';
@@ -114,7 +109,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   // ⚠ THE RUNTIME GATE. This literal is the twin of `ProPlugin['apiVersion']` in contract.ts —
   // bump them together. A half-bump here silently degrades a CORRECT plugin to OSS mode (the warn
   // below is the only trace; capabilities go dark and every /api/pro/* route 404s).
-  if (plugin?.apiVersion !== 21 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 22 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -292,8 +287,8 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         return aiCreditStatus(account, Date.now());
       },
     },
-    reviewEvents,
-    registerLearningsProvider,
+    // The Pro inputs to the free agentic features (Jira fill, CI-analysis seed). Optional member.
+    registerAgenticProviders,
     registerScheduledJob,
     registerPrDetailEnricher,
     // AI Fix infra (per-account, cloud-ready). The host owns the security-sensitive
@@ -346,38 +341,11 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         }),
     },
     coding: {
-      // Lazy-import the agent module (it pulls in the Claude Agent SDK) so the SDK
-      // only loads when a fix actually runs, not at every backend boot.
-      generateFix: async (fixArgs) =>
-        (await import('../coding/agent.js')).runCodingAgent(fixArgs),
-      applyAndPush: (pushArgs) => applyAndPush(pushArgs),
+      // The advisor's config-PR primitive. (generateFix / applyAndPush left with the agentic
+      // fixer at apiVersion 22 — core reaches them through review/agent-context.ts.)
       commitFilesAndOpenPr: (prArgs) => commitFilesAndOpenPr(prArgs),
-      // No trunk-reconciliation seams: AI Fix pushes as-is (see the note on CodingSeam in
-      // contract.ts — removed without an apiVersion bump, so host + plugin land together).
     },
-    // Claude Review infra: diff prep + the SDK run + the GitHub review POST. Lazy so the
-    // Agent SDK (agent.js) loads only when a review actually runs, not at every boot.
-    review: {
-      prepareReview: async (a) => (await import('../review/prepare.js')).prepareReview(a),
-      runReview: async (a) => (await import('../review/agent.js')).runReview(a),
-      postReview: async (a) => (await import('../review/post-seam.js')).postReview(a),
-      postFinding: async (a) => (await import('../review/post-seam.js')).postFinding(a),
-      // One chat turn about a finished review (OPTIONAL member, apiVersion stays 21). Same lazy
-      // import rule: the Agent SDK loads only when someone asks a question.
-      chat: async (a) => (await import('../review/chat-agent.js')).runReviewChat(a),
-      // ⚠ BUDGET ONLY. The `hasUserKey` half and the whole `setLocalKey` member went with the
-      // stored BYO Anthropic key: local Claude Review authenticates from an ambient Claude session,
-      // else the environment's `ANTHROPIC_API_KEY` (review/auth.ts). Nothing here reads or writes
-      // `~/.pierre-review/config.json`'s `anthropicApiKey` any more.
-      getLocalKeyStatus: () => ({
-        reviewBudgetUsd: getEffectiveReviewBudget(),
-        reviewBudgetMax: MAX_REVIEW_BUDGET_USD,
-      }),
-      setReviewBudget: (usd) => {
-        setUserReviewBudget(usd);
-        return { reviewBudgetUsd: getEffectiveReviewBudget() };
-      },
-    },
+    // (No `review` seam since apiVersion 22: Claude Review is core — review/agent-context.ts.)
     // The merge-conflict resolver's per-hunk seam — still LOCAL ONLY, but ⚠ NO LONGER FOR THE
     // REASON IT WAS. The original argument was that cloud had no session to address, because the
     // six core resolver routes were registered behind `!config.isCloud`. They are now registered

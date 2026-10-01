@@ -245,15 +245,17 @@ export default function HowWeMeasure(): JSX.Element {
               <div>
                 <p className="mb-6">
                   There is a third place {SITE_NAME} uses AI, and it is separate from both models
-                  on this page: short written summaries — a paragraph on a long pull request, a
-                  read on a red build, the reason beside an item in your queue. Those are
-                  language, not measurement, and they are clearly marked as writing wherever they
-                  appear.
+                  on this page: writing. Short summaries — a paragraph on a long pull request, a
+                  read on a red build, the reason beside an item in your queue — and, on your own
+                  machine, Claude&rsquo;s review of a pull request and its fix for the comments
+                  you pick. Those are language, not measurement, and they are clearly marked
+                  wherever they appear.
                 </p>
                 <p>
                   No number on any screen comes from them, and nothing in the product acts on a
                   model&rsquo;s output on its own. A grade changes what a list is sorted by. It
-                  never resolves a thread, merges a pull request or closes anything.
+                  never resolves a thread, merges a pull request or closes anything. A review is
+                  posted, and a fix pushed, only when you press the button.
                 </p>
               </div>
             </div>

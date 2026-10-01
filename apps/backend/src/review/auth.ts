@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { PRODUCT_NAME } from '@pierre-review/shared';
 
 // Best-effort detector for whether the Claude Agent SDK has usable credentials.
 // The SDK itself exposes no runtime auth option — auth comes from the environment
@@ -31,6 +30,8 @@ export function hasAmbientClaudeAuth(): boolean {
   return ambientCandidates.some((path) => existsSync(path));
 }
 
+export const NO_CLAUDE_AUTH_MESSAGE = 'Sign in to Claude Code or set ANTHROPIC_API_KEY';
+
 export function detectClaudeAuth(): ClaudeAuthResult {
   // Claude Review PREFERS the ambient subscription (see applyClaudeReviewAuth), so
   // report it first when present — even if an API key also exists.
@@ -49,14 +50,13 @@ export function detectClaudeAuth(): ClaudeAuthResult {
     return { status: 'ok', method: 'api_key' };
   }
 
-  // ⚠ THIS SENTENCE IS RENDERED IN THE SPA, NOT JUST LOGGED. It travels pro/bind.ts →
-  // `authMessage` on the wire → ClaudeReviewTab and AiFixTab, where it prints unbackticked
-  // mid-paragraph. It used to end "restart pierre-review", which a reader there cannot tell is
-  // a command rather than the product's name — so it names the product, and the command is not
-  // mentioned at all (restarting is restarting, however you started it).
+  // ⚠ THIS SENTENCE IS RENDERED IN THE SPA, NOT JUST LOGGED — it is the ONE line that replaces
+  // every Run button when no credential is found (`MeResponse.ai.authMessage` and the routes'
+  // `authMessage`). Plain and short, and it promises no plan or billing: Limn stores no key and
+  // charges nothing; the run uses the user's own Claude Code sign-in or API key.
   return {
     status: 'none',
-    message: `No Claude authentication found. Run \`claude\` once to sign in to an eligible Claude plan (Pro/Max/Team/Enterprise), or set ANTHROPIC_API_KEY in the environment before starting, then restart ${PRODUCT_NAME}.`,
+    message: NO_CLAUDE_AUTH_MESSAGE,
   };
 }
 

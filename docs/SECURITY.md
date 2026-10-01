@@ -154,7 +154,7 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
   says "Not built or tested here." beside the diff — it promises no CI (see
   [docs/PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § The fix agent has no shell).
 
-**The local clone cache (`~/.pierre-review/clones`) — five fixes, and the standing invariant.**
+**The local clone cache (`~/.limn/clones`) — five fixes, and the standing invariant.**
 The AI-Fix agent, Claude Review and now the merge-conflict resolver all work inside this cache, so
 it went from a corner to a hot path and was hardened before the resolver was allowed to multiply the
 clone count. **The invariant: a GitHub token never reaches disk.**

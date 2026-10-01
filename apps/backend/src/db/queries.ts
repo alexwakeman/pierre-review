@@ -210,7 +210,6 @@ import { runTransaction } from './client.js';
 import { enrichMyTurn } from '../feed/my-turn.js';
 import { resolvePrTickets } from '../pr/detail-enricher.js';
 import { config } from '../config.js';
-import { getProCapabilities } from '../pro/contract.js';
 import { createHash } from 'node:crypto';
 import {
   approvalInfoFromStandings,
@@ -3259,7 +3258,7 @@ async function getClaudeReviewFeedItems(
   // Single-PR isolation (see getFeed): scope to this PR's runs (with a widened `since`).
   prId: number | null = null,
 ): Promise<ConsolidatedFeedItem[]> {
-  if (!getProCapabilities().claudeReview) return [];
+  if (!config.aiEnabled) return [];
   const conds = [
     eq(repos.accountId, accountId),
     eq(claudeReviews.status, 'succeeded'),
@@ -8579,7 +8578,7 @@ export async function getMyTurn(
   // viewer's own clock. A newer run has a later `finishedAt`, so it re-summons on its own. The
   // posted-findings rule inside `getUnactionedClaudeReviews` still retires a card as well.
   const claudeSeeds: ClaudeReviewToAction[] =
-    show.claude_review && getProCapabilities().claudeReview
+    show.claude_review && config.aiEnabled
       ? await getUnactionedClaudeReviews(accountId, scopedRepoIds)
       : [];
   const claudeClocks = await lastActionClocks(
@@ -9886,6 +9885,14 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
           .execute();
       }
       await tx.delete(claudeReviews).where(inArray(claudeReviews.prId, prIds)).execute();
+      // The agentic tables core ADOPTED from the plugin (migration 0074 / pg 0061): AI Fix runs
+      // (~MiB patches) and Claude Review's learnings. No FKs, so nothing would cascade; before this
+      // the plugin had no deleteRepo hook at all and both were orphaned on a repo removal.
+      await tx.delete(schema.aiFixes).where(inArray(schema.aiFixes.prId, prIds)).execute();
+      await tx
+        .delete(schema.reviewLearnings)
+        .where(inArray(schema.reviewLearnings.prId, prIds))
+        .execute();
       await tx.delete(pullRequests).where(eq(pullRequests.repoId, id)).execute();
     }
     // The workspace membership row references this repo (the composite FK is ON DELETE cascade,
@@ -9934,15 +9941,15 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
 // for a repo's PRs, grouped by PR (newest run first within each), PRs ordered by
 // most-recent run desc. Richer than listAllClaudeReviews (which keeps only one
 // latest-succeeded run per PR). IDOR-sensitive id getter: scoped by accountId, and
-// gated on getProCapabilities().claudeReview. An unowned repo (cross-account) → empty list.
+// gated on config.aiEnabled (the agentic switch). An unowned repo (cross-account) → empty list.
 export async function listClaudeReviewsByRepo(
   repoId: number,
   accountId: number,
 ): Promise<RepoClaudeReviewsResponse> {
-  if (!getProCapabilities().claudeReview) return { enabled: false, prs: [] };
+  if (!config.aiEnabled) return { enabled: false, prs: [] };
   // Ownership: a repo not owned by this account leaks nothing (404-equivalent).
   const owned = await getRepo(repoId, accountId);
-  if (!owned) return { enabled: getProCapabilities().claudeReview, prs: [] };
+  if (!owned) return { enabled: config.aiEnabled, prs: [] };
 
   const rows = await db
     .select({

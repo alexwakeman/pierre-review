@@ -52,7 +52,7 @@ function tierRows() {
   let m;
   while ((m = re.exec(body))) {
     const u = (s) =>
-      (s ?? '').replace(/\\'/g, "'").replace(/\$\{INSTALL_COMMAND\}/g, 'npx pierre-review');
+      (s ?? '').replace(/\\'/g, "'").replace(/\$\{INSTALL_COMMAND\}/g, 'npx limn-review');
     rows.push({ q: u(m[1]), free: u(m[2] ?? m[3]), pro: u(m[4]) });
   }
   if (rows.length === 0) throw new Error('no tier rows parsed — did ROWS change shape?');

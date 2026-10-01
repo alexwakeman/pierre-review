@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import type { ClaudeReviewPrState, TimelinePr, User } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
 import { useFilters } from '../../store/filters.js';
 import { reviewCellFor, reviewCellRank } from '../../lib/claudeReviewColumn.js';
@@ -26,7 +26,7 @@ import { SortHeader, type SortState, compare, nextSort } from './sortableTable.j
 // Owns its sort state; default order = sortOpenPrsByActivity (the same order the inline lists
 // use). Rows are WHOLE-ROW clickable — the caller decides what a click opens (onOpenPr).
 //
-// The "Claude review" column renders ONLY with the Claude Review capability (local + Pro+); without
+// The "Claude review" column renders ONLY where agentic AI runs (`me.ai.enabled`: local, free); without
 // it there is no column and no request. With it, ONE batched states request covers every listed
 // row (never one per row), and each cell's controls stop propagation so a click never opens the row.
 
@@ -207,7 +207,7 @@ export function OpenPrsTable({
   );
 
   // The Claude review column: capability-gated, ONE request for every listed PR.
-  const claudeOn = useProCapabilities().claudeReview;
+  const claudeOn = useAiCapabilities().enabled;
   const prIds = useMemo(() => prs.map((p) => p.id), [prs]);
   const { data: claudeData } = useClaudeReviewStates(prIds, claudeOn);
   const claudeStates = useMemo(

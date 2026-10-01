@@ -4,7 +4,7 @@ import {
   useUpdateWorkspaceProSettings,
   useWorkspaceProSettings,
 } from '../../hooks/useWorkspaceProSettings.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { JiraApiAccess } from './JiraApiAccess.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
@@ -44,7 +44,7 @@ export function IssueLinksSection(): JSX.Element {
   const mutation = useUpdateWorkspaceProSettings(workspaceId);
   const data = query.data;
   // Jira API access feeds Claude Review only, so it is offered only where Claude Review runs.
-  const claudeReview = useProCapabilities().claudeReview;
+  const claudeReview = useAiCapabilities().enabled;
 
   // Re-seeded on the resolved workspace / STORED VALUE: an uncontrolled seed would leave the
   // previous workspace's tracker in the inputs after a switch, and Save would write it here.

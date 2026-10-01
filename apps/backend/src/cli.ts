@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 // ── tiny ANSI helpers (degrade gracefully when not a TTY) ──────────────────
 const useColor = process.stdout.isTTY && process.env.NO_COLOR === undefined;
@@ -65,7 +64,7 @@ function parseArgs(argv: string[]): CliOptions {
         break;
       default:
         console.error(`Unknown argument: ${arg}`);
-        console.error('Run `pierre --help` for usage.');
+        console.error('Run `limn --help` for usage.');
         process.exit(1);
     }
   }
@@ -73,16 +72,19 @@ function parseArgs(argv: string[]): CliOptions {
 }
 
 function printUsage(): void {
-  console.log(`pierre — ${'local-only GitHub PR activity dashboard'}
+  console.log(`limn — ${'local-only GitHub PR activity dashboard'}
 
 Usage:
-  pierre [options]
-  pierre-review [options]
-  pierre status [options]
+  limn [options]
+  limn status [options]
+  limn ai install
 
 Commands:
   status           Your cross-repo "my turn" queue in the terminal, with
-                   clickable links (see \`pierre status --help\`)
+                   clickable links (see \`limn status --help\`)
+  ai install       Download the AI runtime Claude Review and AI Fix run on
+                   (one time, about 110 MB). The app offers the same button.
+  ai status        Say whether the AI runtime is set up
 
 Options:
   --no-open        Don't open the browser (also honours NO_OPEN env)
@@ -93,6 +95,11 @@ Options:
                    to DEPLOYMENT_MODE=cloud. Skips the gh-auth pre-check.
   --mode <m>       'local' (default) or 'cloud'
   -h, --help       Show this help
+
+The old \`pierre-review\` package now only forwards to this one; it will be removed.
+
+Your data lives in ~/.limn (LIMN_DATA_DIR overrides). An existing ~/.pierre-review
+is moved there once, on first start.
 
 Prerequisite (local mode):
   Requires the GitHub CLI (https://cli.github.com), authenticated via
@@ -118,13 +125,23 @@ function openBrowser(url: string): void {
 }
 
 // The default local SQLite location — a user-writable home dir, never the (possibly
-// read-only) install dir. Shared by the server boot and `pierre status`.
-function defaultLocalDbPath(): string {
-  return join(homedir(), '.pierre-review', 'pierre-review.sqlite');
+// read-only) install dir. Shared by the server boot and `limn status`. The FILE keeps its
+// pre-rename name on purpose: the one-time move of ~/.pierre-review → ~/.limn carries it (and its
+// WAL files) across untouched, and renaming a live SQLite file is a second migration for nothing.
+async function defaultLocalDbPath(): Promise<string> {
+  const { resolveDataDir } = await import('./data-dir.js');
+  return join(resolveDataDir(), 'pierre-review.sqlite');
+}
+
+// Move a pre-rename ~/.pierre-review to ~/.limn, once, before anything reads a path inside it.
+// Never clobbers an existing ~/.limn; never moves into an explicit LIMN_DATA_DIR.
+async function migrateDataDir(): Promise<void> {
+  const { migrateLegacyDataDir } = await import('./data-dir.js');
+  migrateLegacyDataDir({ log: (msg) => console.log(`  ${dim(msg)}`) });
 }
 
 // Fail fast with a friendly message when the GitHub CLI isn't installed / authed.
-// Both the local server boot and `pierre status` need a working `gh` token.
+// Both the local server boot and `limn status` need a working `gh` token.
 function ghAuthPreCheck(): void {
   try {
     execFileSync('gh', ['auth', 'token'], { stdio: 'ignore' });
@@ -139,7 +156,7 @@ function ghAuthPreCheck(): void {
   }
 }
 
-// ── `pierre status` — a self-contained, read-only subcommand ────────────────
+// ── `limn status` — a self-contained, read-only subcommand ────────────────
 interface StatusOptions {
   watch: boolean;
   sync: boolean;
@@ -189,7 +206,7 @@ function parseStatusArgs(argv: string[]): StatusOptions {
         break;
       default:
         console.error(`Unknown argument: ${arg}`);
-        console.error('Run `pierre status --help` for usage.');
+        console.error('Run `limn status --help` for usage.');
         process.exit(1);
     }
   }
@@ -197,10 +214,10 @@ function parseStatusArgs(argv: string[]): StatusOptions {
 }
 
 function printStatusUsage(): void {
-  console.log(`pierre status — your cross-repo "my turn" queue in the terminal
+  console.log(`limn status — your cross-repo "my turn" queue in the terminal
 
 Usage:
-  pierre status [options]
+  limn status [options]
 
 Options:
   --sync           Fetch fresh state from GitHub first (otherwise shows data as of
@@ -210,8 +227,8 @@ Options:
   --db <path>      SQLite DB path (also DATABASE_URL env)
   -h, --help       Show this help
 
-Reads the local pierre database. Without --sync it shows data as of the last sync
-— run it alongside \`pierre\`, or pass --sync to fetch fresh state first. Links are
+Reads the local Limn database. Without --sync it shows data as of the last sync
+— run it alongside \`limn\`, or pass --sync to fetch fresh state first. Links are
 clickable in terminals that support OSC-8 hyperlinks.
 `);
 }
@@ -226,7 +243,7 @@ async function runStatusCommand(argv: string[]): Promise<void> {
   // status is LOCAL-only — it reads your on-disk SQLite database directly.
   if (process.env.DEPLOYMENT_MODE === 'cloud') {
     console.error(
-      '`pierre status` is local-only — it reads your local SQLite database.',
+      '`limn status` is local-only — it reads your local SQLite database.',
     );
     process.exit(1);
   }
@@ -241,7 +258,8 @@ async function runStatusCommand(argv: string[]): Promise<void> {
   // would make this guard check one file while the DB opens another.
   process.env.NODE_ENV ??= 'production';
   if (opts.db !== undefined) process.env.DATABASE_URL = resolve(opts.db);
-  if (!process.env.DATABASE_URL) process.env.DATABASE_URL = defaultLocalDbPath();
+  await migrateDataDir();
+  if (!process.env.DATABASE_URL) process.env.DATABASE_URL = await defaultLocalDbPath();
   try {
     mkdirSync(dirname(process.env.DATABASE_URL), { recursive: true });
   } catch {
@@ -252,7 +270,7 @@ async function runStatusCommand(argv: string[]): Promise<void> {
   // an empty queue. --sync legitimately bootstraps a fresh DB, so skip the guard then.
   if (!opts.sync && !existsSync(process.env.DATABASE_URL)) {
     console.error(
-      `No pierre database found at ${process.env.DATABASE_URL} — run \`pierre\` first to sync, or pass --db.`,
+      `No Limn database found at ${process.env.DATABASE_URL} — run \`limn\` first to sync, or pass --db.`,
     );
     process.exit(1);
   }
@@ -268,14 +286,77 @@ async function runStatusCommand(argv: string[]): Promise<void> {
   });
 }
 
+// ── `limn ai install` / `limn ai status` — the AI runtime, from the terminal ──────
+// The same download the app's "Set up AI" button runs (ai/runtime.ts): the pinned Agent SDK and
+// its three peers into ~/.limn/ai-runtime via `npm install --prefix`. Local only.
+async function runAiCommand(argv: string[]): Promise<void> {
+  const sub = argv[0];
+  if (sub !== 'install' && sub !== 'status') {
+    console.log(`limn ai — the AI runtime Claude Review and AI Fix run on
+
+Usage:
+  limn ai install   Download it (one time, about 110 MB) into ~/.limn/ai-runtime
+  limn ai status    Say whether it is set up
+
+Claude Review and AI Fix are free. They run on your own Claude Code or
+Anthropic API key: sign in to Claude Code, or set ANTHROPIC_API_KEY.
+Set LIMN_CLAUDE_PATH to use your installed \`claude\` and skip its bundled copy.
+`);
+    process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
+  }
+  if (process.env.DEPLOYMENT_MODE === 'cloud') {
+    console.error('AI review and fix run on your machine only: npx limn-review');
+    process.exit(1);
+  }
+  if (process.env.LIMN_AI_DISABLED === 'true') {
+    console.error('AI is turned off here (LIMN_AI_DISABLED=true).');
+    process.exit(1);
+  }
+  await migrateDataDir();
+  const { getAiRuntimeStatus, installAiRuntime, aiRuntimePins } = await import('./ai/runtime.js');
+
+  if (sub === 'status') {
+    const s = getAiRuntimeStatus();
+    const words =
+      s.runtime === 'ready' ? 'AI is set up.' : 'AI is not set up. Run: limn ai install';
+    console.log(s.runtimeMessage ? `${words} ${s.runtimeMessage}` : words);
+    process.exit(s.runtime === 'ready' ? 0 : 1);
+  }
+
+  const pins = aiRuntimePins();
+  if (pins) {
+    console.log(bold('Setting up AI (one-time download, about 110 MB):'));
+    for (const [name, version] of Object.entries(pins)) console.log(`  ${dim(`${name}@${version}`)}`);
+  }
+  const result = await installAiRuntime((p) => {
+    if (p.phase === 'downloading') console.log(`  ${dim(p.message)}`);
+    else if (p.phase !== 'failed') console.log(`${cyan('▸')} ${p.message}`);
+  });
+  if (!result.ok) {
+    console.error(bold(result.message));
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
 
-  // `pierre status` — a read-only subcommand with its own parser, usage, and env
+  // The package was renamed `pierre-review` → `limn-review` (bin `limn`). The old name survives as
+  // the forwarding stub's bin (scripts/deprecated-pierre-review/, never limn-review's own — that
+  // collides with an old global install); say so, once per start, on stderr so piped output is clean.
+  if (/^pierre(-review)?(\.(c?js|cmd|ps1))?$/.test(basename(process.argv[1] ?? ''))) {
+    console.error(dim('`pierre-review` is now `limn` (npm package: limn-review). The old name will be removed.'));
+  }
+
+  // `limn status` — a read-only subcommand with its own parser, usage, and env
   // mapping. Peeled off BEFORE parseArgs (whose default case rejects any bare token),
   // and it never reaches the server boot below.
   if (argv[0] === 'status') {
     await runStatusCommand(argv.slice(1));
+    return;
+  }
+  if (argv[0] === 'ai') {
+    await runAiCommand(argv.slice(1));
     return;
   }
 
@@ -301,8 +382,9 @@ async function main(): Promise<void> {
   if (!isCloud) {
     // ── local: default the DB to a user-writable home location (mkdir -p) ────
     // The package dir is read-only for global installs, so never write there.
+    await migrateDataDir();
     if (!process.env.DATABASE_URL) {
-      process.env.DATABASE_URL = defaultLocalDbPath();
+      process.env.DATABASE_URL = await defaultLocalDbPath();
     }
     try {
       mkdirSync(dirname(process.env.DATABASE_URL), { recursive: true });

@@ -70,6 +70,15 @@ export function usdToCredits(usd: number): number {
   return Math.max(0, Math.round(usd * AI_CREDITS_PER_USD));
 }
 
+// ⚠ EXCEPT THE LOCAL AGENT RUNS (Claude Review, the review chat, AI Fix). Those spend the reader's
+// OWN Claude Code session or Anthropic API key and Limn bills nothing for them, so a credit figure
+// would invent a Limn price. They show plain money, as the provider would charge it.
+export function formatUsd(usd: number): string {
+  const v = Math.max(0, usd);
+  if (v > 0 && v < 0.01) return 'under US$0.01';
+  return `US$${v.toFixed(2)}`;
+}
+
 export interface StateMeta {
   label: string;
   color: string;

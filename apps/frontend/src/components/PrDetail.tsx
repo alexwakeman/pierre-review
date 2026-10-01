@@ -14,7 +14,9 @@ import { usePrCodeLoc } from '../hooks/useLargePr.js';
 import { usePrBlast } from '../hooks/useBlastRadius.js';
 import { usePrLiveRefresh } from '../hooks/usePrLiveRefresh.js';
 import { usePrArmedIntent } from '../hooks/useAutoMerge.js';
-import { useMe, useProCapabilities } from '../hooks/useTriage.js';
+import { useMe } from '../hooks/useTriage.js';
+import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
+import { AiCloudNote } from './AiSetup.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { api } from '../api/client.js';
@@ -676,8 +678,11 @@ export function PrDetail({
   // with `db/blast-radius.ts` on any file the two lists do not share. See usePrBlast's header.
   const blastFields = usePrBlast(prId);
   const { data: repos } = useRepos();
-  const { aiAnalysis, aiFix, claudeReview: claudeReviewEnabled } = useProCapabilities();
-  const aiFixTabEnabled = aiAnalysis || aiFix;
+  // The agentic tabs are FREE and local-only: `me.ai.enabled`, never a Pro capability. Locally they
+  // always list; a missing runtime or credential is handled INSIDE the tab, in place of Run.
+  const aiEnabled = useAiCapabilities().enabled;
+  const claudeReviewEnabled = aiEnabled;
+  const aiFixTabEnabled = aiEnabled;
   // The inner tab is STORE state, paired with the PR it belongs to (see `prDetailTab`), so the
   // URL can name it. Read through the pair — a tab seated for ANOTHER PR is not ours, exactly
   // like the `threadStateFilter` guard below; without that a tab left on Changes would follow the
@@ -1369,6 +1374,8 @@ export function PrDetail({
             </button>
           );
         })}
+        {/* Hosted app: the agentic tabs are not listed — one line says where they run. */}
+        <AiCloudNote className="ml-auto self-center" />
       </div>
 
       {/* There is deliberately NO PR-wide "Check review" bar here any more. A whole-PR sweep on a

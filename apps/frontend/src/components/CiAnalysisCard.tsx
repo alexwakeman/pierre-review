@@ -8,6 +8,8 @@ import {
 } from '@pierre-review/shared';
 import { ApiError } from '../api/client.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
+import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
+import { AiRunGate } from './AiSetup.js';
 import {
   aiFixStartMutationKey,
   useCiAnalysis,
@@ -41,9 +43,9 @@ import { ArrowIcon, ChevronIcon } from './Icons.js';
 // reason the refresh key is: two mounts, one paid run.
 //
 // TIER: this is the cheap, read-only SUMMARY tier (`prSummary` — the same gate as the AI
-// summary and the digest, on in paid cloud and credit-metered), NOT the "pro+" advanced-AI
-// tier. The agentic "Fix it" button is a different thing entirely and stays gated on
-// `aiFix`, so a summary-tier cloud user gets the diagnosis without the fixer.
+// summary and the digest, on in paid cloud and credit-metered), NOT the free local agentic
+// tier. The agentic "Fix it" button is a different thing entirely: the FREE, local-only fixer,
+// gated on `me.ai.enabled` (useAiCapabilities), so a cloud user gets the diagnosis without it.
 //
 // STALENESS: when a stored analysis predates the current head SHA we show the OLD analysis
 // with an "out of date" chip and a manual Re-analyze. We deliberately never regenerate
@@ -95,7 +97,9 @@ const BTN_SECONDARY =
   'whitespace-nowrap rounded border border-gray-300 px-2.5 py-1 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
 
 export function CiAnalysisCard({ pr }: { pr: PrDetail }): JSX.Element | null {
-  const { prSummary, aiFix } = useProCapabilities();
+  const { prSummary } = useProCapabilities();
+  // The agentic fixer is FREE and local-only (`me.ai`), unlike this card's Pro summary tier.
+  const aiFix = useAiCapabilities().enabled;
   const { data } = useCiAnalysis(pr.id, prSummary);
   const refresh = useRefreshCiAnalysis(pr.id);
   const startFix = useStartFix(pr.id);
@@ -219,7 +223,7 @@ export function CiAnalysisCard({ pr }: { pr: PrDetail }): JSX.Element | null {
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {analyzeBtn}
-            {/* The agentic fixer is the pro+ tier — never offered to summary-tier users. On a
+            {/* The agentic fixer is free and local-only — never offered in the cloud. On a
                 STALE analysis the button is replaced by the refusal, not disabled: the fix
                 would be seeded with a diagnosis of code that is gone. */}
             {aiFix &&
@@ -228,6 +232,7 @@ export function CiAnalysisCard({ pr }: { pr: PrDetail }): JSX.Element | null {
                   New commits since this analysis. Re-analyze first.
                 </span>
               ) : (
+                <AiRunGate>
                 <button
                   type="button"
                   className={`${BTN_PRIMARY} inline-flex items-center gap-1`}
@@ -250,6 +255,7 @@ export function CiAnalysisCard({ pr }: { pr: PrDetail }): JSX.Element | null {
                   Fix it
                   <ArrowIcon dir="right" size={11} />
                 </button>
+                </AiRunGate>
               ))}
             {aiFix && !stale && data?.fixability === 'low' && (
               <span className="text-[11px] text-gray-500 dark:text-gray-400">

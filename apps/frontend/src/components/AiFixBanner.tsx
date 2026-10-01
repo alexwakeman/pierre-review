@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import type { AiFixStatus } from '@pierre-review/shared';
 import { useIsMutating } from '@tanstack/react-query';
 import { aiFixStartMutationKey, useAiFixStream } from '../hooks/useAiFix.js';
-import { useProCapabilities } from '../hooks/useTriage.js';
+import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { useFilters, type AiFixRunEntry } from '../store/filters.js';
 import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
@@ -56,7 +56,7 @@ function doneLine(status: AiFixStatus | 'idle'): string | null {
 }
 
 export function AiFixBanner(): JSX.Element | null {
-  const enabled = useProCapabilities().aiFix;
+  const enabled = useAiCapabilities().enabled;
   const runs = useFilters((s) => s.aiFixRuns);
 
   // Oldest first: a run that has been going longest is the one whose finish is imminent, so it

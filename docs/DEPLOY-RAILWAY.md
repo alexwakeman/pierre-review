@@ -2,7 +2,7 @@
 
 This deploys the **public, multi-tenant** build: a dark landing page at `/`,
 GitHub-App sign-in, per-user accounts, and Postgres. Local mode (SQLite +
-`gh auth token` + `npx pierre-review`) is unaffected and needs none of this.
+`gh auth token` + `npx limn-review`) is unaffected and needs none of this.
 
 > Prerequisite: set up sign-in (a GitHub OAuth App and/or GitHub App) first — see
 > [GITHUB-AUTH-SETUP.md](./GITHUB-AUTH-SETUP.md).
@@ -205,8 +205,9 @@ On top of the base cloud vars, add:
 | `STRIPE_PAYMENT_LINK_URL` | your Payment Link | the "Get Pro" checkout (see [BILLING-STRIPE.md](./BILLING-STRIPE.md)). |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_…` | verifies the webhook that flips `accounts.plan` to `pro`. |
 
-**Leave `PRO_ADVANCED_AI_ENABLED` UNSET** — that keeps the agentic tier (Claude Review /
-AI Fix) off in cloud.
+The agentic features (Claude Review / AI Fix) are OFF in cloud by an explicit `isCloud` check
+(`review/agentic.ts`) — there is no flag to set or leave unset. Cloud copy points users at
+`npx limn-review`.
 
 `PRO_PLUGIN_PATH` is baked into the image (`/app/pro/dist/index.js`) — you don't set it.
 
@@ -299,7 +300,7 @@ load**.
 
 | Var | Default | Notes |
 |---|---|---|
-| `CLONE_DIR` | `/tmp/pierre-review/clones` (cloud) | Clone cache root. `$HOME/.pierre-review/clones` locally. |
+| `CLONE_DIR` | `/tmp/pierre-review/clones` (cloud) | Clone cache root. `$HOME/.limn/clones` locally (`LIMN_DATA_DIR`). |
 | `CLONE_CACHE_MAX_BYTES` | 1 GiB (cloud) | LRU cap across all clones. 2 GiB locally. |
 | `CONFLICT_JANITOR_CRON` | `*/15 * * * *` | An invalid value **disables the janitor with a warning** rather than crashing the boot — and a disabled janitor is a disk that grows. |
 | `CONFLICT_SESSION_TTL_MIN` | `30` | Session lifetime, pushed out on every touch. |
@@ -321,10 +322,9 @@ load**.
   `PERSIST_BODIES=true` only if you want that text stored server-side.
 - **Scheduled sync** runs every 5 minutes per account (`SYNC_CRON`), the same as
   local. One bad token doesn't abort the loop.
-- **The agentic AI tier (Claude Review / AI Fix) stays off in cloud** by leaving
-  `PRO_ADVANCED_AI_ENABLED` unset (the retired `ENABLE_CLAUDE_REVIEW` flag no longer
-  applies; `PRO_CLAUDE_REVIEW_ENABLED` remains only as a back-compat alias). It needs a
-  local `gh` + a writable clone dir, so its routes 404 and the tab hides in cloud.
+- **The agentic features (Claude Review / AI Fix) are off in cloud, structurally**:
+  `registerAgenticRoutes` registers nothing when `isCloud` (`PRO_ADVANCED_AI_ENABLED` and
+  `ENABLE_CLAUDE_REVIEW` are deleted), so the routes 404 and `MeResponse.ai.enabled` is false.
 - **Rotating secrets:** rotating `SESSION_SECRET` invalidates all sessions
   (everyone re-signs-in). Do **not** rotate `ENCRYPTION_KEY` without re-encrypting
   stored tokens — a new key can't decrypt old tokens (users would need to re-auth).

@@ -8,6 +8,7 @@ import {
 import { heldByAutoReview, reviewCellFor } from '../../lib/claudeReviewColumn.js';
 import { AUTO_REVIEW_LABEL } from './pendingLabels.js';
 import { unlockReviewSound } from '../../lib/sound.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 
 // One row's "Claude review" cell in the Open PRs table. Rendered ONLY when the Claude Review
 // capability is on (OpenPrsTable decides). Reads the table's ONE batched states answer — it
@@ -51,8 +52,16 @@ export function ClaudeReviewCell({
     return () => clearTimeout(t);
   }, [note]);
 
+  // Not set up yet (no AI runtime, or no Claude credential detected): Review opens the PR's
+  // Claude Review tab, which says what is missing in place of its own Run button. A row has no
+  // room for that sentence, and a start here would only fail.
+  const ready = useAiCapabilities().ready;
   const run = (e: MouseEvent): void => {
     e.stopPropagation();
+    if (!ready) {
+      onOpenReview();
+      return;
+    }
     // Gesture-gated WebAudio: unlock now so the completion chime can play later.
     unlockReviewSound();
     setNote(null);

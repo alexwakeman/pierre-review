@@ -128,6 +128,15 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // file's recorded near-miss failure.
   if (path === '/api/contact' || path === '/api/contact/ticket') return [TIERS.contact];
 
+  // ---- "Set up AI": POST /api/ai/runtime/install (LOCAL ONLY) ----
+  // FOLLOWING THE TOKEN: no model dollars and no GitHub quota — it runs `npm install` of the pinned
+  // AI runtime, ~110 MB of the user's own bandwidth and minutes of a child process. The work is
+  // single-flight inside ai/runtime.ts (a second POST joins the running download rather than
+  // starting one), so the bucket only bounds how many SSE relays a loop can open. `sync` is the
+  // matching shape: "minutes of network work, started by a click". EXACT `===`: `/api/ai` is a
+  // family other routes may join, and none of them should inherit this decision.
+  if (path === '/api/ai/runtime/install') return [TIERS.sync];
+
   // ---- Workspace CRUD: `read`, RECORDED rather than inherited ----
   //
   // The six surviving routes (list / create / rename+reassign / delete / move-one-repo-in /

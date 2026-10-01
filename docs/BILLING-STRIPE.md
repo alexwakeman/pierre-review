@@ -101,9 +101,9 @@ Notes:
 ## Future direction
 
 The flat $15/mo plan gates the cheap tier (digests, Insights). (My Turn / "FYI" feed
-participation is CORE / free on every tier — not part of the paid plan.) The expensive
-**advanced-AI features** (AI Analysis, AI Fix, Claude Review — today one
-all-or-nothing `PRO_ADVANCED_AI_ENABLED` flag) are the natural candidates for
-**metered billing**: the `ai_usage` ledger already records per-account credit
+participation is CORE / free on every tier — not part of the paid plan.) Claude Review and
+AI Fix are NOT candidates: they are free, local-only and run on the user's own Claude
+(docs/CLAUDE-REVIEW.md). The paid one-shot Haiku features (PR summary, CI analysis,
+annotations, report narration) are the natural candidates for **metered billing**: the `ai_usage` ledger already records per-account credit
 spend server-side, so a usage-based Stripe subscription item (reported via
 `usage_records`) can be layered on without new bookkeeping.

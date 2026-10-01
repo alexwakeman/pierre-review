@@ -3953,22 +3953,13 @@ export interface LocalUser {
 // frontend through /api/me exactly like claudeReviewEnabled.
 export interface ProCapabilities {
   activityDigest: boolean; // per-repo LLM headlines digest (Activity)
-  reviewMemory: boolean; // Claude Review learnings
-  // AI Fix (packages/pro/ai-fix). Two independent gates so the cheap, read-only
-  // analysis can ship without the expensive, write-capable fixer:
-  aiAnalysis: boolean; // CI failure analysis (Haiku, read-only) + the AI-Fix Analysis tab
-  // Per-PR AI summary (cheap Haiku, read-only). Split OUT of aiAnalysis so it can ship on the
-  // cheap SUMMARY tier (on in cloud, credit-metered) while CI-analysis + the fixer stay on the
-  // pro+ advanced-AI tier. On whenever the digest/summary tier is on (or advanced AI is).
+  // apiVersion 22: `reviewMemory`, `aiAnalysis`, `aiFix` and `claudeReview` LEFT this map. Claude
+  // Review, review memory and AI Fix are CORE (free, local-only, on the user's own Claude); gate
+  // them on the top-level `MeResponse.ai`, never on `pro`.
+  // Per-PR AI summary + the CI-failure analysis card (Pro, cheap one-shot Haiku, read-only). On
+  // wherever the paid summary tier is (cloud credit-metered).
   prSummary: boolean;
-  aiFix: boolean; // agentic inline code fix + push (Agent SDK, needs write access)
   workspaceInsights: boolean; // workspace review-intelligence "Insights" (no AI; pure reads)
-  // Agentic Claude Review (Agent SDK). The product lives in the plugin (routes/manager/
-  // prompts); the SDK-run infra + tables stay in core behind the ctx.review seam. Gated
-  // by PRO_ADVANCED_AI_ENABLED (formerly PRO_CLAUDE_REVIEW_ENABLED, kept as an alias); all-false
-  // in cloud / OSS. The frontend hides the tab/banner when false. This flag now gates the whole
-  // "pro+" AI tier — aiAnalysis + aiFix + claudeReview flip together.
-  claudeReview: boolean;
   // Slack digest delivery (Pro): a per-account webhook receives the freshly-generated sprint +
   // repo digest on a cadence. The report is AI-generated (Haiku), so this mirrors activityDigest.
   slackDigest: boolean;
@@ -4334,10 +4325,17 @@ export interface LargePrThresholdResponse {
   largePrCodeLocThresholdIsDefault: boolean;
 }
 
+// POST /api/ai/runtime/install — the SSE frames of "Set up AI" (the one-time AI runtime download,
+// apps/backend/src/ai/runtime.ts). `progress` lines are npm's own output, shown as-is; exactly one
+// terminal frame (`done` or `error`) ends the stream. A second POST while a download runs joins it.
+export type AiRuntimeInstallEvent =
+  | { type: 'progress'; phase: 'starting' | 'downloading' | 'verifying'; message: string }
+  | { type: 'done'; runtime: 'ready' }
+  | { type: 'error'; message: string };
+
 export interface MeResponse {
   user: LocalUser | null;
-  // (Claude Review is now the Pro `pro.claudeReview` capability — the old top-level
-  // `claudeReviewEnabled` flag was removed; read it off `pro` instead.)
+  // (Claude Review, review memory and AI Fix are gated on `ai` below — core, free, local-only.)
   // Deployment mode. 'cloud' tells the SPA to show a sign-out control and treat a
   // 401 from /api/me as "signed out" (vs local, where /api/me never 401s).
   deploymentMode: 'local' | 'cloud';
@@ -4359,6 +4357,23 @@ export interface MeResponse {
   // OPEN route with `git_too_old` and the overlay prints it once.
   // ⚠ Gate the SPA on THIS, never on `deploymentMode === 'cloud'`.
   conflictResolver: boolean;
+  // The agentic AI surfaces — Claude Review (run, follow-up, ticket check, auto review, the review
+  // chat), review memory and AI Fix. FREE and LOCAL-ONLY; they run on the user's own Claude Code
+  // session or ANTHROPIC_API_KEY. TOP-LEVEL and NOT inside `pro`, so `entitledProCapabilities` can
+  // never zero it (the `mlSeverity` argument).
+  //  - `enabled`: `!isCloud && !LIMN_AI_DISABLED`. False ⇒ no agentic surface renders (cloud shows
+  //    one "runs on your machine" line instead).
+  //  - `runtime`: the one-time AI runtime download (the SDKs are not in the npm package). 'absent'
+  //    ⇒ the SPA offers "Set up AI"; 'failed' carries `runtimeMessage`.
+  //  - `auth`: whether a Claude credential was detected (a heuristic — the run itself is the real
+  //    check). 'none' ⇒ one line in place of every Run button; `authMessage` is that line.
+  ai: {
+    enabled: boolean;
+    runtime: 'ready' | 'absent' | 'installing' | 'failed';
+    runtimeMessage: string | null;
+    auth: 'ok' | 'none';
+    authMessage: string | null;
+  };
   // The time zone Chronology counts working hours in for a workspace that never set one — the
   // machine's own zone locally, UTC in the cloud, `WORK_TIMEZONE` over both. The Settings form
   // shows it as the "default" beside a workspace's zone. Optional: an older server omits it and
@@ -4661,12 +4676,25 @@ export interface WorkspaceProSettings {
   // story from a detected ticket. OPTIONAL on the wire so an older plugin still type-checks here;
   // the current plugin always sends it.
   jira?: WorkspaceJiraApiSettings;
-  // Auto Claude review of new human PRs in this workspace (plugin migration 0036). OPTIONAL on the
-  // wire so an older plugin still type-checks; absent = off.
+  // RETIRED: auto Claude review moved to core with Claude Review (`GET`/`PUT
+  // /api/workspaces/:id/auto-review`, `WorkspaceAutoReviewResponse`). The plugin no longer sends
+  // this; it stays OPTIONAL so an older plugin still type-checks. Never read it.
   autoReview?: WorkspaceAutoReviewSettings;
 }
 
-// Auto Claude review, per workspace. When on, the plugin reviews each human-authored, non-draft
+// `GET` / `PUT /api/workspaces/:id/auto-review` (CORE, local only — registered only where Claude
+// Review runs). The PUT body is `SetWorkspaceAutoReviewBody`; both answer this. 404 for a
+// workspace that is not the caller's.
+export interface WorkspaceAutoReviewResponse {
+  workspaceId: number;
+  autoReview: WorkspaceAutoReviewSettings;
+}
+export interface SetWorkspaceAutoReviewBody {
+  enabled: boolean;
+}
+
+// Auto Claude review, per workspace (CORE, `workspaces.auto_review_enabled[_at]`, migration 0074 /
+// pg 0061). OFF until someone switches it on. When on, Limn reviews each human-authored, non-draft
 // PR OPENED at or after `enabledAt` (a draft once it is marked ready), once per PR, with the same
 // model and budget as a manual run, at most `dailyCap` a day (UTC days). Turning it off and on
 // again moves `enabledAt`, so nothing opened while it was off is reviewed.
@@ -6541,7 +6569,7 @@ export interface ClaudeReviewListResponse {
 export type ClaudeAuthStatus = 'ok' | 'none';
 
 export interface ClaudeReviewResponse {
-  // Whether the feature is enabled at all (ENABLE_CLAUDE_REVIEW).
+  // Whether the feature is enabled at all (config.aiEnabled: local and not LIMN_AI_DISABLED).
   enabled: boolean;
   // Claude-auth availability for running a review.
   auth: ClaudeAuthStatus;

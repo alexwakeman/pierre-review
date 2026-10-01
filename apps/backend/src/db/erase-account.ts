@@ -149,6 +149,14 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .delete(schema.claudeReviewChatMessages)
       .where(eq(schema.claudeReviewChatMessages.accountId, accountId))
       .execute();
+    // AI Fix runs (patches of the user's code + the prompts they were built from) and Claude
+    // Review's learnings (what the user did with each finding, verbatim text included). Core since
+    // migration 0074 / pg 0061 — the plugin's erasure hook used to own them.
+    await tx.delete(schema.aiFixes).where(eq(schema.aiFixes.accountId, accountId)).execute();
+    await tx
+      .delete(schema.reviewLearnings)
+      .where(eq(schema.reviewLearnings.accountId, accountId))
+      .execute();
     // The AI spend ledger (token/credit counts — no prompt text).
     await tx.delete(aiUsage).where(eq(aiUsage.accountId, accountId)).execute();
     // Any aggregate rows contributed to the cross-org benchmark. Consent was the basis for
@@ -223,6 +231,10 @@ export function accountScopedTables(): {
       table: schema.claudeReviewChatMessages,
     },
     { name: 'aiUsage', col: aiUsage.accountId, table: aiUsage },
+    // Adopted from the plugin (migration 0074 / pg 0061) with AI Fix's fixer and Claude Review's
+    // memory. No FKs, so nothing cascades: the explicit deletes above are the whole guarantee.
+    { name: 'aiFixes', col: schema.aiFixes.accountId, table: schema.aiFixes },
+    { name: 'reviewLearnings', col: schema.reviewLearnings.accountId, table: schema.reviewLearnings },
     // `myTurnDismissals` sat here until migration 0060 / pg 0047 DROPPED the table. It is named
     // rather than silently absent because this list is a checklist, and a checklist that shortens
     // with no explanation reads as an omission — the exact failure this function guards against.

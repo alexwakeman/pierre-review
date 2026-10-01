@@ -130,7 +130,7 @@ export default function Contact(): JSX.Element {
               <span className="font-mono text-mono-row text-ink">{INSTALL_COMMAND}</span>{' '}
               runs it against your own repositories using your existing{' '}
               <span className="font-mono text-mono-row text-ink">gh</span> login, stores no
-              credentials, and sends nothing anywhere.
+              credentials, and sends nothing to us.
             </p>
             <p className="max-w-answer text-body-sm text-ink-body">
               Bugs and feature requests are better as issues than as messages: they are

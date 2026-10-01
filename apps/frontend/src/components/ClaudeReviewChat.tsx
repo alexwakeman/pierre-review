@@ -8,6 +8,7 @@ import {
 } from '../hooks/useClaudeReviewChat.js';
 import { Markdown } from './Markdown.js';
 import { ChevronIcon, CommentIcon } from './Icons.js';
+import { AiRunGate } from './AiSetup.js';
 
 // Claude Review chat. A thread is either the whole review's (findingId null) or one finding's.
 // Nothing is fetched until a thread is opened.
@@ -103,9 +104,11 @@ export function ReviewChatThread({
           className="w-full resize-y rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-950"
         />
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={send} disabled={!canSend} className={BTN}>
-            {busy ? 'Answering…' : 'Ask'}
-          </button>
+          <AiRunGate>
+            <button type="button" onClick={send} disabled={!canSend} className={BTN}>
+              {busy ? 'Answering…' : 'Ask'}
+            </button>
+          </AiRunGate>
           {busy && pendingHere == null && (
             <span className="text-xs text-gray-500 dark:text-gray-400">
               Claude is answering another question on this review.
@@ -117,7 +120,9 @@ export function ReviewChatThread({
             </span>
           )}
           {error != null && <span className="text-xs text-red-600 dark:text-red-400">{error}</span>}
-          <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">Each answer costs credits.</span>
+          <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+            Each answer runs on your own Claude Code or Anthropic API key.
+          </span>
         </div>
       </div>
     </div>

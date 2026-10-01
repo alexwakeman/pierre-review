@@ -55,12 +55,8 @@ beforeAll(async () => {
   // capability makes this a tsc error rather than a silently-false flag.
   setProCapabilities({
     activityDigest: true,
-    reviewMemory: true,
-    aiAnalysis: true,
     prSummary: true,
-    aiFix: true,
     workspaceInsights: true,
-    claudeReview: true,
     slackDigest: true,
     issueLinks: true,
     botTriage: true,

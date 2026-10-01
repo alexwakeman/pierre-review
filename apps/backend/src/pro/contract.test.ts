@@ -10,12 +10,8 @@ import {
 // A "plugin loaded, everything on" capability set.
 const FULL: ProCapabilities = {
   activityDigest: true,
-  reviewMemory: true,
-  aiAnalysis: true,
   prSummary: true,
-  aiFix: true,
   workspaceInsights: true,
-  claudeReview: true,
   slackDigest: true,
   issueLinks: true,
   botTriage: true,

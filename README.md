@@ -1,4 +1,4 @@
-# pierre-review
+# Limn (`limn-review`)
 
 **The calm layer above your review bot.** Bring your own reviewer — CodeRabbit,
 Greptile, Copilot, whatever you run — and Pierre becomes the cross-repo triage
@@ -10,8 +10,9 @@ drill-down into PRs and review threads (read them in-app).
 Third-party review-bot output (CodeRabbit · Greptile · Copilot · Qodo · Sourcery)
 is a **first-class, triaged signal**, not generic noise: bot threads a later commit
 has likely addressed vs the ones still needing a human, a per-vendor signal-to-noise
-rate, and one-click bulk-resolve of the stale ones. Pierre's own agentic **Claude
-Review** is just *one* optional reviewer you can plug in (BYO key) — never the point.
+rate, and one-click bulk-resolve of the stale ones. On your own machine, **Claude
+Review** and **AI Fix** run free on your own Claude Code or Anthropic API key — see
+[Review and fix with Claude](#review-and-fix-with-claude-free-local).
 
 Repos are organised into **Workspaces** — a named group of repos, and the one scope
 the whole app runs on. Every repo lives in exactly one workspace (new repos land in
@@ -23,8 +24,9 @@ than one.
 Runs two ways from one codebase (the `DEPLOYMENT_MODE` env var selects):
 
 - **Local** (default): zero-config, SQLite, authenticates via your `gh` CLI.
-  `npx pierre-review` opens straight to the timeline — no landing page, no
-  accounts, no hosted backend.
+  `npx limn-review` opens straight to the app — no landing page, no
+  accounts, no hosted backend. (The package was `pierre-review`; that name is
+  deprecated, and `~/.pierre-review` moves to `~/.limn` once, on first boot.)
 - **Cloud** (multi-tenant): a public dark landing page, GitHub OAuth App sign-in,
   per-user encrypted accounts, and Postgres. Self-host on Railway. See
   [docs/DEPLOY-RAILWAY.md](docs/DEPLOY-RAILWAY.md).
@@ -36,22 +38,20 @@ Runs two ways from one codebase (the `DEPLOYMENT_MODE` env var selects):
 
 ## Screenshots
 
-The timeline — pull-request activity grouped **repo → contributor**, with shaped
-review markers, the open-PR strip, and a **My Turn** triage panel:
+Pending — everything waiting on you or your workspace, across every repository, in
+six ranked tabs:
 
-![pierre-review timeline](apps/landing/public/shots/timeline.png)
+![Limn Pending board](apps/landing/public/shots/pending-board.png)
 
 Drill into any PR without leaving the dashboard — review threads grouped by file,
 each tagged with its derived state (resolved · replied · likely-addressed ·
 untouched), alongside CI, approvers, and the full activity feed:
 
-![pierre-review PR detail](apps/landing/public/shots/pr-detail.png)
+![Limn PR detail](apps/landing/public/shots/pr-detail.png)
 
-Triage your review bot's firehose: a per-vendor chip counts its comments and how
-many still need a human, and one click resolves the threads a later commit already
-addressed:
+Every review thread already triaged, and every bot comment graded for severity:
 
-![pierre-review bot triage](apps/landing/public/shots/bot-review.png)
+![Limn review threads](apps/landing/public/shots/pr-threads.png)
 
 ## Prerequisites
 
@@ -85,38 +85,73 @@ pnpm sync:once owner/repo
 pnpm db:studio              # inspect the data
 ```
 
-## Claude Review (local only)
+## Review and fix with Claude (free, local)
 
-An opt-in feature that runs the **Claude Agent SDK** against a PR from its detail
-pane: it produces structured review findings, lets you author your own review and
-tick which findings to post inline, then submits **one** GitHub review. It spends
-real Anthropic credits per run, so it's **off by default** and **local-only**
-(force-disabled in cloud — see below).
+Every pull request gets a **Claude** tab when you run Limn on your own machine. It is
+free and on by default — there is no flag to set.
 
-![Claude Review tab](apps/landing/public/shots/claude-review.png)
+- **Claude Review** — Claude reads the change and returns findings, each tied to a
+  line. Tick the ones worth keeping and post them as **one** GitHub review. Paste in
+  a story and it checks the change against it. **Auto review** reviews new pull
+  requests as they arrive; it is off for every workspace until you switch it on.
+- **Ask Claude** — a chat on the review, and on each finding.
+- **AI Fix** — pick the review comments you want fixed. It edits a copy of the
+  branch, shows you the diff, and pushes only when you click Push.
 
-Enable it by setting `ENABLE_CLAUDE_REVIEW=true`, plus an Anthropic auth source
-(next section):
+What the agents can do:
+
+- The reviewer (and the chat) reads the code. It cannot edit files, run commands or
+  reach the web.
+- The fixer edits files. It has no shell, so it builds and tests nothing.
+- Nothing is posted or pushed until you press the button.
+
+### Your Claude, not ours
+
+It runs on your own Claude Code or Anthropic API key. Limn stores no key and charges
+nothing for it. Two sources, first one wins:
+
+1. **Your Claude Code session** — run `claude` once to sign in (or set
+   `CLAUDE_CODE_OAUTH_TOKEN`). When this is present, a run removes
+   `ANTHROPIC_API_KEY` from its own environment so the session is used.
+2. **`ANTHROPIC_API_KEY`** in the environment.
+
+With neither, the Run button is replaced by one line: *Sign in to Claude Code or set
+ANTHROPIC_API_KEY*. Detection lives in `apps/backend/src/review/auth.ts`.
+
+### One-time setup
+
+The npm package ships no AI SDKs, so `npx limn-review` stays small. The first time
+you use review or fix, press **Set up AI** (a one-time download of about 110 MB), or
+run:
 
 ```bash
-# dev
-ENABLE_CLAUDE_REVIEW=true pnpm dev
-
-# published CLI (npx, or the global `pierre`) — it's an env var, there is no flag
-ENABLE_CLAUDE_REVIEW=true npx pierre-review
+npx limn-review ai install     # or `limn ai install` if installed globally
 ```
 
-You can also put `ENABLE_CLAUDE_REVIEW=true` in `.env` (repo root) or
-`apps/backend/.env`. When enabled, a **Claude Review** tab appears in the PR detail
-pane.
+This installs exact, pinned versions of the Claude Agent SDK and its peers into
+`~/.limn/ai-runtime`. From a checkout (`pnpm dev`) they resolve from `node_modules`
+and there is nothing to install. To use the `claude` you already have installed
+instead of the bundled one, set `LIMN_CLAUDE_PATH=/path/to/claude`.
 
-### Bot-comment severity (dev / cloud only)
+To hide every review and fix surface, set `LIMN_AI_DISABLED=true`.
+
+### Cloud: not available
+
+Review and fix are **off in cloud mode** — the routes are not registered
+(`config.isCloud`), and the hosted app says *Review and fix run on your machine:
+npx limn-review*. They need a local clone directory and your own Claude, so they
+only run locally.
+
+With the Pro plugin present, a review can also fill its story from a linked Jira
+ticket (including auto review). Without it, paste the story in.
+
+## Bot-comment severity (dev / cloud only)
 
 Review-bot comments can be scored for **severity** (nit → critical) and **category** by a small
 local ML model, with badges on each comment and a rollup on the Bots tab. It is **free tier**,
 uses no LLM and costs nothing — but it needs the `severity-api` service from the
 [`pierre-ml`](https://github.com/alexwakeman/pierre-ml) repo, vendored here as the
-`packages/ml` submodule, so it is **not available through `npx pierre-review`** (the published
+`packages/ml` submodule, so it is **not available through `npx limn-review`** (the published
 package ships no model). From a checkout with the submodule initialised
 (`git submodule update --init packages/ml`):
 
@@ -127,32 +162,6 @@ pnpm dev
 ```
 
 Full setup, tuning and caveats: [docs/ML-SEVERITY.md](docs/ML-SEVERITY.md).
-
-### Anthropic auth — precedence order
-
-Auth comes from the ambient environment; the first available source wins:
-
-1. **User-supplied key** — pasted into the Claude Review tab, stored locally at
-   `~/.pierre-review/config.json` (mode `0600`, never sent to any server). It
-   overrides the ambient auth for the run.
-2. **`ANTHROPIC_API_KEY`** environment variable.
-3. **`CLAUDE_CODE_OAUTH_TOKEN`** environment variable.
-4. **Ambient Claude Code session** — run `claude` once to sign in to an eligible
-   plan (Pro / Max / Team / Enterprise); pierre-review detects the on-disk
-   credentials under `~/.claude`.
-
-If none is found, the tab explains how to set one up (the first real SDK call is the
-authoritative check). The precedence and detection live in
-`apps/backend/src/review/auth.ts` and `review/local-settings.ts`.
-
-### Cloud: not available
-
-Claude Review is **force-disabled in cloud mode**
-(`config.claudeReviewEnabled = !isCloud && ENABLE_CLAUDE_REVIEW === 'true'`): the
-routes are never registered and the tab is hidden, regardless of
-`ENABLE_CLAUDE_REVIEW`. There is currently **no** way for cloud (multi-tenant) users
-to bring their own Anthropic key to turn it on — it depends on a local `gh` CLI and a
-writable clone directory, so it only runs in local mode.
 
 ## Cloud mode (multi-tenant)
 

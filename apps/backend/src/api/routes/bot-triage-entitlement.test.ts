@@ -44,12 +44,8 @@ const TO = Date.UTC(2026, 6, 15);
  *  tsc error here rather than a silently-false flag. */
 const FULL = {
   activityDigest: true,
-  reviewMemory: true,
-  aiAnalysis: true,
   prSummary: true,
-  aiFix: true,
   workspaceInsights: true,
-  claudeReview: true,
   slackDigest: true,
   issueLinks: true,
   botTriage: true,

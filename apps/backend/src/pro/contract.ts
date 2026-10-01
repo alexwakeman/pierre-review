@@ -22,7 +22,7 @@ import type {
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../github/compare.js';
 import type { PrReviewCommentHunks } from '../sync/hydrate-detail.js';
-import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
+import type { AgenticProviders } from '../review/plugin-providers.js';
 import type { PrDetailEnricher } from '../pr/detail-enricher.js';
 import type { AiUsageRecord } from '../db/usage.js';
 import type { AiCreditStatus } from '../db/credits.js';
@@ -37,12 +37,11 @@ import type { ConflictSeam } from '../conflict/seam.js';
 
 export interface ProCapabilities {
   activityDigest: boolean; // WS2 per-repo LLM headlines digest
-  reviewMemory: boolean; // WS3 Claude Review learnings
-  aiAnalysis: boolean; // AI Fix: CI failure analysis (Haiku, read-only) + the Analysis tab
-  prSummary: boolean; // per-PR AI summary (Haiku, read-only) — cheap SUMMARY tier, on in cloud
-  aiFix: boolean; // AI Fix: agentic inline code fix + push (Agent SDK, needs write)
+  // apiVersion 22: `reviewMemory`, `aiAnalysis`, `aiFix` and `claudeReview` LEFT this object. The
+  // agentic features are CORE (free, local-only, on the user's own Claude) and the SPA gates them
+  // on the top-level `MeResponse.ai`, which `entitledProCapabilities` can never zero.
+  prSummary: boolean; // per-PR AI summary + CI-failure analysis (Haiku, read-only) — Pro SUMMARY tier
   workspaceInsights: boolean; // workspace review-intelligence "Insights" (no AI; pure reads)
-  claudeReview: boolean; // agentic Claude Review (Agent SDK; the product lives in the plugin)
   slackDigest: boolean; // Slack webhook delivery of the sprint + repo digest (Pro; mirrors activityDigest)
   issueLinks: boolean; // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI)
   botTriage: boolean; // Review-bot triage tier — CORE/FREE, but its advanced settings are
@@ -344,9 +343,10 @@ export interface CommitFilesAndOpenPrResult {
   visible: boolean;
 }
 
+// apiVersion 22: `generateFix` and `applyAndPush` LEFT this seam with the agentic fixer (core,
+// coding/ai-fix/, reached through review/agent-context.ts). Their arg/result types stay below as
+// host-internal types — coding/agent.ts and coding/git-ops.ts still speak them.
 export interface CodingSeam {
-  generateFix(args: GenerateFixArgs): Promise<GenerateFixResult>;
-  applyAndPush(args: ApplyAndPushArgs): Promise<ApplyAndPushResult>;
   // The advisor's config-PR primitive: worktree at the DEFAULT branch → write files →
   // commit → push a NEW branch (never force) → open the PR → syncOnePr visibility tail.
   commitFilesAndOpenPr(args: CommitFilesAndOpenPrArgs): Promise<CommitFilesAndOpenPrResult>;
@@ -1165,8 +1165,11 @@ export interface ProContext {
   aiCredits: {
     check(accountId: number): Promise<AiCreditStatus>;
   };
-  reviewEvents: ReviewEventBus; // WS3 capture seam
-  registerLearningsProvider(p: LearningsProvider): void; // WS3 injection seam
+  // apiVersion 22: `reviewEvents` and `registerLearningsProvider` LEFT with Claude Review's memory,
+  // and `review` with Claude Review itself (all core now). In their place, OPTIONAL: the plugin
+  // registers its two Pro inputs to the free agentic features — the Jira fill for an AUTO review
+  // and AI Fix's CI-analysis seed (review/plugin-providers.ts). Absent ⇒ both run without them.
+  registerAgenticProviders?(p: AgenticProviders): void;
   // Background-job seam (host owns process/scheduler infra). The plugin registers node-cron
   // jobs here during register(); the core scheduler cron.schedule()s them AFTER bind, so they
   // ride the config.disableScheduler gate and are torn down with the app. Used by the Slack
@@ -1180,11 +1183,9 @@ export interface ProContext {
   // ticket links (compute-on-read) from a PR's title + head branch; core getPrDetail calls it
   // and sets PrDetail.tickets. Inert in OSS (tickets stays null).
   registerPrDetailEnricher(e: PrDetailEnricher): void;
-  // AI Fix infra (per-account, cloud-ready). Inert in OSS.
+  // GitHub reads/writes + the advisor's config-PR primitive (per-account). Inert in OSS.
   github: GithubSeam;
   coding: CodingSeam;
-  // Claude Review infra (the SDK run + diff prep + GitHub post). Inert in OSS.
-  review: ReviewSeam;
   // The merge-conflict resolver's per-hunk suggestion seam (`conflict/seam.ts`). The plugin runs
   // the model; the HOST owns the hunk, the validators and the suggestion store.
   //
@@ -1249,13 +1250,20 @@ export interface ProPlugin {
   // ProHostQueries gained getAdvisorFindings/getBotEffectPanel, CodingErrorCode gained
   // BRANCH_EXISTS, llm.complete gained `credential`, and ProCapabilities gained `botAdvisor`.
   //
+  // 21 → 22: THE AGENTIC FEATURES MOVED TO CORE. Claude Review (run, follow-up, ticket check, auto
+  // review, the chat), review memory and AI Fix's fixer are free, local-only and core again — on
+  // the user's own Claude, never in cloud. `ProCapabilities` loses `reviewMemory` / `aiAnalysis` /
+  // `aiFix` / `claudeReview`; `ProContext` loses `review`, `reviewEvents` and
+  // `registerLearningsProvider`, and `CodingSeam` loses `generateFix` / `applyAndPush`. It gains the
+  // OPTIONAL `registerAgenticProviders`. Removals are not "narrow additive", hence the bump.
+  //
   // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (its `plugin?.apiVersion !==` runtime gate — THE only
   // enforcer) and two more in the plugin (packages/pro/src/index.ts,
   // packages/pro/src/contract-types.ts). Bump ALL FOUR or the plugin log-and-degrades to OSS mode
   // against a version that is actually correct: capabilities go dark, every /api/pro/* route
   // 404s, and nothing throws. ⚠ The plugin's half lives in a SUBMODULE, so "all four" spans TWO
   // repos — the gitlink committed here must point at a plugin commit carrying the same number.
-  apiVersion: 21;
+  apiVersion: 22;
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
@@ -1264,12 +1272,8 @@ export interface ProPlugin {
 // setter).
 export const EMPTY_CAPABILITIES: ProCapabilities = {
   activityDigest: false,
-  reviewMemory: false,
-  aiAnalysis: false,
   prSummary: false,
-  aiFix: false,
   workspaceInsights: false,
-  claudeReview: false,
   slackDigest: false,
   issueLinks: false,
   botTriage: false,

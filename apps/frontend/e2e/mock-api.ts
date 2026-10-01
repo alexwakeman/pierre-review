@@ -220,12 +220,24 @@ const ME_RESPONSE: MeResponse = {
   // back to its shipped thresholds.
   mlSeverity: false,
   conflictResolver: false,
+  // The agentic AI surfaces (Claude Review, review chat, AI Fix) are FREE and local, but dark here
+  // — the `LIMN_AI_DISABLED=true` state — so the Open PRs table issues no per-row Claude Review
+  // states request and the Feed has no Claude pill. A spec exercising them flips `enabled` and
+  // serves those routes itself.
+  ai: {
+    enabled: false,
+    runtime: 'ready',
+    runtimeMessage: null,
+    auth: 'ok',
+    authMessage: null,
+  },
   largePrCodeLocThreshold: LARGE_PR_CODE_LOC_DEFAULT,
   largePrCodeLocThresholdIsDefault: true,
   blastRadius: null,
-  // Pro tier for e2e: all AI features (digests, Claude Review, AI Fix) stay off so the console
-  // renders without the AI panels/tabs. "My Turn" is CORE / free now (not a Pro capability), so
-  // the Feed's isMyTurn cards/toggle render regardless of these flags. `workspaceInsights` (the
+  // Pro tier for e2e: every Pro AI feature (digests, summaries) stays off so the console renders
+  // without the AI panels. (Claude Review and AI Fix are free now and gate on `ai` above.)
+  // "My Turn" is CORE / free (not a Pro capability), so the Feed's isMyTurn cards/toggle render
+  // regardless of these flags. `workspaceInsights` (the
   // former `teamInsights`) off keeps the Insights rail line hidden.
   pro: {
     activityDigest: false,
@@ -233,12 +245,8 @@ const ME_RESPONSE: MeResponse = {
     periodReports: false,
     botDepth: false,
     workPlan: false,
-    reviewMemory: false,
-    aiAnalysis: false,
     prSummary: false,
-    aiFix: false,
     workspaceInsights: false,
-    claudeReview: false,
     slackDigest: false,
     issueLinks: false,
     botTriage: false,
@@ -771,6 +779,14 @@ export async function installMockApi(page: Page): Promise<void> {
         return json(route, { suggestedReviewers: [], users: [] });
 
       if (path.endsWith('/api/me')) return json(route, ME_RESPONSE);
+      // The one-time AI runtime download streams `AiRuntimeInstallEvent` SSE frames; one `done`
+      // frame is a complete, successful install.
+      if (path.endsWith('/api/ai/runtime/install'))
+        return route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body: 'data: {"type":"done","runtime":"ready"}\n\n',
+        });
       // ⚠ MUST BE SERVED, not left to the catch-all. `workspaceId` starts null in the store and
       // every workspace-scoped query holds itself idle until this response resolves it — a `{}`
       // here leaves the Activity console (the default landing view) permanently blank.

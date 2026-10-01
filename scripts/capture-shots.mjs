@@ -12,7 +12,7 @@
 //
 // TWO PASSES against the SAME seeded DB, selected by SHOT_SET (default `pro`):
 //
-//   PRO  (default) — the full stack (PRO_DIGEST_ENABLED + PRO_ADVANCED_AI_ENABLED)
+//   PRO  (default) — the full stack (PRO_DIGEST_ENABLED; the agentic features are core and on locally)
 //   FREE (SHOT_SET=free) — the same database with PRO_DISABLED=true, which is how
 //        the visible-but-locked panes get photographed honestly: the free tier is
 //        not a cropped screenshot of the paid one, it is a different screen.

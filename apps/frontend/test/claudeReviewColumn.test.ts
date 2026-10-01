@@ -273,9 +273,10 @@ describe("resolveListTicket — the list's user story", () => {
 describe('the wiring', () => {
   const src = (p: string) => readFileSync(join(__dirname, '..', 'src', p), 'utf8');
 
-  it('the column and its request are gated on the Claude Review capability', () => {
+  it('the column and its request are gated on the FREE agentic AI flag (me.ai), never Pro', () => {
     const table = src('components/Activity/OpenPrsTable.tsx');
-    expect(table).toMatch(/const claudeOn = useProCapabilities\(\)\.claudeReview;/);
+    expect(table).toMatch(/const claudeOn = useAiCapabilities\(\)\.enabled;/);
+    expect(table).not.toMatch(/useProCapabilities/);
     expect(table).toMatch(/useClaudeReviewStates\(prIds, claudeOn\)/);
     expect(table).toMatch(/\{claudeOn && \(\s*<SortHeader col="claude"/);
   });

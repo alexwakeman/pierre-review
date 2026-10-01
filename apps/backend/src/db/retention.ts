@@ -106,6 +106,13 @@ async function deletePrSubtree(
       .execute();
   }
   await tx.delete(claudeReviews).where(inArray(claudeReviews.prId, prIds)).execute();
+  // AI Fix runs + Claude Review learnings (core since migration 0074 / pg 0061; the plugin's
+  // retention hook used to prune them). No FKs — explicit, pr-keyed.
+  await tx.delete(schema.aiFixes).where(inArray(schema.aiFixes.prId, prIds)).execute();
+  await tx
+    .delete(schema.reviewLearnings)
+    .where(inArray(schema.reviewLearnings.prId, prIds))
+    .execute();
   await tx.delete(pullRequests).where(inArray(pullRequests.id, prIds)).execute();
   // NB: commitFiles is GLOBAL (sha-keyed, shared across PRs/tenants) — deliberately NOT
   // pruned here. users + syncState are likewise out of scope.

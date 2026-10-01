@@ -63,6 +63,15 @@ const ROWS: Row[] = [
     free: 'Reply, resolve, approve, merge, merge-when-ready, update from trunk, resolve conflicts hunk by hunk.',
     pro: 'Everything free does. Acting on a pull request is never the paid part.',
   },
+  // ⚠ FREE AND LOCAL ONLY. Claude Review, its chat and AI Fix are core, run on the
+  // reader's own Claude (a Claude Code session or ANTHROPIC_API_KEY) and are not
+  // registered on the hosted app — hence the footnote under the table. The CI-failure
+  // read is a different, Pro feature (the row above), so it is not listed here.
+  {
+    q: 'Can Claude review or fix this?',
+    free: 'Yes, on your machine, on your own Claude: a review you tick and post, a chat on it, and a fix that is pushed only when you click.',
+    pro: 'Everything free does. The agents are never the paid part.',
+  },
   {
     q: 'Which review bots are worth their seat?',
     free: 'Detect every bot, name it, set its role and record what it costs — and an independent severity grade on every comment it leaves.',
@@ -100,7 +109,7 @@ const ROWS: Row[] = [
   },
   {
     q: 'Where does it run?',
-    free: `${INSTALL_COMMAND} on your machine, or the hosted service. No repository limit, no user limit.`,
+    free: `${INSTALL_COMMAND} on your machine, or the hosted service. No repository limit, no user limit. Claude review and fix run on your machine only.`,
     pro: 'The same two places. Pro unlocks on whichever one you already use.',
   },
 ];
@@ -153,6 +162,10 @@ export function TierTable(): JSX.Element {
               Pro lists at $25 per user, and is free for a month to anyone who asks for it.
               A user is someone who signs in — bots never count, and there is no
               per-repository charge.
+            </p>
+            <p className="mt-2 max-w-[62ch] font-mono text-mono-caption text-secondary">
+              Review and fix run locally only, on your own Claude Code or Anthropic API key.{' '}
+              {SITE_NAME} stores no key and charges nothing for it.
             </p>
 
             <ShotFrame

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useHasProWorkspaceSettings, useProSettings } from '../../hooks/useProSettings.js';
 import { SprintSection } from './SprintSection.js';
 import { SlackSection } from './SlackSection.js';
@@ -83,6 +84,7 @@ export function SettingsModal({
   onClose: () => void;
 }): JSX.Element {
   const caps = useProCapabilities();
+  const aiEnabled = useAiCapabilities().enabled;
   const isCloud = useMe().data?.deploymentMode === 'cloud';
   // ⚠ THE FETCH IS STILL HERE, AND IT IS NOW PURELY A GATE. No section reads account
   // `ProSettings` any more — the comparison-window mode was the last one and moved to the
@@ -277,9 +279,10 @@ export function SettingsModal({
                     feature: the enricher's input is a PR, and a PR's repo belongs to exactly one
                     workspace. */}
                 {proReady && caps.issueLinks && <IssueLinksSection />}
-                {/* Auto Claude review of new human PRs in THIS workspace (plugin migration 0036).
-                    Claude Review is local-only, so this appears only where it can run. */}
-                {proReady && caps.claudeReview && <AutoReviewSection />}
+                {/* Auto Claude review of new human PRs in THIS workspace — CORE/free, read from
+                    the workspace row (core migration 0074), so it does NOT wait on the plugin
+                    gate. Claude Review is local-only, so this appears only where it can run. */}
+                {aiEnabled && <AutoReviewSection />}
               </div>
             )}
           </section>

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
+import { migrateLegacyDataDir, resolveDataDir } from './data-dir.js';
 
 // apps/backend as the base for relative paths regardless of cwd.
 const backendRoot = resolve(import.meta.dirname, '..');
@@ -57,8 +57,20 @@ const deploymentMode: 'local' | 'cloud' =
   process.env.DEPLOYMENT_MODE === 'cloud' ? 'cloud' : 'local';
 const isCloud = deploymentMode === 'cloud';
 
+// Local: move a pre-rename ~/.pierre-review to ~/.limn, once, BEFORE anything below resolves a path
+// inside the data directory (data-dir.ts). Here, not in index.ts's start(): `pnpm dev` imports this
+// module first, so a later call would move the directory out from under `dataDir`/`cloneDir`. The
+// .env files are loaded by now, so a DATABASE_URL/CLONE_DIR pinned inside the old directory is seen.
+// The CLI already ran it before choosing the DB path; a second call is a no-op. Never under test.
+if (!isCloud && !process.env.VITEST) {
+  migrateLegacyDataDir({
+    log: (msg) => console.log(msg),
+    resolvePath: (p) => (isAbsolute(p) ? p : resolve(backendRoot, p)),
+  });
+}
+
 // Default the SQLite DB under apps/backend/data for local dev. The INSTALLED CLI
-// instead points DATABASE_URL at a user-writable ~/.pierre-review path (see
+// instead points DATABASE_URL at a user-writable ~/.limn path (see
 // cli.ts) BEFORE config loads — so `pnpm dev` and a globally-installed `pierre`
 // never share a database. Sharing one would be a trap: each process has its own
 // in-memory "is-syncing" guard, so two of them double-sync every repo against the
@@ -121,9 +133,9 @@ function defaultCloneDir(): string {
   // ⚠ TWO LEVELS, NOT ONE. `tightenCloneRoot()` chmods the clone root AND ITS PARENT to 0700, so a
   // bare `/tmp/pierre-clones` would aim that at `/tmp` itself — a chmod this process does not own,
   // which fails silently and leaves the root un-tightened. `/tmp/pierre-review` is ours, created by
-  // the same `mkdirSync(..., {recursive: true})`, and mirrors the local `~/.pierre-review/clones`.
+  // the same `mkdirSync(..., {recursive: true})`, and mirrors the local `~/.limn/clones`.
   if (isCloud) return '/tmp/pierre-review/clones';
-  return resolve(homedir(), '.pierre-review', 'clones');
+  return join(resolveDataDir(), 'clones');
 }
 
 export const spaPublicDir = resolve(backendRoot, 'public');
@@ -425,7 +437,7 @@ export const config = {
   // PRO_CLOUD_ENABLED=true (the paid summary-AI tier — set on the Railway image), so the
   // public Dockerfile / OSS npm path is byte-identical to before. Even when true in cloud,
   // per-account entitlement (plan !== 'free') + the /api/pro/* 402 gate decide who actually
-  // gets Pro; agentic AI stays independently gated by PRO_ADVANCED_AI_ENABLED (unset → off).
+  // gets Pro. The agentic features are core and gated separately (`aiEnabled` below; off in cloud).
   proEnabled:
     process.env.PRO_DISABLED !== 'true' &&
     (!isCloud || process.env.PRO_CLOUD_ENABLED === 'true'),
@@ -459,15 +471,26 @@ export const config = {
     digestMinIntervalSec: intFromEnv('PRO_DIGEST_MIN_INTERVAL_SEC', 60),
   },
 
-  // ---- Claude Review — CORE infra knobs (the product moved to @pierre/pro) ----
-  // The SDK-run / diff-prep infra behind the ctx.review seam reads these. The old
-  // `claudeReviewEnabled` env flag was removed — Claude Review is now the Pro
-  // `claudeReview` capability (PRO_CLAUDE_REVIEW_ENABLED); the routing thresholds,
-  // concurrency + queue caps, and the default-model picker moved to PRO_REVIEW_* env.
+  // ---- The agentic features: Claude Review, review memory, AI Fix (CORE, free, LOCAL ONLY) ----
+  // ONE switch, and it is NOT an opt-in: locally they are on and always visible (a missing Claude
+  // credential replaces the Run button with one line; it never hides the feature). They run on
+  // the user's own Claude Code session or ANTHROPIC_API_KEY (review/auth.ts).
+  //   • CLOUD: off, STRUCTURALLY — `registerAgenticRoutes` refuses to register anything when
+  //     `isCloud`, so the guarantee never rests on an env var being unset (it used to: the plugin's
+  //     PRO_ADVANCED_AI_ENABLED, now deleted along with ENABLE_CLAUDE_REVIEW / CLAUDE_REVIEW_ENABLED).
+  //   • LIMN_AI_DISABLED=true: the kill switch for a team that forbids AI tooling — hides every
+  //     agentic surface (`MeResponse.ai.enabled` false) and registers no agentic route.
+  aiEnabled: !isCloud && process.env.LIMN_AI_DISABLED !== 'true',
+  // ---- Claude Review — infra knobs ----
+  // The routing thresholds, concurrency + queue caps keep their historical PRO_REVIEW_* env names.
   // Partial clones + ephemeral worktrees live here (a user-writable home path,
   // never the read-only install dir). CLONE_DIR overrides. See `defaultCloneDir`
   // above for why cloud puts them somewhere else.
   cloneDir: process.env.CLONE_DIR ?? defaultCloneDir(),
+  // The local data directory: `~/.limn` (LIMN_DATA_DIR overrides). Holds the installed CLI's
+  // database, the clone cache, config.json and the AI runtime downloaded on first use. An existing
+  // `~/.pierre-review` (the pre-rename name) is moved here ONCE on first boot — data-dir.ts.
+  dataDir: resolveDataDir(),
   // Soft cap on the clone cache before LRU cleanup evicts idle repos.
   //
   // 2 GiB locally, where the disk is the developer's own and a clone kept warm saves a cold

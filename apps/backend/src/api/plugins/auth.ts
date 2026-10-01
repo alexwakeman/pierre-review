@@ -133,18 +133,16 @@ export function registerAuthGate(app: FastifyInstance): void {
 
 // Which paths the free-plan 402 gate covers.
 //
-// `/api/pro/*` is the convention, but it is NOT the whole surface: when Claude Review moved
-// into the plugin it deliberately KEPT its pre-plugin URLs so the core frontend client did
-// not have to change — `/api/prs/:id/claude-review*`, `/api/claude-reviews/*`,
-// `/api/claude-findings/*`, `/api/claude-review/budget` (its `/key` sibling is DELETED with the
-// retired BYO Anthropic key). A prefix test on `/api/pro/`
-// therefore missed the most expensive routes in the product.
+// `/api/pro/*` is the convention, but it is NOT the whole surface: Claude Review has always kept
+// its pre-plugin URLs — `/api/prs/:id/claude-review*`, `/api/claude-reviews/*`,
+// `/api/claude-findings/*`, `/api/claude-review/budget` — and AI Fix's fixer kept its
+// `/api/pro/prs/:id/ai-fix*` / `/api/pro/ai-fixes/*` paths when both moved to core.
 //
-// Today that is latent rather than exploitable, because agentic AI is off in cloud
-// (PRO_ADVANCED_AI_ENABLED unset ⇒ the routes 404 via their own self-gate) — but "latent"
-// here means "the day someone enables the paid agentic tier, every free account gets it",
-// which is precisely the kind of gap that ships. Enumerated explicitly so adding a plugin
-// route outside /api/pro/ is a visible decision.
+// ⚠ THIS IS NOW THE SECOND GUARD, NOT THE FIRST. Claude Review, review memory and AI Fix are core,
+// free and LOCAL ONLY: `registerAgenticRoutes` (review/agentic.ts) registers none of them in cloud
+// — an explicit `isCloud` check — so in cloud they 404 before this matters. The entries stay so a
+// future change that registers one in cloud does not hand it to every free account by default.
+// Enumerated explicitly so adding a route outside /api/pro/ is a visible decision.
 function isProPath(path: string): boolean {
   if (path.startsWith('/api/pro/')) return true;
   if (path.startsWith('/api/claude-reviews')) return true;

@@ -73,7 +73,7 @@ One env var — **`DEPLOYMENT_MODE` = `local` (default) | `cloud`** — drives
 | GitHub auth | `gh auth token` (one account) | OAuth App and/or GitHub App, per-user tokens |
 | Accounts | 1 synthesized `isLocal` (id 1) | one per signed-in user |
 | Landing / SPA | landing never served (`/` → 302 `/app`); SPA at `/app` | landing at `/`; SPA at `/app` behind the auth gate |
-| Claude Review | allowed (flag) | force-disabled (routes unregistered) |
+| Claude Review / AI Fix | on, free (`LIMN_AI_DISABLED=true` hides) | off — routes unregistered (`isCloud` check) |
 | Sessions/OAuth | none | sealed cookie + `/api/auth/*` |
 | CORS | loopback origins only | exactly `APP_BASE_URL` |
 | CSP / HSTS | CSP yes (no 3rd-party origins); no HSTS | CSP + HSTS + www→apex 301 |
@@ -602,6 +602,11 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   SPACE-SEPARATED (any other format silently breaks Tailwind's `<alpha-value>`);
   `--ai-signal-fill` is NON-TEXT ONLY. ⚠ **Every surviving `violet-`/`purple-`/`indigo-` hit
   is a deliberate KEEP** — do not "finish the migration"; keep-list in the doc.
+- **The agentic surfaces (Claude Review, review chat, review memory, AI Fix) gate on `me.ai`
+  through `useAiCapabilities()`, NEVER `useProCapabilities()`** — they are free. VISIBILITY is
+  `ai.enabled` alone; a missing runtime/credential swaps only the Run button, via the ONE
+  `AiRunGate` (`components/AiSetup.tsx`). Cloud prints `AiCloudNote`, never a ProBadge. Local runs
+  show US$, never credits. [docs/FRONTEND.md](docs/FRONTEND.md) § The agentic AI surfaces.
 - **The Insights chat is multi-turn and the cap is SERVER-side.** ⚠ **The completed turn is
   appended in `useSprintChat`'s HOOK-level `onSuccess`, never a `mutate()` callback** (observer
   teardown kills mutate-scoped callbacks, losing a billed answer). ⚠ The chart pass gets the
@@ -759,20 +764,47 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 
 ---
 
-## Claude Review + the Pro plugin
+## Claude Review, AI Fix + the Pro plugin
 
-**Claude Review** (agentic PR review, `src/review/`): opt-in, **LOCAL-ONLY**
-(`ENABLE_CLAUDE_REVIEW=true`; force-disabled in cloud — the routes are not even registered).
-Details: [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md). Non-negotiables: the agent's tools are
-read-only with **`Bash` denied outright** (the per-review CHAT, optional seam `ctx.review.chat`,
-mirrors the review's mode under the same rule and rebuilds its transcript server-side), and **no AI SDK ships in npm** — every AI module is
-reached only via dynamic `await import()`, and `build-release.mjs` asserts none leak into the
-release manifest. ⚠ **Its credential ladder is TWO RUNGS and there is NO stored key**: an ambient
-Claude session (preferred — the run STRIPS `ANTHROPIC_API_KEY` so a subscription pays instead of a
-meter), else the environment's `ANTHROPIC_API_KEY`, untouched. The BYO key in
-`~/.pierre-review/config.json`, its Settings form, `GET`/`PUT /api/claude-review/key` and
-`ReviewSeam.setLocalKey` are RETIRED — an already-stored value is left on disk and never read, and
-`review/local-settings.ts` survives only for the still-live per-review BUDGET.
+**The agentic features are CORE, FREE and LOCAL-ONLY** (apiVersion 22 moved them out of the
+plugin): Claude Review (run, follow-up, ticket check against a PASTED story, auto review, the review
+chat) in `src/review/claude-review/`, review memory (`review_learnings`) in `src/review/memory/`,
+AI Fix's agentic fixer + push in `src/coding/ai-fix/`. Details:
+[docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md). Non-negotiables:
+
+- **ONE switch, `config.aiEnabled` = `!isCloud && LIMN_AI_DISABLED !== 'true'`** — on and always
+  visible locally (no opt-in flag; `ENABLE_CLAUDE_REVIEW`, `PRO_ADVANCED_AI_ENABLED` and its alias
+  are DELETED). ⚠ **CLOUD IS OFF BY AN EXPLICIT `isCloud` CHECK** in `registerAgenticRoutes`
+  (`review/agentic.ts`) — nothing agentic registers there; `isProPath`'s 402 is the SECOND guard.
+  `MeResponse.ai` (top-level, never inside `pro`) carries `enabled` / `runtime` / `auth`; no
+  credential swaps the Run button for ONE line, never hides the feature. Auto review is OFF per
+  workspace until switched on (`workspaces.auto_review_enabled[_at]`, `GET`/`PUT
+  /api/workspaces/:id/auto-review`, the floor moves only on an off → on flip).
+- **The moved modules take ONE context argument, `AgentContext`** (`review/agent-context.ts`),
+  built from direct core imports — never `ProContext`. Their tests pass a fake one; the queue
+  managers carry it on each item. URL paths did NOT move (the fixer keeps its historical
+  `/api/pro/prs/:id/ai-fix*` and `/api/pro/ai-fixes/*`).
+- **Two Pro inputs ride an OPTIONAL plugin seam** (`ProContext.registerAgenticProviders?`,
+  `review/plugin-providers.ts`): the Jira fill for an AUTO review (`resolveReviewTicket`) and AI
+  Fix's `ci_analysis` seed (`readCiAnalysisSeed` — the CI diagnosis is a Pro card). Absent ⇒ auto
+  review runs with no story and the `ci_analysis` seed is refused as `missing`; the `plain`,
+  `review` and `comments` seeds always work free.
+- The agent's tools are read-only with **`Bash` denied outright** (the CHAT mirrors the review's
+  mode under the same rule and rebuilds its transcript server-side); the fixer edits files, has no
+  shell, builds and tests nothing, and nothing is posted or pushed until the reader presses the
+  button. **No AI SDK is in the npm manifest** — they are downloaded on first use and value-imported
+  ONLY by `ai/runtime.ts`, which `build-release.mjs` asserts (see *Packaging & publishing*).
+  ⚠ **The credential ladder is TWO RUNGS and there is NO stored key**: an ambient Claude session
+  (the run STRIPS `ANTHROPIC_API_KEY`), else the environment's `ANTHROPIC_API_KEY`, untouched.
+  Product copy says "runs on your own Claude Code or Anthropic API key" and never promises
+  subscription billing. The BYO key in `config.json`, its form, `GET`/`PUT
+  /api/claude-review/key` and `setLocalKey` are RETIRED; `review/local-settings.ts` survives for
+  the per-review BUDGET. Local spend is unmetered but still recorded (`recordAiUsage`).
+- ⚠ **Their tables were ADOPTED, not renamed**: `ai_fixes` + `review_learnings` are core since
+  sqlite `0074` / pg `0061` (`CREATE … IF NOT EXISTS`, the plugin's index names, NO FKs); the
+  plugin's own DDL for them was stripped (plugin `0001`/`0002`/`0003`/`0024`) or a FRESH sqlite
+  install hits "duplicate column" and drops the whole plugin to OSS. Both delete paths, erasure,
+  `accountScopedTables()` and `verify:isolation` own them now.
 
 **Pro plugin** (`@pierre/pro`): a PRIVATE git submodule at `packages/pro`
 (`git submodule update --init`); all premium logic lives there. The public repo holds only the
@@ -782,7 +814,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
 [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) +
 [docs/PRO-PLATFORM.md](docs/PRO-PLATFORM.md). What bites:
 
-- **`apiVersion` is 21 and FOUR literals must agree**: host `contract.ts`, plugin `index.ts`,
+- **`apiVersion` is 22 and FOUR literals must agree**: host `contract.ts`, plugin `index.ts`,
   plugin `contract-types.ts`, and `bind.ts`'s runtime gate — **the actual enforcer**. A
   half-bump silently degrades the ENTIRE plugin to OSS mode: capabilities dark, every
   `/api/pro/*` 404, nothing thrown. No test pins it; detection is `tsc` + a boot check of
@@ -799,14 +831,17 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   `jira_ac_field_*` are dormant). [SECURITY.md](docs/SECURITY.md).
 - `ctx.schema` is `Record<string, any>` — a leftover `ctx.schema.teams` type-checks and throws
   only when the query runs. Grep, don't trust the compiler.
-- Tiers — **free gets the per-PR truth, paid gets the cross-team roll-up**: **core** is free and
-  AI-free (feed/timeline/My Turn, per-COMMENT ML severity badges, Settings classification, the
-  bot-only caution + `TuningSuggestions`, the `BotTriageCard` grade);
+- Tiers — **free gets the per-PR truth, paid gets the cross-team roll-up**: **core** is free
+  (feed/timeline/My Turn, per-COMMENT ML severity badges, Settings classification, the bot-only
+  caution + `TuningSuggestions`, the `BotTriageCard` grade) **and, locally, the agentic features —
+  Claude Review, review memory, AI Fix — on the user's own Claude** (`MeResponse.ai`, above);
   **pro** adds `botDepth` (NON-AI depth **and the WHOLE Bots → ROI panel** — vendor table,
   keep/tune/noisy verdicts, the Inflation column *counts included*, ML flagging, volume, seat
-  prices), `activityDigest`, and `periodReports` (period reports + by-workspace axis + the People
-  report + **Chronology**); **pro+** is AI Analysis + AI Fix + Claude Review, on the ONE flag
-  `PRO_ADVANCED_AI_ENABLED`.
+  prices), `activityDigest`, `periodReports` (period reports + by-workspace axis + the People
+  report + **Chronology**), the Jira tracker, and `prSummary` — every ONE-SHOT Haiku feature on
+  the Anthropic API (PR summary, the CI-failure analysis card, comment validity/addressed/simplify
+  annotations, the blast impact note, conflict-assist) plus all reporting narration. There is no
+  "pro+" tier any more (apiVersion 22).
 - ⚠ **Those last SIX surfaces are VISIBLE-BUT-LOCKED, reversing the app's "absent, never upsold"
   posture** (Chronology, period reports, the People report, the by-workspace axis, the ROI panel,
   and the Bots → **Benchmark** tab): tab listed, `ProBadge` on it, body renders `ProLockPanel` — all
@@ -838,12 +873,12 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   prompt-only rule.
 - ⚠ **A model-derived figure and a code-derived figure must be LABELLED APART** in a panel that
   mixes them.
-- **AI Fix has FOUR seeds** (`AiFixSeed`); ⚠ the newest, `'comments'`, WIDENS the
-  attacker-authored channel to every comment dragged in (fencing is the mitigation) and must
-  never get its own queue/slot — the worktree is keyed on the SHA alone. ⚠ A finished fix PUSHES
-  AS-IS; the trunk-reconciliation seams were DELETED at apiVersion 21, so host, plugin and gitlink
-  land together ([docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § AI Fix pushes
-  as-is).
+- **AI Fix has FOUR seeds** (`AiFixSeed`; the fixer is CORE since apiVersion 22,
+  `src/coding/ai-fix/`): `plain`, `review` and `comments` are free; `ci_analysis` needs the Pro CI
+  diagnosis through the optional `readCiAnalysisSeed` provider and is refused as `missing` without
+  one. ⚠ `'comments'` WIDENS the attacker-authored channel to every comment dragged in (fencing is
+  the mitigation) and must never get its own queue/slot — the worktree is keyed on the SHA alone.
+  ⚠ A finished fix PUSHES AS-IS ([docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § AI Fix).
 - ⚠ **THE FIX AGENT HAS NO SHELL** — `FIX_TOOLS` is Read/Glob/Grep + Write/Edit/MultiEdit +
   `submit_fix`, and `DISALLOWED_TOOLS` is `['Bash','NotebookEdit']` (Claude Review denies `Bash`
   too). It reads and edits; **it installs nothing, builds nothing and runs
@@ -853,8 +888,10 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   like that (62 of 63 PRs on one, 1,014 of 9,544 overall), so "CI will run on push" invents the
   verification the sentence exists to deny. Why, and the blocklist it replaced:
   [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § The fix agent has no shell.
-  ⚠ **The prompt and the tool list change together** — `WORKTREE_RULES` (one constant, both fix prompts)
-  and the CI-analysis capability sentence, whose answer is stored raw and RENDERED. ⚠ **AND THE
+  ⚠ **The prompt and the tool list change together** — `WORKTREE_RULES` (one constant, both fix
+  prompts, now CORE `coding/ai-fix/prompts.ts`, pinned by `no-shell.test.ts`) and the CI-analysis
+  capability sentence (still the PLUGIN's `CI_ANALYSIS_SYSTEM`), whose answer is stored raw and
+  RENDERED — two repos, change them together. ⚠ **AND THE
   CAPABILITY SENTENCE IS A TERM OF THE CACHE KEY EVEN THOUGH THE PROMPT IS NOT**: the payload hash
   is `v3|head|diff|check logs`, so a prompt edit alone leaves every stored row asserting a shell and
   a push the product does not have — 17 of 19 real rows did, 3 of them still seedable to the agent.
@@ -870,7 +907,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   touchpoint sits behind a diff-guard `llm-isolation.test.ts` pins unreachable); **a cell with
   ANY acted-on high-severity finding never earns a full suppress**; **a suppression needs ≥1
   untouched thread on a PR that has since MERGED**; nothing it computes may feed `botVerdict`.
-- **The peer benchmark** (`GET /api/pro/bot-benchmark`, Pro on `botDepth`, apiVersion stays 21): the
+- **The peer benchmark** (`GET /api/pro/bot-benchmark`, Pro on `botDepth`, no apiVersion bump): the
   COHORT half of "how does our bot compare" — per-(vendor × activity band) distributions fitted in
   `packages/ml` and BUNDLED at `packages/pro/data/benchmark/benchmark-fit.json`, resolved as a
   SIBLING of `src`/`dist` (the `../migrations` precedent; a `./data/` path breaks in dev).
@@ -895,7 +932,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   ⚠ **THAT ROUTE IS TWO SCREENS AT TWO GRAINS, AND MONEY LIVES ON EXACTLY ONE.** The RAIL renders
   `rollup[]` (ONE CARD PER VENDOR over the workspace — pooled counters, a per-repo evidence table, a
   spread, the price); the REPO TAB renders the per-repository units and **no money at all**. Same
-  route, same ONE fetch; `apiVersion` STAYS 21 (`rollup?` is an optional field on a
+  route, same ONE fetch; no `apiVersion` bump (`rollup?` is an optional field on a
   `packages/shared` wire type, which is not `ProContext`). ⚠ **THE ROLLUP CARRIES NO PERCENTILE OF
   ITS OWN** — pooling is VOLUME-weighted while the cohort distribution is one-repo-one-vote, so a
   workspace spanning four bands folds to a number belonging to no cell, and there is no distribution
@@ -947,7 +984,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   `now`-derived and must stay OUT of the payload hash; ⚠ **ONE PR IS ONE JOB** — the id dedup is
   not enough, a second pass keys on `prId` and wins by time-free `proximity`; ⚠ a repo-grained row
   (a red trunk) must not be described as a PR in the payload, its facts, or on screen; ⚠
-  `ProHostQueries.getWorkPlan` is OPTIONAL so `apiVersion` stays 21.
+  `ProHostQueries.getWorkPlan` is OPTIONAL so no `apiVersion` bump.
 
 ---
 
@@ -1029,7 +1066,7 @@ with a SECTION per pick; contract in
 
 Every hour a pull request is open, somebody is holding the ball: a **reviewer** who has not looked,
 an **author** who owes a response, or nobody - approved and waiting to land. **PRO on
-`periodReports`** (no new capability, apiVersion stays 21), deterministic — no model anywhere in
+`periodReports`** (no new capability, no apiVersion bump), deterministic — no model anywhere in
 it except the opt-in Pointers block (plugin `flow-pointers/`, optional host seam). `db/pr-intervals.ts` + `api/routes/flow.ts` + `Activity/BottlenecksPanel.tsx`. Full contract:
 **[docs/BOTTLENECKS.md](docs/BOTTLENECKS.md)**. ⚠ The 402 lives on the ROUTE; `getFlowCourts` stays
 capability-blind because `verify:isolation` calls that fold directly, with no account row.
@@ -1065,7 +1102,7 @@ microservice from **`packages/ml`**. Full detail: **[docs/ML-SEVERITY.md](docs/M
 
 - **`SEVERITY_API_URL` IS THE WHOLE GATE.** Unset ⇒ no worker, `/api/me` reports
   `mlSeverity:false`, the SPA issues zero ML queries — which keeps the feature dark under
-  `npx pierre-review`. ⚠ The flag is **top-level** on `MeResponse`, NOT part of `pro`:
+  `npx limn-review`. ⚠ The flag is **top-level** on `MeResponse`, NOT part of `pro`:
   `entitledProCapabilities` zeroes that object for free cloud accounts, exactly this feature's
   audience.
 - **Enrichment is a PULL-BASED BACKGROUND WORKER (`sync/ml-enrichment.ts`), never a sync
@@ -1280,8 +1317,13 @@ straight to `/app`, no landing/sign-in).
 
 ## Packaging & publishing
 
-Ships to npm as the single unscoped package `pierre-review` (`npx pierre-review`), built
-artifacts only. Publishing is CI-only — **never run `npm publish`/`npm login` from here**.
+Ships to npm as the single unscoped package `limn-review` (`npx limn-review`, bin `limn`;
+the deprecated `pierre-review` command is the hand-published forwarding stub's bin ONLY — ⚠ never
+re-add it to limn-review, or `npm i -g limn-review` hits EEXIST over an old global install), built artifacts
+only. Local data lives in `~/.limn` (`LIMN_DATA_DIR`); an existing `~/.pierre-review` is moved
+there ONCE by a single rename on first boot (`data-dir.ts`) — ⚠ never clobbering an existing
+`~/.limn`, never copy-then-delete. Internal identifiers (`pierre*`, `@pierre/pro`,
+`@pierre-review/*`, the DB file name) stay. Publishing is CI-only — **never run `npm publish`/`npm login` from here**.
 Details: [docs/PACKAGING.md](docs/PACKAGING.md) + [docs/RELEASE.md](docs/RELEASE.md).
 The traps:
 
@@ -1297,9 +1339,19 @@ The traps:
   path, never by name), and never fork a shared fold to dodge this.
 - **pnpm is PINNED** (`packageManager: pnpm@9.15.9`); bumping it means regenerating
   `pnpm-lock.yaml` or native builds fail (`ERR_PNPM_IGNORED_BUILDS`).
-- **No AI ships in npm**: the AI SDKs are never curated runtime deps; a guardrail assert
-  fails the build if any leak into `release/package.json`. `--with-pro` (the paid cloud
-  image only; public release CI never passes it) adds only `@anthropic-ai/sdk`.
+- **No AI SDK in the manifest; installed on first use.** The agentic features ship as code,
+  but `@anthropic-ai/claude-agent-sdk` (~110 MB native binary), `@anthropic-ai/sdk`,
+  `@modelcontextprotocol/sdk` and `zod` are downloaded into `~/.limn/ai-runtime` by "Set up AI"
+  / `limn ai install`, at EXACT pins the build GENERATES into the non-dependency manifest field
+  `limnAiRuntime`. ⚠ **`apps/backend/src/ai/runtime.ts` is the ONLY module that may value-import
+  them** (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`; type imports are fine) — the build greps
+  `release/dist` and fails on any other; a missed one is ERR_MODULE_NOT_FOUND on npm, only when
+  clicked. ⚠ zod must come from the SAME install as the SDK, by the ESM entry (`index.js`), never
+  `require.resolve` (`index.cjs` = a second instance that silently breaks tool schemas) — so the
+  `schema.ts` shapes are BUILT from a zod handed in. Dev resolves the workspace copies first, so
+  `pnpm dev` is unchanged. `--with-pro` (the paid cloud image only; public release CI never passes
+  it) adds only `@anthropic-ai/sdk`, at the same pin. Detail: [docs/PACKAGING.md](docs/PACKAGING.md)
+  § No AI SDK in the manifest.
 - The landing prerender's `<!-- seo:start/end -->` / `<!-- app:start/end -->` markers in
   `apps/landing/index.html` are load-bearing — deleting them silently reverts the site to
   a contentless shell (the prerenderer throws, but only at build time).
@@ -1326,7 +1378,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0060` and plugin `0034`–`0036` are NOT replayed.
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0061` and plugin `0034`–`0037` are NOT replayed.
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence

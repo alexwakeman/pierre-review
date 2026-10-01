@@ -1,0 +1,21 @@
+{
+  "name": "pierre-review",
+  "version": "0.2.0",
+  "description": "Renamed to limn-review. This package only forwards to it: use `npx limn-review`.",
+  "type": "module",
+  "bin": {
+    "pierre-review": "cli.js",
+    "pierre": "cli.js"
+  },
+  "files": ["cli.js", "README.md"],
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "limn-review": "*"
+  },
+  "license": "SEE LICENSE IN README.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexwakeman/pierre-review.git"
+  },
+  "homepage": "https://www.npmjs.com/package/limn-review"
+}

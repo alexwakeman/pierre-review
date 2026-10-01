@@ -1,10 +1,14 @@
+import { AI_CREDITS_PER_USD } from '@pierre-review/shared';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { formatUsd } from '../../lib/ui.js';
 
 // AI usage, month-to-date. The two seams are metered DIFFERENTLY (see AiUsageResponse):
 //  - SUMMARIES (cheap one-shot Haiku completions — digests, sprint report, insights chat, PR
 //    summary, CI analysis, themes) by a monthly TURN COUNT (N summaries/month).
-//  - AGENTIC TOOLS (Agent-SDK runs — Claude Review, AI Fix) by CREDITS ($ cost, shown as credits,
-//    never dollars).
+//  - AGENTIC TOOLS (Agent-SDK runs — Claude Review, the review chat, AI Fix). FREE and LOCAL-ONLY:
+//    they spend the reader's own Claude Code session or API key, so the row shows MONEY (US$, as
+//    the provider charges it), never Limn credits, and only where they can run (`me.ai.enabled`).
 // Each resets at the UTC month boundary. Local mode is unmetered (null limit/allowance → no bar,
 // just a running total). Mounted only when the "Track usage" panel is open, so it fetches lazily.
 
@@ -27,6 +31,7 @@ function SeamMeter({
   remaining,
   unit,
   resetOn,
+  format,
 }: {
   label: string;
   hint: string;
@@ -35,6 +40,8 @@ function SeamMeter({
   remaining: number | null;
   unit: string;
   resetOn: string;
+  /** Renders the used figure in place of `used.toLocaleString() + unit` (the money row). */
+  format?: (used: number) => string;
 }): JSX.Element {
   const metered = limit != null;
   const exhausted = metered && (remaining ?? 0) <= 0;
@@ -47,9 +54,15 @@ function SeamMeter({
           <div className="text-[10px] text-gray-400">{hint}</div>
         </div>
         <div className="whitespace-nowrap text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
-          {used.toLocaleString()}
-          {metered && <span className="text-gray-400"> / {limit.toLocaleString()}</span>}{' '}
-          <span className="text-[10px] font-normal text-gray-400">{unit}</span>
+          {format ? (
+            format(used)
+          ) : (
+            <>
+              {used.toLocaleString()}
+              {metered && <span className="text-gray-400"> / {limit.toLocaleString()}</span>}{' '}
+              <span className="text-[10px] font-normal text-gray-400">{unit}</span>
+            </>
+          )}
         </div>
       </div>
       {metered && (
@@ -75,6 +88,7 @@ function SeamMeter({
 
 export function TrackUsage(): JSX.Element {
   const { data, isLoading, isError } = useAiUsage(true);
+  const agentic = useAiCapabilities().enabled;
   const monthLabel = data
     ? new Date(data.monthStart).toLocaleDateString(undefined, { month: 'long' })
     : '';
@@ -105,19 +119,22 @@ export function TrackUsage(): JSX.Element {
               unit="summaries"
               resetOn={resetLabel(data.monthStart)}
             />
-            <SeamMeter
-              label="Agentic tools"
-              hint="Claude Review · AI Fix"
-              used={data.agentCreditsUsed}
-              limit={data.agentAllowanceCredits}
-              remaining={data.agentCreditsRemaining}
-              unit="cr"
-              resetOn={resetLabel(data.monthStart)}
-            />
+            {agentic && (
+              <SeamMeter
+                label="Claude Review and AI Fix"
+                hint="on your own Claude Code or Anthropic API key"
+                used={data.agentCreditsUsed}
+                limit={null}
+                remaining={null}
+                unit=""
+                resetOn={resetLabel(data.monthStart)}
+                format={(credits) => formatUsd(credits / AI_CREDITS_PER_USD)}
+              />
+            )}
           </div>
-          <div className="mt-1.5 text-[10px] text-gray-400">
-            Summaries are counted per month; agentic tools draw from a monthly credit balance. Both
-            reset on the 1st.
+          <div className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+            Summaries are counted per month and reset on the 1st.
+            {agentic && ' Limn charges nothing for Claude Review or AI Fix.'}
           </div>
         </>
       )}
