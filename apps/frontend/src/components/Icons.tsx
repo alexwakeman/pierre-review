@@ -254,6 +254,50 @@ export function ArrowIcon({
   );
 }
 
+/**
+ * Fold — a diff's "expand hidden lines" arrow (GitHub's fold-up / fold-down): an arrow leaving a
+ * dashed line, the dashed line being the hidden code. `down` reveals the lines just AFTER the code
+ * above it; `up` reveals the lines just BEFORE the code below it. Not {@link ArrowIcon}: the dashed
+ * line is what says "unfold code here" rather than "go that way".
+ */
+export function FoldIcon({
+  dir = 'down',
+  size = 14,
+  ...rest
+}: IconProps & { dir?: 'up' | 'down' }): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      {dir === 'down' ? (
+        <>
+          <line x1="3" y1="4" x2="21" y2="4" strokeDasharray="3 3" />
+          <line x1="12" y1="9" x2="12" y2="21" />
+          <polyline points="7 16 12 21 17 16" />
+        </>
+      ) : (
+        <>
+          <line x1="3" y1="20" x2="21" y2="20" strokeDasharray="3 3" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+          <polyline points="7 8 12 3 17 8" />
+        </>
+      )}
+    </IconShell>
+  );
+}
+
+/** Unfold — reveal ALL of a diff's hidden lines at once (GitHub's unfold): two arrows leaving a
+ *  dashed line in both directions. The companion of {@link FoldIcon}. */
+export function UnfoldIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <line x1="3" y1="12" x2="21" y2="12" strokeDasharray="3 3" />
+      <line x1="12" y1="8" x2="12" y2="2" />
+      <polyline points="8 5 12 1.5 16 5" />
+      <line x1="12" y1="16" x2="12" y2="22" />
+      <polyline points="8 19 12 22.5 16 19" />
+    </IconShell>
+  );
+}
+
 // Close / dismiss / clear — every ✕ in the app, and the ✗ that marks a failed check.
 export function CloseIcon({ size = 12, ...rest }: IconProps): JSX.Element {
   return (

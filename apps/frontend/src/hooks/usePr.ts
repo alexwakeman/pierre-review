@@ -183,7 +183,7 @@ export function usePrMoreFiles(id: number | null, first: PrFilesResponse | undef
 }
 
 /**
- * One file's raw lines at the PR head (or merge base), for a gap marker's "Show N hidden lines".
+ * One file's raw lines at the PR head (or merge base), for a gap's expand arrows.
  * `enabled` is the CLICK: the block passes false until the reader asks. Keyed on the head the
  * diff was read at, so a push asks again. Not persisted.
  */

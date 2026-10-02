@@ -19,10 +19,10 @@ export interface DiffRow {
   newLine?: number;
   /**
    * `hunk` rows only: the unchanged lines GitHub's patch leaves out BEFORE this hunk, which the
-   * Changes tab draws as a gap marker in place of the `@@` header. `count` lines starting at
+   * Changes tab draws as a hunk expander in place of the `@@` header. `count` lines starting at
    * `oldFrom` / `newFrom` (equal-length on both sides — they are unchanged). `context` is the text
    * git prints after the second `@@` (usually the enclosing function), or '' when there is none.
-   * `count` is 0 for a first hunk that starts at line 1 — no marker is drawn for it.
+   * `count` is 0 for a first hunk that starts at line 1 — no expander is drawn for it.
    */
   gap?: DiffGap;
 }
@@ -56,7 +56,7 @@ function parseHunkHeader(
 //
 // ⚠ THE `hunk` ROWS STAY, though the Changes tab no longer prints the `@@` header: they carry the
 // line-number resets, and thread anchoring and the reveal both address rows BY INDEX. The renderer
-// draws a gap marker (`row.gap`) in their place instead of dropping them.
+// draws a hunk expander (`row.gap`) in their place instead of dropping them.
 export function parsePatch(patch: string | null | undefined): DiffRow[] {
   if (!patch) return [];
   const rows: DiffRow[] = [];
@@ -133,6 +133,152 @@ export function patchEnd(rows: readonly DiffRow[]): { oldNext: number; newNext: 
     if (r.newLine != null) newNext = r.newLine + 1;
   }
   return { oldNext, newNext };
+}
+
+// ---- gap expansion (GitHub's hunk expander) ----
+//
+// A gap is drawn as GitHub draws a hunk line: arrow buttons in the line-number gutter and, in the
+// code column, the hidden count and the enclosing function. Expansion is RENDER-SIDE ONLY — the
+// rows `parsePatch` returns never change, so thread anchoring and the reveal, which address rows
+// by index, cannot be moved by it. Each gap keeps its own `GapReveal`: how many lines the reader
+// has revealed from its TOP (just after the code above, the down arrow) and from its BOTTOM (just
+// before the code below, the up arrow).
+
+/** Lines one arrow click reveals — GitHub's step. */
+export const GAP_EXPAND_STEP = 20;
+
+/**
+ * Where a gap sits, which decides its arrows: `first` (before the first hunk — code only BELOW,
+ * so one up arrow), `between` (two hunks — both arrows, or expand-all when it is small) and
+ * `trailing` (after the last hunk — code only ABOVE, so one down arrow).
+ */
+export type GapPlace = 'first' | 'between' | 'trailing';
+
+export type GapControl = 'down' | 'up' | 'all';
+
+export interface GapReveal {
+  /** Lines revealed from the top of the gap (the down arrow). */
+  top: number;
+  /** Lines revealed from the bottom of the gap (the up arrow). */
+  bottom: number;
+}
+
+export const NO_REVEAL: GapReveal = { top: 0, bottom: 0 };
+
+/** `first` for the hunk row with no hunk before it, else `between`. */
+export function gapPlace(rows: readonly DiffRow[], index: number): GapPlace {
+  for (let k = index - 1; k >= 0; k -= 1) {
+    if (rows[k]?.kind === 'hunk') return 'between';
+  }
+  return 'first';
+}
+
+/**
+ * The revealed lines actually drawn, clamped to the gap's size. `count` null is a trailing gap
+ * whose file is not loaded yet: nothing can be drawn.
+ */
+export function clampReveal(count: number | null, r: GapReveal): GapReveal {
+  if (count == null) return NO_REVEAL;
+  const top = Math.min(Math.max(0, r.top), count);
+  const bottom = Math.min(Math.max(0, r.bottom), count - top);
+  return { top, bottom };
+}
+
+/** Lines still hidden — null while the gap's size is unknown (a trailing gap before the load). */
+export function gapRemaining(count: number | null, r: GapReveal): number | null {
+  if (count == null) return null;
+  const c = clampReveal(count, r);
+  return count - c.top - c.bottom;
+}
+
+/**
+ * The arrows a gap offers, top to bottom. Nothing once it is fully revealed. Between two hunks a
+ * gap that one click would empty gets the single expand-all control instead of two arrows, as on
+ * GitHub. An unknown size (trailing, file not loaded) still offers its down arrow — the click is
+ * what loads the file.
+ */
+export function gapControls(place: GapPlace, remaining: number | null): GapControl[] {
+  if (remaining != null && remaining <= 0) return [];
+  if (place === 'first') return ['up'];
+  if (place === 'trailing') return ['down'];
+  if (remaining != null && remaining <= GAP_EXPAND_STEP) return ['all'];
+  return ['down', 'up'];
+}
+
+/** How many lines a control reveals: one step, or what is left if that is less. */
+export function gapControlLines(control: GapControl, remaining: number | null): number {
+  if (remaining == null) return GAP_EXPAND_STEP;
+  return control === 'all' ? remaining : Math.min(GAP_EXPAND_STEP, remaining);
+}
+
+/** The reveal after one click. Expand-all grows the top so the lines read in file order. */
+export function expandGapReveal(
+  r: GapReveal,
+  control: GapControl,
+  count: number | null,
+): GapReveal {
+  const n = gapControlLines(control, gapRemaining(count, r));
+  return control === 'up' ? { top: r.top, bottom: r.bottom + n } : { top: r.top + n, bottom: r.bottom };
+}
+
+/** The control's accessible name (and tooltip). */
+export function gapControlLabel(control: GapControl, remaining: number | null): string {
+  const n = gapControlLines(control, remaining);
+  const lines = n === 1 ? 'line' : 'lines';
+  if (control === 'all') return `Expand all ${n.toLocaleString()} ${lines}`;
+  return `Expand ${n.toLocaleString()} ${lines} ${control}`;
+}
+
+/**
+ * The muted text in the gap row's code column: the hidden count first, then the enclosing
+ * function git names after the `@@` header — `20 hidden lines · function foo() {`. Just the count
+ * when there is no context; just the context while the count is unknown.
+ */
+export function gapSummary(remaining: number | null, context: string): string {
+  const parts: string[] = [];
+  if (remaining != null) {
+    parts.push(`${remaining.toLocaleString()} hidden ${remaining === 1 ? 'line' : 'lines'}`);
+  }
+  if (context !== '') parts.push(context);
+  return parts.join(' · ');
+}
+
+/** `count` lines of a gap starting `offset` lines into it — the slice one side of a reveal draws. */
+export function gapSlice(gap: DiffGap, offset: number, count: number): DiffGap {
+  return {
+    count,
+    oldFrom: gap.oldFrom + offset,
+    newFrom: gap.newFrom + offset,
+    context: gap.context,
+  };
+}
+
+/** The context lines GitHub's patches carry around each change (git's default `-U3`). */
+const PATCH_CONTEXT_LINES = 3;
+
+/**
+ * Does the patch provably run to the END of the file, so there is no trailing gap to offer before
+ * the file is loaded? True when it carries git's `\ No newline at end of file`, or when its last
+ * change is followed by fewer than three context lines — git always prints three when the file has
+ * them. False means "unknown": the down arrow is offered, and the load says how many lines follow
+ * (possibly none, and then the row goes away).
+ */
+export function patchReachesEnd(rows: readonly DiffRow[]): boolean {
+  if (rows.length === 0) return true;
+  let trailingContext = 0;
+  for (let k = rows.length - 1; k >= 0; k -= 1) {
+    const r = rows[k];
+    if (r == null) continue;
+    if (isNoNewlineRow(r)) return true;
+    if (r.kind === 'context') {
+      trailingContext += 1;
+      continue;
+    }
+    // The first add/del from the end (or a hunk header with no change after it, which a real
+    // patch never has) closes the count.
+    break;
+  }
+  return trailingContext < PATCH_CONTEXT_LINES;
 }
 
 /**

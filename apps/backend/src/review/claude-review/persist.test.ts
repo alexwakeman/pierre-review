@@ -170,6 +170,8 @@ describe('ticket + follow-up persistence', () => {
     await persist.updateFinding(ctx, toIgnore!.id, { included: false, editedBody: 'unused' });
     await persist.updateFinding(ctx, posted!.id, { included: false, editedBody: 'My wording.' });
     await persist.markFindingPosted(ctx, posted!.id, 'c1', 'inline');
+    // `kept` reaches GitHub as an inline comment of a posted REVIEW (no per-comment id).
+    await persist.markReviewPosted(ctx, first, 'rv1', [kept!.id]);
 
     const second = await persist.insertQueuedReview(ctx, prId, 'b'.repeat(40), 'claude-opus-5-5', 1, ticket);
     const assessment: ClaudeTicketAssessment = {
@@ -208,6 +210,8 @@ describe('ticket + follow-up persistence', () => {
       ['re-raise', kept!.id],
     ]);
     const reraise = r.findings[1]!;
+    // Only the re-raise of the second review is posted; 'ordinary' never leaves the app.
+    await persist.markReviewPosted(ctx, second, 'rv2', [reraise.id]);
     expect(r.followUp?.items.map((i) => [i.ref, i.reraisedFindingId])).toEqual([
       ['P1', reraise.id],
       ['P2', null],
@@ -228,24 +232,23 @@ describe('ticket + follow-up persistence', () => {
     const prior = await persist.loadPriorReviewForFollowUp(ctx, prId, 1, current);
     expect(prior?.reviewId).toBe(second);
     expect(prior?.headSha).toBe('b'.repeat(40));
-    // Its own findings (both eligible), then the CARRIED not_checked one from the first review
-    // (ignored but posted, so still eligible — with the user's wording).
+    // Its own POSTED finding ('ordinary' was never posted, so it is out), then the CARRIED
+    // not_checked one from the first review (ignored but posted, so still eligible — with the
+    // user's wording). `kept` is followed up THROUGH its posted re-raise, never twice.
     expect(prior?.findings.map((f) => [f.title, f.carried])).toEqual([
-      ['ordinary', false],
       ['re-raise', false],
       ['ignored but posted', true],
     ]);
-    expect(prior?.findings[2]!.body).toBe('My wording.');
+    expect(prior?.findings[1]!.body).toBe('My wording.');
     // Each finding carries the head of the review that RAISED it — the carried one keeps the
     // first review's, older head — and whether it was posted.
     expect(prior?.findings.map((f) => [f.title, f.headSha, f.posted])).toEqual([
-      ['ordinary', 'b'.repeat(40), false],
-      ['re-raise', 'b'.repeat(40), false],
+      ['re-raise', 'b'.repeat(40), true],
       ['ignored but posted', 'a'.repeat(40), true],
     ]);
 
     // The run's own id is excluded: asking "before `second`" lands on `first`, whose eligible set
-    // drops praise and the ignored-unposted one.
+    // is its two POSTED findings — praise and the ignored-unposted one drop out.
     const beforeSecond = await persist.loadPriorReviewForFollowUp(ctx, prId, 1, second);
     expect(beforeSecond?.reviewId).toBe(first);
     expect(beforeSecond?.findings.map((f) => f.title)).toEqual(['kept', 'ignored but posted']);
@@ -259,6 +262,8 @@ describe('ticket + follow-up persistence', () => {
     const retired = 'claude-opus-4-8' as ClaudeReviewModel;
     const legacy = await persist.insertQueuedReview(ctx, otherPrId, 'l'.repeat(40), retired, 1);
     await persist.saveReviewSuccess(ctx, legacy, success([finding({ title: 'legacy' })]));
+    const legacyFinding = (await persist.getClaudeReviewById(ctx, legacy, 1))!.findings[0]!;
+    await persist.markFindingPosted(ctx, legacyFinding.id, 'c-legacy', 'pr_comment');
     const next = await persist.insertQueuedReview(ctx, otherPrId, 'm'.repeat(40), 'claude-opus-5-5', 1);
     const prior = await persist.loadPriorReviewForFollowUp(ctx, otherPrId, 1, next);
     expect(prior?.reviewId).toBe(legacy);
@@ -353,9 +358,114 @@ describe('ticket + follow-up persistence', () => {
       [F!.id, true, HEAD_A, true],
     ]);
 
-    // Once the reader includes F' after all, R3 follows up THROUGH it — never F twice.
+    // Including F' is not posting it: F is still followed up, not the unposted re-raise.
     await persist.updateFinding(ctx, Fre!.id, { included: true });
+    const ticked = await persist.loadPriorReviewForFollowUp(ctx, chainPrId, 1, r3);
+    expect(ticked?.findings.map((f) => [f.id, f.carried])).toEqual([[F!.id, true]]);
+
+    // Once F' is actually POSTED, R3 follows up THROUGH it — never F twice.
+    await persist.markFindingPosted(ctx, Fre!.id, 'c-fre', 'inline');
     const again = await persist.loadPriorReviewForFollowUp(ctx, chainPrId, 1, r3);
     expect(again?.findings.map((f) => [f.id, f.carried])).toEqual([[Fre!.id, false]]);
+  });
+});
+
+// ⚠ ONLY POSTED FINDINGS ARE FOLLOWED UP. A finding the reader ignored, left unposted or only
+// copied was never said to the author, so it must not reach the prompt, the stored follow-up record
+// or its counts. `postedAt` is the signal — the one column both posting paths stamp.
+describe('only findings posted to GitHub are followed up', () => {
+  let n = 0;
+  const freshPr = async (): Promise<number> => {
+    const { repos, pullRequests } = schema;
+    const key = `persist-posted-${n++}`;
+    const repoId = (
+      await db.insert(repos).values({ accountId: 1, owner: 'acme', name: key, githubNodeId: `R_${key}` }).returning().execute()
+    )[0].id as number;
+    return (
+      await db
+        .insert(pullRequests)
+        .values({
+          githubNodeId: `PR_${key}`, accountId: 1, repoId, number: 1, title: key, state: 'open',
+          isDraft: false, openedAt: new Date(), updatedAt: new Date(), headSha: 'h'.repeat(40),
+        })
+        .returning()
+        .execute()
+    )[0].id as number;
+  };
+
+  it('mixed: posted (in a review, or one by one) are in; included-unposted and ignored-unposted are out', async () => {
+    const pr = await freshPr();
+    const r1 = await persist.insertQueuedReview(ctx, pr, 'a'.repeat(40), 'claude-opus-5-5', 1);
+    await persist.saveReviewSuccess(
+      ctx,
+      r1,
+      success([
+        finding({ title: 'in posted review' }),
+        finding({ title: 'posted alone' }),
+        finding({ title: 'included, never posted' }),
+        finding({ title: 'ignored, never posted' }),
+      ]),
+    );
+    const [inReview, alone, unposted, ignored] = (await persist.getClaudeReviewById(ctx, r1, 1))!.findings;
+    expect(unposted!.included).toBe(true);
+    await persist.updateFinding(ctx, ignored!.id, { included: false });
+    await persist.markReviewPosted(ctx, r1, 'rv', [inReview!.id]);
+    await persist.markFindingPosted(ctx, alone!.id, 'c-alone', 'pr_comment');
+
+    const r2 = await persist.insertQueuedReview(ctx, pr, 'b'.repeat(40), 'claude-opus-5-5', 1);
+    const prior = (await persist.loadPriorReviewForFollowUp(ctx, pr, 1, r2))!;
+    expect(prior.findings.map((f) => [f.title, f.posted])).toEqual([
+      ['in posted review', true],
+      ['posted alone', true],
+    ]);
+
+    // Everything downstream is built from this list, so the stored record and its counts agree.
+    const { selectPriorFindings, reconcileFollowUp } = await import('./follow-up.js');
+    const plan = selectPriorFindings(prior, 'b'.repeat(40));
+    expect(plan.sent.map((s) => s.finding.id)).toEqual([inReview!.id, alone!.id]);
+    const items = reconcileFollowUp(plan, []);
+    expect(items.map((i) => i.priorFindingId)).toEqual([inReview!.id, alone!.id]);
+    expect(items.every((i) => i.priorPosted)).toBe(true);
+  });
+
+  it('an unposted not_checked finding from an older review is not carried', async () => {
+    const pr = await freshPr();
+    const r1 = await persist.insertQueuedReview(ctx, pr, 'a'.repeat(40), 'claude-opus-5-5', 1);
+    await persist.saveReviewSuccess(ctx, r1, success([finding({ title: 'posted' }), finding({ title: 'copied only' })]));
+    const [posted, copied] = (await persist.getClaudeReviewById(ctx, r1, 1))!.findings;
+    await persist.markFindingPosted(ctx, posted!.id, 'c-p', 'inline');
+    const item = (id: number, title: string) => ({
+      ref: null, priorFindingId: id, sent: false, carried: false, status: 'not_checked' as const,
+      explanation: null, path: 'src/a.ts', line: 3, side: 'RIGHT' as const, severity: 'warning' as const, title,
+    });
+    // An older follow-up record that (from before this rule) names both.
+    const r2 = await persist.insertQueuedReview(ctx, pr, 'b'.repeat(40), 'claude-opus-5-5', 1);
+    await persist.saveReviewSuccess(
+      ctx,
+      r2,
+      success([], {
+        followUp: {
+          priorReviewId: r1, priorHeadSha: 'a'.repeat(40), headMoved: true, changesSinceShown: false,
+          items: [item(posted!.id, 'posted'), item(copied!.id, 'copied only')],
+        } satisfies ClaudeReviewFollowUpRecord,
+      }),
+    );
+    const r3 = await persist.insertQueuedReview(ctx, pr, 'c'.repeat(40), 'claude-opus-5-5', 1);
+    const prior = await persist.loadPriorReviewForFollowUp(ctx, pr, 1, r3);
+    expect(prior?.findings.map((f) => [f.id, f.carried])).toEqual([[posted!.id, true]]);
+  });
+
+  it('none posted: the previous review yields no findings, so the run is a fresh review', async () => {
+    const pr = await freshPr();
+    const r1 = await persist.insertQueuedReview(ctx, pr, 'a'.repeat(40), 'claude-opus-5-5', 1);
+    await persist.saveReviewSuccess(ctx, r1, success([finding({ title: 'never posted' }), finding({ title: 'ignored' })]));
+    const ignored = (await persist.getClaudeReviewById(ctx, r1, 1))!.findings[1]!;
+    await persist.updateFinding(ctx, ignored.id, { included: false });
+    const r2 = await persist.insertQueuedReview(ctx, pr, 'b'.repeat(40), 'claude-opus-5-5', 1);
+    const prior = await persist.loadPriorReviewForFollowUp(ctx, pr, 1, r2);
+    expect(prior?.reviewId).toBe(r1);
+    // manager.ts builds a plan only when `prior.findings.length > 0`: no plan ⇒ no "Previous
+    // review" prompt section, no `followUp` record, no follow-up sentence in the SPA.
+    expect(prior?.findings).toEqual([]);
   });
 });

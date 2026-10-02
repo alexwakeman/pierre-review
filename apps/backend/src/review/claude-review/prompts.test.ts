@@ -131,6 +131,8 @@ describe('buildUserPrompt — previous review', () => {
     expect(p2).toContain(`(from an earlier review, at head ${'c'.repeat(12)})`);
     expect(p2).toContain('Where: src/reset.ts (whole file)');
     expect(p).toContain('## Previous review');
+    // Only findings that reached GitHub are followed up, and the prompt says so.
+    expect(p).toContain(`posted the findings below as comments on it.`);
     expect(p.indexOf('## Previous review')).toBeGreaterThan(p.indexOf('## Diff'));
   });
 

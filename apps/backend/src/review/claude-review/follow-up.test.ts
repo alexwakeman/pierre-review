@@ -70,18 +70,20 @@ function finding(over: Partial<ReviewFinding> = {}): ReviewFinding {
 
 describe('eligibility', () => {
   const sev = (s: ClaudeFindingSeverity) => s;
-  it('praise is never followed up', () => {
-    expect(isFollowUpEligible({ included: true, postedAt: null, severity: sev('praise') })).toBe(false);
-    expect(isFollowUpEligible({ included: true, postedAt: new Date(), severity: 'praise' })).toBe(false);
+  it('praise is never followed up, posted or not', () => {
+    expect(isFollowUpEligible({ postedAt: null, severity: sev('praise') })).toBe(false);
+    expect(isFollowUpEligible({ postedAt: new Date(), severity: 'praise' })).toBe(false);
   });
-  it('an ignored, unposted finding is out', () => {
-    expect(isFollowUpEligible({ included: false, postedAt: null, severity: 'blocker' })).toBe(false);
+  it('an unposted finding is out, whatever its tick says (ignored, left unposted, only copied)', () => {
+    expect(isFollowUpEligible({ postedAt: null, severity: 'blocker' })).toBe(false);
+    // The included tick is not part of the rule: a row carrying it is still judged on postedAt.
+    const included = { included: true, postedAt: null, severity: 'question' as const };
+    expect(isFollowUpEligible(included)).toBe(false);
   });
-  it('an ignored but POSTED finding is in (it is on the pull request)', () => {
-    expect(isFollowUpEligible({ included: false, postedAt: new Date(), severity: 'nit' })).toBe(true);
-  });
-  it('an included finding is in', () => {
-    expect(isFollowUpEligible({ included: true, postedAt: null, severity: 'question' })).toBe(true);
+  it('a POSTED finding is in, even if the reader ignored it afterwards (it is on the pull request)', () => {
+    expect(isFollowUpEligible({ postedAt: new Date(), severity: 'nit' })).toBe(true);
+    const ignoredAfter = { included: false, postedAt: new Date(), severity: 'warning' as const };
+    expect(isFollowUpEligible(ignoredAfter)).toBe(true);
   });
   it('uses editedBody when set, falling back when blank', () => {
     expect(resolveFindingBody({ body: 'claude', editedBody: 'mine' })).toBe('mine');

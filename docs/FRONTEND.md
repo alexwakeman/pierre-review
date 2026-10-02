@@ -768,7 +768,7 @@ past the pane's right edge while the file header stopped at it. Now:
   (`DiffWrapToggle`, in the Changes tab header and beside the AI Fix diff) is not the component
   that reads it. Never the filter store: a filter reset must not move the furniture.
 
-#### No diff notation, gap markers, and loading more (Changes tab)
+#### No diff notation, the hunk expander, and loading more (Changes tab)
 
 The diff prints CODE, not diff notation: no `+`/`-` column, no `@@ … @@` header row and no
 `\ No newline at end of file`. Added/removed is the row tint plus the gutters (a removed line has
@@ -778,17 +778,38 @@ KEEPS its header — it doubles as the collapse control there.
 
 - ⚠ **`parsePatch` STILL EMITS THE `hunk` ROWS.** They carry the line-number resets, and thread
   anchoring and the reveal address rows BY INDEX. Each now carries `gap {count, oldFrom, newFrom,
-  context}`, and the renderer draws a slim GAP MARKER in its place (`EllipsisIcon` + "26 unchanged
-  lines" + the function git names after the header, muted). No marker before a first hunk at line 1.
+  context}`, and the renderer draws GITHUB'S HUNK EXPANDER in its place (`GapRow`): fold arrows in
+  the line-number gutter (`FoldIcon` / `UnfoldIcon`), and in the code column, muted, the hidden
+  count then the function git names after the header — `20 hidden lines · function foo() {`, just
+  the count with no context. No "Show N hidden lines" prose: each arrow's `aria-label` says what it
+  reveals ("Expand 20 lines down" / "Expand 20 lines up" / "Expand all N lines"). No row before a
+  first hunk at line 1.
 - ⚠ **HIGHLIGHTING LEXES ONE HUNK AT A TIME** (`highlightDiffRows`). Joining hunks fed the lexer
   text no file contained: a hunk ending on `/**` whose `*/` sat in the hidden gap turned every row of
   the next hunk into one flat comment colour. A hunk that refuses blanks only itself; the 2,000-line
   gate is still counted per side over the whole file. Pinned in `test/highlightDiffRows.test.ts`.
-- **"Show N hidden lines"** (Changes tab only — `fileSource`; the AI Fix tab shows a plain count):
-  the first click reads the WHOLE file once (`GET …/files/content`, head side; base for a deleted
-  file) and expands that gap in place, coloured from the whole file. Once loaded, the lines after the
-  last hunk get a marker too. ⚠ `patchMatchesFile` must agree first — a file read at another commit
-  says "This file has changed since the diff was loaded" instead of splicing wrong lines.
+- **The arrows** (Changes tab only — `fileSource`; the AI Fix tab shows the count with an empty
+  gutter). `gapControls(place, remaining)` decides them: BETWEEN two hunks a down arrow (the lines
+  just after the code above) stacked over an up arrow (the lines just before the code below), each
+  `GAP_EXPAND_STEP` = 20 lines a click, collapsing to ONE expand-all once ≤ 20 remain; before the
+  FIRST hunk one up arrow; after the LAST one down arrow. Each gap keeps its own `GapReveal {top,
+  bottom}` in the block (keyed by hunk row index, -1 = trailing), drawn as top lines · expander row ·
+  bottom lines, the row vanishing at 0 remaining. ⚠ **RENDER-SIDE ONLY** — `rows` never change, so
+  thread anchoring and the reveal keep their indices. The first click reads the WHOLE file once
+  (`GET …/files/content`, head side; base for a deleted file); revealed lines are coloured from the
+  whole file. The trailing arrow is offered BEFORE the load only when `patchReachesEnd` cannot prove
+  the patch already runs to EOF (a `\ No newline` row, or < 3 context lines after the last change —
+  git always prints 3 when the file has them); its size is unknown (`count: null`, no count shown)
+  until the load, which then clamps the reveal and drops the row if nothing follows. ⚠
+  `patchMatchesFile` must agree first — a file read at another commit says "This file has changed
+  since the diff was loaded" in the row instead of splicing wrong lines. Pure logic pinned in
+  `test/gapExpansion.test.ts`.
+- ⚠ **`FileDiffView`'s list wrapper is `relative`, and that is load-bearing.** Tailwind's `sr-only`
+  is `position: absolute`, PrDetail's scroll pane is not positioned, so every changed line's
+  "added"/"removed" word used to take the VIEWPORT as its containing block: hundreds of 1px spans
+  ~29,000px down, outside the pane's clip, grew the DOCUMENT's scroll height to match. A file-tree
+  click's `scrollIntoView` then scrolled the document too — the whole app shell jumped ~265px up
+  with a gap below it. Any new absolutely-positioned element inside the diff relies on the same box.
 - **"Load full diff"** on a file GitHub sent no patch for: the server diffs both sides
   (`GET …/files/diff`), refused past ~1 MB a side.
 - **"Load next 100 files (N of M shown)"** replaces the three "View all on GitHub" notes — one page
@@ -3263,8 +3284,8 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   visually distinguished (filled dot + "this Workspace") because the others are the ones the
   reader cannot see from where they are. Dismissal is component-local and therefore lasts the
   session — that is the only mute there is now, since standing work is never "marked seen".
-  Hidden on the Activity console: the Pending board is the list itself, and the picker lists every
-  workspace's count.
+  It shows under EVERY tab, Activity included (it used to hide there, which removed the one
+  cross-workspace summary from the landing view); the dismiss × sits at its LEFT edge.
 - **`useFilters.openMyTurnInWorkspace(workspaceId)` is THE deep-link** — used by the
   `WelcomeBackBanner` lines (the strip's "Elsewhere" roll-up went with the strip). ⚠ A bare
   `setWorkspace` there HALF-navigates — it re-scopes and

@@ -568,16 +568,17 @@ export async function getReviewPrContext(
  * actually READ code: `review_mode IS NULL OR review_mode <> 'skip'`. ⚠ The NULL arm is
  * load-bearing — pre-routing rows have no mode, and a bare `<>` drops NULL rows in SQL.
  *
- * Its findings are kept when eligible (`isFollowUpEligible`: not ignored — or posted — and not
- * praise), with the body the user saw. CARRY-FORWARD re-loads two kinds of OLDER finding named by
+ * Its findings are kept when eligible (`isFollowUpEligible`: POSTED to GitHub and not praise),
+ * with the body the user saw. A finding that was ignored, left unposted or only copied never enters
+ * the follow-up — not the prompt, not the stored record, not the counts. CARRY-FORWARD re-loads two kinds of OLDER finding named by
  * that run's follow-up items — the ids come only from our own stored JSON and are re-scoped to this
  * PR + account by the query — and marks them `carried`, so nothing drops out of the chain:
  *   - every 'not_checked' item (never shown to the model, or not reported on), when eligible;
- *   - every still-open item (not / partly addressed) that no ELIGIBLE finding of that run raises
- *     again, when the earlier finding was POSTED. That is the re-raise follow-up.ts saved left out
- *     because the comment was already on the same commit (`isAlreadyOnThisCommit`) — the reader
- *     never ignored it — or one the reader ignored while the original stays on the pull request,
- *     which is exactly `isFollowUpEligible`'s "posted counts whatever the tick says now".
+ *   - every still-open item (not / partly addressed) that no ELIGIBLE (posted) finding of that
+ *     run raises again, when the earlier finding is itself eligible. That keeps a posted comment in
+ *     the chain when its re-raise was never posted — the re-raise follow-up.ts saved left out
+ *     because the comment was already on the same commit (`isAlreadyOnThisCommit`), or one the
+ *     reader simply did not post — so it is followed up against the comment that IS on the PR.
  *
  * Every finding carries the head of the review that RAISED it (`cr.headSha` via the join), because
  * "has the code moved since?" is asked per finding, never against the previous review's head.
@@ -646,7 +647,7 @@ export async function loadPriorReviewForFollowUp(
     eligibleOwn.map((f) => f.priorFindingId).filter((id): id is number => id != null),
   );
   const notChecked = new Set<number>();
-  const openPostedOnly = new Set<number>();
+  const openNotReraised = new Set<number>();
   for (const it of row.followUp?.items ?? []) {
     if (!Number.isInteger(it.priorFindingId) || seen.has(it.priorFindingId)) continue;
     if (it.status === 'not_checked') notChecked.add(it.priorFindingId);
@@ -654,10 +655,10 @@ export async function loadPriorReviewForFollowUp(
       (it.status === 'not_addressed' || it.status === 'partly_addressed') &&
       !reraisedByEligible.has(it.priorFindingId)
     ) {
-      openPostedOnly.add(it.priorFindingId);
+      openNotReraised.add(it.priorFindingId);
     }
   }
-  const carriedIds = [...new Set([...notChecked, ...openPostedOnly])];
+  const carriedIds = [...new Set([...notChecked, ...openNotReraised])];
   if (carriedIds.length > 0) {
     const carriedRows = (await ctx.db
       .select({ finding: crf, headSha: cr.headSha })
@@ -671,9 +672,8 @@ export async function loadPriorReviewForFollowUp(
       .orderBy(asc(crf.id))
       .execute()) as Array<{ finding: FindingRow; headSha: string }>;
     for (const { finding, headSha } of carriedRows) {
+      // The ONE rule (posted, not praise) applies to carried findings exactly as to own ones.
       if (seen.has(finding.id) || !isFollowUpEligible(finding)) continue;
-      // A still-open item is carried only when its comment is ON the pull request.
-      if (!notChecked.has(finding.id) && finding.postedAt == null) continue;
       seen.add(finding.id);
       findings.push(toPrior(finding, headSha, true));
     }

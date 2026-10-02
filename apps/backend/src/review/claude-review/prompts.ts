@@ -233,7 +233,7 @@ function pushPreviousReviewSection(
   lines.push('## Previous review');
   lines.push('');
   lines.push(
-    `An earlier review of this pull request (at head ${shortSha(plan.priorHeadSha)}) raised the findings below. For EACH one, decide whether the current code deals with it and report it once in \`followUp\` by its ref (P1, P2, …):`,
+    `An earlier review of this pull request (at head ${shortSha(plan.priorHeadSha)}) posted the findings below as comments on it. For EACH one, decide whether the current code deals with it and report it once in \`followUp\` by its ref (P1, P2, …):`,
   );
   lines.push('- addressed: the code now deals with it');
   lines.push('- partly_addressed: some of it is dealt with');

@@ -23,6 +23,19 @@ import {
   patchEnd,
   patchLineCount,
   patchMatchesFile,
+  patchReachesEnd,
+  clampReveal,
+  expandGapReveal,
+  gapControlLabel,
+  gapControls,
+  gapPlace,
+  gapRemaining,
+  gapSlice,
+  gapSummary,
+  NO_REVEAL,
+  type GapControl,
+  type GapPlace,
+  type GapReveal,
   revealScrollsFileHeader,
   splitDiffMarker,
   type DiffGap,
@@ -34,7 +47,7 @@ import {
   languageForPath,
 } from '../../lib/hljsLines.js';
 import { DERIVED_STATE_META, relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
-import { CheckIcon, ChevronIcon, EllipsisIcon, ExternalLinkIcon } from '../Icons.js';
+import { CheckIcon, ChevronIcon, ExternalLinkIcon, FoldIcon, UnfoldIcon } from '../Icons.js';
 import { CopyButton } from '../CopyButton.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
@@ -54,10 +67,10 @@ import { SELECTED_BORDER, STATUS_META, UNSELECTED_BORDER } from './status.js';
 // diff is not valid source). ⚠ The add/del signal is carried by `ROW_BG`'s TINT and the gutters
 // (a removed line has only an old number, an added one only a new number), plus an sr-only
 // "added"/"removed" word — NO DIFF NOTATION IS PRINTED: no `+`/`-` column, no `@@` header and no
-// `\ No newline at end of file`. Each `@@` header is drawn as a GAP MARKER instead ("26 unchanged
-// lines · function foo() {"); in the Changes tab (`fileSource`) the marker expands in place from
-// the file at the PR head, on click. The `hunk` rows stay in `rows` — anchoring addresses rows by
-// index.
+// `\ No newline at end of file`. Each `@@` header is drawn as GitHub's HUNK EXPANDER instead —
+// fold arrows in the gutter, "26 hidden lines · function foo() {" muted in the code column; in the
+// Changes tab (`fileSource`) the arrows reveal 20 lines at a time in place, from the file at the PR
+// head (`GapRow`). The `hunk` rows stay in `rows` — anchoring addresses rows by index.
 //
 // ⚠ NO LINE MAY LEAVE ITS BOX, IN EITHER WRAP MODE (`useDiffWrap`, ON by default). The table used
 // to be `w-full` under AUTO layout with a `whitespace-pre` code cell, so one long line set the
@@ -88,7 +101,7 @@ export interface DiffFile {
 
 /**
  * Where a block may load MORE of its own file — the Changes tab only (the AI Fix changeset's files
- * are not on GitHub yet). Every read is CLICK-GATED inside the block: a gap's "Show N hidden lines"
+ * are not on GitHub yet). Every read is CLICK-GATED inside the block: a gap's expand arrow
  * reads the file at the PR head, a no-patch file's "Load full diff" reads both sides. `headSha` is
  * the head the patches were read at, so a push re-keys both reads.
  */
@@ -891,59 +904,67 @@ function NoPatchNote({
 }
 
 /**
- * The slim row drawn in place of a `@@` header: the unchanged lines GitHub's patch leaves out,
- * then the enclosing function git names after the header, muted. With a file source it is a
- * button that expands those lines in place (one GitHub read per FILE, on the first click).
- * `status` carries the outcome of that read once the reader has asked.
+ * The row drawn in place of a `@@` header — GitHub's hunk expander. The arrows sit in the
+ * line-number gutter (`gapControls`: one up arrow before the first hunk, one down arrow after the
+ * last, both between two hunks, or ONE expand-all once a click would empty it); the code column
+ * carries the hidden count and the enclosing function git names after the header, muted. No
+ * "Show N hidden lines" prose: the count is the fact, the arrows are the verbs, and each arrow's
+ * accessible name says what it reveals. With no file source (AI Fix) the gutter is empty.
+ * `status` replaces the count once the reader has asked and the one file read has not succeeded.
  */
 function GapRow({
   gap,
-  trailing = false,
+  place,
+  remaining,
   expandable,
   status,
   onExpand,
   wrap,
 }: {
   gap: DiffGap;
-  /** The lines after the last hunk — counted only once the file is loaded. */
-  trailing?: boolean;
+  place: GapPlace;
+  /** Lines still hidden, or null while unknown (a trailing gap before the file is loaded). */
+  remaining: number | null;
   expandable: boolean;
   status: GapLoadStatus;
-  onExpand: () => void;
+  onExpand: (control: GapControl) => void;
   wrap: boolean;
 }): JSX.Element {
-  const n = gap.count.toLocaleString();
-  const lines = gap.count === 1 ? 'line' : 'lines';
-  const label = trailing ? `${n} more unchanged ${lines}` : `${n} unchanged ${lines}`;
+  const controls = expandable && status === 'idle' ? gapControls(place, remaining) : [];
+  const summary =
+    status === 'idle'
+      ? gapSummary(remaining, gap.context)
+      : [GAP_STATUS_TEXT[status] ?? '', gap.context].filter((p) => p !== '').join(' · ');
   return (
-    <tr className="bg-sky-500/5">
-      <td colSpan={4} className="px-2 py-0.5">
-        <FullWidthCell wrap={wrap}>
-          <div className="flex min-w-0 items-center gap-1.5 font-sans text-[12px] text-gray-500 dark:text-gray-400">
-            <EllipsisIcon size={12} className="shrink-0" />
-            {expandable && status === 'idle' ? (
-              <button
-                type="button"
-                onClick={onExpand}
-                className="shrink-0 text-blue-600 hover:underline dark:text-blue-400"
-              >
-                Show {n} hidden {lines}
-              </button>
-            ) : (
-              <span className="shrink-0">
-                {status === 'loading' ? 'Loading…' : (GAP_STATUS_TEXT[status] ?? label)}
-              </span>
-            )}
-            {gap.context !== '' && (
-              <>
-                <span aria-hidden className="decorative-mark shrink-0">
-                  ·
-                </span>
-                <code className="min-w-0 truncate font-mono">{gap.context}</code>
-              </>
-            )}
+    <tr className="bg-sky-500/10">
+      <td colSpan={2} className="border-r border-gray-200 p-0 align-middle dark:border-gray-800">
+        {controls.length > 0 && (
+          <div className="flex flex-col">
+            {controls.map((c) => {
+              const label = gapControlLabel(c, remaining);
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => onExpand(c)}
+                  aria-label={label}
+                  title={label}
+                  className="flex h-5 w-full items-center justify-center text-gray-500 hover:bg-blue-500 hover:text-white focus-visible:bg-blue-500 focus-visible:text-white focus-visible:outline-none dark:text-gray-400 dark:hover:bg-blue-600 dark:focus-visible:bg-blue-600"
+                >
+                  {c === 'all' ? <UnfoldIcon size={16} /> : <FoldIcon dir={c} size={16} />}
+                </button>
+              );
+            })}
           </div>
-        </FullWidthCell>
+        )}
+      </td>
+      <td
+        colSpan={2}
+        className={`px-2 py-0.5 align-middle text-gray-500 dark:text-gray-400 ${
+          wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre'
+        }`}
+      >
+        {summary || ' '}
       </td>
     </tr>
   );
@@ -952,6 +973,7 @@ function GapRow({
 type GapLoadStatus = 'idle' | 'loading' | 'error' | 'too_large' | 'binary' | 'missing' | 'moved';
 
 const GAP_STATUS_TEXT: Partial<Record<GapLoadStatus, string>> = {
+  loading: 'Loading…',
   error: 'Couldn’t load these lines.',
   too_large: 'This file is too large to show here.',
   binary: 'Binary file.',
@@ -1009,6 +1031,75 @@ function ExpandedLines({
   return <>{out}</>;
 }
 
+/**
+ * One gap, expanded or not: the lines revealed from its top, the expander row while anything is
+ * still hidden, then the lines revealed from its bottom (just above the next hunk's code). Nothing
+ * is drawn from the file until it has loaded AND matched the patch (`lines` non-null) — until then
+ * the gap is drawn whole, with the load's status in place of the count.
+ */
+function GapExpansion({
+  gap,
+  place,
+  reveal,
+  lines,
+  html,
+  side,
+  expandable,
+  status,
+  onExpand,
+  wrap,
+}: {
+  /** `count: null` is a trailing gap whose file is not loaded yet. */
+  gap: Omit<DiffGap, 'count'> & { count: number | null };
+  place: GapPlace;
+  reveal: GapReveal | undefined;
+  lines: readonly string[] | null;
+  html: readonly string[] | null;
+  side: 'head' | 'base';
+  expandable: boolean;
+  status: GapLoadStatus;
+  onExpand: (control: GapControl, count: number | null) => void;
+  wrap: boolean;
+}): JSX.Element {
+  const count = gap.count;
+  const shown = lines != null ? clampReveal(count, reveal ?? NO_REVEAL) : NO_REVEAL;
+  const remaining = gapRemaining(count, shown);
+  const whole: DiffGap = { ...gap, count: count ?? 0 };
+  return (
+    <>
+      {lines != null && shown.top > 0 && (
+        <ExpandedLines
+          gap={gapSlice(whole, 0, shown.top)}
+          lines={lines}
+          html={html}
+          side={side}
+          wrap={wrap}
+        />
+      )}
+      {remaining !== 0 && (
+        <GapRow
+          gap={whole}
+          place={place}
+          remaining={remaining}
+          expandable={expandable}
+          status={status}
+          onExpand={(c) => onExpand(c, count)}
+          wrap={wrap}
+        />
+      )}
+      {lines != null && count != null && shown.bottom > 0 && (
+        <ExpandedLines
+          gap={gapSlice(whole, count - shown.bottom, shown.bottom)}
+          lines={lines}
+          html={html}
+          side={side}
+          wrap={wrap}
+        />
+      )}
+    </>
+  );
+}
+
 function FileDiffBlock({
   file,
   commenting,
@@ -1041,8 +1132,7 @@ function FileDiffBlock({
   const patch = file.patch ?? fullDiff.data?.patch ?? null;
   const rows = useMemo(() => parsePatch(patch), [patch]);
 
-  // Gap expansion: the whole file, read ONCE per block on the first "Show N hidden lines" click
-  // (never on mount). A deleted file only has its base; everything else reads the head, whose line
+  // Gap expansion: the whole file, read ONCE per block on the first arrow click (never on mount). A deleted file only has its base; everything else reads the head, whose line
   // numbers the new side of every gap indexes directly.
   const side: 'head' | 'base' = file.status === 'removed' ? 'base' : 'head';
   const contentPath = side === 'base' ? (file.previousPath ?? file.path) : file.path;
@@ -1054,8 +1144,10 @@ function FileDiffBlock({
     fileSource?.headSha ?? null,
     wantContent && fileSource != null,
   );
-  // Gap keys: a hunk row's index, or -1 for the lines after the last hunk.
-  const [openGaps, setOpenGaps] = useState<ReadonlySet<number>>(() => new Set());
+  // Each gap's reveal (`GapReveal`: lines shown from its top and from its bottom), keyed by its
+  // hunk row's index, or -1 for the lines after the last hunk. A key is present once the reader
+  // has clicked that gap — which is also what makes the gap show the load's status.
+  const [reveals, setReveals] = useState<ReadonlyMap<number, GapReveal>>(() => new Map());
   const fileLines = content.data?.lines ?? null;
   const linesFit = useMemo(
     () => (fileLines != null ? patchMatchesFile(rows, fileLines, side) : false),
@@ -1073,25 +1165,38 @@ function FileDiffBlock({
             ? 'moved'
             : 'idle';
   const usableLines = gapStatus === 'idle' && linesFit ? fileLines : null;
-  const expandGap = (key: number): void => {
-    setWantContent(true);
-    setOpenGaps((prev) => new Set(prev).add(key));
-  };
-  // The trailing gap is knowable only once the file is loaded.
-  const trailingGap = useMemo((): DiffGap | null => {
-    if (usableLines == null || rows.length === 0) return null;
+  // The trailing gap: its START is known from the patch, its SIZE only once the file is loaded
+  // (`count: null` until then). Offered before the load only when the patch does not provably
+  // reach the end of the file (`patchReachesEnd`) and the block can load it; after the load, only
+  // when lines really follow.
+  const trailingGap = useMemo((): (Omit<DiffGap, 'count'> & { count: number | null }) | null => {
+    if (rows.length === 0) return null;
     const end = patchEnd(rows);
+    if (usableLines == null) {
+      if (fileSource == null || patchReachesEnd(rows)) return null;
+      return { count: null, oldFrom: end.oldNext, newFrom: end.newNext, context: '' };
+    }
     const next = side === 'head' ? end.newNext : end.oldNext;
     const count = usableLines.length - (next - 1);
     return count > 0 ? { count, oldFrom: end.oldNext, newFrom: end.newNext, context: '' } : null;
-  }, [usableLines, rows, side]);
+  }, [usableLines, rows, side, fileSource]);
+  // One arrow click: load the file (the first time) and grow that gap's reveal. While the file is
+  // loading, a click on a known-size gap is held at its reveal and drawn once the lines arrive.
+  const expandGap = (key: number, control: GapControl, count: number | null): void => {
+    setWantContent(true);
+    setReveals((prev) => {
+      const next = new Map(prev);
+      next.set(key, expandGapReveal(prev.get(key) ?? NO_REVEAL, control, count));
+      return next;
+    });
+  };
   // Expanded lines are coloured from the WHOLE file — the one lex that is right everywhere.
   const fileHtml = useMemo(
     () =>
-      usableLines != null && openGaps.size > 0
+      usableLines != null && reveals.size > 0
         ? highlightLines([...usableLines], languageForPath(file.path), MAX_FILE_DIFF_HIGHLIGHT_LINES)
         : null,
-    [usableLines, openGaps.size, file.path],
+    [usableLines, reveals.size, file.path],
   );
   // Anchor each thread to a diff row via the shared ladder (`anchorRowFor`: live line, else
   // the hunk reconstruction — marked approximate). Threads with no matching row render as
@@ -1339,23 +1444,18 @@ function FileDiffBlock({
                   <Fragment key={i}>
                     {row.kind === 'hunk' ? (
                       row.gap != null && row.gap.count > 0 ? (
-                        openGaps.has(i) && usableLines != null ? (
-                          <ExpandedLines
-                            gap={row.gap}
-                            lines={usableLines}
-                            html={fileHtml}
-                            side={side}
-                            wrap={wrap}
-                          />
-                        ) : (
-                          <GapRow
-                            gap={row.gap}
-                            expandable={fileSource != null}
-                            status={openGaps.has(i) ? gapStatus : 'idle'}
-                            onExpand={() => expandGap(i)}
-                            wrap={wrap}
-                          />
-                        )
+                        <GapExpansion
+                          gap={row.gap}
+                          place={gapPlace(rows, i)}
+                          reveal={reveals.get(i)}
+                          lines={usableLines}
+                          html={fileHtml}
+                          side={side}
+                          expandable={fileSource != null}
+                          status={reveals.has(i) ? gapStatus : 'idle'}
+                          onExpand={(c, count) => expandGap(i, c, count)}
+                          wrap={wrap}
+                        />
                       ) : null
                     ) : isNoNewlineRow(row) ? null : (
                     <DiffLine
@@ -1391,25 +1491,20 @@ function FileDiffBlock({
                       ))}
                   </Fragment>
                 ))}
-                {trailingGap != null &&
-                  (openGaps.has(-1) ? (
-                    <ExpandedLines
-                      gap={trailingGap}
-                      lines={usableLines ?? []}
-                      html={fileHtml}
-                      side={side}
-                      wrap={wrap}
-                    />
-                  ) : (
-                    <GapRow
-                      gap={trailingGap}
-                      trailing
-                      expandable
-                      status="idle"
-                      onExpand={() => expandGap(-1)}
-                      wrap={wrap}
-                    />
-                  ))}
+                {trailingGap != null && (
+                  <GapExpansion
+                    gap={trailingGap}
+                    place="trailing"
+                    reveal={reveals.get(-1)}
+                    lines={usableLines}
+                    html={fileHtml}
+                    side={side}
+                    expandable={fileSource != null}
+                    status={reveals.has(-1) ? gapStatus : 'idle'}
+                    onExpand={(c, count) => expandGap(-1, c, count)}
+                    wrap={wrap}
+                  />
+                )}
             </DiffTable>
           )}
         </div>
@@ -1491,8 +1586,16 @@ export const FileDiffView = memo(function FileDiffView({
     return renamed?.path ?? null;
   }, [files, focusPath]);
 
+  // ⚠ `relative` IS LOAD-BEARING: it makes this list the containing block of every absolutely
+  // positioned descendant — above all the `sr-only` "added"/"removed" word on each changed line
+  // (Tailwind's sr-only is `position: absolute`). PrDetail's scrolling pane is NOT positioned, so
+  // without this the nearest containing block was the viewport: hundreds of 1px spans sat at their
+  // static positions ~29,000px down, OUTSIDE the pane's clip, and grew the DOCUMENT's scroll height
+  // to match. A file-tree click's `scrollIntoView` then scrolled the document as well as the pane —
+  // the whole app shell jumped ~265px up and left a gap at the bottom. MEASURED: html scrollHeight
+  // 29,462 against a 1,000px window before; equal to the window after.
   return (
-    <div>
+    <div className="relative">
       {files.map((f) => (
         <FileDiffBlock
           key={f.path}

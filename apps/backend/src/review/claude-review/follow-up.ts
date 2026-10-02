@@ -1,6 +1,9 @@
 // FOLLOW-UP ON THE PREVIOUS REVIEW (Pro) — the pure half: which earlier findings are sent to the
 // model, how its report is reconciled, and how a still-open finding is raised again.
 //
+// ⚠ ONLY POSTED FINDINGS ENTER IT (`isFollowUpEligible`). A previous review none of whose findings
+// reached GitHub yields no plan, and the run is an ordinary fresh review with no follow-up section.
+//
 // ⚠ NEVER INVENT "ADDRESSED". Every earlier finding we sent gets EXACTLY ONE status: the model's
 // first report for its ref, or 'not_checked' when it said nothing. A finding over the cap was never
 // shown to the model and is 'not_checked' too. The next review CARRIES every 'not_checked' item
@@ -52,7 +55,8 @@ export interface PriorFindingForFollowUp {
   diffHunk: string | null;
   anchored: boolean;
   fileInDiff: boolean;
-  // It was posted to GitHub (postedAt set).
+  // It was posted to GitHub (postedAt set). Always true for a loaded finding now that only posted
+  // ones are eligible; kept on the record (`priorPosted`) and for `isAlreadyOnThisCommit`.
   posted: boolean;
   // true ⇒ from an OLDER review: it was 'not_checked' last time, or it is still open and posted
   // but its reminder was left out of the review (see persist.ts), and is carried forward.
@@ -80,20 +84,24 @@ export interface FollowUpPlan {
 }
 
 /**
- * The follow-up's eligibility rule. `included === false` is the user's "Ignore" (and
- * review-memory's `finding_dismissed` signal), so an ignored finding is left out — UNLESS it was
- * posted, because a posted comment is on the pull request whatever the tick says now. Praise is
- * never followed up: there is nothing to address.
+ * The follow-up's eligibility rule — THE ONE selection point every consumer goes through (the
+ * previous review's own findings AND every carried one, persist.ts `loadPriorReviewForFollowUp`).
  *
- * ⚠ Known edge: runs from before findings were included by default carry `included = false`
- * unless the user ticked them, so they read as ignored. Accepted (the column default is false).
+ * ⚠ ONLY A FINDING THAT WAS POSTED TO GITHUB IS FOLLOWED UP. "Is this still open?" is a question
+ * about a comment on the pull request; a finding the reader ignored, left unposted or only copied
+ * was never said to the author, so asking whether the author dealt with it is asking about
+ * something nobody told them. `postedAt` is the signal because it is the one column BOTH posting
+ * paths stamp: the single-comment route (`markFindingPosted`, which also stores a
+ * `githubCommentId`) and Post review (`markReviewPosted`, whose inline comments ride the GitHub
+ * review and get NO per-comment id). The `included` tick is not consulted at all: it says what the
+ * reader meant to send, never what was sent, and an ignored-after-posting comment is still on the
+ * pull request. Praise is never followed up: there is nothing to address.
  */
 export function isFollowUpEligible(f: {
-  included: boolean;
   postedAt: unknown;
   severity: ClaudeFindingSeverity;
 }): boolean {
-  return (f.included === true || f.postedAt != null) && f.severity !== 'praise';
+  return f.postedAt != null && f.severity !== 'praise';
 }
 
 /** The body the user saw and would have posted — the same rule as routes.ts `resolvedBody`. */

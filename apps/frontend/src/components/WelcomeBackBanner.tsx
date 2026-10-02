@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useMe } from '../hooks/useTriage.js';
 import { useMyTurnByWorkspace } from '../hooks/useMyTurnByWorkspace.js';
-import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { useFilters } from '../store/filters.js';
 import { CloseIcon } from './Icons.js';
 
@@ -60,9 +59,11 @@ import { CloseIcon } from './Icons.js';
 //
 // Dismissal is component-local and therefore lasts the session (this is mounted once, in App).
 // That is the only mute there is now: the population is standing work, so nothing "marks it seen".
-// Hidden while you are already on the Activity console: the Pending board is the list itself, and
-// the Workspace picker lists every workspace's count. My Turn is CORE / free, so this shows on
-// every tier.
+// It shows under EVERY tab, Activity included (Pending, Feed, Bots, Reports): it used to hide on
+// Activity on the theory that the Pending board is the list, but the chips name OTHER workspaces
+// that board cannot show, so hiding it there removed the one cross-workspace summary from the
+// landing view. The dismiss button sits at the LEFT edge, before the headline. My Turn is CORE /
+// free, so this shows on every tier.
 /**
  * How many workspace chips ride the headline before the rest collapse into "+N more".
  * Four fits comfortably beside the headline at a narrow window; beyond that the row would
@@ -72,14 +73,11 @@ const MAX_INLINE_WORKSPACES = 4;
 
 export function WelcomeBackBanner(): JSX.Element | null {
   const { data: me } = useMe();
-  const activeTab = usePinnedTabs((s) => s.activeTab);
   const openMyTurnInWorkspace = useFilters((s) => s.openMyTurnInWorkspace);
   const { lines, total, totalSplit, anyCapped, uncounted } = useMyTurnByWorkspace();
   const [dismissed, setDismissed] = useState(false);
 
   if (dismissed || !me?.user) return null;
-  // Already in the Activity console → no nag; the Pending board is the list there.
-  if (activeTab === 'activity') return null;
   // Empty while the workspace is unresolved (the hook holds itself idle) — nothing to say.
   if (lines.length === 0) return null;
 
@@ -114,6 +112,15 @@ export function WelcomeBackBanner(): JSX.Element | null {
     // workspace name from wrapping this into a two-line banner. `shrink-0` keeps App's flex
     // column from squeezing it instead.
     <div className="flex h-7 shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap border-b border-amber-200 bg-amber-50 px-4 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
+      <button
+        type="button"
+        onClick={() => setDismissed(true)}
+        aria-label="Dismiss welcome back banner"
+        title="Dismiss for this session"
+        className="flex shrink-0 items-center rounded -ml-1 px-1 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300"
+      >
+        <CloseIcon />
+      </button>
       <span className="shrink-0 font-medium">Welcome back</span>
       <span className="shrink-0 text-amber-700/80 dark:text-amber-300/80">
         {/* The headline sums CAPPED card counts, so it says "N+" the moment any line is
@@ -196,15 +203,6 @@ export function WelcomeBackBanner(): JSX.Element | null {
           </span>
         )}
       </span>
-      <button
-        type="button"
-        onClick={() => setDismissed(true)}
-        aria-label="Dismiss"
-        title="Dismiss for this session"
-        className="flex shrink-0 items-center rounded px-1 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300"
-      >
-        <CloseIcon />
-      </button>
     </div>
   );
 }

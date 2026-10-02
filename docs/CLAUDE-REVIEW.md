@@ -179,25 +179,36 @@ posts **one** GitHub review (inline + body + verdict).
 ## Follow-up on the previous review
 
 When a run starts for a PR that has an earlier succeeded review, the new run checks that review's
-comments and says, for each one, whether the current code deals with it.
+comments **that were posted to GitHub** and says, for each one, whether the current code deals
+with it. If none of them was posted, there is nothing to follow up: the run is an ordinary fresh
+review, with no "Previous review" prompt section, no `follow_up` record and no follow-up sentence.
 
 - **Which review.** The newest `claude_reviews` row for the same PR and account with
   `status='succeeded'`, an id below the current run's, and `review_mode IS NULL OR review_mode <>
   'skip'` (a skip run read no code). ⚠ The NULL arm is load-bearing: pre-routing rows have no
   mode, and `ne()` alone drops them. `persist.ts` `loadPriorReviewForFollowUp`, account-scoped
   through the repos join.
-- **Which comments.** `(included || postedAt != null) && severity !== 'praise'` — `included=false`
-  is the user's "Ignore" (and review-memory's `finding_dismissed`), but a posted comment is on the
-  PR whatever the tick says. The prompt uses the body the user saw: `editedBody` when non-blank,
-  else `body` (the routes' `resolvedBody` rule). ⚠ Known edge: rows from before findings were
-  included by default carry `included=false` unless ticked, so they read as ignored.
+- **Which comments — POSTED ONLY.** `postedAt != null && severity !== 'praise'`
+  (`isFollowUpEligible`, the ONE selection point: the previous review's own findings and every
+  carried one go through it, so the prompt, the stored `follow_up` items, the counts in the
+  templated sentence and the SPA's "Previous review" list all agree). A finding the reader ignored,
+  left unposted or only copied was never said to the author, so it is not asked about. ⚠ The signal
+  is `postedAt`, NOT `githubCommentId`: Post review (`markReviewPosted`) stamps `postedAt` on its
+  inline findings but stores no per-comment id (they ride the GitHub review), while the
+  single-comment route (`markFindingPosted`) stamps both. ⚠ The `included` tick is not part of the
+  rule either way: it is what the reader meant to send, and an ignored-after-posting comment is
+  still on the PR. The prompt says the findings were "posted … as comments" and uses the body the
+  user saw: `editedBody` when non-blank, else `body` (the routes' `resolvedBody` rule). Follow-up
+  records stored before this rule may still name unposted findings; they are not rewritten, and
+  the next run's carry-forward re-checks every id through the same rule.
 - **CARRY-FORWARD.** Every item the previous run recorded as `not_checked` names an older finding;
   those are re-loaded (ids from our own stored JSON, re-scoped to this PR + account by the query),
-  re-checked for eligibility and marked `carried`. Without it, a comment Claude skipped — or one
+  re-checked for eligibility (so an unposted one drops out) and marked `carried`. Without it, a comment Claude skipped — or one
   over the cap — would silently drop out of the chain one review later. The same load also carries
-  a still-open item (not / partly addressed) that no ELIGIBLE finding of that run raises again,
-  when its earlier finding was POSTED — the re-raise saved ignored because it was already on the
-  commit (below), or one the reader ignored while the original stays on the PR.
+  a still-open item (not / partly addressed) that no ELIGIBLE (posted) finding of that run raises
+  again, when its earlier finding is itself eligible — the re-raise saved ignored because it was
+  already on the commit (below), or one the reader never posted. The original comment, which IS
+  on the PR, is followed up instead; once the re-raise is posted, the chain runs through it.
 - ⚠ **"HAS THE CODE MOVED?" IS PER FINDING.** Each loaded finding carries the head of the review
   that RAISED it (`PriorFindingForFollowUp.headSha`; the carried query selects `cr.headSha`), and
   `findingHeadMoved` compares THAT with this run's head. The plan-level `headMoved` (previous
