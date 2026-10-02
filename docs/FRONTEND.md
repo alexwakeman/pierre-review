@@ -1035,15 +1035,15 @@ read-only variant — the write gate is GitHub's own `viewerCanReact`.
 
 ### The agentic AI surfaces — free, local, gated on `me.ai` (`useAiCapabilities`)
 
-Claude Review (run, follow-up, ticket check vs a pasted story, auto review, the review chat), review
-memory and AI Fix are **FREE and LOCAL-ONLY**. They run on the reader's own Claude Code session or
+Claude Review (run, follow-up, user-story check, auto review, the review chat) and AI Fix are
+**FREE and LOCAL-ONLY** (review memory is deleted, table and all). They run on the reader's own Claude Code session or
 `ANTHROPIC_API_KEY`; Limn stores no key and charges nothing. Every SPA gate reads the TOP-LEVEL
 `MeResponse.ai` through **`hooks/useAiCapabilities.ts`** (pure half: `lib/aiCapabilities.ts`) —
 never `useProCapabilities()`, whose `aiFix`/`claudeReview`/`aiAnalysis`/`reviewMemory` members are
 gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads them off `pro` again.
 
 - **VISIBILITY IS `ai.enabled` ALONE** (`!isCloud && !LIMN_AI_DISABLED`). Locally the tabs, the Open
-  PRs column, the Feed's Claude pill, review memory and the Settings switch ALWAYS render. ⚠ Never
+  PRs column, the Feed's Claude pill and the Settings switch ALWAYS render. ⚠ Never
   hide a surface on `runtime`/`auth`: hiding it until a credential is detected hides it from exactly
   the people who have not set one up, and the detection is a heuristic (the run is the real check).
 - **What sits in place of a Run button is ONE component, `AiRunGate`** (`components/AiSetup.tsx`),
@@ -1051,8 +1051,8 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   order: runtime not `ready` → `AiRuntimeSetup` ("Set up AI (one-time ~110 MB download)", streaming
   `POST /api/ai/runtime/install` over `sseStream`; `failed` prints its message + Retry); `auth: 'none'`
   (from `/api/me`, or the surface's own route answer passed as `auth`) → the one line "Sign in to
-  Claude Code or set ANTHROPIC_API_KEY"; else the button. Past reviews, the story panel and the
-  budget stay usable either way. The Open PRs cell has no room for the line, so its Review button
+  Claude Code or set ANTHROPIC_API_KEY"; else the button. Past reviews and the story panel stay
+  usable either way. The Open PRs cell has no room for the line, so its Review button
   OPENS the PR's Claude Review tab while `ai.ready` is false.
 - **The install is ONE per page** — a module-level store in `useAiCapabilities.ts`, so two "Set up
   AI" buttons show one progress line and cannot start two downloads; an install the SERVER reports
@@ -1128,6 +1128,13 @@ The `'comments'` AI-Fix seed's two UI halves. Backend contract:
   no `mutationKey`, so `useIsMutating` is not reachable), claimed on click, promoted on success and
   RELEASED on failure, and settlement chains on the `mutateAsync` promise — React Query drops
   per-call callbacks when the component unmounts, which is exactly the tab-switch-mid-request case.
+- **The AI Fix tab carries almost no prose** (2026-10 noise sweep). How the fixer works (no shell,
+  per-comment checks, nothing pushed until Push) lives in ONE `InfoButton` beside the "AI Fix"
+  section title; the roll-up line IS the report's heading; the review handoff names itself on the
+  launch button ("Fix from review") and only the basket-outranks-review fact is a sentence.
+  "Not built or tested here." stays ON SCREEN, folded into the diff header beside the file count —
+  never moved into the popover. `verdict.learning` is on the wire but NOT rendered (it fed the
+  retired review memory).
 
 ---
 
@@ -2365,6 +2372,16 @@ fifty rows has to arrive with the rows.
   shared by the card's chips and the pane's Reviews row. `icon` is a COMPONENT reference
   (`lib/ui.ts` is `.ts` and holds no JSX) — render `<m.icon size={12} />`.
 
+### The PR pane's Suggested row stays after the first Assign
+
+The server empties `GET /api/prs/:id/suggested-reviewers` once ANYONE is requested (its gate is
+"nobody asked yet", which is what retires the Pending routing card). The pane's row used to unmount
+with it, so asking one person took every other suggestion away. `ChecksTab` now keeps the last
+non-empty answer per PR for the session (`seenSuggestions`, bounded at 50, survives a tab-switch
+remount) while the PR is open and not a draft, and `SuggestedReviewersRow` drops anyone already on
+the "Requested" row (user id, or a team by slug / `owner/slug`). Someone asked from the row keeps a
+"Requested" tick until the refetched detail lists them above. The server gate is unchanged.
+
 ### Suggested reviewers on a `reviewer_routing` card — one Assign per suggestion
 
 - Each suggestion row carries its OWN Assign, asking just that reviewer (`RoutingReviewerRow` in
@@ -3040,8 +3057,7 @@ and the `.code-hl` palette above — with exactly one deliberate exception, `Mar
   every gate they cannot clear; the null branch is React's ordinary text rendering. Nothing else
   goes through that door, on any surface.
 - **Not code, and deliberately left plain:** the AI-Fix agent's `recentActivity` log, `CheckList`'s
-  CI logs, `ClaudeReviewTab`'s "exact context sent to Claude" block and `BotAdvisorPanel`'s brief
-  markdown. None of them has a file path, so none of them has a language.
+  CI logs and `BotAdvisorPanel`'s brief markdown. None of them has a file path, so none of them has a language.
 
 ⚠ **A hex a component DERIVES a wash from cannot become a var.** `FeedView`'s `itemGlyph`
 returns `{color}` and the chip paints `background: glyph.color + '1a'`. The `claude_review` kind

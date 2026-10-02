@@ -8823,6 +8823,10 @@ async function countOtherReviewers(
 // re-posting, a CLA bot) after your comment is not an answer to you; before this rule was
 // human-only, it summoned you on your own threads. `lastHuman` skips the GLOBAL automation set and
 // comments with no known author, and the card is built from it rather than from the last row.
+//
+// ⚠ AN APPROVAL AFTER THE CARD'S CLOCK DISCHARGES THE TWO REPLY CARDS — S3(a) and S3(d): approving
+// the PR without replying is the reader's answer, and a later human reply brings the thread back
+// (`approvedSince`, below). S3(b) is NOT discharged: an approval does not say you checked the fix.
 async function getThreadTurns(opts: {
   localUserId: number;
   accountId: number;
@@ -8896,6 +8900,32 @@ async function getThreadTurns(opts: {
     .execute();
   const prById = new Map(prRows.map((p) => [p.id, p]));
 
+  // ⚠ AN APPROVAL ANSWERS A THREAD. Your NEWEST approving review per PR: a thread whose clock (the
+  // comment the card is built from) is STRICTLY EARLIER than it is done — you looked at the PR
+  // after the reply and approved it without answering, which is the action. Applied here, to the
+  // SEEDS, so `myTurnTotal` moves with the list. A human reply AFTER the approval has a later
+  // clock and brings the thread back by the ordinary rules. Only `approved` counts: a `commented`
+  // or `changes_requested` review is not a verdict that the conversation is over.
+  const approvedAtByPr = new Map<number, number>();
+  for (const r of await db
+    .select({ prId: reviews.prId, at: reviews.submittedAt })
+    .from(reviews)
+    .where(
+      and(
+        inArray(reviews.prId, prIds),
+        eq(reviews.authorId, localUserId),
+        eq(reviews.state, 'approved'),
+      ),
+    )
+    .execute()) {
+    const at = r.at.getTime();
+    if (at > (approvedAtByPr.get(r.prId) ?? -Infinity)) approvedAtByPr.set(r.prId, at);
+  }
+  const approvedSince = (prId: number, clock: Date): boolean => {
+    const at = approvedAtByPr.get(prId);
+    return at != null && at > clock.getTime();
+  };
+
   // ONE comment load over the union of thread ids, ordered so the last entry per thread is the
   // most recent (avoids an N+1 loop).
   const allComments = await db
@@ -8953,6 +8983,10 @@ async function getThreadTurns(opts: {
     // file since (S3b). Anything else — you spoke last and nothing has moved — is not yours.
     const youSpokeLast = last.authorId === localUserId;
     if (youSpokeLast && t.derivedState !== 'likely_addressed') continue;
+    // Approving after the last reply answers a REPLY card. A likely_addressed card is a commit
+    // after YOUR comment, so the comment's clock says nothing about whether the approval came
+    // after the fix; leave it alone.
+    if (!youSpokeLast && approvedSince(t.prId, last.createdAt)) continue;
     threadsAwaiting.push(item(t, pr, last, youSpokeLast ? 'likely_addressed' : 'reply'));
   }
 
@@ -8967,6 +9001,7 @@ async function getThreadTurns(opts: {
     if (last.createdAt.getTime() <= mine.createdAt.getTime()) continue;
     const addedAt = addedAtByRepo.get(pr.repoId);
     if (addedAt == null || last.createdAt.getTime() < addedAt.getTime()) continue;
+    if (approvedSince(t.prId, last.createdAt)) continue;
     threadReplies.push(item(t, pr, last, 'reply'));
   }
 
@@ -9885,14 +9920,10 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
           .execute();
       }
       await tx.delete(claudeReviews).where(inArray(claudeReviews.prId, prIds)).execute();
-      // The agentic tables core ADOPTED from the plugin (migration 0074 / pg 0061): AI Fix runs
-      // (~MiB patches) and Claude Review's learnings. No FKs, so nothing would cascade; before this
-      // the plugin had no deleteRepo hook at all and both were orphaned on a repo removal.
+      // The agentic table core ADOPTED from the plugin (migration 0074 / pg 0061): AI Fix runs
+      // (~MiB patches). No FKs, so nothing would cascade; before this the plugin had no deleteRepo
+      // hook at all and they were orphaned on a repo removal.
       await tx.delete(schema.aiFixes).where(inArray(schema.aiFixes.prId, prIds)).execute();
-      await tx
-        .delete(schema.reviewLearnings)
-        .where(inArray(schema.reviewLearnings.prId, prIds))
-        .execute();
       await tx.delete(pullRequests).where(eq(pullRequests.repoId, id)).execute();
     }
     // The workspace membership row references this repo (the composite FK is ON DELETE cascade,
@@ -10160,7 +10191,11 @@ export async function getAutoReviewCandidates(
   accountId: number,
   workspaceId: number,
   opts: { openedSinceMs: number; dayStartMs: number; limit: number },
-): Promise<{ prIds: number[]; autoToday: number } | null> {
+): Promise<{
+  prIds: number[];
+  autoToday: number;
+  reReview: Array<{ prId: number; headSha: string }>;
+} | null> {
   const owned = (
     await db
       .select({ id: workspaces.id })
@@ -10171,7 +10206,7 @@ export async function getAutoReviewCandidates(
   )[0];
   if (!owned) return null;
   const repoIds = await getWorkspaceRepoIds(workspaceId, accountId);
-  if (repoIds.length === 0) return { prIds: [], autoToday: 0 };
+  if (repoIds.length === 0) return { prIds: [], autoToday: 0, reReview: [] };
 
   const autoRows = await db
     .select({ id: claudeReviews.id })
@@ -10187,10 +10222,15 @@ export async function getAutoReviewCandidates(
     )
     .execute();
   const autoToday = autoRows.length;
-  if (opts.limit <= 0) return { prIds: [], autoToday };
+  if (opts.limit <= 0) return { prIds: [], autoToday, reReview: [] };
 
   const open = await db
-    .select({ id: pullRequests.id, authorId: pullRequests.authorId, openedAt: pullRequests.openedAt })
+    .select({
+      id: pullRequests.id,
+      authorId: pullRequests.authorId,
+      openedAt: pullRequests.openedAt,
+      headSha: pullRequests.headSha,
+    })
     .from(pullRequests)
     .where(
       and(
@@ -10203,12 +10243,17 @@ export async function getAutoReviewCandidates(
     )
     .orderBy(asc(pullRequests.openedAt), asc(pullRequests.id))
     .execute();
-  if (open.length === 0) return { prIds: [], autoToday };
+  if (open.length === 0) return { prIds: [], autoToday, reReview: [] };
 
   const [bots, reviewed] = await Promise.all([
     hiddenBotUserIds(accountId, workspaceId),
     db
-      .select({ prId: claudeReviews.prId })
+      .select({
+        id: claudeReviews.id,
+        prId: claudeReviews.prId,
+        headSha: claudeReviews.headSha,
+        status: claudeReviews.status,
+      })
       .from(claudeReviews)
       .where(
         and(
@@ -10223,11 +10268,33 @@ export async function getAutoReviewCandidates(
   ]);
   const botSet = new Set(bots);
   const hasRun = new Set(reviewed.map((r) => r.prId));
-  const prIds = open
-    .filter((r) => r.authorId != null && !botSet.has(r.authorId) && !hasRun.has(r.id))
+  const human = open.filter((r) => r.authorId != null && !botSet.has(r.authorId));
+  const prIds = human
+    .filter((r) => !hasRun.has(r.id))
     .slice(0, opts.limit)
     .map((r) => r.id);
-  return { prIds, autoToday };
+  // RE-REVIEW: a PR already reviewed (a SUCCEEDED run, manual or auto) whose synced head has
+  // moved past every run — new commits or a rewritten history. ONE RUN PER HEAD: any row at the
+  // current head (any status) settles it, and nothing is offered while its latest run is still
+  // queued or running. The sweeper debounces (the head must hold still) — this read does not.
+  const runsByPr = new Map<number, typeof reviewed>();
+  for (const r of reviewed) {
+    const list = runsByPr.get(r.prId) ?? [];
+    list.push(r);
+    runsByPr.set(r.prId, list);
+  }
+  const reReview: Array<{ prId: number; headSha: string }> = [];
+  for (const pr of human) {
+    const runs = runsByPr.get(pr.id);
+    if (!runs || !pr.headSha) continue;
+    if (!runs.some((r) => r.status === 'succeeded')) continue;
+    if (runs.some((r) => r.headSha === pr.headSha)) continue;
+    const latest = runs.reduce((a, b) => (b.id > a.id ? b : a));
+    if (latest.status === 'queued' || latest.status === 'running') continue;
+    reReview.push({ prId: pr.id, headSha: pr.headSha });
+    if (reReview.length >= opts.limit) break;
+  }
+  return { prIds, autoToday, reReview };
 }
 
 // ---- PR write-action contexts (reply / resolve / comment / approve / inline) ----

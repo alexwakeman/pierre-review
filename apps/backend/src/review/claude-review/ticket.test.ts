@@ -6,7 +6,13 @@
 //   pnpm --filter @pierre-review/backend test claude-review-ticket
 import { describe, expect, it } from 'vitest';
 import { CLAUDE_REVIEW_TICKET_MAX_CRITERIA, type ClaudeReviewTicket } from '@pierre-review/shared';
-import { reconcileTicketAssessment } from './ticket.js';
+import {
+  reconcileTicketAssessment,
+  reconcileTicketAssessments,
+  ticketAnalysisCommentBody,
+  ticketEntriesOf,
+  TICKET_COMMENT_MARKER,
+} from './ticket.js';
 
 const ticket: ClaudeReviewTicket = {
   title: 'Reset password',
@@ -102,5 +108,73 @@ describe('reconcileTicketAssessment', () => {
     expect(a.criteria).toEqual([]);
     expect(a.alignment).toBe('not_aligned');
     expect(a.notRequested.map((g) => g.title)).toEqual(['New page']);
+  });
+});
+
+describe('reconcileTicketAssessments — one per ticket, by ref', () => {
+  const t2: ClaudeReviewTicket = { title: 'Audit log', description: null, acceptanceCriteria: null };
+
+  it('matches reports by ref; a ticket with no report is not_checked; unknown/repeated refs dropped', () => {
+    const out = reconcileTicketAssessments(
+      [ticket, t2],
+      [
+        { ref: 'T2', alignment: 'aligned', summary: 'Done.' },
+        { ref: 'T2', alignment: 'not_aligned', summary: 'ignored repeat' },
+        { ref: 'T9', alignment: 'aligned', summary: 'unknown' },
+      ],
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0]!.alignment).toBe('not_checked');
+    expect(out[1]).toMatchObject({ alignment: 'aligned', summary: 'Done.' });
+  });
+
+  it('reads the legacy single report as T1', () => {
+    const out = reconcileTicketAssessments([t2], undefined, { alignment: 'unclear', summary: 'Hm.' });
+    expect(out[0]).toMatchObject({ alignment: 'unclear', summary: 'Hm.' });
+  });
+});
+
+describe('ticketEntriesOf — the stored pair → the wire list', () => {
+  it('a legacy run (one object each) reads as a one-element list', () => {
+    const a = reconcileTicketAssessment(ticket, { alignment: 'aligned', summary: 'ok' });
+    expect(ticketEntriesOf(ticket, a)).toEqual([
+      { index: 0, ref: 'T1', ticket, assessment: a, posted: null },
+    ]);
+    expect(ticketEntriesOf(null, null)).toEqual([]);
+  });
+
+  it('lifts `posted` off the stored assessment', () => {
+    const a = reconcileTicketAssessment(ticket, { alignment: 'aligned', summary: 'ok' });
+    const posted = { githubCommentId: '9', url: 'https://x/1#issuecomment-9', postedAt: '2026-10-01T00:00:00.000Z' };
+    const [e] = ticketEntriesOf([ticket], [{ ...a, posted }]);
+    expect(e!.posted).toEqual(posted);
+    expect('posted' in e!.assessment!).toBe(false);
+  });
+});
+
+describe('ticketAnalysisCommentBody', () => {
+  it('a concise markdown comment: heading, verdict, criteria, gaps, the commit, the marker', () => {
+    const a = reconcileTicketAssessment(ticket, {
+      alignment: 'partly_aligned',
+      summary: 'Most of it, @alice.',
+      criteria: [
+        { text: 'A link is sent', status: 'met', explanation: 'In mail.ts.', path: 'src/mail.ts', line: 4 },
+        { text: 'Link expires', status: 'not_met', explanation: 'No expiry.' },
+      ],
+      missing: [{ title: 'Rate limit', explanation: 'Not done.' }],
+    });
+    const body = ticketAnalysisCommentBody(
+      { ...ticket, key: 'ENG-7', url: 'https://acme.atlassian.net/browse/ENG-7' },
+      a,
+      'abcdef1234567890',
+    );
+    expect(body).toContain('### [ENG-7](https://acme.atlassian.net/browse/ENG-7) · Reset password');
+    expect(body).toContain('**Partly matches the user story**');
+    expect(body).toContain('@\u200balice'); // no mention ping
+    expect(body).toContain('1 of 2 criteria met.');
+    expect(body).toContain('- **Met:** A link is sent — In mail.ts. (`src/mail.ts:4`)');
+    expect(body).toContain('**Not done**');
+    expect(body).toContain('`abcdef1`');
+    expect(body.endsWith(TICKET_COMMENT_MARKER)).toBe(true);
   });
 });

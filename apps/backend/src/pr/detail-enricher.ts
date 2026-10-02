@@ -3,9 +3,9 @@ import type { TicketRef } from '@pierre-review/shared';
 // PR-detail enrichment seam. Core `getPrDetail` builds the base PrDetail; the private @pierre/pro
 // plugin registers an enricher here (bind.ts wires registerPrDetailEnricher into the ProContext)
 // that computes Jira/Linear ticket links COMPUTE-ON-READ from the PR title + head branch against
-// the account's configured provider/base URL. Mirrors review/events.ts: a single nullable
-// provider, null ⇒ inert ⇒ PrDetail.tickets stays null (no ticket UI, free tier). accountId
-// scopes every read the enricher does.
+// the account's configured provider/base URL. A single nullable provider: null ⇒ inert ⇒
+// PrDetail.tickets stays null (no ticket UI, free tier). accountId scopes every read the
+// enricher does.
 export interface PrEnrichInput {
   accountId: number;
   prId: number;

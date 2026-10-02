@@ -173,7 +173,7 @@ describe('POST /api/pro/prs/:id/ai-fix — the model', () => {
 
     startFix.mockClear();
     const comments = await start(app, {
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-5',
       seed: 'comments',
       reviewText: 'must not be forwarded for the comments seed',
       commentTargets: [
@@ -184,7 +184,7 @@ describe('POST /api/pro/prs/:id/ai-fix — the model', () => {
     expect(comments.statusCode).toBe(202);
     expect(startArg()).toMatchObject({
       seed: 'comments',
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-5',
       commentTargets: [
         { kind: 'review_comment', id: 101 },
         { kind: 'pr_comment', id: 202 },

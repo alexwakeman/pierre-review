@@ -9,7 +9,9 @@
 //   4. ⚠ IT NEVER RUNS IN CLOUD, or on a host without the seam;
 //   5. a full lane stops the tick — the rest wait, since the database is the queue;
 //   6. ⚠ while AI is not set up (no runtime / no credential) it queues NOTHING, so no PR gets a
-//      failed row that would use up its one automatic review.
+//      failed row that would use up its one automatic review;
+//   7. ⚠ a RE-REVIEW of a moved head is DEBOUNCED: queued once the head has held still for
+//      AUTO_REREVIEW_SETTLE_MS, once per head, and a burst of pushes costs one run.
 //
 //   pnpm --filter @pierre-review/backend test claude-review/auto-sweep
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -47,14 +49,18 @@ vi.mock('./auto-settings.js', () => ({
   listAutoReviewWorkspaces: async () => roster,
 }));
 
-const { runAutoReviewSweep, utcDayStartMs } = await import('./auto.js');
+const { runAutoReviewSweep, utcDayStartMs, AUTO_REREVIEW_SETTLE_MS, _resetAutoReReviewForTest } =
+  await import('./auto.js');
 
 const NOW = Date.UTC(2026, 8, 30, 15, 30);
 const ids = (n: number, from = 1): number[] => Array.from({ length: n }, (_, i) => from + i);
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let calls: any[];
-let answers: Map<number, { prIds: number[]; autoToday: number }>;
+let answers: Map<
+  number,
+  { prIds: number[]; autoToday: number; reReview?: Array<{ prId: number; headSha: string }> }
+>;
 let blocked: Set<number>;
 const makeCtx = (over: Record<string, unknown> = {}): ProContext =>
   ({
@@ -81,6 +87,7 @@ beforeEach(() => {
   answers = new Map();
   blocked = new Set();
   roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: NOW - 3_600_000 }];
+  _resetAutoReReviewForTest();
 });
 
 describe('runAutoReviewSweep', () => {
@@ -192,5 +199,68 @@ describe('runAutoReviewSweep', () => {
     answers.set(7, { prIds: [5], autoToday: 0 });
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(enqueued).toEqual([[1, 5]]);
+  });
+});
+
+describe('runAutoReviewSweep — re-review on a moved head', () => {
+  const SETTLE = AUTO_REREVIEW_SETTLE_MS;
+  const moved = (sha: string) => answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 30, headSha: sha }] });
+
+  it('a new head is queued ONCE, after it has held still for the settle time', async () => {
+    moved('b1');
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued).toEqual([]); // first sight starts the wait
+    await runAutoReviewSweep(makeCtx(), NOW + SETTLE - 1);
+    expect(enqueued).toEqual([]);
+    const r = await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
+    expect(enqueued).toEqual([[1, 30]]);
+    expect(r.reQueued).toBe(1);
+    // Once a run exists at that head the candidate read stops offering it.
+    answers.set(7, { prIds: [], autoToday: 1, reReview: [] });
+    await runAutoReviewSweep(makeCtx(), NOW + 2 * SETTLE);
+    expect(enqueued).toEqual([[1, 30]]);
+  });
+
+  it('the same head with no new commits is never offered — nothing queued', async () => {
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [] });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    await runAutoReviewSweep(makeCtx(), NOW + 10 * SETTLE);
+    expect(enqueued).toEqual([]);
+  });
+
+  it('⚠ a burst of pushes restarts the wait each time and costs ONE run, on the last head', async () => {
+    moved('c1');
+    await runAutoReviewSweep(makeCtx(), NOW);
+    moved('c2');
+    await runAutoReviewSweep(makeCtx(), NOW + SETTLE - 1000);
+    moved('c3');
+    await runAutoReviewSweep(makeCtx(), NOW + 2 * SETTLE - 2000);
+    expect(enqueued).toEqual([]);
+    await runAutoReviewSweep(makeCtx(), NOW + 3 * SETTLE);
+    expect(enqueued).toEqual([[1, 30]]);
+  });
+
+  it('⚠ auto review off for the workspace ⇒ no re-review', async () => {
+    moved('d1');
+    await runAutoReviewSweep(makeCtx(), NOW);
+    roster = [];
+    await runAutoReviewSweep(makeCtx(), NOW + 2 * SETTLE);
+    expect(enqueued).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('a re-review waiting in the lane is not queued twice, and counts against the day', async () => {
+    moved('e1');
+    await runAutoReviewSweep(makeCtx(), NOW);
+    waiting = new Set([30]);
+    await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
+    expect(enqueued).toEqual([]);
+  });
+
+  it('the daily cap applies to re-reviews too', async () => {
+    answers.set(7, { prIds: [], autoToday: 20, reReview: [{ prId: 30, headSha: 'f1' }] });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
+    expect(enqueued).toEqual([]);
   });
 });

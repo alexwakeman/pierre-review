@@ -13,7 +13,7 @@ type ZodNs = typeof Zod;
 //
 // ⚠ EVERY FOLLOW-UP / USER-STORY FIELD IS OPTIONAL, so a run with no previous review and no user
 // story submits exactly the old shape and validates exactly as before. The prompt — not this
-// schema — requires `followUp` / `ticket` when the user message carries those sections, and the
+// schema — requires `followUp` / `tickets` when the user message carries those sections, and the
 // plugin reconciles whatever arrives (missing refs become 'not_checked'). 'not_checked' is in NO
 // enum here: only the server writes it.
 
@@ -55,6 +55,13 @@ export function buildSubmitReviewShape(z: ZodNs) {
           .describe(
             "Only when this finding raises a finding from the 'Previous review' section again: its ref, e.g. 'P3'. Leave it out otherwise.",
           ),
+        lens: z
+          .enum(["design", "tests", "impact", "accessibility", "security", "performance"])
+          .nullable()
+          .optional()
+          .describe(
+            "Deep reviews only: the specialist angle this finding comes from ('design' for an architecture-level comment). Leave it out for a general finding.",
+          ),
       }),
     ),
     followUp: z
@@ -78,8 +85,12 @@ export function buildSubmitReviewShape(z: ZodNs) {
       .describe(
         "One entry per finding in the 'Previous review' section, each ref at most once. Leave out a ref whose code you cannot see rather than guess. Leave the whole field out when there is no such section.",
       ),
-    ticket: z
-      .object({
+    tickets: z
+      .array(
+      z.object({
+        ref: z
+          .string()
+          .describe("The ticket's ref from the 'User stories' section, e.g. 'T1'."),
         alignment: z.enum([
           "aligned",
           "partly_aligned",
@@ -121,10 +132,11 @@ export function buildSubmitReviewShape(z: ZodNs) {
           .describe(
             "What the change adds that the user story did not ask for.",
           ),
-      })
+      }),
+      )
       .optional()
       .describe(
-        "Only when the user message has a 'User story or task' section. Leave it out otherwise.",
+        "Only when the user message has a 'User stories' section: one entry per ticket there, each ref once. Leave it out otherwise.",
       ),
   };
 }

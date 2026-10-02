@@ -333,6 +333,13 @@ author id that is known, is not you, and is not in the global automation set (be
   (the scanner has not restamped it since migration `0068`) shows no card — under-notifying is the
   safe direction. A new mention shows within one scan tick (5 min); in cloud the scanner covers only
   recently active accounts, so a returning reader waits one tick.
+- **Your APPROVAL discharges S3a, S3b and S3d.** An `approved` review of yours on the PR STRICTLY
+  later than the thread card's clock means you read the reply and approved without answering — done.
+  Applied to the seeds inside `getThreadTurns` (`approvedSince`). Only `approved` counts (a
+  `commented` review is not a verdict), and a human reply after the approval has a later clock, so
+  it brings the thread back. ⚠ REPLY cards only: a `likely_addressed` card on your own thread is
+  a commit after YOUR comment, so an approval later than that comment may still precede the fix —
+  it is never dropped by an approval. Pinned by `db/my-turn-approval.test.ts`.
 - **S3d, S5 and S6 include drafts and automation-authored PRs**: conversations happen on drafts,
   and a colleague can name you on a Dependabot PR.
 - **One PR, one summons.** The PR-grained types claim PRs in a FIXED precedence —

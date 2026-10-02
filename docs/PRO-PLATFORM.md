@@ -380,6 +380,8 @@ GET  /api/pro/inbox/digests/:repoId     → single (+ optional ?prId)
 
 ## 5. Claude Review learnings / memory (Pro only)
 
+> ⚠ **DELETED.** Review memory was removed (and `review_learnings` dropped by sqlite `0075` / pg `0062`). What follows is the historical design only — see [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § REVIEW MEMORY IS DELETED.
+
 The whole design rests on one rule: **core stays inert and premium-free.** Core gains four tiny generic seams; everything that captures, stores, retrieves, renders-context and serves UI data lives in `@pierre/pro`.
 
 ### 5.1 The four core seams (public, premium-free)
@@ -1272,6 +1274,8 @@ GET  /api/pro/inbox/digests/:repoId     → single repo digest (+ optional ?prId
 ---
 
 ## Appendix — Claude Review learnings/memory (full design)
+
+> ⚠ **DELETED.** Review memory was removed (and `review_learnings` dropped by sqlite `0075` / pg `0062`). What follows is the historical design only — see [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § REVIEW MEMORY IS DELETED.
 
 I now have the exact seams confirmed. Here is the design.
 

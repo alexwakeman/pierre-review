@@ -1,21 +1,23 @@
 // The Claude Review tab's follow-up and user-story pieces, kept out of the 2,000-line tab:
 //
-//   ClaudeReviewTicketPanel     — the "User story or task (optional)" input, COLLAPSED by default.
-//   ClaudeReviewTicketResults   — how the run measured up against that user story.
+//   ClaudeReviewTicketPanel     — the "User stories (optional)" input, COLLAPSED by default.
+//   ClaudeReviewTicketResults   — how the run measured up against ONE user story.
 //   ClaudeReviewFollowUpSection — what became of the previous review's comments.
 //
 // Rules for all three:
-//  - Every string from Claude or from the pasted user story renders as PLAIN TEXT: no Markdown,
-//    and no href built from it. A code anchor is a <button> into the Changes tab when the file is
+//  - Every string from Claude or from a pasted user story renders as PLAIN TEXT: no Markdown,
+//    and no href built from it. A story READ FROM JIRA is the one exception, and it renders in
+//    ClaudeReviewTickets.tsx (JiraStoryView), never here. A code anchor is a <button> into the Changes tab when the file is
 //    in the PR, otherwise plain mono text.
 //  - Statuses and counts come from the server's reconcile step, which never invents "addressed".
 //    The sentences are templated in `@pierre-review/shared` (code-derived); Claude's explanations
 //    are shown separately and labelled as Claude's.
 //  - Chips are 11px or larger, sentences 12px or larger, no uppercase-with-tracking labels, and
 //    every muted colour is paired for both themes (`textContrast.test.ts`).
-import { useId, useMemo, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import {
+  CLAUDE_REVIEW_MAX_TICKETS,
   FOLLOW_UP_STATUS_LABEL,
   TICKET_ALIGNMENT_LABEL,
   TICKET_CRITERION_STATUS_LABEL,
@@ -27,10 +29,9 @@ import type {
   ClaudeFindingSide,
   ClaudeFollowUpItem,
   ClaudeReviewFollowUp,
-  ClaudeReviewTicket,
-  ClaudeReviewTicketCheck,
+  ClaudeReviewTicketEntry,
   ClaudeReviewTicketField,
-  ClaudeTicketAssessment,
+  ClaudeReviewTicketsCheck,
   ClaudeTicketCriterionResult,
   ClaudeTicketGap,
   JiraTicketDetails,
@@ -43,6 +44,7 @@ import {
   browserAcMemory,
   fillDraftFromJira,
   fillableJiraTickets,
+  jiraProvenance,
   unfillableJiraTickets,
   jiraFillNote,
   jiraSiteOf,
@@ -58,13 +60,15 @@ import {
   anchorLabel,
   fieldCounter,
   followUpAnchor,
+  isJiraDraft,
   notCheckedReason,
   partitionFollowUp,
-  ticketDraftHasContent,
-  ticketPanelHint,
+  ticketsPanelHint,
   type TicketDraft,
 } from '../lib/claudeReviewFollowUp.js';
 import { ChevronIcon } from './Icons.js';
+import { InfoButton } from './InfoModal.js';
+import { JiraStoryView } from './ClaudeReviewTickets.js';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
 
@@ -79,6 +83,8 @@ const SEVERITY_WORD: Record<ClaudeFindingSeverity, string> = {
 const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-medium';
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const ERROR_TEXT = 'text-red-600 dark:text-red-400';
+const BTN =
+  'whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
 const INPUT =
   'mt-0.5 w-full rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900';
 
@@ -120,7 +126,6 @@ function TicketField({
   field,
   value,
   error,
-  helper,
   children,
 }: {
   id: string;
@@ -128,7 +133,6 @@ function TicketField({
   field: ClaudeReviewTicketField;
   value: string;
   error: string | null;
-  helper?: string | null;
   children: JSX.Element;
 }): JSX.Element {
   const counter = fieldCounter(field, value);
@@ -138,13 +142,8 @@ function TicketField({
         {label}
       </label>
       {children}
-      {(helper != null || counter != null) && (
-        <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs">
-          {helper != null && <span className={MUTED}>{helper}</span>}
-          {counter != null && (
-            <span className={counter.over ? ERROR_TEXT : MUTED}>{counter.text}</span>
-          )}
-        </div>
+      {counter != null && (
+        <div className={`mt-0.5 text-xs ${counter.over ? ERROR_TEXT : MUTED}`}>{counter.text}</div>
       )}
       {error != null && (
         <p id={`${id}-error`} className={`mt-0.5 text-xs ${ERROR_TEXT}`}>
@@ -155,11 +154,105 @@ function TicketField({
   );
 }
 
+/** One typed or pasted story: three editable fields and Remove. */
+function ManualStoryFields({
+  label,
+  value,
+  onChange,
+  onRemove,
+  errorFor,
+}: {
+  label: string;
+  value: TicketDraft;
+  onChange: (next: TicketDraft) => void;
+  onRemove: () => void;
+  errorFor: (f: ClaudeReviewTicketField) => string | null;
+}): JSX.Element {
+  const baseId = useId();
+  const ids = {
+    title: `${baseId}-title`,
+    description: `${baseId}-description`,
+    acceptanceCriteria: `${baseId}-criteria`,
+  };
+  const set = (field: ClaudeReviewTicketField, v: string): void =>
+    onChange({ ...value, [field]: v });
+  const describedBy = (f: ClaudeReviewTicketField): string | undefined =>
+    errorFor(f) != null ? `${ids[f]}-error` : undefined;
+  return (
+    <div className="space-y-2 rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800">
+      <div className="flex items-center gap-2">
+        <span className="flex-1 text-xs font-semibold text-gray-700 dark:text-gray-200">{label}</span>
+        <button type="button" onClick={onRemove} className={BTN}>
+          Remove
+        </button>
+      </div>
+      <TicketField id={ids.title} label="Title" field="title" value={value.title} error={errorFor('title')}>
+        <input
+          id={ids.title}
+          type="text"
+          value={value.title}
+          onChange={(e) => set('title', e.target.value)}
+          aria-invalid={errorFor('title') != null}
+          aria-describedby={describedBy('title')}
+          className={INPUT}
+        />
+      </TicketField>
+      <TicketField
+        id={ids.description}
+        label="Description"
+        field="description"
+        value={value.description}
+        error={errorFor('description')}
+      >
+        <textarea
+          id={ids.description}
+          rows={3}
+          value={value.description}
+          onChange={(e) => set('description', e.target.value)}
+          aria-invalid={errorFor('description') != null}
+          aria-describedby={describedBy('description')}
+          className={INPUT}
+        />
+      </TicketField>
+      <TicketField
+        id={ids.acceptanceCriteria}
+        label="Acceptance criteria"
+        field="acceptanceCriteria"
+        value={value.acceptanceCriteria}
+        error={errorFor('acceptanceCriteria')}
+      >
+        <textarea
+          id={ids.acceptanceCriteria}
+          rows={4}
+          value={value.acceptanceCriteria}
+          onChange={(e) => set('acceptanceCriteria', e.target.value)}
+          aria-invalid={errorFor('acceptanceCriteria') != null}
+          aria-describedby={describedBy('acceptanceCriteria')}
+          className={INPUT}
+        />
+      </TicketField>
+    </div>
+  );
+}
+
+// A ticket this session fetched, kept for its candidates so the dropdown refills the criteria
+// with NO refetch.
+interface FetchedJira {
+  details: JiraTicketDetails;
+  site: string | null;
+  chosen: string;
+}
+
+/** The label a story goes by: its Jira key, else "Story N". */
+export function storyLabel(d: { key?: string | null }, index: number): string {
+  return d.key != null && d.key !== '' ? d.key : `Story ${index + 1}`;
+}
+
 /**
- * The optional user story or task. COLLAPSED by default; when it holds something, the header says
- * so (" · 3 acceptance criteria", " · added", or " · needs a fix") so a closed panel never hides
- * what the next run will send. NO `maxLength` on any input — it would silently cut a paste; the
- * counter and the check's message say what is over instead.
+ * The optional user stories — up to CLAUDE_REVIEW_MAX_TICKETS, each assessed on its own. COLLAPSED
+ * by default; the header says when it holds something (" · 2 added" / " · needs a fix"), so a
+ * closed panel never hides what Run sends. A story read from Jira is READ-ONLY (markdown); a typed
+ * one is three editable fields. NO `maxLength` on any input — it would silently cut a paste.
  */
 export function ClaudeReviewTicketPanel({
   value,
@@ -169,179 +262,218 @@ export function ClaudeReviewTicketPanel({
   tickets,
   prWorkspaceName,
 }: {
-  value: TicketDraft;
-  onChange: (next: TicketDraft) => void;
-  check: ClaudeReviewTicketCheck;
+  value: TicketDraft[];
+  onChange: (next: TicketDraft[]) => void;
+  check: ClaudeReviewTicketsCheck;
   prId: number;
   tickets: readonly TicketRef[] | null | undefined;
   // The workspace that OWNS this PR's repo — the one whose Jira token is used. null = unknown.
   prWorkspaceName?: string | null;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
-  const baseId = useId();
-  const hint = ticketPanelHint(value, check);
-  const errorFor = (f: ClaudeReviewTicketField): string | null =>
-    !check.ok && check.field === f ? check.message : null;
-  const set = (field: ClaudeReviewTicketField, v: string): void =>
-    onChange({ ...value, [field]: v });
-  const ids = {
-    body: `${baseId}-body`,
-    title: `${baseId}-title`,
-    description: `${baseId}-description`,
-    acceptanceCriteria: `${baseId}-criteria`,
+  const bodyId = useId();
+  const [fetched, setFetched] = useState<{ prId: number; byKey: Record<string, FetchedJira> }>({
+    prId,
+    byKey: {},
+  });
+  const byKey = fetched.prId === prId ? fetched.byKey : {};
+  // The list as it is when an answer lands, not when a button was pressed.
+  const latest = useRef(value);
+  latest.current = value;
+  const hint = ticketsPanelHint(value, check);
+  const full = value.length >= CLAUDE_REVIEW_MAX_TICKETS;
+
+  const replaceAt = (i: number, d: TicketDraft): void =>
+    onChange(latest.current.map((x, j) => (j === i ? d : x)));
+  const removeAt = (i: number): void => onChange(latest.current.filter((_, j) => j !== i));
+  const onFilled = (ref: TicketRef, details: JiraTicketDetails, site: string | null, chosen: string, draft: TicketDraft): void => {
+    const story: TicketDraft = { ...draft, ...jiraProvenance(ref) };
+    const cur = latest.current;
+    const at = cur.findIndex((d) => d.key === ref.key);
+    if (at >= 0) onChange(cur.map((d, j) => (j === at ? story : d)));
+    else onChange([...cur, story]);
+    setFetched({ prId, byKey: { ...byKey, [ref.key]: { details, site, chosen } } });
   };
-  const describedBy = (f: ClaudeReviewTicketField): string | undefined =>
-    errorFor(f) != null ? `${ids[f]}-error` : undefined;
+  const chooseAc = (i: number, key: string, id: string): void => {
+    const f = byKey[key];
+    const d = latest.current[i];
+    if (f == null || d == null) return;
+    // An EXPLICIT choice is remembered for this issue type on this Jira site (blank forgets).
+    rememberAcField(browserAcMemory(), f.site, f.details.issueType?.id, id);
+    replaceAt(i, applyAcCandidate(d, f.details.candidates, id));
+    setFetched({ prId, byKey: { ...byKey, [key]: { ...f, chosen: id } } });
+  };
+  const errorAt =
+    (i: number) =>
+    (f: ClaudeReviewTicketField): string | null =>
+      !check.ok && check.index === i && check.field === f ? check.message : null;
+  const addedKeys = new Set(value.map((d) => d.key).filter((k): k is string => k != null));
 
   return (
     <div className="mt-2 rounded border border-gray-200 dark:border-gray-800">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-controls={ids.body}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-gray-700 dark:text-gray-200"
-      >
-        <ChevronIcon dir={open ? 'down' : 'right'} className="shrink-0" />
-        <span>User story or task (optional)</span>
-        {hint !== '' && (
-          <span className={`font-normal ${check.ok ? MUTED : ERROR_TEXT}`}>{hint}</span>
-        )}
-      </button>
-      {open && (
-        <div
-          id={ids.body}
-          className="space-y-2 border-t border-gray-200 px-2 py-2 dark:border-gray-800"
+      <div className="flex items-center gap-1 pr-2">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={bodyId}
+          className="flex flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-gray-700 dark:text-gray-200"
         >
-          <p className={`text-xs ${MUTED}`}>
-            Paste the user story or task. Claude checks the change against it and lists what is
-            missing or was not asked for.
-          </p>
-          <JiraFillButtons
-            prId={prId}
-            tickets={tickets}
-            value={value}
-            onChange={onChange}
-            prWorkspaceName={prWorkspaceName ?? null}
-          />
-          <TicketField
-            id={ids.title}
-            label="Title"
-            field="title"
-            value={value.title}
-            error={errorFor('title')}
-          >
-            <input
-              id={ids.title}
-              type="text"
-              value={value.title}
-              onChange={(e) => set('title', e.target.value)}
-              aria-invalid={errorFor('title') != null}
-              aria-describedby={describedBy('title')}
-              className={INPUT}
-            />
-          </TicketField>
-          <TicketField
-            id={ids.description}
-            label="Description"
-            field="description"
-            value={value.description}
-            error={errorFor('description')}
-          >
-            <textarea
-              id={ids.description}
-              rows={4}
-              value={value.description}
-              onChange={(e) => set('description', e.target.value)}
-              aria-invalid={errorFor('description') != null}
-              aria-describedby={describedBy('description')}
-              className={INPUT}
-            />
-          </TicketField>
-          <TicketField
-            id={ids.acceptanceCriteria}
-            label="Acceptance criteria"
-            field="acceptanceCriteria"
-            value={value.acceptanceCriteria}
-            error={errorFor('acceptanceCriteria')}
-            helper="Any format. Claude works out the individual criteria."
-          >
-            <textarea
-              id={ids.acceptanceCriteria}
-              rows={5}
-              value={value.acceptanceCriteria}
-              onChange={(e) => set('acceptanceCriteria', e.target.value)}
-              placeholder={
-                'Paste them as they are in the ticket, for example:\nGiven a signed-out user\nWhen they ask to reset their password\nThen a reset link is emailed and expires after one hour'
-              }
-              aria-invalid={errorFor('acceptanceCriteria') != null}
-              aria-describedby={describedBy('acceptanceCriteria')}
-              className={INPUT}
-            />
-          </TicketField>
-          {ticketDraftHasContent(value) && (
-            <button
-              type="button"
-              onClick={() => onChange(EMPTY_TICKET_DRAFT)}
-              className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
-            >
-              Clear
-            </button>
+          <ChevronIcon dir={open ? 'down' : 'right'} className="shrink-0" />
+          <span>User stories (optional)</span>
+          {hint !== '' && (
+            <span className={`font-normal ${check.ok ? MUTED : ERROR_TEXT}`}>{hint}</span>
           )}
+        </button>
+        <InfoButton title="User stories">
+          <p>
+            Claude checks the change against each story and lists what is missing or was not asked
+            for. Each story gets its own result, which you can post to the pull request as a comment.
+          </p>
+          <p className="mt-2">
+            Stories read from Jira are shown as they are in the ticket. Up to{' '}
+            {CLAUDE_REVIEW_MAX_TICKETS} per review.
+          </p>
+        </InfoButton>
+      </div>
+      {open && (
+        <div id={bodyId} className="space-y-2 border-t border-gray-200 px-2 py-2 dark:border-gray-800">
+          {value.map((d, i) => {
+            if (isJiraDraft(d)) {
+              const f = d.key != null ? byKey[d.key] : undefined;
+              return (
+                <JiraStoryView
+                  key={`jira-${d.key ?? i}`}
+                  draft={d}
+                  onRemove={() => removeAt(i)}
+                  acPicker={
+                    f != null && d.key != null ? (
+                      <AcFieldPicker fetched={f} onChoose={(id) => chooseAc(i, d.key as string, id)} />
+                    ) : undefined
+                  }
+                />
+              );
+            }
+            return (
+              <ManualStoryFields
+                key={`manual-${i}`}
+                label={storyLabel(d, i)}
+                value={d}
+                onChange={(next) => replaceAt(i, next)}
+                onRemove={() => removeAt(i)}
+                errorFor={errorAt(i)}
+              />
+            );
+          })}
+          {!check.ok && check.index == null && (
+            <p className={`text-xs ${ERROR_TEXT}`}>{check.message}</p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <JiraFillButtons
+              prId={prId}
+              tickets={tickets}
+              addedKeys={addedKeys}
+              full={full}
+              onFilled={onFilled}
+              prWorkspaceName={prWorkspaceName ?? null}
+            />
+            {!full && (
+              <button
+                type="button"
+                onClick={() => onChange([...latest.current, { ...EMPTY_TICKET_DRAFT }])}
+                className={BTN}
+              >
+                Add a story
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
+/** "Acceptance criteria from" — every custom text field on the fetched ticket. */
+function AcFieldPicker({
+  fetched,
+  onChoose,
+}: {
+  fetched: FetchedJira;
+  onChoose: (id: string) => void;
+}): JSX.Element | null {
+  const selectId = useId();
+  const { details, chosen } = fetched;
+  const note = jiraFillNote(details, chosen);
+  if (details.candidates.length === 0) {
+    return note != null ? <p className={`mt-1 text-xs ${MUTED}`}>{note}</p> : null;
+  }
+  return (
+    <div className="mt-1">
+      <label htmlFor={selectId} className="text-xs font-medium text-gray-700 dark:text-gray-200">
+        Acceptance criteria from
+        {details.issueType != null && (
+          <span className={`font-normal ${MUTED}`}> ({details.issueType.name})</span>
+        )}
+      </label>
+      <select id={selectId} value={chosen} onChange={(e) => onChoose(e.target.value)} className={INPUT}>
+        <option value="">None of these</option>
+        {details.candidates.map((c) => (
+          <option key={c.id} value={c.id}>
+            {acCandidateLabel(c)}
+          </option>
+        ))}
+      </select>
+      {details.omittedCandidates > 0 && (
+        <p className={`mt-0.5 text-xs ${MUTED}`}>
+          {details.omittedCandidates} more {details.omittedCandidates === 1 ? 'field' : 'fields'} with
+          text not listed.
+        </p>
+      )}
+      {note != null && <p className={`mt-0.5 text-xs ${MUTED}`}>{note}</p>}
+    </div>
+  );
+}
+
 /**
- * "Fill from KEY" — one button per Jira ticket DETECTED on this PR whose workspace has a saved
- * token (`TicketRef.canFetchDetails`). Nothing renders otherwise: no ticket detected, not Jira, or
- * no token. CLICK-GATED — nothing is fetched on mount. A fill REPLACES the title and description,
- * then offers "Acceptance criteria from": every custom text field on THAT ticket (the right one
- * varies by site and issue type), preselected from the viewer's remembered choice for the issue
- * type, else the best name match, else blank. Choosing refills the box client-side, no refetch.
- * Everything stays editable.
+ * "Add KEY" — one button per Jira ticket DETECTED on this PR whose workspace has a saved token
+ * (`TicketRef.canFetchDetails`) and that is not already in the list. CLICK-GATED — nothing is
+ * fetched on mount. A fill adds the ticket as a READ-ONLY story (or refreshes it), with the
+ * criteria field preselected from the viewer's remembered choice for the issue type, else the
+ * best name match, else blank.
  */
 function JiraFillButtons({
   prId,
   tickets,
-  value,
-  onChange,
+  addedKeys,
+  full,
+  onFilled,
   prWorkspaceName,
 }: {
   prId: number;
   tickets: readonly TicketRef[] | null | undefined;
-  value: TicketDraft;
-  onChange: (next: TicketDraft) => void;
+  addedKeys: ReadonlySet<string>;
+  full: boolean;
+  onFilled: (
+    ref: TicketRef,
+    details: JiraTicketDetails,
+    site: string | null,
+    chosen: string,
+    draft: TicketDraft,
+  ) => void;
   prWorkspaceName: string | null;
 }): JSX.Element | null {
   const fillable = fillableJiraTickets(tickets);
   const unfillable = unfillableJiraTickets(tickets);
-  const selectId = useId();
-  // The draft as it is when the answer lands (or the dropdown changes), not when a button was
-  // pressed — the reader may type in between.
-  const latest = useRef(value);
-  latest.current = value;
-  // The last fill, kept for its candidates so the dropdown refills the box with NO refetch.
-  const [filled, setFilled] = useState<{
-    prId: number;
-    details: JiraTicketDetails;
-    site: string | null;
-  } | null>(null);
-  const [chosen, setChosen] = useState('');
   const fill = useMutation<JiraTicketDetails, Error, string>({
     mutationFn: (key) => api.jiraTicket(prId, key),
     onSuccess: (details, key) => {
       const ref = fillable.find((t) => t.key === key);
-      const site = ref ? jiraSiteOf(ref.url) : null;
+      if (ref == null) return;
+      const site = jiraSiteOf(ref.url);
       const remembered = readRememberedAcField(browserAcMemory(), site, details.issueType?.id);
-      // Title + description replaced; the criteria only when a field is preselected. The same
-      // fill the Open PRs table's click-to-review runs (`fillDraftFromJira`).
-      const { draft, chosen: pick } = fillDraftFromJira(latest.current, details, remembered);
-      onChange(draft);
-      setFilled({ prId, details, site });
-      setChosen(pick);
+      // The same fill the Open PRs table's click-to-review runs (`fillDraftFromJira`).
+      const { draft, chosen } = fillDraftFromJira(EMPTY_TICKET_DRAFT, details, remembered);
+      onFilled(ref, details, site, chosen, draft);
     },
   });
   if (fillable.length === 0) {
@@ -350,77 +482,32 @@ function JiraFillButtons({
     // be the workspace being viewed.)
     if (unfillable.length === 0) return null;
     return (
-      <p className={`text-xs ${MUTED}`}>
-        To fill this from {unfillable.map((t) => t.key).join(', ')}, add a Jira API token in Settings for
-        the {prWorkspaceName != null ? `${prWorkspaceName} workspace` : 'workspace this repository is in'}.
+      <p className={`w-full text-xs ${MUTED}`}>
+        To add {unfillable.map((t) => t.key).join(', ')}, add a Jira API token in Settings for the{' '}
+        {prWorkspaceName != null ? `${prWorkspaceName} workspace` : 'workspace this repository is in'}.
       </p>
     );
   }
-  const shown = filled != null && filled.prId === prId ? filled : null;
-
-  const choose = (id: string): void => {
-    if (shown == null) return;
-    setChosen(id);
-    // An EXPLICIT choice is remembered for this issue type on this Jira site (blank forgets).
-    rememberAcField(browserAcMemory(), shown.site, shown.details.issueType?.id, id);
-    onChange(applyAcCandidate(latest.current, shown.details.candidates, id));
-  };
-  const note = shown != null ? jiraFillNote(shown.details, chosen) : null;
-
   return (
-    <div className="space-y-1.5">
-      <div className="flex flex-wrap items-center gap-2">
-        {fillable.map((t) => {
-          const busy = fill.isPending && fill.variables === t.key;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => fill.mutate(t.key)}
-              disabled={fill.isPending}
-              className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
-            >
-              {busy ? `Filling from ${t.key}…` : `Fill from ${t.key}`}
-            </button>
-          );
-        })}
-        <span className={`text-xs ${MUTED}`}>Replaces the title and description below.</span>
-      </div>
-      {fill.isError && <p className={`text-xs ${ERROR_TEXT}`}>{fill.error.message}</p>}
-      {shown != null && !fill.isError && shown.details.candidates.length > 0 && (
-        <div>
-          <label htmlFor={selectId} className="text-xs font-medium text-gray-700 dark:text-gray-200">
-            Acceptance criteria from
-            {shown.details.issueType != null && (
-              <span className={`font-normal ${MUTED}`}>
-                {' '}
-                ({shown.details.key}, {shown.details.issueType.name})
-              </span>
-            )}
-          </label>
-          <select
-            id={selectId}
-            value={chosen}
-            onChange={(e) => choose(e.target.value)}
-            className={INPUT}
+    <>
+      {fillable.map((t) => {
+        const added = addedKeys.has(t.key);
+        if (full && !added) return null;
+        const busy = fill.isPending && fill.variables === t.key;
+        return (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => fill.mutate(t.key)}
+            disabled={fill.isPending}
+            className={BTN}
           >
-            <option value="">None of these</option>
-            {shown.details.candidates.map((c) => (
-              <option key={c.id} value={c.id}>
-                {acCandidateLabel(c)}
-              </option>
-            ))}
-          </select>
-          {shown.details.omittedCandidates > 0 && (
-            <p className={`mt-0.5 text-xs ${MUTED}`}>
-              {shown.details.omittedCandidates} more{' '}
-              {shown.details.omittedCandidates === 1 ? 'field' : 'fields'} with text not listed.
-            </p>
-          )}
-        </div>
-      )}
-      {note != null && !fill.isError && <p className={`text-xs ${MUTED}`}>{note}</p>}
-    </div>
+            {busy ? `Reading ${t.key}…` : added ? `Refresh ${t.key}` : `Add ${t.key}`}
+          </button>
+        );
+      })}
+      {fill.isError && <p className={`w-full text-xs ${ERROR_TEXT}`}>{fill.error.message}</p>}
+    </>
   );
 }
 
@@ -522,37 +609,46 @@ function GapList({
 }
 
 export function ClaudeReviewTicketResults({
-  ticket,
-  assessment,
+  entry,
+  label,
+  actions,
   changedPaths,
   onOpenInChanges,
 }: {
-  ticket: ClaudeReviewTicket;
-  assessment: ClaudeTicketAssessment | null;
+  entry: ClaudeReviewTicketEntry;
+  // "PROJ-12" or "Story 2".
+  label: string;
+  // Rendered at the row's end: the tab's "Post as comment" / posted link. This file carries no
+  // href (its source guard), so anything linked arrives here.
+  actions?: ReactNode;
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
+  const { ticket, assessment } = entry;
   const sentence = ticketCriteriaSentence(assessment);
   return (
     <section
-      aria-label="User story or task"
+      aria-label={`User story ${label}`}
       className="rounded border border-gray-200 px-3 py-2 dark:border-gray-800"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-semibold">User story or task</span>
+        <span
+          className={`text-xs font-semibold text-gray-700 dark:text-gray-200 ${ticket.key != null ? 'font-mono' : ''}`}
+        >
+          {label}
+        </span>
+        {ticket.title != null && ticket.title !== '' && (
+          <span className="min-w-0 break-words text-sm font-medium">{ticket.title}</span>
+        )}
         {assessment != null && (
           <span className={`${CHIP} ${TICKET_ALIGNMENT_CLASS[assessment.alignment]}`}>
             {TICKET_ALIGNMENT_LABEL[assessment.alignment]}
           </span>
         )}
-        {sentence != null && (
-          <span className="text-xs text-gray-700 dark:text-gray-300">{sentence}</span>
-        )}
+        {actions != null && <span className="ml-auto">{actions}</span>}
       </div>
-      {ticket.title != null && ticket.title !== '' && (
-        <div className="mt-1 whitespace-pre-wrap break-words text-sm font-medium">
-          {ticket.title}
-        </div>
+      {sentence != null && (
+        <div className="mt-0.5 text-xs text-gray-700 dark:text-gray-300">{sentence}</div>
       )}
       {assessment == null ? (
         <p className={`mt-1 text-xs ${MUTED}`}>Not checked in this run.</p>

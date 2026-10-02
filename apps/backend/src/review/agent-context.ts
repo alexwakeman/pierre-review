@@ -5,19 +5,15 @@ import { db, schema, runTransaction, isPg } from '../db/client.js';
 import * as hostQueries from '../db/queries.js';
 import { recordAiUsage, type AiUsageRecord } from '../db/usage.js';
 import { aiCreditStatus, type AiCreditStatus } from '../db/credits.js';
-import { getAccessToken, getAccountById } from '../auth/account.js';
-import { fetchPrHeadInfo, fetchPrUnifiedDiff } from '../github/mutations.js';
+import { getAccessToken, getAccountById, getAccountUserId } from '../auth/account.js';
+import { addIssueComment, fetchPrHeadInfo, fetchPrUnifiedDiff } from '../github/mutations.js';
+import { getPrSyncTarget } from '../sync/resync-after-write.js';
+import { notePrChangedForPr } from '../sync/pr-settle.js';
 import { fetchCompareDiff } from '../github/compare.js';
 import { fetchReviewCommentHunks } from '../sync/hydrate-detail.js';
 import { applyAndPush } from '../coding/git-ops.js';
 import { registerScheduledJob } from '../sync/scheduled-jobs.js';
 import { detectClaudeAuth } from './auth.js';
-import { reviewEvents, type ReviewEventBus } from './events.js';
-import {
-  getEffectiveReviewBudget,
-  setUserReviewBudget,
-  MAX_REVIEW_BUDGET_USD,
-} from './local-settings.js';
 import type {
   ApplyAndPushArgs,
   ApplyAndPushResult,
@@ -28,14 +24,15 @@ import type {
 } from '../pro/contract.js';
 
 // THE AGENTIC FEATURES' ONE CONTEXT OBJECT — Claude Review (+ chat, follow-up, ticket check, auto
-// review), review memory and AI Fix's fixer, all CORE since they left the private plugin.
+// review) and AI Fix's fixer, all CORE since they left the private plugin.
 //
 // They were written against the plugin's `ProContext`, and they keep a context ARGUMENT rather
 // than importing each primitive at every call site for two reasons: their tests build a tiny fake
 // context (no DB, no GitHub, no SDK) and pass it in, and the queue managers carry it on each
 // queued item. What changed is who builds it — core, from DIRECT imports, once, in
 // `buildAgentContext` below — and that the seams it used to cross (`ctx.review`, `ctx.coding`'s
-// fixer half, `ctx.reviewEvents`, the learnings provider) are gone from `ProContext`.
+// fixer half, the review event bus, the learnings provider) are gone from `ProContext`. (The event
+// bus and review memory itself were deleted outright later.)
 //
 // ⚠ THE AGENT SDK IS NEVER IMPORTED HERE. Every SDK-bearing module (review/agent.ts,
 // review/chat-agent.ts, coding/agent.ts) is reached through a lazy `await import()` inside the
@@ -68,13 +65,29 @@ export interface AgentContext {
     applyAndPush(args: ApplyAndPushArgs): Promise<ApplyAndPushResult>;
   };
   review: ReviewSeam;
-  reviewEvents: ReviewEventBus;
+  // GitHub WRITES that are not part of the review seam. `postPrComment` posts ONE PR-level (issue)
+  // comment, then STAMPS it locally and raises the SPA change signal (the `POST
+  // /api/prs/:id/comment` path). null ⇒ the PR is not this account's (nothing was posted). Once
+  // GitHub has answered it never throws: `visible: false` = posted, but the local stamp failed.
+  prWrites: {
+    postPrComment(
+      accountId: number,
+      prId: number,
+      body: string,
+    ): Promise<{ githubCommentId: string; url: string | null; createdAt: string; visible: boolean } | null>;
+  };
   queries: {
     getAutoReviewCandidates?(
       accountId: number,
       workspaceId: number,
       opts: { openedSinceMs: number; dayStartMs: number; limit: number },
-    ): Promise<{ prIds: number[]; autoToday: number } | null>;
+    ): Promise<{
+      prIds: number[];
+      autoToday: number;
+      // Already-reviewed PRs whose head moved past every run (auto RE-review). Absent on an older
+      // host ⇒ none.
+      reReview?: Array<{ prId: number; headSha: string }>;
+    } | null>;
   };
   registerScheduledJob(cron: string, handler: () => Promise<void> | void, label?: string): void;
 }
@@ -142,16 +155,35 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
       postReview: async (a) => (await import('./post-seam.js')).postReview(a),
       postFinding: async (a) => (await import('./post-seam.js')).postFinding(a),
       chat: async (a) => (await import('./chat-agent.js')).runReviewChat(a),
-      getLocalKeyStatus: () => ({
-        reviewBudgetUsd: getEffectiveReviewBudget(),
-        reviewBudgetMax: MAX_REVIEW_BUDGET_USD,
-      }),
-      setReviewBudget: (usd) => {
-        setUserReviewBudget(usd);
-        return { reviewBudgetUsd: getEffectiveReviewBudget() };
+    },
+    prWrites: {
+      postPrComment: async (accountId, prId, body) => {
+        const target = await getPrSyncTarget(prId, accountId);
+        if (!target) return null;
+        const gh = await addIssueComment(
+          await getAccessToken(accountId),
+          target.owner,
+          target.name,
+          target.number,
+          body,
+        );
+        // ⚠ GitHub has 201'd: from here nothing may throw (a retry would post twice).
+        let visible = true;
+        try {
+          const authorId = await getAccountUserId(accountId);
+          await hostQueries.upsertLocalPrComment(prId, authorId, gh);
+        } catch {
+          visible = false;
+        }
+        await notePrChangedForPr(accountId, prId).catch(() => {});
+        return {
+          githubCommentId: String(gh.databaseId),
+          url: gh.url ?? null,
+          createdAt: new Date(gh.createdAt).toISOString(),
+          visible,
+        };
       },
     },
-    reviewEvents,
     queries: {
       getAutoReviewCandidates: (accountId, workspaceId, opts) =>
         hostQueries.getAutoReviewCandidates(accountId, workspaceId, opts),

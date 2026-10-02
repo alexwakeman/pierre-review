@@ -1,5 +1,5 @@
-// THE AGENTIC FEATURES' REGISTRATION GATE (review/agentic.ts). Claude Review, review memory and AI
-// Fix are core, free and LOCAL ONLY. What is pinned:
+// THE AGENTIC FEATURES' REGISTRATION GATE (review/agentic.ts). Claude Review and AI Fix are core,
+// free and LOCAL ONLY. What is pinned:
 //
 //   1. ⚠ CLOUD REGISTERS NOTHING — an explicit `isCloud` check, so the guarantee never rests on an
 //      env var being unset (it used to: the plugin's PRO_ADVANCED_AI_ENABLED).
@@ -15,7 +15,6 @@ const ROUTES: Array<{ method: 'GET' | 'POST' | 'PUT'; url: string }> = [
   { method: 'POST', url: '/api/prs/:id/claude-review' },
   { method: 'GET', url: '/api/claude-reviews/:reviewId/chat' },
   { method: 'PUT', url: '/api/workspaces/:id/auto-review' },
-  { method: 'GET', url: '/api/pro/prs/:id/review-learnings' },
   { method: 'POST', url: '/api/pro/prs/:id/ai-fix' },
   { method: 'POST', url: '/api/pro/ai-fixes/:fixId/push' },
 ];

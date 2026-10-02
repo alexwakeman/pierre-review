@@ -164,7 +164,7 @@ Rules:
 ${WORKTREE_RULES}
 - Keep the changes for different comments independent where you can — one comment's fix should not quietly rewrite another's subject.
 - When you have worked through the whole list, call the submit_fix tool EXACTLY ONCE with a short human-readable summary of everything you changed, a concise conventional-commit-style commit message, and \`commentVerdicts\` containing ONE ENTRY PER REF YOU WERE GIVEN, using the exact ref labels from the list (C1, C2, …).
-- In each verdict: \`verdict\` is what you did, \`valid\` is whether the comment was technically correct (independent of whether you changed anything), \`reasoning\` is grounded in the code you actually read, \`learning\` is a durable takeaway about this reviewer's comments if there is one, and \`pushback\` is REQUIRED for every comment you are disagreeing with — a specific, argued, collegial rebuttal a human will send as a reply, naming the code that refutes the comment. Never write a pushback that just restates your verdict.`;
+- In each verdict: \`verdict\` is what you did, \`valid\` is whether the comment was technically correct (independent of whether you changed anything), \`reasoning\` is grounded in the code you actually read, and \`pushback\` is REQUIRED for every comment you are disagreeing with — a specific, argued, collegial rebuttal a human will send as a reply, naming the code that refutes the comment. Never write a pushback that just restates your verdict.`;
 }
 
 export interface FixSeed {

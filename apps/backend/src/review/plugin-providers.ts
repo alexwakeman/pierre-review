@@ -5,7 +5,7 @@ import type { ClaudeReviewTicket } from '@pierre-review/shared';
 //
 //   resolveReviewTicket — the Jira fill. Free Claude Review checks a PR against a story the reader
 //     PASTES; with the plugin's Jira tracker configured, an AUTO review (no browser to paste into)
-//     asks this for the PR's first detected ticket. Absent ⇒ the auto run goes out with no story,
+//     asks this for the PR's detected tickets. Absent ⇒ the auto run goes out with no story,
 //     exactly as on a workspace with no tracker.
 //   readCiAnalysisSeed — AI Fix's `ci_analysis` seed. The CI-failure analysis is a Pro Haiku card
 //     whose rows live in the plugin's `ai_pr_analyses`; core cannot name that table. Absent, or no
@@ -18,7 +18,14 @@ export interface AgenticProviders {
   resolveReviewTicket?(
     accountId: number,
     prId: number,
-  ): Promise<{ ticket: ClaudeReviewTicket | null; key: string | null }>;
+  ): Promise<{
+    // The first detected ticket (an older plugin answers only this).
+    ticket: ClaudeReviewTicket | null;
+    key: string | null;
+    // EVERY detected ticket that could be read, in detection order (core keeps at most
+    // CLAUDE_REVIEW_MAX_TICKETS). Absent ⇒ read `ticket` as a one-element list.
+    tickets?: ClaudeReviewTicket[];
+  }>;
   // The stored diagnosis's text ALREADY STRIPPED of its confidence footer, the head it diagnosed,
   // and when it was written. null = none stored.
   readCiAnalysisSeed?(

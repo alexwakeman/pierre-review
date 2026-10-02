@@ -7,6 +7,7 @@ import type {
   ReviewBotKind,
   ReviewerSuggestion,
   ReviewProvenance,
+  SuggestedReviewersResponse,
   User,
 } from '@pierre-review/shared';
 import {
@@ -131,24 +132,54 @@ function AutomatedReviewerBadge({
   );
 }
 
+// The last non-empty suggestion answer per PR, kept for the session so the row survives the
+// server emptying it after the first request (and a tab switch remounting the pane). Bounded.
+const seenSuggestions = new Map<number, SuggestedReviewersResponse>();
+function rememberSuggestions(prId: number, data: SuggestedReviewersResponse): void {
+  seenSuggestions.delete(prId);
+  seenSuggestions.set(prId, data);
+  if (seenSuggestions.size > 50) {
+    const oldest = seenSuggestions.keys().next().value;
+    if (oldest !== undefined) seenSuggestions.delete(oldest);
+  }
+}
+
 // Suggested reviewers (CORE) for a PR that has none assigned — each with its rationale and,
 // for someone with push access, a one-click "Assign" that requests them on GitHub. Shown
 // only when the server returned suggestions (it gates on open + non-draft + no reviewers/
 // reviews). Combines CODEOWNERS ownership (users + @org/team) with history-based picks.
 function SuggestedReviewersRow({
   pr,
-  suggestions,
+  suggestions: all,
   usersById,
 }: {
   pr: PrDetailT;
   suggestions: ReviewerSuggestion[];
   usersById: Map<number, User>;
-}): JSX.Element {
+}): JSX.Element | null {
   const request = useRequestReviewers(pr.id);
   const [requested, setRequested] = useState<Set<string>>(new Set());
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const keyOf = (s: ReviewerSuggestion): string =>
     s.kind === 'team' ? `team:${s.teamSlug}` : `user:${s.login}`;
+  // Anyone already on the "Requested" row above is not a suggestion any more. A person asked from
+  // THIS row keeps a "Requested" tick until the refetched detail lists them up there.
+  const requestedUserIds = new Set(
+    pr.requestedReviewers.flatMap((r) => (r.userId != null ? [r.userId] : [])),
+  );
+  const requestedTeams = new Set(
+    pr.requestedReviewers.flatMap((r) => (r.teamName != null ? [r.teamName.toLowerCase()] : [])),
+  );
+  // A requested team is stored as `owner/slug` (the request route's stamp) or as GitHub's name.
+  const owner = pr.repoFullName.split('/')[0] ?? '';
+  const alreadyRequested = (s: ReviewerSuggestion): boolean =>
+    s.kind === 'team'
+      ? [s.teamSlug, s.teamName?.replace(/^@/, ''), s.teamSlug && `${owner}/${s.teamSlug}`].some(
+          (t) => t != null && t !== '' && requestedTeams.has(t.toLowerCase()),
+        )
+      : s.userId != null && requestedUserIds.has(s.userId);
+  const suggestions = all.filter((s) => !alreadyRequested(s));
+  if (suggestions.length === 0) return null;
 
   const assign = (s: ReviewerSuggestion): void => {
     const body: RequestReviewersBody =
@@ -415,10 +446,19 @@ export function ChecksTab({
   // …and the one the watcher GAVE UP ON, which had no surface at all until now. See
   // `usePrStoppedIntent`: a stopped intent used to just make the armed panel disappear.
   const stoppedIntent = usePrStoppedIntent(pr.id);
-  const suggestions = sugg?.suggestedReviewers ?? [];
+  // ⚠ STICKY ACROSS A REQUEST. The server empties the list the moment ANYONE is requested (its
+  // gate is "nobody asked yet"), so asking one person used to take every other suggestion with it.
+  // The last non-empty answer for this PR is kept while the PR is still open and ready, and the
+  // row drops whoever is now requested — so the rest can still be added.
+  const liveSugg = sugg != null && sugg.suggestedReviewers.length > 0 ? sugg : undefined;
+  if (liveSugg) rememberSuggestions(pr.id, liveSugg);
+  const shownSugg =
+    liveSugg ??
+    (pr.state === 'open' && !pr.isDraft ? seenSuggestions.get(pr.id) : undefined);
+  const suggestions = shownSugg?.suggestedReviewers ?? [];
   const suggestUsersById =
-    (sugg?.users?.length ?? 0) > 0
-      ? new Map([...usersById, ...sugg!.users.map((u): [number, User] => [u.id, u])])
+    (shownSugg?.users?.length ?? 0) > 0
+      ? new Map([...usersById, ...shownSugg!.users.map((u): [number, User] => [u.id, u])])
       : usersById;
 
   const ci = CI_META[pr.ciStatus];

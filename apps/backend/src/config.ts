@@ -549,17 +549,13 @@ export const config = {
   // The cap must therefore sit ABOVE the cost of a normal completed review, not at
   // it; `reviewEffort` below is the real cost lever (a large diff at default-high
   // effort is what blew the old $1 cap). Lower REVIEW_BUDGET_USD only if you'd
-  // rather a borderline review fail than complete. Users can override this per
-  // review in the Claude Review tab (local settings), up to a $5 hard ceiling.
-  reviewBudgetUsd: floatFromEnv('REVIEW_BUDGET_USD', 3),
+  // rather a borderline review fail than complete. It is the WHOLE limit for one run,
+  // deep-review specialists included (up to CLAUDE_REVIEW_MAX_SPECIALISTS, each on the review's
+  // model) — there is no per-user override and no route that sets it.
+  reviewBudgetUsd: floatFromEnv('REVIEW_BUDGET_USD', 6.75),
   // Turn cap for a diff-only run. These are TOOL-LESS (only submit_review), so they
   // should finish in ~2 turns; a tight cap is a cheap runaway guard.
   reviewDiffOnlyMaxTurns: intFromEnv('REVIEW_DIFF_ONLY_MAX_TURNS', 6),
-  // Haiku reaches a conclusion in MORE steps than Sonnet/Opus (smaller model, more
-  // tool round-trips), so it routinely tripped the turn cap mid-review and failed.
-  // Give it proportionally more turns in both modes. Its low per-token price means
-  // the extra turns are cheap, and maxBudgetUsd is still the real spend guard.
-  reviewHaikuTurnMultiplier: floatFromEnv('REVIEW_HAIKU_TURN_MULTIPLIER', 2),
   // ---- Claude Review chat (one answered question about a finished review) ----
   // Each answer is its own agent run over the whole review + diff, so it gets its OWN small spend
   // cap rather than the review's. Turn caps are low on purpose: a worktree answer may look up a

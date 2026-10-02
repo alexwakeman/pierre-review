@@ -135,7 +135,7 @@ export function registerAuthGate(app: FastifyInstance): void {
 //
 // `/api/pro/*` is the convention, but it is NOT the whole surface: Claude Review has always kept
 // its pre-plugin URLs — `/api/prs/:id/claude-review*`, `/api/claude-reviews/*`,
-// `/api/claude-findings/*`, `/api/claude-review/budget` — and AI Fix's fixer kept its
+// `/api/claude-findings/*`, `/api/claude-review/*` — and AI Fix's fixer kept its
 // `/api/pro/prs/:id/ai-fix*` / `/api/pro/ai-fixes/*` paths when both moved to core.
 //
 // ⚠ THIS IS NOW THE SECOND GUARD, NOT THE FIRST. Claude Review, review memory and AI Fix are core,

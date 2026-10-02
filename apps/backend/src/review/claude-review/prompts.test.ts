@@ -86,19 +86,20 @@ describe('buildUserPrompt — no ticket, no follow-up', () => {
       ...base,
       mode: 'worktree',
       omittedFiles: ['src/big.ts'],
-      priorReviewContext: 'Prefer early returns.',
     });
     const noBody = buildUserPrompt({ ...base, body: null, baseRef: null, changedFiles: [], excludedFiles: [] });
     expect(diffOnly).toBe(golden.diffOnly);
     expect(worktree).toBe(golden.worktree);
     expect(noBody).toBe(golden.noBody);
     // Explicit nulls are the same as absent.
-    expect(buildUserPrompt({ ...base, mode: 'diff_only', ticket: null, followUp: null })).toBe(golden.diffOnly);
+    expect(buildUserPrompt({ ...base, mode: 'diff_only', tickets: null, followUp: null })).toBe(golden.diffOnly);
     for (const p of [diffOnly, worktree, noBody]) expect(p).not.toContain('---BEGIN');
   });
 
   it('throws when a fenced block has no nonce', () => {
-    expect(() => buildUserPrompt({ ...base, ticket })).toThrow(/nonce/);
+    expect(() => buildUserPrompt({ ...base, tickets: [ticket] })).toThrow(/nonce/);
+    // An empty list is no block at all.
+    expect(buildUserPrompt({ ...base, mode: 'diff_only', tickets: [] })).toBe(golden.diffOnly);
     const plan = selectPriorFindings({ reviewId: 1, headSha: PRIOR_HEAD, findings: [priorFinding()] }, HEAD);
     expect(() => buildUserPrompt({ ...base, followUp: { plan, since: null } })).toThrow(/nonce/);
   });
@@ -239,48 +240,52 @@ describe('buildUserPrompt — previous review', () => {
     expect(p).toContain('They can include changes merged in from the base branch or from a rebase.');
   });
 
-  it('the final line lists followUp / ticket only when present', () => {
+  it('the final line lists followUp / tickets only when present', () => {
     const plan = selectPriorFindings({ reviewId: 1, headSha: PRIOR_HEAD, findings: [priorFinding()] }, HEAD);
-    const both = buildUserPrompt({ ...base, followUp: { plan, since: null }, ticket, nonce: NONCE });
-    const onlyTicket = buildUserPrompt({ ...base, ticket, nonce: NONCE });
+    const both = buildUserPrompt({ ...base, followUp: { plan, since: null }, tickets: [ticket], nonce: NONCE });
+    const onlyTicket = buildUserPrompt({ ...base, tickets: [ticket], nonce: NONCE });
     const none = buildUserPrompt({ ...base });
-    expect(both).toContain('{ summary, verdict, scopeUsed, findings, followUp, ticket }');
-    expect(onlyTicket).toContain('{ summary, verdict, scopeUsed, findings, ticket }');
+    expect(both).toContain('{ summary, verdict, scopeUsed, findings, followUp, tickets }');
+    expect(onlyTicket).toContain('{ summary, verdict, scopeUsed, findings, tickets }');
     expect(onlyTicket).not.toContain('followUp');
     expect(none).toContain('{ summary, verdict, scopeUsed, findings }');
   });
 });
 
-describe('buildUserPrompt — user story', () => {
-  it('fences title, description and the acceptance criteria as ONE unsplit block', () => {
-    const p = buildUserPrompt({ ...base, mode: 'diff_only', ticket, nonce: NONCE });
-    expect(between(p, `---BEGIN TICKET TITLE ${NONCE}---`, `---END TICKET TITLE ${NONCE}---`).trim()).toBe(
+describe('buildUserPrompt — user stories', () => {
+  it('fences each ticket under its ref; the acceptance criteria stay ONE unsplit block', () => {
+    const p = buildUserPrompt({ ...base, mode: 'diff_only', tickets: [ticket], nonce: NONCE });
+    expect(between(p, `---BEGIN T1 TITLE ${NONCE}---`, `---END T1 TITLE ${NONCE}---`).trim()).toBe(
       'Reset password',
     );
-    expect(between(p, `---BEGIN TICKET DESCRIPTION ${NONCE}---`, `---END TICKET DESCRIPTION ${NONCE}---`)).toContain(
+    expect(between(p, `---BEGIN T1 DESCRIPTION ${NONCE}---`, `---END T1 DESCRIPTION ${NONCE}---`)).toContain(
       'sign-in page',
     );
     expect(
-      between(p, `---BEGIN ACCEPTANCE CRITERIA ${NONCE}---`, `---END ACCEPTANCE CRITERIA ${NONCE}---`).trim(),
+      between(p, `---BEGIN T1 ACCEPTANCE CRITERIA ${NONCE}---`, `---END T1 ACCEPTANCE CRITERIA ${NONCE}---`).trim(),
     ).toBe('- link sent\n- link expires after one hour');
-    expect(p).not.toContain('ACCEPTANCE CRITERION AC1');
-    expect(p).toContain('## User story or task');
+    expect(p).toContain('## User stories');
+    expect(p).toContain('### Ticket T1');
     expect(p).toContain('answer unclear for anything it does not show');
-    // Claude enumerates the criteria itself, whatever the format.
     expect(p).toContain('may be in any format');
     expect(p).toContain('Work out the distinct criteria yourself');
-    // Before the diff.
-    expect(p.indexOf('## User story or task')).toBeLessThan(p.indexOf('## Diff'));
+    expect(p.indexOf('## User stories')).toBeLessThan(p.indexOf('## Diff'));
   });
 
-  it('a ticket without criteria tells Claude to leave ticket.criteria out', () => {
+  it('several tickets: one section each, T1…Tn, keys fenced too', () => {
     const p = buildUserPrompt({
       ...base,
-      ticket: { ...ticket, acceptanceCriteria: null },
+      tickets: [
+        { ...ticket, source: 'jira', key: 'ABC-1' },
+        { title: 'Audit log', description: null, acceptanceCriteria: null },
+      ],
       nonce: NONCE,
     });
-    expect(p).toContain('There are no acceptance criteria');
-    expect(p).not.toContain('ACCEPTANCE CRITERIA');
+    expect(p).toContain('2 user stories');
+    expect(between(p, `---BEGIN T1 KEY ${NONCE}---`, `---END T1 KEY ${NONCE}---`).trim()).toBe('ABC-1');
+    expect(between(p, `---BEGIN T2 TITLE ${NONCE}---`, `---END T2 TITLE ${NONCE}---`).trim()).toBe('Audit log');
+    expect(p).not.toContain('T2 ACCEPTANCE CRITERIA');
+    expect(p.indexOf('### Ticket T1')).toBeLessThan(p.indexOf('### Ticket T2'));
   });
 });
 
@@ -307,19 +312,19 @@ describe('the nonce', () => {
       filesTruncated: false,
       reason: null,
     };
-    const texts = untrustedTexts(plan, ticket, since);
+    const texts = untrustedTexts(plan, [ticket], since);
     expect(texts).toContain('finding-body');
     expect(texts).toContain('PATCH-TEXT');
     expect(texts).toContain('- link sent\n- link expires after one hour');
     expect(texts).toContain('Reset password');
   });
 
-  it('both system prompts mention the rotating markers and priorRef / followUp / ticket', () => {
+  it('both system prompts mention the rotating markers and priorRef / followUp / tickets', () => {
     for (const sp of [REVIEW_SYSTEM_PROMPT_DIFF_ONLY, REVIEW_SYSTEM_PROMPT_WORKTREE]) {
       expect(sp).toContain('The tag is random on every run');
       expect(sp).toContain("'priorRef'");
       expect(sp).toContain('`followUp`');
-      expect(sp).toContain('`ticket`');
+      expect(sp).toContain('`tickets`');
     }
   });
 });

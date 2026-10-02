@@ -37,6 +37,17 @@ export function applyJiraTicket(draft: TicketDraft, details: JiraTicketDetails):
   return { ...draft, title: details.title, description: details.description };
 }
 
+/**
+ * The provenance a Jira-read story carries: the panel renders it read-only, as markdown (the
+ * plugin converts Jira's markup), and the run stores where it came from.
+ */
+export function jiraProvenance(
+  ref: Pick<TicketRef, 'key' | 'url'>,
+  now: Date = new Date(),
+): Pick<TicketDraft, 'source' | 'key' | 'url' | 'fetchedAt'> {
+  return { source: 'jira', key: ref.key, url: ref.url, fetchedAt: now.toISOString() };
+}
+
 /** The draft after choosing a candidate. '' (the blank option) leaves the box as it is. */
 export function applyAcCandidate(
   draft: TicketDraft,

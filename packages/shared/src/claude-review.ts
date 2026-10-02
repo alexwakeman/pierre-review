@@ -37,6 +37,16 @@ export const CLAUDE_REVIEW_TICKET_LIMITS = {
 // The most criteria rows kept from one assessment (Claude's list is clipped past this).
 export const CLAUDE_REVIEW_TICKET_MAX_CRITERIA = 40;
 
+// The most user stories one review carries (each is assessed on its own).
+export const CLAUDE_REVIEW_MAX_TICKETS = 5;
+
+/** A tracker key as detection emits it (`PROJ-123`). */
+export const TICKET_KEY_RE = /^[A-Z][A-Z0-9_]{0,19}-\d{1,9}$/;
+const TICKET_URL_MAX = 2000;
+
+/** 'T1'… — the ref of the ticket at `index` (0-based), as Claude sees it. */
+export const ticketRef = (index: number): string => `T${index + 1}`;
+
 // ---- the ticket validator ----
 
 export type ClaudeReviewTicketField = 'title' | 'description' | 'acceptanceCriteria';
@@ -99,14 +109,68 @@ export function checkClaudeReviewTicket(
   if (out.title == null && out.description == null && out.acceptanceCriteria == null) {
     return { ok: true, ticket: null };
   }
-  return {
-    ok: true,
-    ticket: {
-      title: out.title,
-      description: out.description,
-      acceptanceCriteria: out.acceptanceCriteria,
-    },
+  const ticket: ClaudeReviewTicket = {
+    title: out.title,
+    description: out.description,
+    acceptanceCriteria: out.acceptanceCriteria,
   };
+  // Provenance: kept only for a Jira-read ticket, and only when well-formed (dropped otherwise —
+  // it labels the text, it is never a reason to refuse it).
+  if (raw?.source === 'jira') {
+    ticket.source = 'jira';
+    const key = typeof raw.key === 'string' ? raw.key.trim() : '';
+    ticket.key = TICKET_KEY_RE.test(key) ? key : null;
+    const url = typeof raw.url === 'string' ? raw.url.trim() : '';
+    ticket.url = url.length <= TICKET_URL_MAX && /^https?:\/\/[^\s]+$/i.test(url) ? url : null;
+    const at = typeof raw.fetchedAt === 'string' ? Date.parse(raw.fetchedAt) : Number.NaN;
+    ticket.fetchedAt = Number.isFinite(at) ? new Date(at).toISOString() : null;
+  } else if (raw?.source === 'manual') {
+    ticket.source = 'manual';
+  }
+  return { ok: true, ticket };
+}
+
+export type ClaudeReviewTicketsCheck =
+  | { ok: true; tickets: ClaudeReviewTicket[] }
+  | { ok: false; index: number | null; field: ClaudeReviewTicketField | 'tickets'; message: string };
+
+/**
+ * Validate a review's user stories: each through `checkClaudeReviewTicket`, all-blank entries
+ * dropped, at most CLAUDE_REVIEW_MAX_TICKETS left. `index` names the failing entry (null for the
+ * count). It NEVER truncates.
+ */
+export function checkClaudeReviewTickets(
+  raw: ReadonlyArray<ClaudeReviewTicketInput | null | undefined> | null | undefined,
+): ClaudeReviewTicketsCheck {
+  const tickets: ClaudeReviewTicket[] = [];
+  const list = raw ?? [];
+  for (let i = 0; i < list.length; i += 1) {
+    const one = checkClaudeReviewTicket(list[i]);
+    if (!one.ok) {
+      const message = list.length > 1 ? `Ticket ${i + 1}: ${one.message}` : one.message;
+      return { ok: false, index: i, field: one.field, message };
+    }
+    if (one.ticket) tickets.push(one.ticket);
+  }
+  if (tickets.length > CLAUDE_REVIEW_MAX_TICKETS) {
+    return {
+      ok: false,
+      index: null,
+      field: 'tickets',
+      message: `${tickets.length} tickets; the limit is ${CLAUDE_REVIEW_MAX_TICKETS}.`,
+    };
+  }
+  return { ok: true, tickets };
+}
+
+/**
+ * A stored `ticket` / `ticket_assessment` column → a list. Runs from before several tickets stored
+ * ONE object; newer runs store an array. Anything else reads as none.
+ */
+export function storedList<T extends object>(v: T | T[] | null | undefined): T[] {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v.filter((x): x is T => x != null && typeof x === 'object');
+  return typeof v === 'object' ? [v] : [];
 }
 
 // ---- the acceptance-criteria field to preselect ----

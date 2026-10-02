@@ -2267,53 +2267,6 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
       0.0317, 15204, 1088, 4, hoursAgo(2), hoursAgo(2),
     );
 
-  // 6. review_learnings — "review memory": signals from PAST Claude reviews in
-  //    acme/api that surface in the pre-run "From your past reviews in this repo"
-  //    panel on #113 (and get injected into the next run's prompt). Retrieval
-  //    matches on dirPath/ext against #113's finding paths (src/sync, src/db, .ts),
-  //    aggregated per (glob, category): 3+ rows in a group = medium confidence.
-  const insLearning = raw.prepare(
-    `INSERT INTO review_learnings (account_id, repo_id, pr_id, source_review_id,
-       finding_id, head_sha, kind, path, dir_path, ext, category, claude_verdict,
-       user_verdict, claude_title, claude_text, user_text, posted_comment_kind,
-       dedupe_key, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
-  // src/sync/* — a reworded finding (carries the Claude-vs-you example) + two kept.
-  insLearning.run(
-    1, API, 104, 900, null, 'sha104headcommit', 'finding_reworded',
-    'src/sync/commit-files.ts', 'src/sync', '.ts', 'performance', null, null,
-    'Consider batching these lookups',
-    'Consider batching these lookups to reduce round-trips.',
-    'Batch the lookups — one query per commit is an N+1 on big PRs.',
-    null, 'demo-learn-1', hoursAgo(96),
-  );
-  insLearning.run(
-    1, API, 104, 900, null, 'sha104headcommit', 'finding_kept',
-    'src/sync/upsert.ts', 'src/sync', '.ts', 'performance', null, null,
-    'Missing conflict target on upsert', null, null, null, 'demo-learn-2', hoursAgo(96),
-  );
-  insLearning.run(
-    1, API, 106, 901, null, 'sha106headcommit', 'finding_kept',
-    'src/sync/sync-repo.ts', 'src/sync', '.ts', 'performance', null, null,
-    'Unbounded page walk on backfill', null, null, null, 'demo-learn-3', hoursAgo(48),
-  );
-  // src/db/* — style nits mostly dismissed: teaches the agent to stop flagging them.
-  insLearning.run(
-    1, API, 106, 901, null, 'sha106headcommit', 'finding_dismissed',
-    'src/db/queries.ts', 'src/db', '.ts', 'style', null, null,
-    'Prefer early return here', null, null, null, 'demo-learn-4', hoursAgo(48),
-  );
-  insLearning.run(
-    1, API, 106, 901, null, 'sha106headcommit', 'finding_dismissed',
-    'src/db/triage.ts', 'src/db', '.ts', 'style', null, null,
-    'Inline this single-use helper', null, null, null, 'demo-learn-5', hoursAgo(48),
-  );
-  insLearning.run(
-    1, API, 111, 902, null, 'sha111headcommit', 'finding_dismissed',
-    'src/db/queries.ts', 'src/db', '.ts', 'style', null, null,
-    'Reorder imports alphabetically', null, null, null, 'demo-learn-6', hoursAgo(24),
-  );
   proSeeded = true;
 }
 
@@ -2333,7 +2286,7 @@ console.log('  open PRs:', prRows.filter((p) => p.state === 'open').map((p) => p
 console.log('  stale open PRs (one per repo): 140 (web), 141 (api), 142 (infra)');
 console.log(
   proSeeded
-    ? '  pro tables: repo_digests (3), sprint_reports (1), pro_settings (1), ai analyses + fix on #114, review_learnings (6, panel on #113)'
+    ? '  pro tables: repo_digests (3), sprint_reports (1), pro_settings (1), ai analyses + fix on #114'
     : '  pro tables: SKIPPED (packages/pro submodule not checked out)',
 );
 console.log(

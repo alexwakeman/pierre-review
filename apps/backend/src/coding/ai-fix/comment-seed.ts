@@ -554,6 +554,7 @@ export function mapCommentVerdicts(
       valid: typeof r?.valid === 'boolean' ? r.valid : null,
       reasoning: cap(r?.reasoning, 4_000),
       pushback: nullable(r?.pushback, 8_000),
+      // No longer asked for (it fed the deleted review memory); read if a model still sends one.
       learning: nullable(r?.learning, 2_000),
       filesTouched: Array.isArray(r?.filesTouched)
         ? r.filesTouched

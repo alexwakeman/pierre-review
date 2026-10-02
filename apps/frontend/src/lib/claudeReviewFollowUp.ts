@@ -7,6 +7,7 @@
 // retyped here either — they live once in `@pierre-review/shared` (`claude-review.ts`).
 import {
   checkClaudeReviewTicket,
+  checkClaudeReviewTickets,
   CLAUDE_REVIEW_TICKET_LIMITS,
 } from '@pierre-review/shared';
 import type {
@@ -20,6 +21,8 @@ import type {
   ClaudeReviewTicketCheck,
   ClaudeReviewTicketField,
   ClaudeReviewTicketInput,
+  ClaudeReviewTicketsCheck,
+  ClaudeReviewTicketSource,
   ClaudeTicketAlignment,
   ClaudeTicketCriterionStatus,
 } from '@pierre-review/shared';
@@ -236,22 +239,48 @@ export const ALREADY_POSTED_CHIP = {
 // ---- the user story draft ----
 
 // What the three inputs hold, untrimmed (the check trims). Always three strings, so the inputs
-// stay controlled.
+// stay controlled. `source: 'jira'` (+ key/url/fetchedAt) marks a story Limn READ from Jira: the
+// panel shows it read-only, as markdown. Absent / 'manual' = typed or pasted, editable.
 export interface TicketDraft {
   title: string;
   description: string;
   acceptanceCriteria: string;
+  source?: ClaudeReviewTicketSource;
+  key?: string;
+  url?: string;
+  fetchedAt?: string;
 }
 
 export const EMPTY_TICKET_DRAFT: TicketDraft = { title: '', description: '', acceptanceCriteria: '' };
 
 export function ticketDraftFromStored(ticket: ClaudeReviewTicket | null | undefined): TicketDraft {
   if (!ticket) return EMPTY_TICKET_DRAFT;
-  return {
+  const d: TicketDraft = {
     title: ticket.title ?? '',
     description: ticket.description ?? '',
     acceptanceCriteria: ticket.acceptanceCriteria ?? '',
   };
+  if (ticket.source === 'jira') {
+    d.source = 'jira';
+    if (ticket.key != null) d.key = ticket.key;
+    if (ticket.url != null) d.url = ticket.url;
+    if (ticket.fetchedAt != null) d.fetchedAt = ticket.fetchedAt;
+  }
+  return d;
+}
+
+/** The stories a run was given, as drafts (the per-ticket entries, else the legacy single one). */
+export function ticketDraftsFromReview(
+  review: Pick<ClaudeReview, 'tickets' | 'ticket'> | null | undefined,
+): TicketDraft[] {
+  if (review == null) return [];
+  const stored =
+    review.tickets != null ? review.tickets.map((e) => e.ticket) : review.ticket ? [review.ticket] : [];
+  return stored.map(ticketDraftFromStored).filter(ticketDraftHasContent);
+}
+
+export function isJiraDraft(d: TicketDraft): boolean {
+  return d.source === 'jira';
 }
 
 export function ticketDraftHasContent(d: TicketDraft): boolean {
@@ -272,11 +301,54 @@ export function ticketRequestFromCheck(
 ): ClaudeReviewTicketInput | undefined {
   if (!check.ok || check.ticket == null) return undefined;
   const t = check.ticket;
+  return ticketInputFromStored(t);
+}
+
+/** A checked (normalised) ticket back to the request shape, provenance included. */
+export function ticketInputFromStored(t: ClaudeReviewTicket): ClaudeReviewTicketInput {
   const out: ClaudeReviewTicketInput = {};
   if (t.title != null) out.title = t.title;
   if (t.description != null) out.description = t.description;
   if (t.acceptanceCriteria != null) out.acceptanceCriteria = t.acceptanceCriteria;
+  if (t.source != null) out.source = t.source;
+  if (t.key != null) out.key = t.key;
+  if (t.url != null) out.url = t.url;
+  if (t.fetchedAt != null) out.fetchedAt = t.fetchedAt;
   return out;
+}
+
+// ---- several stories ----
+
+/** Every story at once, through the SAME shared check the route runs. */
+export function checkTicketDrafts(drafts: readonly TicketDraft[]): ClaudeReviewTicketsCheck {
+  return checkClaudeReviewTickets(drafts);
+}
+
+/** The request's `tickets`, or undefined when none / invalid (the caller refuses to run then). */
+export function ticketsRequestFromCheck(
+  check: ClaudeReviewTicketsCheck,
+): ClaudeReviewTicketInput[] | undefined {
+  if (!check.ok || check.tickets.length === 0) return undefined;
+  return check.tickets.map(ticketInputFromStored);
+}
+
+/** The collapsed header's addition for several stories: '', ' · 2 added' or ' · needs a fix'. */
+export function ticketsPanelHint(
+  drafts: readonly TicketDraft[],
+  check: ClaudeReviewTicketsCheck,
+): string {
+  const n = drafts.filter(ticketDraftHasContent).length;
+  if (n === 0) return '';
+  if (!check.ok) return ' · needs a fix';
+  return ` · ${n} added`;
+}
+
+/** The drafts to show: the reader's own (touched) list, else the latest run's stories. */
+export function resolveTicketDrafts(
+  own: TicketDraft[] | undefined,
+  review: Pick<ClaudeReview, 'tickets' | 'ticket'> | null | undefined,
+): TicketDraft[] {
+  return own ?? ticketDraftsFromReview(review);
 }
 
 /**
@@ -316,12 +388,12 @@ export function fieldCounter(
 // Bounded: the oldest entry is dropped past the cap.
 export const TICKET_DRAFT_CAP = 50;
 
-export function createTicketDraftStore(cap = TICKET_DRAFT_CAP): {
-  get: (prId: number) => TicketDraft | undefined;
-  set: (prId: number, d: TicketDraft) => void;
+export function createTicketDraftStore<T = TicketDraft>(cap = TICKET_DRAFT_CAP): {
+  get: (prId: number) => T | undefined;
+  set: (prId: number, d: T) => void;
   has: (prId: number) => boolean;
 } {
-  const m = new Map<number, TicketDraft>();
+  const m = new Map<number, T>();
   return {
     get: (prId) => m.get(prId),
     has: (prId) => m.has(prId),

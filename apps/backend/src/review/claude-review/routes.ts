@@ -9,10 +9,9 @@ import type {
   ClaudeReviewStatusResponse,
   GenerateReviewBody,
   PostCommentResult,
+  PostTicketAnalysisResult,
   PostReviewBody,
   PostReviewResult,
-  ReviewBudgetResponse,
-  SetReviewBudgetBody,
   UpdateFindingBody,
   UpdateReviewBody,
 } from '@pierre-review/shared';
@@ -20,9 +19,10 @@ import {
   CLAUDE_REVIEW_MODELS,
   CLAUDE_REVIEW_STATES_MAX_IDS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
-  checkClaudeReviewTicket,
+  checkClaudeReviewTickets,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
+import { ticketAnalysisCommentBody } from './ticket.js';
 import {
   autoReviewHold,
   AGENTIC_AI_ENABLED,
@@ -39,10 +39,12 @@ import {
   getLatestClaudeReview,
   getLatestReviewStates,
   getReviewPostContext,
+  getTicketPostContext,
   listAllClaudeReviews,
   listClaudeReviewHistory,
   markFindingPosted,
   markReviewPosted,
+  markTicketPosted,
   updateFinding,
   updateReviewDraft,
 } from './persist.js';
@@ -54,7 +56,6 @@ import {
 // LIMN_AI_DISABLED; the AGENTIC_AI_ENABLED checks below are the second guard.
 
 const VERDICTS = ['COMMENT', 'REQUEST_CHANGES', 'APPROVE'];
-const REVIEW_MODES = ['auto', 'diff_only', 'worktree'];
 
 const idParam = {
   params: { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } },
@@ -70,6 +71,19 @@ const findingIdParam = {
 // ⚠ `ticket` MUST be declared: Fastify's ajv runs with `removeAdditional`, which would strip an
 // undeclared key SILENTLY (the contact-form honeypot landmine). No `maxLength` on its fields on
 // purpose — the caps answer with our own message from checkClaudeReviewTicket, never ajv's.
+const TICKET_INPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    title: { type: 'string' },
+    description: { type: 'string' },
+    acceptanceCriteria: { type: 'string' },
+    source: { type: 'string', enum: ['jira', 'manual'] },
+    key: { type: 'string' },
+    url: { type: 'string' },
+    fetchedAt: { type: 'string' },
+  },
+} as const;
 const generateSchema = {
   ...idParam,
   body: {
@@ -77,17 +91,17 @@ const generateSchema = {
     additionalProperties: false,
     properties: {
       model: { type: 'string', enum: [...CLAUDE_REVIEW_MODELS] },
-      mode: { type: 'string', enum: REVIEW_MODES },
-      ticket: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          title: { type: 'string' },
-          description: { type: 'string' },
-          acceptanceCriteria: { type: 'string' },
-        },
-      },
+      ticket: TICKET_INPUT_SCHEMA,
+      // No maxItems: the count answers with our own message (checkClaudeReviewTickets).
+      tickets: { type: 'array', items: TICKET_INPUT_SCHEMA },
     },
+  },
+};
+const ticketPostParam = {
+  params: {
+    type: 'object',
+    required: ['reviewId', 'index'],
+    properties: { reviewId: { type: 'integer' }, index: { type: 'integer', minimum: 0 } },
   },
 };
 const updateReviewSchema = {
@@ -118,6 +132,15 @@ const postSchema = {
     properties: { userVerdict: { type: 'string', enum: VERDICTS } },
   },
 };
+
+// Ticket posts are SERIALISED PER REVIEW: every ticket of a review shares one stored JSON array,
+// so two posts recording at once would each write back a copy missing the other's stamp (and the
+// lost ticket would offer "Post" again — a double post). The tail is registered SYNCHRONOUSLY,
+// before any await, so a double click queues behind the first and then reads it as posted.
+const ticketPostChains = new Map<number, Promise<void>>();
+// `${reviewId}:${index}` posted on GitHub whose local record failed — refused for the life of the
+// process, so a retry cannot double-post.
+const postedUnrecorded = new Set<string>();
 
 function featureOff(reply: FastifyReply): { error: string; message: string } {
   reply.status(404);
@@ -180,21 +203,16 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       return {
         enabled: false,
         auth: 'none',
-        reviewBudgetUsd: 0,
-        reviewBudgetMax: 0,
         review: null,
         history: [],
       };
     }
     const accountId = ctx.accountIdOf(req);
     const auth = ctx.llm.detectAuth();
-    const local = ctx.review.getLocalKeyStatus();
     return {
       enabled: true,
       auth: auth.status,
       authMessage: auth.status === 'none' ? auth.message : undefined,
-      reviewBudgetUsd: local.reviewBudgetUsd,
-      reviewBudgetMax: local.reviewBudgetMax,
       review: await getLatestClaudeReview(ctx, id, accountId),
       history: await listClaudeReviewHistory(ctx, id, accountId),
       autoReview: autoReviewHold(id, accountId),
@@ -206,47 +224,35 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
   // credentials from an ambient Claude session first (so a subscription pays, not a meter) and
   // otherwise leaves the environment's `ANTHROPIC_API_KEY` alone — TWO RUNGS, no stored secret, no
   // form. `ctx.review.setLocalKey` went with them, so there is no seam left to write through, and
-  // `getLocalKeyStatus` no longer reports `hasUserKey` — it survives only for the still-live
-  // per-review BUDGET, which is what the sibling route below writes.
+  // `getLocalKeyStatus` went later with the budget route (below).
   //
   // Cloud never used any of this (it runs on `SUMMARY_ANTHROPIC_API_KEY` and the Settings section
   // never rendered there). An already-stored key is left on disk untouched and simply never read:
   // the decision was to stop reading it, not to destroy somebody's file — which is also why there
   // is no "clear it" route here. A route that writes the file is a write path back.
 
-  // Set/clear the local per-review budget cap (local-only; clamped server-side to the max).
-  app.put(
-    '/api/claude-review/budget',
-    {
-      schema: {
-        body: {
-          type: 'object',
-          required: ['usd'],
-          additionalProperties: false,
-          properties: { usd: { type: ['number', 'null'] } },
-        },
-      },
-    },
-    async (req): Promise<ReviewBudgetResponse> => {
-      const { usd } = req.body as SetReviewBudgetBody;
-      return ctx.review.setReviewBudget(usd);
-    },
-  );
+  // ⚠ `PUT /api/claude-review/budget` IS DELETED too. The per-review budget is the environment's
+  // `REVIEW_BUDGET_USD` alone (default $6.75, covering a deep run's specialists) — not a setting.
 
   // Kick off a run.
   app.post('/api/prs/:id/claude-review', { schema: generateSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
     const body = (req.body ?? {}) as GenerateReviewBody;
     const model = body.model ?? DEFAULT_CLAUDE_REVIEW_MODEL;
-    const mode = body.mode;
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);
 
     // The user story: over a cap ⇒ 400 with the field and a plain message, and NO run. Never
     // truncated. The same check runs in the SPA, from the same shared module.
-    const checked = checkClaudeReviewTicket(body.ticket);
+    // `tickets` wins; the legacy single `ticket` is read only when it is absent.
+    const checked = checkClaudeReviewTickets(body.tickets ?? (body.ticket ? [body.ticket] : []));
     if (!checked.ok) {
       reply.status(400);
-      return { error: 'TicketInvalid', field: checked.field, message: checked.message };
+      return {
+        error: 'TicketInvalid',
+        index: checked.index,
+        field: checked.field,
+        message: checked.message,
+      };
     }
 
     const auth = ctx.llm.detectAuth();
@@ -256,7 +262,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     }
 
     const accountId = ctx.accountIdOf(req);
-    const result = await startReview(ctx, accountId, id, model, mode ?? 'auto', checked.ticket);
+    const result = await startReview(ctx, accountId, id, model, checked.tickets);
     if (!result.ok) {
       if (result.reason === 'not_found') {
         reply.status(404);
@@ -292,13 +298,6 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
             : 'The review queue is full; try again once some finish.',
       };
     }
-    ctx.reviewEvents.emit({
-      type: 'review.requested',
-      accountId,
-      prId: id,
-      model,
-      requestedMode: mode ?? 'auto',
-    });
     reply.status(202);
     return { reviewId: result.reviewId, status: 'queued' };
   });
@@ -446,12 +445,6 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       return { error: 'NotFound', message: `Review ${reviewId} not found` };
     }
     await updateReviewDraft(ctx, reviewId, body);
-    ctx.reviewEvents.emit({
-      type: 'review.draftUpdated',
-      accountId,
-      reviewId,
-      change: { userBody: body.userBody, userVerdict: body.userVerdict },
-    });
     return { status: 'ok' };
   });
 
@@ -466,12 +459,6 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       return { error: 'NotFound', message: `Finding ${findingId} not found` };
     }
     await updateFinding(ctx, findingId, body);
-    ctx.reviewEvents.emit({
-      type: 'finding.updated',
-      accountId,
-      findingId,
-      change: { included: body.included, editedBody: body.editedBody },
-    });
     return { status: 'ok' };
   });
 
@@ -511,12 +498,6 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
         };
       }
       await markFindingPosted(ctx, findingId, outcome.commentId, outcome.postedCommentKind);
-      ctx.reviewEvents.emit({
-        type: 'finding.posted',
-        accountId,
-        findingId,
-        postedCommentKind: outcome.postedCommentKind,
-      });
       const result: PostCommentResult = {
         githubCommentId: outcome.commentId,
         postedAt: new Date().toISOString(),
@@ -562,7 +543,9 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
         body: review.userBody ?? '',
         verdict: userVerdict,
         includedFindings: review.findings
-          .filter((f) => f.included)
+          // A finding already on GitHub (posted on its own, or in an earlier submitted review) is
+          // DONE: the SPA offers no "Post again", and a re-submitted review must not post it twice.
+          .filter((f) => f.included && f.postedAt == null)
           .map((f) => ({
             id: f.id,
             path: f.path,
@@ -586,14 +569,6 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       if ('preview' in outcome) return outcome.preview;
 
       await markReviewPosted(ctx, reviewId, outcome.postedReviewId, outcome.inlineFindingIds, outcome.prComments);
-      ctx.reviewEvents.emit({
-        type: 'review.posted',
-        accountId,
-        reviewId,
-        userVerdict,
-        inlineFindingIds: outcome.inlineFindingIds,
-        prCommentFindingIds: outcome.prComments.map((r) => r.findingId),
-      });
       const result: PostReviewResult = {
         postedReviewId: outcome.postedReviewId,
         postedAt: new Date().toISOString(),
@@ -606,4 +581,71 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
     }
   });
+
+  // Post ONE ticket's analysis as a PR-level comment — once per ticket. A GitHub write: its own
+  // `githubWrite` rate tier (tierFor). Stamped locally + the change signal raised by
+  // `ctx.prWrites.postPrComment`. Not refused on a moved head: an issue comment is pinned to no
+  // commit, and the body names the commit it was checked against.
+  app.post(
+    '/api/claude-reviews/:reviewId/tickets/:index/post',
+    { schema: ticketPostParam },
+    async (req, reply) => {
+      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+      const { reviewId, index } = req.params as { reviewId: number; index: number };
+      const accountId = ctx.accountIdOf(req);
+      const prev = ticketPostChains.get(reviewId) ?? Promise.resolve();
+      let release!: () => void;
+      const mine = new Promise<void>((r) => (release = r));
+      const tail = prev.then(() => mine);
+      ticketPostChains.set(reviewId, tail);
+      await prev;
+      try {
+        const tctx = await getTicketPostContext(ctx, reviewId, accountId);
+        const ticket = tctx?.tickets[index];
+        if (!tctx || !ticket) {
+          reply.status(404);
+          return { error: 'NotFound', message: `Ticket ${index + 1} of review ${reviewId} not found` };
+        }
+        const assessment = tctx.assessments[index];
+        if (tctx.status !== 'succeeded' || !assessment || assessment.alignment === 'not_checked') {
+          reply.status(409);
+          return { error: 'NotReady', message: 'This ticket has no analysis to post.' };
+        }
+        if (assessment.posted || postedUnrecorded.has(`${reviewId}:${index}`)) {
+          reply.status(409);
+          return { error: 'AlreadyPosted', message: 'Already posted.', posted: assessment.posted ?? null };
+        }
+        let out;
+        try {
+          out = await ctx.prWrites.postPrComment(
+            accountId,
+            tctx.prId,
+            ticketAnalysisCommentBody(ticket, assessment, tctx.reviewHeadSha),
+          );
+        } catch (err) {
+          reply.status(502);
+          return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
+        }
+        if (!out) {
+          reply.status(404);
+          return { error: 'NotFound', message: `Review ${reviewId} not found` };
+        }
+        // ⚠ GitHub has 201'd: the route may not fail from here. A failed record leaves the
+        // comment posted, so it answers visible:false (the SPA never offers a retry) and the
+        // ticket is refused from here on.
+        const posted = { githubCommentId: out.githubCommentId, url: out.url, postedAt: out.createdAt };
+        let recorded = true;
+        await markTicketPosted(ctx, reviewId, index, posted).catch((err) => {
+          recorded = false;
+          postedUnrecorded.add(`${reviewId}:${index}`);
+          ctx.log.warn({ err }, `claude review ${reviewId}: ticket ${index + 1} posted but not recorded`);
+        });
+        const result: PostTicketAnalysisResult = { ...posted, visible: out.visible && recorded };
+        return result;
+      } finally {
+        release();
+        if (ticketPostChains.get(reviewId) === tail) ticketPostChains.delete(reviewId);
+      }
+    },
+  );
 }

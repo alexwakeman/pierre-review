@@ -43,7 +43,7 @@ const TERMINAL: ReadonlySet<AiFixStatus | 'idle'> = new Set([
 function doneLine(status: AiFixStatus | 'idle'): string | null {
   switch (status) {
     case 'succeeded':
-      return 'Fix ready — click to view';
+      return 'Fix ready';
     case 'failed':
       return 'The fix did not finish';
     case 'cancelled':

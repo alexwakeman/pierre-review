@@ -602,7 +602,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   SPACE-SEPARATED (any other format silently breaks Tailwind's `<alpha-value>`);
   `--ai-signal-fill` is NON-TEXT ONLY. ⚠ **Every surviving `violet-`/`purple-`/`indigo-` hit
   is a deliberate KEEP** — do not "finish the migration"; keep-list in the doc.
-- **The agentic surfaces (Claude Review, review chat, review memory, AI Fix) gate on `me.ai`
+- **The agentic surfaces (Claude Review, review chat, AI Fix) gate on `me.ai`
   through `useAiCapabilities()`, NEVER `useProCapabilities()`** — they are free. VISIBILITY is
   `ai.enabled` alone; a missing runtime/credential swaps only the Run button, via the ONE
   `AiRunGate` (`components/AiSetup.tsx`). Cloud prints `AiCloudNote`, never a ProBadge. Local runs
@@ -768,8 +768,10 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 
 **The agentic features are CORE, FREE and LOCAL-ONLY** (apiVersion 22 moved them out of the
 plugin): Claude Review (run, follow-up, ticket check against a PASTED story, auto review, the review
-chat) in `src/review/claude-review/`, review memory (`review_learnings`) in `src/review/memory/`,
-AI Fix's agentic fixer + push in `src/coding/ai-fix/`. Details:
+chat; a DEEP review consults up to five specialist sub-agents, the cap a PreToolUse hook, never
+the prompt) in `src/review/claude-review/`, AI Fix's agentic fixer + push in `src/coding/ai-fix/`.
+Review memory is DELETED (`review_learnings` dropped by sqlite `0075` / pg `0062`); the depth is
+always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
 [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md). Non-negotiables:
 
 - **ONE switch, `config.aiEnabled` = `!isCloud && LIMN_AI_DISABLED !== 'true'`** — on and always
@@ -779,7 +781,8 @@ AI Fix's agentic fixer + push in `src/coding/ai-fix/`. Details:
   `MeResponse.ai` (top-level, never inside `pro`) carries `enabled` / `runtime` / `auth`; no
   credential swaps the Run button for ONE line, never hides the feature. Auto review is OFF per
   workspace until switched on (`workspaces.auto_review_enabled[_at]`, `GET`/`PUT
-  /api/workspaces/:id/auto-review`, the floor moves only on an off → on flip).
+  /api/workspaces/:id/auto-review`, the floor moves only on an off → on flip); it re-reviews an
+  already-reviewed PR ONCE PER NEW HEAD, debounced (docs/CLAUDE-REVIEW.md § Auto review).
 - **The moved modules take ONE context argument, `AgentContext`** (`review/agent-context.ts`),
   built from direct core imports — never `ProContext`. Their tests pass a fake one; the queue
   managers carry it on each item. URL paths did NOT move (the fixer keeps its historical
@@ -798,9 +801,9 @@ AI Fix's agentic fixer + push in `src/coding/ai-fix/`. Details:
   (the run STRIPS `ANTHROPIC_API_KEY`), else the environment's `ANTHROPIC_API_KEY`, untouched.
   Product copy says "runs on your own Claude Code or Anthropic API key" and never promises
   subscription billing. The BYO key in `config.json`, its form, `GET`/`PUT
-  /api/claude-review/key` and `setLocalKey` are RETIRED; `review/local-settings.ts` survives for
-  the per-review BUDGET. Local spend is unmetered but still recorded (`recordAiUsage`).
-- ⚠ **Their tables were ADOPTED, not renamed**: `ai_fixes` + `review_learnings` are core since
+  /api/claude-review/key` and `setLocalKey` are RETIRED; the per-review budget is the
+  `REVIEW_BUDGET_USD` env var ALONE (default $6.75; no route, no stored override). Local spend is unmetered but still recorded (`recordAiUsage`).
+- ⚠ **Their tables were ADOPTED, not renamed**: `ai_fixes` (+ `review_learnings`, since dropped) are core since
   sqlite `0074` / pg `0061` (`CREATE … IF NOT EXISTS`, the plugin's index names, NO FKs); the
   plugin's own DDL for them was stripped (plugin `0001`/`0002`/`0003`/`0024`) or a FRESH sqlite
   install hits "duplicate column" and drops the whole plugin to OSS. Both delete paths, erasure,
@@ -834,7 +837,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
 - Tiers — **free gets the per-PR truth, paid gets the cross-team roll-up**: **core** is free
   (feed/timeline/My Turn, per-COMMENT ML severity badges, Settings classification, the bot-only
   caution + `TuningSuggestions`, the `BotTriageCard` grade) **and, locally, the agentic features —
-  Claude Review, review memory, AI Fix — on the user's own Claude** (`MeResponse.ai`, above);
+  Claude Review, AI Fix — on the user's own Claude** (`MeResponse.ai`, above);
   **pro** adds `botDepth` (NON-AI depth **and the WHOLE Bots → ROI panel** — vendor table,
   keep/tune/noisy verdicts, the Inflation column *counts included*, ML flagging, volume, seat
   prices), `activityDigest`, `periodReports` (period reports + by-workspace axis + the People
@@ -1378,7 +1381,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0061` and plugin `0034`–`0037` are NOT replayed.
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0062` and plugin `0034`–`0037` are NOT replayed.
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence

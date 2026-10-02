@@ -15,6 +15,7 @@ import {
 } from './claudeReviewFollowUp.js';
 import {
   fillDraftFromJira,
+  jiraProvenance,
   fillableJiraTickets,
   jiraSiteOf,
   readRememberedAcField,
@@ -164,7 +165,10 @@ export async function resolveListTicket(opts: {
     return { ticket: undefined, note: `Started without a user story: ${ref.key} could not be read.` };
   }
   const remembered = readRememberedAcField(opts.memory, jiraSiteOf(ref.url), details.issueType?.id);
-  const { draft } = fillDraftFromJira(EMPTY_TICKET_DRAFT, details, remembered);
+  const draft = {
+    ...fillDraftFromJira(EMPTY_TICKET_DRAFT, details, remembered).draft,
+    ...jiraProvenance(ref),
+  };
   const check = checkTicketDraft(draft);
   if (!check.ok) {
     return { ticket: undefined, note: `Started without ${ref.key}: ${check.message}` };

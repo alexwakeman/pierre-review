@@ -42,8 +42,6 @@ export function buildSubmitFixShape(z: ZodNs) {
           reasoning: z.string(),
           // An argued rebuttal — set ONLY when disagreeing with the comment.
           pushback: z.string().optional(),
-          // A durable takeaway about this reviewer's comment, if any.
-          learning: z.string().optional(),
           filesTouched: z.array(z.string()).optional(),
         }),
       )

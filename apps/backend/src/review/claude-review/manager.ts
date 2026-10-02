@@ -1,4 +1,5 @@
 import {
+  CLAUDE_REVIEW_MAX_TICKETS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   type ActiveReview,
   type ClaudeReviewModel,
@@ -7,15 +8,14 @@ import {
   type ClaudeReviewStreamEvent,
   type ClaudeReviewTicket,
   type ClaudeReviewTrigger,
-  type RequestedReviewMode,
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../../github/compare.js';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
 import { getAgenticProviders } from '../plugin-providers.js';
 import { agenticRunReady } from './ai-ready.js';
-import { buildLearningsContext } from '../memory/retrieval.js';
 import { decideReviewMode } from './routing.js';
+import { offeredSpecialists } from './specialists.js';
 import {
   buildUserPrompt,
   pickReviewNonce,
@@ -30,10 +30,12 @@ import {
   SINCE_PATCH_CHARS,
   type FollowUpPlan,
 } from './follow-up.js';
-import { reconcileTicketAssessment } from './ticket.js';
+import { reconcileTicketAssessments } from './ticket.js';
 import {
   getLatestClaudeReview,
+  getLatestStoredTickets,
   getReviewPrContext,
+  hasReviewAtHead,
   insertQueuedReview,
   loadPriorReviewForFollowUp,
   markReviewCancelled,
@@ -74,12 +76,10 @@ interface QueueItem {
   reviewId: number;
   prId: number;
   model: ClaudeReviewModel;
-  requestedMode: RequestedReviewMode;
   headSha: string;
   prCtx: ReviewPrContext;
-  priorReviewContext?: string;
-  // The validated user story or task (stored on the row at queue time), or null.
-  ticket: ClaudeReviewTicket | null;
+  // The validated user stories (stored on the row at queue time); [] when none.
+  tickets: ClaudeReviewTicket[];
   trigger: ClaudeReviewTrigger;
 }
 
@@ -177,9 +177,8 @@ export async function startReview(
   accountId: number,
   prId: number,
   model: ClaudeReviewModel,
-  requestedMode: RequestedReviewMode,
-  // TRAILING optional: the route's `checkClaudeReviewTicket` result (already normalised + split).
-  ticket: ClaudeReviewTicket | null = null,
+  // TRAILING optional: the route's `checkClaudeReviewTickets` result (already normalised).
+  tickets: ClaudeReviewTicket[] = [],
 ): Promise<StartReviewResult> {
   if (!AGENTIC_AI_ENABLED) return { ok: false, reason: 'disabled' };
   // Hard agentic cap: refuse a run once the account's monthly agent credit allowance is spent
@@ -206,18 +205,11 @@ export async function startReview(
       claimed.delete(prId);
       return { ok: false, reason: 'no_head' };
     }
-    reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, ticket, 'manual');
+    reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, tickets, 'manual');
   } catch (err) {
     claimed.delete(prId);
     throw err;
   }
-
-  // Optional learnings context (review-memory). Best-effort; undefined when nothing matches.
-  const priorReviewContext = await buildLearningsContext(ctx, {
-    accountId,
-    prId,
-    headSha: prCtx.headSha,
-  }).catch(() => undefined);
 
   const item: QueueItem = {
     ctx,
@@ -225,11 +217,9 @@ export async function startReview(
     reviewId,
     prId,
     model,
-    requestedMode,
     headSha: prCtx.headSha,
     prCtx,
-    priorReviewContext,
-    ticket,
+    tickets,
     trigger: 'manual',
   };
   reviewIdByPr.set(prId, reviewId);
@@ -296,19 +286,22 @@ export function _autoLaneForTest(): Array<{ accountId: number; prId: number }> {
   return autoPending.map((a) => ({ accountId: a.accountId, prId: a.prId }));
 }
 
-// The auto run's user story, from the optional Pro Jira provider. Never throws.
-async function autoTicketFor(accountId: number, prId: number): Promise<ClaudeReviewTicket | null> {
+// The auto run's user stories, from the optional Pro Jira provider (every detected ticket, up to
+// the cap; an older plugin answers one). Never throws.
+async function autoTicketsFor(accountId: number, prId: number): Promise<ClaudeReviewTicket[]> {
   const resolve = getAgenticProviders().resolveReviewTicket;
-  if (!resolve) return null;
+  if (!resolve) return [];
   try {
-    return (await resolve(accountId, prId)).ticket;
+    const r = await resolve(accountId, prId);
+    const list = r.tickets ?? (r.ticket ? [r.ticket] : []);
+    return list.slice(0, CLAUDE_REVIEW_MAX_TICKETS);
   } catch {
-    return null;
+    return [];
   }
 }
 
 // A slot opened and the manual queue is empty: write the auto run's row and launch it. Mirrors
-// `startReview` step for step (credits → claim → PR context → row → learnings → launch), with the
+// `startReview` step for step (credits → claim → PR context → row → launch), with the
 // trigger stamped 'auto'. Any refusal simply drops the item: the PR has no row, so the next tick
 // finds it again if it still qualifies.
 async function startAutoItem(a: AutoItem): Promise<void> {
@@ -322,26 +315,26 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     if ((await ctx.aiCredits.check(accountId)).agentBlocked) return;
     const prCtx = await getReviewPrContext(ctx, prId, accountId);
     if (!prCtx?.headSha) return;
+    // ONE RUN PER HEAD: a person may have reviewed this head while the item waited.
+    if (await hasReviewAtHead(ctx, prId, accountId, prCtx.headSha)) return;
     const model = DEFAULT_CLAUDE_REVIEW_MODEL;
-    // ⚠ TRY JIRA WHEN THE PLUGIN OFFERS IT. The browser fills the story for a click; nobody is
-    // here to, so the Pro Jira provider (plugin-providers.ts) fetches the PR's first detected
-    // ticket. Absent (no plugin, no tracker) or failing, the review runs without a story. The item
-    // is already `claimed`, so this await cannot double-start.
-    const ticket = await autoTicketFor(accountId, prId);
+    // A RE-REVIEW (the PR was reviewed before, at an older head) reuses the stories that review
+    // carried — a reader may have typed them. Otherwise ⚠ TRY JIRA WHEN THE PLUGIN OFFERS IT: the
+    // browser fills the stories for a click; nobody is here to, so the Pro Jira provider
+    // (plugin-providers.ts) fetches the PR's detected tickets. Absent (no plugin, no tracker) or
+    // failing, the review runs without a story. The item is already `claimed`, so these awaits
+    // cannot double-start.
+    const prior = await getLatestStoredTickets(ctx, prId, accountId);
+    const tickets = prior.length > 0 ? prior : await autoTicketsFor(accountId, prId);
     const reviewId = await insertQueuedReview(
       ctx,
       prId,
       prCtx.headSha,
       model,
       accountId,
-      ticket,
+      tickets,
       'auto',
     );
-    const priorReviewContext = await buildLearningsContext(ctx, {
-      accountId,
-      prId,
-      headSha: prCtx.headSha,
-    }).catch(() => undefined);
     reviewIdByPr.set(prId, reviewId);
     startingAuto.delete(prId);
     launched = true;
@@ -351,11 +344,9 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       reviewId,
       prId,
       model,
-      requestedMode: 'auto',
       headSha: prCtx.headSha,
       prCtx,
-      priorReviewContext,
-      ticket,
+      tickets,
       trigger: 'auto',
     });
   } catch (err) {
@@ -425,7 +416,7 @@ async function runPipeline(
   });
 
   emit({ phase: 'deciding' });
-  const decision = decideReviewMode(prep.fileMetrics, item.requestedMode);
+  const decision = decideReviewMode(prep.fileMetrics);
   await markReviewRouted(ctx, reviewId, decision.mode, decision.reason);
 
   // 'skip' — nothing substantive to review. Synthesize a succeeded run, no agent turns.
@@ -476,9 +467,11 @@ async function runPipeline(
       since = null;
     }
   }
-  const nonce = pickReviewNonce(untrustedTexts(plan, item.ticket, since));
+  const nonce = pickReviewNonce(untrustedTexts(plan, item.tickets, since));
 
-  const systemPrompt = systemPromptForMode(mode);
+  // A deep review offers the lead its specialist sub-agents (specialists.ts); a diff-only one none.
+  const specialists = mode === 'worktree' ? offeredSpecialists(prep.changedFiles) : [];
+  const systemPrompt = systemPromptForMode(mode, specialists);
   const prompt = buildUserPrompt({
     repoFullName: prCtx.repoFullName,
     prNumber: prCtx.number,
@@ -491,8 +484,7 @@ async function runPipeline(
     diff: prep.promptDiff,
     mode,
     omittedFiles: prep.omittedFiles,
-    priorReviewContext: item.priorReviewContext,
-    ticket: item.ticket,
+    tickets: item.tickets,
     followUp: plan ? { plan, since } : null,
     nonce,
   });
@@ -507,6 +499,7 @@ async function runPipeline(
     systemPrompt,
     prompt,
     strippedDiff: prep.strippedDiff,
+    specialists,
     applyAuthEnv: APPLY_AUTH_ENV,
     abortController: controller,
     onProgress: (p) =>
@@ -545,9 +538,9 @@ async function runPipeline(
       plan && items
         ? linkReraisedFindings(plan, items, res.findings, new Set(prep.changedFiles))
         : res.findings.map((f) => ({ ...f, priorFindingId: null }));
-    const ticketAssessment = item.ticket
-      ? reconcileTicketAssessment(item.ticket, res.ticket)
-      : null;
+    // One assessment per ticket, index-aligned with the stored `ticket` array.
+    const ticketAssessment =
+      item.tickets.length > 0 ? reconcileTicketAssessments(item.tickets, res.tickets, res.ticket) : null;
     await saveReviewSuccess(ctx, reviewId, {
       scope: res.scope,
       summary: res.summary,

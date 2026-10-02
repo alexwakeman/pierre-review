@@ -9,6 +9,7 @@ import type {
   ClaudeFindingSeverity,
   ClaudeFindingSide,
   ClaudeReviewModel,
+  ClaudeFindingLens,
   ClaudeReviewVerdict,
   DailyBriefCounts,
   PersonPeriod,
@@ -425,6 +426,9 @@ export interface ReviewFinding {
   // (the plugin validates it against the refs it sent). Absent/null otherwise.
   // ⚠ OPTIONAL, SO apiVersion STAYS 21.
   priorRef?: string | null;
+  // The specialist lens on a deep review (review/claude-review/specialists.ts); null/absent ⇒ a
+  // general finding. Core-only (Claude Review left the plugin), so no apiVersion question.
+  lens?: ClaudeFindingLens | null;
 }
 
 // ---- Follow-up + user-story reports (host→plugin RESULT fields) ----
@@ -455,6 +459,9 @@ export interface ReviewTicketGapReport {
 }
 
 export interface ReviewTicketReport {
+  // Which ticket this reports on: 'T1'… as the prompt named them. Absent on the legacy single
+  // `ticket` report (read as T1).
+  ref?: string;
   alignment: 'aligned' | 'partly_aligned' | 'not_aligned' | 'unclear';
   summary: string;
   criteria?: ReviewTicketItemReport[];
@@ -478,6 +485,10 @@ export interface RunReviewArgs {
   applyAuthEnv: boolean;
   abortController: AbortController;
   onProgress: (p: ReviewRunProgress) => void;
+  // The specialist sub-agents OFFERED to the lead on a deep review (specialists.ts
+  // `offeredSpecialists`). Honoured ONLY when `mode === 'worktree'`; a diff-only run gets none
+  // whatever is passed. The lead picks among them, at most CLAUDE_REVIEW_MAX_SPECIALISTS.
+  specialists?: ClaudeFindingLens[];
 }
 
 export interface RunReviewResult {
@@ -497,6 +508,8 @@ export interface RunReviewResult {
   // ⚠ OPTIONAL, SO apiVersion STAYS 21 (see ReviewFollowUpReport). Present only when the model
   // reported them — i.e. when the prompt carried a "Previous review" / "User story or task" block.
   followUp?: ReviewFollowUpReport[];
+  // One report per ticket, keyed by `ref`. `ticket` is the legacy single report (read as T1).
+  tickets?: ReviewTicketReport[];
   ticket?: ReviewTicketReport;
 }
 
@@ -614,33 +627,9 @@ export interface ReviewSeam {
   postReview(args: PostReviewArgs): Promise<PostReviewOutcome>;
   // Post ONE finding as a standalone inline / PR-level comment.
   postFinding(args: PostFindingArgs): Promise<PostFindingOutcome>;
-  // The local per-review BUDGET: `reviewBudgetUsd` is the effective cap a run will use
-  // (user override or operator default), `reviewBudgetMax` the hard ceiling the user may set.
-  //
-  // ⚠ THE NAME IS HISTORICAL AND THE KEY HALF IS GONE. This used to report a stored BYO Anthropic
-  // key (`hasUserKey`) alongside the budget, and `setLocalKey` wrote it. The stored key is RETIRED:
-  // local Claude Review resolves credentials from an ambient Claude session first — so a
-  // subscription pays rather than a meter — and otherwise leaves the environment's
-  // `ANTHROPIC_API_KEY` in place. Two rungs, no stored secret, no form, no write path. THIS member
-  // survives NARROWED rather than deleted because the budget is still live
-  // (`ReviewBudgetPanel` / `PUT /api/claude-review/budget` / `getEffectiveReviewBudget()`).
-  //
-  // ⚠ ITS SIBLING `setLocalKey` WAS DELETED OUTRIGHT, AND THAT FAILS THE "NARROW ADDITIVE" TEST —
-  // a removed member is not a trailing optional field. apiVersion deliberately STAYS 21 anyway:
-  // bumping would turn "one dead local route 500s against a lagging submodule" into "the ENTIRE
-  // plugin goes dark, silently" for every account whose gitlink trails, which is strictly worse.
-  // ⚠ THE PRICE OF THAT CHOICE IS A LANDING REQUIREMENT: this host is NOT runtime-compatible with
-  // a plugin commit that still calls `setLocalKey` — the version gate passes and
-  // `PUT /api/claude-review/key` then throws `ctx.review.setLocalKey is not a function`. Host
-  // commit, plugin commit and GITLINK MOVE must land together. Nothing else in the plugin is
-  // affected, and the new SPA never calls that route.
-  getLocalKeyStatus(): {
-    reviewBudgetUsd: number;
-    reviewBudgetMax: number;
-  };
-  // Set (number, clamped to the max) or clear (null → operator default) the local per-review
-  // budget cap; returns the new effective value.
-  setReviewBudget(usd: number | null): { reviewBudgetUsd: number };
+  // ⚠ `getLocalKeyStatus` / `setReviewBudget` ARE DELETED. The per-review budget is the
+  // environment's `REVIEW_BUDGET_USD` (config.reviewBudgetUsd) alone: no stored override, no route,
+  // no seam. The plugin never called either member, so apiVersion stays 22.
   // ONE chat turn about a succeeded review (see ReviewChatArgs). ⚠ OPTIONAL, SO apiVersion STAYS
   // 21: absent against an older host, and the plugin's chat routes then answer 404.
   chat?(args: ReviewChatArgs): Promise<ReviewChatResult>;
@@ -1048,7 +1037,13 @@ export interface ProHostQueries {
     accountId: number,
     workspaceId: number,
     opts: { openedSinceMs: number; dayStartMs: number; limit: number },
-  ): Promise<{ prIds: number[]; autoToday: number } | null>;
+  ): Promise<{
+    prIds: number[];
+    autoToday: number;
+    // Already-reviewed PRs whose head moved past every run (auto RE-review). Absent on an older
+    // host ⇒ none.
+    reReview?: Array<{ prId: number; headSha: string }>;
+  } | null>;
 
   // THE PENDING BOARD (core db/pending-tabs.ts `getPendingBoardSnapshot`): the configuring
   // account's own six tabs for one workspace — the SAME fold `GET /api/attention` serves
@@ -1111,8 +1106,8 @@ export interface ProContext {
   // pro_migrations bookkeeping; see pro/migrate.ts).
   registerMigrations(sqliteFolder: string, pgFolder: string): Promise<void>;
   // Retention hook: the core TTL sweep (db/retention.ts) deletes core PR subtrees; the
-  // plugin registers a handler here to prune ITS OWN tables (ai_fixes / ai_pr_analyses /
-  // review_learnings) for the same PR ids — core can't name plugin tables (open-core
+  // plugin registers a handler here to prune ITS OWN tables (e.g. ai_pr_analyses) for the same
+  // PR ids — core can't name plugin tables (open-core
   // boundary). Called once per delete batch. Inert in OSS (no plugin → never registered).
   registerRetention(
     handler: (args: { prIds: number[] }) => Promise<void> | void,

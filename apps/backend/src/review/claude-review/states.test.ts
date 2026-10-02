@@ -131,15 +131,15 @@ beforeAll(async () => {
       findings: [],
     } as any);
 
-  await succeed(await persist.insertQueuedReview(ctx, current, HEAD, 'claude-opus-5-5', 1, ticket), 'APPROVE');
+  await succeed(await persist.insertQueuedReview(ctx, current, HEAD, 'claude-opus-5-5', 1, [ticket]), 'APPROVE');
   await succeed(await persist.insertQueuedReview(ctx, moved, OLD, 'claude-opus-5-5', 1), 'REQUEST_CHANGES');
   await succeed(await persist.insertQueuedReview(ctx, rerun, OLD, 'claude-opus-5-5', 1), 'APPROVE');
   await persist.insertQueuedReview(ctx, rerun, HEAD, 'claude-opus-5-5', 1);
   await succeed(await persist.insertQueuedReview(ctx, foreign, HEAD, 'claude-opus-5-5', 2), 'APPROVE');
   // The auto runs: one still queued in the DB (the manager says it is running), one finished.
-  await persist.insertQueuedReview(ctx, autoRunning, HEAD, 'claude-opus-5-5', 1, null, 'auto');
+  await persist.insertQueuedReview(ctx, autoRunning, HEAD, 'claude-opus-5-5', 1, [], 'auto');
   await succeed(
-    await persist.insertQueuedReview(ctx, autoDone, HEAD, 'claude-opus-5-5', 1, null, 'auto'),
+    await persist.insertQueuedReview(ctx, autoDone, HEAD, 'claude-opus-5-5', 1, [], 'auto'),
     'APPROVE',
   );
 

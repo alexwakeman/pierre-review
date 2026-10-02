@@ -50,6 +50,10 @@ vi.mock('./persist.js', () => ({
     return id;
   },
   getLatestClaudeReview: async () => null,
+  // PR 70 was reviewed before with a story: a re-review carries it. PR 71 already has a run at
+  // its head (a person reviewed it while the auto item waited).
+  getLatestStoredTickets: async (_ctx: unknown, prId: number) => (prId === 70 ? [PRIOR_TICKET] : []),
+  hasReviewAtHead: async (_ctx: unknown, prId: number) => prId === 71,
   loadPriorReviewForFollowUp: async () => null,
   markReviewCancelled: async () => {},
   markReviewFailed: async () => {},
@@ -60,17 +64,20 @@ vi.mock('./persist.js', () => ({
 // The server-side Jira fill for auto runs — the OPTIONAL Pro provider (plugin-providers.ts): PR 60
 // carries a ticket, every other PR has none.
 const AUTO_TICKET = { title: 'Reset password', description: null, acceptanceCriteria: '* Link is emailed' };
+const AUTO_TICKET_2 = { title: 'Audit log', description: null, acceptanceCriteria: null };
+const PRIOR_TICKET = { title: 'Typed by a person', description: 'x', acceptanceCriteria: null };
 vi.mock('../plugin-providers.js', () => ({
   getAgenticProviders: () => ({
     resolveReviewTicket: async (_account: number, prId: number) =>
-      prId === 60 ? { ticket: AUTO_TICKET, key: 'ENG-7' } : { ticket: null, key: null },
+      prId === 60
+        ? { ticket: AUTO_TICKET, key: 'ENG-7' }
+        : prId === 62
+          ? { ticket: AUTO_TICKET, key: 'ENG-7', tickets: [AUTO_TICKET, AUTO_TICKET_2] }
+          : { ticket: null, key: null },
   }),
 }));
 let aiReady = true;
 vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
-vi.mock('../memory/retrieval.js', () => ({
-  buildLearningsContext: async () => undefined,
-}));
 
 type Manager = typeof import('./manager.js');
 let m: Manager;
@@ -123,7 +130,7 @@ describe('the auto lane', () => {
 
   it('writes NO row while an auto item waits, and stamps trigger auto + the default model at launch', async () => {
     // Occupy the one slot with a manual run.
-    await m.startReview(ctx, 1, 10, 'claude-opus-5-5', 'auto');
+    await m.startReview(ctx, 1, 10, 'claude-opus-5-5');
     await flush();
     expect(m.enqueueAutoReview(ctx, 1, 20)).toBe('queued');
     await flush();
@@ -137,10 +144,10 @@ describe('the auto lane', () => {
   });
 
   it('⚠ a queued MANUAL click launches before a queued auto item', async () => {
-    await m.startReview(ctx, 1, 10, 'claude-opus-5-5', 'auto'); // running
+    await m.startReview(ctx, 1, 10, 'claude-opus-5-5'); // running
     await flush();
     m.enqueueAutoReview(ctx, 1, 20); // waiting in the auto lane
-    const manual = await m.startReview(ctx, 1, 30, 'claude-opus-5-5', 'auto'); // waiting, manual
+    const manual = await m.startReview(ctx, 1, 30, 'claude-opus-5-5'); // waiting, manual
     expect(manual).toMatchObject({ ok: true, queued: true });
 
     await releaseFirst();
@@ -150,35 +157,35 @@ describe('the auto lane', () => {
   });
 
   it('⚠ a full auto lane never makes a click answer busy', async () => {
-    await m.startReview(ctx, 1, 10, 'claude-opus-5-5', 'auto');
+    await m.startReview(ctx, 1, 10, 'claude-opus-5-5');
     await flush();
     expect(m.enqueueAutoReview(ctx, 1, 20)).toBe('queued');
     expect(m.enqueueAutoReview(ctx, 1, 21)).toBe('queued');
     expect(m.enqueueAutoReview(ctx, 1, 22)).toBe('full');
     expect(m.autoLaneRoom()).toBe(0);
     // The manual queue (cap 2) is untouched by the auto lane.
-    expect(await m.startReview(ctx, 1, 30, 'claude-opus-5-5', 'auto')).toMatchObject({ ok: true });
-    expect(await m.startReview(ctx, 1, 31, 'claude-opus-5-5', 'auto')).toMatchObject({ ok: true });
-    expect(await m.startReview(ctx, 1, 32, 'claude-opus-5-5', 'auto')).toEqual({
+    expect(await m.startReview(ctx, 1, 30, 'claude-opus-5-5')).toMatchObject({ ok: true });
+    expect(await m.startReview(ctx, 1, 31, 'claude-opus-5-5')).toMatchObject({ ok: true });
+    expect(await m.startReview(ctx, 1, 32, 'claude-opus-5-5')).toEqual({
       ok: false,
       reason: 'busy',
     });
   });
 
   it('⚠ a click on a PR waiting in the lane is refused, and the lane keeps it', async () => {
-    await m.startReview(ctx, 1, 10, 'claude-opus-5-5', 'auto');
+    await m.startReview(ctx, 1, 10, 'claude-opus-5-5');
     await flush();
     m.enqueueAutoReview(ctx, 1, 20);
     expect(m.autoReviewHold(20, 1)).toBe('queued');
     expect(m.autoReviewHold(20, 2)).toBeNull(); // another account's view: nothing
-    const r = await m.startReview(ctx, 1, 20, 'claude-opus-5-5', 'auto');
+    const r = await m.startReview(ctx, 1, 20, 'claude-opus-5-5');
     expect(r).toEqual({ ok: false, reason: 'auto_in_progress', auto: 'queued' });
     expect(m.autoPendingPrIds().has(20)).toBe(true);
     expect(inserted.some((x) => x.prId === 20)).toBe(false);
   });
 
   it('exposes a waiting auto item through the status and the active list', async () => {
-    await m.startReview(ctx, 1, 10, 'claude-opus-5-5', 'auto');
+    await m.startReview(ctx, 1, 10, 'claude-opus-5-5');
     await flush();
     m.enqueueAutoReview(ctx, 1, 20);
     expect(await m.getReviewStatus(ctx, 1, 20)).toEqual({
@@ -198,19 +205,19 @@ describe('the auto lane', () => {
     m.enqueueAutoReview(ctx, 1, 20);
     await flush();
     expect(m.autoReviewHold(20, 1)).toBe('running');
-    expect(await m.startReview(ctx, 1, 20, 'claude-opus-5-5', 'auto')).toEqual({
+    expect(await m.startReview(ctx, 1, 20, 'claude-opus-5-5')).toEqual({
       ok: false,
       reason: 'auto_in_progress',
       auto: 'running',
     });
     await releaseFirst(); // the auto run ends (here: fails)
     expect(m.autoReviewHold(20, 1)).toBeNull();
-    expect(await m.startReview(ctx, 1, 20, 'claude-opus-5-5', 'auto')).toMatchObject({ ok: true });
+    expect(await m.startReview(ctx, 1, 20, 'claude-opus-5-5')).toMatchObject({ ok: true });
     expect(inserted.filter((x) => x.prId === 20).map((x) => x.trigger)).toEqual(['auto', 'manual']);
   });
 
   it('an account whose credits ran out mid-wait is skipped at launch, with no row', async () => {
-    await m.startReview(ctx, 1, 10, 'claude-opus-5-5', 'auto');
+    await m.startReview(ctx, 1, 10, 'claude-opus-5-5');
     await flush();
     m.enqueueAutoReview(ctx, 2, 40);
     (ctx as any).aiCredits.check = async (a: number) => ({ agentBlocked: a === 2 });
@@ -222,11 +229,11 @@ describe('the auto lane', () => {
   it('⚠ an auto run stores the ticket the server fetched from Jira', async () => {
     m.enqueueAutoReview(ctx, 1, 60);
     await flush();
-    expect(inserted.find((r) => r.prId === 60)).toMatchObject({ trigger: 'auto', ticket: AUTO_TICKET });
+    expect(inserted.find((r) => r.prId === 60)).toMatchObject({ trigger: 'auto', ticket: [AUTO_TICKET] });
     await releaseFirst();
     m.enqueueAutoReview(ctx, 1, 61);
     await flush();
-    expect(inserted.find((r) => r.prId === 61)).toMatchObject({ trigger: 'auto', ticket: null });
+    expect(inserted.find((r) => r.prId === 61)).toMatchObject({ trigger: 'auto', ticket: [] });
   });
 
   it('reports an auto run as auto in the active list', async () => {
@@ -236,7 +243,7 @@ describe('the auto lane', () => {
     expect(active).toEqual([expect.objectContaining({ prId: 50, trigger: 'auto', status: 'running' })]);
   });
   it('⚠ switching a workspace off drops its WAITING items (no row, no run), and only its own', async () => {
-    await m.startReview(ctx, 1, 10, 'claude-opus-5-5', 'auto'); // holds the one slot
+    await m.startReview(ctx, 1, 10, 'claude-opus-5-5'); // holds the one slot
     await flush();
     expect(m.enqueueAutoReview(ctx, 1, 20, 7)).toBe('queued');
     expect(m.enqueueAutoReview(ctx, 1, 21, 8)).toBe('queued');
@@ -246,5 +253,22 @@ describe('the auto lane', () => {
 
     await releaseFirst();
     expect(inserted.map((r) => r.prId)).toEqual([10, 21]); // 20 never got a row
+  });
+
+  it('an auto run takes EVERY ticket the provider read; a re-review carries the previous stories', async () => {
+    expect(m.enqueueAutoReview(ctx, 1, 62)).toBe('queued');
+    await flush();
+    expect(inserted.find((r) => r.prId === 62)?.ticket).toEqual([AUTO_TICKET, AUTO_TICKET_2]);
+    await releaseFirst();
+    expect(m.enqueueAutoReview(ctx, 1, 70)).toBe('queued');
+    await flush();
+    expect(inserted.find((r) => r.prId === 70)?.ticket).toEqual([PRIOR_TICKET]);
+  });
+
+  it('⚠ ONE RUN PER HEAD: an item whose head already has a run writes no row', async () => {
+    expect(m.enqueueAutoReview(ctx, 1, 71)).toBe('queued');
+    await flush();
+    expect(inserted.find((r) => r.prId === 71)).toBeUndefined();
+    expect(runs).toEqual([]);
   });
 });

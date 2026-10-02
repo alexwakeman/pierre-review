@@ -127,6 +127,8 @@ interface ActivityRow {
   actorId: number | null;
   detail?: string;
   href?: string;
+  /** A commit row's full SHA — printed as the 7-character short hash, copied in full. */
+  sha?: string;
   // The timeline event this entry maps to, so "Show" can recenter on and glow
   // it. refId matches the event's ref_id (null for lifecycle, which has no
   // marker — "Show" just recenters on the PR bar then).
@@ -151,6 +153,7 @@ function buildActivity(pr: PrDetailT): ActivityRow[] {
       actorId: c.authorId ?? c.committerId,
       detail: c.message?.split('\n')[0],
       href: `${pr.githubUrl}/commits/${c.sha}`,
+      sha: c.sha,
       event: { type: 'commit_pushed', refId: c.id },
     });
   }
@@ -278,6 +281,20 @@ function ActivityList({
                   className="font-medium"
                 />
                 <span className="text-gray-500 dark:text-gray-400">{r.label}</span>
+                {r.sha && (
+                  <span className="inline-flex items-center gap-0.5">
+                    <a
+                      href={safeExternalUrl(r.href ?? `${pr.githubUrl}/commits/${r.sha}`)}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="font-mono text-xs text-gray-500 hover:text-blue-500 dark:text-gray-400"
+                      aria-label={`Commit ${r.sha.slice(0, 7)} on GitHub`}
+                    >
+                      {r.sha.slice(0, 7)}
+                    </a>
+                    <CopyButton text={r.sha} what="commit hash" title="Copy commit hash" />
+                  </span>
+                )}
                 <span className="text-xs text-gray-400" title={dateTime(r.time)}>
                   · {relativeTime(r.time)}
                 </span>

@@ -106,7 +106,7 @@ runtime dep; `pg` loads only in cloud.
 
 ### No AI SDK in the manifest; installed on first use
 
-Claude Review (run, follow-up, ticket check, auto review, chat), review memory and AI Fix are FREE
+Claude Review (run, follow-up, ticket check, auto review, chat) and AI Fix are FREE
 and ship in the package **as code** — LOCAL ONLY, on the user's own Claude Code session or
 `ANTHROPIC_API_KEY` (`review/auth.ts`). The four SDKs they run on —
 `@anthropic-ai/claude-agent-sdk`, `@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`, `zod` — are

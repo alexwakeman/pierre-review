@@ -23,15 +23,10 @@
 // coding/agent.ts → sdkModelOptions(model, 'worktree'), and nothing else sets its effort.
 import { config, type ReviewEffort } from '../config.js';
 
-// Models that accept the `effort` option. Haiku 4.5 rejects it (the API 400s), so it runs
-// without an effort hint — its low per-token price is its cost lever instead. The old Opus 4.8
-// left this set with the rest of its entries: nothing can start a run on it (both generate
-// routes 400 a model outside the offered list), so nothing here needs to know it.
-export const EFFORT_CAPABLE_MODELS: ReadonlySet<string> = new Set([
-  'claude-opus-5-5',
-  'claude-sonnet-5',
-  'claude-sonnet-4-6',
-]);
+// Models that accept the `effort` option — both offered models. A model outside the offered list
+// (the old Opus 4.8, Sonnet 4.6, Haiku 4.5) left this set: nothing can start a run on one (both
+// generate routes 400 it, and the chat falls back to the default), so nothing here needs to know it.
+export const EFFORT_CAPABLE_MODELS: ReadonlySet<string> = new Set(['claude-opus-5-5', 'claude-sonnet-5']);
 
 // Models whose effort is PINNED regardless of mode or env (see the header).
 export const PINNED_EFFORT: Readonly<Record<string, ReviewEffort>> = { 'claude-opus-5-5': 'medium' };

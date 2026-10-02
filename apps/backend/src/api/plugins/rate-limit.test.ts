@@ -41,6 +41,9 @@ describe('tierFor — AI generation', () => {
   it('bills a Claude Review chat question and reads its history cheaply', () => {
     expect(tiers('POST', '/api/claude-reviews/7/chat')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('GET', '/api/claude-reviews/7/chat')).toEqual(['read']);
+    // A ticket analysis posted as a PR comment is a GitHub write, not a model call.
+    expect(tiers('POST', '/api/claude-reviews/7/tickets/0/post')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/claude-reviews/7/tickets/0/posts')).toEqual(['ai', 'ai_hourly']);
   });
 
   it('treats reads of stored AI results as cheap reads, not generation', () => {
@@ -55,10 +58,8 @@ describe('tierFor — AI generation', () => {
 
   it('does not bill cancels or config writes as generation', () => {
     expect(tiers('POST', '/api/prs/42/claude-review/cancel')).toEqual(['read']);
-    // (`PUT /api/claude-review/key` used to be asserted here. The route is DELETED — the BYO
-    // Anthropic key is retired, so there is nothing left to tier. `/budget` is the surviving
-    // config write on this prefix and carries the same property.)
-    expect(tiers('PUT', '/api/claude-review/budget')).toEqual(['read']);
+    // (`PUT /api/claude-review/key` and `/budget` used to be asserted here. Both routes are
+    // DELETED — the key is retired and the budget is the REVIEW_BUDGET_USD env var.)
     // The Open PRs column's batched latest-run read is a POST (a list of ids) but DB-only.
     expect(tiers('POST', '/api/claude-review/states')).toEqual(['read']);
     // …and only that exact path: a sibling POST under the family still bills.

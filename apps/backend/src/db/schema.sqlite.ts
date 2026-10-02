@@ -1109,13 +1109,15 @@ export const claudeReviews = sqliteTable(
       .notNull()
       .default(sql`(unixepoch())`),
     finishedAt: integer('finished_at', { mode: 'timestamp' }),
-    // The optional user story or task the run was given — stored at QUEUE time so a failed or
-    // cancelled run still prefills the panel. `criteria` is the server's split (AC1..n). Null when
-    // none was given. Migration 0070 (pg 0057).
-    ticket: text('ticket', { mode: 'json' }).$type<ClaudeReviewTicket>(),
-    // The server-validated assessment against `ticket` (every criterion answered once; a skipped
-    // one is 'not_checked'). Null without a ticket or on a run that did not succeed.
-    ticketAssessment: text('ticket_assessment', { mode: 'json' }).$type<ClaudeTicketAssessment>(),
+    // The optional user stories the run was given — stored at QUEUE time so a failed or
+    // cancelled run still prefills the panel. An ARRAY since several tickets (no migration: a run
+    // from before stored ONE object, and readers go through shared `storedList`). Null when none
+    // was given. Migration 0070 (pg 0057).
+    ticket: text('ticket', { mode: 'json' }).$type<ClaudeReviewTicket | ClaudeReviewTicket[]>(),
+    // The server-validated assessment against `ticket` — an ARRAY index-aligned with it (one
+    // object on older runs). Each element also holds its `posted` record once that ticket's
+    // analysis was posted as a PR comment. Null without a ticket or on a run that did not succeed.
+    ticketAssessment: text('ticket_assessment', { mode: 'json' }).$type<ClaudeTicketAssessment | ClaudeTicketAssessment[]>(),
     // What this run found about the PREVIOUS succeeded review's findings (addressed / partly /
     // not / no longer applies / not checked), with the prior review id + head. Null when there was
     // no earlier review with findings to check.
@@ -1188,6 +1190,10 @@ export const claudeReviewFindings = sqliteTable(
     // writer (the plugin, which only links ids it just loaded for this PR) does not already give.
     // Migration 0070 (pg 0057).
     priorFindingId: integer('prior_finding_id'),
+    // The specialist angle that raised it on a DEEP (worktree) review — `ClaudeFindingLens`:
+    // 'design' | 'tests' | 'impact' | 'accessibility' | 'security' | 'performance'. NULL is a
+    // general finding (every diff-only finding and every row before migration 0075 / pg 0062).
+    lens: text('lens'),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
@@ -1236,52 +1242,15 @@ export const claudeReviewChatMessages = sqliteTable(
   }),
 );
 
-// ---- Review memory + AI Fix (CORE since migration 0074 / pg 0061) ----
-// Both tables were created by the private plugin (plugin migrations 0001 / 0002 / 0003 / 0024) and
-// are ADOPTED IN PLACE by 0074's CREATE … IF NOT EXISTS — same names, same columns, same index
-// names, and NO foreign keys (SQLite cannot add one to an existing table without a rebuild, so a
-// fresh and an adopted install would differ). Tenancy is the query layer's `account_id` predicate
-// plus verify:isolation; no id in either table arrives in a request body. Both delete paths
-// (deleteRepo, retention's deletePrSubtree) and eraseAccountData + accountScopedTables() cover them.
+// ---- AI Fix (CORE since migration 0074 / pg 0061) ----
+// Created by the private plugin (plugin migrations 0002 / 0003 / 0024) and ADOPTED IN PLACE by
+// 0074's CREATE … IF NOT EXISTS — same name, same columns, same index names, and NO foreign keys
+// (SQLite cannot add one to an existing table without a rebuild, so a fresh and an adopted install
+// would differ). Tenancy is the query layer's `account_id` predicate plus verify:isolation; no id
+// arrives in a request body. Both delete paths (deleteRepo, retention's deletePrSubtree) and
+// eraseAccountData + accountScopedTables() cover it. (Its sibling, review memory's
+// `review_learnings`, was DROPPED by 0075 / pg 0062.)
 //
-// reviewLearnings — append-only log of what a reviewer DID with a Claude review (kept / dropped /
-// reworded / posted a finding, changed a verdict). The learnings signal fed back into the next
-// review's prompt (review/memory/).
-export const reviewLearnings = sqliteTable(
-  'review_learnings',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    accountId: integer('account_id').notNull(),
-    repoId: integer('repo_id').notNull(),
-    prId: integer('pr_id').notNull(),
-    sourceReviewId: integer('source_review_id').notNull(),
-    findingId: integer('finding_id'),
-    headSha: text('head_sha').notNull(),
-    kind: text('kind').notNull(),
-    path: text('path'),
-    dirPath: text('dir_path'),
-    ext: text('ext'),
-    category: text('category'),
-    claudeVerdict: text('claude_verdict'),
-    userVerdict: text('user_verdict'),
-    claudeTitle: text('claude_title'),
-    claudeText: text('claude_text'),
-    userText: text('user_text'),
-    postedCommentKind: text('posted_comment_kind'),
-    dedupeKey: text('dedupe_key').notNull(),
-    createdAt: integer('created_at', { mode: 'timestamp' })
-      .notNull()
-      .default(sql`(unixepoch())`),
-  },
-  (t) => ({
-    dedupeUx: uniqueIndex('rl_account_dedupe').on(t.accountId, t.dedupeKey),
-    categoryIdx: index('rl_account_repo_category').on(t.accountId, t.repoId, t.category),
-    dirIdx: index('rl_account_repo_dir').on(t.accountId, t.repoId, t.dirPath),
-    sourceReviewIdx: index('rl_account_source_review').on(t.accountId, t.sourceReviewId),
-    createdIdx: index('rl_account_repo_created').on(t.accountId, t.repoId, t.createdAt),
-  }),
-);
-
 // aiFixes — one agentic fix run (history kept; a re-run is a new row). ⚠ An ADOPTED table may
 // carry eight more columns than this declares (plugin 0003's `resolved_*` / `resolve_error`, the
 // removed rebase artifact). Drizzle names only what it knows, so they are never read or written.

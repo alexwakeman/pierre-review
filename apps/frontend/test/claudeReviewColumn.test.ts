@@ -232,7 +232,13 @@ describe("resolveListTicket — the list's user story", () => {
     });
     expect(asked).toEqual(['ACME-1']);
     expect(r.note).toBeNull();
-    expect(r.ticket).toEqual({ title: 'Reset password', description: 'As a user…', acceptanceCriteria: 'notes' });
+    expect(r.ticket).toMatchObject({
+      title: 'Reset password',
+      description: 'As a user…',
+      acceptanceCriteria: 'notes',
+      source: 'jira',
+      key: 'ACME-1',
+    });
   });
 
   it('no ticket, no token, a failed lookup or a failed fetch ⇒ starts without, with a note', async () => {

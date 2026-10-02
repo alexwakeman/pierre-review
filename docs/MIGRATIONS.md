@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0061` and plugin `0034`–`0037` are NOT (written 2026-09-19/24 with the Postgres down; see the
+  ⚠ pg `0052`–`0062` and plugin `0034`–`0037` are NOT (written 2026-09-19/24 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -806,6 +806,16 @@ sweeper reviews from. No backfill (NULL = off). ⚠ Like `0035`, every hand-buil
 the store must replay it (the store SELECTs both columns): `workspace-settings.test.ts`,
 `settings-route-schema.test.ts`, `jira-routes.test.ts`. ⚠ **The pg twin is NOT replayed.**
 
+### `0075_review_lens_drop_learnings` (pg `0062`)
+
+Two unrelated Claude Review changes in one file. `claude_review_findings.lens` (nullable text, no
+backfill): the specialist angle a DEEP review's finding came from (`ClaudeFindingLens`); NULL = a
+general finding, and every older row. And `DROP TABLE IF EXISTS review_learnings` — review memory
+was deleted (capture, retrieval, prompt block, the two routes, the shared types). DROP takes the
+five `rl_*` indexes with it. Nothing recreates the table: core `0074`'s `CREATE … IF NOT EXISTS`
+already ran on every install that reaches `0075`, and the plugin's own DDL for it was stripped at
+apiVersion 22. ⚠ **The pg twin is NOT replayed.**
+
 ### `0074_adopt_agentic_tables` (pg `0061`) + plugin `0037_auto_review_to_core`
 
 Claude Review, review memory and AI Fix's fixer moved from the plugin into CORE (apiVersion 22), and
@@ -843,7 +853,7 @@ repo removal); the plugin's `pruneProByPrIds` / `eraseProByAccountId` no longer 
 plugin already created both tables (every statement must no-op) and against a fresh one; then run
 plugin `0037` with one ON row and check it lands on the right workspace only.
 
-⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0061` and plugin `0034`–`0037`). The
+⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0062` and plugin `0034`–`0037`). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
 core should reach **62 applied = 62 journal entries** and the plugin **37** — and check

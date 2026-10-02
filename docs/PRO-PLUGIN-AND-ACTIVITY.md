@@ -23,7 +23,7 @@ succeeds.
 **Two tiers, plus a free local AI set.** **core (free)** = plain feed + timeline + **My Turn /
 "FYI"**, and — LOCALLY, on the user's own Claude Code session or `ANTHROPIC_API_KEY` — the AGENTIC
 features: Claude Review (run, follow-up, ticket check against a pasted story, auto review, chat),
-review memory and AI Fix's fixer. They LEFT this plugin at **apiVersion 22** and live in core
+and AI Fix's fixer (review memory went with them and was later deleted). They LEFT this plugin at **apiVersion 22** and live in core
 (`apps/backend/src/review/`, `src/coding/ai-fix/`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)), gated on
 the top-level `MeResponse.ai` and off in cloud by an explicit `isCloud` check. **pro** = every
 ONE-SHOT Haiku feature on the Anthropic API (PR summary, the CI-failure analysis card, comment
@@ -62,7 +62,8 @@ is a compile error in the plugin too. It resolves under **tsx** (dev, `src/index
 `node dist` run would need `packages/pro/dist` (no build step yet — Pro is local/dev-only). The
 plugin is **never in the release allowlist** (`build-release.mjs`). Plugin owns its **own**
 dual-dialect tables (`repo_digests`, `ai_pr_analyses`, …; `review_learnings` and `ai_fixes`
-were ADOPTED by core migration `0074` / pg `0061` at apiVersion 22), migrations
+were ADOPTED by core migration `0074` / pg `0061` at apiVersion 22, and core `0075` / pg `0062`
+later DROPPED `review_learnings`), migrations
 (`packages/pro/migrations{,-pg}/*.sql` run via `ctx.registerMigrations` → `src/pro/migrate.ts`,
 the one sanctioned raw-`$client` DDL site + `pro_migrations` bookkeeping), and isolation test.
 
@@ -2802,6 +2803,9 @@ rendering nothing rather than throwing (that component is mounted in eight place
 no error boundary). The sha range is the point: "it compared the wrong two commits" is a
 completely different bug from "it misread the diff".
 
+**HISTORICAL — DELETED.** Review memory moved to core at apiVersion 22 and was then removed
+outright (core sqlite `0075` / pg `0062` dropped `review_learnings`; the event bus, the prompt slot
+and both UI surfaces are gone). What it was:
 **Pro: Claude Review learnings/memory** (`packages/pro/src/review-memory/`). Core seam =
 `src/review/events.ts`: an **inert** typed event-bus (5 emit sites in `claude-review.ts`,
 zero subscribers in OSS) + a learnings-provider registry, plus an optional

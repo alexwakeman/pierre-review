@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type {
   ClaudeFinding,
+  ClaudeFindingLens,
   ClaudeFindingSeverity,
   ClaudeFindingSide,
   ClaudeReview,
   ClaudeReviewFollowUp,
   ClaudeReviewFollowUpRecord,
+  ClaudeReviewHeadState,
   ClaudeReviewListItem,
   ClaudeReviewModel,
   ClaudeReviewPrState,
@@ -19,7 +21,10 @@ import type {
   ReviewMode,
   ReviewRouteReason,
 } from '@pierre-review/shared';
+import { CLAUDE_FINDING_LENSES } from '@pierre-review/shared';
+import { storedList } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../pro/contract.js';
+import { ticketEntriesOf } from './ticket.js';
 import type { AgentContext } from '../agent-context.js';
 import {
   isFollowUpEligible,
@@ -72,6 +77,8 @@ interface FindingRow {
   createdAt: Date;
   // Soft reference to the previous-review finding this one re-raises (migration 0070).
   priorFindingId?: number | null;
+  // The specialist lens (migration 0075 / pg 0062). Free text in the column; narrowed on read.
+  lens?: string | null;
 }
 
 interface ReviewRow {
@@ -101,8 +108,9 @@ interface ReviewRow {
   postedAt: Date | null;
   createdAt: Date;
   finishedAt: Date | null;
-  ticket?: ClaudeReviewTicket | null;
-  ticketAssessment?: ClaudeTicketAssessment | null;
+  // One object on runs from before several tickets; an array since (`storedList` reads both).
+  ticket?: ClaudeReviewTicket | ClaudeReviewTicket[] | null;
+  ticketAssessment?: ClaudeTicketAssessment | ClaudeTicketAssessment[] | null;
   followUp?: ClaudeReviewFollowUpRecord | null;
   // Absent on a host older than core migration 0071 — reads as 'manual'.
   trigger?: string | null;
@@ -130,7 +138,15 @@ function mapFinding(r: FindingRow): ClaudeFinding {
     postedCommentKind: r.postedCommentKind,
     createdAt: isoReq(r.createdAt),
     priorFindingId: r.priorFindingId ?? null,
+    lens: asLens(r.lens),
   };
+}
+
+// A stored lens outside today's list reads as a general finding, never a made-up label.
+function asLens(v: string | null | undefined): ClaudeFindingLens | null {
+  return v != null && (CLAUDE_FINDING_LENSES as readonly string[]).includes(v)
+    ? (v as ClaudeFindingLens)
+    : null;
 }
 
 // The stored follow-up + each item's DERIVED `reraisedFindingId` (the first of this run's
@@ -155,7 +171,12 @@ function mapFollowUp(
   };
 }
 
-function mapReview(r: ReviewRow, findings: FindingRow[]): ClaudeReview {
+function mapReview(
+  r: ReviewRow,
+  findings: FindingRow[],
+  head: ClaudeReviewHeadState | null = null,
+): ClaudeReview {
+  const tickets = ticketEntriesOf(r.ticket, r.ticketAssessment);
   return {
     id: r.id,
     prId: r.prId,
@@ -184,8 +205,10 @@ function mapReview(r: ReviewRow, findings: FindingRow[]): ClaudeReview {
     createdAt: isoReq(r.createdAt),
     finishedAt: iso(r.finishedAt),
     findings: findings.map(mapFinding),
-    ticket: r.ticket ?? null,
-    ticketAssessment: r.ticketAssessment ?? null,
+    tickets,
+    ticket: tickets[0]?.ticket ?? null,
+    ticketAssessment: tickets[0]?.assessment ?? null,
+    head,
     followUp: mapFollowUp(r.followUp, findings),
     trigger: r.trigger === 'auto' ? 'auto' : 'manual',
   };
@@ -216,13 +239,13 @@ export async function getClaudeReviewById(
 ): Promise<ClaudeReview | null> {
   const { cr, crf, prs, repos } = tables(ctx);
   const rows = (await ctx.db
-    .select({ review: cr })
+    .select({ review: cr, prHeadSha: prs.headSha })
     .from(cr)
     .innerJoin(prs, eq(prs.id, cr.prId))
     .innerJoin(repos, eq(repos.id, prs.repoId))
     .where(and(eq(cr.id, reviewId), eq(repos.accountId, accountId)))
     .limit(1)
-    .execute()) as Array<{ review: ReviewRow }>;
+    .execute()) as Array<{ review: ReviewRow; prHeadSha: string | null }>;
   const row = rows[0]?.review ?? null;
   if (!row) return null;
   const findings = (await ctx.db
@@ -231,7 +254,8 @@ export async function getClaudeReviewById(
     .where(eq(crf.reviewId, reviewId))
     .orderBy(asc(crf.id))
     .execute()) as FindingRow[];
-  return mapReview(row, findings);
+  const head = await reviewHeadState(ctx, row.prId, row.headSha, rows[0]!.prHeadSha);
+  return mapReview(row, findings, head);
 }
 
 export async function getLatestClaudeReview(
@@ -388,7 +412,7 @@ export async function getLatestReviewStates(
     verdict: ClaudeReviewVerdict | null;
     headSha: string;
     finishedAt: Date | null;
-    ticket: ClaudeReviewTicket | null;
+    ticket: ClaudeReviewTicket | ClaudeReviewTicket[] | null;
     prHeadSha: string | null;
     trigger: string | null;
   }>;
@@ -404,7 +428,8 @@ export async function getLatestReviewStates(
       verdict: r.verdict,
       reviewedHeadSha: r.headSha,
       finishedAt: iso(r.finishedAt),
-      ticket: r.ticket ?? null,
+      ticket: storedList(r.ticket)[0] ?? null,
+      tickets: storedList(r.ticket),
       headMoved: r.prHeadSha != null && r.prHeadSha !== r.headSha,
       trigger: r.trigger === 'auto' ? 'auto' : 'manual',
     });
@@ -683,15 +708,15 @@ export async function loadPriorReviewForFollowUp(
 
 // ---- Writers ----
 
-// The ticket is stored at QUEUE time (not on success), so a failed or cancelled run still
-// prefills the SPA's panel for the re-run.
+// The tickets are stored at QUEUE time (not on success), so a failed or cancelled run still
+// prefills the SPA's panel for the re-run. Stored as an ARRAY (null when none).
 export async function insertQueuedReview(
   ctx: AgentContext,
   prId: number,
   headSha: string,
   model: ClaudeReviewModel,
   accountId: number,
-  ticket: ClaudeReviewTicket | null = null,
+  tickets: readonly ClaudeReviewTicket[] = [],
   // TRAILING: who started it. 'auto' = the per-workspace sweeper (auto.ts). A label only: core's
   // My Turn read keeps an auto run exactly like a manual one, and the chip says "Auto review".
   trigger: ClaudeReviewTrigger = 'manual',
@@ -699,7 +724,15 @@ export async function insertQueuedReview(
   const { cr } = tables(ctx);
   const rows = (await ctx.db
     .insert(cr)
-    .values({ accountId, prId, headSha, status: 'queued', model, ticket, trigger })
+    .values({
+      accountId,
+      prId,
+      headSha,
+      status: 'queued',
+      model,
+      ticket: tickets.length > 0 ? [...tickets] : null,
+      trigger,
+    })
     .returning({ id: cr.id })
     .execute()) as Array<{ id: number }>;
   return rows[0]!.id;
@@ -737,7 +770,8 @@ export interface ReviewSuccessData {
   // only on a re-raise of a comment already posted on this commit (absent ⇒ included).
   findings: Array<ReviewFinding & { priorFindingId?: number | null; included?: boolean }>;
   followUp?: ClaudeReviewFollowUpRecord | null;
-  ticketAssessment?: ClaudeTicketAssessment | null;
+  // One per ticket, index-aligned with the stored tickets.
+  ticketAssessment?: ClaudeTicketAssessment[] | null;
 }
 
 export async function saveReviewSuccess(
@@ -790,6 +824,7 @@ export async function saveReviewSuccess(
           // `isAlreadyOnThisCommit`), so Post review does not put it on GitHub twice.
           included: f.included ?? true,
           priorFindingId: f.priorFindingId ?? null,
+          lens: f.lens ?? null,
         })
         .execute();
     }
@@ -974,4 +1009,167 @@ async function recordReviewUsage(
     outputTokens: outputTokens ?? null,
     prId: row.prId,
   });
+}
+
+// ---- Outdated: the reviewed commit against the PR's synced head ----
+
+/**
+ * Is the review behind the PR's head? DB-only. `commitsSince` counts the PR's synced commits newer
+ * than the reviewed one (by commit time); null when the reviewed commit is not among them, or when
+ * it looks rewritten (a newer copy with its headline) — never a guess. null overall when the PR's head is unknown.
+ */
+export async function reviewHeadState(
+  ctx: AgentContext,
+  prId: number,
+  reviewedSha: string,
+  currentHeadSha: string | null,
+): Promise<ClaudeReviewHeadState | null> {
+  if (!currentHeadSha) return null;
+  if (currentHeadSha === reviewedSha) {
+    return { currentHeadSha, outdated: false, commitsSince: 0 };
+  }
+  const c = (ctx.schema as any).commits;
+  let commitsSince: number | null = null;
+  if (c) {
+    const rows = (await ctx.db
+      .select({ sha: c.sha, committedAt: c.committedAt, headline: c.messageHeadline })
+      .from(c)
+      .where(eq(c.prId, prId))
+      .execute()) as Array<{ sha: string; committedAt: Date | number; headline: string | null }>;
+    const ms = (v: Date | number): number => (v instanceof Date ? v.getTime() : Number(v));
+    const reviewed = rows.find((r) => r.sha === reviewedSha);
+    const head = rows.find((r) => r.sha === currentHeadSha);
+    if (reviewed && head) {
+      const at = ms(reviewed.committedAt);
+      const newer = rows.filter((r) => r.sha !== reviewedSha && ms(r.committedAt) > at);
+      // Sync never prunes commits a force-push dropped, so a rebase or amend leaves the reviewed
+      // commit's own rewritten copy among the "newer" rows (same headline, later time). Counting
+      // those would call a rewrite "N newer commits"; say only that the branch changed (null).
+      const rewritten =
+        reviewed.headline != null && newer.some((r) => r.headline === reviewed.headline);
+      commitsSince = rewritten ? null : newer.length;
+    }
+  }
+  return { currentHeadSha, outdated: true, commitsSince };
+}
+
+// ---- Auto re-review helpers ----
+
+/** Is there ANY run (any status) of this PR at `headSha`? One run per head. */
+export async function hasReviewAtHead(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  headSha: string,
+): Promise<boolean> {
+  const { cr } = tables(ctx);
+  const rows = (await ctx.db
+    .select({ id: cr.id })
+    .from(cr)
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha)))
+    .limit(1)
+    .execute()) as Array<{ id: number }>;
+  return rows.length > 0;
+}
+
+/** The stories stored on the PR's latest run ([] when none) — what a re-review carries forward. */
+export async function getLatestStoredTickets(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+): Promise<ClaudeReviewTicket[]> {
+  const { cr } = tables(ctx);
+  const rows = (await ctx.db
+    .select({ ticket: cr.ticket })
+    .from(cr)
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId)))
+    .orderBy(desc(cr.id))
+    .limit(1)
+    .execute()) as Array<{ ticket: ClaudeReviewTicket | ClaudeReviewTicket[] | null }>;
+  return storedList(rows[0]?.ticket ?? null);
+}
+
+// ---- Posting one ticket's analysis ----
+
+export interface TicketPostContext {
+  reviewId: number;
+  prId: number;
+  status: ClaudeReview['status'];
+  reviewHeadSha: string;
+  owner: string;
+  name: string;
+  prNumber: number;
+  tickets: ClaudeReviewTicket[];
+  assessments: ClaudeTicketAssessment[];
+}
+
+export async function getTicketPostContext(
+  ctx: AgentContext,
+  reviewId: number,
+  accountId: number,
+): Promise<TicketPostContext | null> {
+  const { cr, prs, repos } = tables(ctx);
+  const rows = (await ctx.db
+    .select({
+      prId: cr.prId,
+      status: cr.status,
+      headSha: cr.headSha,
+      ticket: cr.ticket,
+      ticketAssessment: cr.ticketAssessment,
+      owner: repos.owner,
+      name: repos.name,
+      prNumber: prs.number,
+    })
+    .from(cr)
+    .innerJoin(prs, eq(prs.id, cr.prId))
+    .innerJoin(repos, eq(repos.id, prs.repoId))
+    .where(and(eq(cr.id, reviewId), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute()) as Array<{
+    prId: number;
+    status: ClaudeReview['status'];
+    headSha: string;
+    ticket: ClaudeReviewTicket | ClaudeReviewTicket[] | null;
+    ticketAssessment: ClaudeTicketAssessment | ClaudeTicketAssessment[] | null;
+    owner: string;
+    name: string;
+    prNumber: number;
+  }>;
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    reviewId,
+    prId: r.prId,
+    status: r.status,
+    reviewHeadSha: r.headSha,
+    owner: r.owner,
+    name: r.name,
+    prNumber: r.prNumber,
+    tickets: storedList(r.ticket),
+    assessments: storedList(r.ticketAssessment),
+  };
+}
+
+/**
+ * Record that ticket `index`'s analysis was posted. Rewrites the assessment column as an ARRAY
+ * (a legacy single object becomes a one-element list). The caller holds the per-ticket claim.
+ */
+export async function markTicketPosted(
+  ctx: AgentContext,
+  reviewId: number,
+  index: number,
+  posted: { githubCommentId: string | null; url: string | null; postedAt: string },
+): Promise<void> {
+  const { cr } = tables(ctx);
+  const rows = (await ctx.db
+    .select({ ticketAssessment: cr.ticketAssessment })
+    .from(cr)
+    .where(eq(cr.id, reviewId))
+    .limit(1)
+    .execute()) as Array<{ ticketAssessment: ClaudeTicketAssessment | ClaudeTicketAssessment[] | null }>;
+  const list = storedList(rows[0]?.ticketAssessment ?? null).map((a) => ({ ...a }));
+  const at = list[index];
+  if (!at) return;
+  at.posted = posted;
+  await ctx.db.update(cr).set({ ticketAssessment: list }).where(eq(cr.id, reviewId)).execute();
 }

@@ -856,8 +856,8 @@ export const claudeReviews = pgTable(
     finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
     // User story / its assessment / the follow-up on the previous review. See the
     // schema.sqlite.ts twin for the contracts. Migration pg 0057 (sqlite 0070).
-    ticket: jsonb('ticket').$type<ClaudeReviewTicket>(),
-    ticketAssessment: jsonb('ticket_assessment').$type<ClaudeTicketAssessment>(),
+    ticket: jsonb('ticket').$type<ClaudeReviewTicket | ClaudeReviewTicket[]>(),
+    ticketAssessment: jsonb('ticket_assessment').$type<ClaudeTicketAssessment | ClaudeTicketAssessment[]>(),
     followUp: jsonb('follow_up').$type<ClaudeReviewFollowUpRecord>(),
     // 'manual' | 'auto' — who started the run. Twin of schema.sqlite.ts. Migration pg 0058 (sqlite 0071).
     trigger: text('trigger', { enum: ['manual', 'auto'] }).notNull().default('manual'),
@@ -913,6 +913,8 @@ export const claudeReviewFindings = pgTable(
     // A SOFT reference (no FK, same PR) to the previous-review finding this one re-raises. See
     // the schema.sqlite.ts twin for why there is no FK. Migration pg 0057 (sqlite 0070).
     priorFindingId: integer('prior_finding_id'),
+    // The specialist lens (schema.sqlite.ts twin). Migration pg 0062 (sqlite 0075).
+    lens: text('lens'),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
@@ -951,44 +953,9 @@ export const claudeReviewChatMessages = pgTable(
   }),
 );
 
-// ---- Review memory + AI Fix (CORE since pg 0061 / sqlite 0074) ----
-// Twins of schema.sqlite.ts reviewLearnings / aiFixes, where the contract lives. Adopted in place
-// from the plugin; same index names, no foreign keys.
-export const reviewLearnings = pgTable(
-  'review_learnings',
-  {
-    id: serial('id').primaryKey(),
-    accountId: integer('account_id').notNull(),
-    repoId: integer('repo_id').notNull(),
-    prId: integer('pr_id').notNull(),
-    sourceReviewId: integer('source_review_id').notNull(),
-    findingId: integer('finding_id'),
-    headSha: text('head_sha').notNull(),
-    kind: text('kind').notNull(),
-    path: text('path'),
-    dirPath: text('dir_path'),
-    ext: text('ext'),
-    category: text('category'),
-    claudeVerdict: text('claude_verdict'),
-    userVerdict: text('user_verdict'),
-    claudeTitle: text('claude_title'),
-    claudeText: text('claude_text'),
-    userText: text('user_text'),
-    postedCommentKind: text('posted_comment_kind'),
-    dedupeKey: text('dedupe_key').notNull(),
-    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => ({
-    dedupeUx: uniqueIndex('rl_account_dedupe').on(t.accountId, t.dedupeKey),
-    categoryIdx: index('rl_account_repo_category').on(t.accountId, t.repoId, t.category),
-    dirIdx: index('rl_account_repo_dir').on(t.accountId, t.repoId, t.dirPath),
-    sourceReviewIdx: index('rl_account_source_review').on(t.accountId, t.sourceReviewId),
-    createdIdx: index('rl_account_repo_created').on(t.accountId, t.repoId, t.createdAt),
-  }),
-);
-
+// ---- AI Fix (CORE since pg 0061 / sqlite 0074) ----
+// Twin of schema.sqlite.ts aiFixes, where the contract lives. Adopted in place from the plugin;
+// same index names, no foreign keys. (review_learnings was dropped by pg 0062 / sqlite 0075.)
 export const aiFixes = pgTable(
   'ai_fixes',
   {

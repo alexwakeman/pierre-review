@@ -40,16 +40,24 @@ import { parseGitPatch } from '../lib/diff.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
 import { AiSummary } from './AiSummary.js';
+import { InfoButton } from './InfoModal.js';
 
 const BTN_PRIMARY =
   'whitespace-nowrap rounded border border-blue-400 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
 const BTN_SECONDARY =
   'whitespace-nowrap rounded border border-gray-300 px-2.5 py-1 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
 
-function SectionTitle({ children }: { children: React.ReactNode }): JSX.Element {
+function SectionTitle({
+  children,
+  info,
+}: {
+  children: React.ReactNode;
+  info?: React.ReactNode;
+}): JSX.Element {
   return (
-    <div className="px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+    <div className="flex items-center gap-1 px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
       {children}
+      {info}
     </div>
   );
 }
@@ -196,7 +204,24 @@ function FixerSection({
 
   return (
     <div>
-      <SectionTitle>AI Fix</SectionTitle>
+      <SectionTitle
+        info={
+          <InfoButton title="AI Fix">
+            <p>
+              Claude reads the PR's code and edits files in a private copy. It has no shell, so it
+              installs, builds and tests nothing.
+            </p>
+            <p>
+              To fix from comments, press + on a comment or drag it into the fix scope. Claude
+              checks each one before changing anything, reports back per comment, and writes a
+              reply you can send when it disagrees.
+            </p>
+            <p>Nothing is pushed until you press Push.</p>
+          </InfoButton>
+        }
+      >
+        AI Fix
+      </SectionTitle>
       <div className="px-4">
         {data?.enabled === false ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -209,12 +234,12 @@ function FixerSection({
                 while a run is in flight — the basket is the record of what that run was
                 given, so hiding it mid-run would remove the only context for the progress. */}
             <CommentPicker pr={pr} disabled={isRunning} />
-            {seedReviewText && !isRunning && (
-              <div className="mb-2 rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300">
-                {seed === 'comments'
-                  ? 'A review is queued as a seed, but the comments in the fix scope take precedence — clear them to fix from the review instead.'
-                  : 'Ready to generate a fix from the selected review.'}
-              </div>
+            {/* The review handoff names itself on the button ("Fix from review"). The one fact
+                the button cannot carry is that a non-empty basket outranks the handoff. */}
+            {seedReviewText && seed === 'comments' && !isRunning && (
+              <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+                Fixing the selected comments, not the review. Clear them to fix from the review.
+              </p>
             )}
             <div className="flex flex-wrap items-center gap-2">
               <select
@@ -246,15 +271,12 @@ function FixerSection({
                   className={BTN_PRIMARY}
                   disabled={fixStarting}
                   onClick={start}
-                  title={
-                    seed === 'comments'
-                      ? 'Work through each comment in the fix scope: assess whether it is valid, then fix it'
-                      : undefined
-                  }
                 >
                   {seed === 'comments'
                     ? `Fix ${selection.length} comment${selection.length === 1 ? '' : 's'}`
-                    : fix
+                    : seed === 'review'
+                      ? 'Fix from review'
+                      : fix
                       ? 'Generate new fix'
                       : 'Generate fix'}
                 </button>
@@ -287,7 +309,7 @@ function FixerSection({
                   value={fixProgressPct(liveStatus)}
                   timeConstantSec={40}
                 />
-                <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   {PHASE_LABEL[liveStatus?.progress?.phase ?? ''] ?? 'Working…'}
                 </div>
                 {liveStatus?.progress?.recentActivity &&
@@ -367,36 +389,26 @@ function FixResult({
       {noChanges ? (
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
           {fix.seed === 'comments'
-            ? 'The agent changed no files — see the per-comment verdicts above for why.'
-            : 'The agent made no changes.'}
+            ? 'No files changed. See the verdicts above.'
+            : 'No files changed.'}
         </p>
       ) : (
         <>
-          <div className="mb-1 mt-2 flex items-center justify-between gap-3 text-[11px] text-gray-500 dark:text-gray-400">
+          <div className="mb-1 mt-2 flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
+            {/* "Not built or tested here." is TEMPLATED and sits beside the diff, above Push: the
+                fixer has no shell (coding/agent.ts FIX_TOOLS), and a diff above a Push button
+                invites the reader to assume verification. It states what we know and STOPS —
+                it must not promise CI either (`ciStatusFrom(null)` is 'unknown' for whole repos;
+                CLAUDE.md § The fix agent has no shell). */}
             <span>
               {fix.filesChanged.length} file
-              {fix.filesChanged.length === 1 ? '' : 's'} changed
+              {fix.filesChanged.length === 1 ? '' : 's'} changed · Not built or tested here.
             </span>
             <DiffWrapToggle />
           </div>
           <div className="overflow-hidden rounded border border-gray-200 text-gray-800 dark:border-gray-800 dark:text-gray-200">
             <FileDiffView files={diffFiles} />
           </div>
-          {/* The fixer has no shell — it reads and edits, and nothing here was installed, built
-              or run (apps/backend/src/coding/agent.ts, FIX_TOOLS). The run makes no verification
-              claim of its own, but a diff sitting above a Push button invites the reader to
-              assume one, so the fact is stated once, here, where they are about to press it.
-              TEMPLATED, never asked of the model: a product fact does not belong in model prose
-              (the Bot Tuning Advisor precedent).
-              ⚠ IT STATES WHAT WE KNOW AND STOPS. It used to end "— CI will run on push", which is
-              a promise about the REPOSITORY that this card cannot make: `ciStatusFrom(null)` is
-              `'unknown'` for a PR with no check rollup at all, and whole repos here are like that
-              (62 of 63 PRs on one, 1,014 of 9,544 overall). The sentence exists to stop the reader
-              assuming verification, so a second clause inventing some is the thing it was written
-              to remove. */}
-          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-            Not built or tested here.
-          </p>
           <PushControls
             pr={pr}
             fix={fix}
@@ -455,7 +467,7 @@ function FixHistory({
   return (
     <div className="mt-4 border-t border-gray-200 pt-3 dark:border-gray-800">
       <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
-        Fixes pushed via Limn
+        Earlier fixes pushed
       </div>
       <ul className="space-y-2">
         {pushed.map((h) => (
@@ -528,7 +540,7 @@ function PushControls({
   if (!viewerCanPush) {
     return (
       <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-        You need write access to this repository to push this fix.
+        You need write access to push this fix.
       </p>
     );
   }
@@ -548,18 +560,12 @@ function PushControls({
 
   return (
     <div className="mt-3 rounded border border-gray-200 p-2 dark:border-gray-800">
-      <div className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">
-        Push this fix
-      </div>
-
       {fix.commitMessage && (
-        <div className="mb-2 rounded bg-gray-50 p-2 text-[11px] dark:bg-gray-900">
-          <span className="uppercase tracking-wide text-gray-400">
-            Commit message
-          </span>
-          <div className="mt-0.5 font-mono text-gray-700 dark:text-gray-200">
-            {fix.commitMessage}
-          </div>
+        <div
+          className="mb-2 rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-700 dark:bg-gray-900 dark:text-gray-200"
+          title="Commit message"
+        >
+          {fix.commitMessage}
         </div>
       )}
 

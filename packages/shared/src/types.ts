@@ -3954,7 +3954,7 @@ export interface LocalUser {
 export interface ProCapabilities {
   activityDigest: boolean; // per-repo LLM headlines digest (Activity)
   // apiVersion 22: `reviewMemory`, `aiAnalysis`, `aiFix` and `claudeReview` LEFT this map. Claude
-  // Review, review memory and AI Fix are CORE (free, local-only, on the user's own Claude); gate
+  // Review and AI Fix are CORE (free, local-only, on the user's own Claude); gate
   // them on the top-level `MeResponse.ai`, never on `pro`.
   // Per-PR AI summary + the CI-failure analysis card (Pro, cheap one-shot Haiku, read-only). On
   // wherever the paid summary tier is (cloud credit-metered).
@@ -4335,7 +4335,7 @@ export type AiRuntimeInstallEvent =
 
 export interface MeResponse {
   user: LocalUser | null;
-  // (Claude Review, review memory and AI Fix are gated on `ai` below — core, free, local-only.)
+  // (Claude Review and AI Fix are gated on `ai` below — core, free, local-only.)
   // Deployment mode. 'cloud' tells the SPA to show a sign-out control and treat a
   // 401 from /api/me as "signed out" (vs local, where /api/me never 401s).
   deploymentMode: 'local' | 'cloud';
@@ -4358,7 +4358,7 @@ export interface MeResponse {
   // ⚠ Gate the SPA on THIS, never on `deploymentMode === 'cloud'`.
   conflictResolver: boolean;
   // The agentic AI surfaces — Claude Review (run, follow-up, ticket check, auto review, the review
-  // chat), review memory and AI Fix. FREE and LOCAL-ONLY; they run on the user's own Claude Code
+  // chat) and AI Fix. FREE and LOCAL-ONLY; they run on the user's own Claude Code
   // session or ANTHROPIC_API_KEY. TOP-LEVEL and NOT inside `pro`, so `entitledProCapabilities` can
   // never zero it (the `mlSeverity` argument).
   //  - `enabled`: `!isCloud && !LIMN_AI_DISABLED`. False ⇒ no agentic surface renders (cloud shows
@@ -6182,24 +6182,16 @@ export interface TimelineQuery {
 // STORED with one keeps its id string — the `claude_reviews.model` / `ai_fixes.model`
 // columns are plain text, `ClaudeReview.model` and `AiFix.model` are typed `string`, and the SPA
 // prints a stored run's model raw, never through the labels — and both generate routes 400 it.
-export type ClaudeReviewModel =
-  | 'claude-opus-5-5'
-  | 'claude-sonnet-5'
-  | 'claude-sonnet-4-6'
-  | 'claude-haiku-4-5';
+export type ClaudeReviewModel = 'claude-opus-5-5' | 'claude-sonnet-5';
 
 // The OFFERED list: what the picker shows and what `POST /api/prs/:id/claude-review` accepts.
 // A real runtime value, read by the SPA AND the plugin's route schema (shared is vendored into
 // the release, so both halves read this one spelling). DEFAULT FIRST: Opus 5.5 is the most
-// thorough reviewer and the default; Sonnet 5 is the best-value option; Sonnet 4.6 for
-// continuity; Haiku 4.5 is the cheap fast pass (it takes no `effort` knob). AI Fix reuses this
-// list and opens on DEFAULT_AI_FIX_MODEL (below, with the AI Fix types).
-export const CLAUDE_REVIEW_MODELS: ClaudeReviewModel[] = [
-  'claude-opus-5-5',
-  'claude-sonnet-5',
-  'claude-sonnet-4-6',
-  'claude-haiku-4-5',
-];
+// thorough reviewer and the default; Sonnet 5 is the best-value option. Sonnet 4.6 and Haiku 4.5
+// were dropped from the list (and so from this type): a run stored with either keeps its id and
+// prints it raw, a new run on either is a 400, and the review chat falls back to the default for
+// one (`chatModelFor`). AI Fix reuses this list and opens on DEFAULT_AI_FIX_MODEL (below).
+export const CLAUDE_REVIEW_MODELS: ClaudeReviewModel[] = ['claude-opus-5-5', 'claude-sonnet-5'];
 
 // The model a Claude Review run uses when the request names none, and the picker's opening
 // value. Always `CLAUDE_REVIEW_MODELS[0]` (a test pins it).
@@ -6210,8 +6202,6 @@ export const DEFAULT_CLAUDE_REVIEW_MODEL: ClaudeReviewModel = 'claude-opus-5-5';
 export const CLAUDE_REVIEW_MODEL_LABELS: Record<ClaudeReviewModel, string> = {
   'claude-opus-5-5': 'Claude Opus 5.5 (most thorough)',
   'claude-sonnet-5': 'Claude Sonnet 5 (best value)',
-  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
-  'claude-haiku-4-5': 'Claude Haiku 4.5 (fast, cheap)',
 };
 
 export type ClaudeReviewStatus =
@@ -6233,18 +6223,10 @@ export type ClaudeReviewScope = 'diff_only' | 'worktree';
 //                   cloned worktree as explorable context (the original behaviour).
 export type ReviewMode = 'skip' | 'diff_only' | 'worktree';
 
-// What the user asked for when starting a run. 'auto' lets the router decide (and is
-// the only path that can resolve to 'skip'); 'diff_only'/'worktree' force that mode,
-// overriding the router's metrics.
+// What was asked for when a run started, as RECORDED on `routeReason`. The depth is no longer a
+// choice — every run is 'auto' and the router decides — but rows from before that keep the
+// forced 'diff_only' / 'worktree' they were started with (`decidedBy: 'user'`).
 export type RequestedReviewMode = 'auto' | 'diff_only' | 'worktree';
-
-// Runtime list for the depth picker (frontend bundles shared; the backend keeps a
-// local copy and only `import type`s from here — shared isn't shipped at runtime).
-export const REQUESTED_REVIEW_MODES: RequestedReviewMode[] = [
-  'auto',
-  'diff_only',
-  'worktree',
-];
 
 // The deterministic routing decision's inputs + outcome, recorded on every run so
 // the thresholds can be calibrated (and the choice audited) after the fact. All
@@ -6330,7 +6312,44 @@ export interface ClaudeFinding {
   // shows a "Not addressed since last review" chip from it. Absent/null on ordinary findings and
   // on runs from before follow-ups existed.
   priorFindingId?: number | null;
+  // The specialist angle that raised it on a DEEP (worktree) review: 'design' marks an
+  // architecture-level comment, the rest a focused pass. null/absent ⇒ a general finding (every
+  // diff-only finding, and every run before lenses).
+  lens?: ClaudeFindingLens | null;
 }
+
+// The specialist lenses a deep review may consult (review/claude-review/specialists.ts). One per
+// sub-agent; the lead dispatches at most CLAUDE_REVIEW_MAX_SPECIALISTS of them per run.
+export type ClaudeFindingLens =
+  | 'design'
+  | 'tests'
+  | 'impact'
+  | 'accessibility'
+  | 'security'
+  | 'performance';
+
+export const CLAUDE_FINDING_LENSES: ClaudeFindingLens[] = [
+  'design',
+  'tests',
+  'impact',
+  'accessibility',
+  'security',
+  'performance',
+];
+
+// Short display labels for the lens chip.
+export const CLAUDE_FINDING_LENS_LABELS: Record<ClaudeFindingLens, string> = {
+  design: 'Design',
+  tests: 'Tests',
+  impact: 'Impact',
+  accessibility: 'Accessibility',
+  security: 'Security',
+  performance: 'Performance',
+};
+
+// How many specialist sub-agents ONE deep review may dispatch. Enforced in code (a PreToolUse hook
+// in review/agent.ts denies the next dispatch), not only in the prompt.
+export const CLAUDE_REVIEW_MAX_SPECIALISTS = 3;
 
 // ---- Claude Review: the user story or task (optional input) ----
 // Three free-text fields the person running a review may paste. Caps and the validator live ONCE
@@ -6339,21 +6358,60 @@ export interface ClaudeFinding {
 // (Gherkin, nested bullets, tables, prose), so Claude reads the text and enumerates the criteria
 // itself, best effort.
 
-// What the SPA sends (every field optional; all blank ⇒ no ticket).
+// What the SPA sends (every field optional; all blank ⇒ no ticket). A review carries up to
+// CLAUDE_REVIEW_MAX_TICKETS of these (`GenerateReviewBody.tickets`), each assessed on its own.
 export interface ClaudeReviewTicketInput {
   title?: string;
   description?: string;
   acceptanceCriteria?: string;
+  // Where the text came from. 'jira' = Limn read it through the Jira API (the SPA renders it
+  // read-only, as markdown); 'manual' (or absent) = the reader typed or pasted it.
+  source?: ClaudeReviewTicketSource;
+  // The tracker key, e.g. "BMD-984". Only kept with source 'jira'.
+  key?: string;
+  // The ticket's browse URL (http/https only). Only kept with source 'jira'.
+  url?: string;
+  // When Limn read it from Jira (ISO-8601). Only kept with source 'jira'.
+  fetchedAt?: string;
 }
+
+export type ClaudeReviewTicketSource = 'jira' | 'manual';
 
 // What is STORED on the run (at queue time, so a failed or cancelled run still prefills the
 // panel). `criteria` is LEGACY: runs from before Claude enumerated the criteria itself stored a
 // code-side split here. It is never written now and nothing reads it.
 export interface ClaudeReviewTicket {
   title: string | null;
+  // Markdown when `source` is 'jira' (converted from Jira's markup by the plugin); as typed
+  // otherwise.
   description: string | null;
   acceptanceCriteria: string | null;
   criteria?: string[];
+  // Absent on runs from before several tickets ⇒ read as 'manual' with no key.
+  source?: ClaudeReviewTicketSource;
+  key?: string | null;
+  url?: string | null;
+  fetchedAt?: string | null;
+}
+
+// One ticket of a review, as served on `ClaudeReview.tickets` — one section per ticket on screen.
+// `index` is its 0-based position (the post route addresses it); `ref` is 'T1'… (what Claude saw).
+export interface ClaudeReviewTicketEntry {
+  index: number;
+  ref: string;
+  ticket: ClaudeReviewTicket;
+  // The server-validated assessment of THIS ticket; null when the run did not succeed.
+  assessment: ClaudeTicketAssessment | null;
+  // Set once this ticket's analysis was posted to the PR as a PR-level comment. Posting is once
+  // per ticket: the route answers 409 AlreadyPosted after that.
+  posted: ClaudeTicketPost | null;
+}
+
+export interface ClaudeTicketPost {
+  githubCommentId: string | null;
+  // The comment's GitHub permalink (…#issuecomment-…), when GitHub returned one.
+  url: string | null;
+  postedAt: string; // ISO-8601
 }
 
 // 'not_checked' is written ONLY by the server (Claude never reported on it); the model's own
@@ -6404,6 +6462,9 @@ export interface ClaudeTicketAssessment {
   criteria: ClaudeTicketCriterionResult[];
   missing: ClaudeTicketGap[];
   notRequested: ClaudeTicketGap[];
+  // STORED only (the posted record lives beside the assessment it posted); the wire carries it
+  // as `ClaudeReviewTicketEntry.posted`.
+  posted?: ClaudeTicketPost | null;
 }
 
 // ---- Claude Review: follow-up on the previous review ----
@@ -6507,17 +6568,33 @@ export interface ClaudeReview {
   createdAt: string;
   finishedAt: string | null;
   findings: ClaudeFinding[];
-  // The user story or task this run was given (stored at queue time), or null. Absent on runs
-  // from before the field existed.
+  // The user stories this run was given (stored at queue time), each with its own assessment and
+  // posted state — one section per ticket. [] when none. A run from before several tickets reads
+  // as a one-element list.
+  tickets?: ClaudeReviewTicketEntry[];
+  // @deprecated the FIRST of `tickets` (its ticket / assessment). Read `tickets`.
   ticket?: ClaudeReviewTicket | null;
-  // The server-validated assessment against `ticket`; null when there was no ticket or the run
-  // did not succeed.
+  // @deprecated the FIRST of `tickets`' assessment. Read `tickets`.
   ticketAssessment?: ClaudeTicketAssessment | null;
+  // Is this review OUT OF DATE against the PR as last synced? null when the PR's head is unknown.
+  head?: ClaudeReviewHeadState | null;
   // What this run found about the PREVIOUS succeeded review's findings; null when there was no
   // earlier review with findings to check (or this run skipped).
   followUp?: ClaudeReviewFollowUp | null;
   // Who started the run. Absent on older servers = 'manual'.
   trigger?: ClaudeReviewTrigger;
+}
+
+// The reviewed commit against the PR's current head (the SYNCED head — DB-only, no GitHub call).
+export interface ClaudeReviewHeadState {
+  // The PR's head as last synced.
+  currentHeadSha: string;
+  // currentHeadSha !== the review's headSha: newer commits, or a rewritten history.
+  outdated: boolean;
+  // How many of the PR's commits are newer than the reviewed one. null when it cannot be counted
+  // cheaply (the reviewed commit is not among the PR's synced commits — e.g. a force-push dropped
+  // it). 0 with `outdated` = the history was rewritten without adding a commit.
+  commitsSince: number | null;
 }
 
 // Who started a Claude review run: a person pressing Review, or the per-workspace auto-review
@@ -6580,11 +6657,6 @@ export interface ClaudeReviewResponse {
   // a subscription pays) and the environment's `ANTHROPIC_API_KEY` — both of which `auth` already
   // reports. A field saying "a key is stored" would have described a value that no longer changes
   // any run's behaviour.
-  // The per-review USD budget cap a run will use (the user's local override, or the
-  // operator default when unset) and the hard ceiling the user can set it to. Local
-  // mode only; meaningless (and ignored) in cloud.
-  reviewBudgetUsd: number;
-  reviewBudgetMax: number;
   // The latest run for the PR (with findings), or null if never run.
   review: ClaudeReview | null;
   // All prior runs for the PR (newest first), lighter shape.
@@ -6605,15 +6677,8 @@ export interface ClaudeReviewResponse {
 // decision was to stop reading it, not to destroy somebody's file. Do not re-add a route "just to
 // clear it" — that is a write path back.
 
-// Set (a positive number, clamped server-side to the max) or clear (null → operator
-// default) the local per-review budget cap.
-export interface SetReviewBudgetBody {
-  usd: number | null;
-}
-
-export interface ReviewBudgetResponse {
-  reviewBudgetUsd: number;
-}
+// ⚠ `SetReviewBudgetBody` / `ReviewBudgetResponse` ARE DELETED with `PUT /api/claude-review/budget`.
+// The per-review budget is the environment's `REVIEW_BUDGET_USD` alone.
 
 export type ClaudeReviewPhase =
   | 'cloning'
@@ -6715,12 +6780,25 @@ export interface GenerateReviewBody {
   // One of CLAUDE_REVIEW_MODELS (the offered list). Omitted ⇒ DEFAULT_CLAUDE_REVIEW_MODEL.
   // A model that is not offered (e.g. a retired id) is a 400.
   model?: ClaudeReviewModel;
-  // Review depth. Omitted / 'auto' lets the deterministic router decide; an explicit
-  // 'diff_only' or 'worktree' forces that mode, overriding the router's metrics.
-  mode?: RequestedReviewMode;
-  // The optional user story or task. Over a cap in CLAUDE_REVIEW_TICKET_LIMITS ⇒ 400
-  // { error: 'TicketInvalid', field, message } — never truncated. All blank ⇒ no ticket.
+  // (No depth: the router always decides. A stale `mode` key is stripped by the route schema.)
+  // The optional user stories, at most CLAUDE_REVIEW_MAX_TICKETS. Over a cap in
+  // CLAUDE_REVIEW_TICKET_LIMITS ⇒ 400 { error: 'TicketInvalid', index, field, message } — never
+  // truncated. An all-blank entry is dropped.
+  tickets?: ClaudeReviewTicketInput[];
+  // @deprecated one story; read only when `tickets` is absent.
   ticket?: ClaudeReviewTicketInput;
+}
+
+// POST /api/claude-reviews/:reviewId/tickets/:index/post — post ONE ticket's analysis as a
+// PR-level comment. No body. 409 AlreadyPosted once posted; 409 NotReady while the review has no
+// assessment for it. Once GitHub has answered, the route does not fail: `visible: false` means the
+// comment IS on GitHub and only the local copy is missing (it shows after the next sync) — never
+// offer a retry, it would post twice.
+export interface PostTicketAnalysisResult {
+  githubCommentId: string | null;
+  url: string | null;
+  postedAt: string;
+  visible: boolean;
 }
 
 // Saves the user's authored draft; never mutates Claude's summary/verdict.
@@ -6777,8 +6855,10 @@ export interface ClaudeReviewPrState {
   /** The head commit that run reviewed. null for an auto review still waiting in its lane. */
   reviewedHeadSha: string | null;
   finishedAt: string | null; // ISO-8601
-  /** The user story stored on that run (at queue time), or null. A re-review reuses it. */
+  /** @deprecated the first of `tickets`, or null. */
   ticket: ClaudeReviewTicket | null;
+  /** The user stories stored on that run (at queue time). A re-review reuses them. */
+  tickets?: ClaudeReviewTicket[];
   /** The PR's synced head is a DIFFERENT commit from `reviewedHeadSha`. False when the synced
    *  head is unknown — no reading is never "moved". */
   headMoved: boolean;
@@ -9618,63 +9698,9 @@ export interface SprintReportResponse {
   creditsExhausted?: boolean;
 }
 
-// ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----
-
-// The 9 captured action kinds (see PRO-PLATFORM.md §5.2).
-export type ReviewLearningKind =
-  | 'finding_dismissed'
-  | 'finding_kept'
-  | 'finding_reworded'
-  | 'finding_reword_cleared'
-  | 'finding_posted'
-  | 'review_body_rewritten'
-  | 'verdict_overridden'
-  | 'review_posted'
-  | 'run_requested';
-
-// One aggregated retrieval signal shown BEFORE a run ("Matches from past reviews").
-export interface LearningMatch {
-  glob: string;
-  category: string | null;
-  kind: string;
-  summary: string;
-  confidence: 'low' | 'medium' | 'high';
-  example?: { claude?: string | null; you?: string | null };
-  // Provenance/transparency (for the "what feeds the next review" surface): how many raw
-  // captured actions this signal aggregates, when the most recent one landed, and the
-  // per-kind breakdown. Optional so an older plugin build still satisfies the type.
-  count?: number;
-  lastActionAt?: string | null; // ISO-8601
-  kinds?: { kind: string; count: number }[];
-}
-
-export interface ReviewLearningsResponse {
-  enabled: boolean;
-  matches: LearningMatch[];
-  // The VERBATIM markdown block that will be injected into the next review's prompt as
-  // `priorReviewContext` — byte-identical to what the plugin sends to Claude, so the UI can
-  // show "exactly what feeds the next review". null when there's nothing to inject.
-  contextBlock?: string | null;
-}
-
-// One raw captured action, for the per-review action log (Surface 2).
-export interface ReviewAction {
-  id: number;
-  kind: ReviewLearningKind;
-  category: string | null;
-  path: string | null;
-  glob: string | null;
-  claudeText: string | null;
-  userText: string | null;
-  claudeVerdict: ClaudeReviewVerdict | null;
-  userVerdict: ClaudeReviewVerdict | null;
-  postedCommentKind: string | null;
-  createdAt: string; // ISO-8601
-}
-
-export interface ReviewActionsResponse {
-  actions: ReviewAction[];
-}
+// (Claude Review's learnings / memory — `ReviewLearningKind`, `LearningMatch`,
+// `ReviewLearningsResponse`, `ReviewAction`, `ReviewActionsResponse` — are DELETED with the feature
+// and its routes; core migration 0075 / pg 0062 dropped the table.)
 
 // ---- Default-branch status (CORE, no AI) -------------------------------------------------
 //

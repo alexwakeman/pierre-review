@@ -3083,14 +3083,14 @@ check(
 }
 
 // ── THE AGENTIC TABLES (core since migration 0074 / pg 0061) ─────────────────────────────────────
-// review_learnings (Claude Review's memory) and ai_fixes (AI Fix's runs) moved from the plugin with
-// their features; their cases moved from packages/pro/test/isolation.test.ts. Neither table has a
-// foreign key, so the account predicate in every getter is the WHOLE guarantee. Both accounts get a
-// row on the SAME pr id / source review id where the schema allows it, so a dropped predicate would
-// have something to leak — and the MUTATION checks below prove the seed is not vacuous.
+// ai_fixes (AI Fix's runs) moved from the plugin with its feature; its cases moved from
+// packages/pro/test/isolation.test.ts. (review_learnings, review memory's table, sat beside it until
+// migration 0075 / pg 0062 dropped it.) It has no foreign key, so the account predicate in every
+// getter is the WHOLE guarantee. Both accounts get a row on the SAME source review id, so a dropped
+// predicate would have something to leak — and the MUTATION check below proves the seed is not
+// vacuous.
 {
   const { buildAgentContext } = await import('../src/review/agent-context.js');
-  const { getRelevantLearnings } = await import('../src/review/memory/retrieval.js');
   const fixes = await import('../src/coding/ai-fix/persist.js');
   const { getFixPrContext } = await import('../src/coding/ai-fix/pr-context.js');
   const { getFixStatus } = await import('../src/coding/ai-fix/manager.js');
@@ -3099,45 +3099,6 @@ check(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const actx = buildAgentContext(silent as any);
   const SHARED_REVIEW = 1000;
-  const learning = (accountId: number, repoId: number, prId: number, key: string) => ({
-    accountId,
-    repoId,
-    prId,
-    sourceReviewId: SHARED_REVIEW,
-    headSha: key,
-    kind: 'finding_dismissed',
-    path: 'src/api/x.ts',
-    dirPath: 'src/api',
-    ext: '.ts',
-    category: 'nit',
-    dedupeKey: key,
-    createdAt: now,
-  });
-  await db
-    .insert(schema.reviewLearnings)
-    .values([learning(1, A.repoId, A.prId, 'LA'), learning(2, B.repoId, B.prId, 'LB')])
-    .execute();
-
-  const ownL = await getRelevantLearnings(actx, { accountId: 1, repoId: A.repoId, changedPaths: ['src/api/z.ts'] });
-  check("getRelevantLearnings(A, A.repo) returns A's learning", ownL.length === 1);
-  check(
-    "getRelevantLearnings(A, B.repo) leaks nothing (another account's repo)",
-    (await getRelevantLearnings(actx, { accountId: 1, repoId: B.repoId, changedPaths: ['src/api/z.ts'] })).length === 0,
-  );
-  check(
-    "getRelevantLearnings(B, A.repo) leaks nothing (another account's id)",
-    (await getRelevantLearnings(actx, { accountId: 2, repoId: A.repoId, changedPaths: ['src/api/z.ts'] })).length === 0,
-  );
-  const rl = schema.reviewLearnings;
-  const byReviewA = await db
-    .select()
-    .from(rl)
-    .where(and(eq(rl.accountId, 1), eq(rl.sourceReviewId, SHARED_REVIEW)))
-    .execute();
-  const byReviewAny = await db.select().from(rl).where(eq(rl.sourceReviewId, SHARED_REVIEW)).execute();
-  check("review actions projection(A, shared review id) holds only A's row", byReviewA.length === 1 && byReviewA[0]!.accountId === 1);
-  check('MUTATION: without the account predicate the shared review id reaches BOTH rows', byReviewAny.length === 2);
-
   const fixFor = (accountId: number, repoId: number, prId: number, sha: string) =>
     fixes.insertQueuedFix(actx, {
       accountId,

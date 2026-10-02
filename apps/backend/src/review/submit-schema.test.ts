@@ -100,13 +100,13 @@ describe('submitReviewSchema', () => {
 describe('submitReviewSchema — follow-up and user-story fields', () => {
   const base = { summary: 'ok', verdict: 'COMMENT', scopeUsed: 'diff_only' } as const;
 
-  it('still validates the old shape unchanged (no priorRef / followUp / ticket)', () => {
+  it('still validates the old shape unchanged (no priorRef / followUp / tickets)', () => {
     const p = { ...base, findings: [{ path: 'a.ts', line: 1, severity: 'nit', title: 't', body: 'b' }] };
     const parsed = submitReviewSchema.safeParse(p);
     expect(parsed.success).toBe(true);
     if (parsed.success) {
       expect(parsed.data.followUp).toBeUndefined();
-      expect(parsed.data.ticket).toBeUndefined();
+      expect(parsed.data.tickets).toBeUndefined();
     }
   });
 
@@ -123,7 +123,8 @@ describe('submitReviewSchema — follow-up and user-story fields', () => {
         { ref: 'P3', status: 'partly_addressed', explanation: 'Half.' },
         { ref: 'P4', status: 'no_longer_applies', explanation: 'Gone.' },
       ],
-      ticket: {
+      tickets: [{
+        ref: 'T1',
         alignment: 'partly_aligned',
         summary: 'Mostly.',
         criteria: [
@@ -134,13 +135,13 @@ describe('submitReviewSchema — follow-up and user-story fields', () => {
         ],
         missing: [{ title: 'Expiry', explanation: 'No expiry.' }],
         notRequested: [{ title: 'Extra flag', explanation: 'Adds a flag.', path: 'c.ts', line: 9 }],
-      },
+      }],
     };
     expect(submitReviewSchema.safeParse(p).success).toBe(true);
   });
 
   it('accepts a ticket carrying only alignment + summary', () => {
-    const p = { ...base, findings: [], ticket: { alignment: 'unclear', summary: 'Hard to say.' } };
+    const p = { ...base, findings: [], tickets: [{ ref: 'T1', alignment: 'unclear', summary: 'Hard to say.' }] };
     expect(submitReviewSchema.safeParse(p).success).toBe(true);
   });
 
@@ -153,7 +154,7 @@ describe('submitReviewSchema — follow-up and user-story fields', () => {
     const p = {
       ...base,
       findings: [],
-      ticket: { alignment: 'aligned', summary: 's', criteria: [{ text: 'Criterion 1', status: 'not_checked', explanation: 'x' }] },
+      tickets: [{ ref: 'T1', alignment: 'aligned', summary: 's', criteria: [{ text: 'Criterion 1', status: 'not_checked', explanation: 'x' }] }],
     };
     expect(submitReviewSchema.safeParse(p).success).toBe(false);
   });
@@ -162,7 +163,7 @@ describe('submitReviewSchema — follow-up and user-story fields', () => {
     const p = {
       ...base,
       findings: [],
-      ticket: { alignment: 'aligned', summary: 's', criteria: [{ text: 'Criterion 1', status: 'met', explanation: 'x', line: 2.5 }] },
+      tickets: [{ ref: 'T1', alignment: 'aligned', summary: 's', criteria: [{ text: 'Criterion 1', status: 'met', explanation: 'x', line: 2.5 }] }],
     };
     expect(submitReviewSchema.safeParse(p).success).toBe(false);
   });
@@ -171,13 +172,33 @@ describe('submitReviewSchema — follow-up and user-story fields', () => {
     const p = {
       ...base,
       findings: [],
-      ticket: { alignment: 'aligned', summary: 's', criteria: [{ status: 'met', explanation: 'x' }] },
+      tickets: [{ ref: 'T1', alignment: 'aligned', summary: 's', criteria: [{ status: 'met', explanation: 'x' }] }],
     };
     expect(submitReviewSchema.safeParse(p).success).toBe(false);
   });
 
   it('rejects a follow-up entry with no explanation', () => {
     const p = { ...base, findings: [], followUp: [{ ref: 'P1', status: 'addressed' }] };
+    expect(submitReviewSchema.safeParse(p).success).toBe(false);
+  });
+});
+
+describe('submitReviewSchema — several tickets', () => {
+  const base = { summary: 'ok', verdict: 'COMMENT', scopeUsed: 'diff_only', findings: [] } as const;
+
+  it('accepts one report per ticket, each with its ref', () => {
+    const p = {
+      ...base,
+      tickets: [
+        { ref: 'T1', alignment: 'aligned', summary: 'Yes.' },
+        { ref: 'T2', alignment: 'not_aligned', summary: 'Not this change.' },
+      ],
+    };
+    expect(submitReviewSchema.safeParse(p).success).toBe(true);
+  });
+
+  it('rejects a ticket report with no ref', () => {
+    const p = { ...base, tickets: [{ alignment: 'aligned', summary: 'Yes.' }] };
     expect(submitReviewSchema.safeParse(p).success).toBe(false);
   });
 });

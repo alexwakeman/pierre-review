@@ -13,7 +13,7 @@ history kept), lets the user author their own review + tick which findings to po
 posts **one** GitHub review (inline + body + verdict).
 
 - **FREE, ON BY DEFAULT, LOCAL-ONLY — and ALWAYS VISIBLE locally.** Since apiVersion 22 Claude
-  Review (with its follow-up, ticket check, auto review and chat), review memory and AI Fix's fixer
+  Review (with its follow-up, ticket check, auto review and chat) and AI Fix's fixer
   are CORE again — no plan, no opt-in flag. They run on the user's OWN Claude Code session or
   `ANTHROPIC_API_KEY`; Limn stores no key and charges nothing for them. ONE switch,
   `config.aiEnabled` = `!isCloud && LIMN_AI_DISABLED !== 'true'`; `ENABLE_CLAUDE_REVIEW`,
@@ -47,8 +47,8 @@ posts **one** GitHub review (inline + body + verdict).
   `ReviewSeam.setLocalKey` and every reader of `~/.pierre-review/config.json`'s
   `anthropicApiKey` are gone; an already-stored value is left on disk **untouched and never
   read** (stopping the read was the decision, destroying the file was not — which is also why
-  there is no "clear it" route). `review/local-settings.ts` survives for the still-live
-  per-review BUDGET. Pinned by `review/auth.test.ts`, whose two ⚠ cases are exactly "a stored
+  there is no "clear it" route). `review/local-settings.ts` is DELETED (the per-review
+  budget is the `REVIEW_BUDGET_USD` env var alone). Pinned by `review/auth.test.ts`, whose two ⚠ cases are exactly "a stored
   key never makes `detectClaudeAuth` say ok" and "a stored key is never written into the
   environment".
 - **ALL OF IT IS CORE now** (`apps/backend/src/review/`). The security-sensitive half:
@@ -60,17 +60,25 @@ posts **one** GitHub review (inline + body + verdict).
   product half, moved back from the plugin at apiVersion 22 and published under FSL-1.1-MIT:
   `claude-review/` (`manager.ts` — in-memory queue, one review/PR, `PRO_REVIEW_CONCURRENCY`, the
   auto lane, startup reconcile; `routing.ts`, `prompts.ts`, `follow-up.ts`, `ticket.ts`,
-  `persist.ts`, `routes.ts`, `chat.ts`, `auto.ts`, `auto-settings.ts`), `memory/` (capture,
-  retrieval, the two UI-data routes) and `../coding/ai-fix/` (the fixer).
+  `persist.ts`, `routes.ts`, `chat.ts`, `auto.ts`, `auto-settings.ts`, `specialists.ts`) and
+  `../coding/ai-fix/` (the fixer).
+  - ⚠ **REVIEW MEMORY IS DELETED** — capture (the review event bus `review/events.ts` and its one
+    subscriber), retrieval, the "Reviewer preferences from past reviews" prompt block, the
+    "From your past reviews in this repo (N signals)" panel's two routes
+    (`GET /api/pro/prs/:id/review-learnings`, `GET /api/pro/claude-reviews/:reviewId/actions`), the
+    shared types and the `review_learnings` table (DROPPED by sqlite `0075` / pg `0062`; gone from
+    both schemas, both delete paths, erasure, `accountScopedTables()` and `verify:isolation`). It
+    never improved a review. Do not bring it back as a prompt block: the review prompt carries the
+    PR, the optional user stories and the previous review's findings, nothing about the reader.
   - ⚠ **They take ONE context argument, `AgentContext`** (`review/agent-context.ts`), built by
     `buildAgentContext` from DIRECT core imports — `ctx.review.*`, `ctx.coding.generateFix` /
-    `applyAndPush`, `ctx.github.*`, `ctx.reviewEvents`, `ctx.aiCredits`, `ctx.db` / `ctx.schema`.
+    `applyAndPush`, `ctx.github.*`, `ctx.aiCredits`, `ctx.db` / `ctx.schema`.
     It is not `ProContext`: those seams were DELETED from the plugin contract. The argument stays
     because the tests pass a fake one and the queues carry it per item. Every SDK-bearing module is
     still reached through a lazy `await import()` inside the member that runs it.
   - Registration: routes in `buildApp` via `registerAgenticRoutes`; the process-level half
-    (review-memory capture on the event bus, the auto-review sweeper, the crash-orphan reconciles)
-    once at boot via `startAgenticBackground` (index.ts).
+    (the auto-review sweeper, the crash-orphan reconciles) once at boot via
+    `startAgenticBackground` (index.ts).
   - **Two Pro inputs ride an OPTIONAL plugin seam**, `ProContext.registerAgenticProviders?`
     (`review/plugin-providers.ts`): `resolveReviewTicket` (the Jira fill for an AUTO review — see
     § Auto review) and `readCiAnalysisSeed` (AI Fix's `ci_analysis` seed — see § AI Fix). Absent,
@@ -81,7 +89,11 @@ posts **one** GitHub review (inline + body + verdict).
   (tool-less, no clone) / `worktree` (full clone as context) — stored on `reviewMode` +
   `routeReason` (migration 0013). Conservative: `diff_only` only within every size/spread
   ceiling AND touching no exported contract (`API_PATH_PATTERNS`/`EXPORT_MARKERS`); ambiguity
-  → `worktree`. User can force a mode per run.
+  → `worktree`. ⚠ **THE ROUTER ALWAYS DECIDES**: the Quick / Deep choice is gone from the request
+  (`GenerateReviewBody.mode` deleted; the route schema drops a stale `mode` key, it does not 400),
+  from `startReview` and from `decideReviewMode`, so every new run records `requested: 'auto',
+  decidedBy: 'router'`. Older rows keep the forced values they were started with.
+- **Deep reviews consult specialists** — see § Deep-review specialists.
 - **Line-anchoring is the load-bearing bug risk** (`buildAnchorIndex` in
   `post-review.ts`): a ticked finding posts inline on its `(path, line, side)` when that
   lands on an addable diff line; otherwise it **re-anchors to the file's first changed
@@ -89,23 +101,47 @@ posts **one** GitHub review (inline + body + verdict).
   ones fall back to the review body. Posting pins `commit_id` to the head SHA, 409s if
   it moved.
 - **Frontend:** `ClaudeReviewTab.tsx` + `useClaudeReview.ts` (live progress over SSE,
-  `…/stream`). Claude's output is **read-only** (Copy buttons); a separate "Your review"
+  `…/stream`). Claude's output is **read-only** (Copy buttons); a separate "Review summary"
   textarea + verdict is what posts. Re-reviewing the same head SHA **warns but is allowed**.
   The follow-up and user-story pieces live in `ClaudeReviewFollowUp.tsx` (three components, one
   mount each, pinned by `test/claudeReviewFollowUp.test.ts`) over the pure
-  `lib/claudeReviewFollowUp.ts` (ordering, anchors, the draft ↔ request mapping, chip palette):
+  `lib/claudeReviewFollowUp.ts` (ordering, anchors, the draft ↔ request mapping, chip palette);
+  the two pieces that need markdown or an href — a Jira-read story (`JiraStoryView`) and a ticket's
+  "Post as comment" (`TicketPostControl`) — live in `ClaudeReviewTickets.tsx`, so the plain-text
+  guard on `ClaudeReviewFollowUp.tsx` still holds.
+  - ⚠ **THE SCREEN CARRIES NO DEPTH PICKER, NO BUDGET LINE AND NO MEMORY PANELS.** Depth is the
+    router's call; the per-review budget is the `REVIEW_BUDGET_USD` env var ALONE (default $6.75) —
+    `PUT /api/claude-review/budget`, the `config.json` override and `getLocalKeyStatus` are
+    DELETED, and the SPA neither shows nor edits it. How a
+    run went (tokens, turns, a capped diff, noise files left out) sits behind the "i" beside the
+    meta line (`metaLine`: reviewed SHA · model label · cost). Explanations that earned a place are
+    `InfoButton`s (`components/InfoModal.tsx`), never a paragraph.
+  - **OUTDATED IS SAID TWICE, BRIEFLY**: beside Re-review ("Reviewed abc1234 · 2 newer commits",
+    amber; Re-review turns blue) and as an "Outdated" chip in the review's header. Both read
+    `ClaudeReview.head` through ONE `outdatedPhrase()`; `commitsSince: null` reads "the branch has
+    changed since", `0` "history rewritten since"; an older server falls back to comparing SHAs.
+  - ⚠ **A POSTED FINDING IS DONE.** `postedAt != null` (posted singly OR inside a submitted review —
+    `markReviewPosted` stamps every included finding) removes Post, Reword and Ignore; only the
+    "Posted" link and Copy remain. The post route matches it: `POST …/post` sends included findings
+    with `postedAt == null` only, so a re-submitted review cannot post a comment twice
+    (`post-review-skips-posted.test.ts`). There is NO per-finding "Ask Claude" — the review's one
+    chat thread covers every finding. A finding from a deep-review specialist wears a small lens chip
+    (`CLAUDE_FINDING_LENS_LABELS`).
+  - **"Generate fix from this review" is the LAST thing on the screen**, under Post to GitHub.
   - **Model picker** opens on `DEFAULT_CLAUDE_REVIEW_MODEL` and is NEVER re-seeded from the
     stored run (a run stored under a retired id, such as the old Opus 4.8, would otherwise be a
     select value with no option).
-  - **"User story or task (optional)"** sits under the depth hint, COLLAPSED by default. Its
-    header adds " · added" / " · needs a fix", so a closed panel
-    never hides what Run will send. It runs the SAME `checkClaudeReviewTicket` the route runs:
-    per-field counter past 80% of the cap (trimmed length, as the check measures), the check's
-    message under the field, and Re-review plus the same-commit "Run anyway" are disabled while
-    it fails. No `maxLength` on any input — it would silently cut a paste. The draft prefills from
-    the LATEST run's stored ticket (any status, since it is stored at queue time); a draft the
-    reader has typed wins, kept per PR for the session (`createTicketDraftStore`, 50 PRs). Only
-    a valid, non-empty ticket is sent, as the check's normalised fields.
+  - **"User stories (optional)"** sits under the Run row, COLLAPSED by default. Its header adds
+    " · N added" / " · needs a fix", so a closed panel never hides what Run will send. ONE SECTION
+    PER STORY, up to `CLAUDE_REVIEW_MAX_TICKETS`: "Add KEY" (one per fillable detected Jira ticket
+    not yet in the list; "Refresh KEY" once it is) adds a READ-ONLY story rendered as markdown with
+    its key linked and the "Acceptance criteria from" dropdown; "Add a story" adds three editable
+    fields. Every story has Remove. It runs the SAME `checkClaudeReviewTickets` the route runs:
+    per-field counter past 80% of the cap, the check's message under the failing story's field
+    (`index`), and Re-review plus "Run anyway" are disabled while it fails. No `maxLength` on any
+    input. The list prefills from the LATEST run's stored stories (`ticketDraftsFromReview`, Jira
+    provenance kept); a list the reader has touched wins, per PR for the session. Only valid,
+    non-empty stories are sent, as `tickets`, with `source`/`key`/`url`/`fetchedAt` for a Jira one.
   - **In `ClaudesReview`** (latest AND historic runs): the templated `followUpSentence` sits above
     Claude's summary; then **Previous review** — open items first (Not addressed, Partly addressed,
     then Not checked in GREY, never amber: unknown is not "not addressed"), addressed / no longer
@@ -113,9 +149,13 @@ posts **one** GitHub review (inline + body + verdict).
     (current) path and line, else the earlier path with its line DROPPED once the code moved since
     THAT comment was raised (`itemHeadMoved`: the item's own `headMoved`, falling back to the
     record's on older rows — a carried comment is older than the previous review); a
-    "Raised again below" button scrolls to `#claude-finding-<id>`. Then **User story or task**:
+    "Raised again below" button scrolls to `#claude-finding-<id>`. Then ONE SECTION PER STORY
+    (`ClaudeReview.tickets`, labelled by key, else "Story N", or "User story" when there is one):
     alignment chip, `ticketCriteriaSentence`, one row per criterion in AC order (Not met / Partly
-    met rows bordered), "Asked for but not done" and "Added but not asked for". A finding linked to
+    met rows bordered), "Asked for but not done" and "Added but not asked for", and ONE "Post as
+    comment" (latest run only, once an assessment exists). Posted ⇒ only a "Posted" link, never a
+    re-post; `visible: false` prints "It will show here shortly." and offers no retry. The mutation
+    key is per `(reviewId, index)` so a remount cannot re-enable the button mid-request. A finding linked to
     a still-open earlier comment wears "Not addressed since last review" / "Partly addressed since
     last review" and sorts first within its severity; one that repeats a comment already posted on
     this same commit also wears a grey "Already posted" (`alreadyPostedReraiseIds`) and arrives
@@ -175,6 +215,61 @@ posts **one** GitHub review (inline + body + verdict).
   `packages/pro/test/ai-fix-routes.test.ts` and `apps/frontend/test/aiFixModelDefault.test.ts`.
 - Price (live estimate only; the recorded cost is the SDK's own): Opus 5.5 is $4 in / $20 out per
   MTok, cache write $5, cache read $0.20.
+- **THE OFFERED LIST IS TWO MODELS: Opus 5.5 and Sonnet 5.** Sonnet 4.6 and Haiku 4.5 went the
+  way of Opus 4.8 — out of the `ClaudeReviewModel` union, the labels, `RATES` and
+  `EFFORT_CAPABLE_MODELS` (and the Haiku-only turn multiplier, `REVIEW_HAIKU_TURN_MULTIPLIER`, is
+  deleted). Nothing stores a model as a SETTING, so there was nothing to migrate: stored runs and
+  fixes keep their id and print it raw, both generate routes 400 the two ids, and the review chat's
+  `chatModelFor` already falls back to the default for a stored run on an unoffered model.
+
+## Deep-review specialists
+
+When the router picks `worktree`, the lead reviewer gets a catalogue of specialist sub-agents
+(`claude-review/specialists.ts`, passed as the Agent SDK's `agents` option by `review/agent.ts`)
+and decides which are worth consulting for THIS change:
+
+| Lens / agent name | Asks |
+|---|---|
+| `design` | module boundaries, responsibilities, coupling, fit with existing patterns |
+| `tests` | changed behaviour with no test, tests that assert nothing, missing edge cases |
+| `impact` | consumers outside the diff: other packages/apps, callers, config, schemas, deploy files |
+| `accessibility` | semantics, labels, keyboard, focus, contrast — OFFERED ONLY when a UI file changed (`.tsx/.jsx/.vue/.svelte/.astro/.html/.css/…`) |
+| `security` | injection, missing authorisation/tenant checks, unsafe input, secrets |
+| `performance` | queries in loops, unbounded work, blocking calls, wasted renders |
+
+- **The lead decides, the code caps.** At most `CLAUDE_REVIEW_MAX_SPECIALISTS` (3, shared) dispatches
+  per review. ⚠ **The cap is a PreToolUse hook** (`createDispatchGuard`), not a sentence in the
+  prompt: the 4th dispatch is DENIED. A hook deny holds under `bypassPermissions`, where
+  `canUseTool` would never be asked. The same guard denies any `subagent_type` outside the offered
+  catalogue — the SDK's built-in agent types (`general-purpose` …) INHERIT every tool — and rewrites
+  an allowed dispatch to the foreground (`run_in_background: false`), with no model override and no
+  isolation, so a report is back before the lead submits. Both dispatch-tool spellings (`Agent`, and
+  the older `Task`) are policed.
+- **Specialists are read-only**: `tools: Read/Glob/Grep`, and `disallowedTools` names Bash, every
+  write tool, the web tools, the dispatch tool and the whole `mcp__review` server (no
+  `submit_review`). `model: 'inherit'` — a specialist runs on the review's own model.
+  `SPECIALIST_MAX_TURNS` (12) each; their spend counts against the ONE `maxBudgetUsd` =
+  `REVIEW_BUDGET_USD` (default $6.75, sized for a deep run's three specialists; no per-specialist
+  add-on). Cap 3 and 12 turns are a COST choice: most PRs want design + tests + one more, and the
+  lead tends to use what it is offered. A run that crosses its budget before `submit_review` fails with no
+  findings and is billed anyway.
+- **Diff-only never gets them.** `reviewToolPolicy` (agent.ts) offers specialists only when
+  `mode === 'worktree'`; otherwise the dispatch tool is added to `disallowedTools` (so a diff-only
+  run cannot reach a built-in agent either). Pinned by `claude-review/specialists.test.ts`.
+- **Findings flow through the lead.** A specialist replies in plain text; the lead checks it against
+  the code, drops what it cannot confirm, and submits the rest through `submit_review` with the
+  finding's optional `lens` set. `lens` is stored on `claude_review_findings.lens` (sqlite `0075` /
+  pg `0062`, nullable, no backfill; a stored value outside `CLAUDE_FINDING_LENSES` reads as null)
+  and rides `ClaudeFinding.lens` (labels: `CLAUDE_FINDING_LENS_LABELS`). null = a general finding.
+- **A deep review always carries design comments**: the worktree system prompt (`systemPromptForMode(
+  'worktree', offered)` appends the catalogue section) requires at least one `lens: 'design'`
+  finding about the change as a whole, file-level when it is about the file, `praise` when the
+  design is sound — alongside the usual line-level findings. With no specialists offered the
+  worktree prompt is byte-identical to before.
+- Progress: a dispatch shows as "Asking the <lens> specialist", and a specialist's own steps are
+  prefixed with its name (`describeAssistantBlocks` maps `parent_tool_use_id` → lens).
+- Cost: a deep review that consults specialists costs more than one that does not — each specialist
+  re-reads code in its own context. The per-review budget is the guard; nothing else meters it.
 
 ## Follow-up on the previous review
 
@@ -305,9 +400,47 @@ request.
   invalidation), so the button never comes back while the hold lasts, and the message shows under
   the cell only for as long as the hold does.
 
-## User story or task
+## User stories (one or more tickets)
 
-Optional title, description and acceptance criteria the person running the review may paste.
+Optional user stories — each a title, description and acceptance criteria — that the person running
+the review pastes or fills from Jira. ⚠ **A review carries up to `CLAUDE_REVIEW_MAX_TICKETS` (5)
+and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket.
+
+- **Wire.** `GenerateReviewBody.tickets: ClaudeReviewTicketInput[]` (the legacy single `ticket` is
+  read only when `tickets` is absent). `checkClaudeReviewTickets` (shared) runs each through
+  `checkClaudeReviewTicket`, drops all-blank entries, and refuses over the count — `400
+  {error:'TicketInvalid', index, field, message}`, `index` null for the count; never truncated. A
+  ticket may carry `source: 'jira' | 'manual'` and, for Jira only, `key`, `url` (http/https) and
+  `fetchedAt` — provenance, dropped when malformed, never a reason to refuse. A Jira ticket's
+  `description` is MARKDOWN (the plugin converts Jira's wiki markup, `jiraWikiToMarkdown`), so the
+  SPA renders it read-only as markdown; a manual one is shown as typed.
+- **Stored MIGRATION-FREE.** `claude_reviews.ticket` holds an ARRAY of tickets and
+  `ticket_assessment` an index-aligned ARRAY of assessments; a run from before stored ONE object in
+  each, and every reader goes through shared `storedList` (one object → a one-element list).
+  `ClaudeReview.tickets: ClaudeReviewTicketEntry[]` (`{index, ref:'T1'…, ticket, assessment,
+  posted}`) is the read; `ticket`/`ticketAssessment` survive as the FIRST entry, deprecated.
+- **Prompt + model.** One "User stories" section (`ticket.ts` `pushTicketsSection`): the shared
+  instructions once, then each ticket under `### Ticket Tn`, its key/title/description/criteria
+  fenced as `Tn KEY` / `Tn TITLE` / `Tn DESCRIPTION` / `Tn ACCEPTANCE CRITERIA`. `submit_review`
+  takes `tickets: [{ref, alignment, summary, criteria?, missing?, notRequested?}]`;
+  `reconcileTicketAssessments` matches by ref (unknown / repeated refs dropped, an unreported ticket
+  `not_checked`; the legacy single `ticket` report reads as T1).
+- **Post one ticket's analysis as a PR comment** — `POST
+  /api/claude-reviews/:reviewId/tickets/:index/post`, no body, ONE comment PER TICKET, once:
+  `409 AlreadyPosted` after that (an in-memory claim taken synchronously stops a double click), `409
+  NotReady` while the run has no assessment for it (not succeeded, or `not_checked`). The body is
+  TEMPLATED from the stored assessment (`ticketAnalysisCommentBody`: key/title heading, alignment +
+  Claude's summary, the criteria sentence and rows, "Not done" / "Not asked for", the commit it was
+  checked against) and ends with `<!-- pierre:claude-review-ticket v=1 -->` — which STARTS WITH the
+  review marker on purpose, so `sync/review-fingerprint.ts` attributes it to Limn + Claude like any
+  Claude-derived comment. It goes through `ctx.prWrites.postPrComment` (REST issue comment, then the
+  local `upsertLocalPrComment` stamp + `notePrChangedForPr` — the `POST /api/prs/:id/comment` path)
+  and the record lands on that ticket's stored assessment as `posted {githubCommentId, url,
+  postedAt}`, served as `ClaudeReviewTicketEntry.posted`. Not refused on a moved head (an issue
+  comment is pinned to no commit; the body names the commit). Rate tier `githubWrite`, matched
+  exactly in `tierFor`. ⚠ Once GitHub has answered it returns 200 even if the record or the stamp
+  failed — `PostTicketAnalysisResult.visible:false` means "posted; the local copy is missing" and the
+  SPA must never offer a retry (it would post twice).
 
 - **ONE shared module** (`packages/shared/src/claude-review.ts`): `CLAUDE_REVIEW_TICKET_LIMITS`
   (title ≤ 300 characters, description ≤ 8000, criteria ≤ 8000 characters),
@@ -322,13 +455,12 @@ Optional title, description and acceptance criteria the person running the revie
   each with its own one-sentence `text`. The person's text is kept verbatim in
   `acceptanceCriteria`, which prefills the panel. `ClaudeReviewTicket.criteria` is LEGACY (old
   rows only; never written).
-- **The 400 contract.** `POST /api/prs/:id/claude-review` declares `ticket` in its body schema
+- **The 400 contract.** `POST /api/prs/:id/claude-review` declares `ticket` and `tickets` in its body schema
   (ajv's `removeAdditional` would strip it otherwise) with no `maxLength`; over a cap it answers
   `400 { error: 'TicketInvalid', field, message }` and starts nothing. Never truncated. Control
   characters (other than tab/newline) are refused (pg jsonb cannot hold `\u0000`).
 - **Stored at QUEUE time** on `claude_reviews.ticket`, so a failed or cancelled run still prefills
-  the panel for the re-run. Fenced in the prompt (`---BEGIN TICKET TITLE <nonce>---`,
-  `… DESCRIPTION …`, `… ACCEPTANCE CRITERIA …`).
+  the panel for the re-run.
 - **Reconcile** (`ticket.ts` `reconcileTicketAssessment`): Claude's list in its order, renumbered
   AC1..n, rows with no text or an unknown status dropped, capped at 40, text clipped to 500. If
   criteria text was sent and Claude reported none, ONE `not_checked` row carries the pasted text —
@@ -340,8 +472,8 @@ Optional title, description and acceptance criteria the person running the revie
   existing detection found AND its workspace has a saved Jira token, `PrDetail.tickets[i]
   .canFetchDetails` is true and the EXPANDED panel shows one "Fill from KEY" button per such
   ticket. Click-gated (nothing fetches on mount): `GET /api/pro/prs/:id/jira-ticket?key=` reads the
-  issue with every field (REST v2, `fields=*all&expand=names,schema`; wiki markup kept verbatim,
-  ADF flattened) and the panel REPLACES title and description. Manual entry is unchanged and
+  issue with every field (REST v2, `fields=*all&expand=names,schema`; the description's wiki markup
+  converted to markdown, ADF flattened) and the panel REPLACES title and description. Manual entry is unchanged and
   everything stays editable; nothing is truncated on the way in.
 - ⚠ **THE ACCEPTANCE-CRITERIA FIELD IS CHOSEN PER TICKET, IN THE PANEL — not in Settings.** A
   site-wide picker shipped first and was unusable: real sites carry several fields named
@@ -364,8 +496,8 @@ Optional title, description and acceptance criteria the person running the revie
   so the saved token can read only tickets this workspace's PRs name. Settings, token storage and
   SSRF rules: [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § Jira API access and
   [SECURITY.md](SECURITY.md).
-- **Shown in the app only, not posted.** The prompt tells the model to ALSO raise any concrete
-  defect behind an unmet criterion as a normal finding, and findings are postable.
+- **Posted only on request**, one ticket at a time (above). The prompt also tells the model to raise
+  any concrete defect behind an unmet criterion as a normal finding, and findings are postable.
 - **Vocabularies** (shared): criteria Met / Partly met / Not met / Can't tell from the code /
   Not checked; alignment Matches the user story / Partly matches / Doesn't match / Can't tell /
   Not checked; follow-up Addressed / Partly addressed / Not addressed / No longer applies /
@@ -376,7 +508,7 @@ Optional title, description and acceptance criteria the person running the revie
 Settings → Workspace → **Auto Claude review** (shown wherever `MeResponse.ai.enabled` is — local,
 free; **OFF until switched on**, because it spends the user's own Claude in the background). When a
 workspace switches it on, Claude reviews each **human-authored, non-draft PR OPENED at
-or after that moment** — once per PR, ever — with the same model (`DEFAULT_CLAUDE_REVIEW_MODEL`) and
+or after that moment** — once per HEAD (see re-review below) — with the same model (`DEFAULT_CLAUDE_REVIEW_MODEL`) and
 per-review budget as the Review button. Storage: CORE `workspaces.auto_review_enabled` +
 `auto_review_enabled_at` (core `0074` / pg `0061`; it lived on the plugin's
 `pro_workspace_settings` (plugin `0036`) until Claude Review left the plugin, and plugin `0037`
@@ -420,14 +552,34 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   when its tracker tier is on, backed by `packages/pro/src/jira/resolve-ticket.ts`
   (`resolveAutoReviewTicket`), before the row is written. Without the plugin, free auto review runs
   with no story (free manual review checks a PASTED story). No browser is there to "Fill from KEY",
-  so the plugin does the same fill: the PR's FIRST detected key (the one
-  detection path, so the token still reads only tickets this workspace's PRs name), fetched through
+  so the plugin does the same fill: EVERY detected key, in detection order, up to
+  `CLAUDE_REVIEW_MAX_TICKETS` (the one detection path, so the token still reads only tickets this
+  workspace's PRs name; one failing key skips that ticket only; a moved key answering twice is kept
+  once; each marked `source:'jira'` with key, browse URL and fetch time), fetched through
   `jiraCall` → `jira/fetch.ts`, criteria from `defaultAcCandidate(candidates, null)` — a strong name
   match or none, never a weak one. Each field is CUT to its cap (and unstorable characters dropped)
   instead of refused: nobody is there to trim. It NEVER throws — no tracker, no token or a Jira
-  error is `ticket: null` and the review runs without a story; a Jira failure logs account,
+  error is no ticket and the review runs without a story (the provider answers `tickets[]`, plus
+  the first as `ticket` for an older host); a Jira failure logs account,
   workspace, PR and the error code only. Before this every auto run went out with no ticket. The
   manual paths are unchanged (an empty panel on a click still means "no story").
+- ⚠ **RE-REVIEW ON NEW COMMITS.** The same candidate read returns `reReview: [{prId, headSha}]`:
+  a PR of the same population (opened at/after the floor, human, open, not draft) that has a
+  SUCCEEDED run (manual or auto), whose synced head matches NO run of any status (new commits or a
+  rewritten history), and whose latest run is not queued/running. ONE RUN PER HEAD: any row at the
+  new head settles it, and `startAutoItem` re-checks `hasReviewAtHead` before writing the row (a
+  person may have reviewed it while it waited). ⚠ **DEBOUNCED IN THE SWEEPER**: a moved head must
+  hold still for `AUTO_REREVIEW_SETTLE_MS` (5 min, first-seen time in memory) before it is queued,
+  so a burst of pushes costs ONE run on the last head; a restart only restarts the wait. It is a
+  FULL fresh review on the ordinary auto lane (same cap, slots, model); it carries the previous
+  run's stories (`getLatestStoredTickets`, else the Jira fill), and the existing follow-up reads the
+  earlier POSTED findings so they are not repeated. Switching auto review off stops it like any
+  auto run. `AutoSweepResult.reQueued` counts them.
+- **OUTDATED, ON THE READ.** `ClaudeReview.head: {currentHeadSha, outdated, commitsSince}` compares
+  the reviewed commit with the PR's SYNCED head (DB-only). `commitsSince` counts the PR's synced
+  commits newer (by commit time) than the reviewed one; null when the reviewed commit is not among
+  them (a force-push can drop it) — never a guess; `0` with `outdated` = a rewrite added no commit.
+  `head` is null when the PR's head is unknown.
 - **THE COST GUARD**: `AUTO_REVIEW_DAILY_CAP` = 20 auto runs per workspace per **UTC** day, counting
   today's auto rows plus items still waiting in the lane. Past it, PRs wait for the next day. An
   account whose agent credits are spent sits the tick out.
@@ -447,9 +599,10 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
 
 ## Chat about a review
 
-After a review **succeeds**, the reader can ask Claude about it: one **general thread** per review
-("Ask Claude about this review", under the findings) and one **thread per finding** (the finding's
-**Ask Claude** button). Free and local-only like the rest of Claude Review. Host:
+After a review **succeeds**, the reader can ask Claude about it: ONE **thread** per review
+("Ask Claude about this review", under the findings), which covers every finding. The per-finding
+threads' route (`?findingId=`) still answers, for threads stored before the button was removed, but
+nothing on screen opens a new one. Free and local-only like the rest of Claude Review. Host:
 `review/chat-agent.ts`, reached as `ctx.review.chat` on the core `AgentContext`. Product:
 `review/claude-review/chat.ts`. SPA: `components/ClaudeReviewChat.tsx` +
 `hooks/useClaudeReviewChat.ts`. Table: `claude_review_chat_messages` (core `0073` / pg `0060`).

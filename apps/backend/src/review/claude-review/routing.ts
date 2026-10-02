@@ -1,8 +1,4 @@
-import type {
-  RequestedReviewMode,
-  ReviewMode,
-  ReviewRouteReason,
-} from '@pierre-review/shared';
+import type { ReviewMode, ReviewRouteReason } from '@pierre-review/shared';
 import type { ReviewFileMetric } from '../../pro/contract.js';
 
 // The deterministic review router (Pro): decide, BEFORE the agent runs, whether a PR can be
@@ -10,8 +6,11 @@ import type { ReviewFileMetric } from '../../pro/contract.js';
 // or has nothing substantive to review. A PURE decision over the per-file metrics core computed
 // in ctx.review.prepareReview (the diff primitives stayed core) + the conservative gate below:
 // a change stays diff_only only if within EVERY ceiling AND touching no exported/public
-// contract; anything else (and any ambiguity) routes to worktree. A forced `requested` mode
-// bypasses the gate (metrics still recorded for audit).
+// contract; anything else (and any ambiguity) routes to worktree.
+//
+// ⚠ THE ROUTER ALWAYS DECIDES. The reader used to be able to force a depth (Quick / Deep); that
+// choice is gone from the route, the manager and this function, so every new run records
+// `requested: 'auto', decidedBy: 'router'`. Older rows keep the forced values they were started with.
 
 export interface RoutingThresholds {
   maxFiles: number;
@@ -52,7 +51,6 @@ export interface ReviewDecision {
 
 export function decideReviewMode(
   files: ReviewFileMetric[],
-  requested: RequestedReviewMode,
   thresholds: RoutingThresholds = ROUTING_THRESHOLDS,
 ): ReviewDecision {
   const changedFiles = files.length;
@@ -75,15 +73,7 @@ export function decideReviewMode(
     allFilesNew,
   };
 
-  // Forced overrides bypass the gate (metrics still recorded for audit).
-  if (requested === 'diff_only') {
-    return { mode: 'diff_only', reason: { ...metrics, requested, decidedBy: 'user', trippedBy: null } };
-  }
-  if (requested === 'worktree') {
-    return { mode: 'worktree', reason: { ...metrics, requested, decidedBy: 'user', trippedBy: null } };
-  }
-
-  // requested === 'auto' → the router decides. No textual changes → nothing to review; skip.
+  // No textual changes → nothing to review; skip.
   if (linesChanged === 0) {
     return { mode: 'skip', reason: { ...metrics, requested: 'auto', decidedBy: 'router', trippedBy: null } };
   }

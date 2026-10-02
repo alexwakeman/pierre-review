@@ -23,8 +23,6 @@ const RATES: Record<ClaudeReviewModel, Rate> = {
   // Opus 5.5 — the Claude Review AND AI Fix default. $4 in / $20 out; cache write $5 (1.25×),
   // read $0.20.
   'claude-opus-5-5': { input: 4, output: 20, cacheWrite: 5, cacheRead: 0.2 },
-  'claude-haiku-4-5': { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 },
-  'claude-sonnet-4-6': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
   // Sonnet 5 (≤200K tier) — Sonnet pricing, near-Opus quality.
   'claude-sonnet-5': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
 };

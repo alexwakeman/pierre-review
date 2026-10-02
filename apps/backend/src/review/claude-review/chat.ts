@@ -230,13 +230,21 @@ export interface ChatPromptInput {
   nonce: string;
 }
 
+// The review's tickets as the chat sees them: ref, the ticket, its assessment (no posted state).
+function chatTickets(
+  review: Pick<ChatPromptInput['review'], 'tickets'>,
+): Array<{ ref: string; ticket: unknown; assessment: unknown }> {
+  return (review.tickets ?? []).map((t) => ({ ref: t.ref, ticket: t.ticket, assessment: t.assessment }));
+}
+
 /** Every string that will sit inside a fence — the nonce-collision scan's input. */
 export function chatUntrustedTexts(input: Omit<ChatPromptInput, 'nonce'>): string[] {
   const out: string[] = [input.pr.title, input.pr.body ?? '', input.review.summary ?? ''];
   for (const f of input.review.findings) {
     out.push(f.path, f.title, f.body, f.editedBody ?? '', f.suggestion ?? '', f.diffHunk ?? '');
   }
-  if (input.review.ticket) out.push(JSON.stringify(input.review.ticket));
+  if (input.review.tickets?.length) out.push(JSON.stringify(chatTickets(input.review)));
+  else if (input.review.ticket) out.push(JSON.stringify(input.review.ticket));
   if (input.review.ticketAssessment) out.push(JSON.stringify(input.review.ticketAssessment));
   if (input.review.followUp) out.push(JSON.stringify(input.review.followUp));
   if (input.prepared) out.push(input.prepared.promptDiff, ...input.prepared.changedFiles);
@@ -289,13 +297,19 @@ export function buildChatPrompt(input: ChatPromptInput): string {
   }
   lines.push('');
 
-  if (review.ticket) {
-    lines.push('## User story the review checked against');
+  if (review.tickets?.length || review.ticket) {
+    lines.push('## User stories the review checked against');
     fence(
       lines,
-      'USER STORY',
+      'USER STORIES',
       nonce,
-      JSON.stringify({ ticket: review.ticket, assessment: review.ticketAssessment ?? null }, null, 1),
+      JSON.stringify(
+        review.tickets?.length
+          ? chatTickets(review)
+          : [{ ticket: review.ticket, assessment: review.ticketAssessment ?? null }],
+        null,
+        1,
+      ),
     );
     lines.push('');
   }

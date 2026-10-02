@@ -12,12 +12,11 @@ import type {
   PostReviewResult,
   PrDetail,
   PrFilesResponse,
-  RequestedReviewMode,
   ReviewMode,
   User,
 } from '@pierre-review/shared';
-import type { LearningMatch, ReviewAction } from '@pierre-review/shared';
 import {
+  CLAUDE_FINDING_LENS_LABELS,
   CLAUDE_REVIEW_MODELS,
   CLAUDE_REVIEW_MODEL_LABELS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
@@ -27,8 +26,6 @@ import { formatDate, formatUsd, safeExternalUrl } from '../lib/ui.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { AiCloudNote, AiRunGate } from './AiSetup.js';
-import { useReviewLearnings } from '../hooks/useReviewLearnings.js';
-import { useReviewActions } from '../hooks/useReviewActions.js';
 import { useFilters } from '../store/filters.js';
 import { useWorkspaces } from '../hooks/useWorkspaces.js';
 import {
@@ -41,7 +38,6 @@ import {
   isAutoReviewHoldError,
   usePostFinding,
   usePostReview,
-  useSetReviewBudget,
   useUpdateFinding,
   useUpdateReview,
 } from '../hooks/useClaudeReview.js';
@@ -50,14 +46,14 @@ import { hunkLineMarker, useHunkHighlight } from './DiffHunk.js';
 import { writeClipboard } from './CopyButton.js';
 import { Markdown } from './Markdown.js';
 import { MentionTextarea } from './MentionTextarea.js';
-import { ReviewChatSection, ReviewChatThread } from './ClaudeReviewChat.js';
+import { ReviewChatSection } from './ClaudeReviewChat.js';
+import { InfoButton } from './InfoModal.js';
+import { TicketPostControl } from './ClaudeReviewTickets.js';
 import {
   ArrowIcon,
   CheckIcon,
   ChevronIcon,
-  CommentIcon,
   ExternalLinkIcon,
-  InfoIcon,
   PencilIcon,
   RefreshIcon,
   WarningIcon,
@@ -68,18 +64,19 @@ import {
   ClaudeReviewFollowUpSection,
   ClaudeReviewTicketPanel,
   ClaudeReviewTicketResults,
+  storyLabel,
 } from './ClaudeReviewFollowUp.js';
 import {
   ALREADY_POSTED_CHIP,
   RERAISED_CHIP,
   SEVERITY_CLASS,
   alreadyPostedReraiseIds,
-  checkTicketDraft,
+  checkTicketDrafts,
   createTicketDraftStore,
   reraisedStatusByFindingId,
-  resolveTicketDraft,
+  resolveTicketDrafts,
   sortFindingsForDisplay,
-  ticketRequestFromCheck,
+  ticketsRequestFromCheck,
   type ReraisedStatus,
   type TicketDraft,
 } from '../lib/claudeReviewFollowUp.js';
@@ -114,36 +111,12 @@ function Row({
 
 const shortSha = (sha: string | null): string => (sha ? sha.slice(0, 7) : '—');
 
-// The resolved review mode (what actually ran), and the user-facing depth options.
+// The resolved review mode (what actually ran). Depth is the router's call, never the reader's.
 const REVIEW_MODE_LABEL: Record<ReviewMode, string> = {
   skip: 'Skipped',
   diff_only: 'Quick',
   worktree: 'Deep',
 };
-
-const REQUESTED_MODE_OPTIONS: { value: RequestedReviewMode; label: string }[] = [
-  { value: 'auto', label: 'Auto (router decides)' },
-  { value: 'diff_only', label: 'Quick — diff only' },
-  { value: 'worktree', label: 'Deep — full worktree' },
-];
-
-const plural = (n: number, unit: string): string =>
-  `${n} ${unit}${n === 1 ? '' : 's'}`;
-
-// A short, human-readable explanation of why a run got the mode it did — shown as a
-// tooltip on the mode badge.
-function routeReasonText(review: ClaudeReview): string | undefined {
-  const rr = review.routeReason;
-  if (!rr) return undefined;
-  const size = `${plural(rr.changedFiles, 'file')} · ${plural(rr.linesChanged, 'line')} · ${plural(rr.dirsTouched, 'dir')}`;
-  if (rr.decidedBy === 'user') {
-    return `You chose ${REVIEW_MODE_LABEL[review.reviewMode ?? 'worktree']} for this run (${size}).`;
-  }
-  if (rr.trippedBy) {
-    return `Auto chose Deep — ${size}; over the ${rr.trippedBy} limit.`;
-  }
-  return `Auto chose ${REVIEW_MODE_LABEL[review.reviewMode ?? 'diff_only']} — ${size}.`;
-}
 
 const VERDICT_LABEL: Record<ClaudeReviewVerdict, string> = {
   COMMENT: 'Comment',
@@ -179,14 +152,26 @@ const SEVERITY_ORDER: ClaudeFindingSeverity[] = [
 // The rank + pill palette live in lib/claudeReviewFollowUp.ts, shared with the previous-review
 // list so an earlier comment's severity paints the same pill as a current finding's.
 
+// "abc1234 · Claude Opus 5.5 · US$0.42". A retired model id prints raw.
 function metaLine(review: ClaudeReview): string {
-  const parts: string[] = [review.model];
+  const label = (CLAUDE_REVIEW_MODEL_LABELS as Record<string, string>)[review.model] ?? review.model;
+  const parts: string[] = [shortSha(review.headSha), label];
   if (review.costUsd != null) parts.push(formatUsd(review.costUsd));
-  if (review.numTurns != null) parts.push(`${review.numTurns} turns`);
-  if (review.excludedFiles.length > 0) {
-    parts.push(`${review.excludedFiles.length} noise files excluded`);
-  }
   return parts.join(' · ');
+}
+
+// The reviewed commit against the PR's synced head: null when current, else the short phrase.
+// The server's `head` reading wins; an older server falls back to comparing SHAs.
+function outdatedPhrase(review: ClaudeReview, prHeadSha: string | null): string | null {
+  const h = review.head;
+  if (h != null) {
+    if (!h.outdated) return null;
+    if (h.commitsSince == null) return 'the branch has changed since';
+    if (h.commitsSince === 0) return 'history rewritten since';
+    return `${h.commitsSince} newer commit${h.commitsSince === 1 ? '' : 's'}`;
+  }
+  if (prHeadSha == null || prHeadSha === review.headSha) return null;
+  return 'the branch has changed since';
 }
 
 const PHASE_LABEL: Record<string, string> = {
@@ -399,7 +384,7 @@ function FindingHunk({ hunk, path }: { hunk: string; path?: string | null }): JS
           )}
         </span>
         {lines.length > 1 && (
-          <span className="shrink-0 font-sans text-[10px] text-gray-400">
+          <span className="shrink-0 font-sans text-[11px] text-gray-500 dark:text-gray-400">
             {lines.length} lines
           </span>
         )}
@@ -503,7 +488,6 @@ function FindingRow({
   inChangeset,
   priorStatus,
   alreadyPosted = false,
-  chatReviewId = null,
   onOpenInChanges,
   onToggle,
   onReword,
@@ -530,16 +514,12 @@ function FindingRow({
   // It repeats an earlier comment already posted on this same commit (the server saved it
   // ignored, so Post review does not put it on GitHub twice). The chip says why.
   alreadyPosted?: boolean;
-  // The succeeded review this finding belongs to, when it can be asked about (null ⇒ no Ask).
-  chatReviewId?: number | null;
   onOpenInChanges?: OpenInChanges;
   onToggle: (included: boolean) => void;
   onReword: (editedBody: string) => Promise<unknown>;
   onPostComment: () => Promise<unknown>;
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
-  // This finding's own chat thread, closed until asked for (nothing fetches before that).
-  const [asking, setAsking] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -563,10 +543,11 @@ function FindingRow({
     rewording && draft.trim() !== '' && draft !== (finding.editedBody ?? '')
       ? draft
       : null;
-  const willPostReword = pendingReword != null || hasReword;
 
   const anchorLabel =
     finding.line != null ? `${finding.path}:${finding.line}` : finding.path;
+  // Posted singly, or inside a submitted review. ⚠ A POSTED FINDING IS DONE: no Post again, no
+  // Reword, no Ignore — only its link (and Copy).
   const isPosted = finding.postedAt != null;
   // Permalink depends on HOW it was posted: a PR-level issue comment anchors as
   // #issuecomment-<id>, an inline review comment as #discussion_r<id>.
@@ -620,7 +601,7 @@ function FindingRow({
   // (their own line isn't in the diff) still post inline — the server re-anchors
   // them onto the file's first change. Only a finding whose file isn't in the diff
   // can't post, and that surfaces as an error on the attempt.
-  const canPostComment = editable;
+  const canPostComment = editable && !isPosted;
 
   // Copy is CLAUDE'S ORIGINAL COMMENT, as its markdown SOURCE — never the reader's reword
   // (that is theirs, already in their own editor), and never the rendered DOM, so fences,
@@ -679,7 +660,7 @@ function FindingRow({
   // first change, so the user needs a way to opt them out. An ignored finding
   // collapses + fades but can be re-expanded for a look, then un-ignored
   // (re-included). `included` defaults true, so a finding is normal until ignored.
-  const canIgnore = editable;
+  const canIgnore = editable && !isPosted;
   const ignored = canIgnore && !finding.included;
   const [ignoredExpanded, setIgnoredExpanded] = useState(false);
   const detailsHidden = ignored && !ignoredExpanded;
@@ -694,13 +675,18 @@ function FindingRow({
     >
       <div className="flex items-start gap-2">
         <span
-          className={`mt-0.5 inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${SEVERITY_CLASS[finding.severity]}`}
+          className={`mt-0.5 inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-semibold capitalize ${SEVERITY_CLASS[finding.severity]}`}
         >
           {finding.severity}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold">{finding.title}</span>
+            {finding.lens != null && (
+              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] text-gray-600 dark:text-gray-300">
+                {CLAUDE_FINDING_LENS_LABELS[finding.lens]}
+              </span>
+            )}
             {priorStatus != null && (
               <span
                 className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${RERAISED_CHIP[priorStatus].cls}`}
@@ -723,48 +709,42 @@ function FindingRow({
                   href={safeExternalUrl(commentUrl)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-700 hover:underline dark:text-green-400"
+                  className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 hover:underline dark:text-green-400"
                   title="View this comment on GitHub"
                 >
-                  posted
-                  <CheckIcon size={10} />
+                  Posted
+                  <CheckIcon size={11} />
                 </a>
               ) : (
-                <span className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-700 dark:text-green-400">
-                  posted
-                  <CheckIcon size={10} />
+                <span className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 dark:text-green-400">
+                  Posted
+                  <CheckIcon size={11} />
                 </span>
               ))}
-            {hasReword && (
-              <span
-                className="rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] text-blue-600 dark:text-blue-400"
-                title="You reworded this — your text posts instead of Claude's"
-              >
-                reworded
+            {hasReword && !isPosted && (
+              <span className="rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] text-blue-600 dark:text-blue-400">
+                Your wording
               </span>
             )}
-            {!finding.anchored &&
+            {!finding.anchored && !isPosted &&
               (finding.fileInDiff ? (
                 <span
-                  className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] text-gray-500 dark:text-gray-400"
-                  title="This line isn't in the PR diff — it posts inline on the file's first change (added preferred)"
+                  className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] text-gray-600 dark:text-gray-300"
+                  title="Posts on the file's first change"
                 >
-                  off-diff line — posts on first change
+                  Line not in diff
                 </span>
               ) : (
                 <span
-                  className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-400"
-                  title="This finding's file isn't part of the PR's diff — it posts as a standalone PR-level comment, marked as outside the diff"
+                  className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-400"
+                  title="Posts as a PR comment"
                 >
-                  outside the PR diff — posts as a PR comment
+                  File not in diff
                 </span>
               ))}
             {ignored && (
-              <span
-                className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400"
-                title="Set aside — excluded from the submitted review"
-              >
-                ignored
+              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] text-gray-600 dark:text-gray-300">
+                Ignored
               </span>
             )}
           </div>
@@ -834,8 +814,8 @@ function FindingRow({
                 href={secondaryBlobHref}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="text-[10px] font-sans text-gray-400 hover:text-gray-600 hover:underline dark:hover:text-gray-200"
-                title="Open the file at the reviewed commit (no diff, but no jump — use if the PR diff doesn't land right)"
+                className="font-sans text-[11px] text-gray-500 hover:text-gray-700 hover:underline dark:text-gray-400 dark:hover:text-gray-200"
+                title="Open the file at the reviewed commit"
               >
                 view file
               </a>
@@ -858,27 +838,27 @@ function FindingRow({
           {/* Your reword — shown when set, editable on the latest run. */}
           {hasReword && !rewording && (
             <div className="mt-1.5 rounded border border-blue-200 bg-blue-50/50 px-2 py-1 dark:border-blue-900/50 dark:bg-blue-900/10">
-              <div className="text-[10px] uppercase tracking-wide text-blue-500">
-                Your reword (posts instead of Claude&apos;s)
+              <div className="text-[11px] font-medium text-blue-700 dark:text-blue-400">
+                Your wording
               </div>
               <Markdown>{finding.editedBody as string}</Markdown>
             </div>
           )}
 
           {/* Reword editor (inline). The OPEN trigger lives in the action bar. */}
-          {editable && rewording && (
+          {editable && !isPosted && rewording && (
             <div className="mt-2 space-y-1">
               <MentionTextarea
                 prId={prId}
                 value={draft}
                 onChange={setDraft}
                 rows={4}
-                placeholder="Reword this finding in your own words (markdown). This is what gets posted as the inline comment."
+                placeholder="Your wording (markdown)"
                 className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-gray-700 dark:bg-gray-900"
               />
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={saveReword} className={BTN_PRIMARY}>
-                  Save reword
+                  Save
                 </button>
                 <button
                   type="button"
@@ -896,7 +876,7 @@ function FindingRow({
                     onClick={clearReword}
                     className={`${BTN_SECONDARY} text-gray-500 dark:text-gray-400`}
                   >
-                    Clear reword
+                    Use Claude&apos;s text
                   </button>
                 )}
               </div>
@@ -941,35 +921,21 @@ function FindingRow({
                 type="button"
                 onClick={handlePost}
                 disabled={busy}
-                title={
-                  postsAsPrComment
-                    ? "This finding's file isn't in the PR diff — posts as a standalone PR-level comment (no review submitted)"
-                    : 'Post just this finding as a single inline comment on the PR (no review submitted)'
-                }
                 className={BTN_PRIMARY}
               >
-                {busy
-                  ? 'Posting…'
-                  : postsAsPrComment
-                    ? isPosted
-                      ? 'Post again as PR comment'
-                      : 'Post as PR comment'
-                    : isPosted
-                      ? 'Post again as comment'
-                      : 'Post as comment'}
+                {busy ? 'Posting…' : postsAsPrComment ? 'Post as PR comment' : 'Post as comment'}
               </button>
             )}
-            {editable && !rewording && (
+            {editable && !isPosted && !rewording && (
               <button
                 type="button"
                 onClick={() => {
                   setDraft(finding.editedBody ?? '');
                   setRewording(true);
                 }}
-                title="Rewrite this finding in your own words — your text posts instead of Claude's"
                 className={BTN_PRIMARY}
               >
-                {hasReword ? 'Edit reword' : 'Reword in my words'}
+                {hasReword ? 'Edit wording' : 'Reword'}
               </button>
             )}
             <button type="button" onClick={copy} className={BTN_SECONDARY}>
@@ -985,48 +951,12 @@ function FindingRow({
                 Ignore
               </button>
             )}
-            {chatReviewId != null && (
-              <button
-                type="button"
-                onClick={() => setAsking((v) => !v)}
-                aria-expanded={asking}
-                className={`${BTN_SECONDARY} inline-flex items-center gap-1`}
-              >
-                <CommentIcon size={12} />
-                {asking ? 'Hide questions' : 'Ask Claude'}
-              </button>
-            )}
-            {canPostComment && (
-              <span className="text-[11px] text-gray-400">
-                {willPostReword ? 'posts your reworded text' : "posts Claude's text"}
-              </span>
-            )}
-            {isPosted &&
-              (commentUrl != null ? (
-                <a
-                  href={safeExternalUrl(commentUrl)}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1 text-xs text-green-700 hover:underline dark:text-green-400"
-                >
-                  view comment
-                  <ExternalLinkIcon size={11} />
-                </a>
-              ) : (
-                <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400">
-                  posted
-                  <CheckIcon size={12} />
-                </span>
-              ))}
             {postError != null && (
               <span className="ml-auto text-xs text-red-500">{postError}</span>
             )}
           </>
         )}
       </div>
-      {asking && chatReviewId != null && !ignored && (
-        <ReviewChatThread reviewId={chatReviewId} findingId={finding.id} />
-      )}
     </li>
   );
 }
@@ -1080,6 +1010,9 @@ function ClaudesReview({
   // Only a finished review that actually read code can be asked about.
   const chatReviewId =
     review.status === 'succeeded' && review.reviewMode !== 'skip' ? review.id : null;
+  const outdated = outdatedPhrase(review, prHeadSha);
+  // One section per story (a run from before several stories reads as a one-element list).
+  const ticketEntries = review.tickets ?? [];
 
   return (
     <div className="space-y-2 px-4 py-3">
@@ -1092,35 +1025,35 @@ function ClaudesReview({
         )}
         {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
         {review.reviewMode != null && (
-          <span
-            className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs font-normal text-gray-500 dark:text-gray-400"
-            title={routeReasonText(review)}
-          >
+          <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs font-normal text-gray-600 dark:text-gray-300">
             {REVIEW_MODE_LABEL[review.reviewMode]} review
           </span>
         )}
-        {/* Self-escalation: a diff-only run where Claude judged a deeper review was
-            warranted (scopeUsed = worktree). Prompt the user to re-review as Deep. */}
-        {review.reviewMode === 'diff_only' && review.scope === 'worktree' && (
-          <span
-            className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-xs font-normal text-amber-700 dark:text-amber-400"
-            title="Reviewed from the diff only, but Claude flagged that this change warrants a deeper, cross-file review. Re-review with depth set to Deep."
-          >
+        {outdated != null && (
+          <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-xs font-normal text-amber-700 dark:text-amber-400">
             <WarningIcon size={12} />
-            suggests a deeper review
-          </span>
-        )}
-        {review.diffCapped && (
-          <span
-            className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs font-normal text-gray-500 dark:text-gray-400"
-            title="The diff shown to Claude was truncated to a size budget to control cost. Routing and line-anchoring still used the full diff, and any omitted files were listed for the worktree to read."
-          >
-            diff capped
+            Outdated
           </span>
         )}
       </div>
-      <div className="text-xs text-gray-500 dark:text-gray-400">{metaLine(review)}</div>
-      <UsageBreakdown review={review} />
+      <div className="flex flex-wrap items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+        <span>{metaLine(review)}</span>
+        <InfoButton title="This run">
+          <div className="space-y-2">
+            <UsageBreakdown review={review} />
+            {review.numTurns != null && <p>{review.numTurns} turns.</p>}
+            {review.diffCapped && (
+              <p>The diff was too large to send whole, so it was cut to fit.</p>
+            )}
+            {review.excludedFiles.length > 0 && (
+              <p>
+                Left out as noise: {review.excludedFiles.length} file
+                {review.excludedFiles.length === 1 ? '' : 's'} (lockfiles, generated code).
+              </p>
+            )}
+          </div>
+        </InfoButton>
+      </div>
       {followUpLine != null && <div className="text-sm font-medium">{followUpLine}</div>}
       {review.summary != null && review.summary !== '' && (
         <div className="text-sm">
@@ -1135,14 +1068,27 @@ function ClaudesReview({
           onOpenInChanges={onOpenInChanges}
         />
       )}
-      {review.ticket != null && (
+      {ticketEntries.map((entry) => (
         <ClaudeReviewTicketResults
-          ticket={review.ticket}
-          assessment={review.ticketAssessment ?? null}
+          key={entry.index}
+          entry={entry}
+          label={
+            ticketEntries.length === 1 && entry.ticket.key == null
+              ? 'User story'
+              : storyLabel(entry.ticket, entry.index)
+          }
+          actions={
+            <TicketPostControl
+              prId={review.prId}
+              reviewId={review.id}
+              entry={entry}
+              canPost={editable && review.status === 'succeeded'}
+            />
+          }
           changedPaths={changedPaths}
           onOpenInChanges={onOpenInChanges}
         />
-      )}
+      ))}
       {findings.length > 0 ? (
         <ul className="space-y-2">
           {findings.map((f) => (
@@ -1166,7 +1112,6 @@ function ClaudesReview({
               }
               priorStatus={priorStatusById.get(f.id)}
               alreadyPosted={alreadyPostedIds.has(f.id)}
-              chatReviewId={chatReviewId}
               onOpenInChanges={onOpenInChanges}
               onToggle={(included) => onToggleFinding(f.id, included)}
               onReword={(editedBody) => onRewordFinding(f.id, editedBody)}
@@ -1178,381 +1123,6 @@ function ClaudesReview({
         <div className="text-xs text-gray-400">No line-level findings.</div>
       )}
       {chatReviewId != null && <ReviewChatSection reviewId={chatReviewId} />}
-    </div>
-  );
-}
-
-// Per-review budget cap (local settings). The hard USD ceiling each run may spend: a
-// run that trips it stops and is recorded failed (and still bills for what it used), so
-// this is the lever to raise when "Deep" reviews on a large repo keep hitting the cap —
-// or to lower to fail-fast expensive runs. Local-only; mirrors ApiKeyPanel's write pattern.
-function ReviewBudgetPanel({
-  prId,
-  budgetUsd,
-  budgetMax,
-}: {
-  prId: number;
-  budgetUsd: number;
-  budgetMax: number;
-}): JSX.Element {
-  const setBudget = useSetReviewBudget(prId);
-  const [open, setOpen] = useState(false);
-  const [value, setValue] = useState(budgetUsd.toFixed(2));
-  // Re-sync the input if the server value changes (e.g. a save clamped it to the max).
-  useEffect(() => {
-    setValue(budgetUsd.toFixed(2));
-  }, [budgetUsd]);
-
-  const save = (): void => {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n <= 0) return;
-    setBudget.mutate(Math.min(n, budgetMax));
-  };
-
-  if (!open) {
-    return (
-      <div className="px-4 pb-2">
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-        >
-          Max budget per review:{' '}
-          <span className="font-mono text-gray-600 dark:text-gray-300">
-            ${budgetUsd.toFixed(2)}
-          </span>
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="px-4 pb-2">
-      <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/50">
-        <div className="mb-1 flex items-center justify-between">
-          <span className="text-xs uppercase tracking-wide text-gray-400">
-            Review budget
-          </span>
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-          >
-            Hide
-          </button>
-        </div>
-        <div className="space-y-1.5">
-          <div className="text-sm font-semibold">Max budget per review</div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Hard USD ceiling each review run may spend (max ${budgetMax.toFixed(2)}). A run
-            that hits the cap stops and is recorded failed, so keep this comfortably above a
-            normal review’s cost — raise it if deep reviews keep failing.
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-gray-500 dark:text-gray-400">$</span>
-            <input
-              type="number"
-              min={0.5}
-              max={budgetMax}
-              step={0.5}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              className="w-24 rounded border border-gray-300 bg-white px-2 py-1 font-mono text-sm dark:border-gray-700 dark:bg-gray-900"
-            />
-            <button
-              type="button"
-              onClick={save}
-              disabled={
-                setBudget.isPending ||
-                !(Number(value) > 0) ||
-                Number(value) === budgetUsd
-              }
-              className="rounded border border-blue-400 px-2 py-1 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
-            >
-              {setBudget.isPending ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setBudget.mutate(null)}
-              disabled={setBudget.isPending}
-              className="rounded border border-gray-300 px-2 py-1 text-sm text-gray-500 dark:text-gray-400 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
-            >
-              Reset to default
-            </button>
-          </div>
-          {setBudget.isError && (
-            <div className="text-xs text-red-500">
-              {(setBudget.error as Error)?.message ?? 'Failed to save the budget.'}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Subtle confidence label (right-aligned on a match row) — never a hard claim,
-// mirroring the app's heuristic-honesty ethos.
-const CONFIDENCE_CLASS: Record<LearningMatch['confidence'], string> = {
-  high: 'text-green-600 dark:text-green-400',
-  medium: 'text-amber-600 dark:text-amber-400',
-  low: 'text-gray-400',
-};
-
-// Human labels for the raw learning kinds (what each captured action represents).
-const LEARNING_KIND_LABELS: Record<string, string> = {
-  finding_dismissed: 'dismissed',
-  finding_kept: 'kept',
-  finding_reworded: 'reworded',
-  finding_reword_cleared: 'reword cleared',
-  finding_posted: 'posted',
-  review_body_rewritten: 'body rewritten',
-  verdict_overridden: 'verdict changed',
-  review_posted: 'review posted',
-  run_requested: 'run requested',
-};
-
-function clipText(s: string, max = 240): string {
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
-}
-
-// The VERBATIM markdown block that gets injected into the next review's prompt. Lets the
-// reviewer see exactly what past-review context feeds the next run (not just the aggregated
-// summaries above). Collapsed by default.
-function ContextBlockDisclosure({ block }: { block: string }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="px-2 py-1">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1 text-[10px] font-medium text-ai-signal hover:underline"
-        aria-expanded={open}
-      >
-        <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
-        {open ? 'Hide' : 'Show'} the exact context sent to Claude
-      </button>
-      {open && (
-        <>
-          <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-gray-900 px-2 py-1.5 font-mono text-[10px] leading-snug text-gray-100 dark:bg-black/40">
-            {block}
-          </pre>
-          <div className="mt-0.5 text-[10px] text-gray-400">
-            Injected verbatim as “Reviewer preferences from past reviews” (capped at ~600
-            tokens).
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// One raw captured action in the per-run "what this review taught the memory" log.
-function ReviewActionRow({ action }: { action: ReviewAction }): JSX.Element {
-  const label = LEARNING_KIND_LABELS[action.kind] ?? action.kind;
-  const verdictChanged =
-    (action.claudeVerdict != null || action.userVerdict != null) &&
-    action.claudeVerdict !== action.userVerdict;
-  return (
-    <li className="py-1 text-[11px]">
-      <div className="flex flex-wrap items-center gap-1.5 text-gray-500 dark:text-gray-400">
-        <span className="rounded bg-ai-signal/10 px-1 py-0.5 font-medium text-ai-signal">
-          {label}
-        </span>
-        {action.glob != null && (
-          <span className="truncate font-mono text-gray-400">{action.glob}</span>
-        )}
-        {action.category != null && <span className="text-gray-400">· {action.category}</span>}
-        <span className="ml-auto shrink-0 text-[10px] text-gray-400">
-          {formatDate(action.createdAt)}
-        </span>
-      </div>
-      {verdictChanged && (
-        <div className="mt-0.5 text-gray-500 dark:text-gray-400">
-          verdict: {action.claudeVerdict ?? '—'} →{' '}
-          <span className="text-gray-700 dark:text-gray-200">{action.userVerdict ?? '—'}</span>
-        </div>
-      )}
-      {action.claudeText != null && action.claudeText !== '' && (
-        <div className="mt-0.5">
-          <span className="font-medium text-gray-400">Claude: </span>
-          <span className="text-gray-600 dark:text-gray-300">{clipText(action.claudeText)}</span>
-        </div>
-      )}
-      {action.userText != null && action.userText !== '' && (
-        <div className="mt-0.5">
-          <span className="font-medium text-gray-400">You: </span>
-          <span className="text-gray-600 dark:text-gray-300">{clipText(action.userText)}</span>
-        </div>
-      )}
-    </li>
-  );
-}
-
-// Per-run provenance: the raw actions THIS review contributed to the reviewer's
-// memory — the drill-down behind the aggregated signals. Feeds future reviews of PRs
-// touching the same files. Lazily fetched only when expanded. Free, local-only (`me.ai`).
-function ReviewActionsLog({ reviewId }: { reviewId: number }): JSX.Element | null {
-  const reviewMemory = useAiCapabilities().enabled;
-  const [open, setOpen] = useState(false);
-  const { data } = useReviewActions(reviewId, reviewMemory && open);
-  if (!reviewMemory) return null;
-  const actions = data?.actions ?? [];
-  return (
-    <div className="mx-4 my-2 rounded border border-gray-200 dark:border-gray-800">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-gray-600 dark:text-gray-300"
-        aria-expanded={open}
-      >
-        <ChevronIcon dir={open ? 'down' : 'right'} />
-        What this review taught the memory
-        <span className="ml-auto text-[10px] font-normal text-gray-400">
-          {open ? 'hide' : 'show'}
-        </span>
-      </button>
-      {open && (
-        <div className="border-t border-gray-200 px-2 py-1 dark:border-gray-800">
-          <div className="pb-1 text-[10px] text-gray-500 dark:text-gray-400">
-            <InfoIcon size={10} className="mr-1 inline-block align-[-0.1em]" />
-            Captured from this run — these feed future reviews of PRs touching the same
-            files.
-          </div>
-          {actions.length === 0 ? (
-            <div className="py-1 text-[11px] text-gray-400">
-              No actions captured from this run yet.
-            </div>
-          ) : (
-            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-              {actions.map((a) => (
-                <ReviewActionRow key={a.id} action={a} />
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LearningMatchRow({ match }: { match: LearningMatch }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const hasExample =
-    match.example != null && (match.example.claude != null || match.example.you != null);
-  return (
-    <li className="px-2 py-1.5">
-      <div className="flex items-baseline gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-            <span className="truncate font-mono">{match.glob}</span>
-            {match.category != null && (
-              <>
-                <span className="decorative-mark text-gray-300 dark:text-gray-600">·</span>
-                <span>{match.category}</span>
-              </>
-            )}
-          </div>
-          <div className="text-xs text-gray-700 dark:text-gray-200">{match.summary}</div>
-          {(match.count != null || (match.kinds != null && match.kinds.length > 0)) && (
-            <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-gray-400">
-              {match.count != null && (
-                <span>
-                  {match.count} action{match.count === 1 ? '' : 's'}
-                  {match.lastActionAt != null ? ` · last ${formatDate(match.lastActionAt)}` : ''}
-                </span>
-              )}
-              {match.kinds?.map((k) => (
-                <span
-                  key={k.kind}
-                  className="rounded bg-ai-signal/10 px-1 py-0.5 text-ai-signal"
-                >
-                  {LEARNING_KIND_LABELS[k.kind] ?? k.kind}
-                  {k.count > 1 ? ` ×${k.count}` : ''}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-        <span className={`shrink-0 text-[10px] ${CONFIDENCE_CLASS[match.confidence]}`}>
-          {match.confidence}
-        </span>
-      </div>
-      {hasExample && (
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-gray-400 hover:underline"
-        >
-          {open ? 'hide example' : 'show example'}
-          <ChevronIcon dir={open ? 'down' : 'right'} size={9} />
-        </button>
-      )}
-      {open && hasExample && (
-        <div className="mt-1 space-y-0.5 rounded bg-gray-50 px-2 py-1 text-[11px] dark:bg-gray-800/60">
-          {match.example?.claude != null && (
-            <div>
-              <span className="font-medium text-gray-400">Claude: </span>
-              <span className="text-gray-600 dark:text-gray-300">
-                “{match.example.claude}”
-              </span>
-            </div>
-          )}
-          {match.example?.you != null && (
-            <div>
-              <span className="font-medium text-gray-400">You: </span>
-              <span className="text-gray-600 dark:text-gray-300">
-                “{match.example.you}”
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-    </li>
-  );
-}
-
-// Surface 1: a collapsible panel of aggregated signals from the reviewer's
-// past reviews in this repo, shown ABOVE the Run/Re-review controls. The same
-// signals are injected into the run as context. Free, local-only (`me.ai`); renders
-// nothing in the cloud or when there are no matches.
-function ReviewLearningsPanel({ prId }: { prId: number }): JSX.Element | null {
-  const reviewMemory = useAiCapabilities().enabled;
-  const { data } = useReviewLearnings(prId, reviewMemory);
-  const [open, setOpen] = useState(false);
-  const matches = data?.matches ?? [];
-  if (!reviewMemory || matches.length === 0) return null;
-  return (
-    <div className="mb-2 rounded border border-ai-border bg-ai-surface">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-ai-ink"
-        aria-expanded={open}
-      >
-        <ChevronIcon dir={open ? 'down' : 'right'} />
-        From your past reviews in this repo ({matches.length} signal
-        {matches.length === 1 ? '' : 's'})
-        <span className="ml-auto text-[10px] font-normal text-ai-muted">
-          {open ? 'hide' : 'show'}
-        </span>
-      </button>
-      {open && (
-        <div className="border-t border-ai-hairline px-1 pb-1">
-          <div className="px-2 py-1 text-[10px] text-gray-500 dark:text-gray-400">
-            <InfoIcon size={10} className="mr-1 inline-block align-[-0.1em]" />
-            These are given to Claude as context for this run.
-          </div>
-          {data?.contextBlock != null && data.contextBlock !== '' && (
-            <ContextBlockDisclosure block={data.contextBlock} />
-          )}
-          <ul className="divide-y divide-ai-hairline">
-            {matches.map((m, i) => (
-              <LearningMatchRow key={i} match={m} />
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
@@ -1594,14 +1164,14 @@ function GenerateFixFromReview({
   const openAiFixFromReview = useFilters((s) => s.openAiFixFromReview);
   if (!aiFix || review?.status !== 'succeeded') return null;
   return (
-    <div className="mb-2">
+    <div className="px-4 py-3">
       <button
         type="button"
         onClick={() => openAiFixFromReview(prId, buildReviewSeed(review))}
-        className="whitespace-nowrap rounded border border-ai-border px-2.5 py-1 text-xs text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
-        title="Launch an agent to apply this review as a fix"
+        className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-ai-border px-2.5 py-1 text-xs text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
       >
-        Generate fix from this review →
+        Generate fix from this review
+        <ArrowIcon dir="right" size={11} />
       </button>
     </div>
   );
@@ -1609,7 +1179,7 @@ function GenerateFixFromReview({
 
 // The reader's half-typed user stories, per PR, for this session (survives a tab switch or a PR
 // change). A PR with an entry was TOUCHED, and a stored ticket never overwrites it.
-const ticketDrafts = createTicketDraftStore();
+const ticketDrafts = createTicketDraftStore<TicketDraft[]>();
 
 export function ClaudeReviewTab({
   pr,
@@ -1651,24 +1221,24 @@ export function ClaudeReviewTab({
   // stays until remount.
   const [model, setModel] = useState<ClaudeReviewModel>(DEFAULT_CLAUDE_REVIEW_MODEL);
 
-  // The optional user story or task. The reader's own draft wins; otherwise it prefills from the
-  // LATEST run's stored ticket — stored at queue time, so a failed or cancelled run still
-  // prefills the re-run. Checked by the SAME shared function the route runs (caps, split).
-  const [ticketDraft, setTicketDraftState] = useState<TicketDraft>(() =>
-    resolveTicketDraft(ticketDrafts.get(pr.id), review?.ticket),
+  // The optional user stories. The reader's own list wins; otherwise it prefills from the LATEST
+  // run's stored stories — stored at queue time, so a failed or cancelled run still prefills the
+  // re-run. Checked by the SAME shared function the route runs (caps, count).
+  const [ticketDraft, setTicketDraftState] = useState<TicketDraft[]>(() =>
+    resolveTicketDrafts(ticketDrafts.get(pr.id), review),
   );
   const ticketSeedKey = useRef<string | null>(null);
   useEffect(() => {
     const key = `${pr.id}:${review?.id ?? 'none'}`;
     if (ticketSeedKey.current === key) return;
     ticketSeedKey.current = key;
-    setTicketDraftState(resolveTicketDraft(ticketDrafts.get(pr.id), review?.ticket));
-  }, [pr.id, review?.id, review?.ticket]);
-  const setTicketDraft = (d: TicketDraft): void => {
+    setTicketDraftState(resolveTicketDrafts(ticketDrafts.get(pr.id), review));
+  }, [pr.id, review]);
+  const setTicketDraft = (d: TicketDraft[]): void => {
     ticketDrafts.set(pr.id, d);
     setTicketDraftState(d);
   };
-  const ticketCheck = useMemo(() => checkTicketDraft(ticketDraft), [ticketDraft]);
+  const ticketCheck = useMemo(() => checkTicketDrafts(ticketDraft), [ticketDraft]);
   // The workspace that OWNS this PR's repo — its Jira token is the one "Fill from KEY" uses, which
   // need not be the workspace being viewed. Named in the panel when that workspace has no token.
   const { data: workspaces } = useWorkspaces();
@@ -1676,11 +1246,6 @@ export function ClaudeReviewTab({
   const ticketBlockedTitle = ticketCheck.ok
     ? undefined
     : `Fix the user story first: ${ticketCheck.message}`;
-
-  // Review depth. 'auto' lets the deterministic router decide from the diff; the
-  // user can override to force a Quick (diff-only) or Deep (worktree) review.
-  const [reviewModeChoice, setReviewModeChoice] =
-    useState<RequestedReviewMode>('auto');
 
   // Same-SHA re-run confirmation (warn-but-allow).
   const [confirmRerun, setConfirmRerun] = useState(false);
@@ -1770,6 +1335,10 @@ export function ClaudeReviewTab({
 
   const alreadyReviewed =
     review?.status === 'succeeded' && review.headSha === pr.headSha;
+  // The latest run against the PR's head: shown beside the Re-review button, in amber when newer
+  // commits (or a rewritten history) have landed since.
+  const latestOutdated =
+    review?.status === 'succeeded' ? outdatedPhrase(review, pr.headSha) : null;
 
   const runGenerate = (): void => {
     // An invalid user story never starts a run — including from the same-commit "Run anyway"
@@ -1782,11 +1351,7 @@ export function ClaudeReviewTab({
     setConfirmRerun(false);
     setPreview(null);
     setPostResult(null);
-    generate.mutate({
-      model,
-      mode: reviewModeChoice,
-      ticket: ticketRequestFromCheck(ticketCheck),
-    });
+    generate.mutate({ model, tickets: ticketsRequestFromCheck(ticketCheck) });
   };
 
   const onRunClick = (): void => {
@@ -1828,47 +1393,22 @@ export function ClaudeReviewTab({
   return (
     <div className="divide-y divide-gray-100 py-1 dark:divide-gray-800">
       {/* The run controls are ALWAYS shown; a missing AI runtime or Claude credential replaces
-          only the Run button (AiRunGate), so past reviews, the story and the budget stay usable.
+          only the Run button (AiRunGate), so past reviews and the stories stay usable.
           ⚠ THERE IS NOWHERE IN THE APP TO ENTER A KEY, AND THE LINE MUST NOT PRETEND OTHERWISE:
           both credential rungs (an ambient Claude Code session, then ANTHROPIC_API_KEY) live
           outside the SPA. */}
-        <>
         <div className="px-4 py-3">
-          {/* Surface 1: matches from past reviews, injected into this run. */}
-          <ReviewLearningsPanel prId={pr.id} />
-          {/* Hand this completed review to the agentic fixer. */}
-          <GenerateFixFromReview prId={pr.id} review={review} />
           <div className="flex flex-wrap items-center gap-2">
-            <label className="text-xs uppercase tracking-wide text-gray-400">
-              Model
-            </label>
             <select
               value={model}
               onChange={(e) => setModel(e.target.value as ClaudeReviewModel)}
               disabled={isRunning || starting}
+              aria-label="Model"
               className="rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
             >
               {CLAUDE_REVIEW_MODELS.map((m) => (
                 <option key={m} value={m}>
                   {CLAUDE_REVIEW_MODEL_LABELS[m]}
-                </option>
-              ))}
-            </select>
-            <label className="text-xs uppercase tracking-wide text-gray-400">
-              Depth
-            </label>
-            <select
-              value={reviewModeChoice}
-              onChange={(e) =>
-                setReviewModeChoice(e.target.value as RequestedReviewMode)
-              }
-              disabled={isRunning || starting}
-              title="How deep to review: Auto decides from the diff; Quick reviews the diff only (fast, no repository access); Deep clones the repo and explores callers/dependents."
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
-            >
-              {REQUESTED_MODE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
                 </option>
               ))}
             </select>
@@ -1878,7 +1418,11 @@ export function ClaudeReviewTab({
               onClick={onRunClick}
               disabled={isRunning || starting || autoHold != null || !ticketCheck.ok}
               title={ticketBlockedTitle}
-              className="rounded border border-gray-300 px-2 py-1 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+              className={
+                latestOutdated != null
+                  ? 'rounded border border-blue-400 px-2 py-1 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30'
+                  : 'rounded border border-gray-300 px-2 py-1 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500'
+              }
             >
               {review == null ? 'Run review' : 'Re-review'}
             </button>
@@ -1888,27 +1432,25 @@ export function ClaudeReviewTab({
                 {autoHold === 'running' ? 'Auto review running' : 'Auto review queued'}
               </span>
             )}
-            <span
-              className="font-mono text-xs text-gray-400"
-              title={pr.headSha ?? undefined}
-            >
-              {shortSha(pr.headSha)}
-            </span>
+            {review?.status === 'succeeded' &&
+              (latestOutdated != null ? (
+                <span
+                  className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400"
+                  title={`Now at ${shortSha(pr.headSha)}`}
+                >
+                  <WarningIcon size={12} />
+                  Reviewed <span className="font-mono">{shortSha(review.headSha)}</span> ·{' '}
+                  {latestOutdated}
+                </span>
+              ) : (
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  Reviewed <span className="font-mono">{shortSha(review.headSha)}</span>
+                </span>
+              ))}
           </div>
 
-          {/* Depth hint — the PR's size + what the chosen depth will do. */}
-          <div className="mt-1 text-xs text-gray-400">
-            {plural(pr.changedFilesCount, 'file')} ·{' '}
-            {plural(pr.additions + pr.deletions, 'line')} changed.{' '}
-            {reviewModeChoice === 'auto'
-              ? 'Auto picks Quick (diff-only) for small, localized changes and Deep (worktree) for large or contract-changing ones.'
-              : reviewModeChoice === 'diff_only'
-                ? 'Quick: reviewed from the diff alone — fast, no repository exploration.'
-                : 'Deep: clones the repo and explores callers/dependents — slower, thorough.'}
-          </div>
-
-          {/* The optional user story or task — collapsed by default; its header says when it
-              holds something (or needs a fix), so a closed panel never hides what Run sends. */}
+          {/* The optional user stories — collapsed by default; its header says when it holds
+              something (or needs a fix), so a closed panel never hides what Run sends. */}
           <ClaudeReviewTicketPanel
             value={ticketDraft}
             onChange={setTicketDraft}
@@ -1920,51 +1462,35 @@ export function ClaudeReviewTab({
 
           {/* Same-SHA warn-but-allow confirmation. */}
           {confirmRerun && (
-            <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-300">
-              <div>
-                You already reviewed this exact commit (
-                <span className="font-mono">{shortSha(pr.headSha)}</span>).
-                Re-running will incur additional cost.
-              </div>
-              <div className="mt-1.5 flex gap-2">
-                <button
-                  type="button"
-                  onClick={runGenerate}
-                  disabled={!ticketCheck.ok || autoHold != null}
-                  title={ticketBlockedTitle}
-                  className="rounded border border-amber-400 px-2 py-0.5 text-xs hover:bg-amber-100 disabled:opacity-50 dark:border-amber-600 dark:hover:bg-amber-900/40"
-                >
-                  Run anyway
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmRerun(false)}
-                  className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
-                >
-                  Cancel
-                </button>
-              </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-300">
+              <span>This commit is already reviewed.</span>
+              <button
+                type="button"
+                onClick={runGenerate}
+                disabled={!ticketCheck.ok || autoHold != null}
+                title={ticketBlockedTitle}
+                className="rounded border border-amber-400 px-2 py-0.5 text-xs hover:bg-amber-100 disabled:opacity-50 dark:border-amber-600 dark:hover:bg-amber-900/40"
+              >
+                Run anyway
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmRerun(false)}
+                className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+              >
+                Cancel
+              </button>
             </div>
           )}
 
           {/* An auto-review refusal is shown by the "Auto review queued/running" note instead,
               and is history once the hold ends. */}
           {generate.isError && !isAutoReviewHoldError(generate.error) && (
-            <div className="mt-2 text-xs text-red-500">
+            <div className="mt-2 text-xs text-red-600 dark:text-red-400">
               {(generate.error as Error)?.message ?? 'Failed to start review.'}
             </div>
           )}
         </div>
-        {/* Per-review budget cap (local-only). Always available — the lever to raise when
-            a deep review keeps tripping the default ceiling. */}
-        {data != null && (
-          <ReviewBudgetPanel
-            prId={pr.id}
-            budgetUsd={data.reviewBudgetUsd}
-            budgetMax={data.reviewBudgetMax}
-          />
-        )}
-        </>
 
       {/* Running progress. The bar is mounted OUTSIDE the isRunning gate so it observes
           the running→done transition and plays its 100%→fade-out completion (it renders
@@ -2072,7 +1598,9 @@ export function ClaudeReviewTab({
           >
             {data.history.map((h) => (
               <option key={h.id} value={h.id}>
-                {shortSha(h.headSha)} · {h.model} · {h.status} ·{' '}
+                {shortSha(h.headSha)} ·{' '}
+                {(CLAUDE_REVIEW_MODEL_LABELS as Record<string, string>)[h.model] ?? h.model} ·{' '}
+                {h.status} ·{' '}
                 {formatDate(h.createdAt)}
                 {h.trigger === 'auto' ? ` · ${AUTO_REVIEW_LABEL}` : ''}
                 {h.id === review?.id ? ' (latest)' : ''}
@@ -2105,33 +1633,25 @@ export function ClaudeReviewTab({
         />
       )}
 
-      {/* Provenance drill-down (Pro): the raw actions this run fed into the reviewer's
-          memory — what will inform future reviews of PRs touching the same files. */}
-      {shownReview != null && shownReview.status === 'succeeded' && (
-        <ReviewActionsLog reviewId={shownReview.id} />
-      )}
-
       {/* Section B — the authored review that gets posted (latest run only). */}
       {canEdit && review != null && review.status === 'succeeded' && review.reviewMode !== 'skip' && (
         <div className="space-y-2 px-4 py-3">
-          <div className="text-sm font-semibold">
-            Overall review · the PR-level summary comment
+          <div className="flex items-center gap-1 text-sm font-semibold">
+            Review summary
+            <InfoButton title="Review summary">
+              <p>
+                Posted as the review&apos;s top-level comment, with your verdict. The inline
+                comments are the findings above that you have not ignored or already posted.
+              </p>
+            </InfoButton>
           </div>
-          <p className="text-xs text-gray-400">
-            This is the single <strong>top-level review comment</strong> posted on
-            the PR (GitHub&apos;s review summary), together with your verdict
-            below. It is <strong>not</strong> a line comment — the inline comments
-            come from the findings above that you haven&apos;t{' '}
-            <em>ignored</em>. Leave it short or empty if the inline comments say it
-            all.
-          </p>
           <MentionTextarea
             prId={pr.id}
             value={userBody}
             onChange={setUserBody}
             onBlur={() => updateReview.mutate({ reviewId: review.id, userBody })}
             rows={6}
-            placeholder="Overall summary for the PR (markdown, @ to mention). Posted as the review's top-level comment…"
+            placeholder="Summary (markdown, @ to mention). Optional."
             className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 font-mono text-sm dark:border-gray-700 dark:bg-gray-900"
           />
           <div className="flex flex-wrap items-center gap-2">
@@ -2141,15 +1661,13 @@ export function ClaudeReviewTab({
                 updateReview.mutate({ reviewId: review.id, userBody })
               }
               disabled={updateReview.isPending}
-              title="Save this overall review draft. It's kept until you post to GitHub — it does NOT post anything yet (use “Post to GitHub” below for that)."
+              title="Saves the draft. Nothing is posted yet."
               className="rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
             >
               Save
             </button>
-            <label className="text-xs uppercase tracking-wide text-gray-400">
-              Verdict
-            </label>
             <select
+              aria-label="Verdict"
               value={userVerdict}
               onChange={(e) => {
                 const v = e.target.value as ClaudeReviewVerdict;
@@ -2163,11 +1681,6 @@ export function ClaudeReviewTab({
               <option value="APPROVE">Approve</option>
             </select>
           </div>
-          <p className="text-xs text-gray-400">
-            Claude&apos;s text above is reference only — use a finding&apos;s
-            Reword box to post your own wording inline, or Copy to pull lines in
-            here.
-          </p>
         </div>
       )}
 
@@ -2176,8 +1689,8 @@ export function ClaudeReviewTab({
         <div className="space-y-2 px-4 py-3">
           <div className="text-sm font-semibold">Post to GitHub</div>
           {review.postedAt != null && (
-            <div className="text-xs text-gray-400">
-              Already posted — re-posting is still allowed.
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              Posted {formatDate(review.postedAt)}.
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">
@@ -2187,7 +1700,7 @@ export function ClaudeReviewTab({
               disabled={postReview.isPending}
               className="rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
             >
-              Preview payload
+              Preview
             </button>
             {!confirmPost ? (
               <button
@@ -2221,7 +1734,7 @@ export function ClaudeReviewTab({
               </span>
             )}
             {postReview.isPending && (
-              <span className="text-xs text-gray-400">working…</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">Posting…</span>
             )}
           </div>
 
@@ -2235,9 +1748,8 @@ export function ClaudeReviewTab({
               </div>
               {preview.prComments.length > 0 && (
                 <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Plus <strong>{preview.prComments.length}</strong> PR-level comment
-                  {preview.prComments.length === 1 ? '' : 's'} for findings outside
-                  the PR diff:{' '}
+                  Plus <strong>{preview.prComments.length}</strong> PR comment
+                  {preview.prComments.length === 1 ? '' : 's'}:{' '}
                   {preview.prComments.map((c) => c.path).join(', ')}
                 </div>
               )}
@@ -2253,23 +1765,26 @@ export function ClaudeReviewTab({
                 {postResult.postedCommentCount === 1 ? '' : 's'}
               </div>
               {postResult.prCommentCount > 0 && (
-                <div className="mt-1 text-xs text-green-700/80 dark:text-green-400/80">
-                  Plus {postResult.prCommentCount} PR-level comment
-                  {postResult.prCommentCount === 1 ? '' : 's'} (findings outside the
-                  PR diff).
+                <div className="mt-1 text-xs">
+                  Plus {postResult.prCommentCount} PR comment
+                  {postResult.prCommentCount === 1 ? '' : 's'}.
                 </div>
               )}
             </div>
           )}
 
           {postReview.isError && (
-            <div className="text-xs text-red-500">
+            <div className="text-xs text-red-600 dark:text-red-400">
               {(postReview.error as Error)?.message ??
                 'Failed to post review to GitHub.'}
             </div>
           )}
         </div>
       )}
+
+      {/* Hand the latest succeeded review to the agentic fixer — last, once the reader has
+          decided what in it is worth fixing. */}
+      {canEdit && <GenerateFixFromReview prId={pr.id} review={review} />}
     </div>
   );
 }

@@ -9,7 +9,8 @@
 // `claude_reviews` row at all). So:
 //   • the DATABASE is the queue — a restart loses nothing, and a waiting item has no row;
 //   • a draft is picked up the tick after it is marked ready (if it was opened late enough);
-//   • one review per PR, ever: any row — manual, auto, failed — settles it.
+//   • one FIRST review per PR: any row — manual, auto, failed — settles it (a re-review, below,
+//     needs a new head).
 //
 // THE LANE. Items go onto the manager's AUTO lane (manager.ts), which runs only when no manual
 // item is waiting and has its OWN queue cap, so auto work can never make a click answer 'busy'.
@@ -18,6 +19,16 @@
 // THE COST GUARD is `AUTO_REVIEW_DAILY_CAP` auto runs per workspace per UTC day, counting rows
 // already started today plus items still waiting in the lane. Past it, PRs wait for tomorrow. An
 // account whose agent credits are spent is skipped for the rest of the tick.
+//
+// RE-REVIEW ON NEW COMMITS. A PR already reviewed (a SUCCEEDED run, manual or auto — opened at or
+// after the switch-on, like every auto candidate) whose synced head moves past every run — new
+// commits OR a rewritten history — gets ONE fresh, full review of the new head. Still a pull: the
+// candidate read (`reReview`) re-derives it from the DB each tick, and any row at the new head
+// settles it. DEBOUNCED here: a head must hold still for AUTO_REREVIEW_SETTLE_MS (first seen →
+// now, in memory) before it is queued, so a burst of pushes costs one run on the last head. A
+// restart only restarts the wait. The run is an ordinary auto run: same lane, slot, daily cap,
+// model; it carries the previous run's stories, and the follow-up (follow-up.ts) reads what was
+// already posted.
 //
 // ⚠ IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF: `autoReviewAvailable` needs the agentic switch
 // (config.aiEnabled) AND a local host — checked separately, so the cloud guarantee does not rest on
@@ -36,6 +47,18 @@ import {
 
 export const AUTO_REVIEW_CRON = '* * * * *';
 
+/** How long a moved head must hold still before its re-review is queued. */
+export const AUTO_REREVIEW_SETTLE_MS = 5 * 60 * 1000;
+
+// `${accountId}:${prId}` → the moved head last seen and when it was first seen. Pruned each full
+// tick to the current candidates.
+const headSeen = new Map<string, { sha: string; firstSeenMs: number }>();
+
+/** Test hook. */
+export function _resetAutoReReviewForTest(): void {
+  headSeen.clear();
+}
+
 /** Can auto review run in this process at all? The Settings toggle and the sweeper both ask. */
 export function autoReviewAvailable(ctx: AgentContext): boolean {
   return AGENTIC_AI_ENABLED && !ctx.host.isCloud;
@@ -49,6 +72,8 @@ export function utcDayStartMs(nowMs: number): number {
 
 export interface AutoSweepResult {
   queued: number;
+  // Of `queued`, how many were RE-reviews of a moved head.
+  reQueued: number;
   // Why the sweep stopped early, if it did.
   stopped: 'lane_full' | 'ai_not_ready' | null;
 }
@@ -62,7 +87,7 @@ export async function runAutoReviewSweep(
   ctx: AgentContext,
   nowMs: number = Date.now(),
 ): Promise<AutoSweepResult> {
-  const result: AutoSweepResult = { queued: 0, stopped: null };
+  const result: AutoSweepResult = { queued: 0, reQueued: 0, stopped: null };
   const candidatesOf = ctx.queries.getAutoReviewCandidates?.bind(ctx.queries);
   if (!autoReviewAvailable(ctx) || !candidatesOf) return result;
   if (sweeping) return result; // re-entrancy: a slow tick must not double-enqueue
@@ -76,6 +101,7 @@ export async function runAutoReviewSweep(
   try {
     const dayStartMs = utcDayStartMs(nowMs);
     const creditsOk = new Map<number, boolean>();
+    const liveHeads = new Set<string>();
     const roster = await listAutoReviewWorkspaces(ctx);
     // A workspace switched off since its items were queued: they wait no longer (the settings
     // PUT drops them at once; this catches any other way the switch went off).
@@ -101,7 +127,9 @@ export async function runAutoReviewSweep(
         limit: AUTO_REVIEW_DAILY_CAP + waiting.size,
       });
       if (!res) continue; // the workspace is gone
-      const waitingHere = res.prIds.filter((id) => waiting.has(id)).length;
+      const waitingHere = [...new Set([...res.prIds, ...(res.reReview ?? []).map((r) => r.prId)])].filter(
+        (id) => waiting.has(id),
+      ).length;
       let budget = AUTO_REVIEW_DAILY_CAP - res.autoToday - waitingHere;
       for (const prId of res.prIds) {
         if (budget <= 0) break;
@@ -119,6 +147,37 @@ export async function runAutoReviewSweep(
         // 'already': a person started it meanwhile — it no longer counts against auto.
       }
       if (result.stopped) break;
+
+      // ---- re-reviews of a moved head (debounced) ----
+      for (const { prId, headSha } of res.reReview ?? []) {
+        const k = `${ws.accountId}:${prId}`;
+        liveHeads.add(k);
+        if (waiting.has(prId)) continue;
+        const seen = headSeen.get(k);
+        if (!seen || seen.sha !== headSha) {
+          headSeen.set(k, { sha: headSha, firstSeenMs: nowMs });
+          continue;
+        }
+        if (nowMs - seen.firstSeenMs < AUTO_REREVIEW_SETTLE_MS) continue;
+        if (budget <= 0) continue;
+        const r = enqueueAutoReview(ctx, ws.accountId, prId, ws.workspaceId);
+        if (r === 'queued') {
+          result.queued += 1;
+          result.reQueued += 1;
+          budget -= 1;
+        } else if (r === 'full') {
+          result.stopped = 'lane_full';
+          break;
+        } else if (r === 'disabled') {
+          return result;
+        }
+      }
+      if (result.stopped) break;
+    }
+    // Forget heads that are no longer candidates (reviewed, closed, switched off) — only after a
+    // FULL pass, or a skipped workspace would restart its wait.
+    if (!result.stopped) {
+      for (const k of headSeen.keys()) if (!liveHeads.has(k)) headSeen.delete(k);
     }
     if (result.queued > 0) ctx.log.info(`auto claude review: queued ${result.queued} PR(s)`);
     return result;

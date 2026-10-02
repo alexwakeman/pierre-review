@@ -11,7 +11,9 @@
 //      shows exactly as a clicked run's does; `trigger` rides the card for the "Auto review" label.
 //   4. `getAutoReviewCandidates` — the sweeper's population: open, not draft, opened at/after the
 //      switch-on, a PERSON under the WORKSPACE's judgement (manual "human" wins over the global bot
-//      flag, and a manual "bot" wins over a clean user row), and no claude_reviews row of any kind.
+//      flag, and a manual "bot" wins over a clean user row), and no claude_reviews row of any kind;
+//      plus `reReview` — the same population, already reviewed (a SUCCEEDED run), whose head moved
+//      past every run, with no run in flight.
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
@@ -379,5 +381,49 @@ describe('getAutoReviewCandidates — the sweeper’s population', () => {
     expect(
       await q.getAutoReviewCandidates(1, 99999, { openedSinceMs: 0, dayStartMs: 0, limit: 5 }),
     ).toBeNull();
+  });
+});
+
+describe('getAutoReviewCandidates — re-review of a moved head', () => {
+  const FLOOR = OPENED + 20 * DAY;
+  const late = FLOOR + HOUR;
+  const r: Record<string, number> = {};
+  const run = async (prId: number, headSha: string, status: string) =>
+    db
+      .insert(schema.claudeReviews)
+      .values({ accountId: 1, prId, headSha, status, model: 'm', trigger: 'auto' })
+      .execute();
+
+  beforeAll(async () => {
+    r.moved = await seedPr('rr-moved', { openedAt: late });
+    await run(r.moved, 'old_sha', 'succeeded');
+    r.same = await seedPr('rr-same', { openedAt: late });
+    await run(r.same, 'head_rr-same', 'succeeded');
+    r.onlyFailed = await seedPr('rr-only-failed', { openedAt: late });
+    await run(r.onlyFailed, 'old_sha', 'failed');
+    r.headHasRun = await seedPr('rr-head-has-run', { openedAt: late });
+    await run(r.headHasRun, 'old_sha', 'succeeded');
+    await run(r.headHasRun, 'head_rr-head-has-run', 'failed');
+    r.inFlight = await seedPr('rr-in-flight', { openedAt: late });
+    await run(r.inFlight, 'old_sha', 'succeeded');
+    await run(r.inFlight, 'older_sha', 'running');
+    r.beforeFloor = await seedPr('rr-before-floor', { openedAt: FLOOR - HOUR });
+    await run(r.beforeFloor, 'old_sha', 'succeeded');
+    r.bot = await seedPr('rr-bot', { openedAt: late, authorId: botId });
+    await run(r.bot, 'old_sha', 'succeeded');
+  });
+
+  it('offers only a reviewed PR whose head moved past every run, with nothing in flight', async () => {
+    const res = await q.getAutoReviewCandidates(1, scope.workspaceId, {
+      openedSinceMs: FLOOR,
+      dayStartMs: now - DAY,
+      limit: 50,
+    });
+    const offered = new Map(res.reReview.map((x: any) => [x.prId, x.headSha]));
+    expect(offered.get(r.moved)).toBe('head_rr-moved');
+    for (const k of ['same', 'onlyFailed', 'headHasRun', 'inFlight', 'beforeFloor', 'bot'])
+      expect([k, offered.has(r[k])]).toEqual([k, false]);
+    // A reviewed PR is never a FIRST-review candidate.
+    expect(res.prIds).not.toContain(r.moved);
   });
 });

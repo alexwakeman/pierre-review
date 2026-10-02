@@ -329,10 +329,8 @@ export function CommentFixReport({
 
   return (
     <div className="mt-3 rounded border border-gray-200 p-2 dark:border-gray-800">
+      {/* The roll-up IS the heading: "7 comments: 4 fixed · 1 pushed back". */}
       <div className="text-xs font-semibold text-gray-600 dark:text-gray-300">
-        Per-comment report
-      </div>
-      <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
         {commentVerdictRollup(summary)}
       </div>
       {summary.unmatched > 0 && (
@@ -376,7 +374,7 @@ function Chip({
 }): JSX.Element {
   return (
     <span
-      className="mt-0.5 inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+      className="mt-0.5 inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
       style={{ backgroundColor: `${color}22`, color }}
       title={title}
     >
@@ -397,7 +395,8 @@ function VerdictCard({
   const meta = metaFor(verdict.verdict);
   const target = verdict.target ?? null;
   const reasoning = typeof verdict.reasoning === 'string' ? verdict.reasoning.trim() : '';
-  const learning = typeof verdict.learning === 'string' ? verdict.learning.trim() : '';
+  // `verdict.learning` is still on the wire but deliberately NOT rendered: it was an input to the
+  // retired review memory, and with that gone it is a note nobody acts on.
   const pushback = typeof verdict.pushback === 'string' ? verdict.pushback.trim() : '';
   const files = Array.isArray(verdict.filesTouched) ? verdict.filesTouched : [];
 
@@ -413,8 +412,8 @@ function VerdictCard({
           </Chip>
           <div className="min-w-0 flex-1">
             <div className="text-[11px] text-gray-500 dark:text-gray-400">
-              <span className="font-mono text-gray-400">{verdict.ref}</span> — reported
-              against an unknown reference; no matching comment in the selection.
+              <span className="font-mono text-gray-400">{verdict.ref}</span> matches no selected
+              comment.
             </div>
             {reasoning !== '' && (
               <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -446,7 +445,7 @@ function VerdictCard({
                 for a comment author, which is exactly why the server stamps it onto the
                 target. */}
             {target.isBot && (
-              <span className="rounded bg-gray-500/10 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <span className="rounded bg-gray-500/10 px-1 py-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 bot
               </span>
             )}
@@ -473,7 +472,7 @@ function VerdictCard({
                 that as "not valid" published a verdict on a reviewer's comment that nobody had
                 reached — right above prose saying nothing is known about it. */}
             <span
-              className="rounded bg-gray-500/10 px-1 py-0.5 text-[10px] text-gray-500 dark:text-gray-400"
+              className="rounded bg-gray-500/10 px-1 py-0.5 text-[11px] text-gray-500 dark:text-gray-400"
               title={
                 verdict.valid == null
                   ? 'Nobody assessed this comment on this run — this is not a judgement about it.'
@@ -505,19 +504,8 @@ function VerdictCard({
               className="mt-1 text-[11px] text-gray-400"
               title="The agent's own account of what it edited for this comment. The diff above is the authoritative changeset."
             >
-              <span className="uppercase tracking-wide">Agent says it edited</span>{' '}
+              <span>Says it edited</span>{' '}
               <span className="font-mono text-gray-500 dark:text-gray-400">{files.join(', ')}</span>
-            </div>
-          )}
-
-          {learning !== '' && (
-            <div className="mt-1.5 rounded bg-gray-50 px-2 py-1 dark:bg-gray-900">
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                Learning
-              </div>
-              <div className="text-xs text-gray-600 dark:text-gray-300">
-                <Markdown>{learning}</Markdown>
-              </div>
             </div>
           )}
 
@@ -527,7 +515,7 @@ function VerdictCard({
               style={{ borderColor: DISAGREE_COLOR }}
             >
               <div
-                className="text-[10px] font-semibold uppercase tracking-wide"
+                className="text-[11px] font-semibold uppercase tracking-wide"
                 style={{ color: DISAGREE_COLOR }}
               >
                 Pushback
@@ -668,10 +656,10 @@ function PushbackReply({
         </button>
         <span className="text-[11px] text-gray-400">
           {to.kind === 'thread'
-            ? "Posts as a reply in this comment's thread."
+            ? 'Replies in the thread.'
             : target.kind === 'review_comment'
-              ? "This comment's thread isn't available here — posts as a PR-level comment."
-              : 'Posts as a PR-level comment.'}
+              ? 'Thread not available, so this posts as a PR comment.'
+              : 'Posts as a PR comment.'}
         </span>
       </div>
       {error != null && <div className="text-[11px] text-red-500">{error}</div>}

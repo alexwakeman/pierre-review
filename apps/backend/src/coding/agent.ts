@@ -144,10 +144,7 @@ export async function runAgentInWorktree(
   const usageByUuid = new Map<string, UsageTokens>();
   let result: SDKResultMessage | null = null;
 
-  let maxTurns = opts.maxTurns;
-  if (model === 'claude-haiku-4-5') {
-    maxTurns = Math.ceil(maxTurns * config.reviewHaikuTurnMultiplier);
-  }
+  const maxTurns = opts.maxTurns;
   // 'worktree' ⇒ config.reviewEffort, exactly the effort this path always used.
   const modelOptions = sdkModelOptions(model, 'worktree');
 

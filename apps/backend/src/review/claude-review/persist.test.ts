@@ -11,6 +11,7 @@
 //   pnpm --filter @pierre-review/backend test claude-review-persist
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
 import type {
   ClaudeReviewFollowUpRecord,
   ClaudeReviewModel,
@@ -143,7 +144,7 @@ const ticket: ClaudeReviewTicket = {
 
 describe('ticket + follow-up persistence', () => {
   it('insertQueuedReview stores the ticket at queue time', async () => {
-    const id = await persist.insertQueuedReview(ctx, otherPrId, 'q'.repeat(40), 'claude-opus-5-5', 1, ticket);
+    const id = await persist.insertQueuedReview(ctx, otherPrId, 'q'.repeat(40), 'claude-opus-5-5', 1, [ticket]);
     const latest = await persist.getLatestClaudeReview(ctx, otherPrId, 1);
     expect(latest?.id).toBe(id);
     expect(latest?.ticket).toEqual(ticket);
@@ -173,7 +174,7 @@ describe('ticket + follow-up persistence', () => {
     // `kept` reaches GitHub as an inline comment of a posted REVIEW (no per-comment id).
     await persist.markReviewPosted(ctx, first, 'rv1', [kept!.id]);
 
-    const second = await persist.insertQueuedReview(ctx, prId, 'b'.repeat(40), 'claude-opus-5-5', 1, ticket);
+    const second = await persist.insertQueuedReview(ctx, prId, 'b'.repeat(40), 'claude-opus-5-5', 1, [ticket]);
     const assessment: ClaudeTicketAssessment = {
       alignment: 'aligned',
       summary: 'ok',
@@ -199,7 +200,7 @@ describe('ticket + follow-up persistence', () => {
       second,
       success(
         [finding({ title: 'ordinary' }), finding({ title: 're-raise', priorFindingId: kept!.id })],
-        { followUp, ticketAssessment: assessment },
+        { followUp, ticketAssessment: [assessment] },
       ),
     );
     const r = (await persist.getClaudeReviewById(ctx, second, 1))!;
@@ -467,5 +468,108 @@ describe('only findings posted to GitHub are followed up', () => {
     // manager.ts builds a plan only when `prior.findings.length > 0`: no plan ⇒ no "Previous
     // review" prompt section, no `followUp` record, no follow-up sentence in the SPA.
     expect(prior?.findings).toEqual([]);
+  });
+});
+
+describe('several tickets, posting one, and the outdated read', () => {
+  let n = 0;
+  const newPr = async (headSha: string): Promise<number> => {
+    const { repos, pullRequests } = schema;
+    const key = `persist-tickets-${n++}`;
+    const repoId = (
+      await db.insert(repos).values({ accountId: 1, owner: 'acme', name: key, githubNodeId: `R_${key}` }).returning().execute()
+    )[0].id as number;
+    return (
+      await db
+        .insert(pullRequests)
+        .values({
+          githubNodeId: `PR_${key}`, accountId: 1, repoId, number: 1, title: key, state: 'open',
+          isDraft: false, openedAt: new Date(), updatedAt: new Date(), headSha,
+        })
+        .returning()
+        .execute()
+    )[0].id as number;
+  };
+  const t1: ClaudeReviewTicket = { title: 'One', description: 'd', acceptanceCriteria: null, source: 'jira', key: 'ENG-1', url: null, fetchedAt: null };
+  const t2: ClaudeReviewTicket = { title: 'Two', description: null, acceptanceCriteria: null, source: 'manual' };
+  const assess = (summary: string): ClaudeTicketAssessment => ({
+    alignment: 'aligned', summary, criteria: [], missing: [], notRequested: [],
+  });
+
+  it('stores N tickets + N assessments; the read is one entry per ticket', async () => {
+    const pr = await newPr('h1');
+    const id = await persist.insertQueuedReview(ctx, pr, 'h1', 'claude-opus-5-5', 1, [t1, t2]);
+    await persist.saveReviewSuccess(ctx, id, success([], { ticketAssessment: [assess('a'), assess('b')] }));
+    const r = (await persist.getClaudeReviewById(ctx, id, 1))!;
+    expect(r.tickets?.map((e) => [e.index, e.ref, e.ticket.title, e.assessment?.summary, e.posted])).toEqual([
+      [0, 'T1', 'One', 'a', null],
+      [1, 'T2', 'Two', 'b', null],
+    ]);
+    expect(r.ticket).toEqual(t1); // deprecated: the first
+    expect(await persist.getLatestStoredTickets(ctx, pr, 1)).toEqual([t1, t2]);
+    expect(await persist.getLatestStoredTickets(ctx, pr, 2)).toEqual([]); // another account
+    expect(await persist.hasReviewAtHead(ctx, pr, 1, 'h1')).toBe(true);
+    expect(await persist.hasReviewAtHead(ctx, pr, 1, 'h2')).toBe(false);
+  });
+
+  it('a LEGACY run (one ticket object, one assessment object) reads as a one-element list', async () => {
+    const pr = await newPr('h1');
+    const id = await persist.insertQueuedReview(ctx, pr, 'h1', 'claude-opus-5-5', 1);
+    await db
+      .update(schema.claudeReviews)
+      .set({ ticket: t2, ticketAssessment: assess('legacy'), status: 'succeeded' })
+      .where(eq(schema.claudeReviews.id, id))
+      .execute();
+    const r = (await persist.getClaudeReviewById(ctx, id, 1))!;
+    expect(r.tickets).toEqual([{ index: 0, ref: 'T1', ticket: t2, assessment: assess('legacy'), posted: null }]);
+    // Posting rewrites the column as an array.
+    await persist.markTicketPosted(ctx, id, 0, { githubCommentId: '5', url: null, postedAt: '2026-10-01T00:00:00.000Z' });
+    const after = (await persist.getClaudeReviewById(ctx, id, 1))!;
+    expect(after.tickets?.[0]?.posted).toEqual({ githubCommentId: '5', url: null, postedAt: '2026-10-01T00:00:00.000Z' });
+    const pctx = (await persist.getTicketPostContext(ctx, id, 1))!;
+    expect(pctx.assessments[0]?.posted?.githubCommentId).toBe('5');
+    expect(await persist.getTicketPostContext(ctx, id, 2)).toBeNull();
+  });
+
+  it('head: current ⇒ not outdated; moved ⇒ outdated with the commits since; unknown commit ⇒ null count', async () => {
+    const pr = await newPr('c3');
+    const t = (s: number) => new Date(Date.UTC(2026, 9, 1, 0, s));
+    await db
+      .insert(schema.commits)
+      .values([
+        { sha: 'c1', prId: pr, committedAt: t(1) },
+        { sha: 'c2', prId: pr, committedAt: t(2) },
+        { sha: 'c3', prId: pr, committedAt: t(3) },
+      ])
+      .execute();
+    const atC1 = await persist.insertQueuedReview(ctx, pr, 'c1', 'claude-opus-5-5', 1);
+    expect((await persist.getClaudeReviewById(ctx, atC1, 1))!.head).toEqual({
+      currentHeadSha: 'c3', outdated: true, commitsSince: 2,
+    });
+    const atC3 = await persist.insertQueuedReview(ctx, pr, 'c3', 'claude-opus-5-5', 1);
+    expect((await persist.getClaudeReviewById(ctx, atC3, 1))!.head).toEqual({
+      currentHeadSha: 'c3', outdated: false, commitsSince: 0,
+    });
+    const gone = await persist.insertQueuedReview(ctx, pr, 'force-pushed-away', 'claude-opus-5-5', 1);
+    expect((await persist.getClaudeReviewById(ctx, gone, 1))!.head).toEqual({
+      currentHeadSha: 'c3', outdated: true, commitsSince: null,
+    });
+  });
+
+  it('a rebase keeps the old commit rows: its rewritten copy is not counted as a newer commit', async () => {
+    const pr = await newPr('r1b');
+    const t = (s: number) => new Date(Date.UTC(2026, 9, 1, 0, s));
+    await db
+      .insert(schema.commits)
+      .values([
+        { sha: 'r1', prId: pr, committedAt: t(1), messageHeadline: 'Add reset' },
+        // After a rebase: r1's copy, newer committer time, same headline.
+        { sha: 'r1b', prId: pr, committedAt: t(5), messageHeadline: 'Add reset' },
+      ])
+      .execute();
+    const atR1 = await persist.insertQueuedReview(ctx, pr, 'r1', 'claude-opus-5-5', 1);
+    expect((await persist.getClaudeReviewById(ctx, atR1, 1))!.head).toEqual({
+      currentHeadSha: 'r1b', outdated: true, commitsSince: null,
+    });
   });
 });

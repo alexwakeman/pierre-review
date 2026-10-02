@@ -18,15 +18,20 @@ import type {
   ClaudeReviewStreamEvent,
   ClaudeReviewTicketInput,
   ClaudeReviewVerdict,
-  RequestedReviewMode,
+  PostTicketAnalysisResult,
 } from '@pierre-review/shared';
-import { CLAUDE_REVIEW_STATES_MAX_IDS, DEFAULT_CLAUDE_REVIEW_MODEL } from '@pierre-review/shared';
+import {
+  CLAUDE_REVIEW_STATES_MAX_IDS,
+  DEFAULT_CLAUDE_REVIEW_MODEL,
+  checkClaudeReviewTickets,
+} from '@pierre-review/shared';
 import { api, ApiError } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { useFilters } from '../store/filters.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
 import { anyReviewInFlight, resolveListTicket, type ListTicketResult } from '../lib/claudeReviewColumn.js';
 import { browserAcMemory } from '../lib/jiraTicket.js';
+import { ticketDraftFromStored, ticketsRequestFromCheck } from '../lib/claudeReviewFollowUp.js';
 
 export function useClaudeReview(prId: number | null) {
   return useQuery<ClaudeReviewResponse>({
@@ -147,10 +152,9 @@ export function useGenerateReview(prId: number) {
     mutationKey: claudeReviewStartKey(prId),
     mutationFn: (vars: {
       model: ClaudeReviewModel;
-      mode: RequestedReviewMode;
-      // The optional user story; undefined sends none.
-      ticket?: ClaudeReviewTicketInput;
-    }) => api.generateClaudeReview(prId, vars.model, vars.mode, vars.ticket),
+      // The optional user stories; undefined sends none.
+      tickets?: ClaudeReviewTicketInput[];
+    }) => api.generateClaudeReview(prId, vars.model, vars.tickets),
     onSuccess: () => afterReviewStarted(qc, prId),
     // 409 AutoReviewInProgress: the pane's reading was stale (it polls only while it already
     // knows of a queued hold). Re-read it, so the hold shows and its 5s poll starts — otherwise
@@ -182,7 +186,7 @@ export function useClaudeReviewStates(prIds: readonly number[], enabled: boolean
 }
 
 /**
- * Start a review from the Open PRs table: the defaults (model, 'auto' mode), no picker, through
+ * Start a review from the Open PRs table: the default model, no picker, through
  * the SAME start route and queue as the tab. The user story is resolved ON CLICK only
  * (`resolveListTicket`): a re-review reuses the previous run's stored ticket, otherwise the PR's
  * first fillable Jira ticket is fetched and filled the panel's way. The run starts either way; the
@@ -193,6 +197,16 @@ export function useStartReviewFromList(prId: number) {
   return useMutation<ListTicketResult, Error, { previous: ClaudeReviewPrState | undefined }>({
     mutationKey: claudeReviewStartKey(prId),
     mutationFn: async ({ previous }) => {
+      // A re-review of a run that carried SEVERAL stories reuses them all, unchanged.
+      const prevTickets = previous?.tickets ?? [];
+      if (prevTickets.length > 1) {
+        const check = checkClaudeReviewTickets(prevTickets.map(ticketDraftFromStored));
+        const tickets = ticketsRequestFromCheck(check);
+        if (tickets != null) {
+          await api.generateClaudeReview(prId, DEFAULT_CLAUDE_REVIEW_MODEL, tickets);
+          return { ticket: tickets[0], note: null };
+        }
+      }
       const story = await resolveListTicket({
         previous: previous?.ticket ?? null,
         // PrDetail carries the detected tickets; the SAME cache entry the PR pane reads.
@@ -207,7 +221,11 @@ export function useStartReviewFromList(prId: number) {
         loadDetails: (key) => api.jiraTicket(prId, key),
         memory: browserAcMemory(),
       });
-      await api.generateClaudeReview(prId, DEFAULT_CLAUDE_REVIEW_MODEL, 'auto', story.ticket);
+      await api.generateClaudeReview(
+        prId,
+        DEFAULT_CLAUDE_REVIEW_MODEL,
+        story.ticket != null ? [story.ticket] : undefined,
+      );
       return story;
     },
     onSuccess: () => afterReviewStarted(qc, prId),
@@ -322,17 +340,6 @@ export function useAllClaudeReviews(enabled: boolean) {
 // (`useSetClaudeKey(prId)` was additionally DEAD before any of this — no caller anywhere — so its
 // removal is not part of the retirement, merely overdue.)
 
-// Set or clear the per-review budget cap, then refetch the review so the displayed
-// value reflects the (server-clamped) result.
-export function useSetReviewBudget(prId: number) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (usd: number | null) => api.setReviewBudget(usd),
-    onSuccess: () =>
-      void qc.invalidateQueries({ queryKey: ['claude-review', prId] }),
-  });
-}
-
 export function usePostReview(prId: number) {
   const qc = useQueryClient();
   return useMutation({
@@ -350,4 +357,37 @@ export function usePostReview(prId: number) {
       }
     },
   });
+}
+
+// ⚠ ONE MUTATION KEY PER (review, ticket): two mounts of one section see the same in-flight post,
+// so a tab switch mid-request cannot re-enable the button and invite a second comment.
+export const ticketPostKey = (reviewId: number, index: number): readonly unknown[] => [
+  'claude-ticket-post',
+  reviewId,
+  index,
+];
+
+/** Post one ticket's analysis as a PR comment (once per ticket). */
+export function usePostTicketAnalysis(prId: number, reviewId: number, index: number) {
+  const qc = useQueryClient();
+  return useMutation<PostTicketAnalysisResult, Error, void>({
+    mutationKey: ticketPostKey(reviewId, index),
+    mutationFn: () => api.postClaudeTicketAnalysis(reviewId, index),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
+      void qc.invalidateQueries({ queryKey: ['claude-review-by-id', reviewId] });
+      // A comment on GitHub like any other: THE ONE WRITE SET (prCacheSync.ts).
+      void invalidateAfterPrWrite(qc, prId);
+    },
+    // 409 AlreadyPosted: someone (another tab) posted it — re-read so the posted link shows.
+    onError: (err) =>
+      err instanceof ApiError && err.status === 409
+        ? qc.invalidateQueries({ queryKey: ['claude-review', prId] })
+        : undefined,
+  });
+}
+
+/** True while this ticket's post is in flight, from ANY mount. */
+export function useTicketPostPending(reviewId: number, index: number): boolean {
+  return useIsMutating({ mutationKey: ticketPostKey(reviewId, index) }) > 0;
 }

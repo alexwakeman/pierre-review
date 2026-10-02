@@ -57,15 +57,15 @@ describe('mapSubmittedReview', () => {
     expect(out.findings.map((f) => f.priorRef)).toEqual([null, 'P2', null, null]);
   });
 
-  it('passes followUp and ticket through verbatim, and omits them when absent', () => {
+  it('passes followUp and tickets through verbatim, and omits them when absent', () => {
     const followUp = [{ ref: 'P1', status: 'addressed' as const, explanation: 'Fixed.' }];
-    const ticket = { alignment: 'aligned' as const, summary: 'Matches.', criteria: [] };
-    const withBoth = mapSubmittedReview(payload({ followUp, ticket }), DIFF);
+    const tickets = [{ ref: 'T1', alignment: 'aligned' as const, summary: 'Matches.', criteria: [] }];
+    const withBoth = mapSubmittedReview(payload({ followUp, tickets }), DIFF);
     expect(withBoth.followUp).toEqual(followUp);
-    expect(withBoth.ticket).toEqual(ticket);
+    expect(withBoth.tickets).toEqual(tickets);
     const without = mapSubmittedReview(payload(), DIFF);
     expect('followUp' in without).toBe(false);
-    expect('ticket' in without).toBe(false);
+    expect('tickets' in without).toBe(false);
     expect(without).toMatchObject({ scope: 'diff_only', summary: 'sum', verdict: 'COMMENT' });
   });
 });

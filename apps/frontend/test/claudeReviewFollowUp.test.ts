@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  CLAUDE_REVIEW_MAX_TICKETS,
   CLAUDE_REVIEW_TICKET_LIMITS,
   checkClaudeReviewTicket,
 } from '@pierre-review/shared';
@@ -36,6 +37,7 @@ import {
   FOLLOW_UP_STATUS_CLASS,
   RERAISED_CHIP,
   alreadyPostedReraiseIds,
+  checkTicketDrafts,
   createTicketDraftStore,
   fieldCounter,
   followUpAnchor,
@@ -44,10 +46,14 @@ import {
   partitionFollowUp,
   reraisedStatusByFindingId,
   resolveTicketDraft,
+  resolveTicketDrafts,
   sortFindingsForDisplay,
   ticketDraftFromStored,
+  ticketDraftsFromReview,
   ticketPanelHint,
   ticketRequestFromCheck,
+  ticketsPanelHint,
+  ticketsRequestFromCheck,
 } from '../src/lib/claudeReviewFollowUp.js';
 
 function finding(
@@ -329,6 +335,76 @@ describe('the user story draft', () => {
   });
 });
 
+describe('several user stories', () => {
+  const jira = {
+    title: 'Reset password',
+    description: '*bold*',
+    acceptanceCriteria: '- a',
+    source: 'jira' as const,
+    key: 'ENG-1',
+    url: 'https://acme.atlassian.net/browse/ENG-1',
+    fetchedAt: '2026-10-02T10:00:00.000Z',
+  };
+  const manual = { ...EMPTY_TICKET_DRAFT, title: 'Typed story' };
+
+  it('sends every non-blank story, Jira provenance included, and drops blank ones', () => {
+    const check = checkTicketDrafts([jira, EMPTY_TICKET_DRAFT, manual]);
+    expect(ticketsRequestFromCheck(check)).toEqual([
+      {
+        title: 'Reset password',
+        description: '*bold*',
+        acceptanceCriteria: '- a',
+        source: 'jira',
+        key: 'ENG-1',
+        url: 'https://acme.atlassian.net/browse/ENG-1',
+        fetchedAt: '2026-10-02T10:00:00.000Z',
+      },
+      { title: 'Typed story' },
+    ]);
+    expect(ticketsRequestFromCheck(checkTicketDrafts([]))).toBeUndefined();
+  });
+
+  it('names the failing story by its position, and refuses over the count', () => {
+    const tooLong = { ...EMPTY_TICKET_DRAFT, title: 'x'.repeat(CLAUDE_REVIEW_TICKET_LIMITS.titleChars + 1) };
+    const check = checkTicketDrafts([manual, tooLong]);
+    expect(check.ok).toBe(false);
+    if (!check.ok) {
+      expect(check.index).toBe(1);
+      expect(check.field).toBe('title');
+    }
+    expect(ticketsRequestFromCheck(check)).toBeUndefined();
+    const many = Array.from({ length: CLAUDE_REVIEW_MAX_TICKETS + 1 }, () => manual);
+    const over = checkTicketDrafts(many);
+    expect(over.ok).toBe(false);
+    if (!over.ok) expect(over.index).toBeNull();
+  });
+
+  it('the collapsed header counts the stories', () => {
+    expect(ticketsPanelHint([], checkTicketDrafts([]))).toBe('');
+    expect(ticketsPanelHint([jira, manual], checkTicketDrafts([jira, manual]))).toBe(' · 2 added');
+  });
+
+  it('prefills from a run\'s entries (provenance kept), else its legacy single ticket', () => {
+    const entry = (ticket: object, index: number) => ({
+      index,
+      ref: `T${index + 1}`,
+      ticket: { title: null, description: null, acceptanceCriteria: null, ...ticket },
+      assessment: null,
+      posted: null,
+    });
+    const drafts = ticketDraftsFromReview({ tickets: [entry(jira, 0), entry({ title: 'B' }, 1)] });
+    expect(drafts.map((d) => [d.title, d.source, d.key])).toEqual([
+      ['Reset password', 'jira', 'ENG-1'],
+      ['B', undefined, undefined],
+    ]);
+    expect(
+      ticketDraftsFromReview({ ticket: { title: 'Old', description: null, acceptanceCriteria: null } }),
+    ).toHaveLength(1);
+    expect(resolveTicketDrafts([manual], { tickets: [entry(jira, 0)] })).toEqual([manual]);
+    expect(resolveTicketDrafts(undefined, null)).toEqual([]);
+  });
+});
+
 // ---- source guards ----
 
 const SRC = new URL('../src', import.meta.url).pathname;
@@ -364,6 +440,23 @@ describe('source guards', () => {
     const tab = code(read('components/ClaudeReviewTab.tsx'));
     expect(tab).toMatch(/alreadyPosted=\{alreadyPostedIds\.has\(f\.id\)\}/);
     expect(tab).toMatch(/ALREADY_POSTED_CHIP\.label/);
+  });
+
+  it('a posted finding offers no Post again, Reword or Ignore, and no finding has its own Ask', () => {
+    const tab = code(read('components/ClaudeReviewTab.tsx'));
+    expect(tab).toMatch(/const canPostComment = editable && !isPosted;/);
+    expect(tab).toMatch(/const canIgnore = editable && !isPosted;/);
+    expect(tab).toMatch(/editable && !isPosted && !rewording/);
+    expect(tab).not.toMatch(/Post again/);
+    expect(tab).not.toMatch(/Ask Claude/);
+    expect(tab).not.toMatch(/ReviewChatThread/);
+  });
+
+  it('has no depth picker, no budget line and no review-memory panels', () => {
+    const tab = code(read('components/ClaudeReviewTab.tsx'));
+    expect(tab).not.toMatch(/REQUESTED_MODE_OPTIONS|reviewModeChoice/);
+    expect(tab).not.toMatch(/Max budget/);
+    expect(tab).not.toMatch(/useReviewLearnings|useReviewActions|ReviewLearningsPanel/);
   });
 
   it('opens the model picker on the default and never re-seeds it from a stored run', () => {

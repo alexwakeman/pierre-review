@@ -36,7 +36,6 @@ import type {
   ClaudeReview,
   ClaudeReviewListResponse,
   ClaudeReviewModel,
-  RequestedReviewMode,
   ClaudeReviewResponse,
   ClaudeReviewStatesBody,
   ClaudeReviewStatesResponse,
@@ -46,7 +45,6 @@ import type {
   ClaudeReviewStatusResponse,
   ClaudeReviewTicketInput,
   ClaudeReviewVerdict,
-  ReviewBudgetResponse,
   CreatePrCommentBody,
   CreatePrCommentResult,
   CreateRepoBody,
@@ -138,11 +136,10 @@ import type {
   RepoClaudeReviewsResponse,
   RepoDigest,
   RepoDigestsResponse,
-  ReviewActionsResponse,
-  ReviewLearningsResponse,
   OpenPrsResponse,
   PostCommentResult,
   PostReviewPreview,
+  PostTicketAnalysisResult,
   PostReviewResult,
   PrDetail,
   PrFilesResponse,
@@ -1127,15 +1124,6 @@ export const api = {
   // UI so "sync complete" is not claimed while the model is still scoring what the walk fetched.
   mlStatus: () => get<MlEnrichmentStatus>('/api/ml-status'),
 
-  // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----
-  // Aggregated retrieval signals shown BEFORE a run (Surface 1). Only fetched when
-  // pro.reviewMemory is true.
-  reviewLearnings: (prId: number) =>
-    get<ReviewLearningsResponse>(`/api/pro/prs/${prId}/review-learnings`),
-  // The raw captured action log for one review run (Surface 2).
-  reviewActions: (reviewId: number) =>
-    get<ReviewActionsResponse>(`/api/pro/claude-reviews/${reviewId}/actions`),
-
   // ---- Pro per-account settings (packages/pro `pro_settings`; the config modal) ----
   // ⚠ WHAT IS LEFT HERE IS ONE READING PREFERENCE PLUS THE BOT TOGGLES. Three things left this
   // route for the WORKSPACE grain and none of them kept an account-level default beneath it: the
@@ -1261,26 +1249,29 @@ export const api = {
   // already reported by `ClaudeReviewResponse.auth`. Do not re-add a method "just to clear the
   // stored key" — an already-stored key is left on disk and simply never read, and a clear route
   // is a write path back to a secret nothing consumes.
-  // Set (a number, clamped server-side) or clear (null → operator default) the local
-  // per-review budget cap.
-  setReviewBudget: (usd: number | null) =>
-    fetch('/api/claude-review/budget', jsonBody('PUT', { usd })).then((r) =>
-      handle<ReviewBudgetResponse>(r),
-    ),
   claudeReviewById: (reviewId: number) =>
     get<ClaudeReview>(`/api/claude-reviews/${reviewId}`),
-  // `ticket` is the optional user story, already checked by `checkClaudeReviewTicket` (the route
-  // runs the same check and 400s `TicketInvalid` over a cap). Omitted entirely when there is none.
+  // `tickets` are the optional user stories, already checked by `checkClaudeReviewTickets` (the
+  // route runs the same check and 400s `TicketInvalid` over a cap). Omitted when there are none.
+  // No depth: the router always decides.
   generateClaudeReview: (
     prId: number,
     model: ClaudeReviewModel,
-    mode: RequestedReviewMode,
-    ticket?: ClaudeReviewTicketInput,
+    tickets?: ClaudeReviewTicketInput[],
   ) =>
     fetch(
       `/api/prs/${prId}/claude-review`,
-      jsonBody('POST', { model, mode, ...(ticket ? { ticket } : {}) } satisfies GenerateReviewBody),
+      jsonBody('POST', {
+        model,
+        ...(tickets != null && tickets.length > 0 ? { tickets } : {}),
+      } satisfies GenerateReviewBody),
     ).then((r) => handle<{ reviewId: number; status: string }>(r)),
+  // Post ONE ticket's analysis as a PR-level comment, once. `visible: false` = it IS on GitHub,
+  // only the local copy is missing: never offer a retry (it would post twice).
+  postClaudeTicketAnalysis: (reviewId: number, index: number) =>
+    fetch(`/api/claude-reviews/${reviewId}/tickets/${index}/post`, jsonBody('POST')).then((r) =>
+      handle<PostTicketAnalysisResult>(r),
+    ),
   // The Open PRs table's "Claude review" column: the LATEST run for each listed PR, ONE request
   // for the whole table. DB-only; at most CLAUDE_REVIEW_STATES_MAX_IDS ids (the route 400s over).
   claudeReviewStates: (prIds: number[]) =>

@@ -2,12 +2,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { ClaudeFindingLens } from '@pierre-review/shared';
 import { claudeExecutableOptions, loadAgentSdk } from '../ai/runtime.js';
 import type { RunReviewArgs, RunReviewResult } from '../pro/contract.js';
 import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
 import { applyClaudeReviewAuth } from './auth.js';
-import { getEffectiveReviewBudget } from './local-settings.js';
 import {
   cleanupCloneCache,
   prepWorktree,
@@ -16,6 +16,12 @@ import {
 import { sdkModelOptions } from './model-options.js';
 import { estimateCostUsd } from './pricing.js';
 import { mapSubmittedReview } from './submit-map.js';
+import {
+  DISPATCH_TOOL_NAMES,
+  createDispatchGuard,
+  specialistAgents,
+  type DispatchGuard,
+} from './claude-review/specialists.js';
 import {
   recordUsage,
   sumModelUsage,
@@ -56,6 +62,10 @@ import {
 // explicit `canUseTool` allowlist under a non-bypass permission mode — NOT re-adding 'Bash' with
 // a longer blocklist.
 const WORKTREE_TOOLS = ['Read', 'Glob', 'Grep', 'mcp__review__submit_review'];
+// A deep (worktree) review also gets the sub-agent dispatch tool, so the lead can consult its
+// specialists (claude-review/specialists.ts). Each specialist is itself Read/Glob/Grep only, and
+// every dispatch passes the PreToolUse guard below: catalogue names only, at most
+// CLAUDE_REVIEW_MAX_SPECIALISTS per review, foreground, the lead's model.
 // A DIFF-ONLY review is tool-less: the agent has the full diff in its prompt and no
 // repository to explore, so submit_review is the only tool it gets.
 const DIFF_ONLY_TOOLS = ['mcp__review__submit_review'];
@@ -66,7 +76,7 @@ const DIFF_ONLY_TOOLS = ['mcp__review__submit_review'];
 // above for why a per-command blocklist is not a security boundary when the model's input is
 // attacker-authored. Belt and braces: Bash is also absent from the allow list, so this is the
 // second of two independent reasons it cannot run.
-const DISALLOWED_TOOLS = [
+export const DISALLOWED_TOOLS = [
   'Write',
   'Edit',
   'MultiEdit',
@@ -75,6 +85,31 @@ const DISALLOWED_TOOLS = [
   'WebFetch',
   'WebSearch',
 ];
+
+/**
+ * The tool policy for one run. Pure, so the "specialists only on the deep route" rule is testable
+ * without the SDK. A diff-only run, or a worktree run offered no specialists, gets the dispatch tool
+ * DENIED outright — otherwise the SDK's built-in agent types (which inherit every tool) would be
+ * one call away.
+ */
+export function reviewToolPolicy(
+  mode: 'diff_only' | 'worktree',
+  offered: readonly ClaudeFindingLens[] | undefined,
+): { allowedTools: string[]; disallowedTools: string[]; specialists: ClaudeFindingLens[] } {
+  const specialists = mode === 'worktree' ? [...(offered ?? [])] : [];
+  if (specialists.length > 0) {
+    return {
+      allowedTools: [...WORKTREE_TOOLS, ...DISPATCH_TOOL_NAMES],
+      disallowedTools: [...DISALLOWED_TOOLS],
+      specialists,
+    };
+  }
+  return {
+    allowedTools: mode === 'worktree' ? [...WORKTREE_TOOLS] : [...DIFF_ONLY_TOOLS],
+    disallowedTools: [...DISALLOWED_TOOLS, ...DISPATCH_TOOL_NAMES],
+    specialists,
+  };
+}
 
 // How many recent-activity lines to keep in the live progress ring buffer.
 const ACTIVITY_LOG_CAP = 25;
@@ -122,8 +157,8 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     // head and gets the read-only file tools; a diff-only review is TOOL-LESS with a
     // throwaway cwd and NO clone (the dominant per-run cost) — the whole change is in its prompt.
     let cwd: string;
-    let allowedTools: string[];
     let maxTurns: number;
+    const policy = reviewToolPolicy(mode, args.specialists);
     if (mode === 'worktree') {
       onProgress({ phase: 'cloning', reviewMode: mode });
       ({ repoCloneDir, worktreePath } = await prepWorktree(
@@ -133,18 +168,11 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         args.headSha,
       ));
       cwd = worktreePath;
-      allowedTools = WORKTREE_TOOLS;
       maxTurns = config.reviewMaxTurns;
     } else {
       tempCwd = mkdtempSync(join(tmpdir(), 'pierre-review-'));
       cwd = tempCwd;
-      allowedTools = DIFF_ONLY_TOOLS;
       maxTurns = config.reviewDiffOnlyMaxTurns;
-    }
-    // Haiku reaches a verdict in more steps than Sonnet/Opus; give it proportionally more
-    // turns (cheap at its token price; maxBudgetUsd remains the spend guard).
-    if (model === 'claude-haiku-4-5') {
-      maxTurns = Math.ceil(maxTurns * config.reviewHaikuTurnMultiplier);
     }
     // Effort guides thinking depth + token spend — the dominant cost knob. Per-mode, and only
     // for models that accept it (Haiku rejects `effort`; it runs unset). Opus 5.5 also gets an
@@ -177,6 +205,10 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       ],
     });
 
+    // Deep review: the specialist catalogue + the dispatch guard (a fresh count per run).
+    const guard: DispatchGuard | null =
+      policy.specialists.length > 0 ? createDispatchGuard(policy.specialists) : null;
+
     const q = query({
       prompt: args.prompt,
       options: {
@@ -185,11 +217,31 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         systemPrompt: args.systemPrompt,
         cwd,
         permissionMode: 'bypassPermissions',
-        allowedTools,
-        disallowedTools: DISALLOWED_TOOLS,
+        allowedTools: policy.allowedTools,
+        disallowedTools: policy.disallowedTools,
         maxTurns,
-        // User-set per-review cap (local settings) when present, else the operator default.
-        maxBudgetUsd: getEffectiveReviewBudget(),
+        ...(guard
+          ? {
+              agents: specialistAgents(policy.specialists),
+              // ⚠ THE CAP LIVES HERE, not in the prompt: a PreToolUse hook runs before the tool,
+              // and its deny holds under bypassPermissions (canUseTool would never be asked).
+              hooks: {
+                PreToolUse: [
+                  {
+                    hooks: [
+                      async (input) =>
+                        input.hook_event_name === 'PreToolUse'
+                          ? guard.decide(input.tool_name, input.tool_input)
+                          : { continue: true },
+                    ],
+                  },
+                ],
+              },
+            }
+          : {}),
+        // User-set per-review cap (local settings) when present, else the operator default —
+        // plus headroom for each specialist a deep run is offered (they share this one budget).
+        maxBudgetUsd: config.reviewBudgetUsd,
         // Don't inherit the host's .claude settings / CLAUDE.md / skills.
         settingSources: [],
         mcpServers: { review: server },
@@ -201,6 +253,8 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
 
     // Rolling, newest-last log of what the agent is doing right now, surfaced via onProgress.
     const activity: string[] = [];
+    // Dispatch tool_use id → specialist name, so a specialist's own steps are labelled as its.
+    const specialistByToolUse = new Map<string, string>();
     const pushActivity = (line: string): void => {
       const trimmed = line.trim();
       if (!trimmed) return;
@@ -220,7 +274,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
           /* usage shape varies — never let it break the run */
         }
         try {
-          for (const line of describeAssistantBlocks(message)) pushActivity(line);
+          for (const line of describeAssistantBlocks(message, specialistByToolUse)) pushActivity(line);
         } catch {
           /* never let progress derivation break the run */
         }
@@ -300,10 +354,18 @@ const BASH_CMD_CAP = 80;
  * tool_use block plus a clipped snippet of any assistant text. Defensive throughout — the
  * SDK content/tool-input shapes vary, so every access is guarded and this never throws.
  */
-function describeAssistantBlocks(message: unknown): string[] {
+export function describeAssistantBlocks(
+  message: unknown,
+  specialistByToolUse: Map<string, string> = new Map(),
+): string[] {
   const lines: string[] = [];
-  const content = (message as { message?: { content?: unknown } })?.message?.content;
+  const m = message as { message?: { content?: unknown }; parent_tool_use_id?: unknown };
+  const content = m?.message?.content;
   if (!Array.isArray(content)) return lines;
+  // A message from inside a specialist carries the dispatch's tool_use id.
+  const parent = typeof m.parent_tool_use_id === 'string' ? m.parent_tool_use_id : null;
+  const owner = parent ? specialistByToolUse.get(parent) : undefined;
+  const prefix = owner ? `${owner}: ` : '';
 
   for (const raw of content) {
     if (!raw || typeof raw !== 'object') continue;
@@ -315,10 +377,14 @@ function describeAssistantBlocks(message: unknown): string[] {
         block.input && typeof block.input === 'object'
           ? (block.input as Record<string, unknown>)
           : {};
-      lines.push(labelToolUse(name, input));
+      if (DISPATCH_TOOL_NAMES.includes(name) && typeof (block as { id?: unknown }).id === 'string') {
+        const type = typeof input.subagent_type === 'string' ? input.subagent_type : 'specialist';
+        specialistByToolUse.set((block as { id: string }).id, type);
+      }
+      lines.push(prefix + labelToolUse(name, input));
     } else if (block.type === 'text' && typeof block.text === 'string') {
       const snippet = clip(block.text.replace(/\s+/g, ' ').trim(), TEXT_SNIPPET_CAP);
-      if (snippet) lines.push(snippet);
+      if (snippet) lines.push(prefix + snippet);
     }
   }
   return lines;
@@ -348,6 +414,11 @@ function labelToolUse(name: string, input: Record<string, unknown>): string {
     }
     case 'mcp__review__submit_review':
       return 'Submitting review…';
+    case 'Agent':
+    case 'Task': {
+      const t = str(input.subagent_type);
+      return t ? `Asking the ${t} specialist` : 'Asking a specialist';
+    }
     default: {
       for (const key of Object.keys(input)) {
         const v = str(input[key]);

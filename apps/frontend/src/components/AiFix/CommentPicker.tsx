@@ -292,7 +292,7 @@ function CommentRowImpl({
         {drag != null && <Grip itemKey={c.key} from={inScope ? 'basket' : 'list'} drag={drag} />}
         <UserName user={user} fallbackId={c.authorId} repoId={repoId} className="font-semibold" />
         {c.isReply && (
-          <span className="rounded bg-gray-100 px-1 text-[10px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+          <span className="rounded bg-gray-100 px-1 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
             reply
           </span>
         )}
@@ -763,7 +763,7 @@ export function CommentPicker({
     // One honest line, no empty containers, no basket to drag into.
     return (
       <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
-        No comments on this PR yet — nothing to fix from.
+        No comments to fix from.
       </p>
     );
   }
@@ -803,8 +803,8 @@ export function CommentPicker({
           onClick={() => onAddToScope(moveAllBatch)}
           title={
             moveAllBatch.length < unselectedMovable.length
-              ? `Add ${moveAllBatch.length} of the ${unselectedMovable.length} comments shown — the fix scope holds ${AI_FIX_MAX_COMMENT_TARGETS}. Resolved and outdated comments are skipped; a deliberate drag still includes those.`
-              : 'Add every comment shown, except the resolved and outdated ones — a deliberate drag still includes those.'
+              ? `Adds ${moveAllBatch.length} of ${unselectedMovable.length} (the scope holds ${AI_FIX_MAX_COMMENT_TARGETS}). Skips resolved and outdated.`
+              : 'Skips resolved and outdated comments.'
           }
         >
           Move all{moveAllBatch.length > 0 ? ` (${moveAllBatch.length})` : ''}
@@ -823,8 +823,7 @@ export function CommentPicker({
         <div className="border-b border-gray-100 px-2 py-1 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
           {atCap && (
             <span className="text-amber-600 dark:text-amber-400">
-              The fix scope is full ({AI_FIX_MAX_COMMENT_TARGETS} comments) — remove one to add
-              another.{' '}
+              Fix scope full. Remove one to add another.{' '}
             </span>
           )}
           {notice}
@@ -903,9 +902,8 @@ export function CommentPicker({
             }`}
           >
             {basket.length === 0 ? (
-              <p className="p-1 text-[11px] text-gray-500 dark:text-gray-400">
-                Press the + on a comment, or drag it across. The fixer assesses each one before
-                changing anything, and reports back per comment.
+              <p className="p-1 text-xs text-gray-500 dark:text-gray-400">
+                Press + or drag a comment here.
               </p>
             ) : (
               basket.map(({ ref, comment }, i) =>
@@ -913,7 +911,7 @@ export function CommentPicker({
                   <div key={pickerKey(ref.kind, ref.id)} className="flex items-start gap-1">
                     {/* The prompt label the run assigns (C1, C2, …) is POSITIONAL, so showing the
                         position is what lets a report card be matched back to the row picked. */}
-                    <span className="pt-1.5 font-mono text-[10px] text-gray-400">C{i + 1}</span>
+                    <span className="pt-1.5 font-mono text-[11px] text-gray-400">C{i + 1}</span>
                     <div className="min-w-0 flex-1">
                       <CommentRow
                         c={comment}

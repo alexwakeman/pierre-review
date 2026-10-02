@@ -6,13 +6,11 @@ import { registerClaudeReviewChatRoutes } from './claude-review/chat.js';
 import { registerAutoReviewSettingsRoutes } from './claude-review/auto-settings.js';
 import { registerAutoReview } from './claude-review/auto.js';
 import { reconcileReviewsOnStartup } from './claude-review/manager.js';
-import { registerLearningRoutes } from './memory/routes.js';
-import { registerCapture } from './memory/capture.js';
 import { registerAiFixRoutes } from '../coding/ai-fix/routes.js';
 import { reconcileFixesOnStartup } from '../coding/ai-fix/manager.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, ticket check, the
-// chat, auto review), review memory and AI Fix's fixer. CORE and FREE since apiVersion 22 (they
+// chat, auto review) and AI Fix's fixer. CORE and FREE since apiVersion 22 (they
 // were the plugin's "pro+" tier); they run on the user's OWN Claude Code session or
 // ANTHROPIC_API_KEY (review/auth.ts), and Limn stores no key and charges nothing for them.
 //
@@ -37,7 +35,6 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   registerClaudeReviewRoutes(app, ctx);
   registerClaudeReviewChatRoutes(app, ctx);
   registerAutoReviewSettingsRoutes(app, ctx);
-  registerLearningRoutes(app, ctx);
   registerAiFixRoutes(app, ctx);
   return ctx;
 }
@@ -45,16 +42,14 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
 let backgroundStarted = false;
 
 /**
- * The PROCESS-level half, run once at boot (index.ts) after the app is built: review-memory capture
- * (one subscription to the review event bus), the auto-review sweeper on the host scheduler, and
- * the crash-orphan reconciles (a run that was `running` when the process died is marked failed).
- * Separate from the routes so a test that builds the app twice does not subscribe twice.
+ * The PROCESS-level half, run once at boot (index.ts) after the app is built: the auto-review
+ * sweeper on the host scheduler and the crash-orphan reconciles (a run that was `running` when the process died is marked failed).
+ * Separate from the routes so a test that builds the app twice does not schedule twice.
  */
 export async function startAgenticBackground(app: FastifyInstance): Promise<void> {
   if (!agenticAllowed() || backgroundStarted) return;
   backgroundStarted = true;
   const ctx = buildAgentContext(app.log);
-  registerCapture(ctx);
   registerAutoReview(ctx);
   try {
     await reconcileReviewsOnStartup(ctx);

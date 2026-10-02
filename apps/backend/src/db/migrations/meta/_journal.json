@@ -526,6 +526,13 @@
       "when": 1790301600000,
       "tag": "0074_adopt_agentic_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1790388000000,
+      "tag": "0075_review_lens_drop_learnings",
+      "breakpoints": true
     }
   ]
 }
