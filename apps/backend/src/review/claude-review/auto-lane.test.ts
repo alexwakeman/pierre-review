@@ -53,8 +53,10 @@ vi.mock('./persist.js', () => ({
   // PR 70 was reviewed before with a story: a re-review carries it. PR 71 already has a run at
   // its head (a person reviewed it while the auto item waited).
   getLatestStoredTickets: async (_ctx: unknown, prId: number) => (prId === 70 ? [PRIOR_TICKET] : []),
-  hasReviewAtHead: async (_ctx: unknown, prId: number) => prId === 71,
+  isAutoReReviewSettled: async (_ctx: unknown, prId: number) => prId === 71,
   loadPriorReviewForFollowUp: async () => null,
+  loadPriorRunForCarry: async () => null,
+  markReviewCommentsSeen: async () => {},
   markReviewCancelled: async () => {},
   markReviewFailed: async () => {},
   markReviewRouted: async () => {},

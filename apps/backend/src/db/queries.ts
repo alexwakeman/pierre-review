@@ -264,6 +264,7 @@ import { hubReadingFor, loadRepoCoupling, type RepoCoupling } from './file-coupl
 import { DAYS_PER_MONTH, botWindowMs } from './bot-window.js';
 import { detectChangepoints } from './changepoint.js';
 import { dormantBotUserIds } from './bot-dormancy.js';
+import { newestReviewCommentAt } from './review-threads-for-review.js';
 import {
   automationVendorUserIds,
   exactAutomationVendorUsers,
@@ -10194,7 +10195,7 @@ export async function getAutoReviewCandidates(
 ): Promise<{
   prIds: number[];
   autoToday: number;
-  reReview: Array<{ prId: number; headSha: string }>;
+  reReview: AutoReReviewCandidate[];
 } | null> {
   const owned = (
     await db
@@ -10253,6 +10254,8 @@ export async function getAutoReviewCandidates(
         prId: claudeReviews.prId,
         headSha: claudeReviews.headSha,
         status: claudeReviews.status,
+        createdAt: claudeReviews.createdAt,
+        commentsThrough: claudeReviews.commentsThrough,
       })
       .from(claudeReviews)
       .where(
@@ -10283,18 +10286,58 @@ export async function getAutoReviewCandidates(
     list.push(r);
     runsByPr.set(r.prId, list);
   }
-  const reReview: Array<{ prId: number; headSha: string }> = [];
+  const reReview: AutoReReviewCandidate[] = [];
+  // Same head, but maybe NEW REVIEW COMMENTS: the PR's runs at its head and how far they saw.
+  const sameHead: Array<{ prId: number; headSha: string; coveredMs: number }> = [];
   for (const pr of human) {
     const runs = runsByPr.get(pr.id);
     if (!runs || !pr.headSha) continue;
     if (!runs.some((r) => r.status === 'succeeded')) continue;
-    if (runs.some((r) => r.headSha === pr.headSha)) continue;
     const latest = runs.reduce((a, b) => (b.id > a.id ? b : a));
     if (latest.status === 'queued' || latest.status === 'running') continue;
-    reReview.push({ prId: pr.id, headSha: pr.headSha });
-    if (reReview.length >= opts.limit) break;
+    const atHead = runs.filter((r) => r.headSha === pr.headSha);
+    if (atHead.length === 0) {
+      reReview.push({ prId: pr.id, headSha: pr.headSha, commentsAtMs: null, reason: 'head' });
+      if (reReview.length >= opts.limit) break;
+      continue;
+    }
+    // ⚠ COVERED = the newest qualifying comment any run at this head SAW (`comments_through`),
+    // else its START (`created_at`) for a row that never recorded one — never 0, or a deploy would
+    // re-review every PR that already has comments.
+    const coveredMs = Math.max(
+      ...atHead.map((r) => (r.commentsThrough ?? r.createdAt).getTime()),
+    );
+    sameHead.push({ prId: pr.id, headSha: pr.headSha, coveredMs });
+  }
+  // RE-REVIEW ON NEW COMMENTS: a qualifying review-thread comment (a person's or a bot's, in an
+  // unresolved thread, never one Limn posted — db/review-threads-for-review.ts) newer than what
+  // every run at this head covered. The key is (head, newest comment time); the sweeper debounces
+  // it exactly like a moved head, so a burst of comments costs one run.
+  if (reReview.length < opts.limit && sameHead.length > 0) {
+    const since = new Date(Math.min(...sameHead.map((p) => p.coveredMs)));
+    const newest = await newestReviewCommentAt(
+      accountId,
+      sameHead.map((p) => p.prId),
+      since,
+    );
+    for (const p of sameHead) {
+      const at = newest.get(p.prId);
+      if (!at || at.getTime() <= p.coveredMs) continue;
+      reReview.push({ prId: p.prId, headSha: p.headSha, commentsAtMs: at.getTime(), reason: 'comments' });
+      if (reReview.length >= opts.limit) break;
+    }
   }
   return { prIds, autoToday, reReview };
+}
+
+/** One auto RE-review candidate. `commentsAtMs` is the newest qualifying review comment when the
+ *  trigger is new comments on an unchanged head; null when the head moved. The sweeper's settle key
+ *  is (headSha, commentsAtMs). */
+export interface AutoReReviewCandidate {
+  prId: number;
+  headSha: string;
+  commentsAtMs: number | null;
+  reason: 'head' | 'comments';
 }
 
 // ---- PR write-action contexts (reply / resolve / comment / approve / inline) ----

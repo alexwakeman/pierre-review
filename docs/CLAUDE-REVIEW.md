@@ -69,7 +69,8 @@ posts **one** GitHub review (inline + body + verdict).
     shared types and the `review_learnings` table (DROPPED by sqlite `0075` / pg `0062`; gone from
     both schemas, both delete paths, erasure, `accountScopedTables()` and `verify:isolation`). It
     never improved a review. Do not bring it back as a prompt block: the review prompt carries the
-    PR, the optional user stories and the previous review's findings, nothing about the reader.
+    PR, the optional user stories, the previous review's findings and the other reviewers' open
+    threads, nothing about the reader.
   - ⚠ **They take ONE context argument, `AgentContext`** (`review/agent-context.ts`), built by
     `buildAgentContext` from DIRECT core imports — `ctx.review.*`, `ctx.coding.generateFix` /
     `applyAndPush`, `ctx.github.*`, `ctx.aiCredits`, `ctx.db` / `ctx.schema`.
@@ -327,9 +328,11 @@ review, with no "Previous review" prompt section, no `follow_up` record and no f
   other blocks (compare's own contract: patches are attacker-authored) and included in the nonce
   collision scan. `filesTruncated` is stated. `ok:false` (force-push, 404, rate limit) degrades to
   "judge against the full diff". The prompt says whether the head moved; when it did not, it
-  tells the model the honest answer is mostly `not_addressed`. ⚠ The server does NOT coerce
-  statuses on an unmoved head: the run's head comes from the synced DB while `gh pr diff` is live,
-  so a model saying "addressed" there may have fresher evidence than we do. The prompt tells the
+  tells the model the honest answer is mostly `not_addressed`. ⚠ SUPERSEDED for the same-head
+  case (2026-10): when this run's head IS the previous review's head, the status is now decided in
+  code — see § Only new commits change a judgement. (The old reason not to — the run's head is the
+  synced DB head while `gh pr diff` is live — still applies in principle; the product chose
+  stability over that edge.) The prompt tells the
   model to LEAVE OUT a ref whose code it cannot see (a file cut from a capped diff_only prompt, or a
   deep-review finding outside the diff) rather than guess — it then records `not_checked` and is
   carried to the next review, instead of a guessed "addressed" dropping out of the chain.
@@ -363,20 +366,105 @@ review, with no "Previous review" prompt section, no `follow_up` record and no f
   each follow-up item carries a DERIVED `reraisedFindingId` (the finding whose `priorFindingId`
   matches), and findings carry `priorFindingId`.
 
+## Other reviewers' threads (people and review bots)
+
+Every run that reads code (diff-only or deep) also judges **every unresolved review thread on the
+PR that is not rooted on one of Limn's own posted findings** — comments from people and from other
+review bots (CodeRabbit, Copilot, …). Limn's own posted findings stay in the follow-up above. After
+a run the reader has the PR against the user stories, Claude's findings, the follow-up AND every
+other open comment, so "Generate fix from this review" can produce one fix for all of it.
+
+- **Loader (CORE, DB-only):** `db/review-threads-for-review.ts` `loadReviewThreadsForReview`,
+  reached as `ctx.queries.loadReviewThreads` (absent ⇒ no thread block). Unresolved threads only
+  (resolved ones are not sent — cheap to add later, not obviously useful). Per thread: path, line,
+  outdated, the comments (author login, `authorIsBot` from the GLOBAL automation set
+  `globalAutomationUserIds`, time, body), a github.com link, and how many synced commits are dated
+  after its first and its latest comment — the "has the code moved since this comment" evidence.
+- ⚠ **OWN-COMMENT EXCLUSION IS ONE PREDICATE**, `isLimnPostedComment`, shared by the loader and
+  the auto re-review trigger. Limn posts AS THE READER, so TWO facts must hold together: the
+  comment's author is the ACCOUNT'S OWN login (`accounts.github_login`, case-insensitive), AND it
+  carries Limn's provenance. Provenance is the hidden `<!-- pierre:claude-review` marker — every
+  finding comment, inline or PR-level, now ends with `<!-- pierre:claude-review-finding v=1 -->`
+  (`FINDING_COMMENT_MARKER`, post-review.ts), which survives an edit on GitHub — or, for comments
+  posted before that marker, a posted finding's `github_comment_id` or a text that STARTS WITH a
+  posted finding's resolved body. ⚠ The marker under someone else's login (a teammate's own Limn,
+  pasted text) is ANOTHER reviewer's comment; an unknown author is never own. The marker's
+  `pierre:claude-review` prefix is deliberate — it is the 'pierre' fingerprint, so a single posted
+  comment is attributed to Limn too. A thread rooted on such a comment is the
+  follow-up's; a person's REPLY inside it still counts as a new comment for the trigger.
+- **Prompt** (`claude-review/threads.ts` `pushReviewThreadsSection`): a "Review threads" section
+  after the previous review, one `---BEGIN REVIEW THREAD Rn <nonce>---` fence per thread (the
+  thread text is in the nonce-collision scan). Each thread shows its first comment and the newest
+  ones (`THREAD_COMMENTS_SHOWN` = 6, each clipped to 1,500 characters, "(N more replies not shown)").
+  People's threads go before bots', then oldest first. Caps: 40 threads and ~24k characters; the rest
+  are `not_checked` with `sent:false, ref:null`. The model reports `threads: [{ref, validity, addressed,
+  explanation, draftReply?}]` — validity `valid | partly_valid | not_valid | unclear`, addressed
+  `addressed | partly_addressed | not_addressed | unclear`; `not_checked` is server-only. It is told
+  to judge the comment on the code, not on who wrote it, to leave out a ref whose code it cannot see
+  rather than guess, and NOT to repeat a thread as a finding (it is already on the PR).
+  - **Diff-only vs deep.** Both routes get the block. A deep run may Read the file at a thread's
+    path; a diff-only run sees only the diff, so a thread about code outside it should come back
+    unreported (`not_checked`) rather than guessed. Expect more `not_checked` / `unclear` on
+    diff-only runs, and validity judgements on cross-file claims to be weaker there.
+- **Reconcile — NEVER INVENT "ADDRESSED"** (`reconcileThreads`): refs upper-cased, unknown refs and
+  malformed entries dropped, the first report per ref wins, an unreported thread `not_checked`;
+  explanation clipped to 1,000 characters, `draftReply` to 1,500, the stored excerpt (first comment)
+  to 600. Output order: sent (R order), carried, over the cap.
+- **Stored** on `claude_reviews.thread_assessments` (sqlite `0076` / pg `0063`, nullable JSON, no
+  backfill) and served verbatim as `ClaudeReview.threadAssessments` (`ClaudeThreadAssessment[]`;
+  **null = the run did not assess threads** — an older row, a skip, a failed run — never `[]`), plus
+  `ClaudeReview.threadAssessmentCounts` folded server-side by shared `threadAssessmentCounts`. The
+  "still needs a fix" rule is ONE shared function, `isThreadToFix` (valid / partly valid AND not /
+  partly addressed). `draftReply` is a suggestion only; nothing posts it.
+- **The Pro Haiku per-thread annotations stay** (validity / addressed / simplify, `prSummary`). They
+  answer one thread at a time on demand; the review now covers every open thread in one agentic
+  pass with the code checked out. The two are independent and may disagree.
+- **AI Fix.** "Generate fix from this review" sends the review id (`GenerateFixBody.sourceReviewId`);
+  the core start route passes it only for `seed: 'review'`, and `coding/ai-fix/manager.ts`
+  `reviewThreadSeed` appends that review's `isThreadToFix` threads, each nonce-fenced, to the
+  client's review text — only when the review is THIS PR's and this account's (else nothing is
+  added). One fix covers the findings and the other reviewers' comments.
+
+### Only new commits change a judgement (same-head runs)
+
+A run at the SAME head as the previous succeeded run — a comment-triggered auto re-review, or "Run
+anyway" on the same commit — has no new code to judge. So the earlier answers carry forward IN
+CODE, not by prompt:
+
+- **Threads** (`planThreadReview`): per thread, against the head THAT judgement was made at
+  (`assessedAtHead` — the follow-up's `findingHeadMoved` idea), never the previous run's head. A
+  thread judged at this head with no newer comment is CARRIED whole (`carried: true`, not sent). One
+  with a newer comment is sent (a reply may change its validity), but its `addressed` is LOCKED to
+  the earlier answer whatever the model says. An earlier `not_checked` never carries.
+- **Follow-up** (`selectPriorFindings` → `plan.locked`, applied in `reconcileFollowUp`): when the
+  previous review's head is this head, a finding it raised here is `not_addressed` and a carried open
+  item keeps the status the previous run gave it; stored with `statusCarried: true`. The findings are
+  still SHOWN, so the model links its re-raise by `priorRef` rather than repeating the comment as a
+  new, included finding; only the answer is fixed. A carried `not_checked` item was never judged, so
+  the model still is. ⚠ This deliberately overrides the older "the server does NOT coerce statuses
+  on an unmoved head" rule for the same-head case only (product decision, 2026-10).
+- **User stories** (`ticket.ts` `sameHeadTicketCarry`): a story unchanged since the previous run at
+  this head keeps that assessment (minus its `posted` record); when every story carries, the stories
+  section is not sent at all.
+
 ## Starting from the Open PRs tab
 
-The Open PRs table (`OpenPrsTable`, the pinned "Open PRs" tab) carries a **Claude review** column
-when — and only when — `MeResponse.ai.enabled` is on; without it there is no column and no
+The Open PRs table (`OpenPrsTable`, the pinned "Open PRs" tab) carries a **Claude review** strip on every card
+when — and only when — `MeResponse.ai.enabled` is on; without it there is no strip and no
 request.
 
 - **ONE read for the whole table**: `POST /api/claude-review/states` with the listed PR ids
   (`useClaudeReviewStates`), never a request per row. It polls every 5s only while a listed PR is
   queued or running; a start, and the tab's SSE `done`, invalidate it.
-- **Cells** (`lib/claudeReviewColumn.ts` `reviewCellFor`): no run → **Review**; queued → disabled
-  **Queued**; running → disabled **Reviewing…**; succeeded → the verdict in words, a link that
-  opens the PR's Claude Review tab (`openClaudeReview`), plus **Re-review** when the PR has new
-  commits since that run; failed / cancelled → **Review** again. Every control stops propagation
-  (the row opens the PR). Sortable, needs-a-review first.
+- **The strip** (each card's second row, `ClaudeReviewStrip`; layout in
+  [FRONTEND.md](FRONTEND.md) § Open PRs; state from `lib/claudeReviewColumn.ts` `reviewCellFor`):
+  no run → "Not reviewed" + **Review**; queued → **Queued**; running → **Reviewing…**; succeeded →
+  the verdict pill, a link that opens the PR's Claude Review tab (`openClaudeReview`), plus "N newer
+  commits" and **Re-review** when the PR has moved since that run; failed → "Review failed" +
+  **Review**; cancelled → **Review**. A succeeded run adds the states route's `summary`: findings by
+  severity, posted, design-lens count, story alignment, the previous review's findings fixed/still
+  open, and other reviewers' threads still valid. Every control stops propagation (the card opens
+  the PR). Sortable by state (needs-a-review first) and by findings (most severe first).
 - **A click starts a run through the SAME route and queue as the tab** (`POST
   /api/prs/:id/claude-review`, default model, `auto` mode, no picker): `REVIEW_CONCURRENCY` run at
   once and the rest queue, so many clicks are many queued runs. ⚠ **ONE MUTATION KEY PER PR**
@@ -508,7 +596,7 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
 Settings → Workspace → **Auto Claude review** (shown wherever `MeResponse.ai.enabled` is — local,
 free; **OFF until switched on**, because it spends the user's own Claude in the background). When a
 workspace switches it on, Claude reviews each **human-authored, non-draft PR OPENED at
-or after that moment** — once per HEAD (see re-review below) — with the same model (`DEFAULT_CLAUDE_REVIEW_MODEL`) and
+or after that moment** — once per HEAD, plus once per burst of new review comments (see re-review below) — with the same model (`DEFAULT_CLAUDE_REVIEW_MODEL`) and
 per-review budget as the Review button. Storage: CORE `workspaces.auto_review_enabled` +
 `auto_review_enabled_at` (core `0074` / pg `0061`; it lived on the plugin's
 `pro_workspace_settings` (plugin `0036`) until Claude Review left the plugin, and plugin `0037`
@@ -575,6 +663,20 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   run's stories (`getLatestStoredTickets`, else the Jira fill), and the existing follow-up reads the
   earlier POSTED findings so they are not repeated. Switching auto review off stops it like any
   auto run. `AutoSweepResult.reQueued` counts them.
+- ⚠ **RE-REVIEW ON NEW REVIEW COMMENTS.** The same read also offers a PR whose head has NOT moved
+  but whose unresolved review threads gained a QUALIFYING comment — a person's or another bot's,
+  never Limn's own (`isLimnPostedComment`, § Other reviewers' threads, so posting a review never
+  re-triggers it) — newer than what every run at that head covered: its
+  `claude_reviews.comments_through` (sqlite `0076` / pg `0063`; the newest qualifying comment the run
+  saw, written when it loads the threads), else its `created_at` (older rows, or a run that failed
+  before loading — never 0, or a deploy would re-review every commented PR). `reReview` items carry
+  `commentsAtMs` (null for a moved head) and `reason: 'head' | 'comments'`. ⚠ **THE SETTLE KEY IS
+  (head, newest comment time)**: any change restarts `AUTO_REREVIEW_SETTLE_MS`, so a burst of
+  comments, pushes or both costs ONE run. The waiting item re-checks with `isAutoReReviewSettled`
+  (a row at the head that covered `commentsAtMs`). Review BODIES and PR-level comments do not
+  trigger (they are not assessed either). Same lane, cap, lock, floor and "a succeeded run first"
+  rule as a moved head. On such a run every earlier judgement carries forward (§ Only new commits
+  change a judgement); the new work is the new and changed threads.
 - **OUTDATED, ON THE READ.** `ClaudeReview.head: {currentHeadSha, outdated, commitsSince}` compares
   the reviewed commit with the PR's SYNCED head (DB-only). `commitsSince` counts the PR's synced
   commits newer (by commit time) than the reviewed one; null when the reviewed commit is not among

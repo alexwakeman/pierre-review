@@ -2,6 +2,7 @@ import type { ClaudeFindingSide } from '@pierre-review/shared';
 import type {
   ReviewFinding,
   ReviewFollowUpReport,
+  ReviewThreadReport,
   ReviewTicketReport,
 } from '../pro/contract.js';
 // ⚠ `import type` ONLY — the payload type is zod-inferred, and a value import would pull zod in
@@ -17,6 +18,7 @@ export interface MappedReview {
   // Passed through VERBATIM; the plugin validates coverage against what it sent.
   followUp?: ReviewFollowUpReport[];
   tickets?: ReviewTicketReport[];
+  threads?: ReviewThreadReport[];
 }
 
 /**
@@ -54,5 +56,6 @@ export function mapSubmittedReview(payload: SubmitReviewPayload, strippedDiff: s
     findings,
     ...(payload.followUp !== undefined ? { followUp: payload.followUp } : {}),
     ...(payload.tickets !== undefined ? { tickets: payload.tickets } : {}),
+    ...(payload.threads !== undefined ? { threads: payload.threads } : {}),
   };
 }

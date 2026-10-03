@@ -8,6 +8,7 @@ import {
   type ClaudeReviewStreamEvent,
   type ClaudeReviewTicket,
   type ClaudeReviewTrigger,
+  type ClaudeTicketAssessment,
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../../github/compare.js';
 import { config } from '../../config.js';
@@ -30,14 +31,17 @@ import {
   SINCE_PATCH_CHARS,
   type FollowUpPlan,
 } from './follow-up.js';
-import { reconcileTicketAssessments } from './ticket.js';
+import { reconcileTicketAssessments, sameHeadTicketCarry } from './ticket.js';
+import { planThreadReview, reconcileThreads, type ThreadPlan } from './threads.js';
 import {
   getLatestClaudeReview,
   getLatestStoredTickets,
   getReviewPrContext,
-  hasReviewAtHead,
   insertQueuedReview,
+  isAutoReReviewSettled,
   loadPriorReviewForFollowUp,
+  loadPriorRunForCarry,
+  markReviewCommentsSeen,
   markReviewCancelled,
   markReviewFailed,
   markReviewRouted,
@@ -92,6 +96,10 @@ interface AutoItem {
   // The workspace whose switch queued it, so switching that workspace off drops it
   // (`dropAutoReviews`). Absent only for a caller that names none (tests).
   workspaceId?: number;
+  // A RE-REVIEW triggered by new review comments on an unchanged head: the newest such comment's
+  // time. The settle re-check (`isAutoReReviewSettled`) needs it; null/absent for a first review or
+  // a moved head.
+  commentsAtMs?: number | null;
 }
 
 const claimed = new Set<number>(); // prIds running OR pending — the re-trigger guard
@@ -243,11 +251,13 @@ export function enqueueAutoReview(
   accountId: number,
   prId: number,
   workspaceId?: number,
+  // TRAILING: set for a re-review triggered by new review comments (see AutoItem).
+  commentsAtMs: number | null = null,
 ): EnqueueAutoResult {
   if (!AGENTIC_AI_ENABLED) return 'disabled';
   if (claimed.has(prId) || autoPending.some((a) => a.prId === prId)) return 'already';
   if (autoPending.length >= REVIEW_AUTO_MAX_QUEUED) return 'full';
-  autoPending.push({ ctx, accountId, prId, workspaceId });
+  autoPending.push({ ctx, accountId, prId, workspaceId, commentsAtMs });
   pump();
   return 'queued';
 }
@@ -315,8 +325,9 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     if ((await ctx.aiCredits.check(accountId)).agentBlocked) return;
     const prCtx = await getReviewPrContext(ctx, prId, accountId);
     if (!prCtx?.headSha) return;
-    // ONE RUN PER HEAD: a person may have reviewed this head while the item waited.
-    if (await hasReviewAtHead(ctx, prId, accountId, prCtx.headSha)) return;
+    // ONE RUN PER KEY: a person may have reviewed this head (and, for a comment-triggered
+    // re-review, seen those comments) while the item waited.
+    if (await isAutoReReviewSettled(ctx, prId, accountId, prCtx.headSha, a.commentsAtMs ?? null)) return;
     const model = DEFAULT_CLAUDE_REVIEW_MODEL;
     // A RE-REVIEW (the PR was reviewed before, at an older head) reuses the stories that review
     // carried — a reader may have typed them. Otherwise ⚠ TRY JIRA WHEN THE PLUGIN OFFERS IT: the
@@ -467,7 +478,34 @@ async function runPipeline(
       since = null;
     }
   }
-  const nonce = pickReviewNonce(untrustedTexts(plan, item.tickets, since));
+
+  // ---- what an earlier run already decided AT THIS HEAD (only new commits change it) ----
+  const priorRun = await loadPriorRunForCarry(ctx, item.prId, item.accountId, reviewId);
+  const sameHeadPrior = priorRun && priorRun.headSha === item.headSha ? priorRun : null;
+  const carriedTickets = sameHeadTicketCarry(item.tickets, sameHeadPrior);
+  const allTicketsCarried = item.tickets.length > 0 && carriedTickets.every((a) => a != null);
+  // Every story already assessed at this head ⇒ none is sent: nothing in the code could change it.
+  const promptTickets = allTicketsCarried ? [] : item.tickets;
+
+  // ---- the OTHER reviewers' open threads (people and review bots; never Limn's own) ----
+  // A failure here costs the thread block only, never the review.
+  let threadPlan: ThreadPlan | null = null;
+  const loadThreads = ctx.queries.loadReviewThreads?.bind(ctx.queries);
+  if (loadThreads) {
+    try {
+      const loaded = await loadThreads(item.accountId, item.prId);
+      // The comment half of the auto re-review key: what this run saw (auto.ts).
+      await markReviewCommentsSeen(ctx, reviewId, loaded.newestCommentAt);
+      threadPlan = planThreadReview(loaded.threads, item.headSha, priorRun?.threadAssessments ?? null);
+    } catch (err) {
+      ctx.log.warn(
+        `claude review pr ${item.prId}: review threads not loaded: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      threadPlan = null;
+    }
+  }
+
+  const nonce = pickReviewNonce(untrustedTexts(plan, promptTickets, since, threadPlan));
 
   // A deep review offers the lead its specialist sub-agents (specialists.ts); a diff-only one none.
   const specialists = mode === 'worktree' ? offeredSpecialists(prep.changedFiles) : [];
@@ -484,8 +522,9 @@ async function runPipeline(
     diff: prep.promptDiff,
     mode,
     omittedFiles: prep.omittedFiles,
-    tickets: item.tickets,
+    tickets: promptTickets,
     followUp: plan ? { plan, since } : null,
+    threads: threadPlan,
     nonce,
   });
 
@@ -538,9 +577,17 @@ async function runPipeline(
       plan && items
         ? linkReraisedFindings(plan, items, res.findings, new Set(prep.changedFiles))
         : res.findings.map((f) => ({ ...f, priorFindingId: null }));
-    // One assessment per ticket, index-aligned with the stored `ticket` array.
-    const ticketAssessment =
-      item.tickets.length > 0 ? reconcileTicketAssessments(item.tickets, res.tickets, res.ticket) : null;
+    // One assessment per ticket, index-aligned with the stored `ticket` array; a story already
+    // assessed at this head keeps that assessment.
+    const ticketAssessment: ClaudeTicketAssessment[] | null =
+      item.tickets.length === 0
+        ? null
+        : allTicketsCarried
+          ? carriedTickets.filter((a): a is ClaudeTicketAssessment => a != null)
+          : reconcileTicketAssessments(item.tickets, res.tickets, res.ticket).map(
+              (a, i) => carriedTickets[i] ?? a,
+            );
+    const threadAssessments = threadPlan ? reconcileThreads(threadPlan, res.threads) : null;
     await saveReviewSuccess(ctx, reviewId, {
       scope: res.scope,
       summary: res.summary,
@@ -559,6 +606,7 @@ async function runPipeline(
             }
           : null,
       ticketAssessment,
+      threadAssessments,
     });
   }
 }

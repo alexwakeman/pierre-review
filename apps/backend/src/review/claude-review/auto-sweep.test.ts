@@ -18,6 +18,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentContext as ProContext } from '../agent-context.js';
 
 const enqueued: Array<[number, number]> = [];
+// The comment time each queued re-review carried (manager.ts settle re-check), in queue order.
+const enqueuedCommentsAt: Array<number | null | undefined> = [];
 let laneRoom = 20;
 let waiting = new Set<number>();
 let enqueueAnswer: (prId: number) => string = () => 'queued';
@@ -30,10 +32,17 @@ vi.mock('./manager.js', () => ({
   },
   autoLaneRoom: () => laneRoom,
   autoPendingPrIds: () => waiting,
-  enqueueAutoReview: (_ctx: unknown, accountId: number, prId: number) => {
+  enqueueAutoReview: (
+    _ctx: unknown,
+    accountId: number,
+    prId: number,
+    _workspaceId?: number,
+    commentsAtMs?: number | null,
+  ) => {
     const r = enqueueAnswer(prId);
     if (r === 'queued') {
       enqueued.push([accountId, prId]);
+      enqueuedCommentsAt.push(commentsAtMs);
       laneRoom -= 1;
     }
     return r;
@@ -59,7 +68,11 @@ const ids = (n: number, from = 1): number[] => Array.from({ length: n }, (_, i) 
 let calls: any[];
 let answers: Map<
   number,
-  { prIds: number[]; autoToday: number; reReview?: Array<{ prId: number; headSha: string }> }
+  {
+    prIds: number[];
+    autoToday: number;
+    reReview?: Array<{ prId: number; headSha: string; commentsAtMs?: number | null }>;
+  }
 >;
 let blocked: Set<number>;
 const makeCtx = (over: Record<string, unknown> = {}): ProContext =>
@@ -78,6 +91,7 @@ const makeCtx = (over: Record<string, unknown> = {}): ProContext =>
 
 beforeEach(() => {
   enqueued.length = 0;
+  enqueuedCommentsAt.length = 0;
   laneRoom = 20;
   waiting = new Set();
   enqueueAnswer = () => 'queued';
@@ -259,6 +273,71 @@ describe('runAutoReviewSweep — re-review on a moved head', () => {
 
   it('the daily cap applies to re-reviews too', async () => {
     answers.set(7, { prIds: [], autoToday: 20, reReview: [{ prId: 30, headSha: 'f1' }] });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
+    expect(enqueued).toEqual([]);
+  });
+});
+
+// RE-REVIEW ON NEW REVIEW COMMENTS: the candidate read offers an unchanged head with the newest
+// qualifying comment's time (core pins WHICH comments qualify — Limn's own never do — in
+// claude-review/threads-db.test.ts); the sweeper debounces on (head, comment time).
+describe('runAutoReviewSweep — re-review on new review comments', () => {
+  const SETTLE = AUTO_REREVIEW_SETTLE_MS;
+  const C1 = NOW - 60_000;
+  const commented = (commentsAtMs: number, headSha = 'h1') =>
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 40, headSha, commentsAtMs }] });
+
+  it('a new comment is queued ONCE, after the settle time, carrying its comment time', async () => {
+    commented(C1);
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued).toEqual([]);
+    await runAutoReviewSweep(makeCtx(), NOW + SETTLE - 1);
+    expect(enqueued).toEqual([]);
+    const r = await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
+    expect(enqueued).toEqual([[1, 40]]);
+    expect(enqueuedCommentsAt).toEqual([C1]);
+    expect(r.reQueued).toBe(1);
+    // The run covered that comment: the read stops offering it.
+    answers.set(7, { prIds: [], autoToday: 1, reReview: [] });
+    await runAutoReviewSweep(makeCtx(), NOW + 3 * SETTLE);
+    expect(enqueued).toEqual([[1, 40]]);
+  });
+
+  it('⚠ a burst of comments restarts the wait each time and costs ONE run', async () => {
+    commented(C1);
+    await runAutoReviewSweep(makeCtx(), NOW);
+    commented(C1 + 1_000);
+    await runAutoReviewSweep(makeCtx(), NOW + SETTLE - 1000);
+    commented(C1 + 2_000);
+    await runAutoReviewSweep(makeCtx(), NOW + 2 * SETTLE - 2000);
+    expect(enqueued).toEqual([]);
+    await runAutoReviewSweep(makeCtx(), NOW + 3 * SETTLE);
+    expect(enqueued).toEqual([[1, 40]]);
+    expect(enqueuedCommentsAt).toEqual([C1 + 2_000]);
+  });
+
+  it('a push after a comment restarts the wait too (the key is head AND comment time)', async () => {
+    commented(C1, 'h1');
+    await runAutoReviewSweep(makeCtx(), NOW);
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 40, headSha: 'h2', commentsAtMs: null }] });
+    await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
+    expect(enqueued).toEqual([]);
+    await runAutoReviewSweep(makeCtx(), NOW + 2 * SETTLE);
+    expect(enqueued).toEqual([[1, 40]]);
+    expect(enqueuedCommentsAt).toEqual([null]);
+  });
+
+  it('⚠ auto review off ⇒ no comment-triggered re-review', async () => {
+    commented(C1);
+    await runAutoReviewSweep(makeCtx(), NOW);
+    roster = [];
+    await runAutoReviewSweep(makeCtx(), NOW + 2 * SETTLE);
+    expect(enqueued).toEqual([]);
+  });
+
+  it('respects the daily cap', async () => {
+    answers.set(7, { prIds: [], autoToday: 20, reReview: [{ prId: 40, headSha: 'h1', commentsAtMs: C1 }] });
     await runAutoReviewSweep(makeCtx(), NOW);
     await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
     expect(enqueued).toEqual([]);

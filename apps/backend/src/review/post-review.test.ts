@@ -11,6 +11,9 @@ import {
   splitDiffByFile,
   stripNoiseFromDiff,
 } from './post-review.js';
+import { FINDING_COMMENT_MARKER, prLevelFindingBody } from './post-review.js';
+
+const M = `\n\n${FINDING_COMMENT_MARKER}`;
 
 // A small but realistic single-file unified diff. The hunk header
 // `@@ -10,3 +10,4 @@` means: old file starts at line 10 (3 lines), new file
@@ -396,7 +399,7 @@ describe('buildReview', () => {
       includedFindings: [noSuggestion],
       diff: FOO_DIFF,
     });
-    expect(result.preview.comments[0]?.body).toBe('Plain body, no suggestion.');
+    expect(result.preview.comments[0]?.body).toBe(`Plain body, no suggestion.${M}`);
     expect(result.preview.comments[0]?.body).not.toContain('```suggestion');
   });
 
@@ -417,7 +420,7 @@ describe('buildReview', () => {
       includedFindings: [reworded],
       diff: FOO_DIFF,
     });
-    expect(result.preview.comments[0]?.body).toBe('My reworded comment.');
+    expect(result.preview.comments[0]?.body).toBe(`My reworded comment.${M}`);
     expect(result.preview.comments[0]?.body).not.toContain('original wording');
   });
 
@@ -438,7 +441,7 @@ describe('buildReview', () => {
       includedFindings: [blank],
       diff: FOO_DIFF,
     });
-    expect(result.preview.comments[0]?.body).toBe('Claude body.');
+    expect(result.preview.comments[0]?.body).toBe(`Claude body.${M}`);
   });
 });
 
@@ -446,19 +449,19 @@ describe('findingCommentBody', () => {
   it('uses Claude body, appending a suggestion block when present', () => {
     expect(
       findingCommentBody({ body: 'B', editedBody: null, suggestion: 'S' }),
-    ).toBe('B\n\n```suggestion\nS\n```');
+    ).toBe(`B\n\n\`\`\`suggestion\nS\n\`\`\`${M}`);
     expect(
       findingCommentBody({ body: 'B', editedBody: null, suggestion: null }),
-    ).toBe('B');
+    ).toBe(`B${M}`);
   });
 
   it('prefers a non-empty editedBody over Claude body', () => {
     expect(
       findingCommentBody({ body: 'B', editedBody: 'Mine', suggestion: null }),
-    ).toBe('Mine');
+    ).toBe(`Mine${M}`);
     expect(
       findingCommentBody({ body: 'B', editedBody: '   ', suggestion: null }),
-    ).toBe('B');
+    ).toBe(`B${M}`);
   });
 
   it('appends the fallback note and plainly fences a suggestion on a fallback', () => {
@@ -480,6 +483,15 @@ describe('findingCommentBody', () => {
     );
     expect(out.startsWith('B')).toBe(true);
     expect(out).toContain('first change');
+  });
+});
+
+describe('the finding comment marker', () => {
+  it('stamps every finding comment, inline and PR-level, as the LAST part', () => {
+    expect(findingCommentBody({ body: 'B', editedBody: null, suggestion: 'S' }, { fallbackNote: true }).endsWith(FINDING_COMMENT_MARKER)).toBe(true);
+    expect(prLevelFindingBody({ path: 'a.ts', line: 1, body: 'B', editedBody: null, suggestion: null }).endsWith(FINDING_COMMENT_MARKER)).toBe(true);
+    // The 'pierre' fingerprint prefix, so a single posted comment is attributed to Limn too.
+    expect(FINDING_COMMENT_MARKER).toMatch(/<!--\s*pierre:claude-review/i);
   });
 });
 

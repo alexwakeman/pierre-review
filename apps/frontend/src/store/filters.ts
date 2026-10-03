@@ -723,7 +723,7 @@ export interface FilterState {
 
   // transient: "Generate fix from this review" → open the PR's AI Fix tab, seeded
   // with the review text. Matched by `prId`; cleared by PrDetail once it switches.
-  aiFixTabFocus: { prId: number; reviewText?: string } | null;
+  aiFixTabFocus: { prId: number; reviewText?: string; reviewId?: number } | null;
 
   // transient: a clicked flow-metric tile → which metric the drill-down tab should show.
   // Seeds/re-jumps the MetricsDetail sub-tab (the tab itself is a singleton). null = none.
@@ -1149,7 +1149,8 @@ export interface FilterState {
   consumeClaudeTabFocus: () => void;
   // Open a PR's AI Fix tab, optionally seeded with a review to fix. PrDetail consumes
   // it once it has switched tabs.
-  openAiFixFromReview: (prId: number, reviewText?: string) => void;
+  // `reviewId` names the Claude review: the server adds its open, valid review threads to the seed.
+  openAiFixFromReview: (prId: number, reviewText?: string, reviewId?: number) => void;
   // Open a PR's AI Fix tab from OUTSIDE a mounted PrDetail (the bottom-right AiFixBanner).
   // Mounts the pr-detail tab first — see openClaudeReview for why openAiFixFromReview's
   // signal-only shape is not reusable here.
@@ -1929,12 +1930,12 @@ export const useFilters = create<FilterState>((set, get) => ({
     });
   },
   consumeClaudeTabFocus: () => set({ claudeTabFocus: null }),
-  openAiFixFromReview: (prId, reviewText) =>
+  openAiFixFromReview: (prId, reviewText, reviewId) =>
     set({
       selectedPrId: prId,
       selectedThreadId: null,
       selectedCommentId: null,
-      aiFixTabFocus: { prId, reviewText },
+      aiFixTabFocus: { prId, reviewText, reviewId },
     }),
   // ⚠ The pr-detail TAB is mounted FIRST, exactly like openClaudeReview and NOT like
   // openAiFixFromReview above: `aiFixTabFocus` is consumed by an effect inside a MOUNTED

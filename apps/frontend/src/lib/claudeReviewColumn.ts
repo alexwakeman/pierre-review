@@ -1,5 +1,9 @@
 import type {
+  ClaudeFindingSeverity,
+  ClaudeFollowUpStatus,
   ClaudeReviewPrState,
+  ClaudeReviewStateSummary,
+  ClaudeTicketAlignment,
   ClaudeReviewTicket,
   ClaudeReviewTicketInput,
   ClaudeReviewVerdict,
@@ -37,13 +41,15 @@ export const CLAUDE_VERDICT_LABEL: Record<ClaudeReviewVerdict, string> = {
 // marker. A queued or running auto run HOLDS the PR: the start route answers 409
 // AutoReviewInProgress, so those cells offer no button.
 export type ReviewCell =
-  | { kind: 'start' } // never reviewed, or the last run failed / was cancelled
+  // never reviewed, or the last run failed / was cancelled (`failed` = it failed: the strip says so)
+  | { kind: 'start'; failed?: true }
   | { kind: 'starting' } // this click's request is in flight
   | { kind: 'queued'; auto?: true }
   | { kind: 'running'; auto?: true }
   | {
       kind: 'done';
       reviewId: number | null;
+      verdict?: ClaudeReviewVerdict;
       verdictLabel: string;
       headMoved: boolean;
       auto?: true;
@@ -75,11 +81,13 @@ export function reviewCellFor(
       return {
         kind: 'done',
         reviewId: state.reviewId,
+        ...(state.verdict != null ? { verdict: state.verdict } : {}),
         verdictLabel: state.verdict != null ? CLAUDE_VERDICT_LABEL[state.verdict] : 'Reviewed',
         headMoved: state.headMoved,
         ...auto,
       };
     case 'failed':
+      return { kind: 'start', failed: true };
     case 'cancelled':
       return { kind: 'start' };
   }
@@ -101,6 +109,75 @@ export function reviewCellRank(cell: ReviewCell): number {
     case 'running':
       return 3;
   }
+}
+
+// ---- the strip's figures (all read off the server's `summary`; nothing here decides a status) ----
+
+/** The severities the strip counts, most pressing first. `praise` is not something to act on. */
+export const STRIP_SEVERITIES: readonly ClaudeFindingSeverity[] = ['blocker', 'warning', 'nit', 'question'];
+
+const SEVERITY_WORDS: Record<ClaudeFindingSeverity, [string, string]> = {
+  blocker: ['blocker', 'blockers'],
+  warning: ['warning', 'warnings'],
+  nit: ['nit', 'nits'],
+  question: ['question', 'questions'],
+  praise: ['praise', 'praise'],
+};
+
+export interface SeverityPill {
+  severity: ClaudeFindingSeverity;
+  count: number;
+  label: string; // "2 blockers"
+}
+
+/** One pill per severity the run found, most pressing first. [] for a clean run. */
+export function severityPills(summary: ClaudeReviewStateSummary): SeverityPill[] {
+  return STRIP_SEVERITIES.filter((sev) => (summary.findings[sev] ?? 0) > 0).map((sev) => {
+    const n = summary.findings[sev];
+    return { severity: sev, count: n, label: `${n} ${SEVERITY_WORDS[sev][n === 1 ? 0 : 1]}` };
+  });
+}
+
+/** Every finding the run raised, praise included (the posted denominator). */
+export function findingTotal(summary: ClaudeReviewStateSummary): number {
+  return Object.values(summary.findings).reduce((a, b) => a + b, 0);
+}
+
+/** The "how far behind" words for a review whose PR moved on, or null when it did not. */
+export function outdatedLabel(state: Pick<ClaudeReviewPrState, 'headMoved' | 'commitsSince'>): string | null {
+  if (!state.headMoved) return null;
+  const n = state.commitsSince;
+  if (n == null || n <= 0) return 'Branch changed';
+  return `${n} newer commit${n === 1 ? '' : 's'}`;
+}
+
+/** A story's alignment in a pill's room. */
+export const ALIGNMENT_SHORT: Record<ClaudeTicketAlignment, string> = {
+  aligned: 'Matches',
+  partly_aligned: 'Partly',
+  not_aligned: "Doesn't match",
+  unclear: "Can't tell",
+  not_checked: 'Not checked',
+};
+
+/** The previous review's findings, in two figures: fixed, and still open (not or partly fixed).
+ *  `not_checked` / `no_longer_applies` are neither. null when there was nothing to follow up. */
+export function followUpTally(
+  followUp: Record<ClaudeFollowUpStatus, number> | null,
+): { fixed: number; open: number } | null {
+  if (followUp == null) return null;
+  const fixed = followUp.addressed;
+  const open = followUp.not_addressed + followUp.partly_addressed;
+  if (fixed === 0 && open === 0) return null;
+  return { fixed, open };
+}
+
+/** The Findings sort value: most severe run first under 'desc'. A PR with no finished run sorts
+ *  below a clean one (-1), so "nothing known" never ranks as "nothing found". */
+export function findingsRank(state: ClaudeReviewPrState | undefined): number {
+  const f = state?.summary?.findings;
+  if (f == null) return -1;
+  return f.blocker * 1_000_000 + f.warning * 1_000 + f.nit + f.question;
 }
 
 /** Is this PR held by an auto review (queued in its lane, or running)? A manual start is refused

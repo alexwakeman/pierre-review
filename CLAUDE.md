@@ -782,7 +782,11 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   credential swaps the Run button for ONE line, never hides the feature. Auto review is OFF per
   workspace until switched on (`workspaces.auto_review_enabled[_at]`, `GET`/`PUT
   /api/workspaces/:id/auto-review`, the floor moves only on an off → on flip); it re-reviews an
-  already-reviewed PR ONCE PER NEW HEAD, debounced (docs/CLAUDE-REVIEW.md § Auto review).
+  already-reviewed PR once per new HEAD or new burst of review comments — never Limn's own posted
+  comments (`isLimnPostedComment`, ONE predicate) — debounced on (head, newest comment time). A run
+  also judges every OTHER open review thread (validity + addressed), and on a same-head run every
+  earlier judgement carries forward IN CODE: only new commits change one
+  (docs/CLAUDE-REVIEW.md § Other reviewers' threads, § Auto review).
 - **The moved modules take ONE context argument, `AgentContext`** (`review/agent-context.ts`),
   built from direct core imports — never `ProContext`. Their tests pass a fake one; the queue
   managers carry it on each item. URL paths did NOT move (the fixer keeps its historical
@@ -1381,7 +1385,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0062` and plugin `0034`–`0037` are NOT replayed.
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0063` and plugin `0034`–`0037` are NOT replayed.
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence

@@ -25,6 +25,11 @@ import {
 } from '@pierre-review/shared';
 import {
   NO_STORY_NOTE,
+  findingTotal,
+  findingsRank,
+  followUpTally,
+  outdatedLabel,
+  severityPills,
   anyReviewInFlight,
   heldByAutoReview,
   resolveListTicket,
@@ -62,6 +67,7 @@ describe('the cell', () => {
     expect(reviewCellFor(st(), false)).toEqual({
       kind: 'done',
       reviewId: 10,
+      verdict: 'APPROVE',
       verdictLabel: 'Approve',
       headMoved: false,
     });
@@ -72,8 +78,48 @@ describe('the cell', () => {
     expect(reviewCellFor(st({ verdict: null }), false)).toMatchObject({ verdictLabel: 'Reviewed' });
   });
   it('failed / cancelled ⇒ Review again (never Re-review)', () => {
-    expect(reviewCellFor(st({ status: 'failed', headMoved: true }), false)).toEqual({ kind: 'start' });
+    expect(reviewCellFor(st({ status: 'failed', headMoved: true }), false)).toEqual({ kind: 'start', failed: true });
     expect(reviewCellFor(st({ status: 'cancelled' }), false)).toEqual({ kind: 'start' });
+  });
+});
+
+describe('the strip figures', () => {
+  const summary = {
+    findings: { blocker: 1, warning: 3, nit: 0, question: 2, praise: 1 },
+    lenses: { design: 2 },
+    postedFindings: 0,
+    reviewPosted: false,
+    tickets: [],
+    followUp: null,
+  };
+
+  it('one pill per severity found, most pressing first, praise left out', () => {
+    expect(severityPills(summary).map((p) => p.label)).toEqual(['1 blocker', '3 warnings', '2 questions']);
+    expect(findingTotal(summary)).toBe(7);
+    const clean = { ...summary, findings: { blocker: 0, warning: 0, nit: 0, question: 0, praise: 2 } };
+    expect(severityPills(clean)).toEqual([]);
+  });
+
+  it('outdated says how far behind, or only that the branch changed', () => {
+    expect(outdatedLabel({ headMoved: false, commitsSince: 3 })).toBeNull();
+    expect(outdatedLabel({ headMoved: true, commitsSince: 1 })).toBe('1 newer commit');
+    expect(outdatedLabel({ headMoved: true, commitsSince: 4 })).toBe('4 newer commits');
+    expect(outdatedLabel({ headMoved: true, commitsSince: null })).toBe('Branch changed');
+    expect(outdatedLabel({ headMoved: true })).toBe('Branch changed');
+  });
+
+  it('follow-up folds to fixed / still open; nothing to say is null, never zeros', () => {
+    expect(followUpTally(null)).toBeNull();
+    const none = { addressed: 0, partly_addressed: 0, not_addressed: 0, no_longer_applies: 1, not_checked: 2 };
+    expect(followUpTally(none)).toBeNull();
+    expect(followUpTally({ ...none, addressed: 2, partly_addressed: 1, not_addressed: 1 })).toEqual({ fixed: 2, open: 2 });
+  });
+
+  it('the findings sort puts a PR with no finished run below a clean one', () => {
+    expect(findingsRank(undefined)).toBe(-1);
+    expect(findingsRank(st())).toBe(-1);
+    expect(findingsRank(st({ summary: { ...summary, findings: { blocker: 0, warning: 0, nit: 0, question: 0, praise: 0 } } }))).toBe(0);
+    expect(findingsRank(st({ summary }))).toBeGreaterThan(findingsRank(st({ summary: { ...summary, findings: { ...summary.findings, blocker: 0 } } })));
   });
 });
 
@@ -108,6 +154,7 @@ describe('auto review in the cell', () => {
     expect(reviewCellFor(st({ trigger: 'auto', headMoved: true }), false)).toEqual({
       kind: 'done',
       reviewId: 10,
+      verdict: 'APPROVE',
       verdictLabel: 'Approve',
       headMoved: true,
       auto: true,
@@ -284,7 +331,8 @@ describe('the wiring', () => {
     expect(table).toMatch(/const claudeOn = useAiCapabilities\(\)\.enabled;/);
     expect(table).not.toMatch(/useProCapabilities/);
     expect(table).toMatch(/useClaudeReviewStates\(prIds, claudeOn\)/);
-    expect(table).toMatch(/\{claudeOn && \(\s*<SortHeader col="claude"/);
+    expect(table).toMatch(/\{claudeOn && \(\s*<div className="grid[^"]*--opr-strip[^"]*">\s*<SortHeader as="div" col="claude"/);
+    expect(table).toMatch(/\{claudeOn && \(\s*<div[^>]*>\s*<ClaudeReviewStrip/);
   });
 
   it('every cell control stops propagation (the row opens the PR)', () => {

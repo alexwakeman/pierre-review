@@ -27,6 +27,7 @@ import type {
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
+  ClaudeThreadAssessment,
   ClaudeReviewTicket,
   ClaudeTicketAssessment,
   FlowSettings,
@@ -1127,6 +1128,16 @@ export const claudeReviews = sqliteTable(
     // Turn card's "Auto review" label (an auto run is owned like a manual one). Migration 0071
     // (pg 0058); existing rows are 'manual'.
     trigger: text('trigger', { enum: ['manual', 'auto'] }).notNull().default('manual'),
+    // Every OTHER open review thread on the PR (people and other review bots — never Limn's own
+    // posted findings, which the follow-up covers) and what the run found: is the comment right,
+    // and has the code dealt with it. Null on runs from before the field, or a run that did not
+    // succeed / skipped. Migration 0076 (pg 0063).
+    threadAssessments: text('thread_assessments', { mode: 'json' }).$type<ClaudeThreadAssessment[]>(),
+    // THE COMMENT HALF OF THE AUTO RE-REVIEW KEY: the newest qualifying review-thread comment (not
+    // Limn's own) this run saw when it loaded the threads. A newer one re-triggers an auto review on
+    // the same head. Null ⇒ read the row's `created_at` (older rows, or a run that failed before
+    // loading threads). Migration 0076 (pg 0063).
+    commentsThrough: integer('comments_through', { mode: 'timestamp' }),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),

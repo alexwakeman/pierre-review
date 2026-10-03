@@ -178,3 +178,34 @@ describe('ticketAnalysisCommentBody', () => {
     expect(body.endsWith(TICKET_COMMENT_MARKER)).toBe(true);
   });
 });
+
+describe('sameHeadTicketCarry — only new commits may change a criterion', () => {
+  const story = { title: 'Reset', description: 'd', acceptanceCriteria: '* emailed' };
+  const assessed = {
+    alignment: 'partly_aligned' as const,
+    summary: 's',
+    criteria: [{ index: 1, text: 'emailed', status: 'not_met' as const, explanation: 'e' }],
+    missing: [],
+    notRequested: [],
+    posted: { githubCommentId: '1', url: null, postedAt: '2026-09-01T00:00:00.000Z' },
+  };
+
+  it('carries an unchanged story\'s assessment (without the posted record) and skips edited ones', async () => {
+    const { sameHeadTicketCarry } = await import('./ticket.js');
+    const out = sameHeadTicketCarry(
+      [story, { ...story, acceptanceCriteria: '* emailed\n* logged' }],
+      { tickets: [story], ticketAssessments: [assessed as never] },
+    );
+    expect(out[0]).toMatchObject({ alignment: 'partly_aligned' });
+    expect((out[0] as { posted?: unknown }).posted).toBeUndefined();
+    expect(out[1]).toBeNull();
+  });
+
+  it('carries nothing without a same-head prior, or for a not_checked assessment', async () => {
+    const { sameHeadTicketCarry } = await import('./ticket.js');
+    expect(sameHeadTicketCarry([story], null)).toEqual([null]);
+    expect(
+      sameHeadTicketCarry([story], { tickets: [story], ticketAssessments: [{ ...assessed, alignment: 'not_checked' } as never] }),
+    ).toEqual([null]);
+  });
+});

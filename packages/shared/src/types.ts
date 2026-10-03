@@ -6503,6 +6503,11 @@ export interface ClaudeFollowUpItemRecord {
   // The earlier finding was already posted to GitHub. With `headMoved === false` a re-raise would
   // repeat a comment already on this commit, so it is saved left out of the review. Absent ⇒ false.
   priorPosted?: boolean;
+  // true ⇒ the status was decided WITHOUT asking Claude, because the code has not moved since the
+  // finding was last judged (or raised): a run on the same head as the previous review keeps the
+  // earlier status, and a finding raised at this very head is still not addressed. Only new
+  // commits can change it. Absent ⇒ false.
+  statusCarried?: boolean;
 }
 
 // The wire shape adds `reraisedFindingId`, DERIVED on read: the id of this run's finding that
@@ -6526,6 +6531,64 @@ export interface ClaudeReviewFollowUpRecord {
 export type ClaudeReviewFollowUp = Omit<ClaudeReviewFollowUpRecord, 'items'> & {
   items: ClaudeFollowUpItem[];
 };
+
+// ---- Claude Review: every OTHER open review thread on the PR ----
+// A review assesses each unresolved review thread that is not one of Limn's own posted findings
+// (those stay in the follow-up above): comments from people and from other review bots. Two
+// questions per thread — is the comment right, and has the code dealt with it since.
+// 'not_checked' is written ONLY by the server (over the cap, or Claude did not report on it).
+export type ClaudeThreadValidity = 'valid' | 'partly_valid' | 'not_valid' | 'unclear' | 'not_checked';
+export type ClaudeThreadAddressed =
+  | 'addressed'
+  | 'partly_addressed'
+  | 'not_addressed'
+  | 'unclear'
+  | 'not_checked';
+
+// One thread and what the run found about it, as STORED (`claude_reviews.thread_assessments`) and
+// served verbatim on `ClaudeReview.threadAssessments`.
+export interface ClaudeThreadAssessment {
+  // 'R1'…, the ref Claude saw. null ⇒ not shown to Claude this run (over the cap, or carried).
+  ref: string | null;
+  // review_threads.id (local, same PR).
+  threadId: number;
+  // Shown to Claude this run.
+  sent: boolean;
+  // true ⇒ copied unchanged from the previous run: the code has not moved since it was judged and
+  // nobody has commented on the thread since.
+  carried: boolean;
+  // The thread's first comment: its author, and whether that author is automation.
+  authorLogin: string | null;
+  authorIsBot: boolean;
+  path: string;
+  line: number | null;
+  // The first comment, clipped (plain text, as written — render it as text).
+  excerpt: string;
+  commentCount: number;
+  // The newest comment in the thread when it was judged (ISO).
+  lastCommentAt: string | null;
+  // github.com link to the first comment; null when its id is not synced.
+  url: string | null;
+  validity: ClaudeThreadValidity;
+  addressed: ClaudeThreadAddressed;
+  // Claude's one- or two-sentence explanation. null when not reported.
+  explanation: string | null;
+  // Claude's suggested reply to the thread, when it offered one. Never posted by the server.
+  draftReply: string | null;
+  // The head the judgement was made at. A carried item keeps the head it was judged at.
+  assessedAtHead: string;
+}
+
+export interface ClaudeThreadAssessmentCounts {
+  total: number;
+  // Shown to Claude this run, or carried from an earlier judgement.
+  assessed: number;
+  // Judged right (valid / partly valid) and not (or only partly) dealt with — what AI Fix gets.
+  validUnaddressed: number;
+  notValid: number;
+  addressed: number;
+  notChecked: number;
+}
 
 // One review run (re-review = a new run; history kept, keyed by head SHA).
 export interface ClaudeReview {
@@ -6583,6 +6646,12 @@ export interface ClaudeReview {
   followUp?: ClaudeReviewFollowUp | null;
   // Who started the run. Absent on older servers = 'manual'.
   trigger?: ClaudeReviewTrigger;
+  // Every other open review thread on the PR (people and other review bots) and what this run
+  // found about it. null = the run did not assess threads (an older run, a skip, or not succeeded);
+  // [] = it looked and there were none.
+  threadAssessments?: ClaudeThreadAssessment[] | null;
+  // Counts over `threadAssessments` (server-folded). null exactly when that is null.
+  threadAssessmentCounts?: ClaudeThreadAssessmentCounts | null;
 }
 
 // The reviewed commit against the PR's current head (the SYNCED head — DB-only, no GitHub call).
@@ -6865,6 +6934,34 @@ export interface ClaudeReviewPrState {
   /** Who started that run. `'auto'` on a queued or running entry means an auto review holds the
    *  PR, and a manual start answers 409 AutoReviewInProgress. Absent on older servers = 'manual'. */
   trigger?: ClaudeReviewTrigger;
+  /** With `headMoved`: how many of the PR's synced commits are newer than the reviewed one (the
+   *  same count the Claude Review tab's "outdated" line prints). null = could not be counted (a
+   *  rewritten history, or the reviewed commit is not synced). Absent when the head did not move. */
+  commitsSince?: number | null;
+  /** What the run found — present ONLY on a `succeeded` run (a queued/failed run has no findings
+   *  to count, and a zero there would pretend to know). */
+  summary?: ClaudeReviewStateSummary;
+}
+
+/** The Open PRs strip's per-run figures, folded server-side from the stored run (DB-only). */
+export interface ClaudeReviewStateSummary {
+  /** Findings by severity; every member present (0 = none of that kind on a finished run). */
+  findings: Record<ClaudeFindingSeverity, number>;
+  /** Findings raised by a deep review's specialist, by lens. Only lenses with ≥1 finding. */
+  lenses: Partial<Record<ClaudeFindingLens, number>>;
+  /** Findings already posted to GitHub (inline or as a PR comment). */
+  postedFindings: number;
+  /** The review itself was posted (`postedAt` set). */
+  reviewPosted: boolean;
+  /** One entry per user story the run was given, in order. [] when none. `alignment` null = the
+   *  run stored no assessment for it. */
+  tickets: Array<{ key: string | null; title: string | null; alignment: ClaudeTicketAlignment | null }>;
+  /** What the run found about the previous review's findings, by status. null when there was no
+   *  earlier review to follow up. */
+  followUp: Record<ClaudeFollowUpStatus, number> | null;
+  /** Other reviewers' open threads this run judged (`threadAssessmentCounts` over the stored
+   *  `thread_assessments`). Absent when the run did not assess threads (older run) — never zeros. */
+  threadAssessments?: ClaudeThreadAssessmentCounts;
 }
 
 export interface ClaudeReviewStatesResponse {
@@ -7224,6 +7321,10 @@ export interface GenerateFixBody {
   seed?: AiFixSeed;
   // When seed === 'review', the review text to seed the prompt with.
   reviewText?: string;
+  // When seed === 'review', the Claude review it came from. The server adds that review's open
+  // review threads judged valid and not yet addressed (fenced, from the stored run), so one fix
+  // covers the findings AND the other reviewers' comments. Ignored unless it is this PR's review.
+  sourceReviewId?: number;
   // When seed === 'comments', the comments to work through — (kind, id) pairs only. The
   // server resolves each one against THIS PR's rows and silently drops anything that
   // doesn't belong to it, so a forged id is inert rather than an error. Capped

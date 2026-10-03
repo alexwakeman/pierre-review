@@ -30,6 +30,16 @@
 // model; it carries the previous run's stories, and the follow-up (follow-up.ts) reads what was
 // already posted.
 //
+// RE-REVIEW ON NEW REVIEW COMMENTS. The same read also offers a PR whose head has NOT moved but whose
+// unresolved review threads gained a QUALIFYING comment — a person's or another bot's, never one Limn
+// posted (db/review-threads-for-review.ts `isLimnPostedComment`, so a review never re-triggers
+// itself) — newer than what every run at that head saw (`claude_reviews.comments_through`, else the
+// run's start). THE SETTLE KEY IS (head, newest qualifying comment time): any change restarts the
+// AUTO_REREVIEW_SETTLE_MS wait, so a burst of comments (or of pushes, or both) costs ONE run. On such
+// a same-head run, every earlier judgement carries forward unchanged (only new commits can change
+// "addressed" / "met" — follow-up.ts, threads.ts, ticket.ts `sameHeadTicketCarry`); the new work is
+// the new and changed threads.
+//
 // ⚠ IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF: `autoReviewAvailable` needs the agentic switch
 // (config.aiEnabled) AND a local host — checked separately, so the cloud guarantee does not rest on
 // one flag. It is OFF PER WORKSPACE until someone switches it on: it spends the user's own Claude
@@ -50,9 +60,9 @@ export const AUTO_REVIEW_CRON = '* * * * *';
 /** How long a moved head must hold still before its re-review is queued. */
 export const AUTO_REREVIEW_SETTLE_MS = 5 * 60 * 1000;
 
-// `${accountId}:${prId}` → the moved head last seen and when it was first seen. Pruned each full
-// tick to the current candidates.
-const headSeen = new Map<string, { sha: string; firstSeenMs: number }>();
+// `${accountId}:${prId}` → the re-review KEY last seen — `${headSha}|${commentsAtMs}` — and when it
+// was first seen. Pruned each full tick to the current candidates.
+const headSeen = new Map<string, { key: string; firstSeenMs: number }>();
 
 /** Test hook. */
 export function _resetAutoReReviewForTest(): void {
@@ -72,7 +82,7 @@ export function utcDayStartMs(nowMs: number): number {
 
 export interface AutoSweepResult {
   queued: number;
-  // Of `queued`, how many were RE-reviews of a moved head.
+  // Of `queued`, how many were RE-reviews (a moved head, or new review comments).
   reQueued: number;
   // Why the sweep stopped early, if it did.
   stopped: 'lane_full' | 'ai_not_ready' | null;
@@ -149,18 +159,20 @@ export async function runAutoReviewSweep(
       if (result.stopped) break;
 
       // ---- re-reviews of a moved head (debounced) ----
-      for (const { prId, headSha } of res.reReview ?? []) {
+      for (const { prId, headSha, commentsAtMs } of res.reReview ?? []) {
         const k = `${ws.accountId}:${prId}`;
         liveHeads.add(k);
         if (waiting.has(prId)) continue;
+        // (head, newest qualifying comment): a new push OR a new comment restarts the wait.
+        const key = `${headSha}|${commentsAtMs ?? ''}`;
         const seen = headSeen.get(k);
-        if (!seen || seen.sha !== headSha) {
-          headSeen.set(k, { sha: headSha, firstSeenMs: nowMs });
+        if (!seen || seen.key !== key) {
+          headSeen.set(k, { key, firstSeenMs: nowMs });
           continue;
         }
         if (nowMs - seen.firstSeenMs < AUTO_REREVIEW_SETTLE_MS) continue;
         if (budget <= 0) continue;
-        const r = enqueueAutoReview(ctx, ws.accountId, prId, ws.workspaceId);
+        const r = enqueueAutoReview(ctx, ws.accountId, prId, ws.workspaceId, commentsAtMs ?? null);
         if (r === 'queued') {
           result.queued += 1;
           result.reQueued += 1;

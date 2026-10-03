@@ -14,6 +14,10 @@ import { fetchReviewCommentHunks } from '../sync/hydrate-detail.js';
 import { applyAndPush } from '../coding/git-ops.js';
 import { registerScheduledJob } from '../sync/scheduled-jobs.js';
 import { detectClaudeAuth } from './auth.js';
+import {
+  loadReviewThreadsForReview,
+  type ReviewThreadsForReview,
+} from '../db/review-threads-for-review.js';
 import type {
   ApplyAndPushArgs,
   ApplyAndPushResult,
@@ -84,10 +88,15 @@ export interface AgentContext {
     ): Promise<{
       prIds: number[];
       autoToday: number;
-      // Already-reviewed PRs whose head moved past every run (auto RE-review). Absent on an older
-      // host ⇒ none.
-      reReview?: Array<{ prId: number; headSha: string }>;
+      // Already-reviewed PRs whose head moved past every run, OR whose head is unchanged but a
+      // newer qualifying review comment arrived (auto RE-review). `commentsAtMs` is that comment's
+      // time (null/absent for a moved head); the sweeper settles on (headSha, commentsAtMs).
+      // Absent on an older host ⇒ none.
+      reReview?: Array<{ prId: number; headSha: string; commentsAtMs?: number | null }>;
     } | null>;
+    // The OTHER reviewers' open threads on a PR + the newest qualifying comment
+    // (db/review-threads-for-review.ts). Absent ⇒ the review assesses no threads.
+    loadReviewThreads?(accountId: number, prId: number): Promise<ReviewThreadsForReview>;
   };
   registerScheduledJob(cron: string, handler: () => Promise<void> | void, label?: string): void;
 }
@@ -187,6 +196,7 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
     queries: {
       getAutoReviewCandidates: (accountId, workspaceId, opts) =>
         hostQueries.getAutoReviewCandidates(accountId, workspaceId, opts),
+      loadReviewThreads: (accountId, prId) => loadReviewThreadsForReview(accountId, prId),
     },
     registerScheduledJob,
   };

@@ -533,6 +533,13 @@
       "when": 1790388000000,
       "tag": "0075_review_lens_drop_learnings",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "6",
+      "when": 1790474400000,
+      "tag": "0076_claude_review_threads",
+      "breakpoints": true
     }
   ]
 }

@@ -12,6 +12,7 @@ import type {
   MyTurnPr,
   MyTurnResponse,
   OpenPrsResponse,
+  ClaudeReviewStatesResponse,
   PrDetail,
   Repo,
   ThreadDetail,
@@ -205,6 +206,9 @@ const MARKER_EVENTS: TimelineEvent[] = [
 
 const TIMELINE: TimelineResponse = { prs: PRS, events: [...EVENTS, ...MARKER_EVENTS] };
 const OPEN_PRS: OpenPrsResponse = { prs: PRS };
+// The Open PRs Claude Review strip's ONE batched read. Never requested while `ai.enabled` is false
+// (below); typed and served so a spec that flips it gets the real shape, not the `{}` catch-all.
+const CLAUDE_REVIEW_STATES: ClaudeReviewStatesResponse = { states: [] };
 
 const ME_RESPONSE: MeResponse = {
   user: {
@@ -807,6 +811,7 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.endsWith('/api/activity')) return json(route, ACTIVITY);
       if (path.includes('/api/timeline')) return json(route, TIMELINE);
       if (path.includes('/api/open-prs')) return json(route, OPEN_PRS);
+      if (path.endsWith('/api/claude-review/states')) return json(route, CLAUDE_REVIEW_STATES);
       if (path.endsWith('/api/users')) return json(route, USERS);
       if (path.endsWith('/api/repos')) return json(route, [REPO]);
       if (path.endsWith('/api/mergers')) return json(route, []);

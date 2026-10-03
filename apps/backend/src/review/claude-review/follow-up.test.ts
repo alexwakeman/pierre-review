@@ -350,3 +350,68 @@ describe('a re-raise of a comment already posted on this commit starts left out'
     expect(f).not.toHaveProperty('included');
   });
 });
+
+// ⚠ ONLY NEW COMMITS MAY CHANGE A STATUS: on a run at the previous review's head (a comment-only
+// re-run), the follow-up statuses are decided in code, whatever the model says.
+describe('same head ⇒ statuses carry forward (the code has not moved)', () => {
+  const HEAD = 'a'.repeat(40);
+  const OLDER = 'c'.repeat(40);
+
+  it('a finding raised at this head stays not_addressed even when the model says addressed', () => {
+    const own = prior({ posted: true });
+    const plan = selectPriorFindings(review([own], HEAD), HEAD);
+    expect(plan.headMoved).toBe(false);
+    const items = reconcileFollowUp(plan, [{ ref: 'P1', status: 'addressed', explanation: 'Looks fixed.' }]);
+    expect(items[0]).toMatchObject({ status: 'not_addressed', statusCarried: true, sent: true, ref: 'P1' });
+    expect(items[0]!.explanation).toBe('The code has not changed since this was raised.');
+  });
+
+  it('keeps the model\'s words only when it agreed with the carried status', () => {
+    const own = prior({ posted: true });
+    const plan = selectPriorFindings(review([own], HEAD), HEAD);
+    const items = reconcileFollowUp(plan, [{ ref: 'P1', status: 'not_addressed', explanation: 'Still unchecked on line 10.' }]);
+    expect(items[0]!.explanation).toBe('Still unchecked on line 10.');
+  });
+
+  it('a carried open item keeps the status the previous run gave it', () => {
+    const carried = prior({
+      posted: true,
+      carried: true,
+      headSha: OLDER,
+      priorStatus: { status: 'partly_addressed', explanation: 'Half done.' },
+    });
+    const plan = selectPriorFindings(review([carried], HEAD), HEAD);
+    const items = reconcileFollowUp(plan, [{ ref: 'P1', status: 'not_addressed', explanation: 'x' }]);
+    expect(items[0]).toMatchObject({ status: 'partly_addressed', explanation: 'Half done.', statusCarried: true });
+  });
+
+  it('a carried not_checked item was never judged, so the model still is', () => {
+    const carried = prior({ posted: true, carried: true, headSha: OLDER });
+    const plan = selectPriorFindings(review([carried], HEAD), HEAD);
+    const items = reconcileFollowUp(plan, [{ ref: 'P1', status: 'addressed', explanation: 'Gone.' }]);
+    expect(items[0]).toMatchObject({ status: 'addressed' });
+    expect(items[0]!.statusCarried).toBeUndefined();
+  });
+
+  it('a MOVED head locks nothing', () => {
+    const own = prior({ posted: true });
+    const plan = selectPriorFindings(review([own], OLDER), HEAD);
+    expect(plan.locked.size).toBe(0);
+    const items = reconcileFollowUp(plan, [{ ref: 'P1', status: 'addressed', explanation: 'Fixed.' }]);
+    expect(items[0]).toMatchObject({ status: 'addressed' });
+  });
+
+  it('an item over the cap keeps its locked status and is still raised again (saved left out)', () => {
+    const many = Array.from({ length: PRIOR_FINDINGS_MAX + 1 }, () => prior({ posted: true }));
+    const plan = selectPriorFindings(review(many, HEAD), HEAD);
+    expect(plan.omitted).toHaveLength(1);
+    const items = reconcileFollowUp(plan, []);
+    const over = items.find((i) => !i.sent)!;
+    expect(over).toMatchObject({ ref: null, status: 'not_addressed', statusCarried: true });
+    const linked = linkReraisedFindings(plan, items, [], new Set());
+    const reraise = linked.find((f) => f.priorFindingId === over.priorFindingId)!;
+    expect(reraise).toBeDefined();
+    // Already posted on this same commit: never posted twice.
+    expect(reraise.included).toBe(false);
+  });
+});

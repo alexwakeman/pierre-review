@@ -1,11 +1,11 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import type { ClaudeReviewPrState, TimelinePr, User } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
 import { useFilters } from '../../store/filters.js';
-import { reviewCellFor, reviewCellRank } from '../../lib/claudeReviewColumn.js';
+import { findingsRank, reviewCellFor, reviewCellRank } from '../../lib/claudeReviewColumn.js';
 import {
   CI_META,
   indexUsers,
@@ -16,7 +16,9 @@ import {
 import { Avatar } from '../CommentCard.js';
 import { CheckCircleIcon } from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
-import { ClaudeReviewCell } from './ClaudeReviewCell.js';
+import { ClaudeReviewStrip } from './ClaudeReviewCell.js';
+import { BlastRadiusChip } from './BlastRadiusChip.js';
+import { LargePrFlag } from './LargePrFlag.js';
 import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
 
 // THE open-PR table — the ONE component every open-PR list surface renders (the OpenPrsDetail
@@ -26,9 +28,15 @@ import { SortHeader, type SortState, compare, nextSort } from './sortableTable.j
 // Owns its sort state; default order = sortOpenPrsByActivity (the same order the inline lists
 // use). Rows are WHOLE-ROW clickable — the caller decides what a click opens (onOpenPr).
 //
-// The "Claude review" column renders ONLY where agentic AI runs (`me.ai.enabled`: local, free); without
-// it there is no column and no request. With it, ONE batched states request covers every listed
-// row (never one per row), and each cell's controls stop propagation so a click never opens the row.
+// THE LAYOUT IS A LIST OF NARROW TWO-ROW CARDS ON ONE SHARED CSS GRID. Row 1 is the PR's facts;
+// row 2 is the Claude Review strip. Every card (and the header) reads the SAME column templates —
+// `--opr-cols*` for row 1 and `--opr-strip*` for the strip, set ONCE on the list container — so a
+// cell lines up exactly from card to card. Below `xl` the Updated column drops (still sortable on
+// wide screens) and the fixed tracks narrow; at `2xl` the repo and author tracks widen.
+//
+// The Claude Review strip renders ONLY where agentic AI runs (`me.ai.enabled`: local, free); without
+// it there is no strip and no request. With it, ONE batched states request covers every listed
+// card (never one per card), and each strip control stops propagation so a click never opens the PR.
 
 type SortCol =
   | 'pr'
@@ -40,7 +48,8 @@ type SortCol =
   | 'threads'
   | 'ci'
   | 'approval'
-  | 'claude';
+  | 'claude'
+  | 'findings';
 
 // Each column's "natural" first-click direction (a second click flips it): text columns read
 // A→Z, time/size/backlog columns lead with the most pressing end (longest-open, most-recently
@@ -56,6 +65,7 @@ const DEFAULT_DIR: Record<SortCol, 'asc' | 'desc'> = {
   ci: 'asc',
   approval: 'asc',
   claude: 'asc', // needs a review first (reviewCellRank)
+  findings: 'desc', // most severe first (findingsRank)
 };
 
 // CI rollup → a sortable rank (failing first under 'asc').
@@ -111,6 +121,8 @@ function sortValue(
     case 'claude':
       // Sorts on the stored state, not a click in flight (a sort must not jump under the cursor).
       return reviewCellRank(reviewCellFor(claudeStates.get(pr.id), false));
+    case 'findings':
+      return findingsRank(claudeStates.get(pr.id));
   }
 }
 
@@ -128,12 +140,18 @@ function CiCell({ ci }: { ci: TimelinePr['ciStatus'] }): JSX.Element {
   );
 }
 
+// Diff size, then the blast-radius and large-PR marks as icons (their sentences are the
+// accessible names). Each renders nothing when it has nothing honest to say.
 function LocCell({ pr }: { pr: TimelinePr }): JSX.Element {
   return (
-    <span className="whitespace-nowrap text-[11px]">
-      <span className="text-gray-400">{pr.changedFiles}f</span>{' '}
-      <span className="font-mono text-green-600 dark:text-green-400">+{pr.additions}</span>{' '}
-      <span className="font-mono text-red-500 dark:text-red-400">−{pr.deletions}</span>
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px]">
+      <span>
+        <span className="text-gray-500 dark:text-gray-400">{pr.changedFiles}f</span>{' '}
+        <span className="font-mono text-green-600 dark:text-green-400">+{pr.additions}</span>{' '}
+        <span className="font-mono text-red-500 dark:text-red-400">−{pr.deletions}</span>
+      </span>
+      <BlastRadiusChip pr={pr} iconOnly />
+      <LargePrFlag pr={pr} iconOnly />
     </span>
   );
 }
@@ -146,7 +164,7 @@ function ThreadsCell({ pr }: { pr: TimelinePr }): JSX.Element {
         className={
           pr.threadCounts.untouched > 0
             ? 'text-amber-600 dark:text-amber-400'
-            : 'text-gray-400'
+            : 'text-gray-500 dark:text-gray-400'
         }
         title={`${pr.threadCounts.untouched} untouched thread${pr.threadCounts.untouched === 1 ? '' : 's'}`}
       >
@@ -159,20 +177,59 @@ function ThreadsCell({ pr }: { pr: TimelinePr }): JSX.Element {
 
 function ApprovalCell({ pr }: { pr: TimelinePr }): JSX.Element {
   const standing = pr.isApproved
-    ? { label: 'approved', color: '#22c55e' }
+    ? { label: 'approved', cls: 'bg-green-500/10 text-green-700 dark:text-green-400' }
     : pr.isChangesRequested
-      ? { label: 'changes', color: '#ef4444' }
+      ? { label: 'changes', cls: 'bg-red-500/10 text-red-700 dark:text-red-400' }
       : null;
   if (standing == null) return <span className="text-[11px] text-gray-500 dark:text-gray-400">—</span>;
-  return (
-    <span
-      className="rounded px-1 text-[10px] font-semibold"
-      style={{ color: standing.color, background: standing.color + '1a' }}
-    >
-      {standing.label}
-    </span>
-  );
+  return <span className={`rounded px-1 text-[11px] font-semibold ${standing.cls}`}>{standing.label}</span>;
 }
+
+// ---- the shared grid ----
+// One entry per row-1 column. `base` is the track below `xl` (null = the column is hidden there),
+// `xl` from 1280px, `wide` from 1536px. The title takes what is left, so it is the only flexible
+// track; everything else is fixed, which is what makes the cards line up.
+interface GridCol {
+  col: SortCol;
+  label: string;
+  title?: string;
+  base: string | null;
+  xl: string;
+  wide: string;
+}
+
+const PR_COL: GridCol = { col: 'pr', label: 'Pull request', base: 'minmax(11rem,1fr)', xl: 'minmax(14rem,1fr)', wide: 'minmax(16rem,1fr)' };
+const REPO_COL: GridCol = { col: 'repo', label: 'Repo', base: '6.5rem', xl: '9.5rem', wide: '13rem' };
+const FACT_COLS: GridCol[] = [
+  { col: 'author', label: 'Author', base: '6.5rem', xl: '8.5rem', wide: '10rem' },
+  { col: 'age', label: 'Age', title: 'Time since the PR opened', base: '4rem', xl: '4.5rem', wide: '4.5rem' },
+  { col: 'updated', label: 'Updated', base: null, xl: '4.5rem', wide: '5rem' },
+  { col: 'loc', label: 'Size', title: 'Files, added and deleted lines; blast radius and large-PR marks', base: '8rem', xl: '10rem', wide: '10.5rem' },
+  { col: 'threads', label: 'Threads', title: 'Untouched review threads + the state mix', base: '5rem', xl: '6rem', wide: '6.5rem' },
+  { col: 'ci', label: 'CI', base: '5rem', xl: '6rem', wide: '6.5rem' },
+  { col: 'approval', label: 'Approval', base: '5rem', xl: '6rem', wide: '6.5rem' },
+];
+
+// The Claude Review strip's five cells: outcome · findings · posted + design · context · action.
+const STRIP_BASE = '12.5rem 14.5rem 8.5rem minmax(0,1fr) 5.5rem';
+const STRIP_XL = '15rem 17rem 10rem minmax(0,1fr) 6rem';
+
+function gridVars(cols: GridCol[]): CSSProperties {
+  const tracks = (pick: (c: GridCol) => string | null): string =>
+    cols.map(pick).filter((t): t is string => t != null).join(' ');
+  return {
+    '--opr-cols': tracks((c) => c.base),
+    '--opr-cols-xl': tracks((c) => c.xl),
+    '--opr-cols-2xl': tracks((c) => c.wide),
+    '--opr-strip': STRIP_BASE,
+    '--opr-strip-xl': STRIP_XL,
+  } as CSSProperties;
+}
+
+const ROW_GRID =
+  'grid items-center gap-x-2.5 [grid-template-columns:var(--opr-cols)] xl:[grid-template-columns:var(--opr-cols-xl)] 2xl:[grid-template-columns:var(--opr-cols-2xl)]';
+// The cell wrapper for a column that drops below `xl`.
+const hideBelowXl = (c: GridCol): string => (c.base == null ? 'hidden xl:block' : '');
 
 export function OpenPrsTable({
   prs,
@@ -253,11 +310,17 @@ export function OpenPrsTable({
     );
   }, [prs, sort, maintainersByRepo, usersById, repoNameById, claudeStates]);
 
+  const cols = useMemo(
+    () => (showRepoColumn ? [PR_COL, REPO_COL, ...FACT_COLS] : [PR_COL, ...FACT_COLS]),
+    [showRepoColumn],
+  );
+  const vars = useMemo(() => gridVars(cols), [cols]);
+
   if (isLoading) {
     return (
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="h-8 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+          <div key={i} className="h-12 animate-pulse rounded-md bg-gray-100 dark:bg-gray-900/40" />
         ))}
       </div>
     );
@@ -267,102 +330,122 @@ export function OpenPrsTable({
   }
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+      <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
         {emptyLabel}
       </div>
     );
   }
+
+  const onCardKey = (e: KeyboardEvent<HTMLDivElement>, pr: TimelinePr): void => {
+    // Only the card itself: a key on a strip button belongs to that button.
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onOpenPr(pr);
+    }
+  };
+
+  const header = 'text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400';
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[880px] border-collapse text-sm">
-        <thead>
-          <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-            <SortHeader col="pr" label="Pull request" sort={sort} onSort={onSort} />
-            {showRepoColumn && (
-              <SortHeader col="repo" label="Repo" sort={sort} onSort={onSort} />
-            )}
-            <SortHeader col="author" label="Author" sort={sort} onSort={onSort} />
-            <SortHeader col="age" label="Age" sort={sort} onSort={onSort} title="Time since the PR opened" />
-            <SortHeader col="updated" label="Updated" sort={sort} onSort={onSort} />
-            <SortHeader col="loc" label="LoC" sort={sort} onSort={onSort} title="Diff size (added + deleted lines)" />
-            <SortHeader col="threads" label="Threads" sort={sort} onSort={onSort} title="Untouched review threads + the state mix" />
-            <SortHeader col="ci" label="CI" sort={sort} onSort={onSort} />
-            <SortHeader col="approval" label="Approval" sort={sort} onSort={onSort} />
-            {claudeOn && (
-              <SortHeader col="claude" label="Claude review" sort={sort} onSort={onSort} />
-            )}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((pr) => {
-            const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
-            return (
-              <tr
-                key={pr.id}
-                onClick={() => onOpenPr(pr)}
-                title={`Open #${pr.number} in its own tab`}
-                className="cursor-pointer border-t border-gray-100 align-top hover:bg-gray-50/70 dark:border-gray-800/60 dark:hover:bg-gray-900/40"
-              >
-                <td className="max-w-md py-1.5 pr-3">
-                  <span className="flex items-center gap-1.5">
-                    <span className="font-mono text-[11px] text-gray-400">#{pr.number}</span>
-                    <span className="min-w-0 truncate text-sm font-medium text-gray-800 dark:text-gray-100">
-                      {pr.title}
-                    </span>
-                    {pr.isDraft && (
-                      <span className="shrink-0 rounded bg-gray-500/15 px-1 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                        draft
-                      </span>
-                    )}
+      <div role="table" aria-label="Open pull requests" className="min-w-[58rem] space-y-1" style={vars}>
+        {/* The header: row 1's columns, then the strip's two sortable cells on the same tracks. */}
+        <div role="row" className={`px-3 pb-0.5 ${header}`}>
+          <div className={ROW_GRID}>
+            {cols.map((c) => (
+              <SortHeader
+                key={c.col}
+                as="div"
+                className={`min-w-0 ${hideBelowXl(c)}`}
+                col={c.col}
+                label={c.label}
+                title={c.title}
+                sort={sort}
+                onSort={onSort}
+              />
+            ))}
+          </div>
+          {claudeOn && (
+            <div className="grid gap-x-2.5 [grid-template-columns:var(--opr-strip)] xl:[grid-template-columns:var(--opr-strip-xl)]">
+              <SortHeader as="div" col="claude" label="Claude review" sort={sort} onSort={onSort} className="min-w-0" />
+              <SortHeader
+                as="div"
+                col="findings"
+                label="Findings"
+                title="Claude's findings by severity, most severe first"
+                sort={sort}
+                onSort={onSort}
+                className="min-w-0"
+              />
+            </div>
+          )}
+        </div>
+
+        {rows.map((pr) => {
+          const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
+          return (
+            <div
+              key={pr.id}
+              role="row"
+              tabIndex={0}
+              onClick={() => onOpenPr(pr)}
+              onKeyDown={(e) => onCardKey(e, pr)}
+              title={`Open #${pr.number} in its own tab`}
+              className="cursor-pointer space-y-0.5 rounded-md border border-gray-200 px-3 py-1 hover:border-gray-300 hover:bg-gray-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-800 dark:hover:border-gray-700 dark:hover:bg-gray-900/40"
+            >
+              <div className={ROW_GRID}>
+                <div role="cell" className="flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 font-mono text-[11px] text-gray-500 dark:text-gray-400">#{pr.number}</span>
+                  <span className="min-w-0 truncate text-sm font-medium text-gray-800 dark:text-gray-100">
+                    {pr.title}
                   </span>
-                </td>
+                  {pr.isDraft && (
+                    <span className="shrink-0 rounded bg-gray-500/15 px-1 text-[11px] font-medium text-gray-600 dark:text-gray-300">
+                      draft
+                    </span>
+                  )}
+                </div>
                 {showRepoColumn && (
-                  <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
-                    <span className="block max-w-[12rem] truncate">
-                      {repoNameById.get(pr.repoId) ?? `repo ${pr.repoId}`}
-                    </span>
-                  </td>
+                  <div role="cell" className="min-w-0 truncate text-[11px] text-gray-500 dark:text-gray-400">
+                    {repoNameById.get(pr.repoId) ?? `repo ${pr.repoId}`}
+                  </div>
                 )}
-                <td className="py-1.5 pr-3">
-                  <span className="inline-flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
-                    <Avatar user={author} size={14} />
-                    <span className="max-w-[8rem] truncate">
-                      {userLabel(author, pr.authorId)}
-                    </span>
-                  </span>
-                </td>
-                <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
+                <div role="cell" className="flex min-w-0 items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+                  <Avatar user={author} size={14} />
+                  <span className="truncate">{userLabel(author, pr.authorId)}</span>
+                </div>
+                <div role="cell" className="whitespace-nowrap text-[11px] text-gray-500 dark:text-gray-400">
                   {relativeTime(pr.openedAt)}
-                </td>
-                <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
+                </div>
+                <div role="cell" className="hidden whitespace-nowrap text-[11px] text-gray-500 dark:text-gray-400 xl:block">
                   {relativeTime(pr.updatedAt)}
-                </td>
-                <td className="py-1.5 pr-3">
+                </div>
+                <div role="cell" className="min-w-0">
                   <LocCell pr={pr} />
-                </td>
-                <td className="py-1.5 pr-3">
+                </div>
+                <div role="cell" className="min-w-0">
                   <ThreadsCell pr={pr} />
-                </td>
-                <td className="py-1.5 pr-3">
+                </div>
+                <div role="cell" className="min-w-0">
                   <CiCell ci={pr.ciStatus} />
-                </td>
-                <td className="py-1.5 pr-3">
+                </div>
+                <div role="cell" className="min-w-0">
                   <ApprovalCell pr={pr} />
-                </td>
-                {claudeOn && (
-                  <td className="py-1.5 pr-3">
-                    <ClaudeReviewCell
-                      prId={pr.id}
-                      state={claudeStates.get(pr.id)}
-                      onOpenReview={() => openReview(pr)}
-                    />
-                  </td>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                </div>
+              </div>
+              {claudeOn && (
+                <div className="border-t border-dashed border-gray-200 pt-0.5 dark:border-gray-800">
+                  <ClaudeReviewStrip
+                    prId={pr.id}
+                    state={claudeStates.get(pr.id)}
+                    onOpenReview={() => openReview(pr)}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

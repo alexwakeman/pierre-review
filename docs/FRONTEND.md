@@ -285,11 +285,29 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   with no figure). It is the same cache entry as the tab body and FeedIsolationBanner, so the chip
   adds an observer, not a request. The view is **THE consolidated open-PR view** — the shared
   `OpenPrsTable` over `GET /api/open-prs`, ALWAYS workspace-wide:
-  age/author/LoC/untouched-threads/CI/approval columns, drafts included with a "· N drafts"
-  callout; plus a **Claude review** column ONLY where agentic AI runs (`me.ai.enabled`) — one batched
-  `POST /api/claude-review/states` for every listed row, click-gated starts sharing the tab's
-  mutation key, every control `stopPropagation` ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Starting
-  from the Open PRs tab). Every opener just REVEALS it (`openOpenPrsDetail(repoId?)` →
+  drafts included with a "· N drafts" callout. ⚠ **IT IS A LIST OF NARROW TWO-ROW CARDS ON ONE
+  SHARED CSS GRID**, not a `<table>`: row 1 = the PR's facts (title · repo · author · age · updated ·
+  size — LoC + `BlastRadiusChip`/`LargePrFlag` as icons · untouched threads · CI · approval), row 2 =
+  the **Claude Review strip** (`ClaudeReviewStrip` in `ClaudeReviewCell.tsx`) ONLY where agentic AI
+  runs (`me.ai.enabled`). The column templates are CSS variables set ONCE on the list container
+  (`--opr-cols` / `-xl` / `-2xl` from the `GridCol` table in `OpenPrsTable.tsx`, `--opr-strip` /
+  `-xl` for the strip's five cells: outcome · findings · posted + design · context · action), and
+  every card and the header read the SAME variables — the only flexible track is the title, which
+  is what makes cells line up card to card. Never give one card its own template. Below `xl` the
+  Updated column drops (`base: null`). The cards are `role="row"` + `tabIndex=0` (Enter/Space opens,
+  only when the CARD is the target) inside `role="table"`; headers are `SortHeader as="div"`. The
+  strip has two sorts of its own: Claude review (`reviewCellRank`) and Findings (`findingsRank`, a
+  PR with no finished run BELOW a clean one). Its pills reuse the Claude Review tab's palette
+  (`SEVERITY_CLASS`, `VERDICT_CLASS`, `TICKET_ALIGNMENT_CLASS`, `FOLLOW_UP_STATUS_CLASS`,
+  `CLEAN_CLASS`/`OUTDATED_CLASS` in `lib/claudeReviewFollowUp.ts`) and every figure is the server's
+  `summary` (present only on a succeeded run): severity pills (praise left out; zero found ⇒ green
+  "No issues"), "N newer commits"/"Branch changed", posted, design-lens count, one pill per story
+  with an alignment, "Earlier: N fixed · N still open", and "N reviewer threads still valid" from
+  `summary.threadAssessments.validUnaddressed`. ⚠ **Absent is never zero**: no summary, no story
+  alignment, no follow-up, no thread assessment ⇒ nothing drawn. One batched
+  `POST /api/claude-review/states` covers every listed card, click-gated starts share the tab's
+  mutation key, every strip control `stopPropagation` ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
+  Starting from the Open PRs tab). Every opener just REVEALS it (`openOpenPrsDetail(repoId?)` →
   `showOpenPrs`): the chip and the Reports → Flow metrics "Open PRs" tile pass nothing and CLEAR
   the tab's repo dropdown; the per-repo "Show all N open PRs" footer (`RepoOpenPrList`) passes its
   repo and PRE-SELECTS it, because the footer promised that repo's count. The dropdown
@@ -1068,6 +1086,16 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
 - **Auto review** is `AutoReviewSection` over the CORE `GET`/`PUT /api/workspaces/:id/auto-review`
   (`hooks/useWorkspaceAutoReview.ts`), mounted on `ai.enabled` and NOT behind the plugin's
   `/api/pro/settings` gate. OFF per workspace until switched on.
+- **"Review threads"** (`ClaudeReviewThreads.tsx`, mounted once in `ClaudesReview` after the
+  follow-up) renders `ClaudeReview.threadAssessments` — other reviewers' open threads the run judged
+  ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Other reviewers' threads). `null` renders NOTHING (the run
+  did not assess); `[]` prints "No other review threads.". Header pills from the server's
+  `threadAssessmentCounts` (zeros dropped). Order and colours are pure helpers in
+  `lib/claudeReviewFollowUp.ts` (`partitionThreads`, `THREAD_*_CLASS`): shared `isThreadToFix`
+  first, then other open ones, then not checked; addressed / not-valid rows (`isThreadSettled`)
+  behind "Show N more" — a to-fix row is never hidden. A not-valid comment's addressed pill is grey (`threadAddressedClass`), never red. path:line opens the thread in the Threads tab
+  (PrDetail's `openThreadInThreads`); the GitHub link goes through `safeExternalUrl`; every comment
+  and Claude string is plain text. `draftReply` offers Copy only — no route posts it.
 
 ### The AI-Fix comment picker + validity report (`components/AiFix/`)
 

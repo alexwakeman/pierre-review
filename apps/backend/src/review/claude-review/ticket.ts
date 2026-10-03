@@ -301,3 +301,33 @@ export function ticketAnalysisCommentBody(
   out.push(TICKET_COMMENT_MARKER);
   return out.join('\n');
 }
+
+const sameText = (a: string | null | undefined, b: string | null | undefined): boolean =>
+  (a ?? '').trim() === (b ?? '').trim();
+
+/**
+ * ⚠ ONLY NEW COMMITS MAY CHANGE A CRITERION. On a run at the SAME head as the previous succeeded
+ * run, a story it already assessed (same title, description and acceptance criteria) keeps that
+ * assessment — the code has not moved, so a fresh "not met" would be the model changing its mind,
+ * not the code changing. Index-aligned with `tickets`; null where the story is new, edited, or was
+ * not assessed ('not_checked'). The `posted` record is NOT carried: that comment belongs to the
+ * earlier run. The caller passes `prior` only when the heads match.
+ */
+export function sameHeadTicketCarry(
+  tickets: readonly ClaudeReviewTicket[],
+  prior: { tickets: readonly ClaudeReviewTicket[]; ticketAssessments: readonly ClaudeTicketAssessment[] } | null,
+): Array<ClaudeTicketAssessment | null> {
+  return tickets.map((t) => {
+    if (!prior) return null;
+    const j = prior.tickets.findIndex(
+      (p) =>
+        sameText(p.title, t.title) &&
+        sameText(p.description, t.description) &&
+        sameText(p.acceptanceCriteria, t.acceptanceCriteria),
+    );
+    const a = j >= 0 ? prior.ticketAssessments[j] : undefined;
+    if (!a || a.alignment === 'not_checked') return null;
+    const { posted: _posted, ...rest } = a;
+    return rest;
+  });
+}

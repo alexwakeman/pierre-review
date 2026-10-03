@@ -232,6 +232,14 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         // so the ONLY seed text a comments run may ever see is the one comment-seed.ts builds.
         // (The manager branches before that function is reached — this is the second lock.)
         seedText: seed === 'comments' ? undefined : body.reviewText,
+        // The Claude review a 'review' seed came from: the server adds its open, valid threads
+        // (manager.ts `reviewThreadSeed`, which also checks it is THIS PR's review).
+        sourceReviewId:
+          seed === 'review' &&
+          Number.isInteger(body.sourceReviewId) &&
+          (body.sourceReviewId as number) > 0
+            ? (body.sourceReviewId as number)
+            : null,
         commentTargets,
       });
 

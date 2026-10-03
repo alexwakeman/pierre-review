@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { CLAUDE_REVIEW_STATES_MAX_IDS, type ClaudeReviewTicket } from '@pierre-review/shared';
 import type { AgentContext as ProContext } from '../agent-context.js';
+import { eq as eqOp } from 'drizzle-orm';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -51,6 +52,9 @@ let foreign = 0;
 let lane = 0;
 let autoRunning = 0;
 let autoDone = 0;
+// The strip's summary: a finished run with findings, stories and a follow-up; its PR moved on.
+let rich = 0;
+let richReview = 0;
 
 const HEAD = 'a'.repeat(40);
 const OLD = 'b'.repeat(40);
@@ -115,6 +119,7 @@ beforeAll(async () => {
   lane = await pr(1, r1, 'lane', 5);
   autoRunning = await pr(1, r1, 'auto-running', 6);
   autoDone = await pr(1, r1, 'auto-done', 7);
+  rich = await pr(1, r1, 'rich', 8);
   const r2 = await repo(2, 'states-foreign');
   foreign = await pr(2, r2, 'foreign', 1);
 
@@ -142,6 +147,64 @@ beforeAll(async () => {
     await persist.insertQueuedReview(ctx, autoDone, HEAD, 'claude-opus-5-5', 1, [], 'auto'),
     'APPROVE',
   );
+
+  // The rich run: reviewed at OLD; two commits since (OLD < mid < HEAD by time).
+  richReview = await persist.insertQueuedReview(ctx, rich, OLD, 'claude-opus-5-5', 1, [
+    { ...ticket, source: 'jira', key: 'BMD-1' },
+    { title: 'Second story', description: null, acceptanceCriteria: null },
+  ]);
+  await succeed(richReview, 'REQUEST_CHANGES');
+  const { claudeReviews, claudeReviewFindings, commits } = schema;
+  const finding = (severity: string, extra: Record<string, unknown> = {}) => ({
+    reviewId: richReview,
+    path: 'a.ts',
+    line: 1,
+    severity,
+    title: severity,
+    body: 'b',
+    ...extra,
+  });
+  await db
+    .insert(claudeReviewFindings)
+    .values([
+      finding('blocker', { lens: 'design' }),
+      finding('blocker', { postedAt: new Date() }),
+      finding('warning', { lens: 'design' }),
+      finding('warning', { lens: 'security' }),
+      finding('nit'),
+      finding('question', { lens: 'not-a-lens' }),
+    ])
+    .execute();
+  await db
+    .update(claudeReviews)
+    .set({
+      ticketAssessment: [
+        { alignment: 'partly_aligned', summary: null, criteria: [], missing: [], notRequested: [] },
+      ],
+      followUp: {
+        priorReviewId: 1,
+        priorHeadSha: OLD,
+        headMoved: true,
+        changesSinceShown: false,
+        items: [
+          { status: 'addressed' },
+          { status: 'addressed' },
+          { status: 'not_addressed' },
+          { status: 'not_checked' },
+        ],
+      },
+    })
+    .where(eqOp(claudeReviews.id, richReview))
+    .execute();
+  const t0 = Date.now() - 3 * 3600_000;
+  await db
+    .insert(commits)
+    .values([
+      { sha: OLD, prId: rich, messageHeadline: 'first', committedAt: new Date(t0) },
+      { sha: 'c'.repeat(40), prId: rich, messageHeadline: 'second', committedAt: new Date(t0 + 3600_000) },
+      { sha: HEAD, prId: rich, messageHeadline: 'third', committedAt: new Date(t0 + 7200_000) },
+    ])
+    .execute();
 
   const { default: Fastify } = await import('fastify');
   const { registerClaudeReviewRoutes } = await import('./routes.js');
@@ -214,6 +277,66 @@ describe('POST /api/claude-review/states', () => {
   it('a malformed body ⇒ 400', async () => {
     expect((await states('nope')).statusCode).toBe(400);
     expect((await states(['x'])).statusCode).toBe(400);
+  });
+});
+
+describe('POST /api/claude-review/states — the strip summary', () => {
+  it('folds severity, lens, posted, stories, follow-up and the outdated count for a finished run', async () => {
+    const [s] = (await states([rich])).json().states as any[];
+    expect(s).toMatchObject({ prId: rich, status: 'succeeded', headMoved: true, commitsSince: 2 });
+    expect(s.summary).toEqual({
+      findings: { blocker: 2, warning: 2, nit: 1, question: 1, praise: 0 },
+      lenses: { design: 2, security: 1 },
+      postedFindings: 1,
+      reviewPosted: false,
+      tickets: [
+        { key: 'BMD-1', title: 'Reset password', alignment: 'partly_aligned' },
+        { key: null, title: 'Second story', alignment: null },
+      ],
+      followUp: { addressed: 2, partly_addressed: 0, not_addressed: 1, no_longer_applies: 0, not_checked: 1 },
+    });
+  });
+
+  it('a finished run with no findings reads real zeros; an unfinished run carries no summary', async () => {
+    const byPr = new Map(((await states([current, rerun, moved])).json().states as any[]).map((s) => [s.prId, s]));
+    expect(byPr.get(current).summary).toMatchObject({
+      findings: { blocker: 0, warning: 0, nit: 0, question: 0, praise: 0 },
+      lenses: {},
+      postedFindings: 0,
+      tickets: [{ title: 'Reset password', alignment: null }],
+      followUp: null,
+    });
+    expect(byPr.get(current).summary.threadAssessments).toBeUndefined();
+    expect(byPr.get(current).commitsSince).toBeUndefined();
+    expect(byPr.get(rerun).summary).toBeUndefined();
+    // Moved, but its commits were never synced: the count is unknown, not zero.
+    expect(byPr.get(moved).commitsSince).toBeNull();
+  });
+
+  it("carries the run's thread-assessment counts when it judged other reviewers' threads", async () => {
+    const t = (validity: string, addressed: string) => ({ validity, addressed });
+    await db
+      .update(schema.claudeReviews)
+      .set({
+        threadAssessments: [
+          t('valid', 'not_addressed'),
+          t('partly_valid', 'partly_addressed'),
+          t('valid', 'addressed'),
+          t('not_valid', 'not_addressed'),
+          t('not_checked', 'not_checked'),
+        ] as any,
+      })
+      .where(eqOp(schema.claudeReviews.id, richReview))
+      .execute();
+    const [s] = (await states([rich])).json().states as any[];
+    expect(s.summary.threadAssessments).toEqual({
+      total: 5,
+      assessed: 4,
+      validUnaddressed: 2,
+      notValid: 1,
+      addressed: 1,
+      notChecked: 1,
+    });
   });
 });
 

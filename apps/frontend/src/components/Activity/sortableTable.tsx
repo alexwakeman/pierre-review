@@ -37,17 +37,23 @@ export function SortHeader<C extends string>({
   sort,
   onSort,
   title,
+  as: Cell = 'th',
+  className = 'pb-1 pr-3 font-semibold',
 }: {
   col: C;
   label: string;
   sort: SortState<C> | null;
   onSort: (col: C) => void;
   title?: string;
+  /** 'div' for a CSS-grid list (the Open PRs cards) — it then carries `role="columnheader"`. */
+  as?: 'th' | 'div';
+  className?: string;
 }): JSX.Element {
   const dir = sort != null && sort.col === col ? sort.dir : null;
   return (
-    <th
-      className="pb-1 pr-3 font-semibold"
+    <Cell
+      className={className}
+      role={Cell === 'div' ? 'columnheader' : undefined}
       aria-sort={dir != null ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}
     >
       <button
@@ -63,6 +69,6 @@ export function SortHeader<C extends string>({
           <CaretIcon dir={dir === 'asc' ? 'up' : 'down'} />
         </span>
       </button>
-    </th>
+    </Cell>
   );
 }

@@ -1489,6 +1489,7 @@ export function PrDetail({
             pr={pr}
             usersById={usersById}
             onOpenInChanges={openInChanges}
+            onOpenThread={openThreadInThreads}
           />
         )}
         </Suspense>

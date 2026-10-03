@@ -14,6 +14,14 @@
 // so the plan-level `headMoved` (previous review vs now) is the wrong question for it: it would
 // tell the model "nothing changed" and copy a stale line + suggestion onto the re-raise.
 //
+// ⚠ ONLY NEW COMMITS MAY CHANGE A STATUS. When this run's head is the previous review's head (a
+// comment-only re-run, or "Run anyway" on the same commit), nothing in the code has moved, so the
+// status is decided in CODE, not by the model (`plan.locked`, applied in `reconcileFollowUp`): a
+// finding the previous review raised at this head is still 'not_addressed', and a carried item keeps
+// the status the previous run gave it. The findings are still SHOWN (so the model links its re-raise
+// by `priorRef` instead of repeating the comment as a new, included finding); only the answer is
+// fixed. Items stored this way carry `statusCarried: true`.
+//
 // The earlier findings' text was written by an earlier model run over the same attacker-influenced
 // pull request, so prompts.ts fences it with the run's nonce like every other untrusted block.
 import type {
@@ -61,6 +69,9 @@ export interface PriorFindingForFollowUp {
   // true ⇒ from an OLDER review: it was 'not_checked' last time, or it is still open and posted
   // but its reminder was left out of the review (see persist.ts), and is carried forward.
   carried: boolean;
+  // A CARRIED, still-open item: the status the previous run gave it (and that run's explanation).
+  // Absent for a 'not_checked' carry and for the previous review's own findings.
+  priorStatus?: { status: ClaudeFollowUpStatus; explanation: string | null } | null;
 }
 
 export interface PriorReviewForFollowUp {
@@ -79,9 +90,15 @@ export interface FollowUpPlan {
   headMoved: boolean;
   // What the model is shown, in P order.
   sent: Array<{ ref: string; finding: PriorFindingForFollowUp }>;
-  // Over the count / size cap — never shown; recorded 'not_checked'.
+  // Over the count / size cap — never shown; recorded 'not_checked' (or its locked status).
   omitted: PriorFindingForFollowUp[];
+  // Finding id → the status decided in CODE because the head has not moved since the previous
+  // review (see the header). Empty whenever the head moved.
+  locked: Map<number, { status: ClaudeFollowUpStatus; explanation: string | null }>;
 }
+
+/** The templated explanation of a status the code decided because nothing has moved. */
+export const UNCHANGED_HEAD_EXPLANATION = 'The code has not changed since this was raised.';
 
 /**
  * The follow-up's eligibility rule — THE ONE selection point every consumer goes through (the
@@ -155,6 +172,19 @@ export function selectPriorFindings(prior: PriorReviewForFollowUp, headSha: stri
       omitted.push(f);
     }
   }
+  // ⚠ SAME HEAD ⇒ the code decides. The previous review's own findings were raised at this very
+  // head, so nothing can have addressed them; a carried open item keeps the previous run's answer
+  // (given at this head). A carried 'not_checked' item was never judged, so the model still is.
+  const locked: FollowUpPlan['locked'] = new Map();
+  if (prior.headSha === headSha) {
+    for (const f of ordered) {
+      if (!f.carried && !findingHeadMoved({ headSha }, f)) {
+        locked.set(f.id, { status: 'not_addressed', explanation: UNCHANGED_HEAD_EXPLANATION });
+      } else if (f.carried && f.priorStatus) {
+        locked.set(f.id, { ...f.priorStatus });
+      }
+    }
+  }
   return {
     priorReviewId: prior.reviewId,
     priorHeadSha: prior.headSha,
@@ -162,6 +192,7 @@ export function selectPriorFindings(prior: PriorReviewForFollowUp, headSha: stri
     headMoved: prior.headSha !== headSha,
     sent,
     omitted,
+    locked,
   };
 }
 
@@ -198,6 +229,7 @@ function recordFor(
   sent: boolean,
   status: ClaudeFollowUpStatus,
   explanation: string | null,
+  statusCarried = false,
 ): ClaudeFollowUpItemRecord {
   return {
     ref,
@@ -213,6 +245,7 @@ function recordFor(
     title: f.title,
     headMoved: findingHeadMoved(plan, f),
     priorPosted: f.posted,
+    ...(statusCarried ? { statusCarried: true } : {}),
   };
 }
 
@@ -235,9 +268,17 @@ export function reconcileFollowUp(
     if (!REPORTABLE.has(r.status)) continue;
     byRef.set(ref, { status: r.status, explanation: clipExplanation(r.explanation) });
   }
+  const locked = plan.locked ?? new Map();
   const out: ClaudeFollowUpItemRecord[] = [];
   for (const { ref, finding } of plan.sent) {
     const hit = byRef.get(ref);
+    const lock = locked.get(finding.id);
+    if (lock) {
+      // The code decides; Claude's words are kept only when it agreed.
+      const explanation = hit && hit.status === lock.status && hit.explanation ? hit.explanation : lock.explanation;
+      out.push(recordFor(plan, finding, ref, true, lock.status, explanation, true));
+      continue;
+    }
     out.push(
       hit
         ? recordFor(plan, finding, ref, true, hit.status, hit.explanation)
@@ -245,7 +286,12 @@ export function reconcileFollowUp(
     );
   }
   for (const finding of plan.omitted) {
-    out.push(recordFor(plan, finding, null, false, 'not_checked', null));
+    const lock = locked.get(finding.id);
+    out.push(
+      lock
+        ? recordFor(plan, finding, null, false, lock.status, lock.explanation, true)
+        : recordFor(plan, finding, null, false, 'not_checked', null),
+    );
   }
   return out;
 }
@@ -296,7 +342,10 @@ export function linkReraisedFindings(
 ): LinkedFinding[] {
   const openByRef = new Map<string, ClaudeFollowUpItemRecord>();
   for (const it of items) if (it.ref && REOPEN.has(it.status)) openByRef.set(it.ref, it);
-  const priorById = new Map(plan.sent.map((s) => [s.finding.id, s.finding]));
+  const priorById = new Map<number, PriorFindingForFollowUp>([
+    ...plan.sent.map((s) => [s.finding.id, s.finding] as const),
+    ...plan.omitted.map((f) => [f.id, f] as const),
+  ]);
   const leftOut = (prior: PriorFindingForFollowUp | undefined): { included?: false } =>
     prior && isAlreadyOnThisCommit(plan, prior) ? { included: false } : {};
   const linkedRefs = new Set<string>();
@@ -310,7 +359,8 @@ export function linkReraisedFindings(
     return { ...f, priorFindingId: null };
   });
   for (const it of items) {
-    if (!it.ref || !REOPEN.has(it.status) || linkedRefs.has(it.ref)) continue;
+    if (!REOPEN.has(it.status)) continue;
+    if (it.ref ? linkedRefs.has(it.ref) : !it.statusCarried) continue;
     const prior = priorById.get(it.priorFindingId);
     if (!prior) continue;
     const where = prior.carried ? 'an earlier review' : 'the last review';

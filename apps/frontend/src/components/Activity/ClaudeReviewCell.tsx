@@ -1,24 +1,49 @@
-import { useEffect, useState, type MouseEvent } from 'react';
-import type { ClaudeReviewPrState } from '@pierre-review/shared';
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
+import { TICKET_ALIGNMENT_LABEL, type ClaudeReviewPrState } from '@pierre-review/shared';
 import {
   isAutoReviewHoldError,
   useClaudeReviewStarting,
   useStartReviewFromList,
 } from '../../hooks/useClaudeReview.js';
-import { heldByAutoReview, reviewCellFor } from '../../lib/claudeReviewColumn.js';
+import {
+  ALIGNMENT_SHORT,
+  findingTotal,
+  followUpTally,
+  heldByAutoReview,
+  outdatedLabel,
+  reviewCellFor,
+  severityPills,
+} from '../../lib/claudeReviewColumn.js';
+import {
+  CLEAN_CLASS,
+  FOLLOW_UP_STATUS_CLASS,
+  OUTDATED_CLASS,
+  SEVERITY_CLASS,
+  TICKET_ALIGNMENT_CLASS,
+  VERDICT_CLASS,
+} from '../../lib/claudeReviewFollowUp.js';
 import { AUTO_REVIEW_LABEL } from './pendingLabels.js';
 import { unlockReviewSound } from '../../lib/sound.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { CheckIcon, SparkleIcon } from '../Icons.js';
 
-// One row's "Claude review" cell in the Open PRs table. Rendered ONLY when the Claude Review
-// capability is on (OpenPrsTable decides). Reads the table's ONE batched states answer — it
-// fetches nothing on mount; the only requests it makes follow a click.
+// One card's Claude Review STRIP in the Open PRs list (the card's second row). Rendered ONLY when
+// agentic AI is on (OpenPrsTable decides). Reads the list's ONE batched states answer — it fetches
+// nothing on mount; the only requests it makes follow a click.
 //
-// ⚠ The row is WHOLE-ROW clickable (it opens the PR), so every control here stops propagation.
+// Five cells on the list's shared `--opr-strip` grid, so every card's strip lines up:
+//   outcome (state / verdict, auto mark, how far behind) · findings by severity · posted + design ·
+//   stories, the previous review's findings, other reviewers' threads · the action button.
+// Every figure comes from the server's `summary`, present only on a finished run — nothing here
+// prints a zero it does not know.
+//
+// ⚠ The card is WHOLE-CARD clickable (it opens the PR), so every control here stops propagation.
 
 const BUTTON =
   'rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:cursor-default disabled:opacity-60 dark:border-gray-700 dark:hover:border-gray-500';
 const MUTED = 'text-[11px] text-gray-500 dark:text-gray-400';
+const PILL = 'inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px text-[11px] font-medium';
+const GREY_PILL = `${PILL} bg-gray-500/10 text-gray-600 dark:text-gray-300`;
 const NOTE_MS = 6000;
 
 // The small marker on a run the workspace's auto review started (queued, running or finished).
@@ -26,7 +51,11 @@ function AutoMark(): JSX.Element {
   return <span className={MUTED}>{AUTO_REVIEW_LABEL}</span>;
 }
 
-export function ClaudeReviewCell({
+function Cell({ children, className = '' }: { children?: ReactNode; className?: string }): JSX.Element {
+  return <div className={`flex min-w-0 flex-wrap items-center gap-1 ${className}`}>{children}</div>;
+}
+
+export function ClaudeReviewStrip({
   prId,
   state,
   onOpenReview,
@@ -53,7 +82,7 @@ export function ClaudeReviewCell({
   }, [note]);
 
   // Not set up yet (no AI runtime, or no Claude credential detected): Review opens the PR's
-  // Claude Review tab, which says what is missing in place of its own Run button. A row has no
+  // Claude Review tab, which says what is missing in place of its own Run button. A strip has no
   // room for that sentence, and a start here would only fail.
   const ready = useAiCapabilities().ready;
   const run = (e: MouseEvent): void => {
@@ -70,83 +99,175 @@ export function ClaudeReviewCell({
 
   const stop = (e: MouseEvent): void => e.stopPropagation();
 
-  let body: JSX.Element;
+  // ---- outcome ----
+  let outcome: JSX.Element;
+  let action: JSX.Element | null = null;
   switch (cell.kind) {
     case 'start':
-      body = (
+      outcome = cell.failed ? (
+        <span className={`${PILL} ${SEVERITY_CLASS.blocker}`}>Review failed</span>
+      ) : (
+        <span className={MUTED}>Not reviewed</span>
+      );
+      action = (
         <button type="button" onClick={run} className={BUTTON}>
           Review
         </button>
       );
       break;
     case 'starting':
-      body = (
-        <button type="button" disabled onClick={stop} className={BUTTON}>
-          Starting…
-        </button>
-      );
+      outcome = <span className={GREY_PILL}>Starting…</span>;
       break;
     case 'queued':
-      body = (
-        <span className="inline-flex items-center gap-1.5">
-          <button type="button" disabled onClick={stop} className={BUTTON}>
-            Queued
-          </button>
+      outcome = (
+        <>
+          <span className={GREY_PILL}>Queued</span>
           {cell.auto && <AutoMark />}
-        </span>
+        </>
       );
       break;
     case 'running':
-      body = (
-        <span className="inline-flex items-center gap-1.5">
-          <button type="button" disabled onClick={stop} className={BUTTON}>
+      outcome = (
+        <>
+          <span className={`${PILL} bg-ai-signal/10 text-ai-signal`}>
+            <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ai-signal-fill" />
             Reviewing…
-          </button>
+          </span>
           {cell.auto && <AutoMark />}
-        </span>
+        </>
       );
       break;
-    case 'done':
-      body = (
-        <span className="inline-flex items-center gap-1.5">
+    case 'done': {
+      const behind = state != null ? outdatedLabel(state) : null;
+      outcome = (
+        <>
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               onOpenReview();
             }}
-            className="text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400"
+            className={`${PILL} hover:underline ${cell.verdict != null ? VERDICT_CLASS[cell.verdict] : GREY_PILL}`}
             title="Open this review"
           >
             {cell.verdictLabel}
           </button>
           {cell.auto && <AutoMark />}
-          {cell.headMoved && (
-            <button
-              type="button"
-              onClick={run}
-              className={BUTTON}
-              title="New commits since this review"
-            >
-              Re-review
-            </button>
+          {behind != null && (
+            <span className={`${PILL} ${OUTDATED_CLASS}`} title="The PR has changed since this review">
+              {behind}
+            </span>
           )}
-        </span>
+        </>
       );
+      if (cell.headMoved) {
+        action = (
+          <button type="button" onClick={run} className={BUTTON}>
+            Re-review
+          </button>
+        );
+      }
       break;
+    }
   }
 
+  // ---- what the finished run found (only a succeeded run carries a summary) ----
+  const summary = cell.kind === 'done' ? state?.summary : undefined;
+  const pills = summary != null ? severityPills(summary) : [];
+  const total = summary != null ? findingTotal(summary) : 0;
+  const design = summary?.lenses.design ?? 0;
+  const tally = summary != null ? followUpTally(summary.followUp) : null;
+  const threads = summary?.threadAssessments;
+  const stories = (summary?.tickets ?? []).filter((t) => t.alignment != null);
+
   return (
-    <div className="whitespace-nowrap" onClick={stop}>
-      {body}
-      {showError && (
-        <div className="mt-0.5 max-w-[14rem] whitespace-normal text-[11px] text-red-600 dark:text-red-400">
-          {start.error.message || 'Could not start the review.'}
-        </div>
-      )}
-      {note != null && !start.isError && (
-        <div className={`mt-0.5 max-w-[14rem] whitespace-normal ${MUTED}`}>{note}</div>
-      )}
+    <div
+      role="cell"
+      className="grid items-center gap-x-2.5 gap-y-1 [grid-template-columns:var(--opr-strip)] xl:[grid-template-columns:var(--opr-strip-xl)]"
+      onClick={stop}
+    >
+      <Cell>
+        {/* The model's mark only where a run exists; an unreviewed PR keeps the space so text aligns. */}
+        {cell.kind === 'start' && !cell.failed ? (
+          <span aria-hidden className="inline-block w-3 shrink-0" />
+        ) : (
+          <SparkleIcon size={12} className="shrink-0 text-ai-signal" />
+        )}
+        {outcome}
+      </Cell>
+
+      <Cell>
+        {summary != null &&
+          (pills.length > 0 ? (
+            pills.map((p) => (
+              <span key={p.severity} className={`${PILL} ${SEVERITY_CLASS[p.severity]}`}>
+                {p.label}
+              </span>
+            ))
+          ) : (
+            <span className={`${PILL} ${CLEAN_CLASS}`}>
+              <CheckIcon size={11} />
+              No issues
+            </span>
+          ))}
+      </Cell>
+
+      <Cell>
+        {summary != null &&
+          (summary.reviewPosted || summary.postedFindings > 0 ? (
+            <span className={MUTED} title="Posted to GitHub">
+              {summary.postedFindings > 0 ? `${summary.postedFindings} of ${total} posted` : 'Posted'}
+            </span>
+          ) : (
+            total > 0 && <span className={MUTED}>Not posted</span>
+          ))}
+        {design > 0 && (
+          <span className={GREY_PILL} title="Findings about the design, from a deep review">
+            {design} design
+          </span>
+        )}
+      </Cell>
+
+      <Cell>
+        {showError && (
+          <span className="text-[11px] text-red-600 dark:text-red-400">
+            {start.error.message || 'Could not start the review.'}
+          </span>
+        )}
+        {note != null && !start.isError && <span className={MUTED}>{note}</span>}
+        {stories.map((t, i) => (
+          <span
+            key={i}
+            className={`${PILL} ${TICKET_ALIGNMENT_CLASS[t.alignment!]}`}
+            title={`${t.title ?? 'User story'}: ${TICKET_ALIGNMENT_LABEL[t.alignment!]}`}
+          >
+            {t.key ?? (stories.length > 1 ? `Story ${i + 1}` : 'Story')} · {ALIGNMENT_SHORT[t.alignment!]}
+          </span>
+        ))}
+        {tally != null && (
+          <span className="inline-flex items-center gap-1" title="Findings from the previous review">
+            <span className={MUTED}>Earlier:</span>
+            {tally.fixed > 0 && (
+              <span className={`${PILL} ${FOLLOW_UP_STATUS_CLASS.addressed}`}>{tally.fixed} fixed</span>
+            )}
+            {tally.open > 0 && (
+              <span className={`${PILL} ${FOLLOW_UP_STATUS_CLASS.not_addressed}`}>
+                {tally.open} still open
+              </span>
+            )}
+          </span>
+        )}
+        {threads != null && threads.validUnaddressed > 0 && (
+          <span
+            className={`${PILL} ${OUTDATED_CLASS}`}
+            title="Other reviewers' threads Claude judged valid and not yet addressed"
+          >
+            {threads.validUnaddressed} reviewer thread{threads.validUnaddressed === 1 ? '' : 's'} still valid
+          </span>
+        )}
+      </Cell>
+
+      <Cell className="justify-end">{action}</Cell>
     </div>
   );
 }

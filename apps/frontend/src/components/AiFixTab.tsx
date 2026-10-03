@@ -73,9 +73,12 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
   // A review to seed the fixer with, delivered via the store from ClaudeReviewTab's
   // "Generate fix from this review". Consumed into local state on arrival.
   const [seedReviewText, setSeedReviewText] = useState<string | null>(null);
+  // The review it came from: the server adds that review's open, valid review threads to the seed.
+  const [seedReviewId, setSeedReviewId] = useState<number | null>(null);
   useEffect(() => {
     if (aiFixTabFocus && aiFixTabFocus.prId === pr.id) {
       if (aiFixTabFocus.reviewText) setSeedReviewText(aiFixTabFocus.reviewText);
+      setSeedReviewId(aiFixTabFocus.reviewId ?? null);
       consumeAiFixTabFocus();
     }
   }, [aiFixTabFocus, pr.id, consumeAiFixTabFocus]);
@@ -97,7 +100,11 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
       <FixerSection
         pr={pr}
         seedReviewText={seedReviewText}
-        onSeedConsumed={() => setSeedReviewText(null)}
+        seedReviewId={seedReviewId}
+        onSeedConsumed={() => {
+          setSeedReviewText(null);
+          setSeedReviewId(null);
+        }}
       />
     </div>
   );
@@ -145,10 +152,12 @@ function CiStatusSection({ pr }: { pr: PrDetail }): JSX.Element | null {
 function FixerSection({
   pr,
   seedReviewText,
+  seedReviewId,
   onSeedConsumed,
 }: {
   pr: PrDetail;
   seedReviewText: string | null;
+  seedReviewId: number | null;
   onSeedConsumed: () => void;
 }): JSX.Element {
   const { data, isLoading } = useAiFix(pr.id, true);
@@ -194,6 +203,7 @@ function FixerSection({
         model,
         seed,
         reviewText: seed === 'review' ? seedReviewText ?? undefined : undefined,
+        sourceReviewId: seed === 'review' ? seedReviewId ?? undefined : undefined,
         commentTargets: seed === 'comments' ? selection : undefined,
       },
       { onSuccess: () => onSeedConsumed() },

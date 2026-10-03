@@ -13,15 +13,17 @@ import type {
   ClaudeReviewModel,
   ClaudeReviewPrState,
   ClaudeReviewScope,
+  ClaudeReviewStateSummary,
   ClaudeReviewSummary,
   ClaudeReviewTicket,
   ClaudeReviewTrigger,
   ClaudeReviewVerdict,
+  ClaudeThreadAssessment,
   ClaudeTicketAssessment,
   ReviewMode,
   ReviewRouteReason,
 } from '@pierre-review/shared';
-import { CLAUDE_FINDING_LENSES } from '@pierre-review/shared';
+import { CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@pierre-review/shared';
 import { storedList } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../pro/contract.js';
 import { ticketEntriesOf } from './ticket.js';
@@ -114,6 +116,9 @@ interface ReviewRow {
   followUp?: ClaudeReviewFollowUpRecord | null;
   // Absent on a host older than core migration 0071 — reads as 'manual'.
   trigger?: string | null;
+  // Other reviewers' open threads, judged (migration 0076 / pg 0063). null on older rows.
+  threadAssessments?: ClaudeThreadAssessment[] | null;
+  commentsThrough?: Date | null;
 }
 
 function mapFinding(r: FindingRow): ClaudeFinding {
@@ -211,6 +216,11 @@ function mapReview(
     head,
     followUp: mapFollowUp(r.followUp, findings),
     trigger: r.trigger === 'auto' ? 'auto' : 'manual',
+    // null = this run did not assess threads (older row, skip, not succeeded) — never [].
+    threadAssessments: Array.isArray(r.threadAssessments) ? r.threadAssessments : null,
+    threadAssessmentCounts: Array.isArray(r.threadAssessments)
+      ? threadAssessmentCounts(r.threadAssessments)
+      : null,
   };
 }
 
@@ -417,10 +427,10 @@ export async function getLatestReviewStates(
     trigger: string | null;
   }>;
   const out: ClaudeReviewPrState[] = [];
-  const seen = new Set<number>();
+  const latestByPr = new Map<number, (typeof rows)[number]>();
   for (const r of rows) {
-    if (seen.has(r.prId)) continue; // newest first — the first row per PR is its latest run
-    seen.add(r.prId);
+    if (latestByPr.has(r.prId)) continue; // newest first — the first row per PR is its latest run
+    latestByPr.set(r.prId, r);
     out.push({
       prId: r.prId,
       reviewId: r.reviewId,
@@ -434,7 +444,125 @@ export async function getLatestReviewStates(
       trigger: r.trigger === 'auto' ? 'auto' : 'manual',
     });
   }
+  await foldStateSummaries(ctx, out, latestByPr);
   return out;
+}
+
+/**
+ * The Open PRs strip's figures for the latest runs: severity / lens / posted counts, story
+ * alignments, follow-up statuses and the outdated commit count. A FIXED number of batched reads
+ * (findings, the run's JSON columns, the moved PRs' commits) whatever the list length — never one
+ * per PR. Mutates `states` in place. A run that did not succeed gets no `summary`.
+ */
+async function foldStateSummaries(
+  ctx: AgentContext,
+  states: ClaudeReviewPrState[],
+  latestByPr: Map<number, { reviewId: number; prHeadSha: string | null; headSha: string; ticket: unknown }>,
+): Promise<void> {
+  const { cr, crf } = tables(ctx);
+  const done = states.filter((s) => s.status === 'succeeded' && s.reviewId != null);
+  const doneIds = done.map((s) => s.reviewId as number);
+
+  // 1. Every finding of the finished runs — the columns the fold needs, nothing else.
+  const findings = doneIds.length
+    ? ((await ctx.db
+        .select({ reviewId: crf.reviewId, severity: crf.severity, lens: crf.lens, postedAt: crf.postedAt })
+        .from(crf)
+        .where(inArray(crf.reviewId, doneIds))
+        .execute()) as Array<{ reviewId: number; severity: ClaudeFindingSeverity; lens: string | null; postedAt: unknown }>)
+    : [];
+
+  // 2. The finished runs' stored assessments (JSON) — read for the LATEST runs only, never history.
+  const extras = doneIds.length
+    ? ((await ctx.db
+        .select({
+          id: cr.id,
+          ticketAssessment: cr.ticketAssessment,
+          followUp: cr.followUp,
+          postedAt: cr.postedAt,
+          threadAssessments: cr.threadAssessments,
+        })
+        .from(cr)
+        .where(inArray(cr.id, doneIds))
+        .execute()) as Array<{
+        id: number;
+        ticketAssessment: ClaudeTicketAssessment | ClaudeTicketAssessment[] | null;
+        followUp: ClaudeReviewFollowUpRecord | null;
+        postedAt: unknown;
+        threadAssessments: ClaudeThreadAssessment[] | null;
+      }>)
+    : [];
+  const extrasById = new Map(extras.map((e) => [e.id, e]));
+
+  const findingsById = new Map<number, typeof findings>();
+  for (const f of findings) {
+    const list = findingsById.get(f.reviewId) ?? [];
+    list.push(f);
+    findingsById.set(f.reviewId, list);
+  }
+
+  for (const s of done) {
+    const id = s.reviewId as number;
+    const counts: Record<ClaudeFindingSeverity, number> = { blocker: 0, warning: 0, nit: 0, question: 0, praise: 0 };
+    const lenses: ClaudeReviewStateSummary['lenses'] = {};
+    let postedFindings = 0;
+    for (const f of findingsById.get(id) ?? []) {
+      if (f.severity in counts) counts[f.severity] += 1;
+      const lens = (CLAUDE_FINDING_LENSES as string[]).includes(f.lens ?? '') ? (f.lens as ClaudeFindingLens) : null;
+      if (lens) lenses[lens] = (lenses[lens] ?? 0) + 1;
+      if (f.postedAt != null) postedFindings += 1;
+    }
+    const extra = extrasById.get(id);
+    const latest = latestByPr.get(s.prId);
+    const tickets = ticketEntriesOf(
+      (latest?.ticket ?? null) as ClaudeReviewTicket | ClaudeReviewTicket[] | null,
+      extra?.ticketAssessment ?? null,
+    ).map((e) => ({
+      key: e.ticket.key ?? null,
+      title: e.ticket.title ?? null,
+      alignment: e.assessment?.alignment ?? null,
+    }));
+    let followUp: ClaudeReviewStateSummary['followUp'] = null;
+    const items = extra?.followUp?.items;
+    if (Array.isArray(items) && items.length > 0) {
+      followUp = { addressed: 0, partly_addressed: 0, not_addressed: 0, no_longer_applies: 0, not_checked: 0 };
+      for (const it of items) if (it.status in followUp) followUp[it.status] += 1;
+    }
+    const summary: ClaudeReviewStateSummary = {
+      findings: counts,
+      lenses,
+      postedFindings,
+      reviewPosted: extra?.postedAt != null,
+      tickets,
+      followUp,
+    };
+    // null = the run did not assess threads (an older row): no figure, never zeros.
+    if (Array.isArray(extra?.threadAssessments)) {
+      summary.threadAssessments = threadAssessmentCounts(extra.threadAssessments);
+    }
+    s.summary = summary;
+  }
+
+  // 3. The outdated count, for every moved PR — ONE commits read for all of them.
+  const moved = states.filter((s) => s.headMoved && s.reviewedHeadSha != null);
+  const c = (ctx.schema as any).commits;
+  if (moved.length === 0 || !c) return;
+  const commitRows = (await ctx.db
+    .select({ prId: c.prId, sha: c.sha, committedAt: c.committedAt, headline: c.messageHeadline })
+    .from(c)
+    .where(inArray(c.prId, moved.map((s) => s.prId)))
+    .execute()) as Array<SyncedCommitRow & { prId: number }>;
+  const commitsByPr = new Map<number, SyncedCommitRow[]>();
+  for (const r of commitRows) {
+    const list = commitsByPr.get(r.prId) ?? [];
+    list.push(r);
+    commitsByPr.set(r.prId, list);
+  }
+  for (const s of moved) {
+    const head = latestByPr.get(s.prId)?.prHeadSha;
+    if (!head) continue;
+    s.commitsSince = countCommitsSince(commitsByPr.get(s.prId) ?? [], s.reviewedHeadSha as string, head);
+  }
 }
 
 // ---- Post contexts (repo/PR coordinates for the GitHub posting seam) ----
@@ -672,7 +800,7 @@ export async function loadPriorReviewForFollowUp(
     eligibleOwn.map((f) => f.priorFindingId).filter((id): id is number => id != null),
   );
   const notChecked = new Set<number>();
-  const openNotReraised = new Set<number>();
+  const openNotReraised = new Map<number, NonNullable<PriorFindingForFollowUp['priorStatus']>>();
   for (const it of row.followUp?.items ?? []) {
     if (!Number.isInteger(it.priorFindingId) || seen.has(it.priorFindingId)) continue;
     if (it.status === 'not_checked') notChecked.add(it.priorFindingId);
@@ -680,10 +808,11 @@ export async function loadPriorReviewForFollowUp(
       (it.status === 'not_addressed' || it.status === 'partly_addressed') &&
       !reraisedByEligible.has(it.priorFindingId)
     ) {
-      openNotReraised.add(it.priorFindingId);
+      // Kept with the answer that run gave: on a same-head re-run it stands (follow-up.ts).
+      openNotReraised.set(it.priorFindingId, { status: it.status, explanation: it.explanation ?? null });
     }
   }
-  const carriedIds = [...new Set([...notChecked, ...openNotReraised])];
+  const carriedIds = [...new Set([...notChecked, ...openNotReraised.keys()])];
   if (carriedIds.length > 0) {
     const carriedRows = (await ctx.db
       .select({ finding: crf, headSha: cr.headSha })
@@ -700,7 +829,7 @@ export async function loadPriorReviewForFollowUp(
       // The ONE rule (posted, not praise) applies to carried findings exactly as to own ones.
       if (seen.has(finding.id) || !isFollowUpEligible(finding)) continue;
       seen.add(finding.id);
-      findings.push(toPrior(finding, headSha, true));
+      findings.push({ ...toPrior(finding, headSha, true), priorStatus: openNotReraised.get(finding.id) ?? null });
     }
   }
   return { reviewId: row.id, headSha: row.headSha, findings };
@@ -772,6 +901,8 @@ export interface ReviewSuccessData {
   followUp?: ClaudeReviewFollowUpRecord | null;
   // One per ticket, index-aligned with the stored tickets.
   ticketAssessment?: ClaudeTicketAssessment[] | null;
+  // Other reviewers' open threads, judged. null/absent ⇒ none assessed (stored NULL).
+  threadAssessments?: ClaudeThreadAssessment[] | null;
 }
 
 export async function saveReviewSuccess(
@@ -799,6 +930,7 @@ export async function saveReviewSuccess(
         excludedFiles: data.excludedFiles,
         followUp: data.followUp ?? null,
         ticketAssessment: data.ticketAssessment ?? null,
+        threadAssessments: data.threadAssessments ?? null,
         finishedAt: new Date(),
       })
       .where(eq(cr.id, id))
@@ -1013,6 +1145,35 @@ async function recordReviewUsage(
 
 // ---- Outdated: the reviewed commit against the PR's synced head ----
 
+export interface SyncedCommitRow {
+  sha: string;
+  committedAt: Date | number;
+  headline: string | null;
+}
+
+/**
+ * The pure half of `reviewHeadState` (also folded per PR by the batched Open PRs states read):
+ * how many of a PR's synced commits are newer than the reviewed one. null when either commit is
+ * not synced, or the history looks rewritten (a newer copy with the reviewed commit's headline).
+ */
+export function countCommitsSince(
+  rows: readonly SyncedCommitRow[],
+  reviewedSha: string,
+  currentHeadSha: string,
+): number | null {
+  const ms = (v: Date | number): number => (v instanceof Date ? v.getTime() : Number(v));
+  const reviewed = rows.find((r) => r.sha === reviewedSha);
+  const head = rows.find((r) => r.sha === currentHeadSha);
+  if (!reviewed || !head) return null;
+  const at = ms(reviewed.committedAt);
+  const newer = rows.filter((r) => r.sha !== reviewedSha && ms(r.committedAt) > at);
+  // Sync never prunes commits a force-push dropped, so a rebase or amend leaves the reviewed
+  // commit's own rewritten copy among the "newer" rows (same headline, later time). Counting
+  // those would call a rewrite "N newer commits"; say only that the branch changed (null).
+  const rewritten = reviewed.headline != null && newer.some((r) => r.headline === reviewed.headline);
+  return rewritten ? null : newer.length;
+}
+
 /**
  * Is the review behind the PR's head? DB-only. `commitsSince` counts the PR's synced commits newer
  * than the reviewed one (by commit time); null when the reviewed commit is not among them, or when
@@ -1036,19 +1197,7 @@ export async function reviewHeadState(
       .from(c)
       .where(eq(c.prId, prId))
       .execute()) as Array<{ sha: string; committedAt: Date | number; headline: string | null }>;
-    const ms = (v: Date | number): number => (v instanceof Date ? v.getTime() : Number(v));
-    const reviewed = rows.find((r) => r.sha === reviewedSha);
-    const head = rows.find((r) => r.sha === currentHeadSha);
-    if (reviewed && head) {
-      const at = ms(reviewed.committedAt);
-      const newer = rows.filter((r) => r.sha !== reviewedSha && ms(r.committedAt) > at);
-      // Sync never prunes commits a force-push dropped, so a rebase or amend leaves the reviewed
-      // commit's own rewritten copy among the "newer" rows (same headline, later time). Counting
-      // those would call a rewrite "N newer commits"; say only that the branch changed (null).
-      const rewritten =
-        reviewed.headline != null && newer.some((r) => r.headline === reviewed.headline);
-      commitsSince = rewritten ? null : newer.length;
-    }
+    commitsSince = countCommitsSince(rows, reviewedSha, currentHeadSha);
   }
   return { currentHeadSha, outdated: true, commitsSince };
 }
@@ -1070,6 +1219,94 @@ export async function hasReviewAtHead(
     .limit(1)
     .execute()) as Array<{ id: number }>;
   return rows.length > 0;
+}
+
+/**
+ * Is the auto re-review keyed (headSha, commentsAtMs) already SETTLED? Any run of this PR at the
+ * head settles a moved head (one run per head). For new comments on an unchanged head
+ * (`commentsAtMs` set) a run at the head settles it only when it covered that comment: its
+ * `comments_through` (else its start, `created_at`) is at or after it. The sweeper's candidate read
+ * (db/queries.ts `getAutoReviewCandidates`) applies the same rule; this is the re-check a waiting
+ * item makes before its row is written.
+ */
+export async function isAutoReReviewSettled(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  headSha: string,
+  commentsAtMs: number | null,
+): Promise<boolean> {
+  const { cr } = tables(ctx);
+  const rows = (await ctx.db
+    .select({ createdAt: cr.createdAt, commentsThrough: cr.commentsThrough })
+    .from(cr)
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha)))
+    .execute()) as Array<{ createdAt: Date; commentsThrough: Date | null }>;
+  if (rows.length === 0) return false;
+  if (commentsAtMs == null) return true;
+  return rows.some((r) => (r.commentsThrough ?? r.createdAt).getTime() >= commentsAtMs);
+}
+
+/** Record the newest qualifying review comment the run saw (the comment half of the re-review key). */
+export async function markReviewCommentsSeen(
+  ctx: AgentContext,
+  id: number,
+  commentsThrough: Date | null,
+): Promise<void> {
+  if (!commentsThrough) return;
+  const { cr } = tables(ctx);
+  await ctx.db.update(cr).set({ commentsThrough }).where(eq(cr.id, id)).execute();
+}
+
+/**
+ * The previous SUCCEEDED run (non-skip, id below this one) — what a same-head run carries forward:
+ * its head, its stories + their assessments, and its thread assessments. null when none.
+ */
+export async function loadPriorRunForCarry(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  beforeReviewId: number,
+): Promise<{
+  headSha: string;
+  tickets: ClaudeReviewTicket[];
+  ticketAssessments: ClaudeTicketAssessment[];
+  threadAssessments: ClaudeThreadAssessment[] | null;
+} | null> {
+  const { cr } = tables(ctx);
+  const rows = (await ctx.db
+    .select({
+      headSha: cr.headSha,
+      ticket: cr.ticket,
+      ticketAssessment: cr.ticketAssessment,
+      threadAssessments: cr.threadAssessments,
+    })
+    .from(cr)
+    .where(
+      and(
+        eq(cr.prId, prId),
+        eq(cr.accountId, accountId),
+        eq(cr.status, 'succeeded'),
+        lt(cr.id, beforeReviewId),
+        or(isNull(cr.reviewMode), ne(cr.reviewMode, 'skip')),
+      ),
+    )
+    .orderBy(desc(cr.id))
+    .limit(1)
+    .execute()) as Array<{
+    headSha: string;
+    ticket: ClaudeReviewTicket | ClaudeReviewTicket[] | null;
+    ticketAssessment: ClaudeTicketAssessment | ClaudeTicketAssessment[] | null;
+    threadAssessments: ClaudeThreadAssessment[] | null;
+  }>;
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    headSha: r.headSha,
+    tickets: storedList(r.ticket),
+    ticketAssessments: storedList(r.ticketAssessment),
+    threadAssessments: Array.isArray(r.threadAssessments) ? r.threadAssessments : null,
+  };
 }
 
 /** The stories stored on the PR's latest run ([] when none) — what a re-review carries forward. */

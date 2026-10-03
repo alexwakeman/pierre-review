@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0062` and plugin `0034`–`0037` are NOT (written 2026-09-19/24 with the Postgres down; see the
+  ⚠ pg `0052`–`0063` and plugin `0034`–`0037` are NOT (written 2026-09-19/24 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -806,6 +806,16 @@ sweeper reviews from. No backfill (NULL = off). ⚠ Like `0035`, every hand-buil
 the store must replay it (the store SELECTs both columns): `workspace-settings.test.ts`,
 `settings-route-schema.test.ts`, `jira-routes.test.ts`. ⚠ **The pg twin is NOT replayed.**
 
+### `0076_claude_review_threads` (pg `0063`)
+
+Two nullable columns on `claude_reviews`, no backfill. `thread_assessments` (JSON / jsonb): every
+OTHER open review thread on the PR as the run judged it (validity + addressed; see
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Other reviewers' threads); NULL on every older row reads on the
+wire as "did not assess threads". `comments_through` (unix seconds / timestamptz): the newest
+qualifying review-thread comment the run saw — the comment half of the auto re-review key; NULL ⇒ the
+row's `created_at` stands in, so the deploy does not re-review every commented PR. ⚠ **The pg twin is
+NOT replayed.**
+
 ### `0075_review_lens_drop_learnings` (pg `0062`)
 
 Two unrelated Claude Review changes in one file. `claude_review_findings.lens` (nullable text, no
@@ -853,10 +863,10 @@ repo removal); the plugin's `pruneProByPrIds` / `eraseProByAccountId` no longer 
 plugin already created both tables (every statement must no-op) and against a fresh one; then run
 plugin `0037` with one ON row and check it lands on the right workspace only.
 
-⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0062` and plugin `0034`–`0037`). The
+⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0063` and plugin `0034`–`0037`). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
-core should reach **62 applied = 62 journal entries** and the plugin **37** — and check
+core should reach **64 applied = 64 journal entries** (`0000`–`0063`) and the plugin **37** — and check
 `review_request_events` carries both FKs and its unique index, that `workspaces.flow_settings`,
 `pull_requests.advisory_ids` and `accounts.my_turn_settings` are `jsonb`, and that
 `security_checked_at` and `pr_mentions.mentioned_at` are `timestamp with time zone`. ⚠ `0055` is

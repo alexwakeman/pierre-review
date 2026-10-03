@@ -1,5 +1,5 @@
 import { and, desc, eq } from 'drizzle-orm';
-import { CI_ANALYSIS_CONTRACT_EPOCH_MS } from '@pierre-review/shared';
+import { CI_ANALYSIS_CONTRACT_EPOCH_MS, isThreadToFix } from '@pierre-review/shared';
 import type {
   AiFixCommentTargetRef,
   AiFixProgress,
@@ -12,6 +12,9 @@ import type { CodingProgress } from '../../pro/contract.js';
 import type { AgentContext } from '../../review/agent-context.js';
 import { getFixPrContext } from './pr-context.js';
 import { getAgenticProviders } from '../../review/plugin-providers.js';
+import { getClaudeReviewById } from '../../review/claude-review/persist.js';
+import { pickReviewNonce } from '../../review/claude-review/prompts.js';
+import { threadFixSeedBlock } from '../../review/claude-review/threads.js';
 import {
   buildCommentSeedText,
   resolveCommentTargets,
@@ -346,12 +349,19 @@ function predatesCiContract(createdAt: Date | number | null | undefined): boolea
 // A stored row with a NULL headSha predates the column and cannot be disproved, so it passes —
 // the same reading the card's "out of date" chip takes.
 async function resolveSeedText(
-  _ctx: AgentContext,
+  ctx: AgentContext,
   input: StartFixInput,
   prId: number,
   accountId: number,
   liveHeadSha: string,
 ): Promise<SeedTextResult> {
+  if (input.seed === 'review') {
+    // "Fix from review" = ONE comprehensive fix: the review's own findings (the client's text) plus
+    // the other reviewers' threads the review judged right and not yet dealt with (server-built
+    // from the STORED run, fenced — the comment text is other people's).
+    const threads = await reviewThreadSeed(ctx, input.sourceReviewId ?? null, prId, accountId, input.seedText ?? '');
+    return { ok: true, text: [input.seedText ?? '', threads].filter((t) => t.trim()).join('\n\n') };
+  }
   if (input.seedText) return { ok: true, text: input.seedText };
   if (input.seed === 'ci_analysis') {
     // ⚠ THE CI DIAGNOSIS IS A PRO CARD, so it comes through the OPTIONAL plugin provider
@@ -362,6 +372,34 @@ async function resolveSeedText(
     return ciSeedDecision(row ? { summary: row.text, headSha: row.headSha, createdAt: row.createdAt } : null, liveHeadSha);
   }
   return { ok: true, text: '' };
+}
+
+/**
+ * The thread half of a review seed: the named review's thread assessments that still need a fix
+ * (`isThreadToFix`: judged valid or partly valid, and not or only partly addressed). '' when the id
+ * is absent, not this account's, not THIS PR's review, or has none. Never throws.
+ */
+export async function reviewThreadSeed(
+  ctx: AgentContext,
+  reviewId: number | null,
+  prId: number,
+  accountId: number,
+  clientText: string,
+): Promise<string> {
+  if (reviewId == null) return '';
+  try {
+    const review = await getClaudeReviewById(ctx, reviewId, accountId);
+    if (!review || review.prId !== prId) return '';
+    const items = (review.threadAssessments ?? []).filter(isThreadToFix);
+    if (items.length === 0) return '';
+    const nonce = pickReviewNonce([
+      clientText,
+      ...items.flatMap((t) => [t.path, t.excerpt, t.explanation ?? '', t.authorLogin ?? '']),
+    ]);
+    return threadFixSeedBlock(items, nonce, isThreadToFix);
+  } catch {
+    return '';
+  }
 }
 
 async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {

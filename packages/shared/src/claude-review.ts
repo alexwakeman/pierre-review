@@ -18,6 +18,9 @@
 // that a model-derived and a code-derived figure are labelled apart.
 import type {
   ClaudeFollowUpStatus,
+  ClaudeThreadAddressed,
+  ClaudeThreadAssessmentCounts,
+  ClaudeThreadValidity,
   ClaudeReviewTicket,
   ClaudeReviewTicketInput,
   ClaudeTicketAlignment,
@@ -223,6 +226,59 @@ export const TICKET_ALIGNMENT_LABEL: Record<ClaudeTicketAlignment, string> = {
   unclear: "Can't tell",
   not_checked: 'Not checked',
 };
+
+export const THREAD_VALIDITY_LABEL: Record<ClaudeThreadValidity, string> = {
+  valid: 'Valid',
+  partly_valid: 'Partly valid',
+  not_valid: 'Not valid',
+  unclear: "Can't tell",
+  not_checked: 'Not checked',
+};
+
+export const THREAD_ADDRESSED_LABEL: Record<ClaudeThreadAddressed, string> = {
+  addressed: 'Addressed',
+  partly_addressed: 'Partly addressed',
+  not_addressed: 'Not addressed',
+  unclear: "Can't tell",
+  not_checked: 'Not checked',
+};
+
+// ---- review threads (other reviewers' comments) ----
+
+/**
+ * THE ONE "still needs a fix" rule for a judged review thread: Claude found the comment right (or
+ * partly right) and the code has not (or only partly) dealt with it. AI Fix's review seed, the
+ * counts and the Open PRs column all read this — never retype it.
+ */
+export function isThreadToFix(t: { validity: ClaudeThreadValidity; addressed: ClaudeThreadAddressed }): boolean {
+  return (
+    (t.validity === 'valid' || t.validity === 'partly_valid') &&
+    (t.addressed === 'not_addressed' || t.addressed === 'partly_addressed')
+  );
+}
+
+/** Counts over a run's thread assessments (code-derived). */
+export function threadAssessmentCounts(
+  items: ReadonlyArray<{ validity: ClaudeThreadValidity; addressed: ClaudeThreadAddressed }>,
+): ClaudeThreadAssessmentCounts {
+  const c: ClaudeThreadAssessmentCounts = {
+    total: items.length,
+    assessed: 0,
+    validUnaddressed: 0,
+    notValid: 0,
+    addressed: 0,
+    notChecked: 0,
+  };
+  for (const it of items) {
+    const judged = it.validity !== 'not_checked' || it.addressed !== 'not_checked';
+    if (judged) c.assessed += 1;
+    else c.notChecked += 1;
+    if (isThreadToFix(it)) c.validUnaddressed += 1;
+    if (it.validity === 'not_valid') c.notValid += 1;
+    if (it.addressed === 'addressed') c.addressed += 1;
+  }
+  return c;
+}
 
 // ---- templated sentences (code-derived figures) ----
 

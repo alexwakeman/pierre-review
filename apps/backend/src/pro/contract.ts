@@ -442,6 +442,17 @@ export interface ReviewFollowUpReport {
   explanation: string;
 }
 
+// One OTHER reviewer's open thread, as Claude judged it ('R1'… as the prompt named them). Core-only
+// (Claude Review left the plugin), passed through VERBATIM; review/claude-review/threads.ts
+// reconciles it (each ref once, unknown refs dropped, missing refs 'not_checked').
+export interface ReviewThreadReport {
+  ref: string;
+  validity: 'valid' | 'partly_valid' | 'not_valid' | 'unclear';
+  addressed: 'addressed' | 'partly_addressed' | 'not_addressed' | 'unclear';
+  explanation: string;
+  draftReply?: string | null;
+}
+
 export interface ReviewTicketItemReport {
   // The criterion as Claude read it from the acceptance-criteria text (Claude enumerates them).
   text: string;
@@ -511,6 +522,8 @@ export interface RunReviewResult {
   // One report per ticket, keyed by `ref`. `ticket` is the legacy single report (read as T1).
   tickets?: ReviewTicketReport[];
   ticket?: ReviewTicketReport;
+  // Present only when the prompt carried a "Review threads" section and the model reported.
+  threads?: ReviewThreadReport[];
 }
 
 // The ticked findings the plugin hands to postReview (the plugin read them from the core

@@ -11,8 +11,8 @@ type ZodNs = typeof Zod;
 // Exported as a raw zod shape (what `tool()` wants) plus an assembled object
 // schema (for validation in tests / belt-and-suspenders parsing).
 //
-// ⚠ EVERY FOLLOW-UP / USER-STORY FIELD IS OPTIONAL, so a run with no previous review and no user
-// story submits exactly the old shape and validates exactly as before. The prompt — not this
+// ⚠ EVERY FOLLOW-UP / USER-STORY / REVIEW-THREAD FIELD IS OPTIONAL, so a run with none of those
+// sections submits exactly the old shape and validates exactly as before. The prompt — not this
 // schema — requires `followUp` / `tickets` when the user message carries those sections, and the
 // plugin reconciles whatever arrives (missing refs become 'not_checked'). 'not_checked' is in NO
 // enum here: only the server writes it.
@@ -137,6 +137,26 @@ export function buildSubmitReviewShape(z: ZodNs) {
       .optional()
       .describe(
         "Only when the user message has a 'User stories' section: one entry per ticket there, each ref once. Leave it out otherwise.",
+      ),
+    threads: z
+      .array(
+        z.object({
+          ref: z.string().describe("The thread's ref from the 'Review threads' section, e.g. 'R2'."),
+          validity: z.enum(["valid", "partly_valid", "not_valid", "unclear"]),
+          addressed: z.enum(["addressed", "partly_addressed", "not_addressed", "unclear"]),
+          explanation: z
+            .string()
+            .describe("One or two sentences that name the code you checked."),
+          draftReply: z
+            .string()
+            .nullable()
+            .optional()
+            .describe("Optional: a short reply the author could post on the thread."),
+        }),
+      )
+      .optional()
+      .describe(
+        "Only when the user message has a 'Review threads' section: one entry per thread there, each ref once. Leave out a ref whose code you cannot see rather than guess. Leave the whole field out otherwise.",
       ),
   };
 }

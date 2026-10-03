@@ -9,6 +9,7 @@ import {
   checkClaudeReviewTicket,
   checkClaudeReviewTickets,
   CLAUDE_REVIEW_TICKET_LIMITS,
+  isThreadToFix,
 } from '@pierre-review/shared';
 import type {
   ClaudeFinding,
@@ -23,8 +24,13 @@ import type {
   ClaudeReviewTicketInput,
   ClaudeReviewTicketsCheck,
   ClaudeReviewTicketSource,
+  ClaudeReviewVerdict,
   ClaudeTicketAlignment,
   ClaudeTicketCriterionStatus,
+  ClaudeThreadAddressed,
+  ClaudeThreadAssessment,
+  ClaudeThreadAssessmentCounts,
+  ClaudeThreadValidity,
 } from '@pierre-review/shared';
 
 // ---- severity (moved here from ClaudeReviewTab so the follow-up list paints the same pill) ----
@@ -86,6 +92,17 @@ export const TICKET_CRITERION_STATUS_CLASS: Record<ClaudeTicketCriterionStatus, 
   not_met: CHIP_RED,
   unclear: CHIP_GREY,
   not_checked: CHIP_GREY,
+};
+
+// The Open PRs strip: a finished run that found nothing to act on, and a review the PR moved past.
+export const CLEAN_CLASS = CHIP_GREEN;
+export const OUTDATED_CLASS = CHIP_ORANGE;
+
+// The verdict badge (Claude Review tab) and the Open PRs strip's verdict pill.
+export const VERDICT_CLASS: Record<ClaudeReviewVerdict, string> = {
+  APPROVE: CHIP_GREEN,
+  REQUEST_CHANGES: CHIP_RED,
+  COMMENT: CHIP_GREY,
 };
 
 export const TICKET_ALIGNMENT_CLASS: Record<ClaudeTicketAlignment, string> = {
@@ -179,6 +196,88 @@ export function notCheckedReason(item: Pick<ClaudeFollowUpItem, 'sent'>): string
   return item.sent
     ? "Claude didn't report on this one."
     : 'Not sent to Claude: too many earlier comments.';
+}
+
+// ---- other reviewers' threads ----
+
+// ⚠ `not_checked` / `unclear` are GREY, never amber: unknown is not "still to fix".
+export const THREAD_VALIDITY_CLASS: Record<ClaudeThreadValidity, string> = {
+  valid: CHIP_ORANGE,
+  partly_valid: CHIP_ORANGE,
+  not_valid: CHIP_GREY,
+  unclear: CHIP_GREY,
+  not_checked: CHIP_GREY,
+};
+
+export const THREAD_ADDRESSED_CLASS: Record<ClaudeThreadAddressed, string> = {
+  not_addressed: CHIP_RED,
+  partly_addressed: CHIP_ORANGE,
+  addressed: CHIP_GREEN,
+  unclear: CHIP_GREY,
+  not_checked: CHIP_GREY,
+};
+
+/** The addressed pill's colour. A comment Claude found wrong owes no fix, so it is never red. */
+export function threadAddressedClass(
+  t: Pick<ClaudeThreadAssessment, 'validity' | 'addressed'>,
+): string {
+  return t.validity === 'not_valid' ? CHIP_GREY : THREAD_ADDRESSED_CLASS[t.addressed];
+}
+
+/** A thread the reader can stop looking at: dealt with, or Claude found the comment wrong. */
+export function isThreadSettled(
+  t: Pick<ClaudeThreadAssessment, 'validity' | 'addressed'>,
+): boolean {
+  return !isThreadToFix(t) && (t.addressed === 'addressed' || t.validity === 'not_valid');
+}
+
+/**
+ * The Review threads list: still to fix first (the shared `isThreadToFix`), then the other open
+ * ones (judged before not checked); the settled ones (`isThreadSettled`) go behind "Show N more".
+ * Stable otherwise (the server's own order).
+ */
+export function partitionThreads(items: readonly ClaudeThreadAssessment[]): {
+  shown: ClaudeThreadAssessment[];
+  more: ClaudeThreadAssessment[];
+} {
+  const rank = (t: ClaudeThreadAssessment): number =>
+    isThreadToFix(t) ? 0 : t.validity === 'not_checked' && t.addressed === 'not_checked' ? 2 : 1;
+  const shown: { t: ClaudeThreadAssessment; i: number }[] = [];
+  const more: ClaudeThreadAssessment[] = [];
+  items.forEach((t, i) => {
+    if (isThreadSettled(t)) more.push(t);
+    else shown.push({ t, i });
+  });
+  shown.sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i);
+  return { shown: shown.map((x) => x.t), more };
+}
+
+export interface ThreadCountPill {
+  key: 'toFix' | 'addressed' | 'notValid' | 'notChecked';
+  label: string;
+  cls: string;
+}
+
+/** The header's count pills, zeros left out. Figures are the server's (code-derived) counts. */
+export function threadCountPills(c: ClaudeThreadAssessmentCounts): ThreadCountPill[] {
+  const pills: ThreadCountPill[] = [
+    { key: 'toFix', label: `${c.validUnaddressed} still to fix`, cls: CHIP_RED },
+    { key: 'addressed', label: `${c.addressed} addressed`, cls: CHIP_GREEN },
+    { key: 'notValid', label: `${c.notValid} not valid`, cls: CHIP_GREY },
+    { key: 'notChecked', label: `${c.notChecked} not checked`, cls: CHIP_GREY },
+  ];
+  const n: Record<ThreadCountPill['key'], number> = {
+    toFix: c.validUnaddressed,
+    addressed: c.addressed,
+    notValid: c.notValid,
+    notChecked: c.notChecked,
+  };
+  return pills.filter((p) => n[p.key] > 0);
+}
+
+/** Why a thread carries no verdict. */
+export function threadNotCheckedReason(t: Pick<ClaudeThreadAssessment, 'sent'>): string {
+  return t.sent ? "Claude didn't report on this one." : 'Not sent to Claude: too many open threads.';
 }
 
 export type ReraisedStatus = 'not_addressed' | 'partly_addressed';

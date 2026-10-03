@@ -156,6 +156,14 @@ export function buildReview(input: {
   };
 }
 
+// The hidden provenance stamp on EVERY finding comment Limn posts (inline or PR-level). It is how
+// a later review tells its own comments from other reviewers' (db/review-threads-for-review.ts
+// `isLimnPostedComment`, together with the author being the account's own login — Limn posts as
+// the reader, so neither fact alone is enough). It survives an edit on GitHub, which the old
+// text-prefix match did not. The `pierre:claude-review` prefix is deliberate: it is also the
+// 'pierre' fingerprint (sync/review-fingerprint.ts). ⚠ The spelling is permanent once posted.
+export const FINDING_COMMENT_MARKER = '<!-- pierre:claude-review-finding v=1 -->';
+
 // A finding's inline comment body: the user's reworded text if they wrote one,
 // else Claude's wording — with an optional fenced ```suggestion block appended
 // (GitHub renders it as an applyable suggestion). Takes a minimal shape so it
@@ -183,6 +191,7 @@ export function findingCommentBody(
     );
   }
   if (opts?.fallbackNote) parts.push(FALLBACK_ANCHOR_NOTE);
+  parts.push(FINDING_COMMENT_MARKER);
   return parts.join('\n\n');
 }
 
@@ -210,6 +219,7 @@ export function prLevelFindingBody(f: {
     parts.push(`\`\`\`\n${f.suggestion}\n\`\`\``);
   }
   parts.push(OUTSIDE_DIFF_NOTE);
+  parts.push(FINDING_COMMENT_MARKER);
   return parts.join('\n\n');
 }
 

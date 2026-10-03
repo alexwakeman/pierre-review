@@ -31,6 +31,7 @@ import type {
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
+  ClaudeThreadAssessment,
   ClaudeReviewTicket,
   ClaudeTicketAssessment,
   FlowSettings,
@@ -861,6 +862,10 @@ export const claudeReviews = pgTable(
     followUp: jsonb('follow_up').$type<ClaudeReviewFollowUpRecord>(),
     // 'manual' | 'auto' — who started the run. Twin of schema.sqlite.ts. Migration pg 0058 (sqlite 0071).
     trigger: text('trigger', { enum: ['manual', 'auto'] }).notNull().default('manual'),
+    // Other reviewers' open threads + the comment half of the auto re-review key. Twin of
+    // schema.sqlite.ts. Migration pg 0063 (sqlite 0076).
+    threadAssessments: jsonb('thread_assessments').$type<ClaudeThreadAssessment[]>(),
+    commentsThrough: timestamp('comments_through', { withTimezone: true, mode: 'date' }),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),

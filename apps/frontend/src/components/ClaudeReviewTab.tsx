@@ -66,6 +66,7 @@ import {
   ClaudeReviewTicketResults,
   storyLabel,
 } from './ClaudeReviewFollowUp.js';
+import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
 import {
   ALREADY_POSTED_CHIP,
   RERAISED_CHIP,
@@ -77,6 +78,7 @@ import {
   resolveTicketDrafts,
   sortFindingsForDisplay,
   ticketsRequestFromCheck,
+  VERDICT_CLASS,
   type ReraisedStatus,
   type TicketDraft,
 } from '../lib/claudeReviewFollowUp.js';
@@ -122,12 +124,6 @@ const VERDICT_LABEL: Record<ClaudeReviewVerdict, string> = {
   COMMENT: 'Comment',
   REQUEST_CHANGES: 'Request changes',
   APPROVE: 'Approve',
-};
-
-const VERDICT_CLASS: Record<ClaudeReviewVerdict, string> = {
-  APPROVE: 'bg-green-500/10 text-green-700 dark:text-green-400',
-  REQUEST_CHANGES: 'bg-red-500/10 text-red-700 dark:text-red-400',
-  COMMENT: 'bg-gray-500/10 text-gray-600 dark:text-gray-300',
 };
 
 function VerdictBadge({ verdict }: { verdict: ClaudeReviewVerdict }): JSX.Element {
@@ -975,6 +971,7 @@ function ClaudesReview({
   postErrorMessage,
   changedPaths,
   onOpenInChanges,
+  onOpenThread,
   onToggleFinding,
   onRewordFinding,
   onPostFinding,
@@ -993,6 +990,7 @@ function ClaudesReview({
   // Empty ⇒ we know nothing, fall back to the finding's own `fileInDiff`.
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
+  onOpenThread?: (threadId: number) => void;
   onToggleFinding: (findingId: number, included: boolean) => void;
   onRewordFinding: (findingId: number, editedBody: string) => Promise<unknown>;
   onPostFinding: (findingId: number) => Promise<unknown>;
@@ -1068,6 +1066,11 @@ function ClaudesReview({
           onOpenInChanges={onOpenInChanges}
         />
       )}
+      <ClaudeReviewThreadsSection
+        items={review.threadAssessments}
+        counts={review.threadAssessmentCounts}
+        onOpenThread={onOpenThread}
+      />
       {ticketEntries.map((entry) => (
         <ClaudeReviewTicketResults
           key={entry.index}
@@ -1167,7 +1170,7 @@ function GenerateFixFromReview({
     <div className="px-4 py-3">
       <button
         type="button"
-        onClick={() => openAiFixFromReview(prId, buildReviewSeed(review))}
+        onClick={() => openAiFixFromReview(prId, buildReviewSeed(review), review.id)}
         className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-ai-border px-2.5 py-1 text-xs text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
       >
         Generate fix from this review
@@ -1186,12 +1189,15 @@ export function ClaudeReviewTab({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   usersById,
   onOpenInChanges,
+  onOpenThread,
 }: {
   pr: PrDetail;
   usersById: Map<number, User>;
   // Provided by PrDetail (which owns the tab state). Absent ⇒ every code anchor keeps its
   // pre-existing GitHub link.
   onOpenInChanges?: OpenInChanges;
+  // Opens a review thread in the Threads tab (PrDetail's `openThreadInThreads`).
+  onOpenThread?: (threadId: number) => void;
 }): JSX.Element {
   const ai = useAiCapabilities();
   const { data, isLoading } = useClaudeReview(pr.id);
@@ -1623,6 +1629,7 @@ export function ClaudeReviewTab({
           postErrorMessage={postErrorMessage}
           changedPaths={changedPaths}
           onOpenInChanges={onOpenInChanges}
+          onOpenThread={onOpenThread}
           onToggleFinding={(findingId, included) =>
             updateFinding.mutate({ findingId, included })
           }
